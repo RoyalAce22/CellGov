@@ -3,8 +3,8 @@
 //! Currently only the leaf identifier lives here. The barrier state
 //! machine (participant count, waiting set, release logic) requires
 //! scheduler integration to wake blocked participants on release.
-//! That is Phase 2 sync work; until then, `WaitOnEvent` with a
-//! `WaitTarget::Barrier` unconditionally blocks the issuing unit.
+//! Until that lands, `WaitOnEvent` with a `WaitTarget::Barrier`
+//! unconditionally blocks the issuing unit.
 //!
 //! `BarrierId` is the handle a unit references when it raises an
 //! `Effect::WaitOnEvent` against a barrier.

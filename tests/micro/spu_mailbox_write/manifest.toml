@@ -1,0 +1,26 @@
+[test]
+name = "spu_mailbox_write"
+
+# CellGov side: uses the mailbox send scenario as the closest match.
+# The fake ISA scenario also exercises mailbox send but with more
+# steps. A dedicated CellGov scenario for this microtest may be
+# added later.
+[cellgov]
+scenario = "mailbox_send"
+scenario_args = { messages = 1 }
+
+# RPCS3 side: needs a PPU wrapper ELF that creates a raw SPU,
+# loads spu_mailbox_write.bin into local store, starts it, and
+# reads the outbound mailbox. Not yet available -- requires
+# either hand-assembled PPU ELF or PSL1GHT cross-compilation.
+# [rpcs3]
+# binary = "spu_mailbox_write.elf"
+# decoder = "interpreter"
+# timeout_ms = 5000
+
+[observe]
+memory_regions = []
+mailbox_sequences = true
+
+[expect]
+outcome = "completed"

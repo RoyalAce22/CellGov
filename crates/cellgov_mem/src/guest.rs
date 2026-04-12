@@ -66,6 +66,12 @@ impl GuestMemory {
         self.bytes.len() as u64
     }
 
+    /// Read the entire committed memory backing as a byte slice.
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
     /// Read the bytes covered by `range`.
     ///
     /// Returns `None` if the range extends past the end of memory or

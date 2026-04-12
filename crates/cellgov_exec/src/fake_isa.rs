@@ -34,18 +34,44 @@ pub enum FakeOp {
     LoadImm(u32),
     /// Emit `SharedWriteIntent` writing the accumulator's low byte
     /// (replicated) across the given address range.
-    SharedStore { addr: u64, len: u64 },
+    SharedStore {
+        /// Start address of the write region.
+        addr: u64,
+        /// Byte count of the write region.
+        len: u64,
+    },
     /// Emit `MailboxSend` with the accumulator as the message word.
-    MailboxSend { mailbox: u64 },
+    MailboxSend {
+        /// Target mailbox id.
+        mailbox: u64,
+    },
     /// Emit `MailboxReceiveAttempt`. The commit pipeline pops from
     /// the mailbox if non-empty or blocks the unit if empty.
-    MailboxRecv { mailbox: u64 },
+    MailboxRecv {
+        /// Source mailbox id.
+        mailbox: u64,
+    },
     /// Emit `DmaEnqueue` (Put direction, `src` -> `dst`, `len` bytes).
-    DmaPut { src: u64, dst: u64, len: u64 },
+    DmaPut {
+        /// Source address.
+        src: u64,
+        /// Destination address.
+        dst: u64,
+        /// Transfer size in bytes.
+        len: u64,
+    },
     /// Emit `WaitOnEvent` on a signal with the given mask.
-    Wait { signal: u64, mask: u32 },
+    Wait {
+        /// Signal id.
+        signal: u64,
+        /// Bit mask for signal matching.
+        mask: u32,
+    },
     /// Emit `WaitOnEvent` on a barrier.
-    Barrier { barrier: u64 },
+    Barrier {
+        /// Barrier id.
+        barrier: u64,
+    },
     /// Yield `Finished`. Terminal opcode.
     End,
 }

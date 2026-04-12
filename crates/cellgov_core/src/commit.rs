@@ -45,28 +45,43 @@ pub enum CommitError {
     /// A `SharedWriteIntent`'s payload byte length did not match the
     /// length of its target range. The index identifies the offending
     /// effect's position in the original `emitted_effects` vector.
-    PayloadLengthMismatch { effect_index: usize },
+    PayloadLengthMismatch {
+        /// Position of the offending effect in `emitted_effects`.
+        effect_index: usize,
+    },
     /// A `SharedWriteIntent`'s target range extends past the end of
     /// committed memory or its end address overflows `u64`.
-    OutOfRange { effect_index: usize },
+    OutOfRange {
+        /// Position of the offending effect in `emitted_effects`.
+        effect_index: usize,
+    },
     /// A `MailboxSend` referenced a `MailboxId` that is not registered
     /// in the runtime's mailbox registry. Aborts the entire batch
     /// atomically.
     UnknownMailbox {
+        /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
+        /// The unregistered mailbox.
         mailbox: MailboxId,
     },
     /// A `SignalUpdate` referenced a `SignalId` that is not registered
     /// in the runtime's signal registry. Aborts the entire batch
     /// atomically.
     UnknownSignal {
+        /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
+        /// The unregistered signal.
         signal: SignalId,
     },
     /// A `WakeUnit` referenced a `UnitId` that is not registered in
     /// the runtime's unit registry. Aborts the entire batch
     /// atomically.
-    UnknownWakeTarget { effect_index: usize, target: UnitId },
+    UnknownWakeTarget {
+        /// Position of the offending effect in `emitted_effects`.
+        effect_index: usize,
+        /// The unregistered unit.
+        target: UnitId,
+    },
     /// The underlying memory layer rejected the drain. Should be
     /// unreachable in practice given the pre-validation pass, but
     /// surfaced rather than panicked so tests and tooling can assert

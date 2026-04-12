@@ -435,6 +435,7 @@ pub struct MailboxSender {
 }
 
 impl MailboxSender {
+    /// Create a new mailbox sender unit.
     pub fn new(
         id: UnitId,
         responder: UnitId,
@@ -511,7 +512,7 @@ impl ExecutionUnit for MailboxSender {
                 }
             }
             _ => {
-                // Phase 2: consume the received response, finish.
+                // Consume the received response and finish.
                 let response = ctx.received_messages().first().copied().unwrap_or(0);
                 ExecutionStepResult {
                     yield_reason: YieldReason::Finished,
@@ -546,6 +547,7 @@ pub struct MailboxResponder {
 }
 
 impl MailboxResponder {
+    /// Create a new mailbox responder unit.
     pub fn new(
         id: UnitId,
         sender: UnitId,

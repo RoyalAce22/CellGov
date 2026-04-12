@@ -5,7 +5,7 @@ A deterministic Rust runtime for translated PS3 Cell execution units.
 [![CI](https://img.shields.io/github/actions/workflow/status/RoyalAce22/CellGov/ci.yml?branch=main&label=CI)](https://github.com/RoyalAce22/CellGov/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/RoyalAce22/CellGov/branch/main/graph/badge.svg)](https://codecov.io/gh/RoyalAce22/CellGov)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.75-orange.svg)](https://blog.rust-lang.org/2023/12/28/Rust-1.75.0.html)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-orange.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
 [![Status: experimental](https://img.shields.io/badge/status-experimental-red.svg)](#status)
 
 ## Overview
@@ -56,7 +56,7 @@ CellGov is organized as a Cargo workspace with separate crates for:
 
 ## Building
 
-Requires Rust 1.75 or newer.
+Requires Rust 1.85 or newer.
 
 ```bash
 cargo build

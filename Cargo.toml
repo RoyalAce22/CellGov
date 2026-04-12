@@ -10,13 +10,15 @@ members = [
     "crates/cellgov_exec",
     "crates/cellgov_trace",
     "crates/cellgov_core",
+    "crates/cellgov_compare",
     "crates/cellgov_testkit",
     "apps/cellgov_cli",
+    "apps/cellgov_mkelf",
 ]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 
 [workspace.lints.rust]

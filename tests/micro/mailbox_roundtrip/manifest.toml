@@ -1,0 +1,18 @@
+[test]
+name = "mailbox_roundtrip"
+
+# No [cellgov] section yet -- a matching CellGov scenario would need
+# to model the inbound mailbox write + SPU transform + DMA result path.
+
+[rpcs3]
+binary = "build/mailbox_roundtrip.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 8 },
+]
+
+[expect]
+outcome = "completed"

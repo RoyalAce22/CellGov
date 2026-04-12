@@ -47,14 +47,23 @@ use cellgov_time::{Budget, Epoch, GuestTicks};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedYieldReason {
+    /// Unit's budget was consumed.
     BudgetExhausted = 0,
+    /// Unit accessed a mailbox (send or receive).
     MailboxAccess = 1,
+    /// Unit submitted a DMA request.
     DmaSubmitted = 2,
+    /// Unit is waiting for DMA completion.
     DmaWait = 3,
+    /// Unit is waiting on a sync primitive (barrier, signal).
     WaitingSync = 4,
+    /// Unit hit a syscall boundary.
     Syscall = 5,
+    /// Unit yielded at an interrupt boundary.
     InterruptBoundary = 6,
+    /// Unit faulted.
     Fault = 7,
+    /// Unit execution completed normally.
     Finished = 8,
 }
 
@@ -156,14 +165,23 @@ impl TracedWakeReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedEffectKind {
+    /// Shared memory write intent.
     SharedWriteIntent = 0,
+    /// Mailbox send.
     MailboxSend = 1,
+    /// Mailbox receive attempt.
     MailboxReceiveAttempt = 2,
+    /// DMA transfer enqueued.
     DmaEnqueue = 3,
+    /// Wait on a sync primitive (barrier, signal).
     WaitOnEvent = 4,
+    /// Wake another unit.
     WakeUnit = 5,
+    /// Signal register update.
     SignalUpdate = 6,
+    /// Fault raised.
     FaultRaised = 7,
+    /// Diagnostic trace marker.
     TraceMarker = 8,
 }
 
@@ -216,29 +234,44 @@ pub enum DecodeError {
 pub enum TraceRecord {
     /// The scheduler selected a unit and granted it a budget.
     UnitScheduled {
+        /// Which unit was scheduled.
         unit: UnitId,
+        /// Budget granted for this step.
         granted_budget: Budget,
+        /// Guest time at scheduling.
         time: GuestTicks,
+        /// Epoch at scheduling.
         epoch: Epoch,
     },
     /// A unit's `run_until_yield` returned.
     StepCompleted {
+        /// Which unit completed a step.
         unit: UnitId,
+        /// Why the unit yielded.
         yield_reason: TracedYieldReason,
+        /// How much budget was consumed.
         consumed_budget: Budget,
+        /// Guest time after the step.
         time_after: GuestTicks,
     },
     /// The commit pipeline finished processing a step's effects.
     CommitApplied {
+        /// Which unit's effects were committed.
         unit: UnitId,
+        /// Number of shared writes applied.
         writes_committed: u32,
+        /// Number of effects deferred for later processing.
         effects_deferred: u32,
+        /// Whether a fault discarded all effects.
         fault_discarded: bool,
+        /// Epoch after commit.
         epoch_after: Epoch,
     },
     /// A state hash was captured at a controlled checkpoint.
     StateHashCheckpoint {
+        /// Which hash category this checkpoint covers.
         kind: HashCheckpointKind,
+        /// The hash value.
         hash: StateHash,
     },
     /// A unit emitted an effect during its step. Recorded once per
@@ -247,21 +280,28 @@ pub enum TraceRecord {
     /// (write bytes, mailbox messages, DMA descriptors) are not in the
     /// trace at this slice; that is its own future addition.
     EffectEmitted {
+        /// Which unit emitted the effect.
         unit: UnitId,
+        /// Index within this step's effect list.
         sequence: u32,
+        /// What kind of effect was emitted.
         kind: TracedEffectKind,
     },
     /// A unit's status was overridden to `Blocked` by the commit
     /// pipeline. Emitted once per block transition, after CommitApplied.
     UnitBlocked {
+        /// Which unit was blocked.
         unit: UnitId,
+        /// Why it blocked.
         reason: TracedBlockReason,
     },
     /// A unit's status was overridden to `Runnable` by the commit
     /// pipeline or a DMA completion. Emitted once per wake transition,
     /// after CommitApplied.
     UnitWoken {
+        /// Which unit was woken.
         unit: UnitId,
+        /// Why it was woken.
         reason: TracedWakeReason,
     },
 }

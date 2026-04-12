@@ -70,6 +70,9 @@ pub struct ScenarioResult {
     /// the run. Currently covers mailboxes only; future signal and
     /// barrier state will fold into the same hash.
     pub final_sync_hash: StateHash,
+    /// Full committed memory contents at end of run. Used by the
+    /// comparison harness to extract named memory regions.
+    pub final_memory: Vec<u8>,
 }
 
 /// Drive a scenario fixture to completion via the canonical execution
@@ -110,6 +113,7 @@ pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
         final_memory_hash: StateHash::new(rt.memory().content_hash()),
         final_unit_status_hash: StateHash::new(rt.registry().status_hash()),
         final_sync_hash: StateHash::new(rt.sync_state_hash()),
+        final_memory: rt.memory().as_bytes().to_vec(),
     }
 }
 

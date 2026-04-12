@@ -1,0 +1,16 @@
+{
+  "outcome": "Completed",
+  "memory_regions": [
+    {
+      "name": "result",
+      "addr": 0,
+      "data": [0, 0, 0, 0, 19, 55, 186, 173]
+    }
+  ],
+  "events": [],
+  "state_hashes": null,
+  "metadata": {
+    "runner": "rpcs3-interpreter",
+    "steps": null
+  }
+}
