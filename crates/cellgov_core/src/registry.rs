@@ -210,6 +210,12 @@ impl UnitRegistry {
         self.units.keys().copied()
     }
 
+    /// Iterate unit ids whose effective status is `Runnable`.
+    pub fn runnable_ids(&self) -> impl Iterator<Item = UnitId> + '_ {
+        self.ids()
+            .filter(move |id| self.effective_status(*id) == Some(UnitStatus::Runnable))
+    }
+
     /// The effective status of a unit: the runtime override if one is
     /// set, otherwise the unit's self-reported `status()`.
     ///
@@ -283,18 +289,13 @@ impl UnitRegistry {
     /// le-bytes of each runnable unit, in id order. The empty set
     /// (no runnable units) hashes to the FNV-1a empty-input value.
     pub fn runnable_queue_hash(&self) -> u64 {
-        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for id in self.units.keys() {
             if self.effective_status(*id) == Some(UnitStatus::Runnable) {
-                for b in id.raw().to_le_bytes() {
-                    h ^= b as u64;
-                    h = h.wrapping_mul(FNV_PRIME);
-                }
+                hasher.write(&id.raw().to_le_bytes());
             }
         }
-        h
+        hasher.finish()
     }
 
     /// 64-bit deterministic hash of every unit's (id, effective status)
@@ -309,21 +310,15 @@ impl UnitRegistry {
     /// registry hashes to the FNV-1a empty-input value, which the
     /// runtime trace records on its first checkpoint.
     pub fn status_hash(&self) -> u64 {
-        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (id, _unit) in self.units.iter() {
-            for b in id.raw().to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
+            hasher.write(&id.raw().to_le_bytes());
             let status_byte =
                 self.effective_status(*id)
                     .expect("unit in map must have effective status") as u8;
-            h ^= status_byte as u64;
-            h = h.wrapping_mul(FNV_PRIME);
+            hasher.write(&[status_byte]);
         }
-        h
+        hasher.finish()
     }
 }
 

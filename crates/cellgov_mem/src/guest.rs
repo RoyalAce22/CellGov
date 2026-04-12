@@ -134,14 +134,7 @@ impl GuestMemory {
     /// backings will fold their state into the same `u64` output without
     /// changing this method's signature.
     pub fn content_hash(&self) -> u64 {
-        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
-        for b in &self.bytes {
-            h ^= *b as u64;
-            h = h.wrapping_mul(FNV_PRIME);
-        }
-        h
+        crate::hash::fnv1a(&self.bytes)
     }
 }
 

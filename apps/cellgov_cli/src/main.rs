@@ -1,4 +1,4 @@
-//! cellgov_cli -- run scenarios, dump traces, compare observations.
+//! cellgov_cli -- run scenarios, dump traces, compare observations, explore schedules.
 //!
 //! Commands:
 //!
@@ -9,6 +9,8 @@
 //! - `cellgov_cli compare <manifest.toml> [--mode ...] [--against-baseline <path>]` --
 //!   manifest-driven comparison: run CellGov scenario from manifest and
 //!   compare against a saved baseline.
+//! - `cellgov_cli explore <scenario> [--format human|json]` --
+//!   run bounded schedule exploration on a scenario and report classification.
 //!
 //! Available scenarios: fairness, conflict, mailbox, dma, send, signal, isa.
 
@@ -16,9 +18,30 @@ use cellgov_compare::{
     compare, compare_multi, format_human, format_json, format_multi_human, format_multi_json,
     observe_with_determinism_check, Classification, CompareMode, Observation, RegionDescriptor,
 };
+use cellgov_explore::ExplorationConfig;
 use cellgov_testkit::fixtures::{self, ScenarioFixture};
 use cellgov_testkit::runner::{run, ScenarioOutcome, ScenarioResult};
 use cellgov_trace::TraceReader;
+
+// -- CLI helpers --
+
+fn die(msg: &str) -> ! {
+    eprintln!("{msg}");
+    std::process::exit(1)
+}
+
+fn load_file_or_die(path: &str) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_else(|e| die(&format!("failed to read {path}: {e}")))
+}
+
+fn require_determinism(
+    factory: &dyn Fn() -> ScenarioFixture,
+    name: &str,
+    regions: &[RegionDescriptor],
+) -> Observation {
+    observe_with_determinism_check(factory, regions)
+        .unwrap_or_else(|e| die(&format!("determinism check FAILED for {name}: {e:?}")))
+}
 
 /// Supported scenario names and the fixture factories that produce them.
 fn run_scenario(name: &str) -> Option<(&str, ScenarioResult)> {
@@ -70,6 +93,8 @@ const SCENARIOS: &[&str] = &[
     "fairness", "conflict", "mailbox", "dma", "send", "signal", "isa",
 ];
 
+const MICROTESTS: &[&str] = &["barrier_wakeup", "mailbox_roundtrip", "atomic_reservation"];
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
@@ -79,6 +104,8 @@ fn main() {
         println!("       cellgov_cli compare <scenario|manifest.toml> --save-baseline <path>");
         println!("       cellgov_cli compare <scenario|manifest.toml> --against-baseline <path> [--mode ...] [--format ...]");
         println!("       cellgov_cli compare <manifest.toml> --baselines-dir <dir> [--mode ...] [--format ...]");
+        println!("       cellgov_cli explore <scenario> [--format human|json]");
+        println!("       cellgov_cli explore micro <name> [--format human|json]");
         println!();
         println!("available scenarios:");
         for name in SCENARIOS {
@@ -113,6 +140,39 @@ fn main() {
                         run_compare(&factory, target, mode, format);
                     }
                 }
+                None => {
+                    eprintln!("unknown scenario: {target}");
+                    eprintln!("available: {}", SCENARIOS.join(", "));
+                    std::process::exit(1);
+                }
+            }
+        }
+        return;
+    }
+
+    if args[1] == "explore" {
+        let target = args.get(2).map(String::as_str).unwrap_or_else(|| {
+            eprintln!("usage: cellgov_cli explore <scenario> [--format human|json]");
+            eprintln!("       cellgov_cli explore micro <name> [--format human|json]");
+            std::process::exit(1);
+        });
+        let format = parse_output_format(&args);
+        if target == "micro" {
+            let name = args.get(3).map(String::as_str).unwrap_or_else(|| {
+                eprintln!("usage: cellgov_cli explore micro <name> [--format human|json]");
+                eprintln!("       cellgov_cli explore micro <name> --baselines-dir <dir> [--format human|json]");
+                eprintln!("available microtests: {}", MICROTESTS.join(", "));
+                std::process::exit(1);
+            });
+            let baselines_dir = find_flag_value(&args, "--baselines-dir");
+            if let Some(dir) = baselines_dir {
+                run_explore_micro_oracle(name, &dir, format);
+            } else {
+                run_explore_micro(name, format);
+            }
+        } else {
+            match scenario_factory(target) {
+                Some(factory) => run_explore(&factory, target, format),
                 None => {
                     eprintln!("unknown scenario: {target}");
                     eprintln!("available: {}", SCENARIOS.join(", "));
@@ -210,24 +270,14 @@ fn find_flag_value(args: &[String], flag: &str) -> Option<String> {
 
 /// Run a scenario, observe it with determinism check, and save to disk.
 fn save_baseline(factory: &dyn Fn() -> ScenarioFixture, name: &str, path: &str) {
-    let regions: Vec<RegionDescriptor> = vec![];
-    match observe_with_determinism_check(factory, &regions) {
-        Ok(obs) => {
-            let p = std::path::Path::new(path);
-            if let Some(parent) = p.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            cellgov_compare::baseline::save(&obs, p).unwrap_or_else(|e| {
-                eprintln!("failed to save baseline: {e:?}");
-                std::process::exit(1);
-            });
-            println!("saved baseline for {name} to {path}");
-        }
-        Err(e) => {
-            eprintln!("determinism check FAILED for {name}: {e:?}");
-            std::process::exit(1);
-        }
+    let obs = require_determinism(factory, name, &[]);
+    let p = std::path::Path::new(path);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).ok();
     }
+    cellgov_compare::baseline::save(&obs, p)
+        .unwrap_or_else(|e| die(&format!("failed to save baseline: {e:?}")));
+    println!("saved baseline for {name} to {path}");
 }
 
 /// Run a scenario, observe it, load a saved baseline, and compare.
@@ -238,20 +288,9 @@ fn compare_against_baseline(
     mode: CompareMode,
     format: OutputFormat,
 ) {
-    let regions: Vec<RegionDescriptor> = vec![];
-    let obs = match observe_with_determinism_check(factory, &regions) {
-        Ok(obs) => obs,
-        Err(e) => {
-            eprintln!("determinism check FAILED for {name}: {e:?}");
-            std::process::exit(1);
-        }
-    };
-
-    let baseline =
-        cellgov_compare::baseline::load(std::path::Path::new(path)).unwrap_or_else(|e| {
-            eprintln!("failed to load baseline from {path}: {e:?}");
-            std::process::exit(1);
-        });
+    let obs = require_determinism(factory, name, &[]);
+    let baseline = cellgov_compare::baseline::load(std::path::Path::new(path))
+        .unwrap_or_else(|e| die(&format!("failed to load baseline from {path}: {e:?}")));
 
     let result = compare(&baseline, &obs, mode);
     match format {
@@ -279,38 +318,32 @@ fn run_compare(
     mode: CompareMode,
     format: OutputFormat,
 ) {
-    let regions: Vec<RegionDescriptor> = vec![];
-    match observe_with_determinism_check(factory, &regions) {
-        Ok(obs) => match format {
-            OutputFormat::Human => {
-                println!("scenario: {name}");
-                println!("determinism: ok");
-                println!("outcome: {:?}", obs.outcome);
-                println!("events: {}", obs.events.len());
-                for event in &obs.events {
-                    println!(
-                        "  {:4}  {:?} unit={}",
-                        event.sequence, event.kind, event.unit
-                    );
-                }
-                if let Some(hashes) = &obs.state_hashes {
-                    println!("memory_hash: 0x{:016x}", hashes.memory.raw());
-                    println!("status_hash: 0x{:016x}", hashes.unit_status.raw());
-                    println!("sync_hash: 0x{:016x}", hashes.sync.raw());
-                }
-                println!("mode: {mode:?}");
-                println!("steps: {}", obs.metadata.steps.unwrap_or(0));
-            }
-            OutputFormat::Json => {
+    let obs = require_determinism(factory, name, &[]);
+    match format {
+        OutputFormat::Human => {
+            println!("scenario: {name}");
+            println!("determinism: ok");
+            println!("outcome: {:?}", obs.outcome);
+            println!("events: {}", obs.events.len());
+            for event in &obs.events {
                 println!(
-                    "{}",
-                    serde_json::to_string_pretty(&obs).expect("json serialization")
+                    "  {:4}  {:?} unit={}",
+                    event.sequence, event.kind, event.unit
                 );
             }
-        },
-        Err(e) => {
-            eprintln!("determinism check FAILED for {name}: {e:?}");
-            std::process::exit(1);
+            if let Some(hashes) = &obs.state_hashes {
+                println!("memory_hash: 0x{:016x}", hashes.memory.raw());
+                println!("status_hash: 0x{:016x}", hashes.unit_status.raw());
+                println!("sync_hash: 0x{:016x}", hashes.sync.raw());
+            }
+            println!("mode: {mode:?}");
+            println!("steps: {}", obs.metadata.steps.unwrap_or(0));
+        }
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&obs).expect("json serialization")
+            );
         }
     }
 }
@@ -375,19 +408,12 @@ fn run_manifest_compare(
         return;
     }
 
-    let obs = match observe_with_determinism_check(&factory, &regions) {
-        Ok(obs) => obs,
-        Err(e) => {
-            eprintln!("determinism check FAILED for {test_name}: {e:?}");
-            std::process::exit(1);
-        }
-    };
+    let obs = require_determinism(&factory, test_name, &regions);
 
     if let Some(dir) = baselines_dir {
         let baselines = load_baselines_from_dir(&dir);
         if baselines.is_empty() {
-            eprintln!("no baseline .json files found in {dir}");
-            std::process::exit(1);
+            die(&format!("no baseline .json files found in {dir}"));
         }
         let result = compare_multi(&baselines, &obs, mode);
         match format {
@@ -600,6 +626,261 @@ fn dump_trace(result: &ScenarioResult) {
     println!("--- {count} records total ---");
 }
 
+/// Build a ScenarioFixture for an LV2-driven ELF microtest.
+///
+/// Reads PPU and SPU ELF binaries from `tests/micro/<name>/build/`,
+/// then constructs a fixture that boots the PPU, which drives SPU
+/// creation via LV2 syscalls.
+fn build_lv2_fixture(name: &str) -> ScenarioFixture {
+    use cellgov_mem::{ByteRange, GuestAddr};
+    use cellgov_ppu::PpuExecutionUnit;
+    use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
+    use cellgov_time::Budget;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let base = format!("tests/micro/{name}/build");
+    let ppu_elf = load_file_or_die(&format!("{base}/{name}.elf"));
+    let spu_elf = load_file_or_die(&format!("{base}/spu_main.elf"));
+
+    let mem_size = 0x1002_0000usize;
+    let stack_top = (mem_size as u64) - 0x1000;
+    let primed: Rc<RefCell<Option<cellgov_ppu::state::PpuState>>> = Rc::new(RefCell::new(None));
+    let primed_seed = Rc::clone(&primed);
+    let primed_reg = Rc::clone(&primed);
+
+    ScenarioFixture::builder()
+        .memory_size(mem_size)
+        .budget(Budget::new(100_000))
+        .max_steps(10_000)
+        .seed_memory(move |mem| {
+            let li_r11_22: u32 = (14 << 26) | (11 << 21) | 22;
+            let sc: u32 = 0x4400_0002;
+            let stub_range = ByteRange::new(GuestAddr::new(0), 8).unwrap();
+            let mut stub_bytes = Vec::with_capacity(8);
+            stub_bytes.extend_from_slice(&li_r11_22.to_be_bytes());
+            stub_bytes.extend_from_slice(&sc.to_be_bytes());
+            mem.apply_commit(stub_range, &stub_bytes).unwrap();
+
+            let mut state = cellgov_ppu::state::PpuState::new();
+            cellgov_ppu::loader::load_ppu_elf(&ppu_elf, mem, &mut state).unwrap();
+            state.gpr[1] = stack_top;
+            state.lr = 0;
+            *primed_seed.borrow_mut() = Some(state);
+        })
+        .register(move |rt| {
+            rt.lv2_host_mut()
+                .content_store_mut()
+                .register(b"/app_home/spu_main.elf", spu_elf.clone());
+
+            rt.set_spu_factory(move |id, init| {
+                let mut unit = SpuExecutionUnit::new(id);
+                spu_loader::load_spu_elf(&init.ls_bytes, unit.state_mut()).unwrap();
+                unit.state_mut().pc = init.entry_pc;
+                unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
+                unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
+                unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
+                unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
+                unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
+                Box::new(unit)
+            });
+
+            let ppu_state = primed_reg.borrow_mut().take().unwrap();
+            rt.registry_mut().register_with(|id| {
+                let mut unit = PpuExecutionUnit::new(id);
+                *unit.state_mut() = ppu_state;
+                unit
+            });
+        })
+        .build()
+}
+
+/// Run bounded schedule exploration on an LV2-driven ELF microtest.
+fn run_explore_micro(name: &str, format: OutputFormat) {
+    if !MICROTESTS.contains(&name) {
+        die(&format!(
+            "unknown microtest: {name}\navailable: {}",
+            MICROTESTS.join(", ")
+        ));
+    }
+    let config = ExplorationConfig::default();
+    let result = cellgov_explore::explore(|| build_lv2_fixture(name).build_runtime(), &config);
+    match result {
+        Some(r) => {
+            match format {
+                OutputFormat::Human => {
+                    println!("microtest: {name}");
+                    print!("{}", cellgov_explore::report::format_human(&r));
+                }
+                OutputFormat::Json => {
+                    println!("{}", cellgov_explore::report::format_json(&r));
+                }
+            }
+            if r.outcome == cellgov_explore::OutcomeClass::ScheduleSensitive {
+                std::process::exit(1);
+            }
+        }
+        None => {
+            println!("microtest: {name}");
+            println!("outcome: no branching points (single-unit or trivial)");
+        }
+    }
+}
+
+/// Region specs for each microtest: (symbol_name, [(region_name, offset, size)]).
+fn microtest_region_defs(name: &str) -> (&str, Vec<(&str, u64, u64)>) {
+    match name {
+        "barrier_wakeup" => ("buf", vec![("spu0_result", 0, 8), ("spu1_result", 16, 8)]),
+        "mailbox_roundtrip" => ("result", vec![("result", 0, 8)]),
+        "atomic_reservation" => ("buf", vec![("header", 0, 8), ("data", 16, 128)]),
+        _ => {
+            eprintln!("no region defs for microtest: {name}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Run oracle-aware schedule exploration on an LV2-driven microtest.
+fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputFormat) {
+    if !MICROTESTS.contains(&name) {
+        die(&format!(
+            "unknown microtest: {name}\navailable: {}",
+            MICROTESTS.join(", ")
+        ));
+    }
+
+    // Load oracle baselines.
+    let baselines = load_baselines_from_dir(baselines_dir);
+    if baselines.is_empty() {
+        eprintln!("no baseline .json files found in {baselines_dir}");
+        std::process::exit(1);
+    }
+
+    // Resolve memory regions from ELF symbol.
+    let (symbol, region_defs) = microtest_region_defs(name);
+    let base = format!("tests/micro/{name}/build");
+    let ppu_elf = load_file_or_die(&format!("{base}/{name}.elf"));
+    let base_addr = cellgov_ppu::loader::find_symbol(&ppu_elf, symbol)
+        .unwrap_or_else(|| die(&format!("symbol '{symbol}' not found in {base}/{name}.elf")));
+
+    let region_specs: Vec<cellgov_explore::MemoryRegionSpec> = region_defs
+        .iter()
+        .map(|(rname, offset, size)| cellgov_explore::MemoryRegionSpec {
+            name: (*rname).into(),
+            addr: base_addr + offset,
+            size: *size,
+        })
+        .collect();
+
+    // Run oracle-aware exploration.
+    let config = ExplorationConfig::default();
+    let result = cellgov_explore::explore_with_regions(
+        || build_lv2_fixture(name).build_runtime(),
+        &config,
+        &region_specs,
+    );
+
+    let Some(r) = result else {
+        println!("microtest: {name}");
+        println!("outcome: no branching points");
+        return;
+    };
+
+    // Compare each schedule's regions against oracle baselines.
+    let baseline_matches = compare_regions_against_oracle(&r.baseline.regions, &baselines);
+    let alt_matches: Vec<bool> = r
+        .alternates
+        .iter()
+        .map(|s| compare_regions_against_oracle(&s.regions, &baselines))
+        .collect();
+
+    let all_match = baseline_matches && alt_matches.iter().all(|m| *m);
+    let any_match = baseline_matches || alt_matches.iter().any(|m| *m);
+
+    match format {
+        OutputFormat::Human => {
+            println!("microtest: {name}");
+            print!("{}", cellgov_explore::report::format_human(&r.exploration));
+            println!("oracle_baselines: {}", baselines.len());
+            println!("baseline_matches_oracle: {baseline_matches}");
+            for (i, m) in alt_matches.iter().enumerate() {
+                if !m {
+                    println!("  schedule {i}: ORACLE MISMATCH");
+                }
+            }
+            if all_match {
+                println!("oracle_verdict: all schedules match oracle");
+            } else if any_match {
+                println!("oracle_verdict: PARTIAL -- some schedules diverge from oracle");
+            } else {
+                println!("oracle_verdict: NONE -- no schedule matches oracle");
+            }
+        }
+        OutputFormat::Json => {
+            let json = serde_json::json!({
+                "exploration": serde_json::from_str::<serde_json::Value>(
+                    &cellgov_explore::report::format_json(&r.exploration)
+                ).unwrap(),
+                "oracle": {
+                    "baselines_count": baselines.len(),
+                    "baseline_matches": baseline_matches,
+                    "alternate_matches": alt_matches,
+                    "all_match": all_match,
+                    "any_match": any_match,
+                },
+            });
+            println!("{}", serde_json::to_string_pretty(&json).unwrap());
+        }
+    }
+
+    if !all_match {
+        std::process::exit(1);
+    }
+}
+
+/// Compare captured regions against oracle baselines.
+/// Returns true if all regions match at least one baseline.
+fn compare_regions_against_oracle(
+    captured: &[cellgov_explore::oracle::CapturedRegion],
+    baselines: &[Observation],
+) -> bool {
+    // Match against ANY baseline (oracle agreement not checked here;
+    // that is the compare crate's concern).
+    baselines.iter().any(|oracle| {
+        captured.iter().all(|region| {
+            oracle.memory_regions.iter().any(|oracle_region| {
+                oracle_region.name == region.name && oracle_region.data == region.data
+            })
+        })
+    })
+}
+
+/// Run bounded schedule exploration on a testkit scenario.
+fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, format: OutputFormat) {
+    let config = ExplorationConfig::default();
+    let result = cellgov_explore::explore(|| factory().build_runtime(), &config);
+    match result {
+        Some(r) => {
+            match format {
+                OutputFormat::Human => {
+                    println!("scenario: {name}");
+                    print!("{}", cellgov_explore::report::format_human(&r));
+                }
+                OutputFormat::Json => {
+                    println!("{}", cellgov_explore::report::format_json(&r));
+                }
+            }
+            if r.outcome == cellgov_explore::OutcomeClass::ScheduleSensitive {
+                std::process::exit(1);
+            }
+        }
+        None => {
+            println!("scenario: {name}");
+            println!("outcome: no branching points (single-unit or trivial)");
+        }
+    }
+}
+
 /// Format a [`ScenarioResult`] as a deterministic, ASCII-only summary.
 fn report(name: &str, result: &ScenarioResult) -> String {
     let outcome = match result.outcome {
@@ -734,5 +1015,67 @@ mod tests {
     #[test]
     fn scenario_factory_returns_none_for_unknown() {
         assert!(scenario_factory("nonexistent").is_none());
+    }
+
+    #[test]
+    fn explore_runs_for_multi_unit_scenarios() {
+        // Scenarios with >1 unit should produce exploration results.
+        for name in &["fairness", "conflict", "mailbox"] {
+            let factory =
+                scenario_factory(name).unwrap_or_else(|| panic!("scenario {name} not found"));
+            let config = ExplorationConfig::default();
+            let result = cellgov_explore::explore(|| factory().build_runtime(), &config);
+            assert!(
+                result.is_some(),
+                "scenario {name} should have branching points"
+            );
+        }
+    }
+
+    #[test]
+    fn explore_single_unit_returns_none() {
+        let factory = scenario_factory("isa").expect("isa scenario exists");
+        let config = ExplorationConfig::default();
+        let result = cellgov_explore::explore(|| factory().build_runtime(), &config);
+        assert!(result.is_none(), "single-unit isa has no branching points");
+    }
+
+    #[test]
+    #[ignore] // ~7 min: runs 3 ELF microtests with full exploration
+    fn explore_micro_runs_for_elf_microtests() {
+        // The test binary's CWD may vary; use the CARGO_MANIFEST_DIR
+        // to locate the repo-root-relative test fixtures.
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let repo_root = std::path::Path::new(&manifest_dir)
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let config = ExplorationConfig::default();
+        for name in MICROTESTS {
+            let base = repo_root.join(format!("tests/micro/{name}/build"));
+            let ppu_path = base.join(format!("{name}.elf"));
+            let spu_path = base.join("spu_main.elf");
+            if !ppu_path.exists() || !spu_path.exists() {
+                continue; // ELFs not built; skip
+            }
+            // Temporarily chdir to repo root so build_lv2_fixture
+            // can find the ELFs with its relative paths.
+            let prev = std::env::current_dir().unwrap();
+            std::env::set_current_dir(repo_root).unwrap();
+            let result =
+                cellgov_explore::explore(|| build_lv2_fixture(name).build_runtime(), &config);
+            std::env::set_current_dir(&prev).unwrap();
+            assert!(
+                result.is_some(),
+                "microtest {name} should have branching points"
+            );
+            let r = result.unwrap();
+            assert_eq!(
+                r.outcome,
+                cellgov_explore::OutcomeClass::ScheduleStable,
+                "microtest {name} should be schedule-stable"
+            );
+        }
     }
 }

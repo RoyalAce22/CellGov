@@ -176,51 +176,27 @@ impl ThreadGroupTable {
 
     /// FNV-1a hash of the table for determinism checking.
     pub fn state_hash(&self) -> u64 {
-        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (id, group) in &self.groups {
-            for b in id.to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
-            for b in group.num_threads.to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
-            for b in group.remaining_unfinished.to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
+            hasher.write(&id.to_le_bytes());
+            hasher.write(&group.num_threads.to_le_bytes());
+            hasher.write(&group.remaining_unfinished.to_le_bytes());
             let state_byte = match group.state {
                 GroupState::Created => 0u8,
                 GroupState::Running => 1,
                 GroupState::Finished => 2,
             };
-            h ^= state_byte as u64;
-            h = h.wrapping_mul(FNV_PRIME);
+            hasher.write(&[state_byte]);
             for (slot_idx, slot) in &group.slots {
-                for b in slot_idx.to_le_bytes() {
-                    h ^= b as u64;
-                    h = h.wrapping_mul(FNV_PRIME);
-                }
-                for b in slot.image_handle.raw().to_le_bytes() {
-                    h ^= b as u64;
-                    h = h.wrapping_mul(FNV_PRIME);
-                }
+                hasher.write(&slot_idx.to_le_bytes());
+                hasher.write(&slot.image_handle.raw().to_le_bytes());
             }
         }
         for (uid, gid) in &self.unit_to_group {
-            for b in uid.raw().to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
-            for b in gid.to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
+            hasher.write(&uid.raw().to_le_bytes());
+            hasher.write(&gid.to_le_bytes());
         }
-        h
+        hasher.finish()
     }
 }
 

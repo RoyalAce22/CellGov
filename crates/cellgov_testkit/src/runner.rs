@@ -130,76 +130,10 @@ pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::CountingUnit;
     use cellgov_core::Runtime;
-    use cellgov_effects::Effect;
-    use cellgov_event::UnitId;
-    use cellgov_exec::{
-        ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus,
-        YieldReason,
-    };
     use cellgov_time::Budget;
     use cellgov_trace::{TraceReader, TraceRecord};
-    use std::cell::Cell;
-
-    /// A counting fake unit duplicated locally so the testkit's
-    /// scenario tests do not depend on cellgov_core's private test
-    /// units.
-    struct CountingUnit {
-        id: UnitId,
-        steps: Cell<u64>,
-        max: u64,
-    }
-
-    impl CountingUnit {
-        fn new(id: UnitId, max: u64) -> Self {
-            Self {
-                id,
-                steps: Cell::new(0),
-                max,
-            }
-        }
-    }
-
-    impl ExecutionUnit for CountingUnit {
-        type Snapshot = u64;
-        fn unit_id(&self) -> UnitId {
-            self.id
-        }
-        fn status(&self) -> UnitStatus {
-            if self.steps.get() >= self.max {
-                UnitStatus::Finished
-            } else {
-                UnitStatus::Runnable
-            }
-        }
-        fn run_until_yield(
-            &mut self,
-            budget: Budget,
-            _ctx: &ExecutionContext<'_>,
-        ) -> ExecutionStepResult {
-            let n = self.steps.get() + 1;
-            self.steps.set(n);
-            let yield_reason = if n >= self.max {
-                YieldReason::Finished
-            } else {
-                YieldReason::BudgetExhausted
-            };
-            ExecutionStepResult {
-                yield_reason,
-                consumed_budget: budget,
-                emitted_effects: vec![Effect::TraceMarker {
-                    marker: n as u32,
-                    source: self.id,
-                }],
-                local_diagnostics: LocalDiagnostics::empty(),
-                fault: None,
-                syscall_args: None,
-            }
-        }
-        fn snapshot(&self) -> u64 {
-            self.steps.get()
-        }
-    }
 
     #[test]
     fn empty_fixture_stalls_immediately_with_no_steps() {
