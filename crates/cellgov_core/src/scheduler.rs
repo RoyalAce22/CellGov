@@ -176,6 +176,7 @@ mod tests {
                 }],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
+                syscall_args: None,
             }
         }
 

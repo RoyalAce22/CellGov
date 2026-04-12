@@ -1,0 +1,16 @@
+[package]
+name = "cellgov_lv2"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cellgov_effects = { path = "../cellgov_effects" }
+cellgov_event = { path = "../cellgov_event" }
+cellgov_mem = { path = "../cellgov_mem" }
+cellgov_sync = { path = "../cellgov_sync" }
+cellgov_time = { path = "../cellgov_time" }

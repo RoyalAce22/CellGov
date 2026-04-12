@@ -97,6 +97,12 @@ impl ExecutionUnit for PpuExecutionUnit {
     ) -> ExecutionStepResult {
         let mut remaining = budget.raw();
         let mut effects = Vec::new();
+
+        if let Some(code) = ctx.syscall_return() {
+            self.state.gpr[3] = code;
+            self.state.pc += 4;
+        }
+
         let mem = ctx.memory().as_bytes();
 
         loop {
@@ -110,6 +116,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     emitted_effects: effects,
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
+                    syscall_args: None,
                 };
             }
             let raw = u32::from_be_bytes([mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3]]);
@@ -125,6 +132,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::empty(),
                         fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR | raw)),
+                        syscall_args: None,
                     };
                 }
             };
@@ -147,6 +155,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                             emitted_effects: effects,
                             local_diagnostics: LocalDiagnostics::empty(),
                             fault: Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)),
+                            syscall_args: None,
                         };
                     }
                     let val = match size {
@@ -205,35 +214,19 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.state.pc += 4;
                 }
                 PpuStepOutcome::Syscall => {
-                    let syscall_num = self.state.gpr[11];
-                    if syscall_num == syscall::SYS_PROCESS_EXIT {
-                        self.status = UnitStatus::Finished;
-                        return ExecutionStepResult {
-                            yield_reason: YieldReason::Finished,
-                            consumed_budget: Budget::new(budget.raw() - remaining),
-                            emitted_effects: effects,
-                            local_diagnostics: LocalDiagnostics::empty(),
-                            fault: None,
-                        };
-                    }
-                    if let Some(rv) = syscall::lv2_stub_return_value(syscall_num) {
-                        // Stubbed host boundary: set r3 to the return
-                        // value and continue past the sc instruction.
-                        self.state.gpr[3] = rv;
-                        self.state.pc += 4;
-                    } else {
-                        self.state.pc += 4;
-                        self.status = UnitStatus::Faulted;
-                        return ExecutionStepResult {
-                            yield_reason: YieldReason::Fault,
-                            consumed_budget: Budget::new(budget.raw() - remaining),
-                            emitted_effects: effects,
-                            local_diagnostics: LocalDiagnostics::empty(),
-                            fault: Some(FaultKind::Guest(
-                                FAULT_UNSUPPORTED_SYSCALL | syscall_num as u32,
-                            )),
-                        };
-                    }
+                    let s = &self.state;
+                    let args = [
+                        s.gpr[11], s.gpr[3], s.gpr[4], s.gpr[5], s.gpr[6], s.gpr[7], s.gpr[8],
+                        s.gpr[9], s.gpr[10],
+                    ];
+                    return ExecutionStepResult {
+                        yield_reason: YieldReason::Syscall,
+                        consumed_budget: Budget::new(budget.raw() - remaining),
+                        emitted_effects: effects,
+                        local_diagnostics: LocalDiagnostics::empty(),
+                        fault: None,
+                        syscall_args: Some(args),
+                    };
                 }
                 PpuStepOutcome::Yield {
                     effects: step_effects,
@@ -251,6 +244,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::empty(),
                         fault: None,
+                        syscall_args: None,
                     };
                 }
                 PpuStepOutcome::Fault(f) => {
@@ -266,6 +260,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::empty(),
                         fault: Some(FaultKind::Guest(code)),
+                        syscall_args: None,
                     };
                 }
             }
@@ -278,6 +273,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     emitted_effects: effects,
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
+                    syscall_args: None,
                 };
             }
         }

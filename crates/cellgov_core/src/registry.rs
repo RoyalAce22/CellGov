@@ -107,6 +107,11 @@ pub struct UnitRegistry {
     /// `run_until_yield` and passed to the unit via
     /// `ExecutionContext::received_messages`.
     pending_receives: BTreeMap<UnitId, Vec<u32>>,
+    /// Per-unit syscall return code. Set by the runtime after
+    /// dispatching a `YieldReason::Syscall` through the LV2 host.
+    /// Drained at the start of the next `run_until_yield` and passed
+    /// to the unit via `ExecutionContext::syscall_return`.
+    pending_syscall_returns: BTreeMap<UnitId, u64>,
 }
 
 impl UnitRegistry {
@@ -152,6 +157,28 @@ impl UnitRegistry {
             id.raw(),
         );
         self.units.insert(id, Box::new(unit));
+        id
+    }
+
+    /// Register a unit produced by a boxed factory. The runtime calls
+    /// this when handling `Lv2Dispatch::RegisterSpu` -- the factory
+    /// receives the freshly allocated `UnitId` and returns a boxed
+    /// unit. Same monotonic id allocation as `register_with`.
+    pub fn register_dynamic(
+        &mut self,
+        factory: &dyn Fn(UnitId) -> Box<dyn RegisteredUnit>,
+    ) -> UnitId {
+        let id = UnitId::new(self.next_id);
+        self.next_id += 1;
+        let unit = factory(id);
+        assert_eq!(
+            unit.unit_id(),
+            id,
+            "registered unit reported {} but registry assigned {}",
+            unit.unit_id().raw(),
+            id.raw(),
+        );
+        self.units.insert(id, unit);
         id
     }
 
@@ -233,6 +260,20 @@ impl UnitRegistry {
     /// of each `run_until_yield` to build the `ExecutionContext`.
     pub fn drain_receives(&mut self, id: UnitId) -> Vec<u32> {
         self.pending_receives.remove(&id).unwrap_or_default()
+    }
+
+    /// Store a syscall return code for `id`. The runtime calls this
+    /// after `Lv2Host::dispatch` returns `Immediate { code, .. }` so
+    /// the unit can read the code on its next step.
+    pub fn set_syscall_return(&mut self, id: UnitId, code: u64) {
+        self.pending_syscall_returns.insert(id, code);
+    }
+
+    /// Drain the pending syscall return for `id`, if any. The runtime
+    /// calls this at the start of each `run_until_yield` to build the
+    /// `ExecutionContext`.
+    pub fn drain_syscall_return(&mut self, id: UnitId) -> Option<u64> {
+        self.pending_syscall_returns.remove(&id)
     }
 
     /// 64-bit deterministic hash of the ordered set of unit ids whose
@@ -328,6 +369,7 @@ mod tests {
                 }],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
+                syscall_args: None,
             }
         }
 
@@ -362,6 +404,7 @@ mod tests {
                 emitted_effects: vec![],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
+                syscall_args: None,
             }
         }
 
@@ -481,6 +524,7 @@ mod tests {
                 emitted_effects: vec![],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
+                syscall_args: None,
             }
         }
         fn snapshot(&self) {}

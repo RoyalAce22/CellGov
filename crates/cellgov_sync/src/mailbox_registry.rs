@@ -58,6 +58,15 @@ impl MailboxRegistry {
         id
     }
 
+    /// Register an empty mailbox at a specific id. Used by the runtime
+    /// to align MailboxId with UnitId for dynamically created SPUs.
+    pub fn register_at(&mut self, id: MailboxId) {
+        self.mailboxes.entry(id).or_default();
+        if id.raw() >= self.next_id {
+            self.next_id = id.raw() + 1;
+        }
+    }
+
     /// Borrow a mailbox by id, if present.
     #[inline]
     pub fn get(&self, id: MailboxId) -> Option<&Mailbox> {

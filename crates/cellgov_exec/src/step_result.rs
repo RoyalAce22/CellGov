@@ -72,6 +72,12 @@ pub struct ExecutionStepResult {
     pub local_diagnostics: LocalDiagnostics,
     /// Fault data, present iff `yield_reason == YieldReason::Fault`.
     pub fault: Option<FaultKind>,
+    /// Raw syscall arguments, present iff `yield_reason == YieldReason::Syscall`.
+    /// Index 0 is the syscall number (from the architecture's syscall-number
+    /// register, e.g. GPR 11 on PPC64). Indices 1..=8 are the argument
+    /// registers (e.g. GPR 3..=10). The runtime reads these to classify
+    /// the request and dispatch through the LV2 host.
+    pub syscall_args: Option<[u64; 9]>,
 }
 
 impl ExecutionStepResult {
@@ -114,6 +120,7 @@ mod tests {
             emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         };
         assert_eq!(r.yield_reason, YieldReason::BudgetExhausted);
         assert_eq!(r.consumed_budget, Budget::new(0));
@@ -130,6 +137,7 @@ mod tests {
             emitted_effects: vec![marker(1), marker(2), marker(3)],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         };
         // Direct slice equality preserves both content and order
         // without needing pattern destructuring.
@@ -148,6 +156,7 @@ mod tests {
             emitted_effects: vec![marker(99)],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: Some(FaultKind::Guest(0xbad)),
+            syscall_args: None,
         };
         assert!(r.is_well_formed());
         assert_eq!(r.fault, Some(FaultKind::Guest(0xbad)));
@@ -161,6 +170,7 @@ mod tests {
             emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         };
         assert!(!r.is_well_formed());
     }
@@ -173,6 +183,7 @@ mod tests {
             emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: Some(FaultKind::Validation),
+            syscall_args: None,
         };
         assert!(!r.is_well_formed());
     }
@@ -185,6 +196,7 @@ mod tests {
             emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         };
         assert!(r.is_well_formed());
     }
@@ -197,6 +209,7 @@ mod tests {
             emitted_effects: vec![marker(42)],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         };
         let c = r.clone();
         assert_eq!(r, c);

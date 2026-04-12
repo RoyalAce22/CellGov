@@ -83,6 +83,7 @@ impl ExecutionUnit for CountingUnit {
             }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         }
     }
     fn snapshot(&self) -> u64 {
@@ -160,6 +161,7 @@ impl ExecutionUnit for WritingUnit {
             }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         }
     }
     fn snapshot(&self) -> u64 {
@@ -227,6 +229,7 @@ impl ExecutionUnit for MailboxProducer {
             }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         }
     }
     fn snapshot(&self) -> u64 {
@@ -306,6 +309,7 @@ impl ExecutionUnit for SignalEmitter {
             }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         }
     }
     fn snapshot(&self) -> u64 {
@@ -397,6 +401,7 @@ impl ExecutionUnit for DmaSubmitter {
                     ],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
+                    syscall_args: None,
                 }
             }
             _ => {
@@ -410,6 +415,7 @@ impl ExecutionUnit for DmaSubmitter {
                     }],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
+                    syscall_args: None,
                 }
             }
         }
@@ -499,6 +505,7 @@ impl ExecutionUnit for MailboxSender {
                     ],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
+                    syscall_args: None,
                 }
             }
             1 => {
@@ -512,6 +519,7 @@ impl ExecutionUnit for MailboxSender {
                     }],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
+                    syscall_args: None,
                 }
             }
             _ => {
@@ -526,6 +534,7 @@ impl ExecutionUnit for MailboxSender {
                     }],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
+                    syscall_args: None,
                 }
             }
         }
@@ -598,6 +607,7 @@ impl ExecutionUnit for MailboxResponder {
                     }],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
+                    syscall_args: None,
                 }
             }
             _ => {
@@ -620,6 +630,7 @@ impl ExecutionUnit for MailboxResponder {
                     ],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
+                    syscall_args: None,
                 }
             }
         }

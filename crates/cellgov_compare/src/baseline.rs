@@ -47,43 +47,8 @@ pub fn load(path: &Path) -> Result<Observation, BaselineError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::observation::{
-        NamedMemoryRegion, ObservationMetadata, ObservedEvent, ObservedEventKind, ObservedHashes,
-        ObservedOutcome,
-    };
-    use cellgov_trace::StateHash;
-
-    fn sample_observation() -> Observation {
-        Observation {
-            outcome: ObservedOutcome::Completed,
-            memory_regions: vec![NamedMemoryRegion {
-                name: "result".into(),
-                addr: 0x10000,
-                data: vec![0, 0, 0, 1],
-            }],
-            events: vec![
-                ObservedEvent {
-                    kind: ObservedEventKind::MailboxSend,
-                    unit: 0,
-                    sequence: 0,
-                },
-                ObservedEvent {
-                    kind: ObservedEventKind::UnitWake,
-                    unit: 1,
-                    sequence: 1,
-                },
-            ],
-            state_hashes: Some(ObservedHashes {
-                memory: StateHash::new(0xaabb_ccdd_eeff_0011),
-                unit_status: StateHash::new(0x1122_3344_5566_7788),
-                sync: StateHash::new(0x99aa_bbcc_ddee_ff00),
-            }),
-            metadata: ObservationMetadata {
-                runner: "cellgov".into(),
-                steps: Some(42),
-            },
-        }
-    }
+    use crate::observation::{ObservationMetadata, ObservedOutcome};
+    use crate::test_support::{sample_observation, TempDir};
 
     #[test]
     fn roundtrip_through_json() {
@@ -96,17 +61,12 @@ mod tests {
     #[test]
     fn save_and_load_roundtrip() {
         let obs = sample_observation();
-        let dir = std::env::temp_dir().join("cellgov_baseline_test");
-        std::fs::create_dir_all(&dir).ok();
-        let path = dir.join("test_baseline.json");
+        let dir = TempDir::new("baseline_test");
+        let path = dir.file("test_baseline.json");
 
         save(&obs, &path).expect("save");
         let loaded = load(&path).expect("load");
         assert_eq!(obs, loaded);
-
-        // Cleanup
-        std::fs::remove_file(&path).ok();
-        std::fs::remove_dir(&dir).ok();
     }
 
     #[test]
@@ -127,18 +87,14 @@ mod tests {
 
         let obs = observe_with_determinism_check(factory, &regions).expect("observe");
 
-        let dir = std::env::temp_dir().join("cellgov_pipeline_test");
-        std::fs::create_dir_all(&dir).ok();
-        let path = dir.join("pipeline_baseline.json");
+        let dir = TempDir::new("pipeline_test");
+        let path = dir.file("pipeline_baseline.json");
 
         save(&obs, &path).expect("save");
         let loaded = load(&path).expect("load");
 
         let result = compare(&loaded, &obs, CompareMode::Strict);
         assert_eq!(result.classification, Classification::Match);
-
-        std::fs::remove_file(&path).ok();
-        std::fs::remove_dir(&dir).ok();
     }
 
     #[test]
@@ -155,10 +111,9 @@ mod tests {
         let obs1 = observe_with_determinism_check(factory, &regions).expect("obs1");
         let obs2 = observe_with_determinism_check(factory, &regions).expect("obs2");
 
-        let dir = std::env::temp_dir().join("cellgov_multi_pipeline_test");
-        std::fs::create_dir_all(&dir).ok();
-        let p1 = dir.join("baseline_interp.json");
-        let p2 = dir.join("baseline_llvm.json");
+        let dir = TempDir::new("multi_pipeline_test");
+        let p1 = dir.file("baseline_interp.json");
+        let p2 = dir.file("baseline_llvm.json");
 
         save(&obs1, &p1).expect("save 1");
         save(&obs2, &p2).expect("save 2");
@@ -172,10 +127,6 @@ mod tests {
         let result = compare_multi(&[b1, b2], &cellgov, CompareMode::Strict);
         assert_eq!(result.classification, Classification::Match);
         assert!(result.oracle_divergence.is_none());
-
-        std::fs::remove_file(&p1).ok();
-        std::fs::remove_file(&p2).ok();
-        std::fs::remove_dir(&dir).ok();
     }
 
     #[test]
@@ -215,16 +166,12 @@ mod tests {
             },
         };
 
-        let dir = std::env::temp_dir().join("cellgov_rpcs3_baseline_test");
-        std::fs::create_dir_all(&dir).ok();
-        let path = dir.join("rpcs3_interp.json");
+        let dir = TempDir::new("rpcs3_baseline_test");
+        let path = dir.file("rpcs3_interp.json");
 
         save(&obs, &path).expect("save");
         let loaded = load(&path).expect("load");
         assert_eq!(obs, loaded);
-
-        std::fs::remove_file(&path).ok();
-        std::fs::remove_dir(&dir).ok();
     }
 
     #[test]
@@ -259,22 +206,5 @@ mod tests {
         assert_eq!(result.classification, Classification::Divergence);
         assert!(result.memory_divergence.is_some());
         assert!(result.outcome_mismatch.is_none());
-    }
-
-    #[test]
-    fn observation_without_hashes_roundtrips() {
-        let obs = Observation {
-            outcome: ObservedOutcome::Completed,
-            memory_regions: vec![],
-            events: vec![],
-            state_hashes: None,
-            metadata: ObservationMetadata {
-                runner: "rpcs3".into(),
-                steps: None,
-            },
-        };
-        let json = serde_json::to_string(&obs).expect("serialize");
-        let loaded: Observation = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(obs, loaded);
     }
 }

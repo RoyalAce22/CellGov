@@ -142,43 +142,7 @@ pub struct Observation {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn sample_observation() -> Observation {
-        Observation {
-            outcome: ObservedOutcome::Completed,
-            memory_regions: vec![NamedMemoryRegion {
-                name: "result".into(),
-                addr: 0x10000,
-                data: vec![0, 0, 0, 1],
-            }],
-            events: vec![
-                ObservedEvent {
-                    kind: ObservedEventKind::MailboxSend,
-                    unit: 0,
-                    sequence: 0,
-                },
-                ObservedEvent {
-                    kind: ObservedEventKind::UnitWake,
-                    unit: 1,
-                    sequence: 1,
-                },
-                ObservedEvent {
-                    kind: ObservedEventKind::MailboxReceive,
-                    unit: 1,
-                    sequence: 2,
-                },
-            ],
-            state_hashes: Some(ObservedHashes {
-                memory: StateHash::new(0xaabb),
-                unit_status: StateHash::new(0xccdd),
-                sync: StateHash::new(0xeeff),
-            }),
-            metadata: ObservationMetadata {
-                runner: "cellgov".into(),
-                steps: Some(42),
-            },
-        }
-    }
+    use crate::test_support::sample_observation;
 
     #[test]
     fn observations_with_same_fields_are_equal() {
@@ -276,5 +240,22 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn observation_without_hashes_roundtrips() {
+        let obs = Observation {
+            outcome: ObservedOutcome::Completed,
+            memory_regions: vec![],
+            events: vec![],
+            state_hashes: None,
+            metadata: ObservationMetadata {
+                runner: "rpcs3".into(),
+                steps: None,
+            },
+        };
+        let json = serde_json::to_string(&obs).expect("serialize");
+        let loaded: Observation = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(obs, loaded);
     }
 }

@@ -16,6 +16,9 @@ pub mod report;
 pub mod runner_cellgov;
 pub mod runner_rpcs3;
 
+#[cfg(test)]
+mod test_support;
+
 pub use compare::{
     compare, compare_multi, Classification, CompareMode, CompareResult, EventDivergence,
     MemoryDivergence, MultiCompareResult,

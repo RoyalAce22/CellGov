@@ -30,8 +30,10 @@ pub mod commit;
 pub mod registry;
 pub mod runtime;
 pub mod scheduler;
+pub mod syscall_table;
 
-pub use commit::{BlockReason, CommitError, CommitOutcome, CommitPipeline};
+pub use commit::{BlockReason, CommitContext, CommitError, CommitOutcome, CommitPipeline};
 pub use registry::{RegisteredUnit, UnitRegistry};
-pub use runtime::{Runtime, RuntimeStep, StepError};
+pub use runtime::{Runtime, RuntimeStep, SpuFactory, StepError};
 pub use scheduler::{RoundRobinScheduler, Scheduler};
+pub use syscall_table::SyscallResponseTable;

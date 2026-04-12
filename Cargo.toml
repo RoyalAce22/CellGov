@@ -12,6 +12,7 @@ members = [
     "crates/cellgov_core",
     "crates/cellgov_compare",
     "crates/cellgov_testkit",
+    "crates/cellgov_lv2",
     "crates/cellgov_spu",
     "crates/cellgov_ppu",
     "apps/cellgov_cli",
