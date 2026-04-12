@@ -22,6 +22,10 @@ use crate::completion::DmaCompletion;
 use cellgov_time::GuestTicks;
 use std::collections::BTreeMap;
 
+/// A queued entry: the completion metadata plus optional inline data
+/// for transfers from unit-private memory.
+type QueueEntry = (DmaCompletion, Option<Vec<u8>>);
+
 /// A deterministic priority queue of modeled DMA completions.
 ///
 /// Drains in `(completion_time, sequence)` order. The sequence number
@@ -30,7 +34,7 @@ use std::collections::BTreeMap;
 /// total and stable across runs.
 #[derive(Debug, Clone, Default)]
 pub struct DmaQueue {
-    entries: BTreeMap<(GuestTicks, u64), DmaCompletion>,
+    entries: BTreeMap<(GuestTicks, u64), QueueEntry>,
     next_seq: u64,
 }
 
@@ -53,30 +57,38 @@ impl DmaQueue {
         self.entries.is_empty()
     }
 
-    /// Enqueue `completion`. The queue assigns a fresh sequence number
-    /// to break ties with any other completion that shares the same
-    /// `completion_time`; the assigned ordering key is the pair
+    /// Enqueue `completion` with an optional inline `payload`.
+    ///
+    /// The queue assigns a fresh sequence number to break ties with any
+    /// other completion that shares the same `completion_time`; the
+    /// assigned ordering key is the pair
     /// `(completion.completion_time(), sequence_number)`.
+    ///
+    /// When `payload` is `Some`, the runtime uses those bytes at
+    /// completion time instead of reading from the source address in
+    /// guest memory. This supports transfers from unit-private memory
+    /// (e.g., SPU local store) that is not mapped into the guest
+    /// address space.
     ///
     /// Returns the assigned sequence number for callers that want to
     /// trace it; most callers ignore it.
-    pub fn enqueue(&mut self, completion: DmaCompletion) -> u64 {
+    pub fn enqueue(&mut self, completion: DmaCompletion, payload: Option<Vec<u8>>) -> u64 {
         let seq = self.next_seq;
         self.next_seq += 1;
         self.entries
-            .insert((completion.completion_time(), seq), completion);
+            .insert((completion.completion_time(), seq), (completion, payload));
         seq
     }
 
     /// Borrow the earliest pending completion without removing it.
     /// Returns `None` if the queue is empty.
     pub fn peek(&self) -> Option<&DmaCompletion> {
-        self.entries.values().next()
+        self.entries.values().next().map(|(c, _)| c)
     }
 
-    /// Remove and return the earliest pending completion. Returns
-    /// `None` if the queue is empty.
-    pub fn pop_next(&mut self) -> Option<DmaCompletion> {
+    /// Remove and return the earliest pending completion and its
+    /// payload. Returns `None` if the queue is empty.
+    pub fn pop_next(&mut self) -> Option<(DmaCompletion, Option<Vec<u8>>)> {
         let key = *self.entries.keys().next()?;
         self.entries.remove(&key)
     }
@@ -85,17 +97,11 @@ impl DmaQueue {
     /// equal to `now`, returning them in `(time, sequence)` order.
     ///
     /// "Less than or equal" because a completion scheduled to fire at
-    /// exactly `now` is considered visible at `now`. The relative order between two completions that share a
-    /// `completion_time` is decided by their queue sequence numbers,
-    /// which preserves enqueue order.
-    pub fn pop_due(&mut self, now: GuestTicks) -> Vec<DmaCompletion> {
-        // Split off everything strictly after `now`. The split key
-        // (now+1, 0) is the smallest key whose time is greater than
-        // `now`, so the lower partition contains exactly the due set.
-        // GuestTicks supports checked_add via its `raw()` value; we
-        // saturate on overflow because a u64 tick value past max is
-        // a runtime invariant violation the deadlock detector should
-        // catch much earlier.
+    /// exactly `now` is considered visible at `now`. The relative
+    /// order between two completions that share a `completion_time` is
+    /// decided by their queue sequence numbers, which preserves
+    /// enqueue order.
+    pub fn pop_due(&mut self, now: GuestTicks) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
         let split_time = now.raw().saturating_add(1);
         let after = self.entries.split_off(&(GuestTicks::new(split_time), 0));
         let due = std::mem::replace(&mut self.entries, after);
@@ -136,9 +142,9 @@ mod tests {
     #[test]
     fn enqueue_then_peek_returns_earliest() {
         let mut q = DmaQueue::new();
-        q.enqueue(completion_at(100, 0));
-        q.enqueue(completion_at(50, 1));
-        q.enqueue(completion_at(200, 2));
+        q.enqueue(completion_at(100, 0), None);
+        q.enqueue(completion_at(50, 1), None);
+        q.enqueue(completion_at(200, 2), None);
         assert_eq!(q.len(), 3);
         assert_eq!(q.peek().unwrap().completion_time(), GuestTicks::new(50));
     }
@@ -146,11 +152,11 @@ mod tests {
     #[test]
     fn pop_next_returns_in_time_order() {
         let mut q = DmaQueue::new();
-        q.enqueue(completion_at(100, 0));
-        q.enqueue(completion_at(50, 1));
-        q.enqueue(completion_at(200, 2));
+        q.enqueue(completion_at(100, 0), None);
+        q.enqueue(completion_at(50, 1), None);
+        q.enqueue(completion_at(200, 2), None);
         let times: Vec<u64> = std::iter::from_fn(|| q.pop_next())
-            .map(|c| c.completion_time().raw())
+            .map(|(c, _)| c.completion_time().raw())
             .collect();
         assert_eq!(times, vec![50, 100, 200]);
         assert!(q.is_empty());
@@ -161,11 +167,11 @@ mod tests {
         // Three completions all scheduled for the same tick. Drain
         // order must equal enqueue order (sequence number tiebreak).
         let mut q = DmaQueue::new();
-        q.enqueue(completion_at(100, 7));
-        q.enqueue(completion_at(100, 8));
-        q.enqueue(completion_at(100, 9));
+        q.enqueue(completion_at(100, 7), None);
+        q.enqueue(completion_at(100, 8), None);
+        q.enqueue(completion_at(100, 9), None);
         let issuers: Vec<u64> = std::iter::from_fn(|| q.pop_next())
-            .map(|c| c.issuer().raw())
+            .map(|(c, _)| c.issuer().raw())
             .collect();
         assert_eq!(issuers, vec![7, 8, 9]);
     }
@@ -173,25 +179,22 @@ mod tests {
     #[test]
     fn pop_due_drains_only_due_completions() {
         let mut q = DmaQueue::new();
-        q.enqueue(completion_at(50, 0));
-        q.enqueue(completion_at(100, 1));
-        q.enqueue(completion_at(150, 2));
-        q.enqueue(completion_at(200, 3));
+        q.enqueue(completion_at(50, 0), None);
+        q.enqueue(completion_at(100, 1), None);
+        q.enqueue(completion_at(150, 2), None);
+        q.enqueue(completion_at(200, 3), None);
         let due = q.pop_due(GuestTicks::new(120));
         assert_eq!(due.len(), 2);
-        assert_eq!(due[0].completion_time(), GuestTicks::new(50));
-        assert_eq!(due[1].completion_time(), GuestTicks::new(100));
+        assert_eq!(due[0].0.completion_time(), GuestTicks::new(50));
+        assert_eq!(due[1].0.completion_time(), GuestTicks::new(100));
         assert_eq!(q.len(), 2);
         assert_eq!(q.peek().unwrap().completion_time(), GuestTicks::new(150));
     }
 
     #[test]
     fn pop_due_includes_completions_at_exactly_now() {
-        // "Completion fires at this guest tick" means the boundary is
-        // inclusive. A completion scheduled for
-        // exactly `now` must drain.
         let mut q = DmaQueue::new();
-        q.enqueue(completion_at(100, 0));
+        q.enqueue(completion_at(100, 0), None);
         let due = q.pop_due(GuestTicks::new(100));
         assert_eq!(due.len(), 1);
         assert!(q.is_empty());
@@ -200,7 +203,7 @@ mod tests {
     #[test]
     fn pop_due_with_no_due_completions_returns_empty() {
         let mut q = DmaQueue::new();
-        q.enqueue(completion_at(500, 0));
+        q.enqueue(completion_at(500, 0), None);
         let due = q.pop_due(GuestTicks::new(100));
         assert!(due.is_empty());
         assert_eq!(q.len(), 1);
@@ -216,25 +219,22 @@ mod tests {
     #[test]
     fn pop_due_preserves_enqueue_order_within_same_time() {
         let mut q = DmaQueue::new();
-        // Three at 100, two at 150 -- all due at 200.
-        q.enqueue(completion_at(100, 1));
-        q.enqueue(completion_at(150, 2));
-        q.enqueue(completion_at(100, 3));
-        q.enqueue(completion_at(150, 4));
-        q.enqueue(completion_at(100, 5));
+        q.enqueue(completion_at(100, 1), None);
+        q.enqueue(completion_at(150, 2), None);
+        q.enqueue(completion_at(100, 3), None);
+        q.enqueue(completion_at(150, 4), None);
+        q.enqueue(completion_at(100, 5), None);
         let due = q.pop_due(GuestTicks::new(200));
-        let issuers: Vec<u64> = due.iter().map(|c| c.issuer().raw()).collect();
-        // Time-100 group first (in enqueue order 1, 3, 5), then
-        // time-150 group (in enqueue order 2, 4).
+        let issuers: Vec<u64> = due.iter().map(|(c, _)| c.issuer().raw()).collect();
         assert_eq!(issuers, vec![1, 3, 5, 2, 4]);
     }
 
     #[test]
     fn enqueue_returns_sequential_sequence_numbers() {
         let mut q = DmaQueue::new();
-        let s0 = q.enqueue(completion_at(100, 0));
-        let s1 = q.enqueue(completion_at(100, 1));
-        let s2 = q.enqueue(completion_at(100, 2));
+        let s0 = q.enqueue(completion_at(100, 0), None);
+        let s1 = q.enqueue(completion_at(100, 1), None);
+        let s2 = q.enqueue(completion_at(100, 2), None);
         assert_eq!(s0, 0);
         assert_eq!(s1, 1);
         assert_eq!(s2, 2);
@@ -242,29 +242,37 @@ mod tests {
 
     #[test]
     fn drain_then_enqueue_keeps_sequence_strictly_monotonic() {
-        // Sequence numbers must keep climbing across drains so a
-        // re-used (time, seq) pair never collides with an earlier
-        // entry that briefly inhabited the same time bucket.
         let mut q = DmaQueue::new();
-        q.enqueue(completion_at(100, 0));
-        q.enqueue(completion_at(100, 1));
+        q.enqueue(completion_at(100, 0), None);
+        q.enqueue(completion_at(100, 1), None);
         let _ = q.pop_due(GuestTicks::new(100));
-        let s2 = q.enqueue(completion_at(100, 2));
+        let s2 = q.enqueue(completion_at(100, 2), None);
         assert_eq!(s2, 2);
     }
 
     #[test]
     fn clone_is_independent() {
         let mut a = DmaQueue::new();
-        a.enqueue(completion_at(100, 0));
-        a.enqueue(completion_at(200, 1));
+        a.enqueue(completion_at(100, 0), None);
+        a.enqueue(completion_at(200, 1), None);
         let mut b = a.clone();
         let _ = a.pop_next();
         assert_eq!(a.len(), 1);
         assert_eq!(b.len(), 2);
         assert_eq!(
-            b.pop_next().unwrap().completion_time(),
+            b.pop_next().unwrap().0.completion_time(),
             GuestTicks::new(100)
         );
+    }
+
+    #[test]
+    fn payload_survives_enqueue_and_pop() {
+        let mut q = DmaQueue::new();
+        q.enqueue(completion_at(100, 0), Some(vec![0xDE, 0xAD]));
+        q.enqueue(completion_at(200, 1), None);
+        let (_, payload) = q.pop_next().unwrap();
+        assert_eq!(payload, Some(vec![0xDE, 0xAD]));
+        let (_, payload) = q.pop_next().unwrap();
+        assert_eq!(payload, None);
     }
 }

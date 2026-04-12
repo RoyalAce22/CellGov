@@ -384,7 +384,10 @@ impl ExecutionUnit for DmaSubmitter {
                             source: self.id,
                             source_time: GuestTicks::ZERO,
                         },
-                        Effect::DmaEnqueue { request: req },
+                        Effect::DmaEnqueue {
+                            request: req,
+                            payload: None,
+                        },
                         Effect::WaitOnEvent {
                             target: cellgov_effects::WaitTarget::Barrier(
                                 cellgov_sync::BarrierId::new(0),

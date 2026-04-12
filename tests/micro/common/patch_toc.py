@@ -85,41 +85,9 @@ def patch_rldicr(elf_path):
         data = bytearray(f.read())
 
     count = 0
-    # Scan for rldicr rN, rN, 16, 47 pattern.
-    # rldicr encoding (MD-form): opcode 30, SH=16, ME=47
-    # Bits: 011110 SSSSS AAAAA sssss MMMMM 01 S 0
-    # sh=16: sh[0:4]=10000=16, sh[5]=0
-    # me=47: me[5]=1, me[0:4]=01111 -> me_field = 1|01111<<1 = 0b111110 = stored as me[5]||me[0:3] in bits 21-25
-    # Actually ME is encoded differently. Let me just match the known byte pattern.
-    # From the disassembly: 79 29 83 e4 = rldicr r9,r9,16,47
-    # Let me decode: 0x7929_83E4
-    # Bits: 0111 1001 0010 1001 1000 0011 1110 0100
-    #   opcode = 011110 = 30 (rldicr)
-    #   rS = 01001 = 9
-    #   rA = 01001 = 9
-    #   sh[0:4] = 10000 = 16
-    #   me[5]||me[0:3] = 01111 -> hmm
-    # Encoding bits 21-25: me field = 01111, bit 26-28: XO=1 (01), bit 29: sh[5]=1, bit 30: Rc=0
-    # Wait, bits 26-29 = 0011 1110 0100 -> let me reparse
-    # 0x7929_83E4 in binary:
-    # 7: 0111  9: 1001  2: 0010  9: 1001  8: 1000  3: 0011  E: 1110  4: 0100
-    # 01111001 00101001 10000011 11100100
-    # opcode[0:5] = 011110 = 30 OK
-    # rS[6:10] = 01001 = 9
-    # rA[11:15] = 01001 = 9
-    # sh[16:20] = 10000 = 16
-    # mb[21:25] = 01111
-    # XO[26:28] = 100 -> XO=1 for rldicr is bits 27-29 = 01, not 100
-    # Hmm, let me re-check the PPC encoding.
-
-    # Rather than decode the full encoding, just search for the known
-    # 4-byte patterns. Each rldicr rN,rN,16,47 has a fixed encoding
-    # except for the register field.
-    #
-    # rldicr encoding for sh=16, me=47:
-    # The last 16 bits are always 0x83E4 for these parameters.
-    # The first 16 bits encode: opcode(6) | rS(5) | rA(5).
-    # opcode = 30 = 0b011110, so first byte starts with 0x78 or 0x79.
+    # Match rldicr rN, rN, 16, 47 by checking fixed encoding fields:
+    #   opcode=30 (bits 0-5), sh[0:4]=16 (bits 16-20), rS==rA,
+    #   and the low 12 bits = 0x3E4 (me=47 + XO + sh[5] + Rc).
 
     i = 0
     while i < len(data) - 3:

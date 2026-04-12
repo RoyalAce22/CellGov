@@ -323,10 +323,10 @@ impl CommitPipeline {
                         .expect("pre-validated signal id")
                         .or_in(*value);
                 }
-                Effect::DmaEnqueue { request } => {
+                Effect::DmaEnqueue { request, payload } => {
                     let completion_time = dma_latency.completion_time(request, now);
                     let completion = DmaCompletion::new(*request, completion_time);
-                    dma_queue.enqueue(completion);
+                    dma_queue.enqueue(completion, payload.clone());
                 }
                 Effect::MailboxReceiveAttempt {
                     mailbox, source, ..

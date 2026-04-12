@@ -73,6 +73,11 @@ pub enum Effect {
     DmaEnqueue {
         /// The DMA request packet.
         request: DmaRequest,
+        /// Inline payload for transfers from unit-private memory (e.g.,
+        /// SPU local store). When present, the commit pipeline writes
+        /// these bytes to the destination at completion time instead of
+        /// reading from the source address in guest memory.
+        payload: Option<Vec<u8>>,
     },
     /// Block this unit until the named event fires.
     WaitOnEvent {
@@ -191,8 +196,14 @@ mod tests {
             UnitId::new(5),
         )
         .unwrap();
-        let e = Effect::DmaEnqueue { request: req };
-        let expected = Effect::DmaEnqueue { request: req };
+        let e = Effect::DmaEnqueue {
+            request: req,
+            payload: None,
+        };
+        let expected = Effect::DmaEnqueue {
+            request: req,
+            payload: None,
+        };
         assert_eq!(e, expected);
         // Sanity-check the carried request's fields.
         assert_eq!(req.length(), 0x40);

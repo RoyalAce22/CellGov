@@ -395,7 +395,10 @@ fn dma_enqueue_effect(src: u64, dst: u64, len: u64) -> Effect {
         UnitId::new(0),
     )
     .unwrap();
-    Effect::DmaEnqueue { request: req }
+    Effect::DmaEnqueue {
+        request: req,
+        payload: None,
+    }
 }
 
 #[test]
@@ -454,8 +457,8 @@ fn multiple_dma_enqueues_schedule_in_emission_order() {
     assert_eq!(outcome.dma_enqueued, 2);
     assert_eq!(dma_queue.len(), 2);
     // Both at same completion time; pop order is enqueue order.
-    let c1 = dma_queue.pop_next().unwrap();
-    let c2 = dma_queue.pop_next().unwrap();
+    let (c1, _) = dma_queue.pop_next().unwrap();
+    let (c2, _) = dma_queue.pop_next().unwrap();
     assert_eq!(c1.completion_time(), GuestTicks::new(55));
     assert_eq!(c2.completion_time(), GuestTicks::new(55));
     assert_eq!(c1.source().start().raw(), 0);

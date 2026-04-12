@@ -78,7 +78,11 @@ pub struct ScenarioResult {
 /// Drive a scenario fixture to completion via the canonical execution
 /// path. See the module documentation for the contract.
 pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
-    let memory = GuestMemory::new(fixture.memory_size);
+    let mut memory = GuestMemory::new(fixture.memory_size);
+    // Seed initial memory content (if any) before constructing the
+    // runtime. Fixtures that need a pre-loaded image or trampoline
+    // write it here.
+    (fixture.seed_memory)(&mut memory);
     let mut rt = Runtime::new(memory, fixture.budget, fixture.max_steps);
     // Run the fixture's one-shot setup callback against the live
     // runtime so it can register units, mailboxes, signals, and any
@@ -105,6 +109,12 @@ pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
             }
         }
     };
+
+    // Flush any DMA completions still in the queue. A scenario may
+    // stall before enough guest time elapses for all enqueued DMAs to
+    // fire on their scheduled tick; draining ensures the final memory
+    // snapshot includes every committed transfer.
+    rt.drain_pending_dma();
 
     ScenarioResult {
         outcome,

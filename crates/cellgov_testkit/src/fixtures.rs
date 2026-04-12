@@ -32,7 +32,7 @@ use crate::world::{
 };
 use cellgov_core::Runtime;
 use cellgov_exec::{FakeIsaUnit, FakeOp};
-use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_time::Budget;
 
 /// Boxed one-shot callback that populates a fresh runtime with the
@@ -47,12 +47,19 @@ use cellgov_time::Budget;
 /// that sequential calls compose without fighting the borrow checker.
 type RegisterFn = Box<dyn FnOnce(&mut Runtime)>;
 
+/// Boxed one-shot callback that seeds committed guest memory before
+/// the runtime is constructed. Fixtures that need initial memory
+/// content (for example, a PPU ELF image and an exit-stub trampoline)
+/// write it here; otherwise the memory starts zeroed.
+type SeedMemoryFn = Box<dyn FnOnce(&mut GuestMemory)>;
+
 /// A scenario fixture: everything the runner needs to build a runtime
 /// and populate it before stepping.
 pub struct ScenarioFixture {
     pub(crate) memory_size: usize,
     pub(crate) budget: Budget,
     pub(crate) max_steps: usize,
+    pub(crate) seed_memory: SeedMemoryFn,
     pub(crate) register: RegisterFn,
 }
 
@@ -66,6 +73,7 @@ impl ScenarioFixture {
             memory_size: 0,
             budget: Budget::new(0),
             max_steps: 1,
+            seed_memory: Box::new(|_| {}),
             register: Box::new(|_| {}),
         }
     }
@@ -84,6 +92,7 @@ pub struct ScenarioFixtureBuilder {
     memory_size: usize,
     budget: Budget,
     max_steps: usize,
+    seed_memory: SeedMemoryFn,
     register: RegisterFn,
 }
 
@@ -93,6 +102,7 @@ impl Default for ScenarioFixtureBuilder {
             memory_size: 16,
             budget: Budget::new(1),
             max_steps: 1_000,
+            seed_memory: Box::new(|_| {}),
             register: Box::new(|_| {}),
         }
     }
@@ -119,6 +129,21 @@ impl ScenarioFixtureBuilder {
         self
     }
 
+    /// Install a one-shot memory-seeding callback. Replaces any
+    /// previously installed callback. The callback runs against a
+    /// freshly constructed `GuestMemory` of the configured size,
+    /// before the runtime is built. Use it to pre-populate initial
+    /// state that needs to exist before any unit runs -- for example,
+    /// a PPU ELF image loaded at its virtual addresses or an exit
+    /// stub trampoline placed at a low memory address.
+    pub fn seed_memory<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut GuestMemory) + 'static,
+    {
+        self.seed_memory = Box::new(f);
+        self
+    }
+
     /// Install a one-shot registration callback. Replaces any
     /// previously installed callback. The callback receives a
     /// mutable borrow of the runtime exactly once at fixture
@@ -139,6 +164,7 @@ impl ScenarioFixtureBuilder {
             memory_size: self.memory_size,
             budget: self.budget,
             max_steps: self.max_steps,
+            seed_memory: self.seed_memory,
             register: self.register,
         }
     }
