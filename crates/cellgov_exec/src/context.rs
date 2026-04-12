@@ -29,27 +29,30 @@ use cellgov_mem::GuestMemory;
 /// anything; units publish changes only by emitting `Effect` packets in
 /// their step result, never by reaching through the context.
 ///
-/// Currently exposes the committed shared memory view and any messages
+/// Currently exposes the committed shared memory view, any messages
 /// the runtime delivered on the unit's behalf during the preceding
-/// commit (e.g. from `MailboxReceiveAttempt`). Readonly runtime-facing
-/// handles for querying abstract device state will be added as
-/// additional borrowed fields when abstract devices exist; that is a
-/// non-breaking addition because the constructor remains the seam.
+/// commit (e.g. from `MailboxReceiveAttempt`), and an optional syscall
+/// return code from a previous `YieldReason::Syscall` yield that the
+/// runtime serviced. Readonly runtime-facing handles for querying
+/// abstract device state will be added as additional borrowed fields
+/// when abstract devices exist; that is a non-breaking addition
+/// because the constructor remains the seam.
 #[derive(Debug, Clone, Copy)]
 pub struct ExecutionContext<'a> {
     memory: &'a GuestMemory,
     received: &'a [u32],
+    syscall_return: Option<u64>,
 }
 
 impl<'a> ExecutionContext<'a> {
     /// Construct an `ExecutionContext` over the given committed memory
-    /// with no pending received messages. This is the common
-    /// construction path when no mailbox receives were delivered.
+    /// with no pending received messages and no syscall return.
     #[inline]
     pub const fn new(memory: &'a GuestMemory) -> Self {
         Self {
             memory,
             received: &[],
+            syscall_return: None,
         }
     }
 
@@ -58,7 +61,25 @@ impl<'a> ExecutionContext<'a> {
     /// non-empty vec for the unit about to run.
     #[inline]
     pub fn with_received(memory: &'a GuestMemory, received: &'a [u32]) -> Self {
-        Self { memory, received }
+        Self {
+            memory,
+            received,
+            syscall_return: None,
+        }
+    }
+
+    /// Construct an `ExecutionContext` with a syscall return code.
+    /// The runtime calls this when the unit previously yielded with
+    /// `YieldReason::Syscall` and the LV2 host produced an immediate
+    /// response. The unit reads the return code via
+    /// `syscall_return()` and writes it into its own r3.
+    #[inline]
+    pub fn with_syscall_return(memory: &'a GuestMemory, received: &'a [u32], code: u64) -> Self {
+        Self {
+            memory,
+            received,
+            syscall_return: Some(code),
+        }
     }
 
     /// Borrow the committed memory view. The returned reference shares
@@ -75,6 +96,15 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn received_messages(&self) -> &[u32] {
         self.received
+    }
+
+    /// Syscall return code from the LV2 host, if the unit previously
+    /// yielded with `YieldReason::Syscall` and the runtime serviced
+    /// it with an `Lv2Dispatch::Immediate`. The unit should write
+    /// this value into its r3 and advance PC past the `sc`.
+    #[inline]
+    pub const fn syscall_return(&self) -> Option<u64> {
+        self.syscall_return
     }
 }
 

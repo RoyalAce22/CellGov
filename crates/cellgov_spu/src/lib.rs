@@ -94,9 +94,13 @@ impl ExecutionUnit for SpuExecutionUnit {
     ) -> ExecutionStepResult {
         // Deliver received mailbox messages to the register that was
         // waiting in the rdch instruction that triggered the yield.
+        // Also advance PC past the rdch that yielded MailboxAccess
+        // (the yield handler intentionally left PC pointing at rdch
+        // so the instruction can be retried if the mailbox was empty).
         if let Some(&msg) = ctx.received_messages().first() {
             let rt = self.state.channels.pending_mbox_rt.take().unwrap_or(2);
             self.state.set_reg_word_splat(rt, msg);
+            self.state.pc += 4;
         }
 
         // Fulfill a pending DMA Get from the current committed memory
@@ -131,6 +135,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::empty(),
                         fault: Some(FaultKind::Guest(FAULT_LS_OUT_OF_RANGE | self.state.pc)),
+                        syscall_args: None,
                     };
                 }
             };
@@ -146,6 +151,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::empty(),
                         fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR | raw)),
+                        syscall_args: None,
                     };
                 }
             };
@@ -165,6 +171,12 @@ impl ExecutionUnit for SpuExecutionUnit {
                     effects.extend(step_effects);
                     if reason == YieldReason::Finished {
                         self.status = UnitStatus::Finished;
+                    } else if reason == YieldReason::MailboxAccess {
+                        // Don't advance PC: the rdch hasn't completed
+                        // yet. The mailbox may be empty, in which case
+                        // the SPU will be blocked and resumed later.
+                        // PC advances in the delivery code at the top
+                        // of run_until_yield when the message arrives.
                     } else {
                         // Advance past the yielding instruction so we
                         // don't re-execute it when the runtime resumes us.
@@ -176,6 +188,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::empty(),
                         fault: None,
+                        syscall_args: None,
                     };
                 }
                 SpuStepOutcome::MemoryRead { ea, lsa, size } => {
@@ -207,6 +220,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::empty(),
                         fault: Some(FaultKind::Guest(code)),
+                        syscall_args: None,
                     };
                 }
             }
@@ -219,6 +233,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     emitted_effects: effects,
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
+                    syscall_args: None,
                 };
             }
         }

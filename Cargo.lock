@@ -32,6 +32,7 @@ dependencies = [
  "cellgov_effects",
  "cellgov_event",
  "cellgov_exec",
+ "cellgov_lv2",
  "cellgov_mem",
  "cellgov_sync",
  "cellgov_time",
@@ -70,6 +71,17 @@ name = "cellgov_exec"
 version = "0.0.0"
 dependencies = [
  "cellgov_dma",
+ "cellgov_effects",
+ "cellgov_event",
+ "cellgov_mem",
+ "cellgov_sync",
+ "cellgov_time",
+]
+
+[[package]]
+name = "cellgov_lv2"
+version = "0.0.0"
+dependencies = [
  "cellgov_effects",
  "cellgov_event",
  "cellgov_mem",

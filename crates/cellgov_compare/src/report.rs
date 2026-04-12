@@ -17,12 +17,7 @@ use std::fmt::Write;
 pub fn format_human(result: &CompareResult) -> String {
     let mut out = String::new();
 
-    let class = match result.classification {
-        Classification::Match => "MATCH",
-        Classification::Divergence => "DIVERGENCE",
-        Classification::Unsupported => "UNSUPPORTED",
-        Classification::UnsettledOracle => "UNSETTLED_ORACLE",
-    };
+    let class = classification_label(result.classification);
     let mode = mode_str(result.mode);
 
     writeln!(out, "classification: {class}").ok();
@@ -88,12 +83,7 @@ pub fn format_json(
     actual: &Observation,
 ) -> Result<String, serde_json::Error> {
     let report = JsonReport {
-        classification: match result.classification {
-            Classification::Match => "match",
-            Classification::Divergence => "divergence",
-            Classification::Unsupported => "unsupported",
-            Classification::UnsettledOracle => "unsettled_oracle",
-        },
+        classification: classification_slug(result.classification),
         mode: mode_str(result.mode),
         outcome_mismatch: result.outcome_mismatch.map(|(e, a)| OutcomePair {
             expected: format!("{e:?}"),
@@ -129,12 +119,7 @@ pub fn format_json(
 pub fn format_multi_human(result: &MultiCompareResult, baseline_count: usize) -> String {
     let mut out = String::new();
 
-    let class = match result.classification {
-        Classification::Match => "MATCH",
-        Classification::Divergence => "DIVERGENCE",
-        Classification::Unsupported => "UNSUPPORTED",
-        Classification::UnsettledOracle => "UNSETTLED_ORACLE",
-    };
+    let class = classification_label(result.classification);
 
     writeln!(out, "classification: {class}").ok();
     writeln!(out, "mode: {}", mode_str(result.mode)).ok();
@@ -142,17 +127,7 @@ pub fn format_multi_human(result: &MultiCompareResult, baseline_count: usize) ->
 
     if let Some(ref div) = result.oracle_divergence {
         writeln!(out, "oracle: DISAGREE").ok();
-        if let Some((expected, actual)) = &div.outcome_mismatch {
-            writeln!(out, "  outcome: {expected:?} vs {actual:?}").ok();
-        }
-        if let Some(d) = &div.memory_divergence {
-            writeln!(
-                out,
-                "  memory: region=\"{}\" offset={} 0x{:02x} vs 0x{:02x}",
-                d.region, d.offset, d.expected, d.actual
-            )
-            .ok();
-        }
+        write!(out, "{}", format_human(div)).ok();
     } else {
         writeln!(out, "oracle: AGREE").ok();
         if let Some(ref cg) = result.cellgov_result {
@@ -170,12 +145,7 @@ pub fn format_multi_json(
     cellgov: &Observation,
 ) -> Result<String, serde_json::Error> {
     let report = MultiJsonReport {
-        classification: match result.classification {
-            Classification::Match => "match",
-            Classification::Divergence => "divergence",
-            Classification::Unsupported => "unsupported",
-            Classification::UnsettledOracle => "unsettled_oracle",
-        },
+        classification: classification_slug(result.classification),
         mode: mode_str(result.mode),
         baseline_count: baselines.len(),
         oracle_settled: result.oracle_divergence.is_none(),
@@ -190,6 +160,24 @@ fn mode_str(mode: CompareMode) -> &'static str {
         CompareMode::Memory => "memory",
         CompareMode::Events => "events",
         CompareMode::Prefix => "prefix",
+    }
+}
+
+fn classification_label(c: Classification) -> &'static str {
+    match c {
+        Classification::Match => "MATCH",
+        Classification::Divergence => "DIVERGENCE",
+        Classification::Unsupported => "UNSUPPORTED",
+        Classification::UnsettledOracle => "UNSETTLED_ORACLE",
+    }
+}
+
+fn classification_slug(c: Classification) -> &'static str {
+    match c {
+        Classification::Match => "match",
+        Classification::Divergence => "divergence",
+        Classification::Unsupported => "unsupported",
+        Classification::UnsettledOracle => "unsettled_oracle",
     }
 }
 
@@ -250,24 +238,12 @@ mod tests {
     use super::*;
     use crate::compare::{EventDivergence, MemoryDivergence};
     use crate::observation::{
-        NamedMemoryRegion, ObservationMetadata, ObservedEvent, ObservedEventKind, ObservedOutcome,
+        NamedMemoryRegion, ObservedEvent, ObservedEventKind, ObservedOutcome,
     };
-
-    fn meta(runner: &str) -> ObservationMetadata {
-        ObservationMetadata {
-            runner: runner.into(),
-            steps: None,
-        }
-    }
+    use crate::test_support::obs as obs_full;
 
     fn obs(outcome: ObservedOutcome) -> Observation {
-        Observation {
-            outcome,
-            memory_regions: vec![],
-            events: vec![],
-            state_hashes: None,
-            metadata: meta("test"),
-        }
+        obs_full(outcome, vec![], vec![])
     }
 
     #[test]

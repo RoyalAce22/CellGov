@@ -151,6 +151,27 @@ pub enum BlockReason {
     WaitOnEvent,
 }
 
+/// Mutable references to every runtime subsystem the commit pipeline
+/// touches. Bundled into a struct so `CommitPipeline::process` takes
+/// two arguments instead of eight, and so adding a new subsystem
+/// extends this struct rather than widening a function signature.
+pub struct CommitContext<'a> {
+    /// Committed guest memory.
+    pub memory: &'a mut GuestMemory,
+    /// Unit registry (for status overrides and receive delivery).
+    pub units: &'a mut UnitRegistry,
+    /// Mailbox registry (for send/receive).
+    pub mailboxes: &'a mut MailboxRegistry,
+    /// Signal-notification register registry (for OR-merge updates).
+    pub signals: &'a mut SignalRegistry,
+    /// DMA completion queue.
+    pub dma_queue: &'a mut DmaQueue,
+    /// Latency model for computing DMA completion times.
+    pub dma_latency: &'a dyn DmaLatencyModel,
+    /// Current guest time (used for DMA scheduling).
+    pub now: GuestTicks,
+}
+
 /// The commit pipeline.
 ///
 /// Holds no persistent state (the staging buffer is per-call because
@@ -186,17 +207,10 @@ impl CommitPipeline {
     /// 4. After all effects are validated and staged, drains the
     ///    staging buffer into `memory`. Either every staged write
     ///    becomes visible or none do (atomic-batch guarantee).
-    #[allow(clippy::too_many_arguments)]
     pub fn process(
         &mut self,
         result: &ExecutionStepResult,
-        memory: &mut GuestMemory,
-        units: &mut UnitRegistry,
-        mailboxes: &mut MailboxRegistry,
-        signals: &mut SignalRegistry,
-        dma_queue: &mut DmaQueue,
-        dma_latency: &dyn DmaLatencyModel,
-        now: GuestTicks,
+        ctx: &mut CommitContext<'_>,
     ) -> Result<CommitOutcome, CommitError> {
         if result.yield_reason == YieldReason::Fault {
             return Ok(CommitOutcome {
@@ -217,7 +231,7 @@ impl CommitPipeline {
         let mut blocked_units = Vec::new();
         let mut woken_units = Vec::new();
         let mut deferred = 0usize;
-        let mem_size = memory.size();
+        let mem_size = ctx.memory.size();
 
         // Pre-validation pass. Walk effects in emission order; reject
         // the entire batch on the first failure (atomic-batch rule).
@@ -245,7 +259,7 @@ impl CommitPipeline {
                     writes += 1;
                 }
                 Effect::MailboxSend { mailbox, .. } => {
-                    if mailboxes.get(*mailbox).is_none() {
+                    if ctx.mailboxes.get(*mailbox).is_none() {
                         return Err(CommitError::UnknownMailbox {
                             effect_index: idx,
                             mailbox: *mailbox,
@@ -254,18 +268,15 @@ impl CommitPipeline {
                     sends += 1;
                 }
                 Effect::MailboxReceiveAttempt { mailbox, .. } => {
-                    if mailboxes.get(*mailbox).is_none() {
+                    if ctx.mailboxes.get(*mailbox).is_none() {
                         return Err(CommitError::UnknownMailbox {
                             effect_index: idx,
                             mailbox: *mailbox,
                         });
                     }
-                    // Counted in the apply pass (receives vs
-                    // receives_blocked depends on mailbox state at
-                    // apply time).
                 }
                 Effect::SignalUpdate { signal, .. } => {
-                    if signals.get(*signal).is_none() {
+                    if ctx.signals.get(*signal).is_none() {
                         return Err(CommitError::UnknownSignal {
                             effect_index: idx,
                             signal: *signal,
@@ -277,7 +288,7 @@ impl CommitPipeline {
                     dma_count += 1;
                 }
                 Effect::WakeUnit { target, .. } => {
-                    if units.get(*target).is_none() {
+                    if ctx.units.get(*target).is_none() {
                         return Err(CommitError::UnknownWakeTarget {
                             effect_index: idx,
                             target: *target,
@@ -286,11 +297,6 @@ impl CommitPipeline {
                     wakes += 1;
                 }
                 Effect::WaitOnEvent { .. } => {
-                    // The source unit wants to block until an event
-                    // fires. Currently unconditionally blocks; checking
-                    // whether the wait condition is already satisfied
-                    // (e.g. mailbox non-empty, signal bits set) is a
-                    // follow-up optimization.
                     waits += 1;
                 }
                 _ => {
@@ -306,52 +312,55 @@ impl CommitPipeline {
         // latency model. All happen in the same emission order the
         // units produced them. Pre-validation guarantees every lookup
         // here succeeds.
-        staging.drain_into(memory).map_err(CommitError::Memory)?;
+        staging
+            .drain_into(ctx.memory)
+            .map_err(CommitError::Memory)?;
         for effect in &result.emitted_effects {
             match effect {
                 Effect::MailboxSend {
                     mailbox, message, ..
                 } => {
-                    mailboxes
+                    ctx.mailboxes
                         .get_mut(*mailbox)
                         .expect("pre-validated mailbox id")
                         .send(message.raw());
                 }
                 Effect::SignalUpdate { signal, value, .. } => {
-                    signals
+                    ctx.signals
                         .get_mut(*signal)
                         .expect("pre-validated signal id")
                         .or_in(*value);
                 }
                 Effect::DmaEnqueue { request, payload } => {
-                    let completion_time = dma_latency.completion_time(request, now);
+                    let completion_time = ctx.dma_latency.completion_time(request, ctx.now);
                     let completion = DmaCompletion::new(*request, completion_time);
-                    dma_queue.enqueue(completion, payload.clone());
+                    ctx.dma_queue.enqueue(completion, payload.clone());
                 }
                 Effect::MailboxReceiveAttempt {
                     mailbox, source, ..
                 } => {
-                    let mb = mailboxes
+                    let mb = ctx
+                        .mailboxes
                         .get_mut(*mailbox)
                         .expect("pre-validated mailbox id");
                     match mb.try_receive() {
                         Some(msg) => {
-                            units.push_receive(*source, msg);
+                            ctx.units.push_receive(*source, msg);
                             receives += 1;
                         }
                         None => {
-                            units.set_status_override(*source, UnitStatus::Blocked);
+                            ctx.units.set_status_override(*source, UnitStatus::Blocked);
                             blocked_units.push((*source, BlockReason::MailboxEmpty));
                             receives_blocked += 1;
                         }
                     }
                 }
                 Effect::WakeUnit { target, .. } => {
-                    units.set_status_override(*target, UnitStatus::Runnable);
+                    ctx.units.set_status_override(*target, UnitStatus::Runnable);
                     woken_units.push(*target);
                 }
                 Effect::WaitOnEvent { source, .. } => {
-                    units.set_status_override(*source, UnitStatus::Blocked);
+                    ctx.units.set_status_override(*source, UnitStatus::Blocked);
                     blocked_units.push((*source, BlockReason::WaitOnEvent));
                 }
                 _ => {}

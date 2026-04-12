@@ -148,6 +148,7 @@ impl ExecutionUnit for FakeIsaUnit {
                 emitted_effects: vec![],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
+                syscall_args: None,
             };
         }
 
@@ -235,6 +236,7 @@ impl ExecutionUnit for FakeIsaUnit {
             emitted_effects: effects,
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         }
     }
 

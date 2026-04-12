@@ -62,6 +62,7 @@ impl ExecutionUnit for CountingUnit {
             }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         }
     }
 
@@ -262,6 +263,7 @@ impl ExecutionUnit for WritingUnit {
             }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
+            syscall_args: None,
         }
     }
 
@@ -508,6 +510,7 @@ fn step_emits_one_effect_record_per_effect_in_emission_order() {
                 ],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
+                syscall_args: None,
             }
         }
         fn snapshot(&self) {}
@@ -902,6 +905,7 @@ fn commit_validation_failure_traces_as_fault_discarded() {
                 }],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
+                syscall_args: None,
             }
         }
         fn snapshot(&self) {}

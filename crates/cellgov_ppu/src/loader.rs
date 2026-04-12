@@ -213,6 +213,75 @@ fn read_u16(data: &[u8], offset: usize) -> u16 {
     u16::from_be_bytes([data[offset], data[offset + 1]])
 }
 
+/// ELF section type: symbol table.
+const SHT_SYMTAB: u32 = 2;
+
+/// Look up a symbol by name in an ELF64 big-endian binary and return
+/// its value (address). Returns `None` if the ELF has no symbol table
+/// or the symbol is not found.
+pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
+    if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC {
+        return None;
+    }
+    let shoff = read_u64(data, 40) as usize;
+    let shentsize = read_u16(data, 58) as usize;
+    let shnum = read_u16(data, 60) as usize;
+
+    // Find the SHT_SYMTAB section.
+    for i in 0..shnum {
+        let sh = shoff + i * shentsize;
+        if sh + shentsize > data.len() {
+            return None;
+        }
+        let sh_type = read_u32(data, sh + 4);
+        if sh_type != SHT_SYMTAB {
+            continue;
+        }
+        let sym_off = read_u64(data, sh + 24) as usize;
+        let sym_size = read_u64(data, sh + 32) as usize;
+        let sym_entsize = read_u64(data, sh + 56) as usize;
+        let strtab_idx = read_u32(data, sh + 40) as usize;
+
+        // Read the associated string table section header.
+        let str_sh = shoff + strtab_idx * shentsize;
+        if str_sh + shentsize > data.len() {
+            return None;
+        }
+        let str_off = read_u64(data, str_sh + 24) as usize;
+        let str_size = read_u64(data, str_sh + 32) as usize;
+        if str_off + str_size > data.len() {
+            return None;
+        }
+        let strtab = &data[str_off..str_off + str_size];
+
+        // Scan symbols.
+        if sym_entsize == 0 {
+            return None;
+        }
+        let count = sym_size / sym_entsize;
+        for j in 0..count {
+            let entry = sym_off + j * sym_entsize;
+            if entry + sym_entsize > data.len() {
+                break;
+            }
+            let st_name = read_u32(data, entry) as usize;
+            if st_name >= strtab.len() {
+                continue;
+            }
+            let end = strtab[st_name..]
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(strtab.len() - st_name);
+            let sym_name = &strtab[st_name..st_name + end];
+            if sym_name == name.as_bytes() {
+                return Some(read_u64(data, entry + 8));
+            }
+        }
+        return None; // only one SYMTAB expected
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +476,31 @@ mod tests {
             mem.as_bytes()[pc + 3],
         ]);
         assert_ne!(first_insn, 0, "entry point should have code");
+    }
+
+    #[test]
+    fn find_symbol_locates_result_in_ppu_elf() {
+        let path =
+            std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        let addr = find_symbol(&data, "result");
+        assert!(addr.is_some(), "symbol 'result' not found in ELF");
+        // The address should be 128-byte aligned (the C code uses
+        // __attribute__((aligned(128)))).
+        assert_eq!(addr.unwrap() % 128, 0);
+    }
+
+    #[test]
+    fn find_symbol_returns_none_for_missing() {
+        let path =
+            std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        assert!(find_symbol(&data, "nonexistent_symbol_xyz").is_none());
     }
 }

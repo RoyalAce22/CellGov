@@ -273,44 +273,8 @@ fn find_event_divergence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::observation::{ObservationMetadata, ObservedEventKind};
-
-    fn meta(runner: &str) -> ObservationMetadata {
-        ObservationMetadata {
-            runner: runner.into(),
-            steps: None,
-        }
-    }
-
-    fn region(name: &str, data: Vec<u8>) -> NamedMemoryRegion {
-        NamedMemoryRegion {
-            name: name.into(),
-            addr: 0x10000,
-            data,
-        }
-    }
-
-    fn event(kind: ObservedEventKind, unit: u64, sequence: u32) -> ObservedEvent {
-        ObservedEvent {
-            kind,
-            unit,
-            sequence,
-        }
-    }
-
-    fn obs(
-        outcome: ObservedOutcome,
-        regions: Vec<NamedMemoryRegion>,
-        events: Vec<ObservedEvent>,
-    ) -> Observation {
-        Observation {
-            outcome,
-            memory_regions: regions,
-            events,
-            state_hashes: None,
-            metadata: meta("test"),
-        }
-    }
+    use crate::observation::ObservedEventKind;
+    use crate::test_support::{event, obs, region};
 
     #[test]
     fn identical_observations_match_in_all_modes() {

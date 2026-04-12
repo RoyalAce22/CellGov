@@ -1,0 +1,903 @@
+//! `Lv2Host` -- the LV2 model the runtime calls into.
+//!
+//! The host owns image registry and thread group state. The runtime
+//! calls `dispatch` once per syscall yield, synchronously, during the
+//! same `step()` that processed the yield. The host reads guest memory
+//! through the `Lv2Runtime` trait and returns an `Lv2Dispatch` telling
+//! the runtime what to do.
+
+use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState};
+use crate::image::ContentStore;
+use crate::request::Lv2Request;
+use crate::thread_group::ThreadGroupTable;
+use cellgov_effects::{Effect, MailboxMessage, WritePayload};
+use cellgov_event::{PriorityClass, UnitId};
+use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_sync::MailboxId;
+use cellgov_time::GuestTicks;
+
+/// Readonly view of runtime state the host is allowed to access.
+///
+/// The runtime implements this trait. The host calls `read_committed`
+/// to read guest memory during dispatch. No other runtime internals
+/// are exposed.
+pub trait Lv2Runtime {
+    /// Read `len` bytes of committed guest memory starting at `addr`.
+    /// Returns `None` if the range is out of bounds.
+    fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]>;
+}
+
+/// The LV2 host model.
+///
+/// Holds all LV2-side state: image registry, thread group table,
+/// waiter lists. The runtime owns an `Lv2Host` and calls `dispatch`
+/// on every PPU syscall yield.
+#[derive(Debug, Clone)]
+pub struct Lv2Host {
+    content: ContentStore,
+    groups: ThreadGroupTable,
+}
+
+impl Default for Lv2Host {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Lv2Host {
+    /// Construct an empty host with no registered images or groups.
+    pub fn new() -> Self {
+        Self {
+            content: ContentStore::new(),
+            groups: ThreadGroupTable::new(),
+        }
+    }
+
+    /// Borrow the content store (image registry).
+    pub fn content_store(&self) -> &ContentStore {
+        &self.content
+    }
+
+    /// Mutably borrow the content store. The test harness calls this
+    /// to pre-register SPU images before the scenario runs.
+    pub fn content_store_mut(&mut self) -> &mut ContentStore {
+        &mut self.content
+    }
+
+    /// Borrow the thread group table.
+    pub fn thread_groups(&self) -> &ThreadGroupTable {
+        &self.groups
+    }
+
+    /// Mutably borrow the thread group table.
+    pub fn thread_groups_mut(&mut self) -> &mut ThreadGroupTable {
+        &mut self.groups
+    }
+
+    /// Record that `unit_id` is an SPU belonging to `group_id` at
+    /// `slot`. The runtime calls this after each SPU is registered
+    /// during `RegisterSpu` handling.
+    pub fn record_spu(&mut self, unit_id: cellgov_event::UnitId, group_id: u32, slot: u32) {
+        self.groups.record_spu(unit_id, group_id, slot);
+    }
+
+    /// Notify that the SPU `unit_id` has finished. Returns
+    /// `Some(group_id)` if the group is now fully finished (all
+    /// SPUs done), `None` otherwise.
+    pub fn notify_spu_finished(&mut self, unit_id: cellgov_event::UnitId) -> Option<u32> {
+        self.groups.notify_spu_finished(unit_id)
+    }
+
+    /// FNV-1a hash of all LV2 host state for determinism checking.
+    ///
+    /// The runtime folds this into `sync_state_hash` at every commit
+    /// boundary so replay tooling detects LV2 state divergence.
+    pub fn state_hash(&self) -> u64 {
+        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+        let mut h = FNV_OFFSET;
+        for source in [self.content.state_hash(), self.groups.state_hash()] {
+            for b in source.to_le_bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(FNV_PRIME);
+            }
+        }
+        h
+    }
+
+    /// Dispatch a syscall request.
+    ///
+    /// The runtime calls this once per PPU syscall yield. The host
+    /// reads any guest memory it needs through `rt`, mutates its own
+    /// internal state, and returns an `Lv2Dispatch` describing what
+    /// the runtime should do.
+    pub fn dispatch(
+        &mut self,
+        request: Lv2Request,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        match request {
+            Lv2Request::SpuImageOpen { img_ptr, path_ptr } => {
+                self.dispatch_image_open(img_ptr, path_ptr, requester, rt)
+            }
+            Lv2Request::SpuThreadGroupCreate {
+                id_ptr,
+                num_threads,
+                ..
+            } => self.dispatch_group_create(id_ptr, num_threads, requester),
+            req @ Lv2Request::SpuThreadInitialize { .. } => {
+                self.dispatch_thread_initialize(req, requester, rt)
+            }
+            Lv2Request::SpuThreadGroupStart { group_id } => self.dispatch_group_start(group_id),
+            Lv2Request::SpuThreadGroupJoin {
+                group_id,
+                cause_ptr,
+                status_ptr,
+            } => self.dispatch_group_join(group_id, cause_ptr, status_ptr),
+            Lv2Request::SpuThreadWriteMb { thread_id, value } => {
+                self.dispatch_write_mb(thread_id, value, requester)
+            }
+            _ => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+        }
+    }
+
+    fn dispatch_image_open(
+        &mut self,
+        img_ptr: u32,
+        path_ptr: u32,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        // Read the NUL-terminated path string from guest memory.
+        // Limit to 256 bytes to avoid unbounded reads.
+        let path_bytes = match rt.read_committed(path_ptr as u64, 256) {
+            Some(bytes) => bytes,
+            None => {
+                return Lv2Dispatch::Immediate {
+                    code: 0x8001_0002, // CELL_EFAULT
+                    effects: vec![],
+                };
+            }
+        };
+        let path_len = path_bytes
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(path_bytes.len());
+        let path = &path_bytes[..path_len];
+
+        let record = match self.content.lookup_by_path(path) {
+            Some(r) => r,
+            None => {
+                return Lv2Dispatch::Immediate {
+                    code: 0x8001_0002, // CELL_ENOENT
+                    effects: vec![],
+                };
+            }
+        };
+
+        // Build the sys_spu_image_t struct (16 bytes, big-endian):
+        //   offset 0: type/handle (u32)
+        //   offset 4: entry point (u32) -- 0 for now, resolved at thread init
+        //   offset 8: segments addr (u32) -- opaque, not used by CellGov
+        //   offset 12: nsegs (i32) -- 0 for CellGov's purposes
+        let handle = record.handle;
+        let mut img_struct = [0u8; 16];
+        img_struct[0..4].copy_from_slice(&handle.raw().to_be_bytes());
+
+        let range =
+            ByteRange::new(GuestAddr::new(img_ptr as u64), 16).expect("sys_spu_image_t range");
+        let effect = Effect::SharedWriteIntent {
+            range,
+            bytes: WritePayload::new(img_struct.to_vec()),
+            ordering: PriorityClass::Normal,
+            source: requester,
+            source_time: GuestTicks::ZERO,
+        };
+
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![effect],
+        }
+    }
+
+    fn dispatch_group_create(
+        &mut self,
+        id_ptr: u32,
+        num_threads: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        let group_id = self.groups.create(num_threads);
+
+        // Write the allocated group id (big-endian u32) to the
+        // caller's output pointer.
+        let range = ByteRange::new(GuestAddr::new(id_ptr as u64), 4)
+            .expect("sys_spu_thread_group_create id_ptr range");
+        let effect = Effect::SharedWriteIntent {
+            range,
+            bytes: WritePayload::new(group_id.to_be_bytes().to_vec()),
+            ordering: PriorityClass::Normal,
+            source: requester,
+            source_time: GuestTicks::ZERO,
+        };
+
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![effect],
+        }
+    }
+
+    fn dispatch_group_start(&mut self, group_id: u32) -> Lv2Dispatch {
+        let group = match self.groups.get_mut(group_id) {
+            Some(g) => g,
+            None => {
+                return Lv2Dispatch::Immediate {
+                    code: 0x8001_000D, // CELL_ESRCH
+                    effects: vec![],
+                };
+            }
+        };
+
+        let mut inits = Vec::new();
+        let slot_entries: Vec<_> = group.slots.iter().map(|(&k, v)| (k, v.clone())).collect();
+        for (slot_idx, slot) in &slot_entries {
+            let record = match self.content.lookup_by_handle(slot.image_handle) {
+                Some(r) => r,
+                None => {
+                    return Lv2Dispatch::Immediate {
+                        code: 0x8001_000D, // bad handle
+                        effects: vec![],
+                    };
+                }
+            };
+
+            inits.push(SpuInitState {
+                ls_bytes: record.elf_bytes.clone(),
+                entry_pc: 0x80,
+                stack_ptr: 0x3FFF0,
+                args: slot.args,
+                group_id,
+                slot: *slot_idx,
+            });
+        }
+
+        group.state = crate::thread_group::GroupState::Running;
+
+        Lv2Dispatch::RegisterSpu {
+            inits,
+            effects: vec![],
+            code: 0,
+        }
+    }
+
+    fn dispatch_thread_initialize(
+        &mut self,
+        req: Lv2Request,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        let (thread_ptr, group_id, thread_num, img_ptr, arg_ptr) = match req {
+            Lv2Request::SpuThreadInitialize {
+                thread_ptr,
+                group_id,
+                thread_num,
+                img_ptr,
+                arg_ptr,
+                ..
+            } => (thread_ptr, group_id, thread_num, img_ptr, arg_ptr),
+            _ => unreachable!(),
+        };
+
+        // Read the image handle from the sys_spu_image_t struct at
+        // img_ptr (first 4 bytes, big-endian u32).
+        let image_handle = match rt.read_committed(img_ptr as u64, 4) {
+            Some(bytes) => u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
+            None => {
+                return Lv2Dispatch::Immediate {
+                    code: 0x8001_0002, // CELL_EFAULT
+                    effects: vec![],
+                };
+            }
+        };
+
+        // Read sys_spu_thread_argument (4x u64 BE) from guest memory
+        // NOW, not at group_start time. The PPU may reuse the same
+        // stack variable for multiple initialize calls.
+        let args = if arg_ptr != 0 {
+            match rt.read_committed(arg_ptr as u64, 32) {
+                Some(bytes) => {
+                    let mut a = [0u64; 4];
+                    for (i, chunk) in bytes.chunks_exact(8).enumerate().take(4) {
+                        a[i] = u64::from_be_bytes(chunk.try_into().unwrap());
+                    }
+                    a
+                }
+                None => [0u64; 4],
+            }
+        } else {
+            [0u64; 4]
+        };
+
+        let handle = crate::dispatch::SpuImageHandle::new(image_handle);
+        if !self
+            .groups
+            .initialize_thread(group_id, thread_num, handle, args)
+        {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000D, // CELL_ESRCH
+                effects: vec![],
+            };
+        }
+
+        // Write a thread id to *thread_ptr. Use a synthetic id
+        // derived from group_id and thread_num.
+        let thread_id = group_id * 256 + thread_num;
+        let range = ByteRange::new(GuestAddr::new(thread_ptr as u64), 4).expect("thread_ptr range");
+        let effect = Effect::SharedWriteIntent {
+            range,
+            bytes: WritePayload::new(thread_id.to_be_bytes().to_vec()),
+            ordering: PriorityClass::Normal,
+            source: requester,
+            source_time: GuestTicks::ZERO,
+        };
+
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![effect],
+        }
+    }
+
+    fn dispatch_group_join(&self, group_id: u32, cause_ptr: u32, status_ptr: u32) -> Lv2Dispatch {
+        if self.groups.get(group_id).is_none() {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000D, // CELL_ESRCH
+                effects: vec![],
+            };
+        }
+        Lv2Dispatch::Block {
+            reason: Lv2BlockReason::ThreadGroupJoin { group_id },
+            pending: PendingResponse::ThreadGroupJoin {
+                group_id,
+                code: 0,
+                cause_ptr,
+                status_ptr,
+                cause: 0x0001, // SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT
+                status: 0,
+            },
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_write_mb(&self, thread_id: u32, value: u32, requester: UnitId) -> Lv2Dispatch {
+        let target_uid = match self.groups.unit_for_thread(thread_id) {
+            Some(uid) => uid,
+            None => {
+                return Lv2Dispatch::Immediate {
+                    code: 0x8001_000D, // CELL_ESRCH
+                    effects: vec![],
+                };
+            }
+        };
+        let effect = Effect::MailboxSend {
+            mailbox: MailboxId::new(target_uid.raw()),
+            message: MailboxMessage::new(value),
+            source: requester,
+        };
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![effect],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::request;
+    use cellgov_mem::GuestMemory;
+
+    struct FakeRuntime {
+        memory: GuestMemory,
+    }
+
+    impl FakeRuntime {
+        fn new(size: usize) -> Self {
+            Self {
+                memory: GuestMemory::new(size),
+            }
+        }
+
+        fn with_memory(memory: GuestMemory) -> Self {
+            Self { memory }
+        }
+    }
+
+    impl Lv2Runtime for FakeRuntime {
+        fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
+            let start = addr as usize;
+            let end = start.checked_add(len)?;
+            let bytes = self.memory.as_bytes();
+            if end <= bytes.len() {
+                Some(&bytes[start..end])
+            } else {
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn image_open_out_of_range_path_returns_error() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let req = Lv2Request::SpuImageOpen {
+            img_ptr: 0x1000,
+            path_ptr: 0x2000,
+        };
+        let result = host.dispatch(req, UnitId::new(0), &rt);
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_ne!(code, 0);
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn group_create_allocates_id_and_writes_to_guest() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x4000);
+        let req = Lv2Request::SpuThreadGroupCreate {
+            id_ptr: 0x3000,
+            num_threads: 2,
+            priority: 100,
+            attr_ptr: 0x3800,
+        };
+        let result = host.dispatch(req, UnitId::new(0), &rt);
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0);
+                assert_eq!(effects.len(), 1);
+                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
+                    assert_eq!(range.start().raw(), 0x3000);
+                    assert_eq!(range.length(), 4);
+                    // Group id 1, big-endian.
+                    assert_eq!(bytes.bytes(), &1u32.to_be_bytes());
+                } else {
+                    panic!("expected SharedWriteIntent");
+                }
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+        assert_eq!(host.thread_groups().len(), 1);
+        let group = host.thread_groups().get(1).unwrap();
+        assert_eq!(group.num_threads, 2);
+    }
+
+    #[test]
+    fn group_create_allocates_monotonic_ids() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x4000);
+        let r1 = host.dispatch(
+            Lv2Request::SpuThreadGroupCreate {
+                id_ptr: 0x100,
+                num_threads: 1,
+                priority: 0,
+                attr_ptr: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        let r2 = host.dispatch(
+            Lv2Request::SpuThreadGroupCreate {
+                id_ptr: 0x200,
+                num_threads: 1,
+                priority: 0,
+                attr_ptr: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        // First group gets id 1, second gets id 2.
+        if let Lv2Dispatch::Immediate { effects, .. } = r1 {
+            assert_eq!(
+                effects[0].clone(),
+                Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(0x100), 4).unwrap(),
+                    bytes: WritePayload::new(1u32.to_be_bytes().to_vec()),
+                    ordering: PriorityClass::Normal,
+                    source: UnitId::new(0),
+                    source_time: GuestTicks::ZERO,
+                }
+            );
+        }
+        if let Lv2Dispatch::Immediate { effects, .. } = r2 {
+            assert_eq!(
+                effects[0].clone(),
+                Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(0x200), 4).unwrap(),
+                    bytes: WritePayload::new(2u32.to_be_bytes().to_vec()),
+                    ordering: PriorityClass::Normal,
+                    source: UnitId::new(0),
+                    source_time: GuestTicks::ZERO,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn thread_initialize_records_slot() {
+        let mut host = Lv2Host::new();
+        host.content_store_mut().register(b"/spu.elf", vec![0xAA]);
+
+        // Guest memory: image struct at 0x200 (handle=1 in first 4
+        // bytes, written by a previous image_open dispatch).
+        let mut mem = GuestMemory::new(0x4000);
+        let img_range = ByteRange::new(GuestAddr::new(0x200), 4).unwrap();
+        mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
+        let rt = FakeRuntime::with_memory(mem);
+
+        // Create group.
+        host.dispatch(
+            Lv2Request::SpuThreadGroupCreate {
+                id_ptr: 0x100,
+                num_threads: 2,
+                priority: 0,
+                attr_ptr: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        // Initialize slot 0 -- reads image handle from img_ptr.
+        let result = host.dispatch(
+            Lv2Request::SpuThreadInitialize {
+                thread_ptr: 0x300,
+                group_id: 1,
+                thread_num: 0,
+                img_ptr: 0x200,
+                attr_ptr: 0,
+                arg_ptr: 0x1000,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0);
+                assert_eq!(effects.len(), 1); // thread_id write
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+        let group = host.thread_groups().get(1).unwrap();
+        assert_eq!(group.slots.len(), 1);
+        assert_eq!(group.slots[&0].image_handle.raw(), 1);
+    }
+
+    #[test]
+    fn thread_initialize_unknown_group_returns_error() {
+        let mut host = Lv2Host::new();
+        let mut mem = GuestMemory::new(0x1000);
+        let img_range = ByteRange::new(GuestAddr::new(0x200), 4).unwrap();
+        mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
+        let rt = FakeRuntime::with_memory(mem);
+        let result = host.dispatch(
+            Lv2Request::SpuThreadInitialize {
+                thread_ptr: 0x300,
+                group_id: 99,
+                thread_num: 0,
+                img_ptr: 0x200,
+                attr_ptr: 0,
+                arg_ptr: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_ne!(code, 0);
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stub_dispatch_returns_cell_ok_for_tty_write() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let args = [0, 0x8000, 64, 0x9000, 0, 0, 0, 0];
+        let req = request::classify(403, &args);
+        let result = host.dispatch(req, UnitId::new(0), &rt);
+        assert_eq!(
+            result,
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn stub_dispatch_returns_cell_ok_for_process_exit() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let req = Lv2Request::ProcessExit { code: 0 };
+        let result = host.dispatch(req, UnitId::new(0), &rt);
+        assert_eq!(
+            result,
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn stub_dispatch_returns_cell_ok_for_unsupported() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let req = Lv2Request::Unsupported { number: 999 };
+        let result = host.dispatch(req, UnitId::new(0), &rt);
+        assert_eq!(
+            result,
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn fake_runtime_reads_committed_memory() {
+        let rt = FakeRuntime::new(256);
+        assert!(rt.read_committed(0, 4).is_some());
+        assert!(rt.read_committed(252, 4).is_some());
+        assert!(rt.read_committed(253, 4).is_none());
+        assert!(rt.read_committed(0, 0).is_some());
+    }
+
+    #[test]
+    fn content_store_accessible_through_host() {
+        let mut host = Lv2Host::new();
+        assert!(host.content_store().is_empty());
+        let h = host
+            .content_store_mut()
+            .register(b"/app_home/spu.elf", vec![1, 2, 3]);
+        assert_eq!(h.raw(), 1);
+        assert_eq!(host.content_store().len(), 1);
+    }
+
+    #[test]
+    fn state_hash_changes_when_image_registered() {
+        let empty = Lv2Host::new();
+        let mut populated = Lv2Host::new();
+        populated.content_store_mut().register(b"/spu.elf", vec![]);
+        assert_ne!(empty.state_hash(), populated.state_hash());
+    }
+
+    #[test]
+    fn state_hash_deterministic_across_instances() {
+        let mut a = Lv2Host::new();
+        let mut b = Lv2Host::new();
+        a.content_store_mut().register(b"/spu.elf", vec![1, 2]);
+        b.content_store_mut().register(b"/spu.elf", vec![1, 2]);
+        assert_eq!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    fn image_open_writes_struct_and_returns_cell_ok() {
+        let mut host = Lv2Host::new();
+        host.content_store_mut()
+            .register(b"/app_home/spu.elf", vec![0xAA]);
+
+        // Place the path string "/app_home/spu.elf\0" at address 0x100
+        // in guest memory, and reserve 16 bytes at 0x200 for the output
+        // struct.
+        let mut mem = GuestMemory::new(0x300);
+        let path = b"/app_home/spu.elf\0";
+        let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
+        mem.apply_commit(path_range, path).unwrap();
+
+        let rt = FakeRuntime::with_memory(mem);
+        let req = Lv2Request::SpuImageOpen {
+            img_ptr: 0x200,
+            path_ptr: 0x100,
+        };
+        let result = host.dispatch(req, UnitId::new(0), &rt);
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0);
+                assert_eq!(effects.len(), 1);
+                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
+                    assert_eq!(range.start().raw(), 0x200);
+                    assert_eq!(range.length(), 16);
+                    // First 4 bytes: handle in big-endian (handle 1)
+                    assert_eq!(&bytes.bytes()[0..4], &1u32.to_be_bytes());
+                } else {
+                    panic!("expected SharedWriteIntent");
+                }
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_open_unknown_path_returns_error() {
+        let mut host = Lv2Host::new();
+        // No images registered.
+        let mut mem = GuestMemory::new(0x300);
+        let path = b"/nonexistent.elf\0";
+        let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
+        mem.apply_commit(path_range, path).unwrap();
+
+        let rt = FakeRuntime::with_memory(mem);
+        let req = Lv2Request::SpuImageOpen {
+            img_ptr: 0x200,
+            path_ptr: 0x100,
+        };
+        let result = host.dispatch(req, UnitId::new(0), &rt);
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_ne!(code, 0);
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_open_bad_path_ptr_returns_error() {
+        let host_with_image = {
+            let mut h = Lv2Host::new();
+            h.content_store_mut().register(b"/spu.elf", vec![]);
+            h
+        };
+        // path_ptr points past end of memory.
+        let rt = FakeRuntime::new(64);
+        let req = Lv2Request::SpuImageOpen {
+            img_ptr: 0,
+            path_ptr: 0xFFFF,
+        };
+        let result = host_with_image.clone().dispatch(req, UnitId::new(0), &rt);
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_ne!(code, 0);
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_open_handle_is_deterministic() {
+        let make_host = || {
+            let mut h = Lv2Host::new();
+            h.content_store_mut().register(b"/spu.elf", vec![1, 2, 3]);
+            h
+        };
+
+        let mut mem = GuestMemory::new(0x300);
+        let path = b"/spu.elf\0";
+        let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
+        mem.apply_commit(path_range, path).unwrap();
+        let rt = FakeRuntime::with_memory(mem);
+
+        let r1 = make_host().dispatch(
+            Lv2Request::SpuImageOpen {
+                img_ptr: 0x200,
+                path_ptr: 0x100,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        let r2 = make_host().dispatch(
+            Lv2Request::SpuImageOpen {
+                img_ptr: 0x200,
+                path_ptr: 0x100,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn group_start_returns_register_spu_with_inits() {
+        let mut host = Lv2Host::new();
+        host.content_store_mut()
+            .register(b"/spu.elf", vec![0xAA, 0xBB]);
+
+        // Prepare guest memory: path at 0x100, arg struct at 0x200,
+        // image struct at 0x300 (handle=1 pre-populated).
+        let mut mem = GuestMemory::new(0x4000);
+        let path = b"/spu.elf\0";
+        let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
+        mem.apply_commit(path_range, path).unwrap();
+        let img_range = ByteRange::new(GuestAddr::new(0x300), 4).unwrap();
+        mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
+
+        // sys_spu_thread_argument: 4x u64 big-endian.
+        // arg1 = 0x1000 (result EA)
+        let mut arg_bytes = [0u8; 32];
+        arg_bytes[0..8].copy_from_slice(&0x1000u64.to_be_bytes());
+        let arg_range = ByteRange::new(GuestAddr::new(0x200), 32).unwrap();
+        mem.apply_commit(arg_range, &arg_bytes).unwrap();
+
+        let rt = FakeRuntime::with_memory(mem);
+
+        // image_open
+        host.dispatch(
+            Lv2Request::SpuImageOpen {
+                img_ptr: 0x300,
+                path_ptr: 0x100,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+
+        // group_create (1 thread)
+        host.dispatch(
+            Lv2Request::SpuThreadGroupCreate {
+                id_ptr: 0x400,
+                num_threads: 1,
+                priority: 0,
+                attr_ptr: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+
+        // thread_initialize (slot 0, img_ptr 0x300 has handle, arg_ptr 0x200)
+        host.dispatch(
+            Lv2Request::SpuThreadInitialize {
+                thread_ptr: 0x500,
+                group_id: 1,
+                thread_num: 0,
+                img_ptr: 0x300,
+                attr_ptr: 0,
+                arg_ptr: 0x200,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+
+        // group_start
+        let result = host.dispatch(
+            Lv2Request::SpuThreadGroupStart { group_id: 1 },
+            UnitId::new(0),
+            &rt,
+        );
+
+        match result {
+            Lv2Dispatch::RegisterSpu { inits, code, .. } => {
+                assert_eq!(code, 0);
+                assert_eq!(inits.len(), 1);
+                assert_eq!(inits[0].ls_bytes, vec![0xAA, 0xBB]);
+                assert_eq!(inits[0].entry_pc, 0x80);
+                assert_eq!(inits[0].stack_ptr, 0x3FFF0);
+                assert_eq!(inits[0].args[0], 0x1000);
+                assert_eq!(inits[0].group_id, 1);
+                assert_eq!(inits[0].slot, 0);
+            }
+            other => panic!("expected RegisterSpu, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn group_start_unknown_group_returns_error() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::SpuThreadGroupStart { group_id: 99 },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code, .. } => assert_ne!(code, 0),
+            other => panic!("expected Immediate error, got {other:?}"),
+        }
+    }
+}
