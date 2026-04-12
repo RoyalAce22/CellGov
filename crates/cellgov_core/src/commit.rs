@@ -18,13 +18,13 @@
 //!   (malformed effects, out-of-range writes). A rejected batch commits
 //!   nothing and surfaces as a fault on the originating unit.
 //!
-//! Currently, this module handles `SharedWriteIntent` end to end.
-//! All other [`Effect`] variants -- mailbox sends/receives, DMA
-//! enqueues, signal updates, wakes, waits, fault raises, trace markers
-//! -- are **counted as deferred** and pass through without state-machine
-//! action. Their state machines (mailbox FIFO, signal register, DMA
-//! completion queue, etc.) will land into this same pipeline as the
-//! corresponding effect handlers are implemented.
+//! The pipeline handles these effect types end to end:
+//! `SharedWriteIntent` (memory commits), `MailboxSend` (FIFO push),
+//! `MailboxReceiveAttempt` (pop or block), `SignalUpdate` (OR-merge),
+//! `DmaEnqueue` (latency-modeled completion queue), `WakeUnit`
+//! (status override to Runnable), and `WaitOnEvent` (status override
+//! to Blocked). `FaultRaised` and `TraceMarker` are counted but do
+//! not mutate runtime state.
 
 use crate::registry::UnitRegistry;
 use cellgov_dma::{DmaCompletion, DmaLatencyModel, DmaQueue};

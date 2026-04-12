@@ -15,6 +15,7 @@ members = [
     "crates/cellgov_lv2",
     "crates/cellgov_spu",
     "crates/cellgov_ppu",
+    "crates/cellgov_explore",
     "apps/cellgov_cli",
     "apps/cellgov_mkelf",
 ]

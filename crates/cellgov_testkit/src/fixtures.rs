@@ -83,6 +83,20 @@ impl ScenarioFixture {
     pub fn builder() -> ScenarioFixtureBuilder {
         ScenarioFixtureBuilder::default()
     }
+
+    /// Build a ready-to-step `Runtime` from this fixture, consuming it.
+    ///
+    /// Seeds memory, constructs the runtime, and runs the registration
+    /// callback. The caller is responsible for stepping the runtime.
+    /// Used by the exploration engine to produce fresh runtimes from
+    /// the same fixture factory.
+    pub fn build_runtime(self) -> Runtime {
+        let mut memory = GuestMemory::new(self.memory_size);
+        (self.seed_memory)(&mut memory);
+        let mut rt = Runtime::new(memory, self.budget, self.max_steps);
+        (self.register)(&mut rt);
+        rt
+    }
 }
 
 /// Builder for [`ScenarioFixture`]. Defaults to a 16-byte memory, a

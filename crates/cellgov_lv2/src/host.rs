@@ -93,16 +93,11 @@ impl Lv2Host {
     /// The runtime folds this into `sync_state_hash` at every commit
     /// boundary so replay tooling detects LV2 state divergence.
     pub fn state_hash(&self) -> u64 {
-        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for source in [self.content.state_hash(), self.groups.state_hash()] {
-            for b in source.to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
+            hasher.write(&source.to_le_bytes());
         }
-        h
+        hasher.finish()
     }
 
     /// Dispatch a syscall request.

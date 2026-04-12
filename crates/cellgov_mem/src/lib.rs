@@ -13,12 +13,14 @@
 
 pub mod addr;
 pub mod guest;
+pub mod hash;
 pub mod local_store;
 pub mod range;
 pub mod staging;
 
 pub use addr::GuestAddr;
 pub use guest::{GuestMemory, MemError};
+pub use hash::{fnv1a, Fnv1aHasher};
 pub use local_store::LocalStore;
 pub use range::ByteRange;
 pub use staging::{StagedWrite, StagingMemory};

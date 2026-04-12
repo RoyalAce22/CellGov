@@ -20,7 +20,8 @@
 //! classifies the args, dispatches through `Lv2Host`, and handles the
 //! response: `Immediate` stores the return code for the next step,
 //! `RegisterSpu` constructs new SPU units via the pluggable
-//! `SpuFactory`, and `Block` (future) stores a `PendingResponse`.
+//! `SpuFactory`, and `Block` stores a `PendingResponse` in the
+//! `SyscallResponseTable` and transitions the caller to `Blocked`.
 //!
 //! ## Determinism contract
 //!
@@ -68,7 +69,7 @@
 //!   after every commit, so replay tooling can compare post-commit
 //!   states across runs.
 //!
-//! The trace format is binary from day one. Tests pull
+//! The trace format is binary, not text. Tests pull
 //! the bytes out via [`Runtime::trace`] and feed them to the
 //! [`cellgov_trace::TraceReader`] for assertions. Text rendering is a
 //! downstream tool over the same binary buffer.
@@ -133,10 +134,8 @@ pub enum StepError {
 ///
 /// Composes the registry, scheduler, committed memory, guest time,
 /// and epoch into a single object that drives one step at a time via
-/// [`Runtime::step`]. Currently hardcodes the scheduler to
-/// [`RoundRobinScheduler`]; a future refactor can take a
-/// `Box<dyn Scheduler>` parameter without changing the public step
-/// contract.
+/// [`Runtime::step`]. The scheduler is pluggable via
+/// [`Runtime::set_scheduler`]; defaults to [`RoundRobinScheduler`].
 /// Factory that constructs an SPU execution unit from an init state.
 /// The runtime calls this when `Lv2Dispatch::RegisterSpu` fires.
 /// The factory receives the `UnitId` the registry allocated and the
@@ -153,7 +152,7 @@ pub struct Runtime {
     lv2_host: Lv2Host,
     syscall_responses: SyscallResponseTable,
     spu_factory: Option<SpuFactory>,
-    scheduler: RoundRobinScheduler,
+    scheduler: Box<dyn Scheduler>,
     commit_pipeline: CommitPipeline,
     memory: GuestMemory,
     time: GuestTicks,
@@ -201,7 +200,7 @@ impl Runtime {
             lv2_host: Lv2Host::new(),
             syscall_responses: SyscallResponseTable::new(),
             spu_factory: None,
-            scheduler: RoundRobinScheduler::new(),
+            scheduler: Box::new(RoundRobinScheduler::new()),
             commit_pipeline: CommitPipeline::new(),
             memory,
             time: GuestTicks::ZERO,
@@ -240,199 +239,19 @@ impl Runtime {
         };
         let mut outcome = self.commit_pipeline.process(result, &mut ctx);
 
-        // Syscall dispatch: if the unit yielded with Syscall, classify
-        // the args and dispatch through the LV2 host. The host returns
-        // an Lv2Dispatch telling us what to do.
         let source = self.last_scheduled_unit.unwrap_or_else(|| UnitId::new(0));
         if result.yield_reason == YieldReason::Syscall {
-            if let Some(args) = &result.syscall_args {
-                let request = cellgov_lv2::request::classify(
-                    args[0],
-                    &[
-                        args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
-                    ],
-                );
-                let is_process_exit =
-                    matches!(request, cellgov_lv2::Lv2Request::ProcessExit { .. });
-                let dispatch = self
-                    .lv2_host
-                    .dispatch(request, source, &MemoryView(&self.memory));
-                match dispatch {
-                    Lv2Dispatch::Immediate { code, effects } => {
-                        for effect in &effects {
-                            match effect {
-                                cellgov_effects::Effect::SharedWriteIntent {
-                                    range, bytes, ..
-                                } => {
-                                    let _ = self.memory.apply_commit(*range, bytes.bytes());
-                                }
-                                cellgov_effects::Effect::MailboxSend {
-                                    mailbox, message, ..
-                                } => {
-                                    if let Some(mbox) = self.mailbox_registry.get_mut(*mailbox) {
-                                        mbox.send(message.raw());
-                                    }
-                                    // Wake the SPU if it's blocked waiting
-                                    // for this mailbox (MailboxId == UnitId).
-                                    let target = UnitId::new(mailbox.raw());
-                                    if self.registry.effective_status(target)
-                                        == Some(UnitStatus::Blocked)
-                                    {
-                                        self.registry
-                                            .set_status_override(target, UnitStatus::Runnable);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        if is_process_exit {
-                            // Cascade: finish every unit in the process
-                            // so the runner does not stall on live SPUs.
-                            let all_ids: Vec<UnitId> = self.registry.ids().collect();
-                            for uid in &all_ids {
-                                self.registry
-                                    .set_status_override(*uid, UnitStatus::Finished);
-                                self.lv2_host.notify_spu_finished(*uid);
-                                self.syscall_responses.take(*uid);
-                            }
-                        } else {
-                            self.registry.set_syscall_return(source, code);
-                        }
-                    }
-                    Lv2Dispatch::RegisterSpu {
-                        inits,
-                        effects: spu_effects,
-                        code,
-                    } => {
-                        for effect in &spu_effects {
-                            if let cellgov_effects::Effect::SharedWriteIntent {
-                                range, bytes, ..
-                            } = effect
-                            {
-                                let _ = self.memory.apply_commit(*range, bytes.bytes());
-                            }
-                        }
-                        if let Some(factory) = &self.spu_factory {
-                            for init in inits {
-                                let gid = init.group_id;
-                                let slot = init.slot;
-                                let uid = self
-                                    .registry
-                                    .register_dynamic(&|id| factory(id, init.clone()));
-                                self.lv2_host.record_spu(uid, gid, slot);
-                                self.mailbox_registry
-                                    .register_at(cellgov_sync::MailboxId::new(uid.raw()));
-                            }
-                        }
-                        self.registry.set_syscall_return(source, code);
-                    }
-                    Lv2Dispatch::Block {
-                        pending,
-                        effects: blk_effects,
-                        ..
-                    } => {
-                        for effect in &blk_effects {
-                            if let cellgov_effects::Effect::SharedWriteIntent {
-                                range, bytes, ..
-                            } = effect
-                            {
-                                let _ = self.memory.apply_commit(*range, bytes.bytes());
-                            }
-                        }
-                        self.syscall_responses.insert(source, pending);
-                        self.registry
-                            .set_status_override(source, UnitStatus::Blocked);
-                    }
-                }
-            }
+            self.dispatch_syscall(result, source);
         }
 
-        // Epoch advances on every commit boundary, even on validation
-        // failure. Overflow is a runtime invariant violation; the
-        // surrounding deadlock detector should fire long before we
-        // get anywhere near 2^64 commits.
         self.epoch = self.epoch.next().expect("epoch overflow");
-
-        // Fire DMA completions whose modeled time has arrived. Each
-        // fired completion applies its transfer to committed memory
-        // and wakes the issuing unit so it can observe the result on
-        // its next step. Runs on both Ok and Err outcome paths
-        // because completions are from previous steps, not the
-        // current one.
-        let due = self.dma_queue.pop_due(self.time);
-        for (c, payload) in &due {
-            // Apply the transfer. If the effect carried an inline
-            // payload (e.g., SPU local store bytes), use that directly.
-            // Otherwise read the source bytes from committed guest
-            // memory (the normal path for guest-memory-to-guest-memory
-            // transfers).
-            let bytes = if let Some(data) = payload {
-                data.clone()
-            } else if let Some(src) = self.memory.read(c.source()) {
-                src.to_vec()
-            } else {
-                continue;
-            };
-            let _ = self.memory.apply_commit(c.destination(), &bytes);
-            self.registry
-                .set_status_override(c.issuer(), UnitStatus::Runnable);
-        }
+        let due = self.fire_dma_completions();
         if let Ok(ref mut o) = outcome {
             o.dma_completions_fired = due.len();
         }
 
-        // Join-wake: when an SPU finishes, notify the LV2 host so it
-        // can decrement the group's remaining-unfinished counter. If
-        // the counter reaches zero, find the PPU that is blocked on
-        // that group's join and wake it with its pending response.
         if result.yield_reason == YieldReason::Finished {
-            if let Some(finished_group) = self.lv2_host.notify_spu_finished(source) {
-                // The group is fully finished. Find the joiner.
-                let waiters: Vec<UnitId> = self.syscall_responses.pending_ids().collect();
-                for waiter_id in waiters {
-                    let is_match = self
-                        .syscall_responses
-                        .peek(waiter_id)
-                        .map(|p| matches!(p, PendingResponse::ThreadGroupJoin { group_id, .. } if *group_id == finished_group))
-                        .unwrap_or(false);
-                    if !is_match {
-                        continue;
-                    }
-                    if let Some(pending) = self.syscall_responses.take(waiter_id) {
-                        match &pending {
-                            PendingResponse::ThreadGroupJoin {
-                                code,
-                                cause_ptr,
-                                status_ptr,
-                                cause,
-                                status,
-                                ..
-                            } => {
-                                self.registry.set_syscall_return(waiter_id, *code);
-                                self.registry
-                                    .set_status_override(waiter_id, UnitStatus::Runnable);
-                                if let Some(range) = cellgov_mem::ByteRange::new(
-                                    cellgov_mem::GuestAddr::new(*cause_ptr as u64),
-                                    4,
-                                ) {
-                                    let _ = self.memory.apply_commit(range, &cause.to_be_bytes());
-                                }
-                                if let Some(range) = cellgov_mem::ByteRange::new(
-                                    cellgov_mem::GuestAddr::new(*status_ptr as u64),
-                                    4,
-                                ) {
-                                    let _ = self.memory.apply_commit(range, &status.to_be_bytes());
-                                }
-                            }
-                            PendingResponse::ReturnCode { code } => {
-                                self.registry.set_syscall_return(waiter_id, *code);
-                                self.registry
-                                    .set_status_override(waiter_id, UnitStatus::Runnable);
-                            }
-                        }
-                    }
-                }
-            }
+            self.resolve_join_wakes(source);
         }
 
         // Trace pipeline step 7 (and the validation rejection edge): one
@@ -519,6 +338,172 @@ impl Runtime {
         });
 
         outcome
+    }
+
+    // ------------------------------------------------------------------
+    // Private helpers extracted from commit_step for SRP.
+    // ------------------------------------------------------------------
+
+    /// Apply effects produced by an LV2 dispatch. Handles
+    /// SharedWriteIntent (memory commit) and MailboxSend (FIFO push
+    /// + blocked-SPU wake) uniformly across all dispatch variants.
+    fn apply_lv2_effects(&mut self, effects: &[cellgov_effects::Effect]) {
+        for effect in effects {
+            match effect {
+                cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. } => {
+                    let _ = self.memory.apply_commit(*range, bytes.bytes());
+                }
+                cellgov_effects::Effect::MailboxSend {
+                    mailbox, message, ..
+                } => {
+                    if let Some(mbox) = self.mailbox_registry.get_mut(*mailbox) {
+                        mbox.send(message.raw());
+                    }
+                    let target = UnitId::new(mailbox.raw());
+                    if self.registry.effective_status(target) == Some(UnitStatus::Blocked) {
+                        self.registry
+                            .set_status_override(target, UnitStatus::Runnable);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Classify a syscall yield, dispatch through the LV2 host, and
+    /// handle the result (immediate return, SPU registration, or block).
+    fn dispatch_syscall(&mut self, result: &ExecutionStepResult, source: UnitId) {
+        let Some(args) = &result.syscall_args else {
+            return;
+        };
+        let request = cellgov_lv2::request::classify(
+            args[0],
+            &[
+                args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
+            ],
+        );
+        let is_process_exit = matches!(request, cellgov_lv2::Lv2Request::ProcessExit { .. });
+        let dispatch = self
+            .lv2_host
+            .dispatch(request, source, &MemoryView(&self.memory));
+        match dispatch {
+            Lv2Dispatch::Immediate { code, effects } => {
+                self.apply_lv2_effects(&effects);
+                if is_process_exit {
+                    let all_ids: Vec<UnitId> = self.registry.ids().collect();
+                    for uid in &all_ids {
+                        self.registry
+                            .set_status_override(*uid, UnitStatus::Finished);
+                        self.lv2_host.notify_spu_finished(*uid);
+                        self.syscall_responses.take(*uid);
+                    }
+                } else {
+                    self.registry.set_syscall_return(source, code);
+                }
+            }
+            Lv2Dispatch::RegisterSpu {
+                inits,
+                effects,
+                code,
+            } => {
+                self.apply_lv2_effects(&effects);
+                if let Some(factory) = &self.spu_factory {
+                    for init in inits {
+                        let gid = init.group_id;
+                        let slot = init.slot;
+                        let uid = self
+                            .registry
+                            .register_dynamic(&|id| factory(id, init.clone()));
+                        self.lv2_host.record_spu(uid, gid, slot);
+                        self.mailbox_registry
+                            .register_at(cellgov_sync::MailboxId::new(uid.raw()));
+                    }
+                }
+                self.registry.set_syscall_return(source, code);
+            }
+            Lv2Dispatch::Block {
+                pending, effects, ..
+            } => {
+                self.apply_lv2_effects(&effects);
+                self.syscall_responses.insert(source, pending);
+                self.registry
+                    .set_status_override(source, UnitStatus::Blocked);
+            }
+        }
+    }
+
+    /// Pop and apply DMA completions whose modeled time has arrived.
+    /// Returns the list of fired completions for trace recording.
+    fn fire_dma_completions(&mut self) -> Vec<(cellgov_dma::DmaCompletion, Option<Vec<u8>>)> {
+        let due = self.dma_queue.pop_due(self.time);
+        for (c, payload) in &due {
+            let bytes = if let Some(data) = payload {
+                data.clone()
+            } else if let Some(src) = self.memory.read(c.source()) {
+                src.to_vec()
+            } else {
+                continue;
+            };
+            let _ = self.memory.apply_commit(c.destination(), &bytes);
+            self.registry
+                .set_status_override(c.issuer(), UnitStatus::Runnable);
+        }
+        due
+    }
+
+    /// When an SPU finishes, notify the LV2 host. If the group is
+    /// fully finished, find and wake the PPU blocked on that group's
+    /// join with its pending response.
+    fn resolve_join_wakes(&mut self, source: UnitId) {
+        let Some(finished_group) = self.lv2_host.notify_spu_finished(source) else {
+            return;
+        };
+        let waiters: Vec<UnitId> = self.syscall_responses.pending_ids().collect();
+        for waiter_id in waiters {
+            let is_match = self
+                .syscall_responses
+                .peek(waiter_id)
+                .map(|p| {
+                    matches!(p, PendingResponse::ThreadGroupJoin { group_id, .. } if *group_id == finished_group)
+                })
+                .unwrap_or(false);
+            if !is_match {
+                continue;
+            }
+            if let Some(pending) = self.syscall_responses.take(waiter_id) {
+                match &pending {
+                    PendingResponse::ThreadGroupJoin {
+                        code,
+                        cause_ptr,
+                        status_ptr,
+                        cause,
+                        status,
+                        ..
+                    } => {
+                        self.registry.set_syscall_return(waiter_id, *code);
+                        self.registry
+                            .set_status_override(waiter_id, UnitStatus::Runnable);
+                        if let Some(range) = cellgov_mem::ByteRange::new(
+                            cellgov_mem::GuestAddr::new(*cause_ptr as u64),
+                            4,
+                        ) {
+                            let _ = self.memory.apply_commit(range, &cause.to_be_bytes());
+                        }
+                        if let Some(range) = cellgov_mem::ByteRange::new(
+                            cellgov_mem::GuestAddr::new(*status_ptr as u64),
+                            4,
+                        ) {
+                            let _ = self.memory.apply_commit(range, &status.to_be_bytes());
+                        }
+                    }
+                    PendingResponse::ReturnCode { code } => {
+                        self.registry.set_syscall_return(waiter_id, *code);
+                        self.registry
+                            .set_status_override(waiter_id, UnitStatus::Runnable);
+                    }
+                }
+            }
+        }
     }
 
     /// Borrow the binary trace buffer accumulated so far.
@@ -621,6 +606,12 @@ impl Runtime {
         &self.dma_queue
     }
 
+    /// Replace the scheduler. The explorer uses this to inject a
+    /// prescribed schedule that forces a specific unit ordering.
+    pub fn set_scheduler<S: Scheduler + 'static>(&mut self, scheduler: S) {
+        self.scheduler = Box::new(scheduler);
+    }
+
     /// Split-borrow both registries at once. Used by the testkit
     /// runner so a fixture's setup callback can register a mailbox
     /// and a unit that targets it in one call without fighting the
@@ -638,21 +629,16 @@ impl Runtime {
     /// these values via the `SyncState` checkpoint records the runtime
     /// emits at every commit boundary.
     pub fn sync_state_hash(&self) -> u64 {
-        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for source in [
             self.mailbox_registry.state_hash(),
             self.signal_registry.state_hash(),
             self.lv2_host.state_hash(),
             self.syscall_responses.state_hash(),
         ] {
-            for b in source.to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
+            hasher.write(&source.to_le_bytes());
         }
-        h
+        hasher.finish()
     }
 
     /// Borrow committed guest memory.

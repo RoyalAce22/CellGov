@@ -74,19 +74,13 @@ impl SyscallResponseTable {
     /// The hash covers every `(UnitId, PendingResponse)` pair in key
     /// order. An empty table returns the FNV offset basis.
     pub fn state_hash(&self) -> u64 {
-        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (unit, response) in &self.pending {
-            for b in unit.raw().to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
-            let response_bytes = match response {
+            hasher.write(&unit.raw().to_le_bytes());
+            match response {
                 PendingResponse::ReturnCode { code } => {
-                    let mut v = vec![0u8];
-                    v.extend_from_slice(&code.to_le_bytes());
-                    v
+                    hasher.write(&[0u8]);
+                    hasher.write(&code.to_le_bytes());
                 }
                 PendingResponse::ThreadGroupJoin {
                     group_id,
@@ -96,22 +90,17 @@ impl SyscallResponseTable {
                     cause,
                     status,
                 } => {
-                    let mut v = vec![1u8];
-                    v.extend_from_slice(&group_id.to_le_bytes());
-                    v.extend_from_slice(&code.to_le_bytes());
-                    v.extend_from_slice(&cause_ptr.to_le_bytes());
-                    v.extend_from_slice(&status_ptr.to_le_bytes());
-                    v.extend_from_slice(&cause.to_le_bytes());
-                    v.extend_from_slice(&status.to_le_bytes());
-                    v
+                    hasher.write(&[1u8]);
+                    hasher.write(&group_id.to_le_bytes());
+                    hasher.write(&code.to_le_bytes());
+                    hasher.write(&cause_ptr.to_le_bytes());
+                    hasher.write(&status_ptr.to_le_bytes());
+                    hasher.write(&cause.to_le_bytes());
+                    hasher.write(&status.to_le_bytes());
                 }
-            };
-            for b in &response_bytes {
-                h ^= *b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
             }
         }
-        h
+        hasher.finish()
     }
 }
 

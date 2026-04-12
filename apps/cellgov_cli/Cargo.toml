@@ -10,6 +10,12 @@ workspace = true
 
 [dependencies]
 cellgov_compare = { path = "../../crates/cellgov_compare" }
+cellgov_core = { path = "../../crates/cellgov_core" }
+cellgov_explore = { path = "../../crates/cellgov_explore" }
+cellgov_mem = { path = "../../crates/cellgov_mem" }
+cellgov_ppu = { path = "../../crates/cellgov_ppu" }
+cellgov_spu = { path = "../../crates/cellgov_spu" }
 cellgov_testkit = { path = "../../crates/cellgov_testkit" }
+cellgov_time = { path = "../../crates/cellgov_time" }
 cellgov_trace = { path = "../../crates/cellgov_trace" }
 serde_json = "1"

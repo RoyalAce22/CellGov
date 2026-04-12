@@ -92,20 +92,12 @@ impl ContentStore {
     /// Covers every `(path, handle)` pair in path order. An empty
     /// store returns the FNV offset basis.
     pub fn state_hash(&self) -> u64 {
-        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (path, record) in &self.by_path {
-            for b in path {
-                h ^= *b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
-            for b in record.handle.raw().to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
+            hasher.write(path);
+            hasher.write(&record.handle.raw().to_le_bytes());
         }
-        h
+        hasher.finish()
     }
 }
 

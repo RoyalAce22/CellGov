@@ -105,30 +105,19 @@ impl MailboxRegistry {
     /// two runs reached the same set of mailbox states. The empty
     /// registry hashes to the FNV-1a empty-input value.
     pub fn state_hash(&self) -> u64 {
-        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (id, mailbox) in self.mailboxes.iter() {
-            for b in id.raw().to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
-            for b in (mailbox.len() as u64).to_le_bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(FNV_PRIME);
-            }
+            hasher.write(&id.raw().to_le_bytes());
+            hasher.write(&(mailbox.len() as u64).to_le_bytes());
             // Walk front-to-back, the same order try_receive would
             // observe, so replay sees identical bytes across runs.
             // Mailbox does not expose iter() yet; the helper below
             // clones the queue once and drains the clone.
             for word in mailbox_iter(mailbox) {
-                for b in word.to_le_bytes() {
-                    h ^= b as u64;
-                    h = h.wrapping_mul(FNV_PRIME);
-                }
+                hasher.write(&word.to_le_bytes());
             }
         }
-        h
+        hasher.finish()
     }
 }
 

@@ -7,7 +7,13 @@ name = "cellgov_cli"
 version = "0.0.0"
 dependencies = [
  "cellgov_compare",
+ "cellgov_core",
+ "cellgov_explore",
+ "cellgov_mem",
+ "cellgov_ppu",
+ "cellgov_spu",
  "cellgov_testkit",
+ "cellgov_time",
  "cellgov_trace",
  "serde_json",
 ]
@@ -79,6 +85,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cellgov_explore"
+version = "0.0.0"
+dependencies = [
+ "cellgov_core",
+ "cellgov_dma",
+ "cellgov_effects",
+ "cellgov_event",
+ "cellgov_exec",
+ "cellgov_mem",
+ "cellgov_sync",
+ "cellgov_testkit",
+ "cellgov_time",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cellgov_lv2"
 version = "0.0.0"
 dependencies = [
@@ -136,6 +159,7 @@ name = "cellgov_sync"
 version = "0.0.0"
 dependencies = [
  "cellgov_event",
+ "cellgov_mem",
  "cellgov_time",
 ]
 

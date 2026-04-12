@@ -34,7 +34,7 @@ RPCS3 is the right tool if the goal is to play a game. CellGov is the right tool
 PS3 games run PPU and SPU threads concurrently. A static recompiler must decide which synchronization to preserve and which is coincidental. CellGov answers that question:
 
 - **Deterministic tracing** produces a complete, ordered record of every scheduling decision, effect, and commit. Two runs of the same scenario produce byte-identical traces.
-- **Schedule exploration** (planned) systematically tries alternate legal interleavings and classifies which ones produce different outcomes. This tells the recompiler exactly which orderings the game depends on.
+- **Schedule exploration** systematically tries alternate legal interleavings and classifies which ones produce different outcomes. This tells the recompiler exactly which orderings the game depends on.
 - **Oracle comparison** validates CellGov's output against RPCS3 baselines, and the same harness will validate recompiled output against CellGov's traces.
 
 ## Status
@@ -43,14 +43,18 @@ CellGov is in early development and currently in **Pre-Alpha**.
 
 Current capabilities:
 
-- deterministic round-robin scheduler with deadlock detection
+- deterministic round-robin scheduler with pluggable scheduler injection and deadlock detection
 - commit pipeline processing 9 effect types (writes, mailbox, DMA, signals, wake/block, faults, trace markers)
-- real PPU interpreter (PPC64 instruction subset, ELF64 loader, LV2 syscall stubs)
+- real PPU interpreter (PPC64 instruction subset, ELF64 loader, LV2 syscall dispatch)
 - real SPU interpreter (128x128-bit register file, 256 KB local store, channel file)
+- LV2 host model with 8 working syscalls (SPU image/thread-group lifecycle, mailbox write, join wake, process exit)
 - binary trace format with categorical filtering and encode/decode roundtrip
 - FNV-1a state hashing at every commit boundary
+- bounded schedule exploration with dependency-aware pruning and schedule-stable/sensitive classification
+- oracle-aware exploration comparing per-schedule memory against RPCS3 baselines
 - comparison harness with strict/memory/events/prefix modes and RPCS3 oracle validation
 - six PSL1GHT-compiled microtests matching RPCS3 interpreter + LLVM baselines
+- CLI with run, dump, compare, and explore subcommands (human + JSON output)
 
 Interfaces are expected to change. The project is not yet suitable for real PS3 workloads.
 
