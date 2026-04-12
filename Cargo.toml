@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cellgov_time",
+    "crates/cellgov_event",
+    "crates/cellgov_mem",
+    "crates/cellgov_effects",
+    "crates/cellgov_sync",
+    "crates/cellgov_dma",
+    "crates/cellgov_exec",
+    "crates/cellgov_trace",
+    "crates/cellgov_core",
+    "crates/cellgov_testkit",
+    "apps/cellgov_cli",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

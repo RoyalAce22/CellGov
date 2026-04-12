@@ -1,0 +1,4 @@
+# Normalize all text files to LF in the repository.
+# Working-tree line endings on Windows still follow core.autocrlf,
+# but the stored copy is always LF so CI and cross-platform diffs stay clean.
+* text=auto eol=lf

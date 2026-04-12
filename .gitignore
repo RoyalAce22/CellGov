@@ -1,0 +1,12 @@
+# rust runtime
+/target
+
+# documentation -- only the dev/ subtree is private
+docs/dev/
+
+# IDE files
+.vscode/
+
+# AI tooling
+.claude/
+CLAUDE.local.md

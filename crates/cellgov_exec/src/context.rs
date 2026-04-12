@@ -1,0 +1,107 @@
+//! `ExecutionContext` -- the readonly view exposed to a running unit.
+//!
+//! An execution context exposes only:
+//!
+//! - unit-local readable state needed to continue (lives in the unit, not here)
+//! - readonly committed shared memory view
+//! - readonly runtime-facing handles for querying abstract device state
+//!
+//! The determinism rule: the shared committed-memory view
+//! must be **frozen** for the entire duration of a single `run_until_yield`
+//! call. A unit cannot observe commits made by other units mid-step. Any
+//! new commits become visible only on the unit's next scheduled
+//! invocation. This eliminates read/observe nondeterminism by
+//! construction.
+//!
+//! This crate enforces the freeze rule structurally: `ExecutionContext`
+//! holds an immutable borrow of `GuestMemory`, and `run_until_yield`
+//! takes `&ExecutionContext`. Rust's borrow checker ensures the runtime
+//! cannot mutate the underlying memory while the context is alive,
+//! which is exactly the duration of the unit's step.
+
+use cellgov_mem::GuestMemory;
+
+/// The readonly view of runtime state exposed to an execution unit
+/// during a single `run_until_yield` call.
+///
+/// `ExecutionContext` is intentionally narrow. Everything it carries is
+/// shared-borrowed from the runtime. There is no mutable access to
+/// anything; units publish changes only by emitting `Effect` packets in
+/// their step result, never by reaching through the context.
+///
+/// Currently exposes the committed shared memory view and any messages
+/// the runtime delivered on the unit's behalf during the preceding
+/// commit (e.g. from `MailboxReceiveAttempt`). Readonly runtime-facing
+/// handles for querying abstract device state will be added as
+/// additional borrowed fields when abstract devices exist; that is a
+/// non-breaking addition because the constructor remains the seam.
+#[derive(Debug, Clone, Copy)]
+pub struct ExecutionContext<'a> {
+    memory: &'a GuestMemory,
+    received: &'a [u32],
+}
+
+impl<'a> ExecutionContext<'a> {
+    /// Construct an `ExecutionContext` over the given committed memory
+    /// with no pending received messages. This is the common
+    /// construction path when no mailbox receives were delivered.
+    #[inline]
+    pub const fn new(memory: &'a GuestMemory) -> Self {
+        Self {
+            memory,
+            received: &[],
+        }
+    }
+
+    /// Construct an `ExecutionContext` with pending received messages.
+    /// The runtime calls this when `drain_receives` returned a
+    /// non-empty vec for the unit about to run.
+    #[inline]
+    pub fn with_received(memory: &'a GuestMemory, received: &'a [u32]) -> Self {
+        Self { memory, received }
+    }
+
+    /// Borrow the committed memory view. The returned reference shares
+    /// this context's lifetime, so it cannot outlive the step.
+    #[inline]
+    pub const fn memory(&self) -> &GuestMemory {
+        self.memory
+    }
+
+    /// Messages delivered to this unit by the runtime during the
+    /// preceding commit cycle (e.g. popped from a mailbox via
+    /// `MailboxReceiveAttempt`). Empty if no messages were delivered.
+    /// The slice is in delivery order.
+    #[inline]
+    pub const fn received_messages(&self) -> &[u32] {
+        self.received
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+
+    fn range(start: u64, length: u64) -> ByteRange {
+        ByteRange::new(GuestAddr::new(start), length).unwrap()
+    }
+
+    #[test]
+    fn context_exposes_committed_memory() {
+        let mut mem = GuestMemory::new(16);
+        mem.apply_commit(range(0, 4), &[1, 2, 3, 4]).unwrap();
+        let ctx = ExecutionContext::new(&mem);
+        let bytes = ctx.memory().read(range(0, 4)).unwrap();
+        assert_eq!(bytes, &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn context_is_copy() {
+        let mem = GuestMemory::new(8);
+        let ctx = ExecutionContext::new(&mem);
+        let copy = ctx;
+        // Both still usable; would not compile if Copy were absent.
+        assert_eq!(ctx.memory().size(), copy.memory().size());
+    }
+}
