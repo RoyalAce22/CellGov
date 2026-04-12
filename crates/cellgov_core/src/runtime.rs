@@ -238,18 +238,20 @@ impl Runtime {
         // because completions are from previous steps, not the
         // current one.
         let due = self.dma_queue.pop_due(self.time);
-        for c in &due {
-            // Apply the transfer: read source bytes, write to
-            // destination. Currently treats both Put and Get as a
-            // plain copy within committed memory.
-            if let Some(bytes) = self.memory.read(c.source()) {
-                let bytes = bytes.to_vec();
-                // Destination out-of-range is a scenario construction
-                // bug; apply_commit returns Err which we
-                // silently drop. The trace still records the
-                // completion via the hash checkpoint.
-                let _ = self.memory.apply_commit(c.destination(), &bytes);
-            }
+        for (c, payload) in &due {
+            // Apply the transfer. If the effect carried an inline
+            // payload (e.g., SPU local store bytes), use that directly.
+            // Otherwise read the source bytes from committed guest
+            // memory (the normal path for guest-memory-to-guest-memory
+            // transfers).
+            let bytes = if let Some(data) = payload {
+                data.clone()
+            } else if let Some(src) = self.memory.read(c.source()) {
+                src.to_vec()
+            } else {
+                continue;
+            };
+            let _ = self.memory.apply_commit(c.destination(), &bytes);
             self.registry
                 .set_status_override(c.issuer(), UnitStatus::Runnable);
         }
@@ -310,7 +312,7 @@ impl Runtime {
                 });
             }
         }
-        for c in &due {
+        for (c, _) in &due {
             self.trace.record(&TraceRecord::UnitWoken {
                 unit: c.issuer(),
                 reason: TracedWakeReason::DmaCompletion,
@@ -472,6 +474,24 @@ impl Runtime {
     #[inline]
     pub fn max_steps(&self) -> usize {
         self.max_steps
+    }
+
+    /// Drain all pending DMA completions regardless of their scheduled
+    /// time, applying each transfer to committed memory. Used at
+    /// scenario termination to ensure all in-flight transfers become
+    /// visible in the final memory snapshot.
+    pub fn drain_pending_dma(&mut self) {
+        let due = self.dma_queue.pop_due(GuestTicks::new(u64::MAX));
+        for (c, payload) in &due {
+            let bytes = if let Some(data) = payload {
+                data.clone()
+            } else if let Some(src) = self.memory.read(c.source()) {
+                src.to_vec()
+            } else {
+                continue;
+            };
+            let _ = self.memory.apply_commit(c.destination(), &bytes);
+        }
     }
 
     /// Drive one pipeline pass: select a unit, grant budget, run it,

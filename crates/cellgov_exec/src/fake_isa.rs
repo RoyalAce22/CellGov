@@ -203,7 +203,10 @@ impl ExecutionUnit for FakeIsaUnit {
                 .expect("DmaPut src and dst lengths must match");
                 (
                     YieldReason::DmaSubmitted,
-                    vec![Effect::DmaEnqueue { request: req }],
+                    vec![Effect::DmaEnqueue {
+                        request: req,
+                        payload: None,
+                    }],
                 )
             }
             FakeOp::Wait { signal, mask: _ } => (

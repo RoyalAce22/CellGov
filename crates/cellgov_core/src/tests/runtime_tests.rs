@@ -673,7 +673,7 @@ fn dma_completion_fires_and_applies_transfer() {
     )
     .unwrap();
     rt.dma_queue
-        .enqueue(DmaCompletion::new(req, GuestTicks::new(3)));
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 10));
     // Step consumes budget=5, time goes to 5. Commit fires the
@@ -711,7 +711,7 @@ fn dma_completion_wakes_issuer() {
     )
     .unwrap();
     rt.dma_queue
-        .enqueue(DmaCompletion::new(req, GuestTicks::new(3)));
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
     // Step runs unit 0 (unit 1 is blocked). Time -> 5.
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(0));
@@ -740,7 +740,7 @@ fn dma_completion_does_not_fire_before_its_time() {
     .unwrap();
     // Scheduled at time 100, budget=2 so first step reaches time=2.
     rt.dma_queue
-        .enqueue(DmaCompletion::new(req, GuestTicks::new(100)));
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(100)), None);
     let s = rt.step().unwrap();
     let outcome = rt.commit_step(&s.result).unwrap();
     // Not yet due.

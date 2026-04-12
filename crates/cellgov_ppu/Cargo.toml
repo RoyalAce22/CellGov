@@ -1,0 +1,22 @@
+[package]
+name = "cellgov_ppu"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cellgov_effects = { path = "../cellgov_effects" }
+cellgov_event = { path = "../cellgov_event" }
+cellgov_exec = { path = "../cellgov_exec" }
+cellgov_mem = { path = "../cellgov_mem" }
+cellgov_time = { path = "../cellgov_time" }
+
+[dev-dependencies]
+cellgov_compare = { path = "../cellgov_compare" }
+cellgov_core = { path = "../cellgov_core" }
+cellgov_spu = { path = "../cellgov_spu" }
+cellgov_testkit = { path = "../cellgov_testkit" }
