@@ -1,0 +1,21 @@
+[test]
+name = "ls_to_shared"
+
+# No [cellgov] section -- there is no CellGov scenario that matches
+# "SPU local-store computation published to main memory."
+# Classified as Unsupported on the CellGov side.
+
+[rpcs3]
+binary = "build/ls_to_shared.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# 16-byte header (status + count + pad) + 128-byte computed data
+memory_regions = [
+  { name = "header", addr = 0, size = 8 },
+  { name = "data", addr = 16, size = 128 },
+]
+
+[expect]
+outcome = "completed"

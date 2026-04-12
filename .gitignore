@@ -7,6 +7,22 @@ docs/dev/
 # IDE files
 .vscode/
 
+# external tools
+tools/
+
+# test artifacts (binaries, ELFs, ISOs, memory dumps, build output)
+tests/micro/**/*.bin
+tests/micro/**/*.elf
+tests/micro/**/*.self
+tests/micro/**/*.iso
+tests/micro/**/*.o
+tests/micro/**/build/
+tests/micro/hello_world/
+
+# Raw TTY dumps (binary artifacts from RPCS3 runs)
+baselines/**/*.tty
+
 # AI tooling
 .claude/
+.dspy_state/
 CLAUDE.local.md

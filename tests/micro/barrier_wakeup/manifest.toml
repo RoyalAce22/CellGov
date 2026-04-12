@@ -1,0 +1,21 @@
+[test]
+name = "barrier_wakeup"
+
+# No [cellgov] section -- there is no CellGov scenario that matches
+# "two SPU threads with inter-SPU ordering via shared memory."
+# Classified as Unsupported on the CellGov side.
+
+[rpcs3]
+binary = "build/barrier_wakeup.elf"
+decoder = "interpreter"
+timeout_ms = 15000
+
+[observe]
+# Two 8-byte result slots, one per SPU thread.
+memory_regions = [
+  { name = "spu0_result", addr = 0, size = 8 },
+  { name = "spu1_result", addr = 16, size = 8 },
+]
+
+[expect]
+outcome = "completed"

@@ -2,3 +2,6 @@
 # Working-tree line endings on Windows still follow core.autocrlf,
 # but the stored copy is always LF so CI and cross-platform diffs stay clean.
 * text=auto eol=lf
+
+# Count microtest C sources in language stats.
+tests/micro/**/*.c linguist-vendored=false

@@ -1,0 +1,20 @@
+[test]
+name = "spu_fixed_value"
+
+# No [cellgov] section -- there is no CellGov scenario that matches
+# "SPU writes a fixed value via DMA." The harness classifies this as
+# Unsupported on the CellGov side.
+
+[rpcs3]
+binary = "build/spu_fixed_value.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# TestResult: 4-byte status + 4-byte value
+memory_regions = [
+  { name = "result", addr = 0, size = 8 },
+]
+
+[expect]
+outcome = "completed"
