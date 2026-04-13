@@ -13,6 +13,7 @@ use cellgov_exec::YieldReason;
 
 /// What happened after executing one instruction.
 #[derive(Debug)]
+#[allow(missing_docs)]
 pub enum PpuStepOutcome {
     /// Instruction executed, advance PC by 4, keep running.
     Continue,

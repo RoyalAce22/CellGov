@@ -1061,3 +1061,16 @@ fn max_steps_zero_rejects_first_step() {
         .register_with(|id| CountingUnit::new(id, 5));
     assert_eq!(rt.step(), Err(StepError::MaxStepsExceeded));
 }
+
+#[test]
+fn into_memory_returns_committed_state() {
+    let mut mem = GuestMemory::new(64);
+    let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0), 4).unwrap();
+    mem.apply_commit(range, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
+
+    let rt = Runtime::new(mem, Budget::new(1), 100);
+    let recovered = rt.into_memory();
+
+    assert_eq!(&recovered.as_bytes()[0..4], &[0xDE, 0xAD, 0xBE, 0xEF]);
+    assert_eq!(recovered.size(), 64);
+}

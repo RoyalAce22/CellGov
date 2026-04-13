@@ -16,6 +16,7 @@ pub mod instruction;
 pub mod loader;
 pub mod nid_db;
 pub mod prx;
+pub mod sprx;
 pub mod state;
 pub mod syscall;
 
@@ -29,10 +30,13 @@ use cellgov_exec::{
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::{Budget, GuestTicks};
 
-/// Fault code constants for PPU faults encoded into `FaultKind::Guest`.
+/// PPU tried to fetch at an address beyond guest memory.
 pub const FAULT_PC_OUT_OF_RANGE: u32 = 0x0102_0000;
+/// Instruction word did not match any implemented encoding.
 pub const FAULT_DECODE_ERROR: u32 = 0x0105_0000;
+/// Load or store targeted an out-of-bounds guest address.
 pub const FAULT_INVALID_ADDRESS: u32 = 0x0106_0000;
+/// Syscall number or VMX sub-opcode has no handler.
 pub const FAULT_UNSUPPORTED_SYSCALL: u32 = 0x0107_0000;
 
 /// PPU execution unit snapshot for replay.

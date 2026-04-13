@@ -9,7 +9,11 @@
 //! `PpuDecodeError::Unsupported`.
 
 /// A decoded PPU instruction.
+///
+/// Variant fields are PPC register indices (rt, ra, rb) and immediates
+/// (imm, offset, link) -- self-documenting by PPC naming convention.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(missing_docs)]
 pub enum PpuInstruction {
     // -- Integer loads --
     /// Load word and zero: rt = mem[ra + imm] (32-bit, zero-extended).

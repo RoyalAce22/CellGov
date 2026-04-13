@@ -79,6 +79,55 @@ pub enum Lv2Request {
         /// Value to deposit into the SPU's inbound mailbox.
         value: u32,
     },
+    /// sys_mutex_create (100).
+    MutexCreate {
+        /// Guest address to write the allocated mutex id into.
+        id_ptr: u32,
+        /// Guest address of the attribute struct (opaque).
+        attr_ptr: u32,
+    },
+    /// sys_mutex_lock (102).
+    MutexLock {
+        /// Mutex id.
+        mutex_id: u32,
+        /// Timeout in microseconds (0 = infinite).
+        timeout: u64,
+    },
+    /// sys_mutex_unlock (104).
+    MutexUnlock {
+        /// Mutex id.
+        mutex_id: u32,
+    },
+    /// sys_event_queue_create (128).
+    EventQueueCreate {
+        /// Guest address to write the allocated queue id into.
+        id_ptr: u32,
+        /// Guest address of the attribute struct (opaque).
+        attr_ptr: u32,
+        /// Event queue key.
+        key: u64,
+        /// Maximum queue size.
+        size: u32,
+    },
+    /// sys_event_queue_destroy (129).
+    EventQueueDestroy {
+        /// Queue id.
+        queue_id: u32,
+    },
+    /// sys_memory_allocate (348).
+    MemoryAllocate {
+        /// Allocation size in bytes (must be aligned to page size).
+        size: u64,
+        /// Page size flags: 0x400 = 1MB, 0x200 = 64KB, 0 = 1MB default.
+        flags: u64,
+        /// Guest address to write the allocated address into.
+        alloc_addr_ptr: u32,
+    },
+    /// sys_memory_free (349).
+    MemoryFree {
+        /// Guest address to free.
+        addr: u32,
+    },
     /// sys_process_exit (22).
     ProcessExit {
         /// Exit code.
@@ -137,6 +186,34 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
         },
         22 => Lv2Request::ProcessExit {
             code: args[0] as u32,
+        },
+        100 => Lv2Request::MutexCreate {
+            id_ptr: args[0] as u32,
+            attr_ptr: args[1] as u32,
+        },
+        102 => Lv2Request::MutexLock {
+            mutex_id: args[0] as u32,
+            timeout: args[1],
+        },
+        104 => Lv2Request::MutexUnlock {
+            mutex_id: args[0] as u32,
+        },
+        128 => Lv2Request::EventQueueCreate {
+            id_ptr: args[0] as u32,
+            attr_ptr: args[1] as u32,
+            key: args[2],
+            size: args[3] as u32,
+        },
+        129 => Lv2Request::EventQueueDestroy {
+            queue_id: args[0] as u32,
+        },
+        348 => Lv2Request::MemoryAllocate {
+            size: args[0],
+            flags: args[1],
+            alloc_addr_ptr: args[2] as u32,
+        },
+        349 => Lv2Request::MemoryFree {
+            addr: args[0] as u32,
         },
         n => Lv2Request::Unsupported { number: n },
     }
@@ -251,5 +328,71 @@ mod tests {
                 "syscall {n} should be Unsupported"
             );
         }
+    }
+
+    #[test]
+    fn classify_mutex_create() {
+        let args = [0x5000, 0x6000, 0, 0, 0, 0, 0, 0];
+        let req = classify(100, &args);
+        assert_eq!(
+            req,
+            Lv2Request::MutexCreate {
+                id_ptr: 0x5000,
+                attr_ptr: 0x6000,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_mutex_lock_unlock() {
+        let args = [42, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(102, &args),
+            Lv2Request::MutexLock {
+                mutex_id: 42,
+                timeout: 0,
+            }
+        );
+        assert_eq!(
+            classify(104, &args),
+            Lv2Request::MutexUnlock { mutex_id: 42 }
+        );
+    }
+
+    #[test]
+    fn classify_event_queue_create_destroy() {
+        let args = [0x7000, 0x8000, 0x100, 64, 0, 0, 0, 0];
+        assert_eq!(
+            classify(128, &args),
+            Lv2Request::EventQueueCreate {
+                id_ptr: 0x7000,
+                attr_ptr: 0x8000,
+                key: 0x100,
+                size: 64,
+            }
+        );
+        let args2 = [99, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(129, &args2),
+            Lv2Request::EventQueueDestroy { queue_id: 99 }
+        );
+    }
+
+    #[test]
+    fn classify_memory_allocate_free() {
+        let args = [0x10000, 0x200, 0x9000, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(348, &args),
+            Lv2Request::MemoryAllocate {
+                size: 0x10000,
+                flags: 0x200,
+                alloc_addr_ptr: 0x9000,
+            }
+        );
+        let args2 = [0x3000_0000, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(349, &args2),
+            Lv2Request::MemoryFree { addr: 0x3000_0000 }
+        );
     }
 }

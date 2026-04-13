@@ -257,6 +257,47 @@ pub(crate) fn read_u16(data: &[u8], offset: usize) -> u16 {
     u16::from_be_bytes([data[offset], data[offset + 1]])
 }
 
+/// PT_TLS segment type.
+const PT_TLS: u32 = 7;
+
+/// TLS segment info extracted from an ELF's PT_TLS program header.
+#[derive(Debug, Clone, Copy)]
+pub struct TlsInfo {
+    /// Virtual address of the TLS template in guest memory.
+    pub vaddr: u64,
+    /// Size of initialized TLS data (from ELF file).
+    pub filesz: u64,
+    /// Total TLS memory size per thread (including BSS).
+    pub memsz: u64,
+}
+
+/// Find the PT_TLS program header in an ELF64 binary.
+///
+/// Returns `None` if the ELF has no TLS segment.
+pub fn find_tls_segment(data: &[u8]) -> Option<TlsInfo> {
+    if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC {
+        return None;
+    }
+    let phoff = read_u64(data, 32) as usize;
+    let phentsize = read_u16(data, 54) as usize;
+    let phnum = read_u16(data, 56) as usize;
+
+    for i in 0..phnum {
+        let base = phoff + i * phentsize;
+        if base + phentsize > data.len() {
+            break;
+        }
+        if read_u32(data, base) == PT_TLS {
+            return Some(TlsInfo {
+                vaddr: read_u64(data, base + 16),
+                filesz: read_u64(data, base + 32),
+                memsz: read_u64(data, base + 40),
+            });
+        }
+    }
+    None
+}
+
 /// ELF section type: symbol table.
 const SHT_SYMTAB: u32 = 2;
 
@@ -546,5 +587,72 @@ mod tests {
         }
         let data = std::fs::read(path).unwrap();
         assert!(find_symbol(&data, "nonexistent_symbol_xyz").is_none());
+    }
+
+    /// Build a minimal ELF64 with a PT_TLS program header for testing.
+    fn make_elf_with_tls(tls_vaddr: u64, tls_filesz: u64, tls_memsz: u64) -> Vec<u8> {
+        let mut buf = vec![0u8; 256];
+        buf[0..4].copy_from_slice(&ELF_MAGIC);
+        buf[4] = 2; // 64-bit
+        buf[5] = 2; // big-endian
+                    // phoff = 64, phentsize = 56, phnum = 1
+        buf[32..40].copy_from_slice(&64u64.to_be_bytes());
+        buf[54..56].copy_from_slice(&56u16.to_be_bytes());
+        buf[56..58].copy_from_slice(&1u16.to_be_bytes());
+        // PT_TLS at phdr[0]
+        let ph = 64;
+        buf[ph..ph + 4].copy_from_slice(&PT_TLS.to_be_bytes());
+        buf[ph + 16..ph + 24].copy_from_slice(&tls_vaddr.to_be_bytes());
+        buf[ph + 32..ph + 40].copy_from_slice(&tls_filesz.to_be_bytes());
+        buf[ph + 40..ph + 48].copy_from_slice(&tls_memsz.to_be_bytes());
+        buf
+    }
+
+    #[test]
+    fn find_tls_returns_correct_info() {
+        let data = make_elf_with_tls(0x895cd0, 4, 0x1dc);
+        let tls = find_tls_segment(&data).expect("should find PT_TLS");
+        assert_eq!(tls.vaddr, 0x895cd0);
+        assert_eq!(tls.filesz, 4);
+        assert_eq!(tls.memsz, 0x1dc);
+    }
+
+    #[test]
+    fn find_tls_returns_none_without_tls() {
+        let mut data = vec![0u8; 256];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 2;
+        data[5] = 2;
+        data[32..40].copy_from_slice(&64u64.to_be_bytes());
+        data[54..56].copy_from_slice(&56u16.to_be_bytes());
+        // PT_LOAD, not PT_TLS
+        data[56..58].copy_from_slice(&1u16.to_be_bytes());
+        data[64..68].copy_from_slice(&PT_LOAD.to_be_bytes());
+        assert!(find_tls_segment(&data).is_none());
+    }
+
+    #[test]
+    fn find_tls_returns_none_for_bad_magic() {
+        let data = vec![0u8; 128];
+        assert!(find_tls_segment(&data).is_none());
+    }
+
+    #[test]
+    fn find_tls_returns_none_for_short_input() {
+        assert!(find_tls_segment(&[0; 10]).is_none());
+    }
+
+    #[test]
+    fn find_tls_on_real_elf() {
+        let path =
+            std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        let tls = find_tls_segment(&data).expect("flOw ELF should have PT_TLS");
+        assert_eq!(tls.vaddr, 0x895cd0);
+        assert_eq!(tls.filesz, 4);
+        assert_eq!(tls.memsz, 0x1dc);
     }
 }
