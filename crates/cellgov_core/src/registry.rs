@@ -112,6 +112,9 @@ pub struct UnitRegistry {
     /// Drained at the start of the next `run_until_yield` and passed
     /// to the unit via `ExecutionContext::syscall_return`.
     pending_syscall_returns: BTreeMap<UnitId, u64>,
+    /// Per-unit register writes injected by HLE dispatch (e.g., r13
+    /// for TLS initialization). Drained alongside syscall returns.
+    pending_register_writes: BTreeMap<UnitId, Vec<(u8, u64)>>,
 }
 
 impl UnitRegistry {
@@ -275,11 +278,24 @@ impl UnitRegistry {
         self.pending_syscall_returns.insert(id, code);
     }
 
+    /// Queue a register write for the next run_until_yield of `id`.
+    pub fn push_register_write(&mut self, id: UnitId, reg: u8, value: u64) {
+        self.pending_register_writes
+            .entry(id)
+            .or_default()
+            .push((reg, value));
+    }
+
     /// Drain the pending syscall return for `id`, if any. The runtime
     /// calls this at the start of each `run_until_yield` to build the
     /// `ExecutionContext`.
     pub fn drain_syscall_return(&mut self, id: UnitId) -> Option<u64> {
         self.pending_syscall_returns.remove(&id)
+    }
+
+    /// Drain pending register writes for `id`.
+    pub fn drain_register_writes(&mut self, id: UnitId) -> Vec<(u8, u64)> {
+        self.pending_register_writes.remove(&id).unwrap_or_default()
     }
 
     /// 64-bit deterministic hash of the ordered set of unit ids whose

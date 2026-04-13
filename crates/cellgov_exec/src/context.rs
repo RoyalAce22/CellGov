@@ -42,6 +42,9 @@ pub struct ExecutionContext<'a> {
     memory: &'a GuestMemory,
     received: &'a [u32],
     syscall_return: Option<u64>,
+    /// Register writes injected by the host (e.g., HLE stubs that
+    /// need to set registers beyond r3). Each entry is (gpr_index, value).
+    register_writes: &'a [(u8, u64)],
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -53,6 +56,7 @@ impl<'a> ExecutionContext<'a> {
             memory,
             received: &[],
             syscall_return: None,
+            register_writes: &[],
         }
     }
 
@@ -65,6 +69,7 @@ impl<'a> ExecutionContext<'a> {
             memory,
             received,
             syscall_return: None,
+            register_writes: &[],
         }
     }
 
@@ -79,6 +84,25 @@ impl<'a> ExecutionContext<'a> {
             memory,
             received,
             syscall_return: Some(code),
+            register_writes: &[],
+        }
+    }
+
+    /// Construct an `ExecutionContext` with a syscall return code and
+    /// additional register writes. Used by HLE stubs that need to set
+    /// registers beyond r3 (e.g., r13 for TLS initialization).
+    #[inline]
+    pub fn with_syscall_return_and_regs(
+        memory: &'a GuestMemory,
+        received: &'a [u32],
+        code: u64,
+        register_writes: &'a [(u8, u64)],
+    ) -> Self {
+        Self {
+            memory,
+            received,
+            syscall_return: Some(code),
+            register_writes,
         }
     }
 
@@ -105,6 +129,14 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn syscall_return(&self) -> Option<u64> {
         self.syscall_return
+    }
+
+    /// Register writes injected by HLE stubs. Each entry is
+    /// (gpr_index, value). The unit applies these alongside the
+    /// syscall return.
+    #[inline]
+    pub const fn register_writes(&self) -> &[(u8, u64)] {
+        self.register_writes
     }
 }
 

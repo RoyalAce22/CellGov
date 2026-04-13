@@ -124,6 +124,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         let mut effects = Vec::new();
 
         loop {
+            let step_pc = self.state.pc as u64;
             // Fetch
             let raw = match self.state.fetch() {
                 Some(w) => w,
@@ -133,7 +134,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::empty(),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(FaultKind::Guest(FAULT_LS_OUT_OF_RANGE | self.state.pc)),
                         syscall_args: None,
                     };
@@ -149,8 +150,8 @@ impl ExecutionUnit for SpuExecutionUnit {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::empty(),
-                        fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR | raw)),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
                         syscall_args: None,
                     };
                 }
@@ -186,7 +187,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         yield_reason: reason,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::empty(),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
                     };
@@ -218,7 +219,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::empty(),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(FaultKind::Guest(code)),
                         syscall_args: None,
                     };
@@ -231,7 +232,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     yield_reason: YieldReason::BudgetExhausted,
                     consumed_budget: budget,
                     emitted_effects: effects,
-                    local_diagnostics: LocalDiagnostics::empty(),
+                    local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: None,
                     syscall_args: None,
                 };

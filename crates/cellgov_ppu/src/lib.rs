@@ -11,8 +11,11 @@
 
 pub mod decode;
 pub mod exec;
+mod fp;
 pub mod instruction;
 pub mod loader;
+pub mod nid_db;
+pub mod prx;
 pub mod state;
 pub mod syscall;
 
@@ -102,19 +105,42 @@ impl ExecutionUnit for PpuExecutionUnit {
             self.state.gpr[3] = code;
             self.state.pc += 4;
         }
+        for &(reg, val) in ctx.register_writes() {
+            if (reg as usize) < 32 {
+                self.state.gpr[reg as usize] = val;
+            }
+        }
 
         let mem = ctx.memory().as_bytes();
 
+        // Helper: build a memory-fault step result. Used by Load,
+        // LoadVec, and FpLoad to avoid duplicating the fault
+        // construction.
+        macro_rules! mem_fault {
+            ($step_pc:expr, $ea:expr, $budget:expr, $remaining:expr, $effects:expr) => {
+                ExecutionStepResult {
+                    yield_reason: YieldReason::Fault,
+                    consumed_budget: Budget::new($budget.raw() - $remaining),
+                    emitted_effects: $effects,
+                    local_diagnostics: LocalDiagnostics::with_pc_ea($step_pc, $ea),
+                    fault: Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)),
+                    syscall_args: None,
+                }
+            };
+        }
+
         loop {
+            // Capture PC before fetch/decode/execute for diagnostics.
+            let step_pc = self.state.pc;
             // Fetch: read 4 bytes from committed guest memory at PC.
-            let pc = self.state.pc as usize;
+            let pc = step_pc as usize;
             if pc + 4 > mem.len() {
                 self.status = UnitStatus::Faulted;
                 return ExecutionStepResult {
                     yield_reason: YieldReason::Fault,
                     consumed_budget: Budget::new(budget.raw() - remaining),
                     emitted_effects: effects,
-                    local_diagnostics: LocalDiagnostics::empty(),
+                    local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
                     syscall_args: None,
                 };
@@ -130,8 +156,8 @@ impl ExecutionUnit for PpuExecutionUnit {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::empty(),
-                        fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR | raw)),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
                         syscall_args: None,
                     };
                 }
@@ -149,17 +175,11 @@ impl ExecutionUnit for PpuExecutionUnit {
                     let addr = ea as usize;
                     if addr + size as usize > mem.len() {
                         self.status = UnitStatus::Faulted;
-                        return ExecutionStepResult {
-                            yield_reason: YieldReason::Fault,
-                            consumed_budget: Budget::new(budget.raw() - remaining),
-                            emitted_effects: effects,
-                            local_diagnostics: LocalDiagnostics::empty(),
-                            fault: Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)),
-                            syscall_args: None,
-                        };
+                        return mem_fault!(step_pc, ea, budget, remaining, effects);
                     }
                     let val = match size {
                         1 => mem[addr] as u64,
+                        2 => u16::from_be_bytes([mem[addr], mem[addr + 1]]) as u64,
                         4 => u32::from_be_bytes([
                             mem[addr],
                             mem[addr + 1],
@@ -200,6 +220,70 @@ impl ExecutionUnit for PpuExecutionUnit {
                     }
                     self.state.pc += 4;
                 }
+                PpuStepOutcome::LoadVec { ea, vt } => {
+                    let addr = ea as usize;
+                    if addr + 16 > mem.len() {
+                        self.status = UnitStatus::Faulted;
+                        return mem_fault!(step_pc, ea, budget, remaining, effects);
+                    }
+                    let mut bytes = [0u8; 16];
+                    bytes.copy_from_slice(&mem[addr..addr + 16]);
+                    self.state.vr[vt as usize] = u128::from_be_bytes(bytes);
+                    self.state.pc += 4;
+                }
+                PpuStepOutcome::FpLoad { ea, size, frt } => {
+                    let addr = ea as usize;
+                    if addr + size as usize > mem.len() {
+                        self.status = UnitStatus::Faulted;
+                        return mem_fault!(step_pc, ea, budget, remaining, effects);
+                    }
+                    let val = match size {
+                        4 => {
+                            let bits = u32::from_be_bytes([
+                                mem[addr],
+                                mem[addr + 1],
+                                mem[addr + 2],
+                                mem[addr + 3],
+                            ]);
+                            // lfs: convert single to double
+                            (f32::from_bits(bits) as f64).to_bits()
+                        }
+                        8 => u64::from_be_bytes([
+                            mem[addr],
+                            mem[addr + 1],
+                            mem[addr + 2],
+                            mem[addr + 3],
+                            mem[addr + 4],
+                            mem[addr + 5],
+                            mem[addr + 6],
+                            mem[addr + 7],
+                        ]),
+                        _ => 0,
+                    };
+                    self.state.fpr[frt as usize] = val;
+                    self.state.pc += 4;
+                }
+                PpuStepOutcome::FpStore { ea, size, value } => {
+                    let bytes = match size {
+                        4 => {
+                            // stfs: convert double to single
+                            let f = f64::from_bits(value) as f32;
+                            f.to_be_bytes().to_vec()
+                        }
+                        8 => value.to_be_bytes().to_vec(),
+                        _ => vec![],
+                    };
+                    if let Some(range) = ByteRange::new(GuestAddr::new(ea), size as u64) {
+                        effects.push(cellgov_effects::Effect::SharedWriteIntent {
+                            range,
+                            bytes: WritePayload::new(bytes),
+                            ordering: PriorityClass::Normal,
+                            source: self.id,
+                            source_time: GuestTicks::ZERO,
+                        });
+                    }
+                    self.state.pc += 4;
+                }
                 PpuStepOutcome::StoreVec { ea, value } => {
                     let bytes = value.to_be_bytes().to_vec();
                     if let Some(range) = ByteRange::new(GuestAddr::new(ea), 16) {
@@ -223,7 +307,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         yield_reason: YieldReason::Syscall,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::empty(),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: Some(args),
                     };
@@ -242,7 +326,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         yield_reason: reason,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::empty(),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
                     };
@@ -258,7 +342,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::empty(),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(FaultKind::Guest(code)),
                         syscall_args: None,
                     };
@@ -271,7 +355,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     yield_reason: YieldReason::BudgetExhausted,
                     consumed_budget: budget,
                     emitted_effects: effects,
-                    local_diagnostics: LocalDiagnostics::empty(),
+                    local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: None,
                     syscall_args: None,
                 };

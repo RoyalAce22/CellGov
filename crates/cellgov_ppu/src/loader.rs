@@ -50,6 +50,50 @@ pub struct LoadResult {
     pub min_memory_size: usize,
 }
 
+/// Scan program headers and return the minimum guest memory size
+/// needed to hold all PT_LOAD segments (including BSS). Does not
+/// modify any state.
+pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
+    if data.len() < ELF_HEADER_SIZE {
+        return Err(LoadError::TooSmall);
+    }
+    if data[0..4] != ELF_MAGIC {
+        return Err(LoadError::BadMagic);
+    }
+    if data[4] != 2 {
+        return Err(LoadError::Not64Bit);
+    }
+    if data[5] != 2 {
+        return Err(LoadError::NotBigEndian);
+    }
+
+    let phoff = read_u64(data, 32) as usize;
+    let phentsize = read_u16(data, 54) as usize;
+    let phnum = read_u16(data, 56) as usize;
+
+    let mut max_addr: usize = 0;
+    for i in 0..phnum {
+        let base = phoff + i * phentsize;
+        if base + phentsize > data.len() {
+            return Err(LoadError::TooSmall);
+        }
+        let p_type = read_u32(data, base);
+        if p_type != PT_LOAD {
+            continue;
+        }
+        let p_vaddr = read_u64(data, base + 16);
+        let p_memsz = read_u64(data, base + 40) as usize;
+        if p_memsz == 0 {
+            continue;
+        }
+        let end = p_vaddr as usize + p_memsz;
+        if end > max_addr {
+            max_addr = end;
+        }
+    }
+    Ok(max_addr)
+}
+
 /// Load a PPU ELF64 binary into guest memory and set the PC.
 ///
 /// Copies all PT_LOAD segments with nonzero memsz into guest memory
@@ -187,7 +231,7 @@ pub fn load_ppu_elf(
     })
 }
 
-fn read_u64(data: &[u8], offset: usize) -> u64 {
+pub(crate) fn read_u64(data: &[u8], offset: usize) -> u64 {
     u64::from_be_bytes([
         data[offset],
         data[offset + 1],
@@ -200,7 +244,7 @@ fn read_u64(data: &[u8], offset: usize) -> u64 {
     ])
 }
 
-fn read_u32(data: &[u8], offset: usize) -> u32 {
+pub(crate) fn read_u32(data: &[u8], offset: usize) -> u32 {
     u32::from_be_bytes([
         data[offset],
         data[offset + 1],
@@ -209,7 +253,7 @@ fn read_u32(data: &[u8], offset: usize) -> u32 {
     ])
 }
 
-fn read_u16(data: &[u8], offset: usize) -> u16 {
+pub(crate) fn read_u16(data: &[u8], offset: usize) -> u16 {
     u16::from_be_bytes([data[offset], data[offset + 1]])
 }
 

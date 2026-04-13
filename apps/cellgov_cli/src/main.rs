@@ -23,6 +23,8 @@ use cellgov_testkit::fixtures::{self, ScenarioFixture};
 use cellgov_testkit::runner::{run, ScenarioOutcome, ScenarioResult};
 use cellgov_trace::TraceReader;
 
+mod game;
+
 // -- CLI helpers --
 
 fn die(msg: &str) -> ! {
@@ -106,6 +108,7 @@ fn main() {
         println!("       cellgov_cli compare <manifest.toml> --baselines-dir <dir> [--mode ...] [--format ...]");
         println!("       cellgov_cli explore <scenario> [--format human|json]");
         println!("       cellgov_cli explore micro <name> [--format human|json]");
+        println!("       cellgov_cli run-game <elf-path> [--max-steps N] [--trace]");
         println!();
         println!("available scenarios:");
         for name in SCENARIOS {
@@ -180,6 +183,19 @@ fn main() {
                 }
             }
         }
+        return;
+    }
+
+    if args[1] == "run-game" {
+        let elf_path = args.get(2).map(String::as_str).unwrap_or_else(|| {
+            eprintln!("usage: cellgov_cli run-game <elf-path> [--max-steps N] [--trace]");
+            std::process::exit(1);
+        });
+        let max_steps: usize = find_flag_value(&args, "--max-steps")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100_000);
+        let trace = args.iter().any(|a| a == "--trace");
+        game::run_game(elf_path, max_steps, trace);
         return;
     }
 

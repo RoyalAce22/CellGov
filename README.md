@@ -45,18 +45,21 @@ Current capabilities:
 
 - deterministic round-robin scheduler with pluggable scheduler injection and deadlock detection
 - commit pipeline processing 9 effect types (writes, mailbox, DMA, signals, wake/block, faults, trace markers)
-- real PPU interpreter (PPC64 instruction subset, ELF64 loader, LV2 syscall dispatch)
+- real PPU interpreter with 79 instruction variants covering integer, FP, branch, compare, rotate/shift, VMX, load/store, and SPR/CR operations
 - real SPU interpreter (128x128-bit register file, 256 KB local store, channel file)
 - LV2 host model with 8 working syscalls (SPU image/thread-group lifecycle, mailbox write, join wake, process exit)
+- HLE import infrastructure: PRX import table parser, NID database (140+ functions across 12 PS3 modules), 24-byte GOT-patching trampolines, NID-based runtime dispatch for TLS init, malloc, memset, and process exit
 - binary trace format with categorical filtering and encode/decode roundtrip
-- FNV-1a state hashing at every commit boundary
+- FNV-1a state hashing with cached content_hash and skip_hash_checkpoints for large guest memories
 - bounded schedule exploration with dependency-aware pruning and schedule-stable/sensitive classification
 - oracle-aware exploration comparing per-schedule memory against RPCS3 baselines
 - comparison harness with strict/memory/events/prefix modes and RPCS3 oracle validation
 - six PSL1GHT-compiled microtests matching RPCS3 interpreter + LLVM baselines
-- CLI with run, dump, compare, and explore subcommands (human + JSON output)
+- real game boot: flOw (NPUA80001) loads into 260 MB guest memory and executes 158K+ PPU steps through CRT0, TLS init, heap setup, and module initialization
+- CLI with run, dump, compare, explore, and run-game subcommands (human + JSON output, per-step trace, instruction coverage reporting)
+- 800+ tests across 15 crates and two binaries, zero `unsafe`
 
-Interfaces are expected to change. The project is not yet suitable for real PS3 workloads.
+Known limitation: real game boot requires PRX module_start execution (or equivalent libc state fabrication) to proceed past C++ static initialization. The pure-HLE approach is sufficient for PSL1GHT microtests but not for games built with the Sony SDK's full C++ runtime. Implementation forthcoming.
 
 ## Workspace
 
