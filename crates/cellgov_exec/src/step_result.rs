@@ -37,6 +37,25 @@ pub struct LocalDiagnostics {
     pub pc: Option<u64>,
     /// Effective address that caused a memory fault, if applicable.
     pub faulting_ea: Option<u64>,
+    /// Register snapshot at fault time. Populated only on fault
+    /// steps by arch units that support it (PPU). `None` on
+    /// non-fault steps and from units that do not populate it.
+    pub fault_regs: Option<FaultRegisterDump>,
+}
+
+/// Snapshot of key registers captured at fault time for diagnostics.
+/// Arch-neutral: carries named u64 slots that the CLI can format
+/// without knowing PPU vs SPU specifics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FaultRegisterDump {
+    /// GPR[0..31].
+    pub gprs: [u64; 32],
+    /// Link register (LR on PPC64).
+    pub lr: u64,
+    /// Count register (CTR on PPC64).
+    pub ctr: u64,
+    /// Condition register (CR on PPC64, packed 32-bit).
+    pub cr: u32,
 }
 
 impl LocalDiagnostics {
@@ -48,6 +67,7 @@ impl LocalDiagnostics {
         Self {
             pc: None,
             faulting_ea: None,
+            fault_regs: None,
         }
     }
 
@@ -57,6 +77,7 @@ impl LocalDiagnostics {
         Self {
             pc: Some(pc),
             faulting_ea: None,
+            fault_regs: None,
         }
     }
 
@@ -66,6 +87,7 @@ impl LocalDiagnostics {
         Self {
             pc: Some(pc),
             faulting_ea: Some(ea),
+            fault_regs: None,
         }
     }
 }

@@ -1004,3 +1004,60 @@ fn step_then_commit_writes_become_visible() {
     );
     assert_eq!(rt.epoch(), Epoch::new(2));
 }
+
+#[test]
+fn fault_driven_mode_skips_trace_records() {
+    use cellgov_trace::TraceReader;
+
+    let mem = GuestMemory::new(64);
+    let mut rt = Runtime::new(mem, Budget::new(10), 100);
+    rt.set_mode(RuntimeMode::FaultDriven);
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 5));
+
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result).unwrap();
+
+    // FaultDriven should produce zero trace records.
+    let reader = TraceReader::new(rt.trace().bytes());
+    let records: Vec<_> = reader.collect();
+    assert!(
+        records.is_empty(),
+        "FaultDriven mode should emit no trace records, got {}",
+        records.len()
+    );
+}
+
+#[test]
+fn full_trace_mode_emits_trace_records() {
+    use cellgov_trace::TraceReader;
+
+    let mem = GuestMemory::new(64);
+    let mut rt = Runtime::new(mem, Budget::new(10), 100);
+    // Default is FullTrace.
+    assert_eq!(rt.mode(), RuntimeMode::FullTrace);
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 5));
+
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result).unwrap();
+
+    let reader = TraceReader::new(rt.trace().bytes());
+    let records: Vec<_> = reader.collect();
+    // FullTrace should emit at least: UnitScheduled, StepCompleted,
+    // CommitApplied, and 4 hash checkpoints = 7 minimum.
+    assert!(
+        records.len() >= 7,
+        "FullTrace mode should emit >= 7 trace records, got {}",
+        records.len()
+    );
+}
+
+#[test]
+fn max_steps_zero_rejects_first_step() {
+    let mem = GuestMemory::new(64);
+    let mut rt = Runtime::new(mem, Budget::new(10), 0);
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 5));
+    assert_eq!(rt.step(), Err(StepError::MaxStepsExceeded));
+}

@@ -19,6 +19,21 @@ pub fn lookup(nid: u32) -> Option<(&'static str, &'static str)> {
         .map(|i| (NID_TABLE[i].1, NID_TABLE[i].2))
 }
 
+/// Classify how safe a HLE stub is for a given NID.
+///
+/// Returns one of: "stateful" (needs real implementation),
+/// "unsafe-to-stub" (stub may cause incorrect behavior),
+/// or "noop-safe" (returning 0 is correct).
+pub fn stub_classification(nid: u32) -> &'static str {
+    match nid {
+        0x744680a2 => "stateful",       // sys_initialize_tls
+        0xebe5f72f => "unsafe-to-stub", // _sys_malloc
+        0x1573dc3f => "stateful",       // _sys_memset
+        0xe6f2c1e7 => "stateful",       // sys_process_exit
+        _ => "noop-safe",
+    }
+}
+
 /// (NID, module_name, function_name) -- sorted by NID for binary search.
 static NID_TABLE: &[(u32, &str, &str)] = &[
     (
@@ -207,5 +222,19 @@ mod tests {
                 w[1].0
             );
         }
+    }
+
+    #[test]
+    fn stub_classification_known_nids() {
+        assert_eq!(stub_classification(0x744680a2), "stateful"); // sys_initialize_tls
+        assert_eq!(stub_classification(0xebe5f72f), "unsafe-to-stub"); // _sys_malloc
+        assert_eq!(stub_classification(0x1573dc3f), "stateful"); // _sys_memset
+        assert_eq!(stub_classification(0xe6f2c1e7), "stateful"); // sys_process_exit
+    }
+
+    #[test]
+    fn stub_classification_unknown_is_noop_safe() {
+        assert_eq!(stub_classification(0xDEADBEEF), "noop-safe");
+        assert_eq!(stub_classification(0x00000000), "noop-safe");
     }
 }

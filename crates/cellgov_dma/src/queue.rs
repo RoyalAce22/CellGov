@@ -102,10 +102,18 @@ impl DmaQueue {
     /// decided by their queue sequence numbers, which preserves
     /// enqueue order.
     pub fn pop_due(&mut self, now: GuestTicks) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
-        let split_time = now.raw().saturating_add(1);
-        let after = self.entries.split_off(&(GuestTicks::new(split_time), 0));
-        let due = std::mem::replace(&mut self.entries, after);
-        due.into_values().collect()
+        match now.raw().checked_add(1) {
+            Some(split_time) => {
+                let after = self.entries.split_off(&(GuestTicks::new(split_time), 0));
+                let due = std::mem::replace(&mut self.entries, after);
+                due.into_values().collect()
+            }
+            None => {
+                // now == u64::MAX: everything is due.
+                let all = std::mem::take(&mut self.entries);
+                all.into_values().collect()
+            }
+        }
     }
 }
 
@@ -274,5 +282,18 @@ mod tests {
         assert_eq!(payload, Some(vec![0xDE, 0xAD]));
         let (_, payload) = q.pop_next().unwrap();
         assert_eq!(payload, None);
+    }
+
+    #[test]
+    fn pop_due_at_max_ticks_drains_everything() {
+        // Completions scheduled at u64::MAX should still be drained
+        // when pop_due is called with u64::MAX. The saturating_add(1)
+        // in pop_due must not cause these to be missed.
+        let mut q = DmaQueue::new();
+        q.enqueue(completion_at(u64::MAX, 0), None);
+        q.enqueue(completion_at(u64::MAX - 1, 1), None);
+        let due = q.pop_due(GuestTicks::new(u64::MAX));
+        assert_eq!(due.len(), 2, "both completions should be drained at MAX");
+        assert!(q.is_empty());
     }
 }

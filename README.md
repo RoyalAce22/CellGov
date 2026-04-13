@@ -44,20 +44,23 @@ CellGov is in early development and currently in **Pre-Alpha**.
 Current capabilities:
 
 - deterministic round-robin scheduler with pluggable scheduler injection and deadlock detection
-- commit pipeline processing 9 effect types (writes, mailbox, DMA, signals, wake/block, faults, trace markers)
+- commit pipeline processing 9 effect types (writes, mailbox, DMA, signals, wake/block, faults, trace markers) with fast-path skip for zero-effect steps
 - real PPU interpreter with 79 instruction variants covering integer, FP, branch, compare, rotate/shift, VMX, load/store, and SPR/CR operations
 - real SPU interpreter (128x128-bit register file, 256 KB local store, channel file)
 - LV2 host model with 8 working syscalls (SPU image/thread-group lifecycle, mailbox write, join wake, process exit)
-- HLE import infrastructure: PRX import table parser, NID database (140+ functions across 12 PS3 modules), 24-byte GOT-patching trampolines, NID-based runtime dispatch for TLS init, malloc, memset, and process exit
-- binary trace format with categorical filtering and encode/decode roundtrip
-- FNV-1a state hashing with cached content_hash and skip_hash_checkpoints for large guest memories
+- HLE import infrastructure: PRX import table parser, NID database (140+ functions across 12 PS3 modules with stub classification), 24-byte GOT-patching trampolines, NID-based runtime dispatch for TLS init, malloc, memset, and process exit
+- RuntimeMode enum (FaultDriven/DeterminismCheck/FullTrace) controlling trace and hash checkpoint overhead
+- binary trace format with categorical filtering, encode/decode roundtrip, and mode-gated emission
+- FNV-1a state hashing with cached content_hash and mode-gated checkpoints for large guest memories
+- inline WritePayload storage (stack-allocated for payloads up to 16 bytes, heap fallback above)
 - bounded schedule exploration with dependency-aware pruning and schedule-stable/sensitive classification
 - oracle-aware exploration comparing per-schedule memory against RPCS3 baselines
 - comparison harness with strict/memory/events/prefix modes and RPCS3 oracle validation
 - six PSL1GHT-compiled microtests matching RPCS3 interpreter + LLVM baselines
-- real game boot: flOw (NPUA80001) loads into 260 MB guest memory and executes 158K+ PPU steps through CRT0, TLS init, heap setup, and module initialization
-- CLI with run, dump, compare, explore, and run-game subcommands (human + JSON output, per-step trace, instruction coverage reporting)
-- 800+ tests across 15 crates and two binaries, zero `unsafe`
+- real game boot: flOw (NPUA80001) loads into 260 MB guest memory and executes 142K+ PPU steps through CRT0, TLS init, heap setup, and module initialization
+- criterion benchmark harness for decode, execute, run_until_yield, content_hash, and commit_step with baseline comparison
+- CLI with run, dump, compare, explore, and run-game subcommands (human + JSON output, per-step trace, instruction coverage, boot progress checkpoints, register dump and mini-trace on fault, HLE import classification summary)
+- 824 tests across 15 crates and two binaries, zero `unsafe`, 82% line coverage
 
 Known limitation: real game boot requires PRX module_start execution (or equivalent libc state fabrication) to proceed past C++ static initialization. The pure-HLE approach is sufficient for PSL1GHT microtests but not for games built with the Sony SDK's full C++ runtime. Implementation forthcoming.
 

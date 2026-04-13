@@ -4,7 +4,7 @@ CellGov is a Rust workspace implementing a deterministic event-driven runtime fo
 
 ## Current state
 
-The runtime executes units in a deterministic round-robin loop, processes effects through the commit pipeline, and produces a binary trace. Real PPU and SPU execution units decode and interpret guest instructions against committed memory and their own local state, emitting effects for every guest-visible operation. The PPU drives SPU creation through a real LV2 host model. A schedule exploration engine replays workloads with alternate scheduling choices, classifies outcomes as schedule-stable or schedule-sensitive, and compares per-schedule memory against RPCS3 oracle baselines. The workspace compiles clean under `unsafe_code = "forbid"` and has 800+ tests across 15 crates and two binaries.
+The runtime executes units in a deterministic round-robin loop, processes effects through the commit pipeline, and produces a binary trace. Real PPU and SPU execution units decode and interpret guest instructions against committed memory and their own local state, emitting effects for every guest-visible operation. The PPU drives SPU creation through a real LV2 host model. A schedule exploration engine replays workloads with alternate scheduling choices, classifies outcomes as schedule-stable or schedule-sensitive, and compares per-schedule memory against RPCS3 oracle baselines. A RuntimeMode enum (FaultDriven/DeterminismCheck/FullTrace) controls per-step overhead: trace record emission and hash checkpoints are gated on the mode. A criterion benchmark harness measures decode, execute, run_until_yield, content_hash, and commit_step with baseline comparison for before/after optimization tracking. The workspace compiles clean under `unsafe_code = "forbid"` and has 824 tests across 15 crates and two binaries with 82% line coverage.
 
 Phase 6 drove CellGov through a real commercial PS3 title (flOw, NPUA80001) from ELF load to 158K+ PPU steps of boot execution. The boot survives TLS initialization, heap setup, module initialization, and early game setup before hitting the C++ static initialization off-ramp (libc module_start not executed).
 
@@ -13,7 +13,7 @@ Phase 6 drove CellGov through a real commercial PS3 title (flOw, NPUA80001) from
 - **Deterministic step loop** with round-robin scheduling and deadlock detection
 - **Commit pipeline** processing 9 effect types: `SharedWriteIntent`, `MailboxSend`, `MailboxReceiveAttempt`, `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`, `FaultRaised`, `TraceMarker`
 - **Binary trace format** with 7 record types, categorical filtering, and encode/decode roundtrip
-- **FNV-1a state hashing** via `cellgov_mem::Fnv1aHasher` at commit boundaries with cached `content_hash` (Cell-based interior mutability) and `skip_hash_checkpoints` for large guest memories
+- **FNV-1a state hashing** via `cellgov_mem::Fnv1aHasher` at commit boundaries with cached `content_hash` (Cell-based interior mutability) and mode-gated checkpoints for large guest memories
 - **DMA completion queue** with pluggable latency models and automatic issuer wake
 - **Mailbox FIFO** with send/receive/block-on-empty and per-unit inbox delivery
 - **Signal registers** with OR-merge semantics
@@ -22,12 +22,16 @@ Phase 6 drove CellGov through a real commercial PS3 title (flOw, NPUA80001) from
 - **HLE dispatch** with NID-based function routing, register injection (TLS r13 setup), bump allocator (_sys_malloc/_sys_free), memset, and noop-safe stubs for 140+ imported functions
 - **Syscall response table** for blocked PPU callers, keyed by UnitId, drained at wake time
 - **SPU factory** for runtime-driven SPU creation from `Lv2Dispatch::RegisterSpu`
+- **RuntimeMode** (FaultDriven/DeterminismCheck/FullTrace) gating trace record emission and hash checkpoints per mode, replacing the loose `skip_hash_checkpoints` flag
+- **Inline WritePayload** storage (stack-allocated `[u8; 16]` for payloads up to 16 bytes, heap fallback above) eliminating per-store heap allocation in the interpreter hot path
+- **Commit fast path** skipping the staging pipeline entirely for steps with zero emitted effects
+- **Criterion benchmark harness** (`bench.sh`) for decode, execute, run_until_yield, content_hash, commit_step with baseline save/compare for optimization tracking
 - **Scenario test harness** with deterministic replay assertions, golden trace pinning, and invariant checks
 - **Fake ISA** (8 opcodes) retained as a clean-room runtime probe alongside the real execution units
 
 ### Execution units
 
-- **PPU (`cellgov_ppu`)**: PPC64 interpreter with GPRs, FPRs, PC, CR, LR, CTR, XER, TB, and 32 vector registers. Implements 79 instruction variants covering integer arithmetic/logic, load/store (D-form, indexed, with-update), branch (conditional, LR, CTR), compare, rotate/shift, floating-point (single/double loads/stores, 20+ FP63/FP59 arithmetic ops including fmadd/fmul/fdiv/fcmp/fsel/frsp/fctiwz/fcfid), VMX (25+ VX-form and VA-form vector operations), SPR/CR moves (mflr/mtlr/mfcr/mtcrf/mfctr/mftb), and cache/sync control (no-ops for deterministic model). PPU ELF64 loader handles PT_LOAD segments, BSS zero-init, and PPC64 ABI v1 function-descriptor entry points. PS3 PRX import table parser discovers imported modules and functions from PT_0x60000002 program headers. HLE stub binder writes 24-byte trampolines (OPD + lis/ori/sc/blr) and patches GOT entries. NID database covers 140+ PS3 SDK functions across 12 modules. Per-step `LocalDiagnostics` carries PC and faulting EA for all step outcomes.
+- **PPU (`cellgov_ppu`)**: PPC64 interpreter with GPRs, FPRs, PC, CR, LR, CTR, XER, TB, and 32 vector registers. Implements 79 instruction variants covering integer arithmetic/logic, load/store (D-form, indexed, with-update), branch (conditional, LR, CTR), compare, rotate/shift, floating-point (single/double loads/stores, 20+ FP63/FP59 arithmetic ops including fmadd/fmul/fdiv/fcmp/fsel/frsp/fctiwz/fcfid), VMX (25+ VX-form and VA-form vector operations), SPR/CR moves (mflr/mtlr/mfcr/mtcrf/mfctr/mftb), and cache/sync control (no-ops for deterministic model). PPU ELF64 loader handles PT_LOAD segments, BSS zero-init, and PPC64 ABI v1 function-descriptor entry points. PS3 PRX import table parser discovers imported modules and functions from PT_0x60000002 program headers. HLE stub binder writes 24-byte trampolines (OPD + lis/ori/sc/blr) and patches GOT entries. NID database covers 140+ PS3 SDK functions across 12 modules with stub classification (noop-safe/stateful/unsafe-to-stub). `PpuInstruction::variant_name()` returns a `&'static str` for zero-allocation instruction coverage tallying. Per-step `LocalDiagnostics` carries PC, faulting EA, and optional `FaultRegisterDump` (GPR[0..31], LR, CTR, CR) captured on fault for diagnostics without re-running with --trace.
 - **SPU (`cellgov_spu`)**: SPU interpreter with 128x128-bit register file, 256 KB local store, and channel file. Implements a working subset of RR/RI7/RI10/RI16/RI18/RRR formats covering constant formation, integer arithmetic, logical, compare, branch, shuffle/rotate, load/store, and channel operations. Communicates with the runtime exclusively through effects -- never reads or writes committed shared memory directly. Includes an SPU ELF loader.
 
 ### LV2 host model
@@ -86,11 +90,11 @@ HLE-dispatched sysPrxForUser functions (NID-based):
 
 The CLI `run-game` subcommand loads a decrypted PS3 ELF into 260 MB of guest memory and runs the PPU from the entry point with Budget=1 (instruction-level granularity). Phase 6 drove this through flOw's boot sequence:
 
-- **158K+ steps executed** before hitting the C++ static init off-ramp
-- **7 distinct HLE functions** dispatched (TLS init, malloc, memset, lwmutex, thread_get_id, time, process_exit)
+- **142K+ steps executed** before hitting the C++ static init off-ramp
+- **5 distinct HLE functions** dispatched (TLS init, malloc, lwmutex, time, process_exit)
 - **51 PPU instruction variants** exercised during boot
 - **No decode faults** -- all instructions in the boot path are implemented
-- **Performance**: 142K steps in 192ms (release mode), ~743K instructions/second
+- **Performance**: 142K steps in ~56ms step loop time (release mode, FaultDriven), ~2.5M instructions/second. Boot progress checkpoints print every 10K steps with distinct PC count and HLE call tally.
 - **Off-ramp**: game aborts in `__cxa_guard_acquire` because libc `module_start` was never executed (pure-HLE limitation). Unblocking requires PRX module_start execution or libc state fabrication.
 
 ### Microtest corpus

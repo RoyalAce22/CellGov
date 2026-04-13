@@ -10,3 +10,10 @@ workspace = true
 
 [dependencies]
 cellgov_time = { path = "../cellgov_time" }
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "mem_bench"
+harness = false

@@ -23,16 +23,17 @@ use crate::exec::{PpuFault, PpuStepOutcome};
 use cellgov_effects::{FaultKind, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, LocalDiagnostics,
+    UnitStatus, YieldReason,
 };
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::{Budget, GuestTicks};
 
 /// Fault code constants for PPU faults encoded into `FaultKind::Guest`.
-const FAULT_PC_OUT_OF_RANGE: u32 = 0x0102_0000;
-const FAULT_DECODE_ERROR: u32 = 0x0105_0000;
-const FAULT_INVALID_ADDRESS: u32 = 0x0106_0000;
-const FAULT_UNSUPPORTED_SYSCALL: u32 = 0x0107_0000;
+pub const FAULT_PC_OUT_OF_RANGE: u32 = 0x0102_0000;
+pub const FAULT_DECODE_ERROR: u32 = 0x0105_0000;
+pub const FAULT_INVALID_ADDRESS: u32 = 0x0106_0000;
+pub const FAULT_UNSUPPORTED_SYSCALL: u32 = 0x0107_0000;
 
 /// PPU execution unit snapshot for replay.
 #[derive(Debug, Clone)]
@@ -82,6 +83,33 @@ impl PpuExecutionUnit {
     }
 }
 
+impl PpuExecutionUnit {
+    fn capture_regs(&self) -> FaultRegisterDump {
+        FaultRegisterDump {
+            gprs: self.state.gpr,
+            lr: self.state.lr,
+            ctr: self.state.ctr,
+            cr: self.state.cr,
+        }
+    }
+
+    fn fault_diag(&self, pc: u64) -> LocalDiagnostics {
+        LocalDiagnostics {
+            pc: Some(pc),
+            faulting_ea: None,
+            fault_regs: Some(self.capture_regs()),
+        }
+    }
+
+    fn fault_diag_ea(&self, pc: u64, ea: u64) -> LocalDiagnostics {
+        LocalDiagnostics {
+            pc: Some(pc),
+            faulting_ea: Some(ea),
+            fault_regs: Some(self.capture_regs()),
+        }
+    }
+}
+
 impl ExecutionUnit for PpuExecutionUnit {
     type Snapshot = PpuSnapshot;
 
@@ -122,7 +150,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     yield_reason: YieldReason::Fault,
                     consumed_budget: Budget::new($budget.raw() - $remaining),
                     emitted_effects: $effects,
-                    local_diagnostics: LocalDiagnostics::with_pc_ea($step_pc, $ea),
+                    local_diagnostics: self.fault_diag_ea($step_pc, $ea),
                     fault: Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)),
                     syscall_args: None,
                 }
@@ -140,7 +168,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     yield_reason: YieldReason::Fault,
                     consumed_budget: Budget::new(budget.raw() - remaining),
                     emitted_effects: effects,
-                    local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                    local_diagnostics: self.fault_diag(step_pc),
                     fault: Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
                     syscall_args: None,
                 };
@@ -156,7 +184,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        local_diagnostics: self.fault_diag(step_pc),
                         fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
                         syscall_args: None,
                     };
@@ -202,17 +230,17 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.state.pc += 4;
                 }
                 PpuStepOutcome::Store { ea, size, value } => {
-                    let bytes = match size {
-                        1 => vec![value as u8],
-                        2 => (value as u16).to_be_bytes().to_vec(),
-                        4 => (value as u32).to_be_bytes().to_vec(),
-                        8 => value.to_be_bytes().to_vec(),
-                        _ => vec![],
+                    let payload = match size {
+                        1 => WritePayload::from_slice(&[value as u8]),
+                        2 => WritePayload::from_slice(&(value as u16).to_be_bytes()),
+                        4 => WritePayload::from_slice(&(value as u32).to_be_bytes()),
+                        8 => WritePayload::from_slice(&value.to_be_bytes()),
+                        _ => WritePayload::from_slice(&[]),
                     };
                     if let Some(range) = ByteRange::new(GuestAddr::new(ea), size as u64) {
                         effects.push(cellgov_effects::Effect::SharedWriteIntent {
                             range,
-                            bytes: WritePayload::new(bytes),
+                            bytes: payload,
                             ordering: PriorityClass::Normal,
                             source: self.id,
                             source_time: GuestTicks::ZERO,
@@ -264,19 +292,19 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.state.pc += 4;
                 }
                 PpuStepOutcome::FpStore { ea, size, value } => {
-                    let bytes = match size {
+                    let payload = match size {
                         4 => {
                             // stfs: convert double to single
                             let f = f64::from_bits(value) as f32;
-                            f.to_be_bytes().to_vec()
+                            WritePayload::from_slice(&f.to_be_bytes())
                         }
-                        8 => value.to_be_bytes().to_vec(),
-                        _ => vec![],
+                        8 => WritePayload::from_slice(&value.to_be_bytes()),
+                        _ => WritePayload::from_slice(&[]),
                     };
                     if let Some(range) = ByteRange::new(GuestAddr::new(ea), size as u64) {
                         effects.push(cellgov_effects::Effect::SharedWriteIntent {
                             range,
-                            bytes: WritePayload::new(bytes),
+                            bytes: payload,
                             ordering: PriorityClass::Normal,
                             source: self.id,
                             source_time: GuestTicks::ZERO,
@@ -285,11 +313,11 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.state.pc += 4;
                 }
                 PpuStepOutcome::StoreVec { ea, value } => {
-                    let bytes = value.to_be_bytes().to_vec();
+                    let payload = WritePayload::from_slice(&value.to_be_bytes());
                     if let Some(range) = ByteRange::new(GuestAddr::new(ea), 16) {
                         effects.push(cellgov_effects::Effect::SharedWriteIntent {
                             range,
-                            bytes: WritePayload::new(bytes),
+                            bytes: payload,
                             ordering: PriorityClass::Normal,
                             source: self.id,
                             source_time: GuestTicks::ZERO,
@@ -342,7 +370,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        local_diagnostics: self.fault_diag(step_pc),
                         fault: Some(FaultKind::Guest(code)),
                         syscall_args: None,
                     };

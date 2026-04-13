@@ -818,7 +818,7 @@ fn mailbox_roundtrip_lv2_driven() {
     );
 }
 
-// -- Phase 6: real game ELF loading --
+// -- Real game ELF loading --
 
 #[test]
 fn flow_eboot_loads_into_guest_memory() {
@@ -868,8 +868,8 @@ fn flow_eboot_loads_into_guest_memory() {
 }
 
 /// Boot progress regression: load flOw, run PPU, assert execution
-/// begins and record the fault. This test gate advances as phase 6
-/// milestones extend the boot frontier.
+/// begins and record the fault. Assertions advance as the boot
+/// frontier extends.
 #[test]
 fn flow_boot_progress() {
     use cellgov_core::{Runtime, StepError};
@@ -931,10 +931,56 @@ fn flow_boot_progress() {
     );
 
     // Current state: faults at step 1 with PC_OUT_OF_RANGE.
-    // As phase 6 progresses, update these assertions to reflect
-    // the new boot frontier.
+    // Update these assertions as the boot frontier advances.
     assert!(
         faulted,
         "expected fault (boot not yet complete), but PPU stalled after {steps} steps"
+    );
+}
+
+#[test]
+fn fault_includes_register_dump() {
+    // Execute a PPU at PC=0 with no instructions in memory.
+    // This faults immediately with PC_OUT_OF_RANGE and should
+    // include a FaultRegisterDump with the GPR state.
+    let mem = GuestMemory::new(64);
+    let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
+    ppu.state_mut().gpr[3] = 0xCAFE;
+    ppu.state_mut().lr = 0x1000;
+    ppu.state_mut().ctr = 0x2000;
+    ppu.state_mut().cr = 0x80000000;
+    ppu.state_mut().pc = 0x100; // past end of 64-byte memory
+
+    let ctx = ExecutionContext::new(&mem);
+    let result = ppu.run_until_yield(Budget::new(1), &ctx);
+
+    assert_eq!(result.yield_reason, YieldReason::Fault);
+    let regs = result
+        .local_diagnostics
+        .fault_regs
+        .as_ref()
+        .expect("fault should include register dump");
+    assert_eq!(regs.gprs[3], 0xCAFE);
+    assert_eq!(regs.lr, 0x1000);
+    assert_eq!(regs.ctr, 0x2000);
+    assert_eq!(regs.cr, 0x80000000);
+}
+
+#[test]
+fn non_fault_step_has_no_register_dump() {
+    // addi r3, r0, 42 at PC=0
+    let raw: u32 = (14 << 26) | (3 << 21) | 42;
+    let mut mem = GuestMemory::new(64);
+    let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0), 4).unwrap();
+    mem.apply_commit(range, &raw.to_be_bytes()).unwrap();
+
+    let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
+    let ctx = ExecutionContext::new(&mem);
+    let result = ppu.run_until_yield(Budget::new(1), &ctx);
+
+    assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
+    assert!(
+        result.local_diagnostics.fault_regs.is_none(),
+        "non-fault step should not include register dump"
     );
 }

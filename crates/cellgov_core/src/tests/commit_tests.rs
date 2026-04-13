@@ -705,3 +705,24 @@ fn fault_step_discards_mailbox_sends() {
     assert_eq!(outcome.mailbox_sends_committed, 0);
     assert!(bed.mailboxes.get(mb).unwrap().is_empty());
 }
+
+#[test]
+fn two_receives_same_mailbox_first_pops_second_blocks() {
+    let mut bed = CommitTestBed::new(8);
+    let receiver_id = bed.units.register_with(DummyUnit::runnable);
+    let mb = bed.mailboxes.register();
+    // Put exactly one message in the mailbox.
+    bed.mailboxes.get_mut(mb).unwrap().send(42);
+    // Two receives from the same mailbox in one step.
+    let r = step_with(
+        YieldReason::MailboxAccess,
+        vec![
+            mailbox_receive(mb, receiver_id),
+            mailbox_receive(mb, receiver_id),
+        ],
+    );
+    let outcome = bed.process(&r).unwrap();
+    // First receive pops the message, second blocks.
+    assert_eq!(outcome.mailbox_receives_committed, 1);
+    assert_eq!(outcome.mailbox_receives_blocked, 1);
+}

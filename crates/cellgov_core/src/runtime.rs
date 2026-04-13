@@ -143,6 +143,25 @@ pub enum StepError {
 /// ready to run.
 pub type SpuFactory = Box<dyn Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit>>;
 
+/// Controls the runtime's overhead profile: which trace records are
+/// emitted and whether state-hash checkpoints are computed at commit
+/// boundaries.
+///
+/// Replaces the loose `skip_hash_checkpoints` flag with a single
+/// configuration point that is harder to misconfigure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMode {
+    /// Trace off, hash checkpoints off. Minimal per-step bookkeeping.
+    /// Default for `run-game`.
+    FaultDriven,
+    /// Trace on (commits + block/wake only), hash checkpoints on.
+    /// For microtest replay and oracle comparison.
+    DeterminismCheck,
+    /// All trace records, all hash checkpoints.
+    /// For exploration and debugging.
+    FullTrace,
+}
+
 pub struct Runtime {
     pub(crate) registry: UnitRegistry,
     mailbox_registry: MailboxRegistry,
@@ -172,12 +191,10 @@ pub struct Runtime {
     /// Bump allocator pointer for _sys_malloc HLE. Points to the next
     /// free address in guest memory. Allocations are never freed.
     pub(crate) hle_heap_ptr: u32,
-    /// When true, state-hash checkpoints (committed memory, runnable
-    /// queue, unit status, sync state) are skipped in commit_step.
-    /// This avoids the O(memory_size) hash per step, which is
-    /// prohibitive for large guest memories (e.g., 260 MB).
-    /// Determinism verification is unavailable when disabled.
-    skip_hash_checkpoints: bool,
+    /// Controls trace and hash checkpoint overhead. Defaults to
+    /// `FullTrace` (all records, all hashes). `FaultDriven` disables
+    /// both; `DeterminismCheck` enables hashes and commit-level trace.
+    mode: RuntimeMode,
 }
 
 impl Runtime {
@@ -224,7 +241,7 @@ impl Runtime {
             last_scheduled_unit: None,
             hle_nids: std::collections::BTreeMap::new(),
             hle_heap_ptr: 0,
-            skip_hash_checkpoints: false,
+            mode: RuntimeMode::FullTrace,
         }
     }
 
@@ -278,52 +295,51 @@ impl Runtime {
         //
         // Attribution: there is one commit batch per unit yield, so
         // `source` (defined above) is the unit that produced the batch.
-        let record = match &outcome {
-            Ok(o) => TraceRecord::CommitApplied {
-                unit: source,
-                writes_committed: o.writes_committed as u32,
-                effects_deferred: o.effects_deferred as u32,
-                fault_discarded: o.fault_discarded,
-                epoch_after: self.epoch,
-            },
-            Err(_) => TraceRecord::CommitApplied {
-                unit: source,
-                writes_committed: 0,
-                effects_deferred: 0,
-                fault_discarded: true,
-                epoch_after: self.epoch,
-            },
-        };
-        self.trace.record(&record);
+        // Commit-level trace records fire in DeterminismCheck and
+        // FullTrace modes but not FaultDriven.
+        if self.mode != RuntimeMode::FaultDriven {
+            let record = match &outcome {
+                Ok(o) => TraceRecord::CommitApplied {
+                    unit: source,
+                    writes_committed: o.writes_committed as u32,
+                    effects_deferred: o.effects_deferred as u32,
+                    fault_discarded: o.fault_discarded,
+                    epoch_after: self.epoch,
+                },
+                Err(_) => TraceRecord::CommitApplied {
+                    unit: source,
+                    writes_committed: 0,
+                    effects_deferred: 0,
+                    fault_discarded: true,
+                    epoch_after: self.epoch,
+                },
+            };
+            self.trace.record(&record);
 
-        // Emit block/wake transition records. The commit pipeline
-        // tracks which units were blocked (empty mailbox, wait-on-event)
-        // and woken (wake effect). DMA completion wakes are emitted
-        // separately since they are handled by the runtime, not the
-        // pipeline.
-        if let Ok(ref o) = outcome {
-            for &(unit, ref reason) in &o.blocked_units {
-                let traced_reason = match reason {
-                    crate::commit::BlockReason::MailboxEmpty => TracedBlockReason::MailboxEmpty,
-                    crate::commit::BlockReason::WaitOnEvent => TracedBlockReason::WaitOnEvent,
-                };
-                self.trace.record(&TraceRecord::UnitBlocked {
-                    unit,
-                    reason: traced_reason,
-                });
+            if let Ok(ref o) = outcome {
+                for &(unit, ref reason) in &o.blocked_units {
+                    let traced_reason = match reason {
+                        crate::commit::BlockReason::MailboxEmpty => TracedBlockReason::MailboxEmpty,
+                        crate::commit::BlockReason::WaitOnEvent => TracedBlockReason::WaitOnEvent,
+                    };
+                    self.trace.record(&TraceRecord::UnitBlocked {
+                        unit,
+                        reason: traced_reason,
+                    });
+                }
+                for &unit in &o.woken_units {
+                    self.trace.record(&TraceRecord::UnitWoken {
+                        unit,
+                        reason: TracedWakeReason::WakeEffect,
+                    });
+                }
             }
-            for &unit in &o.woken_units {
+            for (c, _) in &due {
                 self.trace.record(&TraceRecord::UnitWoken {
-                    unit,
-                    reason: TracedWakeReason::WakeEffect,
+                    unit: c.issuer(),
+                    reason: TracedWakeReason::DmaCompletion,
                 });
             }
-        }
-        for (c, _) in &due {
-            self.trace.record(&TraceRecord::UnitWoken {
-                unit: c.issuer(),
-                reason: TracedWakeReason::DmaCompletion,
-            });
         }
 
         // State hash checkpoints. Four kinds:
@@ -333,7 +349,7 @@ impl Runtime {
         // post-commit state. Skipped when hash checkpoints are
         // disabled (large guest memories where O(N) hashing per
         // step is prohibitive).
-        if !self.skip_hash_checkpoints {
+        if self.mode != RuntimeMode::FaultDriven {
             let mem_hash = StateHash::new(self.memory.content_hash());
             self.trace.record(&TraceRecord::StateHashCheckpoint {
                 kind: HashCheckpointKind::CommittedMemory,
@@ -651,10 +667,15 @@ impl Runtime {
         self.hle_heap_ptr = base;
     }
 
-    /// Disable per-step state-hash checkpoints. Skips the O(N) memory
-    /// hash in commit_step, making large guest memories usable.
-    pub fn set_skip_hash_checkpoints(&mut self, skip: bool) {
-        self.skip_hash_checkpoints = skip;
+    /// Set the runtime mode controlling trace and hash checkpoint
+    /// overhead.
+    pub fn set_mode(&mut self, mode: RuntimeMode) {
+        self.mode = mode;
+    }
+
+    /// Current runtime mode.
+    pub fn mode(&self) -> RuntimeMode {
+        self.mode
     }
 
     /// Split-borrow both registries at once. Used by the testkit
@@ -765,16 +786,15 @@ impl Runtime {
         self.registry.clear_status_override(unit_id);
 
         // Trace pipeline step 1+2: scheduler selected `unit_id` and
-        // granted `budget_per_step`. Recorded *before* run_until_yield
-        // so the trace makes the decision visible even if the unit
-        // panics or runs forever (the deadlock detector is the next
-        // safety net, but the schedule decision is already on record).
-        self.trace.record(&TraceRecord::UnitScheduled {
-            unit: unit_id,
-            granted_budget: self.budget_per_step,
-            time: self.time,
-            epoch: self.epoch,
-        });
+        // granted `budget_per_step`. Per-step records only in FullTrace.
+        if self.mode == RuntimeMode::FullTrace {
+            self.trace.record(&TraceRecord::UnitScheduled {
+                unit: unit_id,
+                granted_budget: self.budget_per_step,
+                time: self.time,
+                epoch: self.epoch,
+            });
+        }
 
         // Build the readonly memory view for this step. The borrow
         // is alive only for the duration of run_until_yield, which is
@@ -820,26 +840,23 @@ impl Runtime {
         self.steps_taken += 1;
         self.last_scheduled_unit = Some(unit_id);
 
-        // Trace pipeline step 3+9: unit yielded with this reason after
-        // consuming this much budget; guest time is now `time_after`.
-        self.trace.record(&TraceRecord::StepCompleted {
-            unit: unit_id,
-            yield_reason: traced_yield_reason(result.yield_reason),
-            consumed_budget: result.consumed_budget,
-            time_after,
-        });
-
-        // Trace pipeline step 4: one EffectEmitted record per effect,
-        // in emission order, with `sequence` running 0..N within the
-        // step. Per-effect payloads (write bytes, mailbox messages,
-        // DMA descriptors) are not in the trace yet; the kind alone is
-        // enough for replay tooling to verify the effect sequence.
-        for (sequence, effect) in result.emitted_effects.iter().enumerate() {
-            self.trace.record(&TraceRecord::EffectEmitted {
+        // Trace pipeline step 3+9: per-step records only in FullTrace.
+        if self.mode == RuntimeMode::FullTrace {
+            self.trace.record(&TraceRecord::StepCompleted {
                 unit: unit_id,
-                sequence: sequence as u32,
-                kind: traced_effect_kind(effect),
+                yield_reason: traced_yield_reason(result.yield_reason),
+                consumed_budget: result.consumed_budget,
+                time_after,
             });
+
+            // Trace pipeline step 4: one EffectEmitted per effect.
+            for (sequence, effect) in result.emitted_effects.iter().enumerate() {
+                self.trace.record(&TraceRecord::EffectEmitted {
+                    unit: unit_id,
+                    sequence: sequence as u32,
+                    kind: traced_effect_kind(effect),
+                });
+            }
         }
 
         Ok(RuntimeStep {
