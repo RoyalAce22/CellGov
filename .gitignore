@@ -10,11 +10,10 @@ docs/dev/
 # external tools
 tools/
 
-# test artifacts (binaries, ELFs, ISOs, memory dumps, build output)
+# test artifacts (compiled ELFs, objects, build output)
 tests/micro/**/*.bin
 tests/micro/**/*.elf
 tests/micro/**/*.self
-tests/micro/**/*.iso
 tests/micro/**/*.o
 tests/micro/**/build/
 tests/micro/hello_world/

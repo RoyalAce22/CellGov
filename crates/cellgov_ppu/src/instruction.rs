@@ -30,6 +30,12 @@ pub enum PpuInstruction {
         /// Signed 16-bit displacement.
         imm: i16,
     },
+    /// Load halfword and zero: rt = mem[ra + imm] (16-bit, zero-extended).
+    Lhz { rt: u8, ra: u8, imm: i16 },
+    /// Load halfword algebraic: rt = mem[ra + imm] (16-bit, sign-extended).
+    Lha { rt: u8, ra: u8, imm: i16 },
+    /// Load word with update: rt = mem[ra + imm] (32-bit), ra = ra + imm.
+    Lwzu { rt: u8, ra: u8, imm: i16 },
     /// Load doubleword: rt = mem[ra + imm] (64-bit).
     Ld {
         /// Destination register.
@@ -119,6 +125,12 @@ pub enum PpuInstruction {
         /// Signed 16-bit immediate (shifted left 16 at execution).
         imm: i16,
     },
+    /// Subtract from immediate carrying: rt = sign_extend(imm) - ra.
+    Subfic { rt: u8, ra: u8, imm: i16 },
+    /// Multiply low immediate: rt = ra * sign_extend(imm) (low 64 bits).
+    Mulli { rt: u8, ra: u8, imm: i16 },
+    /// Add immediate carrying: rt = ra + sign_extend(imm), update CA.
+    Addic { rt: u8, ra: u8, imm: i16 },
     /// Add: rt = ra + rb.
     Add {
         /// Destination register.
@@ -137,6 +149,44 @@ pub enum PpuInstruction {
         /// Source register.
         rb: u8,
     },
+    /// Subtract from: rt = rb - ra.
+    Subf { rt: u8, ra: u8, rb: u8 },
+    /// Negate: rt = -(ra).
+    Neg { rt: u8, ra: u8 },
+    /// Multiply low word: rt = (ra * rb) as i32 (low 32 bits).
+    Mullw { rt: u8, ra: u8, rb: u8 },
+    /// Multiply high word unsigned: rt = ((ra as u32) * (rb as u32)) >> 32.
+    Mulhwu { rt: u8, ra: u8, rb: u8 },
+    /// Divide word: rt = (ra as i32) / (rb as i32).
+    Divw { rt: u8, ra: u8, rb: u8 },
+    /// Divide word unsigned: rt = (ra as u32) / (rb as u32).
+    Divwu { rt: u8, ra: u8, rb: u8 },
+    /// AND: ra = rs & rb.
+    And { ra: u8, rs: u8, rb: u8 },
+    /// AND with complement: ra = rs & !rb.
+    Andc { ra: u8, rs: u8, rb: u8 },
+    /// NOR: ra = ~(rs | rb). When rs==rb, this is `not`.
+    Nor { ra: u8, rs: u8, rb: u8 },
+    /// XOR: ra = rs ^ rb.
+    Xor { ra: u8, rs: u8, rb: u8 },
+    /// AND immediate: ra = rs & zero_extend(imm).
+    AndiDot { ra: u8, rs: u8, imm: u16 },
+    /// Shift left word: ra = (rs as u32) << (rb & 0x3F), zero-extended.
+    Slw { ra: u8, rs: u8, rb: u8 },
+    /// Shift right word: ra = (rs as u32) >> (rb & 0x3F), zero-extended.
+    Srw { ra: u8, rs: u8, rb: u8 },
+    /// Shift right algebraic word immediate: ra = sign_extend((rs as i32) >> sh).
+    Srawi { ra: u8, rs: u8, sh: u8 },
+    /// Shift left doubleword: ra = rs << (rb & 0x7F).
+    Sld { ra: u8, rs: u8, rb: u8 },
+    /// Shift right doubleword: ra = rs >> (rb & 0x7F).
+    Srd { ra: u8, rs: u8, rb: u8 },
+    /// Count leading zeros word: ra = clz(rs as u32), zero-extended.
+    Cntlzw { ra: u8, rs: u8 },
+    /// Extend sign halfword: ra = sign_extend_16_to_64(rs).
+    Extsh { ra: u8, rs: u8 },
+    /// Extend sign byte: ra = sign_extend_8_to_64(rs).
+    Extsb { ra: u8, rs: u8 },
     /// Extend sign word: ra = sign_extend_32_to_64(rs).
     Extsw {
         /// Destination register.
@@ -183,6 +233,42 @@ pub enum PpuInstruction {
         /// Unsigned 16-bit immediate.
         imm: u16,
     },
+    /// Compare word (register-register, signed 32-bit).
+    Cmpw {
+        /// Condition register field (0-7).
+        bf: u8,
+        /// First source register.
+        ra: u8,
+        /// Second source register.
+        rb: u8,
+    },
+    /// Compare logical word (register-register, unsigned 32-bit).
+    Cmplw {
+        /// Condition register field (0-7).
+        bf: u8,
+        /// First source register.
+        ra: u8,
+        /// Second source register.
+        rb: u8,
+    },
+    /// Compare doubleword (register-register, signed 64-bit).
+    Cmpd {
+        /// Condition register field (0-7).
+        bf: u8,
+        /// First source register.
+        ra: u8,
+        /// Second source register.
+        rb: u8,
+    },
+    /// Compare logical doubleword (register-register, unsigned 64-bit).
+    Cmpld {
+        /// Condition register field (0-7).
+        bf: u8,
+        /// First source register.
+        ra: u8,
+        /// Second source register.
+        rb: u8,
+    },
 
     // -- Branch --
     /// Unconditional branch: PC += offset. Optionally sets LR.
@@ -223,21 +309,37 @@ pub enum PpuInstruction {
     },
 
     // -- Special-purpose register moves --
+    // -- Indexed loads/stores --
+    /// Load word and zero indexed: rt = mem[(ra|0) + rb] (32-bit).
+    Lwzx { rt: u8, ra: u8, rb: u8 },
+    /// Load byte and zero indexed: rt = mem[(ra|0) + rb] (8-bit).
+    Lbzx { rt: u8, ra: u8, rb: u8 },
+    /// Load doubleword indexed: rt = mem[(ra|0) + rb] (64-bit).
+    Ldx { rt: u8, ra: u8, rb: u8 },
+    /// Load halfword and zero indexed: rt = mem[(ra|0) + rb] (16-bit).
+    Lhzx { rt: u8, ra: u8, rb: u8 },
+    /// Store word indexed: mem[(ra|0) + rb] = rs (32-bit).
+    Stwx { rs: u8, ra: u8, rb: u8 },
+    /// Store doubleword indexed: mem[(ra|0) + rb] = rs (64-bit).
+    Stdx { rs: u8, ra: u8, rb: u8 },
+    /// Store byte indexed: mem[(ra|0) + rb] = rs (8-bit).
+    Stbx { rs: u8, ra: u8, rb: u8 },
+
+    // -- Special-purpose register moves --
+    /// Move from time base: rt = TB, then TB += 1 (deterministic).
+    Mftb { rt: u8 },
+    /// Move from CR: rt = CR (32 bits, zero-extended to 64).
+    Mfcr { rt: u8 },
+    /// Move to CR fields: CR = (rs >> 32) masked by CRM.
+    Mtcrf { rs: u8, crm: u8 },
     /// Move from LR: rt = LR.
-    Mflr {
-        /// Destination register.
-        rt: u8,
-    },
+    Mflr { rt: u8 },
     /// Move to LR: LR = rs.
-    Mtlr {
-        /// Source register.
-        rs: u8,
-    },
+    Mtlr { rs: u8 },
+    /// Move from CTR: rt = CTR.
+    Mfctr { rt: u8 },
     /// Move to CTR: CTR = rs.
-    Mtctr {
-        /// Source register.
-        rs: u8,
-    },
+    Mtctr { rs: u8 },
 
     // -- Rotate/shift (subset) --
     /// Rotate left word immediate then AND with mask.
@@ -283,6 +385,34 @@ pub enum PpuInstruction {
     /// zeros `vr[vt]` and is commonly emitted by compilers to clear a
     /// vector register (including in the PPC64 stdarg / varargs save
     /// area setup).
+    /// Generic VX-form VMX instruction. The XO field selects the
+    /// operation; execution dispatches on it. This avoids 160+
+    /// individual enum variants for every VMX opcode.
+    Vx {
+        /// 11-bit extended opcode selecting the VMX operation.
+        xo: u16,
+        /// Destination vector register (or source for stores).
+        vt: u8,
+        /// Source vector register A (or immediate for vspltis*).
+        va: u8,
+        /// Source vector register B.
+        vb: u8,
+    },
+    /// Generic VA-form VMX instruction (4-register, 6-bit sub-opcode).
+    Va {
+        /// 6-bit sub-opcode.
+        xo: u8,
+        /// Destination vector register.
+        vt: u8,
+        /// Source vector register A.
+        va: u8,
+        /// Source vector register B.
+        vb: u8,
+        /// Source vector register C.
+        vc: u8,
+    },
+    /// Vector XOR (kept as named variant for backward compatibility
+    /// with existing tests; decodes as Vx { xo: 0x4c4, ... } going forward).
     Vxor {
         /// Destination vector register.
         vt: u8,
@@ -301,6 +431,34 @@ pub enum PpuInstruction {
         ra: u8,
         /// Offset register.
         rb: u8,
+    },
+
+    // -- Floating-point loads/stores --
+    /// Load float single: frt = (float)mem[ra + imm], converted to double.
+    Lfs { frt: u8, ra: u8, imm: i16 },
+    /// Load float double: frt = mem[ra + imm] (64-bit).
+    Lfd { frt: u8, ra: u8, imm: i16 },
+    /// Store float single: mem[ra + imm] = (float)frs.
+    Stfs { frs: u8, ra: u8, imm: i16 },
+    /// Store float double: mem[ra + imm] = frs (64-bit).
+    Stfd { frs: u8, ra: u8, imm: i16 },
+
+    /// Generic floating-point instruction (opcode 63, A-form/X-form).
+    /// XO selects the operation; execution dispatches on it.
+    Fp63 {
+        xo: u16,
+        frt: u8,
+        fra: u8,
+        frb: u8,
+        frc: u8,
+    },
+    /// Generic floating-point instruction (opcode 59, single-precision).
+    Fp59 {
+        xo: u16,
+        frt: u8,
+        fra: u8,
+        frb: u8,
+        frc: u8,
     },
 
     // -- System --

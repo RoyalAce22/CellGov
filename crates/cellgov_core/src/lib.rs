@@ -27,6 +27,7 @@
 //! 10. trace every decision
 
 pub mod commit;
+mod hle;
 pub mod registry;
 pub mod runtime;
 pub mod scheduler;

@@ -30,7 +30,14 @@ use cellgov_time::Budget;
 /// Adding non-breaking fields later is the same shape as any other Rust
 /// struct: append, derive `Default`, done.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct LocalDiagnostics {}
+pub struct LocalDiagnostics {
+    /// Program counter at the start of the step (the instruction
+    /// that was fetched, or attempted). Set by PPU/SPU on every
+    /// step; `None` only from synthetic/test step results.
+    pub pc: Option<u64>,
+    /// Effective address that caused a memory fault, if applicable.
+    pub faulting_ea: Option<u64>,
+}
 
 impl LocalDiagnostics {
     /// An empty diagnostics record. Equivalent to
@@ -38,7 +45,28 @@ impl LocalDiagnostics {
     /// call sites can be explicit about producing one.
     #[inline]
     pub const fn empty() -> Self {
-        Self {}
+        Self {
+            pc: None,
+            faulting_ea: None,
+        }
+    }
+
+    /// Diagnostics with a program counter.
+    #[inline]
+    pub const fn with_pc(pc: u64) -> Self {
+        Self {
+            pc: Some(pc),
+            faulting_ea: None,
+        }
+    }
+
+    /// Diagnostics with a program counter and faulting effective address.
+    #[inline]
+    pub const fn with_pc_ea(pc: u64, ea: u64) -> Self {
+        Self {
+            pc: Some(pc),
+            faulting_ea: Some(ea),
+        }
     }
 }
 

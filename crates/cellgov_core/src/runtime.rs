@@ -144,7 +144,7 @@ pub enum StepError {
 pub type SpuFactory = Box<dyn Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit>>;
 
 pub struct Runtime {
-    registry: UnitRegistry,
+    pub(crate) registry: UnitRegistry,
     mailbox_registry: MailboxRegistry,
     signal_registry: SignalRegistry,
     dma_queue: DmaQueue,
@@ -154,7 +154,7 @@ pub struct Runtime {
     spu_factory: Option<SpuFactory>,
     scheduler: Box<dyn Scheduler>,
     commit_pipeline: CommitPipeline,
-    memory: GuestMemory,
+    pub(crate) memory: GuestMemory,
     time: GuestTicks,
     epoch: Epoch,
     budget_per_step: Budget,
@@ -166,6 +166,18 @@ pub struct Runtime {
     /// produced the batch -- there is one commit batch per unit yield,
     /// so this is always the right unit.
     last_scheduled_unit: Option<UnitId>,
+    /// HLE NID table: maps HLE index -> NID for dispatch of HLE calls
+    /// that need non-trivial behavior (e.g., TLS init, mutex create).
+    hle_nids: std::collections::BTreeMap<u32, u32>,
+    /// Bump allocator pointer for _sys_malloc HLE. Points to the next
+    /// free address in guest memory. Allocations are never freed.
+    pub(crate) hle_heap_ptr: u32,
+    /// When true, state-hash checkpoints (committed memory, runnable
+    /// queue, unit status, sync state) are skipped in commit_step.
+    /// This avoids the O(memory_size) hash per step, which is
+    /// prohibitive for large guest memories (e.g., 260 MB).
+    /// Determinism verification is unavailable when disabled.
+    skip_hash_checkpoints: bool,
 }
 
 impl Runtime {
@@ -210,6 +222,9 @@ impl Runtime {
             max_steps,
             trace,
             last_scheduled_unit: None,
+            hle_nids: std::collections::BTreeMap::new(),
+            hle_heap_ptr: 0,
+            skip_hash_checkpoints: false,
         }
     }
 
@@ -315,27 +330,31 @@ impl Runtime {
         // committed memory, runnable queue, sync state, and unit
         // status. All four are emitted here, taken AFTER the commit
         // (including DMA completion firing) so replay tooling sees
-        // post-commit state.
-        let mem_hash = StateHash::new(self.memory.content_hash());
-        self.trace.record(&TraceRecord::StateHashCheckpoint {
-            kind: HashCheckpointKind::CommittedMemory,
-            hash: mem_hash,
-        });
-        let rq_hash = StateHash::new(self.registry.runnable_queue_hash());
-        self.trace.record(&TraceRecord::StateHashCheckpoint {
-            kind: HashCheckpointKind::RunnableQueue,
-            hash: rq_hash,
-        });
-        let status_hash = StateHash::new(self.registry.status_hash());
-        self.trace.record(&TraceRecord::StateHashCheckpoint {
-            kind: HashCheckpointKind::UnitStatus,
-            hash: status_hash,
-        });
-        let sync_hash = StateHash::new(self.sync_state_hash());
-        self.trace.record(&TraceRecord::StateHashCheckpoint {
-            kind: HashCheckpointKind::SyncState,
-            hash: sync_hash,
-        });
+        // post-commit state. Skipped when hash checkpoints are
+        // disabled (large guest memories where O(N) hashing per
+        // step is prohibitive).
+        if !self.skip_hash_checkpoints {
+            let mem_hash = StateHash::new(self.memory.content_hash());
+            self.trace.record(&TraceRecord::StateHashCheckpoint {
+                kind: HashCheckpointKind::CommittedMemory,
+                hash: mem_hash,
+            });
+            let rq_hash = StateHash::new(self.registry.runnable_queue_hash());
+            self.trace.record(&TraceRecord::StateHashCheckpoint {
+                kind: HashCheckpointKind::RunnableQueue,
+                hash: rq_hash,
+            });
+            let status_hash = StateHash::new(self.registry.status_hash());
+            self.trace.record(&TraceRecord::StateHashCheckpoint {
+                kind: HashCheckpointKind::UnitStatus,
+                hash: status_hash,
+            });
+            let sync_hash = StateHash::new(self.sync_state_hash());
+            self.trace.record(&TraceRecord::StateHashCheckpoint {
+                kind: HashCheckpointKind::SyncState,
+                hash: sync_hash,
+            });
+        }
 
         outcome
     }
@@ -376,6 +395,15 @@ impl Runtime {
         let Some(args) = &result.syscall_args else {
             return;
         };
+
+        // HLE import stubs use syscall numbers >= 0x10000.
+        if args[0] >= 0x10000 {
+            let hle_index = (args[0] - 0x10000) as u32;
+            let nid = self.hle_nids.get(&hle_index).copied().unwrap_or(0);
+            self.dispatch_hle(source, nid, args);
+            return;
+        }
+
         let request = cellgov_lv2::request::classify(
             args[0],
             &[
@@ -612,6 +640,23 @@ impl Runtime {
         self.scheduler = Box::new(scheduler);
     }
 
+    /// Register HLE NID mappings for dispatch. Maps HLE index -> NID
+    /// so the runtime can dispatch specific HLE functions (TLS init, etc.).
+    pub fn set_hle_nids(&mut self, nids: std::collections::BTreeMap<u32, u32>) {
+        self.hle_nids = nids;
+    }
+
+    /// Set the base address for the HLE bump allocator (_sys_malloc).
+    pub fn set_hle_heap_base(&mut self, base: u32) {
+        self.hle_heap_ptr = base;
+    }
+
+    /// Disable per-step state-hash checkpoints. Skips the O(N) memory
+    /// hash in commit_step, making large guest memories usable.
+    pub fn set_skip_hash_checkpoints(&mut self, skip: bool) {
+        self.skip_hash_checkpoints = skip;
+    }
+
     /// Split-borrow both registries at once. Used by the testkit
     /// runner so a fixture's setup callback can register a mailbox
     /// and a unit that targets it in one call without fighting the
@@ -738,9 +783,19 @@ impl Runtime {
         // delivered to this unit and pass them via ExecutionContext.
         let received = self.registry.drain_receives(unit_id);
         let syscall_ret = self.registry.drain_syscall_return(unit_id);
+        let reg_writes = self.registry.drain_register_writes(unit_id);
         let result = {
             let ctx = if let Some(code) = syscall_ret {
-                ExecutionContext::with_syscall_return(&self.memory, &received, code)
+                if reg_writes.is_empty() {
+                    ExecutionContext::with_syscall_return(&self.memory, &received, code)
+                } else {
+                    ExecutionContext::with_syscall_return_and_regs(
+                        &self.memory,
+                        &received,
+                        code,
+                        &reg_writes,
+                    )
+                }
             } else {
                 ExecutionContext::with_received(&self.memory, &received)
             };

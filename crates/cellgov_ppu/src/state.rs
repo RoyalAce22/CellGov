@@ -7,6 +7,9 @@
 /// PPU general-purpose register count.
 pub const GPR_COUNT: usize = 32;
 
+/// PPU floating-point register count.
+pub const FPR_COUNT: usize = 32;
+
 /// PPU vector register count (AltiVec / VMX).
 pub const VR_COUNT: usize = 32;
 
@@ -15,6 +18,8 @@ pub const VR_COUNT: usize = 32;
 pub struct PpuState {
     /// 32 x 64-bit general-purpose registers.
     pub gpr: [u64; GPR_COUNT],
+    /// 32 x 64-bit floating-point registers (stored as f64 bits).
+    pub fpr: [u64; FPR_COUNT],
     /// 32 x 128-bit vector registers (AltiVec / VMX).
     pub vr: [u128; VR_COUNT],
     /// Program counter.
@@ -27,6 +32,8 @@ pub struct PpuState {
     pub ctr: u64,
     /// Fixed-point exception register (carry, overflow, summary overflow).
     pub xer: u64,
+    /// Time base counter (monotonically increasing, deterministic).
+    pub tb: u64,
 }
 
 impl PpuState {
@@ -34,12 +41,14 @@ impl PpuState {
     pub fn new() -> Self {
         Self {
             gpr: [0u64; GPR_COUNT],
+            fpr: [0u64; FPR_COUNT],
             vr: [0u128; VR_COUNT],
             pc: 0,
             cr: 0,
             lr: 0,
             ctr: 0,
             xer: 0,
+            tb: 0,
         }
     }
 
@@ -67,6 +76,13 @@ impl PpuState {
     pub fn ea_d_form(&self, ra: u8, imm: i16) -> u64 {
         let base = if ra == 0 { 0 } else { self.gpr[ra as usize] };
         base.wrapping_add(imm as i64 as u64)
+    }
+
+    /// Effective address for an X-form load/store: `(ra|0) + rb`.
+    /// When `ra == 0`, the base is literal zero, not `GPR[0]`.
+    pub fn ea_x_form(&self, ra: u8, rb: u8) -> u64 {
+        let base = if ra == 0 { 0 } else { self.gpr[ra as usize] };
+        base.wrapping_add(self.gpr[rb as usize])
     }
 }
 

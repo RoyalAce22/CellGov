@@ -817,3 +817,124 @@ fn mailbox_roundtrip_lv2_driven() {
         "expected TestResult {{status=0, value=0xFFFFFFBD}} in committed memory"
     );
 }
+
+// -- Phase 6: real game ELF loading --
+
+#[test]
+fn flow_eboot_loads_into_guest_memory() {
+    let path =
+        std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
+    if !path.exists() {
+        return; // skip if flOw not installed
+    }
+    let data = std::fs::read(&path).unwrap();
+
+    let mut state = state::PpuState::new();
+    // flOw needs ~260 MB for the 0x10000000 read-only segment
+    let mut mem = GuestMemory::new(0x10400000);
+    let result = loader::load_ppu_elf(&data, &mut mem, &mut state).unwrap();
+
+    // Entry descriptor at 0x846ae0 resolves to code at 0x10230, TOC 0x8969a8
+    assert_eq!(result.entry, 0x846ae0);
+    assert_eq!(state.pc, 0x10230);
+    assert_eq!(state.gpr[2], 0x8969a8);
+
+    // First instruction at PC should be nonzero (real code)
+    let pc = state.pc as usize;
+    let first_insn = u32::from_be_bytes([
+        mem.as_bytes()[pc],
+        mem.as_bytes()[pc + 1],
+        mem.as_bytes()[pc + 2],
+        mem.as_bytes()[pc + 3],
+    ]);
+    assert_ne!(
+        first_insn, 0,
+        "entry point should have code, got 0x00000000"
+    );
+
+    // Code segment should be populated (spot-check near entry)
+    let code_region = &mem.as_bytes()[0x10000..0x10100];
+    assert!(
+        code_region.iter().any(|&b| b != 0),
+        "code segment near base should contain nonzero bytes"
+    );
+
+    // Read-only data at 0x10000000 should be populated
+    let rodata = &mem.as_bytes()[0x10000000..0x10000100];
+    assert!(
+        rodata.iter().any(|&b| b != 0),
+        "read-only data segment should contain nonzero bytes"
+    );
+}
+
+/// Boot progress regression: load flOw, run PPU, assert execution
+/// begins and record the fault. This test gate advances as phase 6
+/// milestones extend the boot frontier.
+#[test]
+fn flow_boot_progress() {
+    use cellgov_core::{Runtime, StepError};
+
+    let path =
+        std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
+    if !path.exists() {
+        return;
+    }
+    let data = std::fs::read(&path).unwrap();
+
+    let required = loader::required_memory_size(&data).unwrap();
+    let mem_size = ((required + 0xFFFF) & !0xFFFF) + 0x100000;
+    let mut mem = GuestMemory::new(mem_size);
+
+    // Plant exit stub at address 0
+    let li_r11_22: u32 = (14 << 26) | (11 << 21) | 22;
+    let sc: u32 = 0x4400_0002;
+    let stub = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0), 8).unwrap();
+    let mut sb = Vec::with_capacity(8);
+    sb.extend_from_slice(&li_r11_22.to_be_bytes());
+    sb.extend_from_slice(&sc.to_be_bytes());
+    mem.apply_commit(stub, &sb).unwrap();
+
+    let mut state = state::PpuState::new();
+    loader::load_ppu_elf(&data, &mut mem, &mut state).unwrap();
+    state.gpr[1] = (mem_size as u64) - 0x1000;
+    state.lr = 0;
+
+    let mut rt = Runtime::new(mem, Budget::new(100_000), 10_000);
+    rt.registry_mut().register_with(|id| {
+        let mut unit = PpuExecutionUnit::new(id);
+        *unit.state_mut() = state;
+        unit
+    });
+
+    let mut steps = 0;
+    let mut faulted = false;
+    loop {
+        match rt.step() {
+            Ok(step) => {
+                let _ = rt.commit_step(&step.result);
+                steps += 1;
+                if step.result.fault.is_some() {
+                    faulted = true;
+                    break;
+                }
+            }
+            Err(StepError::NoRunnableUnit) => break,
+            Err(StepError::MaxStepsExceeded) => break,
+            Err(_) => break,
+        }
+    }
+
+    // Gate: PPU must start executing (at least 1 step).
+    assert!(
+        steps >= 1,
+        "PPU should execute at least 1 step, got {steps}"
+    );
+
+    // Current state: faults at step 1 with PC_OUT_OF_RANGE.
+    // As phase 6 progresses, update these assertions to reflect
+    // the new boot frontier.
+    assert!(
+        faulted,
+        "expected fault (boot not yet complete), but PPU stalled after {steps} steps"
+    );
+}

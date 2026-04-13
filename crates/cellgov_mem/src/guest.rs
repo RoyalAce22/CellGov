@@ -16,6 +16,8 @@
 //! [`apply_commit`](GuestMemory::apply_commit)) are deliberately minimal
 //! so that any of those future layers can wrap the same shape.
 
+use std::cell::Cell;
+
 use crate::range::ByteRange;
 
 /// Committed globally visible guest memory.
@@ -27,6 +29,10 @@ use crate::range::ByteRange;
 #[derive(Debug, Clone)]
 pub struct GuestMemory {
     bytes: Vec<u8>,
+    /// Cached content hash. `None` means the cache is stale (a write
+    /// happened since the last hash computation). Uses `Cell` for
+    /// interior mutability so `content_hash` can stay `&self`.
+    cached_hash: Cell<Option<u64>>,
 }
 
 /// Why a `GuestMemory` operation failed.
@@ -57,6 +63,7 @@ impl GuestMemory {
     pub fn new(size: usize) -> Self {
         Self {
             bytes: vec![0u8; size],
+            cached_hash: Cell::new(None),
         }
     }
 
@@ -120,6 +127,7 @@ impl GuestMemory {
         let start_usize = usize::try_from(start).map_err(|_| MemError::OutOfRange)?;
         let end_usize = usize::try_from(end).map_err(|_| MemError::OutOfRange)?;
         self.bytes[start_usize..end_usize].copy_from_slice(bytes);
+        self.cached_hash.set(None);
         Ok(())
     }
 
@@ -134,7 +142,12 @@ impl GuestMemory {
     /// backings will fold their state into the same `u64` output without
     /// changing this method's signature.
     pub fn content_hash(&self) -> u64 {
-        crate::hash::fnv1a(&self.bytes)
+        if let Some(h) = self.cached_hash.get() {
+            return h;
+        }
+        let h = crate::hash::fnv1a(&self.bytes);
+        self.cached_hash.set(Some(h));
+        h
     }
 }
 

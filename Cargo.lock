@@ -8,6 +8,8 @@ version = "0.0.0"
 dependencies = [
  "cellgov_compare",
  "cellgov_core",
+ "cellgov_effects",
+ "cellgov_exec",
  "cellgov_explore",
  "cellgov_mem",
  "cellgov_ppu",

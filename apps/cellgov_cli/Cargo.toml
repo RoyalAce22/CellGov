@@ -11,6 +11,8 @@ workspace = true
 [dependencies]
 cellgov_compare = { path = "../../crates/cellgov_compare" }
 cellgov_core = { path = "../../crates/cellgov_core" }
+cellgov_effects = { path = "../../crates/cellgov_effects" }
+cellgov_exec = { path = "../../crates/cellgov_exec" }
 cellgov_explore = { path = "../../crates/cellgov_explore" }
 cellgov_mem = { path = "../../crates/cellgov_mem" }
 cellgov_ppu = { path = "../../crates/cellgov_ppu" }

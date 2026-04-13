@@ -1,22 +1,25 @@
 # CellGov Architecture
 
-CellGov is a Rust workspace implementing a deterministic event-driven runtime for translated PS3 PPU and SPU execution units.
+CellGov is a Rust workspace implementing a deterministic event-driven runtime for translated PS3 PPU and SPU execution units. It serves as the oracle/analysis engine for static recompilation of PS3 games.
 
 ## Current state
 
-The runtime executes units in a deterministic round-robin loop, processes effects through the commit pipeline, and produces a binary trace. Real PPU and SPU execution units decode and interpret guest instructions against committed memory and their own local state, emitting effects for every guest-visible operation. The PPU drives SPU creation through a real LV2 host model -- `sys_spu_image_open`, `sys_spu_thread_group_create`, `sys_spu_thread_initialize`, `sys_spu_thread_group_start`, `sys_spu_thread_group_join`, `sys_spu_thread_write_spu_mb`, and `sys_process_exit` all have working implementations. A schedule exploration engine replays workloads with alternate scheduling choices, classifies outcomes as schedule-stable or schedule-sensitive, and compares per-schedule memory against RPCS3 oracle baselines. An external-oracle comparison harness compares CellGov observations against RPCS3 baselines. The workspace compiles clean under `unsafe_code = "forbid"` and has 799 tests across 15 crates and two binaries.
+The runtime executes units in a deterministic round-robin loop, processes effects through the commit pipeline, and produces a binary trace. Real PPU and SPU execution units decode and interpret guest instructions against committed memory and their own local state, emitting effects for every guest-visible operation. The PPU drives SPU creation through a real LV2 host model. A schedule exploration engine replays workloads with alternate scheduling choices, classifies outcomes as schedule-stable or schedule-sensitive, and compares per-schedule memory against RPCS3 oracle baselines. The workspace compiles clean under `unsafe_code = "forbid"` and has 800+ tests across 15 crates and two binaries.
+
+Phase 6 drove CellGov through a real commercial PS3 title (flOw, NPUA80001) from ELF load to 158K+ PPU steps of boot execution. The boot survives TLS initialization, heap setup, module initialization, and early game setup before hitting the C++ static initialization off-ramp (libc module_start not executed).
 
 ### Runtime
 
 - **Deterministic step loop** with round-robin scheduling and deadlock detection
 - **Commit pipeline** processing 9 effect types: `SharedWriteIntent`, `MailboxSend`, `MailboxReceiveAttempt`, `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`, `FaultRaised`, `TraceMarker`
 - **Binary trace format** with 7 record types, categorical filtering, and encode/decode roundtrip
-- **FNV-1a state hashing** via `cellgov_mem::Fnv1aHasher` at every commit boundary (committed memory, runnable queue, unit status, sync state)
+- **FNV-1a state hashing** via `cellgov_mem::Fnv1aHasher` at commit boundaries with cached `content_hash` (Cell-based interior mutability) and `skip_hash_checkpoints` for large guest memories
 - **DMA completion queue** with pluggable latency models and automatic issuer wake
 - **Mailbox FIFO** with send/receive/block-on-empty and per-unit inbox delivery
 - **Signal registers** with OR-merge semantics
 - **Block/wake transitions** via runtime-side status overrides
 - **LV2 host model** (`cellgov_lv2`) with image registry, thread group table, SPU lifecycle management, mailbox write, group-aware join wake, and process-exit cascade
+- **HLE dispatch** with NID-based function routing, register injection (TLS r13 setup), bump allocator (_sys_malloc/_sys_free), memset, and noop-safe stubs for 140+ imported functions
 - **Syscall response table** for blocked PPU callers, keyed by UnitId, drained at wake time
 - **SPU factory** for runtime-driven SPU creation from `Lv2Dispatch::RegisterSpu`
 - **Scenario test harness** with deterministic replay assertions, golden trace pinning, and invariant checks
@@ -24,7 +27,7 @@ The runtime executes units in a deterministic round-robin loop, processes effect
 
 ### Execution units
 
-- **PPU (`cellgov_ppu`)**: PPC64 interpreter with GPRs, PC, CR, LR, CTR, XER, and 32 vector registers. Implements a working subset of integer, logical, load/store, branch, compare, rotate/shift, and vector instructions sufficient for the microtest corpus. PPU ELF64 loader handles PT_LOAD segments, resolves PPC64 ABI v1 function-descriptor entry points, and supports symbol table lookup. LV2 syscalls yield to the runtime, which dispatches through the `Lv2Host` and resumes the PPU with the return code.
+- **PPU (`cellgov_ppu`)**: PPC64 interpreter with GPRs, FPRs, PC, CR, LR, CTR, XER, TB, and 32 vector registers. Implements 79 instruction variants covering integer arithmetic/logic, load/store (D-form, indexed, with-update), branch (conditional, LR, CTR), compare, rotate/shift, floating-point (single/double loads/stores, 20+ FP63/FP59 arithmetic ops including fmadd/fmul/fdiv/fcmp/fsel/frsp/fctiwz/fcfid), VMX (25+ VX-form and VA-form vector operations), SPR/CR moves (mflr/mtlr/mfcr/mtcrf/mfctr/mftb), and cache/sync control (no-ops for deterministic model). PPU ELF64 loader handles PT_LOAD segments, BSS zero-init, and PPC64 ABI v1 function-descriptor entry points. PS3 PRX import table parser discovers imported modules and functions from PT_0x60000002 program headers. HLE stub binder writes 24-byte trampolines (OPD + lis/ori/sc/blr) and patches GOT entries. NID database covers 140+ PS3 SDK functions across 12 modules. Per-step `LocalDiagnostics` carries PC and faulting EA for all step outcomes.
 - **SPU (`cellgov_spu`)**: SPU interpreter with 128x128-bit register file, 256 KB local store, and channel file. Implements a working subset of RR/RI7/RI10/RI16/RI18/RRR formats covering constant formation, integer arithmetic, logical, compare, branch, shuffle/rotate, load/store, and channel operations. Communicates with the runtime exclusively through effects -- never reads or writes committed shared memory directly. Includes an SPU ELF loader.
 
 ### LV2 host model
@@ -43,6 +46,17 @@ Implemented syscalls:
 | `sys_spu_thread_write_spu_mb` | 190     | Deposits a value into the target SPU's inbound mailbox               |
 | `sys_tty_write`               | 403     | Returns CELL_OK (output not captured)                                |
 | `sys_process_exit`            | 22      | Cascades Finished to all units in the process                        |
+
+HLE-dispatched sysPrxForUser functions (NID-based):
+
+| Function               | NID        | Classification    | Behavior                                                    |
+| ---------------------- | ---------- | ----------------- | ----------------------------------------------------------- |
+| `sys_initialize_tls`   | 0x744680a2 | stateful          | Copies TLS image, zeroes BSS, sets r13 = base + 0x7030      |
+| `_sys_malloc`          | 0xebe5f72f | unsafe-to-stub    | Bump allocator (16-byte aligned, never freed)                |
+| `_sys_free`            | 0xfc52a7a9 | noop-safe         | No-op (bump allocator)                                       |
+| `_sys_memset`          | 0x1573dc3f | stateful          | Writes val x size bytes to guest memory, returns ptr         |
+| `sys_process_exit`     | 0xe6f2c1e7 | stateful          | Marks unit Finished                                          |
+| All others             | --         | noop-safe         | Return CELL_OK (0)                                           |
 
 ### Comparison harness
 
@@ -67,6 +81,17 @@ Implemented syscalls:
 - **Oracle-aware exploration** (`explore_with_regions`): extracts named memory regions from each schedule for per-schedule comparison against external baselines
 - **JSON and human-readable reports**
 - **CLI `explore` subcommand**: runs testkit scenarios or ELF-based microtests with optional `--baselines-dir` for oracle comparison
+
+### Game boot (flOw)
+
+The CLI `run-game` subcommand loads a decrypted PS3 ELF into 260 MB of guest memory and runs the PPU from the entry point with Budget=1 (instruction-level granularity). Phase 6 drove this through flOw's boot sequence:
+
+- **158K+ steps executed** before hitting the C++ static init off-ramp
+- **7 distinct HLE functions** dispatched (TLS init, malloc, memset, lwmutex, thread_get_id, time, process_exit)
+- **51 PPU instruction variants** exercised during boot
+- **No decode faults** -- all instructions in the boot path are implemented
+- **Performance**: 142K steps in 192ms (release mode), ~743K instructions/second
+- **Off-ramp**: game aborts in `__cxa_guard_acquire` because libc `module_start` was never executed (pure-HLE limitation). Unblocking requires PRX module_start execution or libc state fabrication.
 
 ### Microtest corpus
 
@@ -176,7 +201,7 @@ graph BT
 
 `cellgov_explore` sits above `cellgov_core` and drives the runtime externally through `Runtime::step`, `Runtime::commit_step`, and `Runtime::set_scheduler`. It depends on the effect and sync primitives for dependency analysis but never modifies the core runtime model. The `serde`/`serde_json` dependency (for JSON reports) is the only external dependency in the exploration engine.
 
-`cellgov_ppu` and `cellgov_spu` appear as leaves in the library DAG: execution units plug into the runtime through the `ExecutionUnit` trait defined in `cellgov_exec`, not through a direct Cargo dependency on `cellgov_core`. The core runtime drives any `T: ExecutionUnit` without naming concrete types. The CLI depends on both architecture crates for the `explore micro` subcommand, which constructs LV2-driven fixtures from real PPU/SPU ELF binaries.
+`cellgov_ppu` and `cellgov_spu` appear as leaves in the library DAG: execution units plug into the runtime through the `ExecutionUnit` trait defined in `cellgov_exec`, not through a direct Cargo dependency on `cellgov_core`. The core runtime drives any `T: ExecutionUnit` without naming concrete types. The CLI depends on both architecture crates for the `explore micro` subcommand and the `run-game` subcommand.
 
 External dependencies are minimal: `serde`, `serde_json`, and `toml` in `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore` and `cellgov_cli`. All other crates are dependency-free beyond the workspace.
 
