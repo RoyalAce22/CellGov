@@ -4,9 +4,9 @@ CellGov is a Rust workspace implementing a deterministic event-driven runtime fo
 
 ## Current state
 
-The runtime executes units in a deterministic round-robin loop, processes effects through the commit pipeline, and produces a binary trace. Real PPU and SPU execution units decode and interpret guest instructions against committed memory and their own local state, emitting effects for every guest-visible operation. The PPU drives SPU creation through a real LV2 host model. A schedule exploration engine replays workloads with alternate scheduling choices, classifies outcomes as schedule-stable or schedule-sensitive, and compares per-schedule memory against RPCS3 oracle baselines. A RuntimeMode enum (FaultDriven/DeterminismCheck/FullTrace) controls per-step overhead: trace record emission and hash checkpoints are gated on the mode. A criterion benchmark harness measures decode, execute, run_until_yield, content_hash, and commit_step with baseline comparison for before/after optimization tracking. The workspace compiles clean under `unsafe_code = "forbid"` and has 824 tests across 15 crates and two binaries with 82% line coverage.
+The runtime executes units in a deterministic round-robin loop, processes effects through the commit pipeline, and produces a binary trace. Real PPU and SPU execution units decode and interpret guest instructions against committed memory and their own local state, emitting effects for every guest-visible operation. The PPU drives SPU creation through a real LV2 host model. A schedule exploration engine replays workloads with alternate scheduling choices, classifies outcomes as schedule-stable or schedule-sensitive, and compares per-schedule memory against RPCS3 oracle baselines. A RuntimeMode enum (FaultDriven/DeterminismCheck/FullTrace) controls per-step overhead: trace record emission and hash checkpoints are gated on the mode. A criterion benchmark harness measures decode, execute, run_until_yield, content_hash, and commit_step with baseline comparison for before/after optimization tracking. The workspace compiles clean under `unsafe_code = "forbid"` and has 857+ tests across 15 crates and two binaries.
 
-Phase 6 drove CellGov through a real commercial PS3 title (flOw, NPUA80001) from ELF load to 158K+ PPU steps of boot execution. The boot survives TLS initialization, heap setup, module initialization, and early game setup before hitting the C++ static initialization off-ramp (libc module_start not executed).
+Firmware PRX loading lets CellGov load decrypted PS3 firmware modules, apply segment-aware relocations, and execute module_start through the PPU interpreter before the game's entry point. Combined with TLS pre-initialization and kernel memory allocation, this drives flOw past C++ static initialization to 337K+ PPU steps of boot execution with 30K+ distinct PCs.
 
 ### Runtime
 
@@ -18,8 +18,8 @@ Phase 6 drove CellGov through a real commercial PS3 title (flOw, NPUA80001) from
 - **Mailbox FIFO** with send/receive/block-on-empty and per-unit inbox delivery
 - **Signal registers** with OR-merge semantics
 - **Block/wake transitions** via runtime-side status overrides
-- **LV2 host model** (`cellgov_lv2`) with image registry, thread group table, SPU lifecycle management, mailbox write, group-aware join wake, and process-exit cascade
-- **HLE dispatch** with NID-based function routing, register injection (TLS r13 setup), bump allocator (_sys_malloc/_sys_free), memset, and noop-safe stubs for 140+ imported functions
+- **LV2 host model** (`cellgov_lv2`) with image registry, thread group table, SPU lifecycle management, mailbox write, group-aware join wake, process-exit cascade, mutex/event-queue create with monotonic ID allocation, and bump-allocating sys_memory_allocate for kernel memory
+- **HLE dispatch** with NID-based function routing, register injection (TLS r13 setup), bump allocator (_sys_malloc/_sys_free), memset, noop-safe stubs for 140+ imported functions, and HLE keep-list for functions that require full firmware initialization
 - **Syscall response table** for blocked PPU callers, keyed by UnitId, drained at wake time
 - **SPU factory** for runtime-driven SPU creation from `Lv2Dispatch::RegisterSpu`
 - **RuntimeMode** (FaultDriven/DeterminismCheck/FullTrace) gating trace record emission and hash checkpoints per mode, replacing the loose `skip_hash_checkpoints` flag
@@ -31,7 +31,7 @@ Phase 6 drove CellGov through a real commercial PS3 title (flOw, NPUA80001) from
 
 ### Execution units
 
-- **PPU (`cellgov_ppu`)**: PPC64 interpreter with GPRs, FPRs, PC, CR, LR, CTR, XER, TB, and 32 vector registers. Implements 79 instruction variants covering integer arithmetic/logic, load/store (D-form, indexed, with-update), branch (conditional, LR, CTR), compare, rotate/shift, floating-point (single/double loads/stores, 20+ FP63/FP59 arithmetic ops including fmadd/fmul/fdiv/fcmp/fsel/frsp/fctiwz/fcfid), VMX (25+ VX-form and VA-form vector operations), SPR/CR moves (mflr/mtlr/mfcr/mtcrf/mfctr/mftb), and cache/sync control (no-ops for deterministic model). PPU ELF64 loader handles PT_LOAD segments, BSS zero-init, and PPC64 ABI v1 function-descriptor entry points. PS3 PRX import table parser discovers imported modules and functions from PT_0x60000002 program headers. HLE stub binder writes 24-byte trampolines (OPD + lis/ori/sc/blr) and patches GOT entries. NID database covers 140+ PS3 SDK functions across 12 modules with stub classification (noop-safe/stateful/unsafe-to-stub). `PpuInstruction::variant_name()` returns a `&'static str` for zero-allocation instruction coverage tallying. Per-step `LocalDiagnostics` carries PC, faulting EA, and optional `FaultRegisterDump` (GPR[0..31], LR, CTR, CR) captured on fault for diagnostics without re-running with --trace.
+- **PPU (`cellgov_ppu`)**: PPC64 interpreter with GPRs, FPRs, PC, CR, LR, CTR, XER, TB, and 32 vector registers. Implements 79 instruction variants covering integer arithmetic/logic, load/store (D-form, indexed, with-update), branch (conditional, LR, CTR), compare, rotate/shift, floating-point (single/double loads/stores, 20+ FP63/FP59 arithmetic ops including fmadd/fmul/fdiv/fcmp/fsel/frsp/fctiwz/fcfid), VMX (25+ VX-form and VA-form vector operations), SPR/CR moves (mflr/mtlr/mfcr/mtcrf/mfctr/mftb), and cache/sync control (no-ops for deterministic model). PPU ELF64 loader handles PT_LOAD segments, BSS zero-init, PPC64 ABI v1 function-descriptor entry points, and PT_TLS segment discovery. SPRX parser and loader (`sprx` module) reads decrypted PS3 firmware PRX files (ELF64 type 0xFFA4), extracts module_info/exports/relocations, loads segments into guest memory at a chosen base, and applies 4 relocation types (R_PPC64_ADDR32, ADDR16_LO, ADDR16_HI, ADDR16_HA) with PS3 segment-relative encoding. PS3 PRX import table parser discovers imported modules and functions from PT_0x60000002 program headers. HLE stub binder writes 24-byte trampolines (OPD + lis/ori/sc/blr) and patches GOT entries. NID database covers 140+ PS3 SDK functions across 12 modules with stub classification (noop-safe/stateful/unsafe-to-stub). `PpuInstruction::variant_name()` returns a `&'static str` for zero-allocation instruction coverage tallying. Per-step `LocalDiagnostics` carries PC, faulting EA, and optional `FaultRegisterDump` (GPR[0..31], LR, CTR, CR) captured on fault for diagnostics without re-running with --trace.
 - **SPU (`cellgov_spu`)**: SPU interpreter with 128x128-bit register file, 256 KB local store, and channel file. Implements a working subset of RR/RI7/RI10/RI16/RI18/RRR formats covering constant formation, integer arithmetic, logical, compare, branch, shuffle/rotate, load/store, and channel operations. Communicates with the runtime exclusively through effects -- never reads or writes committed shared memory directly. Includes an SPU ELF loader.
 
 ### LV2 host model
@@ -42,14 +42,21 @@ Implemented syscalls:
 
 | Syscall                       | Number  | What it does                                                         |
 | ----------------------------- | ------- | -------------------------------------------------------------------- |
+| `sys_process_exit`            | 22      | Cascades Finished to all units in the process                        |
+| `sys_mutex_create`            | 100     | Allocates a monotonic mutex ID, writes to guest pointer              |
+| `sys_mutex_lock`              | 102     | Stub: returns CELL_OK (single-threaded module_start)                 |
+| `sys_mutex_unlock`            | 104     | Stub: returns CELL_OK                                                |
+| `sys_event_queue_create`      | 128     | Allocates a monotonic queue ID, writes to guest pointer              |
+| `sys_event_queue_destroy`     | 129     | Stub: returns CELL_OK                                                |
 | `sys_spu_image_open`          | 156     | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory   |
 | `sys_spu_thread_group_create` | 170     | Allocates a monotonic group id, writes it to guest pointer           |
 | `sys_spu_thread_initialize`   | 172     | Records image handle and args (copied at init time) per slot         |
 | `sys_spu_thread_group_start`  | 173     | Returns `RegisterSpu` with init state per slot; runtime creates SPUs |
 | `sys_spu_thread_group_join`   | 177/178 | Blocks caller; wakes when all SPUs in the group finish               |
 | `sys_spu_thread_write_spu_mb` | 190     | Deposits a value into the target SPU's inbound mailbox               |
+| `sys_memory_allocate`         | 348     | Bump-allocates 64KB-aligned guest memory from kernel region          |
+| `sys_memory_free`             | 349     | Stub: no-op (CellGov does not track deallocation)                    |
 | `sys_tty_write`               | 403     | Returns CELL_OK (output not captured)                                |
-| `sys_process_exit`            | 22      | Cascades Finished to all units in the process                        |
 
 HLE-dispatched sysPrxForUser functions (NID-based):
 
@@ -88,14 +95,29 @@ HLE-dispatched sysPrxForUser functions (NID-based):
 
 ### Game boot (flOw)
 
-The CLI `run-game` subcommand loads a decrypted PS3 ELF into 260 MB of guest memory and runs the PPU from the entry point with Budget=1 (instruction-level granularity). Phase 6 drove this through flOw's boot sequence:
+The CLI `run-game` subcommand loads a decrypted PS3 ELF and runs the PPU from the entry point with Budget=1 (instruction-level granularity). With `--firmware-dir`, it also loads decrypted firmware PRX modules, executes their module_start functions, and resolves game imports against real firmware exports.
 
-- **142K+ steps executed** before hitting the C++ static init off-ramp
-- **5 distinct HLE functions** dispatched (TLS init, malloc, lwmutex, time, process_exit)
-- **51 PPU instruction variants** exercised during boot
-- **No decode faults** -- all instructions in the boot path are implemented
-- **Performance**: 142K steps in ~56ms step loop time (release mode, FaultDriven), ~2.5M instructions/second. Boot progress checkpoints print every 10K steps with distinct PC count and HLE call tally.
-- **Off-ramp**: game aborts in `__cxa_guard_acquire` because libc `module_start` was never executed (pure-HLE limitation). Unblocking requires PRX module_start execution or libc state fabrication.
+Boot sequence:
+
+1. Load game ELF into guest memory, parse import tables, bind HLE trampolines
+2. Load liblv2.prx (decrypted firmware), apply 1,042 relocations, resolve 161 exports
+3. Pre-initialize TLS from the game's PT_TLS segment (kernel bootstrap)
+4. Execute liblv2 module_start (198 steps of firmware initialization)
+5. Run game CRT0 from the ELF entry point
+
+Current flOw boot metrics (release, FaultDriven mode, with firmware loading):
+
+| Metric | Value |
+|--------|-------|
+| Steps | 337,183 |
+| Distinct PCs | 30,000+ |
+| HLE calls | 500+ |
+| Module_start steps | 198 |
+| PRX relocations | 1,042 |
+| Imports resolved to real code | 0 (all 15 sysPrxForUser kept as HLE) |
+| Outcome | STALL (deep in game initialization, past static init) |
+
+The C++ static initialization blocker (`__cxa_guard_acquire` failure from uninitialized libc state) is resolved. The game now progresses past static constructors into actual game setup before hitting the next blocker (likely RSX/GCM initialization or an unimplemented instruction).
 
 ### Microtest corpus
 

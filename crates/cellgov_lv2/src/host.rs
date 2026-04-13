@@ -36,6 +36,11 @@ pub trait Lv2Runtime {
 pub struct Lv2Host {
     content: ContentStore,
     groups: ThreadGroupTable,
+    /// Monotonic ID counter for kernel objects (mutexes, event queues, etc.).
+    next_kernel_id: u32,
+    /// Bump allocator for sys_memory_allocate. Hands out 64KB-aligned
+    /// addresses from the guest memory region starting at 0x30000000.
+    mem_alloc_ptr: u32,
 }
 
 impl Default for Lv2Host {
@@ -50,7 +55,16 @@ impl Lv2Host {
         Self {
             content: ContentStore::new(),
             groups: ThreadGroupTable::new(),
+            next_kernel_id: 0x4000_0001, // start above zero to catch uninitialized use
+            mem_alloc_ptr: 0x3000_0000,  // kernel memory region start
         }
+    }
+
+    /// Allocate a monotonic kernel object ID.
+    fn alloc_id(&mut self) -> u32 {
+        let id = self.next_kernel_id;
+        self.next_kernel_id += 1;
+        id
     }
 
     /// Borrow the content store (image registry).
@@ -97,6 +111,8 @@ impl Lv2Host {
         for source in [self.content.state_hash(), self.groups.state_hash()] {
             hasher.write(&source.to_le_bytes());
         }
+        hasher.write(&self.next_kernel_id.to_le_bytes());
+        hasher.write(&self.mem_alloc_ptr.to_le_bytes());
         hasher.finish()
     }
 
@@ -132,6 +148,33 @@ impl Lv2Host {
             } => self.dispatch_group_join(group_id, cause_ptr, status_ptr),
             Lv2Request::SpuThreadWriteMb { thread_id, value } => {
                 self.dispatch_write_mb(thread_id, value, requester)
+            }
+            Lv2Request::MutexCreate { id_ptr, .. } => self.dispatch_mutex_create(id_ptr, requester),
+            Lv2Request::MutexLock { .. } | Lv2Request::MutexUnlock { .. } => {
+                // Stub: single-threaded module_start never contends.
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![],
+                }
+            }
+            Lv2Request::EventQueueCreate { id_ptr, .. } => {
+                self.dispatch_event_queue_create(id_ptr, requester)
+            }
+            Lv2Request::EventQueueDestroy { .. } => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            Lv2Request::MemoryAllocate {
+                size,
+                alloc_addr_ptr,
+                ..
+            } => self.dispatch_memory_allocate(size, alloc_addr_ptr, requester),
+            Lv2Request::MemoryFree { .. } => {
+                // Stub: no-op (CellGov doesn't track memory deallocation).
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![],
+                }
             }
             _ => Lv2Dispatch::Immediate {
                 code: 0,
@@ -364,6 +407,46 @@ impl Lv2Host {
             },
             effects: vec![],
         }
+    }
+
+    /// Build an Immediate dispatch that writes a u32 value to a guest
+    /// pointer and returns CELL_OK. Used by create-style syscalls that
+    /// allocate a kernel object and write its ID to an output parameter.
+    fn immediate_write_u32(value: u32, ptr: u32, source: UnitId) -> Lv2Dispatch {
+        let write = Effect::SharedWriteIntent {
+            range: ByteRange::new(GuestAddr::new(ptr as u64), 4).unwrap(),
+            bytes: WritePayload::from_slice(&value.to_be_bytes()),
+            ordering: PriorityClass::Normal,
+            source,
+            source_time: GuestTicks::ZERO,
+        };
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![write],
+        }
+    }
+
+    fn dispatch_mutex_create(&mut self, id_ptr: u32, requester: UnitId) -> Lv2Dispatch {
+        let id = self.alloc_id();
+        Self::immediate_write_u32(id, id_ptr, requester)
+    }
+
+    fn dispatch_event_queue_create(&mut self, id_ptr: u32, requester: UnitId) -> Lv2Dispatch {
+        let id = self.alloc_id();
+        Self::immediate_write_u32(id, id_ptr, requester)
+    }
+
+    fn dispatch_memory_allocate(
+        &mut self,
+        size: u64,
+        alloc_addr_ptr: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        // Align to 64KB boundary.
+        let align = 0x10000u32;
+        let aligned_ptr = (self.mem_alloc_ptr + align - 1) & !(align - 1);
+        self.mem_alloc_ptr = aligned_ptr + size as u32;
+        Self::immediate_write_u32(aligned_ptr, alloc_addr_ptr, requester)
     }
 
     fn dispatch_write_mb(&self, thread_id: u32, value: u32, requester: UnitId) -> Lv2Dispatch {
@@ -894,5 +977,163 @@ mod tests {
             Lv2Dispatch::Immediate { code, .. } => assert_ne!(code, 0),
             other => panic!("expected Immediate error, got {other:?}"),
         }
+    }
+
+    // -- Phase 7 syscall dispatch tests --
+
+    /// Extract the big-endian u32 value from a SharedWriteIntent effect.
+    fn extract_write_u32(effect: &cellgov_effects::Effect) -> u32 {
+        match effect {
+            cellgov_effects::Effect::SharedWriteIntent { bytes, .. } => {
+                let b = bytes.bytes();
+                assert_eq!(b.len(), 4);
+                u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+            }
+            other => panic!("expected SharedWriteIntent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mutex_create_allocates_monotonic_ids() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let source = UnitId::new(0);
+
+        let r1 = host.dispatch(
+            Lv2Request::MutexCreate {
+                id_ptr: 0x100,
+                attr_ptr: 0x200,
+            },
+            source,
+            &rt,
+        );
+        let r2 = host.dispatch(
+            Lv2Request::MutexCreate {
+                id_ptr: 0x104,
+                attr_ptr: 0x200,
+            },
+            source,
+            &rt,
+        );
+
+        let id1 = match &r1 {
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: e,
+            } => extract_write_u32(&e[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+        let id2 = match &r2 {
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: e,
+            } => extract_write_u32(&e[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+        assert_ne!(id1, id2, "IDs should be monotonically different");
+        assert!(id1 > 0 && id2 > 0, "IDs should be non-zero");
+    }
+
+    #[test]
+    fn event_queue_create_allocates_id() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let result = host.dispatch(
+            Lv2Request::EventQueueCreate {
+                id_ptr: 0x100,
+                attr_ptr: 0x200,
+                key: 0,
+                size: 64,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code: 0, effects } => {
+                assert_eq!(effects.len(), 1);
+                let id = extract_write_u32(&effects[0]);
+                assert!(id > 0, "queue ID should be non-zero");
+            }
+            other => panic!("expected Immediate(0), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn memory_allocate_returns_aligned_sequential_addresses() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let source = UnitId::new(0);
+
+        let addr1 = match host.dispatch(
+            Lv2Request::MemoryAllocate {
+                size: 0x10000,
+                flags: 0x200,
+                alloc_addr_ptr: 0x100,
+            },
+            source,
+            &rt,
+        ) {
+            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+        let addr2 = match host.dispatch(
+            Lv2Request::MemoryAllocate {
+                size: 0x10000,
+                flags: 0x200,
+                alloc_addr_ptr: 0x104,
+            },
+            source,
+            &rt,
+        ) {
+            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+
+        assert_eq!(addr1 & 0xFFFF, 0, "addr1 not 64KB-aligned");
+        assert_eq!(addr2 & 0xFFFF, 0, "addr2 not 64KB-aligned");
+        assert!(
+            addr2 >= addr1 + 0x10000,
+            "allocations overlap: 0x{addr1:x} and 0x{addr2:x}"
+        );
+    }
+
+    #[test]
+    fn mutex_lock_unlock_are_noop_stubs() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        for req in [
+            Lv2Request::MutexLock {
+                mutex_id: 1,
+                timeout: 0,
+            },
+            Lv2Request::MutexUnlock { mutex_id: 1 },
+        ] {
+            let result = host.dispatch(req, UnitId::new(0), &rt);
+            assert_eq!(
+                result,
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![]
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn memory_free_is_noop_stub() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::MemoryFree { addr: 0x3000_0000 },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(
+            result,
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![]
+            }
+        );
     }
 }

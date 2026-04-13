@@ -189,7 +189,7 @@ fn main() {
     if args[1] == "run-game" {
         let elf_path = args.get(2).map(String::as_str).unwrap_or_else(|| {
             eprintln!(
-                "usage: cellgov_cli run-game <elf-path> [--max-steps N] [--trace] [--profile]"
+                "usage: cellgov_cli run-game <elf-path> [--max-steps N] [--trace] [--profile] [--firmware-dir DIR]"
             );
             std::process::exit(1);
         });
@@ -198,7 +198,8 @@ fn main() {
             .unwrap_or(100_000);
         let trace = args.iter().any(|a| a == "--trace");
         let profile = args.iter().any(|a| a == "--profile");
-        game::run_game(elf_path, max_steps, trace, profile);
+        let firmware_dir = find_flag_value(&args, "--firmware-dir");
+        game::run_game(elf_path, max_steps, trace, profile, firmware_dir.as_deref());
         return;
     }
 

@@ -47,8 +47,10 @@ Current capabilities:
 - commit pipeline processing 9 effect types (writes, mailbox, DMA, signals, wake/block, faults, trace markers) with fast-path skip for zero-effect steps
 - real PPU interpreter with 79 instruction variants covering integer, FP, branch, compare, rotate/shift, VMX, load/store, and SPR/CR operations
 - real SPU interpreter (128x128-bit register file, 256 KB local store, channel file)
-- LV2 host model with 8 working syscalls (SPU image/thread-group lifecycle, mailbox write, join wake, process exit)
-- HLE import infrastructure: PRX import table parser, NID database (140+ functions across 12 PS3 modules with stub classification), 24-byte GOT-patching trampolines, NID-based runtime dispatch for TLS init, malloc, memset, and process exit
+- LV2 host model with 13 working syscalls (SPU lifecycle, mutex create/lock/unlock, event queue create/destroy, memory allocate/free, mailbox write, TTY write, process exit)
+- firmware PRX loading: SPRX parser for decrypted PS3 firmware modules (ELF64 type 0xFFA4), segment loader with 4 relocation types (ADDR32, ADDR16_LO/HI/HA) using PS3 segment-relative encoding, export table extraction, and module_start execution through the PPU interpreter
+- HLE import infrastructure: PRX import table parser, NID database (140+ functions across 12 PS3 modules with stub classification), 24-byte GOT-patching trampolines, NID-based runtime dispatch for TLS init, malloc, memset, and process exit, with HLE keep-list for functions that depend on incomplete firmware initialization
+- kernel bootstrap: TLS pre-initialization from the game ELF's PT_TLS segment, bump-allocating kernel memory for sys_memory_allocate, monotonic ID allocation for kernel objects
 - RuntimeMode enum (FaultDriven/DeterminismCheck/FullTrace) controlling trace and hash checkpoint overhead
 - binary trace format with categorical filtering, encode/decode roundtrip, and mode-gated emission
 - FNV-1a state hashing with cached content_hash and mode-gated checkpoints for large guest memories
@@ -57,12 +59,10 @@ Current capabilities:
 - oracle-aware exploration comparing per-schedule memory against RPCS3 baselines
 - comparison harness with strict/memory/events/prefix modes and RPCS3 oracle validation
 - six PSL1GHT-compiled microtests matching RPCS3 interpreter + LLVM baselines
-- real game boot: flOw (NPUA80001) loads into 260 MB guest memory and executes 142K+ PPU steps through CRT0, TLS init, heap setup, and module initialization
+- real game boot: flOw (NPUA80001) boots past C++ static initialization into game setup -- 337K+ PPU steps, 30K+ distinct PCs, 500+ HLE calls, with liblv2.prx loaded and module_start executed before the game entry point
 - criterion benchmark harness for decode, execute, run_until_yield, content_hash, and commit_step with baseline comparison
-- CLI with run, dump, compare, explore, and run-game subcommands (human + JSON output, per-step trace, instruction coverage, boot progress checkpoints, register dump and mini-trace on fault, HLE import classification summary)
-- 824 tests across 15 crates and two binaries, zero `unsafe`, 82% line coverage
-
-Known limitation: real game boot requires PRX module_start execution (or equivalent libc state fabrication) to proceed past C++ static initialization. The pure-HLE approach is sufficient for PSL1GHT microtests but not for games built with the Sony SDK's full C++ runtime. Implementation forthcoming.
+- CLI with run, dump, compare, explore, and run-game subcommands (human + JSON output, per-step trace, instruction coverage, boot progress checkpoints, register dump and mini-trace on fault, HLE import classification summary, `--firmware-dir` for PRX loading)
+- 857+ tests across 15 crates and two binaries, zero `unsafe`
 
 ## Workspace
 

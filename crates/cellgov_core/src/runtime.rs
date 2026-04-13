@@ -162,6 +162,7 @@ pub enum RuntimeMode {
     FullTrace,
 }
 
+/// Deterministic step-loop runtime over guest memory and registered units.
 pub struct Runtime {
     pub(crate) registry: UnitRegistry,
     mailbox_registry: MailboxRegistry,
@@ -711,6 +712,15 @@ impl Runtime {
     #[inline]
     pub fn memory(&self) -> &GuestMemory {
         &self.memory
+    }
+
+    /// Consume the runtime and return its guest memory.
+    ///
+    /// Used to chain execution phases: run module_start in one runtime,
+    /// extract the memory (now containing initialized state), and create
+    /// a new runtime for the game's entry point.
+    pub fn into_memory(self) -> GuestMemory {
+        self.memory
     }
 
     /// Current guest time. Advances by `result.consumed_budget` after

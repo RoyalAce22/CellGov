@@ -37,9 +37,13 @@ pub fn build_overrides(branch_step: usize, choice: UnitId) -> Vec<Option<UnitId>
 
 /// Result of iterating over branching-point alternates.
 pub struct AlternateIteration {
+    /// Per-schedule outcomes.
     pub schedules: Vec<ScheduleRecord>,
+    /// True if the exploration hit the max-schedule or max-step bound.
     pub bounds_hit: bool,
+    /// True if at least one alternate produced a different memory hash.
     pub found_divergence: bool,
+    /// Number of alternates skipped by dependency pruning.
     pub schedules_pruned: usize,
 }
 

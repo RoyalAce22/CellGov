@@ -31,9 +31,11 @@ pub struct StepFootprint {
     pub dma_ranges: Vec<ByteRange>,
     /// Signals updated.
     pub signal_updates: Vec<SignalId>,
-    /// Barrier/mailbox/signal wait targets.
+    /// Mailbox wait targets.
     pub wait_mailboxes: Vec<MailboxId>,
+    /// Signal wait targets.
     pub wait_signals: Vec<SignalId>,
+    /// Barrier wait targets.
     pub wait_barriers: Vec<BarrierId>,
     /// Units explicitly woken.
     pub wake_targets: Vec<cellgov_event::UnitId>,
