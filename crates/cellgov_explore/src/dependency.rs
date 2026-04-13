@@ -418,6 +418,23 @@ mod tests {
         assert!(a.conflicts(&b));
     }
 
+    #[test]
+    fn wait_vs_wake_conflicts_symmetric() {
+        // Reverse direction of wake_vs_wait: a waits, b wakes.
+        let a = StepFootprint::from_effects(&[Effect::WaitOnEvent {
+            target: cellgov_effects::WaitTarget::Mailbox(MailboxId::new(1)),
+            source: UnitId::new(0),
+        }]);
+        let b = StepFootprint::from_effects(&[Effect::WakeUnit {
+            target: UnitId::new(3),
+            source: UnitId::new(1),
+        }]);
+        assert!(
+            a.conflicts(&b),
+            "wait vs wake should conflict symmetrically"
+        );
+    }
+
     // -- Barrier conflicts --
 
     #[test]

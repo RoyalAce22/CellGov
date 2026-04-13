@@ -20,3 +20,8 @@ cellgov_compare = { path = "../cellgov_compare" }
 cellgov_core = { path = "../cellgov_core" }
 cellgov_spu = { path = "../cellgov_spu" }
 cellgov_testkit = { path = "../cellgov_testkit" }
+criterion.workspace = true
+
+[[bench]]
+name = "ppu_bench"
+harness = false

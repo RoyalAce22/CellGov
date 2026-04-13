@@ -25,5 +25,8 @@ edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 
+[workspace.dependencies]
+criterion = { version = "0.5", default-features = false }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"

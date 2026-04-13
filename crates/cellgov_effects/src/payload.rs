@@ -7,46 +7,93 @@
 
 use cellgov_sync::{BarrierId, MailboxId, SignalId};
 
+/// Max bytes stored inline without heap allocation.
+const INLINE_CAP: usize = 16;
+
 /// The bytes a `SharedWriteIntent` will deposit into its target range.
 ///
-/// `WritePayload` is a thin wrapper around `Vec<u8>` that exposes the
-/// bytes by reference. The wrapper exists so the public effect API does
-/// not leak `Vec<u8>` mutability and so future representations (small
-/// inline buffer, sharded payloads, etc.) can slot in without changing
-/// every call site.
+/// Payloads up to 16 bytes are stored inline on the stack. Larger
+/// payloads spill to a heap-allocated `Vec<u8>`. All current PPU
+/// stores (1/2/4/8/16 bytes) and LV2 writes fit within the inline
+/// buffer, so the hot path never allocates.
 ///
 /// The runtime checks that `payload.len() == range.length()` at commit
 /// validation time; that check is not duplicated here so that this type
 /// can be constructed in isolation in tests.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WritePayload {
-    bytes: Vec<u8>,
+    storage: PayloadStorage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum PayloadStorage {
+    Inline { buf: [u8; INLINE_CAP], len: u8 },
+    Heap(Vec<u8>),
 }
 
 impl WritePayload {
     /// Construct a `WritePayload` from owned bytes.
     #[inline]
     pub fn new(bytes: Vec<u8>) -> Self {
-        Self { bytes }
+        if bytes.len() <= INLINE_CAP {
+            let mut buf = [0u8; INLINE_CAP];
+            buf[..bytes.len()].copy_from_slice(&bytes);
+            Self {
+                storage: PayloadStorage::Inline {
+                    buf,
+                    len: bytes.len() as u8,
+                },
+            }
+        } else {
+            Self {
+                storage: PayloadStorage::Heap(bytes),
+            }
+        }
+    }
+
+    /// Construct a `WritePayload` from a byte slice. Avoids an
+    /// intermediate `Vec` allocation for slices that fit inline.
+    #[inline]
+    pub fn from_slice(src: &[u8]) -> Self {
+        if src.len() <= INLINE_CAP {
+            let mut buf = [0u8; INLINE_CAP];
+            buf[..src.len()].copy_from_slice(src);
+            Self {
+                storage: PayloadStorage::Inline {
+                    buf,
+                    len: src.len() as u8,
+                },
+            }
+        } else {
+            Self {
+                storage: PayloadStorage::Heap(src.to_vec()),
+            }
+        }
     }
 
     /// View the payload bytes.
     #[inline]
     pub fn bytes(&self) -> &[u8] {
-        &self.bytes
+        match &self.storage {
+            PayloadStorage::Inline { buf, len } => &buf[..*len as usize],
+            PayloadStorage::Heap(v) => v,
+        }
     }
 
     /// Length of the payload in bytes.
     #[inline]
     pub fn len(&self) -> usize {
-        self.bytes.len()
+        match &self.storage {
+            PayloadStorage::Inline { len, .. } => *len as usize,
+            PayloadStorage::Heap(v) => v.len(),
+        }
     }
 
     /// Whether the payload carries zero bytes. Zero-length writes are
     /// degenerate but legal -- the runtime trace still records them.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.bytes.is_empty()
+        self.len() == 0
     }
 }
 
@@ -135,6 +182,53 @@ mod tests {
         let c = WritePayload::new(vec![1, 2, 4]);
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn from_slice_matches_new() {
+        let data = [0xDE, 0xAD, 0xBE, 0xEF];
+        let a = WritePayload::new(data.to_vec());
+        let b = WritePayload::from_slice(&data);
+        assert_eq!(a, b);
+        assert_eq!(b.bytes(), &data);
+        assert_eq!(b.len(), 4);
+    }
+
+    #[test]
+    fn from_slice_empty() {
+        let p = WritePayload::from_slice(&[]);
+        assert!(p.is_empty());
+        assert_eq!(p.len(), 0);
+        assert_eq!(p.bytes(), &[]);
+    }
+
+    #[test]
+    fn inline_at_boundary() {
+        // Exactly INLINE_CAP bytes should stay inline.
+        let data = [0xAB; INLINE_CAP];
+        let p = WritePayload::from_slice(&data);
+        assert_eq!(p.len(), INLINE_CAP);
+        assert_eq!(p.bytes(), &data);
+        // Verify it matches the Vec path.
+        assert_eq!(p, WritePayload::new(data.to_vec()));
+    }
+
+    #[test]
+    fn heap_above_boundary() {
+        // INLINE_CAP + 1 bytes should spill to heap.
+        let data = vec![0xCD; INLINE_CAP + 1];
+        let p = WritePayload::from_slice(&data);
+        assert_eq!(p.len(), INLINE_CAP + 1);
+        assert_eq!(p.bytes(), data.as_slice());
+        assert_eq!(p, WritePayload::new(data));
+    }
+
+    #[test]
+    fn clone_preserves_storage() {
+        let inline = WritePayload::from_slice(&[1, 2, 3]);
+        let heap = WritePayload::from_slice(&[0xFF; INLINE_CAP + 1]);
+        assert_eq!(inline.clone(), inline);
+        assert_eq!(heap.clone(), heap);
     }
 
     #[test]

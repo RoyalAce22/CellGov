@@ -466,9 +466,156 @@ pub enum PpuInstruction {
     Sc,
 }
 
+impl PpuInstruction {
+    /// Return the variant name as a static string, without formatting
+    /// the fields. Used for instruction coverage tallying without
+    /// per-step heap allocation.
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Self::Lwz { .. } => "Lwz",
+            Self::Lbz { .. } => "Lbz",
+            Self::Lhz { .. } => "Lhz",
+            Self::Lha { .. } => "Lha",
+            Self::Lwzu { .. } => "Lwzu",
+            Self::Ld { .. } => "Ld",
+            Self::Stw { .. } => "Stw",
+            Self::Stwu { .. } => "Stwu",
+            Self::Stdu { .. } => "Stdu",
+            Self::Stb { .. } => "Stb",
+            Self::Sth { .. } => "Sth",
+            Self::Std { .. } => "Std",
+            Self::Addi { .. } => "Addi",
+            Self::Addis { .. } => "Addis",
+            Self::Subfic { .. } => "Subfic",
+            Self::Mulli { .. } => "Mulli",
+            Self::Addic { .. } => "Addic",
+            Self::Add { .. } => "Add",
+            Self::Or { .. } => "Or",
+            Self::Subf { .. } => "Subf",
+            Self::Neg { .. } => "Neg",
+            Self::Mullw { .. } => "Mullw",
+            Self::Mulhwu { .. } => "Mulhwu",
+            Self::Divw { .. } => "Divw",
+            Self::Divwu { .. } => "Divwu",
+            Self::And { .. } => "And",
+            Self::Andc { .. } => "Andc",
+            Self::Nor { .. } => "Nor",
+            Self::Xor { .. } => "Xor",
+            Self::AndiDot { .. } => "AndiDot",
+            Self::Slw { .. } => "Slw",
+            Self::Srw { .. } => "Srw",
+            Self::Srawi { .. } => "Srawi",
+            Self::Sld { .. } => "Sld",
+            Self::Srd { .. } => "Srd",
+            Self::Cntlzw { .. } => "Cntlzw",
+            Self::Extsh { .. } => "Extsh",
+            Self::Extsb { .. } => "Extsb",
+            Self::Extsw { .. } => "Extsw",
+            Self::Ori { .. } => "Ori",
+            Self::Oris { .. } => "Oris",
+            Self::Cmpwi { .. } => "Cmpwi",
+            Self::Cmplwi { .. } => "Cmplwi",
+            Self::Cmpw { .. } => "Cmpw",
+            Self::Cmplw { .. } => "Cmplw",
+            Self::Cmpd { .. } => "Cmpd",
+            Self::Cmpld { .. } => "Cmpld",
+            Self::B { .. } => "B",
+            Self::Bc { .. } => "Bc",
+            Self::Bclr { .. } => "Bclr",
+            Self::Bcctr { .. } => "Bcctr",
+            Self::Lwzx { .. } => "Lwzx",
+            Self::Lbzx { .. } => "Lbzx",
+            Self::Ldx { .. } => "Ldx",
+            Self::Lhzx { .. } => "Lhzx",
+            Self::Stwx { .. } => "Stwx",
+            Self::Stdx { .. } => "Stdx",
+            Self::Stbx { .. } => "Stbx",
+            Self::Mftb { .. } => "Mftb",
+            Self::Mfcr { .. } => "Mfcr",
+            Self::Mtcrf { .. } => "Mtcrf",
+            Self::Mflr { .. } => "Mflr",
+            Self::Mtlr { .. } => "Mtlr",
+            Self::Mfctr { .. } => "Mfctr",
+            Self::Mtctr { .. } => "Mtctr",
+            Self::Rlwinm { .. } => "Rlwinm",
+            Self::Rldicl { .. } => "Rldicl",
+            Self::Rldicr { .. } => "Rldicr",
+            Self::Vx { .. } => "Vx",
+            Self::Va { .. } => "Va",
+            Self::Vxor { .. } => "Vxor",
+            Self::Stvx { .. } => "Stvx",
+            Self::Lfs { .. } => "Lfs",
+            Self::Lfd { .. } => "Lfd",
+            Self::Stfs { .. } => "Stfs",
+            Self::Stfd { .. } => "Stfd",
+            Self::Fp63 { .. } => "Fp63",
+            Self::Fp59 { .. } => "Fp59",
+            Self::Sc => "Sc",
+        }
+    }
+}
+
 /// Why decoding failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PpuDecodeError {
     /// No matching encoding for this 32-bit word.
     Unsupported(u32),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variant_name_matches_debug_prefix() {
+        // Spot-check that variant_name returns the same string as the
+        // Debug impl's variant prefix.
+        let cases: &[PpuInstruction] = &[
+            PpuInstruction::Addi {
+                rt: 0,
+                ra: 0,
+                imm: 0,
+            },
+            PpuInstruction::Lwz {
+                rt: 0,
+                ra: 0,
+                imm: 0,
+            },
+            PpuInstruction::B {
+                offset: 0,
+                link: false,
+            },
+            PpuInstruction::Sc,
+            PpuInstruction::Fp63 {
+                xo: 0,
+                frt: 0,
+                fra: 0,
+                frb: 0,
+                frc: 0,
+            },
+        ];
+        for insn in cases {
+            let debug = format!("{insn:?}");
+            let prefix = debug
+                .split_once([' ', '{'])
+                .map(|(n, _)| n)
+                .unwrap_or(&debug);
+            assert_eq!(
+                insn.variant_name(),
+                prefix,
+                "variant_name mismatch for {debug}"
+            );
+        }
+    }
+
+    #[test]
+    fn variant_name_is_static() {
+        let insn = PpuInstruction::Add {
+            rt: 3,
+            ra: 4,
+            rb: 5,
+        };
+        let name: &'static str = insn.variant_name();
+        assert_eq!(name, "Add");
+    }
 }

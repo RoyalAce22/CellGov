@@ -35,6 +35,6 @@ pub mod syscall_table;
 
 pub use commit::{BlockReason, CommitContext, CommitError, CommitOutcome, CommitPipeline};
 pub use registry::{RegisteredUnit, UnitRegistry};
-pub use runtime::{Runtime, RuntimeStep, SpuFactory, StepError};
+pub use runtime::{Runtime, RuntimeMode, RuntimeStep, SpuFactory, StepError};
 pub use scheduler::{RoundRobinScheduler, Scheduler};
 pub use syscall_table::SyscallResponseTable;

@@ -1,13 +1,27 @@
 //! `run-game` subcommand: load a decrypted PS3 ELF and run the PPU
 //! until fault, stall, or step limit.
 
-use cellgov_core::{Runtime, StepError};
+use std::time::Instant;
+
+use cellgov_core::{Runtime, RuntimeMode, StepError};
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_time::Budget;
 
 use super::{die, load_file_or_die};
 
-pub fn run_game(elf_path: &str, max_steps: usize, trace: bool) {
+/// Fetch a 32-bit big-endian instruction word from guest memory at `pc`.
+fn fetch_raw_at(rt: &Runtime, pc: u64) -> Option<u32> {
+    let m = rt.memory().as_bytes();
+    let a = pc as usize;
+    if a + 4 <= m.len() {
+        Some(u32::from_be_bytes([m[a], m[a + 1], m[a + 2], m[a + 3]]))
+    } else {
+        None
+    }
+}
+
+pub fn run_game(elf_path: &str, max_steps: usize, trace: bool, profile: bool) {
+    let t_start = Instant::now();
     let elf_data = load_file_or_die(elf_path);
 
     // Determine memory size from ELF segments.
@@ -18,12 +32,14 @@ pub fn run_game(elf_path: &str, max_steps: usize, trace: bool) {
     let mem_size = ((required_size + 0xFFFF) & !0xFFFF) + 0x100000;
     let mut state = cellgov_ppu::state::PpuState::new();
     let mut mem = cellgov_mem::GuestMemory::new(mem_size);
+    let t_mem_alloc = t_start.elapsed();
 
     // Address 0 must stay zero: CRT0 linked lists use *NULL as a
     // termination sentinel. No exit stub is planted here.
 
     let load_result = cellgov_ppu::loader::load_ppu_elf(&elf_data, &mut mem, &mut state)
         .unwrap_or_else(|e| die(&format!("failed to load ELF: {e:?}")));
+    let t_elf_load = t_start.elapsed();
 
     // Parse and bind HLE import stubs.
     let hle_bindings = match cellgov_ppu::prx::parse_imports(&elf_data) {
@@ -42,6 +58,7 @@ pub fn run_game(elf_path: &str, max_steps: usize, trace: bool) {
             vec![]
         }
     };
+    let t_hle_bind = t_start.elapsed();
 
     // Patch the game's libc malloc entry points to redirect to the
     // _sys_malloc HLE stub, bypassing uninitialized heap arenas.
@@ -62,10 +79,19 @@ pub fn run_game(elf_path: &str, max_steps: usize, trace: bool) {
     println!("max_steps: {max_steps}");
     println!();
 
+    if profile {
+        println!("startup timing:");
+        println!("  file read + mem alloc: {:?}", t_mem_alloc);
+        println!("  ELF load:             {:?}", t_elf_load - t_mem_alloc);
+        println!("  HLE bind:             {:?}", t_hle_bind - t_elf_load);
+        println!("  total startup:        {:?}", t_hle_bind);
+        println!();
+    }
+
     // Budget=1 gives instruction-level fault granularity: each
     // runtime step executes exactly one PPU instruction.
     let mut rt = Runtime::new(mem, Budget::new(1), max_steps);
-    rt.set_skip_hash_checkpoints(true);
+    rt.set_mode(RuntimeMode::FaultDriven);
     // Place HLE heap after TLS area (0x10400000 + 64KB for TLS).
     rt.set_hle_heap_base(0x10410000);
     // Build HLE NID table so the runtime can dispatch specific
@@ -80,72 +106,185 @@ pub fn run_game(elf_path: &str, max_steps: usize, trace: bool) {
     });
 
     let mut steps: usize = 0;
+    let mut distinct_pcs: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
     let mut hle_calls: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
-    let mut insn_coverage: std::collections::BTreeMap<String, usize> =
+    let mut insn_coverage: std::collections::BTreeMap<&'static str, usize> =
         std::collections::BTreeMap::new();
+    let mut timing = if profile {
+        Some(StepTiming::default())
+    } else {
+        None
+    };
 
-    let outcome = step_loop(
-        &mut rt,
-        &mut steps,
-        &mut hle_calls,
-        &mut insn_coverage,
-        &hle_bindings,
+    let t_loop_start = Instant::now();
+    let mut loop_ctx = StepLoopCtx {
+        steps: &mut steps,
+        distinct_pcs: &mut distinct_pcs,
+        hle_calls: &mut hle_calls,
+        insn_coverage: &mut insn_coverage,
+        hle_bindings: &hle_bindings,
         trace,
-    );
+        timing: &mut timing,
+        loop_start: t_loop_start,
+        pc_ring: [0; PC_RING_SIZE],
+        pc_ring_pos: 0,
+    };
+    let outcome = step_loop(&mut rt, &mut loop_ctx);
+    let t_loop = t_loop_start.elapsed();
 
     println!("outcome: {outcome}");
     println!("steps: {steps}");
     print_hle_summary(&hle_calls, &hle_bindings);
     print_insn_coverage(&insn_coverage);
+
+    if let Some(t) = &timing {
+        println!();
+        println!("profile:");
+        println!("  total loop:    {:?}", t_loop);
+        println!(
+            "  step (sched):  {:?}  ({:.1}%)",
+            t.step_time,
+            pct(t.step_time, t_loop)
+        );
+        println!(
+            "  commit:        {:?}  ({:.1}%)",
+            t.commit_time,
+            pct(t.commit_time, t_loop)
+        );
+        println!(
+            "  coverage tally:{:?}  ({:.1}%)",
+            t.coverage_time,
+            pct(t.coverage_time, t_loop)
+        );
+        let overhead = t_loop
+            .saturating_sub(t.step_time)
+            .saturating_sub(t.commit_time)
+            .saturating_sub(t.coverage_time);
+        println!(
+            "  other overhead:{:?}  ({:.1}%)",
+            overhead,
+            pct(overhead, t_loop)
+        );
+        println!(
+            "  steps/sec:     {:.0}",
+            steps as f64 / t_loop.as_secs_f64()
+        );
+    }
 }
 
-fn step_loop(
-    rt: &mut Runtime,
-    steps: &mut usize,
-    hle_calls: &mut std::collections::BTreeMap<u32, usize>,
-    insn_coverage: &mut std::collections::BTreeMap<String, usize>,
-    hle_bindings: &[cellgov_ppu::prx::HleBinding],
+fn pct(part: std::time::Duration, total: std::time::Duration) -> f64 {
+    if total.is_zero() {
+        0.0
+    } else {
+        100.0 * part.as_secs_f64() / total.as_secs_f64()
+    }
+}
+
+#[derive(Default)]
+struct StepTiming {
+    step_time: std::time::Duration,
+    commit_time: std::time::Duration,
+    coverage_time: std::time::Duration,
+}
+
+const PC_RING_SIZE: usize = 16;
+
+struct StepLoopCtx<'a> {
+    steps: &'a mut usize,
+    distinct_pcs: &'a mut std::collections::BTreeSet<u64>,
+    hle_calls: &'a mut std::collections::BTreeMap<u32, usize>,
+    insn_coverage: &'a mut std::collections::BTreeMap<&'static str, usize>,
+    hle_bindings: &'a [cellgov_ppu::prx::HleBinding],
     trace: bool,
-) -> String {
+    timing: &'a mut Option<StepTiming>,
+    loop_start: Instant,
+    /// Ring buffer of recent PCs for mini-trace on fault.
+    pc_ring: [u64; PC_RING_SIZE],
+    pc_ring_pos: usize,
+}
+
+fn step_loop(rt: &mut Runtime, ctx: &mut StepLoopCtx<'_>) -> String {
     loop {
-        match rt.step() {
+        let t0 = Instant::now();
+        let step_result = rt.step();
+        let t1 = Instant::now();
+
+        match step_result {
             Ok(step) => {
-                *steps += 1;
-                // Tally instruction coverage from the PC.
+                *ctx.steps += 1;
+
                 if let Some(pc) = step.result.local_diagnostics.pc {
-                    let m = rt.memory().as_bytes();
-                    let a = pc as usize;
-                    if a + 4 <= m.len() {
-                        let raw = u32::from_be_bytes([m[a], m[a + 1], m[a + 2], m[a + 3]]);
+                    ctx.distinct_pcs.insert(pc);
+                    ctx.pc_ring[ctx.pc_ring_pos % PC_RING_SIZE] = pc;
+                    ctx.pc_ring_pos += 1;
+                }
+
+                // Progress checkpoint every 10K steps.
+                if *ctx.steps % 10_000 == 0 {
+                    let elapsed = ctx.loop_start.elapsed();
+                    println!(
+                        "  [{:>6}] {:.1?} elapsed, {} distinct PCs, {} HLE calls",
+                        ctx.steps,
+                        elapsed,
+                        ctx.distinct_pcs.len(),
+                        ctx.hle_calls.values().sum::<usize>(),
+                    );
+                }
+
+                // Tally instruction coverage from the PC.
+                let t_cov_start = Instant::now();
+                if let Some(pc) = step.result.local_diagnostics.pc {
+                    if let Some(raw) = fetch_raw_at(rt, pc) {
                         let name = match cellgov_ppu::decode::decode(raw) {
-                            Ok(insn) => format!("{insn:?}")
-                                .split_once([' ', '{'])
-                                .map(|(n, _)| n.to_string())
-                                .unwrap_or_else(|| format!("{insn:?}")),
-                            Err(_) => "DECODE_ERROR".to_string(),
+                            Ok(insn) => insn.variant_name(),
+                            Err(_) => "DECODE_ERROR",
                         };
-                        *insn_coverage.entry(name).or_insert(0) += 1;
+                        *ctx.insn_coverage.entry(name).or_insert(0) += 1;
                     }
                 }
-                if trace {
-                    print_trace_line(rt, &step.result, *steps, hle_bindings);
+                let t_cov_end = Instant::now();
+
+                if ctx.trace {
+                    print_trace_line(rt, &step.result, *ctx.steps, ctx.hle_bindings);
                 }
                 // Track HLE/LV2 calls before commit.
                 if let Some(args) = &step.result.syscall_args {
                     if args[0] >= 0x10000 {
                         let idx = (args[0] - 0x10000) as u32;
-                        *hle_calls.entry(idx).or_insert(0) += 1;
+                        *ctx.hle_calls.entry(idx).or_insert(0) += 1;
                     }
                 }
+
+                let t2 = Instant::now();
                 let _ = rt.commit_step(&step.result);
+                let t3 = Instant::now();
+
+                if let Some(t) = ctx.timing.as_mut() {
+                    t.step_time += t1 - t0;
+                    t.commit_time += t3 - t2;
+                    t.coverage_time += t_cov_end - t_cov_start;
+                }
 
                 if let Some(fault) = &step.result.fault {
-                    break format_fault(rt, &step.result, fault, *steps);
+                    break format_fault(
+                        rt,
+                        &step.result,
+                        fault,
+                        *ctx.steps,
+                        &ctx.pc_ring,
+                        ctx.pc_ring_pos,
+                    );
                 }
             }
-            Err(StepError::NoRunnableUnit) => break format!("STALL after {} steps", steps),
-            Err(StepError::MaxStepsExceeded) => break format!("MAX_STEPS after {} steps", steps),
-            Err(StepError::TimeOverflow) => break format!("TIME_OVERFLOW after {} steps", steps),
+            Err(StepError::NoRunnableUnit) => {
+                break format!("STALL after {} steps", ctx.steps);
+            }
+            Err(StepError::MaxStepsExceeded) => {
+                break format!("MAX_STEPS after {} steps", ctx.steps);
+            }
+            Err(StepError::TimeOverflow) => {
+                break format!("TIME_OVERFLOW after {} steps", ctx.steps);
+            }
         }
     }
 }
@@ -157,13 +296,7 @@ fn print_trace_line(
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) {
     if let Some(pc) = result.local_diagnostics.pc {
-        let m = rt.memory().as_bytes();
-        let a = pc as usize;
-        let raw = if a + 4 <= m.len() {
-            u32::from_be_bytes([m[a], m[a + 1], m[a + 2], m[a + 3]])
-        } else {
-            0
-        };
+        let raw = fetch_raw_at(rt, pc).unwrap_or(0);
         println!(
             "[{steps:>4}] PC=0x{pc:08x}  raw=0x{raw:08x}  yr={:?}",
             result.yield_reason
@@ -206,33 +339,29 @@ fn format_fault(
     result: &cellgov_exec::ExecutionStepResult,
     fault: &cellgov_effects::FaultKind,
     steps: usize,
+    pc_ring: &[u64; PC_RING_SIZE],
+    pc_ring_pos: usize,
 ) -> String {
     let pc = result.local_diagnostics.pc;
     let pc_str = pc
         .map(|a| format!("0x{a:08x}"))
         .unwrap_or_else(|| "?".to_string());
-    let desc = format!("{fault:?}");
+    use cellgov_ppu::{
+        FAULT_DECODE_ERROR, FAULT_INVALID_ADDRESS, FAULT_PC_OUT_OF_RANGE, FAULT_UNSUPPORTED_SYSCALL,
+    };
     let detail = match fault {
         cellgov_effects::FaultKind::Guest(code) => {
             let fault_type = code & 0xFFFF_0000;
             match fault_type {
-                0x0102_0000 => format!("PC_OUT_OF_RANGE at PC={pc_str}"),
-                0x0105_0000 => {
+                FAULT_PC_OUT_OF_RANGE => format!("PC_OUT_OF_RANGE at PC={pc_str}"),
+                FAULT_DECODE_ERROR => {
                     let raw_str = pc
-                        .and_then(|a| {
-                            let a = a as usize;
-                            let m = rt.memory().as_bytes();
-                            if a + 4 <= m.len() {
-                                let w = u32::from_be_bytes([m[a], m[a + 1], m[a + 2], m[a + 3]]);
-                                Some(format!("0x{w:08x}"))
-                            } else {
-                                None
-                            }
-                        })
+                        .and_then(|a| fetch_raw_at(rt, a))
+                        .map(|w| format!("0x{w:08x}"))
                         .unwrap_or_else(|| "?".to_string());
                     format!("DECODE_ERROR at PC={pc_str} (raw={raw_str})")
                 }
-                0x0106_0000 => {
+                FAULT_INVALID_ADDRESS => {
                     let ea_str = result
                         .local_diagnostics
                         .faulting_ea
@@ -240,16 +369,44 @@ fn format_fault(
                         .unwrap_or_else(|| "?".to_string());
                     format!("INVALID_ADDRESS at PC={pc_str} (ea={ea_str})")
                 }
-                0x0107_0000 => {
+                FAULT_UNSUPPORTED_SYSCALL => {
                     let nr = code & 0x0000_FFFF;
                     format!("UNSUPPORTED_SYSCALL (nr={nr}) at PC={pc_str}")
                 }
-                _ => format!("{desc} at PC={pc_str}"),
+                _ => format!("Guest(0x{code:08x}) at PC={pc_str}"),
             }
         }
-        _ => format!("{desc} at PC={pc_str}"),
+        _ => format!("Validation at PC={pc_str}"),
     };
-    format!("FAULT at step {steps}: {detail}")
+    let mut out = format!("FAULT at step {steps}: {detail}");
+
+    // Register dump if available.
+    if let Some(regs) = &result.local_diagnostics.fault_regs {
+        out.push_str("\n  registers:");
+        for (i, &val) in regs.gprs.iter().enumerate() {
+            if i % 4 == 0 {
+                out.push_str("\n    ");
+            }
+            out.push_str(&format!("r{i:<2}=0x{val:016x}  "));
+        }
+        out.push_str(&format!(
+            "\n    LR=0x{:016x}  CTR=0x{:016x}  CR=0x{:08x}",
+            regs.lr, regs.ctr, regs.cr
+        ));
+    }
+
+    // Mini-trace: last N PCs from the ring buffer.
+    let filled = pc_ring_pos.min(PC_RING_SIZE);
+    if filled > 0 {
+        out.push_str(&format!("\n  last {filled} PCs:"));
+        let start = pc_ring_pos.saturating_sub(PC_RING_SIZE);
+        for i in start..pc_ring_pos {
+            let pc = pc_ring[i % PC_RING_SIZE];
+            out.push_str(&format!("\n    0x{pc:08x}"));
+        }
+    }
+
+    out
 }
 
 fn patch_malloc(hle_bindings: &[cellgov_ppu::prx::HleBinding], mem: &mut cellgov_mem::GuestMemory) {
@@ -279,24 +436,58 @@ fn print_hle_summary(
     hle_calls: &std::collections::BTreeMap<u32, usize>,
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) {
+    let called_count = hle_calls.len();
+    let total_count = hle_bindings.len();
+    let uncalled_count = total_count - called_count.min(total_count);
+    println!("hle_imports: {total_count} bound, {called_count} called, {uncalled_count} uncalled");
+
     if !hle_calls.is_empty() {
-        println!("hle_calls: {} distinct", hle_calls.len());
+        println!("  called:");
         for (idx, count) in hle_calls {
-            let name = hle_bindings
+            let (name, class) = hle_bindings
                 .get(*idx as usize)
                 .map(|b| {
                     let func = cellgov_ppu::nid_db::lookup(b.nid)
                         .map(|(_, f)| f)
                         .unwrap_or("?");
-                    format!("{}::{}", b.module, func)
+                    (
+                        format!("{}::{}", b.module, func),
+                        cellgov_ppu::nid_db::stub_classification(b.nid),
+                    )
                 })
-                .unwrap_or_else(|| format!("hle_{idx}"));
-            println!("  {name}: {count}x");
+                .unwrap_or_else(|| (format!("hle_{idx}"), "?"));
+            println!("    {name}: {count}x [{class}]");
+        }
+    }
+
+    // Show uncalled imports grouped by classification.
+    let uncalled: Vec<_> = hle_bindings
+        .iter()
+        .filter(|b| !hle_calls.contains_key(&b.index))
+        .collect();
+    if !uncalled.is_empty() {
+        let stateful: Vec<_> = uncalled
+            .iter()
+            .filter(|b| cellgov_ppu::nid_db::stub_classification(b.nid) != "noop-safe")
+            .collect();
+        if !stateful.is_empty() {
+            println!("  uncalled (non-noop):");
+            for b in &stateful {
+                let func = cellgov_ppu::nid_db::lookup(b.nid)
+                    .map(|(_, f)| f)
+                    .unwrap_or("?");
+                let class = cellgov_ppu::nid_db::stub_classification(b.nid);
+                println!("    {}::{} [{class}]", b.module, func);
+            }
+        }
+        let noop_count = uncalled.len() - stateful.len();
+        if noop_count > 0 {
+            println!("  uncalled (noop-safe): {noop_count} functions");
         }
     }
 }
 
-fn print_insn_coverage(insn_coverage: &std::collections::BTreeMap<String, usize>) {
+fn print_insn_coverage(insn_coverage: &std::collections::BTreeMap<&'static str, usize>) {
     if !insn_coverage.is_empty() {
         let mut sorted: Vec<_> = insn_coverage.iter().collect();
         sorted.sort_by(|a, b| b.1.cmp(a.1));

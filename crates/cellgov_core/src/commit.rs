@@ -219,6 +219,11 @@ impl CommitPipeline {
             });
         }
 
+        // Fast path: no effects means nothing to validate, stage, or apply.
+        if result.emitted_effects.is_empty() {
+            return Ok(CommitOutcome::default());
+        }
+
         let mut staging = StagingMemory::new();
         let mut writes = 0usize;
         let mut sends = 0usize;
