@@ -27,6 +27,72 @@ pub struct RegionDescriptor {
     pub size: u64,
 }
 
+/// How a long-running boot (e.g. `cellgov_cli run-game`) terminated.
+///
+/// Separate from `ScenarioOutcome` because the testkit runner has no
+/// notion of guest-initiated process exit, hard faults, or HLE-driven
+/// termination. Each of these maps onto a normalized `ObservedOutcome`
+/// when an `Observation` is built from a boot run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootOutcome {
+    /// Guest reached `sys_process_exit` cleanly.
+    ProcessExit,
+    /// PPU raised a hard fault (decode error, unimplemented, etc).
+    Fault,
+    /// Max-step cap reached without termination.
+    MaxSteps,
+}
+
+/// Build an `Observation` from a completed `run-game`-style boot.
+///
+/// Unlike `observe()` (which consumes a scenario's trace and hashes),
+/// this variant takes a raw final-memory snapshot plus the boot outcome
+/// and step count. State hashes are set to `None` because the
+/// game-boot path does not retain the per-step hashes the testkit
+/// runner accumulates; the `ObservedHashes` field is reserved for
+/// scenario comparisons, not long-boot checkpoints.
+pub fn observe_from_boot(
+    final_memory: &[u8],
+    outcome: BootOutcome,
+    steps_taken: usize,
+    regions: &[RegionDescriptor],
+) -> Observation {
+    let observed_outcome = match outcome {
+        BootOutcome::ProcessExit => ObservedOutcome::Completed,
+        BootOutcome::Fault => ObservedOutcome::Fault,
+        BootOutcome::MaxSteps => ObservedOutcome::Timeout,
+    };
+
+    let memory_regions = regions
+        .iter()
+        .map(|desc| {
+            let start = desc.addr as usize;
+            let end = start.saturating_add(desc.size as usize);
+            let data = if start <= final_memory.len() && end <= final_memory.len() {
+                final_memory[start..end].to_vec()
+            } else {
+                vec![0u8; desc.size as usize]
+            };
+            NamedMemoryRegion {
+                name: desc.name.clone(),
+                addr: desc.addr,
+                data,
+            }
+        })
+        .collect();
+
+    Observation {
+        outcome: observed_outcome,
+        memory_regions,
+        events: Vec::new(),
+        state_hashes: None,
+        metadata: ObservationMetadata {
+            runner: "cellgov-boot".into(),
+            steps: Some(steps_taken),
+        },
+    }
+}
+
 /// Convert a `ScenarioResult` into a normalized `Observation`.
 ///
 /// `regions` declares which memory regions to extract. Each region
@@ -314,5 +380,46 @@ mod tests {
                 result.err()
             );
         }
+    }
+
+    #[test]
+    fn observe_from_boot_maps_process_exit_to_completed() {
+        let mem = vec![0u8; 16];
+        let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1000, &[]);
+        assert_eq!(obs.outcome, ObservedOutcome::Completed);
+        assert_eq!(obs.metadata.runner, "cellgov-boot");
+        assert_eq!(obs.metadata.steps, Some(1000));
+        assert!(obs.state_hashes.is_none());
+    }
+
+    #[test]
+    fn observe_from_boot_maps_fault_and_max_steps() {
+        let mem = vec![0u8; 16];
+        let fault = observe_from_boot(&mem, BootOutcome::Fault, 50, &[]);
+        assert_eq!(fault.outcome, ObservedOutcome::Fault);
+        let timeout = observe_from_boot(&mem, BootOutcome::MaxSteps, 100_000, &[]);
+        assert_eq!(timeout.outcome, ObservedOutcome::Timeout);
+    }
+
+    #[test]
+    fn observe_from_boot_extracts_regions() {
+        let mut mem = vec![0u8; 256];
+        mem[0x40..0x48].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        let regions = vec![
+            RegionDescriptor {
+                name: "text".into(),
+                addr: 0x40,
+                size: 8,
+            },
+            RegionDescriptor {
+                name: "out_of_bounds".into(),
+                addr: 0x400,
+                size: 16,
+            },
+        ];
+        let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1, &regions);
+        assert_eq!(obs.memory_regions.len(), 2);
+        assert_eq!(obs.memory_regions[0].data, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(obs.memory_regions[1].data, vec![0u8; 16]);
     }
 }

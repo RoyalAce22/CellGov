@@ -21,6 +21,7 @@ cellgov_core = { path = "../cellgov_core" }
 cellgov_spu = { path = "../cellgov_spu" }
 cellgov_testkit = { path = "../cellgov_testkit" }
 criterion.workspace = true
+sha1 = "0.10"
 
 [[bench]]
 name = "ppu_bench"

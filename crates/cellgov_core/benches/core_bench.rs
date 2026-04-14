@@ -2,6 +2,8 @@
 //!
 //! Measures: commit_step with 0, 1, and 10 SharedWriteIntent effects.
 
+#![allow(missing_docs)]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use cellgov_core::commit::{CommitContext, CommitPipeline};

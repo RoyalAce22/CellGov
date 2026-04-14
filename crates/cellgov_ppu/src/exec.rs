@@ -36,6 +36,19 @@ pub enum PpuStepOutcome {
         /// Destination register.
         rt: u8,
     },
+    /// Sign-extending load: run_until_yield reads `size` bytes from `ea`
+    /// and sign-extends the result to 64 bits before writing to GPR
+    /// `rt`. Used by lha/lhax (halfword algebraic) and lwa/lwax
+    /// (word algebraic) which differ from their zero-extending
+    /// counterparts only in how they widen into the 64-bit register.
+    LoadSigned {
+        /// Guest effective address.
+        ea: u64,
+        /// Number of bytes (1, 2, or 4).
+        size: u8,
+        /// Destination register.
+        rt: u8,
+    },
     /// Store request: run_until_yield emits a SharedWriteIntent for
     /// `size` bytes of `value` at `ea`.
     Store {
@@ -118,30 +131,25 @@ pub fn execute(
             size: 2,
             rt,
         },
-        PpuInstruction::Lha { rt, ra, imm } => {
-            // Load halfword algebraic: need sign extension, handled
-            // specially since the Load outcome only zero-extends.
-            // We return Load with size=2 and post-process in lib.rs.
-            // Actually, let's handle sign-extension here by reading
-            // via Load outcome and fixing up in lib.rs. For now,
-            // use the same Load path -- lib.rs reads 2 bytes as u16
-            // then we sign-extend below. But Load returns a u64...
-            // The Load outcome in lib.rs only does zero-extend for size=2.
-            // We need a different approach. Let's use size=2 with a
-            // negative marker... Actually, the simplest: just read
-            // directly here if we can. But we don't have memory access.
-            // Let's add a LoadSigned variant or handle it in lib.rs.
-            // For now, use Load{size:2} and add sign-extension in lib.rs.
-            PpuStepOutcome::Load {
-                ea: state.ea_d_form(ra, imm),
-                size: 2,
-                rt,
-            }
-        }
+        PpuInstruction::Lha { rt, ra, imm } => PpuStepOutcome::LoadSigned {
+            ea: state.ea_d_form(ra, imm),
+            size: 2,
+            rt,
+        },
         PpuInstruction::Lwzu { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
             state.gpr[ra as usize] = ea;
             PpuStepOutcome::Load { ea, size: 4, rt }
+        }
+        PpuInstruction::Lbzu { rt, ra, imm } => {
+            let ea = state.ea_d_form(ra, imm);
+            state.gpr[ra as usize] = ea;
+            PpuStepOutcome::Load { ea, size: 1, rt }
+        }
+        PpuInstruction::Ldu { rt, ra, imm } => {
+            let ea = state.ea_d_form(ra, imm);
+            state.gpr[ra as usize] = ea;
+            PpuStepOutcome::Load { ea, size: 8, rt }
         }
         PpuInstruction::Ld { rt, ra, imm } => PpuStepOutcome::Load {
             ea: state.ea_d_form(ra, imm),
@@ -218,6 +226,34 @@ pub fn execute(
             size: 8,
             value: state.gpr[rs as usize],
         },
+        PpuInstruction::Ldarx { rt, ra, rb } => PpuStepOutcome::Load {
+            ea: state.ea_x_form(ra, rb),
+            size: 8,
+            rt,
+        },
+        PpuInstruction::Stdcx { rs, ra, rb } => {
+            // Single-threaded: reservation never lost, CAS always succeeds.
+            state.set_cr_field(0, 0b0010); // EQ
+            PpuStepOutcome::Store {
+                ea: state.ea_x_form(ra, rb),
+                size: 8,
+                value: state.gpr[rs as usize],
+            }
+        }
+        PpuInstruction::Lwarx { rt, ra, rb } => PpuStepOutcome::Load {
+            ea: state.ea_x_form(ra, rb),
+            size: 4,
+            rt,
+        },
+        PpuInstruction::Stwcx { rs, ra, rb } => {
+            // Single-threaded: reservation never lost, CAS always succeeds.
+            state.set_cr_field(0, 0b0010); // EQ
+            PpuStepOutcome::Store {
+                ea: state.ea_x_form(ra, rb),
+                size: 4,
+                value: state.gpr[rs as usize],
+            }
+        }
         PpuInstruction::Stbx { rs, ra, rb } => PpuStepOutcome::Store {
             ea: state.ea_x_form(ra, rb),
             size: 1,
@@ -280,6 +316,22 @@ pub fn execute(
             state.gpr[rt as usize] = (a * b) >> 32;
             PpuStepOutcome::Continue
         }
+        PpuInstruction::Mulhdu { rt, ra, rb } => {
+            let a = state.gpr[ra as usize] as u128;
+            let b = state.gpr[rb as usize] as u128;
+            state.gpr[rt as usize] = ((a * b) >> 64) as u64;
+            PpuStepOutcome::Continue
+        }
+        PpuInstruction::Adde { rt, ra, rb } => {
+            let a = state.gpr[ra as usize];
+            let b = state.gpr[rb as usize];
+            let ca_in: u64 = state.xer_ca() as u64;
+            let (sum1, c1) = a.overflowing_add(b);
+            let (sum2, c2) = sum1.overflowing_add(ca_in);
+            state.gpr[rt as usize] = sum2;
+            state.set_xer_ca(c1 || c2);
+            PpuStepOutcome::Continue
+        }
         PpuInstruction::Divw { rt, ra, rb } => {
             let a = state.gpr[ra as usize] as i32;
             let b = state.gpr[rb as usize] as i32;
@@ -292,6 +344,26 @@ pub fn execute(
             let b = state.gpr[rb as usize] as u32;
             let result = if b == 0 { 0 } else { a / b };
             state.gpr[rt as usize] = result as u64;
+            PpuStepOutcome::Continue
+        }
+        PpuInstruction::Divd { rt, ra, rb } => {
+            let a = state.gpr[ra as usize] as i64;
+            let b = state.gpr[rb as usize] as i64;
+            let result = if b == 0 { 0 } else { a.wrapping_div(b) };
+            state.gpr[rt as usize] = result as u64;
+            PpuStepOutcome::Continue
+        }
+        PpuInstruction::Divdu { rt, ra, rb } => {
+            let a = state.gpr[ra as usize];
+            let b = state.gpr[rb as usize];
+            let result = if b == 0 { 0 } else { a / b };
+            state.gpr[rt as usize] = result;
+            PpuStepOutcome::Continue
+        }
+        PpuInstruction::Mulld { rt, ra, rb } => {
+            let a = state.gpr[ra as usize];
+            let b = state.gpr[rb as usize];
+            state.gpr[rt as usize] = a.wrapping_mul(b);
             PpuStepOutcome::Continue
         }
         PpuInstruction::Or { ra, rs, rb } => {
@@ -392,6 +464,14 @@ pub fn execute(
         }
         PpuInstruction::Oris { ra, rs, imm } => {
             state.gpr[ra as usize] = state.gpr[rs as usize] | ((imm as u64) << 16);
+            PpuStepOutcome::Continue
+        }
+        PpuInstruction::Xori { ra, rs, imm } => {
+            state.gpr[ra as usize] = state.gpr[rs as usize] ^ imm as u64;
+            PpuStepOutcome::Continue
+        }
+        PpuInstruction::Xoris { ra, rs, imm } => {
+            state.gpr[ra as usize] = state.gpr[rs as usize] ^ ((imm as u64) << 16);
             PpuStepOutcome::Continue
         }
 
@@ -579,6 +659,14 @@ pub fn execute(
             state.gpr[ra as usize] = (rotated & mask) as u64;
             PpuStepOutcome::Continue
         }
+        PpuInstruction::Rlwnm { ra, rs, rb, mb, me } => {
+            let val = state.gpr[rs as usize] as u32;
+            let n = (state.gpr[rb as usize] & 0x1F) as u32;
+            let rotated = val.rotate_left(n);
+            let mask = rlwinm_mask(mb, me);
+            state.gpr[ra as usize] = (rotated & mask) as u64;
+            PpuStepOutcome::Continue
+        }
         PpuInstruction::Rldicl { ra, rs, sh, mb } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
             state.gpr[ra as usize] = rotated & mask64(mb, 63);
@@ -597,8 +685,10 @@ pub fn execute(
             state.vr[vt as usize] = state.vr[va as usize] ^ state.vr[vb as usize];
             PpuStepOutcome::Continue
         }
-        PpuInstruction::Vx { xo, vt, va, vb } => execute_vx(state, xo, vt, va, vb),
-        PpuInstruction::Va { xo, vt, va, vb, vc } => execute_va(state, xo, vt, va, vb, vc),
+        PpuInstruction::Vx { xo, vt, va, vb } => crate::exec_vec::execute_vx(state, xo, vt, va, vb),
+        PpuInstruction::Va { xo, vt, va, vb, vc } => {
+            crate::exec_vec::execute_va(state, xo, vt, va, vb, vc)
+        }
         PpuInstruction::Stvx { vs, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]) & !15u64;
@@ -708,365 +798,7 @@ fn mask64(mb: u8, me: u8) -> u64 {
     }
 }
 
-/// Execute a VX-form VMX instruction (primary=4, 11-bit XO).
-fn execute_vx(state: &mut PpuState, xo: u16, vt: u8, va: u8, vb: u8) -> PpuStepOutcome {
-    // lvx needs memory access -- return a LoadVec outcome.
-    if xo == 103 {
-        let base = if va == 0 { 0 } else { state.gpr[va as usize] };
-        let ea = (base.wrapping_add(state.gpr[vb as usize])) & !0xF;
-        return PpuStepOutcome::LoadVec { ea, vt };
-    }
-
-    let a = state.vr[va as usize];
-    let b = state.vr[vb as usize];
-
-    let result = match xo {
-        // -- Integer add/sub --
-        0x000 => vadd_bytes(a, b), // vaddubm
-        0x040 => vadd_halfs(a, b), // vadduhm
-        0x080 => vadd_words(a, b), // vadduwm
-
-        // -- Integer compare --
-        0x086 => vcmpequw(a, b), // vcmpequw
-
-        // -- Logical --
-        0xac4 => a & b,    // vand
-        0x6c4 => a | b,    // vor
-        0x4c4 => a ^ b,    // vxor (fallback)
-        0x8c4 => a & !b,   // vandc
-        0x7c4 => !(a | b), // vnor
-
-        // -- Shift --
-        0x284 => vslw(a, b),  // vslw
-        0x384 => vsrw(a, b),  // vsrw
-        0x484 => vsraw(a, b), // vsraw
-        0x444 => vsrah(a, b), // vsrah
-        0x304 => vsrab(a, b), // vsrab
-
-        // -- Splat --
-        0x18c => vspltw(a, b, va), // vspltw (va is the index)
-        0x38c => vspltisw(va),     // vspltisw (va is sign-extended 5-bit imm)
-
-        // -- Merge --
-        0x00c => vmrghb(a, b), // vmrghb
-        0x04c => vmrghh(a, b), // vmrghh
-        0x08c => vmrghw(a, b), // vmrghw (actually 0x08c? check)
-        0x40a => vmrglb(a, b), // vmrglb
-        0x44a => vmrglh(a, b), // vmrglh
-        0x48a => vmrglw(a, b), // vmrglw
-
-        // -- Multiply --
-        0x048 => vmulouh(a, b), // vmulouh
-
-        // -- Subtract --
-        0x600 => vsub_ubytes_sat(a, b), // vsububs (saturating)
-
-        _ => {
-            return PpuStepOutcome::Fault(PpuFault::UnsupportedSyscall(xo as u64));
-        }
-    };
-
-    state.vr[vt as usize] = result;
-    PpuStepOutcome::Continue
-}
-
-/// Execute a VA-form VMX instruction (primary=4, 6-bit sub-opcode, 4 registers).
-fn execute_va(state: &mut PpuState, xo: u8, vt: u8, va: u8, vb: u8, vc: u8) -> PpuStepOutcome {
-    let a = state.vr[va as usize];
-    let b = state.vr[vb as usize];
-    let c = state.vr[vc as usize];
-
-    let result = match xo {
-        0x2a => vsel(a, b, c),    // vsel
-        0x2b => vperm(a, b, c),   // vperm
-        0x2c => vsldoi(a, b, vc), // vsldoi (vc field is the shift amount)
-        _ => {
-            return PpuStepOutcome::Fault(PpuFault::UnsupportedSyscall(xo as u64));
-        }
-    };
-
-    state.vr[vt as usize] = result;
-    PpuStepOutcome::Continue
-}
-
-// -- VMX helper functions --
-// Vectors are stored as u128, big-endian (byte 0 is the MSB).
-
-fn vadd_bytes(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in 0..16 {
-        r[i] = ab[i].wrapping_add(bb[i]);
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vadd_halfs(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in (0..16).step_by(2) {
-        let av = u16::from_be_bytes([ab[i], ab[i + 1]]);
-        let bv = u16::from_be_bytes([bb[i], bb[i + 1]]);
-        let rv = av.wrapping_add(bv);
-        let [h, l] = rv.to_be_bytes();
-        r[i] = h;
-        r[i + 1] = l;
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vadd_words(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in (0..16).step_by(4) {
-        let av = u32::from_be_bytes([ab[i], ab[i + 1], ab[i + 2], ab[i + 3]]);
-        let bv = u32::from_be_bytes([bb[i], bb[i + 1], bb[i + 2], bb[i + 3]]);
-        let rv = av.wrapping_add(bv);
-        let bytes = rv.to_be_bytes();
-        r[i..i + 4].copy_from_slice(&bytes);
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vcmpequw(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in (0..16).step_by(4) {
-        let av = u32::from_be_bytes([ab[i], ab[i + 1], ab[i + 2], ab[i + 3]]);
-        let bv = u32::from_be_bytes([bb[i], bb[i + 1], bb[i + 2], bb[i + 3]]);
-        let mask: u32 = if av == bv { 0xFFFF_FFFF } else { 0 };
-        r[i..i + 4].copy_from_slice(&mask.to_be_bytes());
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vslw(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in (0..16).step_by(4) {
-        let av = u32::from_be_bytes([ab[i], ab[i + 1], ab[i + 2], ab[i + 3]]);
-        let sh = u32::from_be_bytes([bb[i], bb[i + 1], bb[i + 2], bb[i + 3]]) & 0x1F;
-        let rv = av << sh;
-        r[i..i + 4].copy_from_slice(&rv.to_be_bytes());
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vsrw(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in (0..16).step_by(4) {
-        let av = u32::from_be_bytes([ab[i], ab[i + 1], ab[i + 2], ab[i + 3]]);
-        let sh = u32::from_be_bytes([bb[i], bb[i + 1], bb[i + 2], bb[i + 3]]) & 0x1F;
-        let rv = av >> sh;
-        r[i..i + 4].copy_from_slice(&rv.to_be_bytes());
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vsraw(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in (0..16).step_by(4) {
-        let av = i32::from_be_bytes([ab[i], ab[i + 1], ab[i + 2], ab[i + 3]]);
-        let sh = u32::from_be_bytes([bb[i], bb[i + 1], bb[i + 2], bb[i + 3]]) & 0x1F;
-        let rv = av >> sh;
-        r[i..i + 4].copy_from_slice(&rv.to_be_bytes());
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vsrah(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in (0..16).step_by(2) {
-        let av = i16::from_be_bytes([ab[i], ab[i + 1]]);
-        let sh = u16::from_be_bytes([bb[i], bb[i + 1]]) & 0xF;
-        let rv = av >> sh;
-        let [h, l] = rv.to_be_bytes();
-        r[i] = h;
-        r[i + 1] = l;
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vsrab(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in 0..16 {
-        let av = ab[i] as i8;
-        let sh = bb[i] & 0x7;
-        r[i] = (av >> sh) as u8;
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vspltw(_a: u128, b: u128, idx: u8) -> u128 {
-    let bb = b.to_be_bytes();
-    let start = (idx as usize & 3) * 4;
-    let word = u32::from_be_bytes([bb[start], bb[start + 1], bb[start + 2], bb[start + 3]]);
-    let mut r = [0u8; 16];
-    for i in (0..16).step_by(4) {
-        r[i..i + 4].copy_from_slice(&word.to_be_bytes());
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vspltisw(imm: u8) -> u128 {
-    // 5-bit sign-extended immediate, splatted to all 4 words.
-    let val = if imm & 0x10 != 0 {
-        (imm as i8 | !0x1F_u8 as i8) as i32
-    } else {
-        imm as i32
-    };
-    let word = (val as u32).to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in (0..16).step_by(4) {
-        r[i..i + 4].copy_from_slice(&word);
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vmrghb(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in 0..8 {
-        r[i * 2] = ab[i];
-        r[i * 2 + 1] = bb[i];
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vmrghh(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in 0..4 {
-        r[i * 4] = ab[i * 2];
-        r[i * 4 + 1] = ab[i * 2 + 1];
-        r[i * 4 + 2] = bb[i * 2];
-        r[i * 4 + 3] = bb[i * 2 + 1];
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vmrghw(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    r[0..4].copy_from_slice(&ab[0..4]);
-    r[4..8].copy_from_slice(&bb[0..4]);
-    r[8..12].copy_from_slice(&ab[4..8]);
-    r[12..16].copy_from_slice(&bb[4..8]);
-    u128::from_be_bytes(r)
-}
-
-fn vmrglb(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in 0..8 {
-        r[i * 2] = ab[i + 8];
-        r[i * 2 + 1] = bb[i + 8];
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vmrglh(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in 0..4 {
-        r[i * 4] = ab[8 + i * 2];
-        r[i * 4 + 1] = ab[8 + i * 2 + 1];
-        r[i * 4 + 2] = bb[8 + i * 2];
-        r[i * 4 + 3] = bb[8 + i * 2 + 1];
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vmrglw(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    r[0..4].copy_from_slice(&ab[8..12]);
-    r[4..8].copy_from_slice(&bb[8..12]);
-    r[8..12].copy_from_slice(&ab[12..16]);
-    r[12..16].copy_from_slice(&bb[12..16]);
-    u128::from_be_bytes(r)
-}
-
-fn vmulouh(a: u128, b: u128) -> u128 {
-    // Multiply odd unsigned halfwords -> 32-bit results.
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in 0..4 {
-        let ah = u16::from_be_bytes([ab[i * 4 + 2], ab[i * 4 + 3]]) as u32;
-        let bh = u16::from_be_bytes([bb[i * 4 + 2], bb[i * 4 + 3]]) as u32;
-        let prod = ah * bh;
-        r[i * 4..i * 4 + 4].copy_from_slice(&prod.to_be_bytes());
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vsub_ubytes_sat(a: u128, b: u128) -> u128 {
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut r = [0u8; 16];
-    for i in 0..16 {
-        r[i] = ab[i].saturating_sub(bb[i]);
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vsel(a: u128, b: u128, c: u128) -> u128 {
-    // vsel: for each bit, result = (c_bit ? b_bit : a_bit)
-    (a & !c) | (b & c)
-}
-
-fn vperm(a: u128, b: u128, c: u128) -> u128 {
-    // vperm: for each byte in c, the low 5 bits index into
-    // the concatenation of a and b (32 bytes).
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let cb = c.to_be_bytes();
-    let mut concat = [0u8; 32];
-    concat[0..16].copy_from_slice(&ab);
-    concat[16..32].copy_from_slice(&bb);
-    let mut r = [0u8; 16];
-    for i in 0..16 {
-        let idx = (cb[i] & 0x1F) as usize;
-        r[i] = concat[idx];
-    }
-    u128::from_be_bytes(r)
-}
-
-fn vsldoi(a: u128, b: u128, sh: u8) -> u128 {
-    // vsldoi: concatenate a:b (32 bytes), shift left by sh bytes,
-    // take the high 16 bytes.
-    let ab = a.to_be_bytes();
-    let bb = b.to_be_bytes();
-    let mut concat = [0u8; 32];
-    concat[0..16].copy_from_slice(&ab);
-    concat[16..32].copy_from_slice(&bb);
-    let shift = (sh & 0xF) as usize;
-    let mut r = [0u8; 16];
-    for i in 0..16 {
-        r[i] = concat[(i + shift) % 32];
-    }
-    u128::from_be_bytes(r)
-}
+// Vector (VMX / AltiVec) execution helpers live in exec_vec.rs.
 
 #[cfg(test)]
 mod tests {
@@ -1249,6 +981,73 @@ mod tests {
     }
 
     #[test]
+    fn ldu_writes_ea_back_to_ra() {
+        // ldu r7, -8(r4): read 8 bytes at r4-8, set r4 := r4-8.
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x1020;
+        let result = execute(
+            &PpuInstruction::Ldu {
+                rt: 7,
+                ra: 4,
+                imm: -8,
+            },
+            &mut s,
+            uid(),
+        );
+        match result {
+            PpuStepOutcome::Load { ea, size, rt } => {
+                assert_eq!(ea, 0x1018);
+                assert_eq!(size, 8);
+                assert_eq!(rt, 7);
+            }
+            other => panic!("expected Load, got {:?}", other),
+        }
+        // Update form: RA holds the effective address after the instruction.
+        assert_eq!(s.gpr[4], 0x1018);
+    }
+
+    #[test]
+    fn rlwnm_rotates_by_rb_low_5_bits() {
+        // rlwnm r0, r0, r8, 0, 31: full-word rotate left by r8 mod 32.
+        let mut s = PpuState::new();
+        s.gpr[0] = 0x0000_0000_1234_5678;
+        s.gpr[8] = 8; // rotate by 8
+        execute(
+            &PpuInstruction::Rlwnm {
+                ra: 0,
+                rs: 0,
+                rb: 8,
+                mb: 0,
+                me: 31,
+            },
+            &mut s,
+            uid(),
+        );
+        // 0x12345678 rotated left by 8 = 0x34567812
+        assert_eq!(s.gpr[0], 0x3456_7812);
+    }
+
+    #[test]
+    fn rlwnm_ignores_high_bits_of_rb() {
+        // Only low 5 bits of RB are used. 0x20 == 32 -> 0 rotation.
+        let mut s = PpuState::new();
+        s.gpr[1] = 0x0000_0000_DEAD_BEEF;
+        s.gpr[2] = 0x20;
+        execute(
+            &PpuInstruction::Rlwnm {
+                ra: 3,
+                rs: 1,
+                rb: 2,
+                mb: 0,
+                me: 31,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[3], 0xDEAD_BEEF);
+    }
+
+    #[test]
     fn vxor_self_zeros_vector_register() {
         let mut s = PpuState::new();
         s.vr[5] = 0xDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEFu128;
@@ -1328,6 +1127,29 @@ mod tests {
     }
 
     #[test]
+    fn lha_returns_load_signed() {
+        let mut s = PpuState::new();
+        s.gpr[1] = 0x1000;
+        let result = execute(
+            &PpuInstruction::Lha {
+                rt: 3,
+                ra: 1,
+                imm: 2,
+            },
+            &mut s,
+            uid(),
+        );
+        match result {
+            PpuStepOutcome::LoadSigned { ea, size, rt } => {
+                assert_eq!(ea, 0x1002);
+                assert_eq!(size, 2);
+                assert_eq!(rt, 3);
+            }
+            other => panic!("expected LoadSigned, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn stw_returns_store() {
         let mut s = PpuState::new();
         s.gpr[1] = 0x1000;
@@ -1388,5 +1210,253 @@ mod tests {
         );
         assert!(matches!(result, PpuStepOutcome::Continue));
         assert_eq!(s.pc, 0x1000); // unchanged
+    }
+
+    #[test]
+    fn divdu_basic() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 100;
+        s.gpr[4] = 7;
+        execute(
+            &PpuInstruction::Divdu {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[5], 14);
+    }
+
+    #[test]
+    fn divdu_divide_by_zero() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 100;
+        s.gpr[4] = 0;
+        execute(
+            &PpuInstruction::Divdu {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[5], 0);
+    }
+
+    #[test]
+    fn divdu_large_values() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+        s.gpr[4] = 2;
+        execute(
+            &PpuInstruction::Divdu {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[5], 0x7FFF_FFFF_FFFF_FFFF);
+    }
+
+    #[test]
+    fn divd_signed() {
+        let mut s = PpuState::new();
+        s.gpr[3] = (-100i64) as u64;
+        s.gpr[4] = 7;
+        execute(
+            &PpuInstruction::Divd {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[5] as i64, -14);
+    }
+
+    #[test]
+    fn divd_divide_by_zero() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 100;
+        s.gpr[4] = 0;
+        execute(
+            &PpuInstruction::Divd {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[5], 0);
+    }
+
+    #[test]
+    fn mulld_basic() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 7;
+        s.gpr[4] = 8;
+        execute(
+            &PpuInstruction::Mulld {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[5], 56);
+    }
+
+    #[test]
+    fn mulld_wraps_on_overflow() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+        s.gpr[4] = 2;
+        execute(
+            &PpuInstruction::Mulld {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        // -1 * 2 = -2 (wrapping) = 0xFFFF_FFFF_FFFF_FFFE
+        assert_eq!(s.gpr[5], 0xFFFF_FFFF_FFFF_FFFE);
+    }
+
+    #[test]
+    fn adde_adds_with_carry_in_and_sets_carry_out() {
+        let mut s = PpuState::new();
+        // First: adde with CA=1 on overflowing low word produces carry-out.
+        s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+        s.gpr[4] = 0;
+        s.set_xer_ca(true);
+        execute(
+            &PpuInstruction::Adde {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        // 0xFFFF... + 0 + 1 = 0, with carry.
+        assert_eq!(s.gpr[5], 0);
+        assert!(s.xer_ca());
+    }
+
+    #[test]
+    fn adde_without_carry_clears_ca() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 5;
+        s.gpr[4] = 3;
+        s.set_xer_ca(false);
+        execute(
+            &PpuInstruction::Adde {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[5], 8);
+        assert!(!s.xer_ca());
+    }
+
+    #[test]
+    fn mulhdu_takes_high_64_bits_of_u128_product() {
+        // 0xFFFF_FFFF_FFFF_FFFF * 2 = 0x1_FFFF_FFFF_FFFF_FFFE,
+        // high 64 bits = 1.
+        let mut s = PpuState::new();
+        s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+        s.gpr[4] = 2;
+        execute(
+            &PpuInstruction::Mulhdu {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[5], 1);
+    }
+
+    #[test]
+    fn mulhdu_small_product_is_zero() {
+        // 7 * 8 = 56; fits in 64 bits, so high 64 bits = 0.
+        let mut s = PpuState::new();
+        s.gpr[3] = 7;
+        s.gpr[4] = 8;
+        execute(
+            &PpuInstruction::Mulhdu {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[5], 0);
+    }
+
+    #[test]
+    fn ldarx_produces_load_like_ldx() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 0x1000;
+        s.gpr[4] = 0x8;
+        let result = execute(
+            &PpuInstruction::Ldarx {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        match result {
+            PpuStepOutcome::Load { ea, size, rt } => {
+                assert_eq!(ea, 0x1008);
+                assert_eq!(size, 8);
+                assert_eq!(rt, 5);
+            }
+            other => panic!("expected Load, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stdcx_always_succeeds_in_single_threaded() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 0x1000;
+        s.gpr[4] = 0x8;
+        s.gpr[5] = 0xDEAD_BEEF_CAFE_BABE;
+        let result = execute(
+            &PpuInstruction::Stdcx {
+                rs: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            uid(),
+        );
+        match result {
+            PpuStepOutcome::Store { ea, size, value } => {
+                assert_eq!(ea, 0x1008);
+                assert_eq!(size, 8);
+                assert_eq!(value, 0xDEAD_BEEF_CAFE_BABE);
+            }
+            other => panic!("expected Store, got {other:?}"),
+        }
+        // CR0 EQ must be set to indicate success.
+        assert_eq!(s.cr_field(0), 0b0010);
     }
 }

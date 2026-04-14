@@ -40,6 +40,11 @@ pub enum PpuInstruction {
     Lha { rt: u8, ra: u8, imm: i16 },
     /// Load word with update: rt = mem[ra + imm] (32-bit), ra = ra + imm.
     Lwzu { rt: u8, ra: u8, imm: i16 },
+    /// Load byte with update: rt = mem[ra + imm] (8-bit), ra = ra + imm.
+    Lbzu { rt: u8, ra: u8, imm: i16 },
+    /// Load doubleword with update: rt = mem[ra + imm] (64-bit),
+    /// ra = ra + imm. DS-form (imm low 2 bits always 0).
+    Ldu { rt: u8, ra: u8, imm: i16 },
     /// Load doubleword: rt = mem[ra + imm] (64-bit).
     Ld {
         /// Destination register.
@@ -161,10 +166,39 @@ pub enum PpuInstruction {
     Mullw { rt: u8, ra: u8, rb: u8 },
     /// Multiply high word unsigned: rt = ((ra as u32) * (rb as u32)) >> 32.
     Mulhwu { rt: u8, ra: u8, rb: u8 },
+    /// Multiply high doubleword unsigned: rt = high 64 bits of
+    /// ((ra as u128) * (rb as u128)). Used by compilers to lower
+    /// unsigned 64-bit division by a constant.
+    Mulhdu { rt: u8, ra: u8, rb: u8 },
+    /// Add extended: rt = ra + rb + `XER[CA]`. Sets `XER[CA]` to the
+    /// unsigned overflow. Used for multi-word addition chains.
+    Adde { rt: u8, ra: u8, rb: u8 },
+    /// Multiply low doubleword: rt = ra * rb (low 64 bits, wrapping).
+    Mulld { rt: u8, ra: u8, rb: u8 },
+    /// Load doubleword and reserve indexed (atomic load): rt = mem[(ra|0) + rb].
+    /// Single-threaded: equivalent to Ldx.
+    Ldarx { rt: u8, ra: u8, rb: u8 },
+    /// Store doubleword conditional indexed (atomic CAS store): mem[(ra|0) + rb] = rs.
+    /// Single-threaded: always succeeds, sets CR0 EQ.
+    Stdcx { rs: u8, ra: u8, rb: u8 },
+    /// Load word and reserve indexed (atomic 32-bit load): rt = zext32(mem[(ra|0) + rb]).
+    /// Single-threaded: equivalent to Lwzx.
+    Lwarx { rt: u8, ra: u8, rb: u8 },
+    /// Store word conditional indexed (atomic 32-bit CAS store): mem[(ra|0) + rb] = rs as u32.
+    /// Single-threaded: always succeeds, sets CR0 EQ.
+    Stwcx { rs: u8, ra: u8, rb: u8 },
+    /// XOR immediate: ra = rs ^ zero_extend(imm).
+    Xori { ra: u8, rs: u8, imm: u16 },
+    /// XOR immediate shifted: ra = rs ^ (zero_extend(imm) << 16).
+    Xoris { ra: u8, rs: u8, imm: u16 },
     /// Divide word: rt = (ra as i32) / (rb as i32).
     Divw { rt: u8, ra: u8, rb: u8 },
     /// Divide word unsigned: rt = (ra as u32) / (rb as u32).
     Divwu { rt: u8, ra: u8, rb: u8 },
+    /// Divide doubleword: rt = (ra as i64) / (rb as i64).
+    Divd { rt: u8, ra: u8, rb: u8 },
+    /// Divide doubleword unsigned: rt = ra / rb (64-bit unsigned).
+    Divdu { rt: u8, ra: u8, rb: u8 },
     /// AND: ra = rs & rb.
     And { ra: u8, rs: u8, rb: u8 },
     /// AND with complement: ra = rs & !rb.
@@ -359,6 +393,20 @@ pub enum PpuInstruction {
         /// Mask end.
         me: u8,
     },
+    /// Rotate left word (variable) then AND with mask: shift amount is
+    /// the low 5 bits of rb. Otherwise identical to `Rlwinm`.
+    Rlwnm {
+        /// Destination register.
+        ra: u8,
+        /// Source register.
+        rs: u8,
+        /// Register whose low 5 bits give the shift amount.
+        rb: u8,
+        /// Mask begin.
+        mb: u8,
+        /// Mask end.
+        me: u8,
+    },
     /// Rotate left doubleword immediate then clear left: mask bits
     /// mb..63. Implements aliases `clrldi`, `srdi`, `extrdi`.
     Rldicl {
@@ -481,6 +529,8 @@ impl PpuInstruction {
             Self::Lhz { .. } => "Lhz",
             Self::Lha { .. } => "Lha",
             Self::Lwzu { .. } => "Lwzu",
+            Self::Lbzu { .. } => "Lbzu",
+            Self::Ldu { .. } => "Ldu",
             Self::Ld { .. } => "Ld",
             Self::Stw { .. } => "Stw",
             Self::Stwu { .. } => "Stwu",
@@ -499,8 +549,19 @@ impl PpuInstruction {
             Self::Neg { .. } => "Neg",
             Self::Mullw { .. } => "Mullw",
             Self::Mulhwu { .. } => "Mulhwu",
+            Self::Mulhdu { .. } => "Mulhdu",
+            Self::Adde { .. } => "Adde",
             Self::Divw { .. } => "Divw",
             Self::Divwu { .. } => "Divwu",
+            Self::Divd { .. } => "Divd",
+            Self::Divdu { .. } => "Divdu",
+            Self::Mulld { .. } => "Mulld",
+            Self::Ldarx { .. } => "Ldarx",
+            Self::Stdcx { .. } => "Stdcx",
+            Self::Lwarx { .. } => "Lwarx",
+            Self::Stwcx { .. } => "Stwcx",
+            Self::Xori { .. } => "Xori",
+            Self::Xoris { .. } => "Xoris",
             Self::And { .. } => "And",
             Self::Andc { .. } => "Andc",
             Self::Nor { .. } => "Nor",
@@ -542,6 +603,7 @@ impl PpuInstruction {
             Self::Mfctr { .. } => "Mfctr",
             Self::Mtctr { .. } => "Mtctr",
             Self::Rlwinm { .. } => "Rlwinm",
+            Self::Rlwnm { .. } => "Rlwnm",
             Self::Rldicl { .. } => "Rldicl",
             Self::Rldicr { .. } => "Rldicr",
             Self::Vx { .. } => "Vx",

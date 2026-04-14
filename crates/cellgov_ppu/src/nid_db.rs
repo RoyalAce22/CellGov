@@ -27,8 +27,8 @@ pub fn lookup(nid: u32) -> Option<(&'static str, &'static str)> {
 pub fn stub_classification(nid: u32) -> &'static str {
     match nid {
         0x744680a2 => "stateful",       // sys_initialize_tls
-        0xebe5f72f => "unsafe-to-stub", // _sys_malloc
-        0x1573dc3f => "stateful",       // _sys_memset
+        0xbdb18f83 => "unsafe-to-stub", // _sys_malloc
+        0x68b9b011 => "stateful",       // _sys_memset
         0xe6f2c1e7 => "stateful",       // sys_process_exit
         _ => "noop-safe",
     }
@@ -56,7 +56,7 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
     (0x112a5ee9, "cellSysmodule", "cellSysmoduleUnloadModule"),
     (0x139a9e9b, "sys_net", "sys_net_initialize_network_ex"),
     (0x13efe7f5, "sys_net", "getsockname"),
-    (0x1573dc3f, "sysPrxForUser", "_sys_memset"),
+    (0x1573dc3f, "sysPrxForUser", "sys_lwmutex_lock"),
     (0x15bae46b, "cellGcmSys", "_cellGcmInitBody"),
     (0x182d9890, "cellSpurs", "cellSpursRequestIdleSpu"),
     (0x189a74da, "cellSysutil", "cellSysutilCheckCallback"),
@@ -75,6 +75,7 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
     (0x3138e632, "sys_io", "cellMouseGetData"),
     (0x32267a31, "cellSysmodule", "cellSysmoduleLoadModule"),
     (0x350d454e, "sysPrxForUser", "sys_ppu_thread_get_id"),
+    (0x35168520, "sysPrxForUser", "_sys_heap_malloc"),
     (0x35f21355, "cellSync", "cellSyncBarrierWait"),
     (0x3a33c1fd, "cellGcmSys", "_cellGcmFunc15"),
     (0x3aaad464, "sys_io", "cellPadGetInfo"),
@@ -84,6 +85,7 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
     (0x40e895d3, "cellSysutil", "cellSysutilGetSystemParamInt"),
     (0x4129fe2d, "cellAudio", "cellAudioPortClose"),
     (0x433f6ec0, "sys_io", "cellKbInit"),
+    (0x44265c08, "sysPrxForUser", "_sys_heap_memalign"),
     (0x4692ab35, "cellSysutil", "cellAudioOutConfigure"),
     (0x4885aa18, "sceNp", "sceNpTerm"),
     (0x4ae8d215, "cellGcmSys", "cellGcmSetFlipMode"),
@@ -101,6 +103,7 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
     (0x62b0f803, "cellSysutil", "cellMsgDialogAbort"),
     (0x63ff6ff9, "cellSysmodule", "cellSysmoduleInitialize"),
     (0x64f66d35, "sys_net", "connect"),
+    (0x68b9b011, "sysPrxForUser", "_sys_memset"),
     (0x69726aa2, "cellSpurs", "cellSpursAddWorkload"),
     (0x6c272124, "cellSync", "cellSyncBarrierTryWait"),
     (0x6db6e8cd, "sys_net", "socketclose"),
@@ -119,6 +122,7 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
     (0x887572d5, "cellSysutil", "cellVideoOutGetState"),
     (0x88f03575, "sys_net", "setsockopt"),
     (0x89be28f2, "cellAudio", "cellAudioPortStart"),
+    (0x8a561d92, "sysPrxForUser", "_sys_heap_free"),
     (0x8b72cda1, "sys_io", "cellPadGetData"),
     (0x9117df20, "cellSysutil", "cellHddGameCheck"),
     (0x9647570b, "sys_net", "sendto"),
@@ -141,15 +145,18 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
     (0xaa3b4bcd, "sys_fs", "cellFsGetFreeSize"),
     (0xacfc8dbc, "cellSpurs", "cellSpursInitialize"),
     (0xaeb78725, "sysPrxForUser", "sys_lwmutex_trylock"),
-    (0xaff080a4, "sysPrxForUser", "_sys_heap_create_heap"),
+    (0xaede4b03, "sysPrxForUser", "_sys_heap_delete_heap"),
+    (0xaff080a4, "sysPrxForUser", "sys_ppu_thread_exit"),
     (0xb0a59804, "sys_net", "bind"),
     (0xb2e761d4, "cellGcmSys", "cellGcmResetFlipStatus"),
+    (0xb2fcf2c8, "sysPrxForUser", "_sys_heap_create_heap"),
     (0xb68d5625, "sys_net", "sys_net_finalize_network"),
     (0xb9bc6207, "cellSpurs", "cellSpursAttachLv2EventQueue"),
     (0xbcc09fe7, "sceNp", "sceNpBasicRegisterHandler"),
     (0xbd28fdbf, "sceNp", "sceNpInit"),
     (0xbd5a59fc, "cellNetCtl", "cellNetCtlInit"),
     (0xbd6d60d9, "cellGcmSys", "cellGcmSetInvalidateTile"),
+    (0xbdb18f83, "sysPrxForUser", "_sys_malloc"),
     (0xbe5be3ba, "sys_io", "cellPadSetSensorMode"),
     (0xbfce3285, "sys_io", "cellKbEnd"),
     (
@@ -158,7 +165,7 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
         "cellAudioOutGetSoundAvailability",
     ),
     (0xc22c79b5, "cellSysutil", "cellSaveDataAutoLoad"),
-    (0xc3476d0c, "sysPrxForUser", "sys_lwmutex_lock"),
+    (0xc3476d0c, "sysPrxForUser", "sys_lwmutex_destroy"),
     (0xc9030138, "sys_io", "cellMouseInit"),
     (0xc94f6939, "sys_net", "accept"),
     (0xca4c4600, "cellSpurs", "cellSpursFinalize"),
@@ -176,15 +183,16 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
     (0xe558748d, "cellSysutil", "cellVideoOutGetResolution"),
     (0xe6f2c1e7, "sysPrxForUser", "sys_process_exit"),
     (0xe7dcd3b4, "sceNp", "sceNpManagerRegisterCallback"),
-    (0xebe5f72f, "sysPrxForUser", "_sys_malloc"),
+    (0xebe5f72f, "sysPrxForUser", "sys_spu_image_import"),
     (0xecdcf2ab, "sys_fs", "cellFsWrite"),
     (0xef3efa34, "sys_fs", "cellFsFstat"),
+    (0xf7f7fb20, "sysPrxForUser", "_sys_free"),
     (0xf80196c1, "cellGcmSys", "cellGcmGetLabelAddress"),
     (0xf81eca25, "cellSysutil", "cellMsgDialogOpen"),
     (0xf843818d, "cellSpurs", "cellSpursReadyCountStore"),
     (0xf8a175ec, "cellSysutil", "cellSaveDataAutoSave"),
     (0xfba04f37, "sys_net", "recv"),
-    (0xfc52a7a9, "sysPrxForUser", "_sys_free"),
+    (0xfc52a7a9, "sysPrxForUser", "sys_game_process_exitspawn"),
     (0xfe37a7f4, "sceNp", "sceNpManagerGetNpId"),
     (0xff0a21b7, "sys_io", "cellKbRead"),
     (0xff42dcc3, "sys_fs", "cellFsClosedir"),
@@ -227,8 +235,8 @@ mod tests {
     #[test]
     fn stub_classification_known_nids() {
         assert_eq!(stub_classification(0x744680a2), "stateful"); // sys_initialize_tls
-        assert_eq!(stub_classification(0xebe5f72f), "unsafe-to-stub"); // _sys_malloc
-        assert_eq!(stub_classification(0x1573dc3f), "stateful"); // _sys_memset
+        assert_eq!(stub_classification(0xbdb18f83), "unsafe-to-stub"); // _sys_malloc
+        assert_eq!(stub_classification(0x68b9b011), "stateful"); // _sys_memset
         assert_eq!(stub_classification(0xe6f2c1e7), "stateful"); // sys_process_exit
     }
 
@@ -236,5 +244,84 @@ mod tests {
     fn stub_classification_unknown_is_noop_safe() {
         assert_eq!(stub_classification(0xDEADBEEF), "noop-safe");
         assert_eq!(stub_classification(0x00000000), "noop-safe");
+    }
+
+    /// Regression guard for the NID mislabeling bug where `_sys_malloc`,
+    /// `_sys_free`, and `_sys_heap_create_heap` were mapped to the NIDs
+    /// of `sys_spu_image_import`, `sys_game_process_exitspawn`, and
+    /// `sys_ppu_thread_exit` respectively. NIDs are SHA-1(name || suffix)
+    /// with a fixed 16-byte suffix; see RPCS3 `PPUModule.cpp
+    /// ppu_generate_id` for the canonical algorithm. Values below come
+    /// from PSL1GHT `liblv2/exports.h` and RPCS3 `PPUFunction.cpp`.
+    #[test]
+    fn critical_hle_nids_match_psl1ght() {
+        // (name, expected_nid) for every function we dispatch specially
+        // in cellgov_core::hle. If any entry here disagrees with the
+        // NID_TABLE, we would route real game calls through the wrong
+        // handler -- the failure mode that corrupted memory during the
+        // flOw boot before these values were corrected.
+        let expected = [
+            ("sys_initialize_tls", 0x744680a2u32),
+            ("sys_process_exit", 0xe6f2c1e7),
+            ("_sys_malloc", 0xbdb18f83),
+            ("_sys_free", 0xf7f7fb20),
+            ("_sys_memset", 0x68b9b011),
+            ("sys_lwmutex_create", 0x2f85c0ef),
+            ("sys_lwmutex_lock", 0x1573dc3f),
+            ("sys_lwmutex_unlock", 0x1bc200f4),
+            ("sys_lwmutex_destroy", 0xc3476d0c),
+            ("_sys_heap_create_heap", 0xb2fcf2c8),
+            ("_sys_heap_delete_heap", 0xaede4b03),
+            ("_sys_heap_malloc", 0x35168520),
+            ("_sys_heap_memalign", 0x44265c08),
+            ("_sys_heap_free", 0x8a561d92),
+        ];
+        for (name, nid) in expected {
+            let got = lookup(nid).map(|(_, n)| n);
+            assert_eq!(
+                got,
+                Some(name),
+                "NID 0x{nid:08x} must map to {name}, got {got:?}",
+            );
+        }
+    }
+
+    /// Validate every entry in NID_TABLE by recomputing its NID from
+    /// the function name via the canonical PS3 algorithm:
+    ///
+    ///   NID = SHA-1(name || 16-byte suffix), first 4 bytes as LE u32.
+    ///
+    /// The 16-byte suffix is the value RPCS3's `ppu_generate_id` uses
+    /// (PSDevWiki documents the same constant). If anyone adds a new
+    /// NID entry with a typo'd hash, this test fails immediately
+    /// instead of waiting for a game to misroute that NID.
+    ///
+    /// This is the regression guard that would have caught the
+    /// pre-Phase-8 mislabeling of _sys_malloc / _sys_free /
+    /// _sys_heap_create_heap.
+    #[test]
+    fn nid_table_round_trips_through_sha1() {
+        use sha1::{Digest, Sha1};
+        const SUFFIX: [u8; 16] = [
+            0x67, 0x59, 0x65, 0x99, 0x04, 0x25, 0x04, 0x90, 0x56, 0x64, 0x27, 0x49, 0x94, 0x89,
+            0x74, 0x1A,
+        ];
+        let mut wrong = Vec::new();
+        for &(stored_nid, _module, name) in NID_TABLE {
+            let mut hasher = Sha1::new();
+            hasher.update(name.as_bytes());
+            hasher.update(SUFFIX);
+            let digest = hasher.finalize();
+            let computed = u32::from_le_bytes([digest[0], digest[1], digest[2], digest[3]]);
+            if computed != stored_nid {
+                wrong.push((stored_nid, name, computed));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "{} NID(s) do not round-trip through SHA-1: {:#x?}",
+            wrong.len(),
+            wrong
+        );
     }
 }

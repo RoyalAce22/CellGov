@@ -192,6 +192,10 @@ pub struct Runtime {
     /// Bump allocator pointer for _sys_malloc HLE. Points to the next
     /// free address in guest memory. Allocations are never freed.
     pub(crate) hle_heap_ptr: u32,
+    /// Monotonic kernel-object ID counter for HLE-created primitives
+    /// (lwmutex sleep_queue, etc.). Starts above zero so a zero-initialized
+    /// guest field is distinguishable from a legitimate allocated ID.
+    pub(crate) hle_next_id: u32,
     /// Controls trace and hash checkpoint overhead. Defaults to
     /// `FullTrace` (all records, all hashes). `FaultDriven` disables
     /// both; `DeterminismCheck` enables hashes and commit-level trace.
@@ -242,6 +246,7 @@ impl Runtime {
             last_scheduled_unit: None,
             hle_nids: std::collections::BTreeMap::new(),
             hle_heap_ptr: 0,
+            hle_next_id: 0x8000_0001,
             mode: RuntimeMode::FullTrace,
         }
     }
@@ -878,7 +883,7 @@ impl Runtime {
     }
 }
 
-/// Map an [`Effect`] onto its [`TracedEffectKind`] twin.
+/// Map an `Effect` onto its `TracedEffectKind` twin.
 ///
 /// Same DAG situation as `traced_yield_reason`: `cellgov_trace` sits
 /// below `cellgov_effects` in the workspace and cannot import the

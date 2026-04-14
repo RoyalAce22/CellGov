@@ -77,10 +77,9 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let (rt, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Lbz { rt, ra, imm })
         }
-        // lbzu: approximate as lbz (update semantics omitted)
         35 => {
             let (rt, ra, imm) = d_form(raw);
-            Ok(PpuInstruction::Lbz { rt, ra, imm })
+            Ok(PpuInstruction::Lbzu { rt, ra, imm })
         }
         40 => {
             let (rt, ra, imm) = d_form(raw);
@@ -91,13 +90,15 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             Ok(PpuInstruction::Lha { rt, ra, imm })
         }
         58 => {
-            // ld (DS-form): low 2 bits are the sub-opcode (0 = ld)
-            if raw & 0x3 != 0 {
-                return Err(PpuDecodeError::Unsupported(raw));
-            }
+            // DS-form: low 2 bits are the sub-opcode.
+            let sub = raw & 0x3;
             let (rt, ra, _) = d_form(raw);
             let imm = (raw & 0xFFFC) as i16;
-            Ok(PpuInstruction::Ld { rt, ra, imm })
+            match sub {
+                0 => Ok(PpuInstruction::Ld { rt, ra, imm }),
+                1 => Ok(PpuInstruction::Ldu { rt, ra, imm }),
+                _ => Err(PpuDecodeError::Unsupported(raw)),
+            }
         }
         // D-form: stores
         36 => {
@@ -149,6 +150,14 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         25 => {
             let (rs, ra, imm) = d_form_u(raw);
             Ok(PpuInstruction::Oris { ra, rs, imm })
+        }
+        26 => {
+            let (rs, ra, imm) = d_form_u(raw);
+            Ok(PpuInstruction::Xori { ra, rs, imm })
+        }
+        27 => {
+            let (rs, ra, imm) = d_form_u(raw);
+            Ok(PpuInstruction::Xoris { ra, rs, imm })
         }
         28 => {
             let (rs, ra, imm) = d_form_u(raw);
@@ -206,6 +215,15 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let mb = ((raw >> 6) & 0x1F) as u8;
             let me = ((raw >> 1) & 0x1F) as u8;
             Ok(PpuInstruction::Rlwinm { ra, rs, sh, mb, me })
+        }
+        23 => {
+            // rlwnm: like rlwinm but shift amount is low 5 bits of RB.
+            let rs = ((raw >> 21) & 0x1F) as u8;
+            let ra = ((raw >> 16) & 0x1F) as u8;
+            let rb = ((raw >> 11) & 0x1F) as u8;
+            let mb = ((raw >> 6) & 0x1F) as u8;
+            let me = ((raw >> 1) & 0x1F) as u8;
+            Ok(PpuInstruction::Rlwnm { ra, rs, rb, mb, me })
         }
         30 => decode_md(raw),
 
@@ -306,11 +324,11 @@ fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 /// Fields (Power ISA bit positions, bit 0 = MSB of the 32-bit word):
 /// - bits 6..10:  rs
 /// - bits 11..15: ra
-/// - bits 16..20: sh[0..4]  (low 5 bits of shift)
-/// - bits 21..25: mb[0..4] / me[0..4] (low 5 bits of mask bound)
-/// - bit 26:      mb[5] / me[5] (high-order bit of mask bound)
+/// - bits 16..20: `sh[0..4]`  (low 5 bits of shift)
+/// - bits 21..25: `mb[0..4]` / `me[0..4]` (low 5 bits of mask bound)
+/// - bit 26:      `mb[5]` / `me[5]` (high-order bit of mask bound)
 /// - bits 27..29: xo (0 = rldicl, 1 = rldicr)
-/// - bit 30:      sh[5] (high-order bit of shift)
+/// - bit 30:      `sh[5]` (high-order bit of shift)
 /// - bit 31:      Rc
 fn decode_md(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let rs = ((raw >> 21) & 0x1F) as u8;
@@ -395,8 +413,13 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         104 => return Ok(PpuInstruction::Neg { rt, ra }),
         235 => return Ok(PpuInstruction::Mullw { rt, ra, rb }),
         11 => return Ok(PpuInstruction::Mulhwu { rt, ra, rb }),
+        9 => return Ok(PpuInstruction::Mulhdu { rt, ra, rb }),
+        138 => return Ok(PpuInstruction::Adde { rt, ra, rb }),
         491 => return Ok(PpuInstruction::Divw { rt, ra, rb }),
         459 => return Ok(PpuInstruction::Divwu { rt, ra, rb }),
+        489 => return Ok(PpuInstruction::Divd { rt, ra, rb }),
+        457 => return Ok(PpuInstruction::Divdu { rt, ra, rb }),
+        233 => return Ok(PpuInstruction::Mulld { rt, ra, rb }),
         _ => {}
     }
 
@@ -436,6 +459,12 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         87 => return Ok(PpuInstruction::Lbzx { rt, ra, rb }),
         21 => return Ok(PpuInstruction::Ldx { rt, ra, rb }),
         279 => return Ok(PpuInstruction::Lhzx { rt, ra, rb }),
+
+        // Atomic load-reserve / store-conditional
+        84 => return Ok(PpuInstruction::Ldarx { rt, ra, rb }),
+        214 => return Ok(PpuInstruction::Stdcx { rs: rt, ra, rb }),
+        20 => return Ok(PpuInstruction::Lwarx { rt, ra, rb }),
+        150 => return Ok(PpuInstruction::Stwcx { rs: rt, ra, rb }),
 
         // Indexed stores
         151 => return Ok(PpuInstruction::Stwx { rs: rt, ra, rb }),
@@ -678,6 +707,96 @@ mod tests {
                 vt: 0,
                 va: 0,
                 vb: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn ldu_decodes_with_negative_ds_offset() {
+        // ldu r7, -8(r4): primary 58, RT=7, RA=4, DS=-2 (= -8/4), sub=1.
+        // Raw 0xE8E4FFF9 seen in flOw main binary at PC 0x006ba174.
+        let insn = decode(0xE8E4_FFF9).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Ldu {
+                rt: 7,
+                ra: 4,
+                imm: -8,
+            }
+        );
+    }
+
+    #[test]
+    fn ld_still_decodes_with_sub_zero() {
+        // Ensure primary-58 sub=0 still maps to Ld, not Ldu.
+        // ld r3, 0(r4): raw 0xE8640000.
+        let insn = decode(0xE864_0000).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Ld {
+                rt: 3,
+                ra: 4,
+                imm: 0
+            }
+        );
+    }
+
+    #[test]
+    fn rlwnm_decodes() {
+        // rlwnm r0, r0, r8, 0, 31 -> opcode 23 with RB=r8, MB=0, ME=31.
+        // Raw: 0x5C00403E (seen in flOw main binary at PC 0x006b862c).
+        let insn = decode(0x5C00_403E).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Rlwnm {
+                ra: 0,
+                rs: 0,
+                rb: 8,
+                mb: 0,
+                me: 31,
+            }
+        );
+    }
+
+    #[test]
+    fn adde_decodes() {
+        // adde r3, r0, r29 -> opcode 31, RT=3, RA=0, RB=29, XO=138.
+        // Raw 0x7C60E914 observed in flOw at PC 0x000459c4.
+        let insn = decode(0x7C60_E914).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Adde {
+                rt: 3,
+                ra: 0,
+                rb: 29,
+            }
+        );
+    }
+
+    #[test]
+    fn mulhdu_decodes() {
+        // mulhdu r0, r0, r11: opcode 31, RT=0, RA=0, RB=11, XO=9 -> 0x7C005812
+        let insn = decode(0x7C00_5812).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Mulhdu {
+                rt: 0,
+                ra: 0,
+                rb: 11,
+            }
+        );
+    }
+
+    #[test]
+    fn lbzu_decodes() {
+        // lbzu r0, 1(r9) -> opcode 35, RT=0, RA=9, D=1 -> 0x8C090001
+        let insn = decode(0x8C09_0001).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Lbzu {
+                rt: 0,
+                ra: 9,
+                imm: 1,
             }
         );
     }
