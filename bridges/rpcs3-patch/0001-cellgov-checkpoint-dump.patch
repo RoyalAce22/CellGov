@@ -1,0 +1,114 @@
+From: CellGov <noreply@cellgov.local>
+Subject: [PATCH] cellgov: env-var-gated memory dump at _sys_process_exit
+
+Adds an opt-in checkpoint dump that writes configured guest-memory
+regions to a binary file when _sys_process_exit is reached. Controlled
+by two environment variables; no effect when unset.
+
+Environment variables:
+
+  CELLGOV_DUMP_PATH     Path to output dump file. When unset the hook
+                        is a no-op. The file is overwritten on each
+                        run.
+
+  CELLGOV_DUMP_REGIONS  Comma-separated list of `addr:size` pairs in
+                        hex (e.g. 0x10000:0x800000,0x10000000:0x400000).
+                        Each region is appended to the dump file
+                        contiguously in declaration order.
+
+The CellGov side consumes the dump via `tools/rpcs3-to-observation/`,
+which packages it into a standard Observation JSON using a region
+manifest that must list the same regions in the same order.
+
+This hook is read-only with respect to guest state: it calls
+vm::base() + memcpy to the host output file and returns. It runs on
+the PPU thread that issued the exit, before RPCS3's normal exit
+teardown.
+
+Target file: rpcs3/Emu/Cell/lv2/sys_process.cpp
+
+---
+
+diff --git a/rpcs3/Emu/Cell/lv2/sys_process.cpp b/rpcs3/Emu/Cell/lv2/sys_process.cpp
+--- a/rpcs3/Emu/Cell/lv2/sys_process.cpp
++++ b/rpcs3/Emu/Cell/lv2/sys_process.cpp
+@@ -1,6 +1,9 @@
+ #include "stdafx.h"
+ #include "sys_process.h"
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
+
+ #include "Emu/Memory/vm.h"
+ #include "Emu/System.h"
+@@ -343,12 +346,80 @@ extern void signal_system_cache_can_stay();
+
++// CellGov checkpoint-dump hook. Writes guest memory regions to a file
++// when CELLGOV_DUMP_PATH is set. See tools/rpcs3-patch/README.md in
++// the CellGov repo.
++static void cellgov_checkpoint_dump()
++{
++	const char* path = std::getenv("CELLGOV_DUMP_PATH");
++	if (!path || !*path)
++	{
++		return;
++	}
++
++	const char* regions_env = std::getenv("CELLGOV_DUMP_REGIONS");
++	if (!regions_env || !*regions_env)
++	{
++		std::fprintf(stderr, "[cellgov] CELLGOV_DUMP_PATH set but CELLGOV_DUMP_REGIONS empty; skipping dump\n");
++		return;
++	}
++
++	std::FILE* f = std::fopen(path, "wb");
++	if (!f)
++	{
++		std::fprintf(stderr, "[cellgov] failed to open dump path: %s\n", path);
++		return;
++	}
++
++	// Parse "addr:size,addr:size,..." in hex. Each region is appended
++	// contiguously in declaration order; the CellGov side recovers
++	// boundaries from the region manifest, not from the file.
++	std::string s(regions_env);
++	std::size_t cursor = 0;
++	while (cursor < s.size())
++	{
++		std::size_t comma = s.find(',', cursor);
++		std::string pair = s.substr(cursor, comma == std::string::npos ? std::string::npos : comma - cursor);
++		cursor = comma == std::string::npos ? s.size() : comma + 1;
++
++		std::size_t colon = pair.find(':');
++		if (colon == std::string::npos) continue;
++
++		unsigned long long addr = std::strtoull(pair.substr(0, colon).c_str(), nullptr, 16);
++		unsigned long long size = std::strtoull(pair.substr(colon + 1).c_str(), nullptr, 16);
++		if (size == 0) continue;
++
++		const void* base = vm::base(static_cast<u32>(addr));
++		if (!base)
++		{
++			std::fprintf(stderr, "[cellgov] region 0x%llx:0x%llx has no base; skipping\n", addr, size);
++			continue;
++		}
++
++		std::fwrite(base, 1, static_cast<std::size_t>(size), f);
++	}
++
++	std::fclose(f);
++	std::fprintf(stderr, "[cellgov] checkpoint dump written to %s\n", path);
++}
++
+ void _sys_process_exit(ppu_thread& ppu, s32 status, u32 arg2, u32 arg3)
+ {
+ 	ppu.state += cpu_flag::wait;
+
+ 	sys_process.warning("_sys_process_exit(status=%d, arg2=0x%x, arg3=0x%x)", status, arg2, arg3);
+
++	cellgov_checkpoint_dump();
++
+ 	Emu.CallFromMainThread([]()
+ 	{
+ 		sys_process.success("Process finished");

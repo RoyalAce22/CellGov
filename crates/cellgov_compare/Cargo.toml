@@ -8,6 +8,14 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["rpcs3-runner"]
+# Compiles the RPCS3 process-spawning adapter (runner_rpcs3 module +
+# the manifest's Rpcs3Decoder bridge). Downstream importers that just
+# want the Observation schema, compare, diverge, and zoom_lookup
+# can opt out with default-features = false.
+rpcs3-runner = []
+
 [dependencies]
 cellgov_event = { path = "../cellgov_event" }
 cellgov_testkit = { path = "../cellgov_testkit" }
@@ -15,3 +23,10 @@ cellgov_trace = { path = "../cellgov_trace" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "diverge_bench"
+harness = false

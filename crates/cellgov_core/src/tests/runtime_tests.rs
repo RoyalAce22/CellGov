@@ -1062,6 +1062,171 @@ fn max_steps_zero_rejects_first_step() {
     assert_eq!(rt.step(), Err(StepError::MaxStepsExceeded));
 }
 
+/// Test unit that simulates per-step state-hash production. The
+/// runtime should drain the configured pairs after run_until_yield
+/// and emit one TraceRecord::PpuStateHash per pair, in order, with
+/// monotonically incrementing step indices that span across multiple
+/// run_until_yield calls.
+type FullStateTuple = (u64, [u64; 32], u64, u64, u64, u32);
+
+struct StateHashEmittingUnit {
+    id: UnitId,
+    pairs_per_step: Vec<Vec<(u64, u64)>>,
+    /// Optional 9G zoom-in snapshots, paired with `pairs_per_step`.
+    /// Inner Vec empty means no full-state records that step.
+    full_per_step: Vec<Vec<FullStateTuple>>,
+    step_idx: Cell<usize>,
+}
+
+impl ExecutionUnit for StateHashEmittingUnit {
+    type Snapshot = ();
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+    fn status(&self) -> UnitStatus {
+        if self.step_idx.get() >= self.pairs_per_step.len() {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+    ) -> ExecutionStepResult {
+        self.step_idx.set(self.step_idx.get() + 1);
+        ExecutionStepResult {
+            yield_reason: YieldReason::BudgetExhausted,
+            consumed_budget: budget,
+            emitted_effects: vec![],
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+    fn snapshot(&self) -> Self::Snapshot {}
+    fn drain_retired_state_hashes(&mut self) -> Vec<(u64, u64)> {
+        let i = self.step_idx.get();
+        if i == 0 || i > self.pairs_per_step.len() {
+            return vec![];
+        }
+        self.pairs_per_step[i - 1].clone()
+    }
+    fn drain_retired_state_full(&mut self) -> Vec<FullStateTuple> {
+        let i = self.step_idx.get();
+        if i == 0 || i > self.full_per_step.len() {
+            return vec![];
+        }
+        self.full_per_step[i - 1].clone()
+    }
+}
+
+#[test]
+fn runtime_emits_ppu_state_hash_records_with_monotonic_step_index() {
+    use cellgov_trace::{StateHash, TraceReader, TraceRecord};
+    let mut rt = build(16, 5, 100);
+    rt.registry_mut().register_with(|id| StateHashEmittingUnit {
+        id,
+        // First call retires 2 instructions; second retires 1; third retires 0.
+        pairs_per_step: vec![
+            vec![(0x100, 0xaaa), (0x104, 0xbbb)],
+            vec![(0x200, 0xccc)],
+            vec![],
+        ],
+        full_per_step: vec![vec![], vec![], vec![]],
+        step_idx: Cell::new(0),
+    });
+    rt.step().unwrap();
+    rt.step().unwrap();
+    rt.step().unwrap();
+
+    let bytes = rt.trace().bytes().to_vec();
+    let hashes: Vec<TraceRecord> = TraceReader::new(&bytes)
+        .map(|r| r.expect("decode"))
+        .filter(|r| matches!(r, TraceRecord::PpuStateHash { .. }))
+        .collect();
+
+    assert_eq!(
+        hashes.len(),
+        3,
+        "3 retired-instruction fingerprints in total"
+    );
+
+    let extract = |r: &TraceRecord| match r {
+        TraceRecord::PpuStateHash { step, pc, hash } => (*step, *pc, hash.raw()),
+        _ => panic!("expected PpuStateHash"),
+    };
+    assert_eq!(extract(&hashes[0]), (0, 0x100, 0xaaa));
+    assert_eq!(extract(&hashes[1]), (1, 0x104, 0xbbb));
+    assert_eq!(extract(&hashes[2]), (2, 0x200, 0xccc));
+    let _ = StateHash::new(0); // touch to keep the import in use even if hashes are filtered
+}
+
+#[test]
+fn runtime_emits_no_ppu_state_hash_when_unit_drains_empty() {
+    use cellgov_trace::{TraceReader, TraceRecord};
+    // CountingUnit does not override drain_retired_state_hashes, so
+    // it returns the trait default (empty). Runtime must emit zero
+    // PpuStateHash records regardless of how many steps run.
+    let mut rt = build(16, 5, 100);
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 5));
+    for _ in 0..3 {
+        rt.step().unwrap();
+    }
+    let bytes = rt.trace().bytes().to_vec();
+    let count = TraceReader::new(&bytes)
+        .map(|r| r.expect("decode"))
+        .filter(|r| matches!(r, TraceRecord::PpuStateHash { .. }))
+        .count();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
+    use cellgov_trace::{TraceReader, TraceRecord};
+    let mut rt = build(16, 5, 100);
+    rt.registry_mut().register_with(|id| StateHashEmittingUnit {
+        id,
+        // Three retired instructions, of which only the middle one
+        // is inside a hypothetical zoom-in window.
+        pairs_per_step: vec![vec![(0x100, 0xaa), (0x104, 0xbb), (0x108, 0xcc)]],
+        full_per_step: vec![vec![(0x104, [0u64; 32], 0, 0, 0, 0)]],
+        step_idx: Cell::new(0),
+    });
+    rt.step().unwrap();
+
+    // Main trace: 3 PpuStateHash, 0 PpuStateFull (the main stream is
+    // homogeneous; full states never get mixed in).
+    let main_bytes = rt.trace().bytes().to_vec();
+    let main_records: Vec<_> = TraceReader::new(&main_bytes)
+        .map(|r| r.expect("decode"))
+        .collect();
+    let main_hashes = main_records
+        .iter()
+        .filter(|r| matches!(r, TraceRecord::PpuStateHash { .. }))
+        .count();
+    let main_fulls = main_records
+        .iter()
+        .filter(|r| matches!(r, TraceRecord::PpuStateFull { .. }))
+        .count();
+    assert_eq!(main_hashes, 3, "all hashes go to main stream");
+    assert_eq!(main_fulls, 0, "full states never appear in main stream");
+
+    // Zoom trace: 1 PpuStateFull at the windowed PC.
+    let zoom_bytes = rt.zoom_trace().bytes().to_vec();
+    let zoom_records: Vec<_> = TraceReader::new(&zoom_bytes)
+        .map(|r| r.expect("decode"))
+        .collect();
+    assert_eq!(zoom_records.len(), 1);
+    match &zoom_records[0] {
+        TraceRecord::PpuStateFull { pc, .. } => assert_eq!(*pc, 0x104),
+        other => panic!("expected PpuStateFull, got {other:?}"),
+    }
+}
+
 #[test]
 fn into_memory_returns_committed_state() {
     let mut mem = GuestMemory::new(64);

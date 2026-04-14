@@ -10,10 +10,12 @@
 
 pub mod baseline;
 pub mod compare;
+pub mod diverge;
 pub mod manifest;
 pub mod observation;
 pub mod report;
 pub mod runner_cellgov;
+#[cfg(feature = "rpcs3-runner")]
 pub mod runner_rpcs3;
 
 #[cfg(test)]
@@ -23,6 +25,7 @@ pub use compare::{
     compare, compare_multi, Classification, CompareMode, CompareResult, EventDivergence,
     MemoryDivergence, MultiCompareResult,
 };
+pub use diverge::{diverge, zoom_lookup, DivergeField, DivergeReport, RegDiff, ZoomLookup};
 pub use observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,
     ObservedHashes, ObservedOutcome,

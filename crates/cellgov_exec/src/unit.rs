@@ -102,6 +102,34 @@ pub trait ExecutionUnit {
     /// Capture the unit's current state as deterministic data. Must
     /// satisfy the snapshot rule documented on the trait.
     fn snapshot(&self) -> Self::Snapshot;
+
+    /// Drain per-instruction state fingerprints retired during the most
+    /// recent `run_until_yield`. Returns an empty vector by default.
+    ///
+    /// Used by the per-step divergence trace. Units opt in by
+    /// overriding this method and a corresponding "per-step trace"
+    /// setter of their own. Unit implementations that never opt in pay
+    /// nothing: the default empty vector allocates no heap.
+    ///
+    /// Contract: each pair is `(pc, state_hash)` for one retired
+    /// instruction, in retirement order. The caller is responsible for
+    /// assigning monotonic step indices; the unit does not know its
+    /// own position in the global step sequence.
+    fn drain_retired_state_hashes(&mut self) -> Vec<(u64, u64)> {
+        Vec::new()
+    }
+
+    /// Drain full-register snapshots collected during the most recent
+    /// `run_until_yield` inside the unit's configured zoom-in window.
+    /// Returns an empty vector by default.
+    ///
+    /// Each entry is `(pc, gpr, lr, ctr, xer, cr)` for one retired
+    /// instruction whose retirement index fell inside the window. The
+    /// caller assigns monotonic step indices, matching the indices
+    /// used for `drain_retired_state_hashes`.
+    fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

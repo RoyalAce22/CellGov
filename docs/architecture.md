@@ -13,7 +13,7 @@ that.
 
 ## Workspace shape
 
-15 library crates plus 2 binary crates, organized as a strict layered
+15 library crates plus 3 binary crates, organized as a strict layered
 DAG. Foundational primitives sit at the bottom; consumers at the top.
 No backward edges.
 
@@ -21,6 +21,7 @@ No backward edges.
 graph BT
   cli["apps/cellgov_cli"]
   mkelf["apps/cellgov_mkelf"]
+  rpcs3obs["bridges/rpcs3_to_observation"]
   explore[cellgov_explore]
   compare[cellgov_compare]
   testkit[cellgov_testkit]
@@ -87,6 +88,7 @@ graph BT
   trace --> cli
   ppu --> cli
   spu --> cli
+  compare --> rpcs3obs
 ```
 
 Three structural rules worth calling out:
@@ -118,16 +120,17 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_dma` | DMA completion queue with pluggable latency models. |
 | `cellgov_effects` | The 9-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above). |
 | `cellgov_exec` | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime. |
-| `cellgov_trace` | Binary trace format: 7 record variants with strict tag/layout contract. |
+| `cellgov_trace` | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace). |
 | `cellgov_lv2` | LV2 model: image registry, thread-group table, syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`). |
 | `cellgov_core` | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook. |
 | `cellgov_ppu` | PPU interpreter, ELF64/SPRX/PRX loaders, NID database, HLE binder. |
 | `cellgov_spu` | SPU interpreter, channel file, SPU ELF loader. |
 | `cellgov_testkit` | Scenario fixtures and the runner used by tests across the workspace. |
-| `cellgov_compare` | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff. |
+| `cellgov_compare` | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`. |
 | `cellgov_explore` | Bounded schedule exploration with conflict-aware pruning. |
-| `cellgov_cli` | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`. |
+| `cellgov_cli` | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`. |
 | `cellgov_mkelf` | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies. |
+| `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`. |
 
 ## Per-step pipeline
 
@@ -159,20 +162,37 @@ The full vocabulary of guest-visible operations:
   `SharedWriteIntent`, `MailboxSend`, `MailboxReceiveAttempt`,
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
   `FaultRaised`, `TraceMarker`.
-- **7 trace record variants** in `cellgov_trace::TraceRecord`:
-  `UnitScheduled`, `StepCompleted`, `CommitApplied`,
-  `StateHashCheckpoint`, `EffectEmitted`, `UnitBlocked`, `UnitWoken`.
+- **9 trace record variants** in `cellgov_trace::TraceRecord` --
+  seven decision-level (`UnitScheduled`, `StepCompleted`,
+  `CommitApplied`, `StateHashCheckpoint`, `EffectEmitted`,
+  `UnitBlocked`, `UnitWoken`) plus two per-step variants for the
+  divergence trace (`PpuStateHash`, `PpuStateFull`).
 
 Trace emission is gated by `RuntimeMode` (`FaultDriven` /
 `DeterminismCheck` / `FullTrace`). Fault-driven boot pays no trace
 overhead; determinism check pays state-hash overhead at commit
 boundaries; full trace pays both.
 
+The two per-step variants are gated separately on the unit, not on
+`RuntimeMode`. `PpuExecutionUnit::set_per_step_trace(true)` enables
+one `PpuStateHash` (25 bytes: step + pc + 64-bit FNV-1a fingerprint
+of GPR + LR + CTR + XER + CR) per retired instruction. The runtime
+drains them via `ExecutionUnit::drain_retired_state_hashes` after
+each `run_until_yield` and writes them to the main trace stream
+with monotonic per-instruction step indices that are independent of
+`steps_taken`. `set_full_state_window(Some((lo, hi)))` enables a
+bounded-window second stream of `PpuStateFull` records (301 bytes
+each, full register snapshot) routed to a separate `zoom_trace`
+sink so the main per-step stream stays homogeneous. Cost: 876 ns per
+100 instructions when off, 27 us per 100 instructions when on
+(measured on a Windows dev box; the off branch is one predicted-away
+test in the hot loop).
+
 ## Execution units
 
 **PPU (`cellgov_ppu`)**: PPC64 interpreter with 32 GPRs, 32 FPRs, PC,
 CR, LR, CTR, XER (carry tracked), TB, and 32 vector registers.
-**93 instruction variants** today, covering integer arithmetic and
+**91 instruction variants** today, covering integer arithmetic and
 logic, D-form and indexed loads/stores with and without update,
 conditional branches with LR/CTR variants, 64-bit multiply and divide
 families, signed and unsigned multiply-high, rotate and mask families
@@ -280,6 +300,47 @@ observations from `run-game` outputs and the CLI's
 MATCH or the first differing field. Determinism check on flOw's full
 1.4M-step boot passes byte-identical between two CellGov runs of the
 same ELF.
+
+### Per-step divergence localization
+
+Two scanners turn per-step state-trace files into actionable diff
+reports:
+
+- `cellgov_compare::diverge(a, b)` walks two trace byte buffers,
+  filters each to `PpuStateHash` records, and reports the first
+  index where they disagree. Three outcomes: `Identical { count }`,
+  `LengthDiffers { common_count, a_count, b_count }`, or
+  `Differs { step, a_pc, b_pc, a_hash, b_hash, field }` with `field`
+  in `{Pc, Hash}`. The check order is step count -> PC -> hash so
+  the report names the highest-level divergence first. Surfaced via
+  `cellgov_cli diverge <a.state> <b.state>`. Throughput is
+  ~17 ns per record, so a 1.4M-record flOw boot scan completes in
+  ~80 ms.
+- `cellgov_compare::zoom_lookup(a_zoom, b_zoom, step)` consumes
+  separate zoom-trace files (`PpuStateFull` records emitted only
+  inside the unit's window) and returns either `Found { diffs }`
+  with per-field `RegDiff { field, a, b }` entries or
+  `MissingStep`. An empty `diffs` is the false-collision case
+  (`PpuStateHash` reported a divergence but `PpuStateFull` shows
+  byte-equal state) and tells the outer scanner it can resume from
+  the next step. Surfaced via `cellgov_cli zoom <a> <b> <step>`.
+
+### RPCS3 bridge
+
+`bridges/rpcs3-patch/0001-cellgov-checkpoint-dump.patch` adds an
+opt-in dump hook to RPCS3's `_sys_process_exit` and `sys_tty_write`
+syscalls. With `CELLGOV_DUMP_PATH`, `CELLGOV_DUMP_REGIONS`, and
+`CELLGOV_DUMP_TTY_NTH=N` set, RPCS3 writes the configured guest
+memory regions to a binary file on the Nth `sys_tty_write` and
+exits. `bridges/rpcs3_to_observation` then converts that dump plus a
+shared region manifest into the same `Observation` JSON
+`cellgov_cli compare-observations` reads.
+
+The patched RPCS3 binary is built by the developer; the CellGov
+library has no Cargo or runtime dependency on RPCS3. The bridge is
+a verification-time tool, not a library coupling. See
+`tests/fixtures/flow_cross_runner/REPRODUCTION.md` for the build commands
+and the documented vendored-RPCS3 build-config workarounds.
 
 ## Boot status
 

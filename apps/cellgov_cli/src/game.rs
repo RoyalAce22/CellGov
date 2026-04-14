@@ -30,6 +30,7 @@ pub fn run_game(
     patch_bytes: &[(u64, u8)],
     dump_mem_addrs: &[u64],
     save_observation: Option<&str>,
+    observation_manifest: Option<&str>,
 ) {
     let t_start = Instant::now();
     let elf_data = load_file_or_die(elf_path);
@@ -275,41 +276,97 @@ pub fn run_game(
     }
 
     if let Some(path) = save_observation {
-        save_boot_observation(path, &elf_data, rt.memory().as_bytes(), boot_outcome, steps);
+        save_boot_observation(
+            path,
+            &elf_data,
+            rt.memory().as_bytes(),
+            boot_outcome,
+            steps,
+            observation_manifest,
+        );
     }
+}
+
+/// One region in a checkpoint observation manifest, sharing the schema
+/// used by `tools/rpcs3_to_observation/` and `tests/fixtures/flow_checkpoint.toml`.
+#[derive(Debug, serde::Deserialize)]
+struct CheckpointManifest {
+    regions: Vec<CheckpointRegion>,
+}
+
+/// A single named region in a checkpoint observation manifest.
+#[derive(Debug, serde::Deserialize)]
+struct CheckpointRegion {
+    name: String,
+    #[serde(deserialize_with = "de_hex_u64")]
+    addr: u64,
+    #[serde(deserialize_with = "de_hex_u64")]
+    size: u64,
+}
+
+fn de_hex_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    use serde::Deserialize;
+    let s = String::deserialize(d)?;
+    let trimmed = s.strip_prefix("0x").unwrap_or(&s);
+    u64::from_str_radix(trimmed, 16).map_err(serde::de::Error::custom)
 }
 
 /// Build a boot-checkpoint observation and serialize it as JSON.
 ///
-/// Region list is derived from the ELF's PT_LOAD segments: each segment
-/// becomes one region named `seg{index}_{ro|rw}`. Writable segments
-/// (.data/.bss) compare meaningfully only at matched boot states;
-/// read-only segments (.text/.rodata) must byte-match at any checkpoint.
+/// Region list defaults to the ELF's PT_LOAD segments (one region per
+/// segment, named `seg{index}_{ro|rw}`). When `manifest_path` is set,
+/// the regions come from that TOML manifest instead -- this is how a
+/// cross-runner comparison guarantees matching region names on both
+/// sides (CellGov and RPCS3 read the same manifest).
 fn save_boot_observation(
     path: &str,
     elf_data: &[u8],
     final_memory: &[u8],
     outcome: cellgov_compare::BootOutcome,
     steps: usize,
+    manifest_path: Option<&str>,
 ) {
-    let segments = match cellgov_ppu::loader::pt_load_segments(elf_data) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("save-observation: failed to enumerate PT_LOAD: {e:?}");
-            return;
+    let regions: Vec<cellgov_compare::RegionDescriptor> = match manifest_path {
+        Some(mp) => match std::fs::read_to_string(mp)
+            .map_err(|e| format!("read {mp}: {e}"))
+            .and_then(|t| {
+                toml::from_str::<CheckpointManifest>(&t).map_err(|e| format!("parse {mp}: {e}"))
+            }) {
+            Ok(m) => m
+                .regions
+                .into_iter()
+                .map(|r| cellgov_compare::RegionDescriptor {
+                    name: r.name,
+                    addr: r.addr,
+                    size: r.size,
+                })
+                .collect(),
+            Err(e) => {
+                eprintln!("save-observation: {e}");
+                return;
+            }
+        },
+        None => {
+            let segments = match cellgov_ppu::loader::pt_load_segments(elf_data) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("save-observation: failed to enumerate PT_LOAD: {e:?}");
+                    return;
+                }
+            };
+            segments
+                .iter()
+                .map(|s| {
+                    let kind = if s.writable { "rw" } else { "ro" };
+                    cellgov_compare::RegionDescriptor {
+                        name: format!("seg{}_{kind}", s.index),
+                        addr: s.vaddr,
+                        size: s.memsz,
+                    }
+                })
+                .collect()
         }
     };
-    let regions: Vec<cellgov_compare::RegionDescriptor> = segments
-        .iter()
-        .map(|s| {
-            let kind = if s.writable { "rw" } else { "ro" };
-            cellgov_compare::RegionDescriptor {
-                name: format!("seg{}_{kind}", s.index),
-                addr: s.vaddr,
-                size: s.memsz,
-            }
-        })
-        .collect();
     let observation = cellgov_compare::observe_from_boot(final_memory, outcome, steps, &regions);
     match serde_json::to_string_pretty(&observation) {
         Ok(json) => {
@@ -535,5 +592,93 @@ fn step_loop(
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CheckpointManifest, CheckpointRegion};
+
+    fn parse(text: &str) -> CheckpointManifest {
+        toml::from_str(text).expect("parses")
+    }
+
+    #[test]
+    fn checkpoint_manifest_parses_hex_addresses() {
+        // The run-game --observation-manifest flag uses this struct
+        // to override the PT_LOAD-derived region list. Hex parsing
+        // must accept the same syntax the rpcs3_to_observation
+        // adapter accepts so both runners read the same manifest
+        // file.
+        let m = parse(
+            r#"
+            [[regions]]
+            name = "code"
+            addr = "0x10000"
+            size = "0x800000"
+
+            [[regions]]
+            name = "rodata"
+            addr = "0x10000000"
+            size = "0x40000"
+            "#,
+        );
+        assert_eq!(m.regions.len(), 2);
+        let CheckpointRegion {
+            ref name,
+            addr,
+            size,
+        } = m.regions[0];
+        assert_eq!(name, "code");
+        assert_eq!(addr, 0x10000);
+        assert_eq!(size, 0x800000);
+        assert_eq!(m.regions[1].addr, 0x1000_0000);
+        assert_eq!(m.regions[1].size, 0x40000);
+    }
+
+    #[test]
+    fn checkpoint_manifest_accepts_unprefixed_hex() {
+        // The deserializer strips an optional 0x prefix so manifests
+        // can be hand-edited either way.
+        let m = parse(
+            r#"
+            [[regions]]
+            name = "r"
+            addr = "1000"
+            size = "10"
+            "#,
+        );
+        assert_eq!(m.regions[0].addr, 0x1000);
+        assert_eq!(m.regions[0].size, 0x10);
+    }
+
+    #[test]
+    fn checkpoint_manifest_rejects_non_hex_value() {
+        let bad = toml::from_str::<CheckpointManifest>(
+            r#"
+            [[regions]]
+            name = "r"
+            addr = "not-hex"
+            size = "10"
+            "#,
+        );
+        assert!(bad.is_err(), "non-hex addr must fail");
+    }
+
+    #[test]
+    fn checkpoint_manifest_loads_committed_flow_fixture() {
+        // Pin the checked-in flOw checkpoint manifest so a future
+        // edit that breaks parsing fails locally and not in a live
+        // cross-runner run.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("flow_checkpoint.toml");
+        let text = std::fs::read_to_string(&path).expect("read");
+        let m: CheckpointManifest = toml::from_str(&text).expect("parses");
+        assert!(!m.regions.is_empty());
+        assert!(m.regions.iter().any(|r| r.name == "code"));
     }
 }

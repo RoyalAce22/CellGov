@@ -51,6 +51,7 @@ dependencies = [
  "cellgov_compare",
  "cellgov_core",
  "cellgov_effects",
+ "cellgov_event",
  "cellgov_exec",
  "cellgov_explore",
  "cellgov_mem",
@@ -59,7 +60,9 @@ dependencies = [
  "cellgov_testkit",
  "cellgov_time",
  "cellgov_trace",
+ "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]
@@ -69,6 +72,7 @@ dependencies = [
  "cellgov_event",
  "cellgov_testkit",
  "cellgov_trace",
+ "criterion",
  "serde",
  "serde_json",
  "toml",
@@ -526,6 +530,17 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "rpcs3_to_observation"
+version = "0.0.0"
+dependencies = [
+ "cellgov_compare",
+ "cellgov_trace",
+ "serde",
+ "serde_json",
+ "toml",
+]
 
 [[package]]
 name = "same-file"

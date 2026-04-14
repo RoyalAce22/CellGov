@@ -129,6 +129,7 @@ mod tests {
         assert!(result.oracle_divergence.is_none());
     }
 
+    #[cfg(feature = "rpcs3-runner")]
     #[test]
     fn rpcs3_tty_baseline_roundtrip() {
         // Parse a real RPCS3 TTY output, build an Observation, save

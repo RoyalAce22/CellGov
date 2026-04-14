@@ -28,10 +28,11 @@
 
 SYS_PROCESS_PARAM(1001, 0x10000)
 
-/* TestResult layout matching phase_2.md. */
+/* Two-word fixed result layout shared across the microtest corpus:
+ * status is 0 on pass, value carries the test-specific result word. */
 struct TestResult {
-    unsigned int status;   /* 0 = pass */
-    unsigned int value;    /* test-specific result word */
+    unsigned int status;
+    unsigned int value;
 };
 
 /* TTY protocol tag. */

@@ -1,0 +1,1 @@
+DIVERGE region data: first byte differs at offset 0x7768 (guest 0x827768) -- 10 vs 00

@@ -18,6 +18,30 @@ members = [
     "crates/cellgov_explore",
     "apps/cellgov_cli",
     "apps/cellgov_mkelf",
+    "bridges/rpcs3_to_observation",
+]
+# Default-build excludes the RPCS3 bridge so a plain `cargo build`
+# does not pull in any RPCS3-aware code. Build it explicitly with
+# `cargo build -p rpcs3_to_observation` when running the
+# cross-runner comparison pipeline.
+default-members = [
+    "crates/cellgov_time",
+    "crates/cellgov_event",
+    "crates/cellgov_mem",
+    "crates/cellgov_effects",
+    "crates/cellgov_sync",
+    "crates/cellgov_dma",
+    "crates/cellgov_exec",
+    "crates/cellgov_trace",
+    "crates/cellgov_core",
+    "crates/cellgov_compare",
+    "crates/cellgov_testkit",
+    "crates/cellgov_lv2",
+    "crates/cellgov_spu",
+    "crates/cellgov_ppu",
+    "crates/cellgov_explore",
+    "apps/cellgov_cli",
+    "apps/cellgov_mkelf",
 ]
 
 [workspace.package]

@@ -1,13 +1,13 @@
 # rust runtime
 /target
 
-# documentation -- only the dev/ subtree is private
 docs/dev/
 
 # IDE files
 .vscode/
 
-# external tools
+# external tools (vendored RPCS3, Ghidra, etc.) -- everything under
+# tools/ is third-party; CellGov-owned bridges live under bridges/
 tools/
 
 # test artifacts (compiled ELFs, objects, build output)
@@ -20,6 +20,11 @@ tests/micro/hello_world/
 
 # Raw TTY dumps (binary artifacts from RPCS3 runs)
 baselines/**/*.tty
+
+# Large flOw cross-runner observation artifacts (too big for git;
+# reproduced from tests/fixtures/flow_cross_runner/REPRODUCTION.md)
+tests/fixtures/flow_cross_runner/*.json
+tests/fixtures/flow_cross_runner/*.dump
 
 # AI tooling
 .claude/

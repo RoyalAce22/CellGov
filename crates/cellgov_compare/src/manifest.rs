@@ -6,6 +6,7 @@
 //! per microtest.
 
 use crate::observation::ObservedOutcome;
+#[cfg(feature = "rpcs3-runner")]
 use crate::runner_rpcs3::Rpcs3Decoder;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -78,6 +79,7 @@ pub enum DecoderField {
     Llvm,
 }
 
+#[cfg(feature = "rpcs3-runner")]
 impl From<DecoderField> for Rpcs3Decoder {
     fn from(d: DecoderField) -> Self {
         match d {

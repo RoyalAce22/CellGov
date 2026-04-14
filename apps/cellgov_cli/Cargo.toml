@@ -12,6 +12,7 @@ workspace = true
 cellgov_compare = { path = "../../crates/cellgov_compare" }
 cellgov_core = { path = "../../crates/cellgov_core" }
 cellgov_effects = { path = "../../crates/cellgov_effects" }
+cellgov_event = { path = "../../crates/cellgov_event" }
 cellgov_exec = { path = "../../crates/cellgov_exec" }
 cellgov_explore = { path = "../../crates/cellgov_explore" }
 cellgov_mem = { path = "../../crates/cellgov_mem" }
@@ -20,4 +21,6 @@ cellgov_spu = { path = "../../crates/cellgov_spu" }
 cellgov_testkit = { path = "../../crates/cellgov_testkit" }
 cellgov_time = { path = "../../crates/cellgov_time" }
 cellgov_trace = { path = "../../crates/cellgov_trace" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
