@@ -291,11 +291,87 @@ criterion_group!(
     bench_execute_rlwinm,
 );
 
+// --- per-step state-hash trace cost ---
+
+/// Run the same 100-instruction addi loop with per-step state-hash
+/// tracing OFF. Pairs with `bench_run_until_yield_per_step_on` to
+/// quantify the cost of leaving the per-step path enabled. The OFF
+/// branch is the zero-cost path the runtime defaults to.
+fn bench_run_until_yield_per_step_off(c: &mut Criterion) {
+    let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
+    let addi_bytes = addi_word.to_be_bytes();
+    let mut mem = GuestMemory::new(4096);
+    for i in 0..1000 {
+        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(i * 4), 4).unwrap();
+        mem.apply_commit(range, &addi_bytes).unwrap();
+    }
+
+    c.bench_function("run_until_yield/per_step_off_addi100", |b| {
+        b.iter(|| {
+            let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
+            // Default: per_step_trace == false.
+            let ctx = ExecutionContext::new(&mem);
+            ppu.run_until_yield(black_box(Budget::new(100)), &ctx)
+        })
+    });
+}
+
+/// Same workload with per-step tracing ON. This pays the
+/// `state_hash()` call plus a Vec push every retired instruction.
+/// The runtime opts in only when the dev explicitly requests
+/// per-step trace.
+fn bench_run_until_yield_per_step_on(c: &mut Criterion) {
+    let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
+    let addi_bytes = addi_word.to_be_bytes();
+    let mut mem = GuestMemory::new(4096);
+    for i in 0..1000 {
+        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(i * 4), 4).unwrap();
+        mem.apply_commit(range, &addi_bytes).unwrap();
+    }
+
+    c.bench_function("run_until_yield/per_step_on_addi100", |b| {
+        b.iter(|| {
+            let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
+            ppu.set_per_step_trace(true);
+            let ctx = ExecutionContext::new(&mem);
+            let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx);
+            // Drain every iteration so the buffer does not grow
+            // unbounded across criterion samples.
+            let _ = ppu.drain_retired_state_hashes();
+            r
+        })
+    });
+}
+
+// --- per-call cost of PpuState::state_hash() ---
+
+/// Cost of one PpuState::state_hash() call. Pulled out of the
+/// per-step emission bench so a regression in the hash function
+/// itself can be distinguished from a regression in the surrounding
+/// emission path. Hash input is 324 bytes (32 GPRs + LR + CTR + XER
+/// + CR).
+fn bench_state_hash(c: &mut Criterion) {
+    let mut s = PpuState::new();
+    for (i, r) in s.gpr.iter_mut().enumerate() {
+        *r = 0x1000 + i as u64;
+    }
+    s.lr = 0xdead_beef;
+    s.ctr = 0xcafe_babe;
+    s.xer = 1 << 29;
+    s.cr = 0xa5a5_a5a5;
+    c.bench_function("state_hash/full_register_file", |b| {
+        b.iter(|| black_box(&s).state_hash())
+    });
+}
+
 criterion_group!(
     run_benches,
     bench_run_until_yield_100,
     bench_run_until_yield_budget_1,
     bench_run_until_yield_mixed,
+    bench_run_until_yield_per_step_off,
+    bench_run_until_yield_per_step_on,
+    bench_state_hash,
 );
 
 criterion_main!(decode_benches, execute_benches, run_benches);

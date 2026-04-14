@@ -200,6 +200,19 @@ pub struct Runtime {
     /// `FullTrace` (all records, all hashes). `FaultDriven` disables
     /// both; `DeterminismCheck` enables hashes and commit-level trace.
     mode: RuntimeMode,
+    /// Monotonic counter over per-instruction state hashes. Each
+    /// entry drained from a unit's `drain_retired_state_hashes` is
+    /// stamped with this counter, then the counter is incremented.
+    /// The counter is orthogonal to `steps_taken` (which counts
+    /// `run_until_yield` invocations, not individual retired
+    /// instructions).
+    per_step_index: u64,
+    /// Separate trace sink for zoom-in `PpuStateFull` records. Kept
+    /// distinct from the main `trace` writer so the per-step stream
+    /// stays homogeneous: every record in `trace` is fixed-size
+    /// `PpuStateHash`, every record in `zoom_trace` is `PpuStateFull`.
+    /// The CLI extracts this via `Runtime::zoom_trace`.
+    zoom_trace: TraceWriter,
 }
 
 impl Runtime {
@@ -248,6 +261,8 @@ impl Runtime {
             hle_heap_ptr: 0,
             hle_next_id: 0x8000_0001,
             mode: RuntimeMode::FullTrace,
+            per_step_index: 0,
+            zoom_trace: TraceWriter::new(),
         }
     }
 
@@ -568,6 +583,15 @@ impl Runtime {
         &self.trace
     }
 
+    /// Borrow the 9G zoom-in trace writer. Empty unless a unit had a
+    /// zoom-in window configured during one of the runs that fed
+    /// `step()`. Kept distinct from `trace()` so the per-step stream
+    /// stays homogeneous.
+    #[inline]
+    pub fn zoom_trace(&self) -> &TraceWriter {
+        &self.zoom_trace
+    }
+
     /// Borrow the unit registry.
     #[inline]
     pub fn registry(&self) -> &UnitRegistry {
@@ -838,8 +862,54 @@ impl Runtime {
                 .registry
                 .get_mut(unit_id)
                 .expect("scheduler returned an id that is not in the registry");
-            unit.run_until_yield(self.budget_per_step, &ctx)
+            let res = unit.run_until_yield(self.budget_per_step, &ctx);
+            // Drain per-instruction state fingerprints and full snapshots
+            // collected during the step. Both empty unless the unit
+            // has the corresponding mode on; drain is stable across
+            // every unit via the trait defaults.
+            let retired_hashes = unit.drain_retired_state_hashes();
+            let retired_full = unit.drain_retired_state_full();
+            (res, retired_hashes, retired_full)
         };
+        let (result, retired_hashes, retired_full) = result;
+
+        // Per-step divergence trace: one TraceRecord::PpuStateHash
+        // per retired instruction in the main trace stream. Step indices
+        // are assigned monotonically, independent of `steps_taken`.
+        // Then one TraceRecord::PpuStateFull per windowed snapshot in
+        // the separate zoom-in stream. Both are paired by step index
+        // so the diff printer can match a hash divergence with its
+        // full-state snapshot when both are present.
+        let hash_base = self.per_step_index;
+        for (pc, hash) in retired_hashes {
+            self.trace.record(&TraceRecord::PpuStateHash {
+                step: self.per_step_index,
+                pc,
+                hash: cellgov_trace::StateHash::new(hash),
+            });
+            self.per_step_index += 1;
+        }
+        // Each full-state snapshot is paired with the per-step hash at
+        // the same retired index. We assume the unit emits full states
+        // for a contiguous prefix of the same retirement sequence the
+        // hashes use. The window's start index is unit-relative; here
+        // we only know how many full-state entries the unit drained,
+        // so we stamp them with `hash_base + i` -- correct only when
+        // the window starts at the unit's retirement_counter == 0.
+        // Larger windows that start mid-run get correct PCs but do not
+        // attempt to recover the original step index (the diff printer
+        // matches by PC instead).
+        for (i, (pc, gpr, lr, ctr, xer, cr)) in retired_full.into_iter().enumerate() {
+            self.zoom_trace.record(&TraceRecord::PpuStateFull {
+                step: hash_base + i as u64,
+                pc,
+                gpr,
+                lr,
+                ctr,
+                xer,
+                cr,
+            });
+        }
 
         // Identity time-advancement policy: budget units convert 1:1
         // to guest ticks. The time-advancement policy can be any

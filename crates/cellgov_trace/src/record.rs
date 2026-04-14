@@ -30,6 +30,8 @@
 //! - `0x04 EffectEmitted`     -- 1 + 8 + 4 + 1 = 14 bytes
 //! - `0x05 UnitBlocked`       -- 1 + 8 + 1 = 10 bytes
 //! - `0x06 UnitWoken`         -- 1 + 8 + 1 = 10 bytes
+//! - `0x07 PpuStateHash`      -- 1 + 8 + 8 + 8 = 25 bytes
+//! - `0x08 PpuStateFull`      -- 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 = 301 bytes
 
 use crate::hash::StateHash;
 use crate::level::TraceLevel;
@@ -230,6 +232,11 @@ pub enum DecodeError {
 /// land (mailbox routing, DMA completion, sync wakes, etc.). Each new
 /// variant must use a strictly greater tag than the current maximum
 /// to preserve binary compatibility with existing traces.
+// PpuStateFull carries 32 GPRs by value, making it ~300 bytes vs
+// ~30 for every other variant. Records are encoded to bytes
+// immediately and the enum value is not stored long-term, so the
+// layout difference does not justify a heap allocation per record.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TraceRecord {
     /// The scheduler selected a unit and granted it a budget.
@@ -304,6 +311,44 @@ pub enum TraceRecord {
         /// Why it was woken.
         reason: TracedWakeReason,
     },
+    /// Per-step PPU state fingerprint captured at instruction retire.
+    ///
+    /// Per-step divergence trace. Emitted once per retired PPU
+    /// instruction when per-step tracing is active. The `hash` field
+    /// covers GPR + LR + CTR + XER + CR under a canonical
+    /// tooling-local byte layout.
+    PpuStateHash {
+        /// Monotonically increasing step index within the run.
+        step: u64,
+        /// Program counter of the instruction that just retired.
+        pc: u64,
+        /// 64-bit fingerprint of the live register file.
+        hash: StateHash,
+    },
+    /// Full PPU register snapshot captured at instruction retire.
+    ///
+    /// Zoom-in mode. Emitted only inside an opt-in window `[lo, hi]`
+    /// configured on the unit; never on the hot path. The payload is
+    /// the same architectural surface `PpuStateHash` covers but
+    /// uncompressed, so a divergence diff can name the exact
+    /// register that disagrees rather than just "the hash differs".
+    PpuStateFull {
+        /// Monotonically increasing step index within the run. Matches
+        /// the `step` field on `PpuStateHash` for the same instruction.
+        step: u64,
+        /// Program counter of the instruction that just retired.
+        pc: u64,
+        /// 32 x 64-bit general-purpose registers, GPR[0..32].
+        gpr: [u64; 32],
+        /// Link register.
+        lr: u64,
+        /// Count register.
+        ctr: u64,
+        /// Fixed-point exception register.
+        xer: u64,
+        /// Condition register (packed 32-bit).
+        cr: u32,
+    },
 }
 
 const TAG_UNIT_SCHEDULED: u8 = 0x00;
@@ -313,6 +358,8 @@ const TAG_STATE_HASH_CHECKPOINT: u8 = 0x03;
 const TAG_EFFECT_EMITTED: u8 = 0x04;
 const TAG_UNIT_BLOCKED: u8 = 0x05;
 const TAG_UNIT_WOKEN: u8 = 0x06;
+const TAG_PPU_STATE_HASH: u8 = 0x07;
+const TAG_PPU_STATE_FULL: u8 = 0x08;
 
 impl TraceRecord {
     /// The category this record belongs to. Used by readers and
@@ -324,7 +371,9 @@ impl TraceRecord {
             | TraceRecord::UnitBlocked { .. }
             | TraceRecord::UnitWoken { .. } => TraceLevel::Scheduling,
             TraceRecord::CommitApplied { .. } => TraceLevel::Commits,
-            TraceRecord::StateHashCheckpoint { .. } => TraceLevel::Hashes,
+            TraceRecord::StateHashCheckpoint { .. }
+            | TraceRecord::PpuStateHash { .. }
+            | TraceRecord::PpuStateFull { .. } => TraceLevel::Hashes,
             TraceRecord::EffectEmitted { .. } => TraceLevel::Effects,
         }
     }
@@ -394,6 +443,32 @@ impl TraceRecord {
                 buf.push(TAG_UNIT_WOKEN);
                 write_u64(buf, unit.raw());
                 buf.push(*reason as u8);
+            }
+            TraceRecord::PpuStateHash { step, pc, hash } => {
+                buf.push(TAG_PPU_STATE_HASH);
+                write_u64(buf, *step);
+                write_u64(buf, *pc);
+                write_u64(buf, hash.raw());
+            }
+            TraceRecord::PpuStateFull {
+                step,
+                pc,
+                gpr,
+                lr,
+                ctr,
+                xer,
+                cr,
+            } => {
+                buf.push(TAG_PPU_STATE_FULL);
+                write_u64(buf, *step);
+                write_u64(buf, *pc);
+                for r in gpr.iter() {
+                    write_u64(buf, *r);
+                }
+                write_u64(buf, *lr);
+                write_u64(buf, *ctr);
+                write_u64(buf, *xer);
+                write_u32(buf, *cr);
             }
         }
     }
@@ -482,6 +557,33 @@ impl TraceRecord {
                     .ok_or(DecodeError::UnknownWakeReason(reason_byte))?;
                 TraceRecord::UnitWoken { unit, reason }
             }
+            TAG_PPU_STATE_HASH => {
+                let step = read_u64(bytes, &mut pos)?;
+                let pc = read_u64(bytes, &mut pos)?;
+                let hash = StateHash::new(read_u64(bytes, &mut pos)?);
+                TraceRecord::PpuStateHash { step, pc, hash }
+            }
+            TAG_PPU_STATE_FULL => {
+                let step = read_u64(bytes, &mut pos)?;
+                let pc = read_u64(bytes, &mut pos)?;
+                let mut gpr = [0u64; 32];
+                for r in gpr.iter_mut() {
+                    *r = read_u64(bytes, &mut pos)?;
+                }
+                let lr = read_u64(bytes, &mut pos)?;
+                let ctr = read_u64(bytes, &mut pos)?;
+                let xer = read_u64(bytes, &mut pos)?;
+                let cr = read_u32(bytes, &mut pos)?;
+                TraceRecord::PpuStateFull {
+                    step,
+                    pc,
+                    gpr,
+                    lr,
+                    ctr,
+                    xer,
+                    cr,
+                }
+            }
             other => return Err(DecodeError::UnknownTag(other)),
         };
         Ok((record, pos))
@@ -525,359 +627,5 @@ fn read_u64(bytes: &[u8], pos: &mut usize) -> Result<u64, DecodeError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn roundtrip(r: TraceRecord) {
-        let mut buf = Vec::new();
-        r.encode(&mut buf);
-        let (decoded, n) = TraceRecord::decode(&buf).expect("decode");
-        assert_eq!(decoded, r);
-        assert_eq!(n, buf.len());
-    }
-
-    #[test]
-    fn unit_scheduled_roundtrip() {
-        roundtrip(TraceRecord::UnitScheduled {
-            unit: UnitId::new(7),
-            granted_budget: Budget::new(100),
-            time: GuestTicks::new(42),
-            epoch: Epoch::new(3),
-        });
-    }
-
-    #[test]
-    fn step_completed_roundtrip_each_yield_reason() {
-        let reasons = [
-            TracedYieldReason::BudgetExhausted,
-            TracedYieldReason::MailboxAccess,
-            TracedYieldReason::DmaSubmitted,
-            TracedYieldReason::DmaWait,
-            TracedYieldReason::WaitingSync,
-            TracedYieldReason::Syscall,
-            TracedYieldReason::InterruptBoundary,
-            TracedYieldReason::Fault,
-            TracedYieldReason::Finished,
-        ];
-        for r in reasons {
-            roundtrip(TraceRecord::StepCompleted {
-                unit: UnitId::new(1),
-                yield_reason: r,
-                consumed_budget: Budget::new(50),
-                time_after: GuestTicks::new(100),
-            });
-        }
-    }
-
-    #[test]
-    fn commit_applied_roundtrip() {
-        roundtrip(TraceRecord::CommitApplied {
-            unit: UnitId::new(2),
-            writes_committed: 5,
-            effects_deferred: 3,
-            fault_discarded: false,
-            epoch_after: Epoch::new(7),
-        });
-        roundtrip(TraceRecord::CommitApplied {
-            unit: UnitId::new(2),
-            writes_committed: 0,
-            effects_deferred: 0,
-            fault_discarded: true,
-            epoch_after: Epoch::new(7),
-        });
-    }
-
-    #[test]
-    fn state_hash_checkpoint_roundtrip_each_kind() {
-        let kinds = [
-            HashCheckpointKind::CommittedMemory,
-            HashCheckpointKind::RunnableQueue,
-            HashCheckpointKind::SyncState,
-            HashCheckpointKind::UnitStatus,
-        ];
-        for k in kinds {
-            roundtrip(TraceRecord::StateHashCheckpoint {
-                kind: k,
-                hash: StateHash::new(0xdead_beef_cafe_babe),
-            });
-        }
-    }
-
-    #[test]
-    fn effect_emitted_roundtrip_each_kind() {
-        let kinds = [
-            TracedEffectKind::SharedWriteIntent,
-            TracedEffectKind::MailboxSend,
-            TracedEffectKind::MailboxReceiveAttempt,
-            TracedEffectKind::DmaEnqueue,
-            TracedEffectKind::WaitOnEvent,
-            TracedEffectKind::WakeUnit,
-            TracedEffectKind::SignalUpdate,
-            TracedEffectKind::FaultRaised,
-            TracedEffectKind::TraceMarker,
-        ];
-        for (i, k) in kinds.into_iter().enumerate() {
-            roundtrip(TraceRecord::EffectEmitted {
-                unit: UnitId::new(3),
-                sequence: i as u32,
-                kind: k,
-            });
-        }
-    }
-
-    #[test]
-    fn effect_emitted_discriminants_locked() {
-        // Pinned to match cellgov_effects::Effect variant order. If
-        // either side reorders, replay against an existing trace
-        // breaks; this test catches local drift before that happens.
-        assert_eq!(TracedEffectKind::SharedWriteIntent as u8, 0);
-        assert_eq!(TracedEffectKind::MailboxSend as u8, 1);
-        assert_eq!(TracedEffectKind::MailboxReceiveAttempt as u8, 2);
-        assert_eq!(TracedEffectKind::DmaEnqueue as u8, 3);
-        assert_eq!(TracedEffectKind::WaitOnEvent as u8, 4);
-        assert_eq!(TracedEffectKind::WakeUnit as u8, 5);
-        assert_eq!(TracedEffectKind::SignalUpdate as u8, 6);
-        assert_eq!(TracedEffectKind::FaultRaised as u8, 7);
-        assert_eq!(TracedEffectKind::TraceMarker as u8, 8);
-    }
-
-    #[test]
-    fn unknown_effect_kind_returns_error() {
-        let mut buf = vec![TAG_EFFECT_EMITTED];
-        write_u64(&mut buf, 0);
-        write_u32(&mut buf, 0);
-        buf.push(99);
-        assert_eq!(
-            TraceRecord::decode(&buf),
-            Err(DecodeError::UnknownEffectKind(99))
-        );
-    }
-
-    #[test]
-    fn level_classification() {
-        let scheduled = TraceRecord::UnitScheduled {
-            unit: UnitId::new(0),
-            granted_budget: Budget::new(0),
-            time: GuestTicks::ZERO,
-            epoch: Epoch::ZERO,
-        };
-        let step = TraceRecord::StepCompleted {
-            unit: UnitId::new(0),
-            yield_reason: TracedYieldReason::Finished,
-            consumed_budget: Budget::new(0),
-            time_after: GuestTicks::ZERO,
-        };
-        let commit = TraceRecord::CommitApplied {
-            unit: UnitId::new(0),
-            writes_committed: 0,
-            effects_deferred: 0,
-            fault_discarded: false,
-            epoch_after: Epoch::ZERO,
-        };
-        let hash = TraceRecord::StateHashCheckpoint {
-            kind: HashCheckpointKind::CommittedMemory,
-            hash: StateHash::ZERO,
-        };
-        let effect = TraceRecord::EffectEmitted {
-            unit: UnitId::new(0),
-            sequence: 0,
-            kind: TracedEffectKind::SharedWriteIntent,
-        };
-        assert_eq!(scheduled.level(), TraceLevel::Scheduling);
-        assert_eq!(step.level(), TraceLevel::Scheduling);
-        assert_eq!(commit.level(), TraceLevel::Commits);
-        assert_eq!(hash.level(), TraceLevel::Hashes);
-        assert_eq!(effect.level(), TraceLevel::Effects);
-    }
-
-    #[test]
-    fn truncated_input_returns_error() {
-        let r = TraceRecord::UnitScheduled {
-            unit: UnitId::new(1),
-            granted_budget: Budget::new(1),
-            time: GuestTicks::ZERO,
-            epoch: Epoch::ZERO,
-        };
-        let mut buf = Vec::new();
-        r.encode(&mut buf);
-        // Drop the last byte: should fail to decode.
-        let truncated = &buf[..buf.len() - 1];
-        assert_eq!(TraceRecord::decode(truncated), Err(DecodeError::Truncated));
-    }
-
-    #[test]
-    fn unknown_tag_returns_error() {
-        let bad = [0xff_u8];
-        assert_eq!(
-            TraceRecord::decode(&bad),
-            Err(DecodeError::UnknownTag(0xff))
-        );
-    }
-
-    #[test]
-    fn unknown_yield_reason_returns_error() {
-        let mut buf = vec![TAG_STEP_COMPLETED];
-        write_u64(&mut buf, 0); // unit
-        buf.push(99); // bogus yield reason
-        write_u64(&mut buf, 0); // consumed
-        write_u64(&mut buf, 0); // time_after
-        assert_eq!(
-            TraceRecord::decode(&buf),
-            Err(DecodeError::UnknownYieldReason(99))
-        );
-    }
-
-    #[test]
-    fn unknown_hash_kind_returns_error() {
-        let mut buf = vec![TAG_STATE_HASH_CHECKPOINT];
-        buf.push(99); // bogus kind
-        write_u64(&mut buf, 0);
-        assert_eq!(
-            TraceRecord::decode(&buf),
-            Err(DecodeError::UnknownHashKind(99))
-        );
-    }
-
-    #[test]
-    fn invalid_bool_returns_error() {
-        let mut buf = vec![TAG_COMMIT_APPLIED];
-        write_u64(&mut buf, 0);
-        write_u32(&mut buf, 0);
-        write_u32(&mut buf, 0);
-        buf.push(2); // not 0 or 1
-        write_u64(&mut buf, 0);
-        assert_eq!(TraceRecord::decode(&buf), Err(DecodeError::InvalidBool(2)));
-    }
-
-    #[test]
-    fn fixed_sizes_match_documentation() {
-        // Verify the wire-size table in the module doc comment.
-        let mut buf = Vec::new();
-        TraceRecord::UnitScheduled {
-            unit: UnitId::new(0),
-            granted_budget: Budget::new(0),
-            time: GuestTicks::ZERO,
-            epoch: Epoch::ZERO,
-        }
-        .encode(&mut buf);
-        assert_eq!(buf.len(), 33);
-
-        buf.clear();
-        TraceRecord::StepCompleted {
-            unit: UnitId::new(0),
-            yield_reason: TracedYieldReason::BudgetExhausted,
-            consumed_budget: Budget::new(0),
-            time_after: GuestTicks::ZERO,
-        }
-        .encode(&mut buf);
-        assert_eq!(buf.len(), 26);
-
-        buf.clear();
-        TraceRecord::CommitApplied {
-            unit: UnitId::new(0),
-            writes_committed: 0,
-            effects_deferred: 0,
-            fault_discarded: false,
-            epoch_after: Epoch::ZERO,
-        }
-        .encode(&mut buf);
-        assert_eq!(buf.len(), 26);
-
-        buf.clear();
-        TraceRecord::StateHashCheckpoint {
-            kind: HashCheckpointKind::CommittedMemory,
-            hash: StateHash::ZERO,
-        }
-        .encode(&mut buf);
-        assert_eq!(buf.len(), 10);
-
-        buf.clear();
-        TraceRecord::EffectEmitted {
-            unit: UnitId::new(0),
-            sequence: 0,
-            kind: TracedEffectKind::SharedWriteIntent,
-        }
-        .encode(&mut buf);
-        assert_eq!(buf.len(), 14);
-
-        buf.clear();
-        TraceRecord::UnitBlocked {
-            unit: UnitId::new(0),
-            reason: TracedBlockReason::WaitOnEvent,
-        }
-        .encode(&mut buf);
-        assert_eq!(buf.len(), 10);
-
-        buf.clear();
-        TraceRecord::UnitWoken {
-            unit: UnitId::new(0),
-            reason: TracedWakeReason::WakeEffect,
-        }
-        .encode(&mut buf);
-        assert_eq!(buf.len(), 10);
-    }
-
-    #[test]
-    fn unit_blocked_roundtrip_each_reason() {
-        let reasons = [
-            TracedBlockReason::WaitOnEvent,
-            TracedBlockReason::MailboxEmpty,
-        ];
-        for r in reasons {
-            roundtrip(TraceRecord::UnitBlocked {
-                unit: UnitId::new(5),
-                reason: r,
-            });
-        }
-    }
-
-    #[test]
-    fn unit_woken_roundtrip_each_reason() {
-        let reasons = [
-            TracedWakeReason::WakeEffect,
-            TracedWakeReason::DmaCompletion,
-        ];
-        for r in reasons {
-            roundtrip(TraceRecord::UnitWoken {
-                unit: UnitId::new(5),
-                reason: r,
-            });
-        }
-    }
-
-    #[test]
-    fn unknown_block_reason_returns_error() {
-        let mut buf = vec![TAG_UNIT_BLOCKED];
-        write_u64(&mut buf, 0);
-        buf.push(99);
-        assert_eq!(
-            TraceRecord::decode(&buf),
-            Err(DecodeError::UnknownBlockReason(99))
-        );
-    }
-
-    #[test]
-    fn unknown_wake_reason_returns_error() {
-        let mut buf = vec![TAG_UNIT_WOKEN];
-        write_u64(&mut buf, 0);
-        buf.push(99);
-        assert_eq!(
-            TraceRecord::decode(&buf),
-            Err(DecodeError::UnknownWakeReason(99))
-        );
-    }
-
-    #[test]
-    fn blocked_and_woken_are_scheduling_level() {
-        let blocked = TraceRecord::UnitBlocked {
-            unit: UnitId::new(0),
-            reason: TracedBlockReason::WaitOnEvent,
-        };
-        let woken = TraceRecord::UnitWoken {
-            unit: UnitId::new(0),
-            reason: TracedWakeReason::DmaCompletion,
-        };
-        assert_eq!(blocked.level(), TraceLevel::Scheduling);
-        assert_eq!(woken.level(), TraceLevel::Scheduling);
-    }
-}
+#[path = "record_tests.rs"]
+mod tests;

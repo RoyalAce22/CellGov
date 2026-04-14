@@ -59,6 +59,21 @@ pub trait RegisteredUnit: 'static {
         budget: Budget,
         ctx: &ExecutionContext<'_>,
     ) -> ExecutionStepResult;
+
+    /// Drain per-instruction state fingerprints retired during the most
+    /// recent `run_until_yield`. Same contract as
+    /// [`ExecutionUnit::drain_retired_state_hashes`]. Default returns
+    /// empty for units that do not opt in to per-step tracing.
+    fn drain_retired_state_hashes(&mut self) -> Vec<(u64, u64)> {
+        Vec::new()
+    }
+
+    /// Drain full-register snapshots collected inside the unit's
+    /// configured zoom-in window. Same contract as
+    /// [`ExecutionUnit::drain_retired_state_full`]. Default empty.
+    fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
+        Vec::new()
+    }
 }
 
 impl<U: ExecutionUnit + 'static> RegisteredUnit for U {
@@ -79,6 +94,16 @@ impl<U: ExecutionUnit + 'static> RegisteredUnit for U {
         ctx: &ExecutionContext<'_>,
     ) -> ExecutionStepResult {
         ExecutionUnit::run_until_yield(self, budget, ctx)
+    }
+
+    #[inline]
+    fn drain_retired_state_hashes(&mut self) -> Vec<(u64, u64)> {
+        ExecutionUnit::drain_retired_state_hashes(self)
+    }
+
+    #[inline]
+    fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
+        ExecutionUnit::drain_retired_state_full(self)
     }
 }
 

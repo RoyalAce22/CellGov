@@ -1040,6 +1040,182 @@ fn lbzu_advances_ra_to_effective_address() {
 }
 
 #[test]
+fn per_step_trace_off_records_no_state_hashes() {
+    // 9D contract: per-step tracing off (default) means the unit
+    // produces an empty drain even after retiring instructions. The
+    // hot-loop branch must skip the push entirely.
+    let mut mem = GuestMemory::new(64);
+    place_insn(&mut mem, 0, (14 << 26) | (3 << 21) | 1); // addi r3, r0, 1
+    place_insn(&mut mem, 4, (14 << 26) | (4 << 21) | 2); // addi r4, r0, 2
+    place_insn(&mut mem, 8, (14 << 26) | (5 << 21) | 3); // addi r5, r0, 3
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    use cellgov_exec::ExecutionUnit;
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(3), &ctx);
+
+    let drained = unit.drain_retired_state_hashes();
+    assert!(
+        drained.is_empty(),
+        "per_step_trace off must produce no fingerprints, got {} entries",
+        drained.len()
+    );
+}
+
+#[test]
+fn per_step_trace_on_records_one_hash_per_retired_instruction() {
+    use cellgov_exec::ExecutionUnit;
+    let mut mem = GuestMemory::new(64);
+    place_insn(&mut mem, 0, (14 << 26) | (3 << 21) | 1); // addi r3, r0, 1
+    place_insn(&mut mem, 4, (14 << 26) | (4 << 21) | 2); // addi r4, r0, 2
+    place_insn(&mut mem, 8, (14 << 26) | (5 << 21) | 3); // addi r5, r0, 3
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.set_per_step_trace(true);
+    assert!(unit.per_step_trace());
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(3), &ctx);
+
+    let drained = unit.drain_retired_state_hashes();
+    assert_eq!(drained.len(), 3, "one fingerprint per retired instruction");
+
+    // PCs reflect the start of each retired instruction in order.
+    assert_eq!(drained[0].0, 0);
+    assert_eq!(drained[1].0, 4);
+    assert_eq!(drained[2].0, 8);
+
+    // State after each instruction differs: r3, r4, r5 are set in
+    // turn. Adjacent hashes must differ.
+    assert_ne!(drained[0].1, drained[1].1);
+    assert_ne!(drained[1].1, drained[2].1);
+}
+
+#[test]
+fn drain_retired_state_hashes_clears_buffer() {
+    use cellgov_exec::ExecutionUnit;
+    let mut mem = GuestMemory::new(64);
+    place_insn(&mut mem, 0, (14 << 26) | (3 << 21) | 1);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.set_per_step_trace(true);
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+
+    assert_eq!(unit.drain_retired_state_hashes().len(), 1);
+    assert_eq!(
+        unit.drain_retired_state_hashes().len(),
+        0,
+        "drain must consume the buffer"
+    );
+}
+
+#[test]
+fn per_step_trace_does_not_record_on_fault() {
+    // Decode-fault path: a bogus opcode (primary 0) cannot retire, so
+    // no fingerprint is pushed even with per-step trace on.
+    use cellgov_exec::ExecutionUnit;
+    let mut mem = GuestMemory::new(64);
+    place_insn(&mut mem, 0, 0x0000_0000);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.set_per_step_trace(true);
+    let ctx = ExecutionContext::new(&mem);
+    let result = unit.run_until_yield(Budget::new(1), &ctx);
+
+    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert!(
+        unit.drain_retired_state_hashes().is_empty(),
+        "fault means the instruction did not retire; no fingerprint"
+    );
+}
+
+#[test]
+fn full_state_window_off_records_no_full_states() {
+    // Default: window None -> drain returns empty even after
+    // retiring instructions. Per-step hashes still produced when
+    // their separate flag is on, so the two paths are independent.
+    use cellgov_exec::ExecutionUnit;
+    let mut mem = GuestMemory::new(64);
+    place_insn(&mut mem, 0, (14 << 26) | (3 << 21) | 1);
+    place_insn(&mut mem, 4, (14 << 26) | (4 << 21) | 2);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(2), &ctx);
+    assert!(unit.drain_retired_state_full().is_empty());
+}
+
+#[test]
+fn full_state_window_emits_only_inside_range() {
+    // Retire 5 instructions; window is [1, 3] inclusive. Drain must
+    // contain exactly indices 1..=3 with their PCs in order.
+    use cellgov_exec::ExecutionUnit;
+    let mut mem = GuestMemory::new(64);
+    for i in 0..5 {
+        place_insn(
+            &mut mem,
+            (i * 4) as usize,
+            (14 << 26) | ((3 + i as u32 % 3) << 21) | (i as u32 + 1),
+        );
+    }
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.set_full_state_window(Some((1, 3)));
+    assert_eq!(unit.full_state_window(), Some((1, 3)));
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(5), &ctx);
+
+    let drained = unit.drain_retired_state_full();
+    assert_eq!(drained.len(), 3, "[1,3] inclusive == 3 entries");
+    assert_eq!(drained[0].0, 4);
+    assert_eq!(drained[1].0, 8);
+    assert_eq!(drained[2].0, 12);
+}
+
+#[test]
+fn full_state_window_and_per_step_hash_are_independent() {
+    // With per-step trace ON and window [0, 0], the per-step stream
+    // gets 5 entries, the window stream gets 1.
+    use cellgov_exec::ExecutionUnit;
+    let mut mem = GuestMemory::new(64);
+    for i in 0..5 {
+        place_insn(
+            &mut mem,
+            (i * 4) as usize,
+            (14 << 26) | ((3 + i as u32 % 3) << 21) | (i as u32 + 1),
+        );
+    }
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.set_per_step_trace(true);
+    unit.set_full_state_window(Some((0, 0)));
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(5), &ctx);
+
+    assert_eq!(unit.drain_retired_state_hashes().len(), 5);
+    assert_eq!(unit.drain_retired_state_full().len(), 1);
+}
+
+#[test]
+fn full_state_window_captures_actual_register_values() {
+    // After retiring `addi r3, r0, 7`, GPR[3] must equal 7 in the
+    // captured snapshot.
+    use cellgov_exec::ExecutionUnit;
+    let mut mem = GuestMemory::new(64);
+    place_insn(&mut mem, 0, (14 << 26) | (3 << 21) | 7);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.set_full_state_window(Some((0, 0)));
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+
+    let drained = unit.drain_retired_state_full();
+    assert_eq!(drained.len(), 1);
+    let (_pc, gpr, _lr, _ctr, _xer, _cr) = drained[0];
+    assert_eq!(gpr[3], 7);
+}
+
+#[test]
 fn non_fault_step_has_no_register_dump() {
     // addi r3, r0, 42 at PC=0
     let raw: u32 = (14 << 26) | (3 << 21) | 42;

@@ -100,6 +100,30 @@ impl PpuState {
         let base = if ra == 0 { 0 } else { self.gpr[ra as usize] };
         base.wrapping_add(self.gpr[rb as usize])
     }
+
+    /// 64-bit fingerprint of the architectural register file used by
+    /// the per-step divergence trace.
+    ///
+    /// Coverage: 32 x GPR, LR, CTR, XER (all u64), and CR (u32). FPR
+    /// and VR are intentionally excluded -- the initial fingerprint is
+    /// chosen to be cheap; if a real divergence is suspected to be
+    /// hidden by the GPR-only coverage, a wider variant is added then.
+    ///
+    /// Encoding: each field is appended in little-endian byte order
+    /// in a fixed sequence (GPR[0..32], LR, CTR, XER, CR). This is a
+    /// tooling-local serialization for cross-runner reproducibility,
+    /// not a statement about PPC architectural endianness.
+    pub fn state_hash(&self) -> u64 {
+        let mut h = cellgov_mem::Fnv1aHasher::new();
+        for r in &self.gpr {
+            h.write(&r.to_le_bytes());
+        }
+        h.write(&self.lr.to_le_bytes());
+        h.write(&self.ctr.to_le_bytes());
+        h.write(&self.xer.to_le_bytes());
+        h.write(&self.cr.to_le_bytes());
+        h.finish()
+    }
 }
 
 impl Default for PpuState {
@@ -185,6 +209,80 @@ mod tests {
             !(1u64 << 29),
             "clear CA should preserve all other bits"
         );
+    }
+
+    #[test]
+    fn state_hash_is_reproducible_for_same_state() {
+        let mut a = PpuState::new();
+        let mut b = PpuState::new();
+        a.gpr[3] = 0x1234_5678_9abc_def0;
+        a.lr = 0x42;
+        a.ctr = 0x84;
+        a.xer = 1 << 29;
+        a.cr = 0xa5a5_a5a5;
+        b.gpr[3] = 0x1234_5678_9abc_def0;
+        b.lr = 0x42;
+        b.ctr = 0x84;
+        b.xer = 1 << 29;
+        b.cr = 0xa5a5_a5a5;
+        assert_eq!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    fn state_hash_distinguishes_every_covered_field() {
+        // For every architectural field the fingerprint covers, mutating
+        // that field alone must flip the hash. If a field is silently
+        // dropped from coverage, this test fails on the dropped field.
+        let base = PpuState::new();
+        let baseline = base.state_hash();
+
+        for i in 0..GPR_COUNT {
+            let mut s = base.clone();
+            s.gpr[i] = 1;
+            assert_ne!(
+                s.state_hash(),
+                baseline,
+                "GPR[{i}] must influence state_hash"
+            );
+        }
+
+        let mut s = base.clone();
+        s.lr = 1;
+        assert_ne!(s.state_hash(), baseline, "LR must influence state_hash");
+
+        let mut s = base.clone();
+        s.ctr = 1;
+        assert_ne!(s.state_hash(), baseline, "CTR must influence state_hash");
+
+        let mut s = base.clone();
+        s.xer = 1;
+        assert_ne!(s.state_hash(), baseline, "XER must influence state_hash");
+
+        let mut s = base.clone();
+        s.cr = 1;
+        assert_ne!(s.state_hash(), baseline, "CR must influence state_hash");
+    }
+
+    #[test]
+    fn state_hash_ignores_pc_fpr_vr() {
+        // Contract: PC and the wider register banks (FPR, VR) are
+        // not part of the fingerprint. Mutating them must NOT flip
+        // the hash. If we later widen coverage, this test changes
+        // intentionally; until then it pins the documented surface.
+        let base = PpuState::new();
+        let baseline = base.state_hash();
+
+        let mut s = base.clone();
+        s.pc = 0xdead_beef;
+        assert_eq!(s.state_hash(), baseline, "PC is excluded");
+
+        let mut s = base.clone();
+        s.fpr[7] = 0xffff_ffff_ffff_ffff;
+        assert_eq!(s.state_hash(), baseline, "FPR is excluded");
+
+        let mut s = base.clone();
+        s.vr[0] = u128::MAX;
+        assert_eq!(s.state_hash(), baseline, "VR is excluded");
     }
 
     #[test]

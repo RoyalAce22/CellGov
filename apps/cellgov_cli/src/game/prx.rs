@@ -367,10 +367,13 @@ pub(super) fn run_module_start(
     rt.into_memory()
 }
 
-/// Attempt to load liblv2.prx from the firmware directory and resolve
-/// game imports against its exports. For each imported NID that the
-/// module exports, the GOT entry is re-patched to point to the real
-/// OPD instead of the HLE trampoline.
+/// Attempt to load liblv2.prx from the PS3 firmware directory and
+/// resolve game imports against its exports. The firmware directory
+/// is expected to contain decrypted PS3 system PRX modules; CellGov
+/// does not ship them, and the files are not RPCS3-specific.
+///
+/// For each imported NID that the module exports, the GOT entry is
+/// re-patched to point to the real OPD instead of the HLE trampoline.
 pub(super) fn load_firmware_prx(
     firmware_dir: Option<&str>,
     hle_bindings: &[cellgov_ppu::prx::HleBinding],

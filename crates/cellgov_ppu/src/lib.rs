@@ -73,6 +73,32 @@ pub struct PpuExecutionUnit {
     break_pc: Option<u64>,
     /// Number of hits to skip before firing the break (0 = first hit).
     break_skip: u32,
+    /// When true, `run_until_yield` pushes one `(pc, state_hash)` pair
+    /// into `per_step_hashes` after every retired instruction. Off by
+    /// default -- the inner loop skips the push entirely when off.
+    per_step_trace: bool,
+    /// Per-step fingerprints collected during the current
+    /// `run_until_yield`. Drained by the runtime via
+    /// `ExecutionUnit::drain_retired_state_hashes`.
+    per_step_hashes: Vec<(u64, u64)>,
+    /// Optional inclusive window of step indices (relative to this
+    /// unit's own retirement counter) for the zoom-in trace. When
+    /// the unit's retirement counter is in `[lo, hi]`, the unit
+    /// pushes a full register snapshot into `per_step_full_states`
+    /// after retiring the instruction. None disables the zoom-in
+    /// path entirely; the hot loop's check is one branch when the
+    /// window is None and an integer-range test when it is Some.
+    full_state_window: Option<(u64, u64)>,
+    /// Per-unit retirement counter used to test against
+    /// `full_state_window`. Increments only on successful retirement,
+    /// matching the gate the per-step hash uses.
+    retirement_counter: u64,
+    /// Full-state snapshots collected during the current
+    /// `run_until_yield`. Drained by the runtime via
+    /// `ExecutionUnit::drain_retired_state_full`. Each entry is
+    /// `(pc, gpr, lr, ctr, xer, cr)` for one retired instruction
+    /// inside the configured window.
+    per_step_full_states: Vec<(u64, [u64; 32], u64, u64, u64, u32)>,
 }
 
 impl PpuExecutionUnit {
@@ -84,7 +110,45 @@ impl PpuExecutionUnit {
             status: UnitStatus::Runnable,
             break_pc: None,
             break_skip: 0,
+            per_step_trace: false,
+            per_step_hashes: Vec::new(),
+            full_state_window: None,
+            retirement_counter: 0,
+            per_step_full_states: Vec::new(),
         }
+    }
+
+    /// Turn per-step state-hash tracing on or off.
+    ///
+    /// When on, `run_until_yield` pushes one `(pc, state_hash)` pair
+    /// into an internal buffer after every retired instruction. The
+    /// runtime drains the buffer through
+    /// `ExecutionUnit::drain_retired_state_hashes` and converts each
+    /// entry into a `TraceRecord::PpuStateHash`. Off by default.
+    pub fn set_per_step_trace(&mut self, on: bool) {
+        self.per_step_trace = on;
+    }
+
+    /// Whether per-step state-hash tracing is currently on.
+    pub fn per_step_trace(&self) -> bool {
+        self.per_step_trace
+    }
+
+    /// Configure a zoom-in window: full-register snapshots are
+    /// captured for instructions retired with index in `[lo, hi]`
+    /// (inclusive). Index counting is per-unit and starts at 0 for
+    /// the first retired instruction. Pass `None` to disable.
+    ///
+    /// The full snapshots are collected separately from per-step
+    /// hashes and drained via a separate trait method, so the main
+    /// per-step trace stream stays homogeneous.
+    pub fn set_full_state_window(&mut self, window: Option<(u64, u64)>) {
+        self.full_state_window = window;
+    }
+
+    /// Current zoom-in window, if any.
+    pub fn full_state_window(&self) -> Option<(u64, u64)> {
+        self.full_state_window
     }
 
     /// Set a breakpoint: fires on the `skip`-th-plus-one hit at `pc`
@@ -437,6 +501,23 @@ impl ExecutionUnit for PpuExecutionUnit {
                 }
             }
 
+            if self.per_step_trace {
+                self.per_step_hashes
+                    .push((step_pc, self.state.state_hash()));
+            }
+
+            // Zoom-in window. The window check is gated on the
+            // window being Some so the hot path stays one branch when
+            // off.
+            if let Some((lo, hi)) = self.full_state_window {
+                if self.retirement_counter >= lo && self.retirement_counter <= hi {
+                    let s = &self.state;
+                    self.per_step_full_states
+                        .push((step_pc, s.gpr, s.lr, s.ctr, s.xer, s.cr));
+                }
+            }
+            self.retirement_counter += 1;
+
             remaining = remaining.saturating_sub(1);
             if remaining == 0 {
                 return ExecutionStepResult {
@@ -459,6 +540,14 @@ impl ExecutionUnit for PpuExecutionUnit {
             lr: self.state.lr,
             ctr: self.state.ctr,
         }
+    }
+
+    fn drain_retired_state_hashes(&mut self) -> Vec<(u64, u64)> {
+        std::mem::take(&mut self.per_step_hashes)
+    }
+
+    fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
+        std::mem::take(&mut self.per_step_full_states)
     }
 }
 

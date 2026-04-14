@@ -51,18 +51,25 @@ Pre-Alpha. Capability today:
 
 - Boots flOw (NPUA80001) past C++ static initialization, through
   liblv2's `module_start`, and reaches the first RSX call
-  (`_cellGcmInitBody`) at PPU step 1.4M -- the documented
-  CPU-side boundary for the static-recomp oracle.
-- 93 PPU instruction variants, full SPU interpreter, 17 LV2 syscalls
-  with non-default handling, NID-correct sysPrxForUser HLE dispatch.
-- Determinism-checked observation pipeline: the same boot of the
-  same ELF produces a byte-identical 12 MB observation from two
-  separate runs.
-- 894 tests across 17 crates, zero `unsafe`.
+  (`_cellGcmInitBody`) at PPU step 1.4M -- the documented CPU-side
+  boundary for the static-recomp oracle.
+- Cross-runner verified: at the first-`sys_tty_write` boot
+  checkpoint, CellGov and RPCS3 produce byte-identical code
+  segments and rodata. Data segment differs only in pointer-table
+  layout where the two allocators place the same logical
+  allocations at different addresses.
+- Per-step divergence trace: opt-in `PpuStateHash` records (one per
+  retired PPU instruction), a streaming `diverge` scanner, and a
+  zoom-in mode that names the exact register field that
+  disagrees.
+- 91 PPU instruction variants, full SPU interpreter, 15 LV2
+  syscalls with non-default handling, NID-correct sysPrxForUser
+  HLE dispatch.
+- 951 tests across 15 crates and 3 apps, zero `unsafe`.
 
 ## Workspace
 
-Cargo workspace, 15 crates and 2 binaries. See
+Cargo workspace, 15 library crates and 3 binaries. See
 [`docs/architecture.md`](docs/architecture.md) for the layering
 diagram and per-crate responsibilities.
 
@@ -76,6 +83,19 @@ cargo test --workspace
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+The CellGov library crates have no external runtime dependencies on
+RPCS3. Booting a real PS3 game requires PS3 system firmware files
+(decrypted SPRX modules like `liblv2.sprx`); these are not shipped
+with CellGov and must be supplied via `--firmware-dir`. RPCS3's
+`dev_flash/sys/external` is one convenient source for the files,
+but the dependency is on the PS3 firmware itself.
+
+The `cellgov_compare` crate gates the RPCS3 process-spawning runner
+behind the default-on `rpcs3-runner` Cargo feature. Importers that
+just want the `Observation` schema, `compare()`, `diverge()`, and
+`zoom_lookup()` can opt out with
+`default-features = false` and never compile RPCS3-aware code.
 
 ## Testing
 

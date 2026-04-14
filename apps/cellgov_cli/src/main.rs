@@ -23,16 +23,19 @@ use cellgov_testkit::fixtures::{self, ScenarioFixture};
 use cellgov_testkit::runner::{run, ScenarioOutcome, ScenarioResult};
 use cellgov_trace::TraceReader;
 
+mod compare_cmds;
 mod game;
+
+use compare_cmds::{run_compare_observations, run_diverge, run_zoom};
 
 // -- CLI helpers --
 
-fn die(msg: &str) -> ! {
+pub(crate) fn die(msg: &str) -> ! {
     eprintln!("{msg}");
     std::process::exit(1)
 }
 
-fn load_file_or_die(path: &str) -> Vec<u8> {
+pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| die(&format!("failed to read {path}: {e}")))
 }
 
@@ -199,10 +202,50 @@ fn main() {
         return;
     }
 
+    if args[1] == "diverge" {
+        let a_path = args.get(2).map(String::as_str).unwrap_or_else(|| {
+            eprintln!("usage: cellgov_cli diverge <a.state> <b.state>");
+            std::process::exit(1);
+        });
+        let b_path = args.get(3).map(String::as_str).unwrap_or_else(|| {
+            eprintln!("usage: cellgov_cli diverge <a.state> <b.state>");
+            std::process::exit(1);
+        });
+        run_diverge(a_path, b_path);
+        return;
+    }
+
+    if args[1] == "zoom" {
+        let a_path = args.get(2).map(String::as_str).unwrap_or_else(|| {
+            eprintln!("usage: cellgov_cli zoom <a.zoom.state> <b.zoom.state> <step>");
+            std::process::exit(1);
+        });
+        let b_path = args.get(3).map(String::as_str).unwrap_or_else(|| {
+            eprintln!("usage: cellgov_cli zoom <a.zoom.state> <b.zoom.state> <step>");
+            std::process::exit(1);
+        });
+        let step_str = args.get(4).map(String::as_str).unwrap_or_else(|| {
+            eprintln!("usage: cellgov_cli zoom <a.zoom.state> <b.zoom.state> <step>");
+            std::process::exit(1);
+        });
+        let step: u64 = step_str.parse().unwrap_or_else(|e| {
+            eprintln!("invalid step '{step_str}': {e}");
+            std::process::exit(1);
+        });
+        run_zoom(a_path, b_path, step);
+        return;
+    }
+
     if args[1] == "run-game" {
         let elf_path = args.get(2).map(String::as_str).unwrap_or_else(|| {
             eprintln!(
-                "usage: cellgov_cli run-game <elf-path> [--max-steps N] [--trace] [--profile] [--firmware-dir DIR]"
+                "usage: cellgov_cli run-game <elf-path> [--max-steps N] [--trace] [--profile] [--firmware-dir DIR]\n\
+                 \n\
+                 --firmware-dir points at a directory of decrypted PS3 firmware\n\
+                 PRX modules (e.g. liblv2.sprx). The files come from PS3 system\n\
+                 firmware; one convenient source is RPCS3's dev_flash/sys/external\n\
+                 directory after RPCS3 has installed the system update, but the\n\
+                 dependency is on the PS3 firmware itself, not on RPCS3."
             );
             std::process::exit(1);
         });
@@ -243,6 +286,7 @@ fn main() {
             })
             .unwrap_or_default();
         let save_observation = find_flag_value(&args, "--save-observation");
+        let observation_manifest = find_flag_value(&args, "--observation-manifest");
         game::run_game(
             elf_path,
             max_steps,
@@ -254,6 +298,7 @@ fn main() {
             &patch_bytes,
             &dump_mem_addrs,
             save_observation.as_deref(),
+            observation_manifest.as_deref(),
         );
         return;
     }
@@ -341,67 +386,6 @@ fn find_flag_value(args: &[String], flag: &str) -> Option<String> {
         }
     }
     None
-}
-
-/// Compare two observation JSON files. Exits 0 on match, 1 on diverge.
-///
-/// Used for boot-determinism checks: save two observations from the same
-/// ELF and assert they are byte-identical. If divergence is reported,
-/// the message names the first field that differs.
-fn run_compare_observations(a_path: &str, b_path: &str) {
-    let a_bytes = load_file_or_die(a_path);
-    let b_bytes = load_file_or_die(b_path);
-    let a: cellgov_compare::Observation =
-        serde_json::from_slice(&a_bytes).unwrap_or_else(|e| die(&format!("parse {a_path}: {e}")));
-    let b: cellgov_compare::Observation =
-        serde_json::from_slice(&b_bytes).unwrap_or_else(|e| die(&format!("parse {b_path}: {e}")));
-
-    if a.outcome != b.outcome {
-        println!("DIVERGE outcome: {:?} vs {:?}", a.outcome, b.outcome);
-        std::process::exit(1);
-    }
-    if a.memory_regions.len() != b.memory_regions.len() {
-        println!(
-            "DIVERGE region count: {} vs {}",
-            a.memory_regions.len(),
-            b.memory_regions.len()
-        );
-        std::process::exit(1);
-    }
-    for (ra, rb) in a.memory_regions.iter().zip(b.memory_regions.iter()) {
-        if ra.name != rb.name || ra.addr != rb.addr {
-            println!(
-                "DIVERGE region identity: {}@0x{:x} vs {}@0x{:x}",
-                ra.name, ra.addr, rb.name, rb.addr
-            );
-            std::process::exit(1);
-        }
-        if ra.data != rb.data {
-            let first_diff = ra
-                .data
-                .iter()
-                .zip(rb.data.iter())
-                .position(|(x, y)| x != y)
-                .unwrap_or(0);
-            println!(
-                "DIVERGE region {}: first byte differs at offset 0x{:x} (guest 0x{:x}) -- {:02x} vs {:02x}",
-                ra.name,
-                first_diff,
-                ra.addr + first_diff as u64,
-                ra.data[first_diff],
-                rb.data[first_diff],
-            );
-            std::process::exit(1);
-        }
-    }
-    println!(
-        "MATCH outcome={:?}, {} regions ({} bytes) identical, steps {:?} vs {:?}",
-        a.outcome,
-        a.memory_regions.len(),
-        a.memory_regions.iter().map(|r| r.data.len()).sum::<usize>(),
-        a.metadata.steps,
-        b.metadata.steps,
-    );
 }
 
 /// Run a scenario, observe it with determinism check, and save to disk.
@@ -755,6 +739,15 @@ fn dump_trace(result: &ScenarioResult) {
                     unit.raw(),
                     reason_str
                 );
+            }
+            TraceRecord::PpuStateHash { step, pc, hash } => {
+                println!(
+                    "{i:4}  PpuStateHash       step={step} pc=0x{pc:x} hash=0x{:x}",
+                    hash.raw()
+                );
+            }
+            TraceRecord::PpuStateFull { step, pc, .. } => {
+                println!("{i:4}  PpuStateFull       step={step} pc=0x{pc:x} (window capture)");
             }
         }
     }

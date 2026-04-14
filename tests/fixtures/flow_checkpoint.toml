@@ -1,0 +1,39 @@
+# Region manifest for the flOw boot checkpoint.
+#
+# Shared by three producers, all of which must read it the same way:
+#
+#   - the RPCS3 dump-hook patch (CELLGOV_DUMP_REGIONS env var, same
+#     addr and size expressed as hex pairs in declaration order),
+#   - apps/rpcs3_to_observation, which reads this file to slice the
+#     RPCS3 dump into named Observation regions, and
+#   - the CellGov `run-game --save-observation` path with the
+#     `--observation-manifest` flag, which uses the same region
+#     names and addresses.
+#
+# Regions appear in declaration order in the dump file. Do not
+# reorder without updating every producer. Sizes are in bytes.
+#
+# Segment addresses come from flOw EBOOT.elf's PT_LOAD headers. BSS
+# is not included because its contents are zero-initialized on both
+# runners and add no diagnostic value; if a real BSS divergence
+# appears later, add it back here explicitly.
+#
+# Region semantics: `code` and `rodata` must byte-match across
+# runners (read-only ELF data); `data` may differ in pointer-table
+# layout where allocators place the same logical allocations at
+# different addresses.
+
+[[regions]]
+name = "code"
+addr = "0x10000"
+size = "0x800000"
+
+[[regions]]
+name = "data"
+addr = "0x820000"
+size = "0x80000"
+
+[[regions]]
+name = "rodata"
+addr = "0x10000000"
+size = "0x40000"
