@@ -186,6 +186,19 @@ fn main() {
         return;
     }
 
+    if args[1] == "compare-observations" {
+        let a_path = args.get(2).map(String::as_str).unwrap_or_else(|| {
+            eprintln!("usage: cellgov_cli compare-observations <a.json> <b.json>");
+            std::process::exit(1);
+        });
+        let b_path = args.get(3).map(String::as_str).unwrap_or_else(|| {
+            eprintln!("usage: cellgov_cli compare-observations <a.json> <b.json>");
+            std::process::exit(1);
+        });
+        run_compare_observations(a_path, b_path);
+        return;
+    }
+
     if args[1] == "run-game" {
         let elf_path = args.get(2).map(String::as_str).unwrap_or_else(|| {
             eprintln!(
@@ -199,7 +212,49 @@ fn main() {
         let trace = args.iter().any(|a| a == "--trace");
         let profile = args.iter().any(|a| a == "--profile");
         let firmware_dir = find_flag_value(&args, "--firmware-dir");
-        game::run_game(elf_path, max_steps, trace, profile, firmware_dir.as_deref());
+        let dump_at_pc = find_flag_value(&args, "--dump-at-pc")
+            .and_then(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok());
+        let dump_skip: u32 = find_flag_value(&args, "--dump-skip")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        // --dump-mem ADDR prints 32 bytes at the given guest address right
+        // before execution starts (after all loading). Comma-separated list.
+        let dump_mem_addrs: Vec<u64> = find_flag_value(&args, "--dump-mem")
+            .map(|v| {
+                v.split(',')
+                    .filter_map(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // --patch-byte ADDR=VALUE (both hex). Repeatable by joining with commas.
+        let patch_bytes: Vec<(u64, u8)> = find_flag_value(&args, "--patch-byte")
+            .map(|v| {
+                v.split(',')
+                    .filter_map(|pair| {
+                        let mut parts = pair.splitn(2, '=');
+                        let a = parts.next()?.trim_start_matches("0x");
+                        let b = parts.next()?.trim_start_matches("0x");
+                        Some((
+                            u64::from_str_radix(a, 16).ok()?,
+                            u8::from_str_radix(b, 16).ok()?,
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let save_observation = find_flag_value(&args, "--save-observation");
+        game::run_game(
+            elf_path,
+            max_steps,
+            trace,
+            profile,
+            firmware_dir.as_deref(),
+            dump_at_pc,
+            dump_skip,
+            &patch_bytes,
+            &dump_mem_addrs,
+            save_observation.as_deref(),
+        );
         return;
     }
 
@@ -286,6 +341,67 @@ fn find_flag_value(args: &[String], flag: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Compare two observation JSON files. Exits 0 on match, 1 on diverge.
+///
+/// Used for boot-determinism checks: save two observations from the same
+/// ELF and assert they are byte-identical. If divergence is reported,
+/// the message names the first field that differs.
+fn run_compare_observations(a_path: &str, b_path: &str) {
+    let a_bytes = load_file_or_die(a_path);
+    let b_bytes = load_file_or_die(b_path);
+    let a: cellgov_compare::Observation =
+        serde_json::from_slice(&a_bytes).unwrap_or_else(|e| die(&format!("parse {a_path}: {e}")));
+    let b: cellgov_compare::Observation =
+        serde_json::from_slice(&b_bytes).unwrap_or_else(|e| die(&format!("parse {b_path}: {e}")));
+
+    if a.outcome != b.outcome {
+        println!("DIVERGE outcome: {:?} vs {:?}", a.outcome, b.outcome);
+        std::process::exit(1);
+    }
+    if a.memory_regions.len() != b.memory_regions.len() {
+        println!(
+            "DIVERGE region count: {} vs {}",
+            a.memory_regions.len(),
+            b.memory_regions.len()
+        );
+        std::process::exit(1);
+    }
+    for (ra, rb) in a.memory_regions.iter().zip(b.memory_regions.iter()) {
+        if ra.name != rb.name || ra.addr != rb.addr {
+            println!(
+                "DIVERGE region identity: {}@0x{:x} vs {}@0x{:x}",
+                ra.name, ra.addr, rb.name, rb.addr
+            );
+            std::process::exit(1);
+        }
+        if ra.data != rb.data {
+            let first_diff = ra
+                .data
+                .iter()
+                .zip(rb.data.iter())
+                .position(|(x, y)| x != y)
+                .unwrap_or(0);
+            println!(
+                "DIVERGE region {}: first byte differs at offset 0x{:x} (guest 0x{:x}) -- {:02x} vs {:02x}",
+                ra.name,
+                first_diff,
+                ra.addr + first_diff as u64,
+                ra.data[first_diff],
+                rb.data[first_diff],
+            );
+            std::process::exit(1);
+        }
+    }
+    println!(
+        "MATCH outcome={:?}, {} regions ({} bytes) identical, steps {:?} vs {:?}",
+        a.outcome,
+        a.memory_regions.len(),
+        a.memory_regions.iter().map(|r| r.data.len()).sum::<usize>(),
+        a.metadata.steps,
+        b.metadata.steps,
+    );
 }
 
 /// Run a scenario, observe it with determinism check, and save to disk.

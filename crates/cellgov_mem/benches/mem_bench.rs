@@ -1,7 +1,14 @@
 //! Memory microbenchmarks.
 //!
-//! Measures: content_hash throughput at 1 MB, 16 MB, and 260 MB;
+//! Measures: content_hash throughput at 1 MB, 16 MB, 260 MB, and 1 GB;
 //! apply_commit latency; FNV-1a raw throughput.
+//!
+//! The 1 GB size matches the worst case of `cellgov_cli run-game`, which
+//! sizes guest memory to `min_for_kernel = 0x40000000` to cover flOw's
+//! kernel alloc region. The 260 MB intermediate point covers ELF loading
+//! patterns; 1 GB covers full-boot content_hash cost.
+
+#![allow(missing_docs)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
@@ -41,6 +48,21 @@ fn bench_content_hash_260mb(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_content_hash_1gb(c: &mut Criterion) {
+    // 1 GB matches min_for_kernel = 0x40000000 in run-game, the worst-case
+    // checkpoint hash cost when comparing two full-boot observations.
+    let mem = GuestMemory::new(1 << 30); // 1 GB
+    let mut group = c.benchmark_group("content_hash_large");
+    group.sample_size(10);
+    group.bench_function("1gb", |b| {
+        b.iter(|| {
+            let m = mem.clone();
+            black_box(m.content_hash())
+        })
+    });
+    group.finish();
+}
+
 fn bench_content_hash_cached(c: &mut Criterion) {
     let mem = GuestMemory::new(1 << 20); // 1 MB
                                          // Warm the cache
@@ -62,6 +84,15 @@ fn bench_fnv1a_raw_16mb(c: &mut Criterion) {
     c.bench_function("fnv1a_raw/16mb", |b| {
         b.iter(|| black_box(fnv1a(black_box(&data))))
     });
+}
+
+fn bench_fnv1a_raw_1gb(c: &mut Criterion) {
+    // Worst case for the run-game kernel-region size.
+    let data = vec![0u8; 1 << 30];
+    let mut group = c.benchmark_group("fnv1a_raw_large");
+    group.sample_size(10);
+    group.bench_function("1gb", |b| b.iter(|| black_box(fnv1a(black_box(&data)))));
+    group.finish();
 }
 
 fn bench_apply_commit_4b(c: &mut Criterion) {
@@ -97,7 +128,12 @@ criterion_group!(
     bench_apply_commit_4kb,
 );
 
-// Separate group for the slow 260 MB benchmark
-criterion_group!(hash_large_benches, bench_content_hash_260mb);
+// Separate group for the slow large-memory benchmarks.
+criterion_group!(
+    hash_large_benches,
+    bench_content_hash_260mb,
+    bench_content_hash_1gb,
+    bench_fnv1a_raw_1gb,
+);
 
 criterion_main!(hash_benches, hash_large_benches);

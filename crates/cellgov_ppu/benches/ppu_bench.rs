@@ -3,6 +3,8 @@
 //! Measures: decode throughput, execute per-variant latency,
 //! run_until_yield with Budget=100 on a synthetic instruction stream.
 
+#![allow(missing_docs)]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use cellgov_event::UnitId;
@@ -246,8 +248,8 @@ fn bench_run_until_yield_mixed(c: &mut Criterion) {
         ),
         // 0x08: cmpwi cr0, r3, 100
         (0x08, (11 << 26) | (3 << 16) | 100),
-        // 0x0C: b +0 (loop to self -- will eventually exhaust budget)
-        // Actually: addi r5, r5, 1 (keep it straight-line to avoid infinite loop)
+        // 0x0C: addi r5, r5, 1 -- straight-line so the bench runs to budget
+        // exhaustion without an infinite loop.
         (0x0C, (14 << 26) | (5 << 21) | (5 << 16) | 1),
     ];
     // Tile this 4-instruction block across memory

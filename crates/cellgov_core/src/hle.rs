@@ -12,9 +12,15 @@ use crate::runtime::Runtime;
 // NID constants for functions that need non-trivial behavior.
 const NID_SYS_INITIALIZE_TLS: u32 = 0x744680a2;
 const NID_SYS_PROCESS_EXIT: u32 = 0xe6f2c1e7;
-const NID_SYS_MALLOC: u32 = 0xebe5f72f;
-const NID_SYS_FREE: u32 = 0xfc52a7a9;
-const NID_SYS_MEMSET: u32 = 0x1573dc3f;
+const NID_SYS_MALLOC: u32 = 0xbdb18f83;
+const NID_SYS_FREE: u32 = 0xf7f7fb20;
+const NID_SYS_MEMSET: u32 = 0x68b9b011;
+const NID_SYS_LWMUTEX_CREATE: u32 = 0x2f85c0ef;
+const NID_SYS_HEAP_CREATE_HEAP: u32 = 0xb2fcf2c8;
+const NID_SYS_HEAP_DELETE_HEAP: u32 = 0xaede4b03;
+const NID_SYS_HEAP_MALLOC: u32 = 0x35168520;
+const NID_SYS_HEAP_MEMALIGN: u32 = 0x44265c08;
+const NID_SYS_HEAP_FREE: u32 = 0x8a561d92;
 
 impl Runtime {
     /// Dispatch an HLE import call by NID. Most functions are
@@ -32,6 +38,16 @@ impl Runtime {
                 self.registry.set_syscall_return(source, 0);
             }
             NID_SYS_MEMSET => self.hle_memset(source, args),
+            NID_SYS_LWMUTEX_CREATE => self.hle_lwmutex_create(source, args),
+            NID_SYS_HEAP_CREATE_HEAP => self.hle_heap_create_heap(source),
+            NID_SYS_HEAP_DELETE_HEAP => {
+                self.registry.set_syscall_return(source, 0);
+            }
+            NID_SYS_HEAP_MALLOC => self.hle_heap_malloc(source, args),
+            NID_SYS_HEAP_MEMALIGN => self.hle_heap_memalign(source, args),
+            NID_SYS_HEAP_FREE => {
+                self.registry.set_syscall_return(source, 0);
+            }
             _ => {
                 self.registry.set_syscall_return(source, 0);
             }
@@ -85,6 +101,114 @@ impl Runtime {
     fn hle_malloc(&mut self, source: UnitId, args: &[u64; 9]) {
         let size = args[1] as u32;
         let aligned_ptr = (self.hle_heap_ptr + 15) & !15;
+        let new_ptr = aligned_ptr + size;
+        if (new_ptr as usize) <= self.memory.as_bytes().len() {
+            self.hle_heap_ptr = new_ptr;
+            self.registry.set_syscall_return(source, aligned_ptr as u64);
+        } else {
+            self.registry.set_syscall_return(source, 0);
+        }
+    }
+
+    /// Initialize a `sys_lwmutex_t` (24-byte struct) in guest memory.
+    ///
+    /// PS3's sysPrxForUser sys_lwmutex_create writes five fields into the
+    /// caller-provided struct before returning success. If we skip this,
+    /// any inline fast-path CAS that expects `lock_var.owner == lwmutex_free
+    /// (0xFFFFFFFF)` sees zero instead and falls into error handling.
+    ///
+    /// Mirrors RPCS3 `Emu/Cell/Modules/sys_lwmutex_.cpp`:
+    ///
+    /// ```text
+    /// lwmutex->lock_var.store({ lwmutex_free, 0 });
+    /// lwmutex->attribute = attr->recursive | attr->protocol;
+    /// lwmutex->recursive_count = 0;
+    /// lwmutex->sleep_queue = *out_id;
+    /// ```
+    fn hle_lwmutex_create(&mut self, source: UnitId, args: &[u64; 9]) {
+        let mutex_ptr = args[1] as u32;
+        let attr_ptr = args[2] as u32;
+
+        // Read attribute struct (at minimum: protocol @ 0, recursive @ 4).
+        let mem = self.memory.as_bytes();
+        let attr_offset = attr_ptr as usize;
+        let (protocol, recursive) = if attr_offset + 8 <= mem.len() {
+            let p = u32::from_be_bytes([
+                mem[attr_offset],
+                mem[attr_offset + 1],
+                mem[attr_offset + 2],
+                mem[attr_offset + 3],
+            ]);
+            let r = u32::from_be_bytes([
+                mem[attr_offset + 4],
+                mem[attr_offset + 5],
+                mem[attr_offset + 6],
+                mem[attr_offset + 7],
+            ]);
+            (p, r)
+        } else {
+            // SYS_SYNC_PRIORITY | SYS_SYNC_NOT_RECURSIVE as a safe default.
+            (0x2, 0x20)
+        };
+
+        let sleep_queue = self.hle_next_id;
+        self.hle_next_id = self.hle_next_id.wrapping_add(1);
+
+        // Build the 24-byte lwmutex struct (big-endian u32 fields):
+        //   +0  owner           = 0xFFFFFFFF (lwmutex_free)
+        //   +4  waiter          = 0
+        //   +8  attribute       = recursive | protocol
+        //   +12 recursive_count = 0
+        //   +16 sleep_queue     = allocated id
+        //   +20 pad             = 0
+        let mut buf = [0u8; 24];
+        buf[0..4].copy_from_slice(&0xFFFF_FFFFu32.to_be_bytes());
+        buf[8..12].copy_from_slice(&(recursive | protocol).to_be_bytes());
+        buf[16..20].copy_from_slice(&sleep_queue.to_be_bytes());
+
+        let target = mutex_ptr as usize;
+        if target + 24 <= self.memory.as_bytes().len() {
+            if let Some(range) =
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(target as u64), 24)
+            {
+                let _ = self.memory.apply_commit(range, &buf);
+            }
+        }
+        self.registry.set_syscall_return(source, 0);
+    }
+
+    /// Allocate a fresh heap id. Matches RPCS3 `_sys_heap_create_heap`:
+    /// returns an opaque handle the caller stores and passes back to
+    /// `_sys_heap_malloc` / `_sys_heap_free`. Real backing memory is
+    /// served through `hle_heap_malloc` from the HLE bump arena, not
+    /// from a per-heap pool.
+    fn hle_heap_create_heap(&mut self, source: UnitId) {
+        let id = self.hle_next_id;
+        self.hle_next_id = self.hle_next_id.wrapping_add(1);
+        self.registry.set_syscall_return(source, id as u64);
+    }
+
+    /// `_sys_heap_malloc(heap, size)`. The heap argument is ignored;
+    /// allocation bumps the shared HLE arena like `_sys_malloc` does.
+    fn hle_heap_malloc(&mut self, source: UnitId, args: &[u64; 9]) {
+        let size = args[2] as u32;
+        let aligned_ptr = (self.hle_heap_ptr + 15) & !15;
+        let new_ptr = aligned_ptr + size;
+        if (new_ptr as usize) <= self.memory.as_bytes().len() {
+            self.hle_heap_ptr = new_ptr;
+            self.registry.set_syscall_return(source, aligned_ptr as u64);
+        } else {
+            self.registry.set_syscall_return(source, 0);
+        }
+    }
+
+    /// `_sys_heap_memalign(heap, align, size)`. Rounds the bump pointer
+    /// up to `max(align, 16)`, then allocates from the shared HLE arena.
+    fn hle_heap_memalign(&mut self, source: UnitId, args: &[u64; 9]) {
+        let align = (args[2] as u32).max(16);
+        let size = args[3] as u32;
+        let mask = align - 1;
+        let aligned_ptr = (self.hle_heap_ptr + mask) & !mask;
         let new_ptr = aligned_ptr + size;
         if (new_ptr as usize) <= self.memory.as_bytes().len() {
             self.hle_heap_ptr = new_ptr;

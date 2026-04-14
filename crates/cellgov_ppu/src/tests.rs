@@ -967,6 +967,79 @@ fn fault_includes_register_dump() {
 }
 
 #[test]
+fn lha_sign_extends_negative_halfword() {
+    // Place 0xFFFE (i16 = -2) at memory offset 8, then lha r3, 8(r0) at PC=0.
+    let mut mem = GuestMemory::new(64);
+    let neg_range = ByteRange::new(GuestAddr::new(8), 2).unwrap();
+    mem.apply_commit(neg_range, &0xFFFEu16.to_be_bytes())
+        .unwrap();
+    // lha: opcode 42, RT=3, RA=0, D=8 -> (42<<26) | (3<<21) | 8
+    let lha: u32 = (42 << 26) | (3 << 21) | 8;
+    place_insn(&mut mem, 0, lha);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+
+    // Sign-extended -2 as u64 = 0xFFFF_FFFF_FFFF_FFFE.
+    assert_eq!(unit.state().gpr[3], 0xFFFF_FFFF_FFFF_FFFE);
+}
+
+#[test]
+fn lha_zero_extends_positive_halfword() {
+    // Place 0x1234 (positive) at offset 8, then lha r4, 8(r0) at PC=0.
+    let mut mem = GuestMemory::new(64);
+    let pos_range = ByteRange::new(GuestAddr::new(8), 2).unwrap();
+    mem.apply_commit(pos_range, &0x1234u16.to_be_bytes())
+        .unwrap();
+    let lha: u32 = (42 << 26) | (4 << 21) | 8;
+    place_insn(&mut mem, 0, lha);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+
+    assert_eq!(unit.state().gpr[4], 0x1234);
+}
+
+/// Regression guard for the Lbzu update-form bug where the decoder
+/// silently treated `lbzu` as `lbz` and skipped the RA writeback.
+/// liblv2's strchr-style scan loop relies on `lbzu r0, 1(r9)` to
+/// advance r9 by 1 each iteration; without the writeback, r9 stays
+/// stuck and the loop spins forever. The test verifies BOTH that the
+/// loaded byte matches what is actually at r9+1 AND that r9 has been
+/// advanced to that address after the instruction retires.
+#[test]
+fn lbzu_advances_ra_to_effective_address() {
+    let mut mem = GuestMemory::new(64);
+    // Memory: at offset 0x10 store byte 0x2F (ASCII '/'), the byte
+    // the actual liblv2 loop scans for.
+    let target_addr: u64 = 0x10;
+    let target_byte: u8 = 0x2F;
+    let r = ByteRange::new(GuestAddr::new(target_addr), 1).unwrap();
+    mem.apply_commit(r, &[target_byte]).unwrap();
+    // lbzu r0, 1(r9): primary 35, RT=0, RA=9, D=1 -> 0x8C090001
+    place_insn(&mut mem, 0, 0x8C09_0001);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    // r9 starts one byte BELOW the target; lbzu must advance it.
+    unit.state_mut().gpr[9] = target_addr - 1;
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+
+    assert_eq!(
+        unit.state().gpr[9],
+        target_addr,
+        "lbzu must update RA to the effective address",
+    );
+    assert_eq!(
+        unit.state().gpr[0],
+        target_byte as u64,
+        "lbzu must load the byte at the effective address into RT",
+    );
+}
+
+#[test]
 fn non_fault_step_has_no_register_dump() {
     // addi r3, r0, 42 at PC=0
     let raw: u32 = (14 << 26) | (3 << 21) | 42;

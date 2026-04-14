@@ -11,6 +11,7 @@
 
 pub mod decode;
 pub mod exec;
+mod exec_vec;
 mod fp;
 pub mod instruction;
 pub mod loader;
@@ -38,6 +39,8 @@ pub const FAULT_DECODE_ERROR: u32 = 0x0105_0000;
 pub const FAULT_INVALID_ADDRESS: u32 = 0x0106_0000;
 /// Syscall number or VMX sub-opcode has no handler.
 pub const FAULT_UNSUPPORTED_SYSCALL: u32 = 0x0107_0000;
+/// Debug breakpoint fired at a user-requested PC.
+pub const FAULT_DEBUG_BREAK: u32 = 0x0108_0000;
 
 /// PPU execution unit snapshot for replay.
 #[derive(Debug, Clone)]
@@ -64,6 +67,12 @@ pub struct PpuExecutionUnit {
     id: UnitId,
     state: state::PpuState,
     status: UnitStatus,
+    /// If set, `run_until_yield` entries matching `break_pc` skip the
+    /// first `break_skip` hits, then on the next hit emit a synthetic
+    /// FAULT_DEBUG_BREAK fault with full register capture.
+    break_pc: Option<u64>,
+    /// Number of hits to skip before firing the break (0 = first hit).
+    break_skip: u32,
 }
 
 impl PpuExecutionUnit {
@@ -73,7 +82,16 @@ impl PpuExecutionUnit {
             id,
             state: state::PpuState::new(),
             status: UnitStatus::Runnable,
+            break_pc: None,
+            break_skip: 0,
         }
+    }
+
+    /// Set a breakpoint: fires on the `skip`-th-plus-one hit at `pc`
+    /// (skip=0 means first hit). Emits a synthetic FAULT_DEBUG_BREAK.
+    pub fn set_break_pc(&mut self, pc: u64, skip: u32) {
+        self.break_pc = Some(pc);
+        self.break_skip = skip;
     }
 
     /// Mutable access to the PPU's architectural state.
@@ -140,6 +158,24 @@ impl ExecutionUnit for PpuExecutionUnit {
         for &(reg, val) in ctx.register_writes() {
             if (reg as usize) < 32 {
                 self.state.gpr[reg as usize] = val;
+            }
+        }
+
+        // Counted debug breakpoint. Skips `break_skip` hits, then fires
+        // a synthetic FAULT_DEBUG_BREAK with full register capture.
+        if self.break_pc == Some(self.state.pc) {
+            if self.break_skip > 0 {
+                self.break_skip -= 1;
+            } else {
+                self.break_pc = None;
+                return ExecutionStepResult {
+                    yield_reason: YieldReason::Fault,
+                    consumed_budget: Budget::new(0),
+                    emitted_effects: vec![],
+                    local_diagnostics: self.fault_diag(self.state.pc),
+                    fault: Some(FaultKind::Guest(FAULT_DEBUG_BREAK)),
+                    syscall_args: None,
+                };
             }
         }
 
@@ -228,6 +264,26 @@ impl ExecutionUnit for PpuExecutionUnit {
                             mem[addr + 6],
                             mem[addr + 7],
                         ]),
+                        _ => 0,
+                    };
+                    self.state.gpr[rt as usize] = val;
+                    self.state.pc += 4;
+                }
+                PpuStepOutcome::LoadSigned { ea, size, rt } => {
+                    let addr = ea as usize;
+                    if addr + size as usize > mem.len() {
+                        self.status = UnitStatus::Faulted;
+                        return mem_fault!(step_pc, ea, budget, remaining, effects);
+                    }
+                    let val: u64 = match size {
+                        1 => (mem[addr] as i8) as i64 as u64,
+                        2 => i16::from_be_bytes([mem[addr], mem[addr + 1]]) as i64 as u64,
+                        4 => i32::from_be_bytes([
+                            mem[addr],
+                            mem[addr + 1],
+                            mem[addr + 2],
+                            mem[addr + 3],
+                        ]) as i64 as u64,
                         _ => 0,
                     };
                     self.state.gpr[rt as usize] = val;

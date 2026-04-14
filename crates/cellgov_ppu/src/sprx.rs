@@ -299,8 +299,8 @@ fn extract_segment(data: &[u8], phdr: &RawPhdr) -> Result<PrxSegment, PrxParseEr
 ///
 /// Layout:
 ///   +0:  u16 attributes
-///   +2:  u8[2] version
-///   +4:  char[28] name
+///   +2:  `u8[2]` version
+///   +4:  `char[28]` name
 ///   +32: u32 toc
 ///   +36: u32 exports_start (vaddr)
 ///   +40: u32 exports_end (vaddr)
@@ -1352,7 +1352,7 @@ mod tests {
             "should export sys_initialize_tls"
         );
         assert!(
-            loaded.exports.contains_key(&0xebe5f72f),
+            loaded.exports.contains_key(&0xbdb18f83),
             "should export _sys_malloc"
         );
     }

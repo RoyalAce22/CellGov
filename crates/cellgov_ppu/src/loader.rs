@@ -257,6 +257,79 @@ pub(crate) fn read_u16(data: &[u8], offset: usize) -> u16 {
     u16::from_be_bytes([data[offset], data[offset + 1]])
 }
 
+/// A PT_LOAD segment's address range and permission bits.
+///
+/// Used to derive memory-region descriptors for cross-runner comparison:
+/// read-only segments (code / rodata) must be byte-identical between
+/// runners at any checkpoint; writable segments (data / bss) depend on
+/// boot state and compare meaningfully only at matched checkpoints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoadSegment {
+    /// Index of the program header within the ELF.
+    pub index: usize,
+    /// Guest virtual address of the segment start.
+    pub vaddr: u64,
+    /// Bytes read from the ELF file (<= memsz).
+    pub filesz: u64,
+    /// Total size in memory, including BSS tail (>= filesz).
+    pub memsz: u64,
+    /// ELF p_flags bit 0 (PF_X: executable).
+    pub executable: bool,
+    /// ELF p_flags bit 1 (PF_W: writable).
+    pub writable: bool,
+    /// ELF p_flags bit 2 (PF_R: readable).
+    pub readable: bool,
+}
+
+/// Enumerate every PT_LOAD segment in a PPU ELF64 binary.
+///
+/// Skips zero-sized segments. The returned order matches program header
+/// order, which is the order `load_ppu_elf` copies them into guest
+/// memory. Readers can classify a segment as code/rodata (not writable)
+/// versus data/bss (writable) via the permission bits.
+pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
+    if data.len() < ELF_HEADER_SIZE {
+        return Err(LoadError::TooSmall);
+    }
+    if data[0..4] != ELF_MAGIC {
+        return Err(LoadError::BadMagic);
+    }
+    if data[4] != 2 {
+        return Err(LoadError::Not64Bit);
+    }
+    if data[5] != 2 {
+        return Err(LoadError::NotBigEndian);
+    }
+    let phoff = read_u64(data, 32) as usize;
+    let phentsize = read_u16(data, 54) as usize;
+    let phnum = read_u16(data, 56) as usize;
+    let mut out = Vec::new();
+    for i in 0..phnum {
+        let base = phoff + i * phentsize;
+        if base + phentsize > data.len() {
+            return Err(LoadError::TooSmall);
+        }
+        if read_u32(data, base) != PT_LOAD {
+            continue;
+        }
+        let p_flags = read_u32(data, base + 4);
+        let memsz = read_u64(data, base + 40);
+        if memsz == 0 {
+            continue;
+        }
+        out.push(LoadSegment {
+            index: i,
+            vaddr: read_u64(data, base + 16),
+            filesz: read_u64(data, base + 32),
+            memsz,
+            executable: (p_flags & 0x1) != 0,
+            writable: (p_flags & 0x2) != 0,
+            readable: (p_flags & 0x4) != 0,
+        });
+    }
+    Ok(out)
+}
+
 /// PT_TLS segment type.
 const PT_TLS: u32 = 7;
 
@@ -293,6 +366,68 @@ pub fn find_tls_segment(data: &[u8]) -> Option<TlsInfo> {
                 filesz: read_u64(data, base + 32),
                 memsz: read_u64(data, base + 40),
             });
+        }
+    }
+    None
+}
+
+/// SYS_PROCESS_PARAM_MAGIC -- marks the .sys_proc_param section.
+const SYS_PROCESS_PARAM_MAGIC: u32 = 0x13bcc5f6;
+
+/// Parsed sys_process_param_t from the game ELF's .sys_proc_param section.
+///
+/// The PS3 kernel reads this section during process startup to configure
+/// the primary PPU thread and the libc heap. CellGov mirrors RPCS3 in
+/// passing `malloc_pagesize` into the game entry via r12 so the CRT0 can
+/// initialize its allocator with the correct page size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SysProcessParam {
+    /// SDK version that built the ELF (e.g., 0x150004 = SDK 1.5.0.4).
+    pub sdk_version: u32,
+    /// Primary PPU thread priority (0..3071).
+    pub primary_prio: i32,
+    /// Primary PPU thread stack size in bytes.
+    pub primary_stacksize: u32,
+    /// libc malloc page size (0x10000 = 64KB, 0x100000 = 1MB, 0 = unset).
+    pub malloc_pagesize: u32,
+    /// PPC segment mode (0 = default, 1 = OVLM).
+    pub ppc_seg: u32,
+}
+
+/// Scan the raw ELF bytes for a `.sys_proc_param` section by magic.
+///
+/// The section is normally at a fixed offset in a PT_LOAD segment; locating
+/// it by magic lets us find it without parsing section headers. Returns
+/// `None` if the magic is not present.
+pub fn find_sys_process_param(data: &[u8]) -> Option<SysProcessParam> {
+    let magic_bytes = SYS_PROCESS_PARAM_MAGIC.to_be_bytes();
+    // The struct layout is:
+    //   u32 size, magic, version, sdk_version,
+    //   i32 primary_prio,
+    //   u32 primary_stacksize, malloc_pagesize, ppc_seg
+    // Magic is at byte offset 4 of the struct.
+    let mut idx = 0;
+    while idx + 32 <= data.len() {
+        if let Some(found) = data[idx..].windows(4).position(|w| w == magic_bytes) {
+            let s = idx + found;
+            if s < 4 || s + 28 > data.len() {
+                return None;
+            }
+            let start = s - 4;
+            let size = read_u32(data, start);
+            if size < 0x20 {
+                idx = s + 4;
+                continue;
+            }
+            return Some(SysProcessParam {
+                sdk_version: read_u32(data, start + 12),
+                primary_prio: read_u32(data, start + 16) as i32,
+                primary_stacksize: read_u32(data, start + 20),
+                malloc_pagesize: read_u32(data, start + 24),
+                ppc_seg: read_u32(data, start + 28),
+            });
+        } else {
+            return None;
         }
     }
     None
@@ -640,6 +775,41 @@ mod tests {
     #[test]
     fn find_tls_returns_none_for_short_input() {
         assert!(find_tls_segment(&[0; 10]).is_none());
+    }
+
+    #[test]
+    fn pt_load_segments_enumerates_all() {
+        // Two PT_LOAD segments with different permission bits.
+        let mut data = mk_elf_header(2);
+        write_ph(&mut data, 0, 0x100, 0x1000, 0x40, 0x40);
+        // Set PF_R|PF_X (0x5) on segment 0.
+        data[64 + 4..64 + 8].copy_from_slice(&0x5u32.to_be_bytes());
+        write_ph(&mut data, 1, 0x200, 0x2000, 0x20, 0x80);
+        // Set PF_R|PF_W (0x6) on segment 1.
+        data[64 + 56 + 4..64 + 56 + 8].copy_from_slice(&0x6u32.to_be_bytes());
+        let segs = pt_load_segments(&data).expect("parses");
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].vaddr, 0x1000);
+        assert_eq!(segs[0].memsz, 0x40);
+        assert!(segs[0].executable);
+        assert!(!segs[0].writable);
+        assert!(segs[0].readable);
+        assert_eq!(segs[1].vaddr, 0x2000);
+        assert_eq!(segs[1].filesz, 0x20);
+        assert_eq!(segs[1].memsz, 0x80);
+        assert!(!segs[1].executable);
+        assert!(segs[1].writable);
+        assert!(segs[1].readable);
+    }
+
+    #[test]
+    fn pt_load_segments_skips_zero_memsz() {
+        let mut data = mk_elf_header(2);
+        write_ph(&mut data, 0, 0x100, 0x1000, 0, 0);
+        write_ph(&mut data, 1, 0x200, 0x2000, 0x10, 0x10);
+        let segs = pt_load_segments(&data).expect("parses");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].vaddr, 0x2000);
     }
 
     #[test]

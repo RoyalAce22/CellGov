@@ -6,14 +6,13 @@
 //! through the `Lv2Runtime` trait and returns an `Lv2Dispatch` telling
 //! the runtime what to do.
 
-use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState};
+use crate::dispatch::Lv2Dispatch;
 use crate::image::ContentStore;
 use crate::request::Lv2Request;
 use crate::thread_group::ThreadGroupTable;
-use cellgov_effects::{Effect, MailboxMessage, WritePayload};
+use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_sync::MailboxId;
 use cellgov_time::GuestTicks;
 
 /// Readonly view of runtime state the host is allowed to access.
@@ -26,6 +25,8 @@ pub trait Lv2Runtime {
     /// Returns `None` if the range is out of bounds.
     fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]>;
 }
+
+mod spu;
 
 /// The LV2 host model.
 ///
@@ -149,6 +150,9 @@ impl Lv2Host {
             Lv2Request::SpuThreadWriteMb { thread_id, value } => {
                 self.dispatch_write_mb(thread_id, value, requester)
             }
+            Lv2Request::TtyWrite {
+                len, nwritten_ptr, ..
+            } => Self::immediate_write_u32(len, nwritten_ptr, requester),
             Lv2Request::MutexCreate { id_ptr, .. } => self.dispatch_mutex_create(id_ptr, requester),
             Lv2Request::MutexLock { .. } | Lv2Request::MutexUnlock { .. } => {
                 // Stub: single-threaded module_start never contends.
@@ -176,236 +180,31 @@ impl Lv2Host {
                     effects: vec![],
                 }
             }
+            // Syscall 481 is _sys_prx_start_module. RPCS3 returns
+            // CELL_EINVAL (0x80010002) when id == 0 or pOpt is null.
+            // CellGov's _sys_prx_load_module stub returns 0 (id=0),
+            // so liblv2 ends up calling start with id=0. Returning
+            // CELL_EINVAL signals a real, spec-correct failure
+            // instead of CELL_OK with an unfilled output struct --
+            // the latter causes liblv2 to read uninitialized stack
+            // memory and crash on a bogus pointer.
+            Lv2Request::Unsupported { number: 481 } => Lv2Dispatch::Immediate {
+                code: 0x8001_0002,
+                effects: vec![],
+            },
+            // Syscall 402 is sys_tty_read. RPCS3 returns CELL_EIO
+            // (0x8001002B) when debug console mode is not enabled,
+            // which matches real retail PS3 behavior. A CELL_OK stub
+            // tells the game the read succeeded with uninitialized
+            // bytes, causing CRT input loops to spin indefinitely.
+            Lv2Request::Unsupported { number: 402 } => Lv2Dispatch::Immediate {
+                code: 0x8001_002B,
+                effects: vec![],
+            },
             _ => Lv2Dispatch::Immediate {
                 code: 0,
                 effects: vec![],
             },
-        }
-    }
-
-    fn dispatch_image_open(
-        &mut self,
-        img_ptr: u32,
-        path_ptr: u32,
-        requester: UnitId,
-        rt: &dyn Lv2Runtime,
-    ) -> Lv2Dispatch {
-        // Read the NUL-terminated path string from guest memory.
-        // Limit to 256 bytes to avoid unbounded reads.
-        let path_bytes = match rt.read_committed(path_ptr as u64, 256) {
-            Some(bytes) => bytes,
-            None => {
-                return Lv2Dispatch::Immediate {
-                    code: 0x8001_0002, // CELL_EFAULT
-                    effects: vec![],
-                };
-            }
-        };
-        let path_len = path_bytes
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(path_bytes.len());
-        let path = &path_bytes[..path_len];
-
-        let record = match self.content.lookup_by_path(path) {
-            Some(r) => r,
-            None => {
-                return Lv2Dispatch::Immediate {
-                    code: 0x8001_0002, // CELL_ENOENT
-                    effects: vec![],
-                };
-            }
-        };
-
-        // Build the sys_spu_image_t struct (16 bytes, big-endian):
-        //   offset 0: type/handle (u32)
-        //   offset 4: entry point (u32) -- 0 for now, resolved at thread init
-        //   offset 8: segments addr (u32) -- opaque, not used by CellGov
-        //   offset 12: nsegs (i32) -- 0 for CellGov's purposes
-        let handle = record.handle;
-        let mut img_struct = [0u8; 16];
-        img_struct[0..4].copy_from_slice(&handle.raw().to_be_bytes());
-
-        let range =
-            ByteRange::new(GuestAddr::new(img_ptr as u64), 16).expect("sys_spu_image_t range");
-        let effect = Effect::SharedWriteIntent {
-            range,
-            bytes: WritePayload::new(img_struct.to_vec()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: GuestTicks::ZERO,
-        };
-
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![effect],
-        }
-    }
-
-    fn dispatch_group_create(
-        &mut self,
-        id_ptr: u32,
-        num_threads: u32,
-        requester: UnitId,
-    ) -> Lv2Dispatch {
-        let group_id = self.groups.create(num_threads);
-
-        // Write the allocated group id (big-endian u32) to the
-        // caller's output pointer.
-        let range = ByteRange::new(GuestAddr::new(id_ptr as u64), 4)
-            .expect("sys_spu_thread_group_create id_ptr range");
-        let effect = Effect::SharedWriteIntent {
-            range,
-            bytes: WritePayload::new(group_id.to_be_bytes().to_vec()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: GuestTicks::ZERO,
-        };
-
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![effect],
-        }
-    }
-
-    fn dispatch_group_start(&mut self, group_id: u32) -> Lv2Dispatch {
-        let group = match self.groups.get_mut(group_id) {
-            Some(g) => g,
-            None => {
-                return Lv2Dispatch::Immediate {
-                    code: 0x8001_000D, // CELL_ESRCH
-                    effects: vec![],
-                };
-            }
-        };
-
-        let mut inits = Vec::new();
-        let slot_entries: Vec<_> = group.slots.iter().map(|(&k, v)| (k, v.clone())).collect();
-        for (slot_idx, slot) in &slot_entries {
-            let record = match self.content.lookup_by_handle(slot.image_handle) {
-                Some(r) => r,
-                None => {
-                    return Lv2Dispatch::Immediate {
-                        code: 0x8001_000D, // bad handle
-                        effects: vec![],
-                    };
-                }
-            };
-
-            inits.push(SpuInitState {
-                ls_bytes: record.elf_bytes.clone(),
-                entry_pc: 0x80,
-                stack_ptr: 0x3FFF0,
-                args: slot.args,
-                group_id,
-                slot: *slot_idx,
-            });
-        }
-
-        group.state = crate::thread_group::GroupState::Running;
-
-        Lv2Dispatch::RegisterSpu {
-            inits,
-            effects: vec![],
-            code: 0,
-        }
-    }
-
-    fn dispatch_thread_initialize(
-        &mut self,
-        req: Lv2Request,
-        requester: UnitId,
-        rt: &dyn Lv2Runtime,
-    ) -> Lv2Dispatch {
-        let (thread_ptr, group_id, thread_num, img_ptr, arg_ptr) = match req {
-            Lv2Request::SpuThreadInitialize {
-                thread_ptr,
-                group_id,
-                thread_num,
-                img_ptr,
-                arg_ptr,
-                ..
-            } => (thread_ptr, group_id, thread_num, img_ptr, arg_ptr),
-            _ => unreachable!(),
-        };
-
-        // Read the image handle from the sys_spu_image_t struct at
-        // img_ptr (first 4 bytes, big-endian u32).
-        let image_handle = match rt.read_committed(img_ptr as u64, 4) {
-            Some(bytes) => u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
-            None => {
-                return Lv2Dispatch::Immediate {
-                    code: 0x8001_0002, // CELL_EFAULT
-                    effects: vec![],
-                };
-            }
-        };
-
-        // Read sys_spu_thread_argument (4x u64 BE) from guest memory
-        // NOW, not at group_start time. The PPU may reuse the same
-        // stack variable for multiple initialize calls.
-        let args = if arg_ptr != 0 {
-            match rt.read_committed(arg_ptr as u64, 32) {
-                Some(bytes) => {
-                    let mut a = [0u64; 4];
-                    for (i, chunk) in bytes.chunks_exact(8).enumerate().take(4) {
-                        a[i] = u64::from_be_bytes(chunk.try_into().unwrap());
-                    }
-                    a
-                }
-                None => [0u64; 4],
-            }
-        } else {
-            [0u64; 4]
-        };
-
-        let handle = crate::dispatch::SpuImageHandle::new(image_handle);
-        if !self
-            .groups
-            .initialize_thread(group_id, thread_num, handle, args)
-        {
-            return Lv2Dispatch::Immediate {
-                code: 0x8001_000D, // CELL_ESRCH
-                effects: vec![],
-            };
-        }
-
-        // Write a thread id to *thread_ptr. Use a synthetic id
-        // derived from group_id and thread_num.
-        let thread_id = group_id * 256 + thread_num;
-        let range = ByteRange::new(GuestAddr::new(thread_ptr as u64), 4).expect("thread_ptr range");
-        let effect = Effect::SharedWriteIntent {
-            range,
-            bytes: WritePayload::new(thread_id.to_be_bytes().to_vec()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: GuestTicks::ZERO,
-        };
-
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![effect],
-        }
-    }
-
-    fn dispatch_group_join(&self, group_id: u32, cause_ptr: u32, status_ptr: u32) -> Lv2Dispatch {
-        if self.groups.get(group_id).is_none() {
-            return Lv2Dispatch::Immediate {
-                code: 0x8001_000D, // CELL_ESRCH
-                effects: vec![],
-            };
-        }
-        Lv2Dispatch::Block {
-            reason: Lv2BlockReason::ThreadGroupJoin { group_id },
-            pending: PendingResponse::ThreadGroupJoin {
-                group_id,
-                code: 0,
-                cause_ptr,
-                status_ptr,
-                cause: 0x0001, // SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT
-                status: 0,
-            },
-            effects: vec![],
         }
     }
 
@@ -448,33 +247,11 @@ impl Lv2Host {
         self.mem_alloc_ptr = aligned_ptr + size as u32;
         Self::immediate_write_u32(aligned_ptr, alloc_addr_ptr, requester)
     }
-
-    fn dispatch_write_mb(&self, thread_id: u32, value: u32, requester: UnitId) -> Lv2Dispatch {
-        let target_uid = match self.groups.unit_for_thread(thread_id) {
-            Some(uid) => uid,
-            None => {
-                return Lv2Dispatch::Immediate {
-                    code: 0x8001_000D, // CELL_ESRCH
-                    effects: vec![],
-                };
-            }
-        };
-        let effect = Effect::MailboxSend {
-            mailbox: MailboxId::new(target_uid.raw()),
-            message: MailboxMessage::new(value),
-            source: requester,
-        };
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![effect],
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::request;
     use cellgov_mem::GuestMemory;
 
     struct FakeRuntime {
@@ -683,19 +460,30 @@ mod tests {
     }
 
     #[test]
-    fn stub_dispatch_returns_cell_ok_for_tty_write() {
+    fn tty_write_writes_nwritten_and_returns_ok() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let args = [0, 0x8000, 64, 0x9000, 0, 0, 0, 0];
-        let req = request::classify(403, &args);
+        let rt = FakeRuntime::new(0x10000);
+        let req = Lv2Request::TtyWrite {
+            fd: 0,
+            buf_ptr: 0x8000,
+            len: 64,
+            nwritten_ptr: 0x9000,
+        };
         let result = host.dispatch(req, UnitId::new(0), &rt);
-        assert_eq!(
-            result,
-            Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![],
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0);
+                assert_eq!(effects.len(), 1);
+                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
+                    assert_eq!(range.start().raw(), 0x9000);
+                    assert_eq!(range.length(), 4);
+                    assert_eq!(bytes.bytes(), &64u32.to_be_bytes());
+                } else {
+                    panic!("expected SharedWriteIntent");
+                }
             }
-        );
+            other => panic!("expected Immediate, got {other:?}"),
+        }
     }
 
     #[test]
@@ -979,7 +767,7 @@ mod tests {
         }
     }
 
-    // -- Phase 7 syscall dispatch tests --
+    // -- Syscall dispatch tests --
 
     /// Extract the big-endian u32 value from a SharedWriteIntent effect.
     fn extract_write_u32(effect: &cellgov_effects::Effect) -> u32 {
@@ -1117,6 +905,43 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn tty_read_returns_eio() {
+        // Syscall 402 is sys_tty_read. RPCS3 returns CELL_EIO =
+        // 0x8001002B outside debug console mode; that is the retail
+        // behavior real games target. CELL_OK with no data causes
+        // CRT input loops to spin indefinitely.
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(Lv2Request::Unsupported { number: 402 }, UnitId::new(0), &rt);
+        assert_eq!(
+            result,
+            Lv2Dispatch::Immediate {
+                code: 0x8001_002B,
+                effects: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn prx_start_module_returns_einval() {
+        // Syscall 481 is _sys_prx_start_module. With id=0 or a null
+        // pOpt, RPCS3 (and real LV2) returns CELL_EINVAL = 0x80010002.
+        // Our stub always returns CELL_EINVAL because we do not track
+        // PRX lifecycle state; this keeps liblv2 on a spec-correct
+        // error path rather than CELL_OK-with-garbage-output.
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(Lv2Request::Unsupported { number: 481 }, UnitId::new(0), &rt);
+        assert_eq!(
+            result,
+            Lv2Dispatch::Immediate {
+                code: 0x8001_0002,
+                effects: vec![],
+            }
+        );
     }
 
     #[test]

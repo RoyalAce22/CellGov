@@ -118,29 +118,10 @@ pub fn beq(offset: i16) -> u32 {
 /// Encode `clrldi rA, rS, 32` (clear left 32 bits of doubleword).
 /// Alias for `rldicl rA, rS, 0, 32`.
 pub fn clrldi(ra: u32, rs: u32) -> u32 {
-    // rldicl rA, rS, SH=0, MB=32
-    // Encoding: opcode 30, rS, rA, sh[0:4]=0, mb[0:4]=0, mb[5]=0... complex.
-    // MD-form: [30(6)][rS(5)][rA(5)][sh0:4(5)][mb0:4(5)][XO=0(3)][sh5(1)][Rc(1)]
-    // sh = 0 -> sh0:4 = 0, sh5 = 0
-    // mb = 32 -> mb0:4 = 0, mb5 = 0 (mb is encoded as mb[0:4]||mb[5])
-    // Wait: mb=32 in the instruction encoding. mb field is 6 bits split as mb[5]||mb[0:4].
-    // mb = 32 = 0b100000 -> mb[0:4] = 0b00000, mb[5] = 1... no.
-    // Actually: mb is stored as (mb >> 5) | ((mb & 0x1F) << 1) in certain forms.
-    // Let me use the simpler encoding: rldicl with SH=0, MB=32.
-    //
-    // MD-form for rldicl (XO=0):
-    //   bits[0:5] = 30 (opcode)
-    //   bits[6:10] = rS
-    //   bits[11:15] = rA
-    //   bits[16:20] = sh[0:4] (shift amount low 5 bits)
-    //   bits[21:25] = mb[5] || mb[0:3] (mask begin, rotated)
-    //   bits[26:29] = 0 (XO for rldicl)
-    //   bit[30] = sh[5] (shift amount high bit)
-    //   bit[31] = Rc
-    //
-    // sh = 0: sh[0:4] = 0, sh[5] = 0
-    // mb = 32 = 0b100000: mb[5] = 1, mb[0:4] = 00000
-    //   stored as: mb[5] || mb[0:3] = 1 || 0000 = 0b10000 = 16
+    // rldicl rA, rS, SH=0, MB=32 -- MD-form (opcode 30, XO 0).
+    // The 6-bit MB field is split: bits[21..25] hold (MB[5] << 4) | MB[0..3],
+    // and bit[30] holds SH[5]. For SH=0, MB=32, that gives bits[21..25]=16
+    // and bit[30]=0.
     let sh_lo: u32 = 0;
     let mb: u32 = 32;
     let mb_field = ((mb & 0x20) >> 5) | ((mb & 0x1F) << 1);

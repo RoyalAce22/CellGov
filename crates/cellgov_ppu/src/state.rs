@@ -71,6 +71,22 @@ impl PpuState {
         (self.cr >> shift) & 1 != 0
     }
 
+    /// XER carry bit: CA = bit 34 counting from the 64-bit MSB (PPC
+    /// numbering), which is bit 29 counting from the LSB. Used by
+    /// extended add/subtract instructions (adde, subfe, addme, addze).
+    pub fn xer_ca(&self) -> bool {
+        (self.xer >> 29) & 1 != 0
+    }
+
+    /// Set the XER carry bit.
+    pub fn set_xer_ca(&mut self, value: bool) {
+        if value {
+            self.xer |= 1 << 29;
+        } else {
+            self.xer &= !(1u64 << 29);
+        }
+    }
+
     /// Effective address for a D-form load/store: `(ra|0) + sign_extend(imm)`.
     /// When `ra == 0`, the base is literal zero, not `GPR[0]`.
     pub fn ea_d_form(&self, ra: u8, imm: i16) -> u64 {
@@ -140,5 +156,45 @@ mod tests {
         let mut s = PpuState::new();
         s.gpr[1] = 1000;
         assert_eq!(s.ea_d_form(1, -4), 996);
+    }
+
+    #[test]
+    fn xer_ca_round_trips() {
+        let mut s = PpuState::new();
+        assert!(!s.xer_ca(), "fresh state has CA cleared");
+        s.set_xer_ca(true);
+        assert!(s.xer_ca());
+        s.set_xer_ca(false);
+        assert!(!s.xer_ca());
+    }
+
+    /// Setting CA must not disturb adjacent XER bits. PPC numbers
+    /// XER[CA] as bit 34 (from MSB), which is bit 29 from the LSB --
+    /// a common off-by-one mistake would be to use bit 30 or 28
+    /// instead, which would silently corrupt SO or OV.
+    #[test]
+    fn set_xer_ca_does_not_touch_other_bits() {
+        let mut s = PpuState::new();
+        // Set every other bit besides CA to 1.
+        s.xer = !(1u64 << 29);
+        s.set_xer_ca(true);
+        assert_eq!(s.xer, !0u64, "set CA should preserve all other bits");
+        s.set_xer_ca(false);
+        assert_eq!(
+            s.xer,
+            !(1u64 << 29),
+            "clear CA should preserve all other bits"
+        );
+    }
+
+    #[test]
+    fn xer_ca_reads_only_bit_29() {
+        let mut s = PpuState::new();
+        // Set every bit EXCEPT bit 29: CA must read as false.
+        s.xer = !(1u64 << 29);
+        assert!(!s.xer_ca());
+        // Now set only bit 29: CA must read as true.
+        s.xer = 1u64 << 29;
+        assert!(s.xer_ca());
     }
 }
