@@ -250,14 +250,33 @@ impl ExecutionUnit for PpuExecutionUnit {
         // a BTreeMap lookup on every access. The fetch path keeps
         // using `mem` (the base-0 region) since code always lives in
         // the main region.
-        let region_views: Vec<(u64, &[u8])> = ctx
-            .memory()
-            .regions()
-            .map(|r| (r.base(), r.bytes()))
-            .collect();
+        //
+        // Stack-allocated fixed-size table: PS3 runs with <= 4 regions
+        // (main, stack, rsx, spu_reserved) and no production codepath
+        // adds more. Avoiding the heap allocation matters here because
+        // `run_until_yield` is called once per retired instruction in
+        // Budget=1 mode (run-game, bench-boot, fault-driven replay),
+        // so a per-call `Vec::new` is a per-step allocation on the hot
+        // path. `MAX_REGIONS` is wider than the current usage to keep
+        // headroom without an assertion-failure risk.
+        const MAX_REGIONS: usize = 8;
+        let mut region_views_storage: [(u64, &[u8]); MAX_REGIONS] =
+            [(0, &[] as &[u8]); MAX_REGIONS];
+        let mut n_regions = 0usize;
+        for r in ctx.memory().regions() {
+            debug_assert!(
+                n_regions < MAX_REGIONS,
+                "region_views table too small; bump MAX_REGIONS"
+            );
+            if n_regions < MAX_REGIONS {
+                region_views_storage[n_regions] = (r.base(), r.bytes());
+                n_regions += 1;
+            }
+        }
+        let region_views = &region_views_storage[..n_regions];
         let load_slice = |ea: u64, len: usize| -> Option<&[u8]> {
             let end = ea.checked_add(len as u64)?;
-            for &(base, bytes) in &region_views {
+            for &(base, bytes) in region_views {
                 let region_end = base + bytes.len() as u64;
                 if ea >= base && end <= region_end {
                     let offset = (ea - base) as usize;

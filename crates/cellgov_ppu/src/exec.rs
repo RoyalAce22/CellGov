@@ -317,6 +317,13 @@ pub fn execute(
             state.gpr[rt as usize] = (a * b) >> 32;
             PpuStepOutcome::Continue
         }
+        PpuInstruction::Mulhw { rt, ra, rb } => {
+            // Signed 32x32 -> high 32 bits, sign-extended to 64-bit.
+            let a = state.gpr[ra as usize] as i32 as i64;
+            let b = state.gpr[rb as usize] as i32 as i64;
+            state.gpr[rt as usize] = ((a * b) >> 32) as i32 as i64 as u64;
+            PpuStepOutcome::Continue
+        }
         PpuInstruction::Mulhdu { rt, ra, rb } => {
             let a = state.gpr[ra as usize] as u128;
             let b = state.gpr[rb as usize] as u128;
@@ -331,6 +338,16 @@ pub fn execute(
             let (sum2, c2) = sum1.overflowing_add(ca_in);
             state.gpr[rt as usize] = sum2;
             state.set_xer_ca(c1 || c2);
+            PpuStepOutcome::Continue
+        }
+        PpuInstruction::Addze { rt, ra } => {
+            // Equivalent to adde with RB = 0, so only one overflow
+            // edge matters (ra overflowing when ca_in = 1).
+            let a = state.gpr[ra as usize];
+            let ca_in: u64 = state.xer_ca() as u64;
+            let (sum, c) = a.overflowing_add(ca_in);
+            state.gpr[rt as usize] = sum;
+            state.set_xer_ca(c);
             PpuStepOutcome::Continue
         }
         PpuInstruction::Divw { rt, ra, rb } => {
@@ -369,6 +386,10 @@ pub fn execute(
         }
         PpuInstruction::Or { ra, rs, rb } => {
             state.gpr[ra as usize] = state.gpr[rs as usize] | state.gpr[rb as usize];
+            PpuStepOutcome::Continue
+        }
+        PpuInstruction::Orc { ra, rs, rb } => {
+            state.gpr[ra as usize] = state.gpr[rs as usize] | !state.gpr[rb as usize];
             PpuStepOutcome::Continue
         }
         PpuInstruction::And { ra, rs, rb } => {
@@ -445,6 +466,10 @@ pub fn execute(
         PpuInstruction::Cntlzw { ra, rs } => {
             let val = state.gpr[rs as usize] as u32;
             state.gpr[ra as usize] = val.leading_zeros() as u64;
+            PpuStepOutcome::Continue
+        }
+        PpuInstruction::Cntlzd { ra, rs } => {
+            state.gpr[ra as usize] = state.gpr[rs as usize].leading_zeros() as u64;
             PpuStepOutcome::Continue
         }
         PpuInstruction::Extsh { ra, rs } => {
@@ -724,6 +749,29 @@ pub fn execute(
             ea: state.ea_d_form(ra, imm),
             size: 8,
             value: state.fpr[frs as usize],
+        },
+        PpuInstruction::Stfsu { frs, ra, imm } => {
+            let ea = state.ea_d_form(ra, imm);
+            let value = state.fpr[frs as usize];
+            state.gpr[ra as usize] = ea;
+            PpuStepOutcome::FpStore { ea, size: 4, value }
+        }
+        PpuInstruction::Stfdu { frs, ra, imm } => {
+            let ea = state.ea_d_form(ra, imm);
+            let value = state.fpr[frs as usize];
+            state.gpr[ra as usize] = ea;
+            PpuStepOutcome::FpStore { ea, size: 8, value }
+        }
+        // stfiwx: store the low 32 bits of the FPR as an integer word
+        // at the x-form effective address. Unlike stfs it does NOT
+        // round-convert to single precision; the bits go out verbatim.
+        // Emit through the integer Store outcome (not FpStore) so the
+        // 4-byte payload is written with `value as u32` byte order and
+        // no float normalization.
+        PpuInstruction::Stfiwx { frs, ra, rb } => PpuStepOutcome::Store {
+            ea: state.ea_x_form(ra, rb),
+            size: 4,
+            value: state.fpr[frs as usize] & 0xFFFF_FFFF,
         },
 
         // =================================================================
@@ -1459,5 +1507,185 @@ mod tests {
         }
         // CR0 EQ must be set to indicate success.
         assert_eq!(s.cr_field(0), 0b0010);
+    }
+
+    // stfiwx / stfsu / stfdu / mulhw / cntlzd / addze / orc: one
+    // exec test per variant pinning the semantics.
+
+    #[test]
+    fn mulhw_signed_high_32_bits() {
+        // -2 * 3 = -6; high 32 bits sign-extended == 0xFFFFFFFF.
+        let mut s = PpuState::new();
+        s.gpr[4] = (-2i32) as u32 as u64;
+        s.gpr[5] = 3;
+        execute(
+            &PpuInstruction::Mulhw {
+                rt: 3,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[3], 0xFFFFFFFF_FFFFFFFFu64);
+    }
+
+    #[test]
+    fn mulhw_positive_produces_zero_high_bits() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x0001_0000;
+        s.gpr[5] = 0x0001_0000;
+        execute(
+            &PpuInstruction::Mulhw {
+                rt: 3,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            uid(),
+        );
+        // 0x10000 * 0x10000 = 0x1_0000_0000; high 32 = 1.
+        assert_eq!(s.gpr[3], 1);
+    }
+
+    #[test]
+    fn cntlzd_counts_64_for_zero() {
+        let mut s = PpuState::new();
+        s.gpr[5] = 0;
+        execute(&PpuInstruction::Cntlzd { ra: 3, rs: 5 }, &mut s, uid());
+        assert_eq!(s.gpr[3], 64);
+    }
+
+    #[test]
+    fn cntlzd_high_bit_set_returns_zero() {
+        let mut s = PpuState::new();
+        s.gpr[5] = 1u64 << 63;
+        execute(&PpuInstruction::Cntlzd { ra: 3, rs: 5 }, &mut s, uid());
+        assert_eq!(s.gpr[3], 0);
+    }
+
+    #[test]
+    fn addze_with_ca_zero_copies_ra() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 42;
+        s.set_xer_ca(false);
+        execute(&PpuInstruction::Addze { rt: 3, ra: 4 }, &mut s, uid());
+        assert_eq!(s.gpr[3], 42);
+        assert!(!s.xer_ca());
+    }
+
+    #[test]
+    fn addze_with_ca_set_adds_one() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 42;
+        s.set_xer_ca(true);
+        execute(&PpuInstruction::Addze { rt: 3, ra: 4 }, &mut s, uid());
+        assert_eq!(s.gpr[3], 43);
+        assert!(!s.xer_ca());
+    }
+
+    #[test]
+    fn addze_overflow_sets_ca() {
+        let mut s = PpuState::new();
+        s.gpr[4] = u64::MAX;
+        s.set_xer_ca(true);
+        execute(&PpuInstruction::Addze { rt: 3, ra: 4 }, &mut s, uid());
+        assert_eq!(s.gpr[3], 0);
+        assert!(s.xer_ca());
+    }
+
+    #[test]
+    fn orc_is_or_with_complement_rb() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x00FF_0000;
+        s.gpr[5] = 0x0000_00FF;
+        execute(
+            &PpuInstruction::Orc {
+                ra: 3,
+                rs: 4,
+                rb: 5,
+            },
+            &mut s,
+            uid(),
+        );
+        // 0x00FF_0000 | !0x0000_00FF == 0xFFFF_FF00 sign-extended to u64
+        assert_eq!(s.gpr[3], 0xFFFF_FFFF_FFFF_FF00);
+    }
+
+    #[test]
+    fn stfsu_updates_ra_and_emits_fp_store() {
+        let mut s = PpuState::new();
+        s.gpr[8] = 0x2000;
+        s.fpr[13] = 0x4000_0000_0000_0000;
+        let out = execute(
+            &PpuInstruction::Stfsu {
+                frs: 13,
+                ra: 8,
+                imm: 8,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[8], 0x2008, "ra is updated to ea");
+        match out {
+            PpuStepOutcome::FpStore { ea, size, value } => {
+                assert_eq!(ea, 0x2008);
+                assert_eq!(size, 4);
+                assert_eq!(value, 0x4000_0000_0000_0000);
+            }
+            other => panic!("expected FpStore, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stfdu_updates_ra_and_emits_fp_store() {
+        let mut s = PpuState::new();
+        s.gpr[1] = 0xD000_0100;
+        s.fpr[1] = 0xDEAD_BEEF_CAFE_BABE;
+        let out = execute(
+            &PpuInstruction::Stfdu {
+                frs: 1,
+                ra: 1,
+                imm: -8,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.gpr[1], 0xD000_00F8);
+        match out {
+            PpuStepOutcome::FpStore { ea, size, value } => {
+                assert_eq!(ea, 0xD000_00F8);
+                assert_eq!(size, 8);
+                assert_eq!(value, 0xDEAD_BEEF_CAFE_BABE);
+            }
+            other => panic!("expected FpStore, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stfiwx_stores_low_32_bits_of_fpr_as_integer_word() {
+        // Unlike Stfs (single-precision round-convert), stfiwx writes
+        // the low 32 bits of the FPR bit pattern verbatim as a u32.
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x1000;
+        s.gpr[5] = 0x20;
+        s.fpr[13] = 0x4040_4040_1234_5678;
+        let out = execute(
+            &PpuInstruction::Stfiwx {
+                frs: 13,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            uid(),
+        );
+        match out {
+            PpuStepOutcome::Store { ea, size, value } => {
+                assert_eq!(ea, 0x1020);
+                assert_eq!(size, 4);
+                assert_eq!(value, 0x1234_5678, "low 32 bits verbatim");
+            }
+            other => panic!("expected Store, got {other:?}"),
+        }
     }
 }

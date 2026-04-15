@@ -1,22 +1,21 @@
 //! `run-game` subcommand: load a decrypted PS3 ELF and run the PPU
 //! until fault, stall, or step limit.
 
+mod boot;
 mod diag;
 mod prx;
+pub mod titles;
 
 use diag::{
     fetch_raw_at, format_fault, format_max_steps, format_process_exit, print_hle_summary,
     print_insn_coverage, print_top_pcs, print_trace_line, ProcessExitInfo, TtyCapture,
 };
-use prx::{build_nid_map, load_firmware_prx, pre_init_tls, run_module_start};
 
 use std::time::Instant;
 
-use cellgov_core::{Runtime, RuntimeMode, StepError};
-use cellgov_ppu::PpuExecutionUnit;
-use cellgov_time::Budget;
+use cellgov_core::{Runtime, StepError};
 
-use super::{die, load_file_or_die};
+use titles::Title;
 
 /// PS3 LV2 primary-thread stack base. Matches RPCS3 `vm.cpp`'s
 /// 0xD0000000 page-4K stack block.
@@ -43,6 +42,7 @@ pub(crate) const PS3_SPU_RESERVED_SIZE: usize = 0x2000_0000;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_game(
+    title: Title,
     elf_path: &str,
     max_steps: usize,
     trace: bool,
@@ -56,285 +56,41 @@ pub fn run_game(
     observation_manifest: Option<&str>,
     strict_reserved: bool,
 ) {
-    let t_start = Instant::now();
-    let elf_data = load_file_or_die(elf_path);
-
-    // Determine memory size from ELF segments.
-    let required_size = cellgov_ppu::loader::required_memory_size(&elf_data)
-        .unwrap_or_else(|e| die(&format!("failed to parse ELF: {e:?}")));
-
-    // Round up to 64KB alignment. Guest memory must be large enough for
-    // the game, PRX modules, and PS3 user-memory allocations starting
-    // at 0x00010000. The flat layout covers both the user-memory
-    // region (0x00010000+) and the EBOOT load region (0x10000000+)
-    // with a contiguous 1 GB backing.
-    let min_for_kernel = 0x4000_0000usize; // covers user + EBOOT regions
-    let game_size = ((required_size + 0xFFFF) & !0xFFFF) + 0x200000;
-    let mem_size = game_size.max(min_for_kernel);
-    let mut state = cellgov_ppu::state::PpuState::new();
-    // Build the PS3-spec multi-region layout:
-    // - main at base 0 covering the ELF + allocator pool
-    // - stack at 0xD0000000 (primary-thread stack)
-    // - rsx at 0xC0000000 (video/RSX local memory, reserved
-    //   provisional -- reads return zero and are counted; writes
-    //   fault until a real RSX implementation lands)
-    // - spu_reserved at 0xE0000000 (SPU-shared range, same
-    //   provisional semantics)
-    // `--strict-reserved` upgrades rsx and spu_reserved to
-    // `ReservedStrict`, making reads fault too.
-    let reserved_access = if strict_reserved {
-        cellgov_mem::RegionAccess::ReservedStrict
-    } else {
-        cellgov_mem::RegionAccess::ReservedZeroReadable
-    };
-    let mut mem = cellgov_mem::GuestMemory::from_regions(vec![
-        cellgov_mem::Region::new(0, mem_size, "main", cellgov_mem::PageSize::Page64K),
-        cellgov_mem::Region::new(
-            PS3_PRIMARY_STACK_BASE,
-            PS3_PRIMARY_STACK_SIZE,
-            "stack",
-            cellgov_mem::PageSize::Page4K,
-        ),
-        cellgov_mem::Region::with_access(
-            PS3_RSX_BASE,
-            PS3_RSX_SIZE,
-            "rsx",
-            cellgov_mem::PageSize::Page64K,
-            reserved_access,
-        ),
-        cellgov_mem::Region::with_access(
-            PS3_SPU_RESERVED_BASE,
-            PS3_SPU_RESERVED_SIZE,
-            "spu_reserved",
-            cellgov_mem::PageSize::Page64K,
-            reserved_access,
-        ),
-    ])
-    .unwrap_or_else(|e| die(&format!("failed to build guest memory layout: {e:?}")));
-    let t_mem_alloc = t_start.elapsed();
-
-    // Address 0 must stay zero: CRT0 linked lists use *NULL as a
-    // termination sentinel. No exit stub is planted here.
-
-    let load_result = cellgov_ppu::loader::load_ppu_elf(&elf_data, &mut mem, &mut state)
-        .unwrap_or_else(|e| die(&format!("failed to load ELF: {e:?}")));
-    let t_elf_load = t_start.elapsed();
-
-    // Parse and bind HLE import stubs.
-    let tramp_base = ((required_size + 0xFFF) & !0xFFF) as u32;
-    // CELLGOV_HLE_OPD_BASE: when set (e.g. "0x008A0120"), HLE bindings
-    // produce 8-byte OPDs packed at that address (matching RPCS3's
-    // `vm::alloc(N*8, vm::main)` HLE-table shape per
-    // tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp). Body trampolines
-    // land at `body_base` (16-byte stride). The GOT entries become
-    // packed pointers into user memory rather than 24-byte-aligned
-    // pointers into the upper region.
-    let hle_layout = match std::env::var("CELLGOV_HLE_OPD_BASE") {
-        Ok(s) => {
-            let opd_base =
-                u32::from_str_radix(s.trim_start_matches("0x"), 16).unwrap_or(tramp_base);
-            // Body trampolines packed past the OPD area. Each binding
-            // gets one 16-byte body. Reserve space assuming 256 max
-            // bindings (overestimates flOw's 140; cheap headroom).
-            let body_base = opd_base + 256 * 8;
-            cellgov_ppu::prx::HleLayout::Ps3Spec {
-                opd_base,
-                body_base,
-            }
-        }
-        Err(_) => cellgov_ppu::prx::HleLayout::Legacy24,
-    };
-    let hle_bindings = match cellgov_ppu::prx::parse_imports(&elf_data) {
-        Ok(modules) => {
-            let bindings = cellgov_ppu::prx::bind_hle_stubs_with_layout(
-                &modules, &mut mem, hle_layout, tramp_base,
-            );
-            println!(
-                "imports: {} modules, {} functions bound to HLE stubs",
-                modules.len(),
-                bindings.len()
-            );
-            for m in &modules {
-                let first_stub = m.functions.first().map(|f| f.stub_addr).unwrap_or(0);
-                println!(
-                    "  {}: {} functions, first stub at 0x{:x}",
-                    m.name,
-                    m.functions.len(),
-                    first_stub
-                );
-            }
-            bindings
-        }
-        Err(e) => {
-            println!("imports: none (parse failed: {e:?})");
-            vec![]
-        }
-    };
-    let t_hle_bind = t_start.elapsed();
-
-    // Load firmware PRX module (liblv2) if a firmware directory is provided.
-    // Real exports from the loaded module overwrite HLE GOT patches.
-    let prx_info = load_firmware_prx(firmware_dir, &hle_bindings, &mut mem, tramp_base);
-    let t_prx_load = t_start.elapsed();
-
-    // Pre-initialize the TLS area before module_start. On real PS3, the
-    // kernel sets up TLS from the game ELF's PT_TLS segment before any
-    // module_start runs. We replicate this by copying the TLS template
-    // and setting r13.
-    pre_init_tls(&elf_data, &mut mem);
-
-    // Execute module_start for the loaded PRX before the game.
-    // This initializes libc state (guard variables, heap arenas, TLS)
-    // that the game's CRT0 depends on.
-    //
-    // Skipped when CELLGOV_SKIP_MODULE_START=1: liblv2's module_start
-    // tries to dynamically load further PRX modules via
-    // sys_prx_load_module, which CellGov does not implement. liblv2's
-    // failure-recovery path scribbles a sentinel through a stale
-    // pointer into the game's text segment. Skipping lets the game
-    // call into liblv2 functions directly (most are thin wrappers
-    // around LV2 syscalls that do not require module_start to have
-    // initialized internal state).
-    let skip_ms = std::env::var("CELLGOV_SKIP_MODULE_START")
-        .map(|v| v == "1")
-        .unwrap_or(false);
-    if let Some(ref info) = prx_info {
-        if !skip_ms {
-            mem = run_module_start(mem, info, &hle_bindings, max_steps);
-        } else {
-            println!("module_start: skipped (CELLGOV_SKIP_MODULE_START=1)");
-        }
-    }
-
-    // Set up stack at the PS3-spec primary-thread stack region.
-    state.gpr[1] = PS3_PRIMARY_STACK_TOP;
-    state.lr = 0;
-
-    // Place sys_memory_allocate's first return above the ELF's
-    // occupancy in the user-memory region (0x00010000-0x0FFFFFFF).
-    // Real PS3 LV2 shares that region between the loaded ELF and the
-    // allocator pool; the kernel tracks the ELF's extent so
-    // allocations do not overwrite it. We compute the highest
-    // user-region PT_LOAD end, round up to 64KB, and hand it to the
-    // Lv2Host.
-    let user_region_end = elf_user_region_end(&elf_data);
-    // Reserve trampoline area when CELLGOV_HLE_OPD_BASE is set so the
-    // allocator does not hand out addresses that overwrite the packed
-    // OPD/body region. Pack uses 256 OPD slots * 8 bytes + 256 body
-    // slots * 16 bytes = 0x1800 bytes total starting at opd_base.
-    let trampoline_area_end = match std::env::var("CELLGOV_HLE_OPD_BASE") {
-        Ok(s) => u64::from_str_radix(s.trim_start_matches("0x"), 16)
-            .ok()
-            .map(|opd_base| opd_base + 0x1800)
-            .unwrap_or(0),
-        Err(_) => 0,
-    } as usize;
-    let alloc_floor = user_region_end.max(trampoline_area_end);
-    let alloc_base = ((alloc_floor + 0xFFFF) & !0xFFFF).max(0x0001_0000) as u32;
-
-    // Entry registers matching RPCS3's ppu_load_exec. The game's CRT0
-    // reads these to initialize libc's heap, TLS, and argv/envp.
-    //   r3 = argc, r4 = argv, r5 = envp, r6 = envp count
-    //   r7 = primary PPU thread id
-    //   r8 = TLS vaddr, r9 = TLS filesize, r10 = TLS memsize
-    //   r11 = ELF e_entry
-    //   r12 = malloc_pagesize from .sys_proc_param (fallback 0x100000 = 1MB)
-    let tls_info = cellgov_ppu::loader::find_tls_segment(&elf_data);
-    state.gpr[3] = 0; // argc
-    state.gpr[4] = 0; // argv
-    state.gpr[5] = 0; // envp
-    state.gpr[6] = 0; // envp count
-    state.gpr[7] = 0x0100_0000; // primary PPU thread id (RPCS3 default)
-    state.gpr[8] = tls_info.map(|t| t.vaddr).unwrap_or(0);
-    state.gpr[9] = tls_info.map(|t| t.filesz).unwrap_or(0);
-    state.gpr[10] = tls_info.map(|t| t.memsz).unwrap_or(0);
-    state.gpr[11] = load_result.entry;
-    let proc_param = cellgov_ppu::loader::find_sys_process_param(&elf_data);
-    let malloc_pagesize = proc_param.map(|p| p.malloc_pagesize).unwrap_or(0x100000);
-    state.gpr[12] = malloc_pagesize as u64;
-
-    println!("elf: {elf_path}");
-    println!("memory: {} MB", mem_size / (1024 * 1024));
-    println!(
-        "entry: 0x{:x} (OPD) -> pc=0x{:x} toc=0x{:x}",
-        load_result.entry, state.pc, state.gpr[2]
+    eprintln!(
+        "run-game: title = {} ({})",
+        title.name(),
+        title.display_name()
     );
-    if let Some(p) = proc_param {
-        println!(
-            "sys_proc_param: sdk=0x{:x} prio={} stack=0x{:x} malloc_pagesize=0x{:x}",
-            p.sdk_version, p.primary_prio, p.primary_stacksize, p.malloc_pagesize,
-        );
-    } else {
-        println!("sys_proc_param: not found, using malloc_pagesize=0x{malloc_pagesize:x}");
-    }
-    if let Some(ref info) = prx_info {
-        println!(
-            "prx: {} at 0x{:x} (toc=0x{:x}, {} relocs, {}/{} imports resolved)",
-            info.name, info.base, info.toc, info.relocs_applied, info.resolved, info.total_imports,
-        );
-    }
-    println!("max_steps: {max_steps}");
-    println!();
+    let prepared = boot::prepare(boot::PrepareOptions {
+        title,
+        elf_path,
+        firmware_dir,
+        strict_reserved,
+        dump_at_pc,
+        dump_skip,
+        module_start_max_steps: max_steps,
+        print_banner: true,
+        runtime_max_steps: max_steps,
+        patch_bytes,
+        dump_mem_addrs,
+    });
+    let boot::PreparedBoot {
+        mut rt,
+        hle_bindings,
+        elf_data,
+        timings: st,
+        ..
+    } = prepared;
 
     if profile {
         println!("startup timing:");
-        println!("  file read + mem alloc: {:?}", t_mem_alloc);
-        println!("  ELF load:             {:?}", t_elf_load - t_mem_alloc);
-        println!("  HLE bind:             {:?}", t_hle_bind - t_elf_load);
-        println!("  PRX load + resolve:   {:?}", t_prx_load - t_hle_bind);
-        println!("  total startup:        {:?}", t_prx_load);
+        println!("  file read + mem alloc: {:?}", st.mem_alloc);
+        println!("  ELF load:             {:?}", st.elf_load);
+        println!("  HLE bind:             {:?}", st.hle_bind);
+        println!("  PRX load + resolve:   {:?}", st.prx_load);
+        println!("  total startup:        {:?}", st.total());
         println!();
     }
-
-    // Apply any --patch-byte requests so investigative runs can override
-    // specific flag bytes the game's static init depends on, before any
-    // guest code observes the commit.
-    for &(addr, val) in patch_bytes {
-        if let Some(range) = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1) {
-            let _ = mem.apply_commit(range, &[val]);
-            println!("patch: byte 0x{addr:x} = 0x{val:02x}");
-        }
-    }
-
-    // --dump-mem: print 32 bytes at each requested address so investigative
-    // runs can verify loader-initialized static data before any guest code
-    // has had a chance to mutate it.
-    for &addr in dump_mem_addrs {
-        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 32);
-        match range.and_then(|r| mem.read(r)) {
-            Some(slice) => {
-                let label = mem
-                    .containing_region(addr, 32)
-                    .map(|r| r.label())
-                    .unwrap_or("<unmapped>");
-                print!("mem[0x{addr:x}] ({label}):");
-                for b in slice {
-                    print!(" {b:02x}");
-                }
-                println!();
-            }
-            None => println!("mem[0x{addr:x}]: out of range"),
-        }
-    }
-
-    // Budget=1 gives instruction-level fault granularity: each
-    // runtime step executes exactly one PPU instruction.
-    let mut rt = Runtime::new(mem, Budget::new(1), max_steps);
-    rt.set_mode(RuntimeMode::FaultDriven);
-    // Place HLE heap after TLS area (0x10400000 + 64KB for TLS).
-    rt.set_hle_heap_base(0x10410000);
-    rt.set_hle_nids(build_nid_map(&hle_bindings));
-    // sys_memory_allocate hands out from the PS3 user-memory region,
-    // above the loaded ELF's footprint.
-    rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
-    rt.registry_mut().register_with(|id| {
-        let mut unit = PpuExecutionUnit::new(id);
-        *unit.state_mut() = state;
-        if let Some(pc) = dump_at_pc {
-            unit.set_break_pc(pc, dump_skip);
-        }
-        unit
-    });
 
     let mut steps: usize = 0;
     let mut distinct_pcs: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
@@ -365,6 +121,7 @@ pub fn run_game(
         syscall_ring: [(0, 0); SYSCALL_RING_SIZE],
         syscall_ring_pos: 0,
         pc_hits: &mut pc_hits,
+        checkpoint: title.checkpoint_trigger(),
     };
     let (outcome, boot_outcome) = step_loop(&mut rt, &mut loop_ctx);
     let t_loop = t_loop_start.elapsed();
@@ -428,6 +185,252 @@ pub fn run_game(
     }
 }
 
+/// Result of one [`bench_boot`] invocation. Reports only what the
+/// reproducibility harness needs: how many steps ran, how long the
+/// step loop took, and how the boot terminated.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub struct BenchBootResult {
+    pub title: Title,
+    pub steps: usize,
+    pub wall: std::time::Duration,
+    pub outcome: cellgov_compare::BootOutcome,
+}
+
+impl BenchBootResult {
+    pub fn steps_per_sec(&self) -> f64 {
+        let secs = self.wall.as_secs_f64();
+        if secs == 0.0 {
+            0.0
+        } else {
+            self.steps as f64 / secs
+        }
+    }
+}
+
+/// Run one boot with the minimum step-loop bookkeeping needed to
+/// detect termination. The companion to `run_game` for throughput
+/// measurement: no per-step HashMap entry, no BTreeSet insert, no
+/// decode-again-for-coverage, no progress checkpoint. The boot setup
+/// is byte-identical; only the step loop differs.
+pub fn bench_boot(
+    title: Title,
+    elf_path: &str,
+    max_steps: usize,
+    firmware_dir: Option<&str>,
+    strict_reserved: bool,
+) -> BenchBootResult {
+    let prepared = boot::prepare(boot::PrepareOptions {
+        title,
+        elf_path,
+        firmware_dir,
+        strict_reserved,
+        dump_at_pc: None,
+        dump_skip: 0,
+        module_start_max_steps: max_steps,
+        print_banner: false,
+        runtime_max_steps: max_steps,
+        patch_bytes: &[],
+        dump_mem_addrs: &[],
+    });
+    let mut rt = prepared.rt;
+    let checkpoint = title.checkpoint_trigger();
+
+    let mut steps: usize = 0;
+    let t0 = Instant::now();
+    let outcome = bench_step_loop(&mut rt, checkpoint, &mut steps);
+    let wall = t0.elapsed();
+
+    BenchBootResult {
+        title,
+        steps,
+        wall,
+        outcome,
+    }
+}
+
+/// Minimal step loop: only the state needed to detect a termination
+/// condition. A ProcessExit fires when the runtime reports no
+/// runnable unit (the `sys_process_exit` path removes the primary
+/// unit); a FirstRsxWrite fires when `commit_step` returns
+/// `ReservedWrite` into the rsx region; a fault breaks with Fault;
+/// and exhausting `max_steps` breaks with MaxSteps.
+fn bench_step_loop(
+    rt: &mut Runtime,
+    checkpoint: titles::CheckpointTrigger,
+    steps: &mut usize,
+) -> cellgov_compare::BootOutcome {
+    use cellgov_compare::BootOutcome;
+    loop {
+        match rt.step() {
+            Ok(step) => {
+                *steps += 1;
+                let commit_result = rt.commit_step(&step.result);
+                if rsx_write_checkpoint_addr(checkpoint, &commit_result).is_some() {
+                    return BootOutcome::RsxWriteCheckpoint;
+                }
+                if step.result.fault.is_some() {
+                    return BootOutcome::Fault;
+                }
+            }
+            Err(StepError::NoRunnableUnit) => return BootOutcome::ProcessExit,
+            Err(StepError::MaxStepsExceeded) => return BootOutcome::MaxSteps,
+            Err(StepError::TimeOverflow) => return BootOutcome::Fault,
+        }
+    }
+}
+
+/// Run a single bench invocation and print one machine-parseable
+/// result line to stdout. Used as the inner call when
+/// `bench_boot_pair` spawns a subprocess per measurement.
+///
+/// The subprocess-per-measurement shape is deliberate: running two
+/// back-to-back measurements in the same process sees ~60 percent
+/// wall-time drift between run 1 and run 2 on Windows, dominated by
+/// 1 GB guest-memory allocation / page-commit reuse patterns. Each
+/// measurement needs a fresh heap, fresh page tables, and fresh CPU
+/// caches to be comparable.
+pub fn bench_boot_one_run(
+    title: Title,
+    elf_path: &str,
+    max_steps: usize,
+    firmware_dir: Option<&str>,
+    strict_reserved: bool,
+) -> BenchBootResult {
+    let r = bench_boot(title, elf_path, max_steps, firmware_dir, strict_reserved);
+    println!(
+        "BENCH_RESULT steps={} wall_ms={} steps_per_sec={:.0} outcome={:?}",
+        r.steps,
+        r.wall.as_millis(),
+        r.steps_per_sec(),
+        r.outcome,
+    );
+    r
+}
+
+/// Run `bench_boot_one_run` twice in two subprocesses and print a
+/// pair report with the agreement percentage between the two runs.
+/// The harness rejects a pair whose wall times disagree by more
+/// than 5 percent.
+///
+/// Each subprocess call re-executes the current binary with a
+/// dedicated `bench-boot-once` subcommand so that the second
+/// measurement gets a fresh heap and cache state (see
+/// [`bench_boot_one_run`] for the rationale).
+pub fn bench_boot_pair(
+    title: Title,
+    elf_path: &str,
+    max_steps: usize,
+    firmware_dir: Option<&str>,
+    strict_reserved: bool,
+) -> (BenchBootResult, BenchBootResult) {
+    println!(
+        "bench-boot: title={} elf={elf_path} max_steps={max_steps}",
+        title.name()
+    );
+    let r1 = spawn_one_run(title, elf_path, max_steps, firmware_dir, strict_reserved);
+    println!(
+        "  run 1: steps={} wall_ms={} steps_per_sec={:.0} outcome={:?}",
+        r1.steps,
+        r1.wall.as_millis(),
+        r1.steps_per_sec(),
+        r1.outcome,
+    );
+    let r2 = spawn_one_run(title, elf_path, max_steps, firmware_dir, strict_reserved);
+    println!(
+        "  run 2: steps={} wall_ms={} steps_per_sec={:.0} outcome={:?}",
+        r2.steps,
+        r2.wall.as_millis(),
+        r2.steps_per_sec(),
+        r2.outcome,
+    );
+    let agreement = agreement_percent(r1.wall, r2.wall);
+    let gate = if agreement <= 5.0 { "OK" } else { "FAIL" };
+    println!("  agreement: {agreement:.2}% (gate: <= 5% => {gate})");
+    (r1, r2)
+}
+
+/// Fork-and-exec the current binary to run one `bench-boot-once`
+/// invocation; parse the `BENCH_RESULT` line from stdout.
+///
+/// Inherits the subprocess's stderr so TTS and startup chatter still
+/// reach the user; only stdout is captured for the parseable line.
+fn spawn_one_run(
+    title: Title,
+    elf_path: &str,
+    max_steps: usize,
+    firmware_dir: Option<&str>,
+    strict_reserved: bool,
+) -> BenchBootResult {
+    let exe = std::env::current_exe().expect("current_exe");
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.arg("bench-boot-once")
+        .arg("--title")
+        .arg(title.name())
+        .arg("--max-steps")
+        .arg(max_steps.to_string());
+    if let Some(d) = firmware_dir {
+        cmd.arg("--firmware-dir").arg(d);
+    }
+    if strict_reserved {
+        cmd.arg("--strict-reserved");
+    }
+    cmd.arg(elf_path);
+    let output = cmd.output().expect("subprocess runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_bench_result(title, &stdout).unwrap_or_else(|| {
+        eprintln!("bench-boot: subprocess did not emit BENCH_RESULT line");
+        eprintln!("stdout:\n{stdout}");
+        eprintln!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+        std::process::exit(3);
+    })
+}
+
+/// Parse a `BENCH_RESULT steps=N wall_ms=M steps_per_sec=X outcome=O`
+/// line out of captured stdout. Returns `None` if no such line is
+/// present or if any required field is missing / malformed.
+pub(crate) fn parse_bench_result(title: Title, stdout: &str) -> Option<BenchBootResult> {
+    let line = stdout.lines().find(|l| l.starts_with("BENCH_RESULT "))?;
+    let mut steps: Option<usize> = None;
+    let mut wall_ms: Option<u64> = None;
+    let mut outcome: Option<cellgov_compare::BootOutcome> = None;
+    for tok in line.split_whitespace().skip(1) {
+        if let Some(v) = tok.strip_prefix("steps=") {
+            steps = v.parse().ok();
+        } else if let Some(v) = tok.strip_prefix("wall_ms=") {
+            wall_ms = v.parse().ok();
+        } else if let Some(v) = tok.strip_prefix("outcome=") {
+            outcome = match v {
+                "ProcessExit" => Some(cellgov_compare::BootOutcome::ProcessExit),
+                "RsxWriteCheckpoint" => Some(cellgov_compare::BootOutcome::RsxWriteCheckpoint),
+                "Fault" => Some(cellgov_compare::BootOutcome::Fault),
+                "MaxSteps" => Some(cellgov_compare::BootOutcome::MaxSteps),
+                _ => None,
+            };
+        }
+    }
+    Some(BenchBootResult {
+        title,
+        steps: steps?,
+        wall: std::time::Duration::from_millis(wall_ms?),
+        outcome: outcome?,
+    })
+}
+
+/// Relative wall-time difference between two runs, as a percentage
+/// of the faster run. Used as the reproducibility gate: two bench
+/// invocations must agree within 5 percent.
+pub(crate) fn agreement_percent(a: std::time::Duration, b: std::time::Duration) -> f64 {
+    let aa = a.as_secs_f64();
+    let bb = b.as_secs_f64();
+    if aa == 0.0 || bb == 0.0 {
+        return 0.0;
+    }
+    let min = aa.min(bb);
+    let max = aa.max(bb);
+    100.0 * (max - min) / min
+}
+
 /// One region in a checkpoint observation manifest, sharing the schema
 /// used by `tools/rpcs3_to_observation/` and `tests/fixtures/flow_checkpoint.toml`.
 #[derive(Debug, serde::Deserialize)]
@@ -452,7 +455,7 @@ struct CheckpointRegion {
 /// allocator base forward.
 ///
 /// Returns 0 if no qualifying segments are present.
-fn elf_user_region_end(data: &[u8]) -> usize {
+pub(super) fn elf_user_region_end(data: &[u8]) -> usize {
     const PT_LOAD: u32 = 1;
     fn u16_be(d: &[u8], o: usize) -> u16 {
         u16::from_be_bytes([d[o], d[o + 1]])
@@ -626,6 +629,36 @@ struct StepLoopCtx<'a> {
     /// hits max-steps without faulting: the loop's PCs dominate the
     /// top entries.
     pc_hits: &'a mut std::collections::HashMap<u64, u64>,
+    /// The boot checkpoint the harness is looking for. See
+    /// [`titles::CheckpointTrigger`]. Controls whether a
+    /// reserved-region write is treated as a checkpoint reach or as
+    /// a normal fault (the commit pipeline discards either way).
+    checkpoint: titles::CheckpointTrigger,
+}
+
+/// Classify a `commit_step` outcome as a checkpoint hit, if the
+/// title's trigger is [`titles::CheckpointTrigger::FirstRsxWrite`]
+/// and the commit failed with a `ReservedWrite` to the RSX region.
+///
+/// Returns the faulting guest address when the checkpoint fires,
+/// `None` otherwise. Pulled out as a free function so a unit test
+/// can pin the detection shape without spinning up a full runtime.
+fn rsx_write_checkpoint_addr(
+    trigger: titles::CheckpointTrigger,
+    commit_result: &Result<cellgov_core::CommitOutcome, cellgov_core::CommitError>,
+) -> Option<u64> {
+    if trigger != titles::CheckpointTrigger::FirstRsxWrite {
+        return None;
+    }
+    if let Err(cellgov_core::CommitError::Memory(cellgov_mem::MemError::ReservedWrite {
+        addr,
+        region: "rsx",
+    })) = commit_result
+    {
+        Some(*addr)
+    } else {
+        None
+    }
 }
 
 pub(super) const SYSCALL_RING_SIZE: usize = 32;
@@ -726,8 +759,18 @@ fn step_loop(
                 }
 
                 let t2 = Instant::now();
-                let _ = rt.commit_step(&step.result);
+                let commit_result = rt.commit_step(&step.result);
                 let t3 = Instant::now();
+
+                if let Some(addr) = rsx_write_checkpoint_addr(ctx.checkpoint, &commit_result) {
+                    break (
+                        format!(
+                            "RSX_WRITE_CHECKPOINT at 0x{addr:x} after {} steps",
+                            ctx.steps
+                        ),
+                        BootOutcome::RsxWriteCheckpoint,
+                    );
+                }
 
                 if let Some(t) = ctx.timing.as_mut() {
                     t.step_time += t1 - t0;
@@ -795,7 +838,143 @@ fn step_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::{elf_user_region_end, CheckpointManifest, CheckpointRegion};
+    use super::{
+        elf_user_region_end, rsx_write_checkpoint_addr, titles::CheckpointTrigger,
+        CheckpointManifest, CheckpointRegion,
+    };
+    use cellgov_core::{CommitError, CommitOutcome};
+    use cellgov_mem::MemError;
+
+    #[test]
+    fn rsx_checkpoint_fires_on_reserved_write_to_rsx() {
+        let err: Result<CommitOutcome, CommitError> =
+            Err(CommitError::Memory(MemError::ReservedWrite {
+                addr: 0xC000_0040,
+                region: "rsx",
+            }));
+        assert_eq!(
+            rsx_write_checkpoint_addr(CheckpointTrigger::FirstRsxWrite, &err),
+            Some(0xC000_0040)
+        );
+    }
+
+    #[test]
+    fn rsx_checkpoint_ignores_other_reserved_regions() {
+        // Writes to the SPU-reserved region must not trigger the
+        // RSX checkpoint; only the "rsx" label qualifies.
+        let err: Result<CommitOutcome, CommitError> =
+            Err(CommitError::Memory(MemError::ReservedWrite {
+                addr: 0xE000_0000,
+                region: "spu_reserved",
+            }));
+        assert_eq!(
+            rsx_write_checkpoint_addr(CheckpointTrigger::FirstRsxWrite, &err),
+            None
+        );
+    }
+
+    #[test]
+    fn rsx_checkpoint_inert_for_process_exit_trigger() {
+        // Titles whose trigger is ProcessExit (e.g. flow) keep the
+        // historical behavior: a ReservedWrite is a fault, not a
+        // checkpoint. This keeps flow's outcome stable.
+        let err: Result<CommitOutcome, CommitError> =
+            Err(CommitError::Memory(MemError::ReservedWrite {
+                addr: 0xC000_0040,
+                region: "rsx",
+            }));
+        assert_eq!(
+            rsx_write_checkpoint_addr(CheckpointTrigger::ProcessExit, &err),
+            None
+        );
+    }
+
+    #[test]
+    fn rsx_checkpoint_ignores_successful_commit() {
+        let ok: Result<CommitOutcome, CommitError> = Ok(CommitOutcome::default());
+        assert_eq!(
+            rsx_write_checkpoint_addr(CheckpointTrigger::FirstRsxWrite, &ok),
+            None
+        );
+    }
+
+    #[test]
+    fn rsx_checkpoint_ignores_non_memory_commit_errors() {
+        let err: Result<CommitOutcome, CommitError> =
+            Err(CommitError::PayloadLengthMismatch { effect_index: 0 });
+        assert_eq!(
+            rsx_write_checkpoint_addr(CheckpointTrigger::FirstRsxWrite, &err),
+            None
+        );
+    }
+
+    #[test]
+    fn agreement_percent_is_zero_for_identical_durations() {
+        use std::time::Duration;
+        assert_eq!(
+            super::agreement_percent(Duration::from_millis(1000), Duration::from_millis(1000)),
+            0.0
+        );
+    }
+
+    #[test]
+    fn agreement_percent_is_relative_to_faster_run() {
+        // A 100ms / 105ms pair reports exactly 5 percent; pins the
+        // gate boundary so a unit change in the formula surfaces
+        // here instead of flipping a real bench from pass to fail.
+        use std::time::Duration;
+        let pct = super::agreement_percent(Duration::from_millis(100), Duration::from_millis(105));
+        assert!((pct - 5.0).abs() < 0.0001, "expected 5.0, got {pct}");
+    }
+
+    #[test]
+    fn agreement_percent_is_symmetric() {
+        use std::time::Duration;
+        let a = super::agreement_percent(Duration::from_millis(200), Duration::from_millis(250));
+        let b = super::agreement_percent(Duration::from_millis(250), Duration::from_millis(200));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn agreement_percent_returns_zero_on_empty_duration() {
+        // Guards the divide-by-zero path when a bench reports a
+        // wall_ms of 0 (which can happen on a pathologically fast
+        // run_game or a broken measurement).
+        use std::time::Duration;
+        assert_eq!(
+            super::agreement_percent(Duration::ZERO, Duration::from_millis(100)),
+            0.0
+        );
+    }
+
+    #[test]
+    fn parse_bench_result_extracts_fields() {
+        let stdout = "some preamble\nBENCH_RESULT steps=1402388 wall_ms=323 steps_per_sec=4342377 outcome=ProcessExit\ntrailing noise\n";
+        let r = super::parse_bench_result(super::Title::Flow, stdout).expect("parses");
+        assert_eq!(r.steps, 1402388);
+        assert_eq!(r.wall.as_millis(), 323);
+        assert_eq!(r.outcome, cellgov_compare::BootOutcome::ProcessExit);
+    }
+
+    #[test]
+    fn parse_bench_result_handles_rsx_checkpoint_outcome() {
+        let stdout =
+            "BENCH_RESULT steps=12345 wall_ms=77 steps_per_sec=160000 outcome=RsxWriteCheckpoint\n";
+        let r = super::parse_bench_result(super::Title::Sshd, stdout).expect("parses");
+        assert_eq!(r.outcome, cellgov_compare::BootOutcome::RsxWriteCheckpoint);
+    }
+
+    #[test]
+    fn parse_bench_result_none_when_no_result_line() {
+        let stdout = "just some noise\nbut no result line\n";
+        assert!(super::parse_bench_result(super::Title::Flow, stdout).is_none());
+    }
+
+    #[test]
+    fn parse_bench_result_none_on_unknown_outcome() {
+        let stdout = "BENCH_RESULT steps=1 wall_ms=1 steps_per_sec=1 outcome=WhoKnows\n";
+        assert!(super::parse_bench_result(super::Title::Flow, stdout).is_none());
+    }
 
     /// Build a minimal big-endian ELF64 header with N PT_LOAD program
     /// headers at the supplied (vaddr, memsz) tuples. Just enough

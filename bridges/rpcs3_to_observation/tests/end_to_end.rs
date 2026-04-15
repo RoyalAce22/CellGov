@@ -25,6 +25,22 @@ fn adapter_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_rpcs3_to_observation"))
 }
 
+/// Ask the adapter for the expected oracle-mode config hash and
+/// return it as the "0x..." string the CLI emits. Used by tests so
+/// they do not hard-code the hash value and stay stable if the
+/// canonical YAML changes.
+fn expected_config_hash_hex() -> String {
+    let out = Command::new(adapter_bin())
+        .arg("--print-expected-config-hash")
+        .output()
+        .expect("adapter runs");
+    assert!(
+        out.status.success(),
+        "adapter --print-expected-config-hash failed"
+    );
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
 /// Locate the sibling `cellgov_cli` executable in the same target
 /// directory as this test. `CARGO_BIN_EXE_<name>` is only populated
 /// for binaries in the same package, so we construct the path from
@@ -64,6 +80,7 @@ size = "0x8"
     .unwrap();
 
     let rpcs3_obs_path = work.join("rpcs3.json");
+    let cfg_hash = expected_config_hash_hex();
     let status = Command::new(adapter_bin())
         .args([
             "--dump",
@@ -74,6 +91,8 @@ size = "0x8"
             "completed",
             "--output",
             rpcs3_obs_path.to_str().unwrap(),
+            "--config-hash",
+            &cfg_hash,
         ])
         .status()
         .expect("adapter runs");
@@ -156,6 +175,7 @@ size = "0x4"
     .unwrap();
 
     let rpcs3_obs_path = work.join("rpcs3.json");
+    let cfg_hash = expected_config_hash_hex();
     Command::new(adapter_bin())
         .args([
             "--dump",
@@ -166,6 +186,8 @@ size = "0x4"
             "completed",
             "--output",
             rpcs3_obs_path.to_str().unwrap(),
+            "--config-hash",
+            &cfg_hash,
         ])
         .status()
         .unwrap();
@@ -208,4 +230,79 @@ size = "0x4"
         !stdout.contains("parse"),
         "expected real divergence, not a parse/schema error: {stdout}"
     );
+}
+
+#[test]
+fn adapter_rejects_dump_with_wrong_oracle_config_hash() {
+    // A dump produced under non-oracle-mode RPCS3 settings carries a
+    // config hash that does not match the bridge's expected value.
+    // The adapter must refuse the conversion with a diagnostic naming
+    // the two hashes, not silently produce an Observation whose
+    // cross-runner comparison would be meaningless.
+    let work = tmp("bad_config");
+
+    let dump_path = work.join("rpcs3.dump");
+    fs::write(&dump_path, [0u8; 16]).unwrap();
+
+    let manifest_path = work.join("manifest.toml");
+    fs::write(
+        &manifest_path,
+        r#"
+[[regions]]
+name = "r"
+addr = "0x10000"
+size = "0x10"
+"#,
+    )
+    .unwrap();
+
+    let out_path = work.join("rpcs3.json");
+    let out = Command::new(adapter_bin())
+        .args([
+            "--dump",
+            dump_path.to_str().unwrap(),
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--outcome",
+            "completed",
+            "--output",
+            out_path.to_str().unwrap(),
+            "--config-hash",
+            "0xdeadbeefdeadbeef",
+        ])
+        .output()
+        .expect("adapter runs");
+    assert!(
+        !out.status.success(),
+        "adapter must fail on config-hash mismatch"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("oracle-mode config mismatch"),
+        "diagnostic names the contract: {stderr}"
+    );
+    assert!(
+        stderr.contains("0xdeadbeefdeadbeef"),
+        "diagnostic echoes the supplied hash: {stderr}"
+    );
+    assert!(
+        !out_path.exists(),
+        "adapter must not emit an observation on mismatch"
+    );
+}
+
+#[test]
+fn adapter_prints_expected_config_hash() {
+    let out = Command::new(adapter_bin())
+        .arg("--print-expected-config-hash")
+        .output()
+        .expect("adapter runs");
+    assert!(out.status.success(), "expected-hash command ran clean");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let trimmed = stdout.trim();
+    assert!(
+        trimmed.starts_with("0x"),
+        "hash output is hex-formatted: {trimmed}"
+    );
+    assert_eq!(trimmed.len(), 18, "0x + 16 hex digits: {trimmed}");
 }

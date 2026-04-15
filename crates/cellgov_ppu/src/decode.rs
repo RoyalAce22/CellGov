@@ -243,9 +243,17 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let (frs, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Stfs { frs, ra, imm })
         }
+        53 => {
+            let (frs, ra, imm) = d_form(raw);
+            Ok(PpuInstruction::Stfsu { frs, ra, imm })
+        }
         54 => {
             let (frs, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Stfd { frs, ra, imm })
+        }
+        55 => {
+            let (frs, ra, imm) = d_form(raw);
+            Ok(PpuInstruction::Stfdu { frs, ra, imm })
         }
 
         // Floating-point arithmetic (double and single)
@@ -411,7 +419,9 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         235 => return Ok(PpuInstruction::Mullw { rt, ra, rb }),
         11 => return Ok(PpuInstruction::Mulhwu { rt, ra, rb }),
         9 => return Ok(PpuInstruction::Mulhdu { rt, ra, rb }),
+        75 => return Ok(PpuInstruction::Mulhw { rt, ra, rb }),
         138 => return Ok(PpuInstruction::Adde { rt, ra, rb }),
+        202 => return Ok(PpuInstruction::Addze { rt, ra }),
         491 => return Ok(PpuInstruction::Divw { rt, ra, rb }),
         459 => return Ok(PpuInstruction::Divwu { rt, ra, rb }),
         489 => return Ok(PpuInstruction::Divd { rt, ra, rb }),
@@ -424,6 +434,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     match xo_10 {
         // Logical
         444 => return Ok(PpuInstruction::Or { ra, rs: rt, rb }),
+        412 => return Ok(PpuInstruction::Orc { ra, rs: rt, rb }),
         28 => return Ok(PpuInstruction::And { ra, rs: rt, rb }),
         60 => return Ok(PpuInstruction::Andc { ra, rs: rt, rb }),
         124 => return Ok(PpuInstruction::Nor { ra, rs: rt, rb }),
@@ -445,6 +456,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 
         // Count leading zeros
         26 => return Ok(PpuInstruction::Cntlzw { ra, rs: rt }),
+        58 => return Ok(PpuInstruction::Cntlzd { ra, rs: rt }),
 
         // Extend sign
         922 => return Ok(PpuInstruction::Extsh { ra, rs: rt }),
@@ -467,6 +479,10 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         151 => return Ok(PpuInstruction::Stwx { rs: rt, ra, rb }),
         149 => return Ok(PpuInstruction::Stdx { rs: rt, ra, rb }),
         215 => return Ok(PpuInstruction::Stbx { rs: rt, ra, rb }),
+
+        // Store floating-point as integer word indexed (stfiwx): the
+        // FPR field reuses the RT slot, so the decoded `rt` is `frs`.
+        983 => return Ok(PpuInstruction::Stfiwx { frs: rt, ra, rb }),
 
         // Vector load/store indexed
         103 => {
@@ -808,6 +824,98 @@ mod tests {
                 ra: 31,
                 rs: 3,
                 rb: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn orc_decodes() {
+        // orc r0, r11, r28 -> opcode 31, RA=0, RS=11, RB=28, XO=412
+        // -> 0x7D60_E338. Observed at SSHD PC 0x003df2d0 after ~42M
+        // pre-advance steps.
+        let insn = decode(0x7D60_E338).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Orc {
+                ra: 0,
+                rs: 11,
+                rb: 28,
+            }
+        );
+    }
+
+    #[test]
+    fn addze_decodes() {
+        // addze r0, r0 -> opcode 31, RT=0, RA=0, RB=0, XO=202 (9-bit)
+        // -> 0x7C00_0194. Observed at SSHD PC 0x0069a940.
+        let insn = decode(0x7C00_0194).unwrap();
+        assert_eq!(insn, PpuInstruction::Addze { rt: 0, ra: 0 });
+    }
+
+    #[test]
+    fn cntlzd_decodes() {
+        // cntlzd r0, r11 -> opcode 31, RA=0, RS=11, RB=0, XO=58
+        // -> 0x7D60_0074. Observed at SSHD PC 0x004d57c0.
+        let insn = decode(0x7D60_0074).unwrap();
+        assert_eq!(insn, PpuInstruction::Cntlzd { ra: 0, rs: 11 });
+    }
+
+    #[test]
+    fn stfsu_decodes() {
+        // stfsu f13, 8(r8) -> primary 53, FRS=13, RA=8, D=8 -> 0xD5A80008
+        // Observed at SSHD PC 0x003c2c30.
+        let insn = decode(0xD5A8_0008).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Stfsu {
+                frs: 13,
+                ra: 8,
+                imm: 8,
+            }
+        );
+    }
+
+    #[test]
+    fn stfdu_decodes() {
+        // stfdu f1, -8(r1) -> primary 55, FRS=1, RA=1, D=-8 -> 0xDC21_FFF8
+        let insn = decode(0xDC21_FFF8).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Stfdu {
+                frs: 1,
+                ra: 1,
+                imm: -8,
+            }
+        );
+    }
+
+    #[test]
+    fn mulhw_decodes() {
+        // mulhw r0, r0, r9 -> opcode 31, RT=0, RA=0, RB=9, XO=75
+        // -> 0x7C004896. Observed at SSHD PC 0x0040e464.
+        let insn = decode(0x7C00_4896).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Mulhw {
+                rt: 0,
+                ra: 0,
+                rb: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn stfiwx_decodes() {
+        // stfiwx f13, r0, r9 -> opcode 31, frs=13, ra=0, rb=9, XO=983
+        // -> 0x7DA0_4FAE. Observed at SSHD PC 0x0040e3b4 as the
+        // first CellGov-unrecognized instruction during boot.
+        let insn = decode(0x7DA0_4FAE).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Stfiwx {
+                frs: 13,
+                ra: 0,
+                rb: 9,
             }
         );
     }

@@ -8,10 +8,18 @@
 //!
 //! ```text
 //! rpcs3_to_observation --dump <path> --manifest <path> --outcome <kind> \
-//!     [--steps <n>] --output <path>
+//!     --config-hash <hex> [--steps <n>] --output <path>
+//! rpcs3_to_observation --print-expected-config-hash
 //! ```
 //!
 //! Where `<kind>` is one of `completed|stalled|timeout|fault`.
+//!
+//! `--config-hash` is the 16-char hexadecimal FNV-1a hash of the
+//! canonical RPCS3 oracle-mode config; a dump produced under any
+//! other config is rejected. `--print-expected-config-hash` prints
+//! the value derived from the embedded `oracle_mode_config.yml` so
+//! it can be diffed against a dump-side value without running a
+//! conversion.
 //!
 //! The manifest is a TOML file matching the one consumed by the
 //! RPCS3 patch and by CellGov's own observation producer; see
@@ -62,6 +70,39 @@ struct Args {
     outcome: ObservedOutcome,
     steps: Option<usize>,
     output: PathBuf,
+    config_hash: u64,
+}
+
+/// Canonical RPCS3 oracle-mode config, checked in at
+/// `bridges/rpcs3-patch/oracle_mode_config.yml`. Any cross-runner
+/// dump that was not produced under these settings is not
+/// comparable, so the bridge rejects it at the point of conversion
+/// rather than letting the divergence propagate into a confusing
+/// byte-diff downstream.
+const ORACLE_MODE_CONFIG_YAML: &str = include_str!("../../rpcs3-patch/oracle_mode_config.yml");
+
+/// FNV-1a 64-bit hash over raw bytes. Deterministic, no dependency,
+/// same algorithm family used elsewhere in CellGov's trace tooling.
+fn fnv1a_64(bytes: &[u8]) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut h = OFFSET;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(PRIME);
+    }
+    h
+}
+
+/// Hash of the canonical oracle-mode YAML. Computed at call time so
+/// a new checked-in file value surfaces as a single-commit change.
+fn expected_config_hash() -> u64 {
+    fnv1a_64(ORACLE_MODE_CONFIG_YAML.as_bytes())
+}
+
+fn parse_hex_u64(s: &str) -> Result<u64, String> {
+    let trimmed = s.strip_prefix("0x").unwrap_or(s);
+    u64::from_str_radix(trimmed, 16).map_err(|e| format!("invalid hex '{s}': {e}"))
 }
 
 fn parse_outcome(s: &str) -> Result<ObservedOutcome, String> {
@@ -74,15 +115,28 @@ fn parse_outcome(s: &str) -> Result<ObservedOutcome, String> {
     }
 }
 
-fn parse_args(argv: Vec<String>) -> Result<Args, String> {
+/// Parser outcome: either a full conversion request, or a request
+/// to print the expected oracle-mode config hash.
+enum ParsedArgs {
+    Convert(Args),
+    PrintExpectedConfigHash,
+}
+
+fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, String> {
     let mut dump: Option<PathBuf> = None;
     let mut manifest: Option<PathBuf> = None;
     let mut outcome: Option<ObservedOutcome> = None;
     let mut steps: Option<usize> = None;
     let mut output: Option<PathBuf> = None;
+    let mut config_hash: Option<u64> = None;
 
     let mut it = argv.into_iter().skip(1);
     while let Some(flag) = it.next() {
+        // Handle value-less flags first so they don't trip the
+        // "flag requires a value" check below.
+        if flag == "--print-expected-config-hash" {
+            return Ok(ParsedArgs::PrintExpectedConfigHash);
+        }
         let val = it
             .next()
             .ok_or_else(|| format!("flag {flag} requires a value"))?;
@@ -94,17 +148,19 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                 steps = Some(val.parse().map_err(|e| format!("--steps: {e}"))?);
             }
             "--output" => output = Some(PathBuf::from(val)),
+            "--config-hash" => config_hash = Some(parse_hex_u64(&val)?),
             other => return Err(format!("unknown flag: {other}")),
         }
     }
 
-    Ok(Args {
+    Ok(ParsedArgs::Convert(Args {
         dump: dump.ok_or("--dump required")?,
         manifest: manifest.ok_or("--manifest required")?,
         outcome: outcome.ok_or("--outcome required")?,
         steps,
         output: output.ok_or("--output required")?,
-    })
+        config_hash: config_hash.ok_or("--config-hash required")?,
+    }))
 }
 
 /// Convert a dump + manifest into an `Observation`.
@@ -153,7 +209,27 @@ fn build_observation(
     })
 }
 
+/// Enforce the oracle-mode config contract: the supplied hash must
+/// equal the hash of the checked-in canonical YAML. On mismatch,
+/// both hashes are included in the diagnostic so the user can see
+/// whether the YAML or their RPCS3 config drifted.
+fn check_config_hash(supplied: u64) -> Result<(), String> {
+    let expected = expected_config_hash();
+    if supplied != expected {
+        return Err(format!(
+            "rpcs3 oracle-mode config mismatch: supplied 0x{supplied:016x}, expected 0x{expected:016x}. \
+             The dump was produced under RPCS3 settings that differ from \
+             bridges/rpcs3-patch/oracle_mode_config.yml. Cross-runner \
+             observations from different settings are not comparable; \
+             re-run RPCS3 with the canonical oracle-mode settings."
+        ));
+    }
+    Ok(())
+}
+
 fn run(args: Args) -> Result<(), String> {
+    check_config_hash(args.config_hash)?;
+
     let manifest_text = fs::read_to_string(&args.manifest)
         .map_err(|e| format!("read manifest {}: {e}", args.manifest.display()))?;
     let manifest: Manifest =
@@ -171,7 +247,21 @@ fn run(args: Args) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().collect();
-    match parse_args(argv).and_then(run) {
+    let parsed = match parse_args(argv) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = match parsed {
+        ParsedArgs::Convert(args) => run(args),
+        ParsedArgs::PrintExpectedConfigHash => {
+            println!("0x{:016x}", expected_config_hash());
+            Ok(())
+        }
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
@@ -295,5 +385,65 @@ mod tests {
         let m: Manifest = toml::from_str(toml).unwrap();
         assert_eq!(m.regions[0].addr, 0x10000);
         assert_eq!(m.regions[0].size, 0x800000);
+    }
+
+    #[test]
+    fn fnv1a_64_matches_known_vector() {
+        // Standard FNV-1a 64 test vector for the empty input is the
+        // offset-basis constant itself; for "abc" it is 0xe71fa2190541574b.
+        assert_eq!(fnv1a_64(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a_64(b"abc"), 0xe71f_a219_0541_574b);
+    }
+
+    #[test]
+    fn expected_config_hash_is_stable_and_nonzero() {
+        let h = expected_config_hash();
+        assert_ne!(h, 0);
+        // Sanity: running twice produces the same value.
+        assert_eq!(h, expected_config_hash());
+    }
+
+    #[test]
+    fn check_config_hash_accepts_expected() {
+        assert!(check_config_hash(expected_config_hash()).is_ok());
+    }
+
+    #[test]
+    fn check_config_hash_rejects_with_diagnostic_naming_both_sides() {
+        let err = check_config_hash(0xdead_beef_dead_beef).expect_err("mismatch");
+        assert!(
+            err.contains("oracle-mode config mismatch"),
+            "names the contract: {err}"
+        );
+        assert!(
+            err.contains("0xdeadbeefdeadbeef"),
+            "echoes supplied hash: {err}"
+        );
+        let expected = format!("0x{:016x}", expected_config_hash());
+        assert!(
+            err.contains(&expected),
+            "names expected hash {expected}: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_hex_u64_accepts_both_prefixed_and_bare() {
+        assert_eq!(parse_hex_u64("0xabc"), Ok(0xabc));
+        assert_eq!(parse_hex_u64("abc"), Ok(0xabc));
+        assert!(parse_hex_u64("xyz").is_err());
+    }
+
+    #[test]
+    fn oracle_mode_yaml_contains_four_required_settings() {
+        // Sanity: the checked-in YAML describes the four settings the
+        // oracle-mode contract covers (Video.Renderer = Null,
+        // Audio.Renderer = Null, PPU Decoder = Recompiler (LLVM),
+        // SPU Decoder = Recompiler (LLVM)). If a maintainer drops one
+        // by accident the hash still changes, but this test names
+        // the omission at the layer a reader would look.
+        let y = ORACLE_MODE_CONFIG_YAML;
+        assert!(y.contains("Renderer: \"Null\""));
+        assert!(y.contains("PPU Decoder: Recompiler (LLVM)"));
+        assert!(y.contains("SPU Decoder: Recompiler (LLVM)"));
     }
 }

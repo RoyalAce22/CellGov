@@ -41,6 +41,13 @@ pub enum BootOutcome {
     Fault,
     /// Max-step cap reached without termination.
     MaxSteps,
+    /// First PPU write into the RSX command region (0xC0000000+)
+    /// was attempted. The harness treats this as a success signal
+    /// for titles whose attract-mode loops never exit on their own;
+    /// the observation captured at this point is the cross-runner
+    /// comparison checkpoint. Both runners reach it deterministically
+    /// once per boot.
+    RsxWriteCheckpoint,
 }
 
 /// Build an `Observation` from a completed `run-game`-style boot.
@@ -61,6 +68,9 @@ pub fn observe_from_boot(
         BootOutcome::ProcessExit => ObservedOutcome::Completed,
         BootOutcome::Fault => ObservedOutcome::Fault,
         BootOutcome::MaxSteps => ObservedOutcome::Timeout,
+        // RSX-write checkpoint is a success signal: the guest
+        // reached the agreed-upon cross-runner stopping point.
+        BootOutcome::RsxWriteCheckpoint => ObservedOutcome::Completed,
     };
 
     let memory_regions = regions
@@ -399,6 +409,18 @@ mod tests {
         assert_eq!(fault.outcome, ObservedOutcome::Fault);
         let timeout = observe_from_boot(&mem, BootOutcome::MaxSteps, 100_000, &[]);
         assert_eq!(timeout.outcome, ObservedOutcome::Timeout);
+    }
+
+    #[test]
+    fn observe_from_boot_maps_rsx_write_checkpoint_to_completed() {
+        // RSX-write checkpoint is a success signal: the boot reached
+        // the agreed-upon cross-runner stopping point. It must map
+        // to Completed so the cross-runner comparator treats two
+        // checkpoint captures as comparable.
+        let mem = vec![0u8; 16];
+        let obs = observe_from_boot(&mem, BootOutcome::RsxWriteCheckpoint, 12_345, &[]);
+        assert_eq!(obs.outcome, ObservedOutcome::Completed);
+        assert_eq!(obs.metadata.steps, Some(12_345));
     }
 
     #[test]

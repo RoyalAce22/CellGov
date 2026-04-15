@@ -166,6 +166,10 @@ pub enum PpuInstruction {
     Mullw { rt: u8, ra: u8, rb: u8 },
     /// Multiply high word unsigned: rt = ((ra as u32) * (rb as u32)) >> 32.
     Mulhwu { rt: u8, ra: u8, rb: u8 },
+    /// Multiply high word signed: rt = high 32 bits of (int32(ra) *
+    /// int32(rb)), sign-extended to 64-bit. Used by games that do
+    /// signed fixed-point math on words.
+    Mulhw { rt: u8, ra: u8, rb: u8 },
     /// Multiply high doubleword unsigned: rt = high 64 bits of
     /// ((ra as u128) * (rb as u128)). Used by compilers to lower
     /// unsigned 64-bit division by a constant.
@@ -173,6 +177,11 @@ pub enum PpuInstruction {
     /// Add extended: rt = ra + rb + `XER[CA]`. Sets `XER[CA]` to the
     /// unsigned overflow. Used for multi-word addition chains.
     Adde { rt: u8, ra: u8, rb: u8 },
+    /// Add to Zero Extended: rt = ra + `XER[CA]`; sets `XER[CA]`.
+    /// Short form of adde with the RB operand replaced by zero.
+    /// Common in arbitrary-precision addition loops after the first
+    /// addc.
+    Addze { rt: u8, ra: u8 },
     /// Multiply low doubleword: rt = ra * rb (low 64 bits, wrapping).
     Mulld { rt: u8, ra: u8, rb: u8 },
     /// Load doubleword and reserve indexed (atomic load): rt = mem[(ra|0) + rb].
@@ -221,6 +230,13 @@ pub enum PpuInstruction {
     Srd { ra: u8, rs: u8, rb: u8 },
     /// Count leading zeros word: ra = clz(rs as u32), zero-extended.
     Cntlzw { ra: u8, rs: u8 },
+    /// Count leading zeros doubleword: ra = leading_zeros(rs) as u64,
+    /// evaluating rs as a full 64-bit value.
+    Cntlzd { ra: u8, rs: u8 },
+    /// OR with complement: ra = rs | ~rb. Logical X-form under opcode
+    /// 31, XO 412. Common in games that mask partial words with an
+    /// inverted bitmask.
+    Orc { ra: u8, rs: u8, rb: u8 },
     /// Extend sign halfword: ra = sign_extend_16_to_64(rs).
     Extsh { ra: u8, rs: u8 },
     /// Extend sign byte: ra = sign_extend_8_to_64(rs).
@@ -494,6 +510,20 @@ pub enum PpuInstruction {
     Stfs { frs: u8, ra: u8, imm: i16 },
     /// Store float double: mem[ra + imm] = frs (64-bit).
     Stfd { frs: u8, ra: u8, imm: i16 },
+    /// Store float single with update: mem[ra + imm] = (float)frs,
+    /// ra = ra + imm. D-form with primary opcode 53.
+    Stfsu { frs: u8, ra: u8, imm: i16 },
+    /// Store float double with update: mem[ra + imm] = frs (64-bit),
+    /// ra = ra + imm. D-form with primary opcode 55.
+    Stfdu { frs: u8, ra: u8, imm: i16 },
+    /// Store floating-point as integer word indexed: stores the low 32
+    /// bits of `fpr[frs]` at `(ra == 0 ? 0 : gpr[ra]) + gpr[rb]`
+    /// without any float-to-int conversion -- the FPR is already the
+    /// integer the instruction is about to store. Used by titles that
+    /// keep an integer in a floating-point register across a memory
+    /// store (common pattern after float-to-int conversion via fctiwz
+    /// or similar).
+    Stfiwx { frs: u8, ra: u8, rb: u8 },
 
     /// Generic floating-point instruction (opcode 63, A-form/X-form).
     /// XO selects the operation; execution dispatches on it.
@@ -549,8 +579,10 @@ impl PpuInstruction {
             Self::Neg { .. } => "Neg",
             Self::Mullw { .. } => "Mullw",
             Self::Mulhwu { .. } => "Mulhwu",
+            Self::Mulhw { .. } => "Mulhw",
             Self::Mulhdu { .. } => "Mulhdu",
             Self::Adde { .. } => "Adde",
+            Self::Addze { .. } => "Addze",
             Self::Divw { .. } => "Divw",
             Self::Divwu { .. } => "Divwu",
             Self::Divd { .. } => "Divd",
@@ -573,6 +605,8 @@ impl PpuInstruction {
             Self::Sld { .. } => "Sld",
             Self::Srd { .. } => "Srd",
             Self::Cntlzw { .. } => "Cntlzw",
+            Self::Cntlzd { .. } => "Cntlzd",
+            Self::Orc { .. } => "Orc",
             Self::Extsh { .. } => "Extsh",
             Self::Extsb { .. } => "Extsb",
             Self::Extsw { .. } => "Extsw",
@@ -614,6 +648,9 @@ impl PpuInstruction {
             Self::Lfd { .. } => "Lfd",
             Self::Stfs { .. } => "Stfs",
             Self::Stfd { .. } => "Stfd",
+            Self::Stfsu { .. } => "Stfsu",
+            Self::Stfdu { .. } => "Stfdu",
+            Self::Stfiwx { .. } => "Stfiwx",
             Self::Fp63 { .. } => "Fp63",
             Self::Fp59 { .. } => "Fp59",
             Self::Sc => "Sc",

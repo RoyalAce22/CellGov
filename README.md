@@ -49,16 +49,26 @@ CellGov answers that question:
 
 Pre-Alpha. Capability today:
 
-- Boots flOw (NPUA80001) past C++ static initialization, through
-  liblv2's `module_start`, and reaches the first RSX call
-  (`_cellGcmInitBody`) at PPU step 1.4M -- the documented CPU-side
-  boundary for the static-recomp oracle.
-- Cross-runner verified: at the first-`sys_tty_write` boot
-  checkpoint, CellGov and RPCS3 produce byte-identical `code` and
-  `rodata` segments. Remaining `data` divergences are bounded to
-  HLE-binding-table slot ordering (a per-runner convention, not a
-  semantic difference) and classified as ignored fields under the
-  cross-runner divergence policy.
+- **Titles covered: 2.** flOw (NPUA80001) boots deterministically
+  to `sys_process_exit` at PPU step 1.4M and is cross-runner
+  verified against RPCS3 at the first-`sys_tty_write` boot
+  checkpoint (`code` and `rodata` segments byte-identical; `data`
+  divergences bounded to HLE-binding-table slot ordering,
+  classified as ignored under the cross-runner divergence policy).
+  Super Stardust HD (NPUA80068) boots past the same early-init
+  stages under the shared title harness; its RSX-write checkpoint
+  is within reach pending further interpreter throughput work.
+- **PPU interpreter: 100 instruction variants**, full SPU
+  interpreter, NID-correct sysPrxForUser HLE dispatch.
+- **LV2 syscalls: 16 with non-default handling** (the rest return
+  canned codes through the Unsupported variant and surface as
+  faults if a guest call needs them).
+- **HLE exports: 10 with dedicated handling** in
+  `cellgov_core::hle::dispatch_hle`; the default path returns 0.
+  Per-title import inventories live at
+  [`docs/titles/flow_hle_inventory.md`](docs/titles/flow_hle_inventory.md)
+  and [`docs/titles/sshd_hle_inventory.md`](docs/titles/sshd_hle_inventory.md);
+  regenerate with `cellgov_cli dump-imports --title <name>`.
 - PS3-spec guest memory layout: sparse `BTreeMap<u64, Region>`
   matching RPCS3 `vm.cpp`'s VA blocks. `sys_memory_allocate` returns
   pointers in `0x00010000-0x0FFFFFFF` (above the loaded ELF), the
@@ -71,11 +81,11 @@ Pre-Alpha. Capability today:
 - Configurable HLE OPD packing: 24-byte per-binding trampolines for
   microtests, or 8-byte packed OPDs in user memory matching RPCS3's
   HLE-table shape for cross-runner comparison.
-- 91 PPU instruction variants, full SPU interpreter, 15 LV2
-  syscalls with non-default handling, NID-correct sysPrxForUser
-  HLE dispatch.
-- 978 tests across 15 library crates, 2 binaries, and 1 RPCS3
-  bridge, zero `unsafe`.
+- Reproducible boot bench: `cellgov_cli bench-boot --title <name>`
+  runs two subprocess-isolated boots and reports wall time +
+  steps/sec with a 5 percent cross-run agreement gate.
+- 1045 tests across 15 library crates and 3 binaries, zero
+  `unsafe` (workspace-level `unsafe_code = forbid`).
 
 ## Workspace
 
