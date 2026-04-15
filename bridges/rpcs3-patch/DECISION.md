@@ -13,7 +13,7 @@ save-state format -- is **rejected** for checkpoint use.
   internal structures.
 - ~80 lines of C++, small enough to upstream. If upstream declines,
   we still hold the patch in-tree at `bridges/rpcs3-patch/` without
-  blocking the phase.
+  blocking CellGov's own work.
 
 ## Why not post-processor
 
@@ -28,6 +28,6 @@ save-state format -- is **rejected** for checkpoint use.
 
 ## Scope of this decision
 
-Applies only to checkpoint dumps. Milestone 9F reopens the same
-question for the per-step trace, where the volume and hook location
-are different. That decision is not bound by this one.
+Applies only to checkpoint dumps. The per-step trace reopens the
+same question, where volume and hook location are different. That
+decision is separate from this one.

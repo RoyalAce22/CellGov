@@ -111,25 +111,25 @@ workspace compiles under `unsafe_code = "forbid"`.
 
 ## Per-crate responsibilities
 
-| Crate | Responsibility |
-|-------|----------------|
-| `cellgov_time` | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time. |
-| `cellgov_event` | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary. |
-| `cellgov_mem` | `GuestMemory` (sparse `BTreeMap<u64, Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`. |
-| `cellgov_sync` | Mailbox FIFO, signal-register OR-merge, barrier and wait-set primitives. |
-| `cellgov_dma` | DMA completion queue with pluggable latency models. |
-| `cellgov_effects` | The 9-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above). |
-| `cellgov_exec` | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime. |
-| `cellgov_trace` | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace). |
-| `cellgov_lv2` | LV2 model: image registry, thread-group table, syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`). |
-| `cellgov_core` | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook. |
-| `cellgov_ppu` | PPU interpreter, ELF64/SPRX/PRX loaders, NID database, HLE binder. |
-| `cellgov_spu` | SPU interpreter, channel file, SPU ELF loader. |
-| `cellgov_testkit` | Scenario fixtures and the runner used by tests across the workspace. |
-| `cellgov_compare` | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`. |
-| `cellgov_explore` | Bounded schedule exploration with conflict-aware pruning. |
-| `cellgov_cli` | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`. |
-| `cellgov_mkelf` | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies. |
+| Crate                          | Responsibility                                                                                                                                                                                                                                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cellgov_time`                 | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time.                                                                                                                                                                                           |
+| `cellgov_event`                | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary.                                                                                                                                                                                                             |
+| `cellgov_mem`                  | `GuestMemory` (sparse `BTreeMap<u64, Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`.                                                                                                                 |
+| `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier and wait-set primitives.                                                                                                                                                                                                                                |
+| `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                     |
+| `cellgov_effects`              | The 9-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                      |
+| `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime.                                                                                                                                                                           |
+| `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                              |
+| `cellgov_lv2`                  | LV2 model: image registry, thread-group table, syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                      |
+| `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                        |
+| `cellgov_ppu`                  | PPU interpreter, ELF64/SPRX/PRX loaders, NID database, HLE binder.                                                                                                                                                                                                                                      |
+| `cellgov_spu`                  | SPU interpreter, channel file, SPU ELF loader.                                                                                                                                                                                                                                                          |
+| `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace.                                                                                                                                                                                                                                    |
+| `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                            |
+| `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                               |
+| `cellgov_cli`                  | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                            |
+| `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                    |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`. |
 
 ## Guest memory layout
@@ -145,21 +145,22 @@ The `run-game` driver builds four regions matching the canonical PS3
 LV2 virtual-address layout (cross-referenced against RPCS3's
 `Emu/Memory/vm.cpp`):
 
-| Guest VA              | Size     | Label          | Access                                 | Purpose                                                                 |
-|-----------------------|----------|----------------|----------------------------------------|-------------------------------------------------------------------------|
-| 0x00000000-0x3FFFFFFF | 1 GB     | `main`         | `ReadWrite`                            | User memory: EBOOT PT_LOAD segments, TLS, HLE bump arena, allocator pool |
-| 0xC0000000-0xCFFFFFFF | 256 MB   | `rsx`          | `ReservedZeroReadable` (default)       | Video / RSX local memory -- placeholder, reads zero and are counted      |
-| 0xD0000000-0xD000FFFF | 64 KB    | `stack`        | `ReadWrite`                            | Primary-thread stack (page-4K)                                           |
-| 0xE0000000-0xFFFFFFFF | 512 MB   | `spu_reserved` | `ReservedZeroReadable` (default)       | SPU-shared range -- same provisional semantics as RSX                    |
+| Guest VA              | Size   | Label          | Access                           | Purpose                                                                  |
+| --------------------- | ------ | -------------- | -------------------------------- | ------------------------------------------------------------------------ |
+| 0x00000000-0x3FFFFFFF | 1 GB   | `main`         | `ReadWrite`                      | User memory: EBOOT PT_LOAD segments, TLS, HLE bump arena, allocator pool |
+| 0xC0000000-0xCFFFFFFF | 256 MB | `rsx`          | `ReservedZeroReadable` (default) | Video / RSX local memory -- placeholder, reads zero and are counted      |
+| 0xD0000000-0xD000FFFF | 64 KB  | `stack`        | `ReadWrite`                      | Primary-thread stack (page-4K)                                           |
+| 0xE0000000-0xFFFFFFFF | 512 MB | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX                    |
 
 The `main` region's internal sub-layout is not tracked by the region
 map (it stays flat within that region): `sys_memory_allocate` starts
 above the loaded ELF footprint (computed at startup by scanning the
 ELF's highest user-region PT_LOAD end + 64 KB alignment); TLS sits
 at `0x10400000`; the HLE bump arena at `0x10410000`. The allocator
-base moving above the ELF is the Phase 10B spec match -- the real
-PS3 LV2 shares `0x00010000-0x0FFFFFFF` between the loaded binary and
-the allocator pool.
+base moves above the ELF because real PS3 LV2 shares
+`0x00010000-0x0FFFFFFF` between the loaded binary and the
+allocator pool; CellGov matches that layout so guest pointer
+values line up across runners.
 
 ### Region access modes
 
@@ -193,11 +194,12 @@ legacy accessor that returns the base-0 region's bytes -- code
 always lives in `main`, so this is safe. Load paths (`ld`, `lwz`,
 `lfs`, `lvx`, etc.) go through a cached `load_slice` closure built
 at the top of `run_until_yield`: the closure holds a
-`Vec<(u64, &[u8])>` snapshot of every region's base and bytes, and
+`[(u64, &[u8]); 8]` snapshot of every region's base and bytes, and
 linear-scans it per load. Linear scan wins over `BTreeMap` lookup
-because the region count stays single-digit through Phase 10; if
-later phases add many more mappings, a two-tier fast-path is the
-natural next step. Stores go through `Effect::SharedWriteIntent`
+because the region count stays single-digit under the current PS3
+layout (main, stack, rsx, spu_reserved); if many more mappings are
+later added, a two-tier fast-path is the natural next
+step. Stores go through `Effect::SharedWriteIntent`
 effects -- the commit pipeline's `apply_commit` is region-aware, so
 stores to any mapped region land correctly.
 
@@ -320,31 +322,31 @@ table, syscall classification, syscall dispatch.
 
 15 syscalls are classified into typed `Lv2Request` variants:
 
-| Syscall                       | Number  | Behavior                                                             |
-| ----------------------------- | ------- | -------------------------------------------------------------------- |
-| `sys_process_exit`            | 22      | Cascades Finished to all units in the process.                       |
-| `sys_mutex_create`            | 100     | Allocates a monotonic mutex ID, writes to guest pointer.             |
-| `sys_mutex_lock`              | 102     | Stub: returns CELL_OK (single-threaded module_start).                |
-| `sys_mutex_unlock`            | 104     | Stub: returns CELL_OK.                                               |
-| `sys_event_queue_create`      | 128     | Allocates a monotonic queue ID, writes to guest pointer.             |
-| `sys_event_queue_destroy`     | 129     | Stub: returns CELL_OK.                                               |
-| `sys_spu_image_open`          | 156     | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.  |
-| `sys_spu_thread_group_create` | 170     | Allocates a monotonic group id, writes it to guest pointer.          |
-| `sys_spu_thread_initialize`   | 172     | Records image handle and args (copied at init time) per slot.        |
-| `sys_spu_thread_group_start`  | 173     | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.|
-| `sys_spu_thread_group_join`   | 177/178 | Blocks caller; wakes when all SPUs in the group finish.              |
-| `sys_spu_thread_write_spu_mb` | 190     | Deposits a value into the target SPU's inbound mailbox.              |
+| Syscall                       | Number  | Behavior                                                                                               |
+| ----------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `sys_process_exit`            | 22      | Cascades Finished to all units in the process.                                                         |
+| `sys_mutex_create`            | 100     | Allocates a monotonic mutex ID, writes to guest pointer.                                               |
+| `sys_mutex_lock`              | 102     | Stub: returns CELL_OK (single-threaded module_start).                                                  |
+| `sys_mutex_unlock`            | 104     | Stub: returns CELL_OK.                                                                                 |
+| `sys_event_queue_create`      | 128     | Allocates a monotonic queue ID, writes to guest pointer.                                               |
+| `sys_event_queue_destroy`     | 129     | Stub: returns CELL_OK.                                                                                 |
+| `sys_spu_image_open`          | 156     | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                    |
+| `sys_spu_thread_group_create` | 170     | Allocates a monotonic group id, writes it to guest pointer.                                            |
+| `sys_spu_thread_initialize`   | 172     | Records image handle and args (copied at init time) per slot.                                          |
+| `sys_spu_thread_group_start`  | 173     | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
+| `sys_spu_thread_group_join`   | 177/178 | Blocks caller; wakes when all SPUs in the group finish.                                                |
+| `sys_spu_thread_write_spu_mb` | 190     | Deposits a value into the target SPU's inbound mailbox.                                                |
 | `sys_memory_allocate`         | 348     | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF). |
-| `sys_memory_free`             | 349     | Stub: no-op (CellGov does not track deallocation).                   |
-| `sys_tty_write`               | 403     | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing. |
+| `sys_memory_free`             | 349     | Stub: no-op (CellGov does not track deallocation).                                                     |
+| `sys_tty_write`               | 403     | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing.                                   |
 
 Two more are special-cased in the host dispatcher to return spec-correct
 error codes instead of CELL_OK (matching RPCS3 retail behavior):
 
-| Syscall                  | Number | Returns                            |
-|--------------------------|--------|------------------------------------|
-| `sys_tty_read`           | 402    | CELL_EIO when debug console off.   |
-| `_sys_prx_start_module`  | 481    | CELL_EINVAL when id == 0 or !pOpt. |
+| Syscall                 | Number | Returns                            |
+| ----------------------- | ------ | ---------------------------------- |
+| `sys_tty_read`          | 402    | CELL_EIO when debug console off.   |
+| `_sys_prx_start_module` | 481    | CELL_EINVAL when id == 0 or !pOpt. |
 
 All other syscalls fall through the host dispatcher returning CELL_OK
 with no effects.
@@ -355,18 +357,18 @@ NID-based, separate from the syscall surface. `cellgov_ppu::nid_db`
 holds 145 entries (every one verified by SHA-1+suffix round-trip in
 test). The hot ones with non-trivial behavior:
 
-| Function                | NID        | Classification    | Behavior                                                       |
-| ----------------------- | ---------- | ----------------- | -------------------------------------------------------------- |
-| `sys_initialize_tls`    | 0x744680a2 | stateful          | Copies TLS image, zeroes BSS, sets r13 = base + 0x7030.        |
-| `_sys_malloc`           | 0xbdb18f83 | unsafe-to-stub    | Bump allocator, 16-byte aligned, never freed.                  |
-| `_sys_free`             | 0xf7f7fb20 | noop-safe         | No-op.                                                         |
-| `_sys_memset`           | 0x68b9b011 | stateful          | Writes val * size bytes to guest memory, returns ptr.          |
-| `_sys_heap_create_heap` | 0xb2fcf2c8 | stateful          | Allocates a fresh heap id (RPCS3-equivalent).                  |
-| `_sys_heap_malloc`      | 0x35168520 | unsafe-to-stub    | Bumps the shared HLE arena.                                    |
-| `_sys_heap_memalign`    | 0x44265c08 | unsafe-to-stub    | Bumps with `max(align, 16)` rounding.                          |
-| `sys_lwmutex_create`    | 0x2f85c0ef | stateful          | Initializes the 24-byte sys_lwmutex_t (owner = lwmutex_free).  |
-| `sys_process_exit`      | 0xe6f2c1e7 | stateful          | Marks unit Finished.                                           |
-| All others              | --         | noop-safe         | Return 0.                                                      |
+| Function                | NID        | Classification | Behavior                                                      |
+| ----------------------- | ---------- | -------------- | ------------------------------------------------------------- |
+| `sys_initialize_tls`    | 0x744680a2 | stateful       | Copies TLS image, zeroes BSS, sets r13 = base + 0x7030.       |
+| `_sys_malloc`           | 0xbdb18f83 | unsafe-to-stub | Bump allocator, 16-byte aligned, never freed.                 |
+| `_sys_free`             | 0xf7f7fb20 | noop-safe      | No-op.                                                        |
+| `_sys_memset`           | 0x68b9b011 | stateful       | Writes val \* size bytes to guest memory, returns ptr.        |
+| `_sys_heap_create_heap` | 0xb2fcf2c8 | stateful       | Allocates a fresh heap id (RPCS3-equivalent).                 |
+| `_sys_heap_malloc`      | 0x35168520 | unsafe-to-stub | Bumps the shared HLE arena.                                   |
+| `_sys_heap_memalign`    | 0x44265c08 | unsafe-to-stub | Bumps with `max(align, 16)` rounding.                         |
+| `sys_lwmutex_create`    | 0x2f85c0ef | stateful       | Initializes the 24-byte sys_lwmutex_t (owner = lwmutex_free). |
+| `sys_process_exit`      | 0xe6f2c1e7 | stateful       | Marks unit Finished.                                          |
+| All others              | --         | noop-safe      | Return 0.                                                     |
 
 ## Schedule exploration
 
@@ -440,6 +442,59 @@ a verification-time tool, not a library coupling. See
 `tests/fixtures/flow_cross_runner/REPRODUCTION.md` for the build commands
 and the documented vendored-RPCS3 build-config workarounds.
 
+### Oracle-mode config contract
+
+An RPCS3 observation is only meaningful as an oracle when the RPCS3
+side is configured to emit deterministic PPU/SPU behavior and no
+RSX/audio output: `Video.Renderer = "Null"`, `Audio.Renderer =
+"Null"`, `Core.PPU Decoder = Recompiler (LLVM)`, and `Core.SPU
+Decoder = Recompiler (LLVM)`. The canonical YAML describing these
+four fields is embedded in `bridges/rpcs3_to_observation/`; the
+adapter computes an FNV-1a hash of that YAML at build time and
+requires matching `--config-hash` on every invocation. Dumps
+produced under a different RPCS3 config are rejected at adapter
+entry rather than silently feeding a wrong-config observation into
+the comparator. `cellgov_cli rpcs3_to_observation
+--print-expected-config-hash` prints the current expected hash for
+scripting.
+
+## Title harness (`cellgov_cli`)
+
+All title-specific configuration lives in `apps/cellgov_cli/src/
+game/titles.rs`; no library crate below `cellgov_cli` knows that
+titles exist. The harness is currently wired for two titles:
+
+- **flOw** (NPUA80001): checkpoint is `ProcessExit` -- flOw's boot
+  calls `sys_process_exit` on its own and CellGov records the
+  observation at that point.
+- **Super Stardust HD** (NPUA80068): checkpoint is
+  `FirstRsxWrite` -- SSHD's attract-mode loop never exits, so the
+  harness treats the first PPU write into the `rsx` reserved region
+  as a checkpoint hit.
+
+EBOOT resolution walks
+`<vfs-root>/game/<content-id>/USRDIR/<candidate>` in the order the
+title declares, preferring a decrypted `EBOOT.elf` over the
+encrypted `EBOOT.BIN`. Every real retail PS3 EBOOT is a SELF and
+must be decrypted once via `rpcs3.exe --decrypt` before CellGov can
+load it; `<vfs-root>` defaults to `tools/rpcs3/dev_hdd0` and can be
+overridden by `--vfs-root` or `$CELLGOV_PS3_VFS_ROOT`.
+
+The diagnostic surface is:
+
+- `run-game --title <name>`: fault-driven bring-up run with full
+  per-step coverage (insn tally, PC hit counts, HLE call summary).
+- `bench-boot --title <name>`: two subprocess-isolated boot runs
+  per invocation for reproducible wall-time measurement. The
+  subprocess split is deliberate; two in-process boots on Windows
+  see ~60 percent drift from 1 GB guest-memory allocation / page-
+  commit reuse across `Runtime` instances in one process.
+- `dump-imports --title <name>`: prints the title's full HLE
+  import table with NID, NID-DB name, stub classification, and
+  whether CellGov has dedicated handling. The regenerated
+  artifacts live at [docs/titles/flow_hle_inventory.md](titles/flow_hle_inventory.md)
+  and [docs/titles/sshd_hle_inventory.md](titles/sshd_hle_inventory.md).
+
 ## Boot status
 
 The `run-game` CLI subcommand loads a decrypted PS3 ELF and runs the
@@ -448,21 +503,34 @@ PPU at instruction-level granularity (Budget=1). With
 executes their `module_start` functions, and resolves game imports
 against real firmware exports.
 
-Boot sequence on flOw (NPUA80001):
+Common boot sequence (per-title numbers below):
 
-1. Load `EBOOT.elf` into guest memory; parse import tables; bind 140
+1. Load `EBOOT.elf` into guest memory; parse import tables; bind
    HLE trampolines.
-2. Load `liblv2.prx` (decrypted), apply 1042 relocations, surface 161
+2. Load `liblv2.prx` (decrypted), apply relocations, surface
    exports.
 3. Pre-initialize TLS from the game's PT_TLS segment.
-4. Execute liblv2 `module_start` -- now returns cleanly (24,992 steps,
-   2,344 distinct PCs).
+4. Execute liblv2 `module_start` -- returns cleanly (~24K steps).
 5. Run the game's CRT0 from the ELF entry point.
 
-Current boot reaches the **first RSX call** (`_cellGcmInitBody`) at
-PPU step **1,403,082**, then exits cleanly with `CELL_ESRCH` on
-`sys_spu_thread_group_join` -- post-RSX-boundary territory and the
-documented hard off-ramp for the static-recomp oracle.
+**flOw (NPUA80001).** 140 HLE bindings; liblv2 surfaces 161
+exports. Boot terminates deterministically at `sys_process_exit` at
+PPU step **1,402,388** (prior to exit the run reaches the first RSX
+call, `_cellGcmInitBody`). That terminating step is the documented
+CPU-side boundary for the static-recomp oracle and the point at
+which CellGov records a cross-runner observation.
+
+**Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
+modules; the harness uses a `FirstRsxWrite` checkpoint because the
+attract-mode loop never calls `sys_process_exit`. Current boot
+advances through CRT0, C++ static init, TLS setup, lwmutex
+construction, and deep into the game's config / asset string-table
+processing. Within a 100M-step budget the boot does not yet reach
+the first RSX write; progression is interpreter-throughput-bound
+(the hot path is ordinary strcmp / lookup code, not a missing HLE
+call), and ~1.5B steps of continuous forward progress have been
+observed without hitting a decode fault or an unimplemented
+syscall.
 
 ## Microtest corpus
 
@@ -471,14 +539,14 @@ LV2-driven scenario: the PPU's own compiled code drives the full SPU
 lifecycle through syscalls. No harness pre-registration of SPU
 execution units.
 
-| Test               | What it proves                                                |
-| ------------------ | ------------------------------------------------------------- |
-| spu_fixed_value    | SPU writes a known value via DMA put.                         |
-| mailbox_roundtrip  | PPU-to-SPU mailbox send, SPU transforms and DMA puts result.  |
-| dma_completion     | 128-byte DMA put with tag wait, status header.                |
-| atomic_reservation | SPU `getllar` / `putllc` (load-linked, store-conditional).    |
-| ls_to_shared       | Dependent LS store-to-load chain published via DMA.           |
-| barrier_wakeup     | Two SPU threads, inter-SPU ordering via shared memory polling.|
+| Test               | What it proves                                                 |
+| ------------------ | -------------------------------------------------------------- |
+| spu_fixed_value    | SPU writes a known value via DMA put.                          |
+| mailbox_roundtrip  | PPU-to-SPU mailbox send, SPU transforms and DMA puts result.   |
+| dma_completion     | 128-byte DMA put with tag wait, status header.                 |
+| atomic_reservation | SPU `getllar` / `putllc` (load-linked, store-conditional).     |
+| ls_to_shared       | Dependent LS store-to-load chain published via DMA.            |
+| barrier_wakeup     | Two SPU threads, inter-SPU ordering via shared memory polling. |
 
 Each test has interpreter and LLVM RPCS3 baselines (oracle settled --
 both decoders agree). CellGov runs each through

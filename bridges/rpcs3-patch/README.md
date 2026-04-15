@@ -22,6 +22,11 @@ Rebuild RPCS3 per its normal build instructions.
 
 ## Running with the hook active
 
+RPCS3 must be configured in oracle mode before the dump is
+comparable. The canonical settings are checked in at
+`oracle_mode_config.yml`; `rpcs3-to-observation` refuses dumps
+whose `--config-hash` does not match the hash of that file.
+
 ```bash
 export CELLGOV_DUMP_PATH=/tmp/flow_rpcs3.dump
 export CELLGOV_DUMP_REGIONS=0x10000:0x800000,0x10000000:0x400000
@@ -32,6 +37,19 @@ Each region is written contiguously in declaration order. The region
 manifest passed to `rpcs3-to-observation` must list the same regions
 in the same order -- the dump file has no internal structure beyond
 that contract.
+
+To convert the dump, ask the bridge for the expected config hash
+and pass it alongside the dump:
+
+```bash
+EXPECTED=$(cargo run -q -p rpcs3_to_observation -- --print-expected-config-hash)
+cargo run -q -p rpcs3_to_observation -- \
+    --dump /tmp/flow_rpcs3.dump \
+    --manifest tests/fixtures/flow_checkpoint.toml \
+    --outcome completed \
+    --output /tmp/flow_rpcs3.json \
+    --config-hash "$EXPECTED"
+```
 
 ## Design notes
 

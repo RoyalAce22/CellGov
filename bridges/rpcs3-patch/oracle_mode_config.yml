@@ -1,0 +1,22 @@
+# CellGov oracle-mode required RPCS3 settings.
+#
+# Cross-runner observations captured under different settings are
+# not comparable: host audio, host rendering, and non-LLVM decoders
+# each introduce divergence that no amount of per-step tracing can
+# reconstruct. The bridge refuses dumps whose config hash does not
+# match the hash of this canonical YAML.
+#
+# These four settings are the full oracle contract. RPCS3's build
+# revision is recorded separately in the dump header (not hashed
+# here) because the bridge tolerates any RPCS3 build that passes
+# the cross-runner regression tests. If a future RPCS3 build
+# changes oracle-relevant semantics the config shape itself will
+# change, producing a new hash and forcing an explicit update.
+
+Video:
+  Renderer: "Null"
+Audio:
+  Renderer: "Null"
+Core:
+  PPU Decoder: Recompiler (LLVM)
+  SPU Decoder: Recompiler (LLVM)

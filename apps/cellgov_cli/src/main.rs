@@ -24,6 +24,7 @@ use cellgov_testkit::runner::{run, ScenarioOutcome, ScenarioResult};
 use cellgov_trace::TraceReader;
 
 mod compare_cmds;
+mod dump_imports;
 mod game;
 
 use compare_cmds::{run_compare_observations, run_diverge, run_zoom};
@@ -112,6 +113,9 @@ fn main() {
         println!("       cellgov_cli explore <scenario> [--format human|json]");
         println!("       cellgov_cli explore micro <name> [--format human|json]");
         println!("       cellgov_cli run-game <elf-path> [--max-steps N] [--trace] [--profile]");
+        println!(
+            "       cellgov_cli bench-boot --title <name> [--max-steps N] [--firmware-dir DIR]"
+        );
         println!();
         println!("available scenarios:");
         for name in SCENARIOS {
@@ -237,18 +241,68 @@ fn main() {
     }
 
     if args[1] == "run-game" {
-        let elf_path = args.get(2).map(String::as_str).unwrap_or_else(|| {
-            eprintln!(
-                "usage: cellgov_cli run-game <elf-path> [--max-steps N] [--trace] [--profile] [--firmware-dir DIR]\n\
-                 \n\
-                 --firmware-dir points at a directory of decrypted PS3 firmware\n\
-                 PRX modules (e.g. liblv2.sprx). The files come from PS3 system\n\
-                 firmware; one convenient source is RPCS3's dev_flash/sys/external\n\
-                 directory after RPCS3 has installed the system update, but the\n\
-                 dependency is on the PS3 firmware itself, not on RPCS3."
-            );
-            std::process::exit(1);
-        });
+        let title = match game::titles::Title::parse_from_args(&args) {
+            Ok(t) => t,
+            Err(game::titles::TitleError::Missing) => {
+                eprintln!(
+                    "run-game: --title is required. Known titles: {}",
+                    game::titles::Title::known_names_csv()
+                );
+                std::process::exit(1);
+            }
+            Err(game::titles::TitleError::Unknown(v)) => {
+                eprintln!(
+                    "run-game: unknown title '{v}'. Known titles: {}",
+                    game::titles::Title::known_names_csv()
+                );
+                std::process::exit(1);
+            }
+        };
+        let vfs_root = resolve_ps3_vfs_root(&args);
+        let elf_path = find_run_game_elf_path(&args)
+            .or_else(|| {
+                title
+                    .resolve_eboot(&vfs_root)
+                    // Display paths use '/' consistently so logs are
+                    // readable whether the components came from a
+                    // forward-slash string literal or a Windows
+                    // PathBuf::join.
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+            })
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "usage: cellgov_cli run-game [elf-path] --title <name> [--vfs-root DIR] [--max-steps N] [--trace] [--profile] [--firmware-dir DIR]\n\
+                     \n\
+                     --title selects the PS3 title whose harness config to use.\n\
+                     Known titles: {}\n\
+                     \n\
+                     When no positional elf-path is given, the harness resolves the\n\
+                     title's main executable under <vfs-root>/game/<content-id>/USRDIR/.\n\
+                     VFS root lookup order: --vfs-root <path>, $CELLGOV_PS3_VFS_ROOT,\n\
+                     then 'tools/rpcs3/dev_hdd0' relative to the current directory.\n\
+                     \n\
+                     --firmware-dir points at a directory of decrypted PS3 firmware\n\
+                     PRX modules (e.g. liblv2.sprx). The files come from PS3 system\n\
+                     firmware; one convenient source is RPCS3's dev_flash/sys/external\n\
+                     directory after RPCS3 has installed the system update, but the\n\
+                     dependency is on the PS3 firmware itself, not on RPCS3.\n\
+                     \n\
+                     No executable found for --title {} under vfs-root={}.\n\
+                     Looked for: {}",
+                    game::titles::Title::known_names_csv(),
+                    title.name(),
+                    vfs_root.display(),
+                    title
+                        .content()
+                        .eboot_candidates
+                        .iter()
+                        .map(|n| format!("game/{}/USRDIR/{n}", title.content().content_id))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                std::process::exit(1);
+            });
+        let elf_path = elf_path.as_str();
         let max_steps: usize = find_flag_value(&args, "--max-steps")
             .and_then(|v| v.parse().ok())
             .unwrap_or(100_000);
@@ -289,6 +343,7 @@ fn main() {
         let observation_manifest = find_flag_value(&args, "--observation-manifest");
         let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
         game::run_game(
+            title,
             elf_path,
             max_steps,
             trace,
@@ -302,6 +357,105 @@ fn main() {
             observation_manifest.as_deref(),
             strict_reserved,
         );
+        return;
+    }
+
+    if args[1] == "dump-imports" {
+        dump_imports::run(&args);
+        return;
+    }
+
+    if args[1] == "bench-boot-once" {
+        let title = match game::titles::Title::parse_from_args(&args) {
+            Ok(t) => t,
+            Err(game::titles::TitleError::Missing) => {
+                eprintln!("bench-boot-once: --title is required");
+                std::process::exit(1);
+            }
+            Err(game::titles::TitleError::Unknown(v)) => {
+                eprintln!("bench-boot-once: unknown title '{v}'");
+                std::process::exit(1);
+            }
+        };
+        let vfs_root = resolve_ps3_vfs_root(&args);
+        let elf_path = find_run_game_elf_path(&args)
+            .or_else(|| {
+                title
+                    .resolve_eboot(&vfs_root)
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+            })
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "bench-boot-once: no elf-path and title '{}' not found under vfs-root={}",
+                    title.name(),
+                    vfs_root.display()
+                );
+                std::process::exit(1);
+            });
+        let max_steps: usize = find_flag_value(&args, "--max-steps")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100_000_000);
+        let firmware_dir = find_flag_value(&args, "--firmware-dir");
+        let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
+        game::bench_boot_one_run(
+            title,
+            &elf_path,
+            max_steps,
+            firmware_dir.as_deref(),
+            strict_reserved,
+        );
+        return;
+    }
+
+    if args[1] == "bench-boot" {
+        let title = match game::titles::Title::parse_from_args(&args) {
+            Ok(t) => t,
+            Err(game::titles::TitleError::Missing) => {
+                eprintln!(
+                    "bench-boot: --title is required. Known titles: {}",
+                    game::titles::Title::known_names_csv()
+                );
+                std::process::exit(1);
+            }
+            Err(game::titles::TitleError::Unknown(v)) => {
+                eprintln!(
+                    "bench-boot: unknown title '{v}'. Known titles: {}",
+                    game::titles::Title::known_names_csv()
+                );
+                std::process::exit(1);
+            }
+        };
+        let vfs_root = resolve_ps3_vfs_root(&args);
+        let elf_path = find_run_game_elf_path(&args)
+            .or_else(|| {
+                title
+                    .resolve_eboot(&vfs_root)
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+            })
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "bench-boot: no elf-path and title '{}' not found under vfs-root={}",
+                    title.name(),
+                    vfs_root.display()
+                );
+                std::process::exit(1);
+            });
+        let max_steps: usize = find_flag_value(&args, "--max-steps")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100_000_000);
+        let firmware_dir = find_flag_value(&args, "--firmware-dir");
+        let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
+        let (r1, r2) = game::bench_boot_pair(
+            title,
+            &elf_path,
+            max_steps,
+            firmware_dir.as_deref(),
+            strict_reserved,
+        );
+        let agreement = game::agreement_percent(r1.wall, r2.wall);
+        if agreement > 5.0 {
+            std::process::exit(2);
+        }
         return;
     }
 
@@ -386,6 +540,60 @@ fn find_flag_value(args: &[String], flag: &str) -> Option<String> {
         if arg == flag {
             return args.get(i + 1).cloned();
         }
+    }
+    None
+}
+
+/// Flags that `run-game` accepts which take a following value
+/// argument. Used by [`find_run_game_elf_path`] to skip over
+/// `--flag VALUE` pairs when locating the positional ELF path.
+const RUN_GAME_VALUE_FLAGS: &[&str] = &[
+    "--title",
+    "--vfs-root",
+    "--max-steps",
+    "--firmware-dir",
+    "--dump-at-pc",
+    "--dump-skip",
+    "--dump-mem",
+    "--patch-byte",
+    "--save-observation",
+    "--observation-manifest",
+];
+
+/// Resolve the PS3 VFS root (a directory that acts as
+/// `/dev_hdd0` from the guest's perspective) using, in order:
+/// `--vfs-root <path>`, the `CELLGOV_PS3_VFS_ROOT` env var, then the
+/// repo-local default `tools/rpcs3/dev_hdd0`. Existence of the path
+/// is not verified here -- callers report "no executable found"
+/// against whichever root was chosen.
+fn resolve_ps3_vfs_root(args: &[String]) -> std::path::PathBuf {
+    if let Some(p) = find_flag_value(args, "--vfs-root") {
+        return std::path::PathBuf::from(p);
+    }
+    if let Ok(p) = std::env::var("CELLGOV_PS3_VFS_ROOT") {
+        return std::path::PathBuf::from(p);
+    }
+    std::path::PathBuf::from("tools/rpcs3/dev_hdd0")
+}
+
+/// Locate the positional ELF path in a `run-game` invocation,
+/// skipping over recognized `--flag VALUE` pairs and standalone
+/// `--flag` toggles. Accepts both orderings -- `run-game <elf>
+/// --title flow` and `run-game --title flow <elf>` -- without
+/// caring which came first.
+fn find_run_game_elf_path(args: &[String]) -> Option<String> {
+    let mut i = 2; // skip argv[0] and "run-game"
+    while i < args.len() {
+        let a = &args[i];
+        if RUN_GAME_VALUE_FLAGS.contains(&a.as_str()) {
+            i += 2; // skip flag and its value
+            continue;
+        }
+        if a.starts_with("--") {
+            i += 1; // boolean flag
+            continue;
+        }
+        return Some(a.clone());
     }
     None
 }
@@ -1146,6 +1354,90 @@ mod tests {
     #[test]
     fn scenario_factory_returns_none_for_unknown() {
         assert!(scenario_factory("nonexistent").is_none());
+    }
+
+    fn sv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn find_run_game_elf_path_accepts_elf_first() {
+        let args = sv(&["cli", "run-game", "EBOOT.elf", "--title", "flow"]);
+        assert_eq!(find_run_game_elf_path(&args), Some("EBOOT.elf".to_string()));
+    }
+
+    #[test]
+    fn find_run_game_elf_path_accepts_title_first() {
+        let args = sv(&["cli", "run-game", "--title", "sshd", "EBOOT.BIN"]);
+        assert_eq!(find_run_game_elf_path(&args), Some("EBOOT.BIN".to_string()));
+    }
+
+    #[test]
+    fn find_run_game_elf_path_skips_boolean_flags() {
+        let args = sv(&[
+            "cli",
+            "run-game",
+            "--trace",
+            "--profile",
+            "--title",
+            "flow",
+            "game.elf",
+        ]);
+        assert_eq!(find_run_game_elf_path(&args), Some("game.elf".to_string()));
+    }
+
+    #[test]
+    fn find_run_game_elf_path_returns_none_when_missing() {
+        let args = sv(&["cli", "run-game", "--title", "flow"]);
+        assert_eq!(find_run_game_elf_path(&args), None);
+    }
+
+    #[test]
+    fn find_run_game_elf_path_skips_value_flag_that_looks_like_path() {
+        // "--firmware-dir" takes a value; the /path/to/fw must not be
+        // mistaken for the ELF.
+        let args = sv(&[
+            "cli",
+            "run-game",
+            "--firmware-dir",
+            "/path/to/fw",
+            "--title",
+            "flow",
+            "EBOOT.elf",
+        ]);
+        assert_eq!(find_run_game_elf_path(&args), Some("EBOOT.elf".to_string()));
+    }
+
+    #[test]
+    fn resolve_ps3_vfs_root_prefers_cli_flag() {
+        let args = sv(&[
+            "cli",
+            "run-game",
+            "--title",
+            "flow",
+            "--vfs-root",
+            "/custom/path",
+        ]);
+        assert_eq!(
+            resolve_ps3_vfs_root(&args),
+            std::path::PathBuf::from("/custom/path")
+        );
+    }
+
+    #[test]
+    fn resolve_ps3_vfs_root_default_is_project_relative() {
+        // With no flag and no env var, fall back to the repo-local
+        // default. This test only runs reliably when CELLGOV_PS3_VFS_ROOT
+        // is unset in the environment; tolerate the set case.
+        let args = sv(&["cli", "run-game", "--title", "flow"]);
+        // Unset the env var for this assertion only.
+        let prev = std::env::var("CELLGOV_PS3_VFS_ROOT").ok();
+        std::env::remove_var("CELLGOV_PS3_VFS_ROOT");
+        let got = resolve_ps3_vfs_root(&args);
+        if let Some(p) = prev {
+            std::env::set_var("CELLGOV_PS3_VFS_ROOT", p);
+        }
+        assert_eq!(got, std::path::PathBuf::from("tools/rpcs3/dev_hdd0"));
     }
 
     #[test]
