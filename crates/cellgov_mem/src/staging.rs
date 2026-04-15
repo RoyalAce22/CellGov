@@ -5,7 +5,7 @@
 //! application. It holds them until the pipeline drains the batch into
 //! [`crate::guest::GuestMemory`] at an epoch boundary.
 //!
-//! What it deliberately is **not**:
+//! What it explicitly is **not**:
 //!
 //! - It does not know about `cellgov_effects::Effect` or `OrderingKey`
 //!   types. The commit pipeline pre-sorts writes by the global ordering
@@ -111,19 +111,15 @@ impl StagingMemory {
     /// Returns the number of writes applied on success.
     pub fn drain_into(&mut self, target: &mut GuestMemory) -> Result<usize, MemError> {
         // Pre-validate the whole batch.
-        let size = target.size();
         for w in &self.pending {
             if w.bytes.len() as u64 != w.range.length() {
                 return Err(MemError::LengthMismatch);
             }
-            let end = w
-                .range
-                .start()
-                .raw()
-                .checked_add(w.range.length())
-                .ok_or(MemError::OutOfRange)?;
-            if end > size {
-                return Err(MemError::OutOfRange);
+            let start = w.range.start().raw();
+            let length = w.range.length();
+            let _end = start.checked_add(length).ok_or(MemError::OutOfRange)?;
+            if target.containing_region(start, length).is_none() {
+                return Err(MemError::Unmapped(target.fault_context(start)));
             }
         }
         // All writes are valid; apply them in order. apply_commit
@@ -247,7 +243,7 @@ mod tests {
         s.stage(staged(0, &[1, 1, 1, 1])); // valid
         s.stage(staged(6, &[2, 2, 2, 2])); // overflows: end = 10 > 8
         let err = s.drain_into(&mut mem).unwrap_err();
-        assert_eq!(err, MemError::OutOfRange);
+        assert!(matches!(err, MemError::Unmapped(_)));
         // Memory left untouched.
         assert_eq!(mem.read(range(0, 8)).unwrap(), &[0; 8]);
         assert_eq!(s.len(), 2);

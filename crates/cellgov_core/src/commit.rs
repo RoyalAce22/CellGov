@@ -49,8 +49,9 @@ pub enum CommitError {
         /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
     },
-    /// A `SharedWriteIntent`'s target range extends past the end of
-    /// committed memory or its end address overflows `u64`.
+    /// A `SharedWriteIntent`'s target range is not entirely contained
+    /// within a single registered memory region, or its end address
+    /// overflows `u64`.
     OutOfRange {
         /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
@@ -82,10 +83,11 @@ pub enum CommitError {
         /// The unregistered unit.
         target: UnitId,
     },
-    /// The underlying memory layer rejected the drain. Should be
-    /// unreachable in practice given the pre-validation pass, but
-    /// surfaced rather than panicked so tests and tooling can assert
-    /// on it.
+    /// The underlying memory layer rejected the drain. Reachable when
+    /// a staged write lands in a region whose permissions reject
+    /// writes, or when pre-validation and drain disagree about
+    /// containment. Surfaced rather than panicked so tests and tooling
+    /// can assert on it.
     Memory(MemError),
 }
 
@@ -124,8 +126,7 @@ pub struct CommitOutcome {
     pub waits_committed: usize,
     /// Number of previously-enqueued DMA completions that fired at
     /// this commit boundary (`completion_time <= now`). The runtime
-    /// applies their transfers and wakes their issuers. Set by
-    /// `Runtime::commit_step`, not by `CommitPipeline::process`.
+    /// applies their transfers and wakes their issuers.
     pub dma_completions_fired: usize,
     /// Number of effects of other variants (fault, trace) that the
     /// pipeline saw and passed through unhandled.
@@ -176,9 +177,8 @@ pub struct CommitContext<'a> {
 ///
 /// Holds no persistent state (the staging buffer is per-call because
 /// there is one commit batch per unit yield with no cross-unit
-/// batching). The struct exists so future state can be
-/// added (event queue handle, sync state references) without changing
-/// the public API shape.
+/// batching). The struct exists so future state can be added without
+/// changing the public API shape.
 #[derive(Debug, Default)]
 pub struct CommitPipeline {}
 
@@ -199,7 +199,14 @@ impl CommitPipeline {
     /// 2. Otherwise, walks `result.emitted_effects` in order:
     ///    - `SharedWriteIntent` is validated (length match, in-bounds),
     ///      staged into a fresh [`StagingMemory`].
-    ///    - Other variants are counted as deferred.
+    ///    - `MailboxSend` pushes onto the target FIFO.
+    ///    - `MailboxReceiveAttempt` pops or blocks the source unit.
+    ///    - `SignalUpdate` OR-merges into the target register.
+    ///    - `DmaEnqueue` schedules a completion via the latency model.
+    ///    - `WakeUnit` overrides the target's status to Runnable.
+    ///    - `WaitOnEvent` overrides the source's status to Blocked.
+    ///    - `FaultRaised` and `TraceMarker` fall through and are
+    ///      counted as deferred.
     /// 3. Validation failure aborts the whole batch atomically:
     ///    nothing is committed, the staging buffer (which never reached
     ///    `drain_into`) is discarded with the function return, and the
@@ -207,6 +214,10 @@ impl CommitPipeline {
     /// 4. After all effects are validated and staged, drains the
     ///    staging buffer into `memory`. Either every staged write
     ///    becomes visible or none do (atomic-batch guarantee).
+    ///
+    /// The `dma_completions_fired` field of the returned outcome is
+    /// always zero from this method; `Runtime::commit_step` fills it
+    /// in after popping the DMA queue against current guest time.
     pub fn process(
         &mut self,
         result: &ExecutionStepResult,
@@ -236,7 +247,6 @@ impl CommitPipeline {
         let mut blocked_units = Vec::new();
         let mut woken_units = Vec::new();
         let mut deferred = 0usize;
-        let mem_size = ctx.memory.size();
 
         // Pre-validation pass. Walk effects in emission order; reject
         // the entire batch on the first failure (atomic-batch rule).
@@ -249,12 +259,12 @@ impl CommitPipeline {
                     if bytes.len() as u64 != range.length() {
                         return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
                     }
-                    let end = range
-                        .start()
-                        .raw()
-                        .checked_add(range.length())
+                    let start = range.start().raw();
+                    let length = range.length();
+                    let _end = start
+                        .checked_add(length)
                         .ok_or(CommitError::OutOfRange { effect_index: idx })?;
-                    if end > mem_size {
+                    if ctx.memory.containing_region(start, length).is_none() {
                         return Err(CommitError::OutOfRange { effect_index: idx });
                     }
                     staging.stage(StagedWrite {

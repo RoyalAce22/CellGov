@@ -24,26 +24,33 @@ use cellgov_mem::GuestMemory;
 /// The readonly view of runtime state exposed to an execution unit
 /// during a single `run_until_yield` call.
 ///
-/// `ExecutionContext` is intentionally narrow. Everything it carries is
+/// `ExecutionContext` is narrow by construction. Everything it carries is
 /// shared-borrowed from the runtime. There is no mutable access to
 /// anything; units publish changes only by emitting `Effect` packets in
 /// their step result, never by reaching through the context.
 ///
-/// Currently exposes the committed shared memory view, any messages
-/// the runtime delivered on the unit's behalf during the preceding
-/// commit (e.g. from `MailboxReceiveAttempt`), and an optional syscall
-/// return code from a previous `YieldReason::Syscall` yield that the
-/// runtime serviced. Readonly runtime-facing handles for querying
-/// abstract device state will be added as additional borrowed fields
-/// when abstract devices exist; that is a non-breaking addition
-/// because the constructor remains the seam.
+/// Exposes the committed shared memory view, any messages the
+/// runtime delivered on the unit's behalf during the preceding
+/// commit (e.g. from `MailboxReceiveAttempt`), an optional syscall
+/// return code from a previous `YieldReason::Syscall` yield that
+/// the runtime serviced, and any register writes injected by HLE
+/// stubs alongside that return. Readonly runtime-facing handles
+/// for querying abstract device state can be added as additional
+/// borrowed fields when abstract devices exist; that is a
+/// non-breaking addition because context construction goes through
+/// named constructors (`new`, `with_received`, `with_syscall_return`,
+/// `with_syscall_return_and_regs`) rather than exposing the struct
+/// literal.
 #[derive(Debug, Clone, Copy)]
 pub struct ExecutionContext<'a> {
     memory: &'a GuestMemory,
     received: &'a [u32],
     syscall_return: Option<u64>,
-    /// Register writes injected by the host (e.g., HLE stubs that
-    /// need to set registers beyond r3). Each entry is (gpr_index, value).
+    /// Register writes injected by HLE stubs alongside a syscall
+    /// return. Each entry is `(gpr_index, value)`; the unit applies
+    /// these in addition to writing the syscall return into r3.
+    /// Empty unless the context was built with
+    /// `with_syscall_return_and_regs`.
     register_writes: &'a [(u8, u64)],
 }
 

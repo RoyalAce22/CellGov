@@ -6,9 +6,9 @@
 //! observable outcome. When footprints do not conflict, the two steps
 //! are independent and the swap need not be explored.
 //!
-//! The analysis is deliberately conservative: it over-approximates
-//! dependency so that false independencies (which would silently skip
-//! valid alternate schedules) never occur. False dependencies are
+//! The analysis is conservative: it over-approximates dependency so
+//! that false independencies (which would silently skip valid
+//! alternate schedules) never occur. False dependencies are
 //! acceptable -- they only waste exploration budget.
 
 use cellgov_effects::Effect;
@@ -133,9 +133,10 @@ impl StepFootprint {
             return true;
         }
 
-        // Wake/wait: one wakes a unit that the other IS (conservative --
-        // we treat wake_targets as conflicting with any wait on the other
-        // side). This handles barrier/mailbox wake interactions.
+        // Wake/wait: one wakes a unit that the other is waiting for
+        // (conservative -- we treat wake_targets as conflicting with
+        // any wait on the other side). This handles barrier/mailbox
+        // wake interactions.
         if !self.wake_targets.is_empty() && other.has_any_wait() {
             return true;
         }

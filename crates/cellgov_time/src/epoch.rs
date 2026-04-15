@@ -4,7 +4,7 @@
 //! closed and visible. Epoch is the granularity at which determinism
 //! comparisons -- state hashes, replay checkpoints -- are taken.
 //!
-//! `Epoch` is intentionally distinct from [`crate::ticks::GuestTicks`] and
+//! `Epoch` is a distinct type from [`crate::ticks::GuestTicks`] and
 //! [`crate::budget::Budget`]: the three concepts must not implicitly convert.
 
 /// A logical epoch counter. Advances exactly once per commit batch.
@@ -21,8 +21,8 @@ impl Epoch {
 
     /// Construct an `Epoch` from a raw count.
     ///
-    /// There is no `From<u64>` impl on purpose: epoch values are produced by
-    /// the commit pipeline, not by ad-hoc arithmetic at call sites.
+    /// There is no `From<u64>` impl: epoch values are produced by the
+    /// commit pipeline, not by ad-hoc arithmetic at call sites.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)

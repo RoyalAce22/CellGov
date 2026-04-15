@@ -1,17 +1,18 @@
 //! Stable identifiers used by the event layer.
 //!
 //! Three newtypes live here: [`UnitId`], [`EventId`], and [`SequenceNumber`].
-//! They are deliberately distinct from each other and from the time types in
+//! They are kept distinct from each other and from the time types in
 //! [`cellgov_time`]: a tick is not a sequence number, a unit is not an event,
 //! and none of them are interchangeable with a bare `u64`. The runtime's
-//! determinism contract depends on every id site being deliberate, so there
-//! are no `From<u64>` impls -- every lift uses [`UnitId::new`] and friends.
+//! determinism contract requires every id construction site to be visible,
+//! so there are no `From<u64>` impls -- every lift uses [`UnitId::new`] and
+//! friends.
 //!
 //! `UnitId` is defined here, not in `cellgov_core`, because the global
 //! ordering key in `cellgov_event` must mention it and `cellgov_event` sits
-//! below `cellgov_core` in the workspace dependency DAG. The registry seam in
-//! `cellgov_core` will hand `UnitId` instances out at unit construction time;
-//! the type itself is plain data.
+//! below `cellgov_core` in the workspace dependency DAG. The unit registry
+//! in `cellgov_core` hands `UnitId` instances out at unit construction
+//! time; the type itself is plain data.
 
 /// A stable identifier for an execution unit.
 ///
@@ -26,9 +27,9 @@ pub struct UnitId(u64);
 impl UnitId {
     /// Construct a `UnitId` from a raw value.
     ///
-    /// There is no `From<u64>` impl on purpose: id assignment is the
-    /// registry's job, and ad-hoc construction outside the registry should
-    /// be visible at the call site.
+    /// There is no `From<u64>` impl: id assignment is the registry's job,
+    /// and ad-hoc construction outside the registry should be visible at
+    /// the call site.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
@@ -44,8 +45,8 @@ impl UnitId {
 /// A stable identifier for an event in the runtime's event log.
 ///
 /// `EventId`s are issued at event creation time and used for trace
-/// correlation and replay assertions. They are intentionally not part of
-/// the ordering key: ordering uses [`crate::OrderingKey`], which carries
+/// correlation and replay assertions. They are not part of the ordering
+/// key: ordering uses [`crate::OrderingKey`], which carries
 /// timestamp, priority, source unit, and sequence number. Event ids only
 /// disambiguate two distinct events in trace records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

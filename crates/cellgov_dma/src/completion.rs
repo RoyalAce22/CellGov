@@ -8,10 +8,10 @@
 //! can apply the modeled transfer when the completion fires, without
 //! needing a separate side table to look the request up.
 //!
-//! Currently only the value type and its accessors. The DMA queue
-//! that orders completions by `(completion_time, sequence)` and the
-//! commit-pipeline integration that actually applies them land as
-//! separate slices on top of this seam.
+//! This module owns the completion value type and its accessors. The
+//! DMA queue in [`crate::queue`] orders completions by
+//! `(completion_time, sequence)`, and the commit pipeline applies the
+//! modeled transfer when each completion fires.
 
 use crate::request::{DmaDirection, DmaRequest};
 use cellgov_event::UnitId;
@@ -26,12 +26,12 @@ use cellgov_time::GuestTicks;
 /// [`crate::DmaLatencyModel`] when the request is enqueued; this type
 /// just carries the result.
 ///
-/// `DmaCompletion` is `Copy + Eq + Hash`. Ordering is intentionally
-/// **not** derived: a future DMA queue will order completions by
+/// `DmaCompletion` is `Copy + Eq + Hash`. Ordering is **not** derived:
+/// the DMA queue orders completions by
 /// `(completion_time, sequence_number)` where the sequence number is
 /// queue-assigned, not part of the completion value itself. Deriving
-/// `Ord` here would pin a different ordering and lock the queue
-/// implementation prematurely.
+/// `Ord` here would pin a different ordering and fight the queue's
+/// tiebreak scheme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DmaCompletion {
     request: DmaRequest,

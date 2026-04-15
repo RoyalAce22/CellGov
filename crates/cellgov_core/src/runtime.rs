@@ -68,6 +68,13 @@
 //!   kinds (committed memory, runnable queue, unit status, sync state)
 //!   after every commit, so replay tooling can compare post-commit
 //!   states across runs.
+//! - [`TraceRecord::PpuStateHash`] for each retired instruction a unit
+//!   reports via `drain_retired_state_hashes`, stamped with a
+//!   monotonic step index and carrying the post-retirement PC.
+//! - [`TraceRecord::PpuStateFull`] for each full-register snapshot a
+//!   unit reports via `drain_retired_state_full`, emitted into the
+//!   separate zoom-in trace stream so the main trace stays
+//!   fixed-size-per-record.
 //!
 //! The trace format is binary, not text. Tests pull
 //! the bytes out via [`Runtime::trace`] and feed them to the
@@ -104,7 +111,7 @@ pub struct RuntimeStep {
     pub result: ExecutionStepResult,
     /// Guest time after this step's consumed budget was applied.
     pub time_after: GuestTicks,
-    /// Epoch after this step. Currently only advances at commit
+    /// Epoch after this step. The epoch advances only at commit
     /// boundaries, which the commit pipeline owns; `step()` does not
     /// advance the epoch and the value is unchanged from before the
     /// step.
@@ -146,13 +153,9 @@ pub type SpuFactory = Box<dyn Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit
 /// Controls the runtime's overhead profile: which trace records are
 /// emitted and whether state-hash checkpoints are computed at commit
 /// boundaries.
-///
-/// Replaces the loose `skip_hash_checkpoints` flag with a single
-/// configuration point that is harder to misconfigure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeMode {
     /// Trace off, hash checkpoints off. Minimal per-step bookkeeping.
-    /// Default for `run-game`.
     FaultDriven,
     /// Trace on (commits + block/wake only), hash checkpoints on.
     /// For microtest replay and oracle comparison.
@@ -182,9 +185,10 @@ pub struct Runtime {
     max_steps: usize,
     trace: TraceWriter,
     /// The unit selected by the most recent `step()` call. Used by
-    /// `commit_step()` to attribute the commit record to the unit that
-    /// produced the batch -- there is one commit batch per unit yield,
-    /// so this is always the right unit.
+    /// `commit_step()` to attribute the commit record, syscall
+    /// dispatch, DMA issuer, and join-wake resolution to the unit that
+    /// produced the batch -- there is one commit batch per unit
+    /// yield, so this is always the right unit.
     last_scheduled_unit: Option<UnitId>,
     /// HLE NID table: maps HLE index -> NID for dispatch of HLE calls
     /// that need non-trivial behavior (e.g., TLS init, mutex create).
@@ -196,7 +200,8 @@ pub struct Runtime {
     /// (lwmutex sleep_queue, etc.). Starts above zero so a zero-initialized
     /// guest field is distinguishable from a legitimate allocated ID.
     pub(crate) hle_next_id: u32,
-    /// Controls trace and hash checkpoint overhead. Defaults to
+    /// Controls trace and hash checkpoint overhead. Set via
+    /// `Runtime::set_mode`; the constructor leaves this at
     /// `FullTrace` (all records, all hashes). `FaultDriven` disables
     /// both; `DeterminismCheck` enables hashes and commit-level trace.
     mode: RuntimeMode,
@@ -269,14 +274,26 @@ impl Runtime {
     /// Drive the commit pipeline for a previously-returned step result.
     ///
     /// Validates, stages, and applies the effects in `result` against
-    /// committed memory, then advances the epoch. The epoch advances
-    /// on every commit boundary -- including validation
-    /// failures, since the step's set of effects is "closed" either
-    /// way -- so a `Err` return still mutates `self.epoch`.
+    /// committed memory, then performs the runtime-level work that
+    /// surrounds the commit:
     ///
-    /// Fault rule and atomic-batch semantics are inherited
-    /// from [`CommitPipeline::process`]; this method is the
-    /// runtime-level seam that also owns epoch advancement.
+    /// - advances the epoch (on every commit boundary, including
+    ///   validation failures, since the step's set of effects is
+    ///   "closed" either way -- so an `Err` return still mutates
+    ///   `self.epoch`);
+    /// - dispatches `YieldReason::Syscall` through the LV2 host
+    ///   (immediate return, SPU registration, or block);
+    /// - pops DMA completions whose modeled time has arrived, applies
+    ///   their transfers, and wakes their issuers;
+    /// - resolves join wakes when an SPU finishes its group;
+    /// - emits `CommitApplied`, `UnitBlocked`, and `UnitWoken` trace
+    ///   records (outside `FaultDriven` mode);
+    /// - writes the four `StateHashCheckpoint` records (committed
+    ///   memory, runnable queue, unit status, sync state) outside
+    ///   `FaultDriven` mode.
+    ///
+    /// Fault rule and atomic-batch semantics are inherited from
+    /// [`CommitPipeline::process`].
     pub fn commit_step(
         &mut self,
         result: &ExecutionStepResult,
@@ -367,9 +384,9 @@ impl Runtime {
         // committed memory, runnable queue, sync state, and unit
         // status. All four are emitted here, taken AFTER the commit
         // (including DMA completion firing) so replay tooling sees
-        // post-commit state. Skipped when hash checkpoints are
-        // disabled (large guest memories where O(N) hashing per
-        // step is prohibitive).
+        // post-commit state. Skipped under `RuntimeMode::FaultDriven`
+        // (large guest memories where O(N) hashing per step is
+        // prohibitive).
         if self.mode != RuntimeMode::FaultDriven {
             let mem_hash = StateHash::new(self.memory.content_hash());
             self.trace.record(&TraceRecord::StateHashCheckpoint {
@@ -607,8 +624,9 @@ impl Runtime {
     }
 
     /// Borrow the mailbox registry. Folded into the per-commit
-    /// `SyncState` hash checkpoint; future slices wire `MailboxSend`
-    /// and `MailboxReceiveAttempt` effects through this seam.
+    /// `SyncState` hash checkpoint. The commit pipeline routes
+    /// `MailboxSend` and `MailboxReceiveAttempt` effects through this
+    /// registry.
     #[inline]
     pub fn mailbox_registry(&self) -> &MailboxRegistry {
         &self.mailbox_registry
@@ -759,8 +777,8 @@ impl Runtime {
         self.time
     }
 
-    /// Current epoch. Currently only advances at commit boundaries,
-    /// which the commit pipeline owns; `step()` never advances it.
+    /// Current epoch. Advances only at commit boundaries, which the
+    /// commit pipeline owns; `step()` never advances it.
     #[inline]
     pub fn epoch(&self) -> Epoch {
         self.epoch
@@ -807,8 +825,8 @@ impl Runtime {
     ///
     /// The unit's emitted effects are returned verbatim in
     /// [`RuntimeStep::result`]; this method does not validate, stage,
-    /// commit, or otherwise act on them. The commit pipeline is a
-    /// separate concern that wraps `step()` in a future slice.
+    /// commit, or otherwise act on them. [`Runtime::commit_step`] drives
+    /// the commit pipeline over the returned effects.
     pub fn step(&mut self) -> Result<RuntimeStep, StepError> {
         if self.steps_taken >= self.max_steps {
             return Err(StepError::MaxStepsExceeded);
@@ -889,16 +907,13 @@ impl Runtime {
             });
             self.per_step_index += 1;
         }
-        // Each full-state snapshot is paired with the per-step hash at
-        // the same retired index. We assume the unit emits full states
-        // for a contiguous prefix of the same retirement sequence the
-        // hashes use. The window's start index is unit-relative; here
-        // we only know how many full-state entries the unit drained,
-        // so we stamp them with `hash_base + i` -- correct only when
-        // the window starts at the unit's retirement_counter == 0.
-        // Larger windows that start mid-run get correct PCs but do not
-        // attempt to recover the original step index (the diff printer
-        // matches by PC instead).
+        // Full-state snapshots are stamped with `hash_base + i` so
+        // that, for a zoom-in window starting at the unit's first
+        // retired instruction, the `step` field of each `PpuStateFull`
+        // equals the `step` field of the matching `PpuStateHash`.
+        // Windows that start mid-run carry correct PCs but the `step`
+        // field no longer aligns with the hash stream; the diff
+        // printer matches by PC in that case.
         for (i, (pc, gpr, lr, ctr, xer, cr)) in retired_full.into_iter().enumerate() {
             self.zoom_trace.record(&TraceRecord::PpuStateFull {
                 step: hash_base + i as u64,
@@ -912,10 +927,9 @@ impl Runtime {
         }
 
         // Identity time-advancement policy: budget units convert 1:1
-        // to guest ticks. The time-advancement policy can be any
-        // deterministic function; identity is the
-        // simplest such policy and is locked behind this single line
-        // so future replacements have one place to look.
+        // to guest ticks. Any deterministic function of consumed
+        // budget satisfies the determinism contract; the identity
+        // mapping is the one this runtime ships.
         let advance = GuestTicks::new(result.consumed_budget.raw());
         let time_after = self
             .time
@@ -980,11 +994,11 @@ fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKind {
 /// The two enums live in different crates (`cellgov_exec` and
 /// `cellgov_trace`) because the trace crate sits below `cellgov_exec`
 /// in the workspace DAG and cannot depend on it. Their discriminants
-/// are intentionally identical, but Rust does not let us cast between
+/// match one-for-one, but Rust does not let us cast between
 /// distinct enum types directly, so we route through this exhaustive
-/// match. The exhaustiveness is the load-bearing piece: if a new
+/// match. Exhaustiveness is what ties the two enums together: if a new
 /// `YieldReason` variant is ever added, this match stops compiling and
-/// forces the trace contract to be updated in lockstep.
+/// forces the trace contract to be updated alongside it.
 fn traced_yield_reason(y: YieldReason) -> TracedYieldReason {
     match y {
         YieldReason::BudgetExhausted => TracedYieldReason::BudgetExhausted,

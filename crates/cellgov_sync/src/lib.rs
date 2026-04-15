@@ -1,4 +1,4 @@
-//! cellgov_sync -- mailboxes, signals, barriers, mutex/semaphore placeholders.
+//! cellgov_sync -- mailboxes, signals, and barrier identifiers.
 //!
 //! These are abstract state machines that produce block conditions, wake
 //! conditions, and effect validation results. They never decide scheduling

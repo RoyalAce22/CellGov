@@ -1041,9 +1041,9 @@ fn lbzu_advances_ra_to_effective_address() {
 
 #[test]
 fn per_step_trace_off_records_no_state_hashes() {
-    // 9D contract: per-step tracing off (default) means the unit
-    // produces an empty drain even after retiring instructions. The
-    // hot-loop branch must skip the push entirely.
+    // Per-step tracing off (default) means the unit produces an empty
+    // drain even after retiring instructions. The hot-loop branch
+    // must skip the push entirely.
     let mut mem = GuestMemory::new(64);
     place_insn(&mut mem, 0, (14 << 26) | (3 << 21) | 1); // addi r3, r0, 1
     place_insn(&mut mem, 4, (14 << 26) | (4 << 21) | 2); // addi r4, r0, 2

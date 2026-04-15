@@ -244,6 +244,28 @@ impl ExecutionUnit for PpuExecutionUnit {
         }
 
         let mem = ctx.memory().as_bytes();
+        // Cache every region as (base, bytes) pairs so load paths can
+        // resolve effective addresses against the primary-thread stack
+        // at 0xD0000000 and any other auxiliary region without paying
+        // a BTreeMap lookup on every access. The fetch path keeps
+        // using `mem` (the base-0 region) since code always lives in
+        // the main region.
+        let region_views: Vec<(u64, &[u8])> = ctx
+            .memory()
+            .regions()
+            .map(|r| (r.base(), r.bytes()))
+            .collect();
+        let load_slice = |ea: u64, len: usize| -> Option<&[u8]> {
+            let end = ea.checked_add(len as u64)?;
+            for &(base, bytes) in &region_views {
+                let region_end = base + bytes.len() as u64;
+                if ea >= base && end <= region_end {
+                    let offset = (ea - base) as usize;
+                    return Some(&bytes[offset..offset + len]);
+                }
+            }
+            None
+        };
 
         // Helper: build a memory-fault step result. Used by Load,
         // LoadVec, and FpLoad to avoid duplicating the fault
@@ -304,29 +326,20 @@ impl ExecutionUnit for PpuExecutionUnit {
                     // PC already set by the branch instruction.
                 }
                 PpuStepOutcome::Load { ea, size, rt } => {
-                    let addr = ea as usize;
-                    if addr + size as usize > mem.len() {
-                        self.status = UnitStatus::Faulted;
-                        return mem_fault!(step_pc, ea, budget, remaining, effects);
-                    }
+                    let slice = match load_slice(ea, size as usize) {
+                        Some(s) => s,
+                        None => {
+                            self.status = UnitStatus::Faulted;
+                            return mem_fault!(step_pc, ea, budget, remaining, effects);
+                        }
+                    };
                     let val = match size {
-                        1 => mem[addr] as u64,
-                        2 => u16::from_be_bytes([mem[addr], mem[addr + 1]]) as u64,
-                        4 => u32::from_be_bytes([
-                            mem[addr],
-                            mem[addr + 1],
-                            mem[addr + 2],
-                            mem[addr + 3],
-                        ]) as u64,
+                        1 => slice[0] as u64,
+                        2 => u16::from_be_bytes([slice[0], slice[1]]) as u64,
+                        4 => u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as u64,
                         8 => u64::from_be_bytes([
-                            mem[addr],
-                            mem[addr + 1],
-                            mem[addr + 2],
-                            mem[addr + 3],
-                            mem[addr + 4],
-                            mem[addr + 5],
-                            mem[addr + 6],
-                            mem[addr + 7],
+                            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6],
+                            slice[7],
                         ]),
                         _ => 0,
                     };
@@ -334,20 +347,18 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.state.pc += 4;
                 }
                 PpuStepOutcome::LoadSigned { ea, size, rt } => {
-                    let addr = ea as usize;
-                    if addr + size as usize > mem.len() {
-                        self.status = UnitStatus::Faulted;
-                        return mem_fault!(step_pc, ea, budget, remaining, effects);
-                    }
+                    let slice = match load_slice(ea, size as usize) {
+                        Some(s) => s,
+                        None => {
+                            self.status = UnitStatus::Faulted;
+                            return mem_fault!(step_pc, ea, budget, remaining, effects);
+                        }
+                    };
                     let val: u64 = match size {
-                        1 => (mem[addr] as i8) as i64 as u64,
-                        2 => i16::from_be_bytes([mem[addr], mem[addr + 1]]) as i64 as u64,
-                        4 => i32::from_be_bytes([
-                            mem[addr],
-                            mem[addr + 1],
-                            mem[addr + 2],
-                            mem[addr + 3],
-                        ]) as i64 as u64,
+                        1 => (slice[0] as i8) as i64 as u64,
+                        2 => i16::from_be_bytes([slice[0], slice[1]]) as i64 as u64,
+                        4 => i32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as i64
+                            as u64,
                         _ => 0,
                     };
                     self.state.gpr[rt as usize] = val;
@@ -373,42 +384,35 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.state.pc += 4;
                 }
                 PpuStepOutcome::LoadVec { ea, vt } => {
-                    let addr = ea as usize;
-                    if addr + 16 > mem.len() {
-                        self.status = UnitStatus::Faulted;
-                        return mem_fault!(step_pc, ea, budget, remaining, effects);
-                    }
+                    let slice = match load_slice(ea, 16) {
+                        Some(s) => s,
+                        None => {
+                            self.status = UnitStatus::Faulted;
+                            return mem_fault!(step_pc, ea, budget, remaining, effects);
+                        }
+                    };
                     let mut bytes = [0u8; 16];
-                    bytes.copy_from_slice(&mem[addr..addr + 16]);
+                    bytes.copy_from_slice(slice);
                     self.state.vr[vt as usize] = u128::from_be_bytes(bytes);
                     self.state.pc += 4;
                 }
                 PpuStepOutcome::FpLoad { ea, size, frt } => {
-                    let addr = ea as usize;
-                    if addr + size as usize > mem.len() {
-                        self.status = UnitStatus::Faulted;
-                        return mem_fault!(step_pc, ea, budget, remaining, effects);
-                    }
+                    let slice = match load_slice(ea, size as usize) {
+                        Some(s) => s,
+                        None => {
+                            self.status = UnitStatus::Faulted;
+                            return mem_fault!(step_pc, ea, budget, remaining, effects);
+                        }
+                    };
                     let val = match size {
                         4 => {
-                            let bits = u32::from_be_bytes([
-                                mem[addr],
-                                mem[addr + 1],
-                                mem[addr + 2],
-                                mem[addr + 3],
-                            ]);
+                            let bits = u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]);
                             // lfs: convert single to double
                             (f32::from_bits(bits) as f64).to_bits()
                         }
                         8 => u64::from_be_bytes([
-                            mem[addr],
-                            mem[addr + 1],
-                            mem[addr + 2],
-                            mem[addr + 3],
-                            mem[addr + 4],
-                            mem[addr + 5],
-                            mem[addr + 6],
-                            mem[addr + 7],
+                            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6],
+                            slice[7],
                         ]),
                         _ => 0,
                     };
@@ -552,4 +556,5 @@ impl ExecutionUnit for PpuExecutionUnit {
 }
 
 #[cfg(test)]
+#[path = "tests/ppu_tests.rs"]
 mod tests;

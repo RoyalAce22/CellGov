@@ -26,10 +26,10 @@ use cellgov_exec::UnitStatus;
 /// Pluggable scheduling policy.
 ///
 /// Concrete scheduler types stay private to `cellgov_core`; other
-/// crates see only traits and immutable data packets. This trait is
-/// the public seam other crates use; the concrete
-/// [`RoundRobinScheduler`] is currently the only implementation
-/// behind it.
+/// crates see only traits and immutable data packets. Other crates
+/// plug in their own implementations (for example, the bounded
+/// schedule explorer), with [`RoundRobinScheduler`] serving as the
+/// default shipped alongside the trait.
 pub trait Scheduler {
     /// Select the next runnable unit, or `None` if no unit is
     /// currently runnable.

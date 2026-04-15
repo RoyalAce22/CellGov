@@ -2,16 +2,16 @@
 //!
 //! `TraceWriter` is a thin wrapper around a `Vec<u8>` that appends
 //! [`TraceRecord`] encodings in the order they were emitted. The trace
-//! format is binary from day one; this writer produces binary directly,
-//! so the buffer it accumulates is the same shape any future on-disk
-//! format will use.
+//! format is binary; this writer produces binary directly, so the
+//! buffer it accumulates is the same shape any on-disk format would
+//! use.
 //!
-//! Currently the writer is in-memory: a Vec, no file I/O, no flushing
-//! policy. The runtime calls `record(...)` for each event; tests and
-//! the testkit runner pull the bytes out at the end and feed them to
-//! [`crate::reader::TraceReader`] for assertions. Persisting to disk is
-//! a separate slice that swaps the backing buffer for a `Write`-trait
-//! sink without changing the public surface here.
+//! The writer buffers records in memory: a Vec, no file I/O, no
+//! flushing policy. The runtime calls `record(...)` for each event;
+//! tests and the testkit runner pull the bytes out at the end and
+//! feed them to [`crate::reader::TraceReader`] for assertions. An
+//! on-disk sink could swap the backing buffer for a `Write`-trait
+//! target without changing the public surface here.
 //!
 //! ## Filtering
 //!

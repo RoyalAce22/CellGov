@@ -287,6 +287,7 @@ fn main() {
             .unwrap_or_default();
         let save_observation = find_flag_value(&args, "--save-observation");
         let observation_manifest = find_flag_value(&args, "--observation-manifest");
+        let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
         game::run_game(
             elf_path,
             max_steps,
@@ -299,6 +300,7 @@ fn main() {
             &dump_mem_addrs,
             save_observation.as_deref(),
             observation_manifest.as_deref(),
+            strict_reserved,
         );
         return;
     }

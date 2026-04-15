@@ -1,8 +1,9 @@
 //! HLE (High-Level Emulation) dispatch for PS3 sysPrxForUser imports.
 //!
-//! Dispatches NID-based HLE calls from the runtime. Most functions
-//! are noop-safe (return 0). A few need real behavior: TLS
-//! initialization, malloc, memset, process exit.
+//! Dispatches NID-based HLE calls from the runtime. Unknown NIDs
+//! return 0. The dispatch table handles 11 NIDs with real behavior:
+//! TLS initialization, malloc/free, memset, process exit, lwmutex
+//! create, heap create/delete, heap malloc/memalign/free.
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
@@ -94,8 +95,6 @@ impl Runtime {
         let r13_val = (tls_base + 0x30 + 0x7000) as u64;
         self.registry.push_register_write(source, 13, r13_val);
         self.registry.set_syscall_return(source, 0);
-
-        let _ = slot_size;
     }
 
     fn hle_malloc(&mut self, source: UnitId, args: &[u64; 9]) {

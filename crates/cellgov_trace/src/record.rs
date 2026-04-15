@@ -1,9 +1,9 @@
 //! Structured trace record types and their binary encoding.
 //!
-//! The brief mandates that the trace format is binary from day one.
-//! Records are encoded directly into a `Vec<u8>` by the writer and
-//! decoded out of a `&[u8]` by the reader -- there is no intermediate
-//! Rust-value buffer that would later need to be "ported to binary".
+//! The trace format is binary. Records are encoded directly into a
+//! `Vec<u8>` by the writer and decoded out of a `&[u8]` by the reader
+//! -- there is no intermediate Rust-value buffer that would later need
+//! to be "ported to binary".
 //!
 //! ## Wire format
 //!
@@ -43,7 +43,7 @@ use cellgov_time::{Budget, Epoch, GuestTicks};
 /// This is a parallel enum to `cellgov_exec::YieldReason` because the
 /// trace crate must not depend on `cellgov_exec` (which sits above it
 /// in the workspace DAG -- `effects --> exec`, `effects --> trace`).
-/// The encoded discriminants here intentionally match those of
+/// The encoded discriminants here mirror those of
 /// `cellgov_exec::YieldReason` so a future bridge layer can map between
 /// the two without a translation table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -157,9 +157,9 @@ impl TracedWakeReason {
 /// Parallel enum to `cellgov_effects::Effect` because the trace crate
 /// must not depend on `cellgov_effects` (the workspace DAG runs
 /// effects -> trace, not the other way around). The encoded
-/// discriminants here intentionally match the source enum's variant
-/// order so a future bridge layer can map between the two without a
-/// translation table.
+/// discriminants here mirror the source enum's variant order so a
+/// future bridge layer can map between the two without a translation
+/// table.
 ///
 /// Discriminants are part of the binary trace contract. Do not reorder,
 /// do not insert variants in the middle, do not change the explicit
@@ -227,11 +227,12 @@ pub enum DecodeError {
 
 /// A single structured trace record.
 ///
-/// The variants here are the records the runtime can produce as of
-/// this slice. New variants will be added as new runtime capabilities
-/// land (mailbox routing, DMA completion, sync wakes, etc.). Each new
-/// variant must use a strictly greater tag than the current maximum
-/// to preserve binary compatibility with existing traces.
+/// The variants here cover the records the runtime produces: scheduler
+/// decisions, step completions, commit outcomes, state-hash
+/// checkpoints, per-effect emissions, block/wake transitions, and PPU
+/// per-step fingerprints. Each new variant must use a strictly greater
+/// tag than the current maximum to preserve binary compatibility with
+/// existing traces.
 // PpuStateFull carries 32 GPRs by value, making it ~300 bytes vs
 // ~30 for every other variant. Records are encoded to bytes
 // immediately and the enum value is not stored long-term, so the
@@ -284,8 +285,8 @@ pub enum TraceRecord {
     /// A unit emitted an effect during its step. Recorded once per
     /// effect, in emission order, with `sequence` running 0..N within
     /// the step. Carries the effect kind only -- effect payloads
-    /// (write bytes, mailbox messages, DMA descriptors) are not in the
-    /// trace at this slice; that is its own future addition.
+    /// (write bytes, mailbox messages, DMA descriptors) are not
+    /// included in the record.
     EffectEmitted {
         /// Which unit emitted the effect.
         unit: UnitId,
@@ -627,5 +628,5 @@ fn read_u64(bytes: &[u8], pos: &mut usize) -> Result<u64, DecodeError> {
 }
 
 #[cfg(test)]
-#[path = "record_tests.rs"]
+#[path = "tests/record_tests.rs"]
 mod tests;

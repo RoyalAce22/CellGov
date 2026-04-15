@@ -1,6 +1,6 @@
 //! Streaming per-step state-hash divergence scanner.
 //!
-//! Walks two binary trace streams in lockstep, filters each down to
+//! Walks two binary trace streams step by step, filters each down to
 //! its `PpuStateHash` records, and reports the first index where the
 //! two disagree. The result distinguishes a length mismatch (one
 //! side retired more instructions than the other) from a content

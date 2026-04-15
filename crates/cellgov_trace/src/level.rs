@@ -1,10 +1,10 @@
 //! `TraceLevel` -- categorical filter for trace records.
 //!
-//! The brief calls for trace levels so that high-volume categories can
-//! be filtered without reworking the writer later. These are *categories*
-//! rather than severity levels: a unit-scheduled record is not "more
-//! important" than a commit-applied record, but a replay tool may want
-//! only commit records, or only state-hash records, depending on what it
+//! Trace levels let high-volume categories be filtered without
+//! reworking the writer later. These are *categories* rather than
+//! severity levels: a unit-scheduled record is not "more important"
+//! than a commit-applied record, but a replay tool may want only
+//! commit records, or only state-hash records, depending on what it
 //! is verifying.
 //!
 //! The variants and their `#[repr(u8)]` discriminants are part of the

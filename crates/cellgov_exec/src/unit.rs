@@ -15,6 +15,10 @@
 //!         ctx: &ExecutionContext,
 //!     ) -> ExecutionStepResult;
 //!     fn snapshot(&self) -> Self::Snapshot;
+//!     fn drain_retired_state_hashes(&mut self) -> Vec<(u64, u64)>;
+//!     fn drain_retired_state_full(
+//!         &mut self,
+//!     ) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)>;
 //! }
 //! ```
 //!
@@ -33,14 +37,13 @@ use cellgov_time::Budget;
 /// Coarse runnability state of an execution unit.
 ///
 /// `UnitStatus` is what the scheduler queries to decide whether a unit
-/// belongs in the runnable set. It is intentionally a small total enum;
+/// belongs in the runnable set. It is a small total enum;
 /// finer-grained reasons live in [`crate::YieldReason`] (the most recent
 /// yield) and on the unit itself (its internal state machine).
 ///
-/// Discriminants are locked because the trace format is binary from day
-/// one and the scheduler may store unit status in trace records.
-/// Reordering or renumbering would break replay against any existing
-/// trace.
+/// Discriminants are locked because the trace format is binary and
+/// the scheduler may store unit status in trace records. Reordering
+/// or renumbering would break replay against any existing trace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum UnitStatus {
@@ -64,7 +67,7 @@ pub enum UnitStatus {
 ///
 /// Implementations are anything that can take a budget, run for some
 /// guest time, and return a step result describing what happened. The
-/// runtime owns construction (via the unit registry seam in
+/// runtime owns construction (via the unit registry in
 /// `cellgov_core`) and scheduling; implementations own only their own
 /// internal state machine.
 ///
@@ -73,9 +76,9 @@ pub enum UnitStatus {
 /// allocator-dependent internals, no mutex guards, no references into
 /// runtime-owned memory. A snapshot must be reconstructible into an
 /// equivalent unit state on a different host without any environmental
-/// dependency. The associated type is intentionally unbounded so that
-/// implementations have freedom of representation; the rule is
-/// architectural and enforced at code review, not by trait bounds.
+/// dependency. The associated type is unbounded so that implementations
+/// have freedom of representation; the determinism rule is architectural
+/// and enforced at code review, not by trait bounds.
 pub trait ExecutionUnit {
     /// Pure deterministic state capture used for replay and assertions.
     type Snapshot;
@@ -143,7 +146,7 @@ mod tests {
     /// A minimal fake unit that increments a tick counter on every
     /// step, emits one trace marker, and finishes after `max_steps`.
     /// Exists only to prove the trait shape compiles and behaves as
-    /// expected; the real fake-unit slice lands separately.
+    /// expected; the full fake unit lives in [`crate::fake_isa`].
     struct CountingUnit {
         id: UnitId,
         steps: u64,

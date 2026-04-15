@@ -54,18 +54,28 @@ Pre-Alpha. Capability today:
   (`_cellGcmInitBody`) at PPU step 1.4M -- the documented CPU-side
   boundary for the static-recomp oracle.
 - Cross-runner verified: at the first-`sys_tty_write` boot
-  checkpoint, CellGov and RPCS3 produce byte-identical code
-  segments and rodata. Data segment differs only in pointer-table
-  layout where the two allocators place the same logical
-  allocations at different addresses.
+  checkpoint, CellGov and RPCS3 produce byte-identical `code` and
+  `rodata` segments. Remaining `data` divergences are bounded to
+  HLE-binding-table slot ordering (a per-runner convention, not a
+  semantic difference) and classified as ignored fields under the
+  cross-runner divergence policy.
+- PS3-spec guest memory layout: sparse `BTreeMap<u64, Region>`
+  matching RPCS3 `vm.cpp`'s VA blocks. `sys_memory_allocate` returns
+  pointers in `0x00010000-0x0FFFFFFF` (above the loaded ELF), the
+  primary thread stack lives at `0xD0000000+`, and RSX/SPU-reserved
+  ranges are addressable as zero-readable provisional regions.
 - Per-step divergence trace: opt-in `PpuStateHash` records (one per
   retired PPU instruction), a streaming `diverge` scanner, and a
   zoom-in mode that names the exact register field that
   disagrees.
+- Configurable HLE OPD packing: 24-byte per-binding trampolines for
+  microtests, or 8-byte packed OPDs in user memory matching RPCS3's
+  HLE-table shape for cross-runner comparison.
 - 91 PPU instruction variants, full SPU interpreter, 15 LV2
   syscalls with non-default handling, NID-correct sysPrxForUser
   HLE dispatch.
-- 951 tests across 15 crates and 3 apps, zero `unsafe`.
+- 978 tests across 15 library crates, 2 binaries, and 1 RPCS3
+  bridge, zero `unsafe`.
 
 ## Workspace
 

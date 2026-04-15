@@ -15,7 +15,7 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::GuestTicks;
 
-/// Readonly view of runtime state the host is allowed to access.
+/// Readonly view of runtime state exposed to the host.
 ///
 /// The runtime implements this trait. The host calls `read_committed`
 /// to read guest memory during dispatch. No other runtime internals
@@ -37,10 +37,12 @@ mod spu;
 pub struct Lv2Host {
     content: ContentStore,
     groups: ThreadGroupTable,
-    /// Monotonic ID counter for kernel objects (mutexes, event queues, etc.).
+    /// Monotonic ID counter for kernel objects (mutexes, event queues, etc.),
+    /// starting at base `0x40000001`.
     next_kernel_id: u32,
     /// Bump allocator for sys_memory_allocate. Hands out 64KB-aligned
-    /// addresses from the guest memory region starting at 0x30000000.
+    /// addresses from the PS3 user-memory region starting at
+    /// 0x00010000 (per PSDevWiki and RPCS3 `vm.cpp`).
     mem_alloc_ptr: u32,
 }
 
@@ -57,8 +59,22 @@ impl Lv2Host {
             content: ContentStore::new(),
             groups: ThreadGroupTable::new(),
             next_kernel_id: 0x4000_0001, // start above zero to catch uninitialized use
-            mem_alloc_ptr: 0x3000_0000,  // kernel memory region start
+            mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
         }
+    }
+
+    /// Override the allocator's next-returnable address.
+    ///
+    /// Real PS3 LV2 shares the `0x00010000-0x0FFFFFFF` user-memory
+    /// region between the loaded ELF PT_LOAD segments and the
+    /// `sys_memory_allocate` pool. The kernel tracks what the ELF
+    /// occupies and hands out addresses past it. The default base
+    /// (`0x00010000`) assumes no ELF is loaded; `run-game` and any
+    /// caller that loads a real game must call this with the
+    /// 64KB-aligned address immediately above the ELF's highest
+    /// PT_LOAD end, so allocations do not overwrite the image.
+    pub fn set_mem_alloc_base(&mut self, base: u32) {
+        self.mem_alloc_ptr = base;
     }
 
     /// Allocate a monotonic kernel object ID.
@@ -886,6 +902,35 @@ mod tests {
     }
 
     #[test]
+    fn set_mem_alloc_base_overrides_first_allocation_address() {
+        // The allocator base is configurable so callers that load a
+        // real ELF can place sys_memory_allocate's pool above the
+        // ELF's PT_LOAD footprint. The bump pointer's 64KB alignment
+        // is preserved by the dispatch path, so the first returned
+        // address must be >= the configured base and 64KB-aligned.
+        let mut host = Lv2Host::new();
+        host.set_mem_alloc_base(0x008A_0000);
+        let rt = FakeRuntime::new(0x10000);
+        let addr = match host.dispatch(
+            Lv2Request::MemoryAllocate {
+                size: 0x10000,
+                flags: 0x200,
+                alloc_addr_ptr: 0x100,
+            },
+            UnitId::new(0),
+            &rt,
+        ) {
+            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+        assert_eq!(
+            addr, 0x008A_0000,
+            "first allocation must use configured base"
+        );
+        assert_eq!(addr & 0xFFFF, 0, "alignment must be preserved");
+    }
+
+    #[test]
     fn mutex_lock_unlock_are_noop_stubs() {
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(256);
@@ -949,7 +994,7 @@ mod tests {
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(256);
         let result = host.dispatch(
-            Lv2Request::MemoryFree { addr: 0x3000_0000 },
+            Lv2Request::MemoryFree { addr: 0x0001_0000 },
             UnitId::new(0),
             &rt,
         );

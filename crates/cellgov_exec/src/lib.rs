@@ -6,7 +6,8 @@
 //! - `ExecutionContext` (readonly view exposed to a running unit)
 //! - `YieldReason` enum
 //! - `ExecutionStepResult` (yield reason, consumed budget, emitted effects in
-//!   stable emission order, local diagnostics, optional fault data)
+//!   stable emission order, local diagnostics, optional fault data, optional
+//!   syscall arguments)
 //!
 //! Must not depend on a concrete scheduler implementation. Fake PPU/SPU units
 //! for early testing live here too. Architecture-specific decoding does not.

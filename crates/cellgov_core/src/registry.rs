@@ -3,9 +3,9 @@
 //! Units are not free-floating: they are created via a registry call
 //! that assigns a stable `UnitId`, records the constructor parameters
 //! in the trace, and makes the unit known to the scheduler. Dynamic
-//! spawning (for example, SPU thread group creation) goes through the
-//! same seam, even though the dynamic case is currently stubbed to a
-//! fixed initial set.
+//! spawning (for example, SPU thread group creation via
+//! `register_dynamic`) allocates ids from the same monotonic counter
+//! used by the static-registration path.
 //!
 //! This module owns that seam. It assigns `UnitId`s in a single
 //! sequential allocator, stores units behind a small object-safe trait,
@@ -21,11 +21,11 @@
 //! (`unit_id`, `status`, `run_until_yield`) and is blanket-implemented
 //! for every `U: ExecutionUnit + 'static`.
 //!
-//! Snapshots are deliberately **not** part of `RegisteredUnit`. They are
-//! a separate concern that the runtime trace layer will pick up later
-//! via a different seam, after the binary trace format pins how it wants
-//! to serialize them. Including them now would force a premature
-//! serialization choice.
+//! Snapshots are not part of `RegisteredUnit`. The trait exposes
+//! `drain_retired_state_hashes` and `drain_retired_state_full` for the
+//! runtime's per-step fingerprint and zoom-in windows; full snapshot
+//! serialization is handled outside the object-safe trait so concrete
+//! unit types can pick their own snapshot representation.
 
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus};

@@ -250,9 +250,8 @@ mod tests {
     /// `_sys_free`, and `_sys_heap_create_heap` were mapped to the NIDs
     /// of `sys_spu_image_import`, `sys_game_process_exitspawn`, and
     /// `sys_ppu_thread_exit` respectively. NIDs are SHA-1(name || suffix)
-    /// with a fixed 16-byte suffix; see RPCS3 `PPUModule.cpp
-    /// ppu_generate_id` for the canonical algorithm. Values below come
-    /// from PSL1GHT `liblv2/exports.h` and RPCS3 `PPUFunction.cpp`.
+    /// with a fixed 16-byte suffix. The expected values below are the
+    /// canonical NIDs used by PS3 firmware for these symbols.
     #[test]
     fn critical_hle_nids_match_psl1ght() {
         // (name, expected_nid) for every function we dispatch specially
@@ -291,14 +290,13 @@ mod tests {
     ///
     ///   NID = SHA-1(name || 16-byte suffix), first 4 bytes as LE u32.
     ///
-    /// The 16-byte suffix is the value RPCS3's `ppu_generate_id` uses
-    /// (PSDevWiki documents the same constant). If anyone adds a new
-    /// NID entry with a typo'd hash, this test fails immediately
-    /// instead of waiting for a game to misroute that NID.
+    /// The 16-byte suffix is a fixed constant used by PS3 firmware.
+    /// If anyone adds a new NID entry with a typo'd hash, this test
+    /// fails immediately instead of waiting for a game to misroute
+    /// that NID.
     ///
-    /// This is the regression guard that would have caught the
-    /// pre-Phase-8 mislabeling of _sys_malloc / _sys_free /
-    /// _sys_heap_create_heap.
+    /// This is the regression guard that would have caught the earlier
+    /// mislabeling of _sys_malloc / _sys_free / _sys_heap_create_heap.
     #[test]
     fn nid_table_round_trips_through_sha1() {
         use sha1::{Digest, Sha1};

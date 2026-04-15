@@ -1,7 +1,7 @@
 //! cellgov_trace -- structured trace events, deterministic replay format,
 //! state hash checkpoints.
 //!
-//! Trace format is binary from day one, not text. Trace levels (scheduling,
+//! Trace format is binary, not text. Trace levels (scheduling,
 //! effects, commits, hashes) let high-volume categories be filtered without
 //! reworking the writer. Text rendering is a downstream tool over the binary
 //! format, never the source of truth.

@@ -424,7 +424,8 @@ fn parse_export_table(
     Ok(libs)
 }
 
-/// Read NID + stub vaddr pairs from the export NID and stub tables.
+/// Read the export NID and stub tables and return the split list of
+/// exported functions and variables as `(functions, variables)`.
 fn read_export_entries(
     data: &[u8],
     seg_map: &[SegEntry],

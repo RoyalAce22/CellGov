@@ -127,8 +127,10 @@ impl MailboxMessage {
 /// DMA waits are not represented here -- the
 /// [`crate::Effect::DmaEnqueue`] flow uses the dedicated
 /// `YieldReason::DmaWait` path on the unit side and a separate
-/// completion-correlation mechanism on the runtime side; folding it into
-/// `WaitTarget` would require a tag concept that is currently unresolved.
+/// completion-correlation mechanism on the runtime side. Folding DMA
+/// waits into `WaitTarget` would require per-request tag handles
+/// distinct from the sync primitive ids, so the two flows stay
+/// separate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WaitTarget {
     /// Wait for a message to arrive in a mailbox.
@@ -141,7 +143,7 @@ pub enum WaitTarget {
 
 /// Coarse classification of a fault raised by a unit or by validation.
 ///
-/// The variant set is deliberately small. Validation faults
+/// The variant set is kept small. Validation faults
 /// are produced by the commit pipeline when an effect batch is malformed
 /// (length mismatch, out-of-range write, etc.). Guest faults are produced
 /// by the unit itself; the `code` is opaque to the runtime and rides

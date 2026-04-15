@@ -2,8 +2,8 @@
 //!
 //! Used by the runtime, registries, and sync primitives to produce
 //! reproducible state hashes at every commit boundary. The algorithm
-//! is intentionally simple and stable -- no randomized seed, no
-//! platform-dependent behavior.
+//! is simple and stable -- no randomized seed, no platform-dependent
+//! behavior.
 
 /// FNV-1a offset basis (64-bit).
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;

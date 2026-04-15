@@ -6,8 +6,8 @@ use crate::decision::DecisionLog;
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;
 
-/// Run a runtime to stall or max-steps, calling step + commit_step
-/// in lockstep. Returns the number of steps taken.
+/// Run a runtime to stall or max-steps, pairing each `step` with an
+/// immediate `commit_step`.
 pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) {
     let mut steps = 0;
     loop {

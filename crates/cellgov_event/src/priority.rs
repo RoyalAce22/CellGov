@@ -1,7 +1,9 @@
 //! Event priority class -- the second tier of the global ordering key.
 //!
-//! `PriorityClass` is a small total enum, deliberately not a numeric
-//! newtype. The variant set is fixed and the relative ordering is part of
+//! `PriorityClass` is a small total enum, not a numeric newtype: the
+//! ordering rule lives in the discriminants directly so a misordered
+//! priority is a compile-time fact. The variant set is fixed and the
+//! relative ordering is part of
 //! the runtime's determinism contract: a discriminant reorder would
 //! silently change every tie-break in every replay. The variants and their
 //! `#[repr(u8)]` discriminants are therefore locked.
@@ -9,13 +11,13 @@
 /// Coarse priority class for events flowing through the runtime.
 ///
 /// Lower discriminants order earlier under the derived `Ord`. The variant
-/// order below is load-bearing and part of the determinism contract: do
-/// not reorder, do not insert variants in the middle, do not change the
-/// explicit discriminant values. New classes, if ever needed, must be
-/// appended at the end and given an explicit discriminant strictly greater
-/// than `Critical`.
+/// order below is part of the determinism contract: do not reorder, do
+/// not insert variants in the middle, do not change the explicit
+/// discriminant values. New classes, if ever needed, must be appended
+/// at the end and given an explicit discriminant strictly greater than
+/// `Critical`.
 ///
-/// The set is deliberately small: the minimum needed to let the scheduler
+/// The set is kept small: the minimum needed to let the scheduler
 /// distinguish ordinary work from latency-sensitive wakeups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(u8)]

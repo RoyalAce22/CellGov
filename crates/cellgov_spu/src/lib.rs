@@ -4,10 +4,13 @@
 //! Unit. The fetch-decode-execute loop lives here; instruction
 //! semantics live in `exec.rs`; decoding lives in `decode.rs`.
 //!
-//! The SPU operates on its own 256 KB local store and communicates
-//! with the runtime exclusively through `Effect` packets (DMA
-//! requests, mailbox access, signal operations). It never directly
-//! reads or writes committed shared memory.
+//! The SPU operates on its own 256 KB local store and emits runtime
+//! side-effects exclusively through `Effect` packets (DMA requests,
+//! mailbox access, signal operations) -- it never writes committed
+//! shared memory directly. On the read path, DMA Get and atomic
+//! reservation loads are fulfilled from the frozen committed snapshot
+//! exposed by [`cellgov_exec::ExecutionContext::memory`]; see the
+//! handling of `SpuStepOutcome::MemoryRead` and `pending_get` below.
 
 pub mod channels;
 pub mod decode;
@@ -95,8 +98,8 @@ impl ExecutionUnit for SpuExecutionUnit {
         // Deliver received mailbox messages to the register that was
         // waiting in the rdch instruction that triggered the yield.
         // Also advance PC past the rdch that yielded MailboxAccess
-        // (the yield handler intentionally left PC pointing at rdch
-        // so the instruction can be retried if the mailbox was empty).
+        // (the yield handler leaves PC pointing at rdch so the
+        // instruction can be retried if the mailbox was empty).
         if let Some(&msg) = ctx.received_messages().first() {
             let rt = self.state.channels.pending_mbox_rt.take().unwrap_or(2);
             self.state.set_reg_word_splat(rt, msg);
@@ -250,4 +253,5 @@ impl ExecutionUnit for SpuExecutionUnit {
 }
 
 #[cfg(test)]
+#[path = "tests/spu_tests.rs"]
 mod tests;

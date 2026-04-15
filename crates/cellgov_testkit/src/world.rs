@@ -1,16 +1,17 @@
-//! World builders -- declarative helpers for constructing a runtime,
-//! registering units, seeding committed memory, queueing mailbox/DMA
-//! state, and assigning initial budgets. Tests should read like setup,
-//! not plumbing.
+//! Reusable fake [`ExecutionUnit`] implementations used by scenario
+//! fixtures.
 //!
-//! Currently provides reusable fake [`ExecutionUnit`] implementations
-//! that scenario fixtures can register without redeclaring the same
-//! shapes in every test crate. Memory seeding, mailbox seeding, and
-//! DMA seeding helpers will land as separate slices when their backing
-//! state machines exist.
+//! Each fake unit models a minimal behavior shape -- step counting,
+//! writing to committed memory, mailbox produce/consume, signal updates,
+//! DMA submission, mailbox roundtrip -- so fixtures can compose them
+//! without redeclaring the same shapes in every test. The fakes are
+//! clean-room runtime probes that coexist with the real PPU/SPU
+//! execution units; they test runtime wiring directly, independent of
+//! any architectural interpreter.
 //!
-//! The fake units here are clean-room runtime probes. They never go
-//! away, even after real PPU/SPU translation lands.
+//! Memory seeding lives on [`crate::fixtures::ScenarioFixtureBuilder::seed_memory`];
+//! mailbox and signal seeding is performed inside the fixture's
+//! registration callback via the runtime's `*_mut` accessors.
 
 use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::{Effect, MailboxMessage, WritePayload};
@@ -317,12 +318,13 @@ impl ExecutionUnit for SignalEmitter {
     }
 }
 
-/// Fake unit for Scenario B. Seeds source bytes into committed
-/// memory, submits a DMA Put transfer, and blocks. When the
-/// completion fires (at `now + latency`), the runtime wakes this
-/// unit. On wake it emits a `TraceMarker` and finishes.
+/// Fake unit that exercises the DMA block/unblock path. Seeds source
+/// bytes into committed memory, submits a DMA Put transfer, and
+/// blocks. When the completion fires (at `now + latency`), the
+/// runtime wakes this unit. On wake it emits a `TraceMarker` and
+/// finishes.
 ///
-/// Two phases: Seed+Submit+Block, then Wake+Finish.
+/// Two stages: Seed+Submit+Block, then Wake+Finish.
 pub struct DmaSubmitter {
     id: UnitId,
     source: ByteRange,
@@ -373,7 +375,7 @@ impl ExecutionUnit for DmaSubmitter {
         self.phase.set(p + 1);
         match p {
             0 => {
-                // Phase 0: seed source bytes, submit DMA, block.
+                // Seed source bytes, submit DMA, block.
                 let req =
                     DmaRequest::new(DmaDirection::Put, self.source, self.destination, self.id)
                         .expect("source and destination lengths match");
@@ -425,15 +427,16 @@ impl ExecutionUnit for DmaSubmitter {
     }
 }
 
-/// Fake "PPU" unit for Scenario A. Sends a command word to
-/// `cmd_mailbox`, wakes `responder`, blocks itself, then -- on its
-/// next scheduled step -- receives the response from `resp_mailbox`
-/// and finishes with a `TraceMarker` carrying the response value.
+/// Fake "PPU" unit that drives the mailbox-roundtrip path. Sends a
+/// command word to `cmd_mailbox`, wakes `responder`, blocks itself,
+/// then -- on its next scheduled step -- receives the response from
+/// `resp_mailbox` and finishes with a `TraceMarker` carrying the
+/// response value.
 ///
-/// Currently requires explicit `WakeUnit` because the commit pipeline
-/// does not auto-wake on message delivery. The three internal phases
-/// are: Send (emit send + wake + wait), Receive (emit receive
-/// attempt), Consume (read `received_messages`, emit marker, finish).
+/// Requires explicit `WakeUnit` because the commit pipeline does not
+/// auto-wake on message delivery. The three internal stages are: Send
+/// (emit send + wake + wait), Receive (emit receive attempt), Consume
+/// (read `received_messages`, emit marker, finish).
 pub struct MailboxSender {
     id: UnitId,
     responder: UnitId,
@@ -484,7 +487,7 @@ impl ExecutionUnit for MailboxSender {
         self.phase.set(p + 1);
         match p {
             0 => {
-                // Phase 0: send command, wake responder, block self.
+                // Send command, wake responder, block self.
                 ExecutionStepResult {
                     yield_reason: YieldReason::MailboxAccess,
                     consumed_budget: budget,
@@ -544,11 +547,12 @@ impl ExecutionUnit for MailboxSender {
     }
 }
 
-/// Fake "SPU" unit for Scenario A. Receives a command from
-/// `cmd_mailbox`, computes a response (`command + 1`), sends it to
-/// `resp_mailbox`, wakes the `sender`, and finishes.
+/// Fake "SPU" unit that pairs with [`MailboxSender`] on the mailbox-
+/// roundtrip path. Receives a command from `cmd_mailbox`, computes a
+/// response (`command + 1`), sends it to `resp_mailbox`, wakes the
+/// `sender`, and finishes.
 ///
-/// Two internal phases: Receive (emit receive attempt), Respond
+/// Two internal stages: Receive (emit receive attempt), Respond
 /// (read received, emit send + wake, finish).
 pub struct MailboxResponder {
     id: UnitId,
@@ -597,7 +601,7 @@ impl ExecutionUnit for MailboxResponder {
         self.phase.set(p + 1);
         match p {
             0 => {
-                // Phase 0: attempt to receive command.
+                // Attempt to receive command.
                 ExecutionStepResult {
                     yield_reason: YieldReason::MailboxAccess,
                     consumed_budget: budget,

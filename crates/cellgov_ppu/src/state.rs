@@ -1,8 +1,9 @@
 //! PPU architectural state.
 //!
-//! Owns the register file, program counter, condition register, link
-//! register, count register, and XER. No runtime knowledge -- this is
-//! pure data that `exec.rs` reads and writes.
+//! Owns the general-purpose register file, floating-point registers
+//! (FPR), vector registers (VR), program counter, condition register,
+//! link register, count register, XER, and the time base. No runtime
+//! knowledge -- this is pure data that `exec.rs` reads and writes.
 
 /// PPU general-purpose register count.
 pub const GPR_COUNT: usize = 32;
@@ -105,9 +106,9 @@ impl PpuState {
     /// the per-step divergence trace.
     ///
     /// Coverage: 32 x GPR, LR, CTR, XER (all u64), and CR (u32). FPR
-    /// and VR are intentionally excluded -- the initial fingerprint is
-    /// chosen to be cheap; if a real divergence is suspected to be
-    /// hidden by the GPR-only coverage, a wider variant is added then.
+    /// and VR are excluded to keep the fingerprint cheap; if a real
+    /// divergence is suspected to be hidden by the GPR-only coverage,
+    /// a wider variant is added then.
     ///
     /// Encoding: each field is appended in little-endian byte order
     /// in a fixed sequence (GPR[0..32], LR, CTR, XER, CR). This is a
@@ -267,8 +268,8 @@ mod tests {
     fn state_hash_ignores_pc_fpr_vr() {
         // Contract: PC and the wider register banks (FPR, VR) are
         // not part of the fingerprint. Mutating them must NOT flip
-        // the hash. If we later widen coverage, this test changes
-        // intentionally; until then it pins the documented surface.
+        // the hash. If we later widen coverage, this test will need
+        // to change; until then it pins the documented surface.
         let base = PpuState::new();
         let baseline = base.state_hash();
 

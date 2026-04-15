@@ -3,9 +3,8 @@
 //! detector, capture the binary trace, snapshot final state hashes,
 //! and return a structured [`ScenarioResult`].
 //!
-//! Tests must not invent their own execution loops. They build a
-//! fixture and hand it to [`run`]; the result is the only surface they
-//! assert against.
+//! Tests build a fixture and hand it to [`run`]; the result is the
+//! surface they assert against.
 //!
 //! ## What the runner does
 //!
@@ -66,12 +65,14 @@ pub struct ScenarioResult {
     pub final_memory_hash: StateHash,
     /// Hash of unit statuses at the end of the run.
     pub final_unit_status_hash: StateHash,
-    /// Hash of the runtime's mailbox-registry contents at the end of
-    /// the run. Currently covers mailboxes only; future signal and
-    /// barrier state will fold into the same hash.
+    /// Hash of the runtime's sync-registry contents at the end of the
+    /// run. Aggregates mailboxes, signals, lv2 host state, and
+    /// syscall responses into a single digest (see
+    /// [`cellgov_core::Runtime::sync_state_hash`]).
     pub final_sync_hash: StateHash,
-    /// Full committed memory contents at end of run. Used by the
-    /// comparison harness to extract named memory regions.
+    /// Contents of the base-0 region at end of run. Auxiliary regions
+    /// (stack, reserved) are not included. Used by the comparison
+    /// harness to extract named memory regions.
     pub final_memory: Vec<u8>,
 }
 

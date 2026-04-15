@@ -10,10 +10,9 @@
 //! internals; tests build fixtures and hand them to
 //! [`crate::runner::run`] without ever touching `Runtime` directly.
 //!
-//! The closure-based registration is deliberate: storing
-//! `Box<dyn ExecutionUnit>` directly in the fixture is awkward because
-//! `ExecutionUnit` has an associated type and is not object-safe.
-//! Instead the fixture defers unit construction to a callback the
+//! Registration uses a closure rather than a `Box<dyn ExecutionUnit>`
+//! field because `ExecutionUnit` has an associated type and is not
+//! object-safe. The fixture defers unit construction to a callback the
 //! runtime drives at build time, with the live `&mut UnitRegistry`
 //! handed in. Tests use it as:
 //!
@@ -49,7 +48,7 @@ type RegisterFn = Box<dyn FnOnce(&mut Runtime)>;
 
 /// Boxed one-shot callback that seeds committed guest memory before
 /// the runtime is constructed. Fixtures that need initial memory
-/// content (for example, a PPU ELF image and an exit-stub trampoline)
+/// content (for example, a PPU ELF image or a trampoline payload)
 /// write it here; otherwise the memory starts zeroed.
 type SeedMemoryFn = Box<dyn FnOnce(&mut GuestMemory)>;
 
@@ -66,8 +65,9 @@ pub struct ScenarioFixture {
 impl ScenarioFixture {
     /// Construct an empty fixture: zero-byte memory, zero budget, one
     /// max step, no units. The runner can still drive it -- the result
-    /// will be `Stalled { steps_taken: 0 }` because the registry is
-    /// empty -- and tests use it as the trivial smoke fixture.
+    /// has outcome `Stalled` with `steps_taken == 0` because the
+    /// registry is empty -- and tests use it as the trivial smoke
+    /// fixture.
     pub fn empty() -> Self {
         Self {
             memory_size: 0,
@@ -148,8 +148,8 @@ impl ScenarioFixtureBuilder {
     /// freshly constructed `GuestMemory` of the configured size,
     /// before the runtime is built. Use it to pre-populate initial
     /// state that needs to exist before any unit runs -- for example,
-    /// a PPU ELF image loaded at its virtual addresses or an exit
-    /// stub trampoline placed at a low memory address.
+    /// a PPU ELF image loaded at its virtual addresses or a trampoline
+    /// payload placed at a low memory address.
     pub fn seed_memory<F>(mut self, f: F) -> Self
     where
         F: FnOnce(&mut GuestMemory) + 'static,
@@ -184,7 +184,7 @@ impl ScenarioFixtureBuilder {
     }
 }
 
-/// **Scenario D: budget-exhaustion round-robin fairness.**
+/// **Budget-exhaustion round-robin fairness.**
 ///
 /// Registers `unit_count` [`CountingUnit`]s, each configured to finish
 /// after `steps_per_unit` steps. Per-step budget is 1, so every unit
@@ -223,7 +223,7 @@ pub fn round_robin_fairness_scenario(unit_count: usize, steps_per_unit: u64) -> 
         .build()
 }
 
-/// **Scenario B: DMA block/unblock.**
+/// **DMA block/unblock.**
 ///
 /// A [`DmaSubmitter`] seeds 4 bytes at address 0, submits a DMA Put
 /// to copy them to address 128, and blocks. A [`CountingUnit`] burns
@@ -253,7 +253,7 @@ pub fn dma_block_unblock_scenario() -> ScenarioFixture {
         .build()
 }
 
-/// **Scenario C: deterministic write-conflict resolution.**
+/// **Deterministic write-conflict resolution.**
 ///
 /// Registers two [`WritingUnit`]s that both write into the same 4-byte
 /// committed-memory range. Round-robin scheduling interleaves their
@@ -298,8 +298,8 @@ pub fn write_conflict_scenario(steps_per_unit: u64) -> ScenarioFixture {
 ///
 /// This is the smallest end-to-end test of the `MailboxSend` commit
 /// path through the runner: producer step -> EffectEmitted record ->
-/// commit pipeline -> mailbox FIFO -> SyncState hash. The Scenario A
-/// roundtrip (Scenario A) is tested separately via
+/// commit pipeline -> mailbox FIFO -> SyncState hash. The full
+/// send-receive-respond roundtrip is tested separately via
 /// [`mailbox_roundtrip_scenario`].
 pub fn mailbox_send_scenario(message_count: u64) -> ScenarioFixture {
     assert!(
@@ -321,7 +321,7 @@ pub fn mailbox_send_scenario(message_count: u64) -> ScenarioFixture {
         .build()
 }
 
-/// **Scenario A: mailbox roundtrip.**
+/// **Mailbox roundtrip.**
 ///
 /// PPU-like sender sends a command to SPU-like responder via
 /// `cmd_mailbox`, then blocks. Responder receives the command,
@@ -783,10 +783,9 @@ mod tests {
         // payload. To verify the actual value, build a parallel
         // runtime with the expected final sync state.
         //
-        // For now, we assert the step count and effect sequence are
-        // correct (tested above) which implicitly proves the
-        // response path -- the sender only finishes if it received
-        // a message from the responder.
+        // The step count and effect sequence asserted above implicitly
+        // prove the response path: the sender only finishes if it
+        // received a message from the responder.
     }
 
     #[test]

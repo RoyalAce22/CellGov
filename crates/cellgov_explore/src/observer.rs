@@ -9,10 +9,9 @@ use cellgov_core::Runtime;
 /// Run the runtime to completion (stall or max-steps) and record
 /// every scheduling decision into a `DecisionLog`.
 ///
-/// Returns the log and the number of steps taken. The runtime is
-/// consumed; callers who need the final state should inspect it
-/// before calling this, or use the log to identify branching points
-/// for replay.
+/// Returns the populated `DecisionLog`. The runtime is driven in
+/// place; callers who need the final state should inspect it after
+/// the call, or use the log to identify branching points for replay.
 pub fn observe_decisions(rt: &mut Runtime) -> DecisionLog {
     let mut log = DecisionLog::new();
     loop {

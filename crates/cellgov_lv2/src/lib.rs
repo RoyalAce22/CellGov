@@ -5,7 +5,7 @@
 //! else. It does not depend on `cellgov_core`. The runtime owns
 //! orchestration; this crate owns the state machine.
 //!
-//! The direction of the seam: the runtime drives the host, the host
+//! Direction of the boundary: the runtime drives the host, the host
 //! answers with pure data. The host never reaches into the runtime.
 //! The only way the host reads guest memory is through the
 //! `Lv2Runtime` trait the runtime implements.

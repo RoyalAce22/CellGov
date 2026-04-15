@@ -151,7 +151,7 @@ pub fn observe(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<Observati
     Ok(Observation {
         outcome,
         memory_regions,
-        // Event extraction from RPCS3 is deferred to milestone 2C.
+        // Event extraction from RPCS3 is not implemented.
         events: vec![],
         state_hashes: None,
         metadata: ObservationMetadata {

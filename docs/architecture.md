@@ -115,7 +115,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 |-------|----------------|
 | `cellgov_time` | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time. |
 | `cellgov_event` | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary. |
-| `cellgov_mem` | `GuestMemory` (the flat guest buffer), `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`. |
+| `cellgov_mem` | `GuestMemory` (sparse `BTreeMap<u64, Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`. |
 | `cellgov_sync` | Mailbox FIFO, signal-register OR-merge, barrier and wait-set primitives. |
 | `cellgov_dma` | DMA completion queue with pluggable latency models. |
 | `cellgov_effects` | The 9-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above). |
@@ -131,6 +131,75 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_cli` | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`. |
 | `cellgov_mkelf` | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`. |
+
+## Guest memory layout
+
+`cellgov_mem::GuestMemory` is a sparse `BTreeMap<u64, Region>` keyed
+by region base address. Each `Region` owns a `Vec<u8>` sized to that
+region plus a label, page-size class, and access mode. Address
+translation goes through `containing_region(addr, length)`, which
+returns the region entirely containing the range or `None` if the
+access straddles a boundary or falls in an unmapped gap.
+
+The `run-game` driver builds four regions matching the canonical PS3
+LV2 virtual-address layout (cross-referenced against RPCS3's
+`Emu/Memory/vm.cpp`):
+
+| Guest VA              | Size     | Label          | Access                                 | Purpose                                                                 |
+|-----------------------|----------|----------------|----------------------------------------|-------------------------------------------------------------------------|
+| 0x00000000-0x3FFFFFFF | 1 GB     | `main`         | `ReadWrite`                            | User memory: EBOOT PT_LOAD segments, TLS, HLE bump arena, allocator pool |
+| 0xC0000000-0xCFFFFFFF | 256 MB   | `rsx`          | `ReservedZeroReadable` (default)       | Video / RSX local memory -- placeholder, reads zero and are counted      |
+| 0xD0000000-0xD000FFFF | 64 KB    | `stack`        | `ReadWrite`                            | Primary-thread stack (page-4K)                                           |
+| 0xE0000000-0xFFFFFFFF | 512 MB   | `spu_reserved` | `ReservedZeroReadable` (default)       | SPU-shared range -- same provisional semantics as RSX                    |
+
+The `main` region's internal sub-layout is not tracked by the region
+map (it stays flat within that region): `sys_memory_allocate` starts
+above the loaded ELF footprint (computed at startup by scanning the
+ELF's highest user-region PT_LOAD end + 64 KB alignment); TLS sits
+at `0x10400000`; the HLE bump arena at `0x10410000`. The allocator
+base moving above the ELF is the Phase 10B spec match -- the real
+PS3 LV2 shares `0x00010000-0x0FFFFFFF` between the loaded binary and
+the allocator pool.
+
+### Region access modes
+
+`RegionAccess` has three variants, encoded as a distinct enum (not a
+boolean flag) so a future contributor cannot accidentally collapse
+them:
+
+- **`ReadWrite`**: normal user memory. Reads and writes go through
+  the region's backing `Vec<u8>`.
+- **`ReservedZeroReadable`**: reads return the region's zero-init
+  bytes and bump `GuestMemory::provisional_read_count`; writes fault
+  with `MemError::ReservedWrite`. This is the default for RSX and
+  SPU-reserved -- it keeps the address space honest without
+  requiring real semantics, and surfaces any silent zero-reads in
+  `run-game`'s end-of-boot summary.
+- **`ReservedStrict`**: reads return `None`, writes fault with
+  `MemError::ReservedWrite`. Opted into via `--strict-reserved` on
+  the CLI, used by tests asserting no code paths touch the region
+  yet.
+
+Out-of-region accesses (addresses that fall in no region) surface as
+`MemError::Unmapped(FaultContext)`, where `FaultContext` names the
+faulting address and the labels of the nearest mapped regions below
+and above it. This turns a diagnostic at `0xB0000000` into
+"between `main` and `rsx`" rather than a bare "out of bounds".
+
+### PPU access routing
+
+The PPU interpreter's fetch path uses `GuestMemory::as_bytes()`, a
+legacy accessor that returns the base-0 region's bytes -- code
+always lives in `main`, so this is safe. Load paths (`ld`, `lwz`,
+`lfs`, `lvx`, etc.) go through a cached `load_slice` closure built
+at the top of `run_until_yield`: the closure holds a
+`Vec<(u64, &[u8])>` snapshot of every region's base and bytes, and
+linear-scans it per load. Linear scan wins over `BTreeMap` lookup
+because the region count stays single-digit through Phase 10; if
+later phases add many more mappings, a two-tier fast-path is the
+natural next step. Stores go through `Effect::SharedWriteIntent`
+effects -- the commit pipeline's `apply_commit` is region-aware, so
+stores to any mapped region land correctly.
 
 ## Per-step pipeline
 
@@ -203,9 +272,38 @@ moves, and atomic load-reserve / store-conditional pairs.
 
 The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
-4 relocation types, PS3 PRX import-table parser with 24-byte
-HLE-trampoline binding, and a 145-entry NID database every entry of
-which is verified by SHA-1 round-trip in test.
+4 relocation types, PS3 PRX import-table parser, and a 145-entry NID
+database every entry of which is verified by SHA-1 round-trip in test.
+
+The HLE binder offers two layouts for the OPDs that satisfy
+`sys_prx_load_module`'s import resolution:
+
+- **`HleLayout::Legacy24`** (default): one 24-byte trampoline per
+  binding at a high reserved address. OPD and inline body
+  (`lis r11, hi; ori r11, r11, lo; sc; blr`) live in the same
+  trampoline. Self-contained and easy to inspect.
+- **`HleLayout::Ps3Spec { opd_base, body_base }`**: 8-byte OPDs
+  packed at `opd_base` (matching RPCS3's `vm::alloc(N*8, vm::main)`
+  HLE-table shape per `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp`
+  lines 337-364), with separate 16-byte body trampolines at
+  `body_base`. Used by `run-game` when `CELLGOV_HLE_OPD_BASE` is
+  set so the GOT pointer values land in the user-memory address
+  range RPCS3 also uses for HLE-resolved imports.
+
+Both layouts produce semantically equivalent bindings -- the same
+NID reaches the same dispatch handler regardless of layout. The
+choice only affects where the OPDs sit in the address space, which
+matters for cross-runner byte comparisons. See
+[crates/cellgov_ppu/tests/hle_layout.rs](crates/cellgov_ppu/tests/hle_layout.rs)
+for the equivalence test that backs this property.
+
+`run-game` exposes three env vars for firmware-loading experiments:
+`CELLGOV_PRX_BASE` overrides the firmware PRX load address;
+`CELLGOV_SKIP_MODULE_START=1` bypasses liblv2's `module_start`
+(which corrupts game memory through a stale fixup pointer when
+sys_prx_load_module returns failure for unimplemented submodules);
+`CELLGOV_HLE_OPD_BASE` switches HLE binding to the PS3-spec packed
+layout.
 
 **SPU (`cellgov_spu`)**: 128x128-bit register file, 256 KB local
 store, channel file. Implements RR / RI7 / RI10 / RI16 / RI18 / RRR
@@ -236,7 +334,7 @@ table, syscall classification, syscall dispatch.
 | `sys_spu_thread_group_start`  | 173     | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.|
 | `sys_spu_thread_group_join`   | 177/178 | Blocks caller; wakes when all SPUs in the group finish.              |
 | `sys_spu_thread_write_spu_mb` | 190     | Deposits a value into the target SPU's inbound mailbox.              |
-| `sys_memory_allocate`         | 348     | Bump-allocates 64KB-aligned guest memory from kernel region.         |
+| `sys_memory_allocate`         | 348     | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF). |
 | `sys_memory_free`             | 349     | Stub: no-op (CellGov does not track deallocation).                   |
 | `sys_tty_write`               | 403     | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing. |
 

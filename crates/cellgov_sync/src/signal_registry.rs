@@ -1,4 +1,4 @@
-//! Signal registry seam.
+//! Signal registry.
 //!
 //! Mirrors [`crate::mailbox_registry::MailboxRegistry`] for
 //! [`SignalRegister`] instances. Owns every signal-notification
@@ -7,12 +7,11 @@
 //! iteration via [`BTreeMap`] so the runtime never sees `HashMap`
 //! insertion order.
 //!
-//! Currently provides registration, lookup, iteration, and a
+//! Provides registration, lookup, iteration, and a
 //! [`SignalRegistry::state_hash`] that summarizes every register's
-//! current value into a single `u64`. Wiring `Effect::SignalUpdate`
-//! into the commit pipeline lands as a separate slice on top of this
-//! seam, as does folding the signal hash into the runtime's
-//! `SyncState` checkpoint emission.
+//! current value into a single `u64`. `Effect::SignalUpdate` flows
+//! through the commit pipeline into this registry, and the runtime's
+//! `SyncState` checkpoint emission folds `state_hash` into its hash.
 
 use crate::signal::{SignalId, SignalRegister};
 use std::collections::BTreeMap;
@@ -66,8 +65,7 @@ impl SignalRegistry {
     }
 
     /// Mutably borrow a register by id, if present. The commit
-    /// pipeline uses this to apply `SignalUpdate` effects in a future
-    /// slice.
+    /// pipeline uses this to apply `SignalUpdate` effects.
     #[inline]
     pub fn get_mut(&mut self, id: SignalId) -> Option<&mut SignalRegister> {
         self.registers.get_mut(&id)
@@ -86,9 +84,9 @@ impl SignalRegistry {
     /// 64-bit deterministic hash of every register's `(id, value)`
     /// pair in id order.
     ///
-    /// Will fold into the runtime's `SyncState` checkpoint hash in a
-    /// future slice. FNV-1a, no host-time inputs, no external deps.
-    /// The empty registry hashes to the FNV-1a empty-input value.
+    /// Folded into the runtime's `SyncState` checkpoint hash. FNV-1a,
+    /// no host-time inputs, no external deps. The empty registry
+    /// hashes to the FNV-1a empty-input value.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (id, reg) in self.registers.iter() {

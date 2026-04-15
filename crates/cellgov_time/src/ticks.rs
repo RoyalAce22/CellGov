@@ -9,8 +9,8 @@
 ///
 /// `GuestTicks` is a totally ordered, monotonically non-decreasing counter.
 /// It is the authoritative ordering clock for every guest-visible event in
-/// the runtime. It is intentionally a distinct type from [`crate::budget::Budget`]
-/// and [`crate::epoch::Epoch`]: the three concepts must not implicitly convert.
+/// the runtime. It is a distinct type from [`crate::budget::Budget`] and
+/// [`crate::epoch::Epoch`]: the three concepts must not implicitly convert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct GuestTicks(u64);
 
@@ -21,8 +21,8 @@ impl GuestTicks {
     /// Construct a `GuestTicks` from a raw count.
     ///
     /// This is the only way to lift a `u64` into guest time. There is no
-    /// `From<u64>` impl on purpose: every site that produces a tick value
-    /// must be deliberate.
+    /// `From<u64>` impl: every site that produces a tick value must be
+    /// explicit so the time domain is auditable from the call graph.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)

@@ -17,13 +17,13 @@ use cellgov_time::GuestTicks;
 
 /// The global ordering key shared by every guest-visible event.
 ///
-/// **The field declaration order is load-bearing.** Rust's derived `Ord`
-/// on a struct compares fields lexicographically top-to-bottom, and that
-/// is exactly the required tie-break order. Reordering these fields would
-/// silently change the ordering of every event in every replay. Do not
-/// reorder them, do not insert fields in the middle, and do not change the
-/// derive list to a hand-written `Ord` without re-establishing the same
-/// invariant in tests.
+/// **The field declaration order defines the tie-break order.** Rust's
+/// derived `Ord` on a struct compares fields lexicographically
+/// top-to-bottom, and that is exactly the required tie-break order.
+/// Reordering these fields would silently change the ordering of every
+/// event in every replay. Do not reorder them, do not insert fields in
+/// the middle, and do not change the derive list to a hand-written `Ord`
+/// without re-establishing the same invariant in tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct OrderingKey {
     /// Tier 1: guest-time stamp at which the event becomes visible.

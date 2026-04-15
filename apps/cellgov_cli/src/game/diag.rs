@@ -8,14 +8,25 @@ use crate::game::{PC_RING_SIZE, SYSCALL_RING_SIZE};
 use cellgov_core::Runtime;
 
 /// Fetch a 32-bit big-endian instruction word from guest memory at `pc`.
+///
+/// Region-aware: resolves `pc` against every region in the memory map,
+/// not just the base-0 region. This keeps backtrace printing honest
+/// when a function pointer leaks into the stack region (0xD0000000+)
+/// or any other auxiliary region.
 pub(super) fn fetch_raw_at(rt: &Runtime, pc: u64) -> Option<u32> {
-    let m = rt.memory().as_bytes();
-    let a = pc as usize;
-    if a + 4 <= m.len() {
-        Some(u32::from_be_bytes([m[a], m[a + 1], m[a + 2], m[a + 3]]))
-    } else {
-        None
-    }
+    let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(pc), 4)?;
+    let b = rt.memory().read(range)?;
+    Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+/// Label the region containing `addr`, for human-readable fault context.
+///
+/// Returns `"<unmapped>"` if the address does not fall in any region.
+pub(super) fn region_label_at(rt: &Runtime, addr: u64) -> &'static str {
+    rt.memory()
+        .containing_region(addr, 1)
+        .map(|r| r.label())
+        .unwrap_or("<unmapped>")
 }
 
 /// Captured TTY write for the diagnostic artifact.
@@ -58,17 +69,18 @@ pub(super) fn print_trace_line(
                 .unwrap_or_else(|| format!("hle_{idx}"));
             println!("       -> HLE #{idx}: {name}");
         } else if args[0] == 403 {
-            let buf = args[2] as usize;
-            let len = args[3] as usize;
-            let m = rt.memory().as_bytes();
-            if buf + len <= m.len() {
-                let text = String::from_utf8_lossy(&m[buf..buf + len]);
-                print!("       -> tty: {text}");
-                if !text.ends_with('\n') {
-                    println!();
+            let buf = args[2];
+            let len = args[3];
+            let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(buf), len);
+            match range.and_then(|r| rt.memory().read(r)) {
+                Some(slice) => {
+                    let text = String::from_utf8_lossy(slice);
+                    print!("       -> tty: {text}");
+                    if !text.ends_with('\n') {
+                        println!();
+                    }
                 }
-            } else {
-                println!("       -> LV2 tty_write (oob)");
+                None => println!("       -> LV2 tty_write (oob)"),
             }
         } else {
             println!("       -> LV2 syscall {}", args[0]);
@@ -119,30 +131,40 @@ pub(super) fn format_fault(
                 FAULT_DEBUG_BREAK => {
                     let mut s = format!("DEBUG_BREAK at PC={pc_str}");
                     // Dump memory at each GPR that looks like a guest pointer.
+                    // Region-aware: queries every region by address so a
+                    // GPR holding a stack address (0xD0000000+) is dumped
+                    // from the stack region, not silently dropped because
+                    // it falls outside the base-0 region.
                     if let Some(regs) = &result.local_diagnostics.fault_regs {
-                        let mem = rt.memory().as_bytes();
                         for (i, &val) in regs.gprs.iter().enumerate() {
-                            let addr = val as usize;
-                            if addr < mem.len() && addr > 0x1000 {
-                                let end = (addr + 64).min(mem.len());
-                                s.push_str(&format!("\n  [r{i}=0x{val:08x}]: "));
-                                let slice = &mem[addr..end];
-                                // Show printable ASCII if it looks like a string.
-                                let printable = slice
+                            if val < 0x1000 {
+                                continue;
+                            }
+                            let Some(range) =
+                                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(val), 64)
+                            else {
+                                continue;
+                            };
+                            let Some(slice) = rt.memory().read(range) else {
+                                continue;
+                            };
+                            let label = region_label_at(rt, val);
+                            s.push_str(&format!("\n  [r{i}=0x{val:08x} ({label})]: "));
+                            // Show printable ASCII if it looks like a string.
+                            let printable = slice
+                                .iter()
+                                .take_while(|&&b| (0x20..0x7f).contains(&b))
+                                .count();
+                            if printable >= 4 {
+                                let text: String = slice
                                     .iter()
                                     .take_while(|&&b| (0x20..0x7f).contains(&b))
-                                    .count();
-                                if printable >= 4 {
-                                    let text: String = slice
-                                        .iter()
-                                        .take_while(|&&b| (0x20..0x7f).contains(&b))
-                                        .map(|&b| b as char)
-                                        .collect();
-                                    s.push_str(&format!("{text:?}"));
-                                } else {
-                                    for b in &slice[..16.min(slice.len())] {
-                                        s.push_str(&format!("{b:02x} "));
-                                    }
+                                    .map(|&b| b as char)
+                                    .collect();
+                                s.push_str(&format!("{text:?}"));
+                            } else {
+                                for b in &slice[..16.min(slice.len())] {
+                                    s.push_str(&format!("{b:02x} "));
                                 }
                             }
                         }
@@ -404,5 +426,47 @@ pub(super) fn print_top_pcs(rt: &Runtime, pc_hits: &std::collections::HashMap<u6
             .map(|insn| insn.variant_name().to_string())
             .unwrap_or_else(|| "?".into());
         println!("  {count:>10}x  PC=0x{:08x}  raw={raw}  {disasm}", **pc);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cellgov_mem::{GuestMemory, PageSize, Region};
+    use cellgov_time::Budget;
+
+    fn rt_with_layout() -> Runtime {
+        let mem = GuestMemory::from_regions(vec![
+            Region::new(0, 0x4000_0000, "main", PageSize::Page64K),
+            Region::new(0xD000_0000, 0x0001_0000, "stack", PageSize::Page4K),
+        ])
+        .unwrap();
+        Runtime::new(mem, Budget::new(1), 100)
+    }
+
+    #[test]
+    fn region_label_at_names_stack_region() {
+        let rt = rt_with_layout();
+        // A pointer that looks like a primary-thread stack address must
+        // resolve to the "stack" region label, not "main" or
+        // "<unmapped>". Backtrace and dump-mem helpers depend on this
+        // routing -- legacy backtrace helpers assumed "high address = top
+        // of contiguous memory" and silently dropped 0xD000xxxx values.
+        assert_eq!(region_label_at(&rt, 0xD000_FFF0), "stack");
+    }
+
+    #[test]
+    fn region_label_at_names_main_region() {
+        let rt = rt_with_layout();
+        assert_eq!(region_label_at(&rt, 0x0010_0000), "main");
+    }
+
+    #[test]
+    fn region_label_at_unmapped_addr_is_not_misattributed() {
+        let rt = rt_with_layout();
+        // 0x80000000 is between main (ends at 0x40000000) and stack
+        // (starts at 0xD0000000). Must surface as <unmapped>, not be
+        // silently routed to either neighbor.
+        assert_eq!(region_label_at(&rt, 0x8000_0000), "<unmapped>");
     }
 }

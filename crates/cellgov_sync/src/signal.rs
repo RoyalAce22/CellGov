@@ -1,26 +1,24 @@
 //! Signal notification identifier and the signal-register state machine.
 //!
 //! `SignalId` is the leaf handle the runtime hands out at signal
-//! registration time and is the payload of `Effect::SignalUpdate`. It
-//! must exist before the effect enum can be designed; that is why it
-//! landed in an earlier slice.
+//! registration time and is the payload of `Effect::SignalUpdate`.
 //!
 //! `SignalRegister` is the actual state. In the Cell model a signal
 //! notification register is a small word other units can OR-write
 //! into; the `value` is OR-written into the register and the runtime
-//! applies the OR at commit time. This module owns that register. It
-//! does not produce block/wake conditions yet -- those land in a
-//! follow-up slice that wires the register into the runtime's commit
-//! pipeline and event queue. Sync state machines do not themselves
-//! decide scheduling order; this type stays free of any scheduler
-//! awareness.
+//! applies the OR at commit time. This module owns that register.
+//! The register does not produce block/wake conditions on its own;
+//! the commit pipeline and event queue translate update and wait
+//! outcomes into block/wake events. Sync state machines do not
+//! themselves decide scheduling order; this type stays free of any
+//! scheduler awareness.
 
 /// A stable identifier for a signal notification register in the runtime.
 ///
 /// In the Cell model a signal notification register is a small word
-/// other units can OR-write into. The actual register state lives in
-/// the future signal state machine; this id is just the handle. There
-/// is no `From<u64>` impl on purpose.
+/// other units can OR-write into. The register state lives in
+/// [`SignalRegister`]; this id is just the handle. There
+/// is no `From<u64>` impl: id construction stays at registry sites.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct SignalId(u64);
 
@@ -43,13 +41,12 @@ impl SignalId {
 /// Holds a single 32-bit word. Updates are OR-merged: `or_in(v)` sets
 /// the register to `current | v`. Idempotent under repeated identical
 /// updates, monotonic in the bits-set sense, and trivially
-/// deterministic. Clear-on-read vs. clear-explicitly behavior is not
-/// yet specified; tests that need to reset use `clear`.
+/// deterministic. Clear semantics are explicit: `clear` resets the
+/// register to zero, and there is no clear-on-read rule.
 ///
 /// `SignalRegister` owns the value and nothing else: no `SignalId`
 /// (the registry that owns the register knows its id), no event-queue
-/// handle, no waiter list. Those are integration-layer concerns that
-/// land in follow-up slices.
+/// handle, no waiter list. Those are integration-layer concerns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SignalRegister {
     value: u32,
@@ -83,8 +80,8 @@ impl SignalRegister {
         self.value
     }
 
-    /// Reset the register to zero. There is currently no clear-on-read
-    /// rule; tests and the integration layer invoke this explicitly when
+    /// Reset the register to zero. There is no clear-on-read rule;
+    /// tests and the integration layer invoke this explicitly when
     /// they need to reset.
     #[inline]
     pub fn clear(&mut self) {

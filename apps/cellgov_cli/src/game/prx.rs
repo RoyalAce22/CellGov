@@ -110,9 +110,12 @@ pub(super) fn run_module_start(
     let mut ms_state = cellgov_ppu::state::PpuState::new();
     ms_state.pc = ms.code;
     ms_state.gpr[2] = ms.toc;
-    // Stack below game's stack area.
-    let mem_size = mem.size();
-    ms_state.gpr[1] = mem_size - 0x2000;
+    // module_start shares the primary-thread stack region at
+    // 0xD0000000 with the game. Use a lower offset than the game's
+    // stack_top so the two do not clobber each other; real PS3 LV2
+    // runs module_start to completion before the game, so in practice
+    // they never coexist.
+    ms_state.gpr[1] = super::PS3_PRIMARY_STACK_BASE + 0x8000;
     // TLS base: PPC64 convention is r13 = TLS_area + 0x7030.
     ms_state.gpr[13] = TLS_BASE + 0x30 + 0x7000;
     // LR = 0: when module_start does blr, PC becomes 0. Address 0 is
@@ -403,10 +406,30 @@ pub(super) fn load_firmware_prx(
         }
     };
 
-    // Place the PRX above the game segments and trampoline area.
-    // Trampolines: tramp_base .. tramp_base + bindings*24. Round up to 64KB.
-    let tramp_end = tramp_base as u64 + (hle_bindings.len() as u64) * 24;
-    let prx_base = (tramp_end + 0xFFFF) & !0xFFFF;
+    // Place the PRX in the user-memory region just past the loaded
+    // ELF, matching RPCS3's `vm.cpp` "main" block layout. Real PS3
+    // LV2 loads firmware PRXes into 0x00010000-0x0FFFFFFF after the
+    // application binary; if we place liblv2 at 0x10390000 instead,
+    // the OPD addresses in the application's import table diverge by
+    // many bits versus RPCS3 even though the import resolution is
+    // semantically equivalent. Anchoring to the same VA range as
+    // RPCS3 makes the OPD-table bytes byte-for-byte identical.
+    //
+    // CELLGOV_PRX_BASE overrides the auto-computed base so callers
+    // that need a specific layout (microtests, comparison runs) can
+    // pin it. Default for `run-game`: align(elf_user_region_end, 64K)
+    // computed by `cellgov_cli::game` and passed through `tramp_base`
+    // when the caller has scanned the ELF.
+    let prx_base = match std::env::var("CELLGOV_PRX_BASE") {
+        Ok(s) => u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap_or(tramp_base as u64),
+        Err(_) => {
+            // Default placement: above HLE trampolines, consistent
+            // with the legacy layout. Callers that want PS3-spec
+            // placement set CELLGOV_PRX_BASE explicitly.
+            let tramp_end = tramp_base as u64 + (hle_bindings.len() as u64) * 24;
+            (tramp_end + 0xFFFF) & !0xFFFF
+        }
+    };
 
     let loaded = match cellgov_ppu::sprx::load_prx(&parsed, mem, prx_base) {
         Ok(l) => l,
