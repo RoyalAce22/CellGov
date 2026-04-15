@@ -13,8 +13,11 @@
 //! All assertions consume structured trace records and hashes. Never
 //! assert on human-readable logs.
 //!
-//! Currently provides state-equivalence replay assertions. Invariant
-//! and golden-trace assertions land as separate slices.
+//! Provides state-equivalence replay assertions
+//! ([`assert_deterministic_replay`]), runtime-invariant assertions
+//! ([`assert_guest_time_monotonic`], [`assert_epoch_strictly_increasing`],
+//! [`assert_finished_units_not_rescheduled`]), and golden-trace
+//! assertions (see [`crate::golden`]).
 
 use crate::fixtures::ScenarioFixture;
 use crate::runner::{run, ScenarioResult};

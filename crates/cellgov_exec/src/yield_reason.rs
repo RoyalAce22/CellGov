@@ -7,9 +7,9 @@
 //! architecture crates as wrapper enums on top of this set, not as
 //! additional variants here.
 //!
-//! Discriminants are locked. The trace format is binary from day one;
-//! reordering or renumbering variants would break replay against any
-//! existing trace.
+//! Discriminants are locked. The trace format is binary; reordering
+//! or renumbering variants would break replay against any existing
+//! trace.
 
 /// The reason an execution unit yielded control back to the runtime.
 ///
@@ -43,8 +43,9 @@ pub enum YieldReason {
     /// block condition.
     WaitingSync = 4,
     /// The unit invoked an abstract guest syscall and is yielding so
-    /// the runtime can route the request to its handler. No concrete
-    /// syscall set exists yet; this variant is the seam.
+    /// the runtime can route the request through LV2 dispatch. The
+    /// accompanying `syscall_args` on the step result carries the
+    /// syscall number and argument registers.
     Syscall = 5,
     /// The unit reached a clean point at which an interrupt could be
     /// delivered. The runtime may inject pending interrupts before

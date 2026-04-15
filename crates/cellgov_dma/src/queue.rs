@@ -7,10 +7,8 @@
 //! the same scenario walk the queue in the same order regardless of
 //! host timing or `HashMap` iteration order.
 //!
-//! Currently only the value type and its draining operations. Wiring
-//! `Effect::DmaEnqueue` into the commit pipeline against this queue,
-//! and emitting wake events when completions fire, both land as
-//! separate slices on top of this seam.
+//! `Effect::DmaEnqueue` flows through the commit pipeline into this
+//! queue, and completions emit wake events as they fire.
 //!
 //! Why a [`BTreeMap`] keyed by `(GuestTicks, u64)` rather than a
 //! [`std::collections::BinaryHeap`]: replay determinism. Stable ordered

@@ -22,10 +22,9 @@ use cellgov_time::GuestTicks;
 
 /// An immutable effect packet emitted by an execution unit.
 ///
-/// `Effect` is `Clone + Eq + Debug`. It is intentionally not `Copy`
-/// because [`Effect::SharedWriteIntent`] carries a heap-allocated
-/// payload; cloning is the explicit way to duplicate an effect for
-/// the trace.
+/// `Effect` is `Clone + Eq + Debug`. It is not `Copy` because
+/// [`Effect::SharedWriteIntent`] carries a heap-allocated payload;
+/// cloning is the explicit way to duplicate an effect for the trace.
 ///
 /// The variant order below is part of the runtime's stable trace
 /// contract: the binary trace format will rely on stable discriminants,

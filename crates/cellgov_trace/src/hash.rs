@@ -8,21 +8,23 @@
 //! hash collisions, which `u64` is wide enough to make negligible at
 //! the scale of one runtime instance).
 //!
-//! `StateHash` is intentionally algorithm-agnostic. It carries a `u64`
-//! and nothing more; the producer of the hash decides which algorithm
-//! to use, as long as it is deterministic across hosts and runs. No
-//! specific algorithm is currently pinned. The trace writer ultimately
-//! serializes hashes in stable byte order so that text rendering tools
-//! can compare them across builds.
+//! `StateHash` is algorithm-agnostic at the type level. It carries a
+//! `u64` and nothing more; the producer of the hash decides which
+//! algorithm to use, as long as it is deterministic across hosts and
+//! runs. The committed-memory producer (`GuestMemory::content_hash`)
+//! uses FNV-1a; other checkpoint producers are free to pick their own
+//! algorithm and record the result here. The trace writer serializes
+//! hashes in stable byte order so that text rendering tools can
+//! compare them across builds.
 
 /// A 64-bit deterministic hash of some piece of runtime state.
 ///
 /// `StateHash` is `Copy + Eq + Hash + Ord`. It is the value the trace
 /// records at every state checkpoint and the value replay tooling
 /// compares when it asserts equivalence between two runs of the same
-/// scenario. There is no `From<u64>` impl on purpose: producing a state
-/// hash is a deliberate operation, and ad-hoc construction outside the
-/// hash producer should be visible at the call site.
+/// scenario. `StateHash` omits a `From<u64>` impl so that producing a
+/// state hash stays an explicit operation; ad-hoc construction outside
+/// the hash producer should be visible at the call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct StateHash(u64);
 

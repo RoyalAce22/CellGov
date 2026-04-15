@@ -33,8 +33,9 @@ pub enum SpuStepOutcome {
         reason: YieldReason,
     },
     /// Read from guest memory into local store. The execute layer
-    /// cannot access guest memory directly; run_until_yield fulfills
-    /// the read from the frozen committed snapshot.
+    /// does not hold the `ExecutionContext`; `run_until_yield`
+    /// fulfills the read from the frozen committed snapshot exposed
+    /// by the context.
     MemoryRead {
         /// Guest effective address to read from.
         ea: u64,

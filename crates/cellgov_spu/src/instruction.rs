@@ -5,8 +5,8 @@
 //! execute consumes them. Neither the variant set nor the field types
 //! know about runtime state, Effects, or scheduling.
 //!
-//! Variants are added as microtests require them. Do not speculatively
-//! add instruction forms that no test exercises.
+//! Only add variants exercised by tests. Do not introduce instruction
+//! forms speculatively.
 
 /// A decoded SPU instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

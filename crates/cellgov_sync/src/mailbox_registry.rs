@@ -1,4 +1,4 @@
-//! Mailbox registry seam.
+//! Mailbox registry.
 //!
 //! Mirrors `cellgov_core::UnitRegistry` for [`Mailbox`] instances.
 //! Owns every mailbox known to the runtime, hands out stable
@@ -6,12 +6,12 @@
 //! deterministic id-order iteration via [`BTreeMap`] so the runtime
 //! never sees `HashMap` insertion order.
 //!
-//! Currently provides registration, lookup, iteration, and a
+//! Provides registration, lookup, iteration, and a
 //! [`MailboxRegistry::state_hash`] that summarizes every mailbox's
-//! queue contents into a single `u64`. Wiring `Effect::MailboxSend`
-//! and `Effect::MailboxReceiveAttempt` into the commit pipeline lands
-//! as a separate slice on top of this seam, as does the `SyncState`
-//! hash checkpoint emission from `cellgov_core`.
+//! queue contents into a single `u64`. `Effect::MailboxSend` and
+//! `Effect::MailboxReceiveAttempt` flow through the commit pipeline
+//! into this registry, and the `SyncState` checkpoint emission in
+//! `cellgov_core` folds `state_hash` into its hash.
 
 use crate::mailbox::{Mailbox, MailboxId};
 use std::collections::BTreeMap;
@@ -75,7 +75,7 @@ impl MailboxRegistry {
 
     /// Mutably borrow a mailbox by id, if present. The commit pipeline
     /// uses this to apply `MailboxSend` / `MailboxReceiveAttempt`
-    /// effects in a future slice.
+    /// effects.
     #[inline]
     pub fn get_mut(&mut self, id: MailboxId) -> Option<&mut Mailbox> {
         self.mailboxes.get_mut(&id)
@@ -122,9 +122,9 @@ impl MailboxRegistry {
 }
 
 /// Internal: walk a mailbox's queued messages front-to-back without
-/// consuming them. Mirrors what a future `Mailbox::iter()` method
-/// would expose; kept private to the registry until there is a real
-/// caller outside the hash path.
+/// consuming them. Equivalent to what a `Mailbox::iter()` method
+/// would expose; kept private to the registry because the only
+/// current caller is the state-hash path.
 fn mailbox_iter(mailbox: &Mailbox) -> impl Iterator<Item = u32> + '_ {
     let mut clone = mailbox.clone();
     std::iter::from_fn(move || clone.try_receive())

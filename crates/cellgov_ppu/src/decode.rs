@@ -364,11 +364,8 @@ fn decode_md(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         }),
         // rldimi: rotate left then insert (merge with existing ra).
         3 => {
-            // rldimi: ra = (rotl(rs, sh) & mask) | (ra & ~mask)
-            // where mask covers mb..63-sh. We can handle this inline
-            // in execution. For now, reuse Rldicl and handle the merge
-            // in exec. Actually, rldimi needs its own variant or
-            // special handling. Let's add it properly.
+            // Full insert semantics are not implemented; decode as
+            // Rldicl as a rough approximation.
             Ok(PpuInstruction::Rldicl {
                 ra,
                 rs,

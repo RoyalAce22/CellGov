@@ -79,11 +79,6 @@ pub struct NamedMemoryRegion {
     pub data: Vec<u8>,
 }
 
-/// CellGov-side state hashes carried through from `ScenarioResult`.
-///
-/// These are CellGov-internal and used for replay comparison
-/// (CellGov-vs-CellGov), not for cross-runner comparison. The RPCS3
-/// adapter sets this to `None`.
 /// Serde bridge for `StateHash` without adding serde to `cellgov_trace`.
 mod state_hash_serde {
     use cellgov_trace::StateHash;
@@ -98,7 +93,11 @@ mod state_hash_serde {
     }
 }
 
-/// CellGov-side state hashes for replay comparison.
+/// CellGov-side state hashes carried through from `ScenarioResult`.
+///
+/// These are CellGov-internal and used for replay comparison
+/// (CellGov-vs-CellGov), not for cross-runner comparison. The RPCS3
+/// adapter sets this to `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservedHashes {
     /// Hash of committed guest memory.
@@ -117,7 +116,8 @@ pub struct ObservedHashes {
 pub struct ObservationMetadata {
     /// Which runner produced this observation.
     pub runner: String,
-    /// Number of steps taken (CellGov) or "unknown" sentinel for RPCS3.
+    /// Number of steps taken, or `None` when step counts are unavailable
+    /// for the runner.
     pub steps: Option<usize>,
 }
 

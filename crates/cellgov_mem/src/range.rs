@@ -4,8 +4,8 @@
 //! everywhere the runtime needs to talk about a contiguous span of guest
 //! memory: `SharedWriteIntent` payloads, `DmaRequest` source/destination
 //! windows, page descriptors, and conflict-detection between staged
-//! writes. It is intentionally a small value type with no allocation and
-//! no host references.
+//! writes. It is a small value type with no allocation and no host
+//! references.
 
 use crate::addr::GuestAddr;
 
@@ -81,8 +81,8 @@ impl ByteRange {
     /// an empty range. Two non-empty ranges overlap iff their half-open
     /// intervals intersect: `self.start < other.end && other.start <
     /// self.end`. Adjacent ranges (one ending exactly where the next
-    /// begins) do not overlap, by design -- contiguous-but-disjoint is
-    /// the correct answer for write conflict detection.
+    /// begins) do not overlap -- contiguous-but-disjoint is the correct
+    /// answer for write conflict detection.
     #[inline]
     pub const fn overlaps(self, other: ByteRange) -> bool {
         if self.length == 0 || other.length == 0 {

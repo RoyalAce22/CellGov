@@ -18,6 +18,29 @@ use cellgov_time::Budget;
 
 use super::{die, load_file_or_die};
 
+/// PS3 LV2 primary-thread stack base. Matches RPCS3 `vm.cpp`'s
+/// 0xD0000000 page-4K stack block.
+pub(crate) const PS3_PRIMARY_STACK_BASE: u64 = 0xD000_0000;
+/// Primary-thread stack size. 64 KB covers the default `SYS_PROCESS_PARAM`
+/// stacksize for simple PS3 titles and all CellGov microtests.
+pub(crate) const PS3_PRIMARY_STACK_SIZE: usize = 0x0001_0000;
+/// Highest address reserved 16 bytes below the stack top, matching the
+/// PPC64 ABI's requirement for a backchain+linkage area at the frame
+/// boundary. `state.gpr[1]` is set to this value on thread entry.
+pub(crate) const PS3_PRIMARY_STACK_TOP: u64 =
+    PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 - 0x10;
+/// PS3 RSX video/local-memory base (`0xC0000000`). Reserved
+/// placeholder; reads return zero, writes fault. Real RSX semantics
+/// are out of scope here.
+pub(crate) const PS3_RSX_BASE: u64 = 0xC000_0000;
+/// RSX reservation size (256 MB) per RPCS3 `vm.cpp`.
+pub(crate) const PS3_RSX_SIZE: usize = 0x1000_0000;
+/// PS3 SPU-shared / reserved base (`0xE0000000`). Same semantics as
+/// the RSX placeholder.
+pub(crate) const PS3_SPU_RESERVED_BASE: u64 = 0xE000_0000;
+/// SPU reservation size (512 MB) per RPCS3 `vm.cpp`.
+pub(crate) const PS3_SPU_RESERVED_SIZE: usize = 0x2000_0000;
+
 #[allow(clippy::too_many_arguments)]
 pub fn run_game(
     elf_path: &str,
@@ -31,6 +54,7 @@ pub fn run_game(
     dump_mem_addrs: &[u64],
     save_observation: Option<&str>,
     observation_manifest: Option<&str>,
+    strict_reserved: bool,
 ) {
     let t_start = Instant::now();
     let elf_data = load_file_or_die(elf_path);
@@ -40,17 +64,53 @@ pub fn run_game(
         .unwrap_or_else(|e| die(&format!("failed to parse ELF: {e:?}")));
 
     // Round up to 64KB alignment. Guest memory must be large enough for
-    // the game, PRX modules, and kernel memory allocations (at 0x30000000+).
-    // flOw's memory allocator lays its regions out past 0x31000000 (the
-    // game's `r27 = mem_size` register is the upper boundary it uses as
-    // base for several large sub-regions). Extending to 1 GB covers
-    // the observed 0x31b00028 accesses with headroom without going to
-    // the full PS3 virtual-address space.
-    let min_for_kernel = 0x4000_0000usize; // covers kernel alloc region
+    // the game, PRX modules, and PS3 user-memory allocations starting
+    // at 0x00010000. The flat layout covers both the user-memory
+    // region (0x00010000+) and the EBOOT load region (0x10000000+)
+    // with a contiguous 1 GB backing.
+    let min_for_kernel = 0x4000_0000usize; // covers user + EBOOT regions
     let game_size = ((required_size + 0xFFFF) & !0xFFFF) + 0x200000;
     let mem_size = game_size.max(min_for_kernel);
     let mut state = cellgov_ppu::state::PpuState::new();
-    let mut mem = cellgov_mem::GuestMemory::new(mem_size);
+    // Build the PS3-spec multi-region layout:
+    // - main at base 0 covering the ELF + allocator pool
+    // - stack at 0xD0000000 (primary-thread stack)
+    // - rsx at 0xC0000000 (video/RSX local memory, reserved
+    //   provisional -- reads return zero and are counted; writes
+    //   fault until a real RSX implementation lands)
+    // - spu_reserved at 0xE0000000 (SPU-shared range, same
+    //   provisional semantics)
+    // `--strict-reserved` upgrades rsx and spu_reserved to
+    // `ReservedStrict`, making reads fault too.
+    let reserved_access = if strict_reserved {
+        cellgov_mem::RegionAccess::ReservedStrict
+    } else {
+        cellgov_mem::RegionAccess::ReservedZeroReadable
+    };
+    let mut mem = cellgov_mem::GuestMemory::from_regions(vec![
+        cellgov_mem::Region::new(0, mem_size, "main", cellgov_mem::PageSize::Page64K),
+        cellgov_mem::Region::new(
+            PS3_PRIMARY_STACK_BASE,
+            PS3_PRIMARY_STACK_SIZE,
+            "stack",
+            cellgov_mem::PageSize::Page4K,
+        ),
+        cellgov_mem::Region::with_access(
+            PS3_RSX_BASE,
+            PS3_RSX_SIZE,
+            "rsx",
+            cellgov_mem::PageSize::Page64K,
+            reserved_access,
+        ),
+        cellgov_mem::Region::with_access(
+            PS3_SPU_RESERVED_BASE,
+            PS3_SPU_RESERVED_SIZE,
+            "spu_reserved",
+            cellgov_mem::PageSize::Page64K,
+            reserved_access,
+        ),
+    ])
+    .unwrap_or_else(|e| die(&format!("failed to build guest memory layout: {e:?}")));
     let t_mem_alloc = t_start.elapsed();
 
     // Address 0 must stay zero: CRT0 linked lists use *NULL as a
@@ -62,16 +122,46 @@ pub fn run_game(
 
     // Parse and bind HLE import stubs.
     let tramp_base = ((required_size + 0xFFF) & !0xFFF) as u32;
+    // CELLGOV_HLE_OPD_BASE: when set (e.g. "0x008A0120"), HLE bindings
+    // produce 8-byte OPDs packed at that address (matching RPCS3's
+    // `vm::alloc(N*8, vm::main)` HLE-table shape per
+    // tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp). Body trampolines
+    // land at `body_base` (16-byte stride). The GOT entries become
+    // packed pointers into user memory rather than 24-byte-aligned
+    // pointers into the upper region.
+    let hle_layout = match std::env::var("CELLGOV_HLE_OPD_BASE") {
+        Ok(s) => {
+            let opd_base =
+                u32::from_str_radix(s.trim_start_matches("0x"), 16).unwrap_or(tramp_base);
+            // Body trampolines packed past the OPD area. Each binding
+            // gets one 16-byte body. Reserve space assuming 256 max
+            // bindings (overestimates flOw's 140; cheap headroom).
+            let body_base = opd_base + 256 * 8;
+            cellgov_ppu::prx::HleLayout::Ps3Spec {
+                opd_base,
+                body_base,
+            }
+        }
+        Err(_) => cellgov_ppu::prx::HleLayout::Legacy24,
+    };
     let hle_bindings = match cellgov_ppu::prx::parse_imports(&elf_data) {
         Ok(modules) => {
-            let bindings = cellgov_ppu::prx::bind_hle_stubs(&modules, &mut mem, tramp_base);
+            let bindings = cellgov_ppu::prx::bind_hle_stubs_with_layout(
+                &modules, &mut mem, hle_layout, tramp_base,
+            );
             println!(
                 "imports: {} modules, {} functions bound to HLE stubs",
                 modules.len(),
                 bindings.len()
             );
             for m in &modules {
-                println!("  {}: {} functions", m.name, m.functions.len());
+                let first_stub = m.functions.first().map(|f| f.stub_addr).unwrap_or(0);
+                println!(
+                    "  {}: {} functions, first stub at 0x{:x}",
+                    m.name,
+                    m.functions.len(),
+                    first_stub
+                );
             }
             bindings
         }
@@ -96,14 +186,51 @@ pub fn run_game(
     // Execute module_start for the loaded PRX before the game.
     // This initializes libc state (guard variables, heap arenas, TLS)
     // that the game's CRT0 depends on.
+    //
+    // Skipped when CELLGOV_SKIP_MODULE_START=1: liblv2's module_start
+    // tries to dynamically load further PRX modules via
+    // sys_prx_load_module, which CellGov does not implement. liblv2's
+    // failure-recovery path scribbles a sentinel through a stale
+    // pointer into the game's text segment. Skipping lets the game
+    // call into liblv2 functions directly (most are thin wrappers
+    // around LV2 syscalls that do not require module_start to have
+    // initialized internal state).
+    let skip_ms = std::env::var("CELLGOV_SKIP_MODULE_START")
+        .map(|v| v == "1")
+        .unwrap_or(false);
     if let Some(ref info) = prx_info {
-        mem = run_module_start(mem, info, &hle_bindings, max_steps);
+        if !skip_ms {
+            mem = run_module_start(mem, info, &hle_bindings, max_steps);
+        } else {
+            println!("module_start: skipped (CELLGOV_SKIP_MODULE_START=1)");
+        }
     }
 
-    // Set up stack
-    let stack_top = (mem_size as u64) - 0x1000;
-    state.gpr[1] = stack_top;
+    // Set up stack at the PS3-spec primary-thread stack region.
+    state.gpr[1] = PS3_PRIMARY_STACK_TOP;
     state.lr = 0;
+
+    // Place sys_memory_allocate's first return above the ELF's
+    // occupancy in the user-memory region (0x00010000-0x0FFFFFFF).
+    // Real PS3 LV2 shares that region between the loaded ELF and the
+    // allocator pool; the kernel tracks the ELF's extent so
+    // allocations do not overwrite it. We compute the highest
+    // user-region PT_LOAD end, round up to 64KB, and hand it to the
+    // Lv2Host.
+    let user_region_end = elf_user_region_end(&elf_data);
+    // Reserve trampoline area when CELLGOV_HLE_OPD_BASE is set so the
+    // allocator does not hand out addresses that overwrite the packed
+    // OPD/body region. Pack uses 256 OPD slots * 8 bytes + 256 body
+    // slots * 16 bytes = 0x1800 bytes total starting at opd_base.
+    let trampoline_area_end = match std::env::var("CELLGOV_HLE_OPD_BASE") {
+        Ok(s) => u64::from_str_radix(s.trim_start_matches("0x"), 16)
+            .ok()
+            .map(|opd_base| opd_base + 0x1800)
+            .unwrap_or(0),
+        Err(_) => 0,
+    } as usize;
+    let alloc_floor = user_region_end.max(trampoline_area_end);
+    let alloc_base = ((alloc_floor + 0xFFFF) & !0xFFFF).max(0x0001_0000) as u32;
 
     // Entry registers matching RPCS3's ppu_load_exec. The game's CRT0
     // reads these to initialize libc's heap, TLS, and argv/envp.
@@ -173,16 +300,20 @@ pub fn run_game(
     // runs can verify loader-initialized static data before any guest code
     // has had a chance to mutate it.
     for &addr in dump_mem_addrs {
-        let bytes = mem.as_bytes();
-        let a = addr as usize;
-        if a + 32 <= bytes.len() {
-            print!("mem[0x{addr:x}]:");
-            for b in &bytes[a..a + 32] {
-                print!(" {b:02x}");
+        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 32);
+        match range.and_then(|r| mem.read(r)) {
+            Some(slice) => {
+                let label = mem
+                    .containing_region(addr, 32)
+                    .map(|r| r.label())
+                    .unwrap_or("<unmapped>");
+                print!("mem[0x{addr:x}] ({label}):");
+                for b in slice {
+                    print!(" {b:02x}");
+                }
+                println!();
             }
-            println!();
-        } else {
-            println!("mem[0x{addr:x}]: out of range");
+            None => println!("mem[0x{addr:x}]: out of range"),
         }
     }
 
@@ -193,6 +324,9 @@ pub fn run_game(
     // Place HLE heap after TLS area (0x10400000 + 64KB for TLS).
     rt.set_hle_heap_base(0x10410000);
     rt.set_hle_nids(build_nid_map(&hle_bindings));
+    // sys_memory_allocate hands out from the PS3 user-memory region,
+    // above the loaded ELF's footprint.
+    rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
     rt.registry_mut().register_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
         *unit.state_mut() = state;
@@ -237,6 +371,13 @@ pub fn run_game(
 
     println!("outcome: {outcome}");
     println!("steps: {steps}");
+    // Report any reads that landed in a provisional RSX/SPU region. A
+    // nonzero count surfaces silent zero-reads that would otherwise be
+    // invisible at this scale.
+    let prov = rt.memory().provisional_read_count();
+    if prov > 0 {
+        println!("provisional_reads: {prov} (reserved RSX/SPU regions returned zero)");
+    }
     print_hle_summary(&hle_calls, &hle_bindings);
     print_insn_coverage(&insn_coverage);
     print_top_pcs(&rt, &pc_hits);
@@ -302,6 +443,63 @@ struct CheckpointRegion {
     addr: u64,
     #[serde(deserialize_with = "de_hex_u64")]
     size: u64,
+}
+
+/// Highest end address of any PT_LOAD segment whose vaddr falls in
+/// the PS3 user-memory region `[0x00010000, 0x10000000)`. Segments
+/// in higher regions (HLE metadata at `0x10000000+`) do not share
+/// address space with `sys_memory_allocate`, so they do not push the
+/// allocator base forward.
+///
+/// Returns 0 if no qualifying segments are present.
+fn elf_user_region_end(data: &[u8]) -> usize {
+    const PT_LOAD: u32 = 1;
+    fn u16_be(d: &[u8], o: usize) -> u16 {
+        u16::from_be_bytes([d[o], d[o + 1]])
+    }
+    fn u32_be(d: &[u8], o: usize) -> u32 {
+        u32::from_be_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
+    }
+    fn u64_be(d: &[u8], o: usize) -> u64 {
+        u64::from_be_bytes([
+            d[o],
+            d[o + 1],
+            d[o + 2],
+            d[o + 3],
+            d[o + 4],
+            d[o + 5],
+            d[o + 6],
+            d[o + 7],
+        ])
+    }
+    if data.len() < 64 || data[0..4] != [0x7f, 0x45, 0x4c, 0x46] {
+        return 0;
+    }
+    let phoff = u64_be(data, 32) as usize;
+    let phentsize = u16_be(data, 54) as usize;
+    let phnum = u16_be(data, 56) as usize;
+    let mut max_end: usize = 0;
+    for i in 0..phnum {
+        let base = phoff + i * phentsize;
+        if base + phentsize > data.len() {
+            break;
+        }
+        if u32_be(data, base) != PT_LOAD {
+            continue;
+        }
+        let p_vaddr = u64_be(data, base + 16) as usize;
+        let p_memsz = u64_be(data, base + 40) as usize;
+        if p_memsz == 0 {
+            continue;
+        }
+        if (0x0001_0000..0x1000_0000).contains(&p_vaddr) {
+            let end = p_vaddr + p_memsz;
+            if end > max_end {
+                max_end = end;
+            }
+        }
+    }
+    max_end
 }
 
 fn de_hex_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
@@ -597,7 +795,73 @@ fn step_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::{CheckpointManifest, CheckpointRegion};
+    use super::{elf_user_region_end, CheckpointManifest, CheckpointRegion};
+
+    /// Build a minimal big-endian ELF64 header with N PT_LOAD program
+    /// headers at the supplied (vaddr, memsz) tuples. Just enough
+    /// structure for `elf_user_region_end` to scan -- the segments'
+    /// payloads are not present.
+    fn synthetic_elf(loads: &[(u64, u64)]) -> Vec<u8> {
+        let phoff: u64 = 64;
+        let phentsize: u16 = 56;
+        let phnum: u16 = loads.len() as u16;
+        let header_end = phoff as usize + phentsize as usize * phnum as usize;
+        let mut buf = vec![0u8; header_end];
+        buf[0..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
+        buf[4] = 2; // ELFCLASS64
+        buf[5] = 2; // ELFDATA2MSB (big-endian)
+        buf[32..40].copy_from_slice(&phoff.to_be_bytes());
+        buf[54..56].copy_from_slice(&phentsize.to_be_bytes());
+        buf[56..58].copy_from_slice(&phnum.to_be_bytes());
+        for (i, &(vaddr, memsz)) in loads.iter().enumerate() {
+            let base = phoff as usize + i * phentsize as usize;
+            buf[base..base + 4].copy_from_slice(&1u32.to_be_bytes()); // PT_LOAD
+            buf[base + 16..base + 24].copy_from_slice(&vaddr.to_be_bytes());
+            buf[base + 40..base + 48].copy_from_slice(&memsz.to_be_bytes());
+        }
+        buf
+    }
+
+    #[test]
+    fn elf_user_region_end_picks_max_in_user_range() {
+        // Two PT_LOAD segments inside the user-memory range; the
+        // helper must return the highest end address among them so
+        // the allocator base lands above the loaded ELF.
+        let elf = synthetic_elf(&[(0x0001_0000, 0x80_0000), (0x0082_0000, 0x7_5CD4)]);
+        assert_eq!(elf_user_region_end(&elf), 0x0082_0000 + 0x7_5CD4);
+    }
+
+    #[test]
+    fn elf_user_region_end_ignores_segments_above_user_range() {
+        // Segments at 0x10000000+ (HLE PT_LOADs) do not push the
+        // allocator base forward -- they live in a separate VA range
+        // and do not share the user-memory pool.
+        let elf = synthetic_elf(&[
+            (0x0001_0000, 0x10_0000),
+            (0x1000_0000, 0x4_0000),
+            (0x1006_0000, 0x100),
+        ]);
+        assert_eq!(elf_user_region_end(&elf), 0x0001_0000 + 0x10_0000);
+    }
+
+    #[test]
+    fn elf_user_region_end_skips_zero_memsz() {
+        let elf = synthetic_elf(&[(0x0001_0000, 0), (0x0002_0000, 0x100)]);
+        assert_eq!(elf_user_region_end(&elf), 0x0002_0000 + 0x100);
+    }
+
+    #[test]
+    fn elf_user_region_end_returns_zero_for_no_user_segments() {
+        // All segments outside the user range -> nothing to push.
+        let elf = synthetic_elf(&[(0x1000_0000, 0x4_0000)]);
+        assert_eq!(elf_user_region_end(&elf), 0);
+    }
+
+    #[test]
+    fn elf_user_region_end_rejects_non_elf_input() {
+        assert_eq!(elf_user_region_end(&[0u8; 64]), 0);
+        assert_eq!(elf_user_region_end(&[0u8; 4]), 0);
+    }
 
     fn parse(text: &str) -> CheckpointManifest {
         toml::from_str(text).expect("parses")

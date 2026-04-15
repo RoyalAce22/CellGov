@@ -2,8 +2,9 @@
 //!
 //! Takes a decoded `PpuInstruction` and a `PpuState`, applies the
 //! instruction's semantics (register mutation), and returns a
-//! `PpuStepOutcome`. Syscall dispatch is handled here (or delegated
-//! to `syscall.rs`).
+//! `PpuStepOutcome`. Syscalls emit a `PpuStepOutcome::Syscall`;
+//! actual dispatch lives in `lib.rs::run_until_yield` and
+//! `syscall.rs`.
 
 use crate::fp;
 use crate::instruction::PpuInstruction;
@@ -31,7 +32,7 @@ pub enum PpuStepOutcome {
     Load {
         /// Guest effective address.
         ea: u64,
-        /// Number of bytes (1, 4, or 8).
+        /// Number of bytes (1, 2, 4, or 8).
         size: u8,
         /// Destination register.
         rt: u8,
@@ -54,7 +55,7 @@ pub enum PpuStepOutcome {
     Store {
         /// Guest effective address.
         ea: u64,
-        /// Number of bytes (1, 4, or 8).
+        /// Number of bytes (1, 2, 4, or 8).
         size: u8,
         /// Value to store (right-justified).
         value: u64,

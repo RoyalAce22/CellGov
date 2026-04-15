@@ -1,14 +1,13 @@
 //! Guest address newtype.
 //!
 //! `GuestAddr` is the runtime's representation of a location in the guest's
-//! flat address space. It is intentionally a distinct type from a host
-//! pointer or a bare `u64`: every site that produces an address must be
-//! deliberate, since address arithmetic is the easiest place to introduce
-//! aliasing and overflow bugs that are invisible until they corrupt
-//! committed memory.
+//! flat address space. It is a distinct type from a host pointer or a bare
+//! `u64`: every site that produces an address must be explicit, since
+//! address arithmetic is the easiest place to introduce aliasing and
+//! overflow bugs that are invisible until they corrupt committed memory.
 //!
-//! There are no `From<u64>` or `Into<u64>` impls on purpose. Use
-//! [`GuestAddr::new`] to lift, [`GuestAddr::raw`] to lower.
+//! There are no `From<u64>` or `Into<u64>` impls. Use [`GuestAddr::new`]
+//! to lift, [`GuestAddr::raw`] to lower.
 
 /// A location in the guest's flat address space, in bytes from address zero.
 ///

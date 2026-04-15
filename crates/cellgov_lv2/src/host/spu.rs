@@ -52,7 +52,7 @@ impl Lv2Host {
 
         // Build the sys_spu_image_t struct (16 bytes, big-endian):
         //   offset 0: type/handle (u32)
-        //   offset 4: entry point (u32) -- 0 for now, resolved at thread init
+        //   offset 4: entry point (u32) -- 0 here, resolved at thread init
         //   offset 8: segments addr (u32) -- opaque, not used by CellGov
         //   offset 12: nsegs (i32) -- 0 for CellGov's purposes
         let handle = record.handle;

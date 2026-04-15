@@ -9,9 +9,8 @@
 /// A non-negative quantity of work a scheduler has authorized a unit to
 /// perform before yielding.
 ///
-/// `Budget` is intentionally a distinct type from
-/// [`crate::ticks::GuestTicks`] and [`crate::epoch::Epoch`]: the three
-/// concepts must not implicitly convert.
+/// `Budget` is a distinct type from [`crate::ticks::GuestTicks`] and
+/// [`crate::epoch::Epoch`]: the three concepts must not implicitly convert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Budget(u64);
 
@@ -22,8 +21,8 @@ impl Budget {
 
     /// Construct a `Budget` from a raw amount.
     ///
-    /// There is no `From<u64>` impl on purpose: every grant site must be
-    /// deliberate so that scheduler policy is auditable from the call graph.
+    /// There is no `From<u64>` impl: every grant site must be explicit so
+    /// that scheduler policy is auditable from the call graph.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)

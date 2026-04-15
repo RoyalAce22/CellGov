@@ -7,10 +7,10 @@
 //! is decided later by an implementation of [`crate::DmaLatencyModel`];
 //! actual application of the transfer happens through the commit pipeline.
 //!
-//! The brief is explicit that DMA is not just `memcpy`. The runtime seam
-//! must let a future asynchronous backend slot in without rewriting call
-//! sites, which is why the request type is decoupled from any synchronous
-//! "do it now" entry point.
+//! DMA is not just `memcpy`: a modeled transfer has latency, an
+//! associated issuer, and a completion event. The request type is
+//! decoupled from any synchronous "do it now" entry point so an
+//! asynchronous backend can slot in without rewriting call sites.
 
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;

@@ -7,10 +7,8 @@
 //! assertions alone cannot detect because replay only compares two
 //! runs against each other, not against a known baseline.
 //!
-//! Currently stores expected record sequences as in-source `Vec`
-//! literals in tests. Future slices may move them to on-disk binary
-//! snapshots loaded via `include_bytes!`; the assertion function's
-//! signature stays the same either way.
+//! Expected record sequences live as in-source `Vec` literals in
+//! tests.
 
 use cellgov_trace::{TraceReader, TraceRecord};
 
@@ -83,8 +81,8 @@ mod tests {
     /// Build the expected golden record sequence for the fake-ISA
     /// scenario. This is the curated core-set pinning: if any change
     /// to the runtime, commit pipeline, or trace emission shifts a
-    /// single record, this test fails and the author must
-    /// deliberately update the expectation.
+    /// single record, this test fails and the author must update the
+    /// expectation to match the new trace shape.
     fn fake_isa_golden_records() -> Vec<TraceRecord> {
         // The program is: LoadImm(0xAB), SharedStore{0,4}, MailboxSend{0}, End
         // 4 steps, budget=1, time advances 1 per step.

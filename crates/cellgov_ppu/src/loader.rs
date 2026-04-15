@@ -98,8 +98,9 @@ pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
 ///
 /// Copies all PT_LOAD segments with nonzero memsz into guest memory
 /// at the specified virtual addresses. The `.bss` portion
-/// (memsz > filesz) is zeroed. Sets `state.pc` to the ELF entry
-/// point.
+/// (memsz > filesz) is zeroed. Resolves the ELF entry point through
+/// its OPD: sets `state.pc` to the code address read from the OPD
+/// and `state.gpr[2]` to the accompanying TOC pointer.
 pub fn load_ppu_elf(
     data: &[u8],
     memory: &mut GuestMemory,

@@ -2,16 +2,15 @@
 //!
 //! `MailboxId` is the leaf identifier the runtime hands out at mailbox
 //! registration time and is the payload of `Effect::MailboxSend` and
-//! `Effect::MailboxReceiveAttempt`. It must exist before the effect
-//! enum can be designed; that is why it landed in an earlier slice.
+//! `Effect::MailboxReceiveAttempt`.
 //!
 //! `Mailbox` is the abstract FIFO. It owns the queued message words
-//! and exposes deterministic `send` / `try_receive` operations. It
-//! does not produce block/wake conditions yet; those land in a
-//! follow-up slice that wires the FIFO into the runtime's commit
-//! pipeline and event queue. Sync state machines do not themselves
-//! decide scheduling order -- this type stays free of any scheduler
-//! awareness.
+//! and exposes deterministic `send` / `try_receive` operations. The
+//! FIFO itself does not produce block/wake conditions; the commit
+//! pipeline and event queue translate empty-receive and full-send
+//! outcomes into block/wake events. Sync state machines do not
+//! themselves decide scheduling order -- this type stays free of any
+//! scheduler awareness.
 //!
 //! Messages are stored as raw `u32` words rather than as
 //! `cellgov_effects::MailboxMessage` because the workspace DAG runs
@@ -23,8 +22,8 @@
 /// `MailboxId`s are assigned by the runtime at mailbox registration time
 /// and are recorded in the trace. They must be unique within a single
 /// runtime instance; reuse across runs is allowed and expected for
-/// replay. There is no `From<u64>` impl on purpose -- ad-hoc id
-/// fabrication outside the registry should be visible at the call site.
+/// replay. There is no `From<u64>` impl -- ad-hoc id fabrication outside
+/// the registry should be visible at the call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct MailboxId(u64);
 
@@ -47,8 +46,8 @@ impl MailboxId {
 /// Backed by a `VecDeque<u32>` which preserves insertion order
 /// independent of host `HashMap` iteration order or thread timing.
 /// No host-time inputs or hash iteration order influence the
-/// result. The FIFO is currently unbounded; capacity / blocking-on-full
-/// semantics land as separate slices when there is a real need.
+/// result. The FIFO is unbounded; capacity and blocking-on-full
+/// semantics can be added when a concrete workload requires them.
 ///
 /// `Mailbox` owns the queued words and nothing else: no `MailboxId`
 /// (the registry that owns the mailbox knows its id), no event-queue
@@ -73,7 +72,7 @@ impl Mailbox {
 
     /// Pop the oldest queued message, if any. Returns `None` when the
     /// FIFO is empty; the integration layer translates that into a
-    /// block condition for the receiving unit in a future slice.
+    /// block condition for the receiving unit.
     #[inline]
     pub fn try_receive(&mut self) -> Option<u32> {
         self.queue.pop_front()

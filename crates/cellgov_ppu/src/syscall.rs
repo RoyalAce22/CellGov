@@ -1,12 +1,12 @@
 //! LV2 syscall number constants and stub classification.
 //!
 //! Only the syscalls the microtests actually use are listed by name.
-//! The SPU thread group family (numbers 170..=178) is treated as a
-//! single range stub for now: the microtest CRT0 calls several
-//! operations in that range (create, initialize, start, join, and
-//! priority-related calls), and they are all classified as benign
-//! no-op returns during PPU-only runs until real SPU execution is
-//! wired in.
+//! The SPU thread group family (numbers 170..=192) is treated as a
+//! single range stub: the microtest CRT0 calls several operations in
+//! that range (create, initialize, start, join, priority-related
+//! calls, plus local-store and signal access up to 192), and they
+//! are all classified as benign no-op returns during PPU-only runs
+//! until real SPU execution takes over.
 
 /// sys_process_exit.
 pub const SYS_PROCESS_EXIT: u64 = 22;
@@ -28,10 +28,9 @@ pub const SYS_SPU_THREAD_GROUP_LAST: u64 = 192;
 
 /// Classify a syscall as a stub that returns CELL_OK without doing
 /// anything. The stub set covers `sys_spu_image_open`, the managed
-/// SPU thread group lifecycle range, and TTY write. Real execution
-/// of these syscalls is a later slice; for now they let the PPU
-/// CRT0 advance past its host boundaries so the runtime can observe
-/// its final state.
+/// SPU thread group lifecycle range, and TTY write. Returning
+/// success without side effects lets the PPU CRT0 advance past its
+/// host boundaries so the runtime can observe its final state.
 ///
 /// Returns `Some(0)` when the syscall is a known stub and the
 /// execution unit should set `r3 = 0` and advance past the `sc`.

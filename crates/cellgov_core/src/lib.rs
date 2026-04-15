@@ -22,7 +22,8 @@
 //! 5. validate effects
 //! 6. stage commit batch
 //! 7. apply commit batch to shared visible state
-//! 8. inject resulting events/wakeups into event queue
+//! 8. inject resulting events/wakeups via status overrides, the DMA
+//!    completion queue, and the syscall response table
 //! 9. advance guest time / epoch deterministically
 //! 10. trace every decision
 

@@ -389,10 +389,10 @@ mod tests {
                 alloc_addr_ptr: 0x9000,
             }
         );
-        let args2 = [0x3000_0000, 0, 0, 0, 0, 0, 0, 0];
+        let args2 = [0x0001_0000, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(
             classify(349, &args2),
-            Lv2Request::MemoryFree { addr: 0x3000_0000 }
+            Lv2Request::MemoryFree { addr: 0x0001_0000 }
         );
     }
 }

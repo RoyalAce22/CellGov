@@ -50,7 +50,7 @@ pub(crate) fn execute_vx(state: &mut PpuState, xo: u16, vt: u8, va: u8, vb: u8) 
         // -- Merge --
         0x00c => vmrghb(a, b), // vmrghb
         0x04c => vmrghh(a, b), // vmrghh
-        0x08c => vmrghw(a, b), // vmrghw (actually 0x08c? check)
+        0x08c => vmrghw(a, b), // vmrghw
         0x40a => vmrglb(a, b), // vmrglb
         0x44a => vmrglh(a, b), // vmrglh
         0x48a => vmrglw(a, b), // vmrglw

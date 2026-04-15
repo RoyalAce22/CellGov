@@ -25,9 +25,10 @@ pub struct ImportedModule {
 pub struct ImportedFunction {
     /// Function NID (Numeric ID) -- a 32-bit hash identifying the function.
     pub nid: u32,
-    /// Guest address of the function stub pointer (GOT entry).
-    /// The stub code loads from this address to find the function
-    /// descriptor, then branches through it.
+    /// Guest address of the GOT-style slot for this import. The
+    /// binder patches this slot with the guest address of an OPD
+    /// (function descriptor) so callers dereference it as a normal
+    /// PPC function pointer.
     pub stub_addr: u32,
 }
 
@@ -54,9 +55,8 @@ const PRX_PARAM_MAGIC: u32 = 0x1b43_4cec;
 /// `ppu_proc_prx_param_t`, then walks the libstub array to enumerate
 /// every imported module and its function NIDs + OPD addresses.
 ///
-/// The `vaddr_to_offset` closure converts guest virtual addresses to
-/// file offsets. For typical PS3 ELFs this accounts for the segment
-/// base differences between vaddr and file offset.
+/// `data` is the full ELF image; addresses inside the PRX param
+/// structure are resolved against the ELF's own segments.
 pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseError> {
     // Find PT_0x60000002 program header.
     if data.len() < 64 {
@@ -191,27 +191,62 @@ pub struct HleBinding {
     pub stub_addr: u32,
 }
 
-/// Size of each HLE trampoline in guest memory (bytes).
+/// Size of each HLE trampoline in guest memory (bytes) for the
+/// `Legacy24` layout. The `Ps3Spec` layout uses a different split
+/// (8-byte OPD plus a separate 16-byte body per binding) and does
+/// not use this constant.
 pub const TRAMPOLINE_SIZE: u32 = 24;
+
+/// Layout strategy for HLE trampolines.
+#[derive(Debug, Clone, Copy)]
+pub enum HleLayout {
+    /// Legacy: 24-byte trampolines packed at `trampoline_base`. Each
+    /// trampoline carries its own inline `lis/ori/sc/blr` body. The
+    /// OPD points to the inline body. Simple and self-contained, but
+    /// the resulting GOT pointer values do not match RPCS3, which
+    /// uses a different layout.
+    Legacy24,
+    /// PS3-spec: 8-byte OPDs packed at `opd_base`, body trampolines
+    /// packed at `body_base`. Each 8-byte OPD = `{ body_addr, toc=0 }`
+    /// where `body_addr` points to a separate per-NID 16-byte body
+    /// (lis/ori/sc/blr). This matches RPCS3's HLE OPD shape (8-byte
+    /// stride in user memory) and the byte size of each GOT entry
+    /// becomes a packed pointer rather than a 24-byte-aligned one.
+    Ps3Spec {
+        /// Guest address of the first 8-byte OPD slot. Subsequent
+        /// bindings get slots at `opd_base + index * 8`.
+        opd_base: u32,
+        /// Guest address of the first 16-byte body trampoline.
+        /// Subsequent bindings get bodies at `body_base + index * 16`.
+        body_base: u32,
+    },
+}
 
 /// Write HLE stub trampolines into guest memory and patch each
 /// imported function's GOT entry to point at the trampoline.
 ///
-/// Each trampoline is 24 bytes:
-///   OPD:  { u32 code_addr, u32 toc }   ; function descriptor
-///   Code: lis r11, hi16                 ; r11 = upper 16 bits << 16
-///         ori r11, r11, lo16            ; r11 |= lower 16 bits
-///         sc                             ; 0x4400_0002
-///         blr                            ; 0x4E80_0020
-///
-/// The OPD's code_addr points at the Code portion (OPD addr + 8).
-/// The GOT entry (at `func.stub_addr`) is patched to point to the OPD.
-///
-/// Returns the list of bindings so the runtime can dispatch HLE calls.
+/// Thin wrapper around [`bind_hle_stubs_with_layout`] that selects
+/// the [`HleLayout::Legacy24`] packing (24 bytes per binding at
+/// `trampoline_base`).
 pub fn bind_hle_stubs(
     modules: &[ImportedModule],
     memory: &mut cellgov_mem::GuestMemory,
     trampoline_base: u32,
+) -> Vec<HleBinding> {
+    bind_hle_stubs_with_layout(modules, memory, HleLayout::Legacy24, trampoline_base)
+}
+
+/// Write HLE stub trampolines using the configured layout.
+///
+/// In `Ps3Spec` mode, 8-byte OPDs land at `opd_base` (in stride-8
+/// order matching RPCS3's `vm::alloc(N*8, vm::main)` HLE table) and
+/// body trampolines land at `body_base` with stride 16. The GOT
+/// entries point at the OPDs.
+pub fn bind_hle_stubs_with_layout(
+    modules: &[ImportedModule],
+    memory: &mut cellgov_mem::GuestMemory,
+    layout: HleLayout,
+    legacy_base: u32,
 ) -> Vec<HleBinding> {
     let mut bindings = Vec::new();
     let mut offset = 0u32;
@@ -220,8 +255,16 @@ pub fn bind_hle_stubs(
         for func in &module.functions {
             let hle_index = bindings.len() as u32;
             let syscall_nr = HLE_SYSCALL_BASE + hle_index;
-            let tramp_addr = trampoline_base + offset;
-            let code_addr = tramp_addr + 8; // OPD is 8 bytes, code follows
+            let (opd_addr, body_addr) = match layout {
+                HleLayout::Legacy24 => {
+                    let tramp = legacy_base + offset;
+                    (tramp, tramp + 8)
+                }
+                HleLayout::Ps3Spec {
+                    opd_base,
+                    body_base,
+                } => (opd_base + hle_index * 8, body_base + hle_index * 16),
+            };
 
             let hi = (syscall_nr >> 16) & 0xFFFF;
             let lo = syscall_nr & 0xFFFF;
@@ -232,28 +275,32 @@ pub fn bind_hle_stubs(
             let sc: u32 = 0x4400_0002;
             let blr: u32 = 0x4E80_0020;
 
-            let range = cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new(tramp_addr as u64),
-                TRAMPOLINE_SIZE as u64,
-            );
-            if let Some(range) = range {
-                let mut bytes = [0u8; 24];
-                // OPD: { code_addr, toc=0 }
-                bytes[0..4].copy_from_slice(&code_addr.to_be_bytes());
+            // Write OPD: { body_addr, toc=0 }.
+            let opd_range =
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(opd_addr as u64), 8);
+            if let Some(range) = opd_range {
+                let mut bytes = [0u8; 8];
+                bytes[0..4].copy_from_slice(&body_addr.to_be_bytes());
                 bytes[4..8].copy_from_slice(&0u32.to_be_bytes());
-                // Code: lis r11, hi; ori r11, r11, lo; sc; blr
-                bytes[8..12].copy_from_slice(&lis_r11.to_be_bytes());
-                bytes[12..16].copy_from_slice(&ori_r11.to_be_bytes());
-                bytes[16..20].copy_from_slice(&sc.to_be_bytes());
-                bytes[20..24].copy_from_slice(&blr.to_be_bytes());
+                let _ = memory.apply_commit(range, &bytes);
+            }
+            // Write body: lis r11, hi; ori r11, r11, lo; sc; blr.
+            let body_range =
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(body_addr as u64), 16);
+            if let Some(range) = body_range {
+                let mut bytes = [0u8; 16];
+                bytes[0..4].copy_from_slice(&lis_r11.to_be_bytes());
+                bytes[4..8].copy_from_slice(&ori_r11.to_be_bytes());
+                bytes[8..12].copy_from_slice(&sc.to_be_bytes());
+                bytes[12..16].copy_from_slice(&blr.to_be_bytes());
                 let _ = memory.apply_commit(range, &bytes);
             }
 
-            // Patch the GOT entry to point to our trampoline's OPD.
+            // Patch the GOT entry to point at the OPD.
             let got_range =
                 cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(func.stub_addr as u64), 4);
             if let Some(range) = got_range {
-                let _ = memory.apply_commit(range, &tramp_addr.to_be_bytes());
+                let _ = memory.apply_commit(range, &opd_addr.to_be_bytes());
             }
 
             bindings.push(HleBinding {

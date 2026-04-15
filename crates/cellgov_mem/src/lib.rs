@@ -7,9 +7,10 @@
 //! - `LocalStore`: execution-unit-private memory where applicable
 //!
 //! API surface must avoid direct `write_u32(addr, value)` style calls. Writes
-//! flow as `SharedWriteIntent` effects through the commit pipeline. Future
-//! additions (reservation granules, barriers, page permissions, MMIO regions)
-//! must slot in without changing top-level interfaces.
+//! flow as `SharedWriteIntent` effects through the commit pipeline. Region
+//! metadata (page-size class, access mode) rides on the `Region` type so
+//! further additions (reservation granules, MMIO regions) slot in without
+//! changing top-level interfaces.
 
 pub mod addr;
 pub mod guest;
@@ -19,7 +20,7 @@ pub mod range;
 pub mod staging;
 
 pub use addr::GuestAddr;
-pub use guest::{GuestMemory, MemError};
+pub use guest::{FaultContext, GuestMemory, MemError, PageSize, Region, RegionAccess};
 pub use hash::{fnv1a, Fnv1aHasher};
 pub use local_store::LocalStore;
 pub use range::ByteRange;

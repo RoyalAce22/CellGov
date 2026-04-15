@@ -3,8 +3,8 @@
 //! Each opcode maps to at least one distinct `Effect` path so the
 //! fake ISA exercises the full effect/commit pipeline from a single
 //! unit type. This is not a real instruction set; it exists so the
-//! runtime contract can be validated under realistic multi-effect
-//! workloads before real PPC/SPU translation lands.
+//! runtime contract can be exercised under multi-effect workloads
+//! without standing up a real PPU or SPU unit.
 //!
 //! A `FakeIsaUnit` holds a `Vec<FakeOp>` program and a program
 //! counter. Each `run_until_yield` call decodes one opcode, emits the

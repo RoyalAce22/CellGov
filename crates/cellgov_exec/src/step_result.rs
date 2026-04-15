@@ -22,13 +22,12 @@ use cellgov_time::Budget;
 
 /// Per-step local diagnostics surfaced by an execution unit.
 ///
-/// Currently an empty extension-point struct. `local_diagnostics` is a
-/// required field on the step result, but no specific contents are
-/// defined yet. Inventing fields ahead of a real consumer would just
-/// create churn when the eventual consumers (trace records, scenario
-/// assertions, scheduler heuristics) actually need specific data.
-/// Adding non-breaking fields later is the same shape as any other Rust
-/// struct: append, derive `Default`, done.
+/// Carries the program counter at step start, an optional faulting
+/// effective address, and an optional register snapshot captured at
+/// fault time. All fields are optional because synthetic and
+/// test-only step results may omit them; arch units populate what
+/// they can. Adding non-breaking fields later is the same shape as
+/// any other Rust struct: append, derive `Default`, done.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct LocalDiagnostics {
     /// Program counter at the start of the step (the instruction
@@ -94,11 +93,10 @@ impl LocalDiagnostics {
 
 /// The result of a single `run_until_yield` call.
 ///
-/// Construction is intentionally explicit (the struct fields are `pub`)
-/// because the field set is fixed and any future addition is a
-/// deliberate change to the runtime contract, not a drive-by edit.
-/// There is no `new(...)` constructor to maintain -- units build the
-/// struct directly.
+/// Construction is explicit (the struct fields are `pub`) because the
+/// field set is fixed and any future addition is a contract change to
+/// the runtime, not a drive-by edit. There is no `new(...)` constructor
+/// to maintain -- units build the struct directly.
 ///
 /// **Invariant on `fault`:** `fault` is `Some` if and only if
 /// `yield_reason == YieldReason::Fault`. The runtime relies on this to
