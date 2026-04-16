@@ -114,7 +114,8 @@ fn main() {
         println!("       cellgov_cli explore micro <name> [--format human|json]");
         println!("       cellgov_cli run-game <elf-path> [--max-steps N] [--trace] [--profile]");
         println!(
-            "       cellgov_cli bench-boot --title <name> [--max-steps N] [--firmware-dir DIR]"
+            "       cellgov_cli bench-boot --title <name> [--max-steps N] [--firmware-dir DIR]\n\
+             \t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR]"
         );
         println!();
         println!("available scenarios:");
@@ -241,23 +242,7 @@ fn main() {
     }
 
     if args[1] == "run-game" {
-        let title = match game::titles::Title::parse_from_args(&args) {
-            Ok(t) => t,
-            Err(game::titles::TitleError::Missing) => {
-                eprintln!(
-                    "run-game: --title is required. Known titles: {}",
-                    game::titles::Title::known_names_csv()
-                );
-                std::process::exit(1);
-            }
-            Err(game::titles::TitleError::Unknown(v)) => {
-                eprintln!(
-                    "run-game: unknown title '{v}'. Known titles: {}",
-                    game::titles::Title::known_names_csv()
-                );
-                std::process::exit(1);
-            }
-        };
+        let title = resolve_title_manifest(&args, "run-game");
         let vfs_root = resolve_ps3_vfs_root(&args);
         let elf_path = find_run_game_elf_path(&args)
             .or_else(|| {
@@ -271,32 +256,14 @@ fn main() {
             })
             .unwrap_or_else(|| {
                 eprintln!(
-                    "usage: cellgov_cli run-game [elf-path] --title <name> [--vfs-root DIR] [--max-steps N] [--trace] [--profile] [--firmware-dir DIR]\n\
-                     \n\
-                     --title selects the PS3 title whose harness config to use.\n\
-                     Known titles: {}\n\
-                     \n\
-                     When no positional elf-path is given, the harness resolves the\n\
-                     title's main executable under <vfs-root>/game/<content-id>/USRDIR/.\n\
-                     VFS root lookup order: --vfs-root <path>, $CELLGOV_PS3_VFS_ROOT,\n\
-                     then 'tools/rpcs3/dev_hdd0' relative to the current directory.\n\
-                     \n\
-                     --firmware-dir points at a directory of decrypted PS3 firmware\n\
-                     PRX modules (e.g. liblv2.sprx). The files come from PS3 system\n\
-                     firmware; one convenient source is RPCS3's dev_flash/sys/external\n\
-                     directory after RPCS3 has installed the system update, but the\n\
-                     dependency is on the PS3 firmware itself, not on RPCS3.\n\
-                     \n\
-                     No executable found for --title {} under vfs-root={}.\n\
+                    "run-game: no executable found for title '{}' under vfs-root={}. \
                      Looked for: {}",
-                    game::titles::Title::known_names_csv(),
                     title.name(),
                     vfs_root.display(),
                     title
-                        .content()
-                        .eboot_candidates
+                        .eboot_candidates()
                         .iter()
-                        .map(|n| format!("game/{}/USRDIR/{n}", title.content().content_id))
+                        .map(|n| format!("game/{}/USRDIR/{n}", title.content_id()))
                         .collect::<Vec<_>>()
                         .join(", ")
                 );
@@ -343,7 +310,7 @@ fn main() {
         let observation_manifest = find_flag_value(&args, "--observation-manifest");
         let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
         game::run_game(
-            title,
+            &title,
             elf_path,
             max_steps,
             trace,
@@ -366,17 +333,7 @@ fn main() {
     }
 
     if args[1] == "bench-boot-once" {
-        let title = match game::titles::Title::parse_from_args(&args) {
-            Ok(t) => t,
-            Err(game::titles::TitleError::Missing) => {
-                eprintln!("bench-boot-once: --title is required");
-                std::process::exit(1);
-            }
-            Err(game::titles::TitleError::Unknown(v)) => {
-                eprintln!("bench-boot-once: unknown title '{v}'");
-                std::process::exit(1);
-            }
-        };
+        let title = resolve_title_manifest(&args, "bench-boot-once");
         let vfs_root = resolve_ps3_vfs_root(&args);
         let elf_path = find_run_game_elf_path(&args)
             .or_else(|| {
@@ -397,34 +354,20 @@ fn main() {
             .unwrap_or(100_000_000);
         let firmware_dir = find_flag_value(&args, "--firmware-dir");
         let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
+        let checkpoint_override = resolve_checkpoint_override(&args, "bench-boot-once");
         game::bench_boot_one_run(
-            title,
+            &title,
             &elf_path,
             max_steps,
             firmware_dir.as_deref(),
             strict_reserved,
+            checkpoint_override,
         );
         return;
     }
 
     if args[1] == "bench-boot" {
-        let title = match game::titles::Title::parse_from_args(&args) {
-            Ok(t) => t,
-            Err(game::titles::TitleError::Missing) => {
-                eprintln!(
-                    "bench-boot: --title is required. Known titles: {}",
-                    game::titles::Title::known_names_csv()
-                );
-                std::process::exit(1);
-            }
-            Err(game::titles::TitleError::Unknown(v)) => {
-                eprintln!(
-                    "bench-boot: unknown title '{v}'. Known titles: {}",
-                    game::titles::Title::known_names_csv()
-                );
-                std::process::exit(1);
-            }
-        };
+        let title = resolve_title_manifest(&args, "bench-boot");
         let vfs_root = resolve_ps3_vfs_root(&args);
         let elf_path = find_run_game_elf_path(&args)
             .or_else(|| {
@@ -445,12 +388,14 @@ fn main() {
             .unwrap_or(100_000_000);
         let firmware_dir = find_flag_value(&args, "--firmware-dir");
         let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
+        let checkpoint_override = resolve_checkpoint_override(&args, "bench-boot");
         let (r1, r2) = game::bench_boot_pair(
-            title,
+            &title,
             &elf_path,
             max_steps,
             firmware_dir.as_deref(),
             strict_reserved,
+            checkpoint_override,
         );
         let agreement = game::agreement_percent(r1.wall, r2.wall);
         if agreement > 5.0 {
@@ -549,6 +494,8 @@ fn find_flag_value(args: &[String], flag: &str) -> Option<String> {
 /// `--flag VALUE` pairs when locating the positional ELF path.
 const RUN_GAME_VALUE_FLAGS: &[&str] = &[
     "--title",
+    "--content-id",
+    "--title-manifest",
     "--vfs-root",
     "--max-steps",
     "--firmware-dir",
@@ -558,7 +505,82 @@ const RUN_GAME_VALUE_FLAGS: &[&str] = &[
     "--patch-byte",
     "--save-observation",
     "--observation-manifest",
+    "--checkpoint",
 ];
+
+/// Location the `TitleRegistry` scans by default. Absolute path is
+/// not required -- callers run CellGov from the repo root, where
+/// `docs/titles/` sits alongside `tools/rpcs3`. Kept as a constant
+/// so error diagnostics can name the resolved directory.
+const DEFAULT_TITLE_REGISTRY_DIR: &str = "docs/titles";
+
+/// Resolve the active [`game::manifest::TitleManifest`] for a
+/// subcommand, in priority order:
+///
+/// 1. `--title-manifest <path>` -- load that single TOML file
+///    directly (no registry scan needed).
+/// 2. `--content-id <NPUA80068>` -- scan
+///    `DEFAULT_TITLE_REGISTRY_DIR` and look up by content id.
+/// 3. `--title <shortname>` -- scan the registry and look up by
+///    short name.
+///
+/// Any error in flag parsing or file loading prints a diagnostic
+/// prefixed with `subcmd` and exits with status 1.
+fn resolve_title_manifest(args: &[String], subcmd: &str) -> game::manifest::TitleManifest {
+    if let Some(p) = find_flag_value(args, "--title-manifest") {
+        return game::manifest::TitleManifest::load_from_path(std::path::Path::new(&p))
+            .unwrap_or_else(|e| {
+                eprintln!("{subcmd}: {e}");
+                std::process::exit(1);
+            });
+    }
+    let registry =
+        game::manifest::TitleRegistry::scan_dir(std::path::Path::new(DEFAULT_TITLE_REGISTRY_DIR))
+            .unwrap_or_else(|e| {
+                eprintln!("{subcmd}: title registry: {e}");
+                std::process::exit(1);
+            });
+    if let Some(cid) = find_flag_value(args, "--content-id") {
+        return registry.by_content_id(&cid).cloned().unwrap_or_else(|| {
+            eprintln!(
+                "{subcmd}: unknown content id '{cid}'. Known titles: {}",
+                registry.known_names_csv()
+            );
+            std::process::exit(1);
+        });
+    }
+    if let Some(sn) = find_flag_value(args, "--title") {
+        return registry.by_short_name(&sn).cloned().unwrap_or_else(|| {
+            eprintln!(
+                "{subcmd}: unknown title '{sn}'. Known titles: {}",
+                registry.known_names_csv()
+            );
+            std::process::exit(1);
+        });
+    }
+    eprintln!(
+        "{subcmd}: one of --title, --content-id, or --title-manifest is required. \
+         Known titles: {}",
+        registry.known_names_csv()
+    );
+    std::process::exit(1);
+}
+
+/// Parse `--checkpoint <kind>` out of args, surfacing malformed
+/// values as a `subcmd`-prefixed error and clean exit.
+fn resolve_checkpoint_override(
+    args: &[String],
+    subcmd: &str,
+) -> Option<game::manifest::CheckpointTrigger> {
+    match game::manifest::CheckpointTrigger::parse_from_args(args) {
+        Some(Ok(cp)) => Some(cp),
+        Some(Err(msg)) => {
+            eprintln!("{subcmd}: {msg}");
+            std::process::exit(1);
+        }
+        None => None,
+    }
+}
 
 /// Resolve the PS3 VFS root (a directory that acts as
 /// `/dev_hdd0` from the guest's perspective) using, in order:

@@ -1,0 +1,10 @@
+[title]
+content_id = "NPUA80001"
+short_name = "flow"
+display_name = "flOw (thatgamecompany, 2007)"
+eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+
+[checkpoint]
+# flOw's boot reaches sys_process_exit deterministically under
+# CellGov, so its default checkpoint is that syscall.
+kind = "process-exit"

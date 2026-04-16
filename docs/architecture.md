@@ -225,6 +225,21 @@ faults, the rest of the system sees nothing the unit tried to do.
 This is what makes the determinism guarantees mechanical rather than
 aspirational.
 
+**Trivial-step fast path (FaultDriven only).** When
+`emitted_effects` is empty, `fault` is `None`, `yield_reason`
+is neither `Syscall` nor `Finished`, and the DMA queue is empty,
+`Runtime::commit_step` skips steps 5-8 entirely and only advances
+the epoch (step 9 still runs). Under `RuntimeMode::FaultDriven`
+the trace records of steps 1-8 are suppressed anyway, so the
+observable contract is identical -- every atomic-batch boundary
+still advances the epoch, and scheduler-visible state
+(`status_overrides`, pending receives / syscall returns / reg
+writes) is unchanged by an empty commit. The fast path cuts the
+per-step commit cost for PPU-bound hot loops that dominate real
+game boots; scenarios with async state (pending DMA, pending
+wakes) naturally fall to the slow path on the step that
+originates or observes the async event.
+
 ## Effects and trace records
 
 The full vocabulary of guest-visible operations:
@@ -296,7 +311,7 @@ Both layouts produce semantically equivalent bindings -- the same
 NID reaches the same dispatch handler regardless of layout. The
 choice only affects where the OPDs sit in the address space, which
 matters for cross-runner byte comparisons. See
-[crates/cellgov_ppu/tests/hle_layout.rs](crates/cellgov_ppu/tests/hle_layout.rs)
+[crates/cellgov_ppu/tests/hle_layout.rs](../crates/cellgov_ppu/tests/hle_layout.rs)
 for the equivalence test that backs this property.
 
 `run-game` exposes three env vars for firmware-loading experiments:
@@ -439,7 +454,7 @@ shared region manifest into the same `Observation` JSON
 The patched RPCS3 binary is built by the developer; the CellGov
 library has no Cargo or runtime dependency on RPCS3. The bridge is
 a verification-time tool, not a library coupling. See
-`tests/fixtures/flow_cross_runner/REPRODUCTION.md` for the build commands
+`tests/fixtures/NPUA80001_cross_runner/REPRODUCTION.md` for the build commands
 and the documented vendored-RPCS3 build-config workarounds.
 
 ### Oracle-mode config contract
@@ -460,25 +475,38 @@ scripting.
 
 ## Title harness (`cellgov_cli`)
 
-All title-specific configuration lives in `apps/cellgov_cli/src/
-game/titles.rs`; no library crate below `cellgov_cli` knows that
-titles exist. The harness is currently wired for two titles:
+Title-specific configuration lives in TOML manifests under
+`docs/titles/<content-id>.toml`; no library crate below
+`cellgov_cli` knows that titles exist. `cellgov_cli` scans the
+directory at startup, building a registry that the CLI looks up
+by short name (`--title sshd`), content id (`--content-id
+NPUA80068`), or explicit manifest path (`--title-manifest
+<file>`). The harness is currently wired for two titles:
 
-- **flOw** (NPUA80001): checkpoint is `ProcessExit` -- flOw's boot
-  calls `sys_process_exit` on its own and CellGov records the
+- **flOw** (NPUA80001): checkpoint is `process-exit` -- flOw's
+  boot calls `sys_process_exit` on its own and CellGov records the
   observation at that point.
 - **Super Stardust HD** (NPUA80068): checkpoint is
-  `FirstRsxWrite` -- SSHD's attract-mode loop never exits, so the
-  harness treats the first PPU write into the `rsx` reserved region
-  as a checkpoint hit.
+  `first-rsx-write` -- SSHD's attract-mode loop never exits, so
+  the harness treats the first PPU write into the `rsx` reserved
+  region as a checkpoint hit.
+
+Adding a third title is a single-file TOML commit under
+`docs/titles/`; no Rust change is needed as long as the title
+fits the existing checkpoint kinds (`process-exit`,
+`first-rsx-write`, `pc`) and the standard PS3 VFS layout. The
+`--checkpoint <kind>` flag overrides the manifest default per
+run for targeted diagnostics (e.g. `--checkpoint pc=0x10381ce8`
+for step-count-aligned A/B measurements).
 
 EBOOT resolution walks
 `<vfs-root>/game/<content-id>/USRDIR/<candidate>` in the order the
-title declares, preferring a decrypted `EBOOT.elf` over the
-encrypted `EBOOT.BIN`. Every real retail PS3 EBOOT is a SELF and
-must be decrypted once via `rpcs3.exe --decrypt` before CellGov can
-load it; `<vfs-root>` defaults to `tools/rpcs3/dev_hdd0` and can be
-overridden by `--vfs-root` or `$CELLGOV_PS3_VFS_ROOT`.
+manifest's `eboot_candidates` declares, preferring a decrypted
+`EBOOT.elf` over the encrypted `EBOOT.BIN`. Every real retail PS3
+EBOOT is a SELF and must be decrypted once via
+`rpcs3.exe --decrypt` before CellGov can load it; `<vfs-root>`
+defaults to `tools/rpcs3/dev_hdd0` and can be overridden by
+`--vfs-root` or `$CELLGOV_PS3_VFS_ROOT`.
 
 The diagnostic surface is:
 
@@ -489,11 +517,18 @@ The diagnostic surface is:
   subprocess split is deliberate; two in-process boots on Windows
   see ~60 percent drift from 1 GB guest-memory allocation / page-
   commit reuse across `Runtime` instances in one process.
+  `--checkpoint pc=0xADDR` stops at a specific retired PC, useful
+  for A/B measurements that need identical step counts across
+  runs.
 - `dump-imports --title <name>`: prints the title's full HLE
   import table with NID, NID-DB name, stub classification, and
-  whether CellGov has dedicated handling. The regenerated
-  artifacts live at [docs/titles/flow_hle_inventory.md](titles/flow_hle_inventory.md)
-  and [docs/titles/sshd_hle_inventory.md](titles/sshd_hle_inventory.md).
+  whether CellGov has dedicated handling (the `impl` / `stub`
+  classification reads from
+  `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`, the single
+  library-level source of truth the runtime PRX binder also
+  consults). The regenerated artifacts live at
+  [docs/titles/NPUA80001_hle_inventory.md](titles/NPUA80001_hle_inventory.md)
+  and [docs/titles/NPUA80068_hle_inventory.md](titles/NPUA80068_hle_inventory.md).
 
 ## Boot status
 

@@ -48,6 +48,12 @@ pub enum BootOutcome {
     /// comparison checkpoint. Both runners reach it deterministically
     /// once per boot.
     RsxWriteCheckpoint,
+    /// A step retired with its `local_diagnostics.pc` equal to a
+    /// PC supplied via the CLI's `--checkpoint pc=0xADDR` flag.
+    /// The payload is that PC. Used by the bench harness to stop
+    /// at a named instruction for A/B measurements; not a
+    /// title-default trigger.
+    PcReached(u64),
 }
 
 /// Build an `Observation` from a completed `run-game`-style boot.
@@ -71,6 +77,12 @@ pub fn observe_from_boot(
         // RSX-write checkpoint is a success signal: the guest
         // reached the agreed-upon cross-runner stopping point.
         BootOutcome::RsxWriteCheckpoint => ObservedOutcome::Completed,
+        // A PC-checkpoint stop is likewise a success signal: the
+        // named instruction retired. The harness uses this for
+        // bench-boot A/B measurements; classifying it as Completed
+        // keeps it symmetric with the RSX-write and process-exit
+        // signals for any downstream comparator.
+        BootOutcome::PcReached(_) => ObservedOutcome::Completed,
     };
 
     let memory_regions = regions
@@ -409,6 +421,18 @@ mod tests {
         assert_eq!(fault.outcome, ObservedOutcome::Fault);
         let timeout = observe_from_boot(&mem, BootOutcome::MaxSteps, 100_000, &[]);
         assert_eq!(timeout.outcome, ObservedOutcome::Timeout);
+    }
+
+    #[test]
+    fn observe_from_boot_maps_pc_reached_to_completed() {
+        // A PC-checkpoint stop is a success signal on the same
+        // footing as process-exit and RSX-write; classify as
+        // Completed so the cross-runner comparator can diff
+        // observations produced with --checkpoint pc=ADDR.
+        let mem = vec![0u8; 16];
+        let obs = observe_from_boot(&mem, BootOutcome::PcReached(0x10381ce8), 1402388, &[]);
+        assert_eq!(obs.outcome, ObservedOutcome::Completed);
+        assert_eq!(obs.metadata.steps, Some(1402388));
     }
 
     #[test]

@@ -3,62 +3,35 @@
 //! function alongside its NID-DB name, stub classification, and
 //! whether CellGov has dedicated handling.
 //!
-//! The regenerated artifacts live under `docs/titles/`:
+//! The regenerated artifacts live under `docs/titles/`, keyed by
+//! PSN content id:
 //!
-//! - `docs/titles/flow_hle_inventory.md`
-//! - `docs/titles/sshd_hle_inventory.md`
+//! - `docs/titles/NPUA80001_hle_inventory.md` (flOw)
+//! - `docs/titles/NPUA80068_hle_inventory.md` (Super Stardust HD)
 //!
 //! Regenerate one with:
 //!
 //! ```text
-//! cellgov_cli dump-imports --title <name> \
-//!     > docs/titles/<name>_hle_inventory.md
+//! cellgov_cli dump-imports --title <shortname> \
+//!     > docs/titles/<content-id>_hle_inventory.md
 //! ```
 //!
-//! Title resolution reuses the run-game / bench-boot VFS lookup
-//! path (`--vfs-root`, `$CELLGOV_PS3_VFS_ROOT`,
+//! Title resolution accepts any of `--title <shortname>`,
+//! `--content-id <NPUAXXXXX>`, or `--title-manifest <path>`; the
+//! VFS lookup path is the same as `run-game` / `bench-boot`
+//! (`--vfs-root`, `$CELLGOV_PS3_VFS_ROOT`,
 //! `tools/rpcs3/dev_hdd0`).
 
-use crate::game;
-
-/// NIDs with dedicated CellGov HLE handling, kept as HLE
-/// trampolines instead of being patched to a loaded PRX's
-/// implementation. Mirrors the list in
-/// `game::prx::load_firmware_prx`; the inventory artifact is a
-/// diagnostic surface, not a runtime dependency, so the
-/// duplication keeps library crates free of CLI-tool coupling.
-const CELLGOV_HLE_IMPLEMENTED_NIDS: &[u32] = &[
-    0x744680a2, // sys_initialize_tls
-    0xbdb18f83, // _sys_malloc
-    0xf7f7fb20, // _sys_free
-    0x68b9b011, // _sys_memset
-    0xe6f2c1e7, // sys_process_exit
-    0xb2fcf2c8, // _sys_heap_create_heap
-    0x2f85c0ef, // sys_lwmutex_create
-    0x1573dc3f, // sys_lwmutex_lock
-    0xc3476d0c, // sys_lwmutex_destroy
-    0x1bc200f4, // sys_lwmutex_unlock
-    0xaeb78725, // sys_lwmutex_trylock
-    0x8461e528, // sys_time_get_system_time
-    0x350d454e, // sys_ppu_thread_get_id
-    0x24a1ea07, // sys_ppu_thread_create
-    0x4f7172c9, // sys_process_is_stack
-    0xa2c7ba64, // sys_prx_exitspawn_with_level
-];
+/// NIDs with dedicated CellGov HLE handling. Re-exported from
+/// `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` so the inventory tool
+/// and the runtime PRX binder read from a single source of truth;
+/// adding a new HLE implementation only requires updating the
+/// library constant.
+const CELLGOV_HLE_IMPLEMENTED_NIDS: &[u32] = cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS;
 
 /// Entry point for `cellgov_cli dump-imports --title <name>`.
 pub(crate) fn run(args: &[String]) {
-    let title = match game::titles::Title::parse_from_args(args) {
-        Ok(t) => t,
-        Err(game::titles::TitleError::Missing) => {
-            eprintln!("dump-imports: --title is required");
-            std::process::exit(1);
-        }
-        Err(game::titles::TitleError::Unknown(v)) => {
-            eprintln!("dump-imports: unknown title '{v}'");
-            std::process::exit(1);
-        }
-    };
+    let title = crate::resolve_title_manifest(args, "dump-imports");
     let vfs_root = crate::resolve_ps3_vfs_root(args);
     let elf_path = title.resolve_eboot(&vfs_root).unwrap_or_else(|| {
         eprintln!(
@@ -168,5 +141,17 @@ mod tests {
         let mut deduped = sorted.clone();
         deduped.dedup();
         assert_eq!(sorted.len(), deduped.len(), "duplicate NID in list");
+    }
+
+    #[test]
+    fn inventory_and_runtime_share_the_same_nid_list() {
+        // Pin the single-source-of-truth contract: the dump-imports
+        // tool and the runtime PRX binder both read
+        // `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`. If someone adds
+        // a NID to one call site only, this test fails.
+        assert_eq!(
+            CELLGOV_HLE_IMPLEMENTED_NIDS,
+            cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS
+        );
     }
 }
