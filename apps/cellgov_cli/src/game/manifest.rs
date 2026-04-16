@@ -307,9 +307,8 @@ pub struct TitleRegistry {
 }
 
 // `iter`, `single_from_path`, and `is_empty` are part of the
-// public surface used by tests and future Phase-13 tooling even
-// though the current CLI only hits `by_short_name` /
-// `by_content_id`.
+// public surface used by tests even though the current CLI only
+// hits `by_short_name` / `by_content_id`.
 #[allow(dead_code)]
 impl TitleRegistry {
     /// Scan `dir` for `*.toml` files, load each as a

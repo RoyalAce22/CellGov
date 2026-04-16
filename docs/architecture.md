@@ -115,7 +115,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cellgov_time`                 | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time.                                                                                                                                                                                           |
 | `cellgov_event`                | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary.                                                                                                                                                                                                             |
-| `cellgov_mem`                  | `GuestMemory` (sparse `BTreeMap<u64, Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`.                                                                                                                 |
+| `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`.                                                                                                                           |
 | `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier and wait-set primitives.                                                                                                                                                                                                                                |
 | `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                     |
 | `cellgov_effects`              | The 9-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                      |
@@ -134,16 +134,16 @@ workspace compiles under `unsafe_code = "forbid"`.
 
 ## Guest memory layout
 
-`cellgov_mem::GuestMemory` is a sparse `BTreeMap<u64, Region>` keyed
-by region base address. Each `Region` owns a `Vec<u8>` sized to that
+`cellgov_mem::GuestMemory` is a sorted `Vec<Region>` keyed by
+region base address. Each `Region` owns a `Vec<u8>` sized to that
 region plus a label, page-size class, and access mode. Address
-translation goes through `containing_region(addr, length)`, which
-returns the region entirely containing the range or `None` if the
-access straddles a boundary or falls in an unmapped gap.
+translation goes through `containing_region(addr, length)` (a
+binary search), which returns the region entirely containing the
+range or `None` if the access straddles a boundary or falls in an
+unmapped gap.
 
 The `run-game` driver builds four regions matching the canonical PS3
-LV2 virtual-address layout (cross-referenced against RPCS3's
-`Emu/Memory/vm.cpp`):
+LV2 virtual-address layout:
 
 | Guest VA              | Size   | Label          | Access                           | Purpose                                                                  |
 | --------------------- | ------ | -------------- | -------------------------------- | ------------------------------------------------------------------------ |

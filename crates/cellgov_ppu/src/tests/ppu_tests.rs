@@ -1233,3 +1233,224 @@ fn non_fault_step_has_no_register_dump() {
         "non-fault step should not include register dump"
     );
 }
+
+// -------------------------------------------------------------------
+// Predecoded-shadow invalidation test suite.
+//
+// These tests establish the correctness contract for the
+// predecoded instruction shadow. They must pass bit-identically
+// whether the shadow is active or not.
+//
+// Pattern: each test seeds code that writes a result register to
+// a scratch memory address (0x80) via `stw`, then reads committed
+// memory to check the value. This avoids needing to access PPU
+// register state through `dyn RegisteredUnit`.
+// -------------------------------------------------------------------
+
+mod insn_encode {
+    pub fn li(rd: u32, simm: i16) -> u32 {
+        (14 << 26) | (rd << 21) | ((simm as u16) as u32)
+    }
+    pub fn stw(rs: u32, ra: u32, d: i16) -> u32 {
+        (36 << 26) | (rs << 21) | (ra << 16) | ((d as u16) as u32)
+    }
+    /// Relative unconditional branch. `offset` is a signed byte
+    /// displacement from the current PC (must be 4-byte aligned).
+    pub fn b(offset: i32) -> u32 {
+        (18 << 26) | ((offset as u32) & 0x03FF_FFFC)
+    }
+}
+
+fn step_n(rt: &mut cellgov_core::Runtime, n: usize) {
+    for _ in 0..n {
+        match rt.step() {
+            Ok(s) => {
+                let _ = rt.commit_step(&s.result);
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+fn read_mem_u32(rt: &cellgov_core::Runtime, addr: usize) -> u32 {
+    let m = rt.memory().as_bytes();
+    u32::from_be_bytes([m[addr], m[addr + 1], m[addr + 2], m[addr + 3]])
+}
+
+/// Shadow invalidation scenario 1 -- CRT0 relocation replay.
+///
+/// Seed `li r3, 10` at PC=0, execute it, then overwrite PC=0 with
+/// `li r3, 20` via apply_commit, loop back, execute again. The
+/// store at 0x04 writes r3 to scratch address 0x80 each pass.
+#[test]
+fn shadow_inv_crt0_reloc_replay() {
+    use insn_encode::*;
+    let mut mem = GuestMemory::new(256);
+    place_insn(&mut mem, 0x00, li(3, 10));
+    place_insn(&mut mem, 0x04, stw(3, 0, 0x80));
+    place_insn(&mut mem, 0x08, b(-8));
+
+    let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 100);
+    rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
+    rt.registry_mut().register_with(PpuExecutionUnit::new);
+
+    // Pass 1 (3 steps): li r3,10 -> stw r3,0x80 -> b -8.
+    step_n(&mut rt, 3);
+    assert_eq!(read_mem_u32(&rt, 0x80), 10);
+
+    // Overwrite PC=0 with `li r3, 20`.
+    rt.memory_mut()
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+            &li(3, 20).to_be_bytes(),
+        )
+        .unwrap();
+
+    // Pass 2 (3 steps): li r3,20 -> stw r3,0x80 -> b -8.
+    step_n(&mut rt, 3);
+    assert_eq!(
+        read_mem_u32(&rt, 0x80),
+        20,
+        "rewritten instruction must be observed"
+    );
+}
+
+/// Shadow invalidation scenario 2 -- HLE trampoline plant + execute + re-plant.
+///
+/// Plant `li r3, 111` at PC=0, execute, overwrite with
+/// `li r3, 222`, loop back, execute again. Mimics the PRX binder
+/// planting an HLE stub, executing it, then overwriting with a
+/// different stub.
+#[test]
+fn shadow_inv_hle_trampoline_replant() {
+    use insn_encode::*;
+    let mut mem = GuestMemory::new(256);
+    place_insn(&mut mem, 0x00, li(3, 111));
+    place_insn(&mut mem, 0x04, stw(3, 0, 0x80));
+    place_insn(&mut mem, 0x08, b(-8));
+
+    let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 100);
+    rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
+    rt.registry_mut().register_with(PpuExecutionUnit::new);
+
+    step_n(&mut rt, 3);
+    assert_eq!(read_mem_u32(&rt, 0x80), 111);
+
+    // Re-plant with different value.
+    rt.memory_mut()
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+            &li(3, 222).to_be_bytes(),
+        )
+        .unwrap();
+
+    step_n(&mut rt, 3);
+    assert_eq!(
+        read_mem_u32(&rt, 0x80),
+        222,
+        "second HLE stub value must be observed"
+    );
+}
+
+/// Shadow invalidation scenario 3 -- Write-execute-rewrite-execute across commit
+/// boundary.
+///
+/// Seed `li r3, 100`, execute + store to 0x80 (reads back 100),
+/// then overwrite PC=0 with `li r3, 999`, execute again + store
+/// (reads back 999). Both values must match the committed bytes at
+/// their respective commit points.
+#[test]
+fn shadow_inv_write_exec_rewrite_exec() {
+    use insn_encode::*;
+    let mut mem = GuestMemory::new(256);
+    place_insn(&mut mem, 0x00, li(3, 100));
+    place_insn(&mut mem, 0x04, stw(3, 0, 0x80));
+    place_insn(&mut mem, 0x08, b(-8));
+
+    let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 200);
+    rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
+    rt.registry_mut().register_with(PpuExecutionUnit::new);
+
+    step_n(&mut rt, 3);
+    assert_eq!(read_mem_u32(&rt, 0x80), 100, "first pass stores 100");
+
+    rt.memory_mut()
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(0x00), 4).unwrap(),
+            &li(3, 999).to_be_bytes(),
+        )
+        .unwrap();
+
+    step_n(&mut rt, 3);
+    assert_eq!(
+        read_mem_u32(&rt, 0x80),
+        999,
+        "second pass stores 999 after rewrite"
+    );
+}
+
+/// Shadow invalidation scenario 4 -- Cross-slot write into text.
+///
+/// A 4-byte write that straddles two instruction-word-aligned
+/// slots (offsets 2..6) must be reflected in both words on the
+/// next fetch.
+#[test]
+fn shadow_inv_cross_slot_write() {
+    use insn_encode::*;
+    let mut mem = GuestMemory::new(256);
+    // Seed: slot 0 = li r3, 0 (38 60 00 00), slot 1 = li r4, 0 (38 80 00 00).
+    place_insn(&mut mem, 0x00, li(3, 0));
+    place_insn(&mut mem, 0x04, li(4, 0));
+    place_insn(&mut mem, 0x08, stw(3, 0, 0x80));
+    place_insn(&mut mem, 0x0C, b(0));
+
+    // Patch bytes 2..6: [00 0A 38 C0]
+    //   slot 0 becomes: 38 60 00 0A = li r3, 10
+    //   slot 1 becomes: 38 C0 00 00 = li r6, 0 (changed rD)
+    let patch = [0x00u8, 0x0A, 0x38, 0xC0];
+    mem.apply_commit(ByteRange::new(GuestAddr::new(2), 4).unwrap(), &patch)
+        .unwrap();
+
+    let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 50);
+    rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
+    rt.registry_mut().register_with(PpuExecutionUnit::new);
+
+    // li r3,10 -> li r6,0 -> stw r3,0x80 -> spin.
+    step_n(&mut rt, 3);
+    assert_eq!(
+        read_mem_u32(&rt, 0x80),
+        10,
+        "slot 0 must reflect the cross-slot patch"
+    );
+}
+
+/// Shadow invalidation scenario 5 -- Partial-word write into a text slot.
+///
+/// A single-byte write into the low byte of an instruction word
+/// must produce the partially-modified instruction on the next
+/// fetch.
+#[test]
+fn shadow_inv_partial_word_write() {
+    use insn_encode::*;
+    let mut mem = GuestMemory::new(256);
+    // li r3, 0 at 0x00: bytes 38 60 00 00.
+    place_insn(&mut mem, 0x00, li(3, 0));
+    place_insn(&mut mem, 0x04, stw(3, 0, 0x80));
+    place_insn(&mut mem, 0x08, b(0));
+
+    // Patch byte 3 from 0x00 to 0x2A -> li r3, 42.
+    mem.apply_commit(ByteRange::new(GuestAddr::new(3), 1).unwrap(), &[0x2A])
+        .unwrap();
+
+    let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 50);
+    rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
+    rt.registry_mut().register_with(PpuExecutionUnit::new);
+
+    // li r3,42 -> stw r3,0x80.
+    step_n(&mut rt, 2);
+    assert_eq!(
+        read_mem_u32(&rt, 0x80),
+        42,
+        "partial-byte patch must be observed"
+    );
+}

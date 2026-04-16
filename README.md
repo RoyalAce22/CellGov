@@ -72,28 +72,31 @@ Pre-Alpha. Capability today:
 - **LV2 syscalls: 16 with non-default handling** (the rest return
   canned codes through the Unsupported variant and surface as
   faults if a guest call needs them).
-- **HLE exports: 10 with dedicated handling** in
-  `cellgov_core::hle::dispatch_hle`; the default path returns 0.
-  Per-title import inventories live at
+- **HLE exports: 10 with dedicated handling;** the default path
+  returns 0. Per-title import inventories live at
   [`docs/titles/NPUA80001_hle_inventory.md`](docs/titles/NPUA80001_hle_inventory.md)
   and [`docs/titles/NPUA80068_hle_inventory.md`](docs/titles/NPUA80068_hle_inventory.md);
   regenerate with `cellgov_cli dump-imports --title <name>`.
-- PS3-spec guest memory layout: sparse `BTreeMap<u64, Region>`
-  matching RPCS3 `vm.cpp`'s VA blocks. `sys_memory_allocate` returns
-  pointers in `0x00010000-0x0FFFFFFF` (above the loaded ELF), the
-  primary thread stack lives at `0xD0000000+`, and RSX/SPU-reserved
-  ranges are addressable as zero-readable provisional regions.
-- Per-step divergence trace: opt-in `PpuStateHash` records (one per
-  retired PPU instruction), a streaming `diverge` scanner, and a
-  zoom-in mode that names the exact register field that
-  disagrees.
-- Configurable HLE OPD packing: 24-byte per-binding trampolines for
-  microtests, or 8-byte packed OPDs in user memory matching RPCS3's
-  HLE-table shape for cross-runner comparison.
+- PS3-spec guest memory layout: sparse multi-region address space
+  matching the real PS3 virtual-address map. `sys_memory_allocate`
+  returns pointers in `0x00010000-0x0FFFFFFF` (above the loaded
+  ELF), the primary thread stack lives at `0xD0000000+`, and
+  RSX/SPU-reserved ranges are addressable as zero-readable
+  provisional regions.
+- Per-step divergence trace: opt-in per-instruction state hashes,
+  a streaming `diverge` scanner, and a zoom-in mode that names
+  the exact register field that disagrees.
+- Configurable HLE binding layout: trampolines for test scenarios,
+  or a packed layout matching RPCS3's HLE-table shape for
+  cross-runner comparison.
 - Reproducible boot bench: `cellgov_cli bench-boot --title <name>`
   runs two subprocess-isolated boots and reports wall time +
-  steps/sec with a 5 percent cross-run agreement gate.
-- 1048 tests across 15 library crates and 3 binaries, zero
+  steps/sec; rejects pairs that disagree by more than 5 percent.
+- Predecoded instruction shadow: instructions are decoded once at
+  load time and cached. Subsequent fetches skip the decode step;
+  guest-visible code writes invalidate the affected cache entries
+  and re-decode on the next fetch.
+- 1065 tests across 15 library crates and 3 binaries, zero
   `unsafe` (workspace-level `unsafe_code = forbid`).
 
 ## Workspace

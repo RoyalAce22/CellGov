@@ -586,11 +586,15 @@ pub fn execute(
         // =================================================================
         // Branch
         // =================================================================
-        PpuInstruction::B { offset, link } => {
+        PpuInstruction::B { offset, aa, link } => {
             if link {
                 state.lr = state.pc + 4;
             }
-            state.pc = (state.pc as i64).wrapping_add(offset as i64) as u64;
+            if aa {
+                state.pc = (offset as u64) & 0xFFFF_FFFF_FFFF_FFFC;
+            } else {
+                state.pc = (state.pc as i64).wrapping_add(offset as i64) as u64;
+            }
             PpuStepOutcome::Branch
         }
         PpuInstruction::Bc {
@@ -943,6 +947,7 @@ mod tests {
         let result = execute(
             &PpuInstruction::B {
                 offset: -8,
+                aa: false,
                 link: false,
             },
             &mut s,
@@ -959,6 +964,7 @@ mod tests {
         execute(
             &PpuInstruction::B {
                 offset: 0x100,
+                aa: false,
                 link: true,
             },
             &mut s,
@@ -966,6 +972,43 @@ mod tests {
         );
         assert_eq!(s.lr, 0x1004);
         assert_eq!(s.pc, 0x1100);
+    }
+
+    #[test]
+    fn ba_branches_to_absolute_address() {
+        let mut s = PpuState::new();
+        s.pc = 0x2000;
+        let result = execute(
+            &PpuInstruction::B {
+                offset: 0x100,
+                aa: true,
+                link: false,
+            },
+            &mut s,
+            uid(),
+        );
+        assert!(matches!(result, PpuStepOutcome::Branch));
+        assert_eq!(
+            s.pc, 0x100,
+            "aa=true: target is offset itself, not PC+offset"
+        );
+    }
+
+    #[test]
+    fn bla_sets_lr_and_branches_absolute() {
+        let mut s = PpuState::new();
+        s.pc = 0x2000;
+        execute(
+            &PpuInstruction::B {
+                offset: 0x400,
+                aa: true,
+                link: true,
+            },
+            &mut s,
+            uid(),
+        );
+        assert_eq!(s.lr, 0x2004);
+        assert_eq!(s.pc, 0x400);
     }
 
     #[test]

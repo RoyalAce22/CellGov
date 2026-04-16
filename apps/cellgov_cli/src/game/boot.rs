@@ -285,6 +285,15 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
+    // Build the predecoded instruction shadow from the base-0
+    // region's bytes BEFORE moving `mem` into the Runtime. All
+    // boot-time code writes (ELF load, PRX load, HLE stub
+    // planting, TLS init, module_start) are done at this point,
+    // so the shadow captures the final committed instruction
+    // stream. Runtime stepping invalidates stale slots via
+    // `invalidate_code` on each committed SharedWriteIntent.
+    let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, mem.as_bytes());
+
     let mut rt = Runtime::new(mem, Budget::new(1), opts.runtime_max_steps);
     rt.set_mode(RuntimeMode::FaultDriven);
     rt.set_hle_heap_base(0x10410000);
@@ -293,6 +302,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     rt.registry_mut().register_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
         *unit.state_mut() = state;
+        unit.set_instruction_shadow(shadow);
         if let Some(pc) = opts.dump_at_pc {
             unit.set_break_pc(pc, opts.dump_skip);
         }

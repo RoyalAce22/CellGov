@@ -81,6 +81,18 @@ impl Scheduler for RoundRobinScheduler {
         if registry.is_empty() {
             return None;
         }
+        // Single-unit fast path: when the registry holds exactly
+        // one unit and it is runnable, return it immediately.
+        // Avoids the two-pass iter + effective_status probe for
+        // the PPU-bound hot loop that dominates game boots.
+        if registry.len() == 1 {
+            let (id, _) = registry.iter().next()?;
+            if registry.effective_status(id) == Some(UnitStatus::Runnable) {
+                self.last_scheduled = Some(id);
+                return Some(id);
+            }
+            return None;
+        }
         // Two-pass scan over the registry in id order:
         //
         // First pass: every unit strictly after `last_scheduled`.

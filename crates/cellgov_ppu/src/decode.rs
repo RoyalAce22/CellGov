@@ -179,14 +179,14 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         // I-form: unconditional branch
         18 => {
             let li = raw & 0x03FF_FFFC;
-            // Sign-extend 26-bit offset
             let offset = if li & 0x0200_0000 != 0 {
                 (li | 0xFC00_0000) as i32
             } else {
                 li as i32
             };
+            let aa = raw & 2 != 0;
             let link = raw & 1 != 0;
-            Ok(PpuInstruction::B { offset, link })
+            Ok(PpuInstruction::B { offset, aa, link })
         }
 
         // B-form: conditional branch
@@ -619,6 +619,7 @@ mod tests {
             insn,
             PpuInstruction::B {
                 offset: 8,
+                aa: false,
                 link: true
             }
         );

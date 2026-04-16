@@ -325,11 +325,15 @@ pub enum PpuInstruction {
     },
 
     // -- Branch --
-    /// Unconditional branch: PC += offset. Optionally sets LR.
+    /// Unconditional branch. Optionally sets LR.
     B {
         /// Signed 26-bit offset (already sign-extended, in bytes).
         offset: i32,
-        /// Whether to set LR = PC + 4 (bl).
+        /// Absolute address flag. When true, the target is
+        /// `offset` directly; when false, the target is
+        /// `PC + offset`.
+        aa: bool,
+        /// Whether to set LR = PC + 4 (bl / bla).
         link: bool,
     },
     /// Conditional branch: if condition(BO, BI) then PC += offset.
@@ -686,6 +690,7 @@ mod tests {
             },
             PpuInstruction::B {
                 offset: 0,
+                aa: false,
                 link: false,
             },
             PpuInstruction::Sc,

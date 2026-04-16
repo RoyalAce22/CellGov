@@ -157,6 +157,7 @@ fn bench_execute_cmpwi(c: &mut Criterion) {
 fn bench_execute_b(c: &mut Criterion) {
     let insn = PpuInstruction::B {
         offset: 0x800,
+        aa: false,
         link: false,
     };
     let uid = UnitId::new(0);

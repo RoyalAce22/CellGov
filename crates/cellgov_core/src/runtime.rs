@@ -330,6 +330,21 @@ impl Runtime {
         };
         let mut outcome = self.commit_pipeline.process(result, &mut ctx);
 
+        // Notify units that cached decoded instructions about any
+        // committed code writes so their predecoded shadow can
+        // mark the affected slots stale. Only fires when effects
+        // contain SharedWriteIntent (stores), which is rare in the
+        // SSHD hot loop.
+        if outcome.is_ok() {
+            for effect in &result.emitted_effects {
+                if let cellgov_effects::Effect::SharedWriteIntent { range, .. } = effect {
+                    for (_, unit) in self.registry.iter_mut() {
+                        unit.invalidate_code(range.start().raw(), range.length());
+                    }
+                }
+            }
+        }
+
         let source = self.last_scheduled_unit.unwrap_or_else(|| UnitId::new(0));
         if result.yield_reason == YieldReason::Syscall {
             self.dispatch_syscall(result, source);
@@ -756,6 +771,15 @@ impl Runtime {
         (&mut self.registry, &mut self.mailbox_registry)
     }
 
+    /// Change the per-step budget grant. The new budget takes
+    /// effect on the next `step()` call. Used by bench-boot to
+    /// switch from Budget=1 (fault-driven boot) to a higher budget
+    /// (throughput measurement) after the boot preparation is done
+    /// and all boot-time writes are committed.
+    pub fn set_budget(&mut self, budget: Budget) {
+        self.budget_per_step = budget;
+    }
+
     /// Combined hash of every sync source the runtime owns: mailbox
     /// queues, signal-notification registers, and LV2 host state.
     /// Computed by FNV-1a-merging the per-source hashes in a fixed
@@ -780,6 +804,15 @@ impl Runtime {
     #[inline]
     pub fn memory(&self) -> &GuestMemory {
         &self.memory
+    }
+
+    /// Mutable borrow of committed guest memory. Used by test
+    /// infrastructure and CLI tooling that needs to patch guest
+    /// memory between steps (e.g. self-modifying-code invalidation
+    /// tests, or seeding TLS / PRX images mid-boot).
+    #[inline]
+    pub fn memory_mut(&mut self) -> &mut GuestMemory {
+        &mut self.memory
     }
 
     /// Consume the runtime and return its guest memory.
