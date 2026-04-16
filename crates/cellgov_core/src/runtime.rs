@@ -86,6 +86,7 @@ use crate::registry::{RegisteredUnit, UnitRegistry};
 use crate::scheduler::{RoundRobinScheduler, Scheduler};
 use crate::syscall_table::SyscallResponseTable;
 use cellgov_dma::{DmaLatencyModel, DmaQueue, FixedLatency};
+use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, UnitStatus, YieldReason};
 use cellgov_lv2::{Lv2Dispatch, Lv2Host, Lv2Runtime, PendingResponse, SpuInitState};
@@ -106,9 +107,11 @@ use cellgov_trace::{
 pub struct RuntimeStep {
     /// Which unit was selected and run.
     pub unit: UnitId,
-    /// What the unit returned from `run_until_yield`. Effects are in
-    /// the order the unit emitted them; the runtime never reorders.
+    /// What the unit returned from `run_until_yield`.
     pub result: ExecutionStepResult,
+    /// Effects emitted during this step, in the order the unit emitted
+    /// them. The runtime never reorders.
+    pub effects: Vec<Effect>,
     /// Guest time after this step's consumed budget was applied.
     pub time_after: GuestTicks,
     /// Epoch after this step. The epoch advances only at commit
@@ -200,6 +203,9 @@ pub struct Runtime {
     /// (lwmutex sleep_queue, etc.). Starts above zero so a zero-initialized
     /// guest field is distinguishable from a legitimate allocated ID.
     pub(crate) hle_next_id: u32,
+    /// Reusable effects buffer, taken/returned across steps to avoid
+    /// per-step allocation in the common zero-effects case.
+    effects_buf: Vec<Effect>,
     /// Controls trace and hash checkpoint overhead. Set via
     /// `Runtime::set_mode`; the constructor leaves this at
     /// `FullTrace` (all records, all hashes). `FaultDriven` disables
@@ -262,6 +268,7 @@ impl Runtime {
             max_steps,
             trace,
             last_scheduled_unit: None,
+            effects_buf: Vec::new(),
             hle_nids: std::collections::BTreeMap::new(),
             hle_heap_ptr: 0,
             hle_next_id: 0x8000_0001,
@@ -297,6 +304,7 @@ impl Runtime {
     pub fn commit_step(
         &mut self,
         result: &ExecutionStepResult,
+        effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
         // Trivial-step fast path: under FaultDriven mode, a step
         // that emitted no effects, did not fault, did not yield via
@@ -307,7 +315,7 @@ impl Runtime {
         // contract is identical. Cuts the per-step commit cost for
         // the PPU-bound hot loops that dominate game boots.
         if self.mode == RuntimeMode::FaultDriven
-            && result.emitted_effects.is_empty()
+            && effects.is_empty()
             && result.fault.is_none()
             && !matches!(
                 result.yield_reason,
@@ -328,7 +336,7 @@ impl Runtime {
             dma_latency: self.dma_latency.as_ref(),
             now: self.time,
         };
-        let mut outcome = self.commit_pipeline.process(result, &mut ctx);
+        let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
 
         // Notify units that cached decoded instructions about any
         // committed code writes so their predecoded shadow can
@@ -336,7 +344,7 @@ impl Runtime {
         // contain SharedWriteIntent (stores), which is rare in the
         // SSHD hot loop.
         if outcome.is_ok() {
-            for effect in &result.emitted_effects {
+            for effect in effects {
                 if let cellgov_effects::Effect::SharedWriteIntent { range, .. } = effect {
                     for (_, unit) in self.registry.iter_mut() {
                         unit.invalidate_code(range.start().raw(), range.length());
@@ -915,7 +923,9 @@ impl Runtime {
         let received = self.registry.drain_receives(unit_id);
         let syscall_ret = self.registry.drain_syscall_return(unit_id);
         let reg_writes = self.registry.drain_register_writes(unit_id);
-        let result = {
+        let mut effects_buf = std::mem::take(&mut self.effects_buf);
+        effects_buf.clear();
+        let (result, retired_hashes, retired_full) = {
             let ctx = if let Some(code) = syscall_ret {
                 if reg_writes.is_empty() {
                     ExecutionContext::with_syscall_return(&self.memory, &received, code)
@@ -934,7 +944,7 @@ impl Runtime {
                 .registry
                 .get_mut(unit_id)
                 .expect("scheduler returned an id that is not in the registry");
-            let res = unit.run_until_yield(self.budget_per_step, &ctx);
+            let res = unit.run_until_yield(self.budget_per_step, &ctx, &mut effects_buf);
             // Drain per-instruction state fingerprints and full snapshots
             // collected during the step. Both empty unless the unit
             // has the corresponding mode on; drain is stable across
@@ -953,7 +963,6 @@ impl Runtime {
             };
             (res, retired_hashes, retired_full)
         };
-        let (result, retired_hashes, retired_full) = result;
 
         // Per-step divergence trace: one TraceRecord::PpuStateHash
         // per retired instruction in the main trace stream. Step indices
@@ -1013,7 +1022,7 @@ impl Runtime {
             });
 
             // Trace pipeline step 4: one EffectEmitted per effect.
-            for (sequence, effect) in result.emitted_effects.iter().enumerate() {
+            for (sequence, effect) in effects_buf.iter().enumerate() {
                 self.trace.record(&TraceRecord::EffectEmitted {
                     unit: unit_id,
                     sequence: sequence as u32,
@@ -1022,9 +1031,15 @@ impl Runtime {
             }
         }
 
+        // Move effects_buf into RuntimeStep; self.effects_buf starts
+        // fresh next step. In FaultDriven mode (most steps have 0
+        // effects), effects_buf is empty, so the fresh Vec does not
+        // allocate.
+        self.effects_buf = Vec::new();
         Ok(RuntimeStep {
             unit: unit_id,
             result,
+            effects: effects_buf,
             time_after,
             epoch_after: self.epoch,
         })

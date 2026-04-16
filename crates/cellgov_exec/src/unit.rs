@@ -13,6 +13,7 @@
 //!         &mut self,
 //!         budget: Budget,
 //!         ctx: &ExecutionContext,
+//!         effects: &mut Vec<Effect>,
 //!     ) -> ExecutionStepResult;
 //!     fn snapshot(&self) -> Self::Snapshot;
 //!     fn drain_retired_state_hashes(&mut self) -> Vec<(u64, u64)>;
@@ -31,6 +32,7 @@
 
 use crate::context::ExecutionContext;
 use crate::step_result::ExecutionStepResult;
+use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_time::Budget;
 
@@ -92,6 +94,7 @@ pub trait ExecutionUnit {
     /// Run the unit until it yields, consuming up to `budget` worth of
     /// progress and observing only the readonly state in `ctx`.
     ///
+    /// Effects are pushed into the caller-supplied `effects` vec.
     /// Implementations must preserve the order in which they emit
     /// effects -- the runtime relies on stable intra-step ordering for
     /// validation, conflict diagnostics, fault attribution, and trace
@@ -100,6 +103,7 @@ pub trait ExecutionUnit {
         &mut self,
         budget: Budget,
         ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult;
 
     /// Capture the unit's current state as deterministic data. Must
@@ -146,7 +150,6 @@ mod tests {
     use super::*;
     use crate::yield_reason::YieldReason;
     use crate::LocalDiagnostics;
-    use cellgov_effects::Effect;
     use cellgov_mem::GuestMemory;
 
     /// A minimal fake unit that increments a tick counter on every
@@ -178,6 +181,7 @@ mod tests {
             &mut self,
             budget: Budget,
             _ctx: &ExecutionContext<'_>,
+            effects: &mut Vec<Effect>,
         ) -> ExecutionStepResult {
             self.steps += 1;
             let yield_reason = if self.steps >= self.max_steps {
@@ -185,13 +189,13 @@ mod tests {
             } else {
                 YieldReason::BudgetExhausted
             };
+            effects.push(Effect::TraceMarker {
+                marker: self.steps as u32,
+                source: self.id,
+            });
             ExecutionStepResult {
                 yield_reason,
                 consumed_budget: budget,
-                emitted_effects: vec![Effect::TraceMarker {
-                    marker: self.steps as u32,
-                    source: self.id,
-                }],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -223,15 +227,18 @@ mod tests {
         assert_eq!(unit.unit_id(), UnitId::new(7));
         assert_eq!(unit.status(), UnitStatus::Runnable);
 
-        let r1 = unit.run_until_yield(Budget::new(10), &ctx);
+        let mut effects = Vec::new();
+        let r1 = unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
         assert_eq!(r1.yield_reason, YieldReason::BudgetExhausted);
         assert_eq!(r1.consumed_budget, Budget::new(10));
-        assert_eq!(r1.emitted_effects.len(), 1);
+        assert_eq!(effects.len(), 1);
         assert_eq!(unit.snapshot(), 1);
         assert_eq!(unit.status(), UnitStatus::Runnable);
 
-        let _ = unit.run_until_yield(Budget::new(10), &ctx);
-        let r3 = unit.run_until_yield(Budget::new(10), &ctx);
+        effects.clear();
+        let _ = unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
+        effects.clear();
+        let r3 = unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
         assert_eq!(r3.yield_reason, YieldReason::Finished);
         assert_eq!(unit.snapshot(), 3);
         assert_eq!(unit.status(), UnitStatus::Finished);
@@ -250,7 +257,8 @@ mod tests {
         let snap_before = unit.snapshot();
         let mem = GuestMemory::new(8);
         let ctx = ExecutionContext::new(&mem);
-        let _ = unit.run_until_yield(Budget::new(1), &ctx);
+        let mut effects = Vec::new();
+        let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut effects);
         let snap_after = unit.snapshot();
         assert_eq!(snap_before, 5);
         assert_eq!(snap_after, 6);

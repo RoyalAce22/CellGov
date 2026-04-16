@@ -87,14 +87,19 @@ mod tests {
         fn status(&self) -> UnitStatus {
             self.status.get()
         }
-        fn run_until_yield(&mut self, b: Budget, _: &ExecutionContext<'_>) -> ExecutionStepResult {
+        fn run_until_yield(
+            &mut self,
+            b: Budget,
+            _: &ExecutionContext<'_>,
+            effects: &mut Vec<Effect>,
+        ) -> ExecutionStepResult {
+            effects.push(Effect::TraceMarker {
+                marker: 0,
+                source: self.id,
+            });
             ExecutionStepResult {
                 yield_reason: YieldReason::BudgetExhausted,
                 consumed_budget: b,
-                emitted_effects: vec![Effect::TraceMarker {
-                    marker: 0,
-                    source: self.id,
-                }],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,

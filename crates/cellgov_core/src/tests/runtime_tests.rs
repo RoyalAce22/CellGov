@@ -45,6 +45,7 @@ impl ExecutionUnit for CountingUnit {
         &mut self,
         budget: Budget,
         _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         let n = self.steps.get() + 1;
         self.steps.set(n);
@@ -53,13 +54,13 @@ impl ExecutionUnit for CountingUnit {
         } else {
             YieldReason::BudgetExhausted
         };
+        effects.push(Effect::TraceMarker {
+            marker: n as u32,
+            source: self.id,
+        });
         ExecutionStepResult {
             yield_reason,
             consumed_budget: budget,
-            emitted_effects: vec![Effect::TraceMarker {
-                marker: n as u32,
-                source: self.id,
-            }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -201,9 +202,9 @@ fn step_returns_emitted_effects_in_order() {
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 10));
     let s = rt.step().unwrap();
-    assert_eq!(s.result.emitted_effects.len(), 1);
+    assert_eq!(s.effects.len(), 1);
     assert_eq!(
-        s.result.emitted_effects[0],
+        s.effects[0],
         Effect::TraceMarker {
             marker: 1,
             source: UnitId::new(0),
@@ -238,6 +239,7 @@ impl ExecutionUnit for WritingUnit {
         &mut self,
         budget: Budget,
         _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         use cellgov_effects::WritePayload;
         use cellgov_event::PriorityClass;
@@ -251,16 +253,16 @@ impl ExecutionUnit for WritingUnit {
         };
         let bytes = vec![n as u8; 4];
         let range = ByteRange::new(GuestAddr::new(0), 4).unwrap();
+        effects.push(Effect::SharedWriteIntent {
+            range,
+            bytes: WritePayload::new(bytes),
+            ordering: PriorityClass::Normal,
+            source: self.id,
+            source_time: GuestTicks::ZERO,
+        });
         ExecutionStepResult {
             yield_reason,
             consumed_budget: budget,
-            emitted_effects: vec![Effect::SharedWriteIntent {
-                range,
-                bytes: WritePayload::new(bytes),
-                ordering: PriorityClass::Normal,
-                source: self.id,
-                source_time: GuestTicks::ZERO,
-            }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -383,7 +385,7 @@ fn level_filter_drops_scheduling_records() {
         max: 2,
     });
     let s1 = rt.step().unwrap();
-    rt.commit_step(&s1.result).unwrap();
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -403,7 +405,7 @@ fn step_then_commit_emits_commit_applied_with_post_epoch() {
         max: 3,
     });
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result).unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -485,29 +487,28 @@ fn step_emits_one_effect_record_per_effect_in_emission_order() {
             &mut self,
             budget: Budget,
             _ctx: &ExecutionContext<'_>,
+            effects: &mut Vec<Effect>,
         ) -> ExecutionStepResult {
             self.done.set(true);
             let range = ByteRange::new(GuestAddr::new(0), 4).unwrap();
+            effects.push(Effect::TraceMarker {
+                marker: 1,
+                source: self.id,
+            });
+            effects.push(Effect::SharedWriteIntent {
+                range,
+                bytes: WritePayload::new(vec![1, 2, 3, 4]),
+                ordering: PriorityClass::Normal,
+                source: self.id,
+                source_time: GuestTicks::ZERO,
+            });
+            effects.push(Effect::TraceMarker {
+                marker: 2,
+                source: self.id,
+            });
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
                 consumed_budget: budget,
-                emitted_effects: vec![
-                    Effect::TraceMarker {
-                        marker: 1,
-                        source: self.id,
-                    },
-                    Effect::SharedWriteIntent {
-                        range,
-                        bytes: WritePayload::new(vec![1, 2, 3, 4]),
-                        ordering: PriorityClass::Normal,
-                        source: self.id,
-                        source_time: GuestTicks::ZERO,
-                    },
-                    Effect::TraceMarker {
-                        marker: 2,
-                        source: self.id,
-                    },
-                ],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -522,7 +523,7 @@ fn step_emits_one_effect_record_per_effect_in_emission_order() {
         done: Cell::new(false),
     });
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result).unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let effects: Vec<(u32, TracedEffectKind)> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -567,7 +568,7 @@ fn commit_emits_state_hash_checkpoint_after_commit_applied() {
         max: 1,
     });
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result).unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -601,9 +602,9 @@ fn committed_memory_state_hash_changes_after_write() {
     // [2,2,2,2] to addr 0, so the two CommittedMemory checkpoints
     // must differ.
     let s1 = rt.step().unwrap();
-    rt.commit_step(&s1.result).unwrap();
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
     let s2 = rt.step().unwrap();
-    rt.commit_step(&s2.result).unwrap();
+    rt.commit_step(&s2.result, &s2.effects).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let hashes: Vec<StateHash> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -635,7 +636,7 @@ fn sync_state_checkpoint_changes_when_a_mailbox_is_registered() {
             let _ = rt.mailbox_registry_mut().register();
         }
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result).unwrap();
+        rt.commit_step(&s.result, &s.effects).unwrap();
         let bytes = rt.trace().bytes().to_vec();
         TraceReader::new(&bytes)
             .map(|r| r.expect("decode"))
@@ -682,7 +683,7 @@ fn dma_completion_fires_and_applies_transfer() {
     // Step consumes budget=5, time goes to 5. Commit fires the
     // completion (scheduled at 3, now=5 >= 3).
     let s = rt.step().unwrap();
-    let outcome = rt.commit_step(&s.result).unwrap();
+    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(outcome.dma_completions_fired, 1);
     // Destination now has the source bytes.
     assert_eq!(
@@ -718,7 +719,7 @@ fn dma_completion_wakes_issuer() {
     // Step runs unit 0 (unit 1 is blocked). Time -> 5.
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(0));
-    let outcome = rt.commit_step(&s.result).unwrap();
+    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(outcome.dma_completions_fired, 1);
     // Unit 1 is now woken (override set to Runnable).
     assert_eq!(
@@ -745,7 +746,7 @@ fn dma_completion_does_not_fire_before_its_time() {
     rt.dma_queue
         .enqueue(DmaCompletion::new(req, GuestTicks::new(100)), None);
     let s = rt.step().unwrap();
-    let outcome = rt.commit_step(&s.result).unwrap();
+    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
     // Not yet due.
     assert_eq!(outcome.dma_completions_fired, 0);
     assert_eq!(rt.dma_queue().len(), 1);
@@ -771,7 +772,7 @@ fn sync_state_checkpoint_changes_when_a_signal_register_value_changes() {
                 .or_in(or_in_value);
         }
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result).unwrap();
+        rt.commit_step(&s.result, &s.effects).unwrap();
         let bytes = rt.trace().bytes().to_vec();
         TraceReader::new(&bytes)
             .map(|r| r.expect("decode"))
@@ -801,7 +802,7 @@ fn sync_state_checkpoint_changes_when_a_message_lands_in_a_mailbox() {
             rt.mailbox_registry_mut().get_mut(mb_id).unwrap().send(word);
         }
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result).unwrap();
+        rt.commit_step(&s.result, &s.effects).unwrap();
         let bytes = rt.trace().bytes().to_vec();
         TraceReader::new(&bytes)
             .map(|r| r.expect("decode"))
@@ -830,7 +831,7 @@ fn unit_status_state_hash_changes_when_unit_finishes() {
         .register_with(|id| CountingUnit::new(id, 2));
     for _ in 0..2 {
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result).unwrap();
+        rt.commit_step(&s.result, &s.effects).unwrap();
     }
     let bytes = rt.trace().bytes().to_vec();
     let status_hashes: Vec<StateHash> = TraceReader::new(&bytes)
@@ -890,19 +891,20 @@ fn commit_validation_failure_traces_as_fault_discarded() {
             &mut self,
             budget: Budget,
             _ctx: &ExecutionContext<'_>,
+            effects: &mut Vec<Effect>,
         ) -> ExecutionStepResult {
             self.done.set(true);
+            effects.push(Effect::SharedWriteIntent {
+                // Range starts past end of memory -- definitely OOB.
+                range: ByteRange::new(GuestAddr::new(1024), 4).unwrap(),
+                bytes: WritePayload::new(vec![0; 4]),
+                ordering: PriorityClass::Normal,
+                source: self.id,
+                source_time: GuestTicks::ZERO,
+            });
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
                 consumed_budget: budget,
-                emitted_effects: vec![Effect::SharedWriteIntent {
-                    // Range starts past end of memory -- definitely OOB.
-                    range: ByteRange::new(GuestAddr::new(1024), 4).unwrap(),
-                    bytes: WritePayload::new(vec![0; 4]),
-                    ordering: PriorityClass::Normal,
-                    source: self.id,
-                    source_time: GuestTicks::ZERO,
-                }],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -917,7 +919,7 @@ fn commit_validation_failure_traces_as_fault_discarded() {
         done: Cell::new(false),
     });
     let s = rt.step().unwrap();
-    let err = rt.commit_step(&s.result).unwrap_err();
+    let err = rt.commit_step(&s.result, &s.effects).unwrap_err();
     // We don't assert on the specific CommitError variant -- the
     // commit module already does that. Just verify it's an Err.
     let _ = err;
@@ -962,7 +964,7 @@ fn trace_is_deterministic_across_two_identical_runs() {
         });
         for _ in 0..4 {
             let s = rt.step().unwrap();
-            rt.commit_step(&s.result).unwrap();
+            rt.commit_step(&s.result, &s.effects).unwrap();
         }
         rt.trace().bytes().to_vec()
     }
@@ -981,7 +983,7 @@ fn step_then_commit_writes_become_visible() {
     });
     // First step: writes [1,1,1,1] to addr 0.
     let s1 = rt.step().unwrap();
-    let outcome1 = rt.commit_step(&s1.result).unwrap();
+    let outcome1 = rt.commit_step(&s1.result, &s1.effects).unwrap();
     assert_eq!(outcome1.writes_committed, 1);
     assert!(!outcome1.fault_discarded);
     assert_eq!(
@@ -995,7 +997,7 @@ fn step_then_commit_writes_become_visible() {
 
     // Second step: overwrites with [2,2,2,2].
     let s2 = rt.step().unwrap();
-    rt.commit_step(&s2.result).unwrap();
+    rt.commit_step(&s2.result, &s2.effects).unwrap();
     assert_eq!(
         rt.memory()
             .read(cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0), 4).unwrap())
@@ -1016,7 +1018,7 @@ fn fault_driven_mode_skips_trace_records() {
         .register_with(|id| CountingUnit::new(id, 5));
 
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result).unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
 
     // FaultDriven should produce zero trace records.
     let reader = TraceReader::new(rt.trace().bytes());
@@ -1040,7 +1042,7 @@ fn full_trace_mode_emits_trace_records() {
         .register_with(|id| CountingUnit::new(id, 5));
 
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result).unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
 
     let reader = TraceReader::new(rt.trace().bytes());
     let records: Vec<_> = reader.collect();
@@ -1095,12 +1097,12 @@ impl ExecutionUnit for StateHashEmittingUnit {
         &mut self,
         budget: Budget,
         _ctx: &ExecutionContext<'_>,
+        _effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         self.step_idx.set(self.step_idx.get() + 1);
         ExecutionStepResult {
             yield_reason: YieldReason::BudgetExhausted,
             consumed_budget: budget,
-            emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -1276,6 +1278,7 @@ impl ExecutionUnit for SilentUnit {
         &mut self,
         budget: Budget,
         _ctx: &ExecutionContext<'_>,
+        _effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         let n = self.steps.get() + 1;
         self.steps.set(n);
@@ -1287,7 +1290,6 @@ impl ExecutionUnit for SilentUnit {
         ExecutionStepResult {
             yield_reason,
             consumed_budget: budget,
-            emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -1322,7 +1324,7 @@ fn commit_fast_path_empty_loop_advances_epoch_monotonically() {
     let start_epoch = rt.epoch();
     for _ in 0..10_000 {
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result).unwrap();
+        rt.commit_step(&s.result, &s.effects).unwrap();
     }
     assert_eq!(
         rt.epoch().raw(),
@@ -1382,16 +1384,16 @@ fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
 
     // Step 1: time -> 1. DMA pending, slow path. Not yet due.
     let s = rt.step().unwrap();
-    let o1 = rt.commit_step(&s.result).unwrap();
+    let o1 = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(o1.dma_completions_fired, 0);
     // Step 2: time -> 2. Still pending.
     let s = rt.step().unwrap();
-    let o2 = rt.commit_step(&s.result).unwrap();
+    let o2 = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(o2.dma_completions_fired, 0);
     // Step 3: time -> 3. DMA fires at its scheduled tick, and
     // the transfer applies to memory in the same commit.
     let s = rt.step().unwrap();
-    let o3 = rt.commit_step(&s.result).unwrap();
+    let o3 = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(
         o3.dma_completions_fired, 1,
         "DMA must fire at its scheduled tick despite silent steps"
@@ -1406,7 +1408,7 @@ fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
     // still advances.
     let epoch_before = rt.epoch();
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result).unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(rt.epoch().raw(), epoch_before.raw() + 1);
 }
 
@@ -1454,7 +1456,7 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
     // (DMA pending); nothing fires yet.
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(1));
-    let o = rt.commit_step(&s.result).unwrap();
+    let o = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(o.dma_completions_fired, 0);
     assert_eq!(
         rt.registry().effective_status(UnitId::new(0)),
@@ -1465,7 +1467,7 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
     // immediately.
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(1));
-    let o = rt.commit_step(&s.result).unwrap();
+    let o = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(o.dma_completions_fired, 1);
     let wake_epoch = rt.epoch();
     assert_eq!(
@@ -1477,7 +1479,7 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
     // whichever is first. We force silent steps on both units
     // and verify the wake visibility is preserved.
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result).unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
     // Unit 0's override is cleared the first time it runs (see
     // `clear_status_override` in step); but the wake happened
     // at `wake_epoch`, and the epoch has advanced exactly once

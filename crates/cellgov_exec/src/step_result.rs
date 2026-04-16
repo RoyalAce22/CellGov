@@ -1,15 +1,10 @@
 //! `ExecutionStepResult` -- the value an execution unit returns from
 //! `run_until_yield`.
 //!
-//! A step result carries five fields: the yield reason, the budget the
-//! unit actually consumed, the list of effects it emitted (in stable
-//! emission order), per-step local diagnostics, and optional fault data.
-//!
-//! `emitted_effects` ordering is part of the determinism contract. The
-//! runtime must never reorder effects within a single step: validation,
-//! conflict diagnostics, fault attribution, and trace reconstruction all
-//! depend on stable intra-step ordering even though commit batches are
-//! atomic from the standpoint of guest visibility.
+//! A step result carries four fields: the yield reason, the budget the
+//! unit actually consumed, per-step local diagnostics, and optional
+//! fault data. Effects are collected separately via the `&mut Vec<Effect>`
+//! parameter on `run_until_yield` and are not part of this struct.
 //!
 //! The fault rule is enforced at the runtime layer, not
 //! here: a step that yields with [`crate::YieldReason::Fault`] has all
@@ -17,7 +12,7 @@
 //! discarding is the commit pipeline's job.
 
 use crate::yield_reason::YieldReason;
-use cellgov_effects::{Effect, FaultKind};
+use cellgov_effects::FaultKind;
 use cellgov_time::Budget;
 
 /// Per-step local diagnostics surfaced by an execution unit.
@@ -113,9 +108,6 @@ pub struct ExecutionStepResult {
     /// How much budget the unit actually used during this step.
     /// May be less than the granted budget if the unit yielded early.
     pub consumed_budget: Budget,
-    /// Effects emitted during this step, in the order the unit emitted
-    /// them. The runtime must preserve this order end-to-end.
-    pub emitted_effects: Vec<Effect>,
     /// Per-step diagnostics for trace and assertion consumers.
     pub local_diagnostics: LocalDiagnostics,
     /// Fault data, present iff `yield_reason == YieldReason::Fault`.
@@ -146,14 +138,6 @@ impl ExecutionStepResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cellgov_event::UnitId;
-
-    fn marker(id: u32) -> Effect {
-        Effect::TraceMarker {
-            marker: id,
-            source: UnitId::new(0),
-        }
-    }
 
     #[test]
     fn local_diagnostics_default_and_empty_are_equal() {
@@ -165,34 +149,13 @@ mod tests {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::BudgetExhausted,
             consumed_budget: Budget::new(0),
-            emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
         };
         assert_eq!(r.yield_reason, YieldReason::BudgetExhausted);
         assert_eq!(r.consumed_budget, Budget::new(0));
-        assert!(r.emitted_effects.is_empty());
         assert!(r.fault.is_none());
-        assert!(r.is_well_formed());
-    }
-
-    #[test]
-    fn step_with_effects_preserves_order() {
-        let r = ExecutionStepResult {
-            yield_reason: YieldReason::MailboxAccess,
-            consumed_budget: Budget::new(50),
-            emitted_effects: vec![marker(1), marker(2), marker(3)],
-            local_diagnostics: LocalDiagnostics::empty(),
-            fault: None,
-            syscall_args: None,
-        };
-        // Direct slice equality preserves both content and order
-        // without needing pattern destructuring.
-        assert_eq!(
-            r.emitted_effects.as_slice(),
-            &[marker(1), marker(2), marker(3)]
-        );
         assert!(r.is_well_formed());
     }
 
@@ -201,7 +164,6 @@ mod tests {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::Fault,
             consumed_budget: Budget::new(7),
-            emitted_effects: vec![marker(99)],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: Some(FaultKind::Guest(0xbad)),
             syscall_args: None,
@@ -215,7 +177,6 @@ mod tests {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::Fault,
             consumed_budget: Budget::new(0),
-            emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -228,7 +189,6 @@ mod tests {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::Finished,
             consumed_budget: Budget::new(0),
-            emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: Some(FaultKind::Validation),
             syscall_args: None,
@@ -241,7 +201,6 @@ mod tests {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::Finished,
             consumed_budget: Budget::new(100),
-            emitted_effects: vec![],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -254,7 +213,6 @@ mod tests {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::DmaWait,
             consumed_budget: Budget::new(13),
-            emitted_effects: vec![marker(42)],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,

@@ -4,7 +4,7 @@
 //! precision) A-form and X-form FP instructions. Called from
 //! `exec::execute` for `Fp63` and `Fp59` instruction variants.
 
-use crate::exec::PpuStepOutcome;
+use crate::exec::ExecuteVerdict;
 use crate::state::PpuState;
 
 pub fn execute_fp63(
@@ -14,7 +14,7 @@ pub fn execute_fp63(
     fra: u8,
     frb: u8,
     frc: u8,
-) -> PpuStepOutcome {
+) -> ExecuteVerdict {
     let a = f64::from_bits(state.fpr[fra as usize]);
     let b = f64::from_bits(state.fpr[frb as usize]);
     let c = f64::from_bits(state.fpr[frc as usize]);
@@ -52,7 +52,7 @@ pub fn execute_fp63(
                     0b0010
                 };
                 state.set_cr_field(bf, cr_val);
-                return PpuStepOutcome::Continue;
+                return ExecuteVerdict::Continue;
             }
             12 => {
                 let s = b as f32;
@@ -70,11 +70,11 @@ pub fn execute_fp63(
                 let i = state.fpr[frb as usize] as i64;
                 (i as f64).to_bits()
             }
-            _ => return PpuStepOutcome::Continue,
+            _ => return ExecuteVerdict::Continue,
         },
     };
     state.fpr[frt as usize] = result_bits;
-    PpuStepOutcome::Continue
+    ExecuteVerdict::Continue
 }
 
 pub fn execute_fp59(
@@ -84,7 +84,7 @@ pub fn execute_fp59(
     fra: u8,
     frb: u8,
     frc: u8,
-) -> PpuStepOutcome {
+) -> ExecuteVerdict {
     let a = f64::from_bits(state.fpr[fra as usize]) as f32;
     let b = f64::from_bits(state.fpr[frb as usize]) as f32;
     let c = f64::from_bits(state.fpr[frc as usize]) as f32;
@@ -99,9 +99,9 @@ pub fn execute_fp59(
             18 => a / b,
             21 => a + b,
             20 => a - b,
-            _ => return PpuStepOutcome::Continue,
+            _ => return ExecuteVerdict::Continue,
         },
     };
     state.fpr[frt as usize] = (result as f64).to_bits();
-    PpuStepOutcome::Continue
+    ExecuteVerdict::Continue
 }

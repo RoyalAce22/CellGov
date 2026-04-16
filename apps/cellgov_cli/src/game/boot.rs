@@ -294,7 +294,13 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // `invalidate_code` on each committed SharedWriteIntent.
     let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, mem.as_bytes());
 
-    let mut rt = Runtime::new(mem, Budget::new(1), opts.runtime_max_steps);
+    let step_budget: u64 = 256;
+    let adjusted_max_steps = opts
+        .runtime_max_steps
+        .checked_div(step_budget as usize)
+        .unwrap_or(opts.runtime_max_steps)
+        .max(1);
+    let mut rt = Runtime::new(mem, Budget::new(step_budget), adjusted_max_steps);
     rt.set_mode(RuntimeMode::FaultDriven);
     rt.set_hle_heap_base(0x10410000);
     rt.set_hle_nids(build_nid_map(&hle_bindings));

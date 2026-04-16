@@ -20,7 +20,7 @@ pub mod loader;
 pub mod state;
 
 use crate::exec::{SpuFault, SpuStepOutcome};
-use cellgov_effects::FaultKind;
+use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
@@ -94,6 +94,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         &mut self,
         budget: Budget,
         ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         // Deliver received mailbox messages to the register that was
         // waiting in the rdch instruction that triggered the yield.
@@ -124,7 +125,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         }
 
         let mut remaining = budget.raw();
-        let mut effects = Vec::new();
+        effects.clear();
 
         loop {
             let step_pc = self.state.pc as u64;
@@ -136,7 +137,6 @@ impl ExecutionUnit for SpuExecutionUnit {
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
-                        emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(FaultKind::Guest(FAULT_LS_OUT_OF_RANGE | self.state.pc)),
                         syscall_args: None,
@@ -152,7 +152,6 @@ impl ExecutionUnit for SpuExecutionUnit {
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
-                        emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
                         syscall_args: None,
@@ -189,7 +188,6 @@ impl ExecutionUnit for SpuExecutionUnit {
                     return ExecutionStepResult {
                         yield_reason: reason,
                         consumed_budget: Budget::new(budget.raw() - remaining),
-                        emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
@@ -221,7 +219,6 @@ impl ExecutionUnit for SpuExecutionUnit {
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
-                        emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(FaultKind::Guest(code)),
                         syscall_args: None,
@@ -234,7 +231,6 @@ impl ExecutionUnit for SpuExecutionUnit {
                 return ExecutionStepResult {
                     yield_reason: YieldReason::BudgetExhausted,
                     consumed_budget: budget,
-                    emitted_effects: effects,
                     local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: None,
                     syscall_args: None,

@@ -46,7 +46,7 @@ fn ppu_trace_bytes(mem: &GuestMemory, n: usize) -> Vec<u8> {
     let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
     ppu.set_per_step_trace(true);
     let ctx = ExecutionContext::new(mem);
-    let _ = ppu.run_until_yield(Budget::new(n as u64), &ctx);
+    let _ = ppu.run_until_yield(Budget::new(n as u64), &ctx, &mut Vec::new());
     let pairs = ppu.drain_retired_state_hashes();
     let mut writer = TraceWriter::new();
     for (i, (pc, hash)) in pairs.into_iter().enumerate() {
@@ -207,7 +207,7 @@ fn ppu_zoom_bytes(mem: &GuestMemory, n: usize, window: (u64, u64)) -> Vec<u8> {
     let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
     ppu.set_full_state_window(Some(window));
     let ctx = ExecutionContext::new(mem);
-    let _ = ppu.run_until_yield(Budget::new(n as u64), &ctx);
+    let _ = ppu.run_until_yield(Budget::new(n as u64), &ctx, &mut Vec::new());
     let pairs = ppu.drain_retired_state_full();
     let mut writer = TraceWriter::new();
     for (i, (pc, gpr, lr, ctr, xer, cr)) in pairs.into_iter().enumerate() {

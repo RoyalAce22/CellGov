@@ -119,7 +119,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier and wait-set primitives.                                                                                                                                                                                                                                |
 | `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                     |
 | `cellgov_effects`              | The 9-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                      |
-| `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime.                                                                                                                                                                           |
+| `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                              |
 | `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                              |
 | `cellgov_lv2`                  | LV2 model: image registry, thread-group table, syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                      |
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                        |
@@ -209,28 +209,35 @@ stores to any mapped region land correctly.
 ten-step deterministic loop:
 
 1. Select a runnable unit via the configured `Scheduler`.
-2. Grant the unit the per-step `Budget`.
+2. Grant the unit the per-step `Budget` (default 256 instructions).
 3. Run the unit until it yields (one `ExecutionUnit::run_until_yield`).
-4. Collect emitted `Effect`s from the step result.
-5. Validate effects against the registry and memory.
-6. Stage a commit batch.
-7. Apply the batch to shared state (memory, mailboxes, signals, etc).
-8. Inject resulting events: DMA completions, syscall dispatch through
+   The PPU executes up to Budget instructions per call, batching
+   across basic-block boundaries. An intra-block store-forwarding
+   buffer provides write-then-read coherence within the batch.
+   Effects are collected through a caller-owned `&mut Vec<Effect>`
+   (not on the result struct).
+4. Validate effects against the registry and memory.
+5. Stage a commit batch.
+6. Apply the batch to shared state (memory, mailboxes, signals, etc).
+7. Inject resulting events: DMA completions, syscall dispatch through
    `Lv2Host`, block / wake transitions.
-9. Advance guest time by the unit's consumed budget.
-10. Emit trace records for every decision in steps 1-8.
+8. Advance guest time by the unit's consumed budget.
+9. Emit trace records for every decision in steps 1-7.
 
-Steps 5-8 are atomic. A fault discards the entire batch -- the unit
+Steps 4-6 are atomic. A fault discards the entire batch -- the unit
 faults, the rest of the system sees nothing the unit tried to do.
 This is what makes the determinism guarantees mechanical rather than
-aspirational.
+aspirational. When a fault occurs mid-batch (after some instructions
+have retired), the PPU restores a state snapshot taken at step entry
+and re-executes at Budget=1 so that pre-fault instructions commit
+individually and the faulting instruction is isolated.
 
-**Trivial-step fast path (FaultDriven only).** When
-`emitted_effects` is empty, `fault` is `None`, `yield_reason`
-is neither `Syscall` nor `Finished`, and the DMA queue is empty,
-`Runtime::commit_step` skips steps 5-8 entirely and only advances
-the epoch (step 9 still runs). Under `RuntimeMode::FaultDriven`
-the trace records of steps 1-8 are suppressed anyway, so the
+**Trivial-step fast path (FaultDriven only).** When the effects
+vec is empty, `fault` is `None`, `yield_reason` is neither
+`Syscall` nor `Finished`, and the DMA queue is empty,
+`Runtime::commit_step` skips steps 4-7 entirely and only advances
+the epoch (step 8 still runs). Under `RuntimeMode::FaultDriven`
+the trace records of steps 1-7 are suppressed anyway, so the
 observable contract is identical -- every atomic-batch boundary
 still advances the epoch, and scheduler-visible state
 (`status_overrides`, pending receives / syscall returns / reg
@@ -239,6 +246,36 @@ per-step commit cost for PPU-bound hot loops that dominate real
 game boots; scenarios with async state (pending DMA, pending
 wakes) naturally fall to the slow path on the step that
 originates or observes the async event.
+
+## Predecoded instruction shadow
+
+The PPU maintains a `PredecodedShadow` covering the main text
+region. Every 4-byte-aligned instruction word is decoded once at
+ELF load time and stored in a flat `Vec<PpuInstruction>` indexed
+by `(pc - base) / 4`. The hot-path fetch becomes a bounds check
+plus an array index instead of a raw-memory read plus decode.
+
+Three optimization passes run at shadow build time:
+
+1. **Quickening.** Common idioms are rewritten into specialized
+   variants that eliminate redundant work: `addi rT, 0, imm` ->
+   `Li` (skips GPR read), `or rA, rS, rS` -> `Mr` (register copy),
+   `rlwinm` subsets -> `Slwi`/`Srwi`/`Clrlwi` (direct shifts).
+
+2. **Super-pairing.** Frequent 2-instruction sequences are fused
+   into single dispatch entries: `lwz + cmpwi` -> `LwzCmpwi`,
+   `li + stw` -> `LiStw`, `mflr + stw` -> `MflrStw`, `lwz + mtlr`
+   -> `LwzMtlr`. The second slot is marked `Consumed`; the fetch
+   loop skips it.
+
+3. **Block-length annotation.** A backward scan fills
+   `block_len[i]` with the number of instructions to the end of
+   the basic block. Branches and syscalls terminate blocks. The
+   runtime uses this to size the inner loop's iteration count.
+
+Guest-visible code writes (self-modifying code, CRT0 relocations,
+HLE trampoline planting) invalidate the affected slots. The next
+fetch re-decodes from committed memory and re-applies quickening.
 
 ## Effects and trace records
 
@@ -301,8 +338,7 @@ The HLE binder offers two layouts for the OPDs that satisfy
   trampoline. Self-contained and easy to inspect.
 - **`HleLayout::Ps3Spec { opd_base, body_base }`**: 8-byte OPDs
   packed at `opd_base` (matching RPCS3's `vm::alloc(N*8, vm::main)`
-  HLE-table shape per `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp`
-  lines 337-364), with separate 16-byte body trampolines at
+  HLE-table shape), with separate 16-byte body trampolines at
   `body_base`. Used by `run-game` when `CELLGOV_HLE_OPD_BASE` is
   set so the GOT pointer values land in the user-memory address
   range RPCS3 also uses for HLE-resolved imports.

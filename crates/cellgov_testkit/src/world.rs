@@ -67,6 +67,7 @@ impl ExecutionUnit for CountingUnit {
         &mut self,
         budget: Budget,
         _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         let n = self.steps.get() + 1;
         self.steps.set(n);
@@ -75,13 +76,13 @@ impl ExecutionUnit for CountingUnit {
         } else {
             YieldReason::BudgetExhausted
         };
+        effects.push(Effect::TraceMarker {
+            marker: n as u32,
+            source: self.id,
+        });
         ExecutionStepResult {
             yield_reason,
             consumed_budget: budget,
-            emitted_effects: vec![Effect::TraceMarker {
-                marker: n as u32,
-                source: self.id,
-            }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -141,6 +142,7 @@ impl ExecutionUnit for WritingUnit {
         &mut self,
         budget: Budget,
         _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         let n = self.steps.get() + 1;
         self.steps.set(n);
@@ -150,16 +152,16 @@ impl ExecutionUnit for WritingUnit {
             YieldReason::BudgetExhausted
         };
         let bytes = vec![n as u8; self.range.length() as usize];
+        effects.push(Effect::SharedWriteIntent {
+            range: self.range,
+            bytes: WritePayload::new(bytes),
+            ordering: PriorityClass::Normal,
+            source: self.id,
+            source_time: GuestTicks::ZERO,
+        });
         ExecutionStepResult {
             yield_reason,
             consumed_budget: budget,
-            emitted_effects: vec![Effect::SharedWriteIntent {
-                range: self.range,
-                bytes: WritePayload::new(bytes),
-                ordering: PriorityClass::Normal,
-                source: self.id,
-                source_time: GuestTicks::ZERO,
-            }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -212,6 +214,7 @@ impl ExecutionUnit for MailboxProducer {
         &mut self,
         budget: Budget,
         _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         let n = self.steps.get() + 1;
         self.steps.set(n);
@@ -220,14 +223,14 @@ impl ExecutionUnit for MailboxProducer {
         } else {
             YieldReason::MailboxAccess
         };
+        effects.push(Effect::MailboxSend {
+            mailbox: self.target,
+            message: MailboxMessage::new(n as u32),
+            source: self.id,
+        });
         ExecutionStepResult {
             yield_reason,
             consumed_budget: budget,
-            emitted_effects: vec![Effect::MailboxSend {
-                mailbox: self.target,
-                message: MailboxMessage::new(n as u32),
-                source: self.id,
-            }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -290,6 +293,7 @@ impl ExecutionUnit for SignalEmitter {
         &mut self,
         budget: Budget,
         _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         let n = self.steps.get() + 1;
         self.steps.set(n);
@@ -300,14 +304,14 @@ impl ExecutionUnit for SignalEmitter {
         };
         // Bit `n - 1` so the first step OR-s in 0x1, second 0x2, etc.
         let value = 1u32 << (n - 1) as u32;
+        effects.push(Effect::SignalUpdate {
+            signal: self.target,
+            value,
+            source: self.id,
+        });
         ExecutionStepResult {
             yield_reason,
             consumed_budget: budget,
-            emitted_effects: vec![Effect::SignalUpdate {
-                signal: self.target,
-                value,
-                source: self.id,
-            }],
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -370,6 +374,7 @@ impl ExecutionUnit for DmaSubmitter {
         &mut self,
         budget: Budget,
         _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         let p = self.phase.get();
         self.phase.set(p + 1);
@@ -379,28 +384,24 @@ impl ExecutionUnit for DmaSubmitter {
                 let req =
                     DmaRequest::new(DmaDirection::Put, self.source, self.destination, self.id)
                         .expect("source and destination lengths match");
+                effects.push(Effect::SharedWriteIntent {
+                    range: self.source,
+                    bytes: WritePayload::new(self.seed_bytes.clone()),
+                    ordering: PriorityClass::Normal,
+                    source: self.id,
+                    source_time: GuestTicks::ZERO,
+                });
+                effects.push(Effect::DmaEnqueue {
+                    request: req,
+                    payload: None,
+                });
+                effects.push(Effect::WaitOnEvent {
+                    target: cellgov_effects::WaitTarget::Barrier(cellgov_sync::BarrierId::new(0)),
+                    source: self.id,
+                });
                 ExecutionStepResult {
                     yield_reason: YieldReason::DmaSubmitted,
                     consumed_budget: budget,
-                    emitted_effects: vec![
-                        Effect::SharedWriteIntent {
-                            range: self.source,
-                            bytes: WritePayload::new(self.seed_bytes.clone()),
-                            ordering: PriorityClass::Normal,
-                            source: self.id,
-                            source_time: GuestTicks::ZERO,
-                        },
-                        Effect::DmaEnqueue {
-                            request: req,
-                            payload: None,
-                        },
-                        Effect::WaitOnEvent {
-                            target: cellgov_effects::WaitTarget::Barrier(
-                                cellgov_sync::BarrierId::new(0),
-                            ),
-                            source: self.id,
-                        },
-                    ],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -408,13 +409,13 @@ impl ExecutionUnit for DmaSubmitter {
             }
             _ => {
                 // Woken after DMA completed. Marker + finish.
+                effects.push(Effect::TraceMarker {
+                    marker: 0xd0d0,
+                    source: self.id,
+                });
                 ExecutionStepResult {
                     yield_reason: YieldReason::Finished,
                     consumed_budget: budget,
-                    emitted_effects: vec![Effect::TraceMarker {
-                        marker: 0xd0d0,
-                        source: self.id,
-                    }],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -482,30 +483,29 @@ impl ExecutionUnit for MailboxSender {
         &mut self,
         budget: Budget,
         ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         let p = self.phase.get();
         self.phase.set(p + 1);
         match p {
             0 => {
                 // Send command, wake responder, block self.
+                effects.push(Effect::MailboxSend {
+                    mailbox: self.cmd_mailbox,
+                    message: MailboxMessage::new(self.command),
+                    source: self.id,
+                });
+                effects.push(Effect::WakeUnit {
+                    target: self.responder,
+                    source: self.id,
+                });
+                effects.push(Effect::WaitOnEvent {
+                    target: cellgov_effects::WaitTarget::Mailbox(self.resp_mailbox),
+                    source: self.id,
+                });
                 ExecutionStepResult {
                     yield_reason: YieldReason::MailboxAccess,
                     consumed_budget: budget,
-                    emitted_effects: vec![
-                        Effect::MailboxSend {
-                            mailbox: self.cmd_mailbox,
-                            message: MailboxMessage::new(self.command),
-                            source: self.id,
-                        },
-                        Effect::WakeUnit {
-                            target: self.responder,
-                            source: self.id,
-                        },
-                        Effect::WaitOnEvent {
-                            target: cellgov_effects::WaitTarget::Mailbox(self.resp_mailbox),
-                            source: self.id,
-                        },
-                    ],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -513,13 +513,13 @@ impl ExecutionUnit for MailboxSender {
             }
             1 => {
                 // Attempt to receive response.
+                effects.push(Effect::MailboxReceiveAttempt {
+                    mailbox: self.resp_mailbox,
+                    source: self.id,
+                });
                 ExecutionStepResult {
                     yield_reason: YieldReason::MailboxAccess,
                     consumed_budget: budget,
-                    emitted_effects: vec![Effect::MailboxReceiveAttempt {
-                        mailbox: self.resp_mailbox,
-                        source: self.id,
-                    }],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -528,13 +528,13 @@ impl ExecutionUnit for MailboxSender {
             _ => {
                 // Consume the received response and finish.
                 let response = ctx.received_messages().first().copied().unwrap_or(0);
+                effects.push(Effect::TraceMarker {
+                    marker: response,
+                    source: self.id,
+                });
                 ExecutionStepResult {
                     yield_reason: YieldReason::Finished,
                     consumed_budget: budget,
-                    emitted_effects: vec![Effect::TraceMarker {
-                        marker: response,
-                        source: self.id,
-                    }],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -596,19 +596,20 @@ impl ExecutionUnit for MailboxResponder {
         &mut self,
         budget: Budget,
         ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         let p = self.phase.get();
         self.phase.set(p + 1);
         match p {
             0 => {
                 // Attempt to receive command.
+                effects.push(Effect::MailboxReceiveAttempt {
+                    mailbox: self.cmd_mailbox,
+                    source: self.id,
+                });
                 ExecutionStepResult {
                     yield_reason: YieldReason::MailboxAccess,
                     consumed_budget: budget,
-                    emitted_effects: vec![Effect::MailboxReceiveAttempt {
-                        mailbox: self.cmd_mailbox,
-                        source: self.id,
-                    }],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -618,20 +619,18 @@ impl ExecutionUnit for MailboxResponder {
                 // Read command, send response, wake sender, finish.
                 let cmd = ctx.received_messages().first().copied().unwrap_or(0);
                 let response = cmd.wrapping_add(1);
+                effects.push(Effect::MailboxSend {
+                    mailbox: self.resp_mailbox,
+                    message: MailboxMessage::new(response),
+                    source: self.id,
+                });
+                effects.push(Effect::WakeUnit {
+                    target: self.sender,
+                    source: self.id,
+                });
                 ExecutionStepResult {
                     yield_reason: YieldReason::Finished,
                     consumed_budget: budget,
-                    emitted_effects: vec![
-                        Effect::MailboxSend {
-                            mailbox: self.resp_mailbox,
-                            message: MailboxMessage::new(response),
-                            source: self.id,
-                        },
-                        Effect::WakeUnit {
-                            target: self.sender,
-                            source: self.id,
-                        },
-                    ],
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -654,9 +653,11 @@ mod tests {
         let mem = GuestMemory::new(8);
         let ctx = ExecutionContext::new(&mem);
         let mut u = CountingUnit::new(UnitId::new(0), 3);
+        let mut effects = Vec::new();
         for i in 1..=3 {
             assert_eq!(u.status(), UnitStatus::Runnable);
-            let r = u.run_until_yield(Budget::new(1), &ctx);
+            effects.clear();
+            let r = u.run_until_yield(Budget::new(1), &ctx, &mut effects);
             assert_eq!(u.steps_taken(), i);
             if i == 3 {
                 assert_eq!(r.yield_reason, YieldReason::Finished);
@@ -673,9 +674,10 @@ mod tests {
         let ctx = ExecutionContext::new(&mem);
         let range = ByteRange::new(GuestAddr::new(4), 4).unwrap();
         let mut u = WritingUnit::new(UnitId::new(0), 2, range);
-        let r = u.run_until_yield(Budget::new(1), &ctx);
-        assert_eq!(r.emitted_effects.len(), 1);
-        match &r.emitted_effects[0] {
+        let mut effects = Vec::new();
+        u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
             Effect::SharedWriteIntent {
                 range: r2, bytes, ..
             } => {
@@ -692,9 +694,10 @@ mod tests {
         let ctx = ExecutionContext::new(&mem);
         let target = MailboxId::new(0);
         let mut u = MailboxProducer::new(UnitId::new(0), target, 3);
+        let mut effects = Vec::new();
 
-        let r1 = u.run_until_yield(Budget::new(1), &ctx);
-        match &r1.emitted_effects[0] {
+        let r1 = u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+        match &effects[0] {
             Effect::MailboxSend {
                 mailbox, message, ..
             } => {
@@ -705,9 +708,11 @@ mod tests {
         }
         assert_eq!(r1.yield_reason, YieldReason::MailboxAccess);
 
-        let _ = u.run_until_yield(Budget::new(1), &ctx);
-        let r3 = u.run_until_yield(Budget::new(1), &ctx);
-        match &r3.emitted_effects[0] {
+        effects.clear();
+        let _ = u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+        effects.clear();
+        let r3 = u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+        match &effects[0] {
             Effect::MailboxSend { message, .. } => {
                 assert_eq!(message.raw(), 3);
             }
@@ -723,12 +728,14 @@ mod tests {
         let ctx = ExecutionContext::new(&mem);
         let target = SignalId::new(0);
         let mut u = SignalEmitter::new(UnitId::new(0), target, 4);
+        let mut effects = Vec::new();
 
         // Step 1 -> 0x1, step 2 -> 0x2, step 3 -> 0x4, step 4 -> 0x8.
         for (i, expected_bit) in [1u32, 2, 4, 8].iter().enumerate() {
             assert_eq!(u.status(), UnitStatus::Runnable);
-            let r = u.run_until_yield(Budget::new(1), &ctx);
-            match &r.emitted_effects[0] {
+            effects.clear();
+            let r = u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+            match &effects[0] {
                 Effect::SignalUpdate { signal, value, .. } => {
                     assert_eq!(*signal, target);
                     assert_eq!(*value, *expected_bit);
@@ -755,8 +762,9 @@ mod tests {
         let mem = GuestMemory::new(8);
         let ctx = ExecutionContext::new(&mem);
         let mut u = WritingUnit::at_zero(UnitId::new(0), 1);
-        let r = u.run_until_yield(Budget::new(1), &ctx);
-        match &r.emitted_effects[0] {
+        let mut effects = Vec::new();
+        u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+        match &effects[0] {
             Effect::SharedWriteIntent { range, .. } => {
                 assert_eq!(range.start(), GuestAddr::new(0));
                 assert_eq!(range.length(), 4);

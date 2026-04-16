@@ -20,17 +20,18 @@ pub mod prx;
 pub mod shadow;
 pub mod sprx;
 pub mod state;
+pub mod store_buffer;
 pub mod syscall;
 
-use crate::exec::{PpuFault, PpuStepOutcome};
-use cellgov_effects::{FaultKind, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use crate::exec::{ExecuteVerdict, PpuFault};
+use crate::store_buffer::StoreBuffer;
+use cellgov_effects::{Effect, FaultKind};
+use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, LocalDiagnostics,
     UnitStatus, YieldReason,
 };
-use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_time::{Budget, GuestTicks};
+use cellgov_time::Budget;
 
 /// PPU tried to fetch at an address beyond guest memory.
 pub const FAULT_PC_OUT_OF_RANGE: u32 = 0x0102_0000;
@@ -106,6 +107,15 @@ pub struct PpuExecutionUnit {
     /// slots (from guest-visible code writes) re-decode on the
     /// next fetch.
     instruction_shadow: Option<shadow::PredecodedShadow>,
+    /// Intra-block store-forwarding buffer. Pending stores
+    /// accumulate here during the inner loop and are flushed to
+    /// effects at every yield/fault/budget-exhaustion point.
+    store_buf: StoreBuffer,
+    /// When Some(1), force Budget=1 on the next run_until_yield
+    /// call regardless of the caller's budget. Set after a mid-block
+    /// fault so the re-execution path commits instructions one at a
+    /// time up to the faulting instruction.
+    budget_override: Option<u64>,
 }
 
 impl PpuExecutionUnit {
@@ -123,6 +133,8 @@ impl PpuExecutionUnit {
             retirement_counter: 0,
             per_step_full_states: Vec::new(),
             instruction_shadow: None,
+            store_buf: StoreBuffer::new(),
+            budget_override: None,
         }
     }
 
@@ -228,9 +240,21 @@ impl ExecutionUnit for PpuExecutionUnit {
         &mut self,
         budget: Budget,
         ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
-        let mut remaining = budget.raw();
-        let mut effects = Vec::new();
+        let max_budget = match self.budget_override.take() {
+            Some(b) => b,
+            None => budget.raw(),
+        };
+        let mut remaining = max_budget;
+        effects.clear();
+        self.store_buf.clear();
+
+        let snapshot = if max_budget > 1 {
+            Some(self.state.clone())
+        } else {
+            None
+        };
 
         if let Some(code) = ctx.syscall_return() {
             self.state.gpr[3] = code;
@@ -252,7 +276,6 @@ impl ExecutionUnit for PpuExecutionUnit {
                 return ExecutionStepResult {
                     yield_reason: YieldReason::Fault,
                     consumed_budget: Budget::new(0),
-                    emitted_effects: vec![],
                     local_diagnostics: self.fault_diag(self.state.pc),
                     fault: Some(FaultKind::Guest(FAULT_DEBUG_BREAK)),
                     syscall_args: None,
@@ -291,27 +314,13 @@ impl ExecutionUnit for PpuExecutionUnit {
             }
         }
         let region_views = &region_views_storage[..n_regions];
-        let load_slice = |ea: u64, len: usize| -> Option<&[u8]> {
-            let end = ea.checked_add(len as u64)?;
-            for &(base, bytes) in region_views {
-                let region_end = base + bytes.len() as u64;
-                if ea >= base && end <= region_end {
-                    let offset = (ea - base) as usize;
-                    return Some(&bytes[offset..offset + len]);
-                }
-            }
-            None
-        };
 
-        // Helper: build a memory-fault step result. Used by Load,
-        // LoadVec, and FpLoad to avoid duplicating the fault
-        // construction.
+        // Helper: build a memory-fault step result.
         macro_rules! mem_fault {
-            ($step_pc:expr, $ea:expr, $budget:expr, $remaining:expr, $effects:expr) => {
+            ($step_pc:expr, $ea:expr, $budget:expr, $remaining:expr) => {
                 ExecutionStepResult {
                     yield_reason: YieldReason::Fault,
                     consumed_budget: Budget::new($budget.raw() - $remaining),
-                    emitted_effects: $effects,
                     local_diagnostics: self.fault_diag_ea($step_pc, $ea),
                     fault: Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)),
                     syscall_args: None,
@@ -339,7 +348,6 @@ impl ExecutionUnit for PpuExecutionUnit {
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
-                        emitted_effects: effects,
                         local_diagnostics: self.fault_diag(step_pc),
                         fault: Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
                         syscall_args: None,
@@ -360,7 +368,6 @@ impl ExecutionUnit for PpuExecutionUnit {
                         return ExecutionStepResult {
                             yield_reason: YieldReason::Fault,
                             consumed_budget: Budget::new(budget.raw() - remaining),
-                            emitted_effects: effects,
                             local_diagnostics: self.fault_diag(step_pc),
                             fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
                             syscall_args: None,
@@ -369,143 +376,42 @@ impl ExecutionUnit for PpuExecutionUnit {
                 }
             };
 
+            // Consumed slots are placeholders left by superinstruction
+            // pairing. The preceding superinstruction already did the
+            // work; just advance PC and burn one budget tick.
+            if matches!(insn, instruction::PpuInstruction::Consumed) {
+                self.state.pc += 4;
+                remaining = remaining.saturating_sub(1);
+                if remaining == 0 {
+                    self.store_buf.flush(effects, self.id);
+                    return ExecutionStepResult {
+                        yield_reason: YieldReason::BudgetExhausted,
+                        consumed_budget: budget,
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        fault: None,
+                        syscall_args: None,
+                    };
+                }
+                continue;
+            }
+
             // Execute
-            match exec::execute(&insn, &mut self.state, self.id) {
-                PpuStepOutcome::Continue => {
+            match exec::execute(
+                &insn,
+                &mut self.state,
+                self.id,
+                region_views,
+                effects,
+                &mut self.store_buf,
+            ) {
+                ExecuteVerdict::Continue => {
                     self.state.pc += 4;
                 }
-                PpuStepOutcome::Branch => {
+                ExecuteVerdict::Branch => {
                     // PC already set by the branch instruction.
                 }
-                PpuStepOutcome::Load { ea, size, rt } => {
-                    let slice = match load_slice(ea, size as usize) {
-                        Some(s) => s,
-                        None => {
-                            self.status = UnitStatus::Faulted;
-                            return mem_fault!(step_pc, ea, budget, remaining, effects);
-                        }
-                    };
-                    let val = match size {
-                        1 => slice[0] as u64,
-                        2 => u16::from_be_bytes([slice[0], slice[1]]) as u64,
-                        4 => u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as u64,
-                        8 => u64::from_be_bytes([
-                            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6],
-                            slice[7],
-                        ]),
-                        _ => 0,
-                    };
-                    self.state.gpr[rt as usize] = val;
-                    self.state.pc += 4;
-                }
-                PpuStepOutcome::LoadSigned { ea, size, rt } => {
-                    let slice = match load_slice(ea, size as usize) {
-                        Some(s) => s,
-                        None => {
-                            self.status = UnitStatus::Faulted;
-                            return mem_fault!(step_pc, ea, budget, remaining, effects);
-                        }
-                    };
-                    let val: u64 = match size {
-                        1 => (slice[0] as i8) as i64 as u64,
-                        2 => i16::from_be_bytes([slice[0], slice[1]]) as i64 as u64,
-                        4 => i32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as i64
-                            as u64,
-                        _ => 0,
-                    };
-                    self.state.gpr[rt as usize] = val;
-                    self.state.pc += 4;
-                }
-                PpuStepOutcome::Store { ea, size, value } => {
-                    let payload = match size {
-                        1 => WritePayload::from_slice(&[value as u8]),
-                        2 => WritePayload::from_slice(&(value as u16).to_be_bytes()),
-                        4 => WritePayload::from_slice(&(value as u32).to_be_bytes()),
-                        8 => WritePayload::from_slice(&value.to_be_bytes()),
-                        _ => WritePayload::from_slice(&[]),
-                    };
-                    if let Some(range) = ByteRange::new(GuestAddr::new(ea), size as u64) {
-                        effects.push(cellgov_effects::Effect::SharedWriteIntent {
-                            range,
-                            bytes: payload,
-                            ordering: PriorityClass::Normal,
-                            source: self.id,
-                            source_time: GuestTicks::ZERO,
-                        });
-                    }
-                    self.state.pc += 4;
-                }
-                PpuStepOutcome::LoadVec { ea, vt } => {
-                    let slice = match load_slice(ea, 16) {
-                        Some(s) => s,
-                        None => {
-                            self.status = UnitStatus::Faulted;
-                            return mem_fault!(step_pc, ea, budget, remaining, effects);
-                        }
-                    };
-                    let mut bytes = [0u8; 16];
-                    bytes.copy_from_slice(slice);
-                    self.state.vr[vt as usize] = u128::from_be_bytes(bytes);
-                    self.state.pc += 4;
-                }
-                PpuStepOutcome::FpLoad { ea, size, frt } => {
-                    let slice = match load_slice(ea, size as usize) {
-                        Some(s) => s,
-                        None => {
-                            self.status = UnitStatus::Faulted;
-                            return mem_fault!(step_pc, ea, budget, remaining, effects);
-                        }
-                    };
-                    let val = match size {
-                        4 => {
-                            let bits = u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]);
-                            // lfs: convert single to double
-                            (f32::from_bits(bits) as f64).to_bits()
-                        }
-                        8 => u64::from_be_bytes([
-                            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6],
-                            slice[7],
-                        ]),
-                        _ => 0,
-                    };
-                    self.state.fpr[frt as usize] = val;
-                    self.state.pc += 4;
-                }
-                PpuStepOutcome::FpStore { ea, size, value } => {
-                    let payload = match size {
-                        4 => {
-                            // stfs: convert double to single
-                            let f = f64::from_bits(value) as f32;
-                            WritePayload::from_slice(&f.to_be_bytes())
-                        }
-                        8 => WritePayload::from_slice(&value.to_be_bytes()),
-                        _ => WritePayload::from_slice(&[]),
-                    };
-                    if let Some(range) = ByteRange::new(GuestAddr::new(ea), size as u64) {
-                        effects.push(cellgov_effects::Effect::SharedWriteIntent {
-                            range,
-                            bytes: payload,
-                            ordering: PriorityClass::Normal,
-                            source: self.id,
-                            source_time: GuestTicks::ZERO,
-                        });
-                    }
-                    self.state.pc += 4;
-                }
-                PpuStepOutcome::StoreVec { ea, value } => {
-                    let payload = WritePayload::from_slice(&value.to_be_bytes());
-                    if let Some(range) = ByteRange::new(GuestAddr::new(ea), 16) {
-                        effects.push(cellgov_effects::Effect::SharedWriteIntent {
-                            range,
-                            bytes: payload,
-                            ordering: PriorityClass::Normal,
-                            source: self.id,
-                            source_time: GuestTicks::ZERO,
-                        });
-                    }
-                    self.state.pc += 4;
-                }
-                PpuStepOutcome::Syscall => {
+                ExecuteVerdict::Syscall => {
+                    self.store_buf.flush(effects, self.id);
                     let s = &self.state;
                     let args = [
                         s.gpr[11], s.gpr[3], s.gpr[4], s.gpr[5], s.gpr[6], s.gpr[7], s.gpr[8],
@@ -514,32 +420,28 @@ impl ExecutionUnit for PpuExecutionUnit {
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Syscall,
                         consumed_budget: Budget::new(budget.raw() - remaining),
-                        emitted_effects: effects,
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: Some(args),
                     };
                 }
-                PpuStepOutcome::Yield {
-                    effects: step_effects,
-                    reason,
-                } => {
-                    effects.extend(step_effects);
-                    if reason == YieldReason::Finished {
-                        self.status = UnitStatus::Finished;
-                    } else {
-                        self.state.pc += 4;
+                ExecuteVerdict::Fault(f) => {
+                    if remaining < max_budget {
+                        if let Some(snap) = snapshot.as_ref() {
+                            self.state = snap.clone();
+                            effects.clear();
+                            self.store_buf.clear();
+                            self.budget_override = Some(1);
+                            return ExecutionStepResult {
+                                yield_reason: YieldReason::BudgetExhausted,
+                                consumed_budget: Budget::new(0),
+                                local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                                fault: None,
+                                syscall_args: None,
+                            };
+                        }
                     }
-                    return ExecutionStepResult {
-                        yield_reason: reason,
-                        consumed_budget: Budget::new(budget.raw() - remaining),
-                        emitted_effects: effects,
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: None,
-                        syscall_args: None,
-                    };
-                }
-                PpuStepOutcome::Fault(f) => {
+                    self.store_buf.flush(effects, self.id);
                     self.status = UnitStatus::Faulted;
                     let code = match f {
                         PpuFault::PcOutOfRange(a) => FAULT_PC_OUT_OF_RANGE | a as u32,
@@ -549,9 +451,41 @@ impl ExecutionUnit for PpuExecutionUnit {
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
-                        emitted_effects: effects,
                         local_diagnostics: self.fault_diag(step_pc),
                         fault: Some(FaultKind::Guest(code)),
+                        syscall_args: None,
+                    };
+                }
+                ExecuteVerdict::MemFault(ea) => {
+                    if remaining < max_budget {
+                        if let Some(snap) = snapshot.as_ref() {
+                            self.state = snap.clone();
+                            effects.clear();
+                            self.store_buf.clear();
+                            self.budget_override = Some(1);
+                            return ExecutionStepResult {
+                                yield_reason: YieldReason::BudgetExhausted,
+                                consumed_budget: Budget::new(0),
+                                local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                                fault: None,
+                                syscall_args: None,
+                            };
+                        }
+                    }
+                    self.store_buf.flush(effects, self.id);
+                    self.status = UnitStatus::Faulted;
+                    return mem_fault!(step_pc, ea, budget, remaining);
+                }
+                ExecuteVerdict::BufferFull => {
+                    // Store buffer capacity exceeded. Flush buffered
+                    // stores and yield without advancing PC so the
+                    // overflowing instruction retries on the next step.
+                    self.store_buf.flush(effects, self.id);
+                    return ExecutionStepResult {
+                        yield_reason: YieldReason::BudgetExhausted,
+                        consumed_budget: Budget::new(budget.raw() - remaining),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        fault: None,
                         syscall_args: None,
                     };
                 }
@@ -576,10 +510,10 @@ impl ExecutionUnit for PpuExecutionUnit {
 
             remaining = remaining.saturating_sub(1);
             if remaining == 0 {
+                self.store_buf.flush(effects, self.id);
                 return ExecutionStepResult {
                     yield_reason: YieldReason::BudgetExhausted,
                     consumed_budget: budget,
-                    emitted_effects: effects,
                     local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: None,
                     syscall_args: None,

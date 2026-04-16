@@ -49,55 +49,26 @@ CellGov answers that question:
 
 Pre-Alpha. Capability today:
 
-- **Titles covered: 2.** flOw (NPUA80001) boots deterministically
-  to `sys_process_exit` at PPU step 1.4M and is cross-runner
-  verified against RPCS3 at the first-`sys_tty_write` boot
-  checkpoint. Code and read-only-data segments match RPCS3 byte
-  for byte; the only divergence is a pointer-table layout offset
-  inside the data segment, caused by CellGov and RPCS3 using
-  different allocators that place the same logical allocations at
-  different guest addresses (the pointed-to contents are
-  functionally equivalent). The committed compare report is at
-  [`tests/fixtures/NPUA80001_cross_runner/compare_report.txt`](tests/fixtures/NPUA80001_cross_runner/compare_report.txt);
-  reproduction steps are in the same directory's `REPRODUCTION.md`.
-  Super Stardust HD (NPUA80068) boots past the same early-init
-  stages under the shared title harness; its RSX-write checkpoint
-  is within reach pending further interpreter throughput work.
-  Titles are manifest-driven: each one is a TOML file under
-  [`docs/titles/<content-id>.toml`](docs/titles/). Adding a new
-  title that fits the existing checkpoint kinds and the standard
-  PS3 VFS layout is a single-file commit with no Rust change.
-- **PPU interpreter: 100 instruction variants**, full SPU
-  interpreter, NID-correct sysPrxForUser HLE dispatch.
-- **LV2 syscalls: 16 with non-default handling** (the rest return
-  canned codes through the Unsupported variant and surface as
-  faults if a guest call needs them).
-- **HLE exports: 10 with dedicated handling;** the default path
-  returns 0. Per-title import inventories live at
-  [`docs/titles/NPUA80001_hle_inventory.md`](docs/titles/NPUA80001_hle_inventory.md)
-  and [`docs/titles/NPUA80068_hle_inventory.md`](docs/titles/NPUA80068_hle_inventory.md);
-  regenerate with `cellgov_cli dump-imports --title <name>`.
-- PS3-spec guest memory layout: sparse multi-region address space
-  matching the real PS3 virtual-address map. `sys_memory_allocate`
-  returns pointers in `0x00010000-0x0FFFFFFF` (above the loaded
-  ELF), the primary thread stack lives at `0xD0000000+`, and
-  RSX/SPU-reserved ranges are addressable as zero-readable
-  provisional regions.
-- Per-step divergence trace: opt-in per-instruction state hashes,
-  a streaming `diverge` scanner, and a zoom-in mode that names
-  the exact register field that disagrees.
-- Configurable HLE binding layout: trampolines for test scenarios,
-  or a packed layout matching RPCS3's HLE-table shape for
-  cross-runner comparison.
-- Reproducible boot bench: `cellgov_cli bench-boot --title <name>`
-  runs two subprocess-isolated boots and reports wall time +
-  steps/sec; rejects pairs that disagree by more than 5 percent.
-- Predecoded instruction shadow: instructions are decoded once at
-  load time and cached. Subsequent fetches skip the decode step;
-  guest-visible code writes invalidate the affected cache entries
-  and re-decode on the next fetch.
-- 1065 tests across 15 library crates and 3 binaries, zero
-  `unsafe` (workspace-level `unsafe_code = forbid`).
+- **Titles: 2** -- flOw (NPUA80001) cross-runner verified against
+  RPCS3; Super Stardust HD (NPUA80068) boots past early init.
+  Manifest-driven: adding a title is one TOML file, no Rust change.
+- **PPU: 110 instruction variants**, including quickened
+  specializations and superinstruction compounds. Full SPU
+  interpreter.
+- **LV2: 16 syscalls**, 10 HLE exports with dedicated handling.
+- **Memory**: PS3-spec sparse address space with store-forwarding
+  buffer for intra-block coherence.
+- **Throughput**: basic-block batching (Budget=256), predecoded
+  instruction shadow with quickening and super-pairing.
+- **Tracing**: per-instruction state hashes, streaming divergence
+  scanner, register-level zoom-in.
+- **Cross-runner**: observation schema validated against RPCS3;
+  reproducible boot bench with subprocess isolation.
+- 1125 tests, zero `unsafe` (`unsafe_code = forbid`).
+
+See [`docs/architecture.md`](docs/architecture.md) for full
+technical details on the pipeline, memory model, shadow passes,
+and effect vocabulary.
 
 ## Workspace
 

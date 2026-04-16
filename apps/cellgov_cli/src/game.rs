@@ -269,7 +269,7 @@ fn bench_step_loop(
         match rt.step() {
             Ok(step) => {
                 *steps += 1;
-                let commit_result = rt.commit_step(&step.result);
+                let commit_result = rt.commit_step(&step.result, &step.effects);
                 if rsx_write_checkpoint_addr(checkpoint, &commit_result).is_some() {
                     return BootOutcome::RsxWriteCheckpoint;
                 }
@@ -837,7 +837,7 @@ fn step_loop(
                 }
 
                 let t2 = Instant::now();
-                let commit_result = rt.commit_step(&step.result);
+                let commit_result = rt.commit_step(&step.result, &step.effects);
                 let t3 = Instant::now();
 
                 if let Some(addr) = rsx_write_checkpoint_addr(ctx.checkpoint, &commit_result) {

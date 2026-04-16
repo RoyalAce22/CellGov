@@ -22,8 +22,8 @@ pub fn observe_decisions(rt: &mut Runtime) -> DecisionLog {
         let step_idx = rt.steps_taken();
         match rt.step() {
             Ok(step) => {
-                let footprint = StepFootprint::from_effects(&step.result.emitted_effects);
-                let _ = rt.commit_step(&step.result);
+                let footprint = StepFootprint::from_effects(&step.effects);
+                let _ = rt.commit_step(&step.result, &step.effects);
                 log.push(DecisionPoint {
                     step: step_idx,
                     runnable,

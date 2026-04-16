@@ -19,7 +19,7 @@ pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) {
         }
         match rt.step() {
             Ok(step) => {
-                let _ = rt.commit_step(&step.result);
+                let _ = rt.commit_step(&step.result, &step.effects);
                 steps += 1;
             }
             Err(_) => break,

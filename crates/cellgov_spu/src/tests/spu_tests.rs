@@ -16,7 +16,7 @@ fn stop_instruction_yields_finished() {
     // (LS is already zeroed, and 0x00000000 decodes to stop)
     let mem = GuestMemory::new(16);
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(100), &ctx);
+    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Finished);
     assert_eq!(unit.status(), UnitStatus::Finished);
 }
@@ -34,7 +34,7 @@ fn il_then_stop_executes_two_instructions() {
 
     let mem = GuestMemory::new(16);
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(100), &ctx);
+    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Finished);
     assert_eq!(unit.state().reg_word(3), 42);
 }
@@ -50,7 +50,7 @@ fn budget_exhaustion_yields() {
 
     let mem = GuestMemory::new(16);
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(5), &ctx);
+    let result = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
     assert_eq!(result.consumed_budget, Budget::new(5));
     assert_eq!(unit.state().pc, 20); // 5 nops * 4 bytes
@@ -65,7 +65,7 @@ fn decode_failure_faults() {
 
     let mem = GuestMemory::new(16);
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(100), &ctx);
+    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
     assert!(result.fault.is_some());
@@ -91,7 +91,7 @@ fn lqa_out_of_range_local_store_faults() {
 
     let mem = GuestMemory::new(16);
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(10), &ctx);
+    let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
     // The fault must be a guest-side LS out-of-range encoded with
@@ -146,11 +146,12 @@ fn wrch_mfc_cmd_yields_dma_submitted() {
 
     let mem = GuestMemory::new(16);
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(100), &ctx);
+    let mut effects = Vec::new();
+    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
     assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
-    assert_eq!(result.emitted_effects.len(), 1);
+    assert_eq!(effects.len(), 1);
     assert!(matches!(
-        &result.emitted_effects[0],
+        &effects[0],
         cellgov_effects::Effect::DmaEnqueue {
             payload: Some(_),
             ..
@@ -184,10 +185,11 @@ fn run_spu_fixed_value_binary() {
     let mut all_effects = Vec::new();
     let max_steps = 50;
     for _ in 0..max_steps {
-        let result = unit.run_until_yield(Budget::new(10000), &ctx);
+        let mut step_effects = Vec::new();
+        let result = unit.run_until_yield(Budget::new(10000), &ctx, &mut step_effects);
         let reason = result.yield_reason;
         let fault = result.fault;
-        all_effects.extend(result.emitted_effects);
+        all_effects.extend(step_effects);
 
         match reason {
             YieldReason::Finished => break,
@@ -579,8 +581,9 @@ fn dma_completion_payloads_are_correct() {
 
     let mut dma_payloads = Vec::new();
     for _ in 0..100 {
-        let result = unit.run_until_yield(Budget::new(100_000), &ctx);
-        for e in &result.emitted_effects {
+        let mut step_effects = Vec::new();
+        let result = unit.run_until_yield(Budget::new(100_000), &ctx, &mut step_effects);
+        for e in &step_effects {
             if let cellgov_effects::Effect::DmaEnqueue {
                 request, payload, ..
             } = e

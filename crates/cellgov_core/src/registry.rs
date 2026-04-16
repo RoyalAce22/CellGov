@@ -27,6 +27,7 @@
 //! serialization is handled outside the object-safe trait so concrete
 //! unit types can pick their own snapshot representation.
 
+use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus};
 use cellgov_time::Budget;
@@ -58,6 +59,7 @@ pub trait RegisteredUnit: 'static {
         &mut self,
         budget: Budget,
         ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult;
 
     /// Drain per-instruction state fingerprints retired during the most
@@ -96,8 +98,9 @@ impl<U: ExecutionUnit + 'static> RegisteredUnit for U {
         &mut self,
         budget: Budget,
         ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
-        ExecutionUnit::run_until_yield(self, budget, ctx)
+        ExecutionUnit::run_until_yield(self, budget, ctx, effects)
     }
 
     #[inline]
@@ -400,7 +403,6 @@ impl UnitRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cellgov_effects::Effect;
     use cellgov_exec::{LocalDiagnostics, YieldReason};
     use cellgov_mem::GuestMemory;
 
@@ -428,15 +430,16 @@ mod tests {
             &mut self,
             budget: Budget,
             _ctx: &ExecutionContext<'_>,
+            effects: &mut Vec<Effect>,
         ) -> ExecutionStepResult {
             self.steps += 1;
+            effects.push(Effect::TraceMarker {
+                marker: self.steps as u32,
+                source: self.id,
+            });
             ExecutionStepResult {
                 yield_reason: YieldReason::BudgetExhausted,
                 consumed_budget: budget,
-                emitted_effects: vec![Effect::TraceMarker {
-                    marker: self.steps as u32,
-                    source: self.id,
-                }],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -467,11 +470,11 @@ mod tests {
             &mut self,
             budget: Budget,
             _ctx: &ExecutionContext<'_>,
+            _effects: &mut Vec<Effect>,
         ) -> ExecutionStepResult {
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
                 consumed_budget: budget,
-                emitted_effects: vec![],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -523,9 +526,10 @@ mod tests {
         let mem = GuestMemory::new(8);
         let ctx = ExecutionContext::new(&mem);
         let u = r.get_mut(id).expect("present");
-        let step = u.run_until_yield(Budget::new(5), &ctx);
+        let mut effects = Vec::new();
+        let step = u.run_until_yield(Budget::new(5), &ctx, &mut effects);
         assert_eq!(step.consumed_budget, Budget::new(5));
-        assert_eq!(step.emitted_effects.len(), 1);
+        assert_eq!(effects.len(), 1);
     }
 
     #[test]
@@ -560,9 +564,11 @@ mod tests {
         let mem = GuestMemory::new(8);
         let ctx = ExecutionContext::new(&mem);
         let mut total = 0;
+        let mut effects = Vec::new();
         for (_, u) in r.iter_mut() {
-            let step = u.run_until_yield(Budget::new(1), &ctx);
-            total += step.emitted_effects.len();
+            effects.clear();
+            u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+            total += effects.len();
         }
         assert_eq!(total, 3);
     }
@@ -587,11 +593,11 @@ mod tests {
             &mut self,
             budget: Budget,
             _ctx: &ExecutionContext<'_>,
+            _effects: &mut Vec<Effect>,
         ) -> ExecutionStepResult {
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
                 consumed_budget: budget,
-                emitted_effects: vec![],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,

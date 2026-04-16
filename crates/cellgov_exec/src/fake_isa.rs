@@ -133,6 +133,7 @@ impl ExecutionUnit for FakeIsaUnit {
         &mut self,
         budget: Budget,
         ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         // If any received messages are pending (from a prior
         // MailboxRecv), load the first into the accumulator.
@@ -145,7 +146,6 @@ impl ExecutionUnit for FakeIsaUnit {
             return ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
                 consumed_budget: budget,
-                emitted_effects: vec![],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -155,41 +155,39 @@ impl ExecutionUnit for FakeIsaUnit {
         let op = self.program[self.pc].clone();
         self.pc += 1;
 
-        let (yield_reason, effects) = match op {
+        let yield_reason = match op {
             FakeOp::LoadImm(value) => {
                 self.acc = value;
-                (YieldReason::BudgetExhausted, vec![])
+                YieldReason::BudgetExhausted
             }
             FakeOp::SharedStore { addr, len } => {
                 let byte = self.acc as u8;
                 let range = ByteRange::new(GuestAddr::new(addr), len)
                     .expect("SharedStore range must be valid");
-                (
-                    YieldReason::BudgetExhausted,
-                    vec![Effect::SharedWriteIntent {
-                        range,
-                        bytes: WritePayload::new(vec![byte; len as usize]),
-                        ordering: PriorityClass::Normal,
-                        source: self.id,
-                        source_time: GuestTicks::ZERO,
-                    }],
-                )
+                effects.push(Effect::SharedWriteIntent {
+                    range,
+                    bytes: WritePayload::new(vec![byte; len as usize]),
+                    ordering: PriorityClass::Normal,
+                    source: self.id,
+                    source_time: GuestTicks::ZERO,
+                });
+                YieldReason::BudgetExhausted
             }
-            FakeOp::MailboxSend { mailbox } => (
-                YieldReason::MailboxAccess,
-                vec![Effect::MailboxSend {
+            FakeOp::MailboxSend { mailbox } => {
+                effects.push(Effect::MailboxSend {
                     mailbox: cellgov_sync::MailboxId::new(mailbox),
                     message: MailboxMessage::new(self.acc),
                     source: self.id,
-                }],
-            ),
-            FakeOp::MailboxRecv { mailbox } => (
-                YieldReason::MailboxAccess,
-                vec![Effect::MailboxReceiveAttempt {
+                });
+                YieldReason::MailboxAccess
+            }
+            FakeOp::MailboxRecv { mailbox } => {
+                effects.push(Effect::MailboxReceiveAttempt {
                     mailbox: cellgov_sync::MailboxId::new(mailbox),
                     source: self.id,
-                }],
-            ),
+                });
+                YieldReason::MailboxAccess
+            }
             FakeOp::DmaPut { src, dst, len } => {
                 let src_range = ByteRange::new(GuestAddr::new(src), len)
                     .expect("DmaPut src range must be valid");
@@ -202,38 +200,35 @@ impl ExecutionUnit for FakeIsaUnit {
                     self.id,
                 )
                 .expect("DmaPut src and dst lengths must match");
-                (
-                    YieldReason::DmaSubmitted,
-                    vec![Effect::DmaEnqueue {
-                        request: req,
-                        payload: None,
-                    }],
-                )
+                effects.push(Effect::DmaEnqueue {
+                    request: req,
+                    payload: None,
+                });
+                YieldReason::DmaSubmitted
             }
-            FakeOp::Wait { signal, mask: _ } => (
-                YieldReason::WaitingSync,
-                vec![Effect::WaitOnEvent {
+            FakeOp::Wait { signal, mask: _ } => {
+                effects.push(Effect::WaitOnEvent {
                     target: WaitTarget::Signal(cellgov_sync::SignalId::new(signal)),
                     source: self.id,
-                }],
-            ),
-            FakeOp::Barrier { barrier } => (
-                YieldReason::WaitingSync,
-                vec![Effect::WaitOnEvent {
+                });
+                YieldReason::WaitingSync
+            }
+            FakeOp::Barrier { barrier } => {
+                effects.push(Effect::WaitOnEvent {
                     target: WaitTarget::Barrier(cellgov_sync::BarrierId::new(barrier)),
                     source: self.id,
-                }],
-            ),
+                });
+                YieldReason::WaitingSync
+            }
             FakeOp::End => {
                 self.finished = true;
-                (YieldReason::Finished, vec![])
+                YieldReason::Finished
             }
         };
 
         ExecutionStepResult {
             yield_reason,
             consumed_budget: budget,
-            emitted_effects: effects,
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -258,7 +253,8 @@ mod tests {
     fn empty_program_finishes_immediately() {
         let mem = GuestMemory::new(16);
         let mut u = FakeIsaUnit::new(UnitId::new(0), vec![]);
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem));
+        let mut effects = Vec::new();
+        let r = u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
         assert_eq!(r.yield_reason, YieldReason::Finished);
         assert_eq!(u.status(), UnitStatus::Finished);
     }
@@ -267,7 +263,8 @@ mod tests {
     fn end_finishes() {
         let mem = GuestMemory::new(16);
         let mut u = FakeIsaUnit::new(UnitId::new(0), vec![FakeOp::End]);
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem));
+        let mut effects = Vec::new();
+        let r = u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
         assert_eq!(r.yield_reason, YieldReason::Finished);
         assert_eq!(u.status(), UnitStatus::Finished);
     }
@@ -276,10 +273,11 @@ mod tests {
     fn load_imm_sets_accumulator() {
         let mem = GuestMemory::new(16);
         let mut u = FakeIsaUnit::new(UnitId::new(0), vec![FakeOp::LoadImm(42), FakeOp::End]);
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem));
+        let mut effects = Vec::new();
+        let r = u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
         assert_eq!(r.yield_reason, YieldReason::BudgetExhausted);
         assert_eq!(u.acc(), 42);
-        assert_eq!(r.emitted_effects.len(), 0);
+        assert_eq!(effects.len(), 0);
     }
 
     #[test]
@@ -293,10 +291,12 @@ mod tests {
                 FakeOp::End,
             ],
         );
-        u.run_until_yield(Budget::new(1), &ctx(&mem)); // LoadImm
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem)); // SharedStore
-        assert_eq!(r.emitted_effects.len(), 1);
-        match &r.emitted_effects[0] {
+        let mut effects = Vec::new();
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects); // LoadImm
+        effects.clear();
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects); // SharedStore
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
             Effect::SharedWriteIntent { bytes, .. } => {
                 assert_eq!(bytes.bytes(), &[0xab, 0xab, 0xab, 0xab]);
             }
@@ -315,9 +315,11 @@ mod tests {
                 FakeOp::End,
             ],
         );
-        u.run_until_yield(Budget::new(1), &ctx(&mem));
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem));
-        match &r.emitted_effects[0] {
+        let mut effects = Vec::new();
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
+        effects.clear();
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
+        match &effects[0] {
             Effect::MailboxSend { message, .. } => {
                 assert_eq!(message.raw(), 0xdead);
             }
@@ -332,11 +334,9 @@ mod tests {
             UnitId::new(0),
             vec![FakeOp::MailboxRecv { mailbox: 1 }, FakeOp::End],
         );
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem));
-        assert!(matches!(
-            r.emitted_effects[0],
-            Effect::MailboxReceiveAttempt { .. }
-        ));
+        let mut effects = Vec::new();
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
+        assert!(matches!(effects[0], Effect::MailboxReceiveAttempt { .. }));
     }
 
     #[test]
@@ -353,8 +353,9 @@ mod tests {
                 FakeOp::End,
             ],
         );
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem));
-        assert!(matches!(r.emitted_effects[0], Effect::DmaEnqueue { .. }));
+        let mut effects = Vec::new();
+        let r = u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
+        assert!(matches!(effects[0], Effect::DmaEnqueue { .. }));
         assert_eq!(r.yield_reason, YieldReason::DmaSubmitted);
     }
 
@@ -371,8 +372,9 @@ mod tests {
                 FakeOp::End,
             ],
         );
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem));
-        match &r.emitted_effects[0] {
+        let mut effects = Vec::new();
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
+        match &effects[0] {
             Effect::WaitOnEvent {
                 target: WaitTarget::Signal(sig),
                 ..
@@ -390,8 +392,9 @@ mod tests {
             UnitId::new(0),
             vec![FakeOp::Barrier { barrier: 3 }, FakeOp::End],
         );
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem));
-        match &r.emitted_effects[0] {
+        let mut effects = Vec::new();
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
+        match &effects[0] {
             Effect::WaitOnEvent {
                 target: WaitTarget::Barrier(b),
                 ..
@@ -409,7 +412,8 @@ mod tests {
         // Simulate the runtime delivering a message.
         let received = vec![0xcafe_u32];
         let ctx = ExecutionContext::with_received(&mem, &received);
-        u.run_until_yield(Budget::new(1), &ctx);
+        let mut effects = Vec::new();
+        u.run_until_yield(Budget::new(1), &ctx, &mut effects);
         assert_eq!(u.acc(), 0xcafe);
     }
 
@@ -418,7 +422,8 @@ mod tests {
         let mem = GuestMemory::new(16);
         let mut u = FakeIsaUnit::new(UnitId::new(0), vec![FakeOp::LoadImm(99), FakeOp::End]);
         assert_eq!(u.snapshot(), (0, 0));
-        u.run_until_yield(Budget::new(1), &ctx(&mem));
+        let mut effects = Vec::new();
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
         assert_eq!(u.snapshot(), (1, 99));
     }
 
@@ -434,11 +439,14 @@ mod tests {
                 FakeOp::End,
             ],
         );
+        let mut effects = Vec::new();
         for expected_acc in [1, 2, 3] {
-            u.run_until_yield(Budget::new(1), &ctx(&mem));
+            effects.clear();
+            u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
             assert_eq!(u.acc(), expected_acc);
         }
-        let r = u.run_until_yield(Budget::new(1), &ctx(&mem));
+        effects.clear();
+        let r = u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
         assert_eq!(r.yield_reason, YieldReason::Finished);
     }
 }

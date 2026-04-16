@@ -207,7 +207,7 @@ pub(super) fn run_module_start(
                     );
                 }
 
-                let _ = rt.commit_step(&step.result);
+                let _ = rt.commit_step(&step.result, &step.effects);
 
                 if let Some(fault) = &step.result.fault {
                     let fault_pc = step.result.local_diagnostics.pc.unwrap_or(0);

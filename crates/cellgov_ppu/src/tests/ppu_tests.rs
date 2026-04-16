@@ -1,17 +1,17 @@
 use super::*;
 use cellgov_exec::ExecutionContext;
-use cellgov_mem::GuestMemory;
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 
 /// Run a PPU unit until it reaches a non-Syscall yield, handling the
 /// yield-resume cycle for syscalls by feeding back `r3 = 0` (CELL_OK)
 /// and re-entering. Mimics what the runtime does for `Lv2Dispatch::Immediate`.
-/// Effects from all cycles are accumulated into the final result.
+/// Effects from all cycles are accumulated into `effects`.
 /// Panics after 1000 cycles to avoid infinite loops.
 fn run_to_completion(
     unit: &mut PpuExecutionUnit,
     mem: &GuestMemory,
     budget: Budget,
-) -> ExecutionStepResult {
+) -> (ExecutionStepResult, Vec<Effect>) {
     let mut received = vec![];
     let mut syscall_ret: Option<u64> = None;
     let mut all_effects = Vec::new();
@@ -21,28 +21,28 @@ fn run_to_completion(
         } else {
             ExecutionContext::with_received(mem, &received)
         };
-        let result = unit.run_until_yield(budget, &ctx);
+        let mut effects = Vec::new();
+        let result = unit.run_until_yield(budget, &ctx, &mut effects);
         if result.yield_reason == YieldReason::Syscall {
-            all_effects.extend(result.emitted_effects);
+            all_effects.extend(effects);
             if let Some(args) = &result.syscall_args {
                 if args[0] == 22 {
                     unit.status = UnitStatus::Finished;
-                    return ExecutionStepResult {
-                        yield_reason: YieldReason::Finished,
-                        emitted_effects: all_effects,
-                        ..result
-                    };
+                    return (
+                        ExecutionStepResult {
+                            yield_reason: YieldReason::Finished,
+                            ..result
+                        },
+                        all_effects,
+                    );
                 }
             }
             syscall_ret = Some(0);
             received = vec![];
             continue;
         }
-        all_effects.extend(result.emitted_effects);
-        return ExecutionStepResult {
-            emitted_effects: all_effects,
-            ..result
-        };
+        all_effects.extend(effects);
+        return (result, all_effects);
     }
     panic!("PPU did not terminate within 1000 resume cycles");
 }
@@ -68,7 +68,7 @@ fn li_then_sc_exit() {
     place_insn(&mut mem, 4, 0x4400_0002);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    let result = run_to_completion(&mut unit, &mem, Budget::new(100));
+    let (result, _effects) = run_to_completion(&mut unit, &mem, Budget::new(100));
     assert_eq!(result.yield_reason, YieldReason::Finished);
     assert_eq!(unit.status(), UnitStatus::Finished);
     assert_eq!(unit.state().gpr[11], 22);
@@ -89,12 +89,11 @@ fn store_emits_shared_write_intent() {
     place_insn(&mut mem, 12, 0x4400_0002);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    let result = run_to_completion(&mut unit, &mem, Budget::new(100));
+    let (result, effects) = run_to_completion(&mut unit, &mem, Budget::new(100));
     assert_eq!(result.yield_reason, YieldReason::Finished);
 
     // Should have one SharedWriteIntent for the stw
-    let writes: Vec<_> = result
-        .emitted_effects
+    let writes: Vec<_> = effects
         .iter()
         .filter(|e| matches!(e, cellgov_effects::Effect::SharedWriteIntent { .. }))
         .collect();
@@ -125,7 +124,7 @@ fn load_reads_from_guest_memory() {
     place_insn(&mut mem, 8, 0x4400_0002);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    let result = run_to_completion(&mut unit, &mem, Budget::new(100));
+    let (result, _effects) = run_to_completion(&mut unit, &mem, Budget::new(100));
     assert_eq!(result.yield_reason, YieldReason::Finished);
     assert_eq!(unit.state().gpr[3], 0xDEAD_BEEF);
 }
@@ -140,7 +139,7 @@ fn unknown_syscall_yields_with_args() {
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(100), &ctx);
+    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Syscall);
     let args = result.syscall_args.unwrap();
     assert_eq!(args[0], 999);
@@ -153,7 +152,7 @@ fn decode_failure_faults() {
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(100), &ctx);
+    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
 }
@@ -168,7 +167,7 @@ fn budget_exhaustion_yields() {
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(5), &ctx);
+    let result = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
     assert_eq!(result.consumed_budget, Budget::new(5));
     assert_eq!(unit.state().pc, 20); // 5 nops * 4 bytes
@@ -182,7 +181,7 @@ fn pc_out_of_range_faults() {
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     unit.state_mut().pc = 0x1000; // past end of 256-byte memory
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(10), &ctx);
+    let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
     assert_eq!(
@@ -204,7 +203,7 @@ fn load_out_of_range_faults() {
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     unit.state_mut().gpr[1] = 0x0000_0000_1000_0000; // way past 256 bytes
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(10), &ctx);
+    let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
     assert_eq!(
@@ -261,7 +260,7 @@ fn run_microtest_ppu(rel_path: &str) -> Option<(YieldReason, u64, u64, u64)> {
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     *unit.state_mut() = state;
     let budget = Budget::new(100_000);
-    let result = run_to_completion(&mut unit, &mem, budget);
+    let (result, _effects) = run_to_completion(&mut unit, &mem, budget);
     Some((
         result.yield_reason,
         unit.state().gpr[11],
@@ -911,7 +910,7 @@ fn flow_boot_progress() {
     loop {
         match rt.step() {
             Ok(step) => {
-                let _ = rt.commit_step(&step.result);
+                let _ = rt.commit_step(&step.result, &step.effects);
                 steps += 1;
                 if step.result.fault.is_some() {
                     faulted = true;
@@ -952,7 +951,7 @@ fn fault_includes_register_dump() {
     ppu.state_mut().pc = 0x100; // past end of 64-byte memory
 
     let ctx = ExecutionContext::new(&mem);
-    let result = ppu.run_until_yield(Budget::new(1), &ctx);
+    let result = ppu.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     assert_eq!(result.yield_reason, YieldReason::Fault);
     let regs = result
@@ -979,7 +978,7 @@ fn lha_sign_extends_negative_halfword() {
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     // Sign-extended -2 as u64 = 0xFFFF_FFFF_FFFF_FFFE.
     assert_eq!(unit.state().gpr[3], 0xFFFF_FFFF_FFFF_FFFE);
@@ -997,7 +996,7 @@ fn lha_zero_extends_positive_halfword() {
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     assert_eq!(unit.state().gpr[4], 0x1234);
 }
@@ -1025,7 +1024,7 @@ fn lbzu_advances_ra_to_effective_address() {
     // r9 starts one byte BELOW the target; lbzu must advance it.
     unit.state_mut().gpr[9] = target_addr - 1;
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     assert_eq!(
         unit.state().gpr[9],
@@ -1052,7 +1051,7 @@ fn per_step_trace_off_records_no_state_hashes() {
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     use cellgov_exec::ExecutionUnit;
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(3), &ctx);
+    let _ = unit.run_until_yield(Budget::new(3), &ctx, &mut Vec::new());
 
     let drained = unit.drain_retired_state_hashes();
     assert!(
@@ -1074,7 +1073,7 @@ fn per_step_trace_on_records_one_hash_per_retired_instruction() {
     unit.set_per_step_trace(true);
     assert!(unit.per_step_trace());
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(3), &ctx);
+    let _ = unit.run_until_yield(Budget::new(3), &ctx, &mut Vec::new());
 
     let drained = unit.drain_retired_state_hashes();
     assert_eq!(drained.len(), 3, "one fingerprint per retired instruction");
@@ -1099,7 +1098,7 @@ fn drain_retired_state_hashes_clears_buffer() {
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     unit.set_per_step_trace(true);
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     assert_eq!(unit.drain_retired_state_hashes().len(), 1);
     assert_eq!(
@@ -1120,7 +1119,7 @@ fn per_step_trace_does_not_record_on_fault() {
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     unit.set_per_step_trace(true);
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(1), &ctx);
+    let result = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert!(
@@ -1141,7 +1140,7 @@ fn full_state_window_off_records_no_full_states() {
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(2), &ctx);
+    let _ = unit.run_until_yield(Budget::new(2), &ctx, &mut Vec::new());
     assert!(unit.drain_retired_state_full().is_empty());
 }
 
@@ -1163,7 +1162,7 @@ fn full_state_window_emits_only_inside_range() {
     unit.set_full_state_window(Some((1, 3)));
     assert_eq!(unit.full_state_window(), Some((1, 3)));
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(5), &ctx);
+    let _ = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
 
     let drained = unit.drain_retired_state_full();
     assert_eq!(drained.len(), 3, "[1,3] inclusive == 3 entries");
@@ -1190,7 +1189,7 @@ fn full_state_window_and_per_step_hash_are_independent() {
     unit.set_per_step_trace(true);
     unit.set_full_state_window(Some((0, 0)));
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(5), &ctx);
+    let _ = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
 
     assert_eq!(unit.drain_retired_state_hashes().len(), 5);
     assert_eq!(unit.drain_retired_state_full().len(), 1);
@@ -1207,7 +1206,7 @@ fn full_state_window_captures_actual_register_values() {
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     unit.set_full_state_window(Some((0, 0)));
     let ctx = ExecutionContext::new(&mem);
-    let _ = unit.run_until_yield(Budget::new(1), &ctx);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     let drained = unit.drain_retired_state_full();
     assert_eq!(drained.len(), 1);
@@ -1225,7 +1224,7 @@ fn non_fault_step_has_no_register_dump() {
 
     let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
     let ctx = ExecutionContext::new(&mem);
-    let result = ppu.run_until_yield(Budget::new(1), &ctx);
+    let result = ppu.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
     assert!(
@@ -1265,7 +1264,7 @@ fn step_n(rt: &mut cellgov_core::Runtime, n: usize) {
     for _ in 0..n {
         match rt.step() {
             Ok(s) => {
-                let _ = rt.commit_step(&s.result);
+                let _ = rt.commit_step(&s.result, &s.effects);
             }
             Err(_) => break,
         }
@@ -1453,4 +1452,74 @@ fn shadow_inv_partial_word_write() {
         42,
         "partial-byte patch must be observed"
     );
+}
+
+// -- Phase 14 coverage: mid-block fault recovery --
+
+#[test]
+fn mid_block_fault_triggers_snapshot_restore_and_retry() {
+    // Two instructions: addi r3, r3, 1 (succeeds), then lwz from a
+    // bad address (faults). At Budget>1 the first instruction retires,
+    // then the fault triggers snapshot restore + budget_override=1.
+    // After re-execution at Budget=1 the first instruction commits
+    // individually, and the second faults normally.
+    let mut mem = GuestMemory::new(256);
+    let addi_r3: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1; // addi r3,r3,1
+    let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16); // lwz r4, 0(r5)
+    place_insn(&mut mem, 0, addi_r3);
+    place_insn(&mut mem, 4, lwz_bad);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().gpr[3] = 10;
+    unit.state_mut().gpr[5] = 0xFFFF_0000; // bad address
+
+    // Step 1: Budget=64, addi succeeds then lwz faults mid-block.
+    // Snapshot restores state to gpr[3]=10, yields BudgetExhausted.
+    let ctx = ExecutionContext::new(&mem);
+    let mut effects = Vec::new();
+    let r1 = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
+    assert_eq!(r1.yield_reason, YieldReason::BudgetExhausted);
+    assert!(r1.fault.is_none(), "snapshot restore yields no fault");
+    assert_eq!(
+        unit.state().gpr[3],
+        10,
+        "GPR[3] restored to pre-block value"
+    );
+    assert_eq!(unit.state().pc, 0, "PC restored to block start");
+    assert!(effects.is_empty(), "effects cleared on restore");
+
+    // Step 2: budget_override=1, executes addi r3,r3,1 only.
+    let ctx2 = ExecutionContext::new(&mem);
+    let mut effects2 = Vec::new();
+    let r2 = unit.run_until_yield(Budget::new(64), &ctx2, &mut effects2);
+    assert_eq!(r2.yield_reason, YieldReason::BudgetExhausted);
+    assert_eq!(unit.state().gpr[3], 11, "addi retired at Budget=1");
+    assert_eq!(unit.state().pc, 4, "PC advanced past addi");
+
+    // Step 3: budget_override cleared, Budget=64 again. lwz faults
+    // on first instruction (no prior retirements), so fault is direct.
+    let ctx3 = ExecutionContext::new(&mem);
+    let mut effects3 = Vec::new();
+    let r3 = unit.run_until_yield(Budget::new(64), &ctx3, &mut effects3);
+    assert_eq!(r3.yield_reason, YieldReason::Fault);
+    assert!(r3.fault.is_some());
+    assert_eq!(unit.status(), UnitStatus::Faulted);
+}
+
+#[test]
+fn first_instruction_fault_reports_directly_at_budget_gt_1() {
+    // When the very first instruction in a budget>1 step faults,
+    // no snapshot restore is needed -- fault is reported directly.
+    let mut mem = GuestMemory::new(256);
+    let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16);
+    place_insn(&mut mem, 0, lwz_bad);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().gpr[5] = 0xFFFF_0000;
+
+    let ctx = ExecutionContext::new(&mem);
+    let mut effects = Vec::new();
+    let r = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
+    assert_eq!(r.yield_reason, YieldReason::Fault);
+    assert_eq!(unit.status(), UnitStatus::Faulted);
 }
