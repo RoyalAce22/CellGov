@@ -386,8 +386,6 @@ impl ExecutionUnit for PpuExecutionUnit {
                 let raw = u32::from_be_bytes([mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3]]);
                 match decode::decode(raw) {
                     Ok(i) => {
-                        // Refresh the shadow slot so subsequent
-                        // fetches at this PC hit the fast path.
                         if let Some(s) = self.instruction_shadow.as_mut() {
                             let _ = s.refresh(step_pc, raw);
                         }

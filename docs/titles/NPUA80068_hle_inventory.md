@@ -49,10 +49,10 @@ Classification columns:
 
 | NID        | Name                                              | Class           | CellGov |
 |------------|---------------------------------------------------|-----------------|---------|
-| 0x055bd74d | cellGcmGetTiledPitchSize                          | noop-safe       | stub    |
+| 0x055bd74d | cellGcmGetTiledPitchSize                          | noop-safe       | impl    |
 | 0x06edea9e | <unknown>                                         | noop-safe       | stub    |
 | 0x0e6b0dae | <unknown>                                         | noop-safe       | stub    |
-| 0x15bae46b | _cellGcmInitBody                                  | noop-safe       | stub    |
+| 0x15bae46b | _cellGcmInitBody                                  | noop-safe       | impl    |
 | 0x21397818 | <unknown>                                         | noop-safe       | stub    |
 | 0x21ac3697 | cellGcmAddressToOffset                            | noop-safe       | stub    |
 | 0x3a33c1fd | _cellGcmFunc15                                    | noop-safe       | stub    |
@@ -64,7 +64,7 @@ Classification columns:
 | 0x9ba451e4 | <unknown>                                         | noop-safe       | stub    |
 | 0xa41ef7e8 | <unknown>                                         | noop-safe       | stub    |
 | 0xa53d12ae | cellGcmSetDisplayBuffer                           | noop-safe       | stub    |
-| 0xa547adde | cellGcmGetControlRegister                         | noop-safe       | stub    |
+| 0xa547adde | cellGcmGetControlRegister                         | noop-safe       | impl    |
 | 0xa91b0402 | cellGcmSetVBlankHandler                           | noop-safe       | stub    |
 | 0xb2e761d4 | cellGcmResetFlipStatus                            | noop-safe       | stub    |
 | 0xbc982946 | <unknown>                                         | noop-safe       | stub    |
@@ -73,8 +73,8 @@ Classification columns:
 | 0xd34a420d | cellGcmSetZcull                                   | noop-safe       | stub    |
 | 0xd8f88e1a | <unknown>                                         | noop-safe       | stub    |
 | 0xd9b7653e | <unknown>                                         | noop-safe       | stub    |
-| 0xe315a0b2 | cellGcmGetConfiguration                           | noop-safe       | stub    |
-| 0xf80196c1 | cellGcmGetLabelAddress                            | noop-safe       | stub    |
+| 0xe315a0b2 | cellGcmGetConfiguration                           | noop-safe       | impl    |
+| 0xf80196c1 | cellGcmGetLabelAddress                            | noop-safe       | impl    |
 | 0xffe0160e | <unknown>                                         | noop-safe       | stub    |
 
 ## sysPrxForUser (16 functions)
@@ -314,7 +314,7 @@ Classification columns:
 ## Summary
 
 - Total imports: 200
-- CellGov-implemented: 10
+- CellGov-implemented: 15
 - Unstubbed stateful (need real impl): 0
 - Unstubbed unsafe-to-stub (stub returns wrong value): 0
-- Default-stub noop-safe: 190
+- Default-stub noop-safe: 185

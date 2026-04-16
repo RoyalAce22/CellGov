@@ -84,6 +84,10 @@ pub fn run_game(
         ..
     } = prepared;
 
+    if title.checkpoint_trigger() == manifest::CheckpointTrigger::FirstRsxWrite {
+        rt.set_gcm_rsx_checkpoint(true);
+    }
+
     if profile {
         println!("startup timing:");
         println!("  file read + mem alloc: {:?}", st.mem_alloc);
@@ -270,6 +274,9 @@ pub fn bench_boot(
     });
     let mut rt = prepared.rt;
     let checkpoint = checkpoint_override.unwrap_or_else(|| title.checkpoint_trigger());
+    if checkpoint == manifest::CheckpointTrigger::FirstRsxWrite {
+        rt.set_gcm_rsx_checkpoint(true);
+    }
 
     let mut steps: usize = 0;
     let t0 = Instant::now();
@@ -751,9 +758,11 @@ struct StepLoopCtx<'a> {
 
 /// Classify a `commit_step` outcome as a checkpoint hit, if the
 /// title's trigger is [`manifest::CheckpointTrigger::FirstRsxWrite`]
-/// and the commit failed with a `ReservedWrite` to the RSX region.
+/// and the commit failed with a `ReservedWrite` to the RSX region,
+/// or the GCM control register's put pointer changed from zero
+/// (indicating the game submitted RSX commands).
 ///
-/// Returns the faulting guest address when the checkpoint fires,
+/// Returns the triggering guest address when the checkpoint fires,
 /// `None` otherwise. Pulled out as a free function so a unit test
 /// can pin the detection shape without spinning up a full runtime.
 fn rsx_write_checkpoint_addr(
