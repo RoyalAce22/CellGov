@@ -4,7 +4,7 @@ Deterministic analysis engine for PS3 Cell Broadband Engine workloads.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/RoyalAce22/CellGov/ci.yml?branch=main&label=CI)](https://github.com/RoyalAce22/CellGov/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.85-orange.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
+[![MSRV](https://img.shields.io/badge/MSRV-1.95-orange.svg)](https://blog.rust-lang.org/2026/04/03/Rust-1.95.0.html)
 [![Status: experimental](https://img.shields.io/badge/status-experimental-red.svg)](#status)
 
 ## What CellGov is
@@ -52,7 +52,7 @@ Pre-Alpha. Capability today:
 - **Titles: 2** -- flOw (NPUA80001) cross-runner verified against
   RPCS3; Super Stardust HD (NPUA80068) boots past early init.
   Manifest-driven: adding a title is one TOML file, no Rust change.
-- **PPU: 110 instruction variants**, including quickened
+- **PPU: 117 instruction variants**, including quickened
   specializations and superinstruction compounds. Full SPU
   interpreter.
 - **LV2: 16 syscalls**, 10 HLE exports with dedicated handling.
@@ -64,7 +64,7 @@ Pre-Alpha. Capability today:
   scanner, register-level zoom-in.
 - **Cross-runner**: observation schema validated against RPCS3;
   reproducible boot bench with subprocess isolation.
-- 1125 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 1158 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [`docs/architecture.md`](docs/architecture.md) for full
 technical details on the pipeline, memory model, shadow passes,
@@ -78,7 +78,7 @@ diagram and per-crate responsibilities.
 
 ## Building
 
-Requires Rust 1.85 or newer.
+Requires Rust 1.95 or newer.
 
 ```bash
 cargo build --workspace

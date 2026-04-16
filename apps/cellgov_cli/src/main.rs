@@ -309,6 +309,7 @@ fn main() {
         let save_observation = find_flag_value(&args, "--save-observation");
         let observation_manifest = find_flag_value(&args, "--observation-manifest");
         let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
+        let profile_pairs = args.iter().any(|a| a == "--profile-pairs");
         game::run_game(
             &title,
             elf_path,
@@ -323,6 +324,7 @@ fn main() {
             save_observation.as_deref(),
             observation_manifest.as_deref(),
             strict_reserved,
+            profile_pairs,
         );
         return;
     }

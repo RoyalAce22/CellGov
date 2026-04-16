@@ -200,7 +200,7 @@ fn gen_spu_mailbox_write() -> Vec<u8> {
     let mut data_segment = vec![0u8; 8]; // spu_id + result (zero-init)
     data_segment.extend_from_slice(&spu_image);
     // Pad to 16-byte alignment for process_param_t
-    while data_segment.len() % 16 != 0 {
+    while !data_segment.len().is_multiple_of(16) {
         data_segment.push(0);
     }
     let proc_param_offset = data_segment.len() as u64;

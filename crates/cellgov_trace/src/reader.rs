@@ -41,7 +41,7 @@ impl<'a> TraceReader<'a> {
     }
 }
 
-impl<'a> Iterator for TraceReader<'a> {
+impl Iterator for TraceReader<'_> {
     type Item = Result<TraceRecord, DecodeError>;
 
     fn next(&mut self) -> Option<Self::Item> {

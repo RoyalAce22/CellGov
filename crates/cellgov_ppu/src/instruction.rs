@@ -558,6 +558,17 @@ pub enum PpuInstruction {
     Srwi { ra: u8, rs: u8, n: u8 },
     /// clrlwi rA, rS, n -- specialized from rlwinm rA, rS, 0, n, 31.
     Clrlwi { ra: u8, rs: u8, n: u8 },
+    /// nop -- ori rA, rS, 0 where rA == rS. Does nothing.
+    Nop,
+    /// cmpwi crF, rA, 0 -- compare word immediate against zero.
+    /// Eliminates sign-extension of imm=0 and the subtraction.
+    CmpwZero { bf: u8, ra: u8 },
+    /// clrldi rA, rS, n -- rldicl rA, rS, 0, n. Mask low (64-n) bits.
+    Clrldi { ra: u8, rs: u8, n: u8 },
+    /// sldi rA, rS, n -- rldicr rA, rS, n, 63-n. Shift left doubleword.
+    Sldi { ra: u8, rs: u8, n: u8 },
+    /// srdi rA, rS, n -- rldicl rA, rS, 64-n, n. Shift right doubleword.
+    Srdi { ra: u8, rs: u8, n: u8 },
 
     // -- Superinstructions (compound 2-instruction pairs) --
     /// lwz + cmpwi: load word then compare immediate.
@@ -587,6 +598,26 @@ pub enum PpuInstruction {
     /// lwz + mtlr: load word then move to LR.
     /// Function epilogue: restore return address from stack.
     LwzMtlr { rt: u8, ra_load: u8, offset: i16 },
+    /// cmpwi + bc: compare word immediate then branch conditional.
+    /// Covers 5.28% of adjacent pairs in SSHD profiling data.
+    CmpwiBc {
+        bf: u8,
+        ra: u8,
+        imm: i16,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
+    /// cmpw + bc: compare word (register) then branch conditional.
+    /// Covers 3.68% of adjacent pairs in SSHD profiling data.
+    CmpwBc {
+        bf: u8,
+        ra: u8,
+        rb: u8,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
     /// Consumed by a preceding superinstruction. The fetch loop
     /// advances PC past this slot without executing.
     Consumed,
@@ -706,10 +737,17 @@ impl PpuInstruction {
             Self::Slwi { .. } => "Slwi",
             Self::Srwi { .. } => "Srwi",
             Self::Clrlwi { .. } => "Clrlwi",
+            Self::Nop => "Nop",
+            Self::CmpwZero { .. } => "CmpwZero",
+            Self::Clrldi { .. } => "Clrldi",
+            Self::Sldi { .. } => "Sldi",
+            Self::Srdi { .. } => "Srdi",
             Self::LwzCmpwi { .. } => "LwzCmpwi",
             Self::LiStw { .. } => "LiStw",
             Self::MflrStw { .. } => "MflrStw",
             Self::LwzMtlr { .. } => "LwzMtlr",
+            Self::CmpwiBc { .. } => "CmpwiBc",
+            Self::CmpwBc { .. } => "CmpwBc",
             Self::Consumed => "Consumed",
             Self::Sc => "Sc",
         }

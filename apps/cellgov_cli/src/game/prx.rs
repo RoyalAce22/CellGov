@@ -195,7 +195,7 @@ pub(super) fn run_module_start(
                 }
 
                 // Progress checkpoint every 10K steps.
-                if steps % 10_000 == 0 {
+                if steps.is_multiple_of(10_000) {
                     let hle_total: usize = hle_calls.values().sum();
                     let lv2_total: usize = lv2_calls.values().sum();
                     println!(

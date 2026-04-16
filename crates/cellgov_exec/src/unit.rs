@@ -138,6 +138,18 @@ pub trait ExecutionUnit {
         Vec::new()
     }
 
+    /// Drain instruction-variant frequency data collected during
+    /// profiling mode. Returns an empty vec by default.
+    fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {
+        Vec::new()
+    }
+
+    /// Drain adjacent-pair frequency data collected during profiling
+    /// mode. Returns an empty vec by default.
+    fn drain_profile_pairs(&mut self) -> Vec<((&'static str, &'static str), u64)> {
+        Vec::new()
+    }
+
     /// Notify the unit that guest memory in `[addr, addr+len)` was
     /// written by the commit pipeline. Units that cache decoded
     /// instructions (predecoded shadow) override this to mark the
