@@ -118,8 +118,15 @@ impl StagingMemory {
             let start = w.range.start().raw();
             let length = w.range.length();
             let _end = start.checked_add(length).ok_or(MemError::OutOfRange)?;
-            if target.containing_region(start, length).is_none() {
-                return Err(MemError::Unmapped(target.fault_context(start)));
+            match target.containing_region(start, length) {
+                None => return Err(MemError::Unmapped(target.fault_context(start))),
+                Some(r) if r.access() != crate::RegionAccess::ReadWrite => {
+                    return Err(MemError::ReservedWrite {
+                        addr: start,
+                        region: r.label(),
+                    });
+                }
+                Some(_) => {}
             }
         }
         // All writes are valid; apply them in order. apply_commit
@@ -268,5 +275,28 @@ mod tests {
         a.clear();
         assert!(a.is_empty());
         assert_eq!(b.len(), 1);
+    }
+
+    #[test]
+    fn drain_into_reserved_region_returns_reserved_write() {
+        use crate::{PageSize, Region, RegionAccess};
+        let mut mem = GuestMemory::from_regions(vec![
+            Region::new(0, 256, "main", PageSize::Page64K),
+            Region::with_access(
+                0xC000_0000,
+                256,
+                "rsx",
+                PageSize::Page64K,
+                RegionAccess::ReservedZeroReadable,
+            ),
+        ])
+        .unwrap();
+        let mut s = StagingMemory::new();
+        s.stage(staged(0xC000_0000, &[1, 2, 3, 4]));
+        let err = s.drain_into(&mut mem).unwrap_err();
+        assert!(
+            matches!(err, MemError::ReservedWrite { region: "rsx", .. }),
+            "expected ReservedWrite, got {err:?}"
+        );
     }
 }

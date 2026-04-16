@@ -55,7 +55,8 @@ Pre-Alpha. Capability today:
 - **PPU: 117 instruction variants**, including quickened
   specializations and superinstruction compounds. Full SPU
   interpreter.
-- **LV2: 16 syscalls**, 10 HLE exports with dedicated handling.
+- **LV2: 16 syscalls**, 16 HLE exports with dedicated handling
+  (including cellGcmSys RSX init cluster).
 - **Memory**: PS3-spec sparse address space with store-forwarding
   buffer for intra-block coherence.
 - **Throughput**: basic-block batching (Budget=256), predecoded
@@ -64,7 +65,7 @@ Pre-Alpha. Capability today:
   scanner, register-level zoom-in.
 - **Cross-runner**: observation schema validated against RPCS3;
   reproducible boot bench with subprocess isolation.
-- 1158 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 1168 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [`docs/architecture.md`](docs/architecture.md) for full
 technical details on the pipeline, memory model, shadow passes,

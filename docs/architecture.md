@@ -426,6 +426,25 @@ test). The hot ones with non-trivial behavior:
 | `sys_process_exit`      | 0xe6f2c1e7 | stateful       | Marks unit Finished.                                          |
 | All others              | --         | noop-safe      | Return 0.                                                     |
 
+### cellGcmSys HLE (RSX initialization)
+
+Active only when the Runtime is configured for RSX-checkpoint
+detection (`set_gcm_rsx_checkpoint`). Provides enough of the GCM
+subsystem for SSHD to boot to FirstRsxWrite.
+
+| Function                     | NID        | Behavior                                                     |
+| ---------------------------- | ---------- | ------------------------------------------------------------ |
+| `_cellGcmInitBody`           | 0x15bae46b | Allocates context, command buffer, callback stub, control    |
+|                              |            | register (at 0xC0000040 in RSX space), and label area.       |
+| `cellGcmGetConfiguration`    | 0xe315a0b2 | Writes CellGcmConfig (24 bytes) to caller pointer.           |
+| `cellGcmGetControlRegister`  | 0xa547adde | Returns control register guest address.                      |
+| `cellGcmGetTiledPitchSize`   | 0x055bd74d | Table lookup: smallest valid tiled pitch >= input size.       |
+| `cellGcmGetLabelAddress`     | 0xf80196c1 | Returns label_base + 0x10 * index.                           |
+
+The control register is placed in the RSX reserved region so the
+game's first put-pointer write triggers a ReservedWrite commit
+error, which the CLI translates to the FirstRsxWrite checkpoint.
+
 ## Schedule exploration
 
 `cellgov_explore` enumerates legal alternate schedules without
@@ -597,16 +616,15 @@ CPU-side boundary for the static-recomp oracle and the point at
 which CellGov records a cross-runner observation.
 
 **Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
-modules; the harness uses a `FirstRsxWrite` checkpoint because the
-attract-mode loop never calls `sys_process_exit`. Current boot
-advances through CRT0, C++ static init, TLS setup, lwmutex
-construction, and deep into the game's config / asset string-table
-processing. Within a 100M-step budget the boot does not yet reach
-the first RSX write; progression is interpreter-throughput-bound
-(the hot path is ordinary strcmp / lookup code, not a missing HLE
-call), and ~1.5B steps of continuous forward progress have been
-observed without hitting a decode fault or an unimplemented
-syscall.
+modules (15 with dedicated CellGov handling); the harness uses a
+`FirstRsxWrite` checkpoint because the attract-mode loop never
+calls `sys_process_exit`. Boot advances through CRT0, C++ static
+init, TLS setup, lwmutex construction, GCM initialization
+(_cellGcmInitBody, cellGcmGetConfiguration, cellGcmGetControlRegister),
+keyboard/pad init, SPURS init, video configuration, and into the
+main attract loop. The first RSX write (put-pointer update to the
+GCM control register at 0xC0000040) triggers at step 14,109,359
+(~3.6B instructions, ~72s wall time).
 
 ## Microtest corpus
 

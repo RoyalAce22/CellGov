@@ -1,0 +1,27 @@
+DIVERGE region data: first byte differs at offset 0xbf39 (guest 0x7ebf39) -- 93 vs 94
+
+Classification: PS3-wide, non-semantic -- HLE binding table layout.
+
+Guest address 0x7EBF39 falls inside the HLE OPD (function descriptor)
+stub area. SSHD's first HLE OPD is at 0x7EBF38 (cellResc, first
+import). The diverging byte is the second byte of the first OPD slot,
+which encodes part of the trampoline body address.
+
+CellGov and RPCS3 assign HLE stub slot indices in the same module
+order but may differ by one index position within a module due to
+NID-table iteration order (sorted vs declaration-order). This
+produces a one-byte difference in the OPD pointer field.
+
+This is the same class of divergence seen in flOw's cross-runner
+compare (data:0x7768, also an HLE binding table layout difference).
+Both are PS3-wide, non-semantic: the pointed-to code is functionally
+identical, only the slot-index assignment convention differs.
+
+Code region: byte-identical (0x7c4f68 bytes match).
+Data region: first divergence at offset 0xbf39 of 0x49c98 bytes.
+
+Checkpoint boundary: CellGov captures at FirstRsxWrite (put-pointer
+update to 0xC0000040); RPCS3 captures at sys_tty_write call #10.
+The boundaries are close but not identical -- CellGov reaches the
+RSX control register write while RPCS3 dumps at the last TTY write
+before that point.

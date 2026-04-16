@@ -199,6 +199,11 @@ pub const HLE_SYSCALL_BASE: u32 = 0x10000;
 /// Ordering is by NID value for stable diffing; no runtime code
 /// depends on the order.
 pub const HLE_IMPLEMENTED_NIDS: &[u32] = &[
+    0x055bd74d, // cellGcmGetTiledPitchSize
+    0x15bae46b, // _cellGcmInitBody
+    0xa547adde, // cellGcmGetControlRegister
+    0xe315a0b2, // cellGcmGetConfiguration
+    0xf80196c1, // cellGcmGetLabelAddress
     0x744680a2, // sys_initialize_tls
     0xbdb18f83, // _sys_malloc
     0xf7f7fb20, // _sys_free

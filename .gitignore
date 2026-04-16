@@ -21,10 +21,12 @@ tests/micro/hello_world/
 # Raw TTY dumps (binary artifacts from RPCS3 runs)
 baselines/**/*.tty
 
-# Large flOw cross-runner observation artifacts (too big for git;
-# reproduced from tests/fixtures/NPUA80001_cross_runner/REPRODUCTION.md)
+# Large cross-runner observation artifacts (too big for git;
+# reproduced from tests/fixtures/*/REPRODUCTION.md)
 tests/fixtures/NPUA80001_cross_runner/*.json
 tests/fixtures/NPUA80001_cross_runner/*.dump
+tests/fixtures/NPUA80068_cross_runner/*.json
+tests/fixtures/NPUA80068_cross_runner/*.dump
 
 # AI tooling
 .claude/
