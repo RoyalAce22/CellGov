@@ -19,8 +19,8 @@ cargo build --release -p cellgov_cli
     tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf \
     --firmware-dir tools/rpcs3/dev_flash/sys/external \
     --max-steps 2000000 \
-    --save-observation tests/fixtures/flow_cross_runner/cellgov.json \
-    --observation-manifest tests/fixtures/flow_checkpoint.toml
+    --save-observation tests/fixtures/NPUA80001_cross_runner/cellgov.json \
+    --observation-manifest tests/fixtures/NPUA80001_checkpoint.toml
 ```
 
 Produces `cellgov.json` with 3 regions (code, data, rodata) matching
@@ -92,7 +92,7 @@ the patched binary fataled at startup otherwise.
 cp tools/rpcs3-src/build-msvc/bin/rpcs3.exe tools/rpcs3/rpcs3.exe
 cd tools/rpcs3
 
-CELLGOV_DUMP_PATH=tests/fixtures/flow_cross_runner/rpcs3.dump \
+CELLGOV_DUMP_PATH=tests/fixtures/NPUA80001_cross_runner/rpcs3.dump \
 CELLGOV_DUMP_REGIONS=0x10000:0x800000,0x820000:0x80000,0x10000000:0x40000 \
 CELLGOV_DUMP_TTY_NTH=1 \
 ./rpcs3.exe --no-gui --headless dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf
@@ -109,18 +109,18 @@ shared boundary both runners reliably reach.
 cargo build --release -p rpcs3_to_observation
 
 ./target/release/rpcs3_to_observation \
-    --dump tests/fixtures/flow_cross_runner/rpcs3.dump \
-    --manifest tests/fixtures/flow_checkpoint.toml \
+    --dump tests/fixtures/NPUA80001_cross_runner/rpcs3.dump \
+    --manifest tests/fixtures/NPUA80001_checkpoint.toml \
     --outcome completed \
-    --output tests/fixtures/flow_cross_runner/rpcs3.json
+    --output tests/fixtures/NPUA80001_cross_runner/rpcs3.json
 ```
 
 ## Compare
 
 ```bash
 ./target/release/cellgov_cli compare-observations \
-    tests/fixtures/flow_cross_runner/cellgov.json \
-    tests/fixtures/flow_cross_runner/rpcs3.json
+    tests/fixtures/NPUA80001_cross_runner/cellgov.json \
+    tests/fixtures/NPUA80001_cross_runner/rpcs3.json
 ```
 
 Expected output (saved to `compare_report.txt`):

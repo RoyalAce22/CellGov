@@ -298,6 +298,27 @@ impl Runtime {
         &mut self,
         result: &ExecutionStepResult,
     ) -> Result<CommitOutcome, CommitError> {
+        // Trivial-step fast path: under FaultDriven mode, a step
+        // that emitted no effects, did not fault, did not yield via
+        // Syscall or Finished, and found the DMA queue empty has
+        // no work for the commit pipeline. Epoch still advances
+        // (atomic-batch boundary preserved); trace records are
+        // already off under FaultDriven mode, so the observable
+        // contract is identical. Cuts the per-step commit cost for
+        // the PPU-bound hot loops that dominate game boots.
+        if self.mode == RuntimeMode::FaultDriven
+            && result.emitted_effects.is_empty()
+            && result.fault.is_none()
+            && !matches!(
+                result.yield_reason,
+                YieldReason::Syscall | YieldReason::Finished
+            )
+            && self.dma_queue.is_empty()
+        {
+            self.epoch = self.epoch.next().expect("epoch overflow");
+            return Ok(CommitOutcome::default());
+        }
+
         let mut ctx = CommitContext {
             memory: &mut self.memory,
             units: &mut self.registry,
@@ -884,9 +905,19 @@ impl Runtime {
             // Drain per-instruction state fingerprints and full snapshots
             // collected during the step. Both empty unless the unit
             // has the corresponding mode on; drain is stable across
-            // every unit via the trait defaults.
-            let retired_hashes = unit.drain_retired_state_hashes();
-            let retired_full = unit.drain_retired_state_full();
+            // every unit via the trait defaults. Under FaultDriven
+            // mode no downstream consumer reads the drained data, so
+            // skip both vtable dispatches entirely -- the per-step
+            // saving shows up in PPU-bound hot loops that otherwise
+            // see two trait-call round trips for nothing.
+            let (retired_hashes, retired_full) = if self.mode == RuntimeMode::FaultDriven {
+                (Vec::new(), Vec::new())
+            } else {
+                (
+                    unit.drain_retired_state_hashes(),
+                    unit.drain_retired_state_full(),
+                )
+            };
             (res, retired_hashes, retired_full)
         };
         let (result, retired_hashes, retired_full) = result;

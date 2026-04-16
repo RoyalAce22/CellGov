@@ -442,32 +442,17 @@ pub(super) fn load_firmware_prx(
     // NIDs with working HLE implementations that should NOT be replaced
     // with real PRX code. These are kept as HLE trampolines because the
     // real implementations depend on full module_start initialization
-    // (TLS, heap arenas) which may not complete.
-    const HLE_KEEP_NIDS: &[u32] = &[
-        0x744680a2, // sys_initialize_tls
-        0xbdb18f83, // _sys_malloc
-        0xf7f7fb20, // _sys_free
-        0x68b9b011, // _sys_memset
-        0xe6f2c1e7, // sys_process_exit
-        0xb2fcf2c8, // _sys_heap_create_heap
-        0x2f85c0ef, // sys_lwmutex_create
-        0x1573dc3f, // sys_lwmutex_lock
-        0xc3476d0c, // sys_lwmutex_destroy
-        0x1bc200f4, // sys_lwmutex_unlock
-        0xaeb78725, // sys_lwmutex_trylock
-        0x8461e528, // sys_time_get_system_time
-        0x350d454e, // sys_ppu_thread_get_id
-        0x24a1ea07, // sys_ppu_thread_create
-        0x4f7172c9, // sys_process_is_stack
-        0xa2c7ba64, // sys_prx_exitspawn_with_level
-    ];
+    // (TLS, heap arenas) which may not complete. The list lives in
+    // `cellgov_ppu::prx` as a single library-level source of truth;
+    // the inventory tool (`dump-imports`) reads the same constant.
+    let hle_keep_nids = cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS;
 
     // Re-patch GOT entries for NIDs that the loaded module exports,
     // unless the NID is in the HLE keep list.
     let mut resolved = 0;
     let mut kept_hle = 0;
     for binding in hle_bindings {
-        if HLE_KEEP_NIDS.contains(&binding.nid) {
+        if hle_keep_nids.contains(&binding.nid) {
             kept_hle += 1;
             continue;
         }

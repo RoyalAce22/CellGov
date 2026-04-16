@@ -52,12 +52,21 @@ Pre-Alpha. Capability today:
 - **Titles covered: 2.** flOw (NPUA80001) boots deterministically
   to `sys_process_exit` at PPU step 1.4M and is cross-runner
   verified against RPCS3 at the first-`sys_tty_write` boot
-  checkpoint (`code` and `rodata` segments byte-identical; `data`
-  divergences bounded to HLE-binding-table slot ordering,
-  classified as ignored under the cross-runner divergence policy).
+  checkpoint. Code and read-only-data segments match RPCS3 byte
+  for byte; the only divergence is a pointer-table layout offset
+  inside the data segment, caused by CellGov and RPCS3 using
+  different allocators that place the same logical allocations at
+  different guest addresses (the pointed-to contents are
+  functionally equivalent). The committed compare report is at
+  [`tests/fixtures/NPUA80001_cross_runner/compare_report.txt`](tests/fixtures/NPUA80001_cross_runner/compare_report.txt);
+  reproduction steps are in the same directory's `REPRODUCTION.md`.
   Super Stardust HD (NPUA80068) boots past the same early-init
   stages under the shared title harness; its RSX-write checkpoint
   is within reach pending further interpreter throughput work.
+  Titles are manifest-driven: each one is a TOML file under
+  [`docs/titles/<content-id>.toml`](docs/titles/). Adding a new
+  title that fits the existing checkpoint kinds and the standard
+  PS3 VFS layout is a single-file commit with no Rust change.
 - **PPU interpreter: 100 instruction variants**, full SPU
   interpreter, NID-correct sysPrxForUser HLE dispatch.
 - **LV2 syscalls: 16 with non-default handling** (the rest return
@@ -66,8 +75,8 @@ Pre-Alpha. Capability today:
 - **HLE exports: 10 with dedicated handling** in
   `cellgov_core::hle::dispatch_hle`; the default path returns 0.
   Per-title import inventories live at
-  [`docs/titles/flow_hle_inventory.md`](docs/titles/flow_hle_inventory.md)
-  and [`docs/titles/sshd_hle_inventory.md`](docs/titles/sshd_hle_inventory.md);
+  [`docs/titles/NPUA80001_hle_inventory.md`](docs/titles/NPUA80001_hle_inventory.md)
+  and [`docs/titles/NPUA80068_hle_inventory.md`](docs/titles/NPUA80068_hle_inventory.md);
   regenerate with `cellgov_cli dump-imports --title <name>`.
 - PS3-spec guest memory layout: sparse `BTreeMap<u64, Region>`
   matching RPCS3 `vm.cpp`'s VA blocks. `sys_memory_allocate` returns
@@ -84,7 +93,7 @@ Pre-Alpha. Capability today:
 - Reproducible boot bench: `cellgov_cli bench-boot --title <name>`
   runs two subprocess-isolated boots and reports wall time +
   steps/sec with a 5 percent cross-run agreement gate.
-- 1045 tests across 15 library crates and 3 binaries, zero
+- 1048 tests across 15 library crates and 3 binaries, zero
   `unsafe` (workspace-level `unsafe_code = forbid`).
 
 ## Workspace

@@ -1,0 +1,11 @@
+[title]
+content_id = "NPUA80068"
+short_name = "sshd"
+display_name = "Super Stardust HD (Housemarque, 2007)"
+eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+
+[checkpoint]
+# SSHD's attract-mode loop never exits on its own; the first PPU
+# write to the RSX region (0xC0000000+) is the earliest
+# deterministic stopping point both runners reach.
+kind = "first-rsx-write"

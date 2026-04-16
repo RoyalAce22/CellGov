@@ -3,8 +3,8 @@
 
 mod boot;
 mod diag;
+pub mod manifest;
 mod prx;
-pub mod titles;
 
 use diag::{
     fetch_raw_at, format_fault, format_max_steps, format_process_exit, print_hle_summary,
@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use cellgov_core::{Runtime, StepError};
 
-use titles::Title;
+use manifest::TitleManifest;
 
 /// PS3 LV2 primary-thread stack base. Matches RPCS3 `vm.cpp`'s
 /// 0xD0000000 page-4K stack block.
@@ -42,7 +42,7 @@ pub(crate) const PS3_SPU_RESERVED_SIZE: usize = 0x2000_0000;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_game(
-    title: Title,
+    title: &TitleManifest,
     elf_path: &str,
     max_steps: usize,
     trace: bool,
@@ -191,7 +191,6 @@ pub fn run_game(
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct BenchBootResult {
-    pub title: Title,
     pub steps: usize,
     pub wall: std::time::Duration,
     pub outcome: cellgov_compare::BootOutcome,
@@ -214,11 +213,12 @@ impl BenchBootResult {
 /// decode-again-for-coverage, no progress checkpoint. The boot setup
 /// is byte-identical; only the step loop differs.
 pub fn bench_boot(
-    title: Title,
+    title: &TitleManifest,
     elf_path: &str,
     max_steps: usize,
     firmware_dir: Option<&str>,
     strict_reserved: bool,
+    checkpoint_override: Option<manifest::CheckpointTrigger>,
 ) -> BenchBootResult {
     let prepared = boot::prepare(boot::PrepareOptions {
         title,
@@ -234,7 +234,7 @@ pub fn bench_boot(
         dump_mem_addrs: &[],
     });
     let mut rt = prepared.rt;
-    let checkpoint = title.checkpoint_trigger();
+    let checkpoint = checkpoint_override.unwrap_or_else(|| title.checkpoint_trigger());
 
     let mut steps: usize = 0;
     let t0 = Instant::now();
@@ -242,7 +242,6 @@ pub fn bench_boot(
     let wall = t0.elapsed();
 
     BenchBootResult {
-        title,
         steps,
         wall,
         outcome,
@@ -257,10 +256,15 @@ pub fn bench_boot(
 /// and exhausting `max_steps` breaks with MaxSteps.
 fn bench_step_loop(
     rt: &mut Runtime,
-    checkpoint: titles::CheckpointTrigger,
+    checkpoint: manifest::CheckpointTrigger,
     steps: &mut usize,
 ) -> cellgov_compare::BootOutcome {
     use cellgov_compare::BootOutcome;
+    use manifest::CheckpointTrigger;
+    let target_pc = match checkpoint {
+        CheckpointTrigger::Pc(addr) => Some(addr),
+        _ => None,
+    };
     loop {
         match rt.step() {
             Ok(step) => {
@@ -268,6 +272,11 @@ fn bench_step_loop(
                 let commit_result = rt.commit_step(&step.result);
                 if rsx_write_checkpoint_addr(checkpoint, &commit_result).is_some() {
                     return BootOutcome::RsxWriteCheckpoint;
+                }
+                if let Some(target) = target_pc {
+                    if step.result.local_diagnostics.pc == Some(target) {
+                        return BootOutcome::PcReached(target);
+                    }
                 }
                 if step.result.fault.is_some() {
                     return BootOutcome::Fault;
@@ -291,21 +300,45 @@ fn bench_step_loop(
 /// measurement needs a fresh heap, fresh page tables, and fresh CPU
 /// caches to be comparable.
 pub fn bench_boot_one_run(
-    title: Title,
+    title: &TitleManifest,
     elf_path: &str,
     max_steps: usize,
     firmware_dir: Option<&str>,
     strict_reserved: bool,
+    checkpoint_override: Option<manifest::CheckpointTrigger>,
 ) -> BenchBootResult {
-    let r = bench_boot(title, elf_path, max_steps, firmware_dir, strict_reserved);
+    let r = bench_boot(
+        title,
+        elf_path,
+        max_steps,
+        firmware_dir,
+        strict_reserved,
+        checkpoint_override,
+    );
     println!(
-        "BENCH_RESULT steps={} wall_ms={} steps_per_sec={:.0} outcome={:?}",
+        "BENCH_RESULT steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
         r.steps,
         r.wall.as_millis(),
         r.steps_per_sec(),
-        r.outcome,
+        format_bench_outcome(r.outcome),
     );
     r
+}
+
+/// Render a [`cellgov_compare::BootOutcome`] for a `BENCH_RESULT`
+/// line. Kept in one place so the emit side and the
+/// [`parse_bench_result`] side share the canonical string form for
+/// every variant, including the `PcReached(0xADDR)` shape which
+/// carries a payload.
+pub(crate) fn format_bench_outcome(outcome: cellgov_compare::BootOutcome) -> String {
+    use cellgov_compare::BootOutcome;
+    match outcome {
+        BootOutcome::ProcessExit => "ProcessExit".into(),
+        BootOutcome::RsxWriteCheckpoint => "RsxWriteCheckpoint".into(),
+        BootOutcome::Fault => "Fault".into(),
+        BootOutcome::MaxSteps => "MaxSteps".into(),
+        BootOutcome::PcReached(addr) => format!("PcReached(0x{addr:x})"),
+    }
 }
 
 /// Run `bench_boot_one_run` twice in two subprocesses and print a
@@ -318,31 +351,54 @@ pub fn bench_boot_one_run(
 /// measurement gets a fresh heap and cache state (see
 /// [`bench_boot_one_run`] for the rationale).
 pub fn bench_boot_pair(
-    title: Title,
+    title: &TitleManifest,
     elf_path: &str,
     max_steps: usize,
     firmware_dir: Option<&str>,
     strict_reserved: bool,
+    checkpoint_override: Option<manifest::CheckpointTrigger>,
 ) -> (BenchBootResult, BenchBootResult) {
+    let checkpoint_label = match checkpoint_override {
+        Some(manifest::CheckpointTrigger::Pc(a)) => format!(" checkpoint=pc=0x{a:x}"),
+        Some(manifest::CheckpointTrigger::ProcessExit) => " checkpoint=process-exit".to_string(),
+        Some(manifest::CheckpointTrigger::FirstRsxWrite) => {
+            " checkpoint=first-rsx-write".to_string()
+        }
+        None => String::new(),
+    };
     println!(
-        "bench-boot: title={} elf={elf_path} max_steps={max_steps}",
+        "bench-boot: title={} elf={elf_path} max_steps={max_steps}{checkpoint_label}",
         title.name()
     );
-    let r1 = spawn_one_run(title, elf_path, max_steps, firmware_dir, strict_reserved);
+    let r1 = spawn_one_run(
+        title,
+        elf_path,
+        max_steps,
+        firmware_dir,
+        strict_reserved,
+        checkpoint_override,
+    );
     println!(
-        "  run 1: steps={} wall_ms={} steps_per_sec={:.0} outcome={:?}",
+        "  run 1: steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
         r1.steps,
         r1.wall.as_millis(),
         r1.steps_per_sec(),
-        r1.outcome,
+        format_bench_outcome(r1.outcome),
     );
-    let r2 = spawn_one_run(title, elf_path, max_steps, firmware_dir, strict_reserved);
+    let r2 = spawn_one_run(
+        title,
+        elf_path,
+        max_steps,
+        firmware_dir,
+        strict_reserved,
+        checkpoint_override,
+    );
     println!(
-        "  run 2: steps={} wall_ms={} steps_per_sec={:.0} outcome={:?}",
+        "  run 2: steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
         r2.steps,
         r2.wall.as_millis(),
         r2.steps_per_sec(),
-        r2.outcome,
+        format_bench_outcome(r2.outcome),
     );
     let agreement = agreement_percent(r1.wall, r2.wall);
     let gate = if agreement <= 5.0 { "OK" } else { "FAIL" };
@@ -356,11 +412,12 @@ pub fn bench_boot_pair(
 /// Inherits the subprocess's stderr so TTS and startup chatter still
 /// reach the user; only stdout is captured for the parseable line.
 fn spawn_one_run(
-    title: Title,
+    title: &TitleManifest,
     elf_path: &str,
     max_steps: usize,
     firmware_dir: Option<&str>,
     strict_reserved: bool,
+    checkpoint_override: Option<manifest::CheckpointTrigger>,
 ) -> BenchBootResult {
     let exe = std::env::current_exe().expect("current_exe");
     let mut cmd = std::process::Command::new(&exe);
@@ -375,10 +432,18 @@ fn spawn_one_run(
     if strict_reserved {
         cmd.arg("--strict-reserved");
     }
+    if let Some(cp) = checkpoint_override {
+        let value = match cp {
+            manifest::CheckpointTrigger::ProcessExit => "process-exit".to_string(),
+            manifest::CheckpointTrigger::FirstRsxWrite => "first-rsx-write".to_string(),
+            manifest::CheckpointTrigger::Pc(a) => format!("pc=0x{a:x}"),
+        };
+        cmd.arg("--checkpoint").arg(value);
+    }
     cmd.arg(elf_path);
     let output = cmd.output().expect("subprocess runs");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_bench_result(title, &stdout).unwrap_or_else(|| {
+    parse_bench_result(&stdout).unwrap_or_else(|| {
         eprintln!("bench-boot: subprocess did not emit BENCH_RESULT line");
         eprintln!("stdout:\n{stdout}");
         eprintln!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
@@ -389,7 +454,7 @@ fn spawn_one_run(
 /// Parse a `BENCH_RESULT steps=N wall_ms=M steps_per_sec=X outcome=O`
 /// line out of captured stdout. Returns `None` if no such line is
 /// present or if any required field is missing / malformed.
-pub(crate) fn parse_bench_result(title: Title, stdout: &str) -> Option<BenchBootResult> {
+pub(crate) fn parse_bench_result(stdout: &str) -> Option<BenchBootResult> {
     let line = stdout.lines().find(|l| l.starts_with("BENCH_RESULT "))?;
     let mut steps: Option<usize> = None;
     let mut wall_ms: Option<u64> = None;
@@ -405,12 +470,25 @@ pub(crate) fn parse_bench_result(title: Title, stdout: &str) -> Option<BenchBoot
                 "RsxWriteCheckpoint" => Some(cellgov_compare::BootOutcome::RsxWriteCheckpoint),
                 "Fault" => Some(cellgov_compare::BootOutcome::Fault),
                 "MaxSteps" => Some(cellgov_compare::BootOutcome::MaxSteps),
-                _ => None,
+                other => {
+                    // PcReached carries a hex payload: `PcReached(0xADDR)`.
+                    // Keep the parse strict -- malformed payloads return
+                    // None so a corrupted `BENCH_RESULT` line fails loudly.
+                    if let Some(addr_hex) = other
+                        .strip_prefix("PcReached(0x")
+                        .and_then(|s| s.strip_suffix(')'))
+                    {
+                        u64::from_str_radix(addr_hex, 16)
+                            .ok()
+                            .map(cellgov_compare::BootOutcome::PcReached)
+                    } else {
+                        None
+                    }
+                }
             };
         }
     }
     Some(BenchBootResult {
-        title,
         steps: steps?,
         wall: std::time::Duration::from_millis(wall_ms?),
         outcome: outcome?,
@@ -432,7 +510,7 @@ pub(crate) fn agreement_percent(a: std::time::Duration, b: std::time::Duration) 
 }
 
 /// One region in a checkpoint observation manifest, sharing the schema
-/// used by `tools/rpcs3_to_observation/` and `tests/fixtures/flow_checkpoint.toml`.
+/// used by `tools/rpcs3_to_observation/` and `tests/fixtures/NPUA80001_checkpoint.toml`.
 #[derive(Debug, serde::Deserialize)]
 struct CheckpointManifest {
     regions: Vec<CheckpointRegion>,
@@ -630,24 +708,24 @@ struct StepLoopCtx<'a> {
     /// top entries.
     pc_hits: &'a mut std::collections::HashMap<u64, u64>,
     /// The boot checkpoint the harness is looking for. See
-    /// [`titles::CheckpointTrigger`]. Controls whether a
+    /// [`manifest::CheckpointTrigger`]. Controls whether a
     /// reserved-region write is treated as a checkpoint reach or as
     /// a normal fault (the commit pipeline discards either way).
-    checkpoint: titles::CheckpointTrigger,
+    checkpoint: manifest::CheckpointTrigger,
 }
 
 /// Classify a `commit_step` outcome as a checkpoint hit, if the
-/// title's trigger is [`titles::CheckpointTrigger::FirstRsxWrite`]
+/// title's trigger is [`manifest::CheckpointTrigger::FirstRsxWrite`]
 /// and the commit failed with a `ReservedWrite` to the RSX region.
 ///
 /// Returns the faulting guest address when the checkpoint fires,
 /// `None` otherwise. Pulled out as a free function so a unit test
 /// can pin the detection shape without spinning up a full runtime.
 fn rsx_write_checkpoint_addr(
-    trigger: titles::CheckpointTrigger,
+    trigger: manifest::CheckpointTrigger,
     commit_result: &Result<cellgov_core::CommitOutcome, cellgov_core::CommitError>,
 ) -> Option<u64> {
-    if trigger != titles::CheckpointTrigger::FirstRsxWrite {
+    if trigger != manifest::CheckpointTrigger::FirstRsxWrite {
         return None;
     }
     if let Err(cellgov_core::CommitError::Memory(cellgov_mem::MemError::ReservedWrite {
@@ -839,7 +917,7 @@ fn step_loop(
 #[cfg(test)]
 mod tests {
     use super::{
-        elf_user_region_end, rsx_write_checkpoint_addr, titles::CheckpointTrigger,
+        elf_user_region_end, manifest::CheckpointTrigger, rsx_write_checkpoint_addr,
         CheckpointManifest, CheckpointRegion,
     };
     use cellgov_core::{CommitError, CommitOutcome};
@@ -950,7 +1028,7 @@ mod tests {
     #[test]
     fn parse_bench_result_extracts_fields() {
         let stdout = "some preamble\nBENCH_RESULT steps=1402388 wall_ms=323 steps_per_sec=4342377 outcome=ProcessExit\ntrailing noise\n";
-        let r = super::parse_bench_result(super::Title::Flow, stdout).expect("parses");
+        let r = super::parse_bench_result(stdout).expect("parses");
         assert_eq!(r.steps, 1402388);
         assert_eq!(r.wall.as_millis(), 323);
         assert_eq!(r.outcome, cellgov_compare::BootOutcome::ProcessExit);
@@ -960,20 +1038,46 @@ mod tests {
     fn parse_bench_result_handles_rsx_checkpoint_outcome() {
         let stdout =
             "BENCH_RESULT steps=12345 wall_ms=77 steps_per_sec=160000 outcome=RsxWriteCheckpoint\n";
-        let r = super::parse_bench_result(super::Title::Sshd, stdout).expect("parses");
+        let r = super::parse_bench_result(stdout).expect("parses");
         assert_eq!(r.outcome, cellgov_compare::BootOutcome::RsxWriteCheckpoint);
+    }
+
+    #[test]
+    fn parse_bench_result_handles_pc_reached_outcome() {
+        let stdout = "BENCH_RESULT steps=1402388 wall_ms=250 steps_per_sec=5609552 outcome=PcReached(0x10381ce8)\n";
+        let r = super::parse_bench_result(stdout).expect("parses");
+        assert_eq!(
+            r.outcome,
+            cellgov_compare::BootOutcome::PcReached(0x10381ce8)
+        );
+        assert_eq!(r.steps, 1402388);
+    }
+
+    #[test]
+    fn parse_bench_result_none_on_malformed_pc_reached() {
+        // Missing the 0x prefix and trailing paren; our parser
+        // refuses to guess and returns None so a corrupted line
+        // fails loudly at the call site.
+        let stdout = "BENCH_RESULT steps=1 wall_ms=1 steps_per_sec=1 outcome=PcReached(abc\n";
+        assert!(super::parse_bench_result(stdout).is_none());
+    }
+
+    #[test]
+    fn format_bench_outcome_pc_reached_hex() {
+        let s = super::format_bench_outcome(cellgov_compare::BootOutcome::PcReached(0x10381ce8));
+        assert_eq!(s, "PcReached(0x10381ce8)");
     }
 
     #[test]
     fn parse_bench_result_none_when_no_result_line() {
         let stdout = "just some noise\nbut no result line\n";
-        assert!(super::parse_bench_result(super::Title::Flow, stdout).is_none());
+        assert!(super::parse_bench_result(stdout).is_none());
     }
 
     #[test]
     fn parse_bench_result_none_on_unknown_outcome() {
         let stdout = "BENCH_RESULT steps=1 wall_ms=1 steps_per_sec=1 outcome=WhoKnows\n";
-        assert!(super::parse_bench_result(super::Title::Flow, stdout).is_none());
+        assert!(super::parse_bench_result(stdout).is_none());
     }
 
     /// Build a minimal big-endian ELF64 header with N PT_LOAD program
@@ -1118,7 +1222,7 @@ mod tests {
             .join("..")
             .join("tests")
             .join("fixtures")
-            .join("flow_checkpoint.toml");
+            .join("NPUA80001_checkpoint.toml");
         let text = std::fs::read_to_string(&path).expect("read");
         let m: CheckpointManifest = toml::from_str(&text).expect("parses");
         assert!(!m.regions.is_empty());

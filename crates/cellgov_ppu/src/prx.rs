@@ -178,6 +178,45 @@ pub fn import_summary(modules: &[ImportedModule]) -> String {
 /// numbers below 1024; HLE stubs start at 0x10000 to avoid collision.
 pub const HLE_SYSCALL_BASE: u32 = 0x10000;
 
+/// NIDs for which CellGov ships a dedicated HLE implementation.
+///
+/// Consumed by two call sites that must stay in lockstep:
+///
+/// 1. `cellgov_cli`'s PRX binder keeps an HLE trampoline for any
+///    NID in this list even when the loaded firmware PRX exports
+///    a real body for it, because the real body depends on
+///    module_start completing full initialization (TLS, heap
+///    arenas) that may not have happened yet.
+/// 2. `cellgov_cli`'s `dump-imports` inventory tool marks each
+///    import as `impl` or `stub` based on whether its NID appears
+///    here.
+///
+/// Previously duplicated across both call sites. Promoted to a
+/// single library-level source of truth so adding a new HLE
+/// implementation in `cellgov_core::hle::dispatch_hle` only
+/// requires updating this list once.
+///
+/// Ordering is by NID value for stable diffing; no runtime code
+/// depends on the order.
+pub const HLE_IMPLEMENTED_NIDS: &[u32] = &[
+    0x744680a2, // sys_initialize_tls
+    0xbdb18f83, // _sys_malloc
+    0xf7f7fb20, // _sys_free
+    0x68b9b011, // _sys_memset
+    0xe6f2c1e7, // sys_process_exit
+    0xb2fcf2c8, // _sys_heap_create_heap
+    0x2f85c0ef, // sys_lwmutex_create
+    0x1573dc3f, // sys_lwmutex_lock
+    0xc3476d0c, // sys_lwmutex_destroy
+    0x1bc200f4, // sys_lwmutex_unlock
+    0xaeb78725, // sys_lwmutex_trylock
+    0x8461e528, // sys_time_get_system_time
+    0x350d454e, // sys_ppu_thread_get_id
+    0x24a1ea07, // sys_ppu_thread_create
+    0x4f7172c9, // sys_process_is_stack
+    0xa2c7ba64, // sys_prx_exitspawn_with_level
+];
+
 /// Bind result: maps each HLE index to its module and NID.
 #[derive(Debug, Clone)]
 pub struct HleBinding {
@@ -378,6 +417,27 @@ fn read_cstring(data: &[u8], segments: &[Segment], vaddr: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hle_implemented_nids_is_nonempty_and_unique() {
+        assert!(!HLE_IMPLEMENTED_NIDS.is_empty());
+        let mut sorted = HLE_IMPLEMENTED_NIDS.to_vec();
+        sorted.sort();
+        let mut deduped = sorted.clone();
+        deduped.dedup();
+        assert_eq!(
+            sorted.len(),
+            deduped.len(),
+            "HLE_IMPLEMENTED_NIDS contains a duplicate"
+        );
+    }
+
+    #[test]
+    fn hle_implemented_nids_contains_tls_init() {
+        // sys_initialize_tls is called by every PS3 ELF boot; if
+        // it drops off this list every boot silently downgrades.
+        assert!(HLE_IMPLEMENTED_NIDS.contains(&0x744680a2));
+    }
 
     #[test]
     fn parse_flow_imports() {

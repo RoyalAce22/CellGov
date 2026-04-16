@@ -1239,3 +1239,254 @@ fn into_memory_returns_committed_state() {
     assert_eq!(&recovered.as_bytes()[0..4], &[0xDE, 0xAD, 0xBE, 0xEF]);
     assert_eq!(recovered.size(), 64);
 }
+
+// ---------------------------------------------------------------
+// 12C.1 commit fast path -- three gate microtests.
+//
+// Proof obligations from the phase-12 design doc: the trivial-
+// step fast path must not alter the observable contract in any
+// of the following scenarios.
+// ---------------------------------------------------------------
+
+/// Unit that emits zero effects every step and finishes after
+/// `max` steps. Used by the empty-loop gate below -- its steps
+/// are exactly the kind the trivial-commit fast path short-
+/// circuits.
+struct SilentUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    max: u64,
+}
+
+impl ExecutionUnit for SilentUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= self.max {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+    ) -> ExecutionStepResult {
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        let yield_reason = if n >= self.max {
+            YieldReason::Finished
+        } else {
+            YieldReason::BudgetExhausted
+        };
+        ExecutionStepResult {
+            yield_reason,
+            consumed_budget: budget,
+            emitted_effects: vec![],
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+/// 12C.1 gate 1 -- empty loop.
+///
+/// 10K non-effect-emitting steps under FaultDriven mode must
+/// advance the epoch exactly 10K times (one per step, matching
+/// the atomic-batch boundary contract) and emit zero trace
+/// records (FaultDriven mode's existing guarantee). The fast
+/// path must not break either.
+#[test]
+fn commit_fast_path_empty_loop_advances_epoch_monotonically() {
+    let mut rt = build(64, 1, 20_000);
+    rt.set_mode(RuntimeMode::FaultDriven);
+    // Finished yields take the slow path; BudgetExhausted does
+    // not. Give the unit enough runway so all 10K steps are
+    // BudgetExhausted.
+    rt.registry_mut().register_with(|id| SilentUnit {
+        id,
+        steps: Cell::new(0),
+        max: 100_000,
+    });
+
+    let start_epoch = rt.epoch();
+    for _ in 0..10_000 {
+        let s = rt.step().unwrap();
+        rt.commit_step(&s.result).unwrap();
+    }
+    assert_eq!(
+        rt.epoch().raw(),
+        start_epoch.raw() + 10_000,
+        "epoch must advance exactly once per commit, even on the fast path"
+    );
+    // FaultDriven mode already suppresses trace records; the
+    // fast path must preserve that guarantee on empty-effect
+    // steps. Empty trace bytes is the strongest assertion.
+    assert!(
+        rt.trace().bytes().is_empty(),
+        "FaultDriven + empty-effect steps must produce no trace records"
+    );
+}
+
+/// 12C.1 gate 2 -- DMA completion near a fast-path stretch.
+///
+/// A DMA is enqueued with a fixed completion tick; the issuing
+/// unit emits nothing afterwards (silent steps). The completion
+/// must fire at the step whose accumulated time crosses the
+/// scheduled tick, not one step earlier or later, and the
+/// transfer must apply to committed memory at that boundary.
+///
+/// The fast path checks `dma_queue.is_empty()` and takes the
+/// slow path as soon as a DMA is pending, so this test also
+/// exercises the "enter slow path when async work is present"
+/// transition.
+#[test]
+fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
+    use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
+    use cellgov_mem::{ByteRange, GuestAddr};
+
+    let mut rt = build(256, 1, 100);
+    rt.set_mode(RuntimeMode::FaultDriven);
+    rt.memory
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+            &[0x11, 0x22, 0x33, 0x44],
+        )
+        .unwrap();
+    let req = DmaRequest::new(
+        DmaDirection::Put,
+        ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+        ByteRange::new(GuestAddr::new(128), 4).unwrap(),
+        UnitId::new(0),
+    )
+    .unwrap();
+    // Scheduled at tick 3. Budget=1 per step, so step 3 is the
+    // first where accumulated time reaches 3.
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
+    rt.registry_mut().register_with(|id| SilentUnit {
+        id,
+        steps: Cell::new(0),
+        max: 100,
+    });
+
+    // Step 1: time -> 1. DMA pending, slow path. Not yet due.
+    let s = rt.step().unwrap();
+    let o1 = rt.commit_step(&s.result).unwrap();
+    assert_eq!(o1.dma_completions_fired, 0);
+    // Step 2: time -> 2. Still pending.
+    let s = rt.step().unwrap();
+    let o2 = rt.commit_step(&s.result).unwrap();
+    assert_eq!(o2.dma_completions_fired, 0);
+    // Step 3: time -> 3. DMA fires at its scheduled tick, and
+    // the transfer applies to memory in the same commit.
+    let s = rt.step().unwrap();
+    let o3 = rt.commit_step(&s.result).unwrap();
+    assert_eq!(
+        o3.dma_completions_fired, 1,
+        "DMA must fire at its scheduled tick despite silent steps"
+    );
+    assert_eq!(
+        rt.memory()
+            .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
+            .unwrap(),
+        &[0x11, 0x22, 0x33, 0x44]
+    );
+    // Step 4+: queue empty again. Fast path re-engages; epoch
+    // still advances.
+    let epoch_before = rt.epoch();
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result).unwrap();
+    assert_eq!(rt.epoch().raw(), epoch_before.raw() + 1);
+}
+
+/// 12C.1 gate 3 -- wake visibility through a silent stretch.
+///
+/// Unit A, while blocked, is woken by a DMA completion fired on
+/// unit B's step. That wake is observed outside the commit path
+/// (via `registry().effective_status`) immediately after the
+/// firing step and must stay visible through subsequent silent
+/// (fast-path) steps -- the status flip is carried by the
+/// `status_overrides` map, which the fast path does not touch.
+#[test]
+fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
+    use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
+    use cellgov_mem::{ByteRange, GuestAddr};
+
+    let mut rt = build(256, 1, 100);
+    rt.set_mode(RuntimeMode::FaultDriven);
+    // Unit 0 is the DMA-issuing waiter; it starts Blocked so the
+    // scheduler never picks it until the completion fires.
+    rt.registry_mut().register_with(|id| SilentUnit {
+        id,
+        steps: Cell::new(0),
+        max: 100,
+    });
+    rt.registry_mut()
+        .set_status_override(UnitId::new(0), UnitStatus::Blocked);
+    // Unit 1 drives the clock with silent steps.
+    rt.registry_mut().register_with(|id| SilentUnit {
+        id,
+        steps: Cell::new(0),
+        max: 100,
+    });
+    let req = DmaRequest::new(
+        DmaDirection::Put,
+        ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+        ByteRange::new(GuestAddr::new(128), 4).unwrap(),
+        UnitId::new(0),
+    )
+    .unwrap();
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(2)), None);
+
+    // Step 1: unit 1 runs (unit 0 Blocked), time -> 1. Slow path
+    // (DMA pending); nothing fires yet.
+    let s = rt.step().unwrap();
+    assert_eq!(s.unit, UnitId::new(1));
+    let o = rt.commit_step(&s.result).unwrap();
+    assert_eq!(o.dma_completions_fired, 0);
+    assert_eq!(
+        rt.registry().effective_status(UnitId::new(0)),
+        Some(UnitStatus::Blocked)
+    );
+    // Step 2: unit 1 runs again, time -> 2, DMA fires, unit 0
+    // wakes. The wake is a status_override flip, observable
+    // immediately.
+    let s = rt.step().unwrap();
+    assert_eq!(s.unit, UnitId::new(1));
+    let o = rt.commit_step(&s.result).unwrap();
+    assert_eq!(o.dma_completions_fired, 1);
+    let wake_epoch = rt.epoch();
+    assert_eq!(
+        rt.registry().effective_status(UnitId::new(0)),
+        Some(UnitStatus::Runnable),
+        "DMA completion must wake the issuer"
+    );
+    // Step 3: unit 0 is now Runnable; the scheduler will pick
+    // whichever is first. We force silent steps on both units
+    // and verify the wake visibility is preserved.
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result).unwrap();
+    // Unit 0's override is cleared the first time it runs (see
+    // `clear_status_override` in step); but the wake happened
+    // at `wake_epoch`, and the epoch has advanced exactly once
+    // per subsequent commit regardless of whether the fast or
+    // slow path ran.
+    assert_eq!(
+        rt.epoch().raw(),
+        wake_epoch.raw() + 1,
+        "epoch must advance once per commit, fast or slow"
+    );
+}

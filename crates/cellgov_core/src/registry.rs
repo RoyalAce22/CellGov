@@ -276,8 +276,15 @@ impl UnitRegistry {
 
     /// Clear a previously-set status override. After this call,
     /// [`UnitRegistry::effective_status`] delegates to the unit's
-    /// self-reported `status()` again.
+    /// self-reported `status()` again. Fast path: `Runtime::step`
+    /// calls this every step, but the override map is empty on
+    /// every step that is not a wake boundary -- short-circuiting
+    /// on `is_empty()` saves a BTreeMap probe in the PPU-bound
+    /// hot loop.
     pub fn clear_status_override(&mut self, id: UnitId) {
+        if self.status_overrides.is_empty() {
+            return;
+        }
         self.status_overrides.remove(&id);
     }
 
@@ -292,7 +299,17 @@ impl UnitRegistry {
     /// in the order they were pushed. Returns an empty vec if there
     /// are no pending messages. The runtime calls this at the start
     /// of each `run_until_yield` to build the `ExecutionContext`.
+    ///
+    /// Fast path: the PPU-driven hot loop hits an empty map on every
+    /// step (no pending HLE-driven receive). `BTreeMap::remove`
+    /// probes the root even when the map is empty; guarding on
+    /// `is_empty()` costs one field load per step and short-circuits
+    /// the probe, which is measurable across hundreds of millions of
+    /// steps.
     pub fn drain_receives(&mut self, id: UnitId) -> Vec<u32> {
+        if self.pending_receives.is_empty() {
+            return Vec::new();
+        }
         self.pending_receives.remove(&id).unwrap_or_default()
     }
 
@@ -313,13 +330,21 @@ impl UnitRegistry {
 
     /// Drain the pending syscall return for `id`, if any. The runtime
     /// calls this at the start of each `run_until_yield` to build the
-    /// `ExecutionContext`.
+    /// `ExecutionContext`. Fast path guard: see
+    /// [`UnitRegistry::drain_receives`].
     pub fn drain_syscall_return(&mut self, id: UnitId) -> Option<u64> {
+        if self.pending_syscall_returns.is_empty() {
+            return None;
+        }
         self.pending_syscall_returns.remove(&id)
     }
 
-    /// Drain pending register writes for `id`.
+    /// Drain pending register writes for `id`. Fast path guard: see
+    /// [`UnitRegistry::drain_receives`].
     pub fn drain_register_writes(&mut self, id: UnitId) -> Vec<(u8, u64)> {
+        if self.pending_register_writes.is_empty() {
+            return Vec::new();
+        }
         self.pending_register_writes.remove(&id).unwrap_or_default()
     }
 

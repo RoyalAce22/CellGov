@@ -13,8 +13,8 @@ use cellgov_ppu::prx::HleBinding;
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_time::Budget;
 
+use super::manifest::TitleManifest;
 use super::prx::{build_nid_map, load_firmware_prx, pre_init_tls, run_module_start, PrxLoadInfo};
-use super::titles::Title;
 use super::{
     PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_TOP, PS3_RSX_BASE,
     PS3_RSX_SIZE, PS3_SPU_RESERVED_BASE, PS3_SPU_RESERVED_SIZE,
@@ -55,7 +55,7 @@ impl StartupTimings {
 /// equivalent `run-game` CLI flag; `bench-boot` uses the same
 /// structure so the two paths cannot diverge in meaning.
 pub(super) struct PrepareOptions<'a> {
-    pub title: Title,
+    pub title: &'a TitleManifest,
     pub elf_path: &'a str,
     pub firmware_dir: Option<&'a str>,
     pub strict_reserved: bool,

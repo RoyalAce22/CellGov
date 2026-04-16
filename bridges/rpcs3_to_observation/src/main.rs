@@ -352,7 +352,7 @@ mod tests {
             .join("..")
             .join("tests")
             .join("fixtures")
-            .join("flow_checkpoint.toml");
+            .join("NPUA80001_checkpoint.toml");
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let m: Manifest = toml::from_str(&text).expect("manifest parses");
