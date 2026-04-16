@@ -14,6 +14,7 @@ use cellgov_ppu::decode::decode;
 use cellgov_ppu::exec::execute;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
+use cellgov_ppu::store_buffer::StoreBuffer;
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_time::Budget;
 
@@ -81,8 +82,19 @@ fn bench_execute_addi(c: &mut Criterion) {
     let uid = UnitId::new(0);
     c.bench_function("execute/addi", |b| {
         let mut state = PpuState::new();
+        let mut effects = Vec::new();
+        let mut store_buf = StoreBuffer::new();
         b.iter(|| {
-            execute(black_box(&insn), &mut state, uid);
+            effects.clear();
+            store_buf.clear();
+            execute(
+                black_box(&insn),
+                &mut state,
+                uid,
+                &[],
+                &mut effects,
+                &mut store_buf,
+            );
         })
     });
 }
@@ -98,25 +110,49 @@ fn bench_execute_add(c: &mut Criterion) {
         let mut state = PpuState::new();
         state.gpr[4] = 100;
         state.gpr[5] = 200;
+        let mut effects = Vec::new();
+        let mut store_buf = StoreBuffer::new();
         b.iter(|| {
-            execute(black_box(&insn), &mut state, uid);
+            effects.clear();
+            store_buf.clear();
+            execute(
+                black_box(&insn),
+                &mut state,
+                uid,
+                &[],
+                &mut effects,
+                &mut store_buf,
+            );
         })
     });
 }
 
 fn bench_execute_lwz(c: &mut Criterion) {
-    // Execute returns Load outcome -- no memory access in execute()
+    // Execute now reads memory inline, so provide a region.
     let insn = PpuInstruction::Lwz {
         rt: 3,
         ra: 1,
         imm: 0,
     };
     let uid = UnitId::new(0);
+    let mem = vec![0u8; 0x2000];
     c.bench_function("execute/lwz", |b| {
         let mut state = PpuState::new();
         state.gpr[1] = 0x1000;
+        let views: [(u64, &[u8]); 1] = [(0, &mem)];
+        let mut effects = Vec::new();
+        let mut store_buf = StoreBuffer::new();
         b.iter(|| {
-            execute(black_box(&insn), &mut state, uid);
+            effects.clear();
+            store_buf.clear();
+            execute(
+                black_box(&insn),
+                &mut state,
+                uid,
+                &views,
+                &mut effects,
+                &mut store_buf,
+            );
         })
     });
 }
@@ -132,8 +168,19 @@ fn bench_execute_stw(c: &mut Criterion) {
         let mut state = PpuState::new();
         state.gpr[1] = 0x1000;
         state.gpr[3] = 0xDEAD;
+        let mut effects = Vec::new();
+        let mut store_buf = StoreBuffer::new();
         b.iter(|| {
-            execute(black_box(&insn), &mut state, uid);
+            effects.clear();
+            store_buf.clear();
+            execute(
+                black_box(&insn),
+                &mut state,
+                uid,
+                &[],
+                &mut effects,
+                &mut store_buf,
+            );
         })
     });
 }
@@ -148,8 +195,19 @@ fn bench_execute_cmpwi(c: &mut Criterion) {
     c.bench_function("execute/cmpwi", |b| {
         let mut state = PpuState::new();
         state.gpr[3] = 42;
+        let mut effects = Vec::new();
+        let mut store_buf = StoreBuffer::new();
         b.iter(|| {
-            execute(black_box(&insn), &mut state, uid);
+            effects.clear();
+            store_buf.clear();
+            execute(
+                black_box(&insn),
+                &mut state,
+                uid,
+                &[],
+                &mut effects,
+                &mut store_buf,
+            );
         })
     });
 }
@@ -164,9 +222,20 @@ fn bench_execute_b(c: &mut Criterion) {
     c.bench_function("execute/b", |b| {
         let mut state = PpuState::new();
         state.pc = 0x800;
+        let mut effects = Vec::new();
+        let mut store_buf = StoreBuffer::new();
         b.iter(|| {
             state.pc = 0x800;
-            execute(black_box(&insn), &mut state, uid);
+            effects.clear();
+            store_buf.clear();
+            execute(
+                black_box(&insn),
+                &mut state,
+                uid,
+                &[],
+                &mut effects,
+                &mut store_buf,
+            );
         })
     });
 }
@@ -183,8 +252,19 @@ fn bench_execute_rlwinm(c: &mut Criterion) {
     c.bench_function("execute/rlwinm", |b| {
         let mut state = PpuState::new();
         state.gpr[4] = 0x12345678;
+        let mut effects = Vec::new();
+        let mut store_buf = StoreBuffer::new();
         b.iter(|| {
-            execute(black_box(&insn), &mut state, uid);
+            effects.clear();
+            store_buf.clear();
+            execute(
+                black_box(&insn),
+                &mut state,
+                uid,
+                &[],
+                &mut effects,
+                &mut store_buf,
+            );
         })
     });
 }
@@ -209,7 +289,7 @@ fn bench_run_until_yield_100(c: &mut Criterion) {
         b.iter(|| {
             let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
             let ctx = ExecutionContext::new(&mem);
-            ppu.run_until_yield(black_box(Budget::new(100)), &ctx)
+            ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new())
         })
     });
 }
@@ -230,7 +310,7 @@ fn bench_run_until_yield_budget_1(c: &mut Criterion) {
         b.iter(|| {
             let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
             let ctx = ExecutionContext::new(&mem);
-            ppu.run_until_yield(black_box(Budget::new(1)), &ctx)
+            ppu.run_until_yield(black_box(Budget::new(1)), &ctx, &mut Vec::new())
         })
     });
 }
@@ -266,7 +346,7 @@ fn bench_run_until_yield_mixed(c: &mut Criterion) {
         b.iter(|| {
             let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
             let ctx = ExecutionContext::new(&mem);
-            ppu.run_until_yield(black_box(Budget::new(100)), &ctx)
+            ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new())
         })
     });
 }
@@ -312,7 +392,7 @@ fn bench_run_until_yield_per_step_off(c: &mut Criterion) {
             let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
             // Default: per_step_trace == false.
             let ctx = ExecutionContext::new(&mem);
-            ppu.run_until_yield(black_box(Budget::new(100)), &ctx)
+            ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new())
         })
     });
 }
@@ -335,7 +415,7 @@ fn bench_run_until_yield_per_step_on(c: &mut Criterion) {
             let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
             ppu.set_per_step_trace(true);
             let ctx = ExecutionContext::new(&mem);
-            let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx);
+            let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
             // Drain every iteration so the buffer does not grow
             // unbounded across criterion samples.
             let _ = ppu.drain_retired_state_hashes();

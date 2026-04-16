@@ -26,20 +26,22 @@ fn make_write_effect(addr: u64, data: &[u8]) -> Effect {
     }
 }
 
-fn make_step_result(effects: Vec<Effect>) -> ExecutionStepResult {
-    ExecutionStepResult {
-        yield_reason: YieldReason::BudgetExhausted,
-        consumed_budget: Budget::new(1),
-        emitted_effects: effects,
-        local_diagnostics: LocalDiagnostics::with_pc(0x1000),
-        fault: None,
-        syscall_args: None,
-    }
+fn make_step_result(effects: Vec<Effect>) -> (ExecutionStepResult, Vec<Effect>) {
+    (
+        ExecutionStepResult {
+            yield_reason: YieldReason::BudgetExhausted,
+            consumed_budget: Budget::new(1),
+            local_diagnostics: LocalDiagnostics::with_pc(0x1000),
+            fault: None,
+            syscall_args: None,
+        },
+        effects,
+    )
 }
 
 fn bench_commit_0_effects(c: &mut Criterion) {
     let mut pipeline = CommitPipeline::new();
-    let result = make_step_result(vec![]);
+    let (result, effects) = make_step_result(vec![]);
     let latency = FixedLatency::new(10);
 
     c.bench_function("commit_step/0_effects", |b| {
@@ -58,14 +60,17 @@ fn bench_commit_0_effects(c: &mut Criterion) {
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
             };
-            pipeline.process(black_box(&result), &mut ctx).unwrap()
+            pipeline
+                .process(black_box(&result), black_box(&effects), &mut ctx)
+                .unwrap()
         })
     });
 }
 
 fn bench_commit_1_effect(c: &mut Criterion) {
     let mut pipeline = CommitPipeline::new();
-    let result = make_step_result(vec![make_write_effect(0x100, &[0xDE, 0xAD, 0xBE, 0xEF])]);
+    let (result, effects) =
+        make_step_result(vec![make_write_effect(0x100, &[0xDE, 0xAD, 0xBE, 0xEF])]);
     let latency = FixedLatency::new(10);
 
     c.bench_function("commit_step/1_effect", |b| {
@@ -84,7 +89,9 @@ fn bench_commit_1_effect(c: &mut Criterion) {
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
             };
-            pipeline.process(black_box(&result), &mut ctx).unwrap()
+            pipeline
+                .process(black_box(&result), black_box(&effects), &mut ctx)
+                .unwrap()
         })
     });
 }
@@ -94,7 +101,7 @@ fn bench_commit_10_effects(c: &mut Criterion) {
     let effects: Vec<Effect> = (0..10)
         .map(|i| make_write_effect(i * 8, &[0xAB; 8]))
         .collect();
-    let result = make_step_result(effects);
+    let (result, effects) = make_step_result(effects);
     let latency = FixedLatency::new(10);
 
     c.bench_function("commit_step/10_effects", |b| {
@@ -113,7 +120,9 @@ fn bench_commit_10_effects(c: &mut Criterion) {
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
             };
-            pipeline.process(black_box(&result), &mut ctx).unwrap()
+            pipeline
+                .process(black_box(&result), black_box(&effects), &mut ctx)
+                .unwrap()
         })
     });
 }
@@ -127,7 +136,6 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
     let result = ExecutionStepResult {
         yield_reason: YieldReason::Fault,
         consumed_budget: Budget::new(1),
-        emitted_effects: effects,
         local_diagnostics: LocalDiagnostics::with_pc(0x1000),
         fault: Some(cellgov_effects::FaultKind::Guest(0x0106_0000)),
         syscall_args: None,
@@ -150,7 +158,9 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
             };
-            pipeline.process(black_box(&result), &mut ctx).unwrap()
+            pipeline
+                .process(black_box(&result), black_box(&effects), &mut ctx)
+                .unwrap()
         })
     });
 }

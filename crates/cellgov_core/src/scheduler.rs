@@ -178,14 +178,15 @@ mod tests {
             &mut self,
             budget: Budget,
             _ctx: &ExecutionContext<'_>,
+            effects: &mut Vec<Effect>,
         ) -> ExecutionStepResult {
+            effects.push(Effect::TraceMarker {
+                marker: 0,
+                source: self.id,
+            });
             ExecutionStepResult {
                 yield_reason: YieldReason::BudgetExhausted,
                 consumed_budget: budget,
-                emitted_effects: vec![Effect::TraceMarker {
-                    marker: 0,
-                    source: self.id,
-                }],
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,

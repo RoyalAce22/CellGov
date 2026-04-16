@@ -5,16 +5,36 @@
 //! vector forms; the per-operation `v*` helpers below are pure
 //! functions over big-endian `u128` values.
 
-use crate::exec::{PpuFault, PpuStepOutcome};
+use crate::exec::{load_slice, ExecuteVerdict, PpuFault};
 use crate::state::PpuState;
+use crate::store_buffer::StoreBuffer;
 
 /// Execute a VX-form VMX instruction (primary=4, 11-bit sub-opcode, 3 registers).
-pub(crate) fn execute_vx(state: &mut PpuState, xo: u16, vt: u8, va: u8, vb: u8) -> PpuStepOutcome {
-    // lvx needs memory access -- return a LoadVec outcome.
+pub(crate) fn execute_vx(
+    state: &mut PpuState,
+    xo: u16,
+    vt: u8,
+    va: u8,
+    vb: u8,
+    region_views: &[(u64, &[u8])],
+    store_buf: &StoreBuffer,
+) -> ExecuteVerdict {
+    // lvx: inline 16-byte vector load (checks store buffer first).
     if xo == 103 {
         let base = if va == 0 { 0 } else { state.gpr[va as usize] };
         let ea = (base.wrapping_add(state.gpr[vb as usize])) & !0xF;
-        return PpuStepOutcome::LoadVec { ea, vt };
+        if let Some(val) = store_buf.forward(ea, 16) {
+            state.vr[vt as usize] = val;
+            return ExecuteVerdict::Continue;
+        }
+        let slice = match load_slice(region_views, ea, 16) {
+            Some(s) => s,
+            None => return ExecuteVerdict::MemFault(ea),
+        };
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(slice);
+        state.vr[vt as usize] = u128::from_be_bytes(bytes);
+        return ExecuteVerdict::Continue;
     }
 
     let a = state.vr[va as usize];
@@ -62,12 +82,12 @@ pub(crate) fn execute_vx(state: &mut PpuState, xo: u16, vt: u8, va: u8, vb: u8) 
         0x600 => vsub_ubytes_sat(a, b), // vsububs (saturating)
 
         _ => {
-            return PpuStepOutcome::Fault(PpuFault::UnsupportedSyscall(xo as u64));
+            return ExecuteVerdict::Fault(PpuFault::UnsupportedSyscall(xo as u64));
         }
     };
 
     state.vr[vt as usize] = result;
-    PpuStepOutcome::Continue
+    ExecuteVerdict::Continue
 }
 
 /// Execute a VA-form VMX instruction (primary=4, 6-bit sub-opcode, 4 registers).
@@ -78,7 +98,7 @@ pub(crate) fn execute_va(
     va: u8,
     vb: u8,
     vc: u8,
-) -> PpuStepOutcome {
+) -> ExecuteVerdict {
     let a = state.vr[va as usize];
     let b = state.vr[vb as usize];
     let c = state.vr[vc as usize];
@@ -88,12 +108,12 @@ pub(crate) fn execute_va(
         0x2b => vperm(a, b, c),   // vperm
         0x2c => vsldoi(a, b, vc), // vsldoi (vc field is the shift amount)
         _ => {
-            return PpuStepOutcome::Fault(PpuFault::UnsupportedSyscall(xo as u64));
+            return ExecuteVerdict::Fault(PpuFault::UnsupportedSyscall(xo as u64));
         }
     };
 
     state.vr[vt as usize] = result;
-    PpuStepOutcome::Continue
+    ExecuteVerdict::Continue
 }
 
 // -- VMX helper functions --

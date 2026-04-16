@@ -547,6 +547,50 @@ pub enum PpuInstruction {
         frc: u8,
     },
 
+    // -- Quickened (specialized) forms --
+    /// li rT, imm -- specialized from addi rT, 0, imm (skips GPR read).
+    Li { rt: u8, imm: i16 },
+    /// mr rA, rS -- specialized from or rA, rS, rS (register copy, no OR).
+    Mr { ra: u8, rs: u8 },
+    /// slwi rA, rS, n -- specialized from rlwinm rA, rS, n, 0, 31-n.
+    Slwi { ra: u8, rs: u8, n: u8 },
+    /// srwi rA, rS, n -- specialized from rlwinm rA, rS, 32-n, n, 31.
+    Srwi { ra: u8, rs: u8, n: u8 },
+    /// clrlwi rA, rS, n -- specialized from rlwinm rA, rS, 0, n, 31.
+    Clrlwi { ra: u8, rs: u8, n: u8 },
+
+    // -- Superinstructions (compound 2-instruction pairs) --
+    /// lwz + cmpwi: load word then compare immediate.
+    /// Fused prologue/loop pattern: loads a word and compares it in one step.
+    LwzCmpwi {
+        rt: u8,
+        ra_load: u8,
+        offset: i16,
+        bf: u8,
+        cmp_imm: i16,
+    },
+    /// li + stw: load immediate then store word.
+    /// Common in struct zeroing and initialization sequences.
+    LiStw {
+        rt: u8,
+        imm: i16,
+        ra_store: u8,
+        store_offset: i16,
+    },
+    /// mflr + stw: move from LR then store word.
+    /// Function prologue: save return address to stack.
+    MflrStw {
+        rt: u8,
+        ra_store: u8,
+        store_offset: i16,
+    },
+    /// lwz + mtlr: load word then move to LR.
+    /// Function epilogue: restore return address from stack.
+    LwzMtlr { rt: u8, ra_load: u8, offset: i16 },
+    /// Consumed by a preceding superinstruction. The fetch loop
+    /// advances PC past this slot without executing.
+    Consumed,
+
     // -- System --
     /// System call. Syscall number is in r11 by LV2 convention.
     Sc,
@@ -657,6 +701,16 @@ impl PpuInstruction {
             Self::Stfiwx { .. } => "Stfiwx",
             Self::Fp63 { .. } => "Fp63",
             Self::Fp59 { .. } => "Fp59",
+            Self::Li { .. } => "Li",
+            Self::Mr { .. } => "Mr",
+            Self::Slwi { .. } => "Slwi",
+            Self::Srwi { .. } => "Srwi",
+            Self::Clrlwi { .. } => "Clrlwi",
+            Self::LwzCmpwi { .. } => "LwzCmpwi",
+            Self::LiStw { .. } => "LiStw",
+            Self::MflrStw { .. } => "MflrStw",
+            Self::LwzMtlr { .. } => "LwzMtlr",
+            Self::Consumed => "Consumed",
             Self::Sc => "Sc",
         }
     }

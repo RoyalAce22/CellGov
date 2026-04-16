@@ -97,7 +97,7 @@ pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
                 // by the runtime's commit trace record; the runner
                 // does not abort. The next iteration handles whatever
                 // state the failure left behind.
-                let _ = rt.commit_step(&step.result);
+                let _ = rt.commit_step(&step.result, &step.effects);
             }
             Err(StepError::NoRunnableUnit) => break ScenarioOutcome::Stalled,
             Err(StepError::MaxStepsExceeded) => break ScenarioOutcome::MaxStepsExceeded,

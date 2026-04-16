@@ -221,6 +221,7 @@ impl CommitPipeline {
     pub fn process(
         &mut self,
         result: &ExecutionStepResult,
+        effects: &[Effect],
         ctx: &mut CommitContext<'_>,
     ) -> Result<CommitOutcome, CommitError> {
         if result.yield_reason == YieldReason::Fault {
@@ -231,7 +232,7 @@ impl CommitPipeline {
         }
 
         // Fast path: no effects means nothing to validate, stage, or apply.
-        if result.emitted_effects.is_empty() {
+        if effects.is_empty() {
             return Ok(CommitOutcome::default());
         }
 
@@ -253,7 +254,7 @@ impl CommitPipeline {
         // Mailbox sends are validated against the registry but not yet
         // applied -- mailbox state mutates only in the apply pass
         // below, which runs after every effect has been validated.
-        for (idx, effect) in result.emitted_effects.iter().enumerate() {
+        for (idx, effect) in effects.iter().enumerate() {
             match effect {
                 Effect::SharedWriteIntent { range, bytes, .. } => {
                     if bytes.len() as u64 != range.length() {
@@ -330,7 +331,7 @@ impl CommitPipeline {
         staging
             .drain_into(ctx.memory)
             .map_err(CommitError::Memory)?;
-        for effect in &result.emitted_effects {
+        for effect in effects {
             match effect {
                 Effect::MailboxSend {
                     mailbox, message, ..
