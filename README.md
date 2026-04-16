@@ -50,7 +50,8 @@ CellGov answers that question:
 Pre-Alpha. Capability today:
 
 - **Titles: 2** -- flOw (NPUA80001) cross-runner verified against
-  RPCS3; Super Stardust HD (NPUA80068) boots past early init.
+  RPCS3; Super Stardust HD (NPUA80068) reaches FirstRsxWrite with
+  cross-runner divergence report.
   Manifest-driven: adding a title is one TOML file, no Rust change.
 - **PPU: 117 instruction variants**, including quickened
   specializations and superinstruction compounds. Full SPU
@@ -65,7 +66,10 @@ Pre-Alpha. Capability today:
   scanner, register-level zoom-in.
 - **Cross-runner**: observation schema validated against RPCS3;
   reproducible boot bench with subprocess isolation.
-- 1168 tests, zero `unsafe` (`unsafe_code = forbid`).
+- **Firmware**: standalone PUP decrypter (`cellgov_firmware`) extracts
+  PS3 system modules from Sony's official firmware update without
+  requiring RPCS3.
+- 1184 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [`docs/architecture.md`](docs/architecture.md) for full
 technical details on the pipeline, memory model, shadow passes,
@@ -73,7 +77,7 @@ and effect vocabulary.
 
 ## Workspace
 
-Cargo workspace, 15 library crates and 3 binaries. See
+Cargo workspace, 15 library crates and 3 binaries (+1 firmware tool). See
 [`docs/architecture.md`](docs/architecture.md) for the layering
 diagram and per-crate responsibilities.
 
@@ -88,12 +92,18 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-The CellGov library crates have no external runtime dependencies on
-RPCS3. Booting a real PS3 game requires PS3 system firmware files
-(decrypted SPRX modules like `liblv2.sprx`); these are not shipped
-with CellGov and must be supplied via `--firmware-dir`. RPCS3's
-`dev_flash/sys/external` is one convenient source for the files,
-but the dependency is on the PS3 firmware itself.
+CellGov has no runtime dependency on RPCS3. Booting a real PS3 game
+requires PS3 system firmware (decrypted SPRX modules like
+`liblv2.sprx`). Download the official firmware update
+(`PS3UPDAT.PUP`) from
+[playstation.com](https://www.playstation.com/en-us/support/hardware/ps3/system-software/)
+and decrypt it with the included tool:
+
+```bash
+cargo run -p cellgov_firmware -- install PS3UPDAT.PUP --output dev_flash
+```
+
+Then pass `--firmware-dir dev_flash/sys/external` to `run-game`.
 
 The `cellgov_compare` crate gates the RPCS3 process-spawning runner
 behind the default-on `rpcs3-runner` Cargo feature. Importers that
