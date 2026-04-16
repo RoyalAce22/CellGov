@@ -17,6 +17,7 @@ pub mod instruction;
 pub mod loader;
 pub mod nid_db;
 pub mod prx;
+pub mod shadow;
 pub mod sprx;
 pub mod state;
 pub mod syscall;
@@ -99,6 +100,12 @@ pub struct PpuExecutionUnit {
     /// `(pc, gpr, lr, ctr, xer, cr)` for one retired instruction
     /// inside the configured window.
     per_step_full_states: Vec<(u64, [u64; 32], u64, u64, u64, u32)>,
+    /// Predecoded instruction shadow for the main text region.
+    /// Built once after boot loading; the hot-path fetch checks
+    /// this before falling back to raw memory + decode. Stale
+    /// slots (from guest-visible code writes) re-decode on the
+    /// next fetch.
+    instruction_shadow: Option<shadow::PredecodedShadow>,
 }
 
 impl PpuExecutionUnit {
@@ -115,6 +122,7 @@ impl PpuExecutionUnit {
             full_state_window: None,
             retirement_counter: 0,
             per_step_full_states: Vec::new(),
+            instruction_shadow: None,
         }
     }
 
@@ -166,6 +174,15 @@ impl PpuExecutionUnit {
     /// Read access to the PPU's architectural state.
     pub fn state(&self) -> &state::PpuState {
         &self.state
+    }
+
+    /// Attach a predecoded instruction shadow. The shadow must be
+    /// built from the same memory the PPU will fetch from; the
+    /// caller is responsible for building it after all boot-time
+    /// code writes (ELF load, PRX load, HLE stub planting) have
+    /// finished and before the step loop begins.
+    pub fn set_instruction_shadow(&mut self, shadow: shadow::PredecodedShadow) {
+        self.instruction_shadow = Some(shadow);
     }
 }
 
@@ -305,34 +322,50 @@ impl ExecutionUnit for PpuExecutionUnit {
         loop {
             // Capture PC before fetch/decode/execute for diagnostics.
             let step_pc = self.state.pc;
-            // Fetch: read 4 bytes from committed guest memory at PC.
-            let pc = step_pc as usize;
-            if pc + 4 > mem.len() {
-                self.status = UnitStatus::Faulted;
-                return ExecutionStepResult {
-                    yield_reason: YieldReason::Fault,
-                    consumed_budget: Budget::new(budget.raw() - remaining),
-                    emitted_effects: effects,
-                    local_diagnostics: self.fault_diag(step_pc),
-                    fault: Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
-                    syscall_args: None,
-                };
-            }
-            let raw = u32::from_be_bytes([mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3]]);
 
-            // Decode
-            let insn = match decode::decode(raw) {
-                Ok(i) => i,
-                Err(_) => {
+            // Fetch + Decode: try the predecoded shadow first (O(1)
+            // index). On miss (stale, out-of-range, decode error)
+            // fall back to the raw-memory path.
+            let insn = if let Some(cached) = self
+                .instruction_shadow
+                .as_ref()
+                .and_then(|s| s.get(step_pc))
+            {
+                cached
+            } else {
+                let pc = step_pc as usize;
+                if pc + 4 > mem.len() {
                     self.status = UnitStatus::Faulted;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_budget: Budget::new(budget.raw() - remaining),
                         emitted_effects: effects,
                         local_diagnostics: self.fault_diag(step_pc),
-                        fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
+                        fault: Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
                         syscall_args: None,
                     };
+                }
+                let raw = u32::from_be_bytes([mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3]]);
+                match decode::decode(raw) {
+                    Ok(i) => {
+                        // Refresh the shadow slot so subsequent
+                        // fetches at this PC hit the fast path.
+                        if let Some(s) = self.instruction_shadow.as_mut() {
+                            let _ = s.refresh(step_pc, raw);
+                        }
+                        i
+                    }
+                    Err(_) => {
+                        self.status = UnitStatus::Faulted;
+                        return ExecutionStepResult {
+                            yield_reason: YieldReason::Fault,
+                            consumed_budget: Budget::new(budget.raw() - remaining),
+                            emitted_effects: effects,
+                            local_diagnostics: self.fault_diag(step_pc),
+                            fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
+                            syscall_args: None,
+                        };
+                    }
                 }
             };
 
@@ -571,6 +604,12 @@ impl ExecutionUnit for PpuExecutionUnit {
 
     fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
         std::mem::take(&mut self.per_step_full_states)
+    }
+
+    fn invalidate_code(&mut self, addr: u64, len: u64) {
+        if let Some(s) = self.instruction_shadow.as_mut() {
+            s.invalidate_range(addr, len);
+        }
     }
 }
 

@@ -133,6 +133,12 @@ pub trait ExecutionUnit {
     fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
         Vec::new()
     }
+
+    /// Notify the unit that guest memory in `[addr, addr+len)` was
+    /// written by the commit pipeline. Units that cache decoded
+    /// instructions (predecoded shadow) override this to mark the
+    /// affected slots stale. Default is a no-op.
+    fn invalidate_code(&mut self, _addr: u64, _len: u64) {}
 }
 
 #[cfg(test)]

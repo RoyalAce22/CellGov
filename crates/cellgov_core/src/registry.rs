@@ -74,6 +74,10 @@ pub trait RegisteredUnit: 'static {
     fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
         Vec::new()
     }
+
+    /// Notify the unit that guest memory in `[addr, addr+len)` was
+    /// written. Same contract as [`ExecutionUnit::invalidate_code`].
+    fn invalidate_code(&mut self, _addr: u64, _len: u64) {}
 }
 
 impl<U: ExecutionUnit + 'static> RegisteredUnit for U {
@@ -104,6 +108,11 @@ impl<U: ExecutionUnit + 'static> RegisteredUnit for U {
     #[inline]
     fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
         ExecutionUnit::drain_retired_state_full(self)
+    }
+
+    #[inline]
+    fn invalidate_code(&mut self, addr: u64, len: u64) {
+        ExecutionUnit::invalidate_code(self, addr, len)
     }
 }
 

@@ -1241,11 +1241,10 @@ fn into_memory_returns_committed_state() {
 }
 
 // ---------------------------------------------------------------
-// 12C.1 commit fast path -- three gate microtests.
+// Trivial-commit fast path -- three proof microtests.
 //
-// Proof obligations from the phase-12 design doc: the trivial-
-// step fast path must not alter the observable contract in any
-// of the following scenarios.
+// The trivial-step fast path must not alter the observable
+// contract in any of the following scenarios.
 // ---------------------------------------------------------------
 
 /// Unit that emits zero effects every step and finishes after
@@ -1300,7 +1299,7 @@ impl ExecutionUnit for SilentUnit {
     }
 }
 
-/// 12C.1 gate 1 -- empty loop.
+/// Trivial-commit proof 1 -- empty loop.
 ///
 /// 10K non-effect-emitting steps under FaultDriven mode must
 /// advance the epoch exactly 10K times (one per step, matching
@@ -1339,7 +1338,7 @@ fn commit_fast_path_empty_loop_advances_epoch_monotonically() {
     );
 }
 
-/// 12C.1 gate 2 -- DMA completion near a fast-path stretch.
+/// Trivial-commit proof 2 -- DMA completion near a fast-path stretch.
 ///
 /// A DMA is enqueued with a fixed completion tick; the issuing
 /// unit emits nothing afterwards (silent steps). The completion
@@ -1411,7 +1410,7 @@ fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
     assert_eq!(rt.epoch().raw(), epoch_before.raw() + 1);
 }
 
-/// 12C.1 gate 3 -- wake visibility through a silent stretch.
+/// Trivial-commit proof 3 -- wake visibility through a silent stretch.
 ///
 /// Unit A, while blocked, is woken by a DMA completion fired on
 /// unit B's step. That wake is observed outside the commit path

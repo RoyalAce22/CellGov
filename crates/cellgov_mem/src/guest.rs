@@ -8,18 +8,18 @@
 //! effects. Execution units never call `apply_commit` directly; no
 //! execution unit may publish guest-visible state directly.
 //!
-//! Backing layout: a `BTreeMap<u64, Region>` keyed by region base
-//! address. Each [`Region`] owns a `Vec<u8>` sized to that region and
-//! carries a label and page-size class. Region lookup is `O(log n)`; the
-//! region count stays single-digit in current usage, so the constant
-//! factor dominates and the scan is predictable.
+//! Backing layout: a `Vec<Region>` sorted by base address. Each
+//! [`Region`] owns a `Vec<u8>` sized to that region and carries a
+//! label and page-size class. Region lookup is a binary search
+//! (`partition_point`); the region count stays single-digit, so
+//! the linear scan inside partition_point is cache-friendly and
+//! faster than a BTreeMap tree walk for this size.
 //!
 //! [`GuestMemory::new`] is a convenience constructor for the common
 //! single-region case: one region at base 0 spanning `[0, size)`.
 //! Multi-region layouts use [`GuestMemory::from_regions`].
 
 use std::cell::Cell;
-use std::collections::BTreeMap;
 
 use crate::range::ByteRange;
 
@@ -162,7 +162,7 @@ impl Region {
 /// runtime invariant violation.
 #[derive(Debug, Clone)]
 pub struct GuestMemory {
-    regions: BTreeMap<u64, Region>,
+    regions: Vec<Region>,
     /// Cached content hash. `None` means the cache is stale (a write
     /// happened since the last hash computation). Uses `Cell` for
     /// interior mutability so `content_hash` can stay `&self`.
@@ -261,25 +261,17 @@ impl GuestMemory {
     /// Returns `Err(MemError::OverlappingRegions)` if any two regions'
     /// address ranges overlap. Empty input is allowed and produces a
     /// `GuestMemory` with no mapped addresses (every read faults).
-    pub fn from_regions(regions: Vec<Region>) -> Result<Self, MemError> {
-        let mut map: BTreeMap<u64, Region> = BTreeMap::new();
-        for region in regions {
-            let base = region.base();
-            let end = region.end();
-            // Overlap check: no existing region's [base, end) may
-            // intersect [region.base, region.end). Two ranges
-            // [a, b) and [c, d) overlap iff a < d AND c < b.
-            for existing in map.values() {
-                let ex_base = existing.base();
-                let ex_end = existing.end();
-                if base < ex_end && ex_base < end {
-                    return Err(MemError::OverlappingRegions);
-                }
+    pub fn from_regions(mut regions: Vec<Region>) -> Result<Self, MemError> {
+        regions.sort_by_key(|r| r.base());
+        // Overlap check: sorted by base, so overlaps exist iff
+        // any region's end > the next region's base.
+        for pair in regions.windows(2) {
+            if pair[0].end() > pair[1].base() {
+                return Err(MemError::OverlappingRegions);
             }
-            map.insert(base, region);
         }
         Ok(Self {
-            regions: map,
+            regions,
             cached_hash: Cell::new(None),
             provisional_read_count: Cell::new(0),
         })
@@ -299,12 +291,12 @@ impl GuestMemory {
     /// address-space span (which would include gaps between regions).
     #[inline]
     pub fn size(&self) -> u64 {
-        self.regions.values().map(|r| r.size()).sum()
+        self.regions.iter().map(|r| r.size()).sum()
     }
 
     /// All regions in address order.
     pub fn regions(&self) -> impl Iterator<Item = &Region> {
-        self.regions.values()
+        self.regions.iter()
     }
 
     /// Read the primary region at base 0 as a byte slice.
@@ -320,9 +312,9 @@ impl GuestMemory {
     /// Returns an empty slice if no region exists at base 0.
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
-        match self.regions.get(&0) {
-            Some(r) => &r.bytes,
-            None => &[],
+        match self.regions.first() {
+            Some(r) if r.base() == 0 => &r.bytes,
+            _ => &[],
         }
     }
 
@@ -408,10 +400,8 @@ impl GuestMemory {
                 region: label,
             });
         }
-        let region = self
-            .regions
-            .get_mut(&base)
-            .expect("just located via lookup");
+        let idx = self.regions.partition_point(|r| r.base() < base);
+        let region = &mut self.regions[idx];
         let offset = start - region.base();
         let offset_usize = usize::try_from(offset).map_err(|_| MemError::OutOfRange)?;
         let end_offset = offset + length;
@@ -435,7 +425,7 @@ impl GuestMemory {
             return h;
         }
         let mut hasher = crate::hash::Fnv1aHasher::new();
-        for region in self.regions.values() {
+        for region in &self.regions {
             hasher.write(&region.bytes);
         }
         let h = hasher.finish();
@@ -447,8 +437,12 @@ impl GuestMemory {
     /// if any. Public so callers (staging, local validation) can
     /// pre-check containment without triggering an error path.
     pub fn containing_region(&self, addr: u64, length: u64) -> Option<&Region> {
-        // Largest region whose base <= addr, via BTreeMap range.
-        let (_, region) = self.regions.range(..=addr).next_back()?;
+        // Binary search: find the last region whose base <= addr.
+        let idx = self.regions.partition_point(|r| r.base() <= addr);
+        if idx == 0 {
+            return None;
+        }
+        let region = &self.regions[idx - 1];
         if region.contains(addr, length) {
             Some(region)
         } else {
@@ -463,18 +457,17 @@ impl GuestMemory {
     /// fault diagnostic after [`GuestMemory::containing_region`]
     /// returns `None`.
     pub fn fault_context(&self, addr: u64) -> FaultContext {
-        // Nearest-below: largest region with base <= addr.
-        let below = self
-            .regions
-            .range(..=addr)
-            .next_back()
-            .map(|(_, r)| r.label());
-        // Nearest-above: smallest region with base > addr.
-        let above = self
-            .regions
-            .range((addr.saturating_add(1))..)
-            .next()
-            .map(|(_, r)| r.label());
+        let idx = self.regions.partition_point(|r| r.base() <= addr);
+        let below = if idx > 0 {
+            Some(self.regions[idx - 1].label())
+        } else {
+            None
+        };
+        let above = if idx < self.regions.len() {
+            Some(self.regions[idx].label())
+        } else {
+            None
+        };
         FaultContext {
             addr,
             nearest_below: below,
