@@ -259,14 +259,19 @@ Three optimization passes run at shadow build time:
 
 1. **Quickening.** Common idioms are rewritten into specialized
    variants that eliminate redundant work: `addi rT, 0, imm` ->
-   `Li` (skips GPR read), `or rA, rS, rS` -> `Mr` (register copy),
-   `rlwinm` subsets -> `Slwi`/`Srwi`/`Clrlwi` (direct shifts).
+   `Li`, `or rA, rS, rS` -> `Mr`, `rlwinm` subsets ->
+   `Slwi`/`Srwi`/`Clrlwi`, `ori rA, rA, 0` -> `Nop`,
+   `cmpwi crF, rA, 0` -> `CmpwZero`, `rldicl`/`rldicr` subsets
+   -> `Clrldi`/`Sldi`/`Srdi`. Candidates are selected from
+   instruction profiling data (> 0.5% frequency threshold).
 
 2. **Super-pairing.** Frequent 2-instruction sequences are fused
    into single dispatch entries: `lwz + cmpwi` -> `LwzCmpwi`,
-   `li + stw` -> `LiStw`, `mflr + stw` -> `MflrStw`, `lwz + mtlr`
-   -> `LwzMtlr`. The second slot is marked `Consumed`; the fetch
-   loop skips it.
+   `li + stw` -> `LiStw`, `mflr + stw` -> `MflrStw`,
+   `lwz + mtlr` -> `LwzMtlr`, `cmpwi + bc` -> `CmpwiBc`,
+   `cmpw + bc` -> `CmpwBc`. The second slot is marked `Consumed`;
+   the fetch loop skips it. Candidates are selected from
+   adjacent-pair profiling data (> 1% frequency threshold).
 
 3. **Block-length annotation.** A backward scan fills
    `block_len[i]` with the number of instructions to the end of

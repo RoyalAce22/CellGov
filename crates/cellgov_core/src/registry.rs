@@ -77,6 +77,16 @@ pub trait RegisteredUnit: 'static {
         Vec::new()
     }
 
+    /// Drain instruction-variant profiling data.
+    fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {
+        Vec::new()
+    }
+
+    /// Drain adjacent-pair profiling data.
+    fn drain_profile_pairs(&mut self) -> Vec<((&'static str, &'static str), u64)> {
+        Vec::new()
+    }
+
     /// Notify the unit that guest memory in `[addr, addr+len)` was
     /// written. Same contract as [`ExecutionUnit::invalidate_code`].
     fn invalidate_code(&mut self, _addr: u64, _len: u64) {}
@@ -111,6 +121,16 @@ impl<U: ExecutionUnit + 'static> RegisteredUnit for U {
     #[inline]
     fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
         ExecutionUnit::drain_retired_state_full(self)
+    }
+
+    #[inline]
+    fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {
+        ExecutionUnit::drain_profile_insns(self)
+    }
+
+    #[inline]
+    fn drain_profile_pairs(&mut self) -> Vec<((&'static str, &'static str), u64)> {
+        ExecutionUnit::drain_profile_pairs(self)
     }
 
     #[inline]

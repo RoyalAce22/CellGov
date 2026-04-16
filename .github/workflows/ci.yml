@@ -12,7 +12,7 @@ env:
 
 jobs:
   msrv:
-    name: MSRV (1.85)
+    name: MSRV (1.95)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,7 +20,7 @@ jobs:
       - name: Install MSRV toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85"
+          toolchain: "1.95"
 
       - name: Cache cargo
         uses: actions/cache@v4

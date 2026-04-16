@@ -928,6 +928,32 @@ pub fn execute(
             state.gpr[ra as usize] = val as u64;
             ExecuteVerdict::Continue
         }
+        PpuInstruction::Nop => ExecuteVerdict::Continue,
+        PpuInstruction::CmpwZero { bf, ra } => {
+            let a = state.gpr[ra as usize] as i32;
+            let cr_val = if a < 0 {
+                0b1000
+            } else if a > 0 {
+                0b0100
+            } else {
+                0b0010
+            };
+            state.set_cr_field(bf, cr_val);
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Clrldi { ra, rs, n } => {
+            let mask = if n >= 64 { 0 } else { u64::MAX >> n };
+            state.gpr[ra as usize] = state.gpr[rs as usize] & mask;
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Sldi { ra, rs, n } => {
+            state.gpr[ra as usize] = state.gpr[rs as usize] << n;
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Srdi { ra, rs, n } => {
+            state.gpr[ra as usize] = state.gpr[rs as usize] >> n;
+            ExecuteVerdict::Continue
+        }
 
         // =================================================================
         // Superinstructions (compound 2-instruction pairs)
@@ -991,6 +1017,66 @@ pub fn execute(
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
+        PpuInstruction::CmpwiBc {
+            bf,
+            ra,
+            imm,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            // Compare word immediate
+            let a = state.gpr[ra as usize] as i32;
+            let b = imm as i32;
+            let cr_val = if a < b {
+                0b1000
+            } else if a > b {
+                0b0100
+            } else {
+                0b0010
+            };
+            state.set_cr_field(bf, cr_val);
+            // Branch conditional. The bc offset is relative to the bc
+            // instruction's PC (super slot + 4), so add 4.
+            if branch_condition(state, bo, bi) {
+                state.pc =
+                    (state.pc.wrapping_add(4) as i64).wrapping_add(target_offset as i64) as u64;
+                ExecuteVerdict::Branch
+            } else {
+                // Not taken: outer loop advances PC by 4 (super slot),
+                // then Consumed handler advances by 4 more. Total +8.
+                ExecuteVerdict::Continue
+            }
+        }
+        PpuInstruction::CmpwBc {
+            bf,
+            ra,
+            rb,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            // Compare word (register-register)
+            let a = state.gpr[ra as usize] as i32;
+            let b = state.gpr[rb as usize] as i32;
+            let cr_val = if a < b {
+                0b1000
+            } else if a > b {
+                0b0100
+            } else {
+                0b0010
+            };
+            state.set_cr_field(bf, cr_val);
+            // Branch conditional. The bc offset is relative to the bc
+            // instruction's PC (super slot + 4), so add 4.
+            if branch_condition(state, bo, bi) {
+                state.pc =
+                    (state.pc.wrapping_add(4) as i64).wrapping_add(target_offset as i64) as u64;
+                ExecuteVerdict::Branch
+            } else {
+                ExecuteVerdict::Continue
             }
         }
         PpuInstruction::Consumed => {
@@ -2358,5 +2444,387 @@ mod tests {
             &mut s,
         );
         assert!(matches!(result, ExecuteVerdict::MemFault(_)));
+    }
+
+    // -- Nop --
+
+    #[test]
+    fn nop_matches_ori_same_reg_zero() {
+        let mut s1 = PpuState::new();
+        s1.gpr[5] = 0xDEAD;
+        exec_no_mem(
+            &PpuInstruction::Ori {
+                ra: 5,
+                rs: 5,
+                imm: 0,
+            },
+            &mut s1,
+        );
+
+        let mut s2 = PpuState::new();
+        s2.gpr[5] = 0xDEAD;
+        exec_no_mem(&PpuInstruction::Nop, &mut s2);
+
+        assert_eq!(s1.gpr[5], s2.gpr[5]);
+    }
+
+    #[test]
+    fn nop_returns_continue() {
+        let mut s = PpuState::new();
+        let result = exec_no_mem(&PpuInstruction::Nop, &mut s);
+        assert_eq!(result, ExecuteVerdict::Continue);
+    }
+
+    // -- CmpwZero --
+
+    #[test]
+    fn cmpw_zero_matches_cmpwi_zero() {
+        // Positive value
+        let mut s1 = PpuState::new();
+        s1.gpr[3] = 42;
+        exec_no_mem(
+            &PpuInstruction::Cmpwi {
+                bf: 0,
+                ra: 3,
+                imm: 0,
+            },
+            &mut s1,
+        );
+
+        let mut s2 = PpuState::new();
+        s2.gpr[3] = 42;
+        exec_no_mem(&PpuInstruction::CmpwZero { bf: 0, ra: 3 }, &mut s2);
+
+        assert_eq!(s1.cr, s2.cr);
+        assert_eq!(s2.cr_field(0), 0b0100); // GT
+    }
+
+    #[test]
+    fn cmpw_zero_negative() {
+        let mut s = PpuState::new();
+        s.gpr[3] = (-5i64) as u64;
+        exec_no_mem(&PpuInstruction::CmpwZero { bf: 0, ra: 3 }, &mut s);
+        assert_eq!(s.cr_field(0), 0b1000); // LT
+    }
+
+    #[test]
+    fn cmpw_zero_equal() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 0;
+        exec_no_mem(&PpuInstruction::CmpwZero { bf: 0, ra: 3 }, &mut s);
+        assert_eq!(s.cr_field(0), 0b0010); // EQ
+    }
+
+    #[test]
+    fn cmpw_zero_cr_field_2() {
+        let mut s1 = PpuState::new();
+        s1.gpr[7] = 0;
+        exec_no_mem(
+            &PpuInstruction::Cmpwi {
+                bf: 2,
+                ra: 7,
+                imm: 0,
+            },
+            &mut s1,
+        );
+
+        let mut s2 = PpuState::new();
+        s2.gpr[7] = 0;
+        exec_no_mem(&PpuInstruction::CmpwZero { bf: 2, ra: 7 }, &mut s2);
+
+        assert_eq!(s1.cr, s2.cr);
+    }
+
+    // -- Clrldi --
+
+    #[test]
+    fn clrldi_matches_rldicl_sh0() {
+        let mut s1 = PpuState::new();
+        s1.gpr[4] = 0xFFFF_FFFF_FFFF_FFFF;
+        exec_no_mem(
+            &PpuInstruction::Rldicl {
+                ra: 3,
+                rs: 4,
+                sh: 0,
+                mb: 32,
+            },
+            &mut s1,
+        );
+
+        let mut s2 = PpuState::new();
+        s2.gpr[4] = 0xFFFF_FFFF_FFFF_FFFF;
+        exec_no_mem(
+            &PpuInstruction::Clrldi {
+                ra: 3,
+                rs: 4,
+                n: 32,
+            },
+            &mut s2,
+        );
+
+        assert_eq!(s1.gpr[3], s2.gpr[3]);
+        assert_eq!(s2.gpr[3], 0x0000_0000_FFFF_FFFF);
+    }
+
+    #[test]
+    fn clrldi_zero_mask_clears_all() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 0xDEAD_BEEF_CAFE_BABE;
+        exec_no_mem(
+            &PpuInstruction::Clrldi {
+                ra: 3,
+                rs: 4,
+                n: 64,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[3], 0);
+    }
+
+    // -- Sldi --
+
+    #[test]
+    fn sldi_matches_rldicr() {
+        let mut s1 = PpuState::new();
+        s1.gpr[4] = 0x0000_0000_0000_00FF;
+        exec_no_mem(
+            &PpuInstruction::Rldicr {
+                ra: 3,
+                rs: 4,
+                sh: 8,
+                me: 55,
+            },
+            &mut s1,
+        );
+
+        let mut s2 = PpuState::new();
+        s2.gpr[4] = 0x0000_0000_0000_00FF;
+        exec_no_mem(&PpuInstruction::Sldi { ra: 3, rs: 4, n: 8 }, &mut s2);
+
+        assert_eq!(s1.gpr[3], s2.gpr[3]);
+        assert_eq!(s2.gpr[3], 0x0000_0000_0000_FF00);
+    }
+
+    #[test]
+    fn sldi_large_shift() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 1;
+        exec_no_mem(
+            &PpuInstruction::Sldi {
+                ra: 3,
+                rs: 4,
+                n: 63,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[3], 0x8000_0000_0000_0000);
+    }
+
+    // -- Srdi --
+
+    #[test]
+    fn srdi_matches_rldicl() {
+        let mut s1 = PpuState::new();
+        s1.gpr[4] = 0xFF00_0000_0000_0000;
+        exec_no_mem(
+            &PpuInstruction::Rldicl {
+                ra: 3,
+                rs: 4,
+                sh: 56, // 64 - 8
+                mb: 8,
+            },
+            &mut s1,
+        );
+
+        let mut s2 = PpuState::new();
+        s2.gpr[4] = 0xFF00_0000_0000_0000;
+        exec_no_mem(&PpuInstruction::Srdi { ra: 3, rs: 4, n: 8 }, &mut s2);
+
+        assert_eq!(s1.gpr[3], s2.gpr[3]);
+        assert_eq!(s2.gpr[3], 0x00FF_0000_0000_0000);
+    }
+
+    #[test]
+    fn srdi_large_shift() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x8000_0000_0000_0000;
+        exec_no_mem(
+            &PpuInstruction::Srdi {
+                ra: 3,
+                rs: 4,
+                n: 63,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[3], 1);
+    }
+
+    // -- CmpwiBc --
+
+    #[test]
+    fn cmpwi_bc_taken_matches_separate() {
+        // cmpwi cr0, r3, 10; beq cr0, +16
+        // Separate execution:
+        let mut s1 = PpuState::new();
+        s1.pc = 0x1000;
+        s1.gpr[3] = 10;
+        exec_no_mem(
+            &PpuInstruction::Cmpwi {
+                bf: 0,
+                ra: 3,
+                imm: 10,
+            },
+            &mut s1,
+        );
+        s1.pc = 0x1004; // advance for bc
+        let v1 = exec_no_mem(
+            &PpuInstruction::Bc {
+                bo: 0x0C,
+                bi: 2,
+                offset: 16,
+                link: false,
+            },
+            &mut s1,
+        );
+
+        // Fused execution: super is at the cmpwi slot (0x1000).
+        // The bc offset (16) is relative to the bc's original PC
+        // (super + 4 = 0x1004), so target = 0x1004 + 16 = 0x1014.
+        let mut s2 = PpuState::new();
+        s2.pc = 0x1000;
+        s2.gpr[3] = 10;
+        let v2 = exec_no_mem(
+            &PpuInstruction::CmpwiBc {
+                bf: 0,
+                ra: 3,
+                imm: 10,
+                bo: 0x0C,
+                bi: 2,
+                target_offset: 16,
+            },
+            &mut s2,
+        );
+
+        assert_eq!(s1.cr, s2.cr);
+        assert_eq!(v1, ExecuteVerdict::Branch);
+        assert_eq!(v2, ExecuteVerdict::Branch);
+        assert_eq!(s1.pc, s2.pc);
+        assert_eq!(s2.pc, 0x1014); // 0x1004 + 16
+    }
+
+    #[test]
+    fn cmpwi_bc_not_taken() {
+        let mut s = PpuState::new();
+        s.pc = 0x1000;
+        s.gpr[3] = 5;
+        let v = exec_no_mem(
+            &PpuInstruction::CmpwiBc {
+                bf: 0,
+                ra: 3,
+                imm: 10,
+                bo: 0x0C, // test CR, don't decr CTR
+                bi: 2,    // EQ bit of cr0
+                target_offset: 16,
+            },
+            &mut s,
+        );
+        assert_eq!(v, ExecuteVerdict::Continue);
+        assert_eq!(s.cr_field(0), 0b1000); // LT
+                                           // PC not modified by the super on not-taken; outer loop
+                                           // advances by 4, then Consumed advances by 4, total +8.
+        assert_eq!(s.pc, 0x1000);
+    }
+
+    #[test]
+    fn cmpwi_bc_gt_taken() {
+        // cmpwi cr0, r3, 5; bgt cr0, +20
+        let mut s = PpuState::new();
+        s.pc = 0x2000;
+        s.gpr[3] = 10;
+        let v = exec_no_mem(
+            &PpuInstruction::CmpwiBc {
+                bf: 0,
+                ra: 3,
+                imm: 5,
+                bo: 0x0C, // test CR, don't decr CTR
+                bi: 1,    // GT bit of cr0
+                target_offset: 20,
+            },
+            &mut s,
+        );
+        assert_eq!(v, ExecuteVerdict::Branch);
+        assert_eq!(s.cr_field(0), 0b0100); // GT
+                                           // target = (super_pc + 4) + 20 = 0x2004 + 20 = 0x2018
+        assert_eq!(s.pc, 0x2018);
+    }
+
+    #[test]
+    fn cmpw_bc_taken_matches_separate() {
+        // cmpw cr0, r3, r4; beq cr0, +16
+        let mut s1 = PpuState::new();
+        s1.pc = 0x1000;
+        s1.gpr[3] = 42;
+        s1.gpr[4] = 42;
+        exec_no_mem(
+            &PpuInstruction::Cmpw {
+                bf: 0,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s1,
+        );
+        s1.pc = 0x1004;
+        let v1 = exec_no_mem(
+            &PpuInstruction::Bc {
+                bo: 0x0C,
+                bi: 2,
+                offset: 16,
+                link: false,
+            },
+            &mut s1,
+        );
+
+        let mut s2 = PpuState::new();
+        s2.pc = 0x1000;
+        s2.gpr[3] = 42;
+        s2.gpr[4] = 42;
+        let v2 = exec_no_mem(
+            &PpuInstruction::CmpwBc {
+                bf: 0,
+                ra: 3,
+                rb: 4,
+                bo: 0x0C,
+                bi: 2,
+                target_offset: 16,
+            },
+            &mut s2,
+        );
+
+        assert_eq!(s1.cr, s2.cr);
+        assert_eq!(v1, ExecuteVerdict::Branch);
+        assert_eq!(v2, ExecuteVerdict::Branch);
+        assert_eq!(s1.pc, s2.pc);
+        assert_eq!(s2.pc, 0x1014);
+    }
+
+    #[test]
+    fn cmpw_bc_not_taken() {
+        let mut s = PpuState::new();
+        s.pc = 0x1000;
+        s.gpr[3] = 5;
+        s.gpr[4] = 10;
+        let v = exec_no_mem(
+            &PpuInstruction::CmpwBc {
+                bf: 0,
+                ra: 3,
+                rb: 4,
+                bo: 0x0C,
+                bi: 2,
+                target_offset: 16,
+            },
+            &mut s,
+        );
+        assert_eq!(v, ExecuteVerdict::Continue);
+        assert_eq!(s.cr_field(0), 0b1000); // LT
     }
 }

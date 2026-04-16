@@ -69,6 +69,8 @@ pub(super) struct PrepareOptions<'a> {
     /// to false so its output is just the bench result line plus
     /// whatever chatty PRX/HLE prints the libraries emit.
     pub print_banner: bool,
+    /// When true, enables instruction profiling on the PPU unit.
+    pub profile_pairs: bool,
     /// Value the caller will pass to `Runtime::new`. Needed here
     /// because the banner prints it.
     pub runtime_max_steps: usize,
@@ -311,6 +313,9 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         unit.set_instruction_shadow(shadow);
         if let Some(pc) = opts.dump_at_pc {
             unit.set_break_pc(pc, opts.dump_skip);
+        }
+        if opts.profile_pairs {
+            unit.set_profile_mode(true);
         }
         unit
     });

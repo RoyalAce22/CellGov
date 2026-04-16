@@ -1523,3 +1523,36 @@ fn first_instruction_fault_reports_directly_at_budget_gt_1() {
     assert_eq!(r.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
 }
+
+#[test]
+fn profile_mode_counts_raw_instructions() {
+    let mut mem = GuestMemory::new(256);
+    // addi r3, r0, 1 (li r3, 1)
+    let addi: u32 = (14 << 26) | (3 << 21) | 1;
+    // addi r4, r0, 2 (li r4, 2)
+    let addi2: u32 = (14 << 26) | (4 << 21) | 2;
+    // sc (syscall)
+    let sc: u32 = 0x4400_0002;
+    place_insn(&mut mem, 0, addi);
+    place_insn(&mut mem, 4, addi2);
+    place_insn(&mut mem, 8, sc);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().gpr[11] = 22; // sys_process_exit
+    unit.set_profile_mode(true);
+
+    let ctx = ExecutionContext::new(&mem);
+    let mut effects = Vec::new();
+    let r = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    assert_eq!(r.yield_reason, YieldReason::Syscall);
+
+    let insns = unit.drain_profile_insns();
+    assert!(insns
+        .iter()
+        .any(|(name, count)| *name == "Addi" && *count == 2));
+
+    let pairs = unit.drain_profile_pairs();
+    assert!(pairs
+        .iter()
+        .any(|((a, b), count)| *a == "Addi" && *b == "Addi" && *count == 1));
+}

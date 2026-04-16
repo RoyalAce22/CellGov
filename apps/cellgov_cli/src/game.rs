@@ -55,6 +55,7 @@ pub fn run_game(
     save_observation: Option<&str>,
     observation_manifest: Option<&str>,
     strict_reserved: bool,
+    profile_pairs: bool,
 ) {
     eprintln!(
         "run-game: title = {} ({})",
@@ -73,6 +74,7 @@ pub fn run_game(
         runtime_max_steps: max_steps,
         patch_bytes,
         dump_mem_addrs,
+        profile_pairs,
     });
     let boot::PreparedBoot {
         mut rt,
@@ -173,6 +175,38 @@ pub fn run_game(
         );
     }
 
+    if profile_pairs {
+        eprintln!();
+        eprintln!("--- instruction frequency (raw decoded, top 40) ---");
+        for (_, unit) in rt.registry_mut().iter_mut() {
+            let insns = unit.drain_profile_insns();
+            let total: u64 = insns.iter().map(|(_, c)| c).sum();
+            for (name, count) in insns.iter().take(40) {
+                eprintln!(
+                    "  {:>12}  {:.2}%  {}",
+                    count,
+                    *count as f64 / total as f64 * 100.0,
+                    name
+                );
+            }
+        }
+        eprintln!();
+        eprintln!("--- adjacent pair frequency (raw decoded, top 40) ---");
+        for (_, unit) in rt.registry_mut().iter_mut() {
+            let pairs = unit.drain_profile_pairs();
+            let total: u64 = pairs.iter().map(|(_, c)| c).sum();
+            for ((a, b), count) in pairs.iter().take(40) {
+                eprintln!(
+                    "  {:>12}  {:.2}%  {} ; {}",
+                    count,
+                    *count as f64 / total as f64 * 100.0,
+                    a,
+                    b
+                );
+            }
+        }
+    }
+
     if let Some(path) = save_observation {
         save_boot_observation(
             path,
@@ -232,6 +266,7 @@ pub fn bench_boot(
         runtime_max_steps: max_steps,
         patch_bytes: &[],
         dump_mem_addrs: &[],
+        profile_pairs: false,
     });
     let mut rt = prepared.rt;
     let checkpoint = checkpoint_override.unwrap_or_else(|| title.checkpoint_trigger());
@@ -763,7 +798,7 @@ fn step_loop(
                 }
 
                 // Progress checkpoint every 10K steps.
-                if *ctx.steps % 10_000 == 0 {
+                if (*ctx.steps).is_multiple_of(10_000) {
                     let elapsed = ctx.loop_start.elapsed();
                     println!(
                         "  [{:>6}] {:.1?} elapsed, {} distinct PCs, {} HLE calls",

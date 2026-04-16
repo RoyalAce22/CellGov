@@ -116,6 +116,17 @@ pub struct PpuExecutionUnit {
     /// fault so the re-execution path commits instructions one at a
     /// time up to the faulting instruction.
     budget_override: Option<u64>,
+    /// When true, each retired instruction is re-decoded from
+    /// committed memory (bypassing the shadow) and counted in
+    /// `profile_insns` and `profile_pairs`. Off by default.
+    profile_mode: bool,
+    /// Individual instruction variant frequency (raw decoded stream).
+    profile_insns: std::collections::BTreeMap<&'static str, u64>,
+    /// Adjacent instruction-pair frequency (raw decoded stream,
+    /// pc and pc+4 both decoded from committed memory).
+    profile_pairs: std::collections::BTreeMap<(&'static str, &'static str), u64>,
+    /// Previous instruction's variant name for pair counting.
+    profile_prev: Option<&'static str>,
 }
 
 impl PpuExecutionUnit {
@@ -135,6 +146,10 @@ impl PpuExecutionUnit {
             instruction_shadow: None,
             store_buf: StoreBuffer::new(),
             budget_override: None,
+            profile_mode: false,
+            profile_insns: std::collections::BTreeMap::new(),
+            profile_pairs: std::collections::BTreeMap::new(),
+            profile_prev: None,
         }
     }
 
@@ -176,6 +191,21 @@ impl PpuExecutionUnit {
     pub fn set_break_pc(&mut self, pc: u64, skip: u32) {
         self.break_pc = Some(pc);
         self.break_skip = skip;
+    }
+
+    /// Turn instruction profiling on or off.
+    pub fn set_profile_mode(&mut self, on: bool) {
+        self.profile_mode = on;
+    }
+
+    /// Accumulated instruction frequency data (raw decoded stream).
+    pub fn profile_insns(&self) -> &std::collections::BTreeMap<&'static str, u64> {
+        &self.profile_insns
+    }
+
+    /// Accumulated adjacent-pair frequency data (raw decoded stream).
+    pub fn profile_pairs(&self) -> &std::collections::BTreeMap<(&'static str, &'static str), u64> {
+        &self.profile_pairs
     }
 
     /// Mutable access to the PPU's architectural state.
@@ -491,6 +521,26 @@ impl ExecutionUnit for PpuExecutionUnit {
                 }
             }
 
+            if self.profile_mode {
+                let pc_usize = step_pc as usize;
+                if pc_usize + 4 <= mem.len() {
+                    let raw = u32::from_be_bytes([
+                        mem[pc_usize],
+                        mem[pc_usize + 1],
+                        mem[pc_usize + 2],
+                        mem[pc_usize + 3],
+                    ]);
+                    if let Ok(raw_insn) = decode::decode(raw) {
+                        let name = raw_insn.variant_name();
+                        *self.profile_insns.entry(name).or_insert(0) += 1;
+                        if let Some(prev) = self.profile_prev {
+                            *self.profile_pairs.entry((prev, name)).or_insert(0) += 1;
+                        }
+                        self.profile_prev = Some(name);
+                    }
+                }
+            }
+
             if self.per_step_trace {
                 self.per_step_hashes
                     .push((step_pc, self.state.state_hash()));
@@ -538,6 +588,18 @@ impl ExecutionUnit for PpuExecutionUnit {
 
     fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
         std::mem::take(&mut self.per_step_full_states)
+    }
+
+    fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {
+        let mut v: Vec<_> = self.profile_insns.iter().map(|(&k, &v)| (k, v)).collect();
+        v.sort_by_key(|e| std::cmp::Reverse(e.1));
+        v
+    }
+
+    fn drain_profile_pairs(&mut self) -> Vec<((&'static str, &'static str), u64)> {
+        let mut v: Vec<_> = self.profile_pairs.iter().map(|(&k, &v)| (k, v)).collect();
+        v.sort_by_key(|e| std::cmp::Reverse(e.1));
+        v
     }
 
     fn invalidate_code(&mut self, addr: u64, len: u64) {
