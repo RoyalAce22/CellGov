@@ -21,6 +21,7 @@ No backward edges.
 graph BT
   cli["apps/cellgov_cli"]
   mkelf["apps/cellgov_mkelf"]
+  firmware["apps/cellgov_firmware"]
   rpcs3obs["bridges/rpcs3_to_observation"]
   explore[cellgov_explore]
   compare[cellgov_compare]
@@ -130,6 +131,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                               |
 | `cellgov_cli`                  | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                            |
 | `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                    |
+| `cellgov_firmware`             | PS3 firmware decrypter. Extracts decrypted SPRX modules from a `PS3UPDAT.PUP` file downloaded from Sony's website. PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction. No RPCS3 dependency.                                   |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`. |
 
 ## Guest memory layout
@@ -407,11 +409,18 @@ error codes instead of CELL_OK (matching RPCS3 retail behavior):
 All other syscalls fall through the host dispatcher returning CELL_OK
 with no effects.
 
-## HLE dispatch (sysPrxForUser)
+## HLE dispatch
 
 NID-based, separate from the syscall surface. `cellgov_ppu::nid_db`
 holds 145 entries (every one verified by SHA-1+suffix round-trip in
-test). The hot ones with non-trivial behavior:
+test). Module implementations are decoupled from the Runtime via the
+`HleContext` trait (`cellgov_core::hle_context`). Each module file
+(`hle_sys.rs`, `hle_gcm.rs`) contains free functions that operate
+through `&mut dyn HleContext` -- 7 methods covering guest memory
+read/write, return value, register write, unit status, heap
+allocation, and kernel-object ID allocation.
+
+### sysPrxForUser (`hle_sys.rs`)
 
 | Function                | NID        | Classification | Behavior                                                      |
 | ----------------------- | ---------- | -------------- | ------------------------------------------------------------- |

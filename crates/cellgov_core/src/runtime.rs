@@ -203,13 +203,7 @@ pub struct Runtime {
     /// (lwmutex sleep_queue, etc.). Starts above zero so a zero-initialized
     /// guest field is distinguishable from a legitimate allocated ID.
     pub(crate) hle_next_id: u32,
-    pub(crate) gcm_context_addr: u32,
-    pub(crate) gcm_control_addr: u32,
-    pub(crate) gcm_io_address: u32,
-    pub(crate) gcm_io_size: u32,
-    pub(crate) gcm_local_size: u32,
-    pub(crate) gcm_label_addr: u32,
-    pub(crate) gcm_rsx_checkpoint: bool,
+    pub(crate) gcm_state: crate::hle_gcm::GcmState,
     /// Reusable effects buffer, taken/returned across steps to avoid
     /// per-step allocation in the common zero-effects case.
     effects_buf: Vec<Effect>,
@@ -279,13 +273,7 @@ impl Runtime {
             hle_nids: std::collections::BTreeMap::new(),
             hle_heap_ptr: 0,
             hle_next_id: 0x8000_0001,
-            gcm_context_addr: 0,
-            gcm_control_addr: 0,
-            gcm_io_address: 0,
-            gcm_io_size: 0,
-            gcm_local_size: 0,
-            gcm_label_addr: 0,
-            gcm_rsx_checkpoint: false,
+            gcm_state: crate::hle_gcm::GcmState::default(),
             mode: RuntimeMode::FullTrace,
             per_step_index: 0,
             zoom_trace: TraceWriter::new(),
@@ -833,7 +821,7 @@ impl Runtime {
     /// triggers a ReservedWrite commit error, which the CLI translates
     /// to the FirstRsxWrite checkpoint.
     pub fn set_gcm_rsx_checkpoint(&mut self, enabled: bool) {
-        self.gcm_rsx_checkpoint = enabled;
+        self.gcm_state.rsx_checkpoint = enabled;
     }
 
     /// Mutable borrow of committed guest memory. Used by test
