@@ -276,6 +276,19 @@ impl UnitRegistry {
             .filter(move |id| self.effective_status(*id) == Some(UnitStatus::Runnable))
     }
 
+    /// Count the units whose effective status is `Runnable`.
+    ///
+    /// Used by the scheduler's multi-unit fast path: when the count
+    /// is zero the runtime can yield `AllBlocked` without walking the
+    /// full iteration order, and when the count is one the scheduler
+    /// can skip the two-pass rotation and pick the single runnable
+    /// unit directly. The count reflects `effective_status`, so
+    /// runtime overrides (e.g. a unit parked on a PPU thread join)
+    /// are honored.
+    pub fn count_runnable(&self) -> usize {
+        self.runnable_ids().count()
+    }
+
     /// The effective status of a unit: the runtime override if one is
     /// set, otherwise the unit's self-reported `status()`.
     ///
@@ -684,6 +697,46 @@ mod tests {
         .into_iter()
         .collect();
         assert_eq!(all.len(), 4);
+    }
+
+    #[test]
+    fn count_runnable_matches_runnable_ids() {
+        let mut r = UnitRegistry::new();
+        let (h0, f0) = status_unit(UnitStatus::Runnable);
+        let (h1, f1) = status_unit(UnitStatus::Blocked);
+        let (h2, f2) = status_unit(UnitStatus::Runnable);
+        r.register_with(f0);
+        r.register_with(f1);
+        r.register_with(f2);
+        assert_eq!(r.count_runnable(), 2);
+        assert_eq!(r.runnable_ids().count(), 2);
+        // Flip unit 0 to Blocked via override -- count drops.
+        r.set_status_override(UnitId::new(0), UnitStatus::Blocked);
+        assert_eq!(r.count_runnable(), 1);
+        // Flip unit 1 from Blocked to Runnable self-report.
+        h1.set(UnitStatus::Runnable);
+        assert_eq!(r.count_runnable(), 2);
+        // Clear override on unit 0.
+        r.clear_status_override(UnitId::new(0));
+        assert_eq!(r.count_runnable(), 3);
+        // Quiet unused warnings.
+        let _ = (h0, h2);
+    }
+
+    #[test]
+    fn count_runnable_empty_registry_is_zero() {
+        let r = UnitRegistry::new();
+        assert_eq!(r.count_runnable(), 0);
+    }
+
+    #[test]
+    fn count_runnable_all_blocked_is_zero() {
+        let mut r = UnitRegistry::new();
+        for _ in 0..3 {
+            let (_h, f) = status_unit(UnitStatus::Blocked);
+            r.register_with(f);
+        }
+        assert_eq!(r.count_runnable(), 0);
     }
 
     #[test]

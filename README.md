@@ -5,7 +5,7 @@ Deterministic analysis engine for PS3 Cell Broadband Engine workloads.
 [![CI](https://img.shields.io/github/actions/workflow/status/RoyalAce22/CellGov/ci.yml?branch=main&label=CI)](https://github.com/RoyalAce22/CellGov/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![MSRV](https://img.shields.io/badge/MSRV-1.95-orange.svg)](https://blog.rust-lang.org/2026/04/03/Rust-1.95.0.html)
-[![Status: experimental](https://img.shields.io/badge/status-experimental-red.svg)](#status)
+[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](#status)
 
 ## What CellGov is
 
@@ -59,15 +59,25 @@ Pre-Alpha. Capability today:
   (Li, Mr, Slwi, Srwi, Clrlwi), 3 doubleword quickenings (Clrldi,
   Sldi, Srdi), and 9 superpairs (LwzCmpwi, LiStw, MflrStw, LwzMtlr,
   CmpwiBc, CmpwBc, MflrStd, LdMtlr, StdStd). Full SPU interpreter.
-- **LV2: 18 syscalls**, 18 HLE exports with dedicated handling
-  (including cellGcmSys RSX init cluster, memory-info queries, and
-  per-thread identity).
+- **LV2: 22 syscalls**, 20 HLE exports with dedicated handling
+  (including cellGcmSys RSX init cluster, memory-info queries,
+  and the PPU thread lifecycle: create / exit / join / yield /
+  get-id, with a per-thread table, stack allocator, and TLS
+  template).
+- **Multi-PPU threading.** `sys_ppu_thread_create` spawns a
+  child `PpuExecutionUnit` mid-run; the deterministic
+  round-robin scheduler interleaves all runnable PPU threads;
+  `sys_ppu_thread_join` blocks the caller until the target
+  exits and returns the exit value. Two-thread PSL1GHT
+  microtest (`tests/micro/ppu_two_threads_disjoint_writes`)
+  runs end-to-end with same-budget replay determinism and
+  cross-budget final-state equivalence.
 - **Memory**: PS3-spec sparse address space with store-forwarding
   buffer for intra-block coherence.
 - **Throughput**: basic-block batching with mode-driven step budget
   (default 256, `--budget N` overrides) over a predecoded
-  instruction shadow with quickening and super-pairing. Three
-  foundation titles boot at ~36-56M insns/sec to their checkpoints.
+  instruction shadow with quickening and super-pairing. The three
+  wired titles boot at ~36-56M insns/sec to their checkpoints.
 - **Tracing**: per-instruction state hashes, streaming divergence
   scanner, register-level zoom-in.
 - **Cross-runner**: observation schema validated against RPCS3;
@@ -80,7 +90,7 @@ Pre-Alpha. Capability today:
 - **NID database**: 5,327 PS3 library function name mappings
   merged from RPCS3's module registrations (99%+ of imports named
   in the per-title HLE inventories).
-- 1,205 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 1,284 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [`docs/architecture.md`](docs/architecture.md) for full
 technical details on the pipeline, memory model, shadow passes,

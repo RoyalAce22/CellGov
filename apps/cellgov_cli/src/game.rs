@@ -23,6 +23,16 @@ pub(crate) const PS3_PRIMARY_STACK_BASE: u64 = 0xD000_0000;
 /// Primary-thread stack size. 64 KB covers the default `SYS_PROCESS_PARAM`
 /// stacksize for simple PS3 titles and all CellGov microtests.
 pub(crate) const PS3_PRIMARY_STACK_SIZE: usize = 0x0001_0000;
+/// Base address of the child-thread stack region. Sits immediately
+/// above the primary thread's 64 KB stack, matching the address
+/// `ThreadStackAllocator::CHILD_STACK_BASE` hands out. Must be
+/// backed by a real guest memory region so child threads can
+/// push / pop their stacks.
+pub(crate) const PS3_CHILD_STACKS_BASE: u64 = 0xD001_0000;
+/// Size of the child-stack region. 15 MB accommodates many
+/// simultaneously-live child threads at the PSL1GHT-default 64 KB
+/// each; well within the PS3's user-memory footprint.
+pub(crate) const PS3_CHILD_STACKS_SIZE: usize = 0x00F0_0000;
 /// Highest address reserved 16 bytes below the stack top, matching the
 /// PPC64 ABI's requirement for a backchain+linkage area at the frame
 /// boundary. `state.gpr[1]` is set to this value on thread entry.
@@ -328,7 +338,9 @@ fn bench_step_loop(
                     return BootOutcome::Fault;
                 }
             }
-            Err(StepError::NoRunnableUnit) => return BootOutcome::ProcessExit,
+            Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
+                return BootOutcome::ProcessExit;
+            }
             Err(StepError::MaxStepsExceeded) => return BootOutcome::MaxSteps,
             Err(StepError::TimeOverflow) => return BootOutcome::Fault,
         }
@@ -931,7 +943,7 @@ fn step_loop(
                     );
                 }
             }
-            Err(StepError::NoRunnableUnit) => {
+            Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
                 if let Some(ref exit) = ctx.last_exit {
                     break (
                         format_process_exit(

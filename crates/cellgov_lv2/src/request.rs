@@ -145,6 +145,47 @@ pub enum Lv2Request {
         /// Exit code.
         code: u32,
     },
+    /// sys_ppu_thread_yield (43). Pure scheduling hint -- the
+    /// syscall completes immediately with `CELL_OK` and the
+    /// runtime's round-robin scheduler naturally hands control to
+    /// the next runnable unit on the next step.
+    PpuThreadYield,
+    /// sys_ppu_thread_exit (41). The calling PPU thread is done;
+    /// the runtime transitions its unit to `Finished` and wakes
+    /// any units joining on it with this exit value.
+    PpuThreadExit {
+        /// Exit value passed to joiners' r3 on wake.
+        exit_value: u64,
+    },
+    /// sys_ppu_thread_join (44). Blocks the caller until `target`
+    /// calls `sys_ppu_thread_exit`. On wake the runtime writes the
+    /// target's exit value to `status_out_ptr` (u64 big-endian)
+    /// and returns CELL_OK.
+    PpuThreadJoin {
+        /// Guest thread id of the child to join on.
+        target: u64,
+        /// Guest address to receive the child's exit value on wake.
+        status_out_ptr: u32,
+    },
+    /// sys_ppu_thread_create (52). Spawns a new PPU thread and
+    /// writes its guest-facing id to `id_ptr`.
+    PpuThreadCreate {
+        /// Guest address to receive the minted thread id (u64 BE).
+        id_ptr: u32,
+        /// OPD address of the entry function. The handler reads
+        /// the first 8 bytes to get the code address and the next
+        /// 8 bytes for the TOC.
+        entry_opd: u32,
+        /// Argument passed as the child's r3 on first execution.
+        arg: u64,
+        /// Priority. Captured from the guest but not consulted
+        /// by the current round-robin scheduler.
+        priority: u32,
+        /// Requested child stack size in bytes.
+        stacksize: u64,
+        /// Flags (captured but not interpreted at this level).
+        flags: u64,
+    },
     /// A syscall number that does not map to any known request.
     Unsupported {
         /// The raw syscall number from GPR 11.
@@ -198,6 +239,22 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
         },
         22 => Lv2Request::ProcessExit {
             code: args[0] as u32,
+        },
+        43 => Lv2Request::PpuThreadYield,
+        41 => Lv2Request::PpuThreadExit {
+            exit_value: args[0],
+        },
+        52 => Lv2Request::PpuThreadCreate {
+            id_ptr: args[0] as u32,
+            entry_opd: args[1] as u32,
+            arg: args[2],
+            priority: args[3] as u32,
+            stacksize: args[4],
+            flags: args[5],
+        },
+        44 => Lv2Request::PpuThreadJoin {
+            target: args[0],
+            status_out_ptr: args[1] as u32,
         },
         100 => Lv2Request::MutexCreate {
             id_ptr: args[0] as u32,
@@ -328,6 +385,60 @@ mod tests {
         let args = [0, 0, 0, 0, 0, 0, 0, 0];
         let req = classify(22, &args);
         assert_eq!(req, Lv2Request::ProcessExit { code: 0 });
+    }
+
+    #[test]
+    fn classify_ppu_thread_yield() {
+        // syscall 43 carries no arguments and maps to the
+        // argument-free PpuThreadYield variant regardless of what
+        // the registers happen to hold.
+        let args = [0xDEAD, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(classify(43, &args), Lv2Request::PpuThreadYield);
+    }
+
+    #[test]
+    fn classify_ppu_thread_exit_captures_exit_value() {
+        // syscall 41's single argument is the exit value.
+        let args = [0xDEAD_BEEF, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(41, &args),
+            Lv2Request::PpuThreadExit {
+                exit_value: 0xDEAD_BEEF
+            },
+        );
+    }
+
+    #[test]
+    fn classify_ppu_thread_join_captures_target_and_out_ptr() {
+        // syscall 44 carries the target thread id in r3 and the
+        // status output pointer in r4.
+        let args = [0x0100_0003, 0x5000, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(44, &args),
+            Lv2Request::PpuThreadJoin {
+                target: 0x0100_0003,
+                status_out_ptr: 0x5000,
+            },
+        );
+    }
+
+    #[test]
+    fn classify_ppu_thread_create_captures_all_fields() {
+        // syscall 52's six arguments: id_ptr, entry_opd, arg,
+        // priority, stacksize, flags. Verifies each lands in the
+        // correct slot.
+        let args = [0x3000, 0x2_0000, 0xCAFE_BABE, 1500, 0x10_000, 0, 0, 0];
+        assert_eq!(
+            classify(52, &args),
+            Lv2Request::PpuThreadCreate {
+                id_ptr: 0x3000,
+                entry_opd: 0x2_0000,
+                arg: 0xCAFE_BABE,
+                priority: 1500,
+                stacksize: 0x10_000,
+                flags: 0,
+            },
+        );
     }
 
     #[test]

@@ -233,11 +233,32 @@ impl TitleManifest {
 
     /// Parse a manifest from its in-memory TOML text, attaching
     /// `origin` to any error for diagnostics.
+    ///
+    /// Supports two layouts for the same shape:
+    ///
+    /// 1. Root-level (the standard docs/titles/ format): a
+    ///    `[title]`, `[checkpoint]`, optional `[source]` table at
+    ///    the top of the file.
+    /// 2. Nested under `[cellgov]`: same tables packed under a
+    ///    `[cellgov]` key. Used by microtests that co-locate the
+    ///    CellGov title manifest with their RPCS3 test-harness
+    ///    manifest in a single TOML file.
     pub fn load_from_text(text: &str, origin: &Path) -> Result<Self, ManifestError> {
-        let file: ManifestFile = toml::from_str(text).map_err(|e| ManifestError::Parse {
+        let raw: toml::Value = toml::from_str(text).map_err(|e| ManifestError::Parse {
             path: origin.to_path_buf(),
             message: e.to_string(),
         })?;
+        let file_value = match raw.get("cellgov") {
+            Some(nested) => nested.clone(),
+            None => raw,
+        };
+        let file: ManifestFile =
+            file_value
+                .try_into()
+                .map_err(|e: toml::de::Error| ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: e.to_string(),
+                })?;
         let checkpoint =
             match file.checkpoint.kind.as_str() {
                 "process-exit" => CheckpointTrigger::ProcessExit,
@@ -501,6 +522,35 @@ pc = "0x10381ce8"
         assert_eq!(m.content_id, "NPAA00002");
         assert_eq!(m.short_name, "rsx-write-fixture");
         assert_eq!(m.checkpoint, CheckpointTrigger::FirstRsxWrite);
+    }
+
+    #[test]
+    fn parses_nested_cellgov_section() {
+        // Microtest convention: one TOML file carries both the
+        // RPCS3-harness manifest (at root) and the CellGov title
+        // manifest (under `[cellgov]`). The title loader pulls
+        // the nested subtree transparently.
+        let text = r#"
+[test]
+name = "dummy_microtest"
+
+[rpcs3]
+binary = "build/foo.elf"
+decoder = "interpreter"
+
+[cellgov.title]
+content_id = "CG_TESTBED"
+short_name = "testbed"
+display_name = "Microtest bed"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"
+"#;
+        let m = parse(text);
+        assert_eq!(m.content_id, "CG_TESTBED");
+        assert_eq!(m.short_name, "testbed");
+        assert_eq!(m.checkpoint, CheckpointTrigger::ProcessExit);
     }
 
     #[test]

@@ -98,6 +98,14 @@ impl SyscallResponseTable {
                     hasher.write(&cause.to_le_bytes());
                     hasher.write(&status.to_le_bytes());
                 }
+                PendingResponse::PpuThreadJoin {
+                    target,
+                    status_out_ptr,
+                } => {
+                    hasher.write(&[2u8]);
+                    hasher.write(&target.to_le_bytes());
+                    hasher.write(&status_out_ptr.to_le_bytes());
+                }
             }
         }
         hasher.finish()

@@ -81,17 +81,34 @@ impl Scheduler for RoundRobinScheduler {
         if registry.is_empty() {
             return None;
         }
-        // Single-unit fast path: when the registry holds exactly
-        // one unit and it is runnable, return it immediately.
-        // Avoids the two-pass iter + effective_status probe for
-        // the PPU-bound hot loop that dominates game boots.
-        if registry.len() == 1 {
-            let (id, _) = registry.iter().next()?;
+        // Single-runnable fast path: walk the registry once,
+        // stopping as soon as a second runnable unit is seen. If
+        // exactly one runnable unit exists (the common case for
+        // single-PPU titles and for multi-PPU titles while N-1
+        // threads are parked on joins / sync), return it
+        // directly. Otherwise fall through to the two-pass
+        // rotation. The single-pass walk costs one status probe
+        // per registered unit, same asymptotic cost as
+        // `registry.len() == 1` when only one PPU is registered.
+        let mut single: Option<UnitId> = None;
+        let mut has_multiple = false;
+        for (id, _) in registry.iter() {
             if registry.effective_status(id) == Some(UnitStatus::Runnable) {
-                self.last_scheduled = Some(id);
-                return Some(id);
+                if single.is_some() {
+                    has_multiple = true;
+                    break;
+                }
+                single = Some(id);
             }
-            return None;
+        }
+        if !has_multiple {
+            return match single {
+                Some(id) => {
+                    self.last_scheduled = Some(id);
+                    Some(id)
+                }
+                None => None,
+            };
         }
         // Two-pass scan over the registry in id order:
         //
@@ -276,6 +293,58 @@ mod tests {
         for _ in 0..5 {
             assert_eq!(s.select_next(&r), Some(UnitId::new(2)));
         }
+    }
+
+    #[test]
+    fn three_runnable_units_produce_identical_selection_sequence_across_runs() {
+        // Determinism canary: two independent
+        // RoundRobinScheduler + UnitRegistry pairs, each holding
+        // three runnable test units, must produce byte-identical
+        // selection sequences over a long prefix. This is the
+        // scheduler-layer determinism guard that downstream sync
+        // primitives can rely on. Breaking it (via accidental
+        // HashMap iteration, host-time, or unstable sort) would
+        // fail here before reaching any higher-level integration
+        // test.
+        let r_a = registry_with(&[
+            UnitStatus::Runnable,
+            UnitStatus::Runnable,
+            UnitStatus::Runnable,
+        ]);
+        let r_b = registry_with(&[
+            UnitStatus::Runnable,
+            UnitStatus::Runnable,
+            UnitStatus::Runnable,
+        ]);
+        let mut s_a = RoundRobinScheduler::new();
+        let mut s_b = RoundRobinScheduler::new();
+        let seq_a: Vec<_> = (0..100)
+            .map(|_| s_a.select_next(&r_a).unwrap().raw())
+            .collect();
+        let seq_b: Vec<_> = (0..100)
+            .map(|_| s_b.select_next(&r_b).unwrap().raw())
+            .collect();
+        assert_eq!(seq_a, seq_b);
+        // Shape check: round-robin cycles 0, 1, 2, 0, 1, 2, ...
+        for (i, id) in seq_a.iter().enumerate() {
+            assert_eq!(*id, (i % 3) as u64);
+        }
+    }
+
+    #[test]
+    fn single_runnable_fast_path_picks_it_in_multi_unit_registry() {
+        // Runnable-count fast path regression: 3 units, only unit 1
+        // is runnable. The scheduler must return unit 1 without
+        // walking the full two-pass rotation.
+        let r = registry_with(&[
+            UnitStatus::Blocked,
+            UnitStatus::Runnable,
+            UnitStatus::Blocked,
+        ]);
+        let mut s = RoundRobinScheduler::new();
+        assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
+        assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
+        assert_eq!(s.last_scheduled(), Some(UnitId::new(1)));
     }
 
     #[test]

@@ -203,13 +203,13 @@ pub enum PpuInstruction {
         ra: u8,
         rb: u8,
     },
-    /// Subtract from carrying: rt = ~ra + rb + 1, set XER[CA].
+    /// Subtract from carrying: rt = ~ra + rb + 1, set `XER[CA]`.
     Subfc {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Subtract from extended: rt = ~ra + rb + CA, set XER[CA].
+    /// Subtract from extended: rt = ~ra + rb + `CA`, set `XER[CA]`.
     Subfe {
         rt: u8,
         ra: u8,

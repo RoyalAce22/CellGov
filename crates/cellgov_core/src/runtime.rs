@@ -89,7 +89,10 @@ use cellgov_dma::{DmaLatencyModel, DmaQueue, FixedLatency};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, UnitStatus, YieldReason};
-use cellgov_lv2::{Lv2Dispatch, Lv2Host, Lv2Runtime, PendingResponse, SpuInitState};
+use cellgov_lv2::{
+    Lv2Dispatch, Lv2Host, Lv2Runtime, PendingResponse, PpuThreadAttrs, PpuThreadInitState,
+    SpuInitState,
+};
 use cellgov_mem::GuestMemory;
 use cellgov_sync::{MailboxRegistry, SignalRegistry};
 use cellgov_time::{Budget, Epoch, GuestTicks};
@@ -124,11 +127,24 @@ pub struct RuntimeStep {
 /// Why a [`Runtime::step`] call could not produce a step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepError {
-    /// No unit in the registry is currently runnable. The scheduler
-    /// has nothing to schedule. The runtime is not necessarily done
-    /// (a future event may wake a blocked unit) -- the caller decides
-    /// whether to retry, advance time, or treat this as a stall.
+    /// Registry is empty or every registered unit has
+    /// `UnitStatus::Faulted` / `UnitStatus::Finished`. No future
+    /// transition will wake anything -- this is a terminal stall.
+    /// Call sites typically treat this as "run complete, no more
+    /// work."
     NoRunnableUnit,
+    /// Registry is non-empty and at least one unit is in
+    /// `UnitStatus::Blocked`, but `count_runnable()` is zero. This
+    /// is a scheduler-side liveness probe, not a semantic
+    /// deadlock proof -- under the current sync surface it
+    /// typically means every unit is parked on a PPU thread
+    /// join chain. Once richer sync primitives land it also
+    /// covers units parked on mutexes, condition variables,
+    /// event queues, or external signals (audio, vblank, RSX
+    /// label) that have not yet arrived. The caller decides
+    /// whether to inject a pending wake, advance time, or treat
+    /// this as a stall.
+    AllBlocked,
     /// The runtime has already executed `max_steps` steps. Further
     /// stepping is the deadlock detector firing; the caller must
     /// abort the run rather than retry.
@@ -152,6 +168,12 @@ pub enum StepError {
 /// `SpuInitState` the LV2 host produced; it returns a boxed unit
 /// ready to run.
 pub type SpuFactory = Box<dyn Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit>>;
+
+/// Factory that constructs a child PPU execution unit from an
+/// init state. The CLI installs one at boot via
+/// [`Runtime::set_ppu_factory`]; the runtime invokes it from
+/// [`Lv2Dispatch::PpuThreadCreate`] handling in `commit_step`.
+pub type PpuFactory = Box<dyn Fn(UnitId, PpuThreadInitState) -> Box<dyn RegisteredUnit>>;
 
 /// Controls the runtime's overhead profile: which trace records are
 /// emitted and whether state-hash checkpoints are computed at commit
@@ -191,6 +213,7 @@ pub struct Runtime {
     lv2_host: Lv2Host,
     syscall_responses: SyscallResponseTable,
     spu_factory: Option<SpuFactory>,
+    ppu_factory: Option<PpuFactory>,
     scheduler: Box<dyn Scheduler>,
     commit_pipeline: CommitPipeline,
     pub(crate) memory: GuestMemory,
@@ -272,6 +295,7 @@ impl Runtime {
             lv2_host: Lv2Host::new(),
             syscall_responses: SyscallResponseTable::new(),
             spu_factory: None,
+            ppu_factory: None,
             scheduler: Box::new(RoundRobinScheduler::new()),
             commit_pipeline: CommitPipeline::new(),
             memory,
@@ -526,6 +550,17 @@ impl Runtime {
                 args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
             ],
         );
+        self.dispatch_lv2_request(request, source);
+    }
+
+    /// Route a typed LV2 request through the host and handle the
+    /// resulting dispatch. Exposed to tests that need to exercise
+    /// specific dispatch paths without plumbing a full PPU yield.
+    pub(crate) fn dispatch_lv2_request(
+        &mut self,
+        request: cellgov_lv2::Lv2Request,
+        source: UnitId,
+    ) {
         let is_process_exit = matches!(request, cellgov_lv2::Lv2Request::ProcessExit { .. });
         let dispatch = self
             .lv2_host
@@ -573,7 +608,182 @@ impl Runtime {
                 self.registry
                     .set_status_override(source, UnitStatus::Blocked);
             }
+            Lv2Dispatch::PpuThreadExit {
+                exit_value,
+                woken_unit_ids,
+                effects,
+            } => {
+                self.apply_lv2_effects(&effects);
+                // The source thread is gone -- terminal state.
+                self.registry
+                    .set_status_override(source, UnitStatus::Finished);
+                // Wake each join waiter. Each is expected to have
+                // a PendingResponse::PpuThreadJoin recorded when
+                // it blocked on sys_ppu_thread_join. Consume the
+                // pending response, write the exit value to its
+                // output pointer, and return CELL_OK via r3.
+                for waiter in woken_unit_ids {
+                    let pending = self.syscall_responses.take(waiter);
+                    if let Some(PendingResponse::PpuThreadJoin { status_out_ptr, .. }) = pending {
+                        if let Some(range) = cellgov_mem::ByteRange::new(
+                            cellgov_mem::GuestAddr::new(status_out_ptr as u64),
+                            8,
+                        ) {
+                            let _ = self.memory.apply_commit(range, &exit_value.to_be_bytes());
+                        }
+                        self.registry.set_syscall_return(waiter, 0);
+                    } else {
+                        // Only sys_ppu_thread_join parks a waiter
+                        // on a PPU-thread exit under the current
+                        // sync surface. If a future primitive
+                        // parks differently this branch wakes
+                        // with the raw exit value in r3 rather
+                        // than writing to an out pointer.
+                        self.registry.set_syscall_return(waiter, exit_value);
+                    }
+                    self.registry
+                        .set_status_override(waiter, UnitStatus::Runnable);
+                }
+            }
+            Lv2Dispatch::PpuThreadCreate { .. } => {
+                self.handle_ppu_thread_create(source, dispatch);
+            }
         }
+    }
+
+    fn handle_ppu_thread_create(&mut self, source: UnitId, dispatch: Lv2Dispatch) {
+        let (
+            id_ptr,
+            entry_opd,
+            stack_top,
+            stack_base,
+            stack_size,
+            arg,
+            tls_base,
+            tls_bytes,
+            priority,
+        ) = match dispatch {
+            Lv2Dispatch::PpuThreadCreate {
+                id_ptr,
+                entry_opd,
+                stack_top,
+                stack_base,
+                stack_size,
+                arg,
+                tls_base,
+                tls_bytes,
+                priority,
+                effects,
+            } => {
+                self.apply_lv2_effects(&effects);
+                (
+                    id_ptr, entry_opd, stack_top, stack_base, stack_size, arg, tls_base, tls_bytes,
+                    priority,
+                )
+            }
+            other => unreachable!("handle_ppu_thread_create called with {other:?}"),
+        };
+        // Resolve the OPD: entry_code is the first 8 bytes of the
+        // OPD, TOC is the next 8. Big-endian.
+        let opd_bytes =
+            match cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(entry_opd as u64), 16)
+                .and_then(|r| self.memory.read(r))
+            {
+                Some(b) if b.len() == 16 => {
+                    let mut arr = [0u8; 16];
+                    arr.copy_from_slice(b);
+                    arr
+                }
+                _ => {
+                    // Bad OPD address; return CELL_EFAULT (0x8001000e)
+                    // to the caller and do not spawn a thread.
+                    self.registry.set_syscall_return(source, 0x8001_000e);
+                    return;
+                }
+            };
+        let entry_code = u64::from_be_bytes([
+            opd_bytes[0],
+            opd_bytes[1],
+            opd_bytes[2],
+            opd_bytes[3],
+            opd_bytes[4],
+            opd_bytes[5],
+            opd_bytes[6],
+            opd_bytes[7],
+        ]);
+        let entry_toc = u64::from_be_bytes([
+            opd_bytes[8],
+            opd_bytes[9],
+            opd_bytes[10],
+            opd_bytes[11],
+            opd_bytes[12],
+            opd_bytes[13],
+            opd_bytes[14],
+            opd_bytes[15],
+        ]);
+
+        // Register the child unit via the PPU factory. Without a
+        // factory we cannot construct a concrete PpuExecutionUnit
+        // here (cellgov_core does not depend on cellgov_ppu), so
+        // thread creation fails cleanly with ENOSYS.
+        let Some(factory) = self.ppu_factory.as_ref() else {
+            self.registry.set_syscall_return(source, 0x8001_0028);
+            return;
+        };
+        let init = PpuThreadInitState {
+            entry_code,
+            entry_toc,
+            arg,
+            stack_top,
+            tls_base,
+            // LR sentinel: zero for now. When the child's entry
+            // function returns, execution jumps to PC=0; the
+            // interpreter faults cleanly and the unit ends.
+            // Well-behaved guest code calls sys_ppu_thread_exit
+            // explicitly and never reaches the sentinel.
+            lr_sentinel: 0,
+        };
+        let child_unit_id = self
+            .registry
+            .register_dynamic(&|id| factory(id, init.clone()));
+
+        // Commit TLS bytes into guest memory at tls_base.
+        if !tls_bytes.is_empty() && tls_base != 0 {
+            if let Some(range) = cellgov_mem::ByteRange::new(
+                cellgov_mem::GuestAddr::new(tls_base),
+                tls_bytes.len() as u64,
+            ) {
+                let _ = self.memory.apply_commit(range, &tls_bytes);
+            }
+        }
+
+        // Register the child in the PPU thread table. Fails only
+        // on u64 id exhaustion, which cannot happen here.
+        let attrs = PpuThreadAttrs {
+            entry: entry_opd as u64,
+            arg,
+            stack_base: stack_base as u32,
+            stack_size: stack_size as u32,
+            priority,
+            tls_base: tls_base as u32,
+        };
+        let Some(thread_id) = self.lv2_host.ppu_threads_mut().create(child_unit_id, attrs) else {
+            self.registry.set_syscall_return(source, 0x8001_0004);
+            return;
+        };
+
+        // Write the minted thread id into the caller's output
+        // pointer as a big-endian u64.
+        if let Some(range) =
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(id_ptr as u64), 8)
+        {
+            let _ = self
+                .memory
+                .apply_commit(range, &thread_id.raw().to_be_bytes());
+        }
+
+        // Return CELL_OK to the caller.
+        self.registry.set_syscall_return(source, 0);
     }
 
     /// Pop and apply DMA completions whose modeled time has arrived.
@@ -642,6 +852,13 @@ impl Runtime {
                     }
                     PendingResponse::ReturnCode { code } => {
                         self.registry.set_syscall_return(waiter_id, *code);
+                        self.registry
+                            .set_status_override(waiter_id, UnitStatus::Runnable);
+                    }
+                    PendingResponse::PpuThreadJoin { .. } => {
+                        // SPU thread group join should never wake
+                        // a PPU-thread-join waiter; skip
+                        // defensively if it happens.
                         self.registry
                             .set_status_override(waiter_id, UnitStatus::Runnable);
                     }
@@ -740,6 +957,18 @@ impl Runtime {
         F: Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit> + 'static,
     {
         self.spu_factory = Some(Box::new(factory));
+    }
+
+    /// Install a PPU factory. The runtime calls this factory when
+    /// `Lv2Dispatch::PpuThreadCreate` fires during `commit_step`
+    /// to construct child PPU execution units seeded with the
+    /// proper PPC64 ABI state. The CLI installs one at boot;
+    /// tests that exercise thread creation install their own.
+    pub fn set_ppu_factory<F>(&mut self, factory: F)
+    where
+        F: Fn(UnitId, PpuThreadInitState) -> Box<dyn RegisteredUnit> + 'static,
+    {
+        self.ppu_factory = Some(Box::new(factory));
     }
 
     /// Borrow the syscall response table.
@@ -910,10 +1139,13 @@ impl Runtime {
     /// advance guest time.
     ///
     /// Returns `Err(StepError::MaxStepsExceeded)` if the deadlock
-    /// detector tripped, `Err(StepError::NoRunnableUnit)` if the
-    /// scheduler found nothing to run, and `Err(StepError::TimeOverflow)`
-    /// if the consumed budget would push guest time past `u64::MAX`.
-    /// On success, returns a [`RuntimeStep`] describing what happened.
+    /// detector tripped, `Err(StepError::NoRunnableUnit)` for a
+    /// terminal stall (empty registry or every unit faulted /
+    /// finished), `Err(StepError::AllBlocked)` if at least one
+    /// unit is parked on a block condition but none are runnable,
+    /// and `Err(StepError::TimeOverflow)` if the consumed budget
+    /// would push guest time past `u64::MAX`. On success, returns a
+    /// [`RuntimeStep`] describing what happened.
     ///
     /// The unit's emitted effects are returned verbatim in
     /// [`RuntimeStep::result`]; this method does not validate, stage,
@@ -924,10 +1156,24 @@ impl Runtime {
             return Err(StepError::MaxStepsExceeded);
         }
 
-        let unit_id = self
-            .scheduler
-            .select_next(&self.registry)
-            .ok_or(StepError::NoRunnableUnit)?;
+        let unit_id = match self.scheduler.select_next(&self.registry) {
+            Some(id) => id,
+            None => {
+                // Distinguish "terminal stall" (nothing left to run
+                // or wake) from "all blocked" (parked units that
+                // could be woken by a future signal). Check
+                // effective status for each registered unit; if any
+                // is Blocked we're in the soft-stall case.
+                let any_blocked = self.registry.ids().any(|id| {
+                    self.registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Blocked)
+                });
+                return Err(if any_blocked {
+                    StepError::AllBlocked
+                } else {
+                    StepError::NoRunnableUnit
+                });
+            }
+        };
 
         // The unit is about to run. Clear any runtime-side status
         // override so the unit's own status logic resumes control

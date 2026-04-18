@@ -99,6 +99,40 @@ fn step_with_no_units_returns_no_runnable() {
 }
 
 #[test]
+fn step_with_all_units_blocked_returns_all_blocked() {
+    // Registry is non-empty but every unit has a Blocked
+    // status override. The runtime must distinguish this from
+    // the empty-registry case so callers can tell "nothing will
+    // wake" from "everyone parked on some external signal."
+    let mut rt = build(16, 5, 100);
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    rt.registry_mut()
+        .set_status_override(UnitId::new(0), cellgov_exec::UnitStatus::Blocked);
+    rt.registry_mut()
+        .set_status_override(UnitId::new(1), cellgov_exec::UnitStatus::Blocked);
+    assert_eq!(rt.step().unwrap_err(), StepError::AllBlocked);
+    assert_eq!(rt.steps_taken(), 0);
+}
+
+#[test]
+fn step_with_all_finished_returns_no_runnable_not_all_blocked() {
+    // Finished units are terminal -- they will never wake. That
+    // must read as NoRunnableUnit (terminal stall), not
+    // AllBlocked (soft stall).
+    let mut rt = build(16, 1, 100);
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    // Exhaust the unit.
+    assert!(rt.step().is_ok());
+    // Now unit 0 is Finished. Next step should report
+    // NoRunnableUnit, not AllBlocked.
+    assert_eq!(rt.step().unwrap_err(), StepError::NoRunnableUnit);
+}
+
+#[test]
 fn step_runs_a_registered_unit() {
     let mut rt = build(16, 5, 100);
     rt.registry_mut()

@@ -345,6 +345,27 @@ pub struct TlsInfo {
     pub memsz: u64,
 }
 
+/// PT_TLS program header with every field the per-thread TLS
+/// allocator needs: the offset into the ELF bytes where the
+/// initialized template data starts, plus the vaddr / filesz /
+/// memsz / align fields.
+///
+/// Used by [`extract_tls_template_bytes`] to build a template
+/// that per-thread TLS instantiation can copy.
+#[derive(Debug, Clone, Copy)]
+pub struct TlsProgramHeader {
+    /// Offset into the ELF file where the initialized bytes start.
+    pub file_offset: u64,
+    /// Virtual address of the primary thread's TLS block.
+    pub vaddr: u64,
+    /// Count of initialized bytes (the `.tdata` payload length).
+    pub filesz: u64,
+    /// Total per-thread size (filesz plus `.tbss` zero-init tail).
+    pub memsz: u64,
+    /// Required alignment for per-thread TLS blocks.
+    pub align: u64,
+}
+
 /// Find the PT_TLS program header in an ELF64 binary.
 ///
 /// Returns `None` if the ELF has no TLS segment.
@@ -370,6 +391,52 @@ pub fn find_tls_segment(data: &[u8]) -> Option<TlsInfo> {
         }
     }
     None
+}
+
+/// Find the PT_TLS program header and return every layout field
+/// (including `p_offset` and `p_align`) required to reconstruct a
+/// per-thread TLS block. Returns `None` if the ELF has no TLS
+/// segment.
+pub fn find_tls_program_header(data: &[u8]) -> Option<TlsProgramHeader> {
+    if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC {
+        return None;
+    }
+    let phoff = read_u64(data, 32) as usize;
+    let phentsize = read_u16(data, 54) as usize;
+    let phnum = read_u16(data, 56) as usize;
+
+    for i in 0..phnum {
+        let base = phoff + i * phentsize;
+        if base + phentsize > data.len() {
+            break;
+        }
+        if read_u32(data, base) == PT_TLS {
+            return Some(TlsProgramHeader {
+                file_offset: read_u64(data, base + 8),
+                vaddr: read_u64(data, base + 16),
+                filesz: read_u64(data, base + 32),
+                memsz: read_u64(data, base + 40),
+                align: read_u64(data, base + 48),
+            });
+        }
+    }
+    None
+}
+
+/// Extract the initialized bytes of the PT_TLS template from an
+/// ELF64 binary, alongside the per-thread layout fields.
+///
+/// Returns `(initial_bytes, memsz, align, vaddr)` where
+/// `initial_bytes.len() == filesz` on success. `None` if the ELF
+/// has no PT_TLS or the file offset/length are out of bounds.
+pub fn extract_tls_template_bytes(data: &[u8]) -> Option<(Vec<u8>, u64, u64, u64)> {
+    let hdr = find_tls_program_header(data)?;
+    let start = hdr.file_offset as usize;
+    let end = start.checked_add(hdr.filesz as usize)?;
+    if end > data.len() {
+        return None;
+    }
+    Some((data[start..end].to_vec(), hdr.memsz, hdr.align, hdr.vaddr))
 }
 
 /// SYS_PROCESS_PARAM_MAGIC -- marks the .sys_proc_param section.
@@ -751,6 +818,80 @@ mod tests {
         assert_eq!(tls.vaddr, 0x895cd0);
         assert_eq!(tls.filesz, 4);
         assert_eq!(tls.memsz, 0x1dc);
+    }
+
+    /// Build an ELF64 with a PT_TLS program header including a
+    /// concrete p_offset, p_align, and a filesz-byte initialized
+    /// payload at that offset. Returns `(elf_bytes, initial)` so
+    /// tests can compare the extracted template against the
+    /// original payload.
+    fn make_elf_with_tls_payload(
+        tls_vaddr: u64,
+        initial: &[u8],
+        tls_memsz: u64,
+        tls_align: u64,
+    ) -> Vec<u8> {
+        // Reserve room for the ELF header, one 56-byte program
+        // header, and the TLS payload itself at the tail.
+        let payload_offset = 128u64;
+        let total = (payload_offset as usize) + initial.len() + 16;
+        let mut buf = vec![0u8; total];
+        buf[0..4].copy_from_slice(&ELF_MAGIC);
+        buf[4] = 2; // 64-bit
+        buf[5] = 2; // big-endian
+                    // phoff = 64, phentsize = 56, phnum = 1
+        buf[32..40].copy_from_slice(&64u64.to_be_bytes());
+        buf[54..56].copy_from_slice(&56u16.to_be_bytes());
+        buf[56..58].copy_from_slice(&1u16.to_be_bytes());
+        // PT_TLS at phdr[0]
+        let ph = 64;
+        buf[ph..ph + 4].copy_from_slice(&PT_TLS.to_be_bytes());
+        buf[ph + 8..ph + 16].copy_from_slice(&payload_offset.to_be_bytes());
+        buf[ph + 16..ph + 24].copy_from_slice(&tls_vaddr.to_be_bytes());
+        buf[ph + 32..ph + 40].copy_from_slice(&(initial.len() as u64).to_be_bytes());
+        buf[ph + 40..ph + 48].copy_from_slice(&tls_memsz.to_be_bytes());
+        buf[ph + 48..ph + 56].copy_from_slice(&tls_align.to_be_bytes());
+        // Place the initialized bytes at payload_offset.
+        let start = payload_offset as usize;
+        buf[start..start + initial.len()].copy_from_slice(initial);
+        buf
+    }
+
+    #[test]
+    fn find_tls_program_header_returns_all_fields() {
+        let initial = [0xAAu8, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+        let data = make_elf_with_tls_payload(0x895cd0, &initial, 0x1dc, 0x10);
+        let hdr = find_tls_program_header(&data).expect("should find PT_TLS");
+        assert_eq!(hdr.file_offset, 128);
+        assert_eq!(hdr.vaddr, 0x895cd0);
+        assert_eq!(hdr.filesz, 6);
+        assert_eq!(hdr.memsz, 0x1dc);
+        assert_eq!(hdr.align, 0x10);
+    }
+
+    #[test]
+    fn extract_tls_template_bytes_captures_initial_payload() {
+        let initial = [0x11u8, 0x22, 0x33, 0x44, 0x55];
+        let data = make_elf_with_tls_payload(0x10_0000, &initial, 0x100, 0x20);
+        let (bytes, memsz, align, vaddr) =
+            extract_tls_template_bytes(&data).expect("should extract PT_TLS bytes");
+        assert_eq!(bytes, initial);
+        assert_eq!(memsz, 0x100);
+        assert_eq!(align, 0x20);
+        assert_eq!(vaddr, 0x10_0000);
+    }
+
+    #[test]
+    fn extract_tls_template_bytes_returns_none_when_no_tls() {
+        let mut data = vec![0u8; 256];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 2;
+        data[5] = 2;
+        data[32..40].copy_from_slice(&64u64.to_be_bytes());
+        data[54..56].copy_from_slice(&56u16.to_be_bytes());
+        data[56..58].copy_from_slice(&1u16.to_be_bytes());
+        data[64..68].copy_from_slice(&PT_LOAD.to_be_bytes());
+        assert!(extract_tls_template_bytes(&data).is_none());
     }
 
     #[test]

@@ -99,7 +99,9 @@ pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
                 // state the failure left behind.
                 let _ = rt.commit_step(&step.result, &step.effects);
             }
-            Err(StepError::NoRunnableUnit) => break ScenarioOutcome::Stalled,
+            Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
+                break ScenarioOutcome::Stalled;
+            }
             Err(StepError::MaxStepsExceeded) => break ScenarioOutcome::MaxStepsExceeded,
             Err(StepError::TimeOverflow) => {
                 // TimeOverflow is a runtime invariant violation rather

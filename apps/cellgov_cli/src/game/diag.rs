@@ -415,7 +415,11 @@ pub(super) fn print_top_pcs(rt: &Runtime, pc_hits: &std::collections::HashMap<u6
         return;
     }
     let mut sorted: Vec<_> = pc_hits.iter().collect();
-    sorted.sort_by_key(|&(_, c)| std::cmp::Reverse(*c));
+    // Stable order: descending by hit count, ascending by PC on
+    // ties. Without the PC tiebreak, HashMap iteration order
+    // leaks into the display and replay diffs show spurious
+    // reorderings whenever multiple PCs share a hit count.
+    sorted.sort_by(|&(pc_a, c_a), &(pc_b, c_b)| c_b.cmp(c_a).then(pc_a.cmp(pc_b)));
     println!("top_pcs_by_hit_count:");
     for (pc, count) in sorted.iter().take(20) {
         let raw = fetch_raw_at(rt, **pc)

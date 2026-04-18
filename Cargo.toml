@@ -56,7 +56,9 @@ criterion = { version = "0.5", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-missing_docs = "warn"
+missing_docs = "deny"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
+invalid_rust_codeblocks = "deny"
+invalid_html_tags = "deny"

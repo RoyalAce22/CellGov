@@ -6,8 +6,12 @@
 //! through the `Lv2Runtime` trait and returns an `Lv2Dispatch` telling
 //! the runtime what to do.
 
-use crate::dispatch::Lv2Dispatch;
+use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::image::ContentStore;
+use crate::ppu_thread::{
+    PpuThread, PpuThreadAttrs, PpuThreadId, PpuThreadTable, ThreadStack, ThreadStackAllocator,
+    TlsTemplate,
+};
 use crate::request::Lv2Request;
 use crate::thread_group::ThreadGroupTable;
 use cellgov_effects::{Effect, WritePayload};
@@ -37,6 +41,20 @@ mod spu;
 pub struct Lv2Host {
     content: ContentStore,
     groups: ThreadGroupTable,
+    /// PPU threads (primary plus any created via
+    /// `sys_ppu_thread_create`). Populated by
+    /// `seed_primary_ppu_thread` after the primary PPU unit is
+    /// registered with the runtime. Empty until seeded.
+    ppu_threads: PpuThreadTable,
+    /// Captured PT_TLS template, populated by `set_tls_template`
+    /// when the loader parses the game ELF. Empty on a freshly
+    /// constructed host and for games with no PT_TLS segment.
+    /// Used by `sys_ppu_thread_create` to stamp a fresh TLS
+    /// block for each child thread.
+    tls_template: TlsTemplate,
+    /// Allocator for child-thread stack blocks above
+    /// `0xD0010000`. Starts fresh per host; deterministic.
+    stack_allocator: ThreadStackAllocator,
     /// Monotonic ID counter for kernel objects (mutexes, event queues, etc.),
     /// starting at base `0x40000001`.
     next_kernel_id: u32,
@@ -53,11 +71,15 @@ impl Default for Lv2Host {
 }
 
 impl Lv2Host {
-    /// Construct an empty host with no registered images or groups.
+    /// Construct an empty host with no registered images, groups,
+    /// or PPU threads.
     pub fn new() -> Self {
         Self {
             content: ContentStore::new(),
             groups: ThreadGroupTable::new(),
+            ppu_threads: PpuThreadTable::new(),
+            tls_template: TlsTemplate::empty(),
+            stack_allocator: ThreadStackAllocator::new(),
             next_kernel_id: 0x4000_0001, // start above zero to catch uninitialized use
             mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
         }
@@ -105,6 +127,65 @@ impl Lv2Host {
         &mut self.groups
     }
 
+    /// Borrow the PPU thread table.
+    pub fn ppu_threads(&self) -> &PpuThreadTable {
+        &self.ppu_threads
+    }
+
+    /// Mutably borrow the PPU thread table.
+    pub fn ppu_threads_mut(&mut self) -> &mut PpuThreadTable {
+        &mut self.ppu_threads
+    }
+
+    /// Seed the primary PPU thread.
+    ///
+    /// Called by the runtime after registering the primary PPU
+    /// execution unit. Associates `unit_id` with
+    /// `PpuThreadId::PRIMARY` (0x0100_0000) and records the
+    /// attributes captured from the ELF entry. Must be called
+    /// exactly once; panics if the primary thread is already
+    /// seeded. Subsequent PPU threads are created via
+    /// `sys_ppu_thread_create`.
+    pub fn seed_primary_ppu_thread(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) {
+        self.ppu_threads.insert_primary(unit_id, attrs);
+    }
+
+    /// Look up a PPU thread by its runtime unit id. Returns `None`
+    /// if the unit is not a PPU thread (e.g., it's an SPU).
+    pub fn ppu_thread_for_unit(&self, unit_id: UnitId) -> Option<&PpuThread> {
+        self.ppu_threads.get_by_unit(unit_id)
+    }
+
+    /// Look up the guest-facing PPU thread id for a runtime unit
+    /// id. Returns `None` if the unit is not a PPU thread.
+    pub fn ppu_thread_id_for_unit(&self, unit_id: UnitId) -> Option<PpuThreadId> {
+        self.ppu_threads.thread_id_for_unit(unit_id)
+    }
+
+    /// Capture the game ELF's PT_TLS template. Called by the CLI's
+    /// boot path once per process, after `find_tls_segment`
+    /// returns a PT_TLS header. Safe to call with an empty
+    /// template for games without PT_TLS (the default).
+    pub fn set_tls_template(&mut self, template: TlsTemplate) {
+        self.tls_template = template;
+    }
+
+    /// Borrow the captured TLS template. The
+    /// `sys_ppu_thread_create` handler uses this to stamp a
+    /// fresh per-thread TLS block for each child.
+    pub fn tls_template(&self) -> &TlsTemplate {
+        &self.tls_template
+    }
+
+    /// Allocate a child-thread stack block. Called by
+    /// `sys_ppu_thread_create` to reserve a deterministic
+    /// address range for each new PPU thread. The returned
+    /// block is 16-byte-aligned by default; pass a larger
+    /// alignment for specific layout requirements.
+    pub fn allocate_child_stack(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
+        self.stack_allocator.allocate(size, align)
+    }
+
     /// Record that `unit_id` is an SPU belonging to `group_id` at
     /// `slot`. The runtime calls this after each SPU is registered
     /// during `RegisterSpu` handling.
@@ -130,6 +211,31 @@ impl Lv2Host {
         }
         hasher.write(&self.next_kernel_id.to_le_bytes());
         hasher.write(&self.mem_alloc_ptr.to_le_bytes());
+        // PPU thread table is folded in only when non-empty so
+        // that host instances with no seeded primary thread keep
+        // the same hash they had before the table field existed.
+        // Callers that seed the primary and spawn children see
+        // every state change flow into the hash.
+        if !self.ppu_threads.is_empty() {
+            hasher.write(&self.ppu_threads.state_hash().to_le_bytes());
+        }
+        // Same gating for the TLS template: a freshly constructed
+        // host with no captured template keeps the pre-existing
+        // hash. Once the loader calls `set_tls_template`, the
+        // template contents contribute.
+        if !self.tls_template.is_empty() {
+            hasher.write(&self.tls_template.state_hash().to_le_bytes());
+        }
+        // Stack allocator cursor is folded in only after the
+        // first child-stack allocation (cursor moves past the
+        // CHILD_STACK_BASE sentinel). A host that never spawns
+        // a child keeps the pre-existing hash; once a child is
+        // spawned the cursor contributes.
+        if let Some(peek) = self.stack_allocator.peek_next(0x10) {
+            if peek != ThreadStackAllocator::CHILD_STACK_BASE {
+                hasher.write(&peek.to_le_bytes());
+            }
+        }
         hasher.finish()
     }
 
@@ -218,6 +324,32 @@ impl Lv2Host {
                 let id = self.alloc_id();
                 Self::immediate_write_u32(id, cid_ptr, requester)
             }
+            Lv2Request::PpuThreadYield => {
+                // Pure hint: return CELL_OK with no effects. The
+                // scheduler's round-robin walk already moves on
+                // to a different runnable unit after a syscall
+                // yield; the handler does not need to touch unit
+                // state.
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![],
+                }
+            }
+            Lv2Request::PpuThreadExit { exit_value } => {
+                self.dispatch_ppu_thread_exit(exit_value, requester)
+            }
+            Lv2Request::PpuThreadCreate {
+                id_ptr,
+                entry_opd,
+                arg,
+                priority,
+                stacksize,
+                flags: _,
+            } => self.dispatch_ppu_thread_create(id_ptr, entry_opd, arg, priority, stacksize),
+            Lv2Request::PpuThreadJoin {
+                target,
+                status_out_ptr,
+            } => self.dispatch_ppu_thread_join(target, status_out_ptr, requester),
             // Syscall 481 is _sys_prx_start_module. RPCS3 returns
             // CELL_EINVAL (0x80010002) when id == 0 or pOpt is null.
             // CellGov's _sys_prx_load_module stub returns 0 (id=0),
@@ -271,6 +403,146 @@ impl Lv2Host {
     fn dispatch_event_queue_create(&mut self, id_ptr: u32, requester: UnitId) -> Lv2Dispatch {
         let id = self.alloc_id();
         Self::immediate_write_u32(id, id_ptr, requester)
+    }
+
+    fn dispatch_ppu_thread_join(
+        &mut self,
+        target: u64,
+        status_out_ptr: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        let target_id = PpuThreadId::new(target);
+        // Resolve the target. If it does not exist in the table
+        // the caller passed a bogus id: return CELL_ESRCH.
+        let Some(target_thread) = self.ppu_threads.get(target_id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            };
+        };
+        // If the target has already exited, resolve immediately:
+        // write the exit value to status_out_ptr and return
+        // CELL_OK. No block, no table update.
+        if matches!(
+            target_thread.state,
+            crate::ppu_thread::PpuThreadState::Finished
+        ) {
+            let exit_value = target_thread.exit_value.unwrap_or(0);
+            let write = Effect::SharedWriteIntent {
+                range: ByteRange::new(GuestAddr::new(status_out_ptr as u64), 8).unwrap(),
+                bytes: WritePayload::from_slice(&exit_value.to_be_bytes()),
+                ordering: PriorityClass::Normal,
+                source: requester,
+                source_time: GuestTicks::ZERO,
+            };
+            return Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![write],
+            };
+        }
+        // Target is still Runnable / Blocked. Record the caller
+        // on the target's join-waiter list and block the caller.
+        // The caller's own guest thread id is needed as the
+        // waiter key. If the requester is not a tracked PPU
+        // thread (shouldn't happen in practice), fall back to a
+        // sentinel id so the record still takes place.
+        let caller_thread_id = self
+            .ppu_threads
+            .thread_id_for_unit(requester)
+            .unwrap_or(PpuThreadId::PRIMARY);
+        self.ppu_threads
+            .add_join_waiter(target_id, caller_thread_id);
+        Lv2Dispatch::Block {
+            reason: crate::dispatch::Lv2BlockReason::PpuThreadJoin { target },
+            pending: PendingResponse::PpuThreadJoin {
+                target,
+                status_out_ptr,
+            },
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_ppu_thread_create(
+        &mut self,
+        id_ptr: u32,
+        entry_opd: u32,
+        arg: u64,
+        priority: u32,
+        stacksize: u64,
+    ) -> Lv2Dispatch {
+        // Enforce a minimum stack size so the ABI-required
+        // back-chain and register save area always fit. PSL1GHT
+        // defaults to 0x10_000 (64 KB); callers may request
+        // smaller or zero.
+        let size = stacksize.max(0x4000);
+        let stack = match self.allocate_child_stack(size, 0x10) {
+            Some(s) => s,
+            None => {
+                // Stack-region exhaustion. Return ENOMEM-class
+                // error. Real LV2 returns CELL_ENOMEM on stack
+                // allocation failure.
+                return Lv2Dispatch::Immediate {
+                    code: 0x8001_0004,
+                    effects: vec![],
+                };
+            }
+        };
+
+        // Instantiate a per-thread TLS block from the captured
+        // template. Empty template yields an empty Vec, which
+        // the runtime treats as "no TLS bytes to commit, r13=0".
+        let tls_bytes = self.tls_template.instantiate();
+        // Place the TLS block immediately above the child stack
+        // so the layout is deterministic. If the template is
+        // empty, tls_base is zero and the runtime skips the
+        // TLS-commit effect.
+        let tls_base = if tls_bytes.is_empty() {
+            0
+        } else {
+            // Round up to 16-byte boundary above stack_top for
+            // ABI alignment. The child's r13 points here.
+            (stack.end() + 0xF) & !0xF
+        };
+
+        Lv2Dispatch::PpuThreadCreate {
+            id_ptr,
+            entry_opd,
+            stack_top: stack.initial_sp(),
+            stack_base: stack.base,
+            stack_size: stack.size,
+            arg,
+            tls_base,
+            tls_bytes,
+            priority,
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_ppu_thread_exit(&mut self, exit_value: u64, requester: UnitId) -> Lv2Dispatch {
+        // Look up the calling thread's guest id in the table.
+        // Foundation titles do not seed the primary thread yet,
+        // so the table may not contain the caller; in that case
+        // the runtime still needs to transition the caller to
+        // Finished but no waiters exist to wake.
+        let waiters_unit_ids = match self.ppu_threads.thread_id_for_unit(requester) {
+            Some(tid) => {
+                let waiter_thread_ids = self.ppu_threads.mark_finished(tid, exit_value);
+                // Translate guest thread ids back to runtime
+                // UnitIds. A waiter that has been detached or
+                // purged between join-time and now is simply
+                // skipped.
+                waiter_thread_ids
+                    .into_iter()
+                    .filter_map(|wtid| self.ppu_threads.get(wtid).map(|t| t.unit_id))
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        Lv2Dispatch::PpuThreadExit {
+            exit_value,
+            woken_unit_ids: waiters_unit_ids,
+            effects: vec![],
+        }
     }
 
     fn dispatch_memory_allocate(
@@ -1062,6 +1334,469 @@ mod tests {
             }
             other => panic!("expected Immediate(0), got {other:?}"),
         }
+    }
+
+    fn primary_attrs() -> PpuThreadAttrs {
+        PpuThreadAttrs {
+            entry: 0x10_0000,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x10000,
+            priority: 1000,
+            tls_base: 0x0020_0000,
+        }
+    }
+
+    #[test]
+    fn new_host_has_empty_ppu_thread_table() {
+        let host = Lv2Host::new();
+        assert!(host.ppu_threads().is_empty());
+        assert!(host.ppu_thread_for_unit(UnitId::new(0)).is_none());
+        assert!(host.ppu_thread_id_for_unit(UnitId::new(0)).is_none());
+    }
+
+    #[test]
+    fn seed_primary_ppu_thread_records_mapping() {
+        let mut host = Lv2Host::new();
+        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+        assert_eq!(host.ppu_threads().len(), 1);
+        let primary = host.ppu_thread_for_unit(UnitId::new(0)).unwrap();
+        assert_eq!(primary.id, PpuThreadId::PRIMARY);
+        assert_eq!(primary.unit_id, UnitId::new(0));
+        assert_eq!(primary.state, crate::ppu_thread::PpuThreadState::Runnable);
+        assert_eq!(
+            host.ppu_thread_id_for_unit(UnitId::new(0)),
+            Some(PpuThreadId::PRIMARY),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "primary thread already inserted")]
+    fn seeding_primary_twice_panics() {
+        let mut host = Lv2Host::new();
+        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+        host.seed_primary_ppu_thread(UnitId::new(1), primary_attrs());
+    }
+
+    #[test]
+    fn state_hash_unchanged_when_ppu_table_empty() {
+        // Regression guard: an empty PpuThreadTable must not
+        // perturb Lv2Host::state_hash. Without this, every host
+        // without a seeded primary thread would see its hash
+        // change just because the PPU thread table field exists
+        // on the struct.
+        let fresh = Lv2Host::new();
+        // Two fresh hosts produce identical hashes (sanity).
+        assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
+    }
+
+    #[test]
+    fn state_hash_changes_after_primary_seed() {
+        let pre_seed = Lv2Host::new().state_hash();
+        let mut seeded = Lv2Host::new();
+        seeded.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+        assert_ne!(pre_seed, seeded.state_hash());
+    }
+
+    #[test]
+    fn set_tls_template_stores_bytes() {
+        let mut host = Lv2Host::new();
+        assert!(host.tls_template().is_empty());
+        host.set_tls_template(crate::ppu_thread::TlsTemplate::new(
+            vec![0xDE, 0xAD],
+            0x100,
+            0x10,
+            0x89_5cd0,
+        ));
+        let tpl = host.tls_template();
+        assert!(!tpl.is_empty());
+        assert_eq!(tpl.initial_bytes(), &[0xDE, 0xAD]);
+        assert_eq!(tpl.vaddr(), 0x89_5cd0);
+    }
+
+    #[test]
+    fn state_hash_unchanged_when_tls_template_empty() {
+        // Regression guard matching the ppu_threads gating: an
+        // empty TlsTemplate must not perturb state_hash. Without
+        // this, hosts constructed before the loader captures a
+        // template would see their hash shift just because the
+        // field exists on the struct.
+        let fresh = Lv2Host::new();
+        assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
+    }
+
+    #[test]
+    fn state_hash_changes_after_tls_template_set() {
+        let pre = Lv2Host::new().state_hash();
+        let mut host = Lv2Host::new();
+        host.set_tls_template(crate::ppu_thread::TlsTemplate::new(
+            vec![0x11, 0x22],
+            0x80,
+            0x10,
+            0x1000,
+        ));
+        assert_ne!(pre, host.state_hash());
+    }
+
+    #[test]
+    fn allocate_child_stack_produces_non_overlapping_blocks() {
+        let mut host = Lv2Host::new();
+        let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+        let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+        let s3 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+        // Start at the 0xD0010000 child-stack base.
+        assert_eq!(s1.base, 0xD001_0000);
+        // Monotonic and non-overlapping.
+        assert!(s2.base >= s1.end());
+        assert!(s3.base >= s2.end());
+    }
+
+    #[test]
+    fn state_hash_unchanged_when_no_child_stack_allocated() {
+        // Regression guard: a fresh host (no child threads
+        // spawned) must report the same hash it would before
+        // the stack allocator field existed. Once
+        // `allocate_child_stack` has advanced the cursor past
+        // the sentinel, the contribution kicks in.
+        let fresh = Lv2Host::new();
+        assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
+    }
+
+    #[test]
+    fn state_hash_changes_after_child_stack_allocated() {
+        let pre = Lv2Host::new().state_hash();
+        let mut host = Lv2Host::new();
+        let _ = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+        assert_ne!(pre, host.state_hash());
+    }
+
+    #[test]
+    fn ppu_thread_exit_marks_thread_finished_with_exit_value() {
+        // sys_ppu_thread_exit marks the calling thread Finished,
+        // captures the exit value, and -- when no one is joining
+        // -- returns an empty waker list. The runtime side does
+        // the unit-state transition.
+        let mut host = Lv2Host::new();
+        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::PpuThreadExit {
+                exit_value: 0xDEAD_BEEF,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::PpuThreadExit {
+                exit_value,
+                woken_unit_ids,
+                effects,
+            } => {
+                assert_eq!(exit_value, 0xDEAD_BEEF);
+                assert!(woken_unit_ids.is_empty());
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected PpuThreadExit dispatch, got {other:?}"),
+        }
+        // Primary thread is now Finished with the exit value.
+        let primary = host.ppu_thread_for_unit(UnitId::new(0)).unwrap();
+        assert_eq!(primary.state, crate::ppu_thread::PpuThreadState::Finished);
+        assert_eq!(primary.exit_value, Some(0xDEAD_BEEF));
+    }
+
+    #[test]
+    fn ppu_thread_exit_unseeded_thread_still_returns_dispatch() {
+        // If the caller is not in the thread table yet (e.g. the
+        // primary is unseeded -- foundation-title boot path), the
+        // handler still returns a PpuThreadExit dispatch so the
+        // runtime transitions the unit to Finished. No waiters
+        // are waked because none can be tracked.
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::PpuThreadExit { exit_value: 7 },
+            UnitId::new(99),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::PpuThreadExit {
+                exit_value,
+                woken_unit_ids,
+                ..
+            } => {
+                assert_eq!(exit_value, 7);
+                assert!(woken_unit_ids.is_empty());
+            }
+            other => panic!("expected PpuThreadExit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ppu_thread_exit_wakes_join_waiters() {
+        // A child thread exits with waiters registered on its
+        // join list. The handler reports those waiters' unit ids
+        // so the runtime can wake them.
+        let mut host = Lv2Host::new();
+        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+        let child_tid = host
+            .ppu_threads_mut()
+            .create(UnitId::new(1), primary_attrs())
+            .expect("child create");
+        // Primary joins on the child.
+        host.ppu_threads_mut()
+            .add_join_waiter(child_tid, crate::ppu_thread::PpuThreadId::PRIMARY);
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::PpuThreadExit { exit_value: 5 },
+            UnitId::new(1),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::PpuThreadExit {
+                exit_value,
+                woken_unit_ids,
+                ..
+            } => {
+                assert_eq!(exit_value, 5);
+                assert_eq!(woken_unit_ids, vec![UnitId::new(0)]);
+            }
+            other => panic!("expected PpuThreadExit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ppu_thread_join_finished_target_returns_immediate_with_exit_value() {
+        let mut host = Lv2Host::new();
+        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+        // Create a child and immediately mark it finished.
+        let child = host
+            .ppu_threads_mut()
+            .create(UnitId::new(1), primary_attrs())
+            .expect("child create");
+        host.ppu_threads_mut().mark_finished(child, 0xFEED_FACE);
+        let rt = FakeRuntime::new(0x10000);
+        let result = host.dispatch(
+            Lv2Request::PpuThreadJoin {
+                target: child.raw(),
+                status_out_ptr: 0x500,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0);
+                assert_eq!(effects.len(), 1);
+                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
+                    assert_eq!(range.start().raw(), 0x500);
+                    assert_eq!(range.length(), 8);
+                    assert_eq!(bytes.bytes(), &0xFEED_FACE_u64.to_be_bytes());
+                } else {
+                    panic!("expected SharedWriteIntent");
+                }
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ppu_thread_join_running_target_blocks_and_records_waiter() {
+        let mut host = Lv2Host::new();
+        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+        let child = host
+            .ppu_threads_mut()
+            .create(UnitId::new(1), primary_attrs())
+            .expect("child create");
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::PpuThreadJoin {
+                target: child.raw(),
+                status_out_ptr: 0x500,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Block {
+                reason, pending, ..
+            } => {
+                assert!(matches!(
+                    reason,
+                    crate::dispatch::Lv2BlockReason::PpuThreadJoin { target } if target == child.raw()
+                ));
+                assert!(matches!(
+                    pending,
+                    PendingResponse::PpuThreadJoin {
+                        status_out_ptr: 0x500,
+                        ..
+                    }
+                ));
+            }
+            other => panic!("expected Block, got {other:?}"),
+        }
+        // Child's join-waiter list now contains the primary's id.
+        assert_eq!(
+            host.ppu_threads().get(child).unwrap().join_waiters,
+            vec![crate::ppu_thread::PpuThreadId::PRIMARY],
+        );
+    }
+
+    #[test]
+    fn ppu_thread_join_unknown_target_returns_esrch() {
+        let mut host = Lv2Host::new();
+        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::PpuThreadJoin {
+                target: 0xDEAD_BEEF,
+                status_out_ptr: 0x500,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0x8001_0005);
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate with ESRCH, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ppu_thread_create_returns_dispatch_with_allocated_stack_and_tls() {
+        // With a non-empty TLS template captured, the handler
+        // allocates a child stack block and instantiates a fresh
+        // TLS block. Dispatch carries all fields the runtime
+        // needs to register the child PPU unit.
+        let mut host = Lv2Host::new();
+        host.set_tls_template(crate::ppu_thread::TlsTemplate::new(
+            vec![0xAB, 0xCD, 0xEF],
+            0x100,
+            0x10,
+            0x89_5cd0,
+        ));
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::PpuThreadCreate {
+                id_ptr: 0x1000,
+                entry_opd: 0x2_0000,
+                arg: 0xDEAD_BEEF,
+                priority: 1500,
+                stacksize: 0x10_000,
+                flags: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::PpuThreadCreate {
+                id_ptr,
+                entry_opd,
+                stack_top,
+                stack_base,
+                stack_size,
+                arg,
+                tls_base,
+                tls_bytes,
+                priority,
+                effects,
+            } => {
+                assert_eq!(id_ptr, 0x1000);
+                assert_eq!(entry_opd, 0x2_0000);
+                assert_eq!(arg, 0xDEAD_BEEF);
+                assert_eq!(priority, 1500);
+                // First stack block starts at 0xD0010000.
+                assert_eq!(stack_base, 0xD001_0000);
+                assert_eq!(stack_size, 0x10_000);
+                assert_eq!(stack_top, 0xD002_0000 - 0x10);
+                // TLS block placed at or above the stack end.
+                assert!(tls_base >= stack_base + stack_size);
+                assert_eq!(tls_bytes.len(), 0x100);
+                assert_eq!(&tls_bytes[..3], &[0xAB, 0xCD, 0xEF]);
+                assert!(tls_bytes[3..].iter().all(|&b| b == 0));
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected PpuThreadCreate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ppu_thread_create_with_empty_template_has_no_tls() {
+        // Games without PT_TLS get an empty template. The
+        // dispatch still succeeds; tls_base is zero and
+        // tls_bytes is empty so the runtime leaves r13=0.
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::PpuThreadCreate {
+                id_ptr: 0x1000,
+                entry_opd: 0x2_0000,
+                arg: 0,
+                priority: 1000,
+                stacksize: 0x8000,
+                flags: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::PpuThreadCreate {
+                tls_base,
+                tls_bytes,
+                ..
+            } => {
+                assert_eq!(tls_base, 0);
+                assert!(tls_bytes.is_empty());
+            }
+            other => panic!("expected PpuThreadCreate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ppu_thread_create_enforces_minimum_stack_size() {
+        // A stacksize below the ABI minimum (0x4000) is rounded
+        // up so the child has room for its back-chain + register
+        // save area.
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::PpuThreadCreate {
+                id_ptr: 0x1000,
+                entry_opd: 0x2_0000,
+                arg: 0,
+                priority: 1000,
+                stacksize: 0x100,
+                flags: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::PpuThreadCreate { stack_size, .. } => {
+                assert_eq!(stack_size, 0x4000);
+            }
+            other => panic!("expected PpuThreadCreate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ppu_thread_yield_returns_ok_with_no_effects() {
+        // sys_ppu_thread_yield is a pure scheduler hint: return
+        // CELL_OK immediately, emit no effects. The round-robin
+        // scheduler advances to the next runnable unit on the
+        // next step naturally because the caller has yielded via
+        // YieldReason::Syscall.
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(Lv2Request::PpuThreadYield, UnitId::new(0), &rt);
+        assert_eq!(
+            result,
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            }
+        );
     }
 
     #[test]
