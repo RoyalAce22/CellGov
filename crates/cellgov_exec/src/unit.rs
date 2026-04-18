@@ -52,8 +52,15 @@ pub enum UnitStatus {
     /// Eligible to be scheduled. The default for a freshly registered
     /// unit and the state most units are in between yields.
     Runnable = 0,
-    /// Waiting on an event (mailbox, signal, barrier, DMA completion,
-    /// etc.). Not eligible for scheduling until the runtime wakes it.
+    /// Parked, waiting on an external event. Not eligible for
+    /// scheduling until the runtime transitions the unit back to
+    /// `Runnable`. The guest-semantic reason is owned by whichever
+    /// subsystem parked the unit -- mailbox / signal / barrier /
+    /// DMA waiter lists in `cellgov_mailbox` / `cellgov_signal` /
+    /// `cellgov_dma`, and PPU thread `join` waiters in
+    /// `cellgov_lv2::ppu_thread::PpuThreadTable`. The scheduler
+    /// never branches on the reason; it sees only the opaque
+    /// `Blocked` state and skips the unit.
     Blocked = 1,
     /// Has raised a fault and is in fault-handling state. Whether and
     /// how it returns to `Runnable` is architecture-specific. Currently

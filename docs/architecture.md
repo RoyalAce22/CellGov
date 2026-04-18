@@ -152,6 +152,7 @@ LV2 virtual-address layout:
 | 0x00000000-0x3FFFFFFF | 1 GB   | `main`         | `ReadWrite`                      | User memory: EBOOT PT_LOAD segments, TLS, HLE bump arena, allocator pool |
 | 0xC0000000-0xCFFFFFFF | 256 MB | `rsx`          | `ReservedZeroReadable` (default) | Video / RSX local memory -- placeholder, reads zero and are counted      |
 | 0xD0000000-0xD000FFFF | 64 KB  | `stack`        | `ReadWrite`                      | Primary-thread stack (page-4K)                                           |
+| 0xD0010000-0xD0F0FFFF | 15 MB  | `child_stacks` | `ReadWrite`                      | Stack pool for PPU threads spawned by `sys_ppu_thread_create`            |
 | 0xE0000000-0xFFFFFFFF | 512 MB | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX                    |
 
 The `main` region's internal sub-layout is not tracked by the region
@@ -199,7 +200,7 @@ at the top of `run_until_yield`: the closure holds a
 `[(u64, &[u8]); 8]` snapshot of every region's base and bytes, and
 linear-scans it per load. Linear scan wins over `BTreeMap` lookup
 because the region count stays single-digit under the current PS3
-layout (main, stack, rsx, spu_reserved); if many more mappings are
+layout (main, stack, child_stacks, rsx, spu_reserved); if many more mappings are
 later added, a two-tier fast-path is the natural next
 step. Stores go through `Effect::SharedWriteIntent`
 effects -- the commit pipeline's `apply_commit` is region-aware, so
@@ -210,7 +211,17 @@ stores to any mapped region land correctly.
 `Runtime::step` and `Runtime::commit_step` together implement a
 ten-step deterministic loop:
 
-1. Select a runnable unit via the configured `Scheduler`.
+1. Select a runnable unit via the configured `Scheduler`. The
+   default `RoundRobinScheduler` walks the registry in id
+   order from the position after the last selection, skipping
+   units whose effective status is `Blocked` / `Faulted` /
+   `Finished`. A single-runnable fast path (one iter pass that
+   exits on the second runnable) keeps single-PPU titles off
+   the two-pass rotation. When the registry is non-empty but
+   every unit is `Blocked`, `Runtime::step` returns
+   `StepError::AllBlocked` rather than `NoRunnableUnit` --
+   callers that care about liveness vs terminal stall can
+   distinguish the two.
 2. Grant the unit the per-step `Budget` (default 256 instructions).
 3. Run the unit until it yields (one `ExecutionUnit::run_until_yield`).
    The PPU executes up to Budget instructions per call, batching
@@ -322,7 +333,7 @@ test in the hot loop).
 
 **PPU (`cellgov_ppu`)**: PPC64 interpreter with 32 GPRs, 32 FPRs, PC,
 CR, LR, CTR, XER (carry tracked), TB, and 32 vector registers.
-**91 instruction variants** today, covering integer arithmetic and
+**119 instruction variants** today, covering integer arithmetic and
 logic, D-form and indexed loads/stores with and without update,
 conditional branches with LR/CTR variants, 64-bit multiply and divide
 families, signed and unsigned multiply-high, rotate and mask families
@@ -376,13 +387,18 @@ Includes an SPU ELF loader.
 ## LV2 host
 
 `cellgov_lv2` owns the LV2 state machine: image registry, thread group
-table, syscall classification, syscall dispatch.
+table, PPU thread table, TLS template, child-stack allocator, syscall
+classification, syscall dispatch.
 
-15 syscalls are classified into typed `Lv2Request` variants:
+Classified into typed `Lv2Request` variants:
 
 | Syscall                       | Number  | Behavior                                                                                               |
 | ----------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
 | `sys_process_exit`            | 22      | Cascades Finished to all units in the process.                                                         |
+| `sys_ppu_thread_exit`         | 41      | Finishes the calling unit; wakes joiners with the exit value.                                          |
+| `sys_ppu_thread_yield`        | 43      | No-op scheduling hint; round-robin picks the next runnable unit.                                       |
+| `sys_ppu_thread_join`         | 44      | Either returns exit value immediately or blocks caller on target.                                      |
+| `sys_ppu_thread_create`       | 52      | Allocates stack + TLS, seeds child `PpuState`, registers a new PPU unit mid-run via `PpuFactory`.      |
 | `sys_mutex_create`            | 100     | Allocates a monotonic mutex ID, writes to guest pointer.                                               |
 | `sys_mutex_lock`              | 102     | Stub: returns CELL_OK (single-threaded module_start).                                                  |
 | `sys_mutex_unlock`            | 104     | Stub: returns CELL_OK.                                                                                 |
@@ -394,9 +410,45 @@ table, syscall classification, syscall dispatch.
 | `sys_spu_thread_group_start`  | 173     | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
 | `sys_spu_thread_group_join`   | 177/178 | Blocks caller; wakes when all SPUs in the group finish.                                                |
 | `sys_spu_thread_write_spu_mb` | 190     | Deposits a value into the target SPU's inbound mailbox.                                                |
+| `sys_memory_container_create` | 341     | Allocates a monotonic container id, writes it to guest pointer.                                        |
 | `sys_memory_allocate`         | 348     | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF). |
 | `sys_memory_free`             | 349     | Stub: no-op (CellGov does not track deallocation).                                                     |
+| `sys_memory_get_user_memory_size` | 352 | Writes `sys_memory_info_t` (total / available, 0x0D500000 each) to guest pointer.                     |
 | `sys_tty_write`               | 403     | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing.                                   |
+
+### PPU thread lifecycle
+
+The `PpuThreadTable` in `cellgov_lv2::ppu_thread` tracks every
+PS3-visible PPU thread: the primary (seeded at host construction)
+and any child spawned via `sys_ppu_thread_create`. Each entry
+carries a guest-facing `PpuThreadId`, the runtime `UnitId`, the
+lifecycle state, the creation attributes (entry OPD, arg, stack
+range, priority, TLS base), the exit value (set on
+`sys_ppu_thread_exit`), and a join-waiters list.
+
+State machine: `Runnable -> Blocked(GuestBlockReason)
+-> Runnable` (on wake), or `Runnable -> Finished` (on exit). The
+guest-facing `GuestBlockReason` (currently only models
+`WaitingOnJoin { target }`; richer sync primitives extend it as
+they land) lives next to the thread table; the scheduler sees
+only the opaque `UnitStatus::Blocked`.
+
+Child stacks come from the 15 MB `child_stacks` region at
+`0xD0010000+`. `ThreadStackAllocator` is a deterministic bump
+allocator: two fresh allocators produce byte-identical sequences.
+
+Per-thread TLS is instantiated from the captured `TlsTemplate`:
+`set_tls_template` fires once at boot (from the loader's PT_TLS
+header) and `template.instantiate()` produces a fresh copy of
+the initial bytes plus zero-filled BSS tail for each child.
+
+Mid-run unit registration goes through the `PpuFactory` hook on
+`Runtime` (installed by the CLI boot path). The factory receives
+a `PpuThreadInitState` (resolved entry code address, TOC, arg,
+stack top, TLS base, LR sentinel) and returns a concrete
+`PpuExecutionUnit` with its `PpuState` seeded per the PPC64 ABI.
+This mirrors the SPU factory pattern so `cellgov_core` stays
+independent of `cellgov_ppu`.
 
 Two more are special-cased in the host dispatcher to return spec-correct
 error codes instead of CELL_OK (matching RPCS3 retail behavior):

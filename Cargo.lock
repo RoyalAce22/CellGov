@@ -89,6 +89,7 @@ dependencies = [
  "cellgov_event",
  "cellgov_exec",
  "cellgov_explore",
+ "cellgov_lv2",
  "cellgov_mem",
  "cellgov_ppu",
  "cellgov_spu",

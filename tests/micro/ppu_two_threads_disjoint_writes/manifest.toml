@@ -1,0 +1,60 @@
+[test]
+name = "ppu_two_threads_disjoint_writes"
+
+# Phase 17 structural microtest. No SPU side -- this is a pure
+# PPU multi-threading test. The PPU spawns a second PPU thread
+# via sys_ppu_thread_create, each writes to a disjoint word, the
+# primary joins and reports both words plus the child's exit
+# value over the CGOV TTY protocol.
+
+[rpcs3]
+binary = "build/ppu_two_threads_disjoint_writes.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# TestResult: status + child_word + parent_word + join_retval
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Consumed by `cellgov_cli run-game
+# --title-manifest <this file>`. Same schema shape as the
+# per-title files under docs/titles/, but nested under
+# [cellgov] so one file carries both the RPCS3 harness config
+# (above) and the CellGov run-game config (below).
+#
+# Usage:
+#   1. Build the ELF (requires ps3dev-fresh docker image):
+#        docker run --rm \
+#          -v "$(pwd)/tests/micro/ppu_two_threads_disjoint_writes:/src" \
+#          -v "$(pwd)/tests/micro/common:/common" \
+#          -e COMMON=/common ps3dev-fresh:latest bash /src/build.sh
+#
+#   2. Stage the ELF under dev_hdd0 at the path resolve_eboot()
+#      expects:
+#        mkdir -p tools/rpcs3/dev_hdd0/game/CG_2THREAD/USRDIR
+#        cp tests/micro/ppu_two_threads_disjoint_writes/build/\
+#           ppu_two_threads_disjoint_writes.elf \
+#           tools/rpcs3/dev_hdd0/game/CG_2THREAD/USRDIR/EBOOT.elf
+#
+#   3. Run:
+#        cargo run --release -p cellgov_cli -- run-game \
+#          --title-manifest tests/micro/ppu_two_threads_disjoint_writes/\
+# manifest.toml --max-steps 1000000
+#
+# Expected TTY payload (CGOV magic + 16 bytes):
+#   status=0x00000000 child=0xAAAAAAAA parent=0xBBBBBBBB
+#   join_retval=0xCAFEF00D
+
+[cellgov.title]
+content_id = "CG_2THREAD"
+short_name = "twothread"
+display_name = "CellGov two-thread PPU microtest (Phase 17)"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"

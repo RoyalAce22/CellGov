@@ -5,6 +5,7 @@
 //! variant carries plain data -- no closures, no runtime references.
 
 use cellgov_effects::Effect;
+use cellgov_event::UnitId;
 
 /// How the runtime should complete a dispatched syscall.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +38,56 @@ pub enum Lv2Dispatch {
         /// Effects to commit before blocking.
         effects: Vec<Effect>,
     },
+    /// The calling PPU thread invoked `sys_ppu_thread_exit`. The
+    /// runtime transitions the source unit to
+    /// `UnitStatus::Finished` and wakes each unit in
+    /// `woken_unit_ids` with `exit_value` as its r3. No return
+    /// value is written for the source (the thread is gone).
+    PpuThreadExit {
+        /// Exit value the thread passed to `sys_ppu_thread_exit`.
+        /// Propagated to joiners' r3 when they wake.
+        exit_value: u64,
+        /// Unit ids of blocked joiners to transition back to
+        /// `Runnable`. Empty if no one is currently joining.
+        woken_unit_ids: Vec<UnitId>,
+        /// Effects to commit alongside the exit transition.
+        effects: Vec<Effect>,
+    },
+    /// The calling thread invoked `sys_ppu_thread_create`. The
+    /// runtime allocates a fresh `PpuExecutionUnit`, seeds it per
+    /// the PPC64 ABI (PC, TOC, r1, r3, r13, LR sentinel), inserts
+    /// it into the `PpuThreadTable` via the provided `attrs`, and
+    /// writes the minted thread id into `id_ptr`. Return code for
+    /// the caller is CELL_OK (0).
+    PpuThreadCreate {
+        /// Guest address to write the minted thread id (u64 BE).
+        id_ptr: u32,
+        /// OPD address of the entry function. Runtime resolves
+        /// `code_addr` and `toc` by reading 16 bytes at this
+        /// address from guest memory.
+        entry_opd: u32,
+        /// Stack top (value to load into the child's r1 register).
+        stack_top: u64,
+        /// Child stack block base (lowest address of the reserved
+        /// range). Recorded in thread attrs.
+        stack_base: u64,
+        /// Child stack size.
+        stack_size: u64,
+        /// Argument value for the child's r3 register.
+        arg: u64,
+        /// Base address of the child's per-thread TLS block (0
+        /// when the ELF has no PT_TLS segment). Runtime loads
+        /// this into r13.
+        tls_base: u64,
+        /// Initial bytes to commit at `tls_base` before the child
+        /// starts. Empty when there is no TLS.
+        tls_bytes: Vec<u8>,
+        /// Priority hint captured in thread attrs.
+        priority: u32,
+        /// Effects to commit alongside the create transition
+        /// (e.g. the id_ptr write).
+        effects: Vec<Effect>,
+    },
 }
 
 /// A stable, deterministic, host-side token identifying a loaded SPU
@@ -57,6 +108,35 @@ impl SpuImageHandle {
     pub const fn raw(self) -> u32 {
         self.0
     }
+}
+
+/// Initialization state for a new child PPU thread constructed
+/// by `sys_ppu_thread_create`.
+///
+/// Pure data. The runtime's PPU factory reads these fields to
+/// seed the child's `PpuState` per the PPC64 ABI: PC from
+/// `entry_code`, r2 (TOC) from `entry_toc`, r1 (stack) from
+/// `stack_top`, r3 (argument) from `arg`, r13 (TLS) from
+/// `tls_base`, and LR from the supplied sentinel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PpuThreadInitState {
+    /// Child entry code address (resolved from the OPD).
+    pub entry_code: u64,
+    /// TOC pointer for the child's module (second word of the OPD).
+    pub entry_toc: u64,
+    /// Argument passed to the entry function via r3.
+    pub arg: u64,
+    /// Initial stack pointer (r1). Points at the reserved 16-byte
+    /// back-chain area at the top of the child's stack block.
+    pub stack_top: u64,
+    /// Per-thread TLS base (r13). Zero when the ELF has no
+    /// PT_TLS segment.
+    pub tls_base: u64,
+    /// Sentinel address loaded into LR. When the child's entry
+    /// function returns, execution jumps here -- the runtime
+    /// arranges for a sentinel that triggers
+    /// `sys_ppu_thread_exit(0)`.
+    pub lr_sentinel: u64,
 }
 
 /// Initialization state for a new SPU execution unit.
@@ -92,6 +172,12 @@ pub enum Lv2BlockReason {
         /// The group being joined.
         group_id: u32,
     },
+    /// sys_ppu_thread_join: waiting for a specific PPU thread to
+    /// call sys_ppu_thread_exit.
+    PpuThreadJoin {
+        /// Guest id of the PPU thread being joined.
+        target: u64,
+    },
 }
 
 /// What the runtime should do when a blocked PPU is woken.
@@ -122,6 +208,16 @@ pub enum PendingResponse {
         cause: u32,
         /// Exit status value (filled in at wake time).
         status: u32,
+    },
+    /// On wake, write the PPU child's exit value (u64 big-endian)
+    /// into `status_out_ptr` and set r3 = 0 (CELL_OK).
+    PpuThreadJoin {
+        /// Guest id of the thread being joined. Not strictly
+        /// required for wake (the runtime matches via pending
+        /// table entries), but useful for trace/diagnostics.
+        target: u64,
+        /// Guest address to receive the child's exit value.
+        status_out_ptr: u32,
     },
 }
 

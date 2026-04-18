@@ -307,7 +307,7 @@ pub(super) fn run_module_start(
                     );
                 }
             }
-            Err(StepError::NoRunnableUnit) => {
+            Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
                 break format!("STALL after {} steps", steps);
             }
             Err(StepError::MaxStepsExceeded) => {

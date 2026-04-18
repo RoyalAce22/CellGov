@@ -16,8 +16,9 @@ use cellgov_time::Budget;
 use super::manifest::TitleManifest;
 use super::prx::{build_nid_map, load_firmware_prx, pre_init_tls, run_module_start, PrxLoadInfo};
 use super::{
-    PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_TOP, PS3_RSX_BASE,
-    PS3_RSX_SIZE, PS3_SPU_RESERVED_BASE, PS3_SPU_RESERVED_SIZE,
+    PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
+    PS3_PRIMARY_STACK_TOP, PS3_RSX_BASE, PS3_RSX_SIZE, PS3_SPU_RESERVED_BASE,
+    PS3_SPU_RESERVED_SIZE,
 };
 use crate::{die, load_file_or_die};
 
@@ -123,6 +124,12 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             PS3_PRIMARY_STACK_BASE,
             PS3_PRIMARY_STACK_SIZE,
             "stack",
+            cellgov_mem::PageSize::Page4K,
+        ),
+        cellgov_mem::Region::new(
+            PS3_CHILD_STACKS_BASE,
+            PS3_CHILD_STACKS_SIZE,
+            "child_stacks",
             cellgov_mem::PageSize::Page4K,
         ),
         cellgov_mem::Region::with_access(
@@ -331,6 +338,12 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     rt.set_hle_heap_base(0x10410000);
     rt.set_hle_nids(build_nid_map(&hle_bindings));
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
+    if let Some((bytes, memsz, align, vaddr)) =
+        cellgov_ppu::loader::extract_tls_template_bytes(&elf_data)
+    {
+        rt.lv2_host_mut()
+            .set_tls_template(cellgov_lv2::TlsTemplate::new(bytes, memsz, align, vaddr));
+    }
     rt.registry_mut().register_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
         *unit.state_mut() = state;
@@ -342,6 +355,28 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             unit.set_profile_mode(true);
         }
         unit
+    });
+
+    // Install a PPU factory so `sys_ppu_thread_create` can spawn
+    // child units mid-run. Child threads start with zeroed state
+    // plus the ABI fields the init state specifies; they run
+    // through the decode-on-fetch fallback rather than a
+    // per-thread predecoded shadow (the shadow is not Clone
+    // today, and spawning enough child threads to make
+    // rebuilding per child worth the complexity is not a
+    // workload we currently exercise).
+    rt.set_ppu_factory(|id, init| {
+        let mut unit = PpuExecutionUnit::new(id);
+        {
+            let state = unit.state_mut();
+            state.pc = init.entry_code;
+            state.gpr[1] = init.stack_top;
+            state.gpr[2] = init.entry_toc;
+            state.gpr[3] = init.arg;
+            state.gpr[13] = init.tls_base;
+            state.lr = init.lr_sentinel;
+        }
+        Box::new(unit)
     });
 
     PreparedBoot {
