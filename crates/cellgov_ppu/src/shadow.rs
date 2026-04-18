@@ -358,6 +358,40 @@ fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<PpuInstructio
                 offset: imm,
             })
         }
+        // mflr rT + std rT, off(rA) (PPC64 prologue)
+        (PpuInstruction::Mflr { rt }, PpuInstruction::Std { rs, ra, imm }) if rt == rs => {
+            Some(PpuInstruction::MflrStd {
+                rt,
+                ra_store: ra,
+                store_offset: imm,
+            })
+        }
+        // ld rT, off(rA) + mtlr rT (PPC64 epilogue)
+        (PpuInstruction::Ld { rt, ra, imm }, PpuInstruction::Mtlr { rs }) if rt == rs => {
+            Some(PpuInstruction::LdMtlr {
+                rt,
+                ra_load: ra,
+                offset: imm,
+            })
+        }
+        // std rS1, off1(rA) + std rS2, off2(rA) where off2 = off1 + 8
+        (
+            PpuInstruction::Std {
+                rs: rs1,
+                ra: ra1,
+                imm: off1,
+            },
+            PpuInstruction::Std {
+                rs: rs2,
+                ra: ra2,
+                imm: off2,
+            },
+        ) if ra1 == ra2 && off2 == off1.wrapping_add(8) => Some(PpuInstruction::StdStd {
+            rs1,
+            rs2,
+            ra: ra1,
+            offset1: off1,
+        }),
         // lwz rT, off(rA) + CmpwZero crF, rT (quickened cmpwi-zero)
         (PpuInstruction::Lwz { rt, ra, imm }, PpuInstruction::CmpwZero { bf, ra: cmp_ra })
             if rt == cmp_ra =>
@@ -799,6 +833,16 @@ mod tests {
         (31 << 26) | (rs << 21) | (8 << 16) | (467 << 1)
     }
 
+    /// Encode `ld rT, off(rA)` (opcode 58, DS-form with sub=0).
+    fn ld_raw(rt: u32, ra: u32, off: i16) -> u32 {
+        (58 << 26) | (rt << 21) | (ra << 16) | ((off as u16 as u32) & 0xFFFC)
+    }
+
+    /// Encode `std rS, off(rA)` (opcode 62, DS-form with sub=0).
+    fn std_raw(rs: u32, ra: u32, off: i16) -> u32 {
+        (62 << 26) | (rs << 21) | (ra << 16) | ((off as u16 as u32) & 0xFFFC)
+    }
+
     #[test]
     fn super_pair_lwz_cmpwi() {
         // lwz r3, 8(r1) + cmpwi cr0, r3, 42
@@ -885,6 +929,66 @@ mod tests {
         let shadow = build_from_words(0, &[lwz_raw(3, 1, 16), mtlr_raw(0)]);
         assert!(matches!(shadow.get(0), Some(PpuInstruction::Lwz { .. })));
         assert!(matches!(shadow.get(4), Some(PpuInstruction::Mtlr { .. })));
+    }
+
+    #[test]
+    fn super_pair_mflr_std() {
+        let shadow = build_from_words(0, &[mflr_raw(0), std_raw(0, 1, 16)]);
+        assert_eq!(
+            shadow.get(0),
+            Some(PpuInstruction::MflrStd {
+                rt: 0,
+                ra_store: 1,
+                store_offset: 16,
+            })
+        );
+        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
+    }
+
+    #[test]
+    fn super_pair_ld_mtlr() {
+        let shadow = build_from_words(0, &[ld_raw(0, 1, 16), mtlr_raw(0)]);
+        assert_eq!(
+            shadow.get(0),
+            Some(PpuInstruction::LdMtlr {
+                rt: 0,
+                ra_load: 1,
+                offset: 16,
+            })
+        );
+        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
+    }
+
+    #[test]
+    fn super_pair_std_std_adjacent() {
+        // std r3, 0(r1) + std r4, 8(r1): fuse (same base, off2 = off1+8).
+        let shadow = build_from_words(0, &[std_raw(3, 1, 0), std_raw(4, 1, 8)]);
+        assert_eq!(
+            shadow.get(0),
+            Some(PpuInstruction::StdStd {
+                rs1: 3,
+                rs2: 4,
+                ra: 1,
+                offset1: 0,
+            })
+        );
+        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
+    }
+
+    #[test]
+    fn super_pair_std_std_nonadjacent_no_fuse() {
+        // std r3, 0(r1) + std r4, 16(r1): offset gap != 8, no fuse.
+        let shadow = build_from_words(0, &[std_raw(3, 1, 0), std_raw(4, 1, 16)]);
+        assert!(matches!(shadow.get(0), Some(PpuInstruction::Std { .. })));
+        assert!(matches!(shadow.get(4), Some(PpuInstruction::Std { .. })));
+    }
+
+    #[test]
+    fn super_pair_std_std_different_base_no_fuse() {
+        // std r3, 0(r1) + std r4, 8(r2): different base, no fuse.
+        let shadow = build_from_words(0, &[std_raw(3, 1, 0), std_raw(4, 2, 8)]);
+        assert!(matches!(shadow.get(0), Some(PpuInstruction::Std { .. })));
+        assert!(matches!(shadow.get(4), Some(PpuInstruction::Std { .. })));
     }
 
     #[test]

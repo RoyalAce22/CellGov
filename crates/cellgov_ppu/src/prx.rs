@@ -445,7 +445,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_flow_imports() {
+    fn parse_retail_eboot_imports() {
+        // Exercises the import parser against a real retail EBOOT
+        // (the fixture under tools/rpcs3/dev_hdd0/). Any PS3 game
+        // binary will work; the assertions pin this specific fixture
+        // so the test fails if the import layout is misparsed.
         let path =
             std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
         if !path.exists() {
@@ -456,12 +460,13 @@ mod tests {
 
         assert!(!modules.is_empty(), "should find imported modules");
 
-        // flOw imports 12 modules with 140 functions total.
         let total_funcs: usize = modules.iter().map(|m| m.functions.len()).sum();
         assert_eq!(modules.len(), 12);
         assert_eq!(total_funcs, 140);
 
-        // Spot-check known modules.
+        // Spot-check three modules nearly every retail PS3 game imports:
+        // the sysutil helper library, the sysPrxForUser CRT layer, and
+        // cellGcmSys for the RSX command-buffer setup.
         let names: Vec<&str> = modules.iter().map(|m| m.name.as_str()).collect();
         assert!(names.contains(&"cellSysutil"));
         assert!(names.contains(&"sysPrxForUser"));

@@ -1,4 +1,4 @@
-//! Crypto keys and primitives for PS3 firmware decryption.
+//! Crypto keys for PS3 firmware and SELF decryption.
 
 pub const PUP_KEY: [u8; 0x40] = [
     CELLGOV-REDACTED-KEY
@@ -15,3 +15,90 @@ pub const SCEPKG_ERK: [u8; 0x20] = [
 pub const SCEPKG_RIV: [u8; 0x10] = [
     CELLGOV-REDACTED-KEY,
 ];
+
+pub struct SelfKey {
+    pub erk: [u8; 0x20],
+    pub riv: [u8; 0x10],
+}
+
+fn hex_to_bytes_32(s: &str) -> [u8; 0x20] {
+    let mut out = [0u8; 0x20];
+    for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
+        out[i] = u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16).unwrap();
+    }
+    out
+}
+
+fn hex_to_bytes_16(s: &str) -> [u8; 0x10] {
+    let mut out = [0u8; 0x10];
+    for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
+        out[i] = u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16).unwrap();
+    }
+    out
+}
+
+pub fn app_key_for_revision(revision: u16) -> Option<SelfKey> {
+    let (erk_hex, riv_hex) = match revision {
+        0x0000 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x0001 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x0002 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x0003 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x0004 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x0005 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x0006 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x0007 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x0008 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x0009 => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x000A => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x000B => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x000C => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        0x000D => (
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+        _ => return None,
+    };
+    Some(SelfKey {
+        erk: hex_to_bytes_32(erk_hex),
+        riv: hex_to_bytes_16(riv_hex),
+    })
+}

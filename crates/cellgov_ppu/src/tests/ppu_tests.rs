@@ -820,16 +820,18 @@ fn mailbox_roundtrip_lv2_driven() {
 // -- Real game ELF loading --
 
 #[test]
-fn flow_eboot_loads_into_guest_memory() {
+fn retail_eboot_loads_into_guest_memory() {
     let path =
         std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
     if !path.exists() {
-        return; // skip if flOw not installed
+        return; // skip if the fixture is not installed
     }
     let data = std::fs::read(&path).unwrap();
 
     let mut state = state::PpuState::new();
-    // flOw needs ~260 MB for the 0x10000000 read-only segment
+    // A small retail EBOOT's highest PT_LOAD in this fixture sits at
+    // 0x10000000 (a PS3-standard read-only segment placement), so
+    // guest memory must span up to that plus the segment footprint.
     let mut mem = GuestMemory::new(0x10400000);
     let result = loader::load_ppu_elf(&data, &mut mem, &mut state).unwrap();
 
@@ -866,11 +868,12 @@ fn flow_eboot_loads_into_guest_memory() {
     );
 }
 
-/// Boot progress regression: load flOw, run PPU, assert execution
-/// begins and record the fault. Assertions advance as the boot
-/// frontier extends.
+/// Boot progress regression: load a retail EBOOT, run the PPU, and
+/// assert execution begins. Pins the current end-of-boot condition
+/// for the wired test fixture so regressions surface as test
+/// failures rather than silent behavior changes.
 #[test]
-fn flow_boot_progress() {
+fn retail_boot_progress() {
     use cellgov_core::{Runtime, StepError};
 
     let path =
@@ -1457,12 +1460,14 @@ fn shadow_inv_partial_word_write() {
 // -- Phase 14 coverage: mid-block fault recovery --
 
 #[test]
-fn mid_block_fault_triggers_snapshot_restore_and_retry() {
+fn mid_block_fault_rolls_back_and_propagates_directly() {
     // Two instructions: addi r3, r3, 1 (succeeds), then lwz from a
-    // bad address (faults). At Budget>1 the first instruction retires,
-    // then the fault triggers snapshot restore + budget_override=1.
-    // After re-execution at Budget=1 the first instruction commits
-    // individually, and the second faults normally.
+    // bad address (faults). At Budget>1 the addi retires locally;
+    // when lwz faults the fault rule discards every effect from the
+    // batch, so state must roll back to the snapshot for determinism.
+    // The fault then propagates directly in one yield -- the
+    // diagnostic reports the actual faulting PC even though state
+    // is rolled back to the batch start.
     let mut mem = GuestMemory::new(256);
     let addi_r3: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1; // addi r3,r3,1
     let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16); // lwz r4, 0(r5)
@@ -1473,37 +1478,25 @@ fn mid_block_fault_triggers_snapshot_restore_and_retry() {
     unit.state_mut().gpr[3] = 10;
     unit.state_mut().gpr[5] = 0xFFFF_0000; // bad address
 
-    // Step 1: Budget=64, addi succeeds then lwz faults mid-block.
-    // Snapshot restores state to gpr[3]=10, yields BudgetExhausted.
     let ctx = ExecutionContext::new(&mem);
     let mut effects = Vec::new();
-    let r1 = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
-    assert_eq!(r1.yield_reason, YieldReason::BudgetExhausted);
-    assert!(r1.fault.is_none(), "snapshot restore yields no fault");
+    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
+
+    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert!(result.fault.is_some());
+    assert_eq!(unit.status(), UnitStatus::Faulted);
     assert_eq!(
         unit.state().gpr[3],
         10,
-        "GPR[3] restored to pre-block value"
+        "GPR[3] rolled back to pre-block value (fault rule discards all effects)"
     );
-    assert_eq!(unit.state().pc, 0, "PC restored to block start");
-    assert!(effects.is_empty(), "effects cleared on restore");
-
-    // Step 2: budget_override=1, executes addi r3,r3,1 only.
-    let ctx2 = ExecutionContext::new(&mem);
-    let mut effects2 = Vec::new();
-    let r2 = unit.run_until_yield(Budget::new(64), &ctx2, &mut effects2);
-    assert_eq!(r2.yield_reason, YieldReason::BudgetExhausted);
-    assert_eq!(unit.state().gpr[3], 11, "addi retired at Budget=1");
-    assert_eq!(unit.state().pc, 4, "PC advanced past addi");
-
-    // Step 3: budget_override cleared, Budget=64 again. lwz faults
-    // on first instruction (no prior retirements), so fault is direct.
-    let ctx3 = ExecutionContext::new(&mem);
-    let mut effects3 = Vec::new();
-    let r3 = unit.run_until_yield(Budget::new(64), &ctx3, &mut effects3);
-    assert_eq!(r3.yield_reason, YieldReason::Fault);
-    assert!(r3.fault.is_some());
-    assert_eq!(unit.status(), UnitStatus::Faulted);
+    assert_eq!(unit.state().pc, 0, "PC rolled back to block start");
+    assert!(effects.is_empty(), "no effects committed");
+    assert_eq!(
+        result.local_diagnostics.pc,
+        Some(4),
+        "diagnostic reports the actual faulting PC, not the batch start"
+    );
 }
 
 #[test]

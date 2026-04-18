@@ -128,6 +128,18 @@ pub enum Lv2Request {
         /// Guest address to free.
         addr: u32,
     },
+    /// sys_memory_get_user_memory_size (352).
+    MemoryGetUserMemorySize {
+        /// Guest address of `sys_memory_info_t` output struct.
+        mem_info_ptr: u32,
+    },
+    /// sys_memory_container_create (341).
+    MemoryContainerCreate {
+        /// Guest address to write the allocated container id into.
+        cid_ptr: u32,
+        /// Container size in bytes.
+        size: u64,
+    },
     /// sys_process_exit (22).
     ProcessExit {
         /// Exit code.
@@ -214,6 +226,13 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
         },
         349 => Lv2Request::MemoryFree {
             addr: args[0] as u32,
+        },
+        352 => Lv2Request::MemoryGetUserMemorySize {
+            mem_info_ptr: args[0] as u32,
+        },
+        341 => Lv2Request::MemoryContainerCreate {
+            cid_ptr: args[0] as u32,
+            size: args[1],
         },
         n => Lv2Request::Unsupported { number: n },
     }

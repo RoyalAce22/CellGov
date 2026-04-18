@@ -49,27 +49,38 @@ CellGov answers that question:
 
 Pre-Alpha. Capability today:
 
-- **Titles: 2** -- flOw (NPUA80001) cross-runner verified against
-  RPCS3; Super Stardust HD (NPUA80068) reaches FirstRsxWrite with
-  cross-runner divergence report.
-  Manifest-driven: adding a title is one TOML file, no Rust change.
-- **PPU: 117 instruction variants**, including quickened
-  specializations and superinstruction compounds. Full SPU
-  interpreter.
-- **LV2: 16 syscalls**, 16 HLE exports with dedicated handling
-  (including cellGcmSys RSX init cluster).
+- **Titles: 3** -- flOw (NPUA80001), Super Stardust HD (NPUA80068),
+  WipEout HD Fury (BCES00664). All three boot to their checkpoints
+  with cross-runner observation match against RPCS3 (modulo
+  classified non-semantic divergences). See [docs/titles.md](docs/titles.md)
+  for the per-title compatibility matrix. Manifest-driven: adding a
+  title is one TOML file, no Rust change.
+- **PPU: 119 instruction variants**, including 5 quickened forms
+  (Li, Mr, Slwi, Srwi, Clrlwi), 3 doubleword quickenings (Clrldi,
+  Sldi, Srdi), and 9 superpairs (LwzCmpwi, LiStw, MflrStw, LwzMtlr,
+  CmpwiBc, CmpwBc, MflrStd, LdMtlr, StdStd). Full SPU interpreter.
+- **LV2: 18 syscalls**, 18 HLE exports with dedicated handling
+  (including cellGcmSys RSX init cluster, memory-info queries, and
+  per-thread identity).
 - **Memory**: PS3-spec sparse address space with store-forwarding
   buffer for intra-block coherence.
-- **Throughput**: basic-block batching (Budget=256), predecoded
-  instruction shadow with quickening and super-pairing.
+- **Throughput**: basic-block batching with mode-driven step budget
+  (default 256, `--budget N` overrides) over a predecoded
+  instruction shadow with quickening and super-pairing. Three
+  foundation titles boot at ~36-56M insns/sec to their checkpoints.
 - **Tracing**: per-instruction state hashes, streaming divergence
   scanner, register-level zoom-in.
 - **Cross-runner**: observation schema validated against RPCS3;
-  reproducible boot bench with subprocess isolation.
-- **Firmware**: standalone PUP decrypter (`cellgov_firmware`) extracts
-  PS3 system modules from Sony's official firmware update without
-  requiring RPCS3.
-- 1184 tests, zero `unsafe` (`unsafe_code = forbid`).
+  reproducible boot bench with subprocess isolation; disc ISOs
+  supported via `cellgov_firmware decrypt-self`.
+- **Firmware**: standalone PUP decrypter (`cellgov_firmware`)
+  extracts PS3 system modules from Sony's official firmware update
+  without requiring RPCS3; also decrypts retail game SELFs to ELFs
+  for disc-format titles.
+- **NID database**: 5,327 PS3 library function name mappings
+  merged from RPCS3's module registrations (99%+ of imports named
+  in the per-title HLE inventories).
+- 1,205 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [`docs/architecture.md`](docs/architecture.md) for full
 technical details on the pipeline, memory model, shadow passes,

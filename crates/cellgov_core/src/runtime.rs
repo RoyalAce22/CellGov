@@ -168,6 +168,19 @@ pub enum RuntimeMode {
     FullTrace,
 }
 
+/// Default per-step budget for a given mode. `FullTrace` returns 1
+/// because per-step `PpuStateHash` records require single-instruction
+/// yields to attribute hashes to specific PCs; the other modes
+/// return the throughput batch size (256), where basic-block batching
+/// and store forwarding give the foundational ~5x speedup over
+/// Budget=1. Callers may override via [`Runtime::set_budget`].
+pub fn default_budget_for_mode(mode: RuntimeMode) -> Budget {
+    match mode {
+        RuntimeMode::FullTrace => Budget::new(1),
+        RuntimeMode::FaultDriven | RuntimeMode::DeterminismCheck => Budget::new(256),
+    }
+}
+
 /// Deterministic step-loop runtime over guest memory and registered units.
 pub struct Runtime {
     pub(crate) registry: UnitRegistry,
@@ -343,8 +356,11 @@ impl Runtime {
         // Notify units that cached decoded instructions about any
         // committed code writes so their predecoded shadow can
         // mark the affected slots stale. Only fires when effects
-        // contain SharedWriteIntent (stores), which is rare in the
-        // SSHD hot loop.
+        // contain SharedWriteIntent (stores), which is rare on
+        // normal game hot loops (code and data segments are
+        // separated by PT_LOAD boundaries) but required for
+        // correctness whenever a title does self-modifying code
+        // or runtime relocations after initial load.
         if outcome.is_ok() {
             for effect in effects {
                 if let cellgov_effects::Effect::SharedWriteIntent { range, .. } = effect {
@@ -782,12 +798,16 @@ impl Runtime {
     }
 
     /// Change the per-step budget grant. The new budget takes
-    /// effect on the next `step()` call. Used by bench-boot to
-    /// switch from Budget=1 (fault-driven boot) to a higher budget
-    /// (throughput measurement) after the boot preparation is done
-    /// and all boot-time writes are committed.
+    /// effect on the next `step()` call. Callers that want the
+    /// natural budget for a mode should use
+    /// [`default_budget_for_mode`] instead of picking a number.
     pub fn set_budget(&mut self, budget: Budget) {
         self.budget_per_step = budget;
+    }
+
+    /// Per-step budget the runtime currently grants units.
+    pub fn budget(&self) -> Budget {
+        self.budget_per_step
     }
 
     /// Combined hash of every sync source the runtime owns: mailbox

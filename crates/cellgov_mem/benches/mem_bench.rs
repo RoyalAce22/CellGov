@@ -3,10 +3,13 @@
 //! Measures: content_hash throughput at 1 MB, 16 MB, 260 MB, and 1 GB;
 //! apply_commit latency; FNV-1a raw throughput.
 //!
-//! The 1 GB size matches the worst case of `cellgov_cli run-game`, which
-//! sizes guest memory to `min_for_kernel = 0x40000000` to cover flOw's
-//! kernel alloc region. The 260 MB intermediate point covers ELF loading
-//! patterns; 1 GB covers full-boot content_hash cost.
+//! The 1 GB size matches the worst case of `cellgov_cli run-game`,
+//! which sizes guest memory to `min_for_kernel = 0x40000000` so the
+//! 1 GB user region defined by the PS3 LV2 VA layout is fully
+//! backed. The 260 MB intermediate point represents the upper end of
+//! a typical retail EBOOT's PT_LOAD footprint; 1 GB covers full-boot
+//! content_hash cost once the allocator has walked into the kernel
+//! alloc region.
 
 #![allow(missing_docs)]
 

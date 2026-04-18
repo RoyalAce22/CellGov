@@ -1,9 +1,8 @@
-//! Decrypt PS3 firmware from a PS3UPDAT.PUP file.
+//! PS3 firmware and SELF decryption tools.
 //!
-//! Usage: `cellgov_firmware install <PUP_PATH> [--output <dir>]`
-//!
-//! Downloads the PUP from playstation.com, then run this tool to
-//! produce the decrypted SPRX modules CellGov needs.
+//! Subcommands:
+//!   install <PUP_PATH> [--output <dir>]  -- decrypt firmware PUP
+//!   decrypt-self <SELF_PATH> [--output <path>] -- decrypt game EBOOT.BIN to ELF
 
 mod crypto;
 mod pup;
@@ -14,8 +13,65 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 3 || args[1] != "install" {
-        eprintln!("usage: cellgov_firmware install <PUP_PATH> [--output <dir>]");
+    if args.len() < 3 {
+        print_usage();
+        std::process::exit(1);
+    }
+
+    match args[1].as_str() {
+        "install" => cmd_install(&args),
+        "decrypt-self" => cmd_decrypt_self(&args),
+        _ => {
+            print_usage();
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_usage() {
+    eprintln!("usage:");
+    eprintln!("  cellgov_firmware install <PUP_PATH> [--output <dir>]");
+    eprintln!("  cellgov_firmware decrypt-self <SELF_PATH> [--output <path>]");
+}
+
+fn cmd_decrypt_self(args: &[String]) {
+    let self_path = Path::new(&args[2]);
+    let output_path = if args.len() >= 5 && args[3] == "--output" {
+        PathBuf::from(&args[4])
+    } else {
+        let stem = self_path.file_stem().unwrap_or_default().to_string_lossy();
+        self_path.with_file_name(format!("{stem}.elf"))
+    };
+
+    let data = std::fs::read(self_path).unwrap_or_else(|e| {
+        eprintln!("failed to read {}: {e}", self_path.display());
+        std::process::exit(1);
+    });
+    println!(
+        "cellgov_firmware: decrypting {} ({:.1} MB)",
+        self_path.display(),
+        data.len() as f64 / (1024.0 * 1024.0)
+    );
+
+    let elf = sce::decrypt_self_to_elf(&data).unwrap_or_else(|e| {
+        eprintln!("SELF decryption failed: {e}");
+        std::process::exit(1);
+    });
+
+    std::fs::write(&output_path, &elf).unwrap_or_else(|e| {
+        eprintln!("failed to write {}: {e}", output_path.display());
+        std::process::exit(1);
+    });
+    println!(
+        "cellgov_firmware: wrote {} ({:.1} MB)",
+        output_path.display(),
+        elf.len() as f64 / (1024.0 * 1024.0)
+    );
+}
+
+fn cmd_install(args: &[String]) {
+    if args.len() < 3 {
+        print_usage();
         std::process::exit(1);
     }
 

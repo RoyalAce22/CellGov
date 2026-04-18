@@ -63,9 +63,13 @@ pub(crate) fn execute_vx(
         0x444 => vsrah(a, b), // vsrah
         0x304 => vsrab(a, b), // vsrab
 
-        // -- Splat --
-        0x18c => vspltw(a, b, va), // vspltw (va is the index)
-        0x38c => vspltisw(va),     // vspltisw (va is sign-extended 5-bit imm)
+        // -- Splat (PPC AltiVec ISA XO values) --
+        0x20c => vspltb(b, va),    // vspltb (va is byte index)
+        0x24c => vsplth(b, va),    // vsplth (va is halfword index)
+        0x28c => vspltw(a, b, va), // vspltw (va is word index, signature kept)
+        0x30c => vspltisb(va),     // vspltisb (sign-extended 5-bit imm)
+        0x34c => vspltish(va),     // vspltish
+        0x38c => vspltisw(va),     // vspltisw
 
         // -- Merge --
         0x00c => vmrghb(a, b), // vmrghb
@@ -80,6 +84,10 @@ pub(crate) fn execute_vx(
 
         // -- Subtract --
         0x600 => vsub_ubytes_sat(a, b), // vsububs (saturating)
+
+        // -- Int <-> Float conversions (VX-form, va field is uimm scale) --
+        0x34a => vcfsx(b, va), // vcfsx
+        0x38a => vcfux(b, va), // vcfux
 
         _ => {
             return ExecuteVerdict::Fault(PpuFault::UnsupportedSyscall(xo as u64));
@@ -263,6 +271,49 @@ fn vspltisw(imm: u8) -> u128 {
     u128::from_be_bytes(r)
 }
 
+fn vspltb(b: u128, idx: u8) -> u128 {
+    let bb = b.to_be_bytes();
+    let byte = bb[idx as usize & 0xF];
+    u128::from_be_bytes([byte; 16])
+}
+
+fn vsplth(b: u128, idx: u8) -> u128 {
+    let bb = b.to_be_bytes();
+    let start = (idx as usize & 7) * 2;
+    let half = u16::from_be_bytes([bb[start], bb[start + 1]]);
+    let mut r = [0u8; 16];
+    for i in (0..16).step_by(2) {
+        let bytes = half.to_be_bytes();
+        r[i] = bytes[0];
+        r[i + 1] = bytes[1];
+    }
+    u128::from_be_bytes(r)
+}
+
+fn vspltisb(imm: u8) -> u128 {
+    let val = if imm & 0x10 != 0 {
+        (imm | 0xE0) as i8
+    } else {
+        imm as i8
+    };
+    u128::from_be_bytes([val as u8; 16])
+}
+
+fn vspltish(imm: u8) -> u128 {
+    let val = if imm & 0x10 != 0 {
+        (imm as i8 | !0x1F_u8 as i8) as i16
+    } else {
+        imm as i16
+    };
+    let half = (val as u16).to_be_bytes();
+    let mut r = [0u8; 16];
+    for i in (0..16).step_by(2) {
+        r[i] = half[0];
+        r[i + 1] = half[1];
+    }
+    u128::from_be_bytes(r)
+}
+
 fn vmrghb(a: u128, b: u128) -> u128 {
     let ab = a.to_be_bytes();
     let bb = b.to_be_bytes();
@@ -393,4 +444,124 @@ fn vsldoi(a: u128, b: u128, sh: u8) -> u128 {
         r[i] = concat[(i + shift) % 32];
     }
     u128::from_be_bytes(r)
+}
+
+fn vcfsx(b: u128, uimm: u8) -> u128 {
+    let bytes = b.to_be_bytes();
+    let mut r = [0u8; 16];
+    let scale = (1u32 << uimm) as f32;
+    for i in 0..4 {
+        let off = i * 4;
+        let v = i32::from_be_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
+        let f = (v as f32) / scale;
+        r[off..off + 4].copy_from_slice(&f.to_be_bytes());
+    }
+    u128::from_be_bytes(r)
+}
+
+fn vcfux(b: u128, uimm: u8) -> u128 {
+    let bytes = b.to_be_bytes();
+    let mut r = [0u8; 16];
+    let scale = (1u32 << uimm) as f32;
+    for i in 0..4 {
+        let off = i * 4;
+        let v = u32::from_be_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
+        let f = (v as f32) / scale;
+        r[off..off + 4].copy_from_slice(&f.to_be_bytes());
+    }
+    u128::from_be_bytes(r)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pack_u32x4(lanes: [u32; 4]) -> u128 {
+        let mut r = [0u8; 16];
+        for (i, v) in lanes.iter().enumerate() {
+            r[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
+        }
+        u128::from_be_bytes(r)
+    }
+
+    fn unpack_f32x4(v: u128) -> [f32; 4] {
+        let b = v.to_be_bytes();
+        let mut r = [0.0f32; 4];
+        for i in 0..4 {
+            r[i] = f32::from_be_bytes([b[i * 4], b[i * 4 + 1], b[i * 4 + 2], b[i * 4 + 3]]);
+        }
+        r
+    }
+
+    #[test]
+    fn vcfsx_converts_signed_ints_with_scale() {
+        // vcfsx(v, uimm): four signed-i32 lanes -> float / 2^uimm.
+        let v = pack_u32x4([1i32 as u32, (-1i32) as u32, 1024u32, (-1024i32) as u32]);
+        let lanes = unpack_f32x4(vcfsx(v, 0));
+        assert_eq!(lanes, [1.0, -1.0, 1024.0, -1024.0]);
+
+        let lanes2 = unpack_f32x4(vcfsx(v, 10));
+        assert_eq!(lanes2, [1.0 / 1024.0, -1.0 / 1024.0, 1.0, -1.0]);
+    }
+
+    #[test]
+    fn vcfux_converts_unsigned_ints_with_scale() {
+        // vcfux reads lanes as unsigned -- the sign bit pattern
+        // 0xFFFF_FFFF decodes as ~4.29e9, not -1.
+        let v = pack_u32x4([0, 1, 0xFFFF_FFFF, 0x8000_0000]);
+        let lanes = unpack_f32x4(vcfux(v, 0));
+        assert_eq!(lanes[0], 0.0);
+        assert_eq!(lanes[1], 1.0);
+        // 0xFFFF_FFFF as u32 as f32 rounds to 2^32.
+        assert!((lanes[2] - 4294967296.0).abs() < 1.0);
+        assert!((lanes[3] - 2147483648.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn vspltb_replicates_byte_index() {
+        // vspltb(b, idx): take byte at position idx and splat to all 16.
+        let src = u128::from_be_bytes([
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE,
+            0xFF, 0x10,
+        ]);
+        let result = vspltb(src, 4); // byte[4] = 0x55
+        assert_eq!(result, u128::from_be_bytes([0x55; 16]));
+    }
+
+    #[test]
+    fn vsplth_replicates_halfword_index() {
+        // vsplth(b, idx): halfword at position idx splatted to all 8 halves.
+        let src = u128::from_be_bytes([
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE,
+            0xFF, 0x10,
+        ]);
+        let result = vsplth(src, 2); // halfword[2] = bytes[4..6] = 0x5566
+        let mut expected = [0u8; 16];
+        for i in (0..16).step_by(2) {
+            expected[i] = 0x55;
+            expected[i + 1] = 0x66;
+        }
+        assert_eq!(result, u128::from_be_bytes(expected));
+    }
+
+    #[test]
+    fn vspltisb_sign_extends_5_bit_immediate() {
+        // Positive immediate: byte value = imm.
+        assert_eq!(vspltisb(7), u128::from_be_bytes([7; 16]));
+        // Negative (bit 4 set): byte value sign-extended.
+        // imm = 0x1F = -1 as 5-bit signed; byte should be 0xFF.
+        assert_eq!(vspltisb(0x1F), u128::from_be_bytes([0xFF; 16]));
+    }
+
+    #[test]
+    fn vspltish_sign_extends_to_halfword() {
+        // vspltish imm=3 -> every halfword = 0x0003.
+        let mut expected = [0u8; 16];
+        for i in (0..16).step_by(2) {
+            expected[i + 1] = 3;
+        }
+        assert_eq!(vspltish(3), u128::from_be_bytes(expected));
+        // imm=0x1F -> -1 as halfword = 0xFFFF.
+        assert_eq!(vspltish(0x1F), u128::from_be_bytes([0xFF; 16]));
+    }
 }
