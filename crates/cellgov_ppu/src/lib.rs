@@ -345,19 +345,6 @@ impl ExecutionUnit for PpuExecutionUnit {
         }
         let region_views = &region_views_storage[..n_regions];
 
-        // Helper: build a memory-fault step result.
-        macro_rules! mem_fault {
-            ($step_pc:expr, $ea:expr, $budget:expr, $remaining:expr) => {
-                ExecutionStepResult {
-                    yield_reason: YieldReason::Fault,
-                    consumed_budget: Budget::new($budget.raw() - $remaining),
-                    local_diagnostics: self.fault_diag_ea($step_pc, $ea),
-                    fault: Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)),
-                    syscall_args: None,
-                }
-            };
-        }
-
         loop {
             // Capture PC before fetch/decode/execute for diagnostics.
             let step_pc = self.state.pc;
@@ -454,22 +441,23 @@ impl ExecutionUnit for PpuExecutionUnit {
                     };
                 }
                 ExecuteVerdict::Fault(f) => {
+                    // Capture fault diagnostic at the failing instruction
+                    // BEFORE any state rollback so registers reflect the
+                    // actual fault context (not the batch-start snapshot).
+                    let diag = self.fault_diag(step_pc);
+                    // Roll back to snapshot when faulting mid-batch: the
+                    // fault rule discards every effect emitted in this
+                    // batch, so state must roll back to keep register
+                    // and memory views consistent.
                     if remaining < max_budget {
                         if let Some(snap) = snapshot.as_ref() {
                             self.state = snap.clone();
-                            effects.clear();
                             self.store_buf.clear();
-                            self.budget_override = Some(1);
-                            return ExecutionStepResult {
-                                yield_reason: YieldReason::BudgetExhausted,
-                                consumed_budget: Budget::new(0),
-                                local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                                fault: None,
-                                syscall_args: None,
-                            };
                         }
+                    } else {
+                        self.store_buf.flush(effects, self.id);
                     }
-                    self.store_buf.flush(effects, self.id);
+                    effects.clear();
                     self.status = UnitStatus::Faulted;
                     let code = match f {
                         PpuFault::PcOutOfRange(a) => FAULT_PC_OUT_OF_RANGE | a as u32,
@@ -478,31 +466,34 @@ impl ExecutionUnit for PpuExecutionUnit {
                     };
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_budget: Budget::new(budget.raw() - remaining),
-                        local_diagnostics: self.fault_diag(step_pc),
+                        consumed_budget: Budget::new(0),
+                        local_diagnostics: diag,
                         fault: Some(FaultKind::Guest(code)),
                         syscall_args: None,
                     };
                 }
                 ExecuteVerdict::MemFault(ea) => {
+                    // Same rollback policy as Fault above: capture diag
+                    // first, then roll back state if mid-batch, propagate
+                    // the fault directly.
+                    let diag = self.fault_diag_ea(step_pc, ea);
                     if remaining < max_budget {
                         if let Some(snap) = snapshot.as_ref() {
                             self.state = snap.clone();
-                            effects.clear();
                             self.store_buf.clear();
-                            self.budget_override = Some(1);
-                            return ExecutionStepResult {
-                                yield_reason: YieldReason::BudgetExhausted,
-                                consumed_budget: Budget::new(0),
-                                local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                                fault: None,
-                                syscall_args: None,
-                            };
                         }
+                    } else {
+                        self.store_buf.flush(effects, self.id);
                     }
-                    self.store_buf.flush(effects, self.id);
+                    effects.clear();
                     self.status = UnitStatus::Faulted;
-                    return mem_fault!(step_pc, ea, budget, remaining);
+                    return ExecutionStepResult {
+                        yield_reason: YieldReason::Fault,
+                        consumed_budget: Budget::new(0),
+                        local_diagnostics: diag,
+                        fault: Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)),
+                        syscall_args: None,
+                    };
                 }
                 ExecuteVerdict::BufferFull => {
                     // Store buffer capacity exceeded. Flush buffered

@@ -195,6 +195,17 @@ pub fn execute(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        PpuInstruction::Lhzu { rt, ra, imm } => {
+            let ea = state.ea_d_form(ra, imm);
+            match load_ze(region_views, store_buf, ea, 2) {
+                Ok(val) => {
+                    state.gpr[rt as usize] = val;
+                    state.gpr[ra as usize] = ea;
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
         PpuInstruction::Ldu { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 8) {
@@ -302,6 +313,14 @@ pub fn execute(
             let ea = state.ea_x_form(ra, rb);
             buffer_store(store_buf, ea, 8, state.gpr[rs as usize])
         }
+        PpuInstruction::Stdux { rs, ra, rb } => {
+            let ea = state.gpr[ra as usize].wrapping_add(state.gpr[rb as usize]);
+            let verdict = buffer_store(store_buf, ea, 8, state.gpr[rs as usize]);
+            if matches!(verdict, ExecuteVerdict::Continue) {
+                state.gpr[ra as usize] = ea;
+            }
+            verdict
+        }
         PpuInstruction::Ldarx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 8) {
@@ -379,6 +398,24 @@ pub fn execute(
             state.gpr[rt as usize] = state.gpr[rb as usize].wrapping_sub(state.gpr[ra as usize]);
             ExecuteVerdict::Continue
         }
+        PpuInstruction::Subfc { rt, ra, rb } => {
+            let a = state.gpr[ra as usize];
+            let b = state.gpr[rb as usize];
+            let (result, borrow) = b.overflowing_sub(a);
+            state.gpr[rt as usize] = result;
+            state.set_xer_ca(!borrow);
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Subfe { rt, ra, rb } => {
+            let a = state.gpr[ra as usize];
+            let b = state.gpr[rb as usize];
+            let ca_in: u64 = state.xer_ca() as u64;
+            let (s1, c1) = b.overflowing_add(!a);
+            let (s2, c2) = s1.overflowing_add(ca_in);
+            state.gpr[rt as usize] = s2;
+            state.set_xer_ca(c1 || c2);
+            ExecuteVerdict::Continue
+        }
         PpuInstruction::Neg { rt, ra } => {
             state.gpr[rt as usize] = (state.gpr[ra as usize] as i64).wrapping_neg() as u64;
             ExecuteVerdict::Continue
@@ -405,6 +442,12 @@ pub fn execute(
         PpuInstruction::Mulhdu { rt, ra, rb } => {
             let a = state.gpr[ra as usize] as u128;
             let b = state.gpr[rb as usize] as u128;
+            state.gpr[rt as usize] = ((a * b) >> 64) as u64;
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Mulhd { rt, ra, rb } => {
+            let a = state.gpr[ra as usize] as i64 as i128;
+            let b = state.gpr[rb as usize] as i64 as i128;
             state.gpr[rt as usize] = ((a * b) >> 64) as u64;
             ExecuteVerdict::Continue
         }
@@ -517,8 +560,48 @@ pub fn execute(
         PpuInstruction::Srawi { ra, rs, sh } => {
             let val = state.gpr[rs as usize] as i32;
             let result = val >> sh;
+            let ca = val < 0 && (val as u32) << (32 - sh) != 0;
             state.gpr[ra as usize] = result as i64 as u64;
-            // CA bit would be set here but we don't track XER yet
+            state.set_xer_ca(ca);
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Sraw { ra, rs, rb } => {
+            let shift = state.gpr[rb as usize] & 0x3F;
+            let val = state.gpr[rs as usize] as i32;
+            if shift < 32 {
+                let result = val >> shift;
+                let ca = val < 0 && (val as u32) << (32 - shift as u32) != 0;
+                state.gpr[ra as usize] = result as i64 as u64;
+                state.set_xer_ca(ca);
+            } else {
+                let result = val >> 31;
+                state.gpr[ra as usize] = result as i64 as u64;
+                state.set_xer_ca(val < 0);
+            }
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Srad { ra, rs, rb } => {
+            let shift = state.gpr[rb as usize] & 0x7F;
+            let val = state.gpr[rs as usize] as i64;
+            if shift < 64 {
+                let result = val >> shift;
+                let ca = val < 0 && (val as u64) << (64 - shift) != 0;
+                state.gpr[ra as usize] = result as u64;
+                state.set_xer_ca(ca);
+            } else {
+                let result = val >> 63;
+                state.gpr[ra as usize] = result as u64;
+                state.set_xer_ca(val < 0);
+            }
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Sradi { ra, rs, sh } => {
+            let shift = sh as u64;
+            let val = state.gpr[rs as usize] as i64;
+            let result = val >> shift;
+            let ca = val < 0 && shift > 0 && (val as u64) << (64 - shift) != 0;
+            state.gpr[ra as usize] = result as u64;
+            state.set_xer_ca(ca);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Sld { ra, rs, rb } => {
@@ -793,6 +876,48 @@ pub fn execute(
             state.vr[vt as usize] = state.vr[va as usize] ^ state.vr[vb as usize];
             ExecuteVerdict::Continue
         }
+        PpuInstruction::Lvlx { vt, ra, rb } => {
+            let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
+            let addr = base.wrapping_add(state.gpr[rb as usize]);
+            let aligned = addr & !15u64;
+            let val = if let Some(v) = store_buf.forward(aligned, 16) {
+                v
+            } else {
+                let slice = match load_slice(region_views, aligned, 16) {
+                    Some(s) => s,
+                    None => return ExecuteVerdict::MemFault(aligned),
+                };
+                let mut bytes = [0u8; 16];
+                bytes.copy_from_slice(slice);
+                u128::from_be_bytes(bytes)
+            };
+            let shift = ((addr & 15) * 8) as u32;
+            state.vr[vt as usize] = if shift == 0 { val } else { val << shift };
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Lvrx { vt, ra, rb } => {
+            let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
+            let addr = base.wrapping_add(state.gpr[rb as usize]);
+            let aligned = addr & !15u64;
+            let val = if let Some(v) = store_buf.forward(aligned, 16) {
+                v
+            } else {
+                let slice = match load_slice(region_views, aligned, 16) {
+                    Some(s) => s,
+                    None => return ExecuteVerdict::MemFault(aligned),
+                };
+                let mut bytes = [0u8; 16];
+                bytes.copy_from_slice(slice);
+                u128::from_be_bytes(bytes)
+            };
+            let lo = addr & 15;
+            state.vr[vt as usize] = if lo == 0 {
+                0
+            } else {
+                val >> ((16 - lo) * 8) as u32
+            };
+            ExecuteVerdict::Continue
+        }
         PpuInstruction::Vx { xo, vt, va, vb } => {
             crate::exec_vec::execute_vx(state, xo, vt, va, vb, region_views, store_buf)
         }
@@ -1018,6 +1143,44 @@ pub fn execute(
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
+        }
+        PpuInstruction::MflrStd {
+            rt,
+            ra_store,
+            store_offset,
+        } => {
+            state.gpr[rt as usize] = state.lr;
+            let ea = state.ea_d_form(ra_store, store_offset);
+            buffer_store(store_buf, ea, 8, state.gpr[rt as usize])
+        }
+        PpuInstruction::LdMtlr {
+            rt,
+            ra_load,
+            offset,
+        } => {
+            let ea = state.ea_d_form(ra_load, offset);
+            match load_ze(region_views, store_buf, ea, 8) {
+                Ok(val) => {
+                    state.gpr[rt as usize] = val;
+                    state.lr = val;
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
+        PpuInstruction::StdStd {
+            rs1,
+            rs2,
+            ra,
+            offset1,
+        } => {
+            let ea1 = state.ea_d_form(ra, offset1);
+            let v1 = buffer_store(store_buf, ea1, 8, state.gpr[rs1 as usize]);
+            if !matches!(v1, ExecuteVerdict::Continue) {
+                return v1;
+            }
+            let ea2 = ea1.wrapping_add(8);
+            buffer_store(store_buf, ea2, 8, state.gpr[rs2 as usize])
         }
         PpuInstruction::CmpwiBc {
             bf,
@@ -2826,5 +2989,314 @@ mod tests {
         );
         assert_eq!(v, ExecuteVerdict::Continue);
         assert_eq!(s.cr_field(0), 0b1000); // LT
+    }
+
+    // -- Phase 16 additions --
+
+    #[test]
+    fn subfc_computes_rb_minus_ra_and_sets_ca_on_no_borrow() {
+        let mut s = PpuState::new();
+        // rb(10) - ra(3) = 7; no borrow -> CA=1
+        s.gpr[3] = 3;
+        s.gpr[4] = 10;
+        exec_no_mem(
+            &PpuInstruction::Subfc {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[5], 7);
+        assert!(s.xer_ca());
+    }
+
+    #[test]
+    fn subfc_borrow_clears_ca() {
+        let mut s = PpuState::new();
+        // rb(3) - ra(10) = wrapping; borrow -> CA=0
+        s.gpr[3] = 10;
+        s.gpr[4] = 3;
+        exec_no_mem(
+            &PpuInstruction::Subfc {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[5], 3u64.wrapping_sub(10));
+        assert!(!s.xer_ca());
+    }
+
+    #[test]
+    fn subfe_uses_carry_in() {
+        // rt = ~ra + rb + CA. With CA=1 this is rb - ra; with CA=0
+        // this is rb - ra - 1.
+        let mut s = PpuState::new();
+        s.gpr[3] = 3;
+        s.gpr[4] = 10;
+        s.set_xer_ca(true);
+        exec_no_mem(
+            &PpuInstruction::Subfe {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[5], 7);
+
+        s.set_xer_ca(false);
+        exec_no_mem(
+            &PpuInstruction::Subfe {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[5], 6);
+    }
+
+    #[test]
+    fn sraw_preserves_sign_and_caps_at_31() {
+        let mut s = PpuState::new();
+        // Sign-propagating right shift on the low 32 bits.
+        s.gpr[3] = 0xFFFF_FFFF_8000_0000; // low32 = -2147483648
+        s.gpr[4] = 4;
+        exec_no_mem(
+            &PpuInstruction::Sraw {
+                ra: 5,
+                rs: 3,
+                rb: 4,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[5] as i32 as i64, -2147483648i64 >> 4);
+    }
+
+    #[test]
+    fn srad_signed_64_bit_shift() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 0x8000_0000_0000_0000;
+        s.gpr[4] = 4;
+        exec_no_mem(
+            &PpuInstruction::Srad {
+                ra: 5,
+                rs: 3,
+                rb: 4,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[5] as i64, (0x8000_0000_0000_0000u64 as i64) >> 4);
+    }
+
+    #[test]
+    fn sradi_shift_zero_clears_ca_and_preserves_value() {
+        let mut s = PpuState::new();
+        s.gpr[3] = 0xDEAD_BEEF_CAFE_F00D;
+        s.set_xer_ca(true);
+        exec_no_mem(
+            &PpuInstruction::Sradi {
+                ra: 4,
+                rs: 3,
+                sh: 0,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[4], 0xDEAD_BEEF_CAFE_F00D);
+        assert!(!s.xer_ca());
+    }
+
+    #[test]
+    fn mulhd_signed_high_doubleword() {
+        let mut s = PpuState::new();
+        // -1 * -1 = 1 as i128 = 0x0000_0000_0000_0001, high 64 bits = 0
+        s.gpr[3] = u64::MAX; // -1 as i64
+        s.gpr[4] = u64::MAX;
+        exec_no_mem(
+            &PpuInstruction::Mulhd {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[5], 0);
+
+        // -1 * 2 = -2 as i128, high 64 bits = -1 = 0xFFFF_FFFF_FFFF_FFFF
+        s.gpr[3] = u64::MAX;
+        s.gpr[4] = 2;
+        exec_no_mem(
+            &PpuInstruction::Mulhd {
+                rt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+        );
+        assert_eq!(s.gpr[5], u64::MAX);
+    }
+
+    #[test]
+    fn lhzu_loads_halfword_and_updates_base() {
+        // Place 0xBEEF at address 0x1010.
+        let mut mem = vec![0u8; 0x2000];
+        mem[0x1010..0x1012].copy_from_slice(&0xBEEFu16.to_be_bytes());
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x1000;
+        let mut effects = Vec::new();
+        let result = exec_with_mem(
+            &PpuInstruction::Lhzu {
+                rt: 3,
+                ra: 4,
+                imm: 0x10,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert_eq!(result, ExecuteVerdict::Continue);
+        assert_eq!(s.gpr[3], 0xBEEF);
+        assert_eq!(s.gpr[4], 0x1010, "base register updated with EA");
+    }
+
+    #[test]
+    fn stdux_stores_doubleword_and_updates_base() {
+        let mem = vec![0u8; 0x2000];
+        let mut s = PpuState::new();
+        s.gpr[3] = 0xDEAD_BEEF_CAFE_F00D;
+        s.gpr[4] = 0x1000;
+        s.gpr[5] = 0x40;
+        let mut effects = Vec::new();
+        let result = exec_with_mem(
+            &PpuInstruction::Stdux {
+                rs: 3,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert_eq!(result, ExecuteVerdict::Continue);
+        assert_eq!(s.gpr[4], 0x1040, "base updated to EA = ra + rb");
+        // One SharedWriteIntent for the 8-byte store.
+        assert!(!effects.is_empty());
+    }
+
+    #[test]
+    fn lvlx_aligned_address_matches_lvx() {
+        // With EA already 16-aligned, lvlx == lvx (no shift).
+        let mut mem = vec![0u8; 0x2000];
+        let pattern = [
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE,
+            0xFF, 0x00,
+        ];
+        mem[0x1000..0x1010].copy_from_slice(&pattern);
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x1000;
+        s.gpr[5] = 0;
+        let mut effects = Vec::new();
+        exec_with_mem(
+            &PpuInstruction::Lvlx {
+                vt: 7,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert_eq!(s.vr[7], u128::from_be_bytes(pattern));
+    }
+
+    #[test]
+    fn lvlx_unaligned_shifts_high_bytes_up() {
+        // EA has low 4 bits = 3. lvlx shifts the loaded 16 bytes
+        // left by 3*8 = 24 bits: the top 13 bytes of the aligned
+        // block become the top 13 bytes of the result, and the
+        // bottom 3 bytes are zero.
+        let mut mem = vec![0u8; 0x2000];
+        let pattern = [
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE,
+            0xFF, 0x10,
+        ];
+        mem[0x1000..0x1010].copy_from_slice(&pattern);
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x1003; // EA & 15 = 3
+        s.gpr[5] = 0;
+        let mut effects = Vec::new();
+        exec_with_mem(
+            &PpuInstruction::Lvlx {
+                vt: 7,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        let expected = u128::from_be_bytes(pattern) << 24;
+        assert_eq!(s.vr[7], expected);
+    }
+
+    #[test]
+    fn lvrx_unaligned_shifts_low_bytes_down() {
+        // EA has low 4 bits = 3. lvrx shifts right by (16-3)*8 = 104
+        // bits: only the high 3 bytes of the aligned block survive,
+        // landing in the low 3 bytes of the result.
+        let mut mem = vec![0u8; 0x2000];
+        let pattern = [
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE,
+            0xFF, 0x10,
+        ];
+        mem[0x1000..0x1010].copy_from_slice(&pattern);
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x1003;
+        s.gpr[5] = 0;
+        let mut effects = Vec::new();
+        exec_with_mem(
+            &PpuInstruction::Lvrx {
+                vt: 7,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        let expected = u128::from_be_bytes(pattern) >> 104;
+        assert_eq!(s.vr[7], expected);
+    }
+
+    #[test]
+    fn lvrx_aligned_ea_zero_bytes() {
+        // EA aligned (low 4 bits = 0): lvrx result is all zero.
+        let mut mem = vec![0u8; 0x2000];
+        mem[0x1000..0x1010].copy_from_slice(&[0xFF; 16]);
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x1000;
+        s.gpr[5] = 0;
+        s.vr[7] = u128::MAX; // pre-fill to verify it's overwritten
+        let mut effects = Vec::new();
+        exec_with_mem(
+            &PpuInstruction::Lvrx {
+                vt: 7,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert_eq!(s.vr[7], 0);
     }
 }

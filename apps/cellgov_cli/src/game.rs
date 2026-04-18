@@ -56,6 +56,7 @@ pub fn run_game(
     observation_manifest: Option<&str>,
     strict_reserved: bool,
     profile_pairs: bool,
+    budget_override: Option<u64>,
 ) {
     eprintln!(
         "run-game: title = {} ({})",
@@ -75,6 +76,7 @@ pub fn run_game(
         patch_bytes,
         dump_mem_addrs,
         profile_pairs,
+        budget_override,
     });
     let boot::PreparedBoot {
         mut rt,
@@ -257,6 +259,7 @@ pub fn bench_boot(
     firmware_dir: Option<&str>,
     strict_reserved: bool,
     checkpoint_override: Option<manifest::CheckpointTrigger>,
+    budget_override: Option<u64>,
 ) -> BenchBootResult {
     let prepared = boot::prepare(boot::PrepareOptions {
         title,
@@ -271,6 +274,7 @@ pub fn bench_boot(
         patch_bytes: &[],
         dump_mem_addrs: &[],
         profile_pairs: false,
+        budget_override,
     });
     let mut rt = prepared.rt;
     let checkpoint = checkpoint_override.unwrap_or_else(|| title.checkpoint_trigger());
@@ -348,6 +352,7 @@ pub fn bench_boot_one_run(
     firmware_dir: Option<&str>,
     strict_reserved: bool,
     checkpoint_override: Option<manifest::CheckpointTrigger>,
+    budget_override: Option<u64>,
 ) -> BenchBootResult {
     let r = bench_boot(
         title,
@@ -356,6 +361,7 @@ pub fn bench_boot_one_run(
         firmware_dir,
         strict_reserved,
         checkpoint_override,
+        budget_override,
     );
     println!(
         "BENCH_RESULT steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
@@ -399,6 +405,7 @@ pub fn bench_boot_pair(
     firmware_dir: Option<&str>,
     strict_reserved: bool,
     checkpoint_override: Option<manifest::CheckpointTrigger>,
+    budget_override: Option<u64>,
 ) -> (BenchBootResult, BenchBootResult) {
     let checkpoint_label = match checkpoint_override {
         Some(manifest::CheckpointTrigger::Pc(a)) => format!(" checkpoint=pc=0x{a:x}"),
@@ -408,8 +415,11 @@ pub fn bench_boot_pair(
         }
         None => String::new(),
     };
+    let budget_label = budget_override
+        .map(|b| format!(" budget={b}"))
+        .unwrap_or_default();
     println!(
-        "bench-boot: title={} elf={elf_path} max_steps={max_steps}{checkpoint_label}",
+        "bench-boot: title={} elf={elf_path} max_steps={max_steps}{checkpoint_label}{budget_label}",
         title.name()
     );
     let r1 = spawn_one_run(
@@ -419,6 +429,7 @@ pub fn bench_boot_pair(
         firmware_dir,
         strict_reserved,
         checkpoint_override,
+        budget_override,
     );
     println!(
         "  run 1: steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
@@ -434,6 +445,7 @@ pub fn bench_boot_pair(
         firmware_dir,
         strict_reserved,
         checkpoint_override,
+        budget_override,
     );
     println!(
         "  run 2: steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
@@ -460,6 +472,7 @@ fn spawn_one_run(
     firmware_dir: Option<&str>,
     strict_reserved: bool,
     checkpoint_override: Option<manifest::CheckpointTrigger>,
+    budget_override: Option<u64>,
 ) -> BenchBootResult {
     let exe = std::env::current_exe().expect("current_exe");
     let mut cmd = std::process::Command::new(&exe);
@@ -481,6 +494,9 @@ fn spawn_one_run(
             manifest::CheckpointTrigger::Pc(a) => format!("pc=0x{a:x}"),
         };
         cmd.arg("--checkpoint").arg(value);
+    }
+    if let Some(b) = budget_override {
+        cmd.arg("--budget").arg(b.to_string());
     }
     cmd.arg(elf_path);
     let output = cmd.output().expect("subprocess runs");
@@ -551,8 +567,9 @@ pub(crate) fn agreement_percent(a: std::time::Duration, b: std::time::Duration) 
     100.0 * (max - min) / min
 }
 
-/// One region in a checkpoint observation manifest, sharing the schema
-/// used by `tools/rpcs3_to_observation/` and `tests/fixtures/NPUA80001_checkpoint.toml`.
+/// One region in a checkpoint observation manifest, sharing the
+/// schema used by `bridges/rpcs3_to_observation/` and the per-title
+/// manifests under `tests/fixtures/<SERIAL>_checkpoint.toml`.
 #[derive(Debug, serde::Deserialize)]
 struct CheckpointManifest {
     regions: Vec<CheckpointRegion>,
@@ -1257,8 +1274,8 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_manifest_loads_committed_flow_fixture() {
-        // Pin the checked-in flOw checkpoint manifest so a future
+    fn checkpoint_manifest_loads_committed_fixture() {
+        // Pin a checked-in per-title checkpoint manifest so a future
         // edit that breaks parsing fails locally and not in a live
         // cross-runner run.
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

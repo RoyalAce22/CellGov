@@ -1,0 +1,14 @@
+[title]
+content_id = "BCES00664"
+short_name = "wipeout"
+display_name = "WipEout HD Fury (Sony Liverpool, 2009)"
+eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+
+[source]
+kind = "disc"
+
+[checkpoint]
+# WipEout's boot path includes RSX init via cellGcmSys. The first
+# PPU write to the RSX region (0xC0000000+) is the checkpoint,
+# matching SSHD's convention.
+kind = "first-rsx-write"

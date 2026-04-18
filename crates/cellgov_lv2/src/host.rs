@@ -196,6 +196,28 @@ impl Lv2Host {
                     effects: vec![],
                 }
             }
+            Lv2Request::MemoryGetUserMemorySize { mem_info_ptr } => {
+                let total: u32 = 0x0D50_0000;
+                let avail: u32 = 0x0D50_0000;
+                let mut buf = [0u8; 8];
+                buf[0..4].copy_from_slice(&total.to_be_bytes());
+                buf[4..8].copy_from_slice(&avail.to_be_bytes());
+                let write = Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(mem_info_ptr as u64), 8).unwrap(),
+                    bytes: WritePayload::from_slice(&buf),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: GuestTicks::ZERO,
+                };
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![write],
+                }
+            }
+            Lv2Request::MemoryContainerCreate { cid_ptr, .. } => {
+                let id = self.alloc_id();
+                Self::immediate_write_u32(id, cid_ptr, requester)
+            }
             // Syscall 481 is _sys_prx_start_module. RPCS3 returns
             // CELL_EINVAL (0x80010002) when id == 0 or pOpt is null.
             // CellGov's _sys_prx_load_module stub returns 0 (id=0),
@@ -1005,5 +1027,72 @@ mod tests {
                 effects: vec![]
             }
         );
+    }
+
+    #[test]
+    fn memory_get_user_memory_size_writes_info_struct() {
+        // sys_memory_info_t has two big-endian u32 fields:
+        // total_user_memory, available_user_memory.
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let source = UnitId::new(0);
+
+        let result = host.dispatch(
+            Lv2Request::MemoryGetUserMemorySize {
+                mem_info_ptr: 0x200,
+            },
+            source,
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code: 0, effects } => {
+                assert_eq!(effects.len(), 1, "expect one 8-byte write");
+                match &effects[0] {
+                    cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. } => {
+                        assert_eq!(range.start().raw(), 0x200);
+                        assert_eq!(range.length(), 8);
+                        let b = bytes.bytes();
+                        let total = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+                        let avail = u32::from_be_bytes([b[4], b[5], b[6], b[7]]);
+                        assert_eq!(total, 0x0D50_0000);
+                        assert_eq!(avail, 0x0D50_0000);
+                    }
+                    other => panic!("expected SharedWriteIntent, got {other:?}"),
+                }
+            }
+            other => panic!("expected Immediate(0), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn memory_container_create_writes_monotonic_id() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let source = UnitId::new(0);
+
+        let id1 = match host.dispatch(
+            Lv2Request::MemoryContainerCreate {
+                cid_ptr: 0x100,
+                size: 0x10_0000,
+            },
+            source,
+            &rt,
+        ) {
+            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+        let id2 = match host.dispatch(
+            Lv2Request::MemoryContainerCreate {
+                cid_ptr: 0x104,
+                size: 0x10_0000,
+            },
+            source,
+            &rt,
+        ) {
+            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+        assert_ne!(id1, 0);
+        assert_ne!(id1, id2, "IDs must be monotonic across create calls");
     }
 }

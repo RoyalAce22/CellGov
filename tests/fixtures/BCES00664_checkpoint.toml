@@ -1,0 +1,31 @@
+# Region manifest for the WipEout HD Fury boot checkpoint (FirstRsxWrite).
+#
+# Shared by three producers, all of which must read it the same way:
+#
+#   - the RPCS3 dump-hook patch (CELLGOV_DUMP_REGIONS env var, same
+#     addr and size expressed as hex pairs in declaration order),
+#   - apps/rpcs3_to_observation, which reads this file to slice the
+#     RPCS3 dump into named Observation regions, and
+#   - the CellGov `run-game --save-observation` path with the
+#     `--observation-manifest` flag, which uses the same region
+#     names and addresses.
+#
+# Regions appear in declaration order in the dump file. Do not
+# reorder without updating every producer. Sizes are in bytes.
+#
+# Segment addresses come from WipEout's EBOOT.elf PT_LOAD headers:
+#   PT_LOAD vaddr=0x10000  filesz=0x848e48 memsz=0x848e48 RX
+#   PT_LOAD vaddr=0x860000 filesz=0xd6f80  memsz=0xbdfe08 RW
+#
+# BSS (0x860000+0xd6f80 through 0x143de08) excluded: zero-initialized
+# on both runners. Data region uses filesz to skip BSS.
+
+[[regions]]
+name = "code"
+addr = "0x10000"
+size = "0x848e48"
+
+[[regions]]
+name = "data"
+addr = "0x860000"
+size = "0xd6f80"

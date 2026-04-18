@@ -815,13 +815,19 @@ mod tests {
 
     #[test]
     fn find_tls_on_real_elf() {
+        // Every retail PS3 game binary has a PT_TLS segment because
+        // sysPrxForUser's CRT expects thread-local storage to be set
+        // up at load time. Pin the parse against the fixture under
+        // tools/rpcs3/dev_hdd0/ so a TLS-parser regression fails the
+        // test.
         let path =
             std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
         if !path.exists() {
             return;
         }
         let data = std::fs::read(path).unwrap();
-        let tls = find_tls_segment(&data).expect("flOw ELF should have PT_TLS");
+        let tls =
+            find_tls_segment(&data).expect("retail EBOOT should have a PT_TLS program header");
         assert_eq!(tls.vaddr, 0x895cd0);
         assert_eq!(tls.filesz, 4);
         assert_eq!(tls.memsz, 0x1dc);

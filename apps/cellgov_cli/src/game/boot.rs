@@ -8,7 +8,7 @@
 
 use std::time::{Duration, Instant};
 
-use cellgov_core::{Runtime, RuntimeMode};
+use cellgov_core::{default_budget_for_mode, Runtime, RuntimeMode};
 use cellgov_ppu::prx::HleBinding;
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_time::Budget;
@@ -80,6 +80,13 @@ pub(super) struct PrepareOptions<'a> {
     /// Guest addresses to print 32 bytes at, after patches. Bench
     /// passes an empty slice.
     pub dump_mem_addrs: &'a [u64],
+    /// Per-step budget override. `None` -> use the natural default
+    /// for the runtime mode (currently FaultDriven -> 256). The
+    /// override is what `--budget N` on the CLI sets, useful for
+    /// triage runs (Budget=1 yields one instruction at a time, so
+    /// the PC trace and per-step diagnostic line up exactly with
+    /// the instruction stream) and throughput sweeps.
+    pub budget_override: Option<u64>,
 }
 
 /// Build a fully-initialized `Runtime` for the given title.
@@ -229,6 +236,23 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let malloc_pagesize = proc_param.map(|p| p.malloc_pagesize).unwrap_or(0x100000);
     state.gpr[12] = malloc_pagesize as u64;
 
+    // Budget selection: CLI override beats mode default. The mode is
+    // FaultDriven for both run-game and bench-boot today; if a future
+    // command sets a different mode, the default tracks the mode via
+    // default_budget_for_mode. max_steps is divided by the budget so
+    // the user-visible cap stays in instruction units regardless of
+    // batch size.
+    let mode = RuntimeMode::FaultDriven;
+    let step_budget: u64 = opts
+        .budget_override
+        .unwrap_or_else(|| default_budget_for_mode(mode).raw())
+        .max(1);
+    let adjusted_max_steps = opts
+        .runtime_max_steps
+        .checked_div(step_budget as usize)
+        .unwrap_or(opts.runtime_max_steps)
+        .max(1);
+
     if opts.print_banner {
         println!("title: {}", opts.title.display_name());
         println!("elf: {}", opts.elf_path);
@@ -257,6 +281,12 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             );
         }
         println!("max_steps: {}", opts.runtime_max_steps);
+        let budget_source = if opts.budget_override.is_some() {
+            "override"
+        } else {
+            "mode-default"
+        };
+        println!("budget: {step_budget} ({budget_source})");
         println!();
     }
 
@@ -296,14 +326,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // `invalidate_code` on each committed SharedWriteIntent.
     let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, mem.as_bytes());
 
-    let step_budget: u64 = 256;
-    let adjusted_max_steps = opts
-        .runtime_max_steps
-        .checked_div(step_budget as usize)
-        .unwrap_or(opts.runtime_max_steps)
-        .max(1);
     let mut rt = Runtime::new(mem, Budget::new(step_budget), adjusted_max_steps);
-    rt.set_mode(RuntimeMode::FaultDriven);
+    rt.set_mode(mode);
     rt.set_hle_heap_base(0x10410000);
     rt.set_hle_nids(build_nid_map(&hle_bindings));
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);

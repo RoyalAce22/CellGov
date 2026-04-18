@@ -13,86 +13,80 @@ that.
 
 ## Workspace shape
 
-15 library crates plus 3 binary crates, organized as a strict layered
-DAG. Foundational primitives sit at the bottom; consumers at the top.
-No backward edges.
+15 library crates, 3 application binaries under `apps/`, and 1 bridge
+binary under `bridges/`, organized as a strict layered DAG.
+Foundational primitives sit at the bottom; consumers at the top. No
+backward edges. `cellgov_firmware` is fully standalone (no workspace
+library dependencies); `cellgov_mkelf` likewise.
 
 ```mermaid
 graph BT
-  cli["apps/cellgov_cli"]
-  mkelf["apps/cellgov_mkelf"]
-  firmware["apps/cellgov_firmware"]
-  rpcs3obs["bridges/rpcs3_to_observation"]
-  explore[cellgov_explore]
-  compare[cellgov_compare]
-  testkit[cellgov_testkit]
-  core[cellgov_core]
-  lv2[cellgov_lv2]
-  ppu[cellgov_ppu]
-  spu[cellgov_spu]
-  exec[cellgov_exec]
-  trace[cellgov_trace]
+  subgraph apps ["apps/"]
+    firmware["cellgov_firmware"]
+    mkelf["cellgov_mkelf"]
+    cli["cellgov_cli"]
+  end
+
+  subgraph bridges ["bridges/"]
+    rpcs3obs["rpcs3_to_observation"]
+  end
+
+  time[cellgov_time]
+  event[cellgov_event]
+  mem[cellgov_mem]
   sync[cellgov_sync]
   dma[cellgov_dma]
   effects[cellgov_effects]
-  mem[cellgov_mem]
-  event[cellgov_event]
-  time[cellgov_time]
+  exec[cellgov_exec]
+  trace[cellgov_trace]
+  lv2[cellgov_lv2]
+  core[cellgov_core]
+  ppu[cellgov_ppu]
+  spu[cellgov_spu]
+  testkit[cellgov_testkit]
+  explore[cellgov_explore]
+  compare[cellgov_compare]
 
-  time --> mem
   time --> event
+  time --> mem
+
   event --> sync
+  event --> dma
   mem --> sync
   mem --> dma
-  event --> dma
-  mem --> effects
-  event --> effects
+
   sync --> effects
   dma --> effects
+
   effects --> exec
   effects --> trace
   effects --> lv2
-  event --> lv2
-  mem --> lv2
-  time --> lv2
-  sync --> lv2
+  effects --> ppu
+  effects --> spu
+
   exec --> core
+  exec --> ppu
+  exec --> spu
   trace --> core
-  sync --> core
-  dma --> core
   lv2 --> core
+
   core --> testkit
   core --> explore
-  effects --> explore
-  exec --> explore
-  mem --> explore
-  sync --> explore
-  dma --> explore
-  event --> compare
+
   testkit --> compare
   trace --> compare
-  effects --> ppu
-  event --> ppu
-  exec --> ppu
-  mem --> ppu
-  time --> ppu
-  dma --> spu
-  effects --> spu
-  event --> spu
-  exec --> spu
-  mem --> spu
-  sync --> spu
-  time --> spu
-  compare --> cli
-  explore --> cli
-  testkit --> cli
-  trace --> cli
+
   ppu --> cli
   spu --> cli
+  compare --> cli
+  explore --> cli
   compare --> rpcs3obs
+
+  ppu ~~~ spu
+  firmware ~~~ mkelf
 ```
 
-Three structural rules worth calling out:
+Four structural rules worth calling out:
 
 - `cellgov_lv2` does not depend on `cellgov_core`. The runtime calls
   into the host through a narrow `Lv2Runtime` trait; the host never
@@ -104,11 +98,17 @@ Three structural rules worth calling out:
 - `cellgov_explore` lives above `cellgov_core` and drives the runtime
   externally through `Runtime::step` / `commit_step` /
   `set_scheduler`. It never modifies the runtime model.
+- `cellgov_firmware` is a standalone app with no workspace library
+  dependencies. It uses external crypto crates (`aes`, `cbc`, `ctr`,
+  `hmac`, `sha1`, `flate2`) that no library crate pulls. Its only
+  job is one-shot firmware extraction; no library crate imports it
+  and no runtime path depends on it.
 
 External dependencies are minimal: `serde`, `serde_json`, and `toml`
 in `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore`
-and `cellgov_cli`. Everything else is workspace-internal. The
-workspace compiles under `unsafe_code = "forbid"`.
+and `cellgov_cli`; crypto crates in `cellgov_firmware` only.
+Everything else is workspace-internal. The workspace compiles under
+`unsafe_code = "forbid"`.
 
 ## Per-crate responsibilities
 
@@ -131,7 +131,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                               |
 | `cellgov_cli`                  | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                            |
 | `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                    |
-| `cellgov_firmware`             | PS3 firmware decrypter. Extracts decrypted SPRX modules from a `PS3UPDAT.PUP` file downloaded from Sony's website. PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction. No RPCS3 dependency.                                   |
+| `cellgov_firmware`             | PS3 firmware and SELF decrypter. Two subcommands: `install` extracts decrypted SPRX modules from a `PS3UPDAT.PUP` downloaded from Sony's website (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). `decrypt-self` decrypts a retail game `EBOOT.BIN` (SELF) into an `EBOOT.elf` using per-revision APP keys -- same AES pipeline, different key table. No RPCS3 dependency. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`. |
 
 ## Guest memory layout
@@ -550,15 +550,24 @@ Title-specific configuration lives in TOML manifests under
 directory at startup, building a registry that the CLI looks up
 by short name (`--title sshd`), content id (`--content-id
 NPUA80068`), or explicit manifest path (`--title-manifest
-<file>`). The harness is currently wired for two titles:
+<file>`). The harness is currently wired for three titles:
 
-- **flOw** (NPUA80001): checkpoint is `process-exit` -- flOw's
-  boot calls `sys_process_exit` on its own and CellGov records the
-  observation at that point.
-- **Super Stardust HD** (NPUA80068): checkpoint is
+- **flOw** (NPUA80001): PSN HDD, checkpoint is `process-exit` --
+  flOw's boot calls `sys_process_exit` on its own and CellGov
+  records the observation at that point.
+- **Super Stardust HD** (NPUA80068): PSN HDD, checkpoint is
   `first-rsx-write` -- SSHD's attract-mode loop never exits, so
   the harness treats the first PPU write into the `rsx` reserved
   region as a checkpoint hit.
+- **WipEout HD Fury** (BCES00664): disc ISO, same `first-rsx-write`
+  checkpoint as SSHD. Disc titles add an optional `[source] kind =
+  "disc"` to the manifest; `resolve_eboot` then looks under
+  `dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead of the PSN
+  layout. The encrypted `EBOOT.BIN` is decrypted once via
+  `cellgov_firmware decrypt-self`.
+
+Per-title status (boot checkpoint reached, cross-runner observation
+match) is tracked in [titles.md](titles.md).
 
 Adding a third title is a single-file TOML commit under
 `docs/titles/`; no Rust change is needed as long as the title

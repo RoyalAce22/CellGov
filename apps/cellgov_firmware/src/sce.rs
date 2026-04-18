@@ -1,4 +1,4 @@
-//! SCE/SELF package decrypter for PS3 firmware.
+//! SCE/SELF package decrypter for PS3 firmware and game binaries.
 
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
@@ -89,6 +89,107 @@ type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 type Aes128Ctr = ctr::Ctr128BE<aes::Aes128>;
 
 pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, String> {
+    decrypt_sce(data, &SCEPKG_ERK, &SCEPKG_RIV)
+}
+
+pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, String> {
+    let hdr = parse_sce_header(data)?;
+    let revision = hdr.se_flags & 0x7FFF;
+    let key = crate::crypto::app_key_for_revision(revision)
+        .ok_or_else(|| format!("no APP key for SELF revision 0x{revision:04x}"))?;
+
+    if data.len() < 0x40 {
+        return Err("SELF too short for extended header".into());
+    }
+    let ehdr_offset = read_be_u64(data, 0x30) as usize;
+    let phdr_offset = read_be_u64(data, 0x38) as usize;
+
+    if ehdr_offset + 0x40 > data.len() {
+        return Err("SELF ELF header offset out of range".into());
+    }
+    let e_phnum = read_be_u16(data, ehdr_offset + 0x38) as usize;
+    let e_phentsize = read_be_u16(data, ehdr_offset + 0x36) as usize;
+    if phdr_offset + e_phnum * e_phentsize > data.len() {
+        return Err("SELF program headers out of range".into());
+    }
+
+    let sections = decrypt_sce_sections(data, &key.erk, &key.riv)?;
+
+    let mut elf_size: usize = 0x40 + e_phnum * e_phentsize;
+    for i in 0..e_phnum {
+        let ph_off = phdr_offset + i * e_phentsize;
+        let p_offset = read_be_u64(data, ph_off + 0x08) as usize;
+        let p_filesz = read_be_u64(data, ph_off + 0x20) as usize;
+        let end = p_offset + p_filesz;
+        if end > elf_size {
+            elf_size = end;
+        }
+    }
+
+    let mut elf = vec![0u8; elf_size];
+    elf[..0x40].copy_from_slice(&data[ehdr_offset..ehdr_offset + 0x40]);
+    let phdr_dst = 0x40usize;
+    elf[phdr_dst..phdr_dst + e_phnum * e_phentsize]
+        .copy_from_slice(&data[phdr_offset..phdr_offset + e_phnum * e_phentsize]);
+    // Patch e_phoff to point to our program header location.
+    elf[0x20..0x28].copy_from_slice(&(phdr_dst as u64).to_be_bytes());
+
+    for (sec_idx, sec_data) in sections.iter().enumerate() {
+        if sec_idx >= e_phnum {
+            break;
+        }
+        let ph_off = phdr_offset + sec_idx * e_phentsize;
+        let p_offset = read_be_u64(data, ph_off + 0x08) as usize;
+        let p_filesz = read_be_u64(data, ph_off + 0x20) as usize;
+        let copy_len = sec_data.len().min(p_filesz);
+        if p_offset + copy_len <= elf.len() && !sec_data.is_empty() {
+            elf[p_offset..p_offset + copy_len].copy_from_slice(&sec_data[..copy_len]);
+        }
+    }
+
+    let magic = u32::from_be_bytes([elf[0], elf[1], elf[2], elf[3]]);
+    if magic != 0x7F454C46 {
+        return Err(format!("reconstructed ELF has bad magic: 0x{magic:08x}"));
+    }
+
+    Ok(elf)
+}
+
+fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8>, String> {
+    let sections = decrypt_sce_sections(data, erk, riv)?;
+
+    if std::env::var("CELLGOV_FW_DEBUG").is_ok() {
+        for (i, s) in sections.iter().enumerate() {
+            let magic = if s.len() >= 4 {
+                format!("{:02x}{:02x}{:02x}{:02x}", s[0], s[1], s[2], s[3])
+            } else {
+                "??".to_string()
+            };
+            eprintln!("    section[{i}]: {} bytes, magic={magic}", s.len());
+        }
+    }
+
+    for (i, s) in sections.iter().enumerate() {
+        if s.len() >= 0x107 && &s[0x101..0x106] == b"ustar" {
+            if std::env::var("CELLGOV_FW_DEBUG").is_ok() {
+                eprintln!("    -> using section[{i}] (ustar TAR)");
+            }
+            return Ok(sections.into_iter().nth(i).unwrap());
+        }
+    }
+
+    if let Some(largest) = sections.into_iter().max_by_key(|s| s.len()) {
+        Ok(largest)
+    } else {
+        Err("no usable section found in decrypted package".into())
+    }
+}
+
+fn decrypt_sce_sections(
+    data: &[u8],
+    erk: &[u8; 0x20],
+    riv: &[u8; 0x10],
+) -> Result<Vec<Vec<u8>>, String> {
     let hdr = parse_sce_header(data)?;
 
     let meta_offset = hdr.se_meta as usize + 0x20;
@@ -103,8 +204,8 @@ pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, String> {
     let is_debug = (hdr.se_flags & 0x8000) != 0;
     if !is_debug {
         let decryptor = Aes256CbcDec::new(
-            aes::cipher::generic_array::GenericArray::from_slice(&SCEPKG_ERK),
-            aes::cipher::generic_array::GenericArray::from_slice(&SCEPKG_RIV),
+            aes::cipher::generic_array::GenericArray::from_slice(erk),
+            aes::cipher::generic_array::GenericArray::from_slice(riv),
         );
         decryptor
             .decrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut meta_info_buf)
@@ -214,34 +315,7 @@ pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, String> {
         sections.push(sec_data);
     }
 
-    if std::env::var("CELLGOV_FW_DEBUG").is_ok() {
-        for (i, s) in sections.iter().enumerate() {
-            let magic = if s.len() >= 4 {
-                format!("{:02x}{:02x}{:02x}{:02x}", s[0], s[1], s[2], s[3])
-            } else {
-                "??".to_string()
-            };
-            eprintln!("    section[{i}]: {} bytes, magic={magic}", s.len());
-        }
-    }
-
-    // Find the section that is a valid TAR (starts with a non-null
-    // filename and has "ustar" at offset 0x101).
-    for (i, s) in sections.iter().enumerate() {
-        if s.len() >= 0x107 && &s[0x101..0x106] == b"ustar" {
-            if std::env::var("CELLGOV_FW_DEBUG").is_ok() {
-                eprintln!("    -> using section[{i}] (ustar TAR)");
-            }
-            return Ok(sections.into_iter().nth(i).unwrap());
-        }
-    }
-
-    // Fallback: largest section
-    if let Some(largest) = sections.into_iter().max_by_key(|s| s.len()) {
-        Ok(largest)
-    } else {
-        Err("no usable section found in decrypted package".into())
-    }
+    Ok(sections)
 }
 
 #[cfg(test)]

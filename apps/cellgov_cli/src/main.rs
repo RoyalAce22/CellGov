@@ -112,9 +112,11 @@ fn main() {
         println!("       cellgov_cli compare <manifest.toml> --baselines-dir <dir> [--mode ...] [--format ...]");
         println!("       cellgov_cli explore <scenario> [--format human|json]");
         println!("       cellgov_cli explore micro <name> [--format human|json]");
-        println!("       cellgov_cli run-game <elf-path> [--max-steps N] [--trace] [--profile]");
         println!(
-            "       cellgov_cli bench-boot --title <name> [--max-steps N] [--firmware-dir DIR]\n\
+            "       cellgov_cli run-game <elf-path> [--max-steps N] [--budget N] [--trace] [--profile]"
+        );
+        println!(
+            "       cellgov_cli bench-boot --title <name> [--max-steps N] [--budget N] [--firmware-dir DIR]\n\
              \t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR]"
         );
         println!();
@@ -310,6 +312,8 @@ fn main() {
         let observation_manifest = find_flag_value(&args, "--observation-manifest");
         let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
         let profile_pairs = args.iter().any(|a| a == "--profile-pairs");
+        let budget_override: Option<u64> =
+            find_flag_value(&args, "--budget").and_then(|v| v.parse().ok());
         game::run_game(
             &title,
             elf_path,
@@ -325,6 +329,7 @@ fn main() {
             observation_manifest.as_deref(),
             strict_reserved,
             profile_pairs,
+            budget_override,
         );
         return;
     }
@@ -357,6 +362,8 @@ fn main() {
         let firmware_dir = find_flag_value(&args, "--firmware-dir");
         let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
         let checkpoint_override = resolve_checkpoint_override(&args, "bench-boot-once");
+        let budget_override: Option<u64> =
+            find_flag_value(&args, "--budget").and_then(|v| v.parse().ok());
         game::bench_boot_one_run(
             &title,
             &elf_path,
@@ -364,6 +371,7 @@ fn main() {
             firmware_dir.as_deref(),
             strict_reserved,
             checkpoint_override,
+            budget_override,
         );
         return;
     }
@@ -391,6 +399,8 @@ fn main() {
         let firmware_dir = find_flag_value(&args, "--firmware-dir");
         let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
         let checkpoint_override = resolve_checkpoint_override(&args, "bench-boot");
+        let budget_override: Option<u64> =
+            find_flag_value(&args, "--budget").and_then(|v| v.parse().ok());
         let (r1, r2) = game::bench_boot_pair(
             &title,
             &elf_path,
@@ -398,6 +408,7 @@ fn main() {
             firmware_dir.as_deref(),
             strict_reserved,
             checkpoint_override,
+            budget_override,
         );
         let agreement = game::agreement_percent(r1.wall, r2.wall);
         if agreement > 5.0 {
@@ -500,6 +511,7 @@ const RUN_GAME_VALUE_FLAGS: &[&str] = &[
     "--title-manifest",
     "--vfs-root",
     "--max-steps",
+    "--budget",
     "--firmware-dir",
     "--dump-at-pc",
     "--dump-skip",
@@ -521,8 +533,8 @@ const DEFAULT_TITLE_REGISTRY_DIR: &str = "docs/titles";
 ///
 /// 1. `--title-manifest <path>` -- load that single TOML file
 ///    directly (no registry scan needed).
-/// 2. `--content-id <NPUA80068>` -- scan
-///    `DEFAULT_TITLE_REGISTRY_DIR` and look up by content id.
+/// 2. `--content-id <SERIAL>` -- scan `DEFAULT_TITLE_REGISTRY_DIR`
+///    and look up by PSN content id or disc serial.
 /// 3. `--title <shortname>` -- scan the registry and look up by
 ///    short name.
 ///

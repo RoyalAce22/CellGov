@@ -85,6 +85,10 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let (rt, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Lhz { rt, ra, imm })
         }
+        41 => {
+            let (rt, ra, imm) = d_form(raw);
+            Ok(PpuInstruction::Lhzu { rt, ra, imm })
+        }
         42 => {
             let (rt, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Lha { rt, ra, imm })
@@ -415,10 +419,13 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     match xo_9 {
         266 => return Ok(PpuInstruction::Add { rt, ra, rb }),
         40 => return Ok(PpuInstruction::Subf { rt, ra, rb }),
+        8 => return Ok(PpuInstruction::Subfc { rt, ra, rb }),
+        136 => return Ok(PpuInstruction::Subfe { rt, ra, rb }),
         104 => return Ok(PpuInstruction::Neg { rt, ra }),
         235 => return Ok(PpuInstruction::Mullw { rt, ra, rb }),
         11 => return Ok(PpuInstruction::Mulhwu { rt, ra, rb }),
         9 => return Ok(PpuInstruction::Mulhdu { rt, ra, rb }),
+        73 => return Ok(PpuInstruction::Mulhd { rt, ra, rb }),
         75 => return Ok(PpuInstruction::Mulhw { rt, ra, rb }),
         138 => return Ok(PpuInstruction::Adde { rt, ra, rb }),
         202 => return Ok(PpuInstruction::Addze { rt, ra }),
@@ -447,11 +454,20 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         // Shift doubleword
         27 => return Ok(PpuInstruction::Sld { ra, rs: rt, rb }),
         539 => return Ok(PpuInstruction::Srd { ra, rs: rt, rb }),
+        794 => return Ok(PpuInstruction::Sraw { ra, rs: rt, rb }),
+        827 => return Ok(PpuInstruction::Srad { ra, rs: rt, rb }),
 
         // Shift right algebraic word immediate
         824 => {
-            let sh = rb; // sh is in the rb field position
+            let sh = rb;
             return Ok(PpuInstruction::Srawi { ra, rs: rt, sh });
+        }
+        // sradi (XS-form): XO(10)=826 when sh<32, both 826/827
+        // overlap with srad at 827. The 10-bit XO=826 is
+        // unambiguously sradi; 827 is srad (register shift).
+        826 => {
+            let sh = rb;
+            return Ok(PpuInstruction::Sradi { ra, rs: rt, sh });
         }
 
         // Count leading zeros
@@ -469,6 +485,10 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         21 => return Ok(PpuInstruction::Ldx { rt, ra, rb }),
         279 => return Ok(PpuInstruction::Lhzx { rt, ra, rb }),
 
+        // Cell unaligned-vector loads (Cell BE PPU extensions)
+        519 => return Ok(PpuInstruction::Lvlx { vt: rt, ra, rb }),
+        583 => return Ok(PpuInstruction::Lvrx { vt: rt, ra, rb }),
+
         // Atomic load-reserve / store-conditional
         84 => return Ok(PpuInstruction::Ldarx { rt, ra, rb }),
         214 => return Ok(PpuInstruction::Stdcx { rs: rt, ra, rb }),
@@ -478,6 +498,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         // Indexed stores
         151 => return Ok(PpuInstruction::Stwx { rs: rt, ra, rb }),
         149 => return Ok(PpuInstruction::Stdx { rs: rt, ra, rb }),
+        181 => return Ok(PpuInstruction::Stdux { rs: rt, ra, rb }),
         215 => return Ok(PpuInstruction::Stbx { rs: rt, ra, rb }),
 
         // Store floating-point as integer word indexed (stfiwx): the
@@ -728,7 +749,9 @@ mod tests {
     #[test]
     fn ldu_decodes_with_negative_ds_offset() {
         // ldu r7, -8(r4): primary 58, RT=7, RA=4, DS=-2 (= -8/4), sub=1.
-        // Raw 0xE8E4FFF9 seen in flOw main binary at PC 0x006ba174.
+        // DS-form encodes the displacement as the high 14 bits of the
+        // low 16-bit field; a negative DS must sign-extend correctly
+        // through the shift-left-2 the decoder applies.
         let insn = decode(0xE8E4_FFF9).unwrap();
         assert_eq!(
             insn,
@@ -758,7 +781,8 @@ mod tests {
     #[test]
     fn rlwnm_decodes() {
         // rlwnm r0, r0, r8, 0, 31 -> opcode 23 with RB=r8, MB=0, ME=31.
-        // Raw: 0x5C00403E (seen in flOw main binary at PC 0x006b862c).
+        // Variable-shift rotate-and-mask, distinct from rlwinm's
+        // immediate-shift form (opcode 21).
         let insn = decode(0x5C00_403E).unwrap();
         assert_eq!(
             insn,
@@ -775,7 +799,8 @@ mod tests {
     #[test]
     fn adde_decodes() {
         // adde r3, r0, r29 -> opcode 31, RT=3, RA=0, RB=29, XO=138.
-        // Raw 0x7C60E914 observed in flOw at PC 0x000459c4.
+        // Add-with-carry from XER[CA]; the 9-bit XO form distinct
+        // from X-form XO=10 (vaddfp).
         let insn = decode(0x7C60_E914).unwrap();
         assert_eq!(
             insn,
@@ -831,9 +856,9 @@ mod tests {
 
     #[test]
     fn orc_decodes() {
-        // orc r0, r11, r28 -> opcode 31, RA=0, RS=11, RB=28, XO=412
-        // -> 0x7D60_E338. Observed at SSHD PC 0x003df2d0 after ~42M
-        // pre-advance steps.
+        // orc r0, r11, r28 -> opcode 31, RA=0, RS=11, RB=28, XO=412.
+        // OR with complement: ra = rs | ~rb. Useful for efficient
+        // masking where the compiler has the complement pre-computed.
         let insn = decode(0x7D60_E338).unwrap();
         assert_eq!(
             insn,
@@ -847,24 +872,31 @@ mod tests {
 
     #[test]
     fn addze_decodes() {
-        // addze r0, r0 -> opcode 31, RT=0, RA=0, RB=0, XO=202 (9-bit)
-        // -> 0x7C00_0194. Observed at SSHD PC 0x0069a940.
+        // addze r0, r0 -> opcode 31, RT=0, RA=0, RB=0, XO=202 (9-bit).
+        // Add-to-zero-extended: rt = ra + XER[CA]. The trailing
+        // addition in multi-word add sequences where all remaining
+        // high words are zero; XO=202 is the 9-bit XO-form, not an
+        // X-form with zero RB.
         let insn = decode(0x7C00_0194).unwrap();
         assert_eq!(insn, PpuInstruction::Addze { rt: 0, ra: 0 });
     }
 
     #[test]
     fn cntlzd_decodes() {
-        // cntlzd r0, r11 -> opcode 31, RA=0, RS=11, RB=0, XO=58
-        // -> 0x7D60_0074. Observed at SSHD PC 0x004d57c0.
+        // cntlzd r0, r11 -> opcode 31, RA=0, RS=11, RB=0, XO=58.
+        // Count Leading Zeros Doubleword, the 64-bit counterpart of
+        // cntlzw (XO=26). Compilers emit this for floor(log2) and
+        // bit-find-first intrinsics on 64-bit values.
         let insn = decode(0x7D60_0074).unwrap();
         assert_eq!(insn, PpuInstruction::Cntlzd { ra: 0, rs: 11 });
     }
 
     #[test]
     fn stfsu_decodes() {
-        // stfsu f13, 8(r8) -> primary 53, FRS=13, RA=8, D=8 -> 0xD5A80008
-        // Observed at SSHD PC 0x003c2c30.
+        // stfsu f13, 8(r8) -> primary 53, FRS=13, RA=8, D=8.
+        // Store-float-single with update -- the D-form store pair
+        // primary 52/53 (stfs/stfsu) is distinct from the indexed
+        // X-form pair (stfsx/stfsux at XO=663/695).
         let insn = decode(0xD5A8_0008).unwrap();
         assert_eq!(
             insn,
@@ -892,8 +924,10 @@ mod tests {
 
     #[test]
     fn mulhw_decodes() {
-        // mulhw r0, r0, r9 -> opcode 31, RT=0, RA=0, RB=9, XO=75
-        // -> 0x7C004896. Observed at SSHD PC 0x0040e464.
+        // mulhw r0, r0, r9 -> opcode 31, RT=0, RA=0, RB=9, XO=75.
+        // Signed high-word multiply, distinct from mulhwu (XO=11)
+        // which is unsigned. Compilers emit these pairs for 32x32
+        // -> 64-bit multiplies where the sign interpretation matters.
         let insn = decode(0x7C00_4896).unwrap();
         assert_eq!(
             insn,
@@ -907,9 +941,10 @@ mod tests {
 
     #[test]
     fn stfiwx_decodes() {
-        // stfiwx f13, r0, r9 -> opcode 31, frs=13, ra=0, rb=9, XO=983
-        // -> 0x7DA0_4FAE. Observed at SSHD PC 0x0040e3b4 as the
-        // first CellGov-unrecognized instruction during boot.
+        // stfiwx f13, r0, r9 -> opcode 31, frs=13, ra=0, rb=9, XO=983.
+        // Store-float-integer-word-indexed: writes the low 32 bits of
+        // an FPR to memory as an integer word. Used by float-to-int
+        // conversion sequences (fctiw followed by stfiwx).
         let insn = decode(0x7DA0_4FAE).unwrap();
         assert_eq!(
             insn,

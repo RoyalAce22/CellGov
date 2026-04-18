@@ -27,6 +27,8 @@ tests/fixtures/NPUA80001_cross_runner/*.json
 tests/fixtures/NPUA80001_cross_runner/*.dump
 tests/fixtures/NPUA80068_cross_runner/*.json
 tests/fixtures/NPUA80068_cross_runner/*.dump
+tests/fixtures/BCES00664_cross_runner/*.json
+tests/fixtures/BCES00664_cross_runner/*.dump
 
 # AI tooling
 .claude/

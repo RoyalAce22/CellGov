@@ -1,13 +1,13 @@
 //! Title registry driven by TOML manifests under `docs/titles/`.
 //!
 //! Every PS3 title the CLI's game harness knows about corresponds
-//! to one TOML file named after its PSN content id (for example,
-//! `docs/titles/NPUA80068.toml` for Super Stardust HD). The file
-//! carries the four facts the harness cares about: content id,
-//! short name, display name, and the main-executable candidate
-//! list; plus the default boot checkpoint. Adding a new title
-//! that fits the existing checkpoint kinds and the standard PS3
-//! VFS layout is a single-file commit -- no Rust change.
+//! to one TOML file named after its PSN content id or disc serial
+//! (e.g. `docs/titles/<SERIAL>.toml`). The file carries the four
+//! facts the harness cares about: content id, short name, display
+//! name, and the main-executable candidate list; plus the default
+//! boot checkpoint. Adding a new title that fits the existing
+//! checkpoint kinds and the standard PS3 VFS layout is a
+//! single-file commit -- no Rust change.
 //!
 //! Title metadata lives only in `cellgov_cli`; no library crate
 //! below knows titles exist. Downstream importers that pull
@@ -15,6 +15,15 @@
 //! registry of named games.
 
 use std::path::{Path, PathBuf};
+
+/// How the title's executable is located on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GameSource {
+    /// PSN / HDD game: EBOOT in `<vfs>/game/<content-id>/USRDIR/`.
+    Hdd,
+    /// Disc game: EBOOT in `<vfs>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/`.
+    Disc,
+}
 
 /// One title's manifest as loaded from `docs/titles/<content-id>.toml`.
 ///
@@ -26,9 +35,9 @@ pub struct TitleManifest {
     /// PSN content id and the directory name under
     /// `/dev_hdd0/game/`. Stable per title; primary lookup key.
     pub content_id: String,
-    /// Short CLI name for `--title <name>` and diagnostics
-    /// (e.g. `"flow"`, `"sshd"`). Must be unique across the
-    /// registry; the loader rejects duplicates.
+    /// Short CLI name for `--title <name>` and diagnostics. Must
+    /// be unique across the registry; the loader rejects
+    /// duplicates.
     pub short_name: String,
     /// Human-readable label for log lines and help text.
     pub display_name: String,
@@ -41,6 +50,8 @@ pub struct TitleManifest {
     /// stops at this point; the CLI's `--checkpoint` flag
     /// overrides per run.
     pub checkpoint: CheckpointTrigger,
+    /// Where to find the executable on disk.
+    pub source: GameSource,
 }
 
 /// Stop condition for a boot. The harness picks a default from
@@ -114,6 +125,12 @@ impl CheckpointTrigger {
 struct ManifestFile {
     title: ManifestTitle,
     checkpoint: ManifestCheckpoint,
+    source: Option<ManifestSource>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ManifestSource {
+    kind: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -247,12 +264,23 @@ impl TitleManifest {
                     })
                 }
             };
+        let source = match file.source.as_ref().map(|s| s.kind.as_str()) {
+            Some("disc") => GameSource::Disc,
+            Some(other) => {
+                return Err(ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: format!("unknown source kind '{other}' (accepted: disc)"),
+                });
+            }
+            None => GameSource::Hdd,
+        };
         Ok(TitleManifest {
             content_id: file.title.content_id,
             short_name: file.title.short_name,
             display_name: file.title.display_name,
             eboot_candidates: file.title.eboot_candidates,
             checkpoint,
+            source,
         })
     }
 
@@ -287,7 +315,17 @@ impl TitleManifest {
     /// first candidate executable that exists on disk, or
     /// `None` if neither is present.
     pub fn resolve_eboot(&self, vfs_root: &Path) -> Option<PathBuf> {
-        let usrdir = vfs_root.join("game").join(&self.content_id).join("USRDIR");
+        let usrdir = match self.source {
+            GameSource::Hdd => vfs_root.join("game").join(&self.content_id).join("USRDIR"),
+            GameSource::Disc => {
+                let rpcs3_root = vfs_root.parent().unwrap_or(vfs_root);
+                rpcs3_root
+                    .join("dev_bdvd")
+                    .join(&self.content_id)
+                    .join("PS3_GAME")
+                    .join("USRDIR")
+            }
+        };
         for name in &self.eboot_candidates {
             let p = usrdir.join(name);
             if p.is_file() {
@@ -384,8 +422,9 @@ impl TitleRegistry {
         self.manifests.iter().find(|m| m.short_name == name)
     }
 
-    /// Look up a manifest by its PSN content id (e.g.
-    /// `"NPUA80068"`). Returns `None` for unknown ids.
+    /// Look up a manifest by its PSN content id or disc serial
+    /// (e.g. an `NPxxNNNNN` PSN id or a `BCxxNNNNN` disc serial).
+    /// Returns `None` for unknown ids.
     pub fn by_content_id(&self, content_id: &str) -> Option<&TitleManifest> {
         self.manifests.iter().find(|m| m.content_id == content_id)
     }
@@ -405,22 +444,26 @@ impl TitleRegistry {
 mod tests {
     use super::*;
 
-    const FLOW_TOML: &str = r#"
+    // Synthetic TOML fixtures exercising each checkpoint kind. The
+    // content ids and short names are placeholder values -- the
+    // registry treats every title the same, so the TOML layout and
+    // checkpoint parsing are what matter.
+    const PROCESS_EXIT_TOML: &str = r#"
 [title]
-content_id = "NPUA80001"
-short_name = "flow"
-display_name = "flOw (thatgamecompany, 2007)"
+content_id = "NPAA00001"
+short_name = "proc-exit-fixture"
+display_name = "Process-exit checkpoint fixture"
 eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
 
 [checkpoint]
 kind = "process-exit"
 "#;
 
-    const SSHD_TOML: &str = r#"
+    const FIRST_RSX_WRITE_TOML: &str = r#"
 [title]
-content_id = "NPUA80068"
-short_name = "sshd"
-display_name = "Super Stardust HD (Housemarque, 2007)"
+content_id = "NPAA00002"
+short_name = "rsx-write-fixture"
+display_name = "First-RSX-write checkpoint fixture"
 eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
 
 [checkpoint]
@@ -429,7 +472,7 @@ kind = "first-rsx-write"
 
     const PC_TOML: &str = r#"
 [title]
-content_id = "NPEA00999"
+content_id = "NPAA00003"
 short_name = "pcstop"
 display_name = "PC-checkpoint test title"
 eboot_candidates = ["EBOOT.elf"]
@@ -445,18 +488,18 @@ pc = "0x10381ce8"
 
     #[test]
     fn parses_process_exit_manifest() {
-        let m = parse(FLOW_TOML);
-        assert_eq!(m.content_id, "NPUA80001");
-        assert_eq!(m.short_name, "flow");
+        let m = parse(PROCESS_EXIT_TOML);
+        assert_eq!(m.content_id, "NPAA00001");
+        assert_eq!(m.short_name, "proc-exit-fixture");
         assert_eq!(m.eboot_candidates, vec!["EBOOT.elf", "EBOOT.BIN"]);
         assert_eq!(m.checkpoint, CheckpointTrigger::ProcessExit);
     }
 
     #[test]
     fn parses_first_rsx_write_manifest() {
-        let m = parse(SSHD_TOML);
-        assert_eq!(m.content_id, "NPUA80068");
-        assert_eq!(m.short_name, "sshd");
+        let m = parse(FIRST_RSX_WRITE_TOML);
+        assert_eq!(m.content_id, "NPAA00002");
+        assert_eq!(m.short_name, "rsx-write-fixture");
         assert_eq!(m.checkpoint, CheckpointTrigger::FirstRsxWrite);
     }
 
@@ -512,14 +555,14 @@ kind = "whatever"
         let tmp = std::env::temp_dir().join("cellgov_manifest_scan");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
-        std::fs::write(tmp.join("NPUA80068.toml"), SSHD_TOML).unwrap();
-        std::fs::write(tmp.join("NPUA80001.toml"), FLOW_TOML).unwrap();
+        std::fs::write(tmp.join("NPAA00002.toml"), FIRST_RSX_WRITE_TOML).unwrap();
+        std::fs::write(tmp.join("NPAA00001.toml"), PROCESS_EXIT_TOML).unwrap();
         let reg = TitleRegistry::scan_dir(&tmp).unwrap();
         let names: Vec<&str> = reg.iter().map(|m| m.short_name.as_str()).collect();
-        // Sorted by filename -> NPUA80001 comes before NPUA80068.
-        assert_eq!(names, vec!["flow", "sshd"]);
-        assert!(reg.by_short_name("flow").is_some());
-        assert!(reg.by_content_id("NPUA80068").is_some());
+        // Sorted by filename -> NPAA00001 comes before NPAA00002.
+        assert_eq!(names, vec!["proc-exit-fixture", "rsx-write-fixture"]);
+        assert!(reg.by_short_name("proc-exit-fixture").is_some());
+        assert!(reg.by_content_id("NPAA00002").is_some());
         assert!(reg.by_short_name("unknown").is_none());
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -531,8 +574,8 @@ kind = "whatever"
         std::fs::create_dir_all(&tmp).unwrap();
         // Two manifests with distinct content ids but the same
         // short_name -- registry build must fail.
-        std::fs::write(tmp.join("a.toml"), FLOW_TOML).unwrap();
-        let collide = FLOW_TOML.replace("NPUA80001", "NPEA12345");
+        std::fs::write(tmp.join("a.toml"), PROCESS_EXIT_TOML).unwrap();
+        let collide = PROCESS_EXIT_TOML.replace("NPAA00001", "NPAA99999");
         std::fs::write(tmp.join("b.toml"), &collide).unwrap();
         let err = TitleRegistry::scan_dir(&tmp).expect_err("duplicate short name");
         assert!(matches!(err, ManifestError::DuplicateShortName { .. }));
@@ -544,8 +587,9 @@ kind = "whatever"
         let tmp = std::env::temp_dir().join("cellgov_manifest_dupe_cid");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
-        std::fs::write(tmp.join("a.toml"), FLOW_TOML).unwrap();
-        let collide = FLOW_TOML.replace(r#""flow""#, r#""flow2""#);
+        std::fs::write(tmp.join("a.toml"), PROCESS_EXIT_TOML).unwrap();
+        let collide =
+            PROCESS_EXIT_TOML.replace(r#""proc-exit-fixture""#, r#""proc-exit-fixture-2""#);
         std::fs::write(tmp.join("b.toml"), &collide).unwrap();
         let err = TitleRegistry::scan_dir(&tmp).expect_err("duplicate content id");
         assert!(matches!(err, ManifestError::DuplicateContentId { .. }));

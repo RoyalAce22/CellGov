@@ -342,10 +342,11 @@ mod tests {
     }
 
     #[test]
-    fn flow_checkpoint_manifest_parses_and_fits_guest_memory() {
-        // The checked-in flOw manifest must parse and its
-        // regions must fit inside CellGov's 1 GB guest memory. Run-game
-        // uses 0x4000_0000 bytes (see apps/cellgov_cli/src/game.rs).
+    fn checkpoint_manifest_parses_and_fits_guest_memory() {
+        // A checked-in per-title manifest must parse and its regions
+        // must fit inside CellGov's 1 GB guest memory. run-game uses
+        // 0x4000_0000 bytes (see apps/cellgov_cli/src/game.rs), which
+        // matches the PS3 LV2 user-region size.
         let root = env!("CARGO_MANIFEST_DIR");
         let path = std::path::Path::new(root)
             .join("..")

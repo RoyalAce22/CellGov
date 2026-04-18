@@ -3,11 +3,9 @@
 //! function alongside its NID-DB name, stub classification, and
 //! whether CellGov has dedicated handling.
 //!
-//! The regenerated artifacts live under `docs/titles/`, keyed by
-//! PSN content id:
-//!
-//! - `docs/titles/NPUA80001_hle_inventory.md` (flOw)
-//! - `docs/titles/NPUA80068_hle_inventory.md` (Super Stardust HD)
+//! The regenerated artifacts live under `docs/titles/`, one file
+//! per title keyed by PSN content id or disc serial (e.g.
+//! `docs/titles/<SERIAL>_hle_inventory.md`).
 //!
 //! Regenerate one with:
 //!

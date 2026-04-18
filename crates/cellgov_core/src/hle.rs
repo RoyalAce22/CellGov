@@ -23,6 +23,8 @@ const NID_SYS_HEAP_DELETE_HEAP: u32 = 0xaede4b03;
 const NID_SYS_HEAP_MALLOC: u32 = 0x35168520;
 const NID_SYS_HEAP_MEMALIGN: u32 = 0x44265c08;
 const NID_SYS_HEAP_FREE: u32 = 0x8a561d92;
+const NID_SYS_PPU_THREAD_GET_ID: u32 = 0x350d454e;
+const NID_SYS_TIME_GET_SYSTEM_TIME: u32 = 0x8461e528;
 const NID_CELLGCM_GET_TILED_PITCH_SIZE: u32 = 0x055bd74d;
 const NID_CELLGCM_INIT_BODY: u32 = 0x15bae46b;
 const NID_CELLGCM_GET_CONFIGURATION: u32 = 0xe315a0b2;
@@ -58,6 +60,15 @@ impl Runtime {
             NID_SYS_HEAP_CREATE_HEAP => hle_sys::heap_create_heap(&mut ctx!()),
             NID_SYS_HEAP_MALLOC => hle_sys::heap_malloc(&mut ctx!(), args),
             NID_SYS_HEAP_MEMALIGN => hle_sys::heap_memalign(&mut ctx!(), args),
+            NID_SYS_PPU_THREAD_GET_ID => {
+                let ptr = args[0] as u32;
+                let id: u64 = 0x0100_0000;
+                ctx!().write_guest(ptr as u64, &id.to_be_bytes());
+                ctx!().set_return(0);
+            }
+            NID_SYS_TIME_GET_SYSTEM_TIME => {
+                ctx!().set_return(1_000_000);
+            }
             NID_CELLGCM_GET_TILED_PITCH_SIZE if gcm_enabled => {
                 hle_gcm::get_tiled_pitch_size(&mut ctx!(), args);
             }
@@ -207,5 +218,58 @@ mod tests {
         rt.dispatch_hle(unit_id, NID_CELLGCM_GET_LABEL_ADDRESS, &args5);
         let ret5 = rt.registry_mut().drain_syscall_return(unit_id);
         assert_eq!(ret5, Some(0x50000 + 5 * 0x10));
+    }
+
+    #[test]
+    fn sys_ppu_thread_get_id_writes_thread_id_and_returns_zero() {
+        use crate::runtime::Runtime;
+        use cellgov_mem::GuestMemory;
+        use cellgov_time::Budget;
+
+        let mut rt = Runtime::new(GuestMemory::new(0x100000), Budget::new(1), 100);
+        let unit_id = cellgov_event::UnitId::new(0);
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+
+        // arg[0] is the guest pointer to receive the thread id (u64 BE).
+        let args: [u64; 9] = [0x1000, 0, 0, 0, 0, 0, 0, 0, 0];
+        rt.dispatch_hle(unit_id, NID_SYS_PPU_THREAD_GET_ID, &args);
+
+        let mem = rt.memory().as_bytes();
+        let tid = u64::from_be_bytes([
+            mem[0x1000],
+            mem[0x1001],
+            mem[0x1002],
+            mem[0x1003],
+            mem[0x1004],
+            mem[0x1005],
+            mem[0x1006],
+            mem[0x1007],
+        ]);
+        assert_eq!(tid, 0x0100_0000);
+        assert_eq!(rt.registry_mut().drain_syscall_return(unit_id), Some(0));
+    }
+
+    #[test]
+    fn sys_time_get_system_time_returns_nonzero_monotonic() {
+        use crate::runtime::Runtime;
+        use cellgov_mem::GuestMemory;
+        use cellgov_time::Budget;
+
+        let mut rt = Runtime::new(GuestMemory::new(0x100000), Budget::new(1), 100);
+        let unit_id = cellgov_event::UnitId::new(0);
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+
+        let args: [u64; 9] = [0; 9];
+        rt.dispatch_hle(unit_id, NID_SYS_TIME_GET_SYSTEM_TIME, &args);
+
+        // Returned in r3; the deterministic oracle picks a fixed
+        // nonzero value so guest code that checks time > 0 does not
+        // wedge.
+        let ret = rt.registry_mut().drain_syscall_return(unit_id);
+        assert_eq!(ret, Some(1_000_000));
     }
 }
