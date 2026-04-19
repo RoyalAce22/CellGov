@@ -1,0 +1,29 @@
+[test]
+name = "ppu_event_flag_wakeall"
+
+# Structural microtest. Primary spawns two waiter children on
+# distinct bit masks (AND|NO-CLEAR) and then sets a bit pattern
+# that matches both; both waiters must wake in one set call and
+# observe the same bit pattern.
+
+[rpcs3]
+binary = "build/ppu_event_flag_wakeall.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+content_id = "CG_EVF"
+short_name = "evf"
+display_name = "CellGov event-flag wake-all microtest"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"

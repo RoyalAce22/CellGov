@@ -176,15 +176,31 @@ pub fn run_game(
             t.coverage_time,
             pct(t.coverage_time, t_loop)
         );
-        let overhead = t_loop
-            .saturating_sub(t.step_time)
-            .saturating_sub(t.commit_time)
-            .saturating_sub(t.coverage_time);
-        println!(
-            "  other overhead:{:?}  ({:.1}%)",
-            overhead,
-            pct(overhead, t_loop)
-        );
+        // Untracked = t_loop - (step + commit + coverage). This is
+        // the real "other" bucket: progress checkpoints, TTY
+        // capture, trace printing, syscall tracking -- the gap
+        // between t1 and t2 in the step loop that is not attributed
+        // to any timed region.
+        //
+        // Bucket overflow (tracked > t_loop) would mean the
+        // regions overlap or t_loop missed something; surface that
+        // as a WARN line instead of silently clamping via
+        // saturating_sub.
+        match compute_untracked(t_loop, t.step_time, t.commit_time, t.coverage_time) {
+            Ok(overhead) => {
+                println!(
+                    "  other overhead:{:?}  ({:.1}%)",
+                    overhead,
+                    pct(overhead, t_loop)
+                );
+            }
+            Err(excess) => {
+                println!(
+                    "  other overhead: WARN tracked buckets exceed loop total by {:?}",
+                    excess
+                );
+            }
+        }
         println!(
             "  steps/sec:     {:.0}",
             steps as f64 / t_loop.as_secs_f64()
@@ -746,6 +762,31 @@ fn pct(part: std::time::Duration, total: std::time::Duration) -> f64 {
     }
 }
 
+/// Compute the untracked time inside the step loop.
+///
+/// `Ok(overhead)` is `t_loop - (step + commit + coverage)` when
+/// the tracked buckets fit inside the loop. `Err(excess)` is the
+/// amount by which the buckets overflow -- a timing-invariant
+/// violation that means either the timed regions overlap, a
+/// region double-counts, or `t_loop` starts after the loop
+/// actually began.
+fn compute_untracked(
+    t_loop: std::time::Duration,
+    step: std::time::Duration,
+    commit: std::time::Duration,
+    coverage: std::time::Duration,
+) -> Result<std::time::Duration, std::time::Duration> {
+    let tracked = step
+        .checked_add(commit)
+        .and_then(|s| s.checked_add(coverage))
+        .unwrap_or(std::time::Duration::MAX);
+    if tracked <= t_loop {
+        Ok(t_loop - tracked)
+    } else {
+        Err(tracked - t_loop)
+    }
+}
+
 #[derive(Default)]
 struct StepTiming {
     step_time: std::time::Duration,
@@ -885,10 +926,22 @@ fn step_loop(
                         let m = rt.memory().as_bytes();
                         if buf + len <= m.len() {
                             let raw = m[buf..buf + len].to_vec();
-                            let text = String::from_utf8_lossy(&raw);
-                            let fd = args[1] as u32;
-                            print!("  tty[fd={}]: {text}", fd);
-                            if !text.ends_with('\n') {
+                            // Narrow the fd via try_from so a guest
+                            // passing a >32-bit value surfaces as
+                            // u32::MAX (an obviously-bogus sentinel)
+                            // rather than silently aliasing to a
+                            // plausible low fd. sys_tty_write uses
+                            // 0/1/2 in practice; any wider value
+                            // signals a corrupted caller.
+                            let fd = u32::try_from(args[1]).unwrap_or(u32::MAX);
+                            // Sanitize to ASCII so binary payloads
+                            // (e.g. microtest result structs) do
+                            // not emit control bytes or U+FFFD
+                            // replacements that cp1252 / cp437
+                            // Windows consoles mangle.
+                            let preview = crate::game::diag::ascii_safe_preview(&raw);
+                            print!("  tty[fd={}]: {preview}", fd);
+                            if !preview.ends_with('\n') {
                                 println!();
                             }
                             ctx.last_tty = Some(TtyCapture {
@@ -990,11 +1043,86 @@ fn step_loop(
 #[cfg(test)]
 mod tests {
     use super::{
-        elf_user_region_end, manifest::CheckpointTrigger, rsx_write_checkpoint_addr,
-        CheckpointManifest, CheckpointRegion,
+        compute_untracked, elf_user_region_end, manifest::CheckpointTrigger,
+        rsx_write_checkpoint_addr, CheckpointManifest, CheckpointRegion,
     };
     use cellgov_core::{CommitError, CommitOutcome};
     use cellgov_mem::MemError;
+    use std::time::Duration;
+
+    #[test]
+    fn untracked_is_loop_minus_tracked_sum_in_happy_path() {
+        // step+commit+coverage < t_loop: the difference is the
+        // untracked "other" bucket (progress prints, TTY capture,
+        // syscall tracking -- the gap between t1 and t2).
+        let t_loop = Duration::from_millis(100);
+        let step = Duration::from_millis(40);
+        let commit = Duration::from_millis(20);
+        let coverage = Duration::from_millis(10);
+        assert_eq!(
+            compute_untracked(t_loop, step, commit, coverage),
+            Ok(Duration::from_millis(30))
+        );
+    }
+
+    #[test]
+    fn untracked_zero_when_buckets_fill_the_loop() {
+        // Edge case: every nanosecond of t_loop is accounted for.
+        let t_loop = Duration::from_millis(100);
+        let step = Duration::from_millis(60);
+        let commit = Duration::from_millis(30);
+        let coverage = Duration::from_millis(10);
+        assert_eq!(
+            compute_untracked(t_loop, step, commit, coverage),
+            Ok(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn untracked_errors_when_tracked_exceeds_loop() {
+        // Timing invariant violation: tracked buckets sum to more
+        // than the loop total. The previous `saturating_sub`
+        // implementation hid this silently; the Err path surfaces
+        // the overshoot so the WARN line fires.
+        let t_loop = Duration::from_millis(100);
+        let step = Duration::from_millis(60);
+        let commit = Duration::from_millis(30);
+        let coverage = Duration::from_millis(25);
+        assert_eq!(
+            compute_untracked(t_loop, step, commit, coverage),
+            Err(Duration::from_millis(15))
+        );
+    }
+
+    #[test]
+    fn untracked_handles_zero_loop_cleanly() {
+        // t_loop == 0 with zero buckets is degenerate but not a
+        // violation; overhead is zero.
+        assert_eq!(
+            compute_untracked(
+                Duration::ZERO,
+                Duration::ZERO,
+                Duration::ZERO,
+                Duration::ZERO
+            ),
+            Ok(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn untracked_saturates_on_arithmetic_overflow() {
+        // Pathological: if a bucket is Duration::MAX (should never
+        // happen in practice but we must not panic), the helper
+        // clamps via checked_add and returns Err rather than
+        // overflowing.
+        let result = compute_untracked(
+            Duration::from_millis(100),
+            Duration::MAX,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+        );
+        assert!(result.is_err());
+    }
 
     #[test]
     fn rsx_checkpoint_fires_on_reserved_write_to_rsx() {

@@ -311,13 +311,75 @@ impl PpuThreadIdAllocator {
 /// `UnitStatus::Blocked` and skips the unit. The LV2 host is
 /// responsible for transitioning the unit back to runnable when
 /// the underlying condition resolves.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestBlockReason {
     /// Waiting for `target` to call `sys_ppu_thread_exit`.
     WaitingOnJoin {
         /// Thread whose exit this waiter is parked on.
         target: PpuThreadId,
     },
+    /// Waiting for the lightweight mutex `id` to become available
+    /// (its `sys_lwmutex_unlock`).
+    WaitingOnLwMutex {
+        /// Guest id of the lightweight mutex being awaited.
+        id: u32,
+    },
+    /// Waiting for the heavy mutex `id` to become available (its
+    /// `sys_mutex_unlock`).
+    WaitingOnMutex {
+        /// Guest id of the heavy mutex being awaited.
+        id: u32,
+    },
+    /// Waiting for a `sys_semaphore_post` on semaphore `id` that
+    /// hands ownership of the slot to this waiter.
+    WaitingOnSemaphore {
+        /// Guest id of the semaphore being awaited.
+        id: u32,
+    },
+    /// Waiting for a `sys_event_queue_send` to deliver a payload on
+    /// event queue `id`.
+    WaitingOnEventQueue {
+        /// Guest id of the event queue being awaited.
+        id: u32,
+    },
+    /// Waiting for a `sys_event_flag_set` that satisfies `mask` per
+    /// `mode` on event flag `id`.
+    WaitingOnEventFlag {
+        /// Guest id of the event flag being awaited.
+        id: u32,
+        /// Bit mask the waiter's match predicate uses.
+        mask: u64,
+        /// Match / clear-on-wake policy for this waiter.
+        mode: EventFlagWaitMode,
+    },
+    /// Waiting for a `sys_cond_signal` / `_signal_all` on cond
+    /// `cond_id`. On wake, the runtime re-acquires the associated
+    /// mutex `mutex_id` before returning control to the caller.
+    WaitingOnCond {
+        /// Guest id of the cond being awaited.
+        cond_id: u32,
+        /// Guest id of the mutex released at cond_wait entry; the
+        /// wake path re-acquires it (or parks on it if held).
+        mutex_id: u32,
+    },
+}
+
+/// Event-flag wait policy. Encodes the two orthogonal bits the PS3
+/// ABI exposes at `sys_event_flag_wait` time: how the mask matches
+/// the current bits (AND = all set, OR = any set), and whether the
+/// matched bits are cleared on wake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventFlagWaitMode {
+    /// All bits in `mask` must be set; do not clear on wake.
+    AndNoClear,
+    /// All bits in `mask` must be set; clear the matched bits on
+    /// wake.
+    AndClear,
+    /// Any bit in `mask` must be set; do not clear on wake.
+    OrNoClear,
+    /// Any bit in `mask` must be set; clear the matched bits on
+    /// wake.
+    OrClear,
 }
 
 /// Lifecycle state of a PPU thread.
@@ -547,10 +609,49 @@ impl PpuThreadTable {
                 PpuThreadState::Detached => 3,
             };
             hasher.write(&[state_byte]);
-            if let PpuThreadState::Blocked(GuestBlockReason::WaitingOnJoin { target }) =
-                &thread.state
-            {
-                hasher.write(&target.raw().to_le_bytes());
+            if let PpuThreadState::Blocked(reason) = &thread.state {
+                let (tag, payload) = match *reason {
+                    GuestBlockReason::WaitingOnJoin { target } => {
+                        let mut p = [0u8; 24];
+                        p[0..8].copy_from_slice(&target.raw().to_le_bytes());
+                        (0u8, p)
+                    }
+                    GuestBlockReason::WaitingOnLwMutex { id } => {
+                        let mut p = [0u8; 24];
+                        p[0..4].copy_from_slice(&id.to_le_bytes());
+                        (1, p)
+                    }
+                    GuestBlockReason::WaitingOnMutex { id } => {
+                        let mut p = [0u8; 24];
+                        p[0..4].copy_from_slice(&id.to_le_bytes());
+                        (2, p)
+                    }
+                    GuestBlockReason::WaitingOnSemaphore { id } => {
+                        let mut p = [0u8; 24];
+                        p[0..4].copy_from_slice(&id.to_le_bytes());
+                        (3, p)
+                    }
+                    GuestBlockReason::WaitingOnEventQueue { id } => {
+                        let mut p = [0u8; 24];
+                        p[0..4].copy_from_slice(&id.to_le_bytes());
+                        (4, p)
+                    }
+                    GuestBlockReason::WaitingOnEventFlag { id, mask, mode } => {
+                        let mut p = [0u8; 24];
+                        p[0..4].copy_from_slice(&id.to_le_bytes());
+                        p[4..12].copy_from_slice(&mask.to_le_bytes());
+                        p[12] = mode as u8;
+                        (5, p)
+                    }
+                    GuestBlockReason::WaitingOnCond { cond_id, mutex_id } => {
+                        let mut p = [0u8; 24];
+                        p[0..4].copy_from_slice(&cond_id.to_le_bytes());
+                        p[4..8].copy_from_slice(&mutex_id.to_le_bytes());
+                        (6, p)
+                    }
+                };
+                hasher.write(&[tag]);
+                hasher.write(&payload);
             }
             if let Some(v) = thread.exit_value {
                 hasher.write(&[1]);
@@ -806,6 +907,98 @@ mod tests {
             }
             other => panic!("expected WaitingOnJoin, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn all_guest_block_reason_variants_round_trip_through_blocked_state() {
+        let mut t = PpuThreadTable::new();
+        let waiter = t.create(UnitId::new(2), dummy_attrs()).unwrap();
+        let reasons = [
+            GuestBlockReason::WaitingOnJoin {
+                target: PpuThreadId::PRIMARY,
+            },
+            GuestBlockReason::WaitingOnLwMutex { id: 7 },
+            GuestBlockReason::WaitingOnMutex { id: 7 },
+            GuestBlockReason::WaitingOnSemaphore { id: 7 },
+            GuestBlockReason::WaitingOnEventQueue { id: 7 },
+            GuestBlockReason::WaitingOnEventFlag {
+                id: 7,
+                mask: 0xF0F0,
+                mode: EventFlagWaitMode::AndClear,
+            },
+            GuestBlockReason::WaitingOnCond {
+                cond_id: 7,
+                mutex_id: 8,
+            },
+        ];
+        for reason in reasons {
+            t.get_mut(waiter).unwrap().state = PpuThreadState::Blocked(reason);
+            match &t.get(waiter).unwrap().state {
+                PpuThreadState::Blocked(stored) => assert_eq!(*stored, reason),
+                other => panic!("expected Blocked, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn state_hash_distinguishes_every_guest_block_reason() {
+        // The state_hash tagging must give each variant a distinct
+        // discriminant. Two tables differing only in block reason
+        // must hash differently.
+        fn table_with_reason(reason: GuestBlockReason) -> u64 {
+            let mut t = PpuThreadTable::new();
+            let id = t.create(UnitId::new(1), dummy_attrs()).unwrap();
+            t.get_mut(id).unwrap().state = PpuThreadState::Blocked(reason);
+            t.state_hash()
+        }
+        let hashes = [
+            table_with_reason(GuestBlockReason::WaitingOnJoin {
+                target: PpuThreadId::PRIMARY,
+            }),
+            table_with_reason(GuestBlockReason::WaitingOnLwMutex { id: 1 }),
+            table_with_reason(GuestBlockReason::WaitingOnMutex { id: 1 }),
+            table_with_reason(GuestBlockReason::WaitingOnSemaphore { id: 1 }),
+            table_with_reason(GuestBlockReason::WaitingOnEventQueue { id: 1 }),
+            table_with_reason(GuestBlockReason::WaitingOnEventFlag {
+                id: 1,
+                mask: 0,
+                mode: EventFlagWaitMode::AndNoClear,
+            }),
+            table_with_reason(GuestBlockReason::WaitingOnCond {
+                cond_id: 1,
+                mutex_id: 1,
+            }),
+        ];
+        for (i, h_i) in hashes.iter().enumerate() {
+            for (j, h_j) in hashes.iter().enumerate().skip(i + 1) {
+                assert_ne!(h_i, h_j, "variants {i} and {j} hash-collided");
+            }
+        }
+    }
+
+    #[test]
+    fn state_hash_distinguishes_event_flag_wait_modes() {
+        fn hash_with_mode(mode: EventFlagWaitMode) -> u64 {
+            let mut t = PpuThreadTable::new();
+            let id = t.create(UnitId::new(1), dummy_attrs()).unwrap();
+            t.get_mut(id).unwrap().state =
+                PpuThreadState::Blocked(GuestBlockReason::WaitingOnEventFlag {
+                    id: 1,
+                    mask: 0xAA,
+                    mode,
+                });
+            t.state_hash()
+        }
+        let a = hash_with_mode(EventFlagWaitMode::AndNoClear);
+        let b = hash_with_mode(EventFlagWaitMode::AndClear);
+        let c = hash_with_mode(EventFlagWaitMode::OrNoClear);
+        let d = hash_with_mode(EventFlagWaitMode::OrClear);
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+        assert_ne!(b, c);
+        assert_ne!(b, d);
+        assert_ne!(c, d);
     }
 
     #[test]

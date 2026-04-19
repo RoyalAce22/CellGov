@@ -399,11 +399,12 @@ Classified into typed `Lv2Request` variants:
 | `sys_ppu_thread_yield`        | 43      | No-op scheduling hint; round-robin picks the next runnable unit.                                       |
 | `sys_ppu_thread_join`         | 44      | Either returns exit value immediately or blocks caller on target.                                      |
 | `sys_ppu_thread_create`       | 52      | Allocates stack + TLS, seeds child `PpuState`, registers a new PPU unit mid-run via `PpuFactory`.      |
-| `sys_mutex_create`            | 100     | Allocates a monotonic mutex ID, writes to guest pointer.                                               |
-| `sys_mutex_lock`              | 102     | Stub: returns CELL_OK (single-threaded module_start).                                                  |
-| `sys_mutex_unlock`            | 104     | Stub: returns CELL_OK.                                                                                 |
-| `sys_event_queue_create`      | 128     | Allocates a monotonic queue ID, writes to guest pointer.                                               |
-| `sys_event_queue_destroy`     | 129     | Stub: returns CELL_OK.                                                                                 |
+| `sys_event_flag_*`            | 82-87   | Create / destroy / wait / trywait / set / clear. AND/OR match with CLEAR/NO-CLEAR wake policy.         |
+| `sys_semaphore_*`             | 93-94, 114-117 | Create / destroy / wait / post / trywait / get_value. Wake-or-increment on post.                |
+| `sys_lwmutex_*`               | 95-99   | Create / destroy / lock / unlock / trylock. FIFO waiter list, ownership tracked, EDEADLK on re-enter.  |
+| `sys_mutex_*`                 | 100, 102-104 | Create / lock / unlock / trylock. Heavy-mutex variant of lwmutex with attribute capture.          |
+| `sys_cond_*`                  | 105-110 | Create / destroy / wait / signal / signal_all / signal_to. Two-hop drop-and-reacquire mutex protocol.  |
+| `sys_event_queue_*`           | 128-130, 133-134 | Create / destroy / receive / tryreceive / port_send. Bounded FIFO with 4-u64 payloads.        |
 | `sys_spu_image_open`          | 156     | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                    |
 | `sys_spu_thread_group_create` | 170     | Allocates a monotonic group id, writes it to guest pointer.                                            |
 | `sys_spu_thread_initialize`   | 172     | Records image handle and args (copied at init time) per slot.                                          |
@@ -428,10 +429,15 @@ range, priority, TLS base), the exit value (set on
 
 State machine: `Runnable -> Blocked(GuestBlockReason)
 -> Runnable` (on wake), or `Runnable -> Finished` (on exit). The
-guest-facing `GuestBlockReason` (currently only models
-`WaitingOnJoin { target }`; richer sync primitives extend it as
-they land) lives next to the thread table; the scheduler sees
-only the opaque `UnitStatus::Blocked`.
+guest-facing `GuestBlockReason` lives next to the thread table;
+the scheduler sees only the opaque `UnitStatus::Blocked`.
+Variants cover every LV2 primitive that parks a caller:
+`WaitingOnJoin`, `WaitingOnLwMutex`, `WaitingOnMutex`,
+`WaitingOnSemaphore`, `WaitingOnEventQueue`, `WaitingOnEventFlag`,
+and `WaitingOnCond`. Each carries the primitive id (and the
+associated mutex id for `WaitingOnCond`); this richer context is
+used by diagnostics and fault backtraces but never by the
+scheduler, which stays agnostic to the blocking cause.
 
 Child stacks come from the 15 MB `child_stacks` region at
 `0xD0010000+`. `ThreadStackAllocator` is a deterministic bump
@@ -460,6 +466,102 @@ error codes instead of CELL_OK (matching RPCS3 retail behavior):
 
 All other syscalls fall through the host dispatcher returning CELL_OK
 with no effects.
+
+### Synchronization primitives
+
+Six LV2 primitives park and wake PPU threads under a shared
+contract. Each has its own table inside `Lv2Host`
+(`LwMutexTable`, `MutexTable`, `SemaphoreTable`,
+`EventQueueTable`, `EventFlagTable`, `CondTable`) keyed by the
+guest-visible id. Every table composes the shared `WaiterList`
+-- a strict FIFO queue of `PpuThreadId` -- and contributes to
+the host's `state_hash` only when non-empty.
+
+#### Block / wake protocol
+
+Park side: a wait handler whose predicate fails (mutex owned,
+semaphore count zero, event queue empty, event flag mask
+unsatisfied, cond with any predicate) enqueues the caller on
+the primitive's waiter list, records a
+`PendingResponse` for that unit in the runtime's
+`SyscallResponseTable`, and returns
+`Lv2Dispatch::Block { reason, pending, effects }`. The runtime
+transitions the unit `Runnable -> Blocked` and applies the
+effects atomically. `reason` carries the rich
+`Lv2BlockReason` (primitive id + optional associated mutex id
+for cond); `pending` carries whatever the wake resolver needs
+to complete the syscall (a return code, a 32-byte event
+payload, a u64 flag observation, or a cond-reacquire marker).
+
+Release side: an unlock / post / send / set / signal handler
+reads the waiter list and the primitive state in a single
+dispatch, makes the wake decision, and returns
+`Lv2Dispatch::WakeAndReturn { code, woken_unit_ids,
+response_updates, effects }`. The runtime sets the releaser's
+r3 to `code`, applies per-waiter `response_updates` (these can
+swap a waiter's `PendingResponse` wholesale -- used by event
+queue send to deliver the payload, by event flag set to
+deliver the observed bit pattern, and by cond signal to swap
+`CondWakeReacquire` for `ReturnCode` on clean acquire), and
+then walks `woken_unit_ids`: for each, takes its pending
+response, writes r3 / out-pointer effects accordingly, and
+transitions `Blocked -> Runnable`.
+
+Continuation pointers (event queue out pointer, event flag
+result pointer) are co-located on the primitive's waiter entry,
+not on the release-side dispatch. This is the invariant that
+kept the pattern from drifting into the lost-wake class of
+bugs: parking records everything the wake needs to know.
+
+#### Cond-wake re-acquire (two-hop block)
+
+The one primitive that breaks the straight release-wakes-caller
+pattern is `sys_cond_wait`, because on wake the caller needs
+the associated mutex re-held. The handler emits a new
+`Lv2Dispatch::BlockAndWake` variant: releasing the mutex on
+the way into the cond wait can transfer ownership to a parked
+mutex waiter, which must wake in the same dispatch the cond
+caller blocks.
+
+On the signal side, the wake target holds
+`PendingResponse::CondWakeReacquire { mutex_id, mutex_kind }`.
+The signal handler consults the mutex table:
+
+- If unowned: acquire on the waker's behalf, swap the pending
+  response to `ReturnCode { code: 0 }`, and include the waker
+  in `woken_unit_ids`. Classic wake -- r3 = 0, back to
+  Runnable, mutex now held.
+- If held: re-park the waker on the mutex waiter list, swap
+  the pending response to `ReturnCode { code: 0 }`, and leave
+  the waker Blocked. When the current mutex holder eventually
+  calls `sys_mutex_unlock`, the unlock-wake path transfers
+  ownership to this waker and resolves the swapped pending
+  response.
+
+Cond is non-sticky: a `sys_cond_signal` / `_signal_all` /
+`_signal_to` on a cond with no waiters is observably lost. No
+pending-signal counter is kept; the cond table's state hash is
+unchanged by a lost signal.
+
+#### Lost-wake prevention
+
+The classic lost-wake bug is a race between
+check-waiter-list-then-wake and check-count-then-decrement.
+CellGov cannot race by construction (single-host-threaded,
+deterministic interleaving at commit boundaries), but the
+dispatch handlers still have to read-and-mutate atomically:
+
+- Park handlers read primitive state AND install the block in
+  the same dispatch. The runtime commits the entire dispatch
+  atomically.
+- Release handlers read the waiter list AND drain it in the
+  same dispatch. The runtime commits atomically.
+
+Regression coverage: five post-before-wait tests (one per
+non-cond primitive) assert that a release scheduled before the
+wait observably unblocks the waiter. For cond the inverse
+holds -- a signal-before-wait must NOT wake a subsequent
+waiter -- tested directly against all three signal variants.
 
 ## HLE dispatch
 

@@ -5108,7 +5108,7 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
     (0xf463981c, "cellNetCtl", "cellGameUpdateCheckFinishAsyncEx"),
     (0xf46d8ae5, "sceNpTus", "sceNpTssGetDataNoLimit"),
     (0xf481967f, "cellSysutil", "cellSysutilAvcGetAttribute"),
-    (0xf49f40c0, "RPCS3_HLE_LIBRARY", "WaitForSPUsToEmptySNRs"),
+    (0xf49f40c0, "", "WaitForSPUsToEmptySNRs"),
     (0xf4a2d52b, "sceNpClans", "sceNpClansUpdateMemberInfo"),
     (0xf4aa8b27, "cellSysutil", "cellSysutilAvcCancelByeRequest"),
     (0xf4ad6ea8, "", "ldexp"),

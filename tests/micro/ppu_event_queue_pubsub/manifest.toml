@@ -1,0 +1,29 @@
+[test]
+name = "ppu_event_queue_pubsub"
+
+# Structural microtest. Primary sends 16 payloads; receiver child
+# calls sys_event_queue_receive 16 times and sums the data1
+# fields. Final sum must be 0 + 1 + ... + 15 = 120 with zero
+# errors and the last observed data1 equal to 15.
+
+[rpcs3]
+binary = "build/ppu_event_queue_pubsub.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+content_id = "CG_EVQ"
+short_name = "evq"
+display_name = "CellGov event-queue pub-sub microtest"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"

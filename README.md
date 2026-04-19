@@ -49,48 +49,22 @@ CellGov answers that question:
 
 Pre-Alpha. Capability today:
 
-- **Titles: 3** -- flOw (NPUA80001), Super Stardust HD (NPUA80068),
-  WipEout HD Fury (BCES00664). All three boot to their checkpoints
-  with cross-runner observation match against RPCS3 (modulo
-  classified non-semantic divergences). See [docs/titles.md](docs/titles.md)
-  for the per-title compatibility matrix. Manifest-driven: adding a
-  title is one TOML file, no Rust change.
-- **PPU: 119 instruction variants**, including 5 quickened forms
-  (Li, Mr, Slwi, Srwi, Clrlwi), 3 doubleword quickenings (Clrldi,
-  Sldi, Srdi), and 9 superpairs (LwzCmpwi, LiStw, MflrStw, LwzMtlr,
-  CmpwiBc, CmpwBc, MflrStd, LdMtlr, StdStd). Full SPU interpreter.
-- **LV2: 22 syscalls**, 20 HLE exports with dedicated handling
-  (including cellGcmSys RSX init cluster, memory-info queries,
-  and the PPU thread lifecycle: create / exit / join / yield /
-  get-id, with a per-thread table, stack allocator, and TLS
-  template).
-- **Multi-PPU threading.** `sys_ppu_thread_create` spawns a
-  child `PpuExecutionUnit` mid-run; the deterministic
-  round-robin scheduler interleaves all runnable PPU threads;
-  `sys_ppu_thread_join` blocks the caller until the target
-  exits and returns the exit value. Two-thread PSL1GHT
-  microtest (`tests/micro/ppu_two_threads_disjoint_writes`)
-  runs end-to-end with same-budget replay determinism and
-  cross-budget final-state equivalence.
-- **Memory**: PS3-spec sparse address space with store-forwarding
-  buffer for intra-block coherence.
-- **Throughput**: basic-block batching with mode-driven step budget
-  (default 256, `--budget N` overrides) over a predecoded
-  instruction shadow with quickening and super-pairing. The three
-  wired titles boot at ~36-56M insns/sec to their checkpoints.
-- **Tracing**: per-instruction state hashes, streaming divergence
-  scanner, register-level zoom-in.
-- **Cross-runner**: observation schema validated against RPCS3;
-  reproducible boot bench with subprocess isolation; disc ISOs
-  supported via `cellgov_firmware decrypt-self`.
-- **Firmware**: standalone PUP decrypter (`cellgov_firmware`)
-  extracts PS3 system modules from Sony's official firmware update
-  without requiring RPCS3; also decrypts retail game SELFs to ELFs
-  for disc-format titles.
-- **NID database**: 5,327 PS3 library function name mappings
-  merged from RPCS3's module registrations (99%+ of imports named
-  in the per-title HLE inventories).
-- 1,284 tests, zero `unsafe` (`unsafe_code = forbid`).
+- **Titles**: 3 boot to cross-runner checkpoints -- flOw, Super
+  Stardust HD, WipEout HD Fury. See [docs/titles.md](docs/titles.md).
+- **PPU**: 119 instruction variants with quickening and super-pairing.
+- **SPU**: full interpreter.
+- **LV2**: 47 syscalls, 20 HLE exports.
+- **Multi-PPU threading** via `sys_ppu_thread_create` / `_exit` / `_join`.
+- **Synchronization primitives**: lwmutex, heavy mutex, semaphore,
+  event queue, event flag, and condition variable -- real block and
+  wake, with five per-primitive PSL1GHT microtests.
+- **Memory**: PS3-spec sparse address space, store forwarding.
+- **Throughput**: basic-block batching over a predecoded shadow.
+- **Tracing**: per-instruction state hashes, divergence scanner.
+- **Cross-runner**: normalized observation schema against RPCS3;
+  disc ISOs via `cellgov_firmware decrypt-self`.
+- **Firmware**: standalone PUP and retail SELF decrypter.
+- 1,501 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [`docs/architecture.md`](docs/architecture.md) for full
 technical details on the pipeline, memory model, shadow passes,

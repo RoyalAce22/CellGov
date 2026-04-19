@@ -1,8 +1,8 @@
 /* PPU program: two PPU threads, each writes to a disjoint memory
  * region, primary joins on the child and reports both values.
  *
- * Phase 17 structural microtest. It does not exercise any sync
- * primitive (Phase 18's job) or atomic reservation (Phase 19).
+ * Structural microtest for multi-PPU threading. It does not
+ * exercise any sync primitive or atomic reservation contention.
  * It proves:
  *
  *   1. sys_ppu_thread_create successfully spawns a second PPU

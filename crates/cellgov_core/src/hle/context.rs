@@ -7,9 +7,9 @@
 //! object IDs.
 //!
 //! The dispatch layer in `hle.rs` constructs an internal adapter
-//! that implements this trait by borrowing from the Runtime. Module
-//! implementations (hle_sys, hle_gcm, future modules) accept
-//! `&mut dyn HleContext` and never see the Runtime.
+//! that implements this trait by borrowing from the Runtime.
+//! Per-module files (`hle::sys`, `hle::gcm`, and future modules)
+//! accept `&mut dyn HleContext` and never see the Runtime.
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
