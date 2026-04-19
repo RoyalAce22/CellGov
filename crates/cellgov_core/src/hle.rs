@@ -1,140 +1,56 @@
-//! HLE (High-Level Emulation) dispatch for PS3 system imports.
+//! HLE (High-Level Emulation) router.
 //!
-//! Thin dispatch layer: maps NID to the module handler that
-//! implements it. Module implementations live in separate files
-//! (hle_sys, hle_gcm) and operate through the [`HleContext`] trait,
-//! never touching Runtime directly.
+//! Each PS3 system library is one file in this directory (`sys.rs`
+//! for sysPrxForUser, `gcm.rs` for cellGcmSys, and so on) that
+//! owns its NID constants, its handler bodies, and a `dispatch`
+//! entry point returning `Option<()>`. This file chains those
+//! entry points; the first module to claim a NID wins, and
+//! unclaimed NIDs fall through to the CELL_OK default.
+//!
+//! Scaling rule: a new PS3 library means a new
+//! `crates/cellgov_core/src/hle/<module>.rs` file, one `pub mod`
+//! declaration below, and one line added to the chain. No
+//! registration macro, no mutable global dispatch table, no
+//! link-time wiring.
 
 use cellgov_event::UnitId;
 
-use crate::hle_context::{HleContext, RuntimeHleAdapter};
-use crate::hle_gcm;
-use crate::hle_sys;
+use crate::hle::context::{HleContext, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
-const NID_SYS_INITIALIZE_TLS: u32 = 0x744680a2;
-const NID_SYS_PROCESS_EXIT: u32 = 0xe6f2c1e7;
-const NID_SYS_MALLOC: u32 = 0xbdb18f83;
-const NID_SYS_FREE: u32 = 0xf7f7fb20;
-const NID_SYS_MEMSET: u32 = 0x68b9b011;
-const NID_SYS_LWMUTEX_CREATE: u32 = 0x2f85c0ef;
-const NID_SYS_HEAP_CREATE_HEAP: u32 = 0xb2fcf2c8;
-const NID_SYS_HEAP_DELETE_HEAP: u32 = 0xaede4b03;
-const NID_SYS_HEAP_MALLOC: u32 = 0x35168520;
-const NID_SYS_HEAP_MEMALIGN: u32 = 0x44265c08;
-const NID_SYS_HEAP_FREE: u32 = 0x8a561d92;
-const NID_SYS_PPU_THREAD_GET_ID: u32 = 0x350d454e;
-const NID_SYS_THREAD_CREATE_EX: u32 = 0x24a1ea07;
-const NID_SYS_THREAD_EXIT: u32 = 0xaff080a4;
-const NID_SYS_TIME_GET_SYSTEM_TIME: u32 = 0x8461e528;
-const NID_CELLGCM_GET_TILED_PITCH_SIZE: u32 = 0x055bd74d;
-const NID_CELLGCM_INIT_BODY: u32 = 0x15bae46b;
-const NID_CELLGCM_GET_CONFIGURATION: u32 = 0xe315a0b2;
-const NID_CELLGCM_GET_CONTROL_REGISTER: u32 = 0xa547adde;
-const NID_CELLGCM_GET_LABEL_ADDRESS: u32 = 0xf80196c1;
+pub mod context;
+pub(crate) mod gcm;
+pub(crate) mod sys;
 
 impl Runtime {
     /// Dispatch an HLE import call by NID.
+    ///
+    /// Walks the module chain in priority order. If no module
+    /// claims the NID, the default is `r3 = 0` (CELL_OK) with no
+    /// effects -- the safe fallback for unobserved calls.
     pub(crate) fn dispatch_hle(&mut self, source: UnitId, nid: u32, args: &[u64; 9]) {
-        let gcm_enabled = self.gcm_state.rsx_checkpoint;
-
-        macro_rules! ctx {
-            () => {
-                RuntimeHleAdapter {
-                    memory: &mut self.memory,
-                    registry: &mut self.registry,
-                    heap_ptr: &mut self.hle_heap_ptr,
-                    next_id: &mut self.hle_next_id,
-                    source,
-                }
-            };
-        }
-
-        match nid {
-            NID_SYS_INITIALIZE_TLS => hle_sys::initialize_tls(&mut ctx!(), args),
-            NID_SYS_PROCESS_EXIT => hle_sys::process_exit(&mut ctx!()),
-            NID_SYS_MALLOC => hle_sys::malloc(&mut ctx!(), args),
-            NID_SYS_FREE | NID_SYS_HEAP_DELETE_HEAP | NID_SYS_HEAP_FREE => {
-                ctx!().set_return(0);
+        let handled = sys::dispatch(self, source, nid, args)
+            .or_else(|| gcm::dispatch(self, source, nid, args));
+        if handled.is_none() {
+            RuntimeHleAdapter {
+                memory: &mut self.memory,
+                registry: &mut self.registry,
+                heap_ptr: &mut self.hle_heap_ptr,
+                next_id: &mut self.hle_next_id,
+                source,
             }
-            NID_SYS_MEMSET => hle_sys::memset(&mut ctx!(), args),
-            NID_SYS_LWMUTEX_CREATE => hle_sys::lwmutex_create(&mut ctx!(), args),
-            NID_SYS_HEAP_CREATE_HEAP => hle_sys::heap_create_heap(&mut ctx!()),
-            NID_SYS_HEAP_MALLOC => hle_sys::heap_malloc(&mut ctx!(), args),
-            NID_SYS_HEAP_MEMALIGN => hle_sys::heap_memalign(&mut ctx!(), args),
-            NID_SYS_PPU_THREAD_GET_ID => {
-                let ptr = args[0] as u32;
-                // Look up the calling thread's guest-facing id in
-                // the PpuThreadTable. Returns PRIMARY for the
-                // seeded primary thread and the minted id for
-                // each child spawned via sys_ppu_thread_create.
-                // When the table has not been seeded (boot paths
-                // that never call sys_ppu_thread_create), fall
-                // back to 0x0100_0000 -- the canonical PSL1GHT
-                // primary thread id.
-                let id: u64 = self
-                    .lv2_host()
-                    .ppu_thread_id_for_unit(source)
-                    .map(|tid| tid.raw())
-                    .unwrap_or(0x0100_0000);
-                ctx!().write_guest(ptr as u64, &id.to_be_bytes());
-                ctx!().set_return(0);
-            }
-            NID_SYS_TIME_GET_SYSTEM_TIME => {
-                ctx!().set_return(1_000_000);
-            }
-            NID_SYS_THREAD_CREATE_EX => {
-                // PSL1GHT's sysThreadCreateEx (the HLE wrapper
-                // sysThreadCreate resolves to) maps directly onto
-                // sys_ppu_thread_create. Arg layout matches: r3
-                // through r8 carry id_ptr, opd_ptr, arg,
-                // priority, stacksize, flags.
-                self.dispatch_lv2_request(
-                    cellgov_lv2::Lv2Request::PpuThreadCreate {
-                        id_ptr: args[0] as u32,
-                        entry_opd: args[1] as u32,
-                        arg: args[2],
-                        priority: args[3] as u32,
-                        stacksize: args[4],
-                        flags: args[5],
-                    },
-                    source,
-                );
-            }
-            NID_SYS_THREAD_EXIT => {
-                self.dispatch_lv2_request(
-                    cellgov_lv2::Lv2Request::PpuThreadExit {
-                        exit_value: args[0],
-                    },
-                    source,
-                );
-            }
-            NID_CELLGCM_GET_TILED_PITCH_SIZE if gcm_enabled => {
-                hle_gcm::get_tiled_pitch_size(&mut ctx!(), args);
-            }
-            NID_CELLGCM_INIT_BODY if gcm_enabled => {
-                hle_gcm::init_body(&mut ctx!(), args, &mut self.gcm_state);
-            }
-            NID_CELLGCM_GET_CONFIGURATION if gcm_enabled => {
-                hle_gcm::get_configuration(&mut ctx!(), args, &self.gcm_state);
-            }
-            NID_CELLGCM_GET_CONTROL_REGISTER if gcm_enabled => {
-                hle_gcm::get_control_register(&mut ctx!(), &self.gcm_state);
-            }
-            NID_CELLGCM_GET_LABEL_ADDRESS if gcm_enabled => {
-                hle_gcm::get_label_address(&mut ctx!(), args, &self.gcm_state);
-            }
-            _ => {
-                ctx!().set_return(0);
-            }
+            .set_return(0);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::hle_gcm::tiled_pitch_lookup;
+    use crate::hle::gcm::tiled_pitch_lookup;
+    use crate::hle::gcm::{
+        NID_CELLGCM_GET_CONFIGURATION, NID_CELLGCM_GET_LABEL_ADDRESS, NID_CELLGCM_INIT_BODY,
+    };
+    use crate::hle::sys::{NID_SYS_PPU_THREAD_GET_ID, NID_SYS_TIME_GET_SYSTEM_TIME};
 
     #[test]
     fn tiled_pitch_exact_boundary() {
@@ -162,7 +78,7 @@ mod tests {
 
     #[test]
     fn tiled_pitches_table_is_sorted() {
-        use crate::hle_gcm::TILED_PITCHES;
+        use crate::hle::gcm::TILED_PITCHES;
         for w in TILED_PITCHES.windows(2) {
             assert!(w[0] < w[1], "table not sorted: {} >= {}", w[0], w[1]);
         }
@@ -272,7 +188,6 @@ mod tests {
             cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
         });
 
-        // arg[0] is the guest pointer to receive the thread id (u64 BE).
         let args: [u64; 9] = [0x1000, 0, 0, 0, 0, 0, 0, 0, 0];
         rt.dispatch_hle(unit_id, NID_SYS_PPU_THREAD_GET_ID, &args);
 
@@ -310,7 +225,6 @@ mod tests {
         rt.registry_mut().register_with(|id| {
             cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
         });
-        // Seed the primary PPU thread mapping unit 0 -> PRIMARY.
         let attrs = PpuThreadAttrs {
             entry: 0x1_0000,
             arg: 0,
@@ -341,9 +255,6 @@ mod tests {
 
     #[test]
     fn sys_ppu_thread_join_on_finished_target_writes_exit_value() {
-        // End-to-end join: create a child, mark it finished with
-        // a known exit value, dispatch join from the parent, and
-        // verify the parent reads the exit value back.
         use crate::runtime::Runtime;
         use cellgov_lv2::{Lv2Request, PpuThreadAttrs};
         use cellgov_mem::GuestMemory;
@@ -363,8 +274,6 @@ mod tests {
             tls_base: 0,
         };
         rt.lv2_host_mut().seed_primary_ppu_thread(primary, attrs());
-        // Register a dummy child and mark it finished with a
-        // known exit value.
         rt.registry_mut().register_with(|id| {
             cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
         });
@@ -385,9 +294,7 @@ mod tests {
             primary,
         );
 
-        // CELL_OK to the caller.
         assert_eq!(rt.registry_mut().drain_syscall_return(primary), Some(0));
-        // Exit value landed at status_out_ptr as big-endian u64.
         let mem = rt.memory().as_bytes();
         let status = u64::from_be_bytes([
             mem[0x5000],
@@ -404,10 +311,6 @@ mod tests {
 
     #[test]
     fn sys_ppu_thread_join_blocks_then_wakes_with_exit_value() {
-        // Running target: parent joins and blocks. When the
-        // child subsequently calls sys_ppu_thread_exit, the
-        // parent wakes with the exit value written to its out
-        // pointer.
         use crate::runtime::Runtime;
         use cellgov_lv2::{Lv2Request, PpuThreadAttrs};
         use cellgov_mem::GuestMemory;
@@ -437,7 +340,6 @@ mod tests {
             .create(child, attrs())
             .expect("child create");
 
-        // Parent joins while child is still Runnable.
         rt.dispatch_lv2_request(
             Lv2Request::PpuThreadJoin {
                 target: child_id.raw(),
@@ -445,13 +347,11 @@ mod tests {
             },
             primary,
         );
-        // Parent is now Blocked.
         assert_eq!(
             rt.registry().effective_status(primary),
             Some(cellgov_exec::UnitStatus::Blocked),
         );
 
-        // Child exits.
         rt.dispatch_lv2_request(
             Lv2Request::PpuThreadExit {
                 exit_value: 0xABCD_1234,
@@ -459,8 +359,6 @@ mod tests {
             child,
         );
 
-        // Parent is now Runnable with CELL_OK in r3 and exit
-        // value at status_out_ptr.
         assert_eq!(
             rt.registry().effective_status(primary),
             Some(cellgov_exec::UnitStatus::Runnable),
@@ -482,19 +380,12 @@ mod tests {
 
     #[test]
     fn sys_ppu_thread_create_registers_child_unit_and_mints_thread_id() {
-        // End-to-end check: dispatch a PpuThreadCreate request
-        // through the runtime's full path, verify the runtime
-        // (a) registered a second unit, (b) minted a new
-        // PpuThreadId > PRIMARY, (c) wrote the id back to the
-        // caller's pointer.
         use crate::runtime::Runtime;
         use cellgov_lv2::{Lv2Request, PpuThreadAttrs};
         use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
         use cellgov_time::Budget;
 
         let mut rt = Runtime::new(GuestMemory::new(0x10_0000), Budget::new(1), 100);
-        // Primary unit + PPU thread table seeding so the caller
-        // has a known id.
         let primary = cellgov_event::UnitId::new(0);
         rt.registry_mut().register_with(|id| {
             cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
@@ -510,9 +401,6 @@ mod tests {
         rt.lv2_host_mut()
             .seed_primary_ppu_thread(primary, primary_attrs);
 
-        // Stub PPU factory: returns a FakeIsaUnit in place of a
-        // real PpuExecutionUnit. Records whether the factory was
-        // called via a shared Rc<Cell>.
         use std::cell::Cell;
         use std::rc::Rc;
         let calls = Rc::new(Cell::new(0u32));
@@ -525,7 +413,6 @@ mod tests {
             ))
         });
 
-        // Seed a valid OPD at 0x2_0000: code=0x4_0000, toc=0x5_0000.
         let mut opd = [0u8; 16];
         opd[0..8].copy_from_slice(&0x4_0000u64.to_be_bytes());
         opd[8..16].copy_from_slice(&0x5_0000u64.to_be_bytes());
@@ -545,23 +432,16 @@ mod tests {
             primary,
         );
 
-        // Factory invoked exactly once.
         assert_eq!(calls.get(), 1);
-        // Registry now has two units; the child sits above the
-        // primary in id order.
         let ids: Vec<_> = rt.registry().ids().collect();
         assert_eq!(ids.len(), 2);
-        // Caller received CELL_OK.
         assert_eq!(rt.registry_mut().drain_syscall_return(primary), Some(0));
-        // Thread table has the child with a minted id > PRIMARY.
         let child_unit_id = ids[1];
         let child_thread = rt
             .lv2_host()
             .ppu_thread_for_unit(child_unit_id)
             .expect("child in thread table");
         assert!(child_thread.id.raw() > cellgov_lv2::PpuThreadId::PRIMARY.raw());
-        // The minted id landed at the caller's output pointer,
-        // big-endian u64.
         let mem = rt.memory().as_bytes();
         let written = u64::from_be_bytes([
             mem[0x3_0000],
@@ -578,10 +458,6 @@ mod tests {
 
     #[test]
     fn sys_ppu_thread_get_id_returns_child_id_when_child_registered() {
-        // A second PPU unit created via the table must return its
-        // own minted id, not the primary's id. This is the
-        // capability the two-thread microtest exercises
-        // end-to-end through sys_ppu_thread_create.
         use crate::runtime::Runtime;
         use cellgov_lv2::PpuThreadAttrs;
         use cellgov_mem::GuestMemory;
@@ -644,9 +520,6 @@ mod tests {
         let args: [u64; 9] = [0; 9];
         rt.dispatch_hle(unit_id, NID_SYS_TIME_GET_SYSTEM_TIME, &args);
 
-        // Returned in r3; the deterministic oracle picks a fixed
-        // nonzero value so guest code that checks time > 0 does not
-        // wedge.
         let ret = rt.registry_mut().drain_syscall_return(unit_id);
         assert_eq!(ret, Some(1_000_000));
     }

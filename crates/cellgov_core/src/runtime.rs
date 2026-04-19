@@ -239,7 +239,7 @@ pub struct Runtime {
     /// (lwmutex sleep_queue, etc.). Starts above zero so a zero-initialized
     /// guest field is distinguishable from a legitimate allocated ID.
     pub(crate) hle_next_id: u32,
-    pub(crate) gcm_state: crate::hle_gcm::GcmState,
+    pub(crate) gcm_state: crate::hle::gcm::GcmState,
     /// Reusable effects buffer, taken/returned across steps to avoid
     /// per-step allocation in the common zero-effects case.
     effects_buf: Vec<Effect>,
@@ -310,7 +310,7 @@ impl Runtime {
             hle_nids: std::collections::BTreeMap::new(),
             hle_heap_ptr: 0,
             hle_next_id: 0x8000_0001,
-            gcm_state: crate::hle_gcm::GcmState::default(),
+            gcm_state: crate::hle::gcm::GcmState::default(),
             mode: RuntimeMode::FullTrace,
             per_step_index: 0,
             zoom_trace: TraceWriter::new(),
@@ -648,6 +648,125 @@ impl Runtime {
             Lv2Dispatch::PpuThreadCreate { .. } => {
                 self.handle_ppu_thread_create(source, dispatch);
             }
+            Lv2Dispatch::WakeAndReturn {
+                code,
+                woken_unit_ids,
+                response_updates,
+                effects,
+            } => {
+                self.apply_lv2_effects(&effects);
+                // The release caller returns `code` and stays
+                // runnable.
+                self.registry.set_syscall_return(source, code);
+                // Apply per-waiter pending-response overrides
+                // before resolving wakes. Each override is a
+                // complete replacement -- the release side
+                // (send, set, unlock) supplies everything the
+                // wake needs, including continuation pointers
+                // co-located on the primitive's waiter entry.
+                // No merge rule: if a legitimate `out_ptr == 0`
+                // or `result_ptr == 0` ever arrives from the
+                // guest, it is delivered verbatim.
+                for (waiter, response) in response_updates {
+                    self.syscall_responses.insert(waiter, response);
+                }
+                // Each wake target pulls its pending response and
+                // transitions from Blocked back to Runnable.
+                self.resolve_sync_wakes(&woken_unit_ids);
+            }
+            Lv2Dispatch::BlockAndWake {
+                pending,
+                woken_unit_ids,
+                response_updates,
+                effects,
+                ..
+            } => {
+                self.apply_lv2_effects(&effects);
+                for (waiter, response) in response_updates {
+                    self.syscall_responses.insert(waiter, response);
+                }
+                self.resolve_sync_wakes(&woken_unit_ids);
+                // Park the source: install pending response and
+                // transition Runnable -> Blocked. No r3 is set
+                // here; the eventual wake that resolves `pending`
+                // writes r3 then.
+                self.syscall_responses.insert(source, pending);
+                self.registry
+                    .set_status_override(source, UnitStatus::Blocked);
+            }
+        }
+    }
+
+    /// Apply the pending-response wake protocol for a set of units
+    /// parked on a synchronization primitive (lwmutex, mutex,
+    /// semaphore, event queue, or cond).
+    ///
+    /// For each unit the runtime:
+    ///   * Takes its `PendingResponse` from `syscall_responses`.
+    ///   * Resolves the response variant:
+    ///       - `ReturnCode { code }`: set r3 = code.
+    ///       - `EventQueueReceive { out_ptr, source, data1..3 }`:
+    ///         write the 32-byte payload via a `SharedWriteIntent`
+    ///         commit and set r3 = 0.
+    ///       - `CondWakeReacquire { .. }`: handled by a later
+    ///         phase; the current implementation wakes with r3 = 0
+    ///         and does not re-park on a mutex.
+    ///       - Other variants: defensive fallback -- set r3 = 0.
+    ///   * Transitions the unit from `Blocked` to `Runnable`.
+    fn resolve_sync_wakes(&mut self, woken_unit_ids: &[UnitId]) {
+        for waiter in woken_unit_ids {
+            let waiter = *waiter;
+            let pending = self.syscall_responses.take(waiter);
+            match pending {
+                Some(PendingResponse::ReturnCode { code }) => {
+                    self.registry.set_syscall_return(waiter, code);
+                }
+                Some(PendingResponse::EventQueueReceive {
+                    out_ptr,
+                    source: ev_source,
+                    data1,
+                    data2,
+                    data3,
+                }) => {
+                    let mut buf = [0u8; 32];
+                    buf[0..8].copy_from_slice(&ev_source.to_be_bytes());
+                    buf[8..16].copy_from_slice(&data1.to_be_bytes());
+                    buf[16..24].copy_from_slice(&data2.to_be_bytes());
+                    buf[24..32].copy_from_slice(&data3.to_be_bytes());
+                    if let Some(range) =
+                        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(out_ptr as u64), 32)
+                    {
+                        let _ = self.memory.apply_commit(range, &buf);
+                    }
+                    self.registry.set_syscall_return(waiter, 0);
+                }
+                Some(PendingResponse::EventFlagWake {
+                    result_ptr,
+                    observed,
+                }) => {
+                    if let Some(range) = cellgov_mem::ByteRange::new(
+                        cellgov_mem::GuestAddr::new(result_ptr as u64),
+                        8,
+                    ) {
+                        let _ = self.memory.apply_commit(range, &observed.to_be_bytes());
+                    }
+                    self.registry.set_syscall_return(waiter, 0);
+                }
+                Some(PendingResponse::CondWakeReacquire { .. }) => {
+                    // The full re-acquire path lands with the
+                    // cond primitive. For now treat the wake as a
+                    // plain CELL_OK wake.
+                    self.registry.set_syscall_return(waiter, 0);
+                }
+                Some(_) | None => {
+                    // Defensive: an ill-formed pending or an absent
+                    // entry still transitions the waiter back to
+                    // runnable so it is not stranded.
+                    self.registry.set_syscall_return(waiter, 0);
+                }
+            }
+            self.registry
+                .set_status_override(waiter, UnitStatus::Runnable);
         }
     }
 
@@ -855,10 +974,17 @@ impl Runtime {
                         self.registry
                             .set_status_override(waiter_id, UnitStatus::Runnable);
                     }
-                    PendingResponse::PpuThreadJoin { .. } => {
-                        // SPU thread group join should never wake
-                        // a PPU-thread-join waiter; skip
-                        // defensively if it happens.
+                    PendingResponse::PpuThreadJoin { .. }
+                    | PendingResponse::EventQueueReceive { .. }
+                    | PendingResponse::CondWakeReacquire { .. }
+                    | PendingResponse::EventFlagWake { .. } => {
+                        // SPU thread-group wake path should not
+                        // reach a PPU-thread-join / event-queue /
+                        // cond-wake waiter. The phase that wires
+                        // each of those primitives installs its
+                        // own wake path; recover defensively here
+                        // by setting the waiter runnable without
+                        // writing to the out pointer.
                         self.registry
                             .set_status_override(waiter_id, UnitStatus::Runnable);
                     }

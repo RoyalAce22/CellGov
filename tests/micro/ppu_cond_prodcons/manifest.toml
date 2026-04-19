@@ -1,0 +1,51 @@
+[test]
+name = "ppu_cond_prodcons"
+
+# Structural microtest for the cond primitive. Consumer holds a
+# heavy mutex, checks a bounded-buffer count, cond_waits when the
+# buffer is empty (which drops the mutex). Producer acquires the
+# mutex, deposits a message, cond_signals the consumer. Consumer
+# resumes, re-acquires the mutex, drains the message, signals back
+# for space. N messages pass through a BUF_SIZE-slot buffer; the
+# consumer's sum must equal N*(N-1)/2 with zero syscall errors.
+
+[rpcs3]
+binary = "build/ppu_cond_prodcons.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# TestResult: status + sum + producer_errs + consumer_errs
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# Usage:
+#   1. Build:
+#        docker run --rm \
+#          -v "$(pwd)/tests/micro/ppu_cond_prodcons:/src" \
+#          -v "$(pwd)/tests/micro/common:/common" \
+#          -e COMMON=/common ps3dev-fresh:latest bash /src/build.sh
+#
+#   2. Stage:
+#        mkdir -p tools/rpcs3/dev_hdd0/game/CG_COND/USRDIR
+#        cp tests/micro/ppu_cond_prodcons/build/\
+#           ppu_cond_prodcons.elf \
+#           tools/rpcs3/dev_hdd0/game/CG_COND/USRDIR/EBOOT.elf
+#
+#   3. Run:
+#        cargo run --release -p cellgov_cli -- run-game \
+#          --title-manifest tests/micro/ppu_cond_prodcons/\
+# manifest.toml --max-steps 10000000
+
+[cellgov.title]
+content_id = "CG_COND"
+short_name = "cond"
+display_name = "CellGov cond producer-consumer microtest"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"

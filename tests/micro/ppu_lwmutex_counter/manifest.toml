@@ -1,0 +1,60 @@
+[test]
+name = "ppu_lwmutex_counter"
+
+# Structural microtest. Two PPU threads increment a
+# shared counter N times each under a sys_lwmutex. Proves
+# mutual-exclusion semantics of sys_lwmutex_lock / _unlock: the
+# final counter is exactly 2*N with no lost updates, and the lock
+# never spuriously returns a non-zero error code.
+
+[rpcs3]
+binary = "build/ppu_lwmutex_counter.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# TestResult: status + counter + lock_errors + unlock_errors
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Consumed by `cellgov_cli run-game
+# --title-manifest <this file>`. Same schema shape as the
+# per-title files under docs/titles/, but nested under
+# [cellgov] so one file carries both the RPCS3 harness config
+# (above) and the CellGov run-game config (below).
+#
+# Usage:
+#   1. Build the ELF (requires ps3dev-fresh docker image):
+#        docker run --rm \
+#          -v "$(pwd)/tests/micro/ppu_lwmutex_counter:/src" \
+#          -v "$(pwd)/tests/micro/common:/common" \
+#          -e COMMON=/common ps3dev-fresh:latest bash /src/build.sh
+#
+#   2. Stage the ELF under dev_hdd0 at the path resolve_eboot()
+#      expects:
+#        mkdir -p tools/rpcs3/dev_hdd0/game/CG_LWMTX/USRDIR
+#        cp tests/micro/ppu_lwmutex_counter/build/\
+#           ppu_lwmutex_counter.elf \
+#           tools/rpcs3/dev_hdd0/game/CG_LWMTX/USRDIR/EBOOT.elf
+#
+#   3. Run:
+#        cargo run --release -p cellgov_cli -- run-game \
+#          --title-manifest tests/micro/ppu_lwmutex_counter/\
+# manifest.toml --max-steps 1000000
+#
+# Expected TTY payload (CGOV magic + 16 bytes):
+#   status=0x00000000 counter=0x00000080 (128 = 2*64)
+#   lock_errors=0x00000000 unlock_errors=0x00000000
+
+[cellgov.title]
+content_id = "CG_LWMTX"
+short_name = "lwmtx"
+display_name = "CellGov lwmutex counter microtest"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"

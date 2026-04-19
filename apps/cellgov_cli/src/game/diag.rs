@@ -7,6 +7,27 @@
 use crate::game::{PC_RING_SIZE, SYSCALL_RING_SIZE};
 use cellgov_core::Runtime;
 
+/// Render `bytes` as an ASCII-safe preview string.
+///
+/// Each byte is either passed through (printable ASCII: 0x20..=0x7E)
+/// or replaced with `.`. Result is always pure ASCII and contains no
+/// control characters or Unicode replacement glyphs, so Windows
+/// console renderings (cp1252 / cp437) stay clean. Intended for
+/// live-stream TTY echo and post-run "decoded" summaries when the
+/// guest writes binary payloads.
+pub(super) fn ascii_safe_preview(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|&b| {
+            if (0x20..=0x7E).contains(&b) {
+                b as char
+            } else {
+                '.'
+            }
+        })
+        .collect()
+}
+
 /// Fetch a 32-bit big-endian instruction word from guest memory at `pc`.
 ///
 /// Region-aware: resolves `pc` against every region in the memory map,
@@ -255,9 +276,11 @@ pub(super) fn format_process_exit(
                 out.push_str(&format!("{b:02x} "));
             }
         }
-        // Decoded string.
-        let text = String::from_utf8_lossy(&tty.raw_bytes);
-        out.push_str(&format!("\n  decoded: {:?}", text.trim_end()));
+        // ASCII-safe preview. Non-printable bytes render as `.`
+        // so binary payloads do not leak control chars or U+FFFD
+        // replacements to the terminal.
+        let preview = ascii_safe_preview(&tty.raw_bytes);
+        out.push_str(&format!("\n  decoded: \"{}\"", preview.trim_end()));
     }
 
     // Mini-trace: last N PCs.

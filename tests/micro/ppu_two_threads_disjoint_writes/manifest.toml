@@ -1,7 +1,7 @@
 [test]
 name = "ppu_two_threads_disjoint_writes"
 
-# Phase 17 structural microtest. No SPU side -- this is a pure
+# Structural microtest. No SPU side -- this is a pure
 # PPU multi-threading test. The PPU spawns a second PPU thread
 # via sys_ppu_thread_create, each writes to a disjoint word, the
 # primary joins and reports both words plus the child's exit
@@ -53,7 +53,7 @@ outcome = "completed"
 [cellgov.title]
 content_id = "CG_2THREAD"
 short_name = "twothread"
-display_name = "CellGov two-thread PPU microtest (Phase 17)"
+display_name = "CellGov two-thread PPU microtest"
 eboot_candidates = ["EBOOT.elf"]
 
 [cellgov.checkpoint]

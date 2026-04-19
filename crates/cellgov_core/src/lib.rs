@@ -28,10 +28,7 @@
 //! 10. trace every decision
 
 pub mod commit;
-mod hle;
-pub mod hle_context;
-mod hle_gcm;
-mod hle_sys;
+pub mod hle;
 pub mod registry;
 pub mod runtime;
 pub mod scheduler;

@@ -344,7 +344,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         rt.lv2_host_mut()
             .set_tls_template(cellgov_lv2::TlsTemplate::new(bytes, memsz, align, vaddr));
     }
-    rt.registry_mut().register_with(|id| {
+    let primary_unit_id = rt.registry_mut().register_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
         *unit.state_mut() = state;
         unit.set_instruction_shadow(shadow);
@@ -356,6 +356,26 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
         unit
     });
+    // Register the primary unit in the LV2 host's PPU thread table
+    // so sync primitives (lwmutex / mutex / semaphore / event queue /
+    // cond) can resolve the caller's PpuThreadId from its UnitId.
+    // Without this seeding, the primary's sync calls would fall
+    // back to ESRCH and the primary would never participate in
+    // real block / wake protocols. The join handler used to
+    // defensively use PpuThreadId::PRIMARY when the lookup
+    // failed; richer sync primitives need the bidirectional
+    // mapping to be accurate.
+    rt.lv2_host_mut().seed_primary_ppu_thread(
+        primary_unit_id,
+        cellgov_lv2::PpuThreadAttrs {
+            entry: load_result.entry,
+            arg: 0,
+            stack_base: PS3_PRIMARY_STACK_BASE as u32,
+            stack_size: PS3_PRIMARY_STACK_SIZE as u32,
+            priority: 1001,
+            tls_base: tls_info.map(|t| t.vaddr as u32).unwrap_or(0),
+        },
+    );
 
     // Install a PPU factory so `sys_ppu_thread_create` can spawn
     // child units mid-run. Child threads start with zeroed state

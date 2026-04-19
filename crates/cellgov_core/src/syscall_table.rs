@@ -106,6 +106,36 @@ impl SyscallResponseTable {
                     hasher.write(&target.to_le_bytes());
                     hasher.write(&status_out_ptr.to_le_bytes());
                 }
+                PendingResponse::EventQueueReceive {
+                    out_ptr,
+                    source,
+                    data1,
+                    data2,
+                    data3,
+                } => {
+                    hasher.write(&[3u8]);
+                    hasher.write(&out_ptr.to_le_bytes());
+                    hasher.write(&source.to_le_bytes());
+                    hasher.write(&data1.to_le_bytes());
+                    hasher.write(&data2.to_le_bytes());
+                    hasher.write(&data3.to_le_bytes());
+                }
+                PendingResponse::CondWakeReacquire {
+                    mutex_id,
+                    mutex_kind,
+                } => {
+                    hasher.write(&[4u8]);
+                    hasher.write(&mutex_id.to_le_bytes());
+                    hasher.write(&[*mutex_kind as u8]);
+                }
+                PendingResponse::EventFlagWake {
+                    result_ptr,
+                    observed,
+                } => {
+                    hasher.write(&[5u8]);
+                    hasher.write(&result_ptr.to_le_bytes());
+                    hasher.write(&observed.to_le_bytes());
+                }
             }
         }
         hasher.finish()

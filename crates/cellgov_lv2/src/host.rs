@@ -6,13 +6,17 @@
 //! through the `Lv2Runtime` trait and returns an `Lv2Dispatch` telling
 //! the runtime what to do.
 
-use crate::dispatch::{Lv2Dispatch, PendingResponse};
+use crate::dispatch::{CondMutexKind, Lv2Dispatch, PendingResponse};
 use crate::image::ContentStore;
 use crate::ppu_thread::{
     PpuThread, PpuThreadAttrs, PpuThreadId, PpuThreadTable, ThreadStack, ThreadStackAllocator,
     TlsTemplate,
 };
 use crate::request::Lv2Request;
+use crate::sync_primitives::{
+    CondTable, EventFlagTable, EventPayload, EventQueueTable, LwMutexTable, MutexAttrs, MutexTable,
+    SemaphoreTable,
+};
 use crate::thread_group::ThreadGroupTable;
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -62,6 +66,32 @@ pub struct Lv2Host {
     /// addresses from the PS3 user-memory region starting at
     /// 0x00010000 (per PSDevWiki and RPCS3 `vm.cpp`).
     mem_alloc_ptr: u32,
+    /// Lightweight-mutex table. Empty until the first
+    /// `sys_lwmutex_create`. Its id space is independent of
+    /// `next_kernel_id`; lwmutex ids start at 1.
+    lwmutexes: LwMutexTable,
+    /// Heavy-mutex table. Empty until the first
+    /// `sys_mutex_create`. Ids are minted by the shared
+    /// `next_kernel_id` allocator; the table stores by that id.
+    mutexes: MutexTable,
+    /// Counting semaphore table. Empty until the first
+    /// `sys_semaphore_create`. Ids are minted by
+    /// `next_kernel_id` (distinct from `mutexes` because the
+    /// BTreeMap key spaces are local to each table).
+    semaphores: SemaphoreTable,
+    /// Event queue table. Empty until the first
+    /// `sys_event_queue_create`. Ids are minted by
+    /// `next_kernel_id`; event-port ids are treated as queue ids
+    /// directly (one-to-one binding, matching the common
+    /// pattern).
+    event_queues: EventQueueTable,
+    /// Event flag table. Empty until the first
+    /// `sys_event_flag_create`. Ids are minted by
+    /// `next_kernel_id`.
+    event_flags: EventFlagTable,
+    /// Condition-variable table. Empty until the first
+    /// `sys_cond_create`. Ids are minted by `next_kernel_id`.
+    conds: CondTable,
 }
 
 impl Default for Lv2Host {
@@ -82,6 +112,12 @@ impl Lv2Host {
             stack_allocator: ThreadStackAllocator::new(),
             next_kernel_id: 0x4000_0001, // start above zero to catch uninitialized use
             mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
+            lwmutexes: LwMutexTable::new(),
+            mutexes: MutexTable::new(),
+            semaphores: SemaphoreTable::new(),
+            event_queues: EventQueueTable::new(),
+            event_flags: EventFlagTable::new(),
+            conds: CondTable::new(),
         }
     }
 
@@ -177,6 +213,73 @@ impl Lv2Host {
         &self.tls_template
     }
 
+    /// Read-only view of the lightweight mutex table.
+    pub fn lwmutexes(&self) -> &LwMutexTable {
+        &self.lwmutexes
+    }
+
+    /// Mutable access to the lightweight mutex table. Tests use
+    /// this to preload state; dispatch handlers mutate through the
+    /// host's own private paths.
+    pub fn lwmutexes_mut(&mut self) -> &mut LwMutexTable {
+        &mut self.lwmutexes
+    }
+
+    /// Read-only view of the heavy mutex table.
+    pub fn mutexes(&self) -> &MutexTable {
+        &self.mutexes
+    }
+
+    /// Mutable access to the heavy mutex table. Tests use this to
+    /// preload state.
+    pub fn mutexes_mut(&mut self) -> &mut MutexTable {
+        &mut self.mutexes
+    }
+
+    /// Read-only view of the counting semaphore table.
+    pub fn semaphores(&self) -> &SemaphoreTable {
+        &self.semaphores
+    }
+
+    /// Mutable access to the counting semaphore table. Tests use
+    /// this to preload state.
+    pub fn semaphores_mut(&mut self) -> &mut SemaphoreTable {
+        &mut self.semaphores
+    }
+
+    /// Read-only view of the event queue table.
+    pub fn event_queues(&self) -> &EventQueueTable {
+        &self.event_queues
+    }
+
+    /// Mutable access to the event queue table. Tests use this to
+    /// preload state.
+    pub fn event_queues_mut(&mut self) -> &mut EventQueueTable {
+        &mut self.event_queues
+    }
+
+    /// Read-only view of the event flag table.
+    pub fn event_flags(&self) -> &EventFlagTable {
+        &self.event_flags
+    }
+
+    /// Borrow the cond table.
+    pub fn conds(&self) -> &CondTable {
+        &self.conds
+    }
+
+    /// Mutably borrow the cond table. Used by tests that preload
+    /// cond entries; the runtime mutates the table via `dispatch`.
+    pub fn conds_mut(&mut self) -> &mut CondTable {
+        &mut self.conds
+    }
+
+    /// Mutable access to the event flag table. Tests use this to
+    /// preload state.
+    pub fn event_flags_mut(&mut self) -> &mut EventFlagTable {
+        &mut self.event_flags
+    }
+
     /// Allocate a child-thread stack block. Called by
     /// `sys_ppu_thread_create` to reserve a deterministic
     /// address range for each new PPU thread. The returned
@@ -236,6 +339,36 @@ impl Lv2Host {
                 hasher.write(&peek.to_le_bytes());
             }
         }
+        // Lwmutex table is folded in only when non-empty so that
+        // hosts that never create a lwmutex (every current
+        // foundation title during boot) keep the hash they had
+        // before the table field existed.
+        if !self.lwmutexes.is_empty() {
+            hasher.write(&self.lwmutexes.state_hash().to_le_bytes());
+        }
+        // Heavy mutex table is folded in only when non-empty for
+        // the same reason. Note: historical foundation-title runs
+        // did call sys_mutex_create (the old stub allocated ids
+        // from next_kernel_id without storing anything in a
+        // table); those hashes are preserved below because the
+        // upgraded handler still uses next_kernel_id for id
+        // minting and is_empty() only fires once a real entry
+        // is stored.
+        if !self.mutexes.is_empty() {
+            hasher.write(&self.mutexes.state_hash().to_le_bytes());
+        }
+        if !self.semaphores.is_empty() {
+            hasher.write(&self.semaphores.state_hash().to_le_bytes());
+        }
+        if !self.event_queues.is_empty() {
+            hasher.write(&self.event_queues.state_hash().to_le_bytes());
+        }
+        if !self.event_flags.is_empty() {
+            hasher.write(&self.event_flags.state_hash().to_le_bytes());
+        }
+        if !self.conds.is_empty() {
+            hasher.write(&self.conds.state_hash().to_le_bytes());
+        }
         hasher.finish()
     }
 
@@ -275,21 +408,90 @@ impl Lv2Host {
             Lv2Request::TtyWrite {
                 len, nwritten_ptr, ..
             } => Self::immediate_write_u32(len, nwritten_ptr, requester),
-            Lv2Request::MutexCreate { id_ptr, .. } => self.dispatch_mutex_create(id_ptr, requester),
-            Lv2Request::MutexLock { .. } | Lv2Request::MutexUnlock { .. } => {
-                // Stub: single-threaded module_start never contends.
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: vec![],
-                }
+            Lv2Request::LwMutexCreate { id_ptr, .. } => {
+                self.dispatch_lwmutex_create(id_ptr, requester)
             }
-            Lv2Request::EventQueueCreate { id_ptr, .. } => {
-                self.dispatch_event_queue_create(id_ptr, requester)
+            Lv2Request::LwMutexDestroy { id } => self.dispatch_lwmutex_destroy(id),
+            Lv2Request::LwMutexLock { id, .. } => self.dispatch_lwmutex_lock(id, requester),
+            Lv2Request::LwMutexUnlock { id } => self.dispatch_lwmutex_unlock(id, requester),
+            Lv2Request::LwMutexTryLock { id } => self.dispatch_lwmutex_trylock(id, requester),
+            Lv2Request::MutexCreate { id_ptr, attr_ptr } => {
+                self.dispatch_mutex_create(id_ptr, attr_ptr, requester, rt)
             }
-            Lv2Request::EventQueueDestroy { .. } => Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![],
-            },
+            Lv2Request::MutexLock { mutex_id, .. } => self.dispatch_mutex_lock(mutex_id, requester),
+            Lv2Request::MutexUnlock { mutex_id } => self.dispatch_mutex_unlock(mutex_id, requester),
+            Lv2Request::MutexTryLock { mutex_id } => {
+                self.dispatch_mutex_trylock(mutex_id, requester)
+            }
+            Lv2Request::SemaphoreCreate {
+                id_ptr,
+                initial,
+                max,
+                ..
+            } => self.dispatch_semaphore_create(id_ptr, initial, max, requester),
+            Lv2Request::SemaphoreDestroy { id } => self.dispatch_semaphore_destroy(id),
+            Lv2Request::SemaphoreWait { id, .. } => self.dispatch_semaphore_wait(id, requester),
+            Lv2Request::SemaphorePost { id, val } => self.dispatch_semaphore_post(id, val),
+            Lv2Request::SemaphoreTryWait { id } => self.dispatch_semaphore_trywait(id),
+            Lv2Request::SemaphoreGetValue { id, out_ptr } => {
+                self.dispatch_semaphore_get_value(id, out_ptr, requester)
+            }
+            Lv2Request::EventQueueCreate { id_ptr, size, .. } => {
+                self.dispatch_event_queue_create(id_ptr, size, requester)
+            }
+            Lv2Request::EventQueueDestroy { queue_id } => {
+                self.dispatch_event_queue_destroy(queue_id)
+            }
+            Lv2Request::EventQueueReceive {
+                queue_id, out_ptr, ..
+            } => self.dispatch_event_queue_receive(queue_id, out_ptr, requester),
+            Lv2Request::EventPortSend {
+                port_id,
+                data1,
+                data2,
+                data3,
+            } => self.dispatch_event_port_send(port_id, data1, data2, data3),
+            Lv2Request::EventQueueTryReceive {
+                queue_id,
+                event_array,
+                size,
+                count_out,
+            } => self.dispatch_event_queue_tryreceive(
+                queue_id,
+                event_array,
+                size,
+                count_out,
+                requester,
+            ),
+            Lv2Request::EventFlagCreate { id_ptr, init, .. } => {
+                self.dispatch_event_flag_create(id_ptr, init, requester)
+            }
+            Lv2Request::EventFlagDestroy { id } => self.dispatch_event_flag_destroy(id),
+            Lv2Request::EventFlagWait {
+                id,
+                bits,
+                mode,
+                result_ptr,
+                ..
+            } => self.dispatch_event_flag_wait(id, bits, mode, result_ptr, requester),
+            Lv2Request::EventFlagTryWait {
+                id,
+                bits,
+                mode,
+                result_ptr,
+            } => self.dispatch_event_flag_trywait(id, bits, mode, result_ptr, requester),
+            Lv2Request::EventFlagSet { id, bits } => self.dispatch_event_flag_set(id, bits),
+            Lv2Request::EventFlagClear { id, bits } => self.dispatch_event_flag_clear(id, bits),
+            Lv2Request::CondCreate {
+                id_ptr, mutex_id, ..
+            } => self.dispatch_cond_create(id_ptr, mutex_id, requester),
+            Lv2Request::CondDestroy { id } => self.dispatch_cond_destroy(id),
+            Lv2Request::CondWait { id, .. } => self.dispatch_cond_wait(id, requester),
+            Lv2Request::CondSignal { id } => self.dispatch_cond_signal(id),
+            Lv2Request::CondSignalAll { id } => self.dispatch_cond_signal_all(id),
+            Lv2Request::CondSignalTo { id, target_thread } => {
+                self.dispatch_cond_signal_to(id, target_thread)
+            }
             Lv2Request::MemoryAllocate {
                 size,
                 alloc_addr_ptr,
@@ -395,14 +597,1210 @@ impl Lv2Host {
         }
     }
 
-    fn dispatch_mutex_create(&mut self, id_ptr: u32, requester: UnitId) -> Lv2Dispatch {
+    fn dispatch_mutex_create(
+        &mut self,
+        id_ptr: u32,
+        attr_ptr: u32,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        // Decode the attribute bag if the guest handed us one. PS3
+        // `sys_mutex_attribute_t` is a 32-byte struct where the
+        // first three big-endian u32s encode protocol, recursive
+        // flag, and pshared. The remaining fields (adaptive, name)
+        // are captured but not surfaced at this layer.
+        let attrs = if attr_ptr == 0 {
+            MutexAttrs::default()
+        } else if let Some(bytes) = rt.read_committed(attr_ptr as u64, 12) {
+            let protocol = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            let recursive_raw = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+            MutexAttrs {
+                priority_policy: protocol,
+                recursive: recursive_raw != 0,
+                protocol,
+            }
+        } else {
+            MutexAttrs::default()
+        };
         let id = self.alloc_id();
+        if !self.mutexes.create_with_id(id, attrs) {
+            // Id collision should be impossible (next_kernel_id is
+            // monotonic and unique), but if it ever happens surface
+            // ENOMEM rather than silently drop.
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000C,
+                effects: vec![],
+            };
+        }
         Self::immediate_write_u32(id, id_ptr, requester)
     }
 
-    fn dispatch_event_queue_create(&mut self, id_ptr: u32, requester: UnitId) -> Lv2Dispatch {
+    fn dispatch_mutex_lock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        match self.mutexes.try_acquire(id, caller) {
+            None => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::MutexAcquire::Acquired) => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::MutexAcquire::Contended) => {
+                if !self.mutexes.enqueue_waiter(id, caller) {
+                    return Lv2Dispatch::Immediate {
+                        code: 0x8001_000D, // CELL_EDEADLK
+                        effects: vec![],
+                    };
+                }
+                Lv2Dispatch::Block {
+                    reason: crate::dispatch::Lv2BlockReason::Mutex { id },
+                    pending: PendingResponse::ReturnCode { code: 0 },
+                    effects: vec![],
+                }
+            }
+        }
+    }
+
+    fn dispatch_semaphore_create(
+        &mut self,
+        id_ptr: u32,
+        initial: i32,
+        max: i32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        // EINVAL (0x8001_0002) for initial > max or negative values.
+        // The table also validates this but the syscall-level
+        // check surfaces the guest error cleanly before any id
+        // allocation.
+        if initial > max || initial < 0 || max < 0 {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0002,
+                effects: vec![],
+            };
+        }
         let id = self.alloc_id();
+        if !self.semaphores.create_with_id(id, initial, max) {
+            // Allocator collision (impossible with monotonic
+            // next_kernel_id) or validation tripped -- return
+            // ENOMEM.
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000C,
+                effects: vec![],
+            };
+        }
         Self::immediate_write_u32(id, id_ptr, requester)
+    }
+
+    fn dispatch_semaphore_destroy(&mut self, id: u32) -> Lv2Dispatch {
+        let Some(entry) = self.semaphores.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        if !entry.waiters().is_empty() {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000A, // CELL_EBUSY
+                effects: vec![],
+            };
+        }
+        self.semaphores.destroy(id);
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_semaphore_wait(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        match self.semaphores.try_wait(id) {
+            None => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::SemaphoreWait::Empty) => {
+                if !self.semaphores.enqueue_waiter(id, caller) {
+                    return Lv2Dispatch::Immediate {
+                        code: 0x8001_000D, // CELL_EDEADLK (duplicate enqueue)
+                        effects: vec![],
+                    };
+                }
+                Lv2Dispatch::Block {
+                    reason: crate::dispatch::Lv2BlockReason::Semaphore { id },
+                    pending: PendingResponse::ReturnCode { code: 0 },
+                    effects: vec![],
+                }
+            }
+        }
+    }
+
+    fn dispatch_semaphore_trywait(&mut self, id: u32) -> Lv2Dispatch {
+        match self.semaphores.try_wait(id) {
+            None => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::SemaphoreWait::Empty) => Lv2Dispatch::Immediate {
+                code: 0x8001_000A, // CELL_EBUSY
+                effects: vec![],
+            },
+        }
+    }
+
+    fn dispatch_semaphore_get_value(
+        &mut self,
+        id: u32,
+        out_ptr: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        let Some(entry) = self.semaphores.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        let count = entry.count() as u32;
+        Self::immediate_write_u32(count, out_ptr, requester)
+    }
+
+    fn dispatch_semaphore_post(&mut self, id: u32, val: i32) -> Lv2Dispatch {
+        // Only val == 1 is supported. Multi-slot post would wake
+        // multiple waiters in one dispatch, which complicates the
+        // WakeAndReturn protocol; deferred.
+        if val != 1 {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0002, // CELL_EINVAL
+                effects: vec![],
+            };
+        }
+        match self.semaphores.post_and_wake(id) {
+            crate::sync_primitives::SemaphorePost::Unknown => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            crate::sync_primitives::SemaphorePost::OverMax => Lv2Dispatch::Immediate {
+                code: 0x8001_0002, // CELL_EINVAL
+                effects: vec![],
+            },
+            crate::sync_primitives::SemaphorePost::Incremented => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            crate::sync_primitives::SemaphorePost::Woke { new_owner } => {
+                if let Some(thread) = self.ppu_threads.get(new_owner) {
+                    Lv2Dispatch::WakeAndReturn {
+                        code: 0,
+                        woken_unit_ids: vec![thread.unit_id],
+                        response_updates: vec![],
+                        effects: vec![],
+                    }
+                } else {
+                    // Woken thread no longer in the ppu_threads
+                    // table -- defensive fallback. Post still
+                    // succeeded (the waiter came off the list)
+                    // but no unit to wake.
+                    Lv2Dispatch::Immediate {
+                        code: 0,
+                        effects: vec![],
+                    }
+                }
+            }
+        }
+    }
+
+    fn dispatch_mutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        match self.mutexes.try_acquire(id, caller) {
+            None => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::MutexAcquire::Acquired) => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::MutexAcquire::Contended) => Lv2Dispatch::Immediate {
+                code: 0x8001_000A, // CELL_EBUSY
+                effects: vec![],
+            },
+        }
+    }
+
+    fn dispatch_mutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        match self.mutexes.release_and_wake_next(id, caller) {
+            crate::sync_primitives::MutexRelease::Unknown => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            crate::sync_primitives::MutexRelease::NotOwner => Lv2Dispatch::Immediate {
+                code: 0x8001_0008, // CELL_EPERM
+                effects: vec![],
+            },
+            crate::sync_primitives::MutexRelease::Freed => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            crate::sync_primitives::MutexRelease::Transferred { new_owner } => {
+                if let Some(thread) = self.ppu_threads.get(new_owner) {
+                    Lv2Dispatch::WakeAndReturn {
+                        code: 0,
+                        woken_unit_ids: vec![thread.unit_id],
+                        response_updates: vec![],
+                        effects: vec![],
+                    }
+                } else {
+                    Lv2Dispatch::Immediate {
+                        code: 0,
+                        effects: vec![],
+                    }
+                }
+            }
+        }
+    }
+
+    fn dispatch_lwmutex_create(&mut self, id_ptr: u32, requester: UnitId) -> Lv2Dispatch {
+        // Allocate from the lwmutex table's private id allocator
+        // (starts at 1, independent of `next_kernel_id`). On
+        // overflow return ENOMEM (CELL_ENOMEM = 0x8001_000C) and
+        // do not write the out pointer.
+        let Some(id) = self.lwmutexes.create() else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000C,
+                effects: vec![],
+            };
+        };
+        Self::immediate_write_u32(id, id_ptr, requester)
+    }
+
+    fn dispatch_lwmutex_lock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+        // The caller's PPU thread id is required for ownership
+        // tracking. If the requesting unit is not registered as a
+        // PPU thread the syscall is a guest programming error --
+        // reject with ESRCH rather than silently park.
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        match self.lwmutexes.try_acquire(id, caller) {
+            None => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::LwMutexAcquire::Acquired) => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::LwMutexAcquire::Contended) => {
+                // Enqueue the caller on the waiter list. A duplicate
+                // enqueue (same caller already parked) is a guest
+                // error; the table rejects it and we return EDEADLK.
+                if !self.lwmutexes.enqueue_waiter(id, caller) {
+                    return Lv2Dispatch::Immediate {
+                        code: 0x8001_000D, // CELL_EDEADLK
+                        effects: vec![],
+                    };
+                }
+                Lv2Dispatch::Block {
+                    reason: crate::dispatch::Lv2BlockReason::LwMutex { id },
+                    pending: PendingResponse::ReturnCode { code: 0 },
+                    effects: vec![],
+                }
+            }
+        }
+    }
+
+    fn dispatch_lwmutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        match self.lwmutexes.try_acquire(id, caller) {
+            None => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::LwMutexAcquire::Acquired) => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::LwMutexAcquire::Contended) => Lv2Dispatch::Immediate {
+                code: 0x8001_000A, // CELL_EBUSY
+                effects: vec![],
+            },
+        }
+    }
+
+    fn dispatch_lwmutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        match self.lwmutexes.release_and_wake_next(id, caller) {
+            crate::sync_primitives::LwMutexRelease::Unknown => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            crate::sync_primitives::LwMutexRelease::NotOwner => Lv2Dispatch::Immediate {
+                code: 0x8001_0008, // CELL_EPERM
+                effects: vec![],
+            },
+            crate::sync_primitives::LwMutexRelease::Freed => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            crate::sync_primitives::LwMutexRelease::Transferred { new_owner } => {
+                // Resolve new_owner's PpuThreadId to a UnitId so the
+                // runtime's WakeAndReturn handler can transition it
+                // from Blocked back to Runnable. If the table no
+                // longer knows the thread (destroyed mid-flight),
+                // that is a determinism violation -- fall back to
+                // Freed rather than orphan the owner.
+                if let Some(thread) = self.ppu_threads.get(new_owner) {
+                    Lv2Dispatch::WakeAndReturn {
+                        code: 0,
+                        woken_unit_ids: vec![thread.unit_id],
+                        response_updates: vec![],
+                        effects: vec![],
+                    }
+                } else {
+                    Lv2Dispatch::Immediate {
+                        code: 0,
+                        effects: vec![],
+                    }
+                }
+            }
+        }
+    }
+
+    fn dispatch_lwmutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
+        // ESRCH for unknown id; EBUSY if any waiter is parked
+        // (destroy-with-waiters is a guest programming error and
+        // leaks waiters, so reject).
+        let Some(entry) = self.lwmutexes.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            };
+        };
+        if !entry.waiters().is_empty() || entry.owner().is_some() {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000A, // CELL_EBUSY
+                effects: vec![],
+            };
+        }
+        self.lwmutexes.destroy(id);
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_event_queue_create(
+        &mut self,
+        id_ptr: u32,
+        size: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        // queue_size == 0 is guest-invalid; default to 127 (the
+        // RPCS3 EQUEUE_MAX_RECV_EVENT) when the guest passes
+        // zero, matching permissive ABI behavior.
+        let effective_size = if size == 0 { 127 } else { size };
+        let id = self.alloc_id();
+        if !self.event_queues.create_with_id(id, effective_size) {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000C, // CELL_ENOMEM
+                effects: vec![],
+            };
+        }
+        Self::immediate_write_u32(id, id_ptr, requester)
+    }
+
+    fn dispatch_event_queue_destroy(&mut self, id: u32) -> Lv2Dispatch {
+        let Some(entry) = self.event_queues.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        if !entry.waiters().is_empty() {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000A, // CELL_EBUSY
+                effects: vec![],
+            };
+        }
+        self.event_queues.destroy(id);
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_event_queue_receive(
+        &mut self,
+        id: u32,
+        out_ptr: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            };
+        };
+        match self.event_queues.try_receive(id) {
+            None => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::EventQueueReceive::Delivered(payload)) => {
+                // Payload available -- write the 4-u64
+                // sys_event_t to out_ptr and return CELL_OK.
+                let mut buf = [0u8; 32];
+                buf[0..8].copy_from_slice(&payload.source.to_be_bytes());
+                buf[8..16].copy_from_slice(&payload.data1.to_be_bytes());
+                buf[16..24].copy_from_slice(&payload.data2.to_be_bytes());
+                buf[24..32].copy_from_slice(&payload.data3.to_be_bytes());
+                let write = Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(out_ptr as u64), 32).unwrap(),
+                    bytes: WritePayload::from_slice(&buf),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: GuestTicks::ZERO,
+                };
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![write],
+                }
+            }
+            Some(crate::sync_primitives::EventQueueReceive::Empty) => {
+                if !self.event_queues.enqueue_waiter(id, caller, out_ptr) {
+                    return Lv2Dispatch::Immediate {
+                        code: 0x8001_000D, // CELL_EDEADLK
+                        effects: vec![],
+                    };
+                }
+                // Pending response carries the out_ptr the wait
+                // handler received; payload fields are unused
+                // placeholders. The send-side dispatch replaces
+                // the full response via response_updates at wake
+                // time and the runtime reads the complete value.
+                Lv2Dispatch::Block {
+                    reason: crate::dispatch::Lv2BlockReason::EventQueue { id },
+                    pending: PendingResponse::EventQueueReceive {
+                        out_ptr,
+                        source: 0,
+                        data1: 0,
+                        data2: 0,
+                        data3: 0,
+                    },
+                    effects: vec![],
+                }
+            }
+        }
+    }
+
+    // Map the raw PS3 ABI `mode` word (sys_event_flag_wait_mode)
+    // to the structured EventFlagWaitMode enum. The ABI encodes
+    // policy as two independent bits:
+    //   bit 0: 0 = AND, 1 = OR  (SYS_EVENT_FLAG_WAIT_OR = 0x02)
+    //   bit 1: 0 = NO-CLEAR, 1 = CLEAR (SYS_EVENT_FLAG_WAIT_CLEAR = 0x10)
+    // Real PS3 constants: AND=0x01, OR=0x02, CLEAR=0x10,
+    // CLEAR_ALL=0x20. We accept both bit layouts: the common
+    // (AND|CLEAR) = 0x11 value maps to AndClear, etc.
+    fn decode_event_flag_mode(raw: u32) -> crate::ppu_thread::EventFlagWaitMode {
+        let or_match = (raw & 0x02) != 0;
+        let clear = (raw & 0x10) != 0;
+        match (or_match, clear) {
+            (false, false) => crate::ppu_thread::EventFlagWaitMode::AndNoClear,
+            (false, true) => crate::ppu_thread::EventFlagWaitMode::AndClear,
+            (true, false) => crate::ppu_thread::EventFlagWaitMode::OrNoClear,
+            (true, true) => crate::ppu_thread::EventFlagWaitMode::OrClear,
+        }
+    }
+
+    fn dispatch_event_flag_create(
+        &mut self,
+        id_ptr: u32,
+        init: u64,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        let id = self.alloc_id();
+        if !self.event_flags.create_with_id(id, init) {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000C, // CELL_ENOMEM
+                effects: vec![],
+            };
+        }
+        Self::immediate_write_u32(id, id_ptr, requester)
+    }
+
+    fn dispatch_event_flag_destroy(&mut self, id: u32) -> Lv2Dispatch {
+        let Some(entry) = self.event_flags.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            };
+        };
+        if !entry.waiters().is_empty() {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000A,
+                effects: vec![],
+            };
+        }
+        self.event_flags.destroy(id);
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_event_flag_wait(
+        &mut self,
+        id: u32,
+        bits: u64,
+        mode_raw: u32,
+        result_ptr: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            };
+        };
+        let mode = Self::decode_event_flag_mode(mode_raw);
+        match self.event_flags.try_wait(id, bits, mode) {
+            None => Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
+                // Bits matched -- write observed pattern to
+                // result_ptr and return CELL_OK.
+                let write = Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(result_ptr as u64), 8).unwrap(),
+                    bytes: WritePayload::from_slice(&observed.to_be_bytes()),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: GuestTicks::ZERO,
+                };
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![write],
+                }
+            }
+            Some(crate::sync_primitives::EventFlagWait::NoMatch) => {
+                if !self
+                    .event_flags
+                    .enqueue_waiter(id, caller, bits, mode, result_ptr)
+                {
+                    return Lv2Dispatch::Immediate {
+                        code: 0x8001_000D,
+                        effects: vec![],
+                    };
+                }
+                // Pending response placeholder; set-side dispatch
+                // replaces it with a complete response carrying
+                // the observed bits. The result_ptr stored on the
+                // waiter entry is what makes that possible
+                // without the runtime reading back the parked
+                // response.
+                Lv2Dispatch::Block {
+                    reason: crate::dispatch::Lv2BlockReason::EventFlag { id },
+                    pending: PendingResponse::EventFlagWake {
+                        result_ptr,
+                        observed: 0,
+                    },
+                    effects: vec![],
+                }
+            }
+        }
+    }
+
+    fn dispatch_event_flag_trywait(
+        &mut self,
+        id: u32,
+        bits: u64,
+        mode_raw: u32,
+        result_ptr: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        let mode = Self::decode_event_flag_mode(mode_raw);
+        match self.event_flags.try_wait(id, bits, mode) {
+            None => Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            },
+            Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
+                let write = Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(result_ptr as u64), 8).unwrap(),
+                    bytes: WritePayload::from_slice(&observed.to_be_bytes()),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: GuestTicks::ZERO,
+                };
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![write],
+                }
+            }
+            Some(crate::sync_primitives::EventFlagWait::NoMatch) => Lv2Dispatch::Immediate {
+                code: 0x8001_000A, // CELL_EBUSY
+                effects: vec![],
+            },
+        }
+    }
+
+    fn dispatch_event_flag_set(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
+        let Some(woken) = self.event_flags.set_and_wake(id, bits) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            };
+        };
+        if woken.is_empty() {
+            return Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            };
+        }
+        // Build WakeAndReturn with one response_update per
+        // woken waiter. `set_and_wake` returns the waiter's
+        // recorded result_ptr alongside the observed bits, so
+        // each response_update carries a complete
+        // PendingResponse::EventFlagWake -- no merge magic.
+        let mut unit_ids: Vec<UnitId> = Vec::new();
+        let mut updates: Vec<(UnitId, PendingResponse)> = Vec::new();
+        for wake in woken {
+            if let Some(t) = self.ppu_threads.get(wake.thread) {
+                unit_ids.push(t.unit_id);
+                updates.push((
+                    t.unit_id,
+                    PendingResponse::EventFlagWake {
+                        result_ptr: wake.result_ptr,
+                        observed: wake.observed,
+                    },
+                ));
+            }
+        }
+        Lv2Dispatch::WakeAndReturn {
+            code: 0,
+            woken_unit_ids: unit_ids,
+            response_updates: updates,
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_event_flag_clear(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
+        if !self.event_flags.clear_bits(id, bits) {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            };
+        }
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_cond_create(
+        &mut self,
+        id_ptr: u32,
+        mutex_id: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        // The cond binds to an existing heavy mutex. Reject at
+        // create time if the mutex does not exist; this matches
+        // RPCS3's behavior (lv2_obj::idm_get on the mutex id fails
+        // with ESRCH).
+        if self.mutexes.lookup(mutex_id).is_none() {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        }
+        let id = self.alloc_id();
+        if !self
+            .conds
+            .create_with_id(id, mutex_id, CondMutexKind::Mutex)
+        {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000C, // CELL_ENOMEM
+                effects: vec![],
+            };
+        }
+        Self::immediate_write_u32(id, id_ptr, requester)
+    }
+
+    fn dispatch_cond_destroy(&mut self, id: u32) -> Lv2Dispatch {
+        let Some(entry) = self.conds.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        if !entry.waiters().is_empty() {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_000A, // CELL_EBUSY
+                effects: vec![],
+            };
+        }
+        self.conds.destroy(id);
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_cond_wait(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        let Some(entry) = self.conds.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        let mutex_id = entry.mutex_id();
+        let mutex_kind = entry.mutex_kind();
+        // Release the associated mutex on the caller's behalf. The
+        // release is observable to any mutex waiter that was parked
+        // -- ownership transfers, and that waiter wakes alongside
+        // this cond-wait block.
+        let release = match mutex_kind {
+            CondMutexKind::Mutex => self.mutexes.release_and_wake_next(mutex_id, caller),
+            CondMutexKind::LwMutex => {
+                // sys_cond binds only to heavy mutexes here. A
+                // lwmutex kind is a defensive fallback for
+                // forward compatibility with sys_lwcond; treat as
+                // EPERM so misuse is loud.
+                return Lv2Dispatch::Immediate {
+                    code: 0x8001_0008, // CELL_EPERM
+                    effects: vec![],
+                };
+            }
+        };
+        match release {
+            crate::sync_primitives::MutexRelease::Unknown => Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            },
+            crate::sync_primitives::MutexRelease::NotOwner => Lv2Dispatch::Immediate {
+                code: 0x8001_0008, // CELL_EPERM
+                effects: vec![],
+            },
+            crate::sync_primitives::MutexRelease::Freed => {
+                // Mutex had no waiter; simply park the caller on
+                // the cond.
+                if !self.conds.enqueue_waiter(id, caller) {
+                    return Lv2Dispatch::Immediate {
+                        code: 0x8001_000D, // CELL_EDEADLK (duplicate enqueue)
+                        effects: vec![],
+                    };
+                }
+                Lv2Dispatch::Block {
+                    reason: crate::dispatch::Lv2BlockReason::Cond { id, mutex_id },
+                    pending: PendingResponse::CondWakeReacquire {
+                        mutex_id,
+                        mutex_kind,
+                    },
+                    effects: vec![],
+                }
+            }
+            crate::sync_primitives::MutexRelease::Transferred { new_owner } => {
+                // Mutex waiter inherited ownership. The new owner
+                // needs to wake in this same dispatch alongside the
+                // caller blocking on the cond.
+                if !self.conds.enqueue_waiter(id, caller) {
+                    return Lv2Dispatch::Immediate {
+                        code: 0x8001_000D,
+                        effects: vec![],
+                    };
+                }
+                let woken_unit_ids = if let Some(thread) = self.ppu_threads.get(new_owner) {
+                    vec![thread.unit_id]
+                } else {
+                    vec![]
+                };
+                Lv2Dispatch::BlockAndWake {
+                    reason: crate::dispatch::Lv2BlockReason::Cond { id, mutex_id },
+                    pending: PendingResponse::CondWakeReacquire {
+                        mutex_id,
+                        mutex_kind,
+                    },
+                    woken_unit_ids,
+                    response_updates: vec![],
+                    effects: vec![],
+                }
+            }
+        }
+    }
+
+    fn dispatch_cond_signal_all(&mut self, id: u32) -> Lv2Dispatch {
+        let Some(entry) = self.conds.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        let mutex_id = entry.mutex_id();
+        let mutex_kind = entry.mutex_kind();
+        if !matches!(mutex_kind, CondMutexKind::Mutex) {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0008, // CELL_EPERM
+                effects: vec![],
+            };
+        }
+        let wakers = self.conds.signal_all(id);
+        if wakers.is_empty() {
+            return Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            };
+        }
+        // Walk wakers in FIFO order. First acquirer (if mutex is
+        // free at signal time) wakes cleanly; the rest re-park on
+        // the mutex waiter list. Each gets its pending response
+        // swapped to ReturnCode { 0 } so the unlock-wake path
+        // resolves it as a plain CELL_OK return.
+        let mut woken_unit_ids: Vec<UnitId> = Vec::new();
+        let mut response_updates: Vec<(UnitId, PendingResponse)> = Vec::new();
+        for waker in wakers {
+            let Some(thread) = self.ppu_threads.get(waker) else {
+                continue;
+            };
+            let unit = thread.unit_id;
+            match self.mutexes.try_acquire(mutex_id, waker) {
+                Some(crate::sync_primitives::MutexAcquire::Acquired) => {
+                    woken_unit_ids.push(unit);
+                    response_updates.push((unit, PendingResponse::ReturnCode { code: 0 }));
+                }
+                Some(crate::sync_primitives::MutexAcquire::Contended) => {
+                    // Enqueue is a no-op if `waker` is already on
+                    // the mutex waiter list -- a legitimate but
+                    // unusual state (e.g. test harness seeds it
+                    // directly, or the table was mutated out-of-
+                    // band). The pending response still swaps so
+                    // the eventual unlock-wake resolves the
+                    // existing queue entry cleanly.
+                    let _ = self.mutexes.enqueue_waiter(mutex_id, waker);
+                    response_updates.push((unit, PendingResponse::ReturnCode { code: 0 }));
+                }
+                None => {
+                    // Cond references a destroyed mutex; surface
+                    // ESRCH on the waker's eventual wake rather
+                    // than orphan them.
+                    woken_unit_ids.push(unit);
+                    response_updates
+                        .push((unit, PendingResponse::ReturnCode { code: 0x8001_0005 }));
+                }
+            }
+        }
+        Lv2Dispatch::WakeAndReturn {
+            code: 0,
+            woken_unit_ids,
+            response_updates,
+            effects: vec![],
+        }
+    }
+
+    fn dispatch_cond_signal_to(&mut self, id: u32, target_thread: u32) -> Lv2Dispatch {
+        let Some(entry) = self.conds.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        let mutex_id = entry.mutex_id();
+        let mutex_kind = entry.mutex_kind();
+        if !matches!(mutex_kind, CondMutexKind::Mutex) {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0008, // CELL_EPERM
+                effects: vec![],
+            };
+        }
+        let target = PpuThreadId::new(target_thread as u64);
+        // Remove the target from the cond waiter list. If the
+        // target is not parked on this cond, return ESRCH (lost
+        // signal is not observable here -- the ABI distinguishes
+        // "target not found" from signal_all's "no waiters" case
+        // because the caller named a specific thread).
+        if !self.conds.signal_to(id, target) {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        }
+        self.cond_reacquire_wake(target, mutex_id, false)
+    }
+
+    fn dispatch_cond_signal(&mut self, id: u32) -> Lv2Dispatch {
+        let Some(entry) = self.conds.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        let mutex_id = entry.mutex_id();
+        let mutex_kind = entry.mutex_kind();
+        // Non-sticky: a signal with no parked waiter is lost.
+        let Some(waker) = self.conds.signal_one(id) else {
+            return Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            };
+        };
+        match mutex_kind {
+            CondMutexKind::Mutex => self.cond_reacquire_wake(waker, mutex_id, false),
+            CondMutexKind::LwMutex => Lv2Dispatch::Immediate {
+                code: 0x8001_0008, // CELL_EPERM (sys_cond is heavy-only)
+                effects: vec![],
+            },
+        }
+    }
+
+    /// Apply the cond-wake re-acquire protocol for a single thread.
+    ///
+    /// The woken thread holds a `PendingResponse::CondWakeReacquire`
+    /// from the cond-wait side. This helper consults the mutex
+    /// table and either:
+    ///
+    ///   * Acquires on the waker's behalf and wakes it via
+    ///     `WakeAndRequire` with a swapped pending response
+    ///     (`ReturnCode { 0 }`). Caller transitions Blocked ->
+    ///     Runnable, r3 = 0.
+    ///   * Re-parks the waker on the mutex's waiter list with a
+    ///     swapped pending response, keeping it Blocked. The
+    ///     signaler returns CELL_OK without waking anyone; the
+    ///     waker wakes eventually when some other thread unlocks
+    ///     the mutex.
+    ///
+    /// `use_lwmutex` selects the mutex table for lwcond support
+    /// (not exercised by sys_cond).
+    fn cond_reacquire_wake(
+        &mut self,
+        waker: PpuThreadId,
+        mutex_id: u32,
+        use_lwmutex: bool,
+    ) -> Lv2Dispatch {
+        debug_assert!(!use_lwmutex, "lwmutex cond re-acquire not wired");
+        let Some(thread) = self.ppu_threads.get(waker) else {
+            // Waker no longer tracked -- cond table and ppu thread
+            // table diverged. Defensive fallback: signaler still
+            // returns OK; the waker is effectively stranded.
+            return Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            };
+        };
+        let waker_unit = thread.unit_id;
+        match self.mutexes.try_acquire(mutex_id, waker) {
+            Some(crate::sync_primitives::MutexAcquire::Acquired) => {
+                // Mutex transferred to waker. Wake cleanly with
+                // swapped pending response so the wake resolver
+                // treats this as a plain CELL_OK return.
+                Lv2Dispatch::WakeAndReturn {
+                    code: 0,
+                    woken_unit_ids: vec![waker_unit],
+                    response_updates: vec![(waker_unit, PendingResponse::ReturnCode { code: 0 })],
+                    effects: vec![],
+                }
+            }
+            Some(crate::sync_primitives::MutexAcquire::Contended) => {
+                // Mutex held by someone else. Re-park the waker on
+                // the mutex waiter list with swapped pending
+                // response. Waker stays Blocked; signaler returns
+                // CELL_OK. When the mutex holder eventually calls
+                // sys_mutex_unlock, the unlock-wake path transfers
+                // ownership to this waker and resolves the pending
+                // ReturnCode { 0 }. Enqueue is a no-op if the
+                // waker is already present; the response swap
+                // still lets the existing queue entry resolve
+                // cleanly on unlock.
+                let _ = self.mutexes.enqueue_waiter(mutex_id, waker);
+                Lv2Dispatch::WakeAndReturn {
+                    code: 0,
+                    woken_unit_ids: vec![],
+                    response_updates: vec![(waker_unit, PendingResponse::ReturnCode { code: 0 })],
+                    effects: vec![],
+                }
+            }
+            None => {
+                // Mutex unknown -- cond still references a
+                // destroyed mutex. Guest programming error; signaler
+                // returns ESRCH but the cond waiter was already
+                // dequeued, so drop them from the wake path and
+                // log defensively by setting r3 = 0 via a plain
+                // wake (they return OK with no mutex, letting the
+                // guest's assertion catch the error).
+                Lv2Dispatch::WakeAndReturn {
+                    code: 0x8001_0005,
+                    woken_unit_ids: vec![waker_unit],
+                    response_updates: vec![(
+                        waker_unit,
+                        PendingResponse::ReturnCode { code: 0x8001_0005 },
+                    )],
+                    effects: vec![],
+                }
+            }
+        }
+    }
+
+    fn dispatch_event_queue_tryreceive(
+        &mut self,
+        id: u32,
+        event_array: u32,
+        size: u32,
+        count_out: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        // Drain up to `size` payloads and write them to the
+        // output array as consecutive 32-byte sys_event_t
+        // structs. Write the actual count to count_out. Returns
+        // CELL_OK regardless of how many payloads were available
+        // (zero is a valid result).
+        let Some(batch) = self.event_queues.try_receive_batch(id, size as usize) else {
+            return Lv2Dispatch::Immediate {
+                code: 0x8001_0005, // CELL_ESRCH
+                effects: vec![],
+            };
+        };
+        let count = batch.len() as u32;
+        let mut effects: Vec<Effect> = Vec::new();
+        for (i, payload) in batch.iter().enumerate() {
+            let mut buf = [0u8; 32];
+            buf[0..8].copy_from_slice(&payload.source.to_be_bytes());
+            buf[8..16].copy_from_slice(&payload.data1.to_be_bytes());
+            buf[16..24].copy_from_slice(&payload.data2.to_be_bytes());
+            buf[24..32].copy_from_slice(&payload.data3.to_be_bytes());
+            let addr = event_array as u64 + (i as u64) * 32;
+            if let Some(range) = ByteRange::new(GuestAddr::new(addr), 32) {
+                effects.push(Effect::SharedWriteIntent {
+                    range,
+                    bytes: WritePayload::from_slice(&buf),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: GuestTicks::ZERO,
+                });
+            }
+        }
+        // Write the count to count_out.
+        if let Some(range) = ByteRange::new(GuestAddr::new(count_out as u64), 4) {
+            effects.push(Effect::SharedWriteIntent {
+                range,
+                bytes: WritePayload::from_slice(&count.to_be_bytes()),
+                ordering: PriorityClass::Normal,
+                source: requester,
+                source_time: GuestTicks::ZERO,
+            });
+        }
+        Lv2Dispatch::Immediate { code: 0, effects }
+    }
+
+    fn dispatch_event_port_send(
+        &mut self,
+        port_id: u32,
+        data1: u64,
+        data2: u64,
+        data3: u64,
+    ) -> Lv2Dispatch {
+        // Port id is treated as queue id directly (1:1 binding);
+        // the payload's `source` field carries the port id so the
+        // receiver knows which port delivered the event.
+        let payload = EventPayload {
+            source: port_id as u64,
+            data1,
+            data2,
+            data3,
+        };
+        match self.event_queues.send_and_wake_or_enqueue(port_id, payload) {
+            crate::sync_primitives::EventQueueSend::Unknown => Lv2Dispatch::Immediate {
+                code: 0x8001_0005,
+                effects: vec![],
+            },
+            crate::sync_primitives::EventQueueSend::Full => Lv2Dispatch::Immediate {
+                code: 0x8001_000A, // CELL_EBUSY
+                effects: vec![],
+            },
+            crate::sync_primitives::EventQueueSend::Enqueued => Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![],
+            },
+            crate::sync_primitives::EventQueueSend::Woke {
+                new_owner,
+                out_ptr,
+                payload,
+            } => {
+                // Send_and_wake_or_enqueue returned the waiter's
+                // recorded out_ptr alongside the thread id, so
+                // the response_update carries a complete
+                // PendingResponse -- no merge-with-parked-response
+                // magic needed.
+                if let Some(thread) = self.ppu_threads.get(new_owner) {
+                    Lv2Dispatch::WakeAndReturn {
+                        code: 0,
+                        woken_unit_ids: vec![thread.unit_id],
+                        response_updates: vec![(
+                            thread.unit_id,
+                            PendingResponse::EventQueueReceive {
+                                out_ptr,
+                                source: payload.source,
+                                data1: payload.data1,
+                                data2: payload.data2,
+                                data3: payload.data3,
+                            },
+                        )],
+                        effects: vec![],
+                    }
+                } else {
+                    Lv2Dispatch::Immediate {
+                        code: 0,
+                        effects: vec![],
+                    }
+                }
+            }
+        }
     }
 
     fn dispatch_ppu_thread_join(
@@ -560,1274 +1958,5 @@ impl Lv2Host {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use cellgov_mem::GuestMemory;
-
-    struct FakeRuntime {
-        memory: GuestMemory,
-    }
-
-    impl FakeRuntime {
-        fn new(size: usize) -> Self {
-            Self {
-                memory: GuestMemory::new(size),
-            }
-        }
-
-        fn with_memory(memory: GuestMemory) -> Self {
-            Self { memory }
-        }
-    }
-
-    impl Lv2Runtime for FakeRuntime {
-        fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
-            let start = addr as usize;
-            let end = start.checked_add(len)?;
-            let bytes = self.memory.as_bytes();
-            if end <= bytes.len() {
-                Some(&bytes[start..end])
-            } else {
-                None
-            }
-        }
-    }
-
-    #[test]
-    fn image_open_out_of_range_path_returns_error() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let req = Lv2Request::SpuImageOpen {
-            img_ptr: 0x1000,
-            path_ptr: 0x2000,
-        };
-        let result = host.dispatch(req, UnitId::new(0), &rt);
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_ne!(code, 0);
-                assert!(effects.is_empty());
-            }
-            other => panic!("expected Immediate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn group_create_allocates_id_and_writes_to_guest() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x4000);
-        let req = Lv2Request::SpuThreadGroupCreate {
-            id_ptr: 0x3000,
-            num_threads: 2,
-            priority: 100,
-            attr_ptr: 0x3800,
-        };
-        let result = host.dispatch(req, UnitId::new(0), &rt);
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, 0);
-                assert_eq!(effects.len(), 1);
-                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
-                    assert_eq!(range.start().raw(), 0x3000);
-                    assert_eq!(range.length(), 4);
-                    // Group id 1, big-endian.
-                    assert_eq!(bytes.bytes(), &1u32.to_be_bytes());
-                } else {
-                    panic!("expected SharedWriteIntent");
-                }
-            }
-            other => panic!("expected Immediate, got {other:?}"),
-        }
-        assert_eq!(host.thread_groups().len(), 1);
-        let group = host.thread_groups().get(1).unwrap();
-        assert_eq!(group.num_threads, 2);
-    }
-
-    #[test]
-    fn group_create_allocates_monotonic_ids() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x4000);
-        let r1 = host.dispatch(
-            Lv2Request::SpuThreadGroupCreate {
-                id_ptr: 0x100,
-                num_threads: 1,
-                priority: 0,
-                attr_ptr: 0,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        let r2 = host.dispatch(
-            Lv2Request::SpuThreadGroupCreate {
-                id_ptr: 0x200,
-                num_threads: 1,
-                priority: 0,
-                attr_ptr: 0,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        // First group gets id 1, second gets id 2.
-        if let Lv2Dispatch::Immediate { effects, .. } = r1 {
-            assert_eq!(
-                effects[0].clone(),
-                Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(0x100), 4).unwrap(),
-                    bytes: WritePayload::new(1u32.to_be_bytes().to_vec()),
-                    ordering: PriorityClass::Normal,
-                    source: UnitId::new(0),
-                    source_time: GuestTicks::ZERO,
-                }
-            );
-        }
-        if let Lv2Dispatch::Immediate { effects, .. } = r2 {
-            assert_eq!(
-                effects[0].clone(),
-                Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(0x200), 4).unwrap(),
-                    bytes: WritePayload::new(2u32.to_be_bytes().to_vec()),
-                    ordering: PriorityClass::Normal,
-                    source: UnitId::new(0),
-                    source_time: GuestTicks::ZERO,
-                }
-            );
-        }
-    }
-
-    #[test]
-    fn thread_initialize_records_slot() {
-        let mut host = Lv2Host::new();
-        host.content_store_mut().register(b"/spu.elf", vec![0xAA]);
-
-        // Guest memory: image struct at 0x200 (handle=1 in first 4
-        // bytes, written by a previous image_open dispatch).
-        let mut mem = GuestMemory::new(0x4000);
-        let img_range = ByteRange::new(GuestAddr::new(0x200), 4).unwrap();
-        mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
-        let rt = FakeRuntime::with_memory(mem);
-
-        // Create group.
-        host.dispatch(
-            Lv2Request::SpuThreadGroupCreate {
-                id_ptr: 0x100,
-                num_threads: 2,
-                priority: 0,
-                attr_ptr: 0,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        // Initialize slot 0 -- reads image handle from img_ptr.
-        let result = host.dispatch(
-            Lv2Request::SpuThreadInitialize {
-                thread_ptr: 0x300,
-                group_id: 1,
-                thread_num: 0,
-                img_ptr: 0x200,
-                attr_ptr: 0,
-                arg_ptr: 0x1000,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, 0);
-                assert_eq!(effects.len(), 1); // thread_id write
-            }
-            other => panic!("expected Immediate, got {other:?}"),
-        }
-        let group = host.thread_groups().get(1).unwrap();
-        assert_eq!(group.slots.len(), 1);
-        assert_eq!(group.slots[&0].image_handle.raw(), 1);
-    }
-
-    #[test]
-    fn thread_initialize_unknown_group_returns_error() {
-        let mut host = Lv2Host::new();
-        let mut mem = GuestMemory::new(0x1000);
-        let img_range = ByteRange::new(GuestAddr::new(0x200), 4).unwrap();
-        mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
-        let rt = FakeRuntime::with_memory(mem);
-        let result = host.dispatch(
-            Lv2Request::SpuThreadInitialize {
-                thread_ptr: 0x300,
-                group_id: 99,
-                thread_num: 0,
-                img_ptr: 0x200,
-                attr_ptr: 0,
-                arg_ptr: 0,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_ne!(code, 0);
-                assert!(effects.is_empty());
-            }
-            other => panic!("expected Immediate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn tty_write_writes_nwritten_and_returns_ok() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x10000);
-        let req = Lv2Request::TtyWrite {
-            fd: 0,
-            buf_ptr: 0x8000,
-            len: 64,
-            nwritten_ptr: 0x9000,
-        };
-        let result = host.dispatch(req, UnitId::new(0), &rt);
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, 0);
-                assert_eq!(effects.len(), 1);
-                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
-                    assert_eq!(range.start().raw(), 0x9000);
-                    assert_eq!(range.length(), 4);
-                    assert_eq!(bytes.bytes(), &64u32.to_be_bytes());
-                } else {
-                    panic!("expected SharedWriteIntent");
-                }
-            }
-            other => panic!("expected Immediate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn stub_dispatch_returns_cell_ok_for_process_exit() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let req = Lv2Request::ProcessExit { code: 0 };
-        let result = host.dispatch(req, UnitId::new(0), &rt);
-        assert_eq!(
-            result,
-            Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![],
-            }
-        );
-    }
-
-    #[test]
-    fn stub_dispatch_returns_cell_ok_for_unsupported() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let req = Lv2Request::Unsupported { number: 999 };
-        let result = host.dispatch(req, UnitId::new(0), &rt);
-        assert_eq!(
-            result,
-            Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![],
-            }
-        );
-    }
-
-    #[test]
-    fn fake_runtime_reads_committed_memory() {
-        let rt = FakeRuntime::new(256);
-        assert!(rt.read_committed(0, 4).is_some());
-        assert!(rt.read_committed(252, 4).is_some());
-        assert!(rt.read_committed(253, 4).is_none());
-        assert!(rt.read_committed(0, 0).is_some());
-    }
-
-    #[test]
-    fn content_store_accessible_through_host() {
-        let mut host = Lv2Host::new();
-        assert!(host.content_store().is_empty());
-        let h = host
-            .content_store_mut()
-            .register(b"/app_home/spu.elf", vec![1, 2, 3]);
-        assert_eq!(h.raw(), 1);
-        assert_eq!(host.content_store().len(), 1);
-    }
-
-    #[test]
-    fn state_hash_changes_when_image_registered() {
-        let empty = Lv2Host::new();
-        let mut populated = Lv2Host::new();
-        populated.content_store_mut().register(b"/spu.elf", vec![]);
-        assert_ne!(empty.state_hash(), populated.state_hash());
-    }
-
-    #[test]
-    fn state_hash_deterministic_across_instances() {
-        let mut a = Lv2Host::new();
-        let mut b = Lv2Host::new();
-        a.content_store_mut().register(b"/spu.elf", vec![1, 2]);
-        b.content_store_mut().register(b"/spu.elf", vec![1, 2]);
-        assert_eq!(a.state_hash(), b.state_hash());
-    }
-
-    #[test]
-    fn image_open_writes_struct_and_returns_cell_ok() {
-        let mut host = Lv2Host::new();
-        host.content_store_mut()
-            .register(b"/app_home/spu.elf", vec![0xAA]);
-
-        // Place the path string "/app_home/spu.elf\0" at address 0x100
-        // in guest memory, and reserve 16 bytes at 0x200 for the output
-        // struct.
-        let mut mem = GuestMemory::new(0x300);
-        let path = b"/app_home/spu.elf\0";
-        let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
-        mem.apply_commit(path_range, path).unwrap();
-
-        let rt = FakeRuntime::with_memory(mem);
-        let req = Lv2Request::SpuImageOpen {
-            img_ptr: 0x200,
-            path_ptr: 0x100,
-        };
-        let result = host.dispatch(req, UnitId::new(0), &rt);
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, 0);
-                assert_eq!(effects.len(), 1);
-                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
-                    assert_eq!(range.start().raw(), 0x200);
-                    assert_eq!(range.length(), 16);
-                    // First 4 bytes: handle in big-endian (handle 1)
-                    assert_eq!(&bytes.bytes()[0..4], &1u32.to_be_bytes());
-                } else {
-                    panic!("expected SharedWriteIntent");
-                }
-            }
-            other => panic!("expected Immediate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn image_open_unknown_path_returns_error() {
-        let mut host = Lv2Host::new();
-        // No images registered.
-        let mut mem = GuestMemory::new(0x300);
-        let path = b"/nonexistent.elf\0";
-        let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
-        mem.apply_commit(path_range, path).unwrap();
-
-        let rt = FakeRuntime::with_memory(mem);
-        let req = Lv2Request::SpuImageOpen {
-            img_ptr: 0x200,
-            path_ptr: 0x100,
-        };
-        let result = host.dispatch(req, UnitId::new(0), &rt);
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_ne!(code, 0);
-                assert!(effects.is_empty());
-            }
-            other => panic!("expected Immediate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn image_open_bad_path_ptr_returns_error() {
-        let host_with_image = {
-            let mut h = Lv2Host::new();
-            h.content_store_mut().register(b"/spu.elf", vec![]);
-            h
-        };
-        // path_ptr points past end of memory.
-        let rt = FakeRuntime::new(64);
-        let req = Lv2Request::SpuImageOpen {
-            img_ptr: 0,
-            path_ptr: 0xFFFF,
-        };
-        let result = host_with_image.clone().dispatch(req, UnitId::new(0), &rt);
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_ne!(code, 0);
-                assert!(effects.is_empty());
-            }
-            other => panic!("expected Immediate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn image_open_handle_is_deterministic() {
-        let make_host = || {
-            let mut h = Lv2Host::new();
-            h.content_store_mut().register(b"/spu.elf", vec![1, 2, 3]);
-            h
-        };
-
-        let mut mem = GuestMemory::new(0x300);
-        let path = b"/spu.elf\0";
-        let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
-        mem.apply_commit(path_range, path).unwrap();
-        let rt = FakeRuntime::with_memory(mem);
-
-        let r1 = make_host().dispatch(
-            Lv2Request::SpuImageOpen {
-                img_ptr: 0x200,
-                path_ptr: 0x100,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        let r2 = make_host().dispatch(
-            Lv2Request::SpuImageOpen {
-                img_ptr: 0x200,
-                path_ptr: 0x100,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        assert_eq!(r1, r2);
-    }
-
-    #[test]
-    fn group_start_returns_register_spu_with_inits() {
-        let mut host = Lv2Host::new();
-        host.content_store_mut()
-            .register(b"/spu.elf", vec![0xAA, 0xBB]);
-
-        // Prepare guest memory: path at 0x100, arg struct at 0x200,
-        // image struct at 0x300 (handle=1 pre-populated).
-        let mut mem = GuestMemory::new(0x4000);
-        let path = b"/spu.elf\0";
-        let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
-        mem.apply_commit(path_range, path).unwrap();
-        let img_range = ByteRange::new(GuestAddr::new(0x300), 4).unwrap();
-        mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
-
-        // sys_spu_thread_argument: 4x u64 big-endian.
-        // arg1 = 0x1000 (result EA)
-        let mut arg_bytes = [0u8; 32];
-        arg_bytes[0..8].copy_from_slice(&0x1000u64.to_be_bytes());
-        let arg_range = ByteRange::new(GuestAddr::new(0x200), 32).unwrap();
-        mem.apply_commit(arg_range, &arg_bytes).unwrap();
-
-        let rt = FakeRuntime::with_memory(mem);
-
-        // image_open
-        host.dispatch(
-            Lv2Request::SpuImageOpen {
-                img_ptr: 0x300,
-                path_ptr: 0x100,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-
-        // group_create (1 thread)
-        host.dispatch(
-            Lv2Request::SpuThreadGroupCreate {
-                id_ptr: 0x400,
-                num_threads: 1,
-                priority: 0,
-                attr_ptr: 0,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-
-        // thread_initialize (slot 0, img_ptr 0x300 has handle, arg_ptr 0x200)
-        host.dispatch(
-            Lv2Request::SpuThreadInitialize {
-                thread_ptr: 0x500,
-                group_id: 1,
-                thread_num: 0,
-                img_ptr: 0x300,
-                attr_ptr: 0,
-                arg_ptr: 0x200,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-
-        // group_start
-        let result = host.dispatch(
-            Lv2Request::SpuThreadGroupStart { group_id: 1 },
-            UnitId::new(0),
-            &rt,
-        );
-
-        match result {
-            Lv2Dispatch::RegisterSpu { inits, code, .. } => {
-                assert_eq!(code, 0);
-                assert_eq!(inits.len(), 1);
-                assert_eq!(inits[0].ls_bytes, vec![0xAA, 0xBB]);
-                assert_eq!(inits[0].entry_pc, 0x80);
-                assert_eq!(inits[0].stack_ptr, 0x3FFF0);
-                assert_eq!(inits[0].args[0], 0x1000);
-                assert_eq!(inits[0].group_id, 1);
-                assert_eq!(inits[0].slot, 0);
-            }
-            other => panic!("expected RegisterSpu, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn group_start_unknown_group_returns_error() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::SpuThreadGroupStart { group_id: 99 },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::Immediate { code, .. } => assert_ne!(code, 0),
-            other => panic!("expected Immediate error, got {other:?}"),
-        }
-    }
-
-    // -- Syscall dispatch tests --
-
-    /// Extract the big-endian u32 value from a SharedWriteIntent effect.
-    fn extract_write_u32(effect: &cellgov_effects::Effect) -> u32 {
-        match effect {
-            cellgov_effects::Effect::SharedWriteIntent { bytes, .. } => {
-                let b = bytes.bytes();
-                assert_eq!(b.len(), 4);
-                u32::from_be_bytes([b[0], b[1], b[2], b[3]])
-            }
-            other => panic!("expected SharedWriteIntent, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn mutex_create_allocates_monotonic_ids() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x10000);
-        let source = UnitId::new(0);
-
-        let r1 = host.dispatch(
-            Lv2Request::MutexCreate {
-                id_ptr: 0x100,
-                attr_ptr: 0x200,
-            },
-            source,
-            &rt,
-        );
-        let r2 = host.dispatch(
-            Lv2Request::MutexCreate {
-                id_ptr: 0x104,
-                attr_ptr: 0x200,
-            },
-            source,
-            &rt,
-        );
-
-        let id1 = match &r1 {
-            Lv2Dispatch::Immediate {
-                code: 0,
-                effects: e,
-            } => extract_write_u32(&e[0]),
-            other => panic!("expected Immediate(0), got {other:?}"),
-        };
-        let id2 = match &r2 {
-            Lv2Dispatch::Immediate {
-                code: 0,
-                effects: e,
-            } => extract_write_u32(&e[0]),
-            other => panic!("expected Immediate(0), got {other:?}"),
-        };
-        assert_ne!(id1, id2, "IDs should be monotonically different");
-        assert!(id1 > 0 && id2 > 0, "IDs should be non-zero");
-    }
-
-    #[test]
-    fn event_queue_create_allocates_id() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x10000);
-        let result = host.dispatch(
-            Lv2Request::EventQueueCreate {
-                id_ptr: 0x100,
-                attr_ptr: 0x200,
-                key: 0,
-                size: 64,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::Immediate { code: 0, effects } => {
-                assert_eq!(effects.len(), 1);
-                let id = extract_write_u32(&effects[0]);
-                assert!(id > 0, "queue ID should be non-zero");
-            }
-            other => panic!("expected Immediate(0), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn memory_allocate_returns_aligned_sequential_addresses() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x10000);
-        let source = UnitId::new(0);
-
-        let addr1 = match host.dispatch(
-            Lv2Request::MemoryAllocate {
-                size: 0x10000,
-                flags: 0x200,
-                alloc_addr_ptr: 0x100,
-            },
-            source,
-            &rt,
-        ) {
-            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
-            other => panic!("expected Immediate(0), got {other:?}"),
-        };
-        let addr2 = match host.dispatch(
-            Lv2Request::MemoryAllocate {
-                size: 0x10000,
-                flags: 0x200,
-                alloc_addr_ptr: 0x104,
-            },
-            source,
-            &rt,
-        ) {
-            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
-            other => panic!("expected Immediate(0), got {other:?}"),
-        };
-
-        assert_eq!(addr1 & 0xFFFF, 0, "addr1 not 64KB-aligned");
-        assert_eq!(addr2 & 0xFFFF, 0, "addr2 not 64KB-aligned");
-        assert!(
-            addr2 >= addr1 + 0x10000,
-            "allocations overlap: 0x{addr1:x} and 0x{addr2:x}"
-        );
-    }
-
-    #[test]
-    fn set_mem_alloc_base_overrides_first_allocation_address() {
-        // The allocator base is configurable so callers that load a
-        // real ELF can place sys_memory_allocate's pool above the
-        // ELF's PT_LOAD footprint. The bump pointer's 64KB alignment
-        // is preserved by the dispatch path, so the first returned
-        // address must be >= the configured base and 64KB-aligned.
-        let mut host = Lv2Host::new();
-        host.set_mem_alloc_base(0x008A_0000);
-        let rt = FakeRuntime::new(0x10000);
-        let addr = match host.dispatch(
-            Lv2Request::MemoryAllocate {
-                size: 0x10000,
-                flags: 0x200,
-                alloc_addr_ptr: 0x100,
-            },
-            UnitId::new(0),
-            &rt,
-        ) {
-            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
-            other => panic!("expected Immediate(0), got {other:?}"),
-        };
-        assert_eq!(
-            addr, 0x008A_0000,
-            "first allocation must use configured base"
-        );
-        assert_eq!(addr & 0xFFFF, 0, "alignment must be preserved");
-    }
-
-    #[test]
-    fn mutex_lock_unlock_are_noop_stubs() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        for req in [
-            Lv2Request::MutexLock {
-                mutex_id: 1,
-                timeout: 0,
-            },
-            Lv2Request::MutexUnlock { mutex_id: 1 },
-        ] {
-            let result = host.dispatch(req, UnitId::new(0), &rt);
-            assert_eq!(
-                result,
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: vec![]
-                }
-            );
-        }
-    }
-
-    #[test]
-    fn tty_read_returns_eio() {
-        // Syscall 402 is sys_tty_read. RPCS3 returns CELL_EIO =
-        // 0x8001002B outside debug console mode; that is the retail
-        // behavior real games target. CELL_OK with no data causes
-        // CRT input loops to spin indefinitely.
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(Lv2Request::Unsupported { number: 402 }, UnitId::new(0), &rt);
-        assert_eq!(
-            result,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_002B,
-                effects: vec![],
-            }
-        );
-    }
-
-    #[test]
-    fn prx_start_module_returns_einval() {
-        // Syscall 481 is _sys_prx_start_module. With id=0 or a null
-        // pOpt, RPCS3 (and real LV2) returns CELL_EINVAL = 0x80010002.
-        // Our stub always returns CELL_EINVAL because we do not track
-        // PRX lifecycle state; this keeps liblv2 on a spec-correct
-        // error path rather than CELL_OK-with-garbage-output.
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(Lv2Request::Unsupported { number: 481 }, UnitId::new(0), &rt);
-        assert_eq!(
-            result,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0002,
-                effects: vec![],
-            }
-        );
-    }
-
-    #[test]
-    fn memory_free_is_noop_stub() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::MemoryFree { addr: 0x0001_0000 },
-            UnitId::new(0),
-            &rt,
-        );
-        assert_eq!(
-            result,
-            Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![]
-            }
-        );
-    }
-
-    #[test]
-    fn memory_get_user_memory_size_writes_info_struct() {
-        // sys_memory_info_t has two big-endian u32 fields:
-        // total_user_memory, available_user_memory.
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x10000);
-        let source = UnitId::new(0);
-
-        let result = host.dispatch(
-            Lv2Request::MemoryGetUserMemorySize {
-                mem_info_ptr: 0x200,
-            },
-            source,
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::Immediate { code: 0, effects } => {
-                assert_eq!(effects.len(), 1, "expect one 8-byte write");
-                match &effects[0] {
-                    cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. } => {
-                        assert_eq!(range.start().raw(), 0x200);
-                        assert_eq!(range.length(), 8);
-                        let b = bytes.bytes();
-                        let total = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
-                        let avail = u32::from_be_bytes([b[4], b[5], b[6], b[7]]);
-                        assert_eq!(total, 0x0D50_0000);
-                        assert_eq!(avail, 0x0D50_0000);
-                    }
-                    other => panic!("expected SharedWriteIntent, got {other:?}"),
-                }
-            }
-            other => panic!("expected Immediate(0), got {other:?}"),
-        }
-    }
-
-    fn primary_attrs() -> PpuThreadAttrs {
-        PpuThreadAttrs {
-            entry: 0x10_0000,
-            arg: 0,
-            stack_base: 0xD000_0000,
-            stack_size: 0x10000,
-            priority: 1000,
-            tls_base: 0x0020_0000,
-        }
-    }
-
-    #[test]
-    fn new_host_has_empty_ppu_thread_table() {
-        let host = Lv2Host::new();
-        assert!(host.ppu_threads().is_empty());
-        assert!(host.ppu_thread_for_unit(UnitId::new(0)).is_none());
-        assert!(host.ppu_thread_id_for_unit(UnitId::new(0)).is_none());
-    }
-
-    #[test]
-    fn seed_primary_ppu_thread_records_mapping() {
-        let mut host = Lv2Host::new();
-        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-        assert_eq!(host.ppu_threads().len(), 1);
-        let primary = host.ppu_thread_for_unit(UnitId::new(0)).unwrap();
-        assert_eq!(primary.id, PpuThreadId::PRIMARY);
-        assert_eq!(primary.unit_id, UnitId::new(0));
-        assert_eq!(primary.state, crate::ppu_thread::PpuThreadState::Runnable);
-        assert_eq!(
-            host.ppu_thread_id_for_unit(UnitId::new(0)),
-            Some(PpuThreadId::PRIMARY),
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "primary thread already inserted")]
-    fn seeding_primary_twice_panics() {
-        let mut host = Lv2Host::new();
-        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-        host.seed_primary_ppu_thread(UnitId::new(1), primary_attrs());
-    }
-
-    #[test]
-    fn state_hash_unchanged_when_ppu_table_empty() {
-        // Regression guard: an empty PpuThreadTable must not
-        // perturb Lv2Host::state_hash. Without this, every host
-        // without a seeded primary thread would see its hash
-        // change just because the PPU thread table field exists
-        // on the struct.
-        let fresh = Lv2Host::new();
-        // Two fresh hosts produce identical hashes (sanity).
-        assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
-    }
-
-    #[test]
-    fn state_hash_changes_after_primary_seed() {
-        let pre_seed = Lv2Host::new().state_hash();
-        let mut seeded = Lv2Host::new();
-        seeded.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-        assert_ne!(pre_seed, seeded.state_hash());
-    }
-
-    #[test]
-    fn set_tls_template_stores_bytes() {
-        let mut host = Lv2Host::new();
-        assert!(host.tls_template().is_empty());
-        host.set_tls_template(crate::ppu_thread::TlsTemplate::new(
-            vec![0xDE, 0xAD],
-            0x100,
-            0x10,
-            0x89_5cd0,
-        ));
-        let tpl = host.tls_template();
-        assert!(!tpl.is_empty());
-        assert_eq!(tpl.initial_bytes(), &[0xDE, 0xAD]);
-        assert_eq!(tpl.vaddr(), 0x89_5cd0);
-    }
-
-    #[test]
-    fn state_hash_unchanged_when_tls_template_empty() {
-        // Regression guard matching the ppu_threads gating: an
-        // empty TlsTemplate must not perturb state_hash. Without
-        // this, hosts constructed before the loader captures a
-        // template would see their hash shift just because the
-        // field exists on the struct.
-        let fresh = Lv2Host::new();
-        assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
-    }
-
-    #[test]
-    fn state_hash_changes_after_tls_template_set() {
-        let pre = Lv2Host::new().state_hash();
-        let mut host = Lv2Host::new();
-        host.set_tls_template(crate::ppu_thread::TlsTemplate::new(
-            vec![0x11, 0x22],
-            0x80,
-            0x10,
-            0x1000,
-        ));
-        assert_ne!(pre, host.state_hash());
-    }
-
-    #[test]
-    fn allocate_child_stack_produces_non_overlapping_blocks() {
-        let mut host = Lv2Host::new();
-        let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-        let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-        let s3 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-        // Start at the 0xD0010000 child-stack base.
-        assert_eq!(s1.base, 0xD001_0000);
-        // Monotonic and non-overlapping.
-        assert!(s2.base >= s1.end());
-        assert!(s3.base >= s2.end());
-    }
-
-    #[test]
-    fn state_hash_unchanged_when_no_child_stack_allocated() {
-        // Regression guard: a fresh host (no child threads
-        // spawned) must report the same hash it would before
-        // the stack allocator field existed. Once
-        // `allocate_child_stack` has advanced the cursor past
-        // the sentinel, the contribution kicks in.
-        let fresh = Lv2Host::new();
-        assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
-    }
-
-    #[test]
-    fn state_hash_changes_after_child_stack_allocated() {
-        let pre = Lv2Host::new().state_hash();
-        let mut host = Lv2Host::new();
-        let _ = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-        assert_ne!(pre, host.state_hash());
-    }
-
-    #[test]
-    fn ppu_thread_exit_marks_thread_finished_with_exit_value() {
-        // sys_ppu_thread_exit marks the calling thread Finished,
-        // captures the exit value, and -- when no one is joining
-        // -- returns an empty waker list. The runtime side does
-        // the unit-state transition.
-        let mut host = Lv2Host::new();
-        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::PpuThreadExit {
-                exit_value: 0xDEAD_BEEF,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::PpuThreadExit {
-                exit_value,
-                woken_unit_ids,
-                effects,
-            } => {
-                assert_eq!(exit_value, 0xDEAD_BEEF);
-                assert!(woken_unit_ids.is_empty());
-                assert!(effects.is_empty());
-            }
-            other => panic!("expected PpuThreadExit dispatch, got {other:?}"),
-        }
-        // Primary thread is now Finished with the exit value.
-        let primary = host.ppu_thread_for_unit(UnitId::new(0)).unwrap();
-        assert_eq!(primary.state, crate::ppu_thread::PpuThreadState::Finished);
-        assert_eq!(primary.exit_value, Some(0xDEAD_BEEF));
-    }
-
-    #[test]
-    fn ppu_thread_exit_unseeded_thread_still_returns_dispatch() {
-        // If the caller is not in the thread table yet (e.g. the
-        // primary is unseeded -- foundation-title boot path), the
-        // handler still returns a PpuThreadExit dispatch so the
-        // runtime transitions the unit to Finished. No waiters
-        // are waked because none can be tracked.
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::PpuThreadExit { exit_value: 7 },
-            UnitId::new(99),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::PpuThreadExit {
-                exit_value,
-                woken_unit_ids,
-                ..
-            } => {
-                assert_eq!(exit_value, 7);
-                assert!(woken_unit_ids.is_empty());
-            }
-            other => panic!("expected PpuThreadExit, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ppu_thread_exit_wakes_join_waiters() {
-        // A child thread exits with waiters registered on its
-        // join list. The handler reports those waiters' unit ids
-        // so the runtime can wake them.
-        let mut host = Lv2Host::new();
-        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-        let child_tid = host
-            .ppu_threads_mut()
-            .create(UnitId::new(1), primary_attrs())
-            .expect("child create");
-        // Primary joins on the child.
-        host.ppu_threads_mut()
-            .add_join_waiter(child_tid, crate::ppu_thread::PpuThreadId::PRIMARY);
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::PpuThreadExit { exit_value: 5 },
-            UnitId::new(1),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::PpuThreadExit {
-                exit_value,
-                woken_unit_ids,
-                ..
-            } => {
-                assert_eq!(exit_value, 5);
-                assert_eq!(woken_unit_ids, vec![UnitId::new(0)]);
-            }
-            other => panic!("expected PpuThreadExit, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ppu_thread_join_finished_target_returns_immediate_with_exit_value() {
-        let mut host = Lv2Host::new();
-        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-        // Create a child and immediately mark it finished.
-        let child = host
-            .ppu_threads_mut()
-            .create(UnitId::new(1), primary_attrs())
-            .expect("child create");
-        host.ppu_threads_mut().mark_finished(child, 0xFEED_FACE);
-        let rt = FakeRuntime::new(0x10000);
-        let result = host.dispatch(
-            Lv2Request::PpuThreadJoin {
-                target: child.raw(),
-                status_out_ptr: 0x500,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, 0);
-                assert_eq!(effects.len(), 1);
-                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
-                    assert_eq!(range.start().raw(), 0x500);
-                    assert_eq!(range.length(), 8);
-                    assert_eq!(bytes.bytes(), &0xFEED_FACE_u64.to_be_bytes());
-                } else {
-                    panic!("expected SharedWriteIntent");
-                }
-            }
-            other => panic!("expected Immediate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ppu_thread_join_running_target_blocks_and_records_waiter() {
-        let mut host = Lv2Host::new();
-        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-        let child = host
-            .ppu_threads_mut()
-            .create(UnitId::new(1), primary_attrs())
-            .expect("child create");
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::PpuThreadJoin {
-                target: child.raw(),
-                status_out_ptr: 0x500,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::Block {
-                reason, pending, ..
-            } => {
-                assert!(matches!(
-                    reason,
-                    crate::dispatch::Lv2BlockReason::PpuThreadJoin { target } if target == child.raw()
-                ));
-                assert!(matches!(
-                    pending,
-                    PendingResponse::PpuThreadJoin {
-                        status_out_ptr: 0x500,
-                        ..
-                    }
-                ));
-            }
-            other => panic!("expected Block, got {other:?}"),
-        }
-        // Child's join-waiter list now contains the primary's id.
-        assert_eq!(
-            host.ppu_threads().get(child).unwrap().join_waiters,
-            vec![crate::ppu_thread::PpuThreadId::PRIMARY],
-        );
-    }
-
-    #[test]
-    fn ppu_thread_join_unknown_target_returns_esrch() {
-        let mut host = Lv2Host::new();
-        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::PpuThreadJoin {
-                target: 0xDEAD_BEEF,
-                status_out_ptr: 0x500,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, 0x8001_0005);
-                assert!(effects.is_empty());
-            }
-            other => panic!("expected Immediate with ESRCH, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ppu_thread_create_returns_dispatch_with_allocated_stack_and_tls() {
-        // With a non-empty TLS template captured, the handler
-        // allocates a child stack block and instantiates a fresh
-        // TLS block. Dispatch carries all fields the runtime
-        // needs to register the child PPU unit.
-        let mut host = Lv2Host::new();
-        host.set_tls_template(crate::ppu_thread::TlsTemplate::new(
-            vec![0xAB, 0xCD, 0xEF],
-            0x100,
-            0x10,
-            0x89_5cd0,
-        ));
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::PpuThreadCreate {
-                id_ptr: 0x1000,
-                entry_opd: 0x2_0000,
-                arg: 0xDEAD_BEEF,
-                priority: 1500,
-                stacksize: 0x10_000,
-                flags: 0,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::PpuThreadCreate {
-                id_ptr,
-                entry_opd,
-                stack_top,
-                stack_base,
-                stack_size,
-                arg,
-                tls_base,
-                tls_bytes,
-                priority,
-                effects,
-            } => {
-                assert_eq!(id_ptr, 0x1000);
-                assert_eq!(entry_opd, 0x2_0000);
-                assert_eq!(arg, 0xDEAD_BEEF);
-                assert_eq!(priority, 1500);
-                // First stack block starts at 0xD0010000.
-                assert_eq!(stack_base, 0xD001_0000);
-                assert_eq!(stack_size, 0x10_000);
-                assert_eq!(stack_top, 0xD002_0000 - 0x10);
-                // TLS block placed at or above the stack end.
-                assert!(tls_base >= stack_base + stack_size);
-                assert_eq!(tls_bytes.len(), 0x100);
-                assert_eq!(&tls_bytes[..3], &[0xAB, 0xCD, 0xEF]);
-                assert!(tls_bytes[3..].iter().all(|&b| b == 0));
-                assert!(effects.is_empty());
-            }
-            other => panic!("expected PpuThreadCreate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ppu_thread_create_with_empty_template_has_no_tls() {
-        // Games without PT_TLS get an empty template. The
-        // dispatch still succeeds; tls_base is zero and
-        // tls_bytes is empty so the runtime leaves r13=0.
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::PpuThreadCreate {
-                id_ptr: 0x1000,
-                entry_opd: 0x2_0000,
-                arg: 0,
-                priority: 1000,
-                stacksize: 0x8000,
-                flags: 0,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::PpuThreadCreate {
-                tls_base,
-                tls_bytes,
-                ..
-            } => {
-                assert_eq!(tls_base, 0);
-                assert!(tls_bytes.is_empty());
-            }
-            other => panic!("expected PpuThreadCreate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ppu_thread_create_enforces_minimum_stack_size() {
-        // A stacksize below the ABI minimum (0x4000) is rounded
-        // up so the child has room for its back-chain + register
-        // save area.
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(
-            Lv2Request::PpuThreadCreate {
-                id_ptr: 0x1000,
-                entry_opd: 0x2_0000,
-                arg: 0,
-                priority: 1000,
-                stacksize: 0x100,
-                flags: 0,
-            },
-            UnitId::new(0),
-            &rt,
-        );
-        match result {
-            Lv2Dispatch::PpuThreadCreate { stack_size, .. } => {
-                assert_eq!(stack_size, 0x4000);
-            }
-            other => panic!("expected PpuThreadCreate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ppu_thread_yield_returns_ok_with_no_effects() {
-        // sys_ppu_thread_yield is a pure scheduler hint: return
-        // CELL_OK immediately, emit no effects. The round-robin
-        // scheduler advances to the next runnable unit on the
-        // next step naturally because the caller has yielded via
-        // YieldReason::Syscall.
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
-        let result = host.dispatch(Lv2Request::PpuThreadYield, UnitId::new(0), &rt);
-        assert_eq!(
-            result,
-            Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![],
-            }
-        );
-    }
-
-    #[test]
-    fn memory_container_create_writes_monotonic_id() {
-        let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x10000);
-        let source = UnitId::new(0);
-
-        let id1 = match host.dispatch(
-            Lv2Request::MemoryContainerCreate {
-                cid_ptr: 0x100,
-                size: 0x10_0000,
-            },
-            source,
-            &rt,
-        ) {
-            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
-            other => panic!("expected Immediate(0), got {other:?}"),
-        };
-        let id2 = match host.dispatch(
-            Lv2Request::MemoryContainerCreate {
-                cid_ptr: 0x104,
-                size: 0x10_0000,
-            },
-            source,
-            &rt,
-        ) {
-            Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
-            other => panic!("expected Immediate(0), got {other:?}"),
-        };
-        assert_ne!(id1, 0);
-        assert_ne!(id1, id2, "IDs must be monotonic across create calls");
-    }
-}
+#[path = "tests/host_tests.rs"]
+mod tests;
