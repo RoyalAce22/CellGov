@@ -167,8 +167,8 @@ fn classify_import(
 
 /// Entry point for `cellgov_cli dump-imports --title <name>`.
 pub(crate) fn run(args: &[String]) {
-    let title = crate::resolve_title_manifest(args, "dump-imports");
-    let vfs_root = crate::resolve_ps3_vfs_root(args);
+    let title = crate::cli::title::resolve_title_manifest(args, "dump-imports");
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(args);
     let elf_path = title.resolve_eboot(&vfs_root).unwrap_or_else(|e| {
         eprintln!("dump-imports: {e}");
         std::process::exit(1);

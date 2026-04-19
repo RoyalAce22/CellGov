@@ -10,7 +10,7 @@ use cellgov_ppu::PpuExecutionUnit;
 use cellgov_time::Budget;
 
 use super::diag::fetch_raw_at;
-use crate::die;
+use crate::cli::exit::die;
 
 /// Summary of a loaded firmware PRX module.
 pub(super) struct PrxLoadInfo {
