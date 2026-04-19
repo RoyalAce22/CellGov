@@ -8,7 +8,8 @@ mod prx;
 
 use diag::{
     fetch_raw_at, format_fault, format_max_steps, format_process_exit, print_hle_summary,
-    print_insn_coverage, print_top_pcs, print_trace_line, ProcessExitInfo, TtyCapture,
+    print_insn_coverage, print_shadow_stats, print_top_pcs, print_trace_line, ProcessExitInfo,
+    TtyCapture,
 };
 
 use std::time::Instant;
@@ -156,6 +157,7 @@ pub fn run_game(
     print_hle_summary(&hle_calls, &hle_bindings);
     print_insn_coverage(&insn_coverage);
     print_top_pcs(&rt, &pc_hits);
+    print_shadow_stats(&mut rt);
 
     if let Some(t) = &timing {
         println!();
