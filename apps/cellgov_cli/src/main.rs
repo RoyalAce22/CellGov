@@ -246,31 +246,20 @@ fn main() {
     if args[1] == "run-game" {
         let title = resolve_title_manifest(&args, "run-game");
         let vfs_root = resolve_ps3_vfs_root(&args);
-        let elf_path = find_run_game_elf_path(&args)
-            .or_else(|| {
-                title
-                    .resolve_eboot(&vfs_root)
-                    // Display paths use '/' consistently so logs are
-                    // readable whether the components came from a
-                    // forward-slash string literal or a Windows
-                    // PathBuf::join.
-                    .map(|p| p.to_string_lossy().replace('\\', "/"))
-            })
-            .unwrap_or_else(|| {
-                eprintln!(
-                    "run-game: no executable found for title '{}' under vfs-root={}. \
-                     Looked for: {}",
-                    title.name(),
-                    vfs_root.display(),
-                    title
-                        .eboot_candidates()
-                        .iter()
-                        .map(|n| format!("game/{}/USRDIR/{n}", title.content_id()))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                std::process::exit(1);
-            });
+        let elf_path = match find_run_game_elf_path(&args) {
+            Some(p) => p,
+            None => match title.resolve_eboot(&vfs_root) {
+                // Display paths use '/' consistently so logs are
+                // readable whether the components came from a
+                // forward-slash string literal or a Windows
+                // PathBuf::join.
+                Ok(p) => p.to_string_lossy().replace('\\', "/"),
+                Err(e) => {
+                    eprintln!("run-game: {e}");
+                    std::process::exit(1);
+                }
+            },
+        };
         let elf_path = elf_path.as_str();
         let max_steps: usize = find_flag_value(&args, "--max-steps")
             .and_then(|v| v.parse().ok())
@@ -342,20 +331,16 @@ fn main() {
     if args[1] == "bench-boot-once" {
         let title = resolve_title_manifest(&args, "bench-boot-once");
         let vfs_root = resolve_ps3_vfs_root(&args);
-        let elf_path = find_run_game_elf_path(&args)
-            .or_else(|| {
-                title
-                    .resolve_eboot(&vfs_root)
-                    .map(|p| p.to_string_lossy().replace('\\', "/"))
-            })
-            .unwrap_or_else(|| {
-                eprintln!(
-                    "bench-boot-once: no elf-path and title '{}' not found under vfs-root={}",
-                    title.name(),
-                    vfs_root.display()
-                );
-                std::process::exit(1);
-            });
+        let elf_path = match find_run_game_elf_path(&args) {
+            Some(p) => p,
+            None => match title.resolve_eboot(&vfs_root) {
+                Ok(p) => p.to_string_lossy().replace('\\', "/"),
+                Err(e) => {
+                    eprintln!("bench-boot-once: {e}");
+                    std::process::exit(1);
+                }
+            },
+        };
         let max_steps: usize = find_flag_value(&args, "--max-steps")
             .and_then(|v| v.parse().ok())
             .unwrap_or(100_000_000);
@@ -379,20 +364,16 @@ fn main() {
     if args[1] == "bench-boot" {
         let title = resolve_title_manifest(&args, "bench-boot");
         let vfs_root = resolve_ps3_vfs_root(&args);
-        let elf_path = find_run_game_elf_path(&args)
-            .or_else(|| {
-                title
-                    .resolve_eboot(&vfs_root)
-                    .map(|p| p.to_string_lossy().replace('\\', "/"))
-            })
-            .unwrap_or_else(|| {
-                eprintln!(
-                    "bench-boot: no elf-path and title '{}' not found under vfs-root={}",
-                    title.name(),
-                    vfs_root.display()
-                );
-                std::process::exit(1);
-            });
+        let elf_path = match find_run_game_elf_path(&args) {
+            Some(p) => p,
+            None => match title.resolve_eboot(&vfs_root) {
+                Ok(p) => p.to_string_lossy().replace('\\', "/"),
+                Err(e) => {
+                    eprintln!("bench-boot: {e}");
+                    std::process::exit(1);
+                }
+            },
+        };
         let max_steps: usize = find_flag_value(&args, "--max-steps")
             .and_then(|v| v.parse().ok())
             .unwrap_or(100_000_000);

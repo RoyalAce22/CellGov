@@ -258,4 +258,25 @@ mod tests {
         let loaded: Observation = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(obs, loaded);
     }
+
+    /// Pin the rule that `null` on a required non-Option field is a
+    /// parse error, not a silent default. A regression here (e.g.,
+    /// someone adding `#[serde(default)]` to `memory_regions`) would
+    /// let malformed observations deserialize to empty vectors and
+    /// the compare-observations harness would report a trivially
+    /// vacuous MATCH. Explicit test so the property does not drift.
+    #[test]
+    fn null_on_required_field_rejects() {
+        let json = r#"{
+            "outcome": "Completed",
+            "memory_regions": null,
+            "events": [],
+            "state_hashes": null,
+            "metadata": { "runner": "rpcs3", "steps": null }
+        }"#;
+        assert!(
+            serde_json::from_str::<Observation>(json).is_err(),
+            "null memory_regions must fail to deserialize, not default to empty"
+        );
+    }
 }

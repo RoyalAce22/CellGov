@@ -48,7 +48,7 @@ pub(super) struct StartupTimings {
 
 impl StartupTimings {
     pub fn total(&self) -> Duration {
-        self.prx_load
+        self.mem_alloc + self.elf_load + self.hle_bind + self.prx_load
     }
 }
 
@@ -155,17 +155,43 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let t_elf_load = t_start.elapsed();
 
     let tramp_base = ((required_size + 0xFFF) & !0xFFF) as u32;
-    let hle_layout = match std::env::var("CELLGOV_HLE_OPD_BASE") {
+    // Ps3Spec layout places 256 OPDs (stride 8 = 0x800 bytes) followed
+    // by 256 bodies (stride 16 = 0x1000 bytes), so the total extent
+    // from opd_base is 0x1800. Any override must leave that window
+    // entirely inside the base-0 region.
+    const HLE_PS3_SPEC_EXTENT: u64 = 0x1800;
+    let opd_override: Option<u32> = match std::env::var("CELLGOV_HLE_OPD_BASE") {
         Ok(s) => {
-            let opd_base =
-                u32::from_str_radix(s.trim_start_matches("0x"), 16).unwrap_or(tramp_base);
-            let body_base = opd_base + 256 * 8;
-            cellgov_ppu::prx::HleLayout::Ps3Spec {
-                opd_base,
-                body_base,
+            let v =
+                u32::from_str_radix(s.trim().trim_start_matches("0x"), 16).unwrap_or_else(|e| {
+                    die(&format!("CELLGOV_HLE_OPD_BASE={s:?}: not a hex u32 ({e})"))
+                });
+            if v < tramp_base {
+                die(&format!(
+                    "CELLGOV_HLE_OPD_BASE=0x{v:x} overlaps ELF load region (must be >= 0x{tramp_base:x})"
+                ));
             }
+            // end is the exclusive upper bound; mem_size is the
+            // region length. end == mem_size places the last byte
+            // at mem_size - 1, which is in bounds, so only strict
+            // > is a fault.
+            let end = v as u64 + HLE_PS3_SPEC_EXTENT;
+            if end > mem_size as u64 {
+                die(&format!(
+                    "CELLGOV_HLE_OPD_BASE=0x{v:x}: extent 0x{end:x} exceeds mem_size 0x{:x}",
+                    mem_size
+                ));
+            }
+            Some(v)
         }
-        Err(_) => cellgov_ppu::prx::HleLayout::Legacy24,
+        Err(_) => None,
+    };
+    let hle_layout = match opd_override {
+        Some(opd_base) => cellgov_ppu::prx::HleLayout::Ps3Spec {
+            opd_base,
+            body_base: opd_base + 256 * 8,
+        },
+        None => cellgov_ppu::prx::HleLayout::Legacy24,
     };
     let hle_bindings = match cellgov_ppu::prx::parse_imports(&elf_data) {
         Ok(modules) => {
@@ -191,9 +217,9 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             bindings
         }
         Err(e) => {
-            if opts.print_banner {
-                println!("imports: none (parse failed: {e:?})");
-            }
+            eprintln!(
+                "imports: HLE parse failed: {e:?}; guest will crash on the first unresolved stub"
+            );
             vec![]
         }
     };
@@ -201,35 +227,78 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
 
     let prx_info = load_firmware_prx(opts.firmware_dir, &hle_bindings, &mut mem, tramp_base);
     let t_prx_load = t_start.elapsed();
+    if opts.firmware_dir.is_some() && prx_info.is_none() {
+        eprintln!(
+            "prx: firmware directory was supplied but no PRX was loaded; HLE-only bindings in use"
+        );
+    }
 
     pre_init_tls(&elf_data, &mut mem);
 
-    let skip_ms = std::env::var("CELLGOV_SKIP_MODULE_START")
-        .map(|v| v == "1")
-        .unwrap_or(false);
-    if let Some(ref info) = prx_info {
-        if !skip_ms {
+    // Policy: unset and set-empty both mean "do not skip." Some
+    // shells distinguish `unset VAR` from `VAR=`; here they are
+    // treated identically.
+    let skip_ms = match std::env::var("CELLGOV_SKIP_MODULE_START") {
+        Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" | "" => false,
+            other => die(&format!(
+                "CELLGOV_SKIP_MODULE_START={other:?}: expected 0/1/true/false/yes/no/on/off"
+            )),
+        },
+        Err(_) => false,
+    };
+    match (&prx_info, skip_ms) {
+        (Some(info), false) => {
             mem = run_module_start(mem, info, &hle_bindings, opts.module_start_max_steps);
-        } else if opts.print_banner {
-            println!("module_start: skipped (CELLGOV_SKIP_MODULE_START=1)");
         }
+        (Some(_), true) => {
+            // Always stderr so log-scrapers see this line in the same
+            // stream regardless of whether the caller asked for the
+            // banner. Keeping the banner pure-stdout means one less
+            // asymmetry between run-game and bench-boot output.
+            eprintln!("module_start: skipped (CELLGOV_SKIP_MODULE_START set)");
+        }
+        (None, true) => {
+            eprintln!(
+                "module_start: CELLGOV_SKIP_MODULE_START set, but no PRX was loaded -- flag has no effect"
+            );
+        }
+        (None, false) => {}
     }
 
     state.gpr[1] = PS3_PRIMARY_STACK_TOP;
     state.lr = 0;
 
     let user_region_end = super::elf_user_region_end(&elf_data);
-    let trampoline_area_end = match std::env::var("CELLGOV_HLE_OPD_BASE") {
-        Ok(s) => u64::from_str_radix(s.trim_start_matches("0x"), 16)
-            .ok()
-            .map(|opd_base| opd_base + 0x1800)
-            .unwrap_or(0),
-        Err(_) => 0,
-    } as usize;
+    let trampoline_area_end = match opd_override {
+        Some(opd_base) => (opd_base as usize) + HLE_PS3_SPEC_EXTENT as usize,
+        None => {
+            // Legacy24 layout plants one 24-byte stub per binding at
+            // tramp_base. `bind_hle_stubs_with_layout` emits exactly
+            // one HleBinding per parsed function and advances offset
+            // by TRAMPOLINE_SIZE (24) once per binding, so
+            // hle_bindings.len() * 24 is the exact reserved region.
+            // alloc_floor must clear that or user-memory allocations
+            // can overwrite HLE stubs.
+            let end = (tramp_base as usize) + hle_bindings.len() * 24;
+            (end + 0xFFFF) & !0xFFFF
+        }
+    };
     let alloc_floor = user_region_end.max(trampoline_area_end);
     let alloc_base = ((alloc_floor + 0xFFFF) & !0xFFFF).max(0x0001_0000) as u32;
 
     let tls_info = cellgov_ppu::loader::find_tls_segment(&elf_data);
+    let tls_template = cellgov_ppu::loader::extract_tls_template_bytes(&elf_data);
+    match (tls_info.is_some(), tls_template.is_some()) {
+        (false, true) => eprintln!(
+            "tls: PT_TLS bytes extractable but find_tls_segment returned None; GPRs 8/9/10 will be zero"
+        ),
+        (true, false) => eprintln!(
+            "tls: find_tls_segment found PT_TLS but extract_tls_template_bytes returned None; no TLS template installed, child-thread TLS will be uninitialized"
+        ),
+        _ => {}
+    }
     state.gpr[3] = 0;
     state.gpr[4] = 0;
     state.gpr[5] = 0;
@@ -254,11 +323,14 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         .budget_override
         .unwrap_or_else(|| default_budget_for_mode(mode).raw())
         .max(1);
-    let adjusted_max_steps = opts
-        .runtime_max_steps
-        .checked_div(step_budget as usize)
-        .unwrap_or(opts.runtime_max_steps)
-        .max(1);
+    // On 32-bit targets `step_budget as usize` truncates to the low
+    // 32 bits. That yields 0 only when step_budget is a nonzero
+    // multiple of 2^32 (e.g. a CLI --budget of exactly 0x1_0000_0000),
+    // but clamping the divisor directly keeps the division invariant
+    // enforced at the point it is used rather than inferred from the
+    // producer chain above.
+    let step_budget_usize = (step_budget as usize).max(1);
+    let adjusted_max_steps = (opts.runtime_max_steps / step_budget_usize).max(1);
 
     if opts.print_banner {
         println!("title: {}", opts.title.display_name());
@@ -298,38 +370,50 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     }
 
     for &(addr, val) in opts.patch_bytes {
-        if let Some(range) = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1) {
-            let _ = mem.apply_commit(range, &[val]);
-            if opts.print_banner {
-                println!("patch: byte 0x{addr:x} = 0x{val:02x}");
-            }
+        match cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1) {
+            Some(range) => match mem.apply_commit(range, &[val]) {
+                Ok(()) => {
+                    if opts.print_banner {
+                        println!("patch: byte 0x{addr:x} = 0x{val:02x}");
+                    }
+                }
+                Err(e) => eprintln!(
+                    "patch: byte 0x{addr:x} = 0x{val:02x} FAILED ({e:?}); target not committed"
+                ),
+            },
+            None => eprintln!("patch: byte 0x{addr:x}: invalid address range, skipped"),
         }
     }
 
     for &addr in opts.dump_mem_addrs {
-        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 32);
-        match range.and_then(|r| mem.read(r)) {
-            Some(slice) => {
-                let label = mem
-                    .containing_region(addr, 32)
-                    .map(|r| r.label())
-                    .unwrap_or("<unmapped>");
-                print!("mem[0x{addr:x}] ({label}):");
-                for b in slice {
-                    print!(" {b:02x}");
+        match cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 32) {
+            None => println!("mem[0x{addr:x}]: invalid address range"),
+            Some(r) => match mem.read(r) {
+                Some(slice) => {
+                    let label = mem
+                        .containing_region(addr, 32)
+                        .map(|r| r.label())
+                        .unwrap_or("<unmapped>");
+                    print!("mem[0x{addr:x}] ({label}):");
+                    for b in slice {
+                        print!(" {b:02x}");
+                    }
+                    println!();
                 }
-                println!();
-            }
-            None => println!("mem[0x{addr:x}]: out of range"),
+                None => println!("mem[0x{addr:x}]: unmapped"),
+            },
         }
     }
 
     // Build the predecoded instruction shadow from the base-0
     // region's bytes BEFORE moving `mem` into the Runtime. All
-    // boot-time code writes (ELF load, PRX load, HLE stub
-    // planting, TLS init, module_start) are done at this point,
-    // so the shadow captures the final committed instruction
-    // stream. Runtime stepping invalidates stale slots via
+    // boot-time writes into region 0 (ELF load, HLE stub
+    // planting, TLS init, byte patches, module_start) are
+    // committed at this point. Code outside region 0 (PRX bodies
+    // placed above 0x10000000, for example) is not captured here
+    // and falls through to decode-on-fetch at runtime;
+    // correctness is preserved, only the shadow's fast path.
+    // Runtime stepping invalidates stale slots via
     // `invalidate_code` on each committed SharedWriteIntent.
     let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, mem.as_bytes());
 
@@ -338,9 +422,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     rt.set_hle_heap_base(0x10410000);
     rt.set_hle_nids(build_nid_map(&hle_bindings));
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
-    if let Some((bytes, memsz, align, vaddr)) =
-        cellgov_ppu::loader::extract_tls_template_bytes(&elf_data)
-    {
+    if let Some((bytes, memsz, align, vaddr)) = tls_template {
         rt.lv2_host_mut()
             .set_tls_template(cellgov_lv2::TlsTemplate::new(bytes, memsz, align, vaddr));
     }

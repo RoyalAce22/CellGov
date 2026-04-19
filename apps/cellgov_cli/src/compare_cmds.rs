@@ -40,10 +40,12 @@ pub fn run_zoom(a_path: &str, b_path: &str, step: u64) {
             a_missing,
             b_missing,
         } => {
+            // Positive-sense locals so the format string reads
+            // cleanly; the `!` lives in exactly one place.
+            let a_has_step = !a_missing;
+            let b_has_step = !b_missing;
             println!(
-                "MISSING_STEP step={step}  a_has_step={}  b_has_step={}  (zoom window did not cover this step on at least one side)",
-                !a_missing,
-                !b_missing
+                "MISSING_STEP step={step}  a_has_step={a_has_step}  b_has_step={b_has_step}  (zoom window did not cover this step on at least one side)"
             );
             std::process::exit(2);
         }
@@ -60,6 +62,15 @@ pub fn run_diverge(a_path: &str, b_path: &str) {
     match diverge(&a_bytes, &b_bytes) {
         DivergeReport::Identical { count } => {
             println!("IDENTICAL  {count} PpuStateHash records matched");
+            // Zero-record "identical" is almost always a malformed
+            // or truncated trace, not two legitimately empty runs.
+            // Warn so the operator does not take a trivially-vacuous
+            // match as a real signal.
+            if count == 0 {
+                eprintln!(
+                    "WARN: zero PpuStateHash records matched; trace files may be empty or truncated"
+                );
+            }
         }
         DivergeReport::Differs {
             step,
@@ -123,13 +134,30 @@ pub fn run_compare_observations(a_path: &str, b_path: &str) {
             );
             std::process::exit(1);
         }
+        // Length check FIRST: if one side is a prefix of the other,
+        // `zip(...).position(x != y)` returns None and unwrap_or(0)
+        // would report "first byte differs at 0x0" with identical
+        // bytes (xx vs xx). The operator would see contradictory
+        // output and assume a tool bug when it is actually a length
+        // mismatch.
+        if ra.data.len() != rb.data.len() {
+            println!(
+                "DIVERGE region {}: length {} vs {} bytes",
+                ra.name,
+                ra.data.len(),
+                rb.data.len()
+            );
+            std::process::exit(1);
+        }
         if ra.data != rb.data {
+            // Lengths are equal here, so `position` is guaranteed to
+            // find the first differing byte when the slices differ.
             let first_diff = ra
                 .data
                 .iter()
                 .zip(rb.data.iter())
                 .position(|(x, y)| x != y)
-                .unwrap_or(0);
+                .expect("equal-length slices that differ must have a first diff");
             println!(
                 "DIVERGE region {}: first byte differs at offset 0x{:x} (guest 0x{:x}) -- {:02x} vs {:02x}",
                 ra.name,
@@ -141,12 +169,51 @@ pub fn run_compare_observations(a_path: &str, b_path: &str) {
             std::process::exit(1);
         }
     }
+    let total_bytes: usize = a.memory_regions.iter().map(|r| r.data.len()).sum();
     println!(
         "MATCH outcome={:?}, {} regions ({} bytes) identical, steps {:?} vs {:?}",
         a.outcome,
         a.memory_regions.len(),
-        a.memory_regions.iter().map(|r| r.data.len()).sum::<usize>(),
+        total_bytes,
         a.metadata.steps,
         b.metadata.steps,
     );
+    // Zero regions + zero bytes is almost always an upstream
+    // observation-capture bug rather than a deliberate empty run.
+    // Two empty observations trivially compare equal, which would
+    // quietly hide the real problem.
+    if a.memory_regions.is_empty() {
+        eprintln!(
+            "WARN: both observations carry zero memory regions; comparison is trivially vacuous"
+        );
+    }
+    // Step-count mismatch semantics:
+    //
+    // Different runners (e.g. CellGov vs RPCS3) count step units
+    // differently -- CellGov counts PPU instruction retirements,
+    // RPCS3 counts something else -- so a step-count disagreement
+    // at byte-equal state is expected and does not invalidate the
+    // MATCH verdict. Print a stderr NOTE so an operator who cares
+    // can see it, but keep exit 0.
+    //
+    // Same runner is different: two runs of the same deterministic
+    // runner that reach byte-equal state in different step counts
+    // is a genuine divergence (non-determinism, ordering drift, a
+    // scheduler bug). In that case promote to a DIVERGE verdict
+    // and exit 1 so CI catches it.
+    if let (Some(sa), Some(sb)) = (a.metadata.steps, b.metadata.steps) {
+        if sa != sb {
+            if a.metadata.runner == b.metadata.runner {
+                println!(
+                    "DIVERGE step count: {sa} vs {sb} within runner '{}' (byte-equal state reached via different work -- a determinism failure)",
+                    a.metadata.runner
+                );
+                std::process::exit(1);
+            }
+            eprintln!(
+                "NOTE: step counts differ ({sa} vs {sb}); cross-runner comparison between '{}' and '{}' does not require matching step counts",
+                a.metadata.runner, b.metadata.runner
+            );
+        }
+    }
 }
