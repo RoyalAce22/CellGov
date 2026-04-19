@@ -107,6 +107,15 @@ pub struct PpuExecutionUnit {
     /// slots (from guest-visible code writes) re-decode on the
     /// next fetch.
     instruction_shadow: Option<shadow::PredecodedShadow>,
+    /// Diagnostic counters for the instruction-fetch path. Incremented
+    /// once per retired instruction: `shadow_hits` when the predecoded
+    /// shadow returned Some at the fetch PC, `shadow_misses` when the
+    /// fallback decode-on-fetch path was taken (out-of-shadow address,
+    /// stale slot, or first-time fill). A steadily rising miss rate at
+    /// the same PCs across runs is a silent perf cliff -- code has
+    /// moved outside the shadowed base-0 region.
+    shadow_hits: u64,
+    shadow_misses: u64,
     /// Intra-block store-forwarding buffer. Pending stores
     /// accumulate here during the inner loop and are flushed to
     /// effects at every yield/fault/budget-exhaustion point.
@@ -144,6 +153,8 @@ impl PpuExecutionUnit {
             retirement_counter: 0,
             per_step_full_states: Vec::new(),
             instruction_shadow: None,
+            shadow_hits: 0,
+            shadow_misses: 0,
             store_buf: StoreBuffer::new(),
             budget_override: None,
             profile_mode: false,
@@ -225,6 +236,17 @@ impl PpuExecutionUnit {
     /// finished and before the step loop begins.
     pub fn set_instruction_shadow(&mut self, shadow: shadow::PredecodedShadow) {
         self.instruction_shadow = Some(shadow);
+    }
+
+    /// Return `(shadow_hits, shadow_misses)` counters. Hits +
+    /// misses equals the number of instructions this unit has
+    /// fetched; a high miss ratio indicates code executing outside
+    /// the predecoded shadow region (e.g. in a PRX body above
+    /// 0x10000000 or in a stub trampoline past the shadow end)
+    /// and falling back to decode-on-fetch. Correctness is
+    /// preserved on misses; only the fast path is lost.
+    pub fn shadow_stats(&self) -> (u64, u64) {
+        (self.shadow_hits, self.shadow_misses)
     }
 }
 
@@ -357,8 +379,10 @@ impl ExecutionUnit for PpuExecutionUnit {
                 .as_ref()
                 .and_then(|s| s.get(step_pc))
             {
+                self.shadow_hits += 1;
                 cached
             } else {
+                self.shadow_misses += 1;
                 let pc = step_pc as usize;
                 if pc + 4 > mem.len() {
                     self.status = UnitStatus::Faulted;
@@ -595,6 +619,10 @@ impl ExecutionUnit for PpuExecutionUnit {
         if let Some(s) = self.instruction_shadow.as_mut() {
             s.invalidate_range(addr, len);
         }
+    }
+
+    fn shadow_stats(&self) -> (u64, u64) {
+        (self.shadow_hits, self.shadow_misses)
     }
 }
 

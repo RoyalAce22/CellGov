@@ -433,6 +433,45 @@ pub(super) fn print_insn_coverage(insn_coverage: &std::collections::BTreeMap<&'s
 /// Print the top 20 PCs by hit count with their raw word and decoded
 /// mnemonic. When the boot hits max-steps without faulting, the hottest
 /// PCs name the busy-loop body that is preventing forward progress.
+/// Report the instruction-shadow hit/miss counts per unit plus the
+/// summed total. A rising miss count on any single unit signals that
+/// code that unit is fetching has moved outside the base-0 shadow
+/// (PRX bodies above 0x10000000, trampolines past the shadow end)
+/// and the fast path is quietly regressing even though correctness
+/// holds. With multi-PPU threading live, a worker thread fetching
+/// predominantly from an unshadowed region would otherwise have its
+/// misses drowned by a mostly-shadowed primary -- the per-unit
+/// lines keep that visible.
+pub(super) fn print_shadow_stats(rt: &mut Runtime) {
+    let mut per_unit: Vec<(u64, u64, u64)> = Vec::new();
+    let mut total_hits = 0u64;
+    let mut total_misses = 0u64;
+    for (id, unit) in rt.registry_mut().iter_mut() {
+        let (h, m) = unit.shadow_stats();
+        if h + m == 0 {
+            continue;
+        }
+        per_unit.push((id.raw(), h, m));
+        total_hits += h;
+        total_misses += m;
+    }
+    let total = total_hits + total_misses;
+    if total == 0 {
+        return;
+    }
+    let hit_pct = (total_hits as f64 / total as f64) * 100.0;
+    println!(
+        "shadow: {total_hits}/{total} via shadow ({hit_pct:.1}%), {total_misses} decode-on-fetch"
+    );
+    if per_unit.len() > 1 {
+        for (unit_id, h, m) in &per_unit {
+            let t = h + m;
+            let pct = (*h as f64 / t as f64) * 100.0;
+            println!("  unit {unit_id}: {h}/{t} via shadow ({pct:.1}%), {m} decode-on-fetch");
+        }
+    }
+}
+
 pub(super) fn print_top_pcs(rt: &Runtime, pc_hits: &std::collections::HashMap<u64, u64>) {
     if pc_hits.is_empty() {
         return;

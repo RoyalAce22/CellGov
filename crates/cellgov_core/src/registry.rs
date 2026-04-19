@@ -90,6 +90,12 @@ pub trait RegisteredUnit: 'static {
     /// Notify the unit that guest memory in `[addr, addr+len)` was
     /// written. Same contract as [`ExecutionUnit::invalidate_code`].
     fn invalidate_code(&mut self, _addr: u64, _len: u64) {}
+
+    /// Shadow hit/miss counters. Same contract as
+    /// [`ExecutionUnit::shadow_stats`]. Default `(0, 0)`.
+    fn shadow_stats(&self) -> (u64, u64) {
+        (0, 0)
+    }
 }
 
 impl<U: ExecutionUnit + 'static> RegisteredUnit for U {
@@ -136,6 +142,11 @@ impl<U: ExecutionUnit + 'static> RegisteredUnit for U {
     #[inline]
     fn invalidate_code(&mut self, addr: u64, len: u64) {
         ExecutionUnit::invalidate_code(self, addr, len)
+    }
+
+    #[inline]
+    fn shadow_stats(&self) -> (u64, u64) {
+        ExecutionUnit::shadow_stats(self)
     }
 }
 

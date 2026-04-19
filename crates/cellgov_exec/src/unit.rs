@@ -162,6 +162,16 @@ pub trait ExecutionUnit {
     /// instructions (predecoded shadow) override this to mark the
     /// affected slots stale. Default is a no-op.
     fn invalidate_code(&mut self, _addr: u64, _len: u64) {}
+
+    /// Return `(shadow_hits, shadow_misses)` counters for units that
+    /// keep a predecoded instruction shadow. Units without a shadow
+    /// report `(0, 0)`. Intended for diagnostic reporting -- a high
+    /// miss ratio indicates fetches outside the shadowed region
+    /// (e.g. PRX bodies), which fall back to decode-on-fetch with
+    /// correctness preserved but the fast path lost.
+    fn shadow_stats(&self) -> (u64, u64) {
+        (0, 0)
+    }
 }
 
 #[cfg(test)]
