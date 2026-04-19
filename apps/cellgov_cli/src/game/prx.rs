@@ -10,6 +10,7 @@ use cellgov_ppu::PpuExecutionUnit;
 use cellgov_time::Budget;
 
 use super::diag::fetch_raw_at;
+use crate::die;
 
 /// Summary of a loaded firmware PRX module.
 pub(super) struct PrxLoadInfo {
@@ -31,7 +32,27 @@ pub(super) struct PrxLoadInfo {
 pub(super) fn build_nid_map(
     bindings: &[cellgov_ppu::prx::HleBinding],
 ) -> std::collections::BTreeMap<u32, u32> {
-    bindings.iter().map(|b| (b.index, b.nid)).collect()
+    let mut map = std::collections::BTreeMap::new();
+    for b in bindings {
+        if let Some(prev) = map.insert(b.index, b.nid) {
+            // Two bindings with the same index is an upstream bug in
+            // bind_hle_stubs_with_layout. Collect-into-BTreeMap would
+            // silently overwrite, losing the earlier NID without a
+            // trace; surface it loudly in debug builds.
+            debug_assert!(
+                false,
+                "duplicate HleBinding index {idx}: previous nid 0x{prev:08x} replaced by 0x{nid:08x}",
+                idx = b.index,
+                nid = b.nid
+            );
+            eprintln!(
+                "warning: duplicate HleBinding index {idx}: nid 0x{prev:08x} replaced by 0x{nid:08x}",
+                idx = b.index,
+                nid = b.nid
+            );
+        }
+    }
+    map
 }
 
 /// TLS base address in guest memory. Matches the HLE sys_initialize_tls
@@ -50,34 +71,90 @@ pub(super) fn pre_init_tls(elf_data: &[u8], mem: &mut cellgov_mem::GuestMemory) 
     let p_memsz = tls.memsz as usize;
 
     // Copy TLS initialization image from the ELF's loaded memory.
+    // Bounds failures and commit failures are reported to stderr so
+    // the unconditional "pre-initialized" log below does not lie: a
+    // skipped copy here means r13-relative reads in module_start and
+    // the guest's TLS will hit whatever bytes were already in the
+    // TLS region (almost always zero, but never that by design).
+    let mut copy_ok = true;
     let m = mem.as_bytes();
-    if p_vaddr + p_filesz <= m.len() && tls_data_start + p_filesz <= m.len() {
+    // checked_add: a malformed ELF could present PT_TLS fields that
+    // overflow when summed with filesz; plain `+` would wrap on
+    // 32-bit usize targets and the bounds check could falsely pass.
+    let src_end = p_vaddr.checked_add(p_filesz);
+    let dst_end = tls_data_start.checked_add(p_filesz);
+    if src_end.is_none_or(|e| e > m.len()) || dst_end.is_none_or(|e| e > m.len()) {
+        eprintln!(
+            "tls: skipping template copy: src=0x{:x}+0x{:x} or dst=0x{:x}+0x{:x} exceeds guest memory ({} bytes)",
+            p_vaddr,
+            p_filesz,
+            tls_data_start,
+            p_filesz,
+            m.len()
+        );
+        copy_ok = false;
+    } else {
         let init_data: Vec<u8> = m[p_vaddr..p_vaddr + p_filesz].to_vec();
-        if let Some(range) = cellgov_mem::ByteRange::new(
+        match cellgov_mem::ByteRange::new(
             cellgov_mem::GuestAddr::new(tls_data_start as u64),
             p_filesz as u64,
         ) {
-            let _ = mem.apply_commit(range, &init_data);
+            None => {
+                eprintln!("tls: template copy: invalid byte range at 0x{tls_data_start:x}");
+                copy_ok = false;
+            }
+            Some(range) => {
+                if let Err(e) = mem.apply_commit(range, &init_data) {
+                    eprintln!(
+                        "tls: template copy to 0x{tls_data_start:x} FAILED ({e:?}); TLS not initialized"
+                    );
+                    copy_ok = false;
+                }
+            }
         }
     }
 
     // Zero BSS portion.
     let bss_start = tls_data_start + p_filesz;
     let bss_len = p_memsz.saturating_sub(p_filesz);
-    if bss_len > 0 && bss_start + bss_len <= mem.as_bytes().len() {
-        let zeros = vec![0u8; bss_len];
-        if let Some(range) = cellgov_mem::ByteRange::new(
-            cellgov_mem::GuestAddr::new(bss_start as u64),
-            bss_len as u64,
-        ) {
-            let _ = mem.apply_commit(range, &zeros);
+    let mut bss_ok = true;
+    if bss_len > 0 {
+        let bss_end = bss_start.checked_add(bss_len);
+        if bss_end.is_none_or(|e| e > mem.as_bytes().len()) {
+            eprintln!("tls: skipping BSS zero: 0x{bss_start:x}+0x{bss_len:x} exceeds guest memory");
+            bss_ok = false;
+        } else {
+            let zeros = vec![0u8; bss_len];
+            match cellgov_mem::ByteRange::new(
+                cellgov_mem::GuestAddr::new(bss_start as u64),
+                bss_len as u64,
+            ) {
+                None => {
+                    eprintln!("tls: BSS zero: invalid byte range at 0x{bss_start:x}");
+                    bss_ok = false;
+                }
+                Some(range) => {
+                    if let Err(e) = mem.apply_commit(range, &zeros) {
+                        eprintln!(
+                            "tls: BSS zero at 0x{bss_start:x} FAILED ({e:?}); BSS contains stale bytes"
+                        );
+                        bss_ok = false;
+                    }
+                }
+            }
         }
     }
 
-    println!(
-        "tls: pre-initialized from PT_TLS at 0x{:x} (filesz=0x{:x}, memsz=0x{:x}) -> 0x{:x}",
-        p_vaddr, p_filesz, p_memsz, TLS_BASE
-    );
+    if copy_ok && bss_ok {
+        println!(
+            "tls: pre-initialized from PT_TLS at 0x{:x} (filesz=0x{:x}, memsz=0x{:x}) -> 0x{:x}",
+            p_vaddr, p_filesz, p_memsz, TLS_BASE
+        );
+    } else {
+        eprintln!(
+            "tls: pre-initialization INCOMPLETE (template_copy={copy_ok}, bss_zero={bss_ok}); guest TLS reads will see unexpected bytes"
+        );
+    }
 }
 
 /// Execute a PRX module's module_start function through the PPU
@@ -187,9 +264,24 @@ pub(super) fn run_module_start(
                         let buf = args[2] as usize;
                         let len = (args[3] as usize).min(256);
                         let m = rt.memory().as_bytes();
-                        if buf + len <= m.len() {
+                        // checked_add guards against `buf = u64::MAX`
+                        // scenarios where `buf + len` would wrap on
+                        // 32-bit usize hosts and the `<= m.len()`
+                        // check falsely passes. Guest values are
+                        // attacker-controlled in principle; preserve
+                        // the invariant even if 64-bit is our only
+                        // current target.
+                        let end = buf.checked_add(len);
+                        if end.is_some_and(|e| e <= m.len()) {
                             let text = String::from_utf8_lossy(&m[buf..buf + len]);
                             print!("  module_start TTY: {text}");
+                        } else {
+                            eprintln!(
+                                "  module_start TTY dropped: buf=0x{:x}+0x{:x} exceeds guest memory (0x{:x})",
+                                buf,
+                                len,
+                                m.len()
+                            );
                         }
                     }
                 }
@@ -207,7 +299,15 @@ pub(super) fn run_module_start(
                     );
                 }
 
-                let _ = rt.commit_step(&step.result, &step.effects);
+                if let Err(e) = rt.commit_step(&step.result, &step.effects) {
+                    // A commit failure here means the step's effects
+                    // were not applied; stepping further would run
+                    // against a state the computation never blessed.
+                    // Break with a distinct outcome so the log does
+                    // not mask it as a stall or max-steps.
+                    eprintln!("  module_start commit_step FAILED at step {steps}: {e:?}");
+                    break format!("COMMIT_ERR {e:?} after {steps} steps");
+                }
 
                 if let Some(fault) = &step.result.fault {
                     let fault_pc = step.result.local_diagnostics.pc.unwrap_or(0);
@@ -216,11 +316,26 @@ pub(super) fn run_module_start(
                         _ => None,
                     };
 
+                    // "Returned normally" detection: PC=0 (blr landed on
+                    // the LR=0 sentinel), fault is the decode error on
+                    // the zero word at address 0, AND LR itself is 0 so
+                    // we know no intermediate bl overwrote it. Without
+                    // the LR==0 check a real PC=0 jump from a corrupted
+                    // call target would quietly look like a clean
+                    // return and boot would continue with a
+                    // half-initialized module.
+                    let lr_at_fault = step
+                        .result
+                        .local_diagnostics
+                        .fault_regs
+                        .as_ref()
+                        .map(|r| r.lr)
+                        .unwrap_or(u64::MAX);
                     if fault_pc == 0
+                        && lr_at_fault == 0
                         && guest_code
                             .is_some_and(|c| (c & 0xFFFF_0000) == cellgov_ppu::FAULT_DECODE_ERROR)
                     {
-                        // PC = 0 after blr: module_start returned normally.
                         break format!("RETURNED after {} steps", steps);
                     }
                     let code_str = guest_code
@@ -244,9 +359,14 @@ pub(super) fn run_module_start(
                             regs.lr, regs.ctr, regs.cr,
                         );
                     }
-                    let raw_str = fetch_raw_at(&rt, fault_pc)
-                        .map(|w| format!("0x{w:08x}"))
-                        .unwrap_or_else(|| "?".to_string());
+                    // <unmapped> vs <baddec> distinguishes fetch failure
+                    // (PC not in any mapped region) from decode failure
+                    // (word retrieved but not a legal PPC instruction).
+                    // The fault dump previously collapsed both to "?".
+                    let raw_str = match fetch_raw_at(&rt, fault_pc) {
+                        Some(w) => format!("0x{w:08x}"),
+                        None => "<unmapped>".to_string(),
+                    };
                     // Pre-fault syscall ring: identifies the most recent
                     // syscall numbers and their r3/r4/r5 arguments. When
                     // the fault is in post-syscall handling code, this
@@ -286,13 +406,16 @@ pub(super) fn run_module_start(
                             let idx =
                                 (pc_ring_pos + MS_PC_RING_SIZE - entries + i) % MS_PC_RING_SIZE;
                             let pc = pc_ring[idx];
-                            let raw = fetch_raw_at(&rt, pc)
-                                .map(|w| format!("0x{w:08x}"))
-                                .unwrap_or_else(|| "?".into());
-                            let name = fetch_raw_at(&rt, pc)
-                                .and_then(|w| cellgov_ppu::decode::decode(w).ok())
-                                .map(|insn| insn.variant_name().to_string())
-                                .unwrap_or_else(|| "?".into());
+                            let (raw, name) = match fetch_raw_at(&rt, pc) {
+                                Some(w) => (
+                                    format!("0x{w:08x}"),
+                                    cellgov_ppu::decode::decode(w)
+                                        .ok()
+                                        .map(|insn| insn.variant_name().to_string())
+                                        .unwrap_or_else(|| "<baddec>".into()),
+                                ),
+                                None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
+                            };
                             println!(
                                 "    [{:>2}] pc=0x{:08x} raw={} {}",
                                 (i as i64) - (entries as i64 - 1),
@@ -356,13 +479,16 @@ pub(super) fn run_module_start(
         let mut sorted: Vec<_> = pc_hits.iter().collect();
         sorted.sort_by_key(|&(_, c)| std::cmp::Reverse(*c));
         for (pc, count) in sorted.iter().take(20) {
-            let raw = fetch_raw_at(&rt, **pc)
-                .map(|w| format!("0x{w:08x}"))
-                .unwrap_or_else(|| "?".to_string());
-            let disasm = fetch_raw_at(&rt, **pc)
-                .and_then(|w| cellgov_ppu::decode::decode(w).ok())
-                .map(|insn| insn.variant_name().to_string())
-                .unwrap_or_else(|| "?".into());
+            let (raw, disasm) = match fetch_raw_at(&rt, **pc) {
+                Some(w) => (
+                    format!("0x{w:08x}"),
+                    cellgov_ppu::decode::decode(w)
+                        .ok()
+                        .map(|insn| insn.variant_name().to_string())
+                        .unwrap_or_else(|| "<baddec>".into()),
+                ),
+                None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
+            };
             println!("    {count:>10}x  PC=0x{:08x}  raw={raw}  {disasm}", **pc);
         }
     }
@@ -406,26 +532,52 @@ pub(super) fn load_firmware_prx(
         }
     };
 
-    // Place the PRX in the user-memory region just past the loaded
-    // ELF, matching RPCS3's `vm.cpp` "main" block layout. Real PS3
-    // LV2 loads firmware PRXes into 0x00010000-0x0FFFFFFF after the
-    // application binary; if we place liblv2 at 0x10390000 instead,
-    // the OPD addresses in the application's import table diverge by
-    // many bits versus RPCS3 even though the import resolution is
-    // semantically equivalent. Anchoring to the same VA range as
-    // RPCS3 makes the OPD-table bytes byte-for-byte identical.
+    // Place the PRX in the PS3 user-memory region (0x00010000 ..
+    // 0x0FFFFFFF), just past the loaded ELF and the HLE trampoline
+    // area. This matches what real PS3 LV2 does: the kernel's
+    // first-fit allocator hands firmware PRX segments the region
+    // immediately after what's already mapped, which on a fresh
+    // boot is the application binary. CellGov's placement is a
+    // deterministic reproduction of that "next free slot after the
+    // app binary" position rather than an emulation of the full
+    // allocator state machine.
+    //
+    // RPCS3 places liblv2 via `vm::alloc(..., vm::main)` (see
+    // rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp) which is also
+    // first-fit over the same region, so in practice the addresses
+    // tend to agree; but when they don't, CellGov's position of
+    // authority is what the real PS3 kernel does, not what RPCS3
+    // does. Any divergence from RPCS3 that comes from modelling the
+    // PS3 more faithfully gets documented.
     //
     // CELLGOV_PRX_BASE overrides the auto-computed base so callers
-    // that need a specific layout (microtests, comparison runs) can
-    // pin it. Default for `run-game`: align(elf_user_region_end, 64K)
-    // computed by `cellgov_cli::game` and passed through `tramp_base`
-    // when the caller has scanned the ELF.
+    // that need a specific layout (microtests, cross-runner
+    // comparison runs where RPCS3 picked a different address, a
+    // future allocator-accuracy test) can pin it. Default for
+    // `run-game`: align(elf_user_region_end + hle_trampolines, 64K).
     let prx_base = match std::env::var("CELLGOV_PRX_BASE") {
-        Ok(s) => u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap_or(tramp_base as u64),
+        Ok(s) => {
+            // Tolerate both `0x` and `0X` prefix forms; some
+            // operator tools lowercase env-var values and some
+            // leave the user's original case.
+            let trimmed = s.trim();
+            let stripped = trimmed
+                .strip_prefix("0x")
+                .or_else(|| trimmed.strip_prefix("0X"))
+                .unwrap_or(trimmed);
+            u64::from_str_radix(stripped, 16)
+                .unwrap_or_else(|e| die(&format!("CELLGOV_PRX_BASE={s:?}: not a hex u64 ({e})")))
+        }
         Err(_) => {
-            // Default placement: above HLE trampolines, consistent
-            // with the legacy layout. Callers that want PS3-spec
-            // placement set CELLGOV_PRX_BASE explicitly.
+            // Default placement: round up to a 64K page boundary
+            // just past the ELF-load end and the HLE trampoline
+            // area. That lands inside the PS3 user-memory region
+            // and is below any allocations the runtime makes later
+            // for TLS and HLE heap. tramp_base already encodes
+            // align(elf_user_region_end, 0x1000); adding the
+            // trampoline span and rounding to 64K gives the next
+            // free 64K page the real PS3 allocator would also
+            // return for the first PRX load on a fresh boot.
             let tramp_end = tramp_base as u64 + (hle_bindings.len() as u64) * 24;
             (tramp_end + 0xFFFF) & !0xFFFF
         }
@@ -449,34 +601,68 @@ pub(super) fn load_firmware_prx(
 
     // Re-patch GOT entries for NIDs that the loaded module exports,
     // unless the NID is in the HLE keep list.
+    //
+    // Four disjoint outcomes per binding; their sum equals
+    // hle_bindings.len():
+    //   resolved     - GOT entry committed to point at real OPD.
+    //   failed_patch - real code exists but byte-range or commit
+    //                  failed; import still on HLE.
+    //   kept_hle     - nid is in the HLE keep list; intentional.
+    //   no_export    - loaded PRX does not export this nid; falls
+    //                  through to the HLE trampoline. Counted
+    //                  explicitly so the summary closes the loop
+    //                  on "why is this import still on HLE?"
     let mut resolved = 0;
+    let mut failed_patch = 0;
     let mut kept_hle = 0;
+    let mut no_export = 0;
     for binding in hle_bindings {
         if hle_keep_nids.contains(&binding.nid) {
             kept_hle += 1;
             continue;
         }
-        if let Some(&real_opd_addr) = loaded.exports.get(&binding.nid) {
-            let opd_addr_u32 = real_opd_addr as u32;
-            let got_range = cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new(binding.stub_addr as u64),
-                4,
-            );
-            if let Some(range) = got_range {
-                let _ = mem.apply_commit(range, &opd_addr_u32.to_be_bytes());
+        let Some(&real_opd_addr) = loaded.exports.get(&binding.nid) else {
+            no_export += 1;
+            continue;
+        };
+        let opd_addr_u32 = real_opd_addr as u32;
+        let got_range =
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(binding.stub_addr as u64), 4);
+        match got_range {
+            Some(range) => match mem.apply_commit(range, &opd_addr_u32.to_be_bytes()) {
+                Ok(()) => resolved += 1,
+                Err(e) => {
+                    failed_patch += 1;
+                    eprintln!(
+                        "prx: GOT patch at 0x{:08x} (nid 0x{:08x}) FAILED ({e:?}); import stays on HLE",
+                        binding.stub_addr, binding.nid
+                    );
+                }
+            },
+            None => {
+                failed_patch += 1;
+                eprintln!(
+                    "prx: GOT patch at 0x{:08x} (nid 0x{:08x}): invalid byte range, import stays on HLE",
+                    binding.stub_addr, binding.nid
+                );
             }
-            resolved += 1;
         }
     }
 
     println!(
-        "prx: loaded {} -- {} exports, {}/{} resolved to real code, {} kept as HLE",
+        "prx: loaded {} -- {} exports, {}/{} resolved to real code, {} kept as HLE, {} not exported",
         loaded.name,
         loaded.exports.len(),
         resolved,
         hle_bindings.len(),
         kept_hle,
+        no_export,
     );
+    if failed_patch > 0 {
+        eprintln!(
+            "prx: {failed_patch} GOT patch failure(s); those imports remain bound to HLE trampolines"
+        );
+    }
 
     Some(PrxLoadInfo {
         name: loaded.name,

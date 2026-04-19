@@ -3,6 +3,24 @@
 //! Split out of `game.rs` to keep the core boot driver manageable.
 //! Every function here is pure formatting: it reads state and produces
 //! a String or stdout output, and does not mutate guest state.
+//!
+//! ## pc_ring invariant
+//!
+//! `format_fault`, `format_process_exit`, and `format_max_steps` all
+//! take a `pc_ring: &[u64; PC_RING_SIZE]` borrowed from the CLI's
+//! step loop in `game.rs`. That step loop is single-threaded; the
+//! multi-PPU threading that CellGov supports lives inside the
+//! runtime, not at this driver layer. All three formatters rely on
+//! that invariant for correctness -- a second concurrent stepper
+//! writing the ring would cause torn reads that silently lie in the
+//! mini-trace.
+//!
+//! TODO: before any multi-stepper refactor, replace the three
+//! `&[u64; PC_RING_SIZE]` parameters with a `PcRing` newtype that
+//! is `!Send` (e.g. via `PhantomData<Cell<()>>`) so the type
+//! system rejects moving the ring into a worker thread. Doing
+//! this at the module level rather than on a single formatter
+//! keeps the refactor atomic across all three readers.
 
 use crate::game::{PC_RING_SIZE, SYSCALL_RING_SIZE};
 use cellgov_core::Runtime;
@@ -12,9 +30,19 @@ use cellgov_core::Runtime;
 /// Each byte is either passed through (printable ASCII: 0x20..=0x7E)
 /// or replaced with `.`. Result is always pure ASCII and contains no
 /// control characters or Unicode replacement glyphs, so Windows
-/// console renderings (cp1252 / cp437) stay clean. Intended for
-/// live-stream TTY echo and post-run "decoded" summaries when the
+/// console renderings (cp1252 / cp437) stay clean. Intended for the
+/// partial-read TTY branch and post-run "decoded" summaries when the
 /// guest writes binary payloads.
+///
+/// Deliberately asymmetric with the full-slice TTY path: when the
+/// guest's own `(buf, len)` read succeeds in full, we render via
+/// `String::from_utf8_lossy` to preserve legitimate multi-byte UTF-8
+/// (Japanese text, box-drawing characters, etc.) at the cost of
+/// occasional U+FFFD glyphs on invalid bytes. The partial branch
+/// and the crash-dump "decoded" line trade fidelity for guaranteed
+/// ASCII because those are already in failure-mode output where
+/// diagnostic cleanliness matters more than preserving the guest's
+/// intended rendering.
 pub(super) fn ascii_safe_preview(bytes: &[u8]) -> String {
     bytes
         .iter()
@@ -40,14 +68,68 @@ pub(super) fn fetch_raw_at(rt: &Runtime, pc: u64) -> Option<u32> {
     Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-/// Label the region containing `addr`, for human-readable fault context.
+/// Label the region containing `[addr, addr+len)`, for human-readable
+/// fault context. The `len` argument must match the operation the
+/// caller is about to perform (4 for an instruction fetch, 64 for a
+/// DEBUG_BREAK dump) so the helper's notion of "mapped" agrees with
+/// the subsequent read. Querying with `len=1` would label a PC that
+/// sits 1-3 bytes before a region boundary as "inside region X" even
+/// though the 4-byte fetch fails.
 ///
-/// Returns `"<unmapped>"` if the address does not fall in any region.
-pub(super) fn region_label_at(rt: &Runtime, addr: u64) -> &'static str {
+/// Returns `"<unmapped>"` if the range does not fall entirely in any
+/// single region.
+pub(super) fn region_label_at(rt: &Runtime, addr: u64, len: u64) -> &'static str {
     rt.memory()
-        .containing_region(addr, 1)
+        .containing_region(addr, len)
         .map(|r| r.label())
         .unwrap_or("<unmapped>")
+}
+
+/// Binary-search for the longest prefix of `[buf, buf+len)` that is
+/// fully readable from guest memory. Returns the prefix length plus
+/// its bytes. `None` means even the single starting byte is unmapped.
+pub(super) fn longest_readable_prefix(
+    mem: &cellgov_mem::GuestMemory,
+    buf: u64,
+    len: u64,
+) -> Option<(u64, Vec<u8>)> {
+    if len == 0 {
+        return None;
+    }
+    let mut lo = 0u64;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo).div_ceil(2);
+        let hit = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(buf), mid)
+            .and_then(|r| mem.read(r))
+            .is_some();
+        if hit {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    if lo == 0 {
+        return None;
+    }
+    let r = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(buf), lo)?;
+    let bytes = mem.read(r)?.to_vec();
+    Some((lo, bytes))
+}
+
+/// Resolve an HLE index captured from a trace or syscall-ring entry
+/// into a printable `"{module}::{func}"` string. Distinguishes three
+/// failure modes so operators can tell "unbound HLE" apart from
+/// "index out of range" (which usually means a corrupted capture or
+/// a rebuilt bindings table) and "NID not in database".
+pub(super) fn format_hle_idx(idx: u32, hle_bindings: &[cellgov_ppu::prx::HleBinding]) -> String {
+    match hle_bindings.get(idx as usize) {
+        Some(b) => match cellgov_ppu::nid_db::lookup(b.nid) {
+            Some((_, func)) => format!("{}::{func}", b.module),
+            None => format!("{}::<unresolved-nid-0x{:08x}>", b.module, b.nid),
+        },
+        None => format!("<hle-idx-oob {idx}>"),
+    }
 }
 
 /// Captured TTY write for the diagnostic artifact.
@@ -70,30 +152,31 @@ pub(super) fn print_trace_line(
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) {
     if let Some(pc) = result.local_diagnostics.pc {
-        let raw = fetch_raw_at(rt, pc).unwrap_or(0);
+        // "<unmapped>" distinguishes a failed 4-byte fetch from a PC
+        // that genuinely contains the word 0x00000000 (which decodes
+        // as a valid instruction on PPC). unwrap_or(0) would conflate
+        // the two.
+        let raw = fetch_raw_at(rt, pc)
+            .map(|w| format!("0x{w:08x}"))
+            .unwrap_or_else(|| "<unmapped>".to_string());
         println!(
-            "[{steps:>4}] PC=0x{pc:08x}  raw=0x{raw:08x}  yr={:?}",
+            "[{steps:>4}] PC=0x{pc:08x}  raw={raw}  yr={:?}",
             result.yield_reason
         );
     }
     if let Some(args) = &result.syscall_args {
         if args[0] >= 0x10000 {
             let idx = (args[0] - 0x10000) as u32;
-            let name = hle_bindings
-                .get(idx as usize)
-                .map(|b| {
-                    let func = cellgov_ppu::nid_db::lookup(b.nid)
-                        .map(|(_, f)| f)
-                        .unwrap_or("?");
-                    format!("{}::{}", b.module, func)
-                })
-                .unwrap_or_else(|| format!("hle_{idx}"));
-            println!("       -> HLE #{idx}: {name}");
+            println!(
+                "       -> HLE #{idx}: {}",
+                format_hle_idx(idx, hle_bindings)
+            );
         } else if args[0] == 403 {
             let buf = args[2];
             let len = args[3];
-            let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(buf), len);
-            match range.and_then(|r| rt.memory().read(r)) {
+            let full = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(buf), len)
+                .and_then(|r| rt.memory().read(r));
+            match full {
                 Some(slice) => {
                     let text = String::from_utf8_lossy(slice);
                     print!("       -> tty: {text}");
@@ -101,7 +184,29 @@ pub(super) fn print_trace_line(
                         println!();
                     }
                 }
-                None => println!("       -> LV2 tty_write (oob)"),
+                None => match longest_readable_prefix(rt.memory(), buf, len) {
+                    Some((n, bytes)) => {
+                        // Route partial-prefix bytes through
+                        // ascii_safe_preview to avoid U+FFFD on
+                        // Windows cp1252/cp437 when the truncation
+                        // point lands mid-UTF-8. The full-slice path
+                        // (guest-chosen length) is less likely to
+                        // hit this, but consistency beats risk here.
+                        //
+                        // Newline strategy differs from the full-slice
+                        // path by design: ascii_safe_preview strips
+                        // all control bytes including '\n', so the
+                        // partial output is always a single line and
+                        // println!'s unconditional trailing '\n' is
+                        // exactly one. The full-slice path uses
+                        // print! + conditional println!() because it
+                        // preserves the guest's own '\n' (or absence)
+                        // in the payload.
+                        let text = ascii_safe_preview(&bytes);
+                        println!("       -> tty (partial {n}/{len}): {text}");
+                    }
+                    None => println!("       -> LV2 tty_write (oob, 0/{len} readable)"),
+                },
             }
         } else {
             println!("       -> LV2 syscall {}", args[0]);
@@ -129,12 +234,25 @@ pub(super) fn format_fault(
         cellgov_effects::FaultKind::Guest(code) => {
             let fault_type = code & 0xFFFF_0000;
             match fault_type {
-                FAULT_PC_OUT_OF_RANGE => format!("PC_OUT_OF_RANGE at PC={pc_str}"),
+                FAULT_PC_OUT_OF_RANGE => {
+                    // Include the raw code so any future ABI change that
+                    // starts encoding bits into the low 16 is visible
+                    // rather than silently discarded.
+                    format!("PC_OUT_OF_RANGE at PC={pc_str} (code=0x{code:08x})")
+                }
                 FAULT_DECODE_ERROR => {
-                    let raw_str = pc
-                        .and_then(|a| fetch_raw_at(rt, a))
-                        .map(|w| format!("0x{w:08x}"))
-                        .unwrap_or_else(|| "?".to_string());
+                    // Three-way distinction: PC absent from diagnostics
+                    // (<no-pc>), PC present but unmapped (<unmapped>),
+                    // PC present and mapped but the word did not decode
+                    // (raw hex shown). Collapsing these was how the
+                    // old "?" rendering lost signal.
+                    let raw_str = match pc {
+                        None => "<no-pc>".to_string(),
+                        Some(a) => match fetch_raw_at(rt, a) {
+                            Some(w) => format!("0x{w:08x}"),
+                            None => "<unmapped>".to_string(),
+                        },
+                    };
                     format!("DECODE_ERROR at PC={pc_str} (raw={raw_str})")
                 }
                 FAULT_INVALID_ADDRESS => {
@@ -155,7 +273,9 @@ pub(super) fn format_fault(
                     // Region-aware: queries every region by address so a
                     // GPR holding a stack address (0xD0000000+) is dumped
                     // from the stack region, not silently dropped because
-                    // it falls outside the base-0 region.
+                    // it falls outside the base-0 region. Skipped registers
+                    // still get a one-line marker so "r5 dumped, r6 missing"
+                    // is not an unexplained hole in the dump.
                     if let Some(regs) = &result.local_diagnostics.fault_regs {
                         for (i, &val) in regs.gprs.iter().enumerate() {
                             if val < 0x1000 {
@@ -164,25 +284,34 @@ pub(super) fn format_fault(
                             let Some(range) =
                                 cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(val), 64)
                             else {
+                                s.push_str(&format!(
+                                    "\n  [r{i}=0x{val:08x}]: <invalid address range>"
+                                ));
                                 continue;
                             };
                             let Some(slice) = rt.memory().read(range) else {
+                                s.push_str(&format!("\n  [r{i}=0x{val:08x}]: <unreadable>"));
                                 continue;
                             };
-                            let label = region_label_at(rt, val);
+                            let label = region_label_at(rt, val, 64);
                             s.push_str(&format!("\n  [r{i}=0x{val:08x} ({label})]: "));
                             // Show printable ASCII if it looks like a string.
+                            // If non-printable bytes follow the printable
+                            // prefix, note how many are hidden so a 5-byte
+                            // ASCII header on a binary blob does not silently
+                            // erase the 59 bytes after it.
                             let printable = slice
                                 .iter()
                                 .take_while(|&&b| (0x20..0x7f).contains(&b))
                                 .count();
                             if printable >= 4 {
-                                let text: String = slice
-                                    .iter()
-                                    .take_while(|&&b| (0x20..0x7f).contains(&b))
-                                    .map(|&b| b as char)
-                                    .collect();
+                                let text: String =
+                                    slice[..printable].iter().map(|&b| b as char).collect();
                                 s.push_str(&format!("{text:?}"));
+                                let hidden = slice.len() - printable;
+                                if hidden > 0 {
+                                    s.push_str(&format!(" (+{hidden} non-printable bytes)"));
+                                }
                             } else {
                                 for b in &slice[..16.min(slice.len())] {
                                     s.push_str(&format!("{b:02x} "));
@@ -218,19 +347,28 @@ pub(super) fn format_fault(
     // word and decoded mnemonic. For memory-access faults, walking
     // back through the mnemonics identifies the instruction that
     // computed the bad effective address.
+    //
+    // pc_ring concurrency invariant: see the module-level doc
+    // comment at the top of this file.
     let filled = pc_ring_pos.min(PC_RING_SIZE);
     if filled > 0 {
         out.push_str(&format!("\n  last {filled} PCs:"));
         let start = pc_ring_pos.saturating_sub(PC_RING_SIZE);
         for i in start..pc_ring_pos {
             let pc = pc_ring[i % PC_RING_SIZE];
-            let raw = fetch_raw_at(rt, pc)
-                .map(|w| format!("0x{w:08x}"))
-                .unwrap_or_else(|| "?".to_string());
-            let name = fetch_raw_at(rt, pc)
-                .and_then(|w| cellgov_ppu::decode::decode(w).ok())
-                .map(|insn| insn.variant_name().to_string())
-                .unwrap_or_else(|| "?".into());
+            // Distinguish fetch failure (<unmapped>) from decode
+            // failure (<baddec>) so the backtrace tells an operator
+            // which path went wrong. Previously both rendered "?".
+            let (raw, name) = match fetch_raw_at(rt, pc) {
+                Some(w) => (
+                    format!("0x{w:08x}"),
+                    cellgov_ppu::decode::decode(w)
+                        .ok()
+                        .map(|insn| insn.variant_name().to_string())
+                        .unwrap_or_else(|| "<baddec>".into()),
+                ),
+                None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
+            };
             out.push_str(&format!("\n    0x{pc:08x}  raw={raw}  {name}"));
         }
     }
@@ -278,9 +416,22 @@ pub(super) fn format_process_exit(
         }
         // ASCII-safe preview. Non-printable bytes render as `.`
         // so binary payloads do not leak control chars or U+FFFD
-        // replacements to the terminal.
+        // replacements to the terminal. When every byte is
+        // non-printable, mark the preview explicitly so an
+        // all-dots line does not look like a stripped ASCII
+        // message -- the hex dump above still carries the real
+        // bytes, but the "decoded:" line needs its own signal.
         let preview = ascii_safe_preview(&tty.raw_bytes);
-        out.push_str(&format!("\n  decoded: \"{}\"", preview.trim_end()));
+        let all_nonprintable =
+            !tty.raw_bytes.is_empty() && tty.raw_bytes.iter().all(|&b| !(0x20..=0x7E).contains(&b));
+        if all_nonprintable {
+            out.push_str(&format!(
+                "\n  decoded: \"{}\" (all non-printable)",
+                preview.trim_end()
+            ));
+        } else {
+            out.push_str(&format!("\n  decoded: \"{}\"", preview.trim_end()));
+        }
     }
 
     // Mini-trace: last N PCs.
@@ -303,10 +454,7 @@ pub(super) fn format_process_exit(
             let (nr, pc) = syscall_ring[i % SYSCALL_RING_SIZE];
             if nr >= 0x10000 {
                 let idx = (nr - 0x10000) as u32;
-                let name = hle_bindings
-                    .get(idx as usize)
-                    .and_then(|b| cellgov_ppu::nid_db::lookup(b.nid).map(|(_, f)| f.to_string()))
-                    .unwrap_or_else(|| format!("hle_{idx}"));
+                let name = format_hle_idx(idx, hle_bindings);
                 out.push_str(&format!("\n    HLE {name} at 0x{pc:08x}"));
             } else {
                 out.push_str(&format!("\n    LV2 #{nr} at 0x{pc:08x}"));
@@ -350,10 +498,7 @@ pub(super) fn format_max_steps(
             let (nr, pc) = syscall_ring[i % SYSCALL_RING_SIZE];
             if nr >= 0x10000 {
                 let idx = (nr - 0x10000) as u32;
-                let name = hle_bindings
-                    .get(idx as usize)
-                    .and_then(|b| cellgov_ppu::nid_db::lookup(b.nid).map(|(_, f)| f.to_string()))
-                    .unwrap_or_else(|| format!("hle_{idx}"));
+                let name = format_hle_idx(idx, hle_bindings);
                 out.push_str(&format!("\n    HLE {name} at 0x{pc:08x}"));
             } else {
                 out.push_str(&format!("\n    LV2 #{nr} at 0x{pc:08x}"));
@@ -376,18 +521,13 @@ pub(super) fn print_hle_summary(
     if !hle_calls.is_empty() {
         println!("  called:");
         for (idx, count) in hle_calls {
-            let (name, class) = hle_bindings
-                .get(*idx as usize)
-                .map(|b| {
-                    let func = cellgov_ppu::nid_db::lookup(b.nid)
-                        .map(|(_, f)| f)
-                        .unwrap_or("?");
-                    (
-                        format!("{}::{}", b.module, func),
-                        cellgov_ppu::nid_db::stub_classification(b.nid),
-                    )
-                })
-                .unwrap_or_else(|| (format!("hle_{idx}"), "?"));
+            let (name, class) = match hle_bindings.get(*idx as usize) {
+                Some(b) => (
+                    format_hle_idx(*idx, hle_bindings),
+                    cellgov_ppu::nid_db::stub_classification(b.nid),
+                ),
+                None => (format!("<hle-idx-oob {idx}>"), "<oob>"),
+            };
             println!("    {name}: {count}x [{class}]");
         }
     }
@@ -405,11 +545,15 @@ pub(super) fn print_hle_summary(
         if !stateful.is_empty() {
             println!("  uncalled (non-noop):");
             for b in &stateful {
-                let func = cellgov_ppu::nid_db::lookup(b.nid)
-                    .map(|(_, f)| f)
-                    .unwrap_or("?");
+                // nid_db miss is distinct from print-level "?": tag
+                // it so an absent NID entry is legible as a database
+                // gap rather than a generic unknown.
+                let func = match cellgov_ppu::nid_db::lookup(b.nid) {
+                    Some((_, f)) => f.to_string(),
+                    None => format!("<unresolved-nid-0x{:08x}>", b.nid),
+                };
                 let class = cellgov_ppu::nid_db::stub_classification(b.nid);
-                println!("    {}::{} [{class}]", b.module, func);
+                println!("    {}::{func} [{class}]", b.module);
             }
         }
         let noop_count = uncalled.len() - stateful.len();
@@ -420,13 +564,19 @@ pub(super) fn print_hle_summary(
 }
 
 pub(super) fn print_insn_coverage(insn_coverage: &std::collections::BTreeMap<&'static str, usize>) {
-    if !insn_coverage.is_empty() {
-        let mut sorted: Vec<_> = insn_coverage.iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(a.1));
-        println!("instruction_coverage: {} variants executed", sorted.len());
-        for (name, count) in &sorted {
-            println!("  {name}: {count}x");
-        }
+    // Always emit the header so "no output" is never mistaken for
+    // "coverage tallying disabled" or "the feature has been removed".
+    // This is always-on diagnostic data; an empty map is a real
+    // (if unusual) result.
+    if insn_coverage.is_empty() {
+        println!("instruction_coverage: none");
+        return;
+    }
+    let mut sorted: Vec<_> = insn_coverage.iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(a.1));
+    println!("instruction_coverage: {} variants executed", sorted.len());
+    for (name, count) in &sorted {
+        println!("  {name}: {count}x");
     }
 }
 
@@ -443,10 +593,18 @@ pub(super) fn print_insn_coverage(insn_coverage: &std::collections::BTreeMap<&'s
 /// misses drowned by a mostly-shadowed primary -- the per-unit
 /// lines keep that visible.
 pub(super) fn print_shadow_stats(rt: &mut Runtime) {
+    // Derive registered and active counts from the same iteration
+    // pass. Reading `registry().len()` separately from
+    // `registry_mut().iter_mut()` would be correct today -- nothing
+    // between the two calls mutates the registry -- but brittle if
+    // someone later inserts a registry-mutating call between them
+    // (reentrancy, not threading).
     let mut per_unit: Vec<(u64, u64, u64)> = Vec::new();
     let mut total_hits = 0u64;
     let mut total_misses = 0u64;
+    let mut total_units = 0usize;
     for (id, unit) in rt.registry_mut().iter_mut() {
+        total_units += 1;
         let (h, m) = unit.shadow_stats();
         if h + m == 0 {
             continue;
@@ -457,13 +615,21 @@ pub(super) fn print_shadow_stats(rt: &mut Runtime) {
     }
     let total = total_hits + total_misses;
     if total == 0 {
+        // Explicit "none" so a zero-fetch run is distinguishable
+        // from "stats not plumbed" or "feature disabled".
+        println!("shadow: no fetches recorded");
         return;
     }
     let hit_pct = (total_hits as f64 / total as f64) * 100.0;
+    let active = per_unit.len();
+    // `active` counts units that retired at least one instruction;
+    // `total_units` includes registered-but-silent ones. Reporting
+    // both lets an operator distinguish "1 active unit out of 4" from
+    // "1 active unit out of 1" without rerunning with --profile.
     println!(
-        "shadow: {total_hits}/{total} via shadow ({hit_pct:.1}%), {total_misses} decode-on-fetch"
+        "shadow: {total_hits}/{total} via shadow ({hit_pct:.1}%), {total_misses} decode-on-fetch ({active} active / {total_units} registered)"
     );
-    if per_unit.len() > 1 {
+    if active > 1 {
         for (unit_id, h, m) in &per_unit {
             let t = h + m;
             let pct = (*h as f64 / t as f64) * 100.0;
@@ -484,13 +650,18 @@ pub(super) fn print_top_pcs(rt: &Runtime, pc_hits: &std::collections::HashMap<u6
     sorted.sort_by(|&(pc_a, c_a), &(pc_b, c_b)| c_b.cmp(c_a).then(pc_a.cmp(pc_b)));
     println!("top_pcs_by_hit_count:");
     for (pc, count) in sorted.iter().take(20) {
-        let raw = fetch_raw_at(rt, **pc)
-            .map(|w| format!("0x{w:08x}"))
-            .unwrap_or_else(|| "?".to_string());
-        let disasm = fetch_raw_at(rt, **pc)
-            .and_then(|w| cellgov_ppu::decode::decode(w).ok())
-            .map(|insn| insn.variant_name().to_string())
-            .unwrap_or_else(|| "?".into());
+        // Distinguish fetch failure from decode failure (same
+        // reason as the format_fault mini-trace).
+        let (raw, disasm) = match fetch_raw_at(rt, **pc) {
+            Some(w) => (
+                format!("0x{w:08x}"),
+                cellgov_ppu::decode::decode(w)
+                    .ok()
+                    .map(|insn| insn.variant_name().to_string())
+                    .unwrap_or_else(|| "<baddec>".into()),
+            ),
+            None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
+        };
         println!("  {count:>10}x  PC=0x{:08x}  raw={raw}  {disasm}", **pc);
     }
 }
@@ -518,13 +689,13 @@ mod tests {
         // "<unmapped>". Backtrace and dump-mem helpers depend on this
         // routing -- legacy backtrace helpers assumed "high address = top
         // of contiguous memory" and silently dropped 0xD000xxxx values.
-        assert_eq!(region_label_at(&rt, 0xD000_FFF0), "stack");
+        assert_eq!(region_label_at(&rt, 0xD000_FFF0, 4), "stack");
     }
 
     #[test]
     fn region_label_at_names_main_region() {
         let rt = rt_with_layout();
-        assert_eq!(region_label_at(&rt, 0x0010_0000), "main");
+        assert_eq!(region_label_at(&rt, 0x0010_0000, 4), "main");
     }
 
     #[test]
@@ -533,6 +704,64 @@ mod tests {
         // 0x80000000 is between main (ends at 0x40000000) and stack
         // (starts at 0xD0000000). Must surface as <unmapped>, not be
         // silently routed to either neighbor.
-        assert_eq!(region_label_at(&rt, 0x8000_0000), "<unmapped>");
+        assert_eq!(region_label_at(&rt, 0x8000_0000, 4), "<unmapped>");
+    }
+
+    #[test]
+    fn longest_readable_prefix_returns_none_on_zero_length() {
+        let rt = rt_with_layout();
+        assert!(longest_readable_prefix(rt.memory(), 0, 0).is_none());
+    }
+
+    #[test]
+    fn longest_readable_prefix_returns_none_for_entirely_unmapped_buffer() {
+        let rt = rt_with_layout();
+        // 0x80000000 is not in any region. Even a 1-byte read must
+        // return None; otherwise the "oob, 0/N readable" branch in
+        // print_trace_line never fires.
+        assert!(longest_readable_prefix(rt.memory(), 0x8000_0000, 64).is_none());
+    }
+
+    #[test]
+    fn longest_readable_prefix_finds_region_boundary_exactly() {
+        let rt = rt_with_layout();
+        // main ends at 0x4000_0000. Start 16 bytes before the end
+        // and ask for 64 bytes; the helper must return exactly the
+        // 16-byte prefix that lies inside main. This is the
+        // partial-TTY "crossed into unmapped space" scenario.
+        // Precondition: nothing is readable at or after main's end,
+        // pinned explicitly so a future fixture that adds a region
+        // at 0x4000_0000 turns this test red instead of silently
+        // passing without exercising the boundary case.
+        assert!(
+            longest_readable_prefix(rt.memory(), 0x4000_0000, 1).is_none(),
+            "precondition: nothing readable at main's end"
+        );
+        let buf = 0x4000_0000 - 16;
+        let (n, bytes) = longest_readable_prefix(rt.memory(), buf, 64).expect("some prefix");
+        assert_eq!(n, 16);
+        assert_eq!(bytes.len(), 16);
+    }
+
+    #[test]
+    fn longest_readable_prefix_returns_full_len_when_fully_mapped() {
+        let rt = rt_with_layout();
+        // A 64-byte read inside main succeeds in full; helper must
+        // return the full requested length, not some shorter prefix.
+        let (n, bytes) = longest_readable_prefix(rt.memory(), 0x0010_0000, 64)
+            .expect("fully readable should return Some");
+        assert_eq!(n, 64);
+        assert_eq!(bytes.len(), 64);
+    }
+
+    #[test]
+    fn longest_readable_prefix_single_byte_boundary() {
+        let rt = rt_with_layout();
+        // Exactly one byte at the last valid address; requesting two
+        // must return one. Exercises the lo=0, hi=1 path where mid=1
+        // misses on the second-byte test.
+        let buf = 0x4000_0000 - 1;
+        let (n, _bytes) = longest_readable_prefix(rt.memory(), buf, 2).expect("single-byte prefix");
+        assert_eq!(n, 1);
     }
 }

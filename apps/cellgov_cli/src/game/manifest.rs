@@ -17,11 +17,20 @@
 use std::path::{Path, PathBuf};
 
 /// How the title's executable is located on disk.
+///
+/// Omitting the `[source]` table in a manifest defaults to `Hdd`.
+/// Disc titles must spell out `kind = "disc"` in `[source]`; the
+/// loader does not infer disc from the content id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GameSource {
     /// PSN / HDD game: EBOOT in `<vfs>/game/<content-id>/USRDIR/`.
+    /// This is the default when `[source]` is omitted.
     Hdd,
-    /// Disc game: EBOOT in `<vfs>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/`.
+    /// Disc game: EBOOT in `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/`.
+    /// The vfs root passed to `resolve_eboot` must have a non-empty
+    /// parent directory (typically `vfs_root` itself is
+    /// `.../dev_hdd0` and the parent contains both `dev_hdd0` and
+    /// `dev_bdvd`).
     Disc,
 }
 
@@ -75,24 +84,18 @@ pub enum CheckpointTrigger {
 
 impl CheckpointTrigger {
     /// Parse a `--checkpoint <kind>` value. Accepts
-    /// `process-exit`, `first-rsx-write`, and `pc=0xHEX` (or
-    /// `pc=DECIMAL`).
+    /// `process-exit`, `first-rsx-write`, and `pc=0xHEX` or
+    /// `pc=DECIMAL`. Hex requires the explicit `0x` / `0X` prefix;
+    /// unprefixed values parse as decimal. Without this rule
+    /// `pc=10` is ambiguous (ten or sixteen?) and a user who drops
+    /// the `0x` gets a silently different address.
     pub fn parse_cli_value(value: &str) -> Result<Self, String> {
         match value {
             "process-exit" => Ok(Self::ProcessExit),
             "first-rsx-write" => Ok(Self::FirstRsxWrite),
             _ => {
                 if let Some(rest) = value.strip_prefix("pc=") {
-                    let hex = rest.trim_start_matches("0x").trim_start_matches("0X");
-                    let parsed = if rest.starts_with("0x") || rest.starts_with("0X") {
-                        u64::from_str_radix(hex, 16)
-                    } else {
-                        rest.parse::<u64>()
-                            .or_else(|_| u64::from_str_radix(hex, 16))
-                    };
-                    parsed
-                        .map(Self::Pc)
-                        .map_err(|_| format!("checkpoint pc value '{rest}' is not a u64"))
+                    parse_pc_literal(rest).map(Self::Pc)
                 } else {
                     Err(format!(
                         "unknown checkpoint kind '{value}' (accepted: \
@@ -105,15 +108,51 @@ impl CheckpointTrigger {
 
     /// Read `--checkpoint <kind>` from a raw args vector. `None`
     /// means the flag was not supplied (caller uses the title
-    /// default); `Some(Err)` means it was supplied but malformed.
+    /// default); `Some(Err)` means it was supplied but malformed,
+    /// repeated, or missing its value.
     pub fn parse_from_args(args: &[String]) -> Option<Result<Self, String>> {
-        for i in 0..args.len() {
-            if args[i] == "--checkpoint" {
-                let value = args.get(i + 1)?.as_str();
-                return Some(Self::parse_cli_value(value));
+        let mut found: Option<Result<Self, String>> = None;
+        let mut i = 0;
+        while i < args.len() {
+            if args[i] != "--checkpoint" {
+                i += 1;
+                continue;
             }
+            if found.is_some() {
+                return Some(Err(
+                    "--checkpoint was specified more than once; pass it exactly once.".to_string(),
+                ));
+            }
+            let parsed = match args.get(i + 1) {
+                Some(v) => Self::parse_cli_value(v.as_str()),
+                None => Err(
+                    "--checkpoint requires a value (process-exit, first-rsx-write, \
+                     or pc=0xADDR)"
+                        .to_string(),
+                ),
+            };
+            found = Some(parsed);
+            // Skip the value token so it cannot accidentally match a
+            // flag name if a user picks `--checkpoint --checkpoint`.
+            i += 2;
         }
-        None
+        found
+    }
+}
+
+/// Parse a PC literal from a `--checkpoint pc=...` CLI value or a
+/// `pc = "..."` manifest string. `0x`/`0X` prefix is required for
+/// hex; unprefixed values parse as decimal. Same rule both sides so
+/// the CLI override and the manifest default cannot silently disagree
+/// on what `pc=1ce8` means.
+fn parse_pc_literal(raw: &str) -> Result<u64, String> {
+    if let Some(hex) = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
+        u64::from_str_radix(hex, 16)
+            .map_err(|_| format!("checkpoint pc value '{raw}' is not a hex u64"))
+    } else {
+        raw.parse::<u64>().map_err(|_| {
+            format!("checkpoint pc value '{raw}' is not a decimal u64 (use 0x prefix for hex)")
+        })
     }
 }
 
@@ -122,6 +161,7 @@ impl CheckpointTrigger {
 /// format and vice versa. The loader translates one into the
 /// other, validating checkpoint kinds at the boundary.
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ManifestFile {
     title: ManifestTitle,
     checkpoint: ManifestCheckpoint,
@@ -129,11 +169,13 @@ struct ManifestFile {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ManifestSource {
     kind: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ManifestTitle {
     content_id: String,
     short_name: String,
@@ -142,10 +184,77 @@ struct ManifestTitle {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ManifestCheckpoint {
     kind: String,
     #[serde(default)]
     pc: Option<String>,
+}
+
+/// Why [`TitleManifest::resolve_eboot`] could not return a path.
+///
+/// Kept distinct from the generic `Option<PathBuf>` of the old API
+/// so callers (CLI, tests, anything that cares about stderr) can
+/// distinguish "title is not installed" from "vfs-root is
+/// misconfigured" from "probe hit an I/O error we should show."
+/// The function itself never prints; rendering is the caller's
+/// choice.
+#[derive(Debug)]
+pub enum ResolveEbootError {
+    /// The manifest specifies a disc title but the supplied
+    /// `vfs_root` has no non-empty parent directory, so
+    /// `dev_bdvd/<content-id>/...` cannot be located.
+    MisconfiguredVfsRoot {
+        vfs_root: PathBuf,
+        short_name: String,
+    },
+    /// None of the candidate executables exist under the resolved
+    /// USRDIR. `probe_errors` collects I/O errors other than
+    /// not-found encountered while scanning (permission denied,
+    /// broken symlink, stale NFS handle); the common case is an
+    /// empty Vec, meaning the files simply are not present.
+    ///
+    /// `probe_errors` is not exercised by unit tests -- reliably
+    /// producing a non-NotFound io::Error from `metadata()` in a
+    /// portable way is awkward (EACCES on the parent directory is
+    /// the usual real-world trigger). In practice this field is
+    /// populated by permission problems on USRDIR; treat it as the
+    /// operator-facing diagnostic channel for those cases, not as
+    /// dead code.
+    NotFound {
+        searched: PathBuf,
+        candidates: Vec<String>,
+        probe_errors: Vec<(PathBuf, std::io::Error)>,
+    },
+}
+
+impl std::fmt::Display for ResolveEbootError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MisconfiguredVfsRoot {
+                vfs_root,
+                short_name,
+            } => write!(
+                f,
+                "disc title '{short_name}' needs vfs-root with a parent directory (got {})",
+                vfs_root.display()
+            ),
+            Self::NotFound {
+                searched,
+                candidates,
+                probe_errors,
+            } => {
+                write!(f, "no executable found; looked for:")?;
+                for name in candidates {
+                    write!(f, "\n  {}", searched.join(name).display())?;
+                }
+                for (p, e) in probe_errors {
+                    write!(f, "\n  probe error: {}: {e}", p.display())?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Why a manifest file failed to load. Each variant names the
@@ -170,13 +279,37 @@ pub enum ManifestError {
         name: String,
         first: PathBuf,
         second: PathBuf,
+        /// When `true`, the two files are byte-identical on disk;
+        /// the operator is probably looking at a stray backup or
+        /// copy rather than two genuinely distinct manifests.
+        files_identical: bool,
     },
     /// Two manifests share the same content id.
     DuplicateContentId {
         content_id: String,
         first: PathBuf,
         second: PathBuf,
+        /// See [`DuplicateShortName::files_identical`].
+        files_identical: bool,
     },
+}
+
+/// Compare two files byte-for-byte, returning `true` only if both
+/// reads succeed and the contents match. Silent `false` on I/O
+/// error is intentional: this flag is a diagnostic hint, not an
+/// assertion, and a read failure here should not change how the
+/// duplicate error surfaces elsewhere. Short-circuits on `metadata`
+/// length so a stray large file that happens to have a `.toml`
+/// extension is not slurped into memory twice just for a hint.
+fn files_have_identical_bytes(a: &Path, b: &Path) -> bool {
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(ma), Ok(mb)) if ma.len() == mb.len() => {}
+        _ => return false,
+    }
+    matches!(
+        (std::fs::read(a), std::fs::read(b)),
+        (Ok(x), Ok(y)) if x == y
+    )
 }
 
 impl std::fmt::Display for ManifestError {
@@ -201,22 +334,36 @@ impl std::fmt::Display for ManifestError {
                 name,
                 first,
                 second,
-            } => write!(
-                f,
-                "duplicate title short_name '{name}' in {} and {}",
-                first.display(),
-                second.display()
-            ),
+                files_identical,
+            } => {
+                write!(
+                    f,
+                    "duplicate title short_name '{name}' in {} and {}",
+                    first.display(),
+                    second.display()
+                )?;
+                if *files_identical {
+                    write!(f, " (files are byte-identical; one is likely a stray copy)")?;
+                }
+                Ok(())
+            }
             Self::DuplicateContentId {
                 content_id,
                 first,
                 second,
-            } => write!(
-                f,
-                "duplicate title content_id '{content_id}' in {} and {}",
-                first.display(),
-                second.display()
-            ),
+                files_identical,
+            } => {
+                write!(
+                    f,
+                    "duplicate title content_id '{content_id}' in {} and {}",
+                    first.display(),
+                    second.display()
+                )?;
+                if *files_identical {
+                    write!(f, " (files are byte-identical; one is likely a stray copy)")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -248,9 +395,42 @@ impl TitleManifest {
             path: origin.to_path_buf(),
             message: e.to_string(),
         })?;
-        let file_value = match raw.get("cellgov") {
-            Some(nested) => nested.clone(),
-            None => raw,
+        // Layout selection: if a `cellgov` key exists it must be a
+        // table (the nested microtest layout). A scalar or array
+        // under that key is a shape error, not a silent trigger to
+        // drop the root-level view. And when nested mode is chosen,
+        // any root-level `title`/`checkpoint`/`source` tables are
+        // flagged -- otherwise they would be silently discarded and
+        // half the file's contents vanish without warning.
+        let file_value = if let Some(nested) = raw.get("cellgov") {
+            if !nested.is_table() {
+                return Err(ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: "`cellgov` key must be a table (the nested manifest layout); \
+                              got a scalar or array"
+                        .to_string(),
+                });
+            }
+            if let Some(table) = raw.as_table() {
+                let conflicting: Vec<&str> = ["title", "checkpoint", "source"]
+                    .iter()
+                    .copied()
+                    .filter(|k| table.contains_key(*k))
+                    .collect();
+                if !conflicting.is_empty() {
+                    return Err(ManifestError::Parse {
+                        path: origin.to_path_buf(),
+                        message: format!(
+                            "ambiguous layout: `[cellgov]` is present, but root-level \
+                             manifest tables were also found ({}). Pick one layout.",
+                            conflicting.join(", ")
+                        ),
+                    });
+                }
+            }
+            nested.clone()
+        } else {
+            raw
         };
         let file: ManifestFile =
             file_value
@@ -271,12 +451,12 @@ impl TitleManifest {
                                 .to_string(),
                         }
                     })?;
-                    let hex = raw.trim_start_matches("0x").trim_start_matches("0X");
-                    let parsed = u64::from_str_radix(hex, 16).or_else(|_| raw.parse::<u64>());
-                    CheckpointTrigger::Pc(parsed.map_err(|_| ManifestError::BadCheckpointPc {
-                        path: origin.to_path_buf(),
-                        detail: format!("checkpoint pc value '{raw}' is not a u64"),
-                    })?)
+                    let parsed =
+                        parse_pc_literal(raw).map_err(|detail| ManifestError::BadCheckpointPc {
+                            path: origin.to_path_buf(),
+                            detail,
+                        })?;
+                    CheckpointTrigger::Pc(parsed)
                 }
                 other => {
                     return Err(ManifestError::UnknownCheckpointKind {
@@ -286,11 +466,16 @@ impl TitleManifest {
                 }
             };
         let source = match file.source.as_ref().map(|s| s.kind.as_str()) {
+            // "hdd" is accepted as an explicit synonym for the
+            // default so maintainers can spell it out for symmetry
+            // with disc manifests without getting an "unknown
+            // source kind" error.
             Some("disc") => GameSource::Disc,
+            Some("hdd") => GameSource::Hdd,
             Some(other) => {
                 return Err(ManifestError::Parse {
                     path: origin.to_path_buf(),
-                    message: format!("unknown source kind '{other}' (accepted: disc)"),
+                    message: format!("unknown source kind '{other}' (accepted: disc, hdd)"),
                 });
             }
             None => GameSource::Hdd,
@@ -315,17 +500,6 @@ impl TitleManifest {
         &self.display_name
     }
 
-    /// PSN content id (directory name under `/dev_hdd0/game/`).
-    pub fn content_id(&self) -> &str {
-        &self.content_id
-    }
-
-    /// Candidate executable filenames inside `USRDIR/`, in
-    /// priority order.
-    pub fn eboot_candidates(&self) -> &[String] {
-        &self.eboot_candidates
-    }
-
     /// Built-in boot checkpoint default.
     pub fn checkpoint_trigger(&self) -> CheckpointTrigger {
         self.checkpoint
@@ -333,27 +507,48 @@ impl TitleManifest {
 
     /// Build the conventional PS3 `USRDIR` path for this title
     /// under a VFS root (typically `/dev_hdd0`) and return the
-    /// first candidate executable that exists on disk, or
-    /// `None` if neither is present.
-    pub fn resolve_eboot(&self, vfs_root: &Path) -> Option<PathBuf> {
+    /// first candidate executable that exists on disk.
+    ///
+    /// Returns a structured [`ResolveEbootError`] on failure
+    /// rather than `None`; the caller decides how to render the
+    /// three failure modes (misconfigured vfs root, no candidate
+    /// exists, probe I/O errors). The function itself never
+    /// prints, so tests and non-CLI consumers stay quiet.
+    pub fn resolve_eboot(&self, vfs_root: &Path) -> Result<PathBuf, ResolveEbootError> {
         let usrdir = match self.source {
             GameSource::Hdd => vfs_root.join("game").join(&self.content_id).join("USRDIR"),
             GameSource::Disc => {
-                let rpcs3_root = vfs_root.parent().unwrap_or(vfs_root);
-                rpcs3_root
+                let parent = match vfs_root.parent() {
+                    Some(p) if !p.as_os_str().is_empty() => p,
+                    _ => {
+                        return Err(ResolveEbootError::MisconfiguredVfsRoot {
+                            vfs_root: vfs_root.to_path_buf(),
+                            short_name: self.short_name.clone(),
+                        });
+                    }
+                };
+                parent
                     .join("dev_bdvd")
                     .join(&self.content_id)
                     .join("PS3_GAME")
                     .join("USRDIR")
             }
         };
+        let mut probe_errors = Vec::new();
         for name in &self.eboot_candidates {
             let p = usrdir.join(name);
-            if p.is_file() {
-                return Some(p);
+            match std::fs::metadata(&p) {
+                Ok(md) if md.is_file() => return Ok(p),
+                Ok(_) => {} // exists but not a regular file; keep scanning
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => probe_errors.push((p, e)),
             }
         }
-        None
+        Err(ResolveEbootError::NotFound {
+            searched: usrdir,
+            candidates: self.eboot_candidates.clone(),
+            probe_errors,
+        })
     }
 }
 
@@ -365,10 +560,6 @@ pub struct TitleRegistry {
     manifests: Vec<TitleManifest>,
 }
 
-// `iter`, `single_from_path`, and `is_empty` are part of the
-// public surface used by tests even though the current CLI only
-// hits `by_short_name` / `by_content_id`.
-#[allow(dead_code)]
 impl TitleRegistry {
     /// Scan `dir` for `*.toml` files, load each as a
     /// [`TitleManifest`], and validate that short names and
@@ -381,14 +572,48 @@ impl TitleRegistry {
     /// runs on the same disk. (Relevant for help text and error
     /// diagnostics, which list titles in registry order.)
     pub fn scan_dir(dir: &Path) -> Result<Self, ManifestError> {
-        let mut entries: Vec<PathBuf> = match std::fs::read_dir(dir) {
-            Ok(rd) => rd
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|ext| ext == "toml"))
-                .collect(),
-            Err(_) => return Ok(Self::default()),
+        // Only NotFound is "empty registry"; permission-denied or
+        // not-a-directory are real errors and must not be laundered
+        // into an empty result. A typo'd directory used to produce
+        // the same "empty registry" as a legitimately missing one.
+        let rd = match std::fs::read_dir(dir) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(source) => {
+                return Err(ManifestError::Io {
+                    path: dir.to_path_buf(),
+                    source,
+                })
+            }
         };
+
+        let mut entries: Vec<PathBuf> = Vec::new();
+        for entry in rd {
+            let entry = entry.map_err(|source| ManifestError::Io {
+                path: dir.to_path_buf(),
+                source,
+            })?;
+            let path = entry.path();
+            // Case-insensitive ".toml" so a mixed-case filesystem
+            // does not swallow `FOO.TOML`. Skip hidden files so
+            // manually-hidden or tooling-created dotfile manifests
+            // (e.g. `.backup.toml`) do not silently load as real
+            // titles. Vim swap files like `.foo.toml.swp` already
+            // fail the extension check; Emacs `#name.toml#`
+            // lockfiles fail it too (trailing `#` makes extension
+            // parse as `toml#`).
+            let is_toml = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("toml"));
+            let is_hidden = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'));
+            if is_toml && !is_hidden {
+                entries.push(path);
+            }
+        }
         entries.sort();
 
         let mut manifests: Vec<TitleManifest> = Vec::new();
@@ -403,6 +628,7 @@ impl TitleRegistry {
                     name: m.short_name.clone(),
                     first: prev.clone(),
                     second: path.clone(),
+                    files_identical: files_have_identical_bytes(prev, &path),
                 });
             }
             if let Some(prev) = content_ids.get(&m.content_id) {
@@ -410,6 +636,7 @@ impl TitleRegistry {
                     content_id: m.content_id.clone(),
                     first: prev.clone(),
                     second: path.clone(),
+                    files_identical: files_have_identical_bytes(prev, &path),
                 });
             }
             short_names.insert(m.short_name.clone(), path.clone());
@@ -419,20 +646,18 @@ impl TitleRegistry {
         Ok(Self { manifests })
     }
 
-    /// Single-manifest registry built from one TOML file, used
-    /// by the `--title-manifest <path>` flow so callers can
-    /// point the harness at a manifest outside `docs/titles/`.
-    pub fn single_from_path(path: &Path) -> Result<Self, ManifestError> {
-        let m = TitleManifest::load_from_path(path)?;
-        Ok(Self { manifests: vec![m] })
-    }
-
-    /// Whether the registry holds any manifests.
+    /// Whether the registry holds any manifests. Used by tests
+    /// and the `scan_dir_of_missing_dir_is_empty` check; kept
+    /// distinct from `manifests.is_empty()` so the public API
+    /// stays self-contained.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.manifests.is_empty()
     }
 
-    /// Every manifest in the registry, in scan order.
+    /// Every manifest in the registry, in scan order. Used by
+    /// tests; no CLI caller enumerates the registry directly.
+    #[allow(dead_code)]
     pub fn iter(&self) -> impl Iterator<Item = &TitleManifest> {
         self.manifests.iter()
     }
@@ -451,8 +676,15 @@ impl TitleRegistry {
     }
 
     /// Comma-separated list of every known title's short name in
-    /// registry order. Used in CLI error diagnostics.
+    /// registry order. Used in CLI error diagnostics. Returns
+    /// `"<none>"` rather than an empty string when the registry
+    /// is empty so CLI messages like
+    /// `unknown title 'xyz' (known: <none>)` are legible instead
+    /// of rendering as `(known: )` which looks like broken output.
     pub fn known_names_csv(&self) -> String {
+        if self.manifests.is_empty() {
+            return "<none>".to_string();
+        }
         self.manifests
             .iter()
             .map(|m| m.short_name.as_str())
@@ -464,6 +696,31 @@ impl TitleRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RAII tempdir helper. Each instance uses a unique directory
+    /// suffixed with the current process id so concurrent `cargo
+    /// test` invocations do not stomp on each other's fixtures.
+    /// `remove_dir_all` on drop means a panicking test still
+    /// leaves the filesystem clean on the next run.
+    struct TmpDir(PathBuf);
+
+    impl TmpDir {
+        fn new(name: &str) -> Self {
+            let p = std::env::temp_dir().join(format!("cellgov_{name}_{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&p);
+            std::fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     // Synthetic TOML fixtures exercising each checkpoint kind. The
     // content ids and short names are placeholder values -- the
@@ -602,48 +859,39 @@ kind = "whatever"
 
     #[test]
     fn registry_scans_directory_in_sorted_order() {
-        let tmp = std::env::temp_dir().join("cellgov_manifest_scan");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        std::fs::write(tmp.join("NPAA00002.toml"), FIRST_RSX_WRITE_TOML).unwrap();
-        std::fs::write(tmp.join("NPAA00001.toml"), PROCESS_EXIT_TOML).unwrap();
-        let reg = TitleRegistry::scan_dir(&tmp).unwrap();
+        let tmp = TmpDir::new("manifest_scan");
+        std::fs::write(tmp.path().join("NPAA00002.toml"), FIRST_RSX_WRITE_TOML).unwrap();
+        std::fs::write(tmp.path().join("NPAA00001.toml"), PROCESS_EXIT_TOML).unwrap();
+        let reg = TitleRegistry::scan_dir(tmp.path()).unwrap();
         let names: Vec<&str> = reg.iter().map(|m| m.short_name.as_str()).collect();
         // Sorted by filename -> NPAA00001 comes before NPAA00002.
         assert_eq!(names, vec!["proc-exit-fixture", "rsx-write-fixture"]);
         assert!(reg.by_short_name("proc-exit-fixture").is_some());
         assert!(reg.by_content_id("NPAA00002").is_some());
         assert!(reg.by_short_name("unknown").is_none());
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn registry_rejects_duplicate_short_names() {
-        let tmp = std::env::temp_dir().join("cellgov_manifest_dupe_name");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = TmpDir::new("manifest_dupe_name");
         // Two manifests with distinct content ids but the same
         // short_name -- registry build must fail.
-        std::fs::write(tmp.join("a.toml"), PROCESS_EXIT_TOML).unwrap();
+        std::fs::write(tmp.path().join("a.toml"), PROCESS_EXIT_TOML).unwrap();
         let collide = PROCESS_EXIT_TOML.replace("NPAA00001", "NPAA99999");
-        std::fs::write(tmp.join("b.toml"), &collide).unwrap();
-        let err = TitleRegistry::scan_dir(&tmp).expect_err("duplicate short name");
+        std::fs::write(tmp.path().join("b.toml"), &collide).unwrap();
+        let err = TitleRegistry::scan_dir(tmp.path()).expect_err("duplicate short name");
         assert!(matches!(err, ManifestError::DuplicateShortName { .. }));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn registry_rejects_duplicate_content_ids() {
-        let tmp = std::env::temp_dir().join("cellgov_manifest_dupe_cid");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        std::fs::write(tmp.join("a.toml"), PROCESS_EXIT_TOML).unwrap();
+        let tmp = TmpDir::new("manifest_dupe_cid");
+        std::fs::write(tmp.path().join("a.toml"), PROCESS_EXIT_TOML).unwrap();
         let collide =
             PROCESS_EXIT_TOML.replace(r#""proc-exit-fixture""#, r#""proc-exit-fixture-2""#);
-        std::fs::write(tmp.join("b.toml"), &collide).unwrap();
-        let err = TitleRegistry::scan_dir(&tmp).expect_err("duplicate content id");
+        std::fs::write(tmp.path().join("b.toml"), &collide).unwrap();
+        let err = TitleRegistry::scan_dir(tmp.path()).expect_err("duplicate content id");
         assert!(matches!(err, ManifestError::DuplicateContentId { .. }));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -669,5 +917,250 @@ kind = "whatever"
         );
         assert!(CheckpointTrigger::parse_cli_value("nope").is_err());
         assert!(CheckpointTrigger::parse_cli_value("pc=xyz").is_err());
+    }
+
+    #[test]
+    fn checkpoint_unprefixed_digits_parse_as_decimal_not_hex() {
+        // Must be decimal ten, not hex sixteen. Without the strict
+        // prefix rule the two answers agreed with each other because
+        // the hex fallback silently coerced decimal-looking values.
+        assert_eq!(
+            CheckpointTrigger::parse_cli_value("pc=10"),
+            Ok(CheckpointTrigger::Pc(10))
+        );
+    }
+
+    #[test]
+    fn checkpoint_unprefixed_hex_is_rejected() {
+        // Previously `pc=1ce8` silently parsed as 0x1ce8 via the
+        // decimal-fallback-to-hex chain. Now the decimal parse
+        // fails and no hex fallback is attempted.
+        assert!(CheckpointTrigger::parse_cli_value("pc=1ce8").is_err());
+    }
+
+    #[test]
+    fn parse_from_args_rejects_repeated_flag() {
+        let args = vec![
+            "run-game".to_string(),
+            "--checkpoint".to_string(),
+            "process-exit".to_string(),
+            "--checkpoint".to_string(),
+            "first-rsx-write".to_string(),
+        ];
+        let got = CheckpointTrigger::parse_from_args(&args);
+        assert!(
+            matches!(got, Some(Err(_))),
+            "repeated --checkpoint must surface as Some(Err)"
+        );
+    }
+
+    #[test]
+    fn parse_from_args_rejects_missing_value() {
+        let args = vec!["run-game".to_string(), "--checkpoint".to_string()];
+        let got = CheckpointTrigger::parse_from_args(&args);
+        assert!(
+            matches!(got, Some(Err(_))),
+            "--checkpoint with no value must be Some(Err), not None"
+        );
+    }
+
+    #[test]
+    fn parse_from_args_returns_none_when_flag_absent() {
+        let args = vec!["run-game".to_string(), "--other".to_string()];
+        assert!(CheckpointTrigger::parse_from_args(&args).is_none());
+    }
+
+    #[test]
+    fn pc_manifest_accepts_decimal_literal() {
+        let text = r#"
+[title]
+content_id = "x"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["x"]
+
+[checkpoint]
+kind = "pc"
+pc = "256"
+"#;
+        let m = TitleManifest::load_from_text(text, Path::new("dec.toml")).unwrap();
+        // Decimal 256, not hex 0x256.
+        assert_eq!(m.checkpoint, CheckpointTrigger::Pc(256));
+    }
+
+    #[test]
+    fn pc_manifest_rejects_unprefixed_hex_letters() {
+        let text = r#"
+[title]
+content_id = "x"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["x"]
+
+[checkpoint]
+kind = "pc"
+pc = "1ce8"
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("bad.toml")).expect_err("rejects");
+        assert!(matches!(err, ManifestError::BadCheckpointPc { .. }));
+    }
+
+    #[test]
+    fn cellgov_key_as_scalar_is_rejected() {
+        let text = r#"
+cellgov = "hello"
+"#;
+        let err =
+            TitleManifest::load_from_text(text, Path::new("scalar.toml")).expect_err("rejects");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+    }
+
+    #[test]
+    fn cellgov_nested_with_root_tables_is_rejected() {
+        // Presence of a root-level [title] alongside [cellgov.*] is
+        // ambiguous: the old loader silently dropped root-level
+        // tables. Now both layouts present at once is a shape error.
+        let text = r#"
+[title]
+content_id = "root"
+short_name = "root"
+display_name = "root"
+eboot_candidates = ["x"]
+
+[checkpoint]
+kind = "process-exit"
+
+[cellgov.title]
+content_id = "nested"
+short_name = "nested"
+display_name = "nested"
+eboot_candidates = ["y"]
+
+[cellgov.checkpoint]
+kind = "process-exit"
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("both.toml")).expect_err("rejects");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+    }
+
+    #[test]
+    fn unknown_fields_in_manifest_are_rejected() {
+        let text = r#"
+[title]
+content_id = "x"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["x"]
+short-name = "typo"
+
+[checkpoint]
+kind = "process-exit"
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("typo.toml")).expect_err("rejects");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+    }
+
+    #[test]
+    fn known_names_csv_empty_registry_is_labelled() {
+        let reg = TitleRegistry::default();
+        assert_eq!(reg.known_names_csv(), "<none>");
+    }
+
+    fn hdd_manifest(content_id: &str, short: &str, candidates: &[&str]) -> TitleManifest {
+        TitleManifest {
+            content_id: content_id.to_string(),
+            short_name: short.to_string(),
+            display_name: short.to_string(),
+            eboot_candidates: candidates.iter().map(|s| s.to_string()).collect(),
+            checkpoint: CheckpointTrigger::ProcessExit,
+            source: GameSource::Hdd,
+        }
+    }
+
+    #[test]
+    fn resolve_eboot_hdd_finds_first_candidate() {
+        let tmp = TmpDir::new("resolve_hdd_first");
+        let usrdir = tmp.path().join("game").join("NPAA00001").join("USRDIR");
+        std::fs::create_dir_all(&usrdir).unwrap();
+        std::fs::write(usrdir.join("EBOOT.elf"), b"elf").unwrap();
+        std::fs::write(usrdir.join("EBOOT.BIN"), b"bin").unwrap();
+        let m = hdd_manifest("NPAA00001", "t", &["EBOOT.elf", "EBOOT.BIN"]);
+        let got = m
+            .resolve_eboot(tmp.path())
+            .expect("first candidate resolves");
+        assert_eq!(got, usrdir.join("EBOOT.elf"));
+    }
+
+    #[test]
+    fn resolve_eboot_hdd_falls_through_to_second_candidate() {
+        let tmp = TmpDir::new("resolve_hdd_fallthrough");
+        let usrdir = tmp.path().join("game").join("NPAA00001").join("USRDIR");
+        std::fs::create_dir_all(&usrdir).unwrap();
+        // Only the second candidate exists.
+        std::fs::write(usrdir.join("EBOOT.BIN"), b"bin").unwrap();
+        let m = hdd_manifest("NPAA00001", "t", &["EBOOT.elf", "EBOOT.BIN"]);
+        let got = m
+            .resolve_eboot(tmp.path())
+            .expect("second candidate resolves");
+        assert_eq!(got, usrdir.join("EBOOT.BIN"));
+    }
+
+    #[test]
+    fn resolve_eboot_hdd_returns_notfound_with_candidate_list() {
+        let tmp = TmpDir::new("resolve_hdd_notfound");
+        let m = hdd_manifest("NPAA00001", "t", &["EBOOT.elf", "EBOOT.BIN"]);
+        match m.resolve_eboot(tmp.path()) {
+            Err(ResolveEbootError::NotFound {
+                candidates,
+                probe_errors,
+                ..
+            }) => {
+                assert_eq!(candidates, vec!["EBOOT.elf", "EBOOT.BIN"]);
+                assert!(probe_errors.is_empty(), "no probe errors expected");
+            }
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_eboot_disc_without_parent_returns_misconfigured() {
+        // Two triggers converge on the same MisconfiguredVfsRoot
+        // variant; the test locks in both. A single-component
+        // relative path like "dev_hdd0" has `parent() == Some("")`
+        // (empty but non-None), while "/" and "" return
+        // `parent() == None`. If either trigger drifts under
+        // refactor the test turns red.
+        let mut m = hdd_manifest("NPAA00001", "disc-t", &["EBOOT.BIN"]);
+        m.source = GameSource::Disc;
+        for bad in ["dev_hdd0", "/", ""] {
+            let err = m.resolve_eboot(Path::new(bad)).expect_err("needs parent");
+            assert!(
+                matches!(err, ResolveEbootError::MisconfiguredVfsRoot { .. }),
+                "vfs_root={bad:?} must yield MisconfiguredVfsRoot, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_detection_flags_byte_identical_files() {
+        let tmp = TmpDir::new("manifest_identical_dupes");
+        // Two literally identical files will collide on both
+        // short_name and content_id; the error must carry the
+        // byte-identical hint to save operators from diffing them.
+        std::fs::write(tmp.path().join("a.toml"), PROCESS_EXIT_TOML).unwrap();
+        std::fs::write(tmp.path().join("b.toml"), PROCESS_EXIT_TOML).unwrap();
+        let err = TitleRegistry::scan_dir(tmp.path()).expect_err("duplicate");
+        match err {
+            ManifestError::DuplicateShortName {
+                files_identical, ..
+            }
+            | ManifestError::DuplicateContentId {
+                files_identical, ..
+            } => assert!(
+                files_identical,
+                "identical files must set the files_identical hint"
+            ),
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 }
