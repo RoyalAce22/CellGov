@@ -54,6 +54,12 @@ pub enum BootOutcome {
     /// at a named instruction for A/B measurements; not a
     /// title-default trigger.
     PcReached(u64),
+    /// Internal time counter overflowed. Distinct from `Fault`
+    /// because this is a harness-level resource exhaustion, not a
+    /// guest-visible error. A reproducibility pair that yields
+    /// `TimeOverflow` on one side and `Fault` on the other would be
+    /// miscategorized as "both faulted" if we collapsed the two.
+    TimeOverflow,
 }
 
 /// Build an `Observation` from a completed `run-game`-style boot.
@@ -83,6 +89,10 @@ pub fn observe_from_boot(
         // keeps it symmetric with the RSX-write and process-exit
         // signals for any downstream comparator.
         BootOutcome::PcReached(_) => ObservedOutcome::Completed,
+        // Harness-level resource exhaustion maps to Timeout (same
+        // shape as MaxSteps) rather than Fault: the guest did not
+        // misbehave, the harness simply ran out of time-counter.
+        BootOutcome::TimeOverflow => ObservedOutcome::Timeout,
     };
 
     let memory_regions = regions

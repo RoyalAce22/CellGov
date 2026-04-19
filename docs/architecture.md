@@ -112,27 +112,27 @@ Everything else is workspace-internal. The workspace compiles under
 
 ## Per-crate responsibilities
 
-| Crate                          | Responsibility                                                                                                                                                                                                                                                                                          |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cellgov_time`                 | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time.                                                                                                                                                                                           |
-| `cellgov_event`                | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary.                                                                                                                                                                                                             |
-| `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`.                                                                                                                           |
-| `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier and wait-set primitives.                                                                                                                                                                                                                                |
-| `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                     |
-| `cellgov_effects`              | The 9-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                      |
-| `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                              |
-| `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                              |
-| `cellgov_lv2`                  | LV2 model: image registry, thread-group table, syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                      |
-| `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                        |
-| `cellgov_ppu`                  | PPU interpreter, ELF64/SPRX/PRX loaders, NID database, HLE binder.                                                                                                                                                                                                                                      |
-| `cellgov_spu`                  | SPU interpreter, channel file, SPU ELF loader.                                                                                                                                                                                                                                                          |
-| `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace.                                                                                                                                                                                                                                    |
-| `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                            |
-| `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                               |
-| `cellgov_cli`                  | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                            |
-| `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                    |
+| Crate                          | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cellgov_time`                 | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time.                                                                                                                                                                                                                                                                                                                                            |
+| `cellgov_event`                | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary.                                                                                                                                                                                                                                                                                                                                                              |
+| `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`.                                                                                                                                                                                                                                                                            |
+| `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier and wait-set primitives.                                                                                                                                                                                                                                                                                                                                                                                 |
+| `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `cellgov_effects`              | The 9-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                                                                                                                                                                       |
+| `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                                                                                                                                                                              |
+| `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                                                                                                                                                                               |
+| `cellgov_lv2`                  | LV2 model: image registry, thread-group table, syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                                                                                                                                                                       |
+| `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                         |
+| `cellgov_ppu`                  | PPU interpreter, ELF64/SPRX/PRX loaders, NID database, HLE binder.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `cellgov_spu`                  | SPU interpreter, channel file, SPU ELF loader.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                                                                                                                                                                             |
+| `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                |
+| `cellgov_cli`                  | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                                                                                                                                                                             |
+| `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                                                                                                                                                                     |
 | `cellgov_firmware`             | PS3 firmware and SELF decrypter. Two subcommands: `install` extracts decrypted SPRX modules from a `PS3UPDAT.PUP` downloaded from Sony's website (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). `decrypt-self` decrypts a retail game `EBOOT.BIN` (SELF) into an `EBOOT.elf` using per-revision APP keys -- same AES pipeline, different key table. No RPCS3 dependency. |
-| `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`. |
+| `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                  |
 
 ## Guest memory layout
 
@@ -392,30 +392,30 @@ classification, syscall dispatch.
 
 Classified into typed `Lv2Request` variants:
 
-| Syscall                       | Number  | Behavior                                                                                               |
-| ----------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `sys_process_exit`            | 22      | Cascades Finished to all units in the process.                                                         |
-| `sys_ppu_thread_exit`         | 41      | Finishes the calling unit; wakes joiners with the exit value.                                          |
-| `sys_ppu_thread_yield`        | 43      | No-op scheduling hint; round-robin picks the next runnable unit.                                       |
-| `sys_ppu_thread_join`         | 44      | Either returns exit value immediately or blocks caller on target.                                      |
-| `sys_ppu_thread_create`       | 52      | Allocates stack + TLS, seeds child `PpuState`, registers a new PPU unit mid-run via `PpuFactory`.      |
-| `sys_event_flag_*`            | 82-87   | Create / destroy / wait / trywait / set / clear. AND/OR match with CLEAR/NO-CLEAR wake policy.         |
-| `sys_semaphore_*`             | 93-94, 114-117 | Create / destroy / wait / post / trywait / get_value. Wake-or-increment on post.                |
-| `sys_lwmutex_*`               | 95-99   | Create / destroy / lock / unlock / trylock. FIFO waiter list, ownership tracked, EDEADLK on re-enter.  |
-| `sys_mutex_*`                 | 100, 102-104 | Create / lock / unlock / trylock. Heavy-mutex variant of lwmutex with attribute capture.          |
-| `sys_cond_*`                  | 105-110 | Create / destroy / wait / signal / signal_all / signal_to. Two-hop drop-and-reacquire mutex protocol.  |
-| `sys_event_queue_*`           | 128-130, 133-134 | Create / destroy / receive / tryreceive / port_send. Bounded FIFO with 4-u64 payloads.        |
-| `sys_spu_image_open`          | 156     | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                    |
-| `sys_spu_thread_group_create` | 170     | Allocates a monotonic group id, writes it to guest pointer.                                            |
-| `sys_spu_thread_initialize`   | 172     | Records image handle and args (copied at init time) per slot.                                          |
-| `sys_spu_thread_group_start`  | 173     | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
-| `sys_spu_thread_group_join`   | 177/178 | Blocks caller; wakes when all SPUs in the group finish.                                                |
-| `sys_spu_thread_write_spu_mb` | 190     | Deposits a value into the target SPU's inbound mailbox.                                                |
-| `sys_memory_container_create` | 341     | Allocates a monotonic container id, writes it to guest pointer.                                        |
-| `sys_memory_allocate`         | 348     | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF). |
-| `sys_memory_free`             | 349     | Stub: no-op (CellGov does not track deallocation).                                                     |
-| `sys_memory_get_user_memory_size` | 352 | Writes `sys_memory_info_t` (total / available, 0x0D500000 each) to guest pointer.                     |
-| `sys_tty_write`               | 403     | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing.                                   |
+| Syscall                           | Number           | Behavior                                                                                               |
+| --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `sys_process_exit`                | 22               | Cascades Finished to all units in the process.                                                         |
+| `sys_ppu_thread_exit`             | 41               | Finishes the calling unit; wakes joiners with the exit value.                                          |
+| `sys_ppu_thread_yield`            | 43               | No-op scheduling hint; round-robin picks the next runnable unit.                                       |
+| `sys_ppu_thread_join`             | 44               | Either returns exit value immediately or blocks caller on target.                                      |
+| `sys_ppu_thread_create`           | 52               | Allocates stack + TLS, seeds child `PpuState`, registers a new PPU unit mid-run via `PpuFactory`.      |
+| `sys_event_flag_*`                | 82-87            | Create / destroy / wait / trywait / set / clear. AND/OR match with CLEAR/NO-CLEAR wake policy.         |
+| `sys_semaphore_*`                 | 93-94, 114-117   | Create / destroy / wait / post / trywait / get_value. Wake-or-increment on post.                       |
+| `sys_lwmutex_*`                   | 95-99            | Create / destroy / lock / unlock / trylock. FIFO waiter list, ownership tracked, EDEADLK on re-enter.  |
+| `sys_mutex_*`                     | 100, 102-104     | Create / lock / unlock / trylock. Heavy-mutex variant of lwmutex with attribute capture.               |
+| `sys_cond_*`                      | 105-110          | Create / destroy / wait / signal / signal_all / signal_to. Two-hop drop-and-reacquire mutex protocol.  |
+| `sys_event_queue_*`               | 128-130, 133-134 | Create / destroy / receive / tryreceive / port_send. Bounded FIFO with 4-u64 payloads.                 |
+| `sys_spu_image_open`              | 156              | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                    |
+| `sys_spu_thread_group_create`     | 170              | Allocates a monotonic group id, writes it to guest pointer.                                            |
+| `sys_spu_thread_initialize`       | 172              | Records image handle and args (copied at init time) per slot.                                          |
+| `sys_spu_thread_group_start`      | 173              | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
+| `sys_spu_thread_group_join`       | 177/178          | Blocks caller; wakes when all SPUs in the group finish.                                                |
+| `sys_spu_thread_write_spu_mb`     | 190              | Deposits a value into the target SPU's inbound mailbox.                                                |
+| `sys_memory_container_create`     | 341              | Allocates a monotonic container id, writes it to guest pointer.                                        |
+| `sys_memory_allocate`             | 348              | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF). |
+| `sys_memory_free`                 | 349              | Stub: no-op (CellGov does not track deallocation).                                                     |
+| `sys_memory_get_user_memory_size` | 352              | Writes `sys_memory_info_t` (total / available, 0x0D500000 each) to guest pointer.                      |
+| `sys_tty_write`                   | 403              | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing.                                   |
 
 ### PPU thread lifecycle
 
@@ -595,14 +595,14 @@ Active only when the Runtime is configured for RSX-checkpoint
 detection (`set_gcm_rsx_checkpoint`). Provides enough of the GCM
 subsystem for SSHD to boot to FirstRsxWrite.
 
-| Function                     | NID        | Behavior                                                     |
-| ---------------------------- | ---------- | ------------------------------------------------------------ |
-| `_cellGcmInitBody`           | 0x15bae46b | Allocates context, command buffer, callback stub, control    |
-|                              |            | register (at 0xC0000040 in RSX space), and label area.       |
-| `cellGcmGetConfiguration`    | 0xe315a0b2 | Writes CellGcmConfig (24 bytes) to caller pointer.           |
-| `cellGcmGetControlRegister`  | 0xa547adde | Returns control register guest address.                      |
-| `cellGcmGetTiledPitchSize`   | 0x055bd74d | Table lookup: smallest valid tiled pitch >= input size.       |
-| `cellGcmGetLabelAddress`     | 0xf80196c1 | Returns label_base + 0x10 * index.                           |
+| Function                    | NID        | Behavior                                                  |
+| --------------------------- | ---------- | --------------------------------------------------------- |
+| `_cellGcmInitBody`          | 0x15bae46b | Allocates context, command buffer, callback stub, control |
+|                             |            | register (at 0xC0000040 in RSX space), and label area.    |
+| `cellGcmGetConfiguration`   | 0xe315a0b2 | Writes CellGcmConfig (24 bytes) to caller pointer.        |
+| `cellGcmGetControlRegister` | 0xa547adde | Returns control register guest address.                   |
+| `cellGcmGetTiledPitchSize`  | 0x055bd74d | Table lookup: smallest valid tiled pitch >= input size.   |
+| `cellGcmGetLabelAddress`    | 0xf80196c1 | Returns label_base + 0x10 \* index.                       |
 
 The control register is placed in the RSX reserved region so the
 game's first put-pointer write triggers a ReservedWrite commit
@@ -715,7 +715,7 @@ NPUA80068`), or explicit manifest path (`--title-manifest
   region as a checkpoint hit.
 - **WipEout HD Fury** (BCES00664): disc ISO, same `first-rsx-write`
   checkpoint as SSHD. Disc titles add an optional `[source] kind =
-  "disc"` to the manifest; `resolve_eboot` then looks under
+"disc"` to the manifest; `resolve_eboot` then looks under
   `dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead of the PSN
   layout. The encrypted `EBOOT.BIN` is decrypted once via
   `cellgov_firmware decrypt-self`.
@@ -792,11 +792,18 @@ modules (15 with dedicated CellGov handling); the harness uses a
 `FirstRsxWrite` checkpoint because the attract-mode loop never
 calls `sys_process_exit`. Boot advances through CRT0, C++ static
 init, TLS setup, lwmutex construction, GCM initialization
-(_cellGcmInitBody, cellGcmGetConfiguration, cellGcmGetControlRegister),
+(\_cellGcmInitBody, cellGcmGetConfiguration, cellGcmGetControlRegister),
 keyboard/pad init, SPURS init, video configuration, and into the
 main attract loop. The first RSX write (put-pointer update to the
 GCM control register at 0xC0000040) triggers at step 14,109,359
 (~3.6B instructions, ~72s wall time).
+
+**WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
+from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
+SELF decryption via `cellgov_firmware decrypt-self`. 332 HLE
+bindings across 27 modules -- the largest HLE surface of the
+three foundation titles. Same `FirstRsxWrite` checkpoint as
+SSHD; CellGov reaches it at step 20,569.
 
 ## Microtest corpus
 

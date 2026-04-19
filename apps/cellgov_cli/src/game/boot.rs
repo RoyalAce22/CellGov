@@ -20,7 +20,7 @@ use super::{
     PS3_PRIMARY_STACK_TOP, PS3_RSX_BASE, PS3_RSX_SIZE, PS3_SPU_RESERVED_BASE,
     PS3_SPU_RESERVED_SIZE,
 };
-use crate::{die, load_file_or_die};
+use crate::cli::exit::{die, load_file_or_die};
 
 /// Outputs of [`prepare`] that downstream step loops need.
 #[allow(dead_code)]
@@ -270,7 +270,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     state.gpr[1] = PS3_PRIMARY_STACK_TOP;
     state.lr = 0;
 
-    let user_region_end = super::elf_user_region_end(&elf_data);
+    let user_region_end = super::observation::elf_user_region_end(&elf_data);
     let trampoline_area_end = match opd_override {
         Some(opd_base) => (opd_base as usize) + HLE_PS3_SPEC_EXTENT as usize,
         None => {
