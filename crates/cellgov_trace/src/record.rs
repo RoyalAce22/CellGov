@@ -185,6 +185,10 @@ pub enum TracedEffectKind {
     FaultRaised = 7,
     /// Diagnostic trace marker.
     TraceMarker = 8,
+    /// Atomic reservation acquired (lwarx / ldarx / getllar).
+    ReservationAcquire = 9,
+    /// Conditional atomic store succeeded (stwcx / stdcx / putllc).
+    ConditionalStore = 10,
 }
 
 impl TracedEffectKind {
@@ -199,6 +203,8 @@ impl TracedEffectKind {
             6 => Self::SignalUpdate,
             7 => Self::FaultRaised,
             8 => Self::TraceMarker,
+            9 => Self::ReservationAcquire,
+            10 => Self::ConditionalStore,
             _ => return None,
         })
     }

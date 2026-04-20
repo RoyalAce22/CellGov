@@ -24,9 +24,12 @@ use cellgov_time::{Budget, GuestTicks};
 
 /// A single fake-ISA opcode.
 ///
-/// The variant set is: `LoadImm`, `SharedStore`, `MailboxSend`,
-/// `MailboxRecv`, `DmaPut`, `Wait`, `Barrier`, `End`. Each opcode maps
-/// to at least one `Effect` variant so the pipeline sees every path.
+/// The variant set maps each opcode to at least one `Effect`
+/// variant so the pipeline sees every path. Atomic opcodes
+/// (`ReservationAcquire`, `ConditionalStore`) are straight
+/// pass-throughs to their effect counterparts; the unit carries
+/// no local reservation register -- the test harness installs a
+/// schedule that drives the committed reservation table directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FakeOp {
     /// Load `value` into the unit's accumulator register.
@@ -38,6 +41,24 @@ pub enum FakeOp {
         /// Start address of the write region.
         addr: u64,
         /// Byte count of the write region.
+        len: u64,
+    },
+    /// Emit `Effect::ReservationAcquire` for the 128-byte line
+    /// containing `line_addr`. The unit itself does not track
+    /// local reservation state; this opcode exists to drive the
+    /// committed reservation table for exploration-engine tests.
+    ReservationAcquire {
+        /// Byte address anywhere inside the line to reserve.
+        line_addr: u64,
+    },
+    /// Emit `Effect::ConditionalStore` writing the accumulator's
+    /// low byte (replicated) across the range. Unconditionally
+    /// assumes the reservation is held at emit time (the test
+    /// harness is responsible for ordering).
+    ConditionalStore {
+        /// Start address of the conditional-store region.
+        addr: u64,
+        /// Byte count. Must be 4, 8, or 128.
         len: u64,
     },
     /// Emit `MailboxSend` with the accumulator as the message word.
@@ -219,6 +240,26 @@ impl ExecutionUnit for FakeIsaUnit {
                     source: self.id,
                 });
                 YieldReason::WaitingSync
+            }
+            FakeOp::ReservationAcquire { line_addr } => {
+                effects.push(Effect::ReservationAcquire {
+                    line_addr,
+                    source: self.id,
+                });
+                YieldReason::BudgetExhausted
+            }
+            FakeOp::ConditionalStore { addr, len } => {
+                let byte = self.acc as u8;
+                let range = ByteRange::new(GuestAddr::new(addr), len)
+                    .expect("ConditionalStore range must be valid");
+                effects.push(Effect::ConditionalStore {
+                    range,
+                    bytes: WritePayload::new(vec![byte; len as usize]),
+                    ordering: PriorityClass::Normal,
+                    source: self.id,
+                    source_time: GuestTicks::ZERO,
+                });
+                YieldReason::BudgetExhausted
             }
             FakeOp::End => {
                 self.finished = true;

@@ -14,10 +14,17 @@ use cellgov_time::GuestTicks;
 const CAPACITY: usize = 64;
 
 /// A single pending store entry.
+///
+/// `conditional` is true for entries that carry the bytes of a
+/// successful `stwcx` / `stdcx`. The flush pass skips these (the
+/// ConditionalStore effect was emitted separately), but the
+/// forwarding pass sees them so a subsequent same-step lwarx
+/// observes its own prior conditional-store's bytes.
 #[derive(Clone, Copy)]
 struct StoreEntry {
     addr: u64,
     len: u8,
+    conditional: bool,
     value: u128,
 }
 
@@ -76,7 +83,32 @@ impl StoreBuffer {
         if self.entries.len() >= CAPACITY {
             return false;
         }
-        self.entries.push(StoreEntry { addr, len, value });
+        self.entries.push(StoreEntry {
+            addr,
+            len,
+            conditional: false,
+            value,
+        });
+        true
+    }
+
+    /// Insert a successful conditional store (stwcx / stdcx) for
+    /// intra-step forwarding only. The flush pass skips these
+    /// entries because the ConditionalStore effect was emitted
+    /// directly by the instruction handler; this insert just lets
+    /// a subsequent same-step lwarx see its own prior bytes.
+    /// Returns false if the buffer is full.
+    #[inline]
+    pub fn insert_conditional(&mut self, addr: u64, len: u8, value: u128) -> bool {
+        if self.entries.len() >= CAPACITY {
+            return false;
+        }
+        self.entries.push(StoreEntry {
+            addr,
+            len,
+            conditional: true,
+            value,
+        });
         true
     }
 
@@ -115,6 +147,12 @@ impl StoreBuffer {
     pub fn flush(&mut self, effects: &mut Vec<Effect>, source: UnitId) {
         for i in 0..self.entries.len() {
             let e = &self.entries[i];
+            if e.conditional {
+                // ConditionalStore effects are emitted separately
+                // by stwcx / stdcx. The buffer entry exists only
+                // for intra-step forwarding; do not double-emit.
+                continue;
+            }
             let bytes = &e.value.to_be_bytes();
             let offset = 16 - e.len as usize;
             let payload = WritePayload::from_slice(&bytes[offset..]);

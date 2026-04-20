@@ -125,6 +125,208 @@ fn snapshot_captures_state() {
 }
 
 #[test]
+fn mfc_getllar_sets_local_reservation_and_emits_acquire() {
+    let mut unit = SpuExecutionUnit::new(UnitId::new(7));
+    let s = unit.state_mut();
+
+    // Program: il $10, 0xD0 (MFC_GETLLAR); wrch $ch21, $10.
+    s.channels.mfc_lsa = 0x200;
+    // EA within a PS3 main-memory region. Line 0x1000 is the one we
+    // want the reservation on; 0x1040 is mid-line.
+    s.channels.mfc_eah = 0;
+    s.channels.mfc_eal = 0x1040;
+    s.channels.mfc_size = 128;
+    s.channels.mfc_tag_id = 0;
+
+    let il_raw: u32 = 0x081 << 23 | (0xD0u32 << 7) | 10;
+    s.ls[0..4].copy_from_slice(&il_raw.to_be_bytes());
+    let wrch_raw: u32 = 0x10D << 21 | (21u32 << 7) | 10;
+    s.ls[4..8].copy_from_slice(&wrch_raw.to_be_bytes());
+
+    // Put some content at 0x1040 so the read produces observable bytes.
+    let mut mem = GuestMemory::new(0x2000);
+    let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x1040), 8).unwrap();
+    mem.apply_commit(range, &[0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFA, 0xCE])
+        .unwrap();
+    let ctx = ExecutionContext::new(&mem);
+
+    let mut effects = Vec::new();
+    let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+
+    // Local reservation: canonical line 0x1000.
+    assert_eq!(unit.state().reservation.map(|l| l.addr()), Some(0x1000));
+    // Atomic status = 0 (reservation acquired / success indicator).
+    assert_eq!(unit.state().channels.atomic_status, 0);
+    // Exactly one ReservationAcquire effect at the line address.
+    let acquires: Vec<_> = effects
+        .iter()
+        .filter_map(|e| match e {
+            cellgov_effects::Effect::ReservationAcquire { line_addr, source } => {
+                Some((*line_addr, *source))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(acquires, vec![(0x1000, UnitId::new(7))]);
+}
+
+#[test]
+fn mfc_putllc_with_matching_reservation_emits_conditional_store() {
+    let mut unit = SpuExecutionUnit::new(UnitId::new(8));
+    let s = unit.state_mut();
+    // Pre-populate the reservation on the line we're about to PUTLLC.
+    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
+    // Seed some distinctive bytes in LS at the PUTLLC source.
+    s.channels.mfc_lsa = 0x200;
+    s.channels.mfc_eal = 0x1000;
+    s.channels.mfc_size = 128;
+    s.ls[0x200..0x208].copy_from_slice(&[0xCA, 0xFE, 0xBA, 0xBE, 0x12, 0x34, 0x56, 0x78]);
+
+    // il $10, 0xB4 (MFC_PUTLLC); wrch $ch21, $10.
+    let il_raw: u32 = 0x081 << 23 | (0xB4u32 << 7) | 10;
+    s.ls[0..4].copy_from_slice(&il_raw.to_be_bytes());
+    let wrch_raw: u32 = 0x10D << 21 | (21u32 << 7) | 10;
+    s.ls[4..8].copy_from_slice(&wrch_raw.to_be_bytes());
+
+    let mem = GuestMemory::new(0x2000);
+    // Install a reservation table with unit 8 holding line 0x1000
+    // so the step-start refresh does not clear the local register.
+    let mut table = cellgov_sync::ReservationTable::new();
+    table.insert_or_replace(
+        UnitId::new(8),
+        cellgov_sync::ReservedLine::containing(0x1000),
+    );
+    let ctx = ExecutionContext::new(&mem).with_reservations(&table);
+
+    let mut effects = Vec::new();
+    let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+
+    // Local reservation retired on the success path.
+    assert!(unit.state().reservation.is_none());
+    // atomic_status = 0 (success).
+    assert_eq!(unit.state().channels.atomic_status, 0);
+    // Exactly one ConditionalStore at EA 0x1000 / 128 bytes.
+    let conds: Vec<_> = effects
+        .iter()
+        .filter(|e| matches!(e, cellgov_effects::Effect::ConditionalStore { .. }))
+        .collect();
+    assert_eq!(conds.len(), 1);
+    match conds[0] {
+        cellgov_effects::Effect::ConditionalStore {
+            range,
+            bytes,
+            source,
+            ..
+        } => {
+            assert_eq!(range.start().raw(), 0x1000);
+            assert_eq!(range.length(), 128);
+            assert_eq!(*source, UnitId::new(8));
+            assert_eq!(
+                &bytes.bytes()[..8],
+                &[0xCA, 0xFE, 0xBA, 0xBE, 0x12, 0x34, 0x56, 0x78]
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn mfc_putllc_without_reservation_fails_silently() {
+    let mut unit = SpuExecutionUnit::new(UnitId::new(9));
+    let s = unit.state_mut();
+    // No reservation preloaded.
+    s.channels.mfc_lsa = 0x200;
+    s.channels.mfc_eal = 0x1000;
+    s.channels.mfc_size = 128;
+
+    let il_raw: u32 = 0x081 << 23 | (0xB4u32 << 7) | 10;
+    s.ls[0..4].copy_from_slice(&il_raw.to_be_bytes());
+    let wrch_raw: u32 = 0x10D << 21 | (21u32 << 7) | 10;
+    s.ls[4..8].copy_from_slice(&wrch_raw.to_be_bytes());
+
+    let mem = GuestMemory::new(0x2000);
+    let ctx = ExecutionContext::new(&mem);
+
+    let mut effects = Vec::new();
+    let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+
+    // atomic_status = 1 indicates failure per Cell BE channel semantics.
+    assert_eq!(unit.state().channels.atomic_status, 1);
+    // No ConditionalStore emitted.
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, cellgov_effects::Effect::ConditionalStore { .. })));
+}
+
+#[test]
+fn mfc_putllc_with_reservation_on_different_line_fails() {
+    let mut unit = SpuExecutionUnit::new(UnitId::new(10));
+    let s = unit.state_mut();
+    // Reservation on 0x1000; PUTLLC targets 0x1100 (different line).
+    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
+    s.channels.mfc_lsa = 0x200;
+    s.channels.mfc_eal = 0x1100;
+    s.channels.mfc_size = 128;
+
+    let il_raw: u32 = 0x081 << 23 | (0xB4u32 << 7) | 10;
+    s.ls[0..4].copy_from_slice(&il_raw.to_be_bytes());
+    let wrch_raw: u32 = 0x10D << 21 | (21u32 << 7) | 10;
+    s.ls[4..8].copy_from_slice(&wrch_raw.to_be_bytes());
+
+    let mem = GuestMemory::new(0x2000);
+    let mut table = cellgov_sync::ReservationTable::new();
+    table.insert_or_replace(
+        UnitId::new(10),
+        cellgov_sync::ReservedLine::containing(0x1000),
+    );
+    let ctx = ExecutionContext::new(&mem).with_reservations(&table);
+
+    let mut effects = Vec::new();
+    let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+
+    assert_eq!(unit.state().channels.atomic_status, 1);
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, cellgov_effects::Effect::ConditionalStore { .. })));
+    // Retired regardless of verdict.
+    assert!(unit.state().reservation.is_none());
+}
+
+#[test]
+fn mfc_put_overlapping_reserved_line_clears_local_reservation() {
+    let mut unit = SpuExecutionUnit::new(UnitId::new(11));
+    let s = unit.state_mut();
+    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
+    // MFC_PUT to 0x1040 (same line as reservation), 16 bytes.
+    s.channels.mfc_lsa = 0x200;
+    s.channels.mfc_eal = 0x1040;
+    s.channels.mfc_size = 16;
+    s.channels.mfc_tag_id = 0;
+
+    // il $10, 0x20 (MFC_PUT); wrch $ch21, $10.
+    let il_raw: u32 = 0x081 << 23 | (0x20u32 << 7) | 10;
+    s.ls[0..4].copy_from_slice(&il_raw.to_be_bytes());
+    let wrch_raw: u32 = 0x10D << 21 | (21u32 << 7) | 10;
+    s.ls[4..8].copy_from_slice(&wrch_raw.to_be_bytes());
+
+    let mem = GuestMemory::new(0x2000);
+    let mut table = cellgov_sync::ReservationTable::new();
+    table.insert_or_replace(
+        UnitId::new(11),
+        cellgov_sync::ReservedLine::containing(0x1000),
+    );
+    let ctx = ExecutionContext::new(&mem).with_reservations(&table);
+
+    let mut effects = Vec::new();
+    let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+
+    assert!(
+        unit.state().reservation.is_none(),
+        "MFC_PUT to reserved line must clear the local reservation"
+    );
+}
+
+#[test]
 fn wrch_mfc_cmd_yields_dma_submitted() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(6));
     let s = unit.state_mut();
@@ -325,6 +527,105 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
         "mailbox_roundtrip diverges from RPCS3: {:?}",
         result.cellgov_result
     );
+}
+
+/// Two SPUs contend on a shared 128-byte line via the
+/// `spu_atomic_cross_spu` ELF. Each SPU performs
+/// `INCREMENTS_PER_THREAD` (32 by default) getllar / putllc retry
+/// increments. Correctness gate: the shared counter ends at
+/// exactly 2 * INCREMENTS_PER_THREAD (64) regardless of the
+/// scheduler's interleaving. Without real contention
+/// (always-succeed putllc) concurrent increments would drop
+/// updates and the counter would be less than 64.
+#[test]
+fn spu_atomic_cross_spu_counter_is_exactly_2n() {
+    const INCREMENTS_PER_THREAD: u32 = 32;
+    let elf_path =
+        std::path::Path::new("../../tests/micro/spu_atomic_cross_spu/build/spu_main.elf");
+    if !elf_path.exists() {
+        return;
+    }
+    let elf_data = std::fs::read(elf_path).unwrap();
+
+    // Fixed EAs inside the main-memory region. Atomic line at
+    // 0x10000 (128-byte aligned). Each SPU writes its 16-byte
+    // result slot at 0x11000 / 0x11010.
+    let atomic_ea: u32 = 0x10000;
+    let result_ea_a: u32 = 0x11000;
+    let result_ea_b: u32 = 0x11010;
+
+    let elf = elf_data.clone();
+    let fixture = cellgov_testkit::fixtures::ScenarioFixture::builder()
+        .memory_size(0x2_0000)
+        .budget(Budget::new(100_000))
+        .max_steps(2_000)
+        .register(move |rt| {
+            let elf = elf.clone();
+            let elf2 = elf.clone();
+            rt.registry_mut().register_with(|id| {
+                let mut unit = SpuExecutionUnit::new(id);
+                loader::load_spu_elf(&elf, unit.state_mut()).unwrap();
+                unit.state_mut().pc = 0x80;
+                unit.state_mut().set_reg_word_splat(1, 0x3FFF0);
+                // r3 = spe_id (informational, use unit id),
+                // r4 = atomic_ea, r5 = result_ea_a.
+                unit.state_mut().set_reg_word_splat(3, 0xA);
+                unit.state_mut().set_reg_word_splat(4, atomic_ea);
+                unit.state_mut().set_reg_word_splat(5, result_ea_a);
+                unit
+            });
+            rt.registry_mut().register_with(|id| {
+                let mut unit = SpuExecutionUnit::new(id);
+                loader::load_spu_elf(&elf2, unit.state_mut()).unwrap();
+                unit.state_mut().pc = 0x80;
+                unit.state_mut().set_reg_word_splat(1, 0x3FFF0);
+                unit.state_mut().set_reg_word_splat(3, 0xB);
+                unit.state_mut().set_reg_word_splat(4, atomic_ea);
+                unit.state_mut().set_reg_word_splat(5, result_ea_b);
+                unit
+            });
+        })
+        .build();
+
+    let result = cellgov_testkit::run(fixture);
+    assert_eq!(
+        result.outcome,
+        cellgov_testkit::ScenarioOutcome::Stalled,
+        "SPU pair must stall cleanly at end of run, got {:?}",
+        result.outcome
+    );
+
+    // The first 4 bytes of the atomic line at 0x10000 is the
+    // counter. After both SPUs finish, it must equal 2 *
+    // INCREMENTS_PER_THREAD.
+    let mem = &result.final_memory;
+    let counter_bytes = &mem[atomic_ea as usize..atomic_ea as usize + 4];
+    let counter = u32::from_be_bytes([
+        counter_bytes[0],
+        counter_bytes[1],
+        counter_bytes[2],
+        counter_bytes[3],
+    ]);
+    assert_eq!(
+        counter,
+        2 * INCREMENTS_PER_THREAD,
+        "shared counter must equal 2 * INCREMENTS_PER_THREAD under real contention"
+    );
+
+    // Each SPU writes its 16-byte result slot. Word 0 is status
+    // (expected 0), word 1 is the final counter the SPU saw on its
+    // last successful CAS. Retry counts vary with interleaving
+    // and are not asserted here.
+    for &result_ea in &[result_ea_a, result_ea_b] {
+        let slot = &mem[result_ea as usize..result_ea as usize + 16];
+        let status = u32::from_be_bytes([slot[0], slot[1], slot[2], slot[3]]);
+        let seen = u32::from_be_bytes([slot[4], slot[5], slot[6], slot[7]]);
+        assert_eq!(status, 0, "SPU result slot status must be 0");
+        assert!(
+            (1..=2 * INCREMENTS_PER_THREAD).contains(&seen),
+            "SPU final_counter out of range: {seen}"
+        );
+    }
 }
 
 #[test]

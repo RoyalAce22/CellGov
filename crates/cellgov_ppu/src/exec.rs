@@ -10,8 +10,11 @@ use crate::fp;
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
-use cellgov_effects::Effect;
-use cellgov_event::UnitId;
+use cellgov_effects::{Effect, WritePayload};
+use cellgov_event::{PriorityClass, UnitId};
+use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_sync::ReservedLine;
+use cellgov_time::GuestTicks;
 
 /// What happened after executing one instruction.
 #[derive(Debug, PartialEq, Eq)]
@@ -107,8 +110,26 @@ fn load_se(
 
 /// Insert a store into the store buffer. Returns `BufferFull` if the
 /// buffer has no room; returns `Continue` on success.
+///
+/// Also clears the unit's local atomic reservation if the store's
+/// byte range overlaps the reserved line. This is the architectural
+/// rule "a same-unit store to the reserved line drops the
+/// reservation" -- it applies intra-step so that a subsequent
+/// `stwcx` at the same line observes the invalidation without
+/// waiting for commit.
 #[inline]
-fn buffer_store(store_buf: &mut StoreBuffer, ea: u64, size: u8, value: u64) -> ExecuteVerdict {
+fn buffer_store(
+    store_buf: &mut StoreBuffer,
+    state: &mut PpuState,
+    ea: u64,
+    size: u8,
+    value: u64,
+) -> ExecuteVerdict {
+    if let Some(line) = state.reservation {
+        if line.overlaps_range(ea, size as u64) {
+            state.reservation = None;
+        }
+    }
     if store_buf.insert(ea, size, value as u128) {
         ExecuteVerdict::Continue
     } else {
@@ -124,9 +145,9 @@ fn buffer_store(store_buf: &mut StoreBuffer, ea: u64, size: u8, value: u64) -> E
 pub fn execute(
     insn: &PpuInstruction,
     state: &mut PpuState,
-    _unit_id: UnitId,
+    unit_id: UnitId,
     region_views: &[(u64, &[u8])],
-    _effects: &mut Vec<Effect>,
+    effects: &mut Vec<Effect>,
     store_buf: &mut StoreBuffer,
 ) -> ExecuteVerdict {
     match *insn {
@@ -274,23 +295,23 @@ pub fn execute(
         // =================================================================
         PpuInstruction::Stw { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            buffer_store(store_buf, ea, 4, state.gpr[rs as usize])
+            buffer_store(store_buf, state, ea, 4, state.gpr[rs as usize])
         }
         PpuInstruction::Stb { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            buffer_store(store_buf, ea, 1, state.gpr[rs as usize])
+            buffer_store(store_buf, state, ea, 1, state.gpr[rs as usize])
         }
         PpuInstruction::Sth { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            buffer_store(store_buf, ea, 2, state.gpr[rs as usize])
+            buffer_store(store_buf, state, ea, 2, state.gpr[rs as usize])
         }
         PpuInstruction::Std { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            buffer_store(store_buf, ea, 8, state.gpr[rs as usize])
+            buffer_store(store_buf, state, ea, 8, state.gpr[rs as usize])
         }
         PpuInstruction::Stwu { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            let v = buffer_store(store_buf, ea, 4, state.gpr[rs as usize]);
+            let v = buffer_store(store_buf, state, ea, 4, state.gpr[rs as usize]);
             if v == ExecuteVerdict::Continue {
                 state.gpr[ra as usize] = ea;
             }
@@ -298,7 +319,7 @@ pub fn execute(
         }
         PpuInstruction::Stdu { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            let v = buffer_store(store_buf, ea, 8, state.gpr[rs as usize]);
+            let v = buffer_store(store_buf, state, ea, 8, state.gpr[rs as usize]);
             if v == ExecuteVerdict::Continue {
                 state.gpr[ra as usize] = ea;
             }
@@ -307,15 +328,15 @@ pub fn execute(
         // Indexed stores
         PpuInstruction::Stwx { rs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            buffer_store(store_buf, ea, 4, state.gpr[rs as usize])
+            buffer_store(store_buf, state, ea, 4, state.gpr[rs as usize])
         }
         PpuInstruction::Stdx { rs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            buffer_store(store_buf, ea, 8, state.gpr[rs as usize])
+            buffer_store(store_buf, state, ea, 8, state.gpr[rs as usize])
         }
         PpuInstruction::Stdux { rs, ra, rb } => {
             let ea = state.gpr[ra as usize].wrapping_add(state.gpr[rb as usize]);
-            let verdict = buffer_store(store_buf, ea, 8, state.gpr[rs as usize]);
+            let verdict = buffer_store(store_buf, state, ea, 8, state.gpr[rs as usize]);
             if matches!(verdict, ExecuteVerdict::Continue) {
                 state.gpr[ra as usize] = ea;
             }
@@ -326,36 +347,114 @@ pub fn execute(
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(val) => {
                     state.gpr[rt as usize] = val;
+                    let line = ReservedLine::containing(ea);
+                    state.reservation = Some(line);
+                    effects.push(Effect::ReservationAcquire {
+                        line_addr: line.addr(),
+                        source: unit_id,
+                    });
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
         PpuInstruction::Stdcx { rs, ra, rb } => {
-            // Single-threaded: reservation never lost, CAS always succeeds.
-            state.set_cr_field(0, 0b0010); // EQ
+            // Verdict is local.is_some() && local line matches EA's
+            // line. Cross-unit invalidation is handled at step
+            // start via the context refresh; same-unit self-
+            // invalidation is handled in buffer_store on every
+            // overlapping store. So by the time stwcx / stdcx
+            // executes, local state alone is authoritative.
             let ea = state.ea_x_form(ra, rb);
-            buffer_store(store_buf, ea, 8, state.gpr[rs as usize])
+            let success = match state.reservation {
+                Some(line) => line.addr() == ReservedLine::containing(ea).addr(),
+                None => false,
+            };
+            if success {
+                state.set_cr_field(0, 0b0010); // EQ
+                let range = match ByteRange::new(GuestAddr::new(ea), 8) {
+                    Some(r) => r,
+                    None => return ExecuteVerdict::MemFault(ea),
+                };
+                let value = state.gpr[rs as usize];
+                let bytes = value.to_be_bytes();
+                // Flush any buffered plain stores before the
+                // ConditionalStore so both commit in program order.
+                // The flush also drops any stale conditional
+                // forwarding entries from earlier stwcx's in the
+                // same step; their ConditionalStore effects were
+                // already emitted at that time.
+                store_buf.flush(effects, unit_id);
+                effects.push(Effect::ConditionalStore {
+                    range,
+                    bytes: WritePayload::from_slice(&bytes),
+                    ordering: PriorityClass::Normal,
+                    source: unit_id,
+                    source_time: GuestTicks::ZERO,
+                });
+                // Park a forwarding-only entry so a subsequent
+                // lwarx in the same step sees the bytes this stwcx
+                // committed, rather than the pre-step committed
+                // memory. The flush pass skips conditional entries
+                // so no SharedWriteIntent is emitted for them.
+                store_buf.insert_conditional(ea, 8, value as u128);
+            } else {
+                state.set_cr_field(0, 0b0000); // !EQ
+            }
+            state.reservation = None;
+            ExecuteVerdict::Continue
         }
         PpuInstruction::Lwarx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(val) => {
                     state.gpr[rt as usize] = val;
+                    let line = ReservedLine::containing(ea);
+                    state.reservation = Some(line);
+                    effects.push(Effect::ReservationAcquire {
+                        line_addr: line.addr(),
+                        source: unit_id,
+                    });
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
         PpuInstruction::Stwcx { rs, ra, rb } => {
-            // Single-threaded: reservation never lost, CAS always succeeds.
-            state.set_cr_field(0, 0b0010); // EQ
+            // See Stdcx above for the verdict derivation rationale.
             let ea = state.ea_x_form(ra, rb);
-            buffer_store(store_buf, ea, 4, state.gpr[rs as usize])
+            let success = match state.reservation {
+                Some(line) => line.addr() == ReservedLine::containing(ea).addr(),
+                None => false,
+            };
+            if success {
+                state.set_cr_field(0, 0b0010); // EQ
+                let range = match ByteRange::new(GuestAddr::new(ea), 4) {
+                    Some(r) => r,
+                    None => return ExecuteVerdict::MemFault(ea),
+                };
+                let value32 = state.gpr[rs as usize] as u32;
+                let bytes = value32.to_be_bytes();
+                // See Stdcx above for the flush / forward-entry
+                // rationale.
+                store_buf.flush(effects, unit_id);
+                effects.push(Effect::ConditionalStore {
+                    range,
+                    bytes: WritePayload::from_slice(&bytes),
+                    ordering: PriorityClass::Normal,
+                    source: unit_id,
+                    source_time: GuestTicks::ZERO,
+                });
+                store_buf.insert_conditional(ea, 4, value32 as u128);
+            } else {
+                state.set_cr_field(0, 0b0000); // !EQ
+            }
+            state.reservation = None;
+            ExecuteVerdict::Continue
         }
         PpuInstruction::Stbx { rs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            buffer_store(store_buf, ea, 1, state.gpr[rs as usize])
+            buffer_store(store_buf, state, ea, 1, state.gpr[rs as usize])
         }
 
         // =================================================================
@@ -1005,7 +1104,13 @@ pub fn execute(
         // round-convert to single precision; the bits go out verbatim.
         PpuInstruction::Stfiwx { frs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            buffer_store(store_buf, ea, 4, state.fpr[frs as usize] & 0xFFFF_FFFF)
+            buffer_store(
+                store_buf,
+                state,
+                ea,
+                4,
+                state.fpr[frs as usize] & 0xFFFF_FFFF,
+            )
         }
 
         // =================================================================
@@ -1118,7 +1223,7 @@ pub fn execute(
             let val = imm as i64 as u64;
             state.gpr[rt as usize] = val;
             let ea = state.ea_d_form(ra_store, store_offset);
-            buffer_store(store_buf, ea, 4, val)
+            buffer_store(store_buf, state, ea, 4, val)
         }
         PpuInstruction::MflrStw {
             rt,
@@ -1127,7 +1232,7 @@ pub fn execute(
         } => {
             state.gpr[rt as usize] = state.lr;
             let ea = state.ea_d_form(ra_store, store_offset);
-            buffer_store(store_buf, ea, 4, state.gpr[rt as usize])
+            buffer_store(store_buf, state, ea, 4, state.gpr[rt as usize])
         }
         PpuInstruction::LwzMtlr {
             rt,
@@ -1151,7 +1256,7 @@ pub fn execute(
         } => {
             state.gpr[rt as usize] = state.lr;
             let ea = state.ea_d_form(ra_store, store_offset);
-            buffer_store(store_buf, ea, 8, state.gpr[rt as usize])
+            buffer_store(store_buf, state, ea, 8, state.gpr[rt as usize])
         }
         PpuInstruction::LdMtlr {
             rt,
@@ -1175,12 +1280,12 @@ pub fn execute(
             offset1,
         } => {
             let ea1 = state.ea_d_form(ra, offset1);
-            let v1 = buffer_store(store_buf, ea1, 8, state.gpr[rs1 as usize]);
+            let v1 = buffer_store(store_buf, state, ea1, 8, state.gpr[rs1 as usize]);
             if !matches!(v1, ExecuteVerdict::Continue) {
                 return v1;
             }
             let ea2 = ea1.wrapping_add(8);
-            buffer_store(store_buf, ea2, 8, state.gpr[rs2 as usize])
+            buffer_store(store_buf, state, ea2, 8, state.gpr[rs2 as usize])
         }
         PpuInstruction::CmpwiBc {
             bf,

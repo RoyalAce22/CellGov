@@ -1549,3 +1549,137 @@ fn profile_mode_counts_raw_instructions() {
         .iter()
         .any(|((a, b), count)| *a == "Addi" && *b == "Addi" && *count == 1));
 }
+
+/// One PPU thread + one SPU unit contend on the same
+/// 128-byte line. PPU runs a hand-encoded CAS retry loop for
+/// PPU_N iterations; SPU runs the spu_atomic_cross_spu ELF for
+/// SPU_N iterations. Under real cross-architecture reservation
+/// contention the final counter is exactly `PPU_N + SPU_N`
+/// regardless of scheduler interleaving. Cross-budget equivalence
+/// is asserted by running the same scenario at Budget=1 and
+/// Budget=256.
+#[test]
+fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
+    use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
+    use cellgov_testkit::fixtures::ScenarioFixture;
+
+    const PPU_N: u32 = 16;
+    const SPU_N: u32 = 32;
+
+    let spu_elf_path =
+        std::path::Path::new("../../tests/micro/spu_atomic_cross_spu/build/spu_main.elf");
+    if !spu_elf_path.exists() {
+        return;
+    }
+    let spu_elf = std::fs::read(spu_elf_path).unwrap();
+
+    // Memory layout inside the single main-memory region.
+    // 0x0000..0x0100:   reserved (avoid confusing null dereferences)
+    // 0x0100..0x0120:   PPU program (8 instructions).
+    // 0x1000..0x1080:   SPU result slot.
+    // 0x10000..0x10080: atomic line (128-byte aligned).
+    let ppu_pc: u64 = 0x100;
+    let atomic_ea: u32 = 0x10000;
+    let spu_result_ea: u32 = 0x1000;
+
+    fn run_at_budget(
+        spu_elf: Vec<u8>,
+        ppu_pc: u64,
+        atomic_ea: u32,
+        spu_result_ea: u32,
+        budget: u64,
+    ) -> u32 {
+        let fixture = ScenarioFixture::builder()
+            .memory_size(0x2_0000)
+            .budget(Budget::new(budget))
+            // Cap generous enough for both units to finish N iterations
+            // at the given budget and spin on their halt sentinels.
+            .max_steps(20_000)
+            .seed_memory(move |mem| {
+                // PPU CAS loop. r3 = atomic_ea, r10 = PPU_N on entry.
+                // 0x100: lwarx r9, 0, r3
+                // 0x104: addi r9, r9, 1
+                // 0x108: stwcx. r9, 0, r3
+                // 0x10C: bne- cr0, 0x100  (retry CAS on failure)
+                // 0x110: addi r10, r10, -1
+                // 0x114: cmpwi cr7, r10, 0
+                // 0x118: bne+ cr7, 0x100  (continue outer loop)
+                // 0x11C: b 0x11C          (halt-spin)
+                let program: [u32; 8] = [
+                    0x7D20_1828, // lwarx r9, 0, r3
+                    0x3929_0001, // addi  r9, r9, 1
+                    0x7D20_192D, // stwcx. r9, 0, r3
+                    0x4082_FFF4, // bne- cr0, -12
+                    0x394A_FFFF, // addi r10, r10, -1
+                    0x2F8A_0000, // cmpwi cr7, r10, 0
+                    0x409E_FFE8, // bne+ cr7, -24
+                    0x4800_0000, // b 0 (spin)
+                ];
+                let mut prog_bytes = Vec::with_capacity(32);
+                for raw in program {
+                    prog_bytes.extend_from_slice(&raw.to_be_bytes());
+                }
+                let range = ByteRange::new(GuestAddr::new(ppu_pc), 32).unwrap();
+                mem.apply_commit(range, &prog_bytes).unwrap();
+            })
+            .register(move |rt| {
+                rt.set_spu_factory(|id, init| {
+                    let mut unit = SpuExecutionUnit::new(id);
+                    spu_loader::load_spu_elf(&init.ls_bytes, unit.state_mut()).unwrap();
+                    unit.state_mut().pc = init.entry_pc;
+                    unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
+                    unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
+                    unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
+                    unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
+                    unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
+                    Box::new(unit)
+                });
+
+                // Register PPU unit directly (no LV2 thread-group
+                // plumbing needed for this scenario -- we drive the
+                // scheduler at the unit level).
+                rt.registry_mut().register_with(|id| {
+                    let mut unit = PpuExecutionUnit::new(id);
+                    unit.state_mut().pc = ppu_pc;
+                    unit.state_mut().gpr[3] = atomic_ea as u64;
+                    unit.state_mut().gpr[10] = PPU_N as u64;
+                    unit
+                });
+
+                // Register SPU unit with the atomic ELF loaded.
+                rt.registry_mut().register_with(|id| {
+                    let mut unit = SpuExecutionUnit::new(id);
+                    spu_loader::load_spu_elf(&spu_elf, unit.state_mut()).unwrap();
+                    unit.state_mut().pc = 0x80;
+                    unit.state_mut().set_reg_word_splat(1, 0x3FFF0);
+                    unit.state_mut().set_reg_word_splat(3, 0xB);
+                    unit.state_mut().set_reg_word_splat(4, atomic_ea);
+                    unit.state_mut().set_reg_word_splat(5, spu_result_ea);
+                    unit
+                });
+            })
+            .build();
+
+        let result = cellgov_testkit::run(fixture);
+        let mem = &result.final_memory;
+        let counter_bytes = &mem[atomic_ea as usize..atomic_ea as usize + 4];
+        u32::from_be_bytes([
+            counter_bytes[0],
+            counter_bytes[1],
+            counter_bytes[2],
+            counter_bytes[3],
+        ])
+    }
+
+    let expected = PPU_N + SPU_N;
+    let counter_b1 = run_at_budget(spu_elf.clone(), ppu_pc, atomic_ea, spu_result_ea, 1);
+    assert_eq!(
+        counter_b1, expected,
+        "cross-unit counter at Budget=1 must equal PPU_N + SPU_N"
+    );
+    let counter_b256 = run_at_budget(spu_elf, ppu_pc, atomic_ea, spu_result_ea, 256);
+    assert_eq!(
+        counter_b256, expected,
+        "cross-unit counter at Budget=256 must equal PPU_N + SPU_N"
+    );
+}

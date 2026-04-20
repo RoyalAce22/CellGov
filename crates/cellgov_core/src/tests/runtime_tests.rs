@@ -1525,3 +1525,377 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
         "epoch must advance once per commit, fast or slow"
     );
 }
+
+// --- Reservation state folds into sync_state_hash ---
+
+/// A unit that emits a single `ReservationAcquire` effect on its
+/// first step and a single `SharedWriteIntent` to the reserved
+/// line on its second step, then finishes. Used to exercise the
+/// sync_state_hash folding with a scripted acquire / release
+/// sequence.
+struct ReservationDriverUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    line_addr: u64,
+}
+
+impl ExecutionUnit for ReservationDriverUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 2 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        use cellgov_effects::WritePayload;
+        use cellgov_event::PriorityClass;
+        use cellgov_mem::{ByteRange, GuestAddr};
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        match n {
+            1 => {
+                effects.push(Effect::ReservationAcquire {
+                    line_addr: self.line_addr,
+                    source: self.id,
+                });
+            }
+            2 => {
+                // Overlapping write clears the reservation.
+                let range = ByteRange::new(GuestAddr::new(self.line_addr), 4).unwrap();
+                effects.push(Effect::SharedWriteIntent {
+                    range,
+                    bytes: WritePayload::new(vec![0xAA; 4]),
+                    ordering: PriorityClass::Normal,
+                    source: self.id,
+                    source_time: GuestTicks::ZERO,
+                });
+            }
+            _ => {}
+        }
+        let yield_reason = if n >= 2 {
+            YieldReason::Finished
+        } else {
+            YieldReason::BudgetExhausted
+        };
+        ExecutionStepResult {
+            yield_reason,
+            consumed_budget: budget,
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+#[test]
+fn sync_state_hash_changes_after_reservation_acquire() {
+    let mut rt = build(4096, 1, 100);
+    rt.registry_mut().register_with(|id| ReservationDriverUnit {
+        id,
+        steps: Cell::new(0),
+        line_addr: 0x100,
+    });
+    let h0 = rt.sync_state_hash();
+    // Step 1 emits ReservationAcquire.
+    let s1 = rt.step().unwrap();
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    let h1 = rt.sync_state_hash();
+    assert_ne!(h0, h1, "reservation acquire must shift sync_state_hash");
+}
+
+#[test]
+fn sync_state_hash_returns_to_empty_after_reservation_cleared() {
+    let mut rt = build(4096, 1, 100);
+    rt.registry_mut().register_with(|id| ReservationDriverUnit {
+        id,
+        steps: Cell::new(0),
+        line_addr: 0x100,
+    });
+    let h_empty = rt.sync_state_hash();
+    // Step 1: acquire.
+    let s1 = rt.step().unwrap();
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    assert_ne!(h_empty, rt.sync_state_hash());
+    // Step 2: write to reserved line -> clear sweep drops the entry.
+    let s2 = rt.step().unwrap();
+    rt.commit_step(&s2.result, &s2.effects).unwrap();
+    assert_eq!(
+        h_empty,
+        rt.sync_state_hash(),
+        "cleared reservation table must restore the pre-acquire sync hash"
+    );
+}
+
+#[test]
+fn sync_state_hash_deterministic_across_identical_runs() {
+    fn run() -> Vec<u64> {
+        let mut rt = build(4096, 1, 100);
+        rt.registry_mut().register_with(|id| ReservationDriverUnit {
+            id,
+            steps: Cell::new(0),
+            line_addr: 0x100,
+        });
+        let mut hashes = vec![rt.sync_state_hash()];
+        for _ in 0..2 {
+            let s = rt.step().unwrap();
+            rt.commit_step(&s.result, &s.effects).unwrap();
+            hashes.push(rt.sync_state_hash());
+        }
+        hashes
+    }
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn sync_state_hash_distinguishes_different_reserved_lines() {
+    fn run(line_addr: u64) -> u64 {
+        let mut rt = build(4096, 1, 100);
+        rt.registry_mut().register_with(|id| ReservationDriverUnit {
+            id,
+            steps: Cell::new(0),
+            line_addr,
+        });
+        // Step 1 only: acquire but do not write.
+        let s = rt.step().unwrap();
+        rt.commit_step(&s.result, &s.effects).unwrap();
+        rt.sync_state_hash()
+    }
+    assert_ne!(
+        run(0x100),
+        run(0x200),
+        "different reserved lines must hash differently"
+    );
+}
+
+// --- Lost-reservation regression across write paths ---
+
+/// DMA completions bypass `SharedWriteIntent` -- they are applied
+/// by `fire_dma_completions` via a direct `apply_commit` path.
+/// The clear sweep must still fire on the destination range so a
+/// cross-unit DMA does not leave a stale reservation entry that
+/// a later stwcx / putllc would spuriously read as "still held."
+///
+/// Test: unit 1 pre-holds a reservation on line 0x0. Unit 0
+/// emits a DmaPut whose destination covers the line. After
+/// scheduling runs through the DMA's latency (10 ticks), the
+/// completion fires and the reservation must be cleared.
+#[test]
+fn dma_completion_clears_overlapping_reservation() {
+    use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+    let mut rt = build(256, 1, 100);
+    // DmaPut wants a committed source range. Pre-populate one.
+    {
+        use cellgov_mem::{ByteRange, GuestAddr};
+        let range = ByteRange::new(GuestAddr::new(0x80), 4).unwrap();
+        rt.memory_mut().apply_commit(range, &[0x11; 4]).unwrap();
+    }
+    // Pre-populate unit 1's reservation on line 0x0.
+    rt.reservations_mut()
+        .insert_or_replace(UnitId::new(1), cellgov_sync::ReservedLine::containing(0));
+
+    // Unit 0: emit DmaPut 0x80 -> 0x0, 4 bytes, then run many
+    // LoadImms so guest time keeps advancing past the DMA's
+    // 10-tick latency. Finally End.
+    let mut ops = vec![FakeOp::DmaPut {
+        src: 0x80,
+        dst: 0x0,
+        len: 4,
+    }];
+    for _ in 0..30 {
+        ops.push(FakeOp::LoadImm(0));
+    }
+    ops.push(FakeOp::End);
+    rt.registry_mut()
+        .register_with(|id| FakeIsaUnit::new(id, ops));
+
+    let mut completions_fired = 0usize;
+    for _ in 0..100 {
+        match rt.step() {
+            Ok(step) => {
+                let outcome = rt.commit_step(&step.result, &step.effects).unwrap();
+                completions_fired += outcome.dma_completions_fired;
+                if completions_fired > 0 && !rt.reservations().is_held_by(UnitId::new(1)) {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    assert!(
+        completions_fired > 0,
+        "DMA completion must fire within the step budget"
+    );
+    assert!(
+        !rt.reservations().is_held_by(UnitId::new(1)),
+        "DMA completion to reserved line must clear unit 1's reservation"
+    );
+}
+
+/// Same-unit PPU store through the staging path is proven at the
+/// commit-pipeline level in commit_tests::shared_write_clears_
+/// reservation_covering_line. This runtime-level test pins the
+/// end-to-end invariant by driving a SharedWriteIntent through
+/// the full step / commit cycle and asserting the table clears.
+#[test]
+fn plain_shared_write_through_runtime_clears_reservation() {
+    use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+    let mut rt = build(256, 1, 100);
+    // Unit 1 holds a reservation on line 0.
+    rt.reservations_mut()
+        .insert_or_replace(UnitId::new(1), cellgov_sync::ReservedLine::containing(0));
+
+    // Unit 0: plain shared store to line 0.
+    rt.registry_mut().register_with(|id| {
+        FakeIsaUnit::new(
+            id,
+            vec![
+                FakeOp::LoadImm(0x42),
+                FakeOp::SharedStore { addr: 0, len: 4 },
+                FakeOp::End,
+            ],
+        )
+    });
+
+    for _ in 0..5 {
+        match rt.step() {
+            Ok(step) => {
+                let _ = rt.commit_step(&step.result, &step.effects);
+            }
+            Err(_) => break,
+        }
+    }
+    assert!(
+        !rt.reservations().is_held_by(UnitId::new(1)),
+        "plain SharedWriteIntent must clear cross-unit reservations"
+    );
+}
+
+/// ConditionalStore path drives the clear sweep against both the
+/// emitter's own reservation and any overlapping entries. Pins
+/// that a real stwcx / putllc success retires both.
+#[test]
+fn conditional_store_through_runtime_clears_own_and_overlapping() {
+    use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+    let mut rt = build(256, 1, 100);
+    rt.reservations_mut()
+        .insert_or_replace(UnitId::new(0), cellgov_sync::ReservedLine::containing(0));
+    rt.reservations_mut()
+        .insert_or_replace(UnitId::new(1), cellgov_sync::ReservedLine::containing(0));
+
+    // Unit 0 emits a ConditionalStore to line 0. (FakeIsaUnit
+    // lacks a local reservation register; the test exercises the
+    // commit-pipeline retirement path.)
+    rt.registry_mut().register_with(|id| {
+        FakeIsaUnit::new(
+            id,
+            vec![
+                FakeOp::LoadImm(0xAA),
+                FakeOp::ConditionalStore { addr: 0, len: 4 },
+                FakeOp::End,
+            ],
+        )
+    });
+    // Unit 1 does nothing (it only holds a stale reservation we want to see cleared).
+    rt.registry_mut()
+        .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+
+    for _ in 0..5 {
+        match rt.step() {
+            Ok(step) => {
+                let _ = rt.commit_step(&step.result, &step.effects);
+            }
+            Err(_) => break,
+        }
+    }
+    assert!(!rt.reservations().is_held_by(UnitId::new(0)));
+    assert!(!rt.reservations().is_held_by(UnitId::new(1)));
+}
+
+// --- Multi-primitive determinism canary (atomic content) ---
+
+/// Two units drive acquire / store / clear cycles against a
+/// shared line; a third unit independently emits disjoint shared
+/// writes. Running the full scenario twice must produce
+/// byte-identical final memory AND byte-identical final sync-
+/// state hashes. Combines the multi-unit scheduler-determinism
+/// canary with atomic-contention content so a regression on
+/// either axis fails loudly.
+#[test]
+fn multi_primitive_determinism_canary_with_atomic_content() {
+    use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+    fn run_once() -> (u64, u64) {
+        let mut rt = build(256, 4, 500);
+        // Unit 0 / 1: repeated acquire + conditional-store on
+        // line 0.
+        rt.registry_mut().register_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(0x11),
+                    FakeOp::ReservationAcquire { line_addr: 0 },
+                    FakeOp::ConditionalStore { addr: 0, len: 4 },
+                    FakeOp::LoadImm(0x22),
+                    FakeOp::ReservationAcquire { line_addr: 0 },
+                    FakeOp::ConditionalStore { addr: 0, len: 4 },
+                    FakeOp::End,
+                ],
+            )
+        });
+        rt.registry_mut().register_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(0x33),
+                    FakeOp::ReservationAcquire { line_addr: 0 },
+                    FakeOp::ConditionalStore { addr: 0, len: 4 },
+                    FakeOp::End,
+                ],
+            )
+        });
+        // Unit 2: disjoint shared writes (line 0x80).
+        rt.registry_mut().register_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(0x77),
+                    FakeOp::SharedStore { addr: 0x80, len: 4 },
+                    FakeOp::End,
+                ],
+            )
+        });
+
+        for _ in 0..200 {
+            match rt.step() {
+                Ok(step) => {
+                    let _ = rt.commit_step(&step.result, &step.effects);
+                }
+                Err(_) => break,
+            }
+        }
+        (rt.memory().content_hash(), rt.sync_state_hash())
+    }
+
+    let run_a = run_once();
+    let run_b = run_once();
+    assert_eq!(
+        run_a, run_b,
+        "multi-primitive atomic canary must produce byte-identical final (memory, sync) hashes across runs"
+    );
+}

@@ -22,9 +22,15 @@
 //! `SharedWriteIntent` (memory commits), `MailboxSend` (FIFO push),
 //! `MailboxReceiveAttempt` (pop or block), `SignalUpdate` (OR-merge),
 //! `DmaEnqueue` (latency-modeled completion queue), `WakeUnit`
-//! (status override to Runnable), and `WaitOnEvent` (status override
-//! to Blocked). `FaultRaised` and `TraceMarker` are counted but do
-//! not mutate runtime state.
+//! (status override to Runnable), `WaitOnEvent` (status override
+//! to Blocked), `ReservationAcquire` (insert or replace a
+//! per-unit entry in the atomic reservation table), and
+//! `ConditionalStore` (apply the store, drop the emitter's
+//! reservation entry, clear other units' entries covering the
+//! line). Every committed `SharedWriteIntent` also runs the clear
+//! sweep against the reservation table so a cross-unit store
+//! invalidates any conflicting reservations. `FaultRaised` and
+//! `TraceMarker` are counted but do not mutate runtime state.
 
 use crate::registry::UnitRegistry;
 use cellgov_dma::{DmaCompletion, DmaLatencyModel, DmaQueue};
@@ -32,7 +38,9 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus, YieldReason};
 use cellgov_mem::{GuestMemory, MemError, StagedWrite, StagingMemory};
-use cellgov_sync::{MailboxId, MailboxRegistry, SignalId, SignalRegistry};
+use cellgov_sync::{
+    MailboxId, MailboxRegistry, ReservationTable, ReservedLine, SignalId, SignalRegistry,
+};
 use cellgov_time::GuestTicks;
 
 /// Why a commit batch could not be applied.
@@ -128,6 +136,20 @@ pub struct CommitOutcome {
     /// this commit boundary (`completion_time <= now`). The runtime
     /// applies their transfers and wakes their issuers.
     pub dma_completions_fired: usize,
+    /// Number of `ReservationAcquire` effects that installed or
+    /// replaced a reservation entry.
+    pub reservation_acquires_committed: usize,
+    /// Number of `ConditionalStore` effects whose write was applied
+    /// to committed memory. These are always successful stores by
+    /// construction -- the emitting unit decides success before
+    /// emission.
+    pub conditional_stores_committed: usize,
+    /// Number of reservation-table entries dropped by the clear
+    /// sweep during this commit. Counts both entries dropped by
+    /// ordinary `SharedWriteIntent` writes and entries dropped by
+    /// the success side of `ConditionalStore`. Includes the
+    /// emitter's own entry on each `ConditionalStore` commit.
+    pub reservations_cleared: usize,
     /// Number of effects of other variants (fault, trace) that the
     /// pipeline saw and passed through unhandled.
     pub effects_deferred: usize,
@@ -171,6 +193,12 @@ pub struct CommitContext<'a> {
     pub dma_latency: &'a dyn DmaLatencyModel,
     /// Current guest time (used for DMA scheduling).
     pub now: GuestTicks,
+    /// Atomic reservation table. Updated in place by
+    /// `ReservationAcquire` (insert/replace), `ConditionalStore`
+    /// (drop emitter's entry), and by the clear sweep that runs
+    /// after every committed write (drops overlapping entries from
+    /// other units).
+    pub reservations: &'a mut ReservationTable,
 }
 
 /// The commit pipeline.
@@ -198,13 +226,22 @@ impl CommitPipeline {
     ///    `CommitOutcome { fault_discarded: true, .. }`.
     /// 2. Otherwise, walks `result.emitted_effects` in order:
     ///    - `SharedWriteIntent` is validated (length match, in-bounds),
-    ///      staged into a fresh [`StagingMemory`].
+    ///      staged into a fresh [`StagingMemory`]. After the write
+    ///      commits the clear sweep drops any reservation entries
+    ///      whose line overlaps the write.
     ///    - `MailboxSend` pushes onto the target FIFO.
     ///    - `MailboxReceiveAttempt` pops or blocks the source unit.
     ///    - `SignalUpdate` OR-merges into the target register.
     ///    - `DmaEnqueue` schedules a completion via the latency model.
     ///    - `WakeUnit` overrides the target's status to Runnable.
     ///    - `WaitOnEvent` overrides the source's status to Blocked.
+    ///    - `ReservationAcquire` inserts / replaces the source's
+    ///      atomic-reservation entry, canonicalized to a 128-byte
+    ///      line.
+    ///    - `ConditionalStore` applies the write (same validation
+    ///      and staging as `SharedWriteIntent`), drops the emitter's
+    ///      reservation entry, and runs the clear sweep against
+    ///      every other unit's entry covering the line.
     ///    - `FaultRaised` and `TraceMarker` fall through and are
     ///      counted as deferred.
     /// 3. Validation failure aborts the whole batch atomically:
@@ -245,6 +282,9 @@ impl CommitPipeline {
         let mut dma_count = 0usize;
         let mut wakes = 0usize;
         let mut waits = 0usize;
+        let mut reservation_acquires = 0usize;
+        let mut conditional_stores = 0usize;
+        let mut reservations_cleared = 0usize;
         let mut blocked_units = Vec::new();
         let mut woken_units = Vec::new();
         let mut deferred = 0usize;
@@ -315,6 +355,33 @@ impl CommitPipeline {
                 Effect::WaitOnEvent { .. } => {
                     waits += 1;
                 }
+                Effect::ConditionalStore { range, bytes, .. } => {
+                    // Same validation rules as SharedWriteIntent:
+                    // payload length matches range, range lies fully
+                    // within one registered region. A failure here
+                    // aborts the whole batch atomically.
+                    if bytes.len() as u64 != range.length() {
+                        return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
+                    }
+                    let start = range.start().raw();
+                    let length = range.length();
+                    let _end = start
+                        .checked_add(length)
+                        .ok_or(CommitError::OutOfRange { effect_index: idx })?;
+                    if ctx.memory.containing_region(start, length).is_none() {
+                        return Err(CommitError::OutOfRange { effect_index: idx });
+                    }
+                    staging.stage(StagedWrite {
+                        range: *range,
+                        bytes: bytes.bytes().to_vec(),
+                    });
+                    conditional_stores += 1;
+                }
+                Effect::ReservationAcquire { .. } => {
+                    // No pre-validation: the table accepts any unit
+                    // id (registered or not) and any line address.
+                    // The line is canonicalized in the apply pass.
+                }
                 _ => {
                     deferred += 1;
                 }
@@ -379,6 +446,40 @@ impl CommitPipeline {
                     ctx.units.set_status_override(*source, UnitStatus::Blocked);
                     blocked_units.push((*source, BlockReason::WaitOnEvent));
                 }
+                Effect::SharedWriteIntent { range, .. } => {
+                    // Clear sweep: any committed write to a reserved
+                    // line drops every unit's entry covering the
+                    // line. Runs in the apply pass so cross-unit
+                    // invalidation follows the same emission order
+                    // as the write itself.
+                    reservations_cleared += ctx
+                        .reservations
+                        .clear_covering(range.start().raw(), range.length());
+                }
+                Effect::ReservationAcquire { line_addr, source } => {
+                    // Canonicalize to line granule at insert time.
+                    // The unit may have passed the raw EA; the table
+                    // only ever stores line-aligned addresses.
+                    ctx.reservations
+                        .insert_or_replace(*source, ReservedLine::containing(*line_addr));
+                    reservation_acquires += 1;
+                }
+                Effect::ConditionalStore { range, source, .. } => {
+                    // The write has already been drained into memory
+                    // by the staging pass above. Drop the emitter's
+                    // own reservation entry, then run the clear sweep
+                    // against every OTHER unit's entries covering
+                    // the line. Order matters: removing the emitter
+                    // first means its entry is never subject to the
+                    // sweep (avoids double-counting in
+                    // `reservations_cleared`).
+                    if ctx.reservations.remove_if_present(*source).is_some() {
+                        reservations_cleared += 1;
+                    }
+                    reservations_cleared += ctx
+                        .reservations
+                        .clear_covering(range.start().raw(), range.length());
+                }
                 _ => {}
             }
         }
@@ -393,6 +494,9 @@ impl CommitPipeline {
             wakes_committed: wakes,
             waits_committed: waits,
             dma_completions_fired: 0, // set by Runtime::commit_step
+            reservation_acquires_committed: reservation_acquires,
+            conditional_stores_committed: conditional_stores,
+            reservations_cleared,
             effects_deferred: deferred,
             fault_discarded: false,
             blocked_units,

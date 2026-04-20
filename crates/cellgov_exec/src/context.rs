@@ -19,7 +19,9 @@
 //! cannot mutate the underlying memory while the context is alive,
 //! which is exactly the duration of the unit's step.
 
+use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
+use cellgov_sync::ReservationTable;
 
 /// The readonly view of runtime state exposed to an execution unit
 /// during a single `run_until_yield` call.
@@ -52,6 +54,13 @@ pub struct ExecutionContext<'a> {
     /// Empty unless the context was built with
     /// `with_syscall_return_and_regs`.
     register_writes: &'a [(u8, u64)],
+    /// Read-only view of the committed atomic reservation table.
+    /// `None` when the runtime has not installed a table (e.g. in
+    /// microtests or contexts built before the reservation model is
+    /// wired); in that case [`Self::reservation_held`] returns
+    /// `false` for every unit. Set via
+    /// [`Self::with_reservations`].
+    reservations: Option<&'a ReservationTable>,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -64,6 +73,7 @@ impl<'a> ExecutionContext<'a> {
             received: &[],
             syscall_return: None,
             register_writes: &[],
+            reservations: None,
         }
     }
 
@@ -77,6 +87,7 @@ impl<'a> ExecutionContext<'a> {
             received,
             syscall_return: None,
             register_writes: &[],
+            reservations: None,
         }
     }
 
@@ -92,6 +103,7 @@ impl<'a> ExecutionContext<'a> {
             received,
             syscall_return: Some(code),
             register_writes: &[],
+            reservations: None,
         }
     }
 
@@ -110,6 +122,22 @@ impl<'a> ExecutionContext<'a> {
             received,
             syscall_return: Some(code),
             register_writes,
+            reservations: None,
+        }
+    }
+
+    /// Return a copy of this context with the atomic reservation
+    /// table attached. Any prior reservation view is replaced.
+    /// Chainable after any of the other constructors because
+    /// `ExecutionContext` is `Copy`.
+    #[inline]
+    pub const fn with_reservations(self, table: &'a ReservationTable) -> Self {
+        Self {
+            memory: self.memory,
+            received: self.received,
+            syscall_return: self.syscall_return,
+            register_writes: self.register_writes,
+            reservations: Some(table),
         }
     }
 
@@ -118,6 +146,23 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn memory(&self) -> &GuestMemory {
         self.memory
+    }
+
+    /// Whether the committed reservation table currently lists
+    /// `unit` as holding an atomic reservation. Returns `false`
+    /// when no reservation view has been attached to this context
+    /// (`Self::with_reservations` was not called).
+    ///
+    /// The committed-state half of the conditional-store verdict.
+    /// The unit's own local reservation register is the other
+    /// half; a `stwcx` / `putllc` succeeds only when both signals
+    /// say the reservation is held.
+    #[inline]
+    pub fn reservation_held(&self, unit: UnitId) -> bool {
+        match self.reservations {
+            Some(table) => table.is_held_by(unit),
+            None => false,
+        }
     }
 
     /// Messages delivered to this unit by the runtime during the
@@ -151,6 +196,7 @@ impl<'a> ExecutionContext<'a> {
 mod tests {
     use super::*;
     use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+    use cellgov_sync::{ReservationTable, ReservedLine};
 
     fn range(start: u64, length: u64) -> ByteRange {
         ByteRange::new(GuestAddr::new(start), length).unwrap()
@@ -172,5 +218,36 @@ mod tests {
         let copy = ctx;
         // Both still usable; would not compile if Copy were absent.
         assert_eq!(ctx.memory().size(), copy.memory().size());
+    }
+
+    #[test]
+    fn reservation_held_is_false_without_view() {
+        let mem = GuestMemory::new(8);
+        let ctx = ExecutionContext::new(&mem);
+        assert!(!ctx.reservation_held(UnitId::new(0)));
+        assert!(!ctx.reservation_held(UnitId::new(7)));
+    }
+
+    #[test]
+    fn reservation_held_reads_installed_view() {
+        let mem = GuestMemory::new(8);
+        let mut table = ReservationTable::new();
+        table.insert_or_replace(UnitId::new(3), ReservedLine::containing(0x1000));
+        let ctx = ExecutionContext::new(&mem).with_reservations(&table);
+        assert!(ctx.reservation_held(UnitId::new(3)));
+        assert!(!ctx.reservation_held(UnitId::new(4)));
+    }
+
+    #[test]
+    fn with_reservations_preserves_other_fields() {
+        let mem = GuestMemory::new(8);
+        let received = [7u32, 9];
+        let writes: [(u8, u64); 1] = [(13, 0xfeedface)];
+        let ctx = ExecutionContext::with_syscall_return_and_regs(&mem, &received, 42, &writes);
+        let table = ReservationTable::new();
+        let ctx = ctx.with_reservations(&table);
+        assert_eq!(ctx.received_messages(), &[7, 9]);
+        assert_eq!(ctx.syscall_return(), Some(42));
+        assert_eq!(ctx.register_writes(), &[(13, 0xfeedface)]);
     }
 }

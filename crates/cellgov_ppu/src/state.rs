@@ -2,8 +2,11 @@
 //!
 //! Owns the general-purpose register file, floating-point registers
 //! (FPR), vector registers (VR), program counter, condition register,
-//! link register, count register, XER, and the time base. No runtime
-//! knowledge -- this is pure data that `exec.rs` reads and writes.
+//! link register, count register, XER, the time base, and the atomic
+//! reservation register. No runtime knowledge -- this is pure data
+//! that `exec.rs` reads and writes.
+
+use cellgov_sync::ReservedLine;
 
 /// PPU general-purpose register count.
 pub const GPR_COUNT: usize = 32;
@@ -35,6 +38,14 @@ pub struct PpuState {
     pub xer: u64,
     /// Time base counter (monotonically increasing, deterministic).
     pub tb: u64,
+    /// Per-unit atomic reservation register. `Some(line)` when the
+    /// unit has executed an `lwarx` / `ldarx` and no subsequent same-
+    /// unit store to the line has cleared it locally. The committed-
+    /// state half of the conditional-store verdict lives in the
+    /// runtime's [`cellgov_sync::ReservationTable`] and is consulted
+    /// via `ExecutionContext::reservation_held`. A `stwcx` / `stdcx`
+    /// succeeds only when both signals say the reservation is held.
+    pub reservation: Option<ReservedLine>,
 }
 
 impl PpuState {
@@ -50,6 +61,7 @@ impl PpuState {
             ctr: 0,
             xer: 0,
             tb: 0,
+            reservation: None,
         }
     }
 
@@ -123,6 +135,17 @@ impl PpuState {
         h.write(&self.ctr.to_le_bytes());
         h.write(&self.xer.to_le_bytes());
         h.write(&self.cr.to_le_bytes());
+        // Reservation register: one-byte tag + canonical line addr.
+        // Absent reservations fold the tag only; present ones fold
+        // both so two states differing only in reserved line produce
+        // distinct hashes.
+        match self.reservation {
+            None => h.write(&[0u8]),
+            Some(line) => {
+                h.write(&[1u8]);
+                h.write(&line.addr().to_le_bytes());
+            }
+        }
         h.finish()
     }
 }
@@ -284,6 +307,29 @@ mod tests {
         let mut s = base.clone();
         s.vr[0] = u128::MAX;
         assert_eq!(s.state_hash(), baseline, "VR is excluded");
+    }
+
+    #[test]
+    fn state_hash_tracks_reservation_register() {
+        let base = PpuState::new();
+        let baseline = base.state_hash();
+
+        let mut s = base.clone();
+        s.reservation = Some(ReservedLine::containing(0x1000));
+        let h_a = s.state_hash();
+        assert_ne!(h_a, baseline, "setting a reservation must flip the hash");
+
+        // Different reserved line must hash differently again.
+        let mut s = base.clone();
+        s.reservation = Some(ReservedLine::containing(0x2000));
+        let h_b = s.state_hash();
+        assert_ne!(h_a, h_b, "different reserved lines must hash distinctly");
+
+        // Clearing restores the baseline.
+        let mut s = base.clone();
+        s.reservation = Some(ReservedLine::containing(0x1000));
+        s.reservation = None;
+        assert_eq!(s.state_hash(), baseline);
     }
 
     #[test]

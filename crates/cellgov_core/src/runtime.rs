@@ -208,6 +208,7 @@ pub struct Runtime {
     pub(crate) registry: UnitRegistry,
     mailbox_registry: MailboxRegistry,
     signal_registry: SignalRegistry,
+    reservations: cellgov_sync::ReservationTable,
     dma_queue: DmaQueue,
     dma_latency: Box<dyn DmaLatencyModel>,
     lv2_host: Lv2Host,
@@ -290,6 +291,7 @@ impl Runtime {
             registry: UnitRegistry::new(),
             mailbox_registry: MailboxRegistry::new(),
             signal_registry: SignalRegistry::new(),
+            reservations: cellgov_sync::ReservationTable::new(),
             dma_queue: DmaQueue::new(),
             dma_latency: Box::new(FixedLatency::new(10)),
             lv2_host: Lv2Host::new(),
@@ -374,6 +376,7 @@ impl Runtime {
             dma_queue: &mut self.dma_queue,
             dma_latency: self.dma_latency.as_ref(),
             now: self.time,
+            reservations: &mut self.reservations,
         };
         let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
 
@@ -907,6 +910,16 @@ impl Runtime {
 
     /// Pop and apply DMA completions whose modeled time has arrived.
     /// Returns the list of fired completions for trace recording.
+    ///
+    /// Each completion runs the reservation clear-sweep against the
+    /// destination range. DMA is a separate commit path from
+    /// ordinary `SharedWriteIntent`, so the sweep must be invoked
+    /// explicitly here; without it a cross-unit MFC_PUT would
+    /// commit bytes that overlap another unit's reserved line
+    /// without clearing the reservation, leaving a stale entry
+    /// that a later `stwcx` / `putllc` would spuriously read as
+    /// "still held." The `dma_completion_clears_overlapping_
+    /// reservation` regression test pins the invariant.
     fn fire_dma_completions(&mut self) -> Vec<(cellgov_dma::DmaCompletion, Option<Vec<u8>>)> {
         let due = self.dma_queue.pop_due(self.time);
         for (c, payload) in &due {
@@ -918,6 +931,9 @@ impl Runtime {
                 continue;
             };
             let _ = self.memory.apply_commit(c.destination(), &bytes);
+            let dst = c.destination();
+            self.reservations
+                .clear_covering(dst.start().raw(), dst.length());
             self.registry
                 .set_status_override(c.issuer(), UnitStatus::Runnable);
         }
@@ -1179,6 +1195,7 @@ impl Runtime {
             self.signal_registry.state_hash(),
             self.lv2_host.state_hash(),
             self.syscall_responses.state_hash(),
+            self.reservations.state_hash(),
         ] {
             hasher.write(&source.to_le_bytes());
         }
@@ -1206,6 +1223,21 @@ impl Runtime {
     #[inline]
     pub fn memory_mut(&mut self) -> &mut GuestMemory {
         &mut self.memory
+    }
+
+    /// Borrow the committed atomic-reservation table. Primarily
+    /// for tests that assert on reservation-sweep behavior.
+    #[inline]
+    pub fn reservations(&self) -> &cellgov_sync::ReservationTable {
+        &self.reservations
+    }
+
+    /// Mutable borrow of the reservation table. Used by tests
+    /// that need to pre-populate entries before driving a write
+    /// through the commit pipeline.
+    #[inline]
+    pub fn reservations_mut(&mut self) -> &mut cellgov_sync::ReservationTable {
+        &mut self.reservations
     }
 
     /// Consume the runtime and return its guest memory.
@@ -1342,6 +1374,7 @@ impl Runtime {
             } else {
                 ExecutionContext::with_received(&self.memory, &received)
             };
+            let ctx = ctx.with_reservations(&self.reservations);
             let unit = self
                 .registry
                 .get_mut(unit_id)
@@ -1467,6 +1500,8 @@ fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKind {
         Effect::SignalUpdate { .. } => TracedEffectKind::SignalUpdate,
         Effect::FaultRaised { .. } => TracedEffectKind::FaultRaised,
         Effect::TraceMarker { .. } => TracedEffectKind::TraceMarker,
+        Effect::ReservationAcquire { .. } => TracedEffectKind::ReservationAcquire,
+        Effect::ConditionalStore { .. } => TracedEffectKind::ConditionalStore,
     }
 }
 

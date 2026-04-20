@@ -289,7 +289,10 @@ pub enum ManifestError {
         content_id: String,
         first: PathBuf,
         second: PathBuf,
-        /// See [`DuplicateShortName::files_identical`].
+        /// True when the two manifests are byte-identical
+        /// duplicates of each other (benign -- copy/paste case);
+        /// false when they differ and the conflict is a real
+        /// configuration error.
         files_identical: bool,
     },
 }

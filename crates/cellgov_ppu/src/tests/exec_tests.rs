@@ -688,8 +688,11 @@ fn ldarx_loads_from_memory() {
 }
 
 #[test]
-fn stdcx_always_succeeds_in_single_threaded() {
+fn stdcx_with_matching_reservation_emits_conditional_store() {
     let mut s = PpuState::new();
+    // Pre-populate the local reservation on the line we're about
+    // to store to. This simulates a prior `ldarx` at the same line.
+    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1008));
     s.gpr[3] = 0x1000;
     s.gpr[4] = 0x8;
     s.gpr[5] = 0xDEAD_BEEF_CAFE_BABE;
@@ -708,15 +711,260 @@ fn stdcx_always_succeeds_in_single_threaded() {
     assert_eq!(result, ExecuteVerdict::Continue);
     // CR0 EQ must be set to indicate success.
     assert_eq!(s.cr_field(0), 0b0010);
-    // Should have emitted one store effect.
+    // Local reservation is retired.
+    assert!(s.reservation.is_none());
+    // Exactly one ConditionalStore (no SharedWriteIntent).
     assert_eq!(effects.len(), 1);
     match &effects[0] {
-        Effect::SharedWriteIntent { range, bytes, .. } => {
+        Effect::ConditionalStore { range, bytes, .. } => {
             assert_eq!(range.start().raw(), 0x1008);
+            assert_eq!(range.length(), 8);
             assert_eq!(bytes.bytes(), &0xDEAD_BEEF_CAFE_BABEu64.to_be_bytes());
         }
-        other => panic!("expected SharedWriteIntent, got {other:?}"),
+        other => panic!("expected ConditionalStore, got {other:?}"),
     }
+}
+
+#[test]
+fn stdcx_without_reservation_fails_silently() {
+    let mut s = PpuState::new();
+    // No reservation preloaded.
+    s.gpr[3] = 0x1000;
+    s.gpr[4] = 0x8;
+    s.gpr[5] = 0xDEAD_BEEF_CAFE_BABE;
+    let mut effects = Vec::new();
+    exec_with_mem(
+        &PpuInstruction::Stdcx {
+            rs: 5,
+            ra: 3,
+            rb: 4,
+        },
+        &mut s,
+        0,
+        &[0u8; 0x2000],
+        &mut effects,
+    );
+    // CR0 EQ is NOT set (conditional store failed).
+    assert_eq!(s.cr_field(0), 0b0000);
+    // No ConditionalStore emitted, no SharedWriteIntent either.
+    assert!(effects.is_empty());
+}
+
+#[test]
+fn stwcx_with_reservation_on_different_line_fails() {
+    let mut s = PpuState::new();
+    // Reservation held on 0x1000, but we stwcx at 0x1080 (different
+    // 128-byte line).
+    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
+    s.gpr[3] = 0x1000;
+    s.gpr[4] = 0x80;
+    s.gpr[5] = 0xDEAD_BEEF;
+    let mut effects = Vec::new();
+    exec_with_mem(
+        &PpuInstruction::Stwcx {
+            rs: 5,
+            ra: 3,
+            rb: 4,
+        },
+        &mut s,
+        0,
+        &[0u8; 0x2000],
+        &mut effects,
+    );
+    assert_eq!(s.cr_field(0), 0b0000);
+    assert!(effects.is_empty());
+    // Even on failure the local reservation is retired per ABI.
+    assert!(s.reservation.is_none());
+}
+
+#[test]
+fn same_unit_store_to_reserved_line_clears_local_reservation() {
+    // Lwarx at 0x1000 reserves line 0x1000. A plain stw to 0x1040
+    // overlaps the same line and must clear the reservation so a
+    // later stwcx fails.
+    let mut mem = vec![0u8; 0x2000];
+    mem[0x1000..0x1004].copy_from_slice(&0xdeadbeefu32.to_be_bytes());
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x1000;
+    s.gpr[4] = 0x0;
+    let mut effects = Vec::new();
+
+    // 1) lwarx at 0x1000.
+    exec_with_mem(
+        &PpuInstruction::Lwarx {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+        },
+        &mut s,
+        0,
+        &mem,
+        &mut effects,
+    );
+    assert_eq!(s.reservation.map(|l| l.addr()), Some(0x1000));
+
+    // 2) stw at 0x1040 (same line).
+    s.gpr[6] = 0x1040;
+    s.gpr[7] = 0xAAAA_BBBBu64;
+    let mut effects2 = Vec::new();
+    exec_with_mem(
+        &PpuInstruction::Stw {
+            rs: 7,
+            ra: 6,
+            imm: 0,
+        },
+        &mut s,
+        0,
+        &mem,
+        &mut effects2,
+    );
+    assert!(
+        s.reservation.is_none(),
+        "same-unit store to reserved line must drop the local reservation"
+    );
+
+    // 3) stwcx at 0x1000 -- local reservation is gone, must fail.
+    s.gpr[3] = 0x1000;
+    s.gpr[4] = 0x0;
+    s.gpr[5] = 0x5555_6666u64;
+    let mut effects3 = Vec::new();
+    exec_with_mem(
+        &PpuInstruction::Stwcx {
+            rs: 5,
+            ra: 3,
+            rb: 4,
+        },
+        &mut s,
+        0,
+        &[0u8; 0x2000],
+        &mut effects3,
+    );
+    assert_eq!(
+        s.cr_field(0),
+        0b0000,
+        "stwcx must fail after self-invalidation"
+    );
+    assert!(effects3.is_empty());
+}
+
+#[test]
+fn lwarx_sets_local_reservation_and_emits_acquire() {
+    let mut mem = vec![0u8; 0x2000];
+    mem[0x1040..0x1044].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x1000;
+    s.gpr[4] = 0x40;
+    let mut effects = Vec::new();
+    let result = exec_with_mem(
+        &PpuInstruction::Lwarx {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+        },
+        &mut s,
+        0,
+        &mem,
+        &mut effects,
+    );
+    assert_eq!(result, ExecuteVerdict::Continue);
+    assert_eq!(s.gpr[5], 0xDEAD_BEEF);
+    // Local reservation canonicalized to the enclosing 128-byte
+    // line: EA 0x1040 -> line 0x1000.
+    assert_eq!(
+        s.reservation.map(|l| l.addr()),
+        Some(0x1000),
+        "local reservation must be set to the enclosing line"
+    );
+    // Exactly one ReservationAcquire effect at the line address.
+    let acquires: Vec<_> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::ReservationAcquire { line_addr, source } => Some((*line_addr, *source)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(acquires, vec![(0x1000, UnitId::new(0))]);
+}
+
+#[test]
+fn ldarx_sets_local_reservation_and_emits_acquire() {
+    let mem = vec![0u8; 0x2000];
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x1000;
+    s.gpr[4] = 0x8;
+    let mut effects = Vec::new();
+    exec_with_mem(
+        &PpuInstruction::Ldarx {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+        },
+        &mut s,
+        0,
+        &mem,
+        &mut effects,
+    );
+    // EA 0x1008 -> line 0x1000.
+    assert_eq!(s.reservation.map(|l| l.addr()), Some(0x1000));
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::ReservationAcquire {
+            line_addr: 0x1000,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn stwcx_on_matching_line_retires_local_reservation() {
+    // With the reservation preloaded on the same line as the
+    // stwcx target, the verdict succeeds AND the local register
+    // is retired so the next lwarx starts from a clean slate.
+    let mut s = PpuState::new();
+    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
+    s.gpr[3] = 0x1000;
+    s.gpr[4] = 0x0;
+    s.gpr[5] = 0xCAFE_BABE;
+    let mut effects = Vec::new();
+    let result = exec_with_mem(
+        &PpuInstruction::Stwcx {
+            rs: 5,
+            ra: 3,
+            rb: 4,
+        },
+        &mut s,
+        0,
+        &[0u8; 0x2000],
+        &mut effects,
+    );
+    assert_eq!(result, ExecuteVerdict::Continue);
+    assert_eq!(s.cr_field(0), 0b0010);
+    assert!(
+        s.reservation.is_none(),
+        "stwcx must retire the local reservation on success"
+    );
+}
+
+#[test]
+fn stdcx_on_matching_line_retires_local_reservation() {
+    let mut s = PpuState::new();
+    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
+    s.gpr[3] = 0x1000;
+    s.gpr[4] = 0x0;
+    s.gpr[5] = 0xDEAD_BEEF_CAFE_BABE;
+    let mut effects = Vec::new();
+    exec_with_mem(
+        &PpuInstruction::Stdcx {
+            rs: 5,
+            ra: 3,
+            rb: 4,
+        },
+        &mut s,
+        0,
+        &[0u8; 0x2000],
+        &mut effects,
+    );
+    assert!(s.reservation.is_none());
 }
 
 // stfiwx / stfsu / stfdu / mulhw / cntlzd / addze / orc: one
