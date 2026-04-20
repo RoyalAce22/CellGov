@@ -1,0 +1,48 @@
+[test]
+name = "spu_atomic_cross_spu"
+
+# Two SPUs contending on a shared 128-byte line. Each SPU performs
+# INCREMENTS_PER_THREAD getllar / putllc retry increments. Final
+# counter must be exactly 2 * INCREMENTS_PER_THREAD (64 with the
+# default) regardless of scheduler interleaving. Without real
+# reservation contention (always-succeed putllc) both SPUs could
+# "succeed" concurrently and drop updates, producing a final
+# counter less than 64.
+
+[rpcs3]
+binary = "build/spu_atomic_cross_spu.elf"
+decoder = "interpreter"
+timeout_ms = 15000
+
+[observe]
+# 48-byte result: two 16-byte SPU result slots + summary slot.
+memory_regions = [
+  { name = "result", addr = 0, size = 48 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Build + run:
+#   docker run --rm \
+#     -v "$(pwd)/tests/micro/spu_atomic_cross_spu:/src" \
+#     -v "$(pwd)/tests/micro/common:/common" \
+#     -e COMMON=/common ps3dev-fresh:latest bash /src/build.sh
+#
+#   mkdir -p tools/rpcs3/dev_hdd0/game/CG_SPUAT/USRDIR
+#   cp tests/micro/spu_atomic_cross_spu/build/\
+#      spu_atomic_cross_spu.elf \
+#      tools/rpcs3/dev_hdd0/game/CG_SPUAT/USRDIR/EBOOT.elf
+#
+#   cargo run --release -p cellgov_cli -- run-game \
+#     --title-manifest tests/micro/spu_atomic_cross_spu/manifest.toml \
+#     --max-steps 5000000
+
+[cellgov.title]
+content_id = "CG_SPUAT"
+short_name = "spuatomic"
+display_name = "CellGov cross-SPU atomic contention microtest"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"

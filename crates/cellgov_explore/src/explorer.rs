@@ -92,6 +92,113 @@ mod tests {
         assert!(!r.bounds_hit);
     }
 
+    /// Two-unit atomic contention under exploration.
+    ///
+    /// Two units both acquire a reservation on the same line and
+    /// then emit a conditional store. The commit pipeline's
+    /// clear-sweep rule means whichever unit's ConditionalStore
+    /// commits second has its reservation already cleared by the
+    /// first committer's write -- but the FakeIsaUnit harness
+    /// doesn't model a local reservation register, so both
+    /// ConditionalStores commit unconditionally and the final
+    /// counter byte reflects whichever value landed last.
+    ///
+    /// The gate is not a specific final value -- it is that
+    /// exploration enumerates the orderings without crashing and
+    /// classifies outcomes reproducibly across two runs. When both
+    /// units write the same byte value, all orderings collapse to
+    /// one class (stable). When they write different values, the
+    /// engine classifies as ScheduleSensitive. Both shapes prove
+    /// the explorer handles reservation effects without panicking.
+    #[test]
+    fn explore_two_unit_atomic_contention_is_reproducible() {
+        let make = || {
+            let mem = GuestMemory::new(256);
+            let mut rt = Runtime::new(mem, Budget::new(100), 100);
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xAA),
+                        FakeOp::ReservationAcquire { line_addr: 0x80 },
+                        FakeOp::ConditionalStore { addr: 0x80, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xBB),
+                        FakeOp::ReservationAcquire { line_addr: 0x80 },
+                        FakeOp::ConditionalStore { addr: 0x80, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt
+        };
+
+        // First exploration run.
+        let r1 = explore(make, &ExplorationConfig::default())
+            .expect("contention workload must have branching points");
+
+        // Second exploration run from identical initial state.
+        let r2 = explore(make, &ExplorationConfig::default())
+            .expect("contention workload must have branching points");
+
+        // Classification is reproducible across runs.
+        assert_eq!(
+            r1.outcome, r2.outcome,
+            "exploration classification must be stable across runs",
+        );
+        // Different-byte atomic writes produce schedule-sensitive
+        // outcomes; same-byte writes are schedule-stable. Either
+        // classification is valid for the gate; what matters is
+        // the engine enumerated the orderings without crashing
+        // and produced the same verdict twice.
+        assert!(matches!(
+            r1.outcome,
+            OutcomeClass::ScheduleStable | OutcomeClass::ScheduleSensitive
+        ));
+    }
+
+    /// Two-unit contention with matching stored values
+    /// collapses to a single class. Proves the engine does not
+    /// mislabel equivalent final states as schedule-sensitive.
+    #[test]
+    fn explore_two_unit_atomic_same_value_is_stable() {
+        let result = explore(
+            || {
+                let mem = GuestMemory::new(256);
+                let mut rt = Runtime::new(mem, Budget::new(100), 100);
+                for _ in 0..2 {
+                    rt.registry_mut().register_with(|id| {
+                        FakeIsaUnit::new(
+                            id,
+                            vec![
+                                FakeOp::LoadImm(0x42),
+                                FakeOp::ReservationAcquire { line_addr: 0x80 },
+                                FakeOp::ConditionalStore { addr: 0x80, len: 4 },
+                                FakeOp::End,
+                            ],
+                        )
+                    });
+                }
+                rt
+            },
+            &ExplorationConfig::default(),
+        )
+        .expect("contention workload must have branching points");
+
+        assert_eq!(
+            result.outcome,
+            OutcomeClass::ScheduleStable,
+            "matching conditional-store values across both units must collapse to one class",
+        );
+    }
+
     #[test]
     fn explore_overlapping_writes_is_sensitive() {
         let result = explore(

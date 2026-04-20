@@ -481,6 +481,50 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         Box::new(unit)
     });
 
+    // Install an SPU factory so `sys_spu_thread_group_start` can
+    // spawn SPU units from the content store's registered image.
+    // Mirrors the scenarios path so PPU-plus-SPU microtests run
+    // through `run-game`. Args 0..3 are splatted across the SPU's
+    // r3..r6 which is the Cell BE convention (arg0 -> r3, etc.).
+    rt.set_spu_factory(|id, init| {
+        use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
+        let mut unit = SpuExecutionUnit::new(id);
+        spu_loader::load_spu_elf(&init.ls_bytes, unit.state_mut()).unwrap();
+        unit.state_mut().pc = init.entry_pc;
+        unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
+        unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
+        unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
+        unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
+        unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
+        Box::new(unit)
+    });
+
+    // Auto-register any `spu_main.elf` sitting next to the EBOOT so
+    // `sysSpuImageOpen("/app_home/spu_main.elf")` resolves against
+    // it. Matches how scenarios.rs stages SPU ELFs and lets
+    // PPU-plus-SPU microtests (atomic_reservation /
+    // spu_atomic_cross_spu / etc.) run through `run-game` without
+    // needing a separate manifest field.
+    if let Some(parent) = std::path::Path::new(opts.elf_path).parent() {
+        let spu_candidate = parent.join("spu_main.elf");
+        if spu_candidate.exists() {
+            match std::fs::read(&spu_candidate) {
+                Ok(bytes) => {
+                    rt.lv2_host_mut()
+                        .content_store_mut()
+                        .register(b"/app_home/spu_main.elf", bytes);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "run-game: WARN: cannot read {}: {}",
+                        spu_candidate.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+
     PreparedBoot {
         rt,
         hle_bindings,

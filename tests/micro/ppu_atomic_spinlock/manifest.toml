@@ -1,0 +1,63 @@
+[test]
+name = "ppu_atomic_spinlock"
+
+# Structural microtest. Two PPU threads increment a shared counter
+# via lwarx / stwcx retry loops. Proves atomic reservation
+# contention: every successful stwcx is atomic with its lwarx, so
+# the final counter is exactly 2*N regardless of scheduler
+# interleaving. Without real contention (always-succeed stwcx)
+# both threads could "succeed" concurrently and drop updates,
+# producing a final counter less than 2*N.
+
+[rpcs3]
+binary = "build/ppu_atomic_spinlock.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# TestResult: status + counter + parent_retries + child_retries
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Consumed by `cellgov_cli run-game
+# --title-manifest <this file>`. Same schema shape as the
+# per-title files under docs/titles/, but nested under [cellgov]
+# so one file carries both the RPCS3 harness config (above) and
+# the CellGov run-game config (below).
+#
+# Usage:
+#   1. Build the ELF (requires ps3dev-fresh docker image):
+#        docker run --rm \
+#          -v "$(pwd)/tests/micro/ppu_atomic_spinlock:/src" \
+#          -v "$(pwd)/tests/micro/common:/common" \
+#          -e COMMON=/common ps3dev-fresh:latest bash /src/build.sh
+#
+#   2. Stage the ELF under dev_hdd0 at the path resolve_eboot()
+#      expects:
+#        mkdir -p tools/rpcs3/dev_hdd0/game/CG_ATOMIC/USRDIR
+#        cp tests/micro/ppu_atomic_spinlock/build/\
+#           ppu_atomic_spinlock.elf \
+#           tools/rpcs3/dev_hdd0/game/CG_ATOMIC/USRDIR/EBOOT.elf
+#
+#   3. Run:
+#        cargo run --release -p cellgov_cli -- run-game \
+#          --title-manifest tests/micro/ppu_atomic_spinlock/\
+# manifest.toml --max-steps 1000000
+#
+# Expected TTY payload (CGOV magic + 16 bytes):
+#   status=0x00000000 counter=0x00000080 (128 = 2*64)
+#   parent_retries=<nonzero under contention>
+#   child_retries=<nonzero under contention>
+
+[cellgov.title]
+content_id = "CG_ATOMIC"
+short_name = "atomicspin"
+display_name = "CellGov PPU atomic spinlock microtest"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"

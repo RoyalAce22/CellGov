@@ -4,6 +4,7 @@ use cellgov_effects::{FaultKind, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::LocalDiagnostics;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_sync::ReservationTable;
 use cellgov_time::{Budget, GuestTicks};
 
 // cellgov_testkit depends on cellgov_core, so a reverse dev-dependency
@@ -18,6 +19,7 @@ struct CommitTestBed {
     dma_queue: DmaQueue,
     latency: FixedLatency,
     now: GuestTicks,
+    reservations: ReservationTable,
 }
 
 impl CommitTestBed {
@@ -31,6 +33,7 @@ impl CommitTestBed {
             dma_queue: DmaQueue::new(),
             latency: FixedLatency::new(10),
             now: GuestTicks::ZERO,
+            reservations: ReservationTable::new(),
         }
     }
 
@@ -47,6 +50,7 @@ impl CommitTestBed {
             dma_queue: &mut self.dma_queue,
             dma_latency: &self.latency,
             now: self.now,
+            reservations: &mut self.reservations,
         };
         self.pipeline.process(result, effects, &mut ctx)
     }
@@ -734,4 +738,201 @@ fn two_receives_same_mailbox_first_pops_second_blocks() {
     // First receive pops the message, second blocks.
     assert_eq!(outcome.mailbox_receives_committed, 1);
     assert_eq!(outcome.mailbox_receives_blocked, 1);
+}
+
+// Reservation-model helpers + tests.
+
+fn reservation_acquire(line_addr: u64, source: UnitId) -> Effect {
+    Effect::ReservationAcquire { line_addr, source }
+}
+
+fn conditional_store(addr: u64, bytes: Vec<u8>, source: UnitId) -> Effect {
+    Effect::ConditionalStore {
+        range: range(addr, bytes.len() as u64),
+        bytes: WritePayload::new(bytes),
+        ordering: PriorityClass::Normal,
+        source,
+        source_time: GuestTicks::new(0),
+    }
+}
+
+#[test]
+fn reservation_acquire_installs_entry() {
+    let mut bed = CommitTestBed::new(4096);
+    let u = UnitId::new(1);
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![reservation_acquire(0x100, u)],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    assert_eq!(outcome.reservation_acquires_committed, 1);
+    assert!(bed.reservations.is_held_by(u));
+}
+
+#[test]
+fn reservation_acquire_canonicalizes_to_line() {
+    let mut bed = CommitTestBed::new(4096);
+    let u = UnitId::new(2);
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        // Raw EA inside a line; table must store the aligned line.
+        vec![reservation_acquire(0x140, u)],
+    );
+    bed.process(&r, &e).unwrap();
+    assert_eq!(bed.reservations.get(u).unwrap().addr(), 0x100);
+}
+
+#[test]
+fn reservation_acquire_replaces_prior_entry() {
+    let mut bed = CommitTestBed::new(4096);
+    let u = UnitId::new(3);
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![reservation_acquire(0x100, u), reservation_acquire(0x200, u)],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    assert_eq!(outcome.reservation_acquires_committed, 2);
+    assert_eq!(bed.reservations.get(u).unwrap().addr(), 0x200);
+    assert_eq!(bed.reservations.len(), 1);
+}
+
+#[test]
+fn shared_write_clears_reservation_covering_line() {
+    let mut bed = CommitTestBed::new(4096);
+    // Pre-populate the table: unit 1 has a reservation on 0x100.
+    bed.reservations.insert_or_replace(
+        UnitId::new(1),
+        cellgov_sync::ReservedLine::containing(0x100),
+    );
+    // Unit 0 now commits a plain store at 0x140 (same line).
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![write_intent(0x140, vec![0xAA, 0xBB, 0xCC, 0xDD])],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    assert_eq!(outcome.writes_committed, 1);
+    assert_eq!(outcome.reservations_cleared, 1);
+    assert!(!bed.reservations.is_held_by(UnitId::new(1)));
+}
+
+#[test]
+fn shared_write_leaves_non_overlapping_reservation_alone() {
+    let mut bed = CommitTestBed::new(4096);
+    bed.reservations.insert_or_replace(
+        UnitId::new(1),
+        cellgov_sync::ReservedLine::containing(0x200),
+    );
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![write_intent(0x100, vec![0xAA, 0xBB, 0xCC, 0xDD])],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    assert_eq!(outcome.reservations_cleared, 0);
+    assert!(bed.reservations.is_held_by(UnitId::new(1)));
+}
+
+#[test]
+fn conditional_store_applies_bytes_and_retires_own_reservation() {
+    let mut bed = CommitTestBed::new(4096);
+    let u = UnitId::new(5);
+    bed.reservations
+        .insert_or_replace(u, cellgov_sync::ReservedLine::containing(0x100));
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![conditional_store(0x100, vec![1, 2, 3, 4], u)],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    assert_eq!(outcome.conditional_stores_committed, 1);
+    // Emitter's own entry counts as one cleared reservation.
+    assert_eq!(outcome.reservations_cleared, 1);
+    assert!(!bed.reservations.is_held_by(u));
+    // Bytes landed.
+    let read = bed.mem.read(range(0x100, 4)).unwrap();
+    assert_eq!(read, &[1, 2, 3, 4]);
+}
+
+#[test]
+fn conditional_store_also_clears_other_units_reservations_on_same_line() {
+    let mut bed = CommitTestBed::new(4096);
+    let winner = UnitId::new(5);
+    let loser = UnitId::new(6);
+    bed.reservations
+        .insert_or_replace(winner, cellgov_sync::ReservedLine::containing(0x100));
+    bed.reservations
+        .insert_or_replace(loser, cellgov_sync::ReservedLine::containing(0x100));
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![conditional_store(0x140, vec![9; 4], winner)],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    // Winner's own entry + loser's overlapping entry = 2 cleared.
+    assert_eq!(outcome.reservations_cleared, 2);
+    assert!(bed.reservations.is_empty());
+}
+
+#[test]
+fn same_unit_acquire_then_store_drops_reservation_in_emission_order() {
+    // Acquire at effect index 0, write at effect index 1; commit
+    // applies them in order, so the write's clear sweep drops the
+    // entry installed one effect earlier. Matches the ABI rule:
+    // same-unit store to the reserved line drops the reservation.
+    let mut bed = CommitTestBed::new(4096);
+    let u = UnitId::new(7);
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![
+            reservation_acquire(0x100, u),
+            write_intent(0x140, vec![1, 2, 3, 4]),
+        ],
+    );
+    bed.process(&r, &e).unwrap();
+    assert!(!bed.reservations.is_held_by(u));
+}
+
+#[test]
+fn conditional_store_payload_length_mismatch_rejects_batch() {
+    let mut bed = CommitTestBed::new(4096);
+    let u = UnitId::new(8);
+    bed.reservations
+        .insert_or_replace(u, cellgov_sync::ReservedLine::containing(0x100));
+    // Range length 4 but payload is 2 bytes -> validation error.
+    let bad = Effect::ConditionalStore {
+        range: range(0x100, 4),
+        bytes: WritePayload::new(vec![0, 0]),
+        ordering: PriorityClass::Normal,
+        source: u,
+        source_time: GuestTicks::new(0),
+    };
+    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![bad]);
+    let err = bed.process(&r, &e);
+    assert!(matches!(
+        err,
+        Err(CommitError::PayloadLengthMismatch { effect_index: 0 })
+    ));
+    // Reservation still present; batch aborted atomically.
+    assert!(bed.reservations.is_held_by(u));
+}
+
+#[test]
+fn fault_step_discards_reservation_effects() {
+    let mut bed = CommitTestBed::new(4096);
+    let u = UnitId::new(9);
+    let (mut r, e) = step_with(
+        YieldReason::Fault,
+        vec![
+            reservation_acquire(0x100, u),
+            conditional_store(0x200, vec![1, 2, 3, 4], u),
+        ],
+    );
+    r.fault = Some(FaultKind::Validation);
+    let outcome = bed.process(&r, &e).unwrap();
+    assert!(outcome.fault_discarded);
+    // Nothing applied.
+    assert!(bed.reservations.is_empty());
+    assert!(bed
+        .mem
+        .read(range(0x200, 4))
+        .unwrap()
+        .iter()
+        .all(|b| *b == 0));
 }

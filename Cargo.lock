@@ -232,6 +232,7 @@ dependencies = [
  "cellgov_exec",
  "cellgov_mem",
  "cellgov_spu",
+ "cellgov_sync",
  "cellgov_testkit",
  "cellgov_time",
  "criterion",

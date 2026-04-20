@@ -1,8 +1,10 @@
 //! SPU architectural state.
 //!
-//! Owns the register file, local store, program counter, and channel
-//! state. No runtime knowledge -- this is pure data that `exec.rs`
-//! reads and writes.
+//! Owns the register file, local store, program counter, channel
+//! state, and the per-unit atomic reservation register. No runtime
+//! knowledge -- this is pure data that `exec.rs` reads and writes.
+
+use cellgov_sync::ReservedLine;
 
 /// SPU local store size: 256 KB.
 pub const LS_SIZE: usize = 256 * 1024;
@@ -22,6 +24,14 @@ pub struct SpuState {
     pub pc: u32,
     /// MFC/channel state for DMA, mailbox, signal, and tag operations.
     pub channels: ChannelState,
+    /// Per-unit atomic reservation register. `Some(line)` when the
+    /// unit has executed `MFC_GETLLAR` and no subsequent same-unit
+    /// store to the line has cleared it locally. The committed
+    /// half of the conditional-store verdict lives in the runtime's
+    /// [`cellgov_sync::ReservationTable`] and is consulted via
+    /// `ExecutionContext::reservation_held`. `MFC_PUTLLC` succeeds
+    /// only when both signals say the reservation is held.
+    pub reservation: Option<ReservedLine>,
 }
 
 impl SpuState {
@@ -32,6 +42,7 @@ impl SpuState {
             ls: vec![0u8; LS_SIZE],
             pc: 0,
             channels: ChannelState::new(),
+            reservation: None,
         }
     }
 
@@ -150,6 +161,16 @@ mod tests {
         assert_eq!(s.ls.len(), LS_SIZE);
         assert!(s.ls.iter().all(|&b| b == 0));
         assert!(s.regs.iter().all(|r| r.iter().all(|&b| b == 0)));
+        assert!(s.reservation.is_none());
+    }
+
+    #[test]
+    fn reservation_field_is_settable_and_clearable() {
+        let mut s = SpuState::new();
+        s.reservation = Some(ReservedLine::containing(0x4000));
+        assert_eq!(s.reservation.map(|l| l.addr()), Some(0x4000));
+        s.reservation = None;
+        assert!(s.reservation.is_none());
     }
 
     #[test]

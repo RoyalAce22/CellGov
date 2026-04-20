@@ -2,9 +2,10 @@
 //! bench-boot, and bench-boot-once.
 //!
 //! All three commands need to turn CLI flags into a
-//! [`TitleManifest`] plus a guest-VFS root path. This module
-//! encapsulates that lookup layer so the command modules can
-//! depend on a small, well-typed resolver interface.
+//! [`crate::game::manifest::TitleManifest`] plus a guest-VFS root
+//! path. This module encapsulates that lookup layer so the
+//! command modules can depend on a small, well-typed resolver
+//! interface.
 
 use super::args::find_flag_value;
 use super::exit::die;

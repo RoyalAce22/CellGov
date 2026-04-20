@@ -42,6 +42,9 @@ pub struct SpuSnapshot {
     pub pc: u32,
     /// Local store contents.
     pub ls: Vec<u8>,
+    /// Canonical line address of the per-unit atomic reservation,
+    /// or `None` when the unit does not hold a reservation.
+    pub reservation_line: Option<u64>,
 }
 
 /// A Synergistic Processing Unit execution unit.
@@ -124,6 +127,17 @@ impl ExecutionUnit for SpuExecutionUnit {
             }
         }
 
+        // Refresh the per-unit atomic reservation register against
+        // the committed reservation table at step start. A cross-
+        // unit store committed in a previous commit cycle clears
+        // the committed entry; the local register is stale until
+        // we mirror the clear. The ExecutionContext view is frozen
+        // for the duration of this step so this single check is
+        // sufficient.
+        if self.state.reservation.is_some() && !ctx.reservation_held(self.id) {
+            self.state.reservation = None;
+        }
+
         let mut remaining = budget.raw();
         effects.clear();
 
@@ -193,7 +207,12 @@ impl ExecutionUnit for SpuExecutionUnit {
                         syscall_args: None,
                     };
                 }
-                SpuStepOutcome::MemoryRead { ea, lsa, size } => {
+                SpuStepOutcome::MemoryRead {
+                    ea,
+                    lsa,
+                    size,
+                    acquire_line,
+                } => {
                     let src_start = ea as usize;
                     let src_end = src_start + size as usize;
                     let mem = ctx.memory().as_bytes();
@@ -204,6 +223,16 @@ impl ExecutionUnit for SpuExecutionUnit {
                             self.state.ls[dst_start..dst_end]
                                 .copy_from_slice(&mem[src_start..src_end]);
                         }
+                    }
+                    // MFC_GETLLAR-style reads also emit a
+                    // ReservationAcquire effect so the commit
+                    // pipeline installs the unit's entry in the
+                    // reservation table.
+                    if let Some(line_addr) = acquire_line {
+                        effects.push(Effect::ReservationAcquire {
+                            line_addr,
+                            source: self.id,
+                        });
                     }
                     self.state.pc += 4;
                 }
@@ -244,6 +273,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             regs: self.state.regs,
             pc: self.state.pc,
             ls: self.state.ls.clone(),
+            reservation_line: self.state.reservation.map(|l| l.addr()),
         }
     }
 }

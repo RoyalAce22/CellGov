@@ -563,6 +563,75 @@ wait observably unblocks the waiter. For cond the inverse
 holds -- a signal-before-wait must NOT wake a subsequent
 waiter -- tested directly against all three signal variants.
 
+### Atomic reservation model
+
+PPU `lwarx` / `stwcx.` / `ldarx` / `stdcx.` and SPU
+`MFC_GETLLAR` / `MFC_PUTLLC` back a unified reservation model
+that spans both architectures. The granule is 128 bytes (Cell BE
+cache line) on both sides.
+
+**Two pieces of state.** Every execution unit carries a local
+register -- `Option<ReservedLine>` on `PpuState` / `SpuState` --
+set by an atomic load and cleared by a same-unit overlapping
+store or a conditional-store retirement. The committed
+cross-unit view lives in `cellgov_sync::ReservationTable`, a
+`BTreeMap<UnitId, ReservedLine>` owned by the commit pipeline
+and folded into `sync_state_hash` alongside mailboxes, signals,
+LV2 host state, and syscall responses.
+
+**Verdict rule.** `stwcx.` / `stdcx.` / `MFC_PUTLLC` succeed
+when BOTH the local register is set AND its line matches the
+store's line. The committed half of the check happens as a
+step-start refresh: at the top of every `run_until_yield`, if
+the unit's local register is `Some` but
+`ExecutionContext::reservation_held(unit_id)` is false (a
+cross-unit write committed in a previous commit cycle cleared
+the entry), the local register is cleared. During the step
+itself the context is frozen; intra-step verdicts can trust the
+local register alone.
+
+**Effect vocabulary.** Two `Effect` variants drive the table:
+
+- `ReservationAcquire { line_addr, source }` inserts or replaces
+  the unit's entry. Emitted by `lwarx` / `ldarx` (PPU) and
+  `MFC_GETLLAR` (SPU).
+- `ConditionalStore { range, bytes, source, ordering,
+  source_time }` commits the success path of `stwcx.` / `stdcx.`
+  / `MFC_PUTLLC`. The commit pipeline applies the bytes through
+  the normal staging / drain path, drops the emitter's own
+  reservation entry, and runs the clear sweep against all other
+  entries covering the line.
+
+**Clear-sweep contract.** Every committed write runs the clear
+sweep. The sweep fires from three paths:
+
+1. `SharedWriteIntent` commit. Handled in the commit pipeline's
+   apply pass after the staging drain.
+2. `ConditionalStore` commit. Same as (1) via the shared
+   byte-deposit path, plus the emitter's own entry is dropped.
+3. DMA completion. `fire_dma_completions` invokes
+   `clear_covering` on the destination range after applying the
+   transfer. DMA is a separate commit path from SharedWriteIntent
+   so the sweep call is explicit here; without it a cross-unit
+   MFC_PUT would commit bytes that overlap another unit's
+   reserved line without clearing the reservation.
+
+The contract is that every write path that commits bytes to
+main memory must fire the clear sweep. Adding a new write-
+emitting code path in a later phase must include a corresponding
+`clear_covering` call, and the lost-reservation regression suite
+in `cellgov_core::tests::runtime_tests` pins the invariant per
+path.
+
+**Scope and bounds.** The reservation table and local registers
+are the full contention model. Memory-barrier instructions
+(`sync`, `lwsync`, `eieio`, `isync`) are not modelled explicitly;
+the commit pipeline's ordering at epoch boundaries is the
+effective substitute. Schedule exploration over contention
+workloads is conservative: `StepFootprint::reservation_lines`
+marks a step dependent on any other step whose writes cover the
+reserved line.
+
 ## HLE dispatch
 
 NID-based, separate from the syscall surface. `cellgov_ppu::nid_db`

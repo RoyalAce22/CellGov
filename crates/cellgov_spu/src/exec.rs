@@ -13,10 +13,11 @@ use crate::channels;
 use crate::instruction::SpuInstruction;
 use crate::state::SpuState;
 use cellgov_dma::{DmaDirection, DmaRequest};
-use cellgov_effects::Effect;
-use cellgov_event::UnitId;
+use cellgov_effects::{Effect, WritePayload};
+use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_time::GuestTicks;
 
 /// What happened after executing one instruction.
 #[derive(Debug)]
@@ -43,6 +44,11 @@ pub enum SpuStepOutcome {
         lsa: u32,
         /// Number of bytes to read.
         size: u32,
+        /// When `Some(line_addr)`, `run_until_yield` also emits an
+        /// `Effect::ReservationAcquire` for the line after
+        /// fulfilling the read. Set by `MFC_GETLLAR`. `None` for
+        /// regular reads.
+        acquire_line: Option<u64>,
     },
     /// Instruction caused an architecture fault.
     Fault(SpuFault),
@@ -495,6 +501,14 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             let request =
                 DmaRequest::new(DmaDirection::Put, src, dst, unit_id).expect("matching sizes");
             state.channels.tag_status |= 1 << state.channels.mfc_tag_id;
+            // Same-unit self-invalidation: a regular PUT whose
+            // destination overlaps this unit's reserved line drops
+            // the local reservation per ABI.
+            if let Some(line) = state.reservation {
+                if line.overlaps_range(ea, size as u64) {
+                    state.reservation = None;
+                }
+            }
             SpuStepOutcome::Yield {
                 effects: vec![Effect::DmaEnqueue {
                     request,
@@ -513,23 +527,49 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         }
         channels::MFC_GETLLAR => {
             state.channels.atomic_status = 0; // reservation acquired
-            SpuStepOutcome::MemoryRead { ea, lsa, size: 128 }
+            let line = cellgov_sync::ReservedLine::containing(ea);
+            state.reservation = Some(line);
+            SpuStepOutcome::MemoryRead {
+                ea,
+                lsa,
+                size: 128,
+                acquire_line: Some(line.addr()),
+            }
         }
         channels::MFC_PUTLLC => {
-            let lsa_usize = lsa as usize;
-            let ls_bytes = state.ls[lsa_usize..lsa_usize + 128].to_vec();
-
-            let src = ByteRange::new(GuestAddr::new(lsa as u64), 128).expect("valid LS range");
-            let dst = ByteRange::new(GuestAddr::new(ea), 128).expect("valid EA range");
-            let request =
-                DmaRequest::new(DmaDirection::Put, src, dst, unit_id).expect("matching sizes");
-            state.channels.atomic_status = 0; // conditional store succeeded
-            SpuStepOutcome::Yield {
-                effects: vec![Effect::DmaEnqueue {
-                    request,
-                    payload: Some(ls_bytes),
-                }],
-                reason: YieldReason::DmaSubmitted,
+            // Verdict: local reservation held AND its line matches
+            // the PUTLLC's 128-byte line. Same AND rule as PPU
+            // stwcx / stdcx. Cross-unit invalidation is handled at
+            // step start via the context refresh; same-unit self-
+            // invalidation is handled on every MFC_PUT that
+            // overlaps the reserved line.
+            let line = cellgov_sync::ReservedLine::containing(ea);
+            let success = match state.reservation {
+                Some(l) => l.addr() == line.addr(),
+                None => false,
+            };
+            state.reservation = None;
+            if success {
+                let lsa_usize = lsa as usize;
+                let ls_bytes = state.ls[lsa_usize..lsa_usize + 128].to_vec();
+                let range = ByteRange::new(GuestAddr::new(ea), 128).expect("valid EA range");
+                state.channels.atomic_status = 0;
+                SpuStepOutcome::Yield {
+                    effects: vec![Effect::ConditionalStore {
+                        range,
+                        bytes: WritePayload::new(ls_bytes),
+                        ordering: PriorityClass::Normal,
+                        source: unit_id,
+                        source_time: GuestTicks::ZERO,
+                    }],
+                    reason: YieldReason::DmaSubmitted,
+                }
+            } else {
+                // Conditional store failed; no effect emitted.
+                // atomic_status = 1 indicates PUTLLC failure per
+                // Cell BE channel semantics.
+                state.channels.atomic_status = 1;
+                SpuStepOutcome::Continue
             }
         }
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedMfcCommand(cmd)),

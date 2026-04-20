@@ -58,13 +58,21 @@ Pre-Alpha. Capability today:
 - **Synchronization primitives**: lwmutex, heavy mutex, semaphore,
   event queue, event flag, and condition variable -- real block and
   wake, with five per-primitive PSL1GHT microtests.
+- **Atomic reservation contention**: `lwarx` / `stwcx.` (PPU) and
+  `MFC_GETLLAR` / `MFC_PUTLLC` (SPU) back a unified per-unit
+  reservation register against a committed 128-byte-line table.
+  Cross-unit writes -- plain stores, conditional stores, and DMA
+  completions -- clear conflicting entries so a later stwcx /
+  putllc fails rather than spuriously succeeding. Two-PPU and
+  two-SPU microtests plus a cross-architecture PPU-vs-SPU test
+  pin the contention contract.
 - **Memory**: PS3-spec sparse address space, store forwarding.
 - **Throughput**: basic-block batching over a predecoded shadow.
 - **Tracing**: per-instruction state hashes, divergence scanner.
 - **Cross-runner**: normalized observation schema against RPCS3;
   disc ISOs via `cellgov_firmware decrypt-self`.
 - **Firmware**: standalone PUP and retail SELF decrypter.
-- 1,501 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 1,615 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [`docs/architecture.md`](docs/architecture.md) for full
 technical details on the pipeline, memory model, shadow passes,

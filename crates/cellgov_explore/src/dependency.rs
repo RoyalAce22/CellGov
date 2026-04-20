@@ -13,7 +13,7 @@
 
 use cellgov_effects::Effect;
 use cellgov_mem::ByteRange;
-use cellgov_sync::{BarrierId, MailboxId, SignalId};
+use cellgov_sync::{BarrierId, MailboxId, SignalId, RESERVATION_LINE_BYTES};
 
 /// Summary of the shared resources one execution step accessed.
 ///
@@ -39,6 +39,12 @@ pub struct StepFootprint {
     pub wait_barriers: Vec<BarrierId>,
     /// Units explicitly woken.
     pub wake_targets: Vec<cellgov_event::UnitId>,
+    /// 128-byte-aligned line addresses touched by a
+    /// `ReservationAcquire`. Treated as a conflict against any
+    /// shared write that overlaps the line (because a cross-unit
+    /// store to the line would clear the reservation, changing the
+    /// next stwcx / putllc verdict).
+    pub reservation_lines: Vec<u64>,
 }
 
 impl StepFootprint {
@@ -74,6 +80,15 @@ impl StepFootprint {
                 }
                 Effect::SignalUpdate { signal, .. } => {
                     fp.signal_updates.push(*signal);
+                }
+                Effect::ReservationAcquire { line_addr, .. } => {
+                    fp.reservation_lines
+                        .push(*line_addr & !(RESERVATION_LINE_BYTES - 1));
+                }
+                Effect::ConditionalStore { range, .. } => {
+                    // Commits a write and retires a reservation --
+                    // treat as a shared write for dependency purposes.
+                    fp.shared_writes.push(*range);
                 }
                 // Faults discard the step; trace markers are no-ops.
                 Effect::FaultRaised { .. } | Effect::TraceMarker { .. } => {}
@@ -149,6 +164,23 @@ impl StepFootprint {
             return true;
         }
 
+        // Atomic reservation: a write in one step that covers a line
+        // reserved in the other step changes the next conditional
+        // store's verdict, so the steps are dependent.
+        if write_covers_any_line(&self.shared_writes, &other.reservation_lines)
+            || write_covers_any_line(&other.shared_writes, &self.reservation_lines)
+        {
+            return true;
+        }
+
+        // Atomic reservation: two reservations on the same line are
+        // order-sensitive because the first acquire plus the second
+        // acquire's conditional-store ordering produces different
+        // verdicts depending on which ran first.
+        if lines_overlap(&self.reservation_lines, &other.reservation_lines) {
+            return true;
+        }
+
         false
     }
 
@@ -163,6 +195,7 @@ impl StepFootprint {
             && self.wait_signals.is_empty()
             && self.wait_barriers.is_empty()
             && self.wake_targets.is_empty()
+            && self.reservation_lines.is_empty()
     }
 
     /// Merge another footprint into this one, accumulating all accesses.
@@ -177,6 +210,8 @@ impl StepFootprint {
         self.wait_signals.extend_from_slice(&other.wait_signals);
         self.wait_barriers.extend_from_slice(&other.wait_barriers);
         self.wake_targets.extend_from_slice(&other.wake_targets);
+        self.reservation_lines
+            .extend_from_slice(&other.reservation_lines);
     }
 
     fn has_any_wait(&self) -> bool {
@@ -200,6 +235,39 @@ fn ranges_overlap(a: &[ByteRange], b: &[ByteRange]) -> bool {
 
 /// Check if any ID in `a` appears in `b`.
 fn ids_overlap<T: PartialEq>(a: &[T], b: &[T]) -> bool {
+    for x in a {
+        for y in b {
+            if x == y {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Does any write range in `writes` overlap any 128-byte line in
+/// `lines`?
+fn write_covers_any_line(writes: &[ByteRange], lines: &[u64]) -> bool {
+    for w in writes {
+        let w_start = w.start().raw();
+        let w_len = w.length();
+        if w_len == 0 {
+            continue;
+        }
+        let w_end = w_start.saturating_add(w_len - 1);
+        for &line_addr in lines {
+            let line_end = line_addr.saturating_add(RESERVATION_LINE_BYTES - 1);
+            if w_start <= line_end && line_addr <= w_end {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Does any 128-byte line appear in both lists (by canonical
+/// address)?
+fn lines_overlap(a: &[u64], b: &[u64]) -> bool {
     for x in a {
         for y in b {
             if x == y {

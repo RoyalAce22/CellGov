@@ -13,7 +13,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::{ExecutionStepResult, LocalDiagnostics, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
-use cellgov_sync::{MailboxRegistry, SignalRegistry};
+use cellgov_sync::{MailboxRegistry, ReservationTable, SignalRegistry};
 use cellgov_time::{Budget, GuestTicks};
 
 fn make_write_effect(addr: u64, data: &[u8]) -> Effect {
@@ -50,6 +50,7 @@ fn bench_commit_0_effects(c: &mut Criterion) {
         let mut mailboxes = MailboxRegistry::new();
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
+        let mut reservations = ReservationTable::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -59,6 +60,7 @@ fn bench_commit_0_effects(c: &mut Criterion) {
                 dma_queue: &mut dma,
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
+                reservations: &mut reservations,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -79,6 +81,7 @@ fn bench_commit_1_effect(c: &mut Criterion) {
         let mut mailboxes = MailboxRegistry::new();
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
+        let mut reservations = ReservationTable::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -88,6 +91,7 @@ fn bench_commit_1_effect(c: &mut Criterion) {
                 dma_queue: &mut dma,
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
+                reservations: &mut reservations,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -110,6 +114,7 @@ fn bench_commit_10_effects(c: &mut Criterion) {
         let mut mailboxes = MailboxRegistry::new();
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
+        let mut reservations = ReservationTable::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -119,6 +124,7 @@ fn bench_commit_10_effects(c: &mut Criterion) {
                 dma_queue: &mut dma,
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
+                reservations: &mut reservations,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -148,6 +154,7 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
         let mut mailboxes = MailboxRegistry::new();
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
+        let mut reservations = ReservationTable::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -157,6 +164,7 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
                 dma_queue: &mut dma,
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
+                reservations: &mut reservations,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)

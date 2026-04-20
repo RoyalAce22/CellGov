@@ -9,9 +9,14 @@
 //! diagnostics, fault attribution, and trace reconstruction all depend on
 //! stable intra-step ordering.
 //!
-//! The variant set is exactly nine. Do not add
-//! game-specific or instruction-specific variants here; architecture
-//! crates layer their own wrapper effects on top of this set if needed.
+//! The variant set is bounded. Do not add game-specific or
+//! instruction-specific variants here; architecture crates layer
+//! their own wrapper effects on top of this set if needed. The one
+//! exception is for commit-pipeline-level primitives that cut across
+//! architectures (e.g., the atomic reservation variants added
+//! alongside the PPU + SPU reservation model). Those belong in this
+//! set because the commit pipeline itself is the subsystem that
+//! arbitrates them.
 
 use crate::payload::{FaultKind, MailboxMessage, WaitTarget, WritePayload};
 use cellgov_dma::DmaRequest;
@@ -122,6 +127,56 @@ pub enum Effect {
         marker: u32,
         /// The unit emitting the marker.
         source: UnitId,
+    },
+    /// Install an atomic-reservation entry for `source` on the cache
+    /// line containing `line_addr`.
+    ///
+    /// Processed by the commit pipeline as insert-or-replace against
+    /// the reservation table (a second acquire from the same unit
+    /// drops any prior entry, matching PPC / SPU ABI). A subsequent
+    /// committed write whose range overlaps the reserved line clears
+    /// the entry. `line_addr` is canonicalized to a 128-byte-aligned
+    /// line by the pipeline; callers may pass any byte-granular
+    /// address within the intended line.
+    ///
+    /// Emitted by `lwarx` / `ldarx` on PPU and by the `MFC_GETLLAR`
+    /// channel write on SPU.
+    ReservationAcquire {
+        /// Byte address within the line to reserve. The commit
+        /// pipeline masks off the low 7 bits.
+        line_addr: u64,
+        /// The unit installing the reservation.
+        source: UnitId,
+    },
+    /// Commit the success path of a conditional atomic store
+    /// (`stwcx.` / `stdcx.` on PPU, `MFC_PUTLLC` on SPU).
+    ///
+    /// Processed by the commit pipeline as: apply `bytes` to
+    /// `range` via the normal SharedWriteIntent path (including the
+    /// clear sweep that drops every other unit's overlapping
+    /// reservation entries), then drop `source`'s own reservation
+    /// entry from the table.
+    ///
+    /// The effect's presence encodes success; failure is signaled
+    /// by the unit not emitting the effect at all and setting its
+    /// own CR0 EQ / atomic_status bit locally. The unit decides
+    /// success before emission by AND-ing its per-unit reservation
+    /// register with `ExecutionContext::reservation_held(source)`.
+    ConditionalStore {
+        /// Target byte range. Width is `range.length()`; must be
+        /// 4 (stwcx), 8 (stdcx), or 128 (putllc).
+        range: ByteRange,
+        /// Bytes to deposit into `range`. Length must equal
+        /// `range.length()`; enforced at commit validation time.
+        bytes: WritePayload,
+        /// Tier-2 ordering class used by conflict resolution when
+        /// two units write to overlapping ranges in the same epoch.
+        ordering: PriorityClass,
+        /// The unit whose reservation entry is retired by this
+        /// commit.
+        source: UnitId,
+        /// Guest-time stamp at which the store becomes ordered.
+        source_time: GuestTicks,
     },
 }
 
@@ -295,5 +350,95 @@ mod tests {
             source: UnitId::new(0),
         };
         assert_ne!(mb, wake);
+    }
+
+    #[test]
+    fn reservation_acquire_roundtrip() {
+        let a = Effect::ReservationAcquire {
+            line_addr: 0x1040,
+            source: UnitId::new(3),
+        };
+        let b = Effect::ReservationAcquire {
+            line_addr: 0x1040,
+            source: UnitId::new(3),
+        };
+        let c = Effect::ReservationAcquire {
+            line_addr: 0x1080,
+            source: UnitId::new(3),
+        };
+        let d = Effect::ReservationAcquire {
+            line_addr: 0x1040,
+            source: UnitId::new(4),
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+    }
+
+    #[test]
+    fn conditional_store_roundtrip() {
+        let e = Effect::ConditionalStore {
+            range: range(0x1000, 4),
+            bytes: WritePayload::new(vec![0xde, 0xad, 0xbe, 0xef]),
+            ordering: PriorityClass::Normal,
+            source: UnitId::new(2),
+            source_time: GuestTicks::new(100),
+        };
+        let expected = Effect::ConditionalStore {
+            range: range(0x1000, 4),
+            bytes: WritePayload::new(vec![0xde, 0xad, 0xbe, 0xef]),
+            ordering: PriorityClass::Normal,
+            source: UnitId::new(2),
+            source_time: GuestTicks::new(100),
+        };
+        assert_eq!(e, expected);
+        assert_eq!(e.clone(), e);
+    }
+
+    #[test]
+    fn conditional_store_distinguishes_source() {
+        let a = Effect::ConditionalStore {
+            range: range(0x1000, 4),
+            bytes: WritePayload::new(vec![0; 4]),
+            ordering: PriorityClass::Normal,
+            source: UnitId::new(1),
+            source_time: GuestTicks::new(0),
+        };
+        let b = Effect::ConditionalStore {
+            range: range(0x1000, 4),
+            bytes: WritePayload::new(vec![0; 4]),
+            ordering: PriorityClass::Normal,
+            source: UnitId::new(2),
+            source_time: GuestTicks::new(0),
+        };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn reservation_variants_distinct_from_existing() {
+        // A ReservationAcquire at the same address as a
+        // SharedWriteIntent must compare unequal. Protects against an
+        // accidental merge of the two paths at the enum level.
+        let acq = Effect::ReservationAcquire {
+            line_addr: 0x1000,
+            source: UnitId::new(1),
+        };
+        let write = Effect::SharedWriteIntent {
+            range: range(0x1000, 4),
+            bytes: WritePayload::new(vec![0; 4]),
+            ordering: PriorityClass::Normal,
+            source: UnitId::new(1),
+            source_time: GuestTicks::new(0),
+        };
+        let cond = Effect::ConditionalStore {
+            range: range(0x1000, 4),
+            bytes: WritePayload::new(vec![0; 4]),
+            ordering: PriorityClass::Normal,
+            source: UnitId::new(1),
+            source_time: GuestTicks::new(0),
+        };
+        assert_ne!(acq, write);
+        assert_ne!(acq, cond);
+        assert_ne!(write, cond);
     }
 }

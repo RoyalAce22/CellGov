@@ -57,6 +57,9 @@ pub struct PpuSnapshot {
     pub lr: u64,
     /// Count register.
     pub ctr: u64,
+    /// Canonical line address of the per-unit atomic reservation,
+    /// or `None` when the unit does not hold a reservation.
+    pub reservation_line: Option<u64>,
 }
 
 /// A Power Processing Unit execution unit.
@@ -301,6 +304,18 @@ impl ExecutionUnit for PpuExecutionUnit {
         let mut remaining = max_budget;
         effects.clear();
         self.store_buf.clear();
+
+        // Refresh the per-unit atomic reservation register against
+        // the committed reservation table at step start. A cross-
+        // unit store committed in a previous commit cycle clears
+        // the committed entry; the local register is stale until we
+        // mirror that clear. The ExecutionContext view is frozen for
+        // the duration of this step, so this single read is
+        // sufficient -- no cross-unit clear can fire while the step
+        // runs.
+        if self.state.reservation.is_some() && !ctx.reservation_held(self.id) {
+            self.state.reservation = None;
+        }
 
         let snapshot = if max_budget > 1 {
             Some(self.state.clone())
@@ -592,6 +607,7 @@ impl ExecutionUnit for PpuExecutionUnit {
             cr: self.state.cr,
             lr: self.state.lr,
             ctr: self.state.ctr,
+            reservation_line: self.state.reservation.map(|l| l.addr()),
         }
     }
 
