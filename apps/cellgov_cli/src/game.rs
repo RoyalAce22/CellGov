@@ -161,6 +161,19 @@ pub fn run_game(opts: RunGameOptions<'_>) {
 
     println!("outcome: {outcome}");
     println!("steps: {steps}");
+    // HLE heap watermark: peak address the bump allocator reached.
+    // Subtract the base set in boot::prepare (0x10410000 today) to
+    // get cumulative bytes leaked through the leak-on-free policy.
+    // Reported unconditionally so any run becomes a data point for
+    // sizing the arena and deciding when real individual-allocation
+    // release becomes necessary (see `NID_SYS_FREE` TODO in
+    // cellgov_core::hle::sys_prx_for_user).
+    const HLE_HEAP_BASE: u32 = 0x10410000;
+    let watermark = rt.hle_heap_watermark();
+    let used = watermark.saturating_sub(HLE_HEAP_BASE);
+    println!(
+        "hle_heap_watermark: 0x{watermark:08x} ({used} bytes used above base 0x{HLE_HEAP_BASE:08x})"
+    );
     // Report any reads that landed in a provisional RSX/SPU region. A
     // nonzero count surfaces silent zero-reads that would otherwise be
     // invisible at this scale.

@@ -30,7 +30,10 @@ tests/fixtures/NPUA80068_cross_runner/*.dump
 tests/fixtures/BCES00664_cross_runner/*.json
 tests/fixtures/BCES00664_cross_runner/*.dump
 
+# Canonical Sony PS3 libraries extracted from PS3UPDAT.PUP via
+# cellgov_firmware. Not for redistribution.
+ps3_libs/
+
 # AI tooling
 .claude/
-.dspy_state/
 CLAUDE.local.md

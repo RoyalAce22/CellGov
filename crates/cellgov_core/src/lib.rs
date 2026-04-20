@@ -1,3 +1,4 @@
+#![deny(unused_must_use)]
 //! cellgov_core -- top-level runtime orchestration.
 //!
 //! Owns:

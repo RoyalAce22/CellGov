@@ -83,126 +83,40 @@
 
 use crate::commit::{CommitContext, CommitError, CommitOutcome, CommitPipeline};
 use crate::registry::{RegisteredUnit, UnitRegistry};
-use crate::scheduler::{RoundRobinScheduler, Scheduler};
+use crate::scheduler::Scheduler;
 use crate::syscall_table::SyscallResponseTable;
-use cellgov_dma::{DmaLatencyModel, DmaQueue, FixedLatency};
+use cellgov_dma::{DmaLatencyModel, DmaQueue};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionContext, ExecutionStepResult, UnitStatus, YieldReason};
-use cellgov_lv2::{
-    Lv2Dispatch, Lv2Host, Lv2Runtime, PendingResponse, PpuThreadAttrs, PpuThreadInitState,
-    SpuInitState,
-};
+use cellgov_exec::{ExecutionContext, ExecutionStepResult, YieldReason};
+use cellgov_lv2::{Lv2Host, PpuThreadInitState, SpuInitState};
 use cellgov_mem::GuestMemory;
 use cellgov_sync::{MailboxRegistry, SignalRegistry};
 use cellgov_time::{Budget, Epoch, GuestTicks};
-use cellgov_trace::{
-    HashCheckpointKind, StateHash, TraceRecord, TraceWriter, TracedBlockReason, TracedEffectKind,
-    TracedWakeReason, TracedYieldReason,
+use cellgov_trace::{TraceRecord, TraceWriter};
+
+mod commit_trace;
+mod construction;
+mod dma;
+mod lv2_dispatch;
+mod mem_helpers;
+mod ppu_create;
+mod sync_wakes;
+mod trace_bridge;
+mod types;
+pub use types::{
+    default_budget_for_mode, PpuFactory, RuntimeMode, RuntimeStep, SpuFactory, StepError,
 };
 
-/// One pass of the runtime pipeline as observed from outside.
-///
-/// Returned by [`Runtime::step`] on success. Carries the selected
-/// unit, the unit's step result (with emitted effects in stable
-/// order), and the runtime's time/epoch values *after* the step.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeStep {
-    /// Which unit was selected and run.
-    pub unit: UnitId,
-    /// What the unit returned from `run_until_yield`.
-    pub result: ExecutionStepResult,
-    /// Effects emitted during this step, in the order the unit emitted
-    /// them. The runtime never reorders.
-    pub effects: Vec<Effect>,
-    /// Guest time after this step's consumed budget was applied.
-    pub time_after: GuestTicks,
-    /// Epoch after this step. The epoch advances only at commit
-    /// boundaries, which the commit pipeline owns; `step()` does not
-    /// advance the epoch and the value is unchanged from before the
-    /// step.
-    pub epoch_after: Epoch,
-}
-
-/// Why a [`Runtime::step`] call could not produce a step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StepError {
-    /// Registry is empty or every registered unit has
-    /// `UnitStatus::Faulted` / `UnitStatus::Finished`. No future
-    /// transition will wake anything -- this is a terminal stall.
-    /// Call sites typically treat this as "run complete, no more
-    /// work."
-    NoRunnableUnit,
-    /// Registry is non-empty and at least one unit is in
-    /// `UnitStatus::Blocked`, but `count_runnable()` is zero. This
-    /// is a scheduler-side liveness probe, not a semantic
-    /// deadlock proof -- under the current sync surface it
-    /// typically means every unit is parked on a PPU thread
-    /// join chain. Once richer sync primitives land it also
-    /// covers units parked on mutexes, condition variables,
-    /// event queues, or external signals (audio, vblank, RSX
-    /// label) that have not yet arrived. The caller decides
-    /// whether to inject a pending wake, advance time, or treat
-    /// this as a stall.
-    AllBlocked,
-    /// The runtime has already executed `max_steps` steps. Further
-    /// stepping is the deadlock detector firing; the caller must
-    /// abort the run rather than retry.
-    MaxStepsExceeded,
-    /// The runtime tried to advance guest time past `u64::MAX`. This
-    /// is a runtime invariant violation in any realistic scenario;
-    /// surfaced as an error rather than a panic so tests can assert
-    /// on it.
-    TimeOverflow,
-}
+use trace_bridge::{traced_effect_kind, traced_yield_reason};
 
 /// The top-level runtime.
 ///
 /// Composes the registry, scheduler, committed memory, guest time,
 /// and epoch into a single object that drives one step at a time via
 /// [`Runtime::step`]. The scheduler is pluggable via
-/// [`Runtime::set_scheduler`]; defaults to [`RoundRobinScheduler`].
-/// Factory that constructs an SPU execution unit from an init state.
-/// The runtime calls this when `Lv2Dispatch::RegisterSpu` fires.
-/// The factory receives the `UnitId` the registry allocated and the
-/// `SpuInitState` the LV2 host produced; it returns a boxed unit
-/// ready to run.
-pub type SpuFactory = Box<dyn Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit>>;
-
-/// Factory that constructs a child PPU execution unit from an
-/// init state. The CLI installs one at boot via
-/// [`Runtime::set_ppu_factory`]; the runtime invokes it from
-/// [`Lv2Dispatch::PpuThreadCreate`] handling in `commit_step`.
-pub type PpuFactory = Box<dyn Fn(UnitId, PpuThreadInitState) -> Box<dyn RegisteredUnit>>;
-
-/// Controls the runtime's overhead profile: which trace records are
-/// emitted and whether state-hash checkpoints are computed at commit
-/// boundaries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeMode {
-    /// Trace off, hash checkpoints off. Minimal per-step bookkeeping.
-    FaultDriven,
-    /// Trace on (commits + block/wake only), hash checkpoints on.
-    /// For microtest replay and oracle comparison.
-    DeterminismCheck,
-    /// All trace records, all hash checkpoints.
-    /// For exploration and debugging.
-    FullTrace,
-}
-
-/// Default per-step budget for a given mode. `FullTrace` returns 1
-/// because per-step `PpuStateHash` records require single-instruction
-/// yields to attribute hashes to specific PCs; the other modes
-/// return the throughput batch size (256), where basic-block batching
-/// and store forwarding give the foundational ~5x speedup over
-/// Budget=1. Callers may override via [`Runtime::set_budget`].
-pub fn default_budget_for_mode(mode: RuntimeMode) -> Budget {
-    match mode {
-        RuntimeMode::FullTrace => Budget::new(1),
-        RuntimeMode::FaultDriven | RuntimeMode::DeterminismCheck => Budget::new(256),
-    }
-}
-
+/// [`Runtime::set_scheduler`]; defaults to [`crate::RoundRobinScheduler`].
+///
 /// Deterministic step-loop runtime over guest memory and registered units.
 pub struct Runtime {
     pub(crate) registry: UnitRegistry,
@@ -230,17 +144,10 @@ pub struct Runtime {
     /// produced the batch -- there is one commit batch per unit
     /// yield, so this is always the right unit.
     last_scheduled_unit: Option<UnitId>,
-    /// HLE NID table: maps HLE index -> NID for dispatch of HLE calls
-    /// that need non-trivial behavior (e.g., TLS init, mutex create).
-    hle_nids: std::collections::BTreeMap<u32, u32>,
-    /// Bump allocator pointer for _sys_malloc HLE. Points to the next
-    /// free address in guest memory. Allocations are never freed.
-    pub(crate) hle_heap_ptr: u32,
-    /// Monotonic kernel-object ID counter for HLE-created primitives
-    /// (lwmutex sleep_queue, etc.). Starts above zero so a zero-initialized
-    /// guest field is distinguishable from a legitimate allocated ID.
-    pub(crate) hle_next_id: u32,
-    pub(crate) gcm_state: crate::hle::gcm::GcmState,
+    /// HLE-specific bookkeeping bundled off the main struct so
+    /// `Runtime`'s field list reads as orchestration-only state.
+    /// See [`crate::hle::HleState`].
+    pub(crate) hle: crate::hle::HleState,
     /// Reusable effects buffer, taken/returned across steps to avoid
     /// per-step allocation in the common zero-effects case.
     effects_buf: Vec<Effect>,
@@ -265,60 +172,6 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Construct a runtime over the given memory, with the given
-    /// per-step budget grant and the given max-steps cap. The
-    /// scheduler starts at the beginning of the registry; time and
-    /// epoch start at zero; no units are registered.
-    ///
-    /// Use [`Runtime::registry_mut`] to register units before stepping.
-    pub fn new(memory: GuestMemory, budget_per_step: Budget, max_steps: usize) -> Self {
-        Self::with_trace_writer(memory, budget_per_step, max_steps, TraceWriter::new())
-    }
-
-    /// Construct a runtime with a caller-supplied [`TraceWriter`].
-    ///
-    /// Used by tests and the testkit runner to install a writer with a
-    /// specific level filter (for example, commits + hashes only) so the
-    /// high-volume categories can be filtered, exercising that contract
-    /// end-to-end. Behaviorally identical to [`Runtime::new`] otherwise.
-    pub fn with_trace_writer(
-        memory: GuestMemory,
-        budget_per_step: Budget,
-        max_steps: usize,
-        trace: TraceWriter,
-    ) -> Self {
-        Self {
-            registry: UnitRegistry::new(),
-            mailbox_registry: MailboxRegistry::new(),
-            signal_registry: SignalRegistry::new(),
-            reservations: cellgov_sync::ReservationTable::new(),
-            dma_queue: DmaQueue::new(),
-            dma_latency: Box::new(FixedLatency::new(10)),
-            lv2_host: Lv2Host::new(),
-            syscall_responses: SyscallResponseTable::new(),
-            spu_factory: None,
-            ppu_factory: None,
-            scheduler: Box::new(RoundRobinScheduler::new()),
-            commit_pipeline: CommitPipeline::new(),
-            memory,
-            time: GuestTicks::ZERO,
-            epoch: Epoch::ZERO,
-            budget_per_step,
-            steps_taken: 0,
-            max_steps,
-            trace,
-            last_scheduled_unit: None,
-            effects_buf: Vec::new(),
-            hle_nids: std::collections::BTreeMap::new(),
-            hle_heap_ptr: 0,
-            hle_next_id: 0x8000_0001,
-            gcm_state: crate::hle::gcm::GcmState::default(),
-            mode: RuntimeMode::FullTrace,
-            per_step_index: 0,
-            zoom_trace: TraceWriter::new(),
-        }
-    }
-
     /// Drive the commit pipeline for a previously-returned step result.
     ///
     /// Validates, stages, and applies the effects in `result` against
@@ -413,600 +266,13 @@ impl Runtime {
             self.resolve_join_wakes(source);
         }
 
-        // Trace pipeline step 7 (and the validation rejection edge): one
-        // CommitApplied record per commit boundary, carrying the
-        // post-commit epoch. On validation failure, rejection surfaces
-        // as a fault on the originating unit, so
-        // we record fault_discarded = true with zero counts -- the
-        // batch is closed, just empty.
-        //
         // Attribution: there is one commit batch per unit yield, so
         // `source` (defined above) is the unit that produced the batch.
-        // Commit-level trace records fire in DeterminismCheck and
-        // FullTrace modes but not FaultDriven.
-        if self.mode != RuntimeMode::FaultDriven {
-            let record = match &outcome {
-                Ok(o) => TraceRecord::CommitApplied {
-                    unit: source,
-                    writes_committed: o.writes_committed as u32,
-                    effects_deferred: o.effects_deferred as u32,
-                    fault_discarded: o.fault_discarded,
-                    epoch_after: self.epoch,
-                },
-                Err(_) => TraceRecord::CommitApplied {
-                    unit: source,
-                    writes_committed: 0,
-                    effects_deferred: 0,
-                    fault_discarded: true,
-                    epoch_after: self.epoch,
-                },
-            };
-            self.trace.record(&record);
-
-            if let Ok(ref o) = outcome {
-                for &(unit, ref reason) in &o.blocked_units {
-                    let traced_reason = match reason {
-                        crate::commit::BlockReason::MailboxEmpty => TracedBlockReason::MailboxEmpty,
-                        crate::commit::BlockReason::WaitOnEvent => TracedBlockReason::WaitOnEvent,
-                    };
-                    self.trace.record(&TraceRecord::UnitBlocked {
-                        unit,
-                        reason: traced_reason,
-                    });
-                }
-                for &unit in &o.woken_units {
-                    self.trace.record(&TraceRecord::UnitWoken {
-                        unit,
-                        reason: TracedWakeReason::WakeEffect,
-                    });
-                }
-            }
-            for (c, _) in &due {
-                self.trace.record(&TraceRecord::UnitWoken {
-                    unit: c.issuer(),
-                    reason: TracedWakeReason::DmaCompletion,
-                });
-            }
-        }
-
-        // State hash checkpoints. Four kinds:
-        // committed memory, runnable queue, sync state, and unit
-        // status. All four are emitted here, taken AFTER the commit
-        // (including DMA completion firing) so replay tooling sees
-        // post-commit state. Skipped under `RuntimeMode::FaultDriven`
-        // (large guest memories where O(N) hashing per step is
-        // prohibitive).
-        if self.mode != RuntimeMode::FaultDriven {
-            let mem_hash = StateHash::new(self.memory.content_hash());
-            self.trace.record(&TraceRecord::StateHashCheckpoint {
-                kind: HashCheckpointKind::CommittedMemory,
-                hash: mem_hash,
-            });
-            let rq_hash = StateHash::new(self.registry.runnable_queue_hash());
-            self.trace.record(&TraceRecord::StateHashCheckpoint {
-                kind: HashCheckpointKind::RunnableQueue,
-                hash: rq_hash,
-            });
-            let status_hash = StateHash::new(self.registry.status_hash());
-            self.trace.record(&TraceRecord::StateHashCheckpoint {
-                kind: HashCheckpointKind::UnitStatus,
-                hash: status_hash,
-            });
-            let sync_hash = StateHash::new(self.sync_state_hash());
-            self.trace.record(&TraceRecord::StateHashCheckpoint {
-                kind: HashCheckpointKind::SyncState,
-                hash: sync_hash,
-            });
-        }
+        // Commit-level trace records and state-hash checkpoints fire
+        // in DeterminismCheck and FullTrace modes but not FaultDriven.
+        self.emit_commit_trace(source, &outcome, &due);
 
         outcome
-    }
-
-    // ------------------------------------------------------------------
-    // Private helpers extracted from commit_step for SRP.
-    // ------------------------------------------------------------------
-
-    /// Apply effects produced by an LV2 dispatch. Handles
-    /// SharedWriteIntent (memory commit) and MailboxSend (FIFO push
-    /// + blocked-SPU wake) uniformly across all dispatch variants.
-    fn apply_lv2_effects(&mut self, effects: &[cellgov_effects::Effect]) {
-        for effect in effects {
-            match effect {
-                cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. } => {
-                    let _ = self.memory.apply_commit(*range, bytes.bytes());
-                }
-                cellgov_effects::Effect::MailboxSend {
-                    mailbox, message, ..
-                } => {
-                    if let Some(mbox) = self.mailbox_registry.get_mut(*mailbox) {
-                        mbox.send(message.raw());
-                    }
-                    let target = UnitId::new(mailbox.raw());
-                    if self.registry.effective_status(target) == Some(UnitStatus::Blocked) {
-                        self.registry
-                            .set_status_override(target, UnitStatus::Runnable);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Classify a syscall yield, dispatch through the LV2 host, and
-    /// handle the result (immediate return, SPU registration, or block).
-    fn dispatch_syscall(&mut self, result: &ExecutionStepResult, source: UnitId) {
-        let Some(args) = &result.syscall_args else {
-            return;
-        };
-
-        // HLE import stubs use syscall numbers >= 0x10000.
-        if args[0] >= 0x10000 {
-            let hle_index = (args[0] - 0x10000) as u32;
-            let nid = self.hle_nids.get(&hle_index).copied().unwrap_or(0);
-            self.dispatch_hle(source, nid, args);
-            return;
-        }
-
-        let request = cellgov_lv2::request::classify(
-            args[0],
-            &[
-                args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
-            ],
-        );
-        self.dispatch_lv2_request(request, source);
-    }
-
-    /// Route a typed LV2 request through the host and handle the
-    /// resulting dispatch. Exposed to tests that need to exercise
-    /// specific dispatch paths without plumbing a full PPU yield.
-    pub(crate) fn dispatch_lv2_request(
-        &mut self,
-        request: cellgov_lv2::Lv2Request,
-        source: UnitId,
-    ) {
-        let is_process_exit = matches!(request, cellgov_lv2::Lv2Request::ProcessExit { .. });
-        let dispatch = self
-            .lv2_host
-            .dispatch(request, source, &MemoryView(&self.memory));
-        match dispatch {
-            Lv2Dispatch::Immediate { code, effects } => {
-                self.apply_lv2_effects(&effects);
-                if is_process_exit {
-                    let all_ids: Vec<UnitId> = self.registry.ids().collect();
-                    for uid in &all_ids {
-                        self.registry
-                            .set_status_override(*uid, UnitStatus::Finished);
-                        self.lv2_host.notify_spu_finished(*uid);
-                        self.syscall_responses.take(*uid);
-                    }
-                } else {
-                    self.registry.set_syscall_return(source, code);
-                }
-            }
-            Lv2Dispatch::RegisterSpu {
-                inits,
-                effects,
-                code,
-            } => {
-                self.apply_lv2_effects(&effects);
-                if let Some(factory) = &self.spu_factory {
-                    for init in inits {
-                        let gid = init.group_id;
-                        let slot = init.slot;
-                        let uid = self
-                            .registry
-                            .register_dynamic(&|id| factory(id, init.clone()));
-                        self.lv2_host.record_spu(uid, gid, slot);
-                        self.mailbox_registry
-                            .register_at(cellgov_sync::MailboxId::new(uid.raw()));
-                    }
-                }
-                self.registry.set_syscall_return(source, code);
-            }
-            Lv2Dispatch::Block {
-                pending, effects, ..
-            } => {
-                self.apply_lv2_effects(&effects);
-                self.syscall_responses.insert(source, pending);
-                self.registry
-                    .set_status_override(source, UnitStatus::Blocked);
-            }
-            Lv2Dispatch::PpuThreadExit {
-                exit_value,
-                woken_unit_ids,
-                effects,
-            } => {
-                self.apply_lv2_effects(&effects);
-                // The source thread is gone -- terminal state.
-                self.registry
-                    .set_status_override(source, UnitStatus::Finished);
-                // Wake each join waiter. Each is expected to have
-                // a PendingResponse::PpuThreadJoin recorded when
-                // it blocked on sys_ppu_thread_join. Consume the
-                // pending response, write the exit value to its
-                // output pointer, and return CELL_OK via r3.
-                for waiter in woken_unit_ids {
-                    let pending = self.syscall_responses.take(waiter);
-                    if let Some(PendingResponse::PpuThreadJoin { status_out_ptr, .. }) = pending {
-                        if let Some(range) = cellgov_mem::ByteRange::new(
-                            cellgov_mem::GuestAddr::new(status_out_ptr as u64),
-                            8,
-                        ) {
-                            let _ = self.memory.apply_commit(range, &exit_value.to_be_bytes());
-                        }
-                        self.registry.set_syscall_return(waiter, 0);
-                    } else {
-                        // Only sys_ppu_thread_join parks a waiter
-                        // on a PPU-thread exit under the current
-                        // sync surface. If a future primitive
-                        // parks differently this branch wakes
-                        // with the raw exit value in r3 rather
-                        // than writing to an out pointer.
-                        self.registry.set_syscall_return(waiter, exit_value);
-                    }
-                    self.registry
-                        .set_status_override(waiter, UnitStatus::Runnable);
-                }
-            }
-            Lv2Dispatch::PpuThreadCreate { .. } => {
-                self.handle_ppu_thread_create(source, dispatch);
-            }
-            Lv2Dispatch::WakeAndReturn {
-                code,
-                woken_unit_ids,
-                response_updates,
-                effects,
-            } => {
-                self.apply_lv2_effects(&effects);
-                // The release caller returns `code` and stays
-                // runnable.
-                self.registry.set_syscall_return(source, code);
-                // Apply per-waiter pending-response overrides
-                // before resolving wakes. Each override is a
-                // complete replacement -- the release side
-                // (send, set, unlock) supplies everything the
-                // wake needs, including continuation pointers
-                // co-located on the primitive's waiter entry.
-                // No merge rule: if a legitimate `out_ptr == 0`
-                // or `result_ptr == 0` ever arrives from the
-                // guest, it is delivered verbatim.
-                for (waiter, response) in response_updates {
-                    self.syscall_responses.insert(waiter, response);
-                }
-                // Each wake target pulls its pending response and
-                // transitions from Blocked back to Runnable.
-                self.resolve_sync_wakes(&woken_unit_ids);
-            }
-            Lv2Dispatch::BlockAndWake {
-                pending,
-                woken_unit_ids,
-                response_updates,
-                effects,
-                ..
-            } => {
-                self.apply_lv2_effects(&effects);
-                for (waiter, response) in response_updates {
-                    self.syscall_responses.insert(waiter, response);
-                }
-                self.resolve_sync_wakes(&woken_unit_ids);
-                // Park the source: install pending response and
-                // transition Runnable -> Blocked. No r3 is set
-                // here; the eventual wake that resolves `pending`
-                // writes r3 then.
-                self.syscall_responses.insert(source, pending);
-                self.registry
-                    .set_status_override(source, UnitStatus::Blocked);
-            }
-        }
-    }
-
-    /// Apply the pending-response wake protocol for a set of units
-    /// parked on a synchronization primitive (lwmutex, mutex,
-    /// semaphore, event queue, or cond).
-    ///
-    /// For each unit the runtime:
-    ///   * Takes its `PendingResponse` from `syscall_responses`.
-    ///   * Resolves the response variant:
-    ///       - `ReturnCode { code }`: set r3 = code.
-    ///       - `EventQueueReceive { out_ptr, source, data1..3 }`:
-    ///         write the 32-byte payload via a `SharedWriteIntent`
-    ///         commit and set r3 = 0.
-    ///       - `CondWakeReacquire { .. }`: handled by a later
-    ///         phase; the current implementation wakes with r3 = 0
-    ///         and does not re-park on a mutex.
-    ///       - Other variants: defensive fallback -- set r3 = 0.
-    ///   * Transitions the unit from `Blocked` to `Runnable`.
-    fn resolve_sync_wakes(&mut self, woken_unit_ids: &[UnitId]) {
-        for waiter in woken_unit_ids {
-            let waiter = *waiter;
-            let pending = self.syscall_responses.take(waiter);
-            match pending {
-                Some(PendingResponse::ReturnCode { code }) => {
-                    self.registry.set_syscall_return(waiter, code);
-                }
-                Some(PendingResponse::EventQueueReceive {
-                    out_ptr,
-                    source: ev_source,
-                    data1,
-                    data2,
-                    data3,
-                }) => {
-                    let mut buf = [0u8; 32];
-                    buf[0..8].copy_from_slice(&ev_source.to_be_bytes());
-                    buf[8..16].copy_from_slice(&data1.to_be_bytes());
-                    buf[16..24].copy_from_slice(&data2.to_be_bytes());
-                    buf[24..32].copy_from_slice(&data3.to_be_bytes());
-                    if let Some(range) =
-                        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(out_ptr as u64), 32)
-                    {
-                        let _ = self.memory.apply_commit(range, &buf);
-                    }
-                    self.registry.set_syscall_return(waiter, 0);
-                }
-                Some(PendingResponse::EventFlagWake {
-                    result_ptr,
-                    observed,
-                }) => {
-                    if let Some(range) = cellgov_mem::ByteRange::new(
-                        cellgov_mem::GuestAddr::new(result_ptr as u64),
-                        8,
-                    ) {
-                        let _ = self.memory.apply_commit(range, &observed.to_be_bytes());
-                    }
-                    self.registry.set_syscall_return(waiter, 0);
-                }
-                Some(PendingResponse::CondWakeReacquire { .. }) => {
-                    // The full re-acquire path lands with the
-                    // cond primitive. For now treat the wake as a
-                    // plain CELL_OK wake.
-                    self.registry.set_syscall_return(waiter, 0);
-                }
-                Some(_) | None => {
-                    // Defensive: an ill-formed pending or an absent
-                    // entry still transitions the waiter back to
-                    // runnable so it is not stranded.
-                    self.registry.set_syscall_return(waiter, 0);
-                }
-            }
-            self.registry
-                .set_status_override(waiter, UnitStatus::Runnable);
-        }
-    }
-
-    fn handle_ppu_thread_create(&mut self, source: UnitId, dispatch: Lv2Dispatch) {
-        let (
-            id_ptr,
-            entry_opd,
-            stack_top,
-            stack_base,
-            stack_size,
-            arg,
-            tls_base,
-            tls_bytes,
-            priority,
-        ) = match dispatch {
-            Lv2Dispatch::PpuThreadCreate {
-                id_ptr,
-                entry_opd,
-                stack_top,
-                stack_base,
-                stack_size,
-                arg,
-                tls_base,
-                tls_bytes,
-                priority,
-                effects,
-            } => {
-                self.apply_lv2_effects(&effects);
-                (
-                    id_ptr, entry_opd, stack_top, stack_base, stack_size, arg, tls_base, tls_bytes,
-                    priority,
-                )
-            }
-            other => unreachable!("handle_ppu_thread_create called with {other:?}"),
-        };
-        // Resolve the OPD: entry_code is the first 8 bytes of the
-        // OPD, TOC is the next 8. Big-endian.
-        let opd_bytes =
-            match cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(entry_opd as u64), 16)
-                .and_then(|r| self.memory.read(r))
-            {
-                Some(b) if b.len() == 16 => {
-                    let mut arr = [0u8; 16];
-                    arr.copy_from_slice(b);
-                    arr
-                }
-                _ => {
-                    // Bad OPD address; return CELL_EFAULT (0x8001000e)
-                    // to the caller and do not spawn a thread.
-                    self.registry.set_syscall_return(source, 0x8001_000e);
-                    return;
-                }
-            };
-        let entry_code = u64::from_be_bytes([
-            opd_bytes[0],
-            opd_bytes[1],
-            opd_bytes[2],
-            opd_bytes[3],
-            opd_bytes[4],
-            opd_bytes[5],
-            opd_bytes[6],
-            opd_bytes[7],
-        ]);
-        let entry_toc = u64::from_be_bytes([
-            opd_bytes[8],
-            opd_bytes[9],
-            opd_bytes[10],
-            opd_bytes[11],
-            opd_bytes[12],
-            opd_bytes[13],
-            opd_bytes[14],
-            opd_bytes[15],
-        ]);
-
-        // Register the child unit via the PPU factory. Without a
-        // factory we cannot construct a concrete PpuExecutionUnit
-        // here (cellgov_core does not depend on cellgov_ppu), so
-        // thread creation fails cleanly with ENOSYS.
-        let Some(factory) = self.ppu_factory.as_ref() else {
-            self.registry.set_syscall_return(source, 0x8001_0028);
-            return;
-        };
-        let init = PpuThreadInitState {
-            entry_code,
-            entry_toc,
-            arg,
-            stack_top,
-            tls_base,
-            // LR sentinel: zero for now. When the child's entry
-            // function returns, execution jumps to PC=0; the
-            // interpreter faults cleanly and the unit ends.
-            // Well-behaved guest code calls sys_ppu_thread_exit
-            // explicitly and never reaches the sentinel.
-            lr_sentinel: 0,
-        };
-        let child_unit_id = self
-            .registry
-            .register_dynamic(&|id| factory(id, init.clone()));
-
-        // Commit TLS bytes into guest memory at tls_base.
-        if !tls_bytes.is_empty() && tls_base != 0 {
-            if let Some(range) = cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new(tls_base),
-                tls_bytes.len() as u64,
-            ) {
-                let _ = self.memory.apply_commit(range, &tls_bytes);
-            }
-        }
-
-        // Register the child in the PPU thread table. Fails only
-        // on u64 id exhaustion, which cannot happen here.
-        let attrs = PpuThreadAttrs {
-            entry: entry_opd as u64,
-            arg,
-            stack_base: stack_base as u32,
-            stack_size: stack_size as u32,
-            priority,
-            tls_base: tls_base as u32,
-        };
-        let Some(thread_id) = self.lv2_host.ppu_threads_mut().create(child_unit_id, attrs) else {
-            self.registry.set_syscall_return(source, 0x8001_0004);
-            return;
-        };
-
-        // Write the minted thread id into the caller's output
-        // pointer as a big-endian u64.
-        if let Some(range) =
-            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(id_ptr as u64), 8)
-        {
-            let _ = self
-                .memory
-                .apply_commit(range, &thread_id.raw().to_be_bytes());
-        }
-
-        // Return CELL_OK to the caller.
-        self.registry.set_syscall_return(source, 0);
-    }
-
-    /// Pop and apply DMA completions whose modeled time has arrived.
-    /// Returns the list of fired completions for trace recording.
-    ///
-    /// Each completion runs the reservation clear-sweep against the
-    /// destination range. DMA is a separate commit path from
-    /// ordinary `SharedWriteIntent`, so the sweep must be invoked
-    /// explicitly here; without it a cross-unit MFC_PUT would
-    /// commit bytes that overlap another unit's reserved line
-    /// without clearing the reservation, leaving a stale entry
-    /// that a later `stwcx` / `putllc` would spuriously read as
-    /// "still held." The `dma_completion_clears_overlapping_
-    /// reservation` regression test pins the invariant.
-    fn fire_dma_completions(&mut self) -> Vec<(cellgov_dma::DmaCompletion, Option<Vec<u8>>)> {
-        let due = self.dma_queue.pop_due(self.time);
-        for (c, payload) in &due {
-            let bytes = if let Some(data) = payload {
-                data.clone()
-            } else if let Some(src) = self.memory.read(c.source()) {
-                src.to_vec()
-            } else {
-                continue;
-            };
-            let _ = self.memory.apply_commit(c.destination(), &bytes);
-            let dst = c.destination();
-            self.reservations
-                .clear_covering(dst.start().raw(), dst.length());
-            self.registry
-                .set_status_override(c.issuer(), UnitStatus::Runnable);
-        }
-        due
-    }
-
-    /// When an SPU finishes, notify the LV2 host. If the group is
-    /// fully finished, find and wake the PPU blocked on that group's
-    /// join with its pending response.
-    fn resolve_join_wakes(&mut self, source: UnitId) {
-        let Some(finished_group) = self.lv2_host.notify_spu_finished(source) else {
-            return;
-        };
-        let waiters: Vec<UnitId> = self.syscall_responses.pending_ids().collect();
-        for waiter_id in waiters {
-            let is_match = self
-                .syscall_responses
-                .peek(waiter_id)
-                .map(|p| {
-                    matches!(p, PendingResponse::ThreadGroupJoin { group_id, .. } if *group_id == finished_group)
-                })
-                .unwrap_or(false);
-            if !is_match {
-                continue;
-            }
-            if let Some(pending) = self.syscall_responses.take(waiter_id) {
-                match &pending {
-                    PendingResponse::ThreadGroupJoin {
-                        code,
-                        cause_ptr,
-                        status_ptr,
-                        cause,
-                        status,
-                        ..
-                    } => {
-                        self.registry.set_syscall_return(waiter_id, *code);
-                        self.registry
-                            .set_status_override(waiter_id, UnitStatus::Runnable);
-                        if let Some(range) = cellgov_mem::ByteRange::new(
-                            cellgov_mem::GuestAddr::new(*cause_ptr as u64),
-                            4,
-                        ) {
-                            let _ = self.memory.apply_commit(range, &cause.to_be_bytes());
-                        }
-                        if let Some(range) = cellgov_mem::ByteRange::new(
-                            cellgov_mem::GuestAddr::new(*status_ptr as u64),
-                            4,
-                        ) {
-                            let _ = self.memory.apply_commit(range, &status.to_be_bytes());
-                        }
-                    }
-                    PendingResponse::ReturnCode { code } => {
-                        self.registry.set_syscall_return(waiter_id, *code);
-                        self.registry
-                            .set_status_override(waiter_id, UnitStatus::Runnable);
-                    }
-                    PendingResponse::PpuThreadJoin { .. }
-                    | PendingResponse::EventQueueReceive { .. }
-                    | PendingResponse::CondWakeReacquire { .. }
-                    | PendingResponse::EventFlagWake { .. } => {
-                        // SPU thread-group wake path should not
-                        // reach a PPU-thread-join / event-queue /
-                        // cond-wake waiter. The phase that wires
-                        // each of those primitives installs its
-                        // own wake path; recover defensively here
-                        // by setting the waiter runnable without
-                        // writing to the out pointer.
-                        self.registry
-                            .set_status_override(waiter_id, UnitStatus::Runnable);
-                    }
-                }
-            }
-        }
     }
 
     /// Borrow the binary trace buffer accumulated so far.
@@ -1021,7 +287,7 @@ impl Runtime {
         &self.trace
     }
 
-    /// Borrow the 9G zoom-in trace writer. Empty unless a unit had a
+    /// Borrow the zoom-in trace writer. Empty unless a unit had a
     /// zoom-in window configured during one of the runs that fed
     /// `step()`. Kept distinct from `trace()` so the per-step stream
     /// stays homogeneous.
@@ -1140,12 +406,62 @@ impl Runtime {
     /// Register HLE NID mappings for dispatch. Maps HLE index -> NID
     /// so the runtime can dispatch specific HLE functions (TLS init, etc.).
     pub fn set_hle_nids(&mut self, nids: std::collections::BTreeMap<u32, u32>) {
-        self.hle_nids = nids;
+        self.hle.nids = nids;
     }
 
     /// Set the base address for the HLE bump allocator (_sys_malloc).
+    /// Also records the base in [`HleState`] so the watermark band
+    /// check in `heap_alloc` computes "bytes handed out" against the
+    /// correct origin, and resets the band-warning bitmask so a
+    /// reconfigured run starts with a clean slate.
     pub fn set_hle_heap_base(&mut self, base: u32) {
-        self.hle_heap_ptr = base;
+        assert_ne!(
+            base, 0,
+            "set_hle_heap_base: heap_base = 0 would let heap_alloc hand out address 0, \
+             which the dispatch witnesses in hle::cell_gcm_sys rely on being impossible"
+        );
+        self.hle.heap_base = base;
+        self.hle.heap_ptr = base;
+        self.hle.heap_watermark = base;
+        self.hle.heap_warning_mask = 0;
+    }
+
+    /// Peak address the HLE bump allocator has ever reached. Subtract
+    /// the heap base (the value most recently passed to
+    /// [`Runtime::set_hle_heap_base`]) to get cumulative bytes
+    /// allocated across the scenario. Diagnostic for sizing the
+    /// HLE arena and deciding whether the bump-on-free policy
+    /// needs to become a real free-list allocator. See the TODO
+    /// on `NID_SYS_FREE` in `hle::sys_prx_for_user` for the design sketch.
+    #[inline]
+    pub fn hle_heap_watermark(&self) -> u32 {
+        self.hle.heap_watermark
+    }
+
+    /// Map of NIDs the dispatcher has seen that no HLE module
+    /// claimed, with per-NID call counts. Populated by
+    /// [`Runtime::dispatch_hle`]. Empty after a run means every
+    /// imported library function was at least recognized; a
+    /// non-empty map is a punch list of unimplemented PS3
+    /// library entries the scenario actually touched.
+    #[inline]
+    pub fn hle_unclaimed_nids(&self) -> &std::collections::BTreeMap<u32, usize> {
+        &self.hle.unclaimed_nids
+    }
+
+    /// Map of NIDs whose handlers ran but produced no observable
+    /// mutation (no set_return, set_register, write_guest,
+    /// set_unit_finished, heap_alloc, or alloc_id call) before the
+    /// adapter dropped. Populated from the Drop impl of
+    /// `RuntimeHleAdapter`. Same shape as
+    /// [`Self::hle_unclaimed_nids`] but different population:
+    /// these NIDs were *routed into a handler* that did nothing
+    /// observable, which leaks stale register state through to the
+    /// guest. A non-empty map in a production run is a
+    /// silent-divergence punch list.
+    #[inline]
+    pub fn hle_handlers_without_mutation(&self) -> &std::collections::BTreeMap<u32, usize> {
+        &self.hle.handlers_without_mutation
     }
 
     /// Set the runtime mode controlling trace and hash checkpoint
@@ -1213,7 +529,7 @@ impl Runtime {
     /// triggers a ReservedWrite commit error, which the CLI translates
     /// to the FirstRsxWrite checkpoint.
     pub fn set_gcm_rsx_checkpoint(&mut self, enabled: bool) {
-        self.gcm_state.rsx_checkpoint = enabled;
+        self.hle.gcm.rsx_checkpoint = enabled;
     }
 
     /// Mutable borrow of committed guest memory. Used by test
@@ -1273,24 +589,6 @@ impl Runtime {
     #[inline]
     pub fn max_steps(&self) -> usize {
         self.max_steps
-    }
-
-    /// Drain all pending DMA completions regardless of their scheduled
-    /// time, applying each transfer to committed memory. Used at
-    /// scenario termination to ensure all in-flight transfers become
-    /// visible in the final memory snapshot.
-    pub fn drain_pending_dma(&mut self) {
-        let due = self.dma_queue.pop_due(GuestTicks::new(u64::MAX));
-        for (c, payload) in &due {
-            let bytes = if let Some(data) = payload {
-                data.clone()
-            } else if let Some(src) = self.memory.read(c.source()) {
-                src.to_vec()
-            } else {
-                continue;
-            };
-            let _ = self.memory.apply_commit(c.destination(), &bytes);
-        }
     }
 
     /// Drive one pipeline pass: select a unit, grant budget, run it,
@@ -1478,69 +776,6 @@ impl Runtime {
             time_after,
             epoch_after: self.epoch,
         })
-    }
-}
-
-/// Map an `Effect` onto its `TracedEffectKind` twin.
-///
-/// Same DAG situation as `traced_yield_reason`: `cellgov_trace` sits
-/// below `cellgov_effects` in the workspace and cannot import the
-/// source enum, so the bridge is an exhaustive match. Adding a new
-/// `Effect` variant breaks compilation here and forces the trace
-/// contract to update at the same time.
-fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKind {
-    use cellgov_effects::Effect;
-    match e {
-        Effect::SharedWriteIntent { .. } => TracedEffectKind::SharedWriteIntent,
-        Effect::MailboxSend { .. } => TracedEffectKind::MailboxSend,
-        Effect::MailboxReceiveAttempt { .. } => TracedEffectKind::MailboxReceiveAttempt,
-        Effect::DmaEnqueue { .. } => TracedEffectKind::DmaEnqueue,
-        Effect::WaitOnEvent { .. } => TracedEffectKind::WaitOnEvent,
-        Effect::WakeUnit { .. } => TracedEffectKind::WakeUnit,
-        Effect::SignalUpdate { .. } => TracedEffectKind::SignalUpdate,
-        Effect::FaultRaised { .. } => TracedEffectKind::FaultRaised,
-        Effect::TraceMarker { .. } => TracedEffectKind::TraceMarker,
-        Effect::ReservationAcquire { .. } => TracedEffectKind::ReservationAcquire,
-        Effect::ConditionalStore { .. } => TracedEffectKind::ConditionalStore,
-    }
-}
-
-/// Map a runtime [`YieldReason`] onto its [`TracedYieldReason`] twin.
-///
-/// The two enums live in different crates (`cellgov_exec` and
-/// `cellgov_trace`) because the trace crate sits below `cellgov_exec`
-/// in the workspace DAG and cannot depend on it. Their discriminants
-/// match one-for-one, but Rust does not let us cast between
-/// distinct enum types directly, so we route through this exhaustive
-/// match. Exhaustiveness is what ties the two enums together: if a new
-/// `YieldReason` variant is ever added, this match stops compiling and
-/// forces the trace contract to be updated alongside it.
-fn traced_yield_reason(y: YieldReason) -> TracedYieldReason {
-    match y {
-        YieldReason::BudgetExhausted => TracedYieldReason::BudgetExhausted,
-        YieldReason::MailboxAccess => TracedYieldReason::MailboxAccess,
-        YieldReason::DmaSubmitted => TracedYieldReason::DmaSubmitted,
-        YieldReason::DmaWait => TracedYieldReason::DmaWait,
-        YieldReason::WaitingSync => TracedYieldReason::WaitingSync,
-        YieldReason::Syscall => TracedYieldReason::Syscall,
-        YieldReason::InterruptBoundary => TracedYieldReason::InterruptBoundary,
-        YieldReason::Fault => TracedYieldReason::Fault,
-        YieldReason::Finished => TracedYieldReason::Finished,
-    }
-}
-
-struct MemoryView<'a>(&'a GuestMemory);
-
-impl Lv2Runtime for MemoryView<'_> {
-    fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
-        let bytes = self.0.as_bytes();
-        let start = addr as usize;
-        let end = start.checked_add(len)?;
-        if end <= bytes.len() {
-            Some(&bytes[start..end])
-        } else {
-            None
-        }
     }
 }
 
