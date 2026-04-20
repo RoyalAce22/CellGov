@@ -91,6 +91,36 @@ pub enum CommitError {
         /// The unregistered unit.
         target: UnitId,
     },
+    /// A source-side effect (`MailboxReceiveAttempt`, `WaitOnEvent`,
+    /// `ReservationAcquire`, or `ConditionalStore`) referenced a
+    /// `UnitId` that is not registered. Rejecting these up front
+    /// prevents ghost entries from polluting the reservation table
+    /// and stops message/status deliveries from silently no-oping
+    /// against an invalid id. Aborts the entire batch atomically.
+    UnknownSourceUnit {
+        /// Position of the offending effect in `emitted_effects`.
+        effect_index: usize,
+        /// The unregistered unit.
+        source: UnitId,
+    },
+    /// A `DmaEnqueue` targeted a destination range that is not
+    /// entirely contained within a single registered memory region
+    /// (or whose end address overflows `u64`). Rejecting at enqueue
+    /// time surfaces the bad-target at the offending unit's step
+    /// rather than later when the completion fires and
+    /// `apply_commit` rejects the destination far from the
+    /// originating context.
+    ///
+    /// Only the destination is validated. Source ranges may
+    /// legitimately reference SPU local stores, staging buffers,
+    /// or other non-guest-memory regions that the completion
+    /// handler resolves by path (payload override, MFC channel,
+    /// etc.); pre-validating source against the guest-memory
+    /// region map would reject those legitimate flows.
+    DmaDestinationOutOfRange {
+        /// Position of the offending effect in `emitted_effects`.
+        effect_index: usize,
+    },
     /// The underlying memory layer rejected the drain. Reachable when
     /// a staged write lands in a region whose permissions reject
     /// writes, or when pre-validation and drain disagree about
@@ -137,18 +167,50 @@ pub struct CommitOutcome {
     /// applies their transfers and wakes their issuers.
     pub dma_completions_fired: usize,
     /// Number of `ReservationAcquire` effects that installed or
-    /// replaced a reservation entry.
+    /// replaced a reservation entry. Counts attempts that
+    /// succeeded at the table level, not net-new entries: a
+    /// second acquire on the same unit (whether the raw
+    /// `line_addr` canonicalizes to the same line or a different
+    /// one) bumps this counter, bumps `reservations_cleared` on
+    /// the replacement, and leaves the table size unchanged.
+    /// Tooling that cares about net installs subtracts
+    /// `reservations_cleared`'s acquire-clobber contribution; the
+    /// commit pipeline does not split that sub-count out.
     pub reservation_acquires_committed: usize,
     /// Number of `ConditionalStore` effects whose write was applied
     /// to committed memory. These are always successful stores by
     /// construction -- the emitting unit decides success before
     /// emission.
     pub conditional_stores_committed: usize,
-    /// Number of reservation-table entries dropped by the clear
-    /// sweep during this commit. Counts both entries dropped by
-    /// ordinary `SharedWriteIntent` writes and entries dropped by
-    /// the success side of `ConditionalStore`. Includes the
-    /// emitter's own entry on each `ConditionalStore` commit.
+    /// Number of `ConditionalStore` effects that reached the apply
+    /// path without a prior reservation entry for the emitter.
+    /// Under LL/SC semantics a real emitter must hold a
+    /// reservation at store time; reaching the apply path with no
+    /// entry means either (a) the emitter is a synthetic test
+    /// unit (e.g. `FakeIsaUnit`) that does not model the local
+    /// pre-check, or (b) a real emitter has an ordering bug. The
+    /// pipeline commits the store either way (soft contract --
+    /// see `process` doc) but surfaces the count so real-emitter
+    /// CI can assert this counter stays 0 across whole scenarios.
+    pub conditional_stores_without_prior_reservation: usize,
+    /// Number of reservation-table entries dropped during this
+    /// commit. Three sources contribute:
+    ///
+    /// 1. `SharedWriteIntent` clear-sweep drops every entry whose
+    ///    line overlaps the written range.
+    /// 2. `ConditionalStore` drops the emitter's own entry plus
+    ///    every other unit's entry whose line overlaps the store.
+    /// 3. `ReservationAcquire` clobber: when a unit acquires a
+    ///    second reservation before releasing the first, the
+    ///    prior entry is silently overwritten; that drop counts
+    ///    here so replay tooling can see an entry disappeared
+    ///    from the table.
+    ///
+    /// Invariant: `reservations_cleared` equals the difference
+    /// between reservation entries that existed at start-of-
+    /// commit and entries that exist at end-of-commit, minus net
+    /// `reservation_acquires_committed` that installed fresh
+    /// entries without clobber.
     pub reservations_cleared: usize,
     /// Number of effects of other variants (fault, trace) that the
     /// pipeline saw and passed through unhandled.
@@ -156,6 +218,15 @@ pub struct CommitOutcome {
     /// `true` if the originating step yielded with `YieldReason::Fault`
     /// and the entire batch was discarded because the step faulted.
     pub fault_discarded: bool,
+    /// Number of effects dropped by the fault rule. Zero on any
+    /// successful commit; equals `effects.len()` when
+    /// `fault_discarded` is `true`. Kept as a scalar rather than a
+    /// full per-kind breakdown because per-effect kinds are already
+    /// emitted into the trace stream via
+    /// `TraceRecord::EffectEmitted` at step time; replay tooling
+    /// that needs per-kind discard detail joins the trace records
+    /// with this outcome.
+    pub effects_discarded_on_fault: usize,
     /// Units whose status was overridden to `Blocked` during this
     /// commit, with the reason for the block.
     pub blocked_units: Vec<(UnitId, BlockReason)>,
@@ -264,6 +335,7 @@ impl CommitPipeline {
         if result.yield_reason == YieldReason::Fault {
             return Ok(CommitOutcome {
                 fault_discarded: true,
+                effects_discarded_on_fault: effects.len(),
                 ..CommitOutcome::default()
             });
         }
@@ -284,6 +356,7 @@ impl CommitPipeline {
         let mut waits = 0usize;
         let mut reservation_acquires = 0usize;
         let mut conditional_stores = 0usize;
+        let mut conditional_stores_without_prior_reservation = 0usize;
         let mut reservations_cleared = 0usize;
         let mut blocked_units = Vec::new();
         let mut woken_units = Vec::new();
@@ -323,11 +396,23 @@ impl CommitPipeline {
                     }
                     sends += 1;
                 }
-                Effect::MailboxReceiveAttempt { mailbox, .. } => {
+                Effect::MailboxReceiveAttempt {
+                    mailbox, source, ..
+                } => {
                     if ctx.mailboxes.get(*mailbox).is_none() {
                         return Err(CommitError::UnknownMailbox {
                             effect_index: idx,
                             mailbox: *mailbox,
+                        });
+                    }
+                    // Validate the source: the apply pass calls
+                    // push_receive / set_status_override on this id,
+                    // which would silently drop the message or
+                    // panic mid-commit if the unit is unregistered.
+                    if ctx.units.get(*source).is_none() {
+                        return Err(CommitError::UnknownSourceUnit {
+                            effect_index: idx,
+                            source: *source,
                         });
                     }
                 }
@@ -340,7 +425,24 @@ impl CommitPipeline {
                     }
                     signal_updates += 1;
                 }
-                Effect::DmaEnqueue { .. } => {
+                Effect::DmaEnqueue { request, .. } => {
+                    // Pre-validate the destination range: the
+                    // completion path will `apply_commit` to this
+                    // range far from the originating step, and a
+                    // bad target there would surface as an obscure
+                    // commit failure with no link back to the
+                    // emitter. Source may legitimately be a local
+                    // store or staging buffer outside the guest
+                    // memory regions, so we only check the
+                    // destination.
+                    let dst = request.destination();
+                    let start = dst.start().raw();
+                    let length = dst.length();
+                    if start.checked_add(length).is_none()
+                        || ctx.memory.containing_region(start, length).is_none()
+                    {
+                        return Err(CommitError::DmaDestinationOutOfRange { effect_index: idx });
+                    }
                     dma_count += 1;
                 }
                 Effect::WakeUnit { target, .. } => {
@@ -352,10 +454,26 @@ impl CommitPipeline {
                     }
                     wakes += 1;
                 }
-                Effect::WaitOnEvent { .. } => {
+                Effect::WaitOnEvent { source, .. } => {
+                    // Validate source: apply pass calls
+                    // set_status_override on this id. An
+                    // unregistered source either silently no-ops
+                    // or panics mid-commit (see the similar
+                    // concern on MailboxReceiveAttempt).
+                    if ctx.units.get(*source).is_none() {
+                        return Err(CommitError::UnknownSourceUnit {
+                            effect_index: idx,
+                            source: *source,
+                        });
+                    }
                     waits += 1;
                 }
-                Effect::ConditionalStore { range, bytes, .. } => {
+                Effect::ConditionalStore {
+                    range,
+                    bytes,
+                    source,
+                    ..
+                } => {
                     // Same validation rules as SharedWriteIntent:
                     // payload length matches range, range lies fully
                     // within one registered region. A failure here
@@ -371,16 +489,39 @@ impl CommitPipeline {
                     if ctx.memory.containing_region(start, length).is_none() {
                         return Err(CommitError::OutOfRange { effect_index: idx });
                     }
+                    // Validate source: the apply pass calls
+                    // remove_if_present on this id to drop the
+                    // emitter's reservation entry. An unregistered
+                    // source would silently bypass the
+                    // "drop emitter's entry" invariant and the
+                    // store would commit anyway -- worse than
+                    // rejecting.
+                    if ctx.units.get(*source).is_none() {
+                        return Err(CommitError::UnknownSourceUnit {
+                            effect_index: idx,
+                            source: *source,
+                        });
+                    }
                     staging.stage(StagedWrite {
                         range: *range,
                         bytes: bytes.bytes().to_vec(),
                     });
                     conditional_stores += 1;
                 }
-                Effect::ReservationAcquire { .. } => {
-                    // No pre-validation: the table accepts any unit
-                    // id (registered or not) and any line address.
-                    // The line is canonicalized in the apply pass.
+                Effect::ReservationAcquire { source, .. } => {
+                    // Validate source: an unregistered id would
+                    // still populate the reservation table (the
+                    // table has no registry awareness), producing
+                    // a ghost entry that survives until some other
+                    // unit's overlapping write sweeps it. Rejecting
+                    // here keeps the table registry-consistent
+                    // with the rest of the pipeline.
+                    if ctx.units.get(*source).is_none() {
+                        return Err(CommitError::UnknownSourceUnit {
+                            effect_index: idx,
+                            source: *source,
+                        });
+                    }
                 }
                 _ => {
                     deferred += 1;
@@ -393,8 +534,46 @@ impl CommitPipeline {
         // signal updates OR-merge into their registers, and DMA
         // requests are scheduled into the completion queue via the
         // latency model. All happen in the same emission order the
-        // units produced them. Pre-validation guarantees every lookup
-        // here succeeds.
+        // units produced them. Pre-validation guarantees every
+        // lookup here succeeds.
+        //
+        // Atomicity contract. The `drain_into` below is the only
+        // operation between here and function return that can
+        // represent failure as `CommitError`. The ops that run
+        // after it (mb.send, signal.or_in, dma_queue.enqueue,
+        // reservations.*, payload.clone in DmaEnqueue) are
+        // infallible in the current design:
+        //
+        //   - `Mailbox::send` pushes onto a Vec.
+        //   - `Signal::or_in` is a bitwise OR into a register.
+        //   - `DmaQueue::enqueue` pushes onto a BinaryHeap.
+        //   - `DmaLatencyModel::completion_time` is a pure function.
+        //   - `ReservationTable` ops are BTreeMap operations.
+        //   - `payload.clone` copies a `Vec<u8>`.
+        //
+        // None of these can fail absent host-side allocation
+        // failure. The project's stance is: host OOM aborts the
+        // process via the Rust allocator's default behavior; we
+        // do not model it as a recoverable error and no
+        // `CommitError` variant represents it. The module-level
+        // atomicity guarantee ("either every staged write becomes
+        // visible or none do") is predicated on that assumption;
+        // under host OOM the process is already dying and guest-
+        // visible consistency is no longer meaningful.
+        //
+        // The `.expect(...)` calls below likewise cannot fire
+        // because `ctx` is held by `&mut` for the duration of
+        // this call and nothing external can deregister a
+        // mailbox/signal between the pre-validation and apply
+        // passes.
+        //
+        // If any of those guarantees change (new registry impl,
+        // new latency model with fallible ops, a future
+        // representation of host-OOM as a recoverable error), the
+        // atomicity contract from the module-level doc becomes
+        // load-bearing on behavior that post-dates `drain_into`,
+        // and rollback machinery becomes necessary. Audit this
+        // block when adding a new fallible op in the apply pass.
         staging
             .drain_into(ctx.memory)
             .map_err(CommitError::Memory)?;
@@ -460,8 +639,25 @@ impl CommitPipeline {
                     // Canonicalize to line granule at insert time.
                     // The unit may have passed the raw EA; the table
                     // only ever stores line-aligned addresses.
-                    ctx.reservations
+                    //
+                    // A prior reservation for the same unit is
+                    // clobbered. That is legal under LL/SC
+                    // semantics (a new lwarx/getllar overwrites the
+                    // previous reservation) but the clobber still
+                    // counts as a reservation dropped at this
+                    // commit boundary, so replay and audit tooling
+                    // can tell that an entry disappeared. Bumping
+                    // `reservations_cleared` on the prior-entry
+                    // return keeps the counter's invariant
+                    // "reservations that were in the table at
+                    // start-of-commit and are no longer at
+                    // end-of-commit."
+                    let prior = ctx
+                        .reservations
                         .insert_or_replace(*source, ReservedLine::containing(*line_addr));
+                    if prior.is_some() {
+                        reservations_cleared += 1;
+                    }
                     reservation_acquires += 1;
                 }
                 Effect::ConditionalStore { range, source, .. } => {
@@ -473,8 +669,33 @@ impl CommitPipeline {
                     // first means its entry is never subject to the
                     // sweep (avoids double-counting in
                     // `reservations_cleared`).
+                    //
+                    // Contract note: the pipeline does not verify
+                    // that the emitter's reservation was still held
+                    // (or that it covered the store line) at apply
+                    // time. `ConditionalStore` is a soft emitter-side
+                    // contract -- the emitting unit decides success
+                    // before emission based on its own local
+                    // reservation register. A cross-unit
+                    // SharedWriteIntent earlier in the same batch
+                    // can in principle clear the emitter's table
+                    // entry between emission and this apply point.
+                    // Synthetic emitters (e.g. `FakeIsaUnit` in
+                    // tests) may not model the local pre-check and
+                    // will reach here with no prior entry; that is
+                    // not an invariant violation at the pipeline
+                    // layer. Real emitters (`cellgov_ppu`,
+                    // `cellgov_spu`) pre-check; if they ever reach
+                    // here without a prior entry, that is an
+                    // emitter-side bug to fix there, not here.
                     if ctx.reservations.remove_if_present(*source).is_some() {
                         reservations_cleared += 1;
+                    } else {
+                        // Observability hook for emitter-side LL/SC
+                        // bugs. Synthetic emitters (FakeIsaUnit) hit
+                        // this every time; real emitter scenarios
+                        // must assert this counter stays 0.
+                        conditional_stores_without_prior_reservation += 1;
                     }
                     reservations_cleared += ctx
                         .reservations
@@ -496,9 +717,11 @@ impl CommitPipeline {
             dma_completions_fired: 0, // set by Runtime::commit_step
             reservation_acquires_committed: reservation_acquires,
             conditional_stores_committed: conditional_stores,
+            conditional_stores_without_prior_reservation,
             reservations_cleared,
             effects_deferred: deferred,
             fault_discarded: false,
+            effects_discarded_on_fault: 0,
             blocked_units,
             woken_units,
         })

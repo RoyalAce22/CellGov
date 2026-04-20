@@ -759,7 +759,7 @@ fn conditional_store(addr: u64, bytes: Vec<u8>, source: UnitId) -> Effect {
 #[test]
 fn reservation_acquire_installs_entry() {
     let mut bed = CommitTestBed::new(4096);
-    let u = UnitId::new(1);
+    let u = bed.units.register_with(DummyUnit::runnable);
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
         vec![reservation_acquire(0x100, u)],
@@ -772,7 +772,7 @@ fn reservation_acquire_installs_entry() {
 #[test]
 fn reservation_acquire_canonicalizes_to_line() {
     let mut bed = CommitTestBed::new(4096);
-    let u = UnitId::new(2);
+    let u = bed.units.register_with(DummyUnit::runnable);
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
         // Raw EA inside a line; table must store the aligned line.
@@ -785,7 +785,7 @@ fn reservation_acquire_canonicalizes_to_line() {
 #[test]
 fn reservation_acquire_replaces_prior_entry() {
     let mut bed = CommitTestBed::new(4096);
-    let u = UnitId::new(3);
+    let u = bed.units.register_with(DummyUnit::runnable);
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
         vec![reservation_acquire(0x100, u), reservation_acquire(0x200, u)],
@@ -793,6 +793,9 @@ fn reservation_acquire_replaces_prior_entry() {
     let outcome = bed.process(&r, &e).unwrap();
     assert_eq!(outcome.reservation_acquires_committed, 2);
     assert_eq!(bed.reservations.get(u).unwrap().addr(), 0x200);
+    // Replacing an existing entry counts as a clear under the new
+    // outcome invariant (replay tooling sees the entry dropped).
+    assert_eq!(outcome.reservations_cleared, 1);
     assert_eq!(bed.reservations.len(), 1);
 }
 
@@ -834,7 +837,7 @@ fn shared_write_leaves_non_overlapping_reservation_alone() {
 #[test]
 fn conditional_store_applies_bytes_and_retires_own_reservation() {
     let mut bed = CommitTestBed::new(4096);
-    let u = UnitId::new(5);
+    let u = bed.units.register_with(DummyUnit::runnable);
     bed.reservations
         .insert_or_replace(u, cellgov_sync::ReservedLine::containing(0x100));
     let (r, e) = step_with(
@@ -854,8 +857,8 @@ fn conditional_store_applies_bytes_and_retires_own_reservation() {
 #[test]
 fn conditional_store_also_clears_other_units_reservations_on_same_line() {
     let mut bed = CommitTestBed::new(4096);
-    let winner = UnitId::new(5);
-    let loser = UnitId::new(6);
+    let winner = bed.units.register_with(DummyUnit::runnable);
+    let loser = bed.units.register_with(DummyUnit::runnable);
     bed.reservations
         .insert_or_replace(winner, cellgov_sync::ReservedLine::containing(0x100));
     bed.reservations
@@ -877,7 +880,7 @@ fn same_unit_acquire_then_store_drops_reservation_in_emission_order() {
     // entry installed one effect earlier. Matches the ABI rule:
     // same-unit store to the reserved line drops the reservation.
     let mut bed = CommitTestBed::new(4096);
-    let u = UnitId::new(7);
+    let u = bed.units.register_with(DummyUnit::runnable);
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
         vec![
@@ -927,6 +930,10 @@ fn fault_step_discards_reservation_effects() {
     r.fault = Some(FaultKind::Validation);
     let outcome = bed.process(&r, &e).unwrap();
     assert!(outcome.fault_discarded);
+    // The fault path reports how many effects were dropped so
+    // trace/replay tooling can correlate the outcome record with
+    // the per-effect TraceRecord::EffectEmitted stream.
+    assert_eq!(outcome.effects_discarded_on_fault, 2);
     // Nothing applied.
     assert!(bed.reservations.is_empty());
     assert!(bed
@@ -935,4 +942,109 @@ fn fault_step_discards_reservation_effects() {
         .unwrap()
         .iter()
         .all(|b| *b == 0));
+}
+
+#[test]
+fn reservation_acquire_with_unregistered_source_rejects_batch() {
+    let mut bed = CommitTestBed::new(4096);
+    let ghost = UnitId::new(99); // never registered
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![reservation_acquire(0x100, ghost)],
+    );
+    let err = bed.process(&r, &e);
+    assert!(matches!(
+        err,
+        Err(CommitError::UnknownSourceUnit {
+            effect_index: 0,
+            source
+        }) if source == ghost
+    ));
+    // Nothing pollutes the table on rejection.
+    assert!(bed.reservations.is_empty());
+}
+
+#[test]
+fn conditional_store_with_unregistered_source_rejects_batch() {
+    let mut bed = CommitTestBed::new(4096);
+    let ghost = UnitId::new(99);
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![conditional_store(0x100, vec![1, 2, 3, 4], ghost)],
+    );
+    let err = bed.process(&r, &e);
+    assert!(matches!(
+        err,
+        Err(CommitError::UnknownSourceUnit {
+            effect_index: 0,
+            source
+        }) if source == ghost
+    ));
+    // Store did not commit to memory on rejection.
+    assert!(bed
+        .mem
+        .read(range(0x100, 4))
+        .unwrap()
+        .iter()
+        .all(|b| *b == 0));
+}
+
+#[test]
+fn conditional_store_without_prior_reservation_bumps_counter() {
+    // Emitter-side LL/SC bug surface: a ConditionalStore reaches
+    // apply with no reservation entry for the source. The pipeline
+    // still commits the store (soft contract) but increments the
+    // observability counter so real-emitter CI can assert it stays
+    // zero across whole scenarios.
+    let mut bed = CommitTestBed::new(4096);
+    let u = bed.units.register_with(DummyUnit::runnable);
+    // Note: no reservation is inserted for `u` before the store.
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![conditional_store(0x100, vec![1, 2, 3, 4], u)],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    assert_eq!(outcome.conditional_stores_committed, 1);
+    assert_eq!(outcome.conditional_stores_without_prior_reservation, 1);
+    assert_eq!(outcome.reservations_cleared, 0);
+    // Store still committed.
+    let read = bed.mem.read(range(0x100, 4)).unwrap();
+    assert_eq!(read, &[1, 2, 3, 4]);
+}
+
+#[test]
+fn conditional_store_with_prior_reservation_leaves_counter_at_zero() {
+    let mut bed = CommitTestBed::new(4096);
+    let u = bed.units.register_with(DummyUnit::runnable);
+    bed.reservations
+        .insert_or_replace(u, cellgov_sync::ReservedLine::containing(0x100));
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![conditional_store(0x100, vec![1, 2, 3, 4], u)],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    assert_eq!(outcome.conditional_stores_without_prior_reservation, 0);
+    assert_eq!(outcome.reservations_cleared, 1);
+}
+
+#[test]
+fn dma_enqueue_destination_out_of_range_rejects_batch() {
+    let mut bed = CommitTestBed::new(4096);
+    let issuer = bed.units.register_with(DummyUnit::runnable);
+    // Source is in-range (0..4), destination is past end of memory.
+    let bad_dst = ByteRange::new(GuestAddr::new(0x10_0000), 4).unwrap();
+    let ok_src = range(0, 4);
+    let req = DmaRequest::new(DmaDirection::Put, ok_src, bad_dst, issuer).unwrap();
+    let bad = Effect::DmaEnqueue {
+        request: req,
+        payload: None,
+    };
+    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![bad]);
+    let err = bed.process(&r, &e);
+    assert!(matches!(
+        err,
+        Err(CommitError::DmaDestinationOutOfRange { effect_index: 0 })
+    ));
+    // Queue stays empty when the batch is rejected atomically.
+    assert!(bed.dma_queue.is_empty());
 }
