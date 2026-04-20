@@ -65,34 +65,56 @@ pub trait RegisteredUnit: 'static {
     /// Drain per-instruction state fingerprints retired during the most
     /// recent `run_until_yield`. Same contract as
     /// [`ExecutionUnit::drain_retired_state_hashes`]. Default returns
-    /// empty for units that do not opt in to per-step tracing.
+    /// empty for units that do not opt in to per-step tracing
+    /// (observability only -- omitting this cannot produce a
+    /// correctness bug, only a gap in diagnostics).
     fn drain_retired_state_hashes(&mut self) -> Vec<(u64, u64)> {
         Vec::new()
     }
 
     /// Drain full-register snapshots collected inside the unit's
     /// configured zoom-in window. Same contract as
-    /// [`ExecutionUnit::drain_retired_state_full`]. Default empty.
+    /// [`ExecutionUnit::drain_retired_state_full`]. Default empty
+    /// (observability only -- same rationale as
+    /// [`Self::drain_retired_state_hashes`]).
     fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
         Vec::new()
     }
 
-    /// Drain instruction-variant profiling data.
+    /// Drain instruction-variant profiling data. Default empty
+    /// (profiling is off-path; omitting the override only drops
+    /// the profile, never changes unit semantics).
     fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {
         Vec::new()
     }
 
-    /// Drain adjacent-pair profiling data.
+    /// Drain adjacent-pair profiling data. Default empty (same
+    /// off-path rationale as [`Self::drain_profile_insns`]).
     fn drain_profile_pairs(&mut self) -> Vec<((&'static str, &'static str), u64)> {
         Vec::new()
     }
 
     /// Notify the unit that guest memory in `[addr, addr+len)` was
     /// written. Same contract as [`ExecutionUnit::invalidate_code`].
+    ///
+    /// ## OVERRIDE THIS IF YOUR UNIT CACHES TRANSLATIONS
+    ///
+    /// The default is a silent no-op and is a correctness footgun,
+    /// not a performance one. Any unit that caches decoded
+    /// instructions, a translation block index, a shadow PC ring,
+    /// or any other data derived from guest code will silently
+    /// execute stale code after a guest memory write if it
+    /// inherits the default. PPU and SPU execution units already
+    /// override this through the `ExecutionUnit` blanket impl; a
+    /// direct `RegisteredUnit` impl that represents an executing
+    /// unit MUST override. Use this default only for units that
+    /// demonstrably derive nothing from guest code (e.g. synthetic
+    /// test harnesses, pure event sinks).
     fn invalidate_code(&mut self, _addr: u64, _len: u64) {}
 
     /// Shadow hit/miss counters. Same contract as
-    /// [`ExecutionUnit::shadow_stats`]. Default `(0, 0)`.
+    /// [`ExecutionUnit::shadow_stats`]. Default `(0, 0)` (diagnostic
+    /// only; off-path like the profile methods above).
     fn shadow_stats(&self) -> (u64, u64) {
         (0, 0)
     }
@@ -185,6 +207,13 @@ pub struct UnitRegistry {
     pending_register_writes: BTreeMap<UnitId, Vec<(u8, u64)>>,
 }
 
+// --- construction, size, registration ---
+//
+// Methods that produce a registry, query its cardinality, or add
+// new units. Registration assigns monotonic ids and is the sole
+// writer of `self.next_id` and `self.units` (keys). Factory-panic
+// safety (see `register_with` doc) is a property of this block in
+// isolation -- reorder carefully.
 impl UnitRegistry {
     /// Construct an empty registry.
     #[inline]
@@ -212,13 +241,22 @@ impl UnitRegistry {
     /// a different id than the one it was given -- that is a unit
     /// implementation bug, not a recoverable condition, and the runtime
     /// must surface it loudly.
+    ///
+    /// `next_id` is only bumped after the factory returns successfully
+    /// and the id-consistency assertion passes. A factory that panics
+    /// (e.g. a guest-image parser blowing up inside an SPU thread-group
+    /// constructor) leaves `next_id` untouched, so a caller that
+    /// catches the unwind retries with the same id rather than
+    /// punching a permanent hole in the id sequence. A hole would
+    /// silently change `runnable_queue_hash` / `status_hash` across
+    /// an otherwise-identical replay, breaking the determinism
+    /// claims the module docs make.
     pub fn register_with<U, F>(&mut self, factory: F) -> UnitId
     where
         U: ExecutionUnit + 'static,
         F: FnOnce(UnitId) -> U,
     {
         let id = UnitId::new(self.next_id);
-        self.next_id += 1;
         let unit = factory(id);
         assert_eq!(
             ExecutionUnit::unit_id(&unit),
@@ -227,20 +265,27 @@ impl UnitRegistry {
             ExecutionUnit::unit_id(&unit).raw(),
             id.raw(),
         );
-        self.units.insert(id, Box::new(unit));
+        self.next_id += 1;
+        let prev = self.units.insert(id, Box::new(unit));
+        debug_assert!(
+            prev.is_none(),
+            "UnitRegistry: next_id {id:?} already had a unit -- monotonic counter wrapped or a \
+             future refactor started recycling ids; duplicate insert would silently drop the \
+             old unit"
+        );
         id
     }
 
     /// Register a unit produced by a boxed factory. The runtime calls
     /// this when handling `Lv2Dispatch::RegisterSpu` -- the factory
     /// receives the freshly allocated `UnitId` and returns a boxed
-    /// unit. Same monotonic id allocation as `register_with`.
+    /// unit. Same monotonic id allocation (and same factory-panic
+    /// safety) as `register_with`.
     pub fn register_dynamic(
         &mut self,
         factory: &dyn Fn(UnitId) -> Box<dyn RegisteredUnit>,
     ) -> UnitId {
         let id = UnitId::new(self.next_id);
-        self.next_id += 1;
         let unit = factory(id);
         assert_eq!(
             unit.unit_id(),
@@ -249,10 +294,27 @@ impl UnitRegistry {
             unit.unit_id().raw(),
             id.raw(),
         );
-        self.units.insert(id, unit);
+        self.next_id += 1;
+        let prev = self.units.insert(id, unit);
+        debug_assert!(
+            prev.is_none(),
+            "UnitRegistry: next_id {id:?} already had a unit -- monotonic counter wrapped or a \
+             future refactor started recycling ids; duplicate insert would silently drop the \
+             old unit"
+        );
         id
     }
+}
 
+// --- access and iteration ---
+//
+// Read-paths over the registered unit set. The scheduler lives
+// against this block: `get`/`get_mut` for targeted drives,
+// `iter`/`iter_mut` for the round-robin walk, and the runnable-id
+// helpers for the fast-path scheduling decision. Methods here
+// must stay side-effect free from the caller's perspective --
+// callers read through this surface every step of the hot loop.
+impl UnitRegistry {
     /// Borrow a unit by id, if present.
     #[inline]
     pub fn get(&self, id: UnitId) -> Option<&dyn RegisteredUnit> {
@@ -296,10 +358,39 @@ impl UnitRegistry {
     /// unit directly. The count reflects `effective_status`, so
     /// runtime overrides (e.g. a unit parked on a PPU thread join)
     /// are honored.
+    ///
+    /// The `status_overrides.is_empty()` branch takes the same
+    /// shape as the guard pattern in [`Self::drain_receives`] and
+    /// [`Self::clear_status_override`]: skip the per-id probe
+    /// against an empty override map and query `unit.status()`
+    /// through the registered-unit vtable directly. Whether this
+    /// actually measures faster than the unguarded path
+    /// (`BTreeMap::get` on an empty map is nearly free; the vtable
+    /// dispatch is not) has not been benchmarked -- treat this as
+    /// a shape-consistency change matching the other fast paths
+    /// rather than a measured hot-loop optimization. If a future
+    /// profile shows the unguarded form is just as fast, collapse
+    /// both branches into the slow path.
     pub fn count_runnable(&self) -> usize {
+        if self.status_overrides.is_empty() {
+            return self
+                .units
+                .values()
+                .filter(|u| u.status() == UnitStatus::Runnable)
+                .count();
+        }
         self.runnable_ids().count()
     }
+}
 
+// --- status overrides ---
+//
+// Runtime-side overrides layered on top of the unit's self-reported
+// `status()`. The commit pipeline is the sole writer. `effective_status`
+// is the unified reader consumed by scheduler (via `runnable_ids`)
+// and hash routines. Overrides are expected to live for one step --
+// `Runtime::step` clears before running the overridden unit.
+impl UnitRegistry {
     /// The effective status of a unit: the runtime override if one is
     /// set, otherwise the unit's self-reported `status()`.
     ///
@@ -343,11 +434,38 @@ impl UnitRegistry {
         }
         self.status_overrides.remove(&id);
     }
+}
 
+// --- pending state (receives / syscall returns / register writes) ---
+//
+// Three parallel per-unit inboxes fed by the commit pipeline and
+// drained by the runtime at the start of each `run_until_yield`.
+// All three share the same footgun surface (id validation on
+// write, fast-path empty-map guard on drain, single-threaded
+// assumption on the guard); the shape is deliberately parallel so
+// that adding a fourth inbox stays a mechanical copy of the
+// existing ones rather than a design decision.
+impl UnitRegistry {
     /// Push a received message into a unit's per-unit inbox. The
     /// commit pipeline calls this when `MailboxReceiveAttempt`
     /// successfully pops a message from a non-empty mailbox.
+    ///
+    /// Silently no-ops when `id` does not name a registered unit.
+    /// Mirrors [`Self::set_status_override`]'s policy: a stray
+    /// write (off-by-one in the commit pipeline, stale cross-crate
+    /// id, unit never actually registered) would otherwise land in
+    /// `pending_receives`, never be consumed, and grow the map
+    /// unbounded with no diagnostic. Debug builds panic so the bug
+    /// surfaces in tests; release no-ops to match the rest of the
+    /// pending-state API.
     pub fn push_receive(&mut self, id: UnitId, message: u32) {
+        if !self.units.contains_key(&id) {
+            debug_assert!(
+                false,
+                "push_receive for unknown UnitId {id:?} (would leak into pending_receives)"
+            );
+            return;
+        }
         self.pending_receives.entry(id).or_default().push(message);
     }
 
@@ -362,6 +480,19 @@ impl UnitRegistry {
     /// `is_empty()` costs one field load per step and short-circuits
     /// the probe, which is measurable across hundreds of millions of
     /// steps.
+    ///
+    /// ## Thread-safety note
+    ///
+    /// The `is_empty()` short-circuit assumes single-threaded access
+    /// to the registry (which `&mut self` already enforces at the
+    /// type level). A future refactor that introduces per-unit
+    /// parallel draining (rayon over units, say) would break
+    /// subtly: the short-circuit does not commute with a concurrent
+    /// `push_receive` landing on a different id. The fast-path
+    /// guard here is correct for the current caller and silently
+    /// fragile for any other; if this method ever moves behind a
+    /// lock or a concurrent iterator, remove the guard.
+    #[inline]
     pub fn drain_receives(&mut self, id: UnitId) -> Vec<u32> {
         if self.pending_receives.is_empty() {
             return Vec::new();
@@ -372,22 +503,26 @@ impl UnitRegistry {
     /// Store a syscall return code for `id`. The runtime calls this
     /// after `Lv2Host::dispatch` returns `Immediate { code, .. }` so
     /// the unit can read the code on its next step.
+    ///
+    /// Silently no-ops for unknown ids with a debug_assert. See
+    /// [`Self::push_receive`] for the full rationale.
     pub fn set_syscall_return(&mut self, id: UnitId, code: u64) {
+        if !self.units.contains_key(&id) {
+            debug_assert!(
+                false,
+                "set_syscall_return for unknown UnitId {id:?} \
+                 (would leak into pending_syscall_returns)"
+            );
+            return;
+        }
         self.pending_syscall_returns.insert(id, code);
-    }
-
-    /// Queue a register write for the next run_until_yield of `id`.
-    pub fn push_register_write(&mut self, id: UnitId, reg: u8, value: u64) {
-        self.pending_register_writes
-            .entry(id)
-            .or_default()
-            .push((reg, value));
     }
 
     /// Drain the pending syscall return for `id`, if any. The runtime
     /// calls this at the start of each `run_until_yield` to build the
-    /// `ExecutionContext`. Fast path guard: see
-    /// [`UnitRegistry::drain_receives`].
+    /// `ExecutionContext`. Fast path guard and thread-safety note:
+    /// see [`UnitRegistry::drain_receives`].
+    #[inline]
     pub fn drain_syscall_return(&mut self, id: UnitId) -> Option<u64> {
         if self.pending_syscall_returns.is_empty() {
             return None;
@@ -395,15 +530,46 @@ impl UnitRegistry {
         self.pending_syscall_returns.remove(&id)
     }
 
-    /// Drain pending register writes for `id`. Fast path guard: see
-    /// [`UnitRegistry::drain_receives`].
+    /// Queue a register write for the next run_until_yield of `id`.
+    ///
+    /// Silently no-ops for unknown ids with a debug_assert. See
+    /// [`Self::push_receive`] for the full rationale.
+    pub fn push_register_write(&mut self, id: UnitId, reg: u8, value: u64) {
+        if !self.units.contains_key(&id) {
+            debug_assert!(
+                false,
+                "push_register_write for unknown UnitId {id:?} \
+                 (would leak into pending_register_writes)"
+            );
+            return;
+        }
+        self.pending_register_writes
+            .entry(id)
+            .or_default()
+            .push((reg, value));
+    }
+
+    /// Drain pending register writes for `id`. Fast path guard and
+    /// thread-safety note: see [`UnitRegistry::drain_receives`].
+    #[inline]
     pub fn drain_register_writes(&mut self, id: UnitId) -> Vec<(u8, u64)> {
         if self.pending_register_writes.is_empty() {
             return Vec::new();
         }
         self.pending_register_writes.remove(&id).unwrap_or_default()
     }
+}
 
+// --- checkpoint hashes ---
+//
+// Wire-format-sensitive hash outputs consumed by the trace/replay
+// layer. Changes to the byte order, the status-byte mapping
+// (`status_byte`), or the set of fields hashed will invalidate
+// every existing trace. Golden tests in the `tests` module below
+// pin both outputs; update them in the same commit as any hash
+// change so the trace-incompatibility window is visible in git
+// history.
+impl UnitRegistry {
     /// 64-bit deterministic hash of the ordered set of unit ids whose
     /// effective status is `Runnable`.
     ///
@@ -423,9 +589,21 @@ impl UnitRegistry {
     /// 64-bit deterministic hash of every unit's (id, effective status)
     /// pair in id order.
     ///
-    /// Used as the `UnitStatus` checkpoint hash. FNV-1a, no host-time inputs, no
-    /// external deps. Walks the underlying [`BTreeMap`] in id order so
-    /// the result is independent of registration history.
+    /// Used as the `UnitStatus` checkpoint hash. FNV-1a, no host-time
+    /// inputs, no external deps. Walks the underlying [`BTreeMap`]
+    /// in id order so the result is independent of registration
+    /// history.
+    ///
+    /// ## Wire-format contract
+    ///
+    /// The per-status byte is explicitly mapped by [`status_byte`]
+    /// rather than using `UnitStatus as u8`. The enum's `#[repr(u8)]`
+    /// plus discriminants-locked comment already pin the values, but
+    /// relying on an implicit cast means a future accidental removal
+    /// of `#[repr(u8)]` or a `#[repr(Rust)]` refactor would silently
+    /// change this hash and break replay compatibility with every
+    /// existing trace. The explicit mapping makes the wire contract
+    /// readable in this file and fails loudly on reorder.
     ///
     /// Replay tooling compares pairs of these values to assert that
     /// two runs reached the same set of unit statuses. The empty
@@ -433,14 +611,33 @@ impl UnitRegistry {
     /// runtime trace records on its first checkpoint.
     pub fn status_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        for (id, _unit) in self.units.iter() {
+        for (id, unit) in self.units.iter() {
             hasher.write(&id.raw().to_le_bytes());
-            let status_byte =
-                self.effective_status(*id)
-                    .expect("unit in map must have effective status") as u8;
-            hasher.write(&[status_byte]);
+            let status = self
+                .status_overrides
+                .get(id)
+                .copied()
+                .unwrap_or_else(|| unit.status());
+            hasher.write(&[status_byte(status)]);
         }
         hasher.finish()
+    }
+}
+
+/// Explicit `UnitStatus -> u8` mapping used by [`UnitRegistry::status_hash`].
+///
+/// Values match the discriminants declared on `UnitStatus` today, so
+/// replacing the previous `as u8` cast with this function produces
+/// byte-for-byte identical hashes for every existing trace. The
+/// mapping is exhaustive (no `_ =>`), so adding a variant to
+/// `UnitStatus` without updating this mapping is a compile error --
+/// which is the whole point of making the wire format explicit.
+fn status_byte(status: UnitStatus) -> u8 {
+    match status {
+        UnitStatus::Runnable => 0,
+        UnitStatus::Blocked => 1,
+        UnitStatus::Faulted => 2,
+        UnitStatus::Finished => 3,
     }
 }
 
@@ -847,5 +1044,119 @@ mod tests {
         let mut r = UnitRegistry::new();
         // LyingUnit always reports id 999, never the assigned id.
         r.register_with(|_assigned| LyingUnit);
+    }
+
+    /// Golden test for the [`UnitRegistry::status_hash`] wire format.
+    ///
+    /// The exhaustive `match` in [`super::status_byte`] catches
+    /// variant *additions* at compile time (a new `UnitStatus`
+    /// without an arm is an error). It does not catch someone
+    /// reordering the existing arms or changing a literal (e.g.
+    /// `UnitStatus::Blocked => 1` -> `UnitStatus::Blocked => 5`) --
+    /// such a change is a silent hash drift that breaks replay
+    /// compatibility with every existing trace.
+    ///
+    /// This test pins a fixed three-unit registry at a known hash.
+    /// A drift in `status_byte`, in the byte-order of the FNV-1a
+    /// writes, or in how effective-status is resolved will fail
+    /// here with a before/after value the reader can diff. The
+    /// golden value below was computed by running this same
+    /// scenario once; if it ever has to change, the commit that
+    /// changes it is the one that invalidates every prior trace.
+    #[test]
+    fn status_hash_wire_format_golden() {
+        let mut r = UnitRegistry::new();
+        let (_h0, f0) = status_unit(UnitStatus::Runnable);
+        let (_h1, f1) = status_unit(UnitStatus::Blocked);
+        let (_h2, f2) = status_unit(UnitStatus::Finished);
+        r.register_with(f0);
+        r.register_with(f1);
+        r.register_with(f2);
+        const EXPECTED_STATUS_HASH: u64 = 0xE465_5B46_398E_DE44;
+        assert_eq!(
+            r.status_hash(),
+            EXPECTED_STATUS_HASH,
+            "status_hash wire format drifted; if this change was \
+             intentional, every existing trace is now incompatible"
+        );
+    }
+
+    /// Golden test for the [`UnitRegistry::runnable_queue_hash`] wire
+    /// format. Covers a second silent-drift vector that
+    /// `status_byte` does not: the *predicate* used to decide which
+    /// ids are hashed. `runnable_queue_hash` emits only ids whose
+    /// `effective_status(*id) == Some(UnitStatus::Runnable)`; a
+    /// future variant like `UnitStatus::RunnableButWaitingForFoo`
+    /// that semantically belongs in the runnable set but is not
+    /// literally the `Runnable` variant would silently change this
+    /// hash for every existing trace with no compile-time signal.
+    /// Pinning a mixed-status fixture here makes that drift loud.
+    #[test]
+    fn runnable_queue_hash_wire_format_golden() {
+        let mut r = UnitRegistry::new();
+        let (_h0, f0) = status_unit(UnitStatus::Runnable);
+        let (_h1, f1) = status_unit(UnitStatus::Blocked);
+        let (_h2, f2) = status_unit(UnitStatus::Runnable);
+        let (_h3, f3) = status_unit(UnitStatus::Finished);
+        r.register_with(f0);
+        r.register_with(f1);
+        r.register_with(f2);
+        r.register_with(f3);
+        const EXPECTED_RUNNABLE_QUEUE_HASH: u64 = 0xC615_ADCB_76DD_F8A7;
+        assert_eq!(
+            r.runnable_queue_hash(),
+            EXPECTED_RUNNABLE_QUEUE_HASH,
+            "runnable_queue_hash wire format drifted; if this change \
+             was intentional, every existing trace is now incompatible"
+        );
+    }
+
+    /// A factory that panics must not burn a UnitId. If the caller
+    /// catches the unwind and retries, the new registration has to
+    /// receive the same id the panicking factory saw -- otherwise
+    /// the id sequence has a permanent hole and
+    /// `runnable_queue_hash` / `status_hash` silently diverge from
+    /// a clean replay.
+    #[test]
+    fn factory_panic_does_not_burn_next_id() {
+        let mut r = UnitRegistry::new();
+
+        // First, register one unit normally so the counter sits at 1.
+        let id0 = r.register_with(|id| CountingUnit { id, steps: 0 });
+        assert_eq!(id0, UnitId::new(0));
+
+        // Catch_unwind around a factory that panics.
+        //
+        // This test's soundness under AssertUnwindSafe is not
+        // automatic -- it depends on the invariant that
+        // `register_with` performs NO `&mut self` mutation before
+        // `factory(id)` returns. Today `register_with` only reads
+        // `self.next_id` in the `UnitId::new(self.next_id)` line
+        // before handing off to the factory, so the registry
+        // remains in a consistent state when the factory panics
+        // and subsequent reads of `r` observe valid data. If a
+        // future refactor ever slips a `self.units.insert(...)`,
+        // `self.pending_*` mutation, or `self.next_id += 1` in
+        // before the factory call, this test will silently keep
+        // passing while AssertUnwindSafe begins lying about unwind
+        // safety -- and the "no burned id" guarantee the test
+        // claims to pin would be gone.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            r.register_with::<CountingUnit, _>(|_id| panic!("synthetic factory failure"));
+        }));
+        assert!(result.is_err(), "factory must have panicked");
+
+        // The next successful registration must pick up the id the
+        // panicked factory saw. If fix #2 ever regresses to
+        // incrementing next_id before the factory runs, this will
+        // see id 2 instead of id 1 and fail.
+        let id1 = r.register_with(|id| CountingUnit { id, steps: 0 });
+        assert_eq!(
+            id1,
+            UnitId::new(1),
+            "next_id must not advance when a factory panics -- \
+             a hole in the id sequence silently changes replay hashes"
+        );
+        assert_eq!(r.len(), 2);
     }
 }
