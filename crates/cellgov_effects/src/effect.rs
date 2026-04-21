@@ -178,6 +178,39 @@ pub enum Effect {
         /// Guest-time stamp at which the store becomes ordered.
         source_time: GuestTicks,
     },
+    /// Emitted by the RSX FIFO advance pass when an NV method
+    /// writes a value to the RSX label area (NV406E semaphore
+    /// release or NV4097 report writeback). The commit pipeline
+    /// resolves `offset` against the RSX label base and commits
+    /// the 32-bit value through the same path as
+    /// `SharedWriteIntent`, so the clear sweep and state-hash
+    /// contribution are automatic. Kept as a distinct variant so
+    /// the trace records the FIFO origin separately from PPU /
+    /// SPU / DMA writes.
+    ///
+    /// No `source: UnitId` because the FIFO advance pass runs
+    /// inside the commit pipeline itself, not as a unit step.
+    RsxLabelWrite {
+        /// Byte offset into the RSX label area.
+        offset: u32,
+        /// 32-bit value to write. Emitted big-endian at commit
+        /// time (PS3 guest-visible byte order).
+        value: u32,
+    },
+    /// Emitted by the RSX FIFO advance pass on an
+    /// `NV4097_FLIP_BUFFER` method parse. The commit pipeline
+    /// transitions the flip state to `WAITING`; the next commit
+    /// boundary transitions it to `DONE`. Purely drives the flip-
+    /// status state machine; has no direct memory side-effect.
+    ///
+    /// No `source: UnitId` for the same reason as
+    /// [`Effect::RsxLabelWrite`].
+    RsxFlipRequest {
+        /// Back-buffer index the guest asked to flip to. Recorded
+        /// for observability; the state machine only tracks
+        /// pending vs done.
+        buffer_index: u8,
+    },
 }
 
 #[cfg(test)]
@@ -412,6 +445,83 @@ mod tests {
             source_time: GuestTicks::new(0),
         };
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn rsx_label_write_roundtrip() {
+        let e = Effect::RsxLabelWrite {
+            offset: 0x40,
+            value: 0x1234_5678,
+        };
+        let expected = Effect::RsxLabelWrite {
+            offset: 0x40,
+            value: 0x1234_5678,
+        };
+        assert_eq!(e, expected);
+        assert_eq!(e.clone(), e);
+    }
+
+    #[test]
+    fn rsx_label_write_distinguishes_offset_and_value() {
+        let a = Effect::RsxLabelWrite {
+            offset: 0x40,
+            value: 1,
+        };
+        let b = Effect::RsxLabelWrite {
+            offset: 0x44,
+            value: 1,
+        };
+        let c = Effect::RsxLabelWrite {
+            offset: 0x40,
+            value: 2,
+        };
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(b, c);
+    }
+
+    #[test]
+    fn rsx_flip_request_roundtrip() {
+        let e = Effect::RsxFlipRequest { buffer_index: 1 };
+        let expected = Effect::RsxFlipRequest { buffer_index: 1 };
+        assert_eq!(e, expected);
+        assert_eq!(e.clone(), e);
+    }
+
+    #[test]
+    fn rsx_flip_request_distinguishes_buffer_index() {
+        let a = Effect::RsxFlipRequest { buffer_index: 0 };
+        let b = Effect::RsxFlipRequest { buffer_index: 1 };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn rsx_variants_distinct_from_existing_and_each_other() {
+        // Catches an accidental merge of RSX variants into any
+        // existing effect kind, and catches RsxLabelWrite /
+        // RsxFlipRequest being considered equal despite different
+        // shapes.
+        let label = Effect::RsxLabelWrite {
+            offset: 0,
+            value: 0,
+        };
+        let flip = Effect::RsxFlipRequest { buffer_index: 0 };
+        let write = Effect::SharedWriteIntent {
+            range: range(0x1000, 4),
+            bytes: WritePayload::new(vec![0; 4]),
+            ordering: PriorityClass::Normal,
+            source: UnitId::new(1),
+            source_time: GuestTicks::new(0),
+        };
+        let acq = Effect::ReservationAcquire {
+            line_addr: 0x1000,
+            source: UnitId::new(1),
+        };
+        assert_ne!(label, flip);
+        assert_ne!(label, write);
+        assert_ne!(label, acq);
+        assert_ne!(flip, write);
+        assert_ne!(flip, acq);
     }
 
     #[test]

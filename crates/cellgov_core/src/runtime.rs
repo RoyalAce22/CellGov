@@ -123,6 +123,55 @@ pub struct Runtime {
     mailbox_registry: MailboxRegistry,
     signal_registry: SignalRegistry,
     reservations: cellgov_sync::ReservationTable,
+    /// RSX FIFO cursor tracking put / get / current_reference. Folds
+    /// into [`Runtime::sync_state_hash`] at every commit boundary so a
+    /// cursor change is visible in the per-step state-hash trace. The
+    /// FIFO advance pass (wired in a later slice) is the sole mutator
+    /// of `get`; `put` is written via the RSX IO region pathway; the
+    /// savestate-restore path may overwrite all three.
+    rsx_cursor: crate::rsx::RsxFifoCursor,
+    /// RSX semaphore offset register. Set by the
+    /// `NV406E_SEMAPHORE_OFFSET` handler and consumed by the next
+    /// `NV406E_SEMAPHORE_RELEASE`. Persists across commit boundaries
+    /// because a guest that splits the OFFSET / RELEASE pair across
+    /// FIFO drains must still read the offset the first drain wrote.
+    /// Folded into [`Runtime::sync_state_hash`] so a leaked value
+    /// surfaces at a state-hash diff rather than as a silent cross-
+    /// drain carryover.
+    rsx_sem_offset: u32,
+    /// When true, writes that commit successfully to
+    /// `0xC000_0040..0xC000_004C` (the PS3 RSX control register's
+    /// put / get / reference slots) are mirrored into
+    /// [`Self::rsx_cursor`] at the same commit boundary. When
+    /// false, the cursor is only mutated by the FIFO advance pass
+    /// and by direct [`Self::rsx_cursor_mut`] callers (tests /
+    /// savestate restore). The mirror path is off by default --
+    /// default boot runs keep the PS3 RSX region reserved so the
+    /// first put-pointer write trips the FirstRsxWrite checkpoint;
+    /// enabling this path only makes sense once the hosting layer
+    /// has also made the RSX region writable.
+    rsx_mirror_writes: bool,
+    /// RSX flip-status state machine. Tracks the WAITING / DONE
+    /// byte the guest polls after issuing `cellGcmSetFlip`, plus
+    /// the flip-handler callback address (recorded only; the
+    /// callback is not dispatched into PPU execution). Folds into
+    /// [`Self::sync_state_hash`] so a flip transition is visible
+    /// in the per-step state-hash trace.
+    rsx_flip: crate::rsx_flip::RsxFlipState,
+    /// NV method dispatch table for the RSX FIFO advance pass.
+    /// Populated at construction with the registered handlers
+    /// (NV406E semaphore / reference, NV4097 flip / report / back-
+    /// end semaphore). The advance pass is the only reader.
+    rsx_methods: crate::rsx_method::NvMethodTable,
+    /// RSX effects produced by the FIFO advance pass at the END of
+    /// commit batch N, queued for the START of batch N+1. Preserves
+    /// the atomic-batch contract: FIFO method parses happen in
+    /// batch N (they mutate the cursor + sem_offset committed
+    /// state), but the downstream memory / state effects they
+    /// produce commit alongside batch N+1's unit effects. A
+    /// commit_step with no pending-and-no-new RSX effects pays zero
+    /// extra cost.
+    pending_rsx_effects: Vec<Effect>,
     dma_queue: DmaQueue,
     dma_latency: Box<dyn DmaLatencyModel>,
     lv2_host: Lv2Host,
@@ -216,10 +265,39 @@ impl Runtime {
                 YieldReason::Syscall | YieldReason::Finished
             )
             && self.dma_queue.is_empty()
+            && self.pending_rsx_effects.is_empty()
+            && self.rsx_cursor.get() == self.rsx_cursor.put()
+            && !self.rsx_flip.pending()
         {
             self.epoch = self.epoch.next().expect("epoch overflow");
             return Ok(CommitOutcome::default());
         }
+
+        // Prepend any RSX effects the previous commit's advance pass
+        // emitted into the current batch. Allocates only when
+        // pending_rsx_effects is non-empty, which is rare before the
+        // first put-pointer advance and common after.
+        let combined_storage: Vec<Effect>;
+        let effects: &[Effect] = if self.pending_rsx_effects.is_empty() {
+            effects
+        } else {
+            combined_storage = self
+                .pending_rsx_effects
+                .drain(..)
+                .chain(effects.iter().cloned())
+                .collect();
+            &combined_storage
+        };
+
+        // Snapshot flip.pending at commit-step entry so the post-
+        // apply DONE transition fires only for flips that started
+        // pending in a PRIOR batch -- not ones that just became
+        // pending via a RsxFlipRequest applied in this batch.
+        // Preserves the contract that an intermediate WAITING
+        // observation is guaranteed for any PPU step between the
+        // two commit boundaries.
+        let flip_pending_at_entry = self.rsx_flip.pending();
+        let flip_status_at_entry = self.rsx_flip.status();
 
         let mut ctx = CommitContext {
             memory: &mut self.memory,
@@ -230,6 +308,8 @@ impl Runtime {
             dma_latency: self.dma_latency.as_ref(),
             now: self.time,
             reservations: &mut self.reservations,
+            rsx_label_base: self.hle.gcm.label_addr,
+            rsx_flip: &mut self.rsx_flip,
         };
         let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
 
@@ -251,6 +331,24 @@ impl Runtime {
             }
         }
 
+        // RSX control-register writeback mirror. When
+        // `rsx_mirror_writes` is enabled and the commit succeeded,
+        // any committed write whose range overlaps the PS3 RSX
+        // control register's put / get / reference slots
+        // (0xC000_0040..0xC000_004C) is mirrored into the cursor so
+        // the next FIFO advance pass sees the guest's new put (etc.)
+        // without requiring an explicit runtime-side set_put call.
+        // Reads bytes back from committed memory rather than the
+        // effect payload because a partial-overlap write is legal
+        // (e.g., a 4-byte store that straddles two slots) and the
+        // committed bytes are the authoritative guest-visible
+        // value. The mirror is a no-op on default boots (flag
+        // defaults to false) -- the RSX region is reserved there,
+        // so the write would fault rather than commit.
+        if self.rsx_mirror_writes && outcome.is_ok() {
+            self.mirror_rsx_control_register_writes(effects);
+        }
+
         let source = self.last_scheduled_unit.unwrap_or_else(|| UnitId::new(0));
         if result.yield_reason == YieldReason::Syscall {
             self.dispatch_syscall(result, source);
@@ -264,6 +362,59 @@ impl Runtime {
 
         if result.yield_reason == YieldReason::Finished {
             self.resolve_join_wakes(source);
+        }
+
+        // RSX FIFO advance pass. Runs after unit effects have
+        // committed, after DMA completions have fired, before state-
+        // hash checkpoints are emitted. If the guest's effects
+        // advanced put, drain the FIFO now -- emitted effects land
+        // in self.pending_rsx_effects and commit alongside the next
+        // batch's unit effects (atomic-batch contract). The cursor
+        // mutations are visible in THIS batch's state-hash
+        // checkpoint because the pass runs before emit_commit_trace.
+        if self.rsx_cursor.get() != self.rsx_cursor.put() {
+            crate::rsx_advance::rsx_advance(
+                &self.memory,
+                &mut self.rsx_cursor,
+                &mut self.rsx_sem_offset,
+                &self.rsx_methods,
+                &mut self.pending_rsx_effects,
+                self.time,
+            );
+        }
+
+        // Flip-status WAITING -> DONE transition. Fires ONLY if
+        // the flip was pending when this commit started (i.e., the
+        // RsxFlipRequest landed in a PRIOR batch). This gives the
+        // guest at least one full PPU step window in which a poll
+        // returns WAITING before the next commit boundary flips it
+        // to DONE. A new RsxFlipRequest applied in this batch sets
+        // pending=true but will not transition until the NEXT
+        // commit -- the one-batch-delay tightness contract.
+        if flip_pending_at_entry {
+            self.rsx_flip.complete_pending_flip();
+        }
+
+        // Flip-status memory mirror. If the flip status changed
+        // (RsxFlipRequest applied or the DONE transition fired),
+        // write the new byte-value as a 4-byte BE u32 at the
+        // fixed mirror address so a guest polling through normal
+        // loads observes it. No write on no-change -- keeps the
+        // memory hash stable across no-flip commits. Writes land
+        // in the RSX region, which is ReadWrite when rsx_mirror
+        // is enabled; under the default reserved-region layout
+        // this would fault, so gate on rsx_mirror.
+        if self.rsx_mirror_writes {
+            let flip_status_now = self.rsx_flip.status();
+            if flip_status_now != flip_status_at_entry {
+                let addr = crate::rsx::RSX_FLIP_STATUS_MIRROR_ADDR as u64;
+                if let Some(range) =
+                    cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 4)
+                {
+                    let value = flip_status_now as u32;
+                    let _ = self.memory.apply_commit(range, &value.to_be_bytes());
+                }
+            }
         }
 
         // Attribution: there is one commit batch per unit yield, so
@@ -410,7 +561,7 @@ impl Runtime {
     }
 
     /// Set the base address for the HLE bump allocator (_sys_malloc).
-    /// Also records the base in [`HleState`] so the watermark band
+    /// Also records the base in `HleState` so the watermark band
     /// check in `heap_alloc` computes "bytes handed out" against the
     /// correct origin, and resets the band-warning bitmask so a
     /// reconfigured run starts with a clean slate.
@@ -439,8 +590,8 @@ impl Runtime {
     }
 
     /// Map of NIDs the dispatcher has seen that no HLE module
-    /// claimed, with per-NID call counts. Populated by
-    /// [`Runtime::dispatch_hle`]. Empty after a run means every
+    /// claimed, with per-NID call counts. Populated by the
+    /// internal HLE dispatch path. Empty after a run means every
     /// imported library function was at least recognized; a
     /// non-empty map is a punch list of unimplemented PS3
     /// library entries the scenario actually touched.
@@ -497,13 +648,14 @@ impl Runtime {
         self.budget_per_step
     }
 
-    /// Combined hash of every sync source the runtime owns: mailbox
-    /// queues, signal-notification registers, and LV2 host state.
-    /// Computed by FNV-1a-merging the per-source hashes in a fixed
-    /// source order so the result is deterministic and stable across
-    /// runs of the same scenario. Replay tooling compares pairs of
-    /// these values via the `SyncState` checkpoint records the runtime
-    /// emits at every commit boundary.
+    /// Combined hash of every sync / committed-state source the
+    /// runtime owns: mailbox queues, signal-notification registers,
+    /// LV2 host state, syscall responses, reservation table, and the
+    /// RSX FIFO cursor. Computed by FNV-1a-merging the per-source
+    /// hashes in a fixed source order so the result is deterministic
+    /// and stable across runs of the same scenario. Replay tooling
+    /// compares pairs of these values via the `SyncState` checkpoint
+    /// records the runtime emits at every commit boundary.
     pub fn sync_state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for source in [
@@ -512,6 +664,9 @@ impl Runtime {
             self.lv2_host.state_hash(),
             self.syscall_responses.state_hash(),
             self.reservations.state_hash(),
+            self.rsx_cursor.state_hash(),
+            self.rsx_sem_offset as u64,
+            self.rsx_flip.state_hash(),
         ] {
             hasher.write(&source.to_le_bytes());
         }
@@ -554,6 +709,138 @@ impl Runtime {
     #[inline]
     pub fn reservations_mut(&mut self) -> &mut cellgov_sync::ReservationTable {
         &mut self.reservations
+    }
+
+    /// Borrow the RSX FIFO cursor. Exposed so tests and the CLI can
+    /// assert on put / get / current_reference without round-tripping
+    /// through the sync state hash.
+    #[inline]
+    pub fn rsx_cursor(&self) -> &crate::rsx::RsxFifoCursor {
+        &self.rsx_cursor
+    }
+
+    /// Mutable borrow of the RSX FIFO cursor. Exposed for the
+    /// method-advance pass (wired in a later slice), the savestate-
+    /// restore path, and tests that script cursor mutations.
+    #[inline]
+    pub fn rsx_cursor_mut(&mut self) -> &mut crate::rsx::RsxFifoCursor {
+        &mut self.rsx_cursor
+    }
+
+    /// Current value of the RSX semaphore-offset register. Tests
+    /// and the advance pass use this to assert cross-drain
+    /// persistence of the offset.
+    #[inline]
+    pub fn rsx_sem_offset(&self) -> u32 {
+        self.rsx_sem_offset
+    }
+
+    /// Mutable borrow of the RSX semaphore-offset register. Exposed
+    /// for the method-advance pass (wired in a later slice) and for
+    /// tests that script the offset directly.
+    #[inline]
+    pub fn rsx_sem_offset_mut(&mut self) -> &mut u32 {
+        &mut self.rsx_sem_offset
+    }
+
+    /// Enable (or disable) the RSX control-register writeback
+    /// mirror. When enabled, PPU writes to the control-register
+    /// window (`0xC0000040` / `0xC0000044`) mirror into the
+    /// runtime's `RsxFifoCursor` at the same commit boundary. The
+    /// host is responsible for ensuring the PS3 RSX region is
+    /// writable before enabling this; flipping it to `true` against
+    /// a reserved region means every put-pointer store still
+    /// reserved-writes and the mirror never runs.
+    pub fn set_rsx_mirror_writes(&mut self, enabled: bool) {
+        self.rsx_mirror_writes = enabled;
+    }
+
+    /// Current value of the RSX mirror flag. Primarily for
+    /// test-side assertions and CLI status reporting.
+    #[inline]
+    pub fn rsx_mirror_writes_enabled(&self) -> bool {
+        self.rsx_mirror_writes
+    }
+
+    /// Borrow the RSX flip-status state. Tests and the CLI use
+    /// this to observe the WAITING / DONE transition and the
+    /// registered handler address.
+    #[inline]
+    pub fn rsx_flip(&self) -> &crate::rsx_flip::RsxFlipState {
+        &self.rsx_flip
+    }
+
+    /// Mutable borrow of the RSX flip-status state. Exposed for
+    /// the `NV4097_FLIP_BUFFER` handler, the `cellGcmSetFlipHandler`
+    /// HLE NID, the per-boundary DONE transition, and tests that
+    /// script the state directly.
+    #[inline]
+    pub fn rsx_flip_mut(&mut self) -> &mut crate::rsx_flip::RsxFlipState {
+        &mut self.rsx_flip
+    }
+
+    /// Mirror any committed write to the PS3 RSX control register's
+    /// put / get / reference slots into [`Self::rsx_cursor`].
+    ///
+    /// Walks `effects` looking for `SharedWriteIntent`s whose range
+    /// overlaps `0xC000_0040..0xC000_004C`. For each overlap, reads
+    /// the committed bytes out of guest memory (not out of the
+    /// effect payload, because a partial-overlap write may cross
+    /// two slots and the authoritative value is the one the commit
+    /// pipeline just applied) and updates the corresponding cursor
+    /// field. Each slot is only mirrored when its FULL 4-byte
+    /// window was touched by the write -- a sub-word store is
+    /// still applied to memory but does not update the cursor
+    /// (real PS3 guest code writes all 4 bytes at once; any sub-
+    /// word store is either a bug or an alignment test, and
+    /// fabricating a cursor value from it would hide the guest bug).
+    ///
+    /// Called from `commit_step` after the commit pipeline has
+    /// applied the batch and before the FIFO advance pass runs,
+    /// so the FIFO drain sees the new put / ref in the same batch.
+    fn mirror_rsx_control_register_writes(&mut self, effects: &[Effect]) {
+        use crate::rsx::{RSX_CONTROL_GET_ADDR, RSX_CONTROL_PUT_ADDR, RSX_CONTROL_REF_ADDR};
+        enum Slot {
+            Put,
+            Get,
+            Ref,
+        }
+        const SLOTS: [(u32, Slot); 3] = [
+            (RSX_CONTROL_PUT_ADDR, Slot::Put),
+            (RSX_CONTROL_GET_ADDR, Slot::Get),
+            (RSX_CONTROL_REF_ADDR, Slot::Ref),
+        ];
+        for effect in effects {
+            let Effect::SharedWriteIntent { range, .. } = effect else {
+                continue;
+            };
+            let write_start = range.start().raw();
+            let write_end = write_start.saturating_add(range.length());
+            for (slot_addr, slot) in SLOTS.iter() {
+                let slot_start = *slot_addr as u64;
+                let slot_end = slot_start + 4;
+                if write_start <= slot_start && write_end >= slot_end {
+                    // Full-word coverage: read the committed bytes
+                    // out of guest memory and mirror.
+                    let Some(slot_range) =
+                        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(slot_start), 4)
+                    else {
+                        continue;
+                    };
+                    if let Some(bytes) = self.memory.read(slot_range) {
+                        // PS3 PPU is big-endian; the guest wrote
+                        // a u32 via a big-endian store. Interpret
+                        // bytes accordingly.
+                        let value = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                        match slot {
+                            Slot::Put => self.rsx_cursor.set_put(value),
+                            Slot::Get => self.rsx_cursor.set_get(value),
+                            Slot::Ref => self.rsx_cursor.set_reference(value),
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Consume the runtime and return its guest memory.

@@ -27,3 +27,18 @@ not model.
   "Non-semantic" classifications (HLE OPD layout, SELF
   reconstruction metadata) are documented per-title in
   `tests/fixtures/<serial>_cross_runner/compare_report.txt`.
+
+## flOw ProcessExit
+
+flOw's `ProcessExit` checkpoint is a clean self-shutdown. The
+title completes its init sequence (GCM context, video-out
+query, input init, sysmodule init), then runs its process-wide
+destructor chain and calls `sys_process_exit`. It is voluntary
+termination, not a CellGov fault or hang.
+
+The trigger is that several video and GCM query functions
+(`cellVideoOutGetState`, `cellVideoOutGetResolution`,
+`cellGcmAddressToOffset`) return `CELL_OK` but do not yet
+populate their out-parameters. The title reads zeros from
+those structs, treats the configuration as invalid, and takes
+its graceful-exit branch instead of entering its render loop.

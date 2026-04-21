@@ -119,7 +119,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`.                                                                                                                                                                                                                                                                            |
 | `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier and wait-set primitives.                                                                                                                                                                                                                                                                                                                                                                                 |
 | `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `cellgov_effects`              | The 9-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                                                                                                                                                                       |
+| `cellgov_effects`              | The 13-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                                                                                                                                                                      |
 | `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                                                                                                                                                                              |
 | `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                                                                                                                                                                               |
 | `cellgov_lv2`                  | LV2 model: image registry, thread-group table, syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                                                                                                                                                                       |
@@ -299,10 +299,11 @@ fetch re-decodes from committed memory and re-applies quickening.
 
 The full vocabulary of guest-visible operations:
 
-- **9 effect variants** in `cellgov_effects::Effect`:
+- **13 effect variants** in `cellgov_effects::Effect`:
   `SharedWriteIntent`, `MailboxSend`, `MailboxReceiveAttempt`,
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
-  `FaultRaised`, `TraceMarker`.
+  `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
+  `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`.
 - **9 trace record variants** in `cellgov_trace::TraceRecord` --
   seven decision-level (`UnitScheduled`, `StepCompleted`,
   `CommitApplied`, `StateHashCheckpoint`, `EffectEmitted`,
@@ -547,9 +548,15 @@ unchanged by a lost signal.
 
 The classic lost-wake bug is a race between
 check-waiter-list-then-wake and check-count-then-decrement.
-CellGov cannot race by construction (single-host-threaded,
-deterministic interleaving at commit boundaries), but the
-dispatch handlers still have to read-and-mutate atomically:
+CellGov's runtime runs on a single OS thread and drives every
+guest execution unit (PPU and SPU) sequentially through the
+step loop, committing one batch at a time. Two guest threads
+never execute simultaneously on two host cores, so the dispatch
+handlers cannot be preempted mid-read by another handler
+running in parallel. Interleaving between guest units still
+happens, but only at commit boundaries and in a reproducible
+order. The dispatch handlers still have to read-and-mutate
+atomically within their own dispatch:
 
 - Park handlers read primitive state AND install the block in
   the same dispatch. The runtime commits the entire dispatch
@@ -632,6 +639,95 @@ workloads is conservative: `StepFootprint::reservation_lines`
 marks a step dependent on any other step whose writes cover the
 reserved line.
 
+### RSX CPU-side completion
+
+CellGov models the CPU-visible completion values a PS3 guest
+polls for -- label bytes, flip-status transitions, and GPU
+semaphore / report posts -- as a deterministic state machine
+advanced at commit boundaries by method parsing. Lives in the
+commit pipeline's committed state alongside the reservation
+table; folds into `sync_state_hash`.
+
+**FIFO cursor.** `RsxFifoCursor` tracks three scalar fields:
+`put` (guest writes advance this via `0xC0000040`), `get`
+(the method-advance pass updates this), and
+`current_reference` (last `NV406E_SET_REFERENCE` value;
+readable by `cellGcmGetCurrentReference`). Invariants: `put`
+is only ever set by guest writes to the control register;
+`get` is only ever advanced by the method-advance pass;
+`get <= put` modulo the FIFO size.
+
+**NV method decoder.** A narrow decoder parses the 32-bit
+Fermi / NV4097 method header (6-bit subchannel, 11-bit method
+address, 11-bit argument count, 4-bit flags), then walks the
+argument list from the FIFO. Five handlers are registered:
+`NV406E_SEMAPHORE_OFFSET`, `NV406E_SEMAPHORE_RELEASE`,
+`NV406E_SET_REFERENCE`, `NV4097_SET_REPORT`,
+`NV4097_FLIP_BUFFER`. Unknown methods take the fallback:
+increment `get` past the declared argument count, tick
+`methods_unknown`, emit a one-shot warning. Malformed headers
+(out-of-range reads, address overflow, wrapped cursors) stop
+the advance cleanly with a typed stop reason rather than
+desynchronizing.
+
+**Method-advance pass.** Runs at every commit boundary after
+the reservation clear-sweep, before the next scheduling
+decision. No-op when `get == put`. Otherwise walks the FIFO
+from `get` to `put`, decoding headers and invoking handlers
+in address order. Effects produced by handlers
+(`RsxLabelWrite`, `RsxFlipRequest`) are emitted into the
+NEXT commit batch -- a one-batch delay that preserves
+atomic-batch semantics. FIFO memory is frozen at batch start,
+so reads during the pass cannot observe writes committed in
+the same batch.
+
+**Effect variants.** `RsxLabelWrite { offset, value }` wraps
+a 32-bit big-endian write to the RSX label area through the
+standard `SharedWriteIntent` path, so the reservation clear
+sweep and the state-hash contribution run automatically; kept
+as a typed variant so traces can distinguish FIFO-origin
+label writes from PPU / SPU / DMA writes. `RsxFlipRequest
+{ buffer_index }` has no memory side-effect -- it drives the
+flip state machine only.
+
+**Flip-status state machine.** `RsxFlipState` carries three
+fields: `status` (0 = DONE, 1 = WAITING), `handler` (callback
+address registered via `cellGcmSetFlipHandler`, recorded but
+not dispatched), and `pending` (set by `RsxFlipRequest`,
+cleared on the next commit boundary). Transitions: initial
+status is DONE; an `RsxFlipRequest` commit transitions to
+WAITING with `pending = true`; the next commit boundary
+transitions back to DONE with `pending = false`. The
+intermediate WAITING observation is guaranteed for any PPU
+step between the two boundaries. Multiple
+`RsxFlipRequest`s before the next DONE transition collapse
+(last-writer-wins on `buffer_index`, single
+WAITING-to-DONE transition).
+
+**State-hash contribution.** The RSX committed state folds
+22 bytes of little-endian scalars into `sync_state_hash` at
+every commit boundary: `put / get / current_reference`
+(12 bytes), `flip.status / handler / pending` (6 bytes), and
+the transient `sem_offset` (4 bytes, used to carry the
+offset between an `NV406E_SEMAPHORE_OFFSET` parse and its
+paired `NV406E_SEMAPHORE_RELEASE`).
+
+**Scope boundary.** What the model does NOT do: no RSX
+rasterisation (no pixel produced); no vertex or fragment
+shader execution; no texture, render-target, or surface
+modelling; no per-method latency distribution; no vblank
+cadence; no flip-handler callback dispatch (the address is
+recorded, PPU dispatch into it is deferred); no
+performance-monitor method coverage. The only fidelity claim
+is "the value the CPU polls is the deterministic CPU-visible
+completion value CellGov defines for the equivalent commit-
+boundary model." When the title-manifest opts into the RSX
+mirror (`[rsx] mirror = true`) the region is mapped
+ReadWrite and the runtime's writeback mirror participates in
+the method-driven path; without that flag the RSX region
+stays `ReservedZeroReadable` and put-pointer writes fault as
+the `FirstRsxWrite` checkpoint.
+
 ## HLE dispatch
 
 NID-based, separate from the syscall surface. `cellgov_ppu::nid_db`
@@ -661,21 +757,29 @@ allocation, and kernel-object ID allocation.
 ### cellGcmSys HLE (RSX initialization)
 
 Active only when the Runtime is configured for RSX-checkpoint
-detection (`set_gcm_rsx_checkpoint`). Provides enough of the GCM
-subsystem for SSHD to boot to FirstRsxWrite.
+detection (`set_gcm_rsx_checkpoint`), toggled per title via the
+title-manifest. Provides the CPU-visible GCM surface the
+FIFO-cursor / method-advance path below builds on: context
+allocation, label area, control register mapping, and flip-
+handler registration.
 
-| Function                    | NID        | Behavior                                                  |
-| --------------------------- | ---------- | --------------------------------------------------------- |
-| `_cellGcmInitBody`          | 0x15bae46b | Allocates context, command buffer, callback stub, control |
-|                             |            | register (at 0xC0000040 in RSX space), and label area.    |
-| `cellGcmGetConfiguration`   | 0xe315a0b2 | Writes CellGcmConfig (24 bytes) to caller pointer.        |
-| `cellGcmGetControlRegister` | 0xa547adde | Returns control register guest address.                   |
-| `cellGcmGetTiledPitchSize`  | 0x055bd74d | Table lookup: smallest valid tiled pitch >= input size.   |
-| `cellGcmGetLabelAddress`    | 0xf80196c1 | Returns label_base + 0x10 \* index.                       |
+| Function                    | NID        | Behavior                                                                 |
+| --------------------------- | ---------- | ------------------------------------------------------------------------ |
+| `_cellGcmInitBody`          | 0x15bae46b | Allocates context, command buffer, callback stub, control                |
+|                             |            | register (at 0xC0000040 in RSX space), and label area.                   |
+| `cellGcmGetConfiguration`   | 0xe315a0b2 | Writes CellGcmConfig (24 bytes) to caller pointer.                       |
+| `cellGcmGetControlRegister` | 0xa547adde | Returns control register guest address.                                  |
+| `cellGcmGetTiledPitchSize`  | 0x055bd74d | Table lookup: smallest valid tiled pitch >= input size.                  |
+| `cellGcmGetLabelAddress`    | 0xf80196c1 | Returns label_base + 0x10 \* index.                                      |
+| `cellGcmSetFlipHandler`     | 0xa41ef7e8 | Records the callback address in `RsxFlipState::handler`; not dispatched. |
 
-The control register is placed in the RSX reserved region so the
-game's first put-pointer write triggers a ReservedWrite commit
-error, which the CLI translates to the FirstRsxWrite checkpoint.
+Without the title-manifest RSX mirror flag set, the control
+register stays in the RSX reserved region so the guest's first
+put-pointer write triggers a ReservedWrite commit error, which
+the CLI translates to the `FirstRsxWrite` checkpoint. Manifests
+that opt into `[rsx] mirror = true` map the region ReadWrite so
+the put-pointer write lands normally and the method-advance
+pass drives completion.
 
 ## Schedule exploration
 
@@ -871,7 +975,7 @@ GCM control register at 0xC0000040) triggers at step 14,109,359
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_firmware decrypt-self`. 332 HLE
 bindings across 27 modules -- the largest HLE surface of the
-three foundation titles. Same `FirstRsxWrite` checkpoint as
+three tested titles. Same `FirstRsxWrite` checkpoint as
 SSHD; CellGov reaches it at step 20,569.
 
 ## Microtest corpus

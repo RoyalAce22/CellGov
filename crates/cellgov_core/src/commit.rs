@@ -270,6 +270,21 @@ pub struct CommitContext<'a> {
     /// after every committed write (drops overlapping entries from
     /// other units).
     pub reservations: &'a mut ReservationTable,
+    /// Base address of the RSX label area -- the address returned
+    /// by `cellGcmGetLabelAddress(0)` and published by
+    /// `cellGcmInitBody` into `hle::cell_gcm_sys::GcmState`.
+    /// Zero if GCM has not been initialised. An `Effect::RsxLabelWrite`
+    /// commits as a 4-byte big-endian write at
+    /// `rsx_label_base + offset`; the offset is interpreted against
+    /// this base, NOT against the raw guest address space.
+    pub rsx_label_base: u32,
+    /// RSX flip-status state machine. Mutated by `RsxFlipRequest`
+    /// effect processing (sets WAITING + pending + records buffer
+    /// index) and by the per-boundary DONE transition fired from
+    /// `Runtime::commit_step` after a pending flip survives one
+    /// full batch. Reads are not required by the commit pipeline;
+    /// the pipeline only writes here.
+    pub rsx_flip: &'a mut crate::rsx_flip::RsxFlipState,
 }
 
 /// The commit pipeline.
@@ -523,6 +538,39 @@ impl CommitPipeline {
                         });
                     }
                 }
+                Effect::RsxLabelWrite { offset, value } => {
+                    // Resolve against the RSX label base and stage
+                    // as a 4-byte big-endian write. When label_base
+                    // is zero, the offset is treated as an
+                    // absolute guest address -- the
+                    // `containing_region` check below still rejects
+                    // writes outside mapped memory, so a stray
+                    // offset produces a commit error rather than
+                    // corrupting random addresses. Microtests that
+                    // skip cellGcmInit and allocate their own
+                    // label region use this path; foundation
+                    // titles that call cellGcmInit get a non-zero
+                    // label_base and the offset is interpreted
+                    // relative to it.
+                    let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
+                    let Some(_end) = start.checked_add(4) else {
+                        return Err(CommitError::OutOfRange { effect_index: idx });
+                    };
+                    if ctx.memory.containing_region(start, 4).is_none() {
+                        return Err(CommitError::OutOfRange { effect_index: idx });
+                    }
+                    let Ok(range) =
+                        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(start), 4)
+                            .ok_or(CommitError::OutOfRange { effect_index: idx })
+                    else {
+                        return Err(CommitError::OutOfRange { effect_index: idx });
+                    };
+                    staging.stage(StagedWrite {
+                        range,
+                        bytes: value.to_be_bytes().to_vec(),
+                    });
+                    writes += 1;
+                }
                 _ => {
                     deferred += 1;
                 }
@@ -700,6 +748,18 @@ impl CommitPipeline {
                     reservations_cleared += ctx
                         .reservations
                         .clear_covering(range.start().raw(), range.length());
+                }
+                Effect::RsxFlipRequest { buffer_index } => {
+                    // Transition the flip state: status -> WAITING,
+                    // pending -> true, record buffer_index. The
+                    // WAITING -> DONE transition fires at the next
+                    // commit boundary via Runtime::commit_step's
+                    // post-apply hook. If a flip was ALREADY
+                    // pending when this effect arrives, the corner
+                    // case is last-writer-wins on buffer_index,
+                    // pending stays true, status stays WAITING.
+                    // `request_flip` implements that policy.
+                    ctx.rsx_flip.request_flip(*buffer_index);
                 }
                 _ => {}
             }

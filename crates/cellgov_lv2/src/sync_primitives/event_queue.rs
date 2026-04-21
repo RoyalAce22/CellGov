@@ -271,10 +271,10 @@ impl EventQueueTable {
                 hasher.write(&w.thread.raw().to_le_bytes());
                 // Include out_ptr so two tables differing only
                 // in the parked waiter's continuation pointer
-                // produce distinct hashes. Foundation titles
-                // never park event-queue waiters, so this does
-                // not affect their hash -- the table is gated
-                // empty-unless-used at the host level.
+                // produce distinct hashes. Scenarios that never
+                // park event-queue waiters are unaffected -- the
+                // table is gated empty-unless-used at the host
+                // level.
                 hasher.write(&w.out_ptr.to_le_bytes());
             }
         }

@@ -189,6 +189,10 @@ pub enum TracedEffectKind {
     ReservationAcquire = 9,
     /// Conditional atomic store succeeded (stwcx / stdcx / putllc).
     ConditionalStore = 10,
+    /// RSX FIFO label write (NV406E semaphore release or report writeback).
+    RsxLabelWrite = 11,
+    /// RSX FIFO flip-buffer request (NV4097 flip).
+    RsxFlipRequest = 12,
 }
 
 impl TracedEffectKind {
@@ -205,6 +209,8 @@ impl TracedEffectKind {
             8 => Self::TraceMarker,
             9 => Self::ReservationAcquire,
             10 => Self::ConditionalStore,
+            11 => Self::RsxLabelWrite,
+            12 => Self::RsxFlipRequest,
             _ => return None,
         })
     }

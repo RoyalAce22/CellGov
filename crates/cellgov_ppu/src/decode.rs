@@ -211,6 +211,18 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         19 => decode_xl(raw),
 
         // Rotate/shift
+        20 => {
+            // rlwimi: rotate left word immediate then mask insert.
+            // Same encoding shape as rlwinm; differs only in
+            // that the result merges with the prior value of ra
+            // (unmasked bits preserved) rather than zeroing them.
+            let rs = ((raw >> 21) & 0x1F) as u8;
+            let ra = ((raw >> 16) & 0x1F) as u8;
+            let sh = ((raw >> 11) & 0x1F) as u8;
+            let mb = ((raw >> 6) & 0x1F) as u8;
+            let me = ((raw >> 1) & 0x1F) as u8;
+            Ok(PpuInstruction::Rlwimi { ra, rs, sh, mb, me })
+        }
         21 => {
             // rlwinm
             let rs = ((raw >> 21) & 0x1F) as u8;
@@ -454,6 +466,16 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         // Shift doubleword
         27 => return Ok(PpuInstruction::Sld { ra, rs: rt, rb }),
         539 => return Ok(PpuInstruction::Srd { ra, rs: rt, rb }),
+        // Shift right algebraic. Power ISA XO (10-bit):
+        //   sraw  = 792
+        //   srad  = 794
+        // The 794 and 827 entries predate the Power-ISA-aligned
+        // 792 entry: 794 was historically labelled Sraw but the
+        // ISA assigns 794 to Srad, and 827 does not match either
+        // instruction under the standard 10-bit XO encoding. Both
+        // legacy entries stay in place pending a separate audit
+        // of the instruction-coverage tests.
+        792 => return Ok(PpuInstruction::Sraw { ra, rs: rt, rb }),
         794 => return Ok(PpuInstruction::Sraw { ra, rs: rt, rb }),
         827 => return Ok(PpuInstruction::Srad { ra, rs: rt, rb }),
 

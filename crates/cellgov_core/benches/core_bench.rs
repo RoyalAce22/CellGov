@@ -51,6 +51,7 @@ fn bench_commit_0_effects(c: &mut Criterion) {
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
+        let mut flip = cellgov_core::rsx_flip::RsxFlipState::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -61,6 +62,8 @@ fn bench_commit_0_effects(c: &mut Criterion) {
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
                 reservations: &mut reservations,
+                rsx_label_base: 0,
+                rsx_flip: &mut flip,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -82,6 +85,7 @@ fn bench_commit_1_effect(c: &mut Criterion) {
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
+        let mut flip = cellgov_core::rsx_flip::RsxFlipState::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -92,6 +96,8 @@ fn bench_commit_1_effect(c: &mut Criterion) {
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
                 reservations: &mut reservations,
+                rsx_label_base: 0,
+                rsx_flip: &mut flip,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -115,6 +121,7 @@ fn bench_commit_10_effects(c: &mut Criterion) {
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
+        let mut flip = cellgov_core::rsx_flip::RsxFlipState::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -125,6 +132,8 @@ fn bench_commit_10_effects(c: &mut Criterion) {
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
                 reservations: &mut reservations,
+                rsx_label_base: 0,
+                rsx_flip: &mut flip,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -155,6 +164,7 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
+        let mut flip = cellgov_core::rsx_flip::RsxFlipState::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -165,6 +175,8 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
                 dma_latency: &latency,
                 now: GuestTicks::ZERO,
                 reservations: &mut reservations,
+                rsx_label_base: 0,
+                rsx_flip: &mut flip,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)

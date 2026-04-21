@@ -1932,7 +1932,7 @@ fn cmpw_bc_not_taken() {
     assert_eq!(s.cr_field(0), 0b1000); // LT
 }
 
-// -- Phase 16 additions --
+// -- Extended instruction coverage --
 
 #[test]
 fn subfc_computes_rb_minus_ra_and_sets_ca_on_no_borrow() {

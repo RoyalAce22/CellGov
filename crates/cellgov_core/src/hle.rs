@@ -27,7 +27,7 @@
 //! and emits no side effects. This is the only *safe* default --
 //! every PS3 library function is also the site of a silent divergence
 //! if it was genuinely called and needed real behavior. The router
-//! records every unclaimed call (see [`HleState::unclaimed_nids`]
+//! records every unclaimed call (see `HleState::unclaimed_nids`
 //! and [`Runtime::hle_unclaimed_nids`]) and prints a one-shot
 //! stderr line the first time each NID shows up so "no one
 //! implemented this" stays distinguishable from "this was called
@@ -427,6 +427,100 @@ mod tests {
             "non-checkpoint mode must heap-allocate a non-zero control_addr \
              (dispatch witness relies on both init branches producing non-zero)"
         );
+    }
+
+    #[test]
+    fn gcm_set_flip_handler_records_callback_address() {
+        // cellGcmSetFlipHandler records the callback pointer into
+        // RsxFlipState::handler without touching any other flip
+        // field. Returns 0 (Sony's signature is void; 0 is the
+        // CELL_OK coercion).
+        use crate::hle::cell_gcm_sys::NID_CELLGCM_SET_FLIP_HANDLER;
+        use crate::runtime::Runtime;
+        use cellgov_mem::GuestMemory;
+        use cellgov_time::Budget;
+
+        let mut rt = Runtime::new(GuestMemory::new(0x200000), Budget::new(1), 100);
+        rt.set_hle_heap_base(0x100000);
+        rt.set_gcm_rsx_checkpoint(true);
+        let unit_id = cellgov_event::UnitId::new(0);
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+
+        assert_eq!(rt.rsx_flip().handler(), 0, "starts cleared");
+        let args: [u64; 9] = [0, 0x1234_5678, 0, 0, 0, 0, 0, 0, 0];
+        rt.dispatch_hle(unit_id, NID_CELLGCM_SET_FLIP_HANDLER, &args);
+
+        assert_eq!(rt.rsx_flip().handler(), 0x1234_5678);
+        // Other fields unchanged.
+        assert_eq!(
+            rt.rsx_flip().status(),
+            crate::rsx_flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE
+        );
+        assert!(!rt.rsx_flip().pending());
+    }
+
+    #[test]
+    fn gcm_set_flip_handler_accepts_null_to_clear() {
+        // Games passing NULL to clear the handler is a legal call
+        // pattern. Verify the oracle records 0 without error.
+        use crate::hle::cell_gcm_sys::NID_CELLGCM_SET_FLIP_HANDLER;
+        use crate::runtime::Runtime;
+        use cellgov_mem::GuestMemory;
+        use cellgov_time::Budget;
+
+        let mut rt = Runtime::new(GuestMemory::new(0x200000), Budget::new(1), 100);
+        rt.set_hle_heap_base(0x100000);
+        rt.set_gcm_rsx_checkpoint(true);
+        // Pre-seed a handler so the clear is visible.
+        rt.rsx_flip_mut().set_handler(0xAABB_CCDD);
+        let unit_id = cellgov_event::UnitId::new(0);
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+
+        let args: [u64; 9] = [0; 9];
+        rt.dispatch_hle(unit_id, NID_CELLGCM_SET_FLIP_HANDLER, &args);
+
+        assert_eq!(rt.rsx_flip().handler(), 0, "NULL cleared the handler");
+    }
+
+    #[test]
+    fn gcm_init_body_leaves_labels_zero_initialised() {
+        // Post-init every byte in the label region must read as 0
+        // so the FIFO advance pass is the sole source of label
+        // values. A guest polling a label for a specific non-zero
+        // value correctly spins until a method writes it.
+        use crate::runtime::Runtime;
+        use cellgov_mem::GuestMemory;
+        use cellgov_time::Budget;
+
+        let mut rt = Runtime::new(GuestMemory::new(0x200000), Budget::new(1), 100);
+        rt.set_hle_heap_base(0x100000);
+        rt.set_gcm_rsx_checkpoint(true);
+
+        let unit_id = cellgov_event::UnitId::new(0);
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+
+        let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
+        rt.dispatch_hle(unit_id, NID_CELLGCM_INIT_BODY, &args);
+
+        let label_addr = rt.hle.gcm.label_addr;
+        assert_ne!(label_addr, 0, "init must have allocated a label region");
+        let mem = rt.memory().as_bytes();
+        let base = label_addr as usize;
+        // Sample the whole region. Any non-zero byte is a 0xFF
+        // pre-fill leaking back in; the sample is cheap so we
+        // check the full 4K window rather than a prefix.
+        for (i, byte) in mem[base..base + 4096].iter().enumerate() {
+            assert_eq!(
+                *byte, 0,
+                "label byte at offset {i:#x} must be zero post-init; got {byte:#x}"
+            );
+        }
     }
 
     #[test]

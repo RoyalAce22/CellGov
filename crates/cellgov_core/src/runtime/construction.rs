@@ -48,6 +48,25 @@ impl Runtime {
             mailbox_registry: MailboxRegistry::new(),
             signal_registry: SignalRegistry::new(),
             reservations: cellgov_sync::ReservationTable::new(),
+            rsx_cursor: crate::rsx::RsxFifoCursor::new(),
+            rsx_sem_offset: 0,
+            rsx_mirror_writes: false,
+            rsx_flip: crate::rsx_flip::RsxFlipState::new(),
+            rsx_methods: {
+                let mut t = crate::rsx_method::NvMethodTable::new();
+                crate::rsx_method::register_nv406e_label_handlers(&mut t)
+                    .expect("fresh NvMethodTable cannot collide");
+                crate::rsx_method::register_nv406e_reference_handler(&mut t)
+                    .expect("fresh NvMethodTable cannot collide");
+                crate::rsx_method::register_nv4097_flip_handler(&mut t)
+                    .expect("fresh NvMethodTable cannot collide");
+                crate::rsx_method::register_nv4097_report_handler(&mut t)
+                    .expect("fresh NvMethodTable cannot collide");
+                crate::rsx_method::register_nv4097_back_end_semaphore_handlers(&mut t)
+                    .expect("fresh NvMethodTable cannot collide");
+                t
+            },
+            pending_rsx_effects: Vec::new(),
             dma_queue: DmaQueue::new(),
             dma_latency: Box::new(FixedLatency::new(10)),
             lv2_host: Lv2Host::new(),

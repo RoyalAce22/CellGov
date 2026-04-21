@@ -949,6 +949,18 @@ pub fn execute(
             state.gpr[ra as usize] = (rotated & mask) as u64;
             ExecuteVerdict::Continue
         }
+        PpuInstruction::Rlwimi { ra, rs, sh, mb, me } => {
+            // Rotate-left-word + mask-insert: merge the masked
+            // bits of the rotated rs into the unmasked slots of
+            // the prior ra. Standard PPC bitfield-insert idiom.
+            let val = state.gpr[rs as usize] as u32;
+            let rotated = val.rotate_left(sh as u32);
+            let mask = rlwinm_mask(mb, me);
+            let prior = state.gpr[ra as usize] as u32;
+            let merged = (rotated & mask) | (prior & !mask);
+            state.gpr[ra as usize] = merged as u64;
+            ExecuteVerdict::Continue
+        }
         PpuInstruction::Rlwnm { ra, rs, rb, mb, me } => {
             let val = state.gpr[rs as usize] as u32;
             let n = (state.gpr[rb as usize] & 0x1F) as u32;

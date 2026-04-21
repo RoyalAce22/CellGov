@@ -596,7 +596,7 @@ impl UnitRegistry {
     ///
     /// ## Wire-format contract
     ///
-    /// The per-status byte is explicitly mapped by [`status_byte`]
+    /// The per-status byte is explicitly mapped by `status_byte`
     /// rather than using `UnitStatus as u8`. The enum's `#[repr(u8)]`
     /// plus discriminants-locked comment already pin the values, but
     /// relying on an implicit cast means a future accidental removal

@@ -44,6 +44,8 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
         Effect::TraceMarker { .. } => TracedEffectKind::TraceMarker,
         Effect::ReservationAcquire { .. } => TracedEffectKind::ReservationAcquire,
         Effect::ConditionalStore { .. } => TracedEffectKind::ConditionalStore,
+        Effect::RsxLabelWrite { .. } => TracedEffectKind::RsxLabelWrite,
+        Effect::RsxFlipRequest { .. } => TracedEffectKind::RsxFlipRequest,
     }
 }
 

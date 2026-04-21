@@ -3453,11 +3453,11 @@ fn ppu_thread_exit_marks_thread_finished_with_exit_value() {
 
 #[test]
 fn ppu_thread_exit_unseeded_thread_still_returns_dispatch() {
-    // If the caller is not in the thread table yet (e.g. the
-    // primary is unseeded -- foundation-title boot path), the
-    // handler still returns a PpuThreadExit dispatch so the
-    // runtime transitions the unit to Finished. No waiters
-    // are waked because none can be tracked.
+    // If the caller is not in the thread table yet (e.g. an
+    // unseeded primary on the standard boot path), the handler
+    // still returns a PpuThreadExit dispatch so the runtime
+    // transitions the unit to Finished. No waiters are waked
+    // because none can be tracked.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(256);
     let result = host.dispatch(
@@ -5413,7 +5413,7 @@ fn cond_destroy_with_waiter_returns_ebusy() {
 // produce byte-identical state hashes and byte-identical
 // dispatch-outcome tags at every step. This is the guard
 // against ordering nondeterminism: any such regression must
-// trip this test before it ever reaches foundation titles.
+// trip this test before it ever reaches a real title.
 // ---------------------------------------------------------------
 
 #[test]

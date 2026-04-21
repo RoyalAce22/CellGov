@@ -1,0 +1,65 @@
+[test]
+name = "rsx_label_write_poll"
+
+# Structural microtest. A PPU thread writes an
+# NV406E_SEMAPHORE_OFFSET + RELEASE pair to a FIFO buffer and
+# advances the RSX put pointer. The oracle's FIFO advance pass
+# parses the pair and emits an RsxLabelWrite effect; the commit
+# pipeline lands a 4-byte big-endian write at the label address;
+# the PPU's poll loop observes the written value and reports
+# success. Exercises the full label-write path end-to-end, with
+# rsx_mirror-mode writeback.
+
+[rpcs3]
+binary = "build/rsx_label_write_poll.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# TestResult: status + label_value + expected + spin_iters
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Consumed by `cellgov_cli run-game
+# --title-manifest <this file>`.
+#
+# Usage:
+#   1. Build the ELF (requires ps3dev-fresh docker image):
+#        docker run --rm \
+#          -v "$(pwd)/tests/micro/rsx_label_write_poll:/src" \
+#          -v "$(pwd)/tests/micro/common:/common" \
+#          -e COMMON=/common ps3dev-fresh:latest bash /src/build.sh
+#
+#   2. Stage the ELF under dev_hdd0 at the path resolve_eboot()
+#      expects:
+#        mkdir -p tools/rpcs3/dev_hdd0/game/CG_RXLBL/USRDIR
+#        cp tests/micro/rsx_label_write_poll/build/\
+#           rsx_label_write_poll.elf \
+#           tools/rpcs3/dev_hdd0/game/CG_RXLBL/USRDIR/EBOOT.elf
+#
+#   3. Run:
+#        cargo run --release -p cellgov_cli -- run-game \
+#          --title-manifest \
+# tests/micro/rsx_label_write_poll/manifest.toml --max-steps 1000000
+#
+# Expected TTY payload (CGOV magic + 16 bytes):
+#   status=0x00000000 label_value=0xCAFEBABE
+#   expected=0xCAFEBABE spin_iters=<small>
+
+[cellgov.title]
+content_id = "CG_RXLBL"
+short_name = "rxlbl"
+display_name = "CellGov RSX label-write-poll microtest"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[cellgov.rsx]
+# Title needs the RSX region writable and the runtime's
+# writeback mirror enabled. See TitleManifest::rsx_mirror doc.
+mirror = true

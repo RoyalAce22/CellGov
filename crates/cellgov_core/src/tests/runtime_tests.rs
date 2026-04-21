@@ -1604,6 +1604,714 @@ impl ExecutionUnit for ReservationDriverUnit {
     }
 }
 
+/// Writes FIFO bytes encoding a single `GCM_FLIP_COMMAND` method
+/// with the given buffer index, plus advances put via the RSX
+/// control-register mirror. Finishes after one step.
+struct RsxFlipCommandEmitterUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    fifo_base: u32,
+    buffer_index: u32,
+}
+
+impl ExecutionUnit for RsxFlipCommandEmitterUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 1 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        use crate::rsx::RSX_CONTROL_PUT_ADDR;
+        use crate::rsx_method::{GCM_FLIP_COMMAND, NV_COUNT_SHIFT};
+        use cellgov_effects::WritePayload;
+        use cellgov_event::PriorityClass;
+        use cellgov_mem::{ByteRange, GuestAddr};
+        self.steps.set(1);
+        // FIFO words: GCM_FLIP_COMMAND header (count=1) + arg.
+        let header: u32 = (1u32 << NV_COUNT_SHIFT) | (GCM_FLIP_COMMAND as u32);
+        let mut fifo_bytes: Vec<u8> = Vec::with_capacity(8);
+        fifo_bytes.extend_from_slice(&header.to_le_bytes());
+        fifo_bytes.extend_from_slice(&self.buffer_index.to_le_bytes());
+        effects.push(Effect::SharedWriteIntent {
+            range: ByteRange::new(GuestAddr::new(self.fifo_base as u64), 8).unwrap(),
+            bytes: WritePayload::new(fifo_bytes),
+            ordering: PriorityClass::Normal,
+            source: self.id,
+            source_time: GuestTicks::ZERO,
+        });
+        effects.push(Effect::SharedWriteIntent {
+            range: ByteRange::new(GuestAddr::new(RSX_CONTROL_PUT_ADDR as u64), 4).unwrap(),
+            bytes: WritePayload::new((self.fifo_base + 8).to_be_bytes().to_vec()),
+            ordering: PriorityClass::Normal,
+            source: self.id,
+            source_time: GuestTicks::ZERO,
+        });
+        ExecutionStepResult {
+            yield_reason: YieldReason::Finished,
+            consumed_budget: budget,
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+#[test]
+fn rsx_flip_waiting_observable_between_two_commits_then_done() {
+    // End-to-end flip state machine:
+    // Batch 1: unit emits FLIP_BUFFER + put advance. FIFO drain
+    //   parses and queues RsxFlipRequest into pending.
+    //   Flip state at end of batch 1: DONE (unchanged) -- the
+    //   RsxFlipRequest has NOT been applied yet (lands in batch 2).
+    // Batch 2: commit pipeline applies the queued RsxFlipRequest,
+    //   flipping status to WAITING / pending=true. pending_at_entry
+    //   was false (from batch 1), so no DONE transition.
+    //   Flip state at end of batch 2: WAITING / pending=true.
+    // Batch 3 (or any later boundary): pending_at_entry=true,
+    //   DONE transition fires.
+    //   Flip state at end of batch 3: DONE / pending=false.
+    use crate::rsx_flip::{
+        CELL_GCM_DISPLAY_FLIP_STATUS_DONE, CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
+    };
+    const FIFO_BASE: u32 = 0x200;
+    let mut rt = build_with_rsx_and_label_region(0x4000);
+    rt.set_rsx_mirror_writes(true);
+    rt.registry_mut()
+        .register_with(|id| RsxFlipCommandEmitterUnit {
+            id,
+            steps: Cell::new(0),
+            fifo_base: FIFO_BASE,
+            buffer_index: 2,
+        });
+    // Batch 1: emits FIFO + put; drain parses FLIP_BUFFER, queues effect.
+    let s1 = rt.step().unwrap();
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    assert_eq!(
+        rt.rsx_flip().status(),
+        CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
+        "batch 1 end: effect queued, not yet applied; flip still DONE"
+    );
+    assert!(!rt.rsx_flip().pending());
+    // Batch 2: the unit is finished, no new unit emissions. Commit
+    // drains pending_rsx_effects (our queued RsxFlipRequest). Need
+    // a step -- but the unit is Finished, which means rt.step()
+    // would return NoRunnableUnit. Use a trivial second unit.
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 5));
+    let s2 = rt.step().unwrap();
+    rt.commit_step(&s2.result, &s2.effects).unwrap();
+    assert_eq!(
+        rt.rsx_flip().status(),
+        CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
+        "batch 2 end: RsxFlipRequest applied; WAITING observable"
+    );
+    assert!(rt.rsx_flip().pending());
+    assert_eq!(rt.rsx_flip().buffer_index(), 2);
+    // Batch 3: pending_at_entry=true, DONE transition fires.
+    let s3 = rt.step().unwrap();
+    rt.commit_step(&s3.result, &s3.effects).unwrap();
+    assert_eq!(
+        rt.rsx_flip().status(),
+        CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
+        "batch 3 end: transition fired"
+    );
+    assert!(!rt.rsx_flip().pending());
+}
+
+/// Unit that emits a single `RsxFlipRequest` effect on its first
+/// step, then finishes. Used to exercise the commit pipeline's
+/// RsxFlipRequest application path without going through the FIFO
+/// drain (which adds a one-batch delay).
+struct RsxFlipRequestEmitterUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    buffer_index: u8,
+}
+
+impl ExecutionUnit for RsxFlipRequestEmitterUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 1 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        self.steps.set(1);
+        effects.push(Effect::RsxFlipRequest {
+            buffer_index: self.buffer_index,
+        });
+        ExecutionStepResult {
+            yield_reason: YieldReason::Finished,
+            consumed_budget: budget,
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+#[test]
+fn rsx_flip_request_applied_same_batch_does_not_immediately_transition() {
+    // Tightness probe: when a RsxFlipRequest is applied in this
+    // commit, the DONE transition must NOT fire in the same
+    // batch. `flip_pending_at_entry` was false (pending hasn't
+    // been set yet), so the post-apply hook skips the transition.
+    // Pins the "one-batch-delay" contract the design doc calls out.
+    use crate::rsx_flip::CELL_GCM_DISPLAY_FLIP_STATUS_WAITING;
+    let mut rt = build(4096, 1, 100);
+    rt.registry_mut()
+        .register_with(|id| RsxFlipRequestEmitterUnit {
+            id,
+            steps: Cell::new(0),
+            buffer_index: 1,
+        });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(
+        rt.rsx_flip().status(),
+        CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
+        "WAITING observable; DONE transition does NOT fire same-batch"
+    );
+    assert!(rt.rsx_flip().pending());
+    assert_eq!(rt.rsx_flip().buffer_index(), 1);
+}
+
+#[test]
+fn rsx_flip_transitions_to_done_on_next_commit_boundary() {
+    // Companion to the tightness probe: after the WAITING state
+    // has been observable for one PPU step, the NEXT commit
+    // boundary transitions to DONE. Two-step test: step 1 emits
+    // RsxFlipRequest (WAITING + pending=true); step 2 is any
+    // commit (no flip-related emission); DONE transition fires
+    // because pending_at_entry was true.
+    use crate::rsx_flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE;
+    let mut rt = build(4096, 1, 100);
+    rt.registry_mut()
+        .register_with(|id| RsxFlipRequestEmitterUnit {
+            id,
+            steps: Cell::new(0),
+            buffer_index: 2,
+        });
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 5));
+    let s1 = rt.step().unwrap();
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    assert!(rt.rsx_flip().pending(), "batch 1: WAITING + pending");
+    let s2 = rt.step().unwrap();
+    rt.commit_step(&s2.result, &s2.effects).unwrap();
+    assert_eq!(
+        rt.rsx_flip().status(),
+        CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
+        "batch 2: DONE transition fired"
+    );
+    assert!(!rt.rsx_flip().pending());
+}
+
+#[test]
+fn rsx_flip_second_request_while_pending_resolves_one_transition() {
+    // Corner case: a second RsxFlipRequest that arrives while
+    // pending==true updates buffer_index but does
+    // NOT add a second transition -- exactly one WAITING -> DONE
+    // fires for the sequence.
+    use crate::rsx_flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE;
+    let mut rt = build(4096, 1, 100);
+    rt.registry_mut()
+        .register_with(|id| RsxFlipRequestEmitterUnit {
+            id,
+            steps: Cell::new(0),
+            buffer_index: 1,
+        });
+    rt.registry_mut()
+        .register_with(|id| RsxFlipRequestEmitterUnit {
+            id,
+            steps: Cell::new(0),
+            buffer_index: 5,
+        });
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 5));
+    // Batch 1: first RsxFlipRequest (buffer 1) -> WAITING + pending.
+    let s1 = rt.step().unwrap();
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    assert!(rt.rsx_flip().pending());
+    assert_eq!(rt.rsx_flip().buffer_index(), 1);
+    // Batch 2: second RsxFlipRequest (buffer 5) overwrites
+    // buffer_index BUT pending_at_entry was true so DONE fires.
+    // Post-apply: RsxFlipRequest runs first (WAITING, pending,
+    // buffer=5), then DONE transition checks pending_at_entry=true
+    // and fires. So end state: DONE + pending=false + buffer=5.
+    let s2 = rt.step().unwrap();
+    rt.commit_step(&s2.result, &s2.effects).unwrap();
+    assert_eq!(
+        rt.rsx_flip().status(),
+        CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
+        "exactly one WAITING -> DONE transition for the request sequence"
+    );
+    assert!(!rt.rsx_flip().pending());
+    assert_eq!(
+        rt.rsx_flip().buffer_index(),
+        5,
+        "second request's buffer_index remains recorded"
+    );
+}
+
+/// Writes a u32 to a specific RSX control-register slot via a
+/// single SharedWriteIntent on its first step, then finishes. The
+/// slot address and value are constructor params so a test can
+/// target put / get / reference individually.
+struct RsxControlWriterUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    slot_addr: u64,
+    value: u32,
+}
+
+impl ExecutionUnit for RsxControlWriterUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 1 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        use cellgov_effects::WritePayload;
+        use cellgov_event::PriorityClass;
+        use cellgov_mem::{ByteRange, GuestAddr};
+        self.steps.set(1);
+        let range = ByteRange::new(GuestAddr::new(self.slot_addr), 4).unwrap();
+        effects.push(Effect::SharedWriteIntent {
+            range,
+            bytes: WritePayload::new(self.value.to_be_bytes().to_vec()),
+            ordering: PriorityClass::Normal,
+            source: self.id,
+            source_time: GuestTicks::ZERO,
+        });
+        ExecutionStepResult {
+            yield_reason: YieldReason::Finished,
+            consumed_budget: budget,
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+fn build_with_rsx_writable() -> Runtime {
+    use cellgov_mem::{GuestMemory, PageSize, Region};
+    let regions = vec![
+        Region::new(0, 0x1000, "flat", PageSize::Page4K),
+        Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
+    ];
+    let mem = GuestMemory::from_regions(regions).expect("regions non-overlapping");
+    Runtime::new(mem, Budget::new(1), 100)
+}
+
+#[test]
+fn rsx_mirror_writes_disabled_by_default() {
+    let rt = build(4096, 1, 100);
+    assert!(!rt.rsx_mirror_writes_enabled());
+}
+
+#[test]
+fn rsx_mirror_writes_off_leaves_cursor_unchanged() {
+    use crate::rsx::RSX_CONTROL_PUT_ADDR;
+    let mut rt = build_with_rsx_writable();
+    rt.registry_mut().register_with(|id| RsxControlWriterUnit {
+        id,
+        steps: Cell::new(0),
+        slot_addr: RSX_CONTROL_PUT_ADDR as u64,
+        value: 0x1234,
+    });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(rt.rsx_cursor().put(), 0, "mirror off; cursor untouched");
+}
+
+#[test]
+fn rsx_mirror_writes_on_routes_put_to_cursor() {
+    use crate::rsx::RSX_CONTROL_PUT_ADDR;
+    let mut rt = build_with_rsx_writable();
+    rt.set_rsx_mirror_writes(true);
+    rt.registry_mut().register_with(|id| RsxControlWriterUnit {
+        id,
+        steps: Cell::new(0),
+        slot_addr: RSX_CONTROL_PUT_ADDR as u64,
+        value: 0x0000_1000,
+    });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(rt.rsx_cursor().put(), 0x0000_1000);
+    // Memory also holds the big-endian value (byte-for-byte what
+    // the guest wrote) so a guest read-back sees its own store.
+    use cellgov_mem::{ByteRange, GuestAddr};
+    let mem_bytes = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new(RSX_CONTROL_PUT_ADDR as u64), 4).unwrap())
+        .unwrap();
+    assert_eq!(mem_bytes, &0x0000_1000u32.to_be_bytes());
+}
+
+#[test]
+fn rsx_mirror_writes_on_routes_get_to_cursor() {
+    use crate::rsx::RSX_CONTROL_GET_ADDR;
+    let mut rt = build_with_rsx_writable();
+    rt.set_rsx_mirror_writes(true);
+    rt.registry_mut().register_with(|id| RsxControlWriterUnit {
+        id,
+        steps: Cell::new(0),
+        slot_addr: RSX_CONTROL_GET_ADDR as u64,
+        value: 0x0000_2000,
+    });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(rt.rsx_cursor().get(), 0x0000_2000);
+}
+
+#[test]
+fn rsx_mirror_writes_on_routes_reference_to_cursor() {
+    use crate::rsx::RSX_CONTROL_REF_ADDR;
+    let mut rt = build_with_rsx_writable();
+    rt.set_rsx_mirror_writes(true);
+    rt.registry_mut().register_with(|id| RsxControlWriterUnit {
+        id,
+        steps: Cell::new(0),
+        slot_addr: RSX_CONTROL_REF_ADDR as u64,
+        value: 0xCAFE_BABE,
+    });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(rt.rsx_cursor().current_reference(), 0xCAFE_BABE);
+}
+
+/// Drives a full RSX label-write round trip inside the runtime:
+/// Step 1 writes an OFFSET + RELEASE method pair to FIFO memory
+/// via SharedWriteIntents AND advances put via the RSX control
+/// register mirror. Step 2 (any subsequent commit) drains the
+/// pending RsxLabelWrite emitted by the FIFO advance pass of step 1
+/// into memory at `label_base + offset`. The test asserts the
+/// final memory byte is the expected value.
+struct RsxOffsetReleaseDriverUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    fifo_base: u32,
+    put_target: u32,
+    sem_offset: u32,
+    release_value: u32,
+}
+
+impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 2 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        use crate::rsx::RSX_CONTROL_PUT_ADDR;
+        use crate::rsx_method::{
+            NV406E_SEMAPHORE_OFFSET, NV406E_SEMAPHORE_RELEASE, NV_COUNT_SHIFT,
+        };
+        use cellgov_effects::WritePayload;
+        use cellgov_event::PriorityClass;
+        use cellgov_mem::{ByteRange, GuestAddr};
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        let yield_reason = if n >= 2 {
+            YieldReason::Finished
+        } else {
+            YieldReason::BudgetExhausted
+        };
+        match n {
+            1 => {
+                // Step 1: write FIFO words and advance put. Four
+                // FIFO words: OFFSET header, offset arg, RELEASE
+                // header, release arg. All little-endian (RSX
+                // byte order).
+                let header_offset: u32 =
+                    (1u32 << NV_COUNT_SHIFT) | (NV406E_SEMAPHORE_OFFSET as u32);
+                let header_release: u32 =
+                    (1u32 << NV_COUNT_SHIFT) | (NV406E_SEMAPHORE_RELEASE as u32);
+                let words = [
+                    header_offset,
+                    self.sem_offset,
+                    header_release,
+                    self.release_value,
+                ];
+                let mut fifo_bytes: Vec<u8> = Vec::with_capacity(16);
+                for w in words {
+                    fifo_bytes.extend_from_slice(&w.to_le_bytes());
+                }
+                effects.push(Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(self.fifo_base as u64), 16).unwrap(),
+                    bytes: WritePayload::new(fifo_bytes),
+                    ordering: PriorityClass::Normal,
+                    source: self.id,
+                    source_time: GuestTicks::ZERO,
+                });
+                // Advance put via the control-register mirror.
+                effects.push(Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(RSX_CONTROL_PUT_ADDR as u64), 4).unwrap(),
+                    bytes: WritePayload::new(self.put_target.to_be_bytes().to_vec()),
+                    ordering: PriorityClass::Normal,
+                    source: self.id,
+                    source_time: GuestTicks::ZERO,
+                });
+            }
+            2 => {
+                // Step 2: no effects -- commit_step must drain
+                // the pending RsxLabelWrite emitted at the end of
+                // batch 1's FIFO advance pass into memory.
+            }
+            _ => {}
+        }
+        ExecutionStepResult {
+            yield_reason,
+            consumed_budget: budget,
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+fn build_with_rsx_and_label_region(label_base: u32) -> Runtime {
+    use cellgov_mem::{GuestMemory, PageSize, Region};
+    let regions = vec![
+        // Flat region for FIFO.
+        Region::new(0, 0x10000, "flat", PageSize::Page4K),
+        // RSX region for control-register writes.
+        Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
+    ];
+    let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
+    let mut rt = Runtime::new(mem, Budget::new(1), 100);
+    rt.hle.gcm.label_addr = label_base;
+    rt
+}
+
+#[test]
+fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
+    // FIFO at 0x200. sem_offset = 0x10. label_base = 0x4000. The
+    // final label write lands at 0x4010 as big-endian 0xCAFE_BABE.
+    const FIFO_BASE: u32 = 0x200;
+    const LABEL_BASE: u32 = 0x4000;
+    const SEM_OFFSET: u32 = 0x10;
+    const RELEASE_VALUE: u32 = 0xCAFE_BABE;
+    let mut rt = build_with_rsx_and_label_region(LABEL_BASE);
+    rt.set_rsx_mirror_writes(true);
+    rt.registry_mut()
+        .register_with(|id| RsxOffsetReleaseDriverUnit {
+            id,
+            steps: Cell::new(0),
+            fifo_base: FIFO_BASE,
+            put_target: FIFO_BASE + 16,
+            sem_offset: SEM_OFFSET,
+            release_value: RELEASE_VALUE,
+        });
+    // Step 1: emits FIFO bytes + put advance; triggers drain; queues RsxLabelWrite.
+    let s1 = rt.step().unwrap();
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    assert_eq!(rt.rsx_cursor().put(), FIFO_BASE + 16);
+    assert_eq!(
+        rt.rsx_cursor().get(),
+        FIFO_BASE + 16,
+        "drain must consume the full FIFO"
+    );
+    // Label memory still untouched at end of step 1 -- RSX effects
+    // commit in batch N+1 per the atomic-batch contract.
+    use cellgov_mem::{ByteRange, GuestAddr};
+    let pre_bytes = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new((LABEL_BASE + SEM_OFFSET) as u64), 4).unwrap())
+        .unwrap();
+    assert_eq!(pre_bytes, &[0, 0, 0, 0], "label still zero after batch 1");
+    // Step 2: no unit effects; commit drains pending RsxLabelWrite.
+    let s2 = rt.step().unwrap();
+    rt.commit_step(&s2.result, &s2.effects).unwrap();
+    let post_bytes = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new((LABEL_BASE + SEM_OFFSET) as u64), 4).unwrap())
+        .unwrap();
+    assert_eq!(
+        post_bytes,
+        &RELEASE_VALUE.to_be_bytes(),
+        "label holds the big-endian release value after batch 2"
+    );
+}
+
+#[test]
+fn rsx_label_write_round_trip_is_deterministic_across_runs() {
+    // Same input -> byte-identical final label memory across two
+    // independent runs. Closes the "same-budget replay
+    // determinism" gate for the RSX label-write flow.
+    fn run() -> Vec<u8> {
+        const FIFO_BASE: u32 = 0x200;
+        const LABEL_BASE: u32 = 0x4000;
+        let mut rt = build_with_rsx_and_label_region(LABEL_BASE);
+        rt.set_rsx_mirror_writes(true);
+        rt.registry_mut()
+            .register_with(|id| RsxOffsetReleaseDriverUnit {
+                id,
+                steps: Cell::new(0),
+                fifo_base: FIFO_BASE,
+                put_target: FIFO_BASE + 16,
+                sem_offset: 0x20,
+                release_value: 0xDEAD_F00D,
+            });
+        for _ in 0..2 {
+            let s = rt.step().unwrap();
+            rt.commit_step(&s.result, &s.effects).unwrap();
+        }
+        use cellgov_mem::{ByteRange, GuestAddr};
+        rt.memory()
+            .read(ByteRange::new(GuestAddr::new((LABEL_BASE + 0x20) as u64), 4).unwrap())
+            .unwrap()
+            .to_vec()
+    }
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
+    // Cross-budget final-state equivalence: identical end state
+    // after running with Budget=1 vs Budget=16. Both scenarios
+    // complete the same scripted work; the commit-pipeline path
+    // must not depend on how many instructions the unit consumes
+    // per step.
+    fn run_with_budget(budget: u64) -> Vec<u8> {
+        use cellgov_mem::{GuestMemory, PageSize, Region};
+        const FIFO_BASE: u32 = 0x200;
+        const LABEL_BASE: u32 = 0x4000;
+        let regions = vec![
+            Region::new(0, 0x10000, "flat", PageSize::Page4K),
+            Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
+        ];
+        let mem = GuestMemory::from_regions(regions).unwrap();
+        let mut rt = Runtime::new(mem, Budget::new(budget), 100);
+        rt.hle.gcm.label_addr = LABEL_BASE;
+        rt.set_rsx_mirror_writes(true);
+        rt.registry_mut()
+            .register_with(|id| RsxOffsetReleaseDriverUnit {
+                id,
+                steps: Cell::new(0),
+                fifo_base: FIFO_BASE,
+                put_target: FIFO_BASE + 16,
+                sem_offset: 0x30,
+                release_value: 0x1234_5678,
+            });
+        for _ in 0..2 {
+            let s = rt.step().unwrap();
+            rt.commit_step(&s.result, &s.effects).unwrap();
+        }
+        use cellgov_mem::{ByteRange, GuestAddr};
+        rt.memory()
+            .read(ByteRange::new(GuestAddr::new((LABEL_BASE + 0x30) as u64), 4).unwrap())
+            .unwrap()
+            .to_vec()
+    }
+    assert_eq!(run_with_budget(1), run_with_budget(16));
+    assert_eq!(run_with_budget(1), 0x1234_5678u32.to_be_bytes().to_vec());
+}
+
+#[test]
+fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
+    // Integration: a single SharedWriteIntent that advances put
+    // must feed the cursor AND trigger the FIFO advance pass in
+    // the same commit_step. This pins the ordering contract
+    // (mirror runs BEFORE rsx_advance in commit_step). Use an
+    // empty FIFO (no methods between get=0 and put=0x10 because
+    // memory is zero-initialised; zero-headers are NOPs). Assert
+    // cursor.get advanced to cursor.put after commit.
+    use crate::rsx::RSX_CONTROL_PUT_ADDR;
+    let mut rt = build_with_rsx_writable();
+    rt.set_rsx_mirror_writes(true);
+    rt.registry_mut().register_with(|id| RsxControlWriterUnit {
+        id,
+        steps: Cell::new(0),
+        slot_addr: RSX_CONTROL_PUT_ADDR as u64,
+        // Point put into the flat region (address 0x40 is within
+        // the zero-initialised base-0 region). Zero-count headers
+        // decode as Increment method=0 count=0 which are
+        // unknown-method no-ops; drain reaches put cleanly.
+        value: 0x40,
+    });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(rt.rsx_cursor().put(), 0x40);
+    assert_eq!(
+        rt.rsx_cursor().get(),
+        0x40,
+        "advance pass must have drained after the mirror updated put"
+    );
+}
+
 #[test]
 fn sync_state_hash_changes_after_reservation_acquire() {
     let mut rt = build(4096, 1, 100);
@@ -1658,6 +2366,138 @@ fn sync_state_hash_deterministic_across_identical_runs() {
             rt.commit_step(&s.result, &s.effects).unwrap();
             hashes.push(rt.sync_state_hash());
         }
+        hashes
+    }
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn sync_state_hash_shifts_on_rsx_cursor_put_advance() {
+    // Advancing the RSX cursor's put pointer must change
+    // sync_state_hash even with no units registered and no memory
+    // writes. Pins the cursor's fold into the sync hash so a future
+    // refactor that drops the fold breaks this test immediately.
+    let rt_a = build(4096, 1, 100);
+    let mut rt_b = build(4096, 1, 100);
+    let h_a = rt_a.sync_state_hash();
+    rt_b.rsx_cursor_mut().set_put(0x20);
+    let h_b = rt_b.sync_state_hash();
+    assert_ne!(h_a, h_b, "rsx_cursor.put change must shift sync_state_hash");
+}
+
+#[test]
+fn sync_state_hash_distinguishes_cursor_fields() {
+    // Each of the cursor's three fields must contribute to the
+    // hash independently. Catches a fold that only mixes one field
+    // or masks one out.
+    fn hash_with(put: u32, get: u32, reference: u32) -> u64 {
+        let mut rt = build(4096, 1, 100);
+        rt.rsx_cursor_mut().set_put(put);
+        rt.rsx_cursor_mut().set_get(get);
+        rt.rsx_cursor_mut().set_reference(reference);
+        rt.sync_state_hash()
+    }
+    let base = hash_with(0, 0, 0);
+    assert_ne!(base, hash_with(1, 0, 0), "put field must fold in");
+    assert_ne!(base, hash_with(0, 1, 0), "get field must fold in");
+    assert_ne!(
+        base,
+        hash_with(0, 0, 1),
+        "current_reference field must fold in"
+    );
+}
+
+#[test]
+fn sync_state_hash_deterministic_across_rsx_mutation_sequence() {
+    // Scripted cursor-mutation sequence must produce a byte-
+    // identical per-step sync_state_hash sequence across two
+    // runs. This is the per-slice determinism check for the
+    // state-hash folding.
+    fn run() -> Vec<u64> {
+        let mut rt = build(4096, 1, 100);
+        let mut hashes = vec![rt.sync_state_hash()];
+        rt.rsx_cursor_mut().set_put(0x20);
+        hashes.push(rt.sync_state_hash());
+        rt.rsx_cursor_mut().set_get(0x10);
+        hashes.push(rt.sync_state_hash());
+        rt.rsx_cursor_mut().set_reference(0x1234_5678);
+        hashes.push(rt.sync_state_hash());
+        rt.rsx_cursor_mut().set_put(0x40);
+        hashes.push(rt.sync_state_hash());
+        hashes
+    }
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn sync_state_hash_shifts_on_rsx_flip_request() {
+    // A flip request from DONE to WAITING must change
+    // sync_state_hash. Pins the flip state's fold into the sync
+    // hash so a future refactor that drops the fold breaks this
+    // test immediately.
+    let rt_a = build(4096, 1, 100);
+    let mut rt_b = build(4096, 1, 100);
+    let h_a = rt_a.sync_state_hash();
+    rt_b.rsx_flip_mut().request_flip(0);
+    let h_b = rt_b.sync_state_hash();
+    assert_ne!(h_a, h_b, "flip request must shift sync_state_hash");
+}
+
+#[test]
+fn sync_state_hash_distinguishes_flip_fields() {
+    // Each flip-state field contributes to the hash independently.
+    // Catches a fold that only mixes one field or masks one out.
+    fn hash_with(status: u8, handler: u32, pending: bool, buffer_index: u8) -> u64 {
+        let mut rt = build(4096, 1, 100);
+        rt.rsx_flip_mut()
+            .restore(status, handler, pending, buffer_index);
+        rt.sync_state_hash()
+    }
+    let base = hash_with(0, 0, false, 0);
+    assert_ne!(base, hash_with(1, 0, false, 0), "flip status folds in");
+    assert_ne!(base, hash_with(0, 1, false, 0), "flip handler folds in");
+    assert_ne!(base, hash_with(0, 0, true, 0), "flip pending folds in");
+    assert_ne!(
+        base,
+        hash_with(0, 0, false, 1),
+        "flip buffer_index folds in"
+    );
+}
+
+#[test]
+fn sync_state_hash_returns_to_empty_after_flip_completes() {
+    // Scripted round trip: request + complete must restore the
+    // pre-request sync_state_hash. Pending flips to false, status
+    // returns to DONE, handler and buffer_index are unchanged
+    // from the baseline (both zero).
+    let mut rt = build(4096, 1, 100);
+    let h_empty = rt.sync_state_hash();
+    rt.rsx_flip_mut().request_flip(0);
+    assert_ne!(h_empty, rt.sync_state_hash());
+    rt.rsx_flip_mut().complete_pending_flip();
+    assert_eq!(
+        h_empty,
+        rt.sync_state_hash(),
+        "DONE + pending=false + buffer_index=0 must equal the initial hash"
+    );
+}
+
+#[test]
+fn sync_state_hash_deterministic_across_rsx_flip_sequence() {
+    // Scripted flip sequence produces byte-identical per-step
+    // sync_state_hash sequences across two runs. Pins the
+    // flip-state determinism gate.
+    fn run() -> Vec<u64> {
+        let mut rt = build(4096, 1, 100);
+        let mut hashes = vec![rt.sync_state_hash()];
+        rt.rsx_flip_mut().set_handler(0x1000);
+        hashes.push(rt.sync_state_hash());
+        rt.rsx_flip_mut().request_flip(1);
+        hashes.push(rt.sync_state_hash());
+        rt.rsx_flip_mut().complete_pending_flip();
+        hashes.push(rt.sync_state_hash());
+        rt.rsx_flip_mut().request_flip(2);
+        hashes.push(rt.sync_state_hash());
         hashes
     }
     assert_eq!(run(), run());
@@ -1826,6 +2666,184 @@ fn conditional_store_through_runtime_clears_own_and_overlapping() {
     }
     assert!(!rt.reservations().is_held_by(UnitId::new(0)));
     assert!(!rt.reservations().is_held_by(UnitId::new(1)));
+}
+
+// --- Multi-primitive determinism canary with RSX content ---
+
+/// Unit that emits `count` `RsxFlipRequest` effects, one per step,
+/// then finishes. Cycles the buffer_index across requests so each
+/// commit hash depends on the exact emission order.
+struct RsxFlipSpinnerUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    count: u64,
+}
+
+impl ExecutionUnit for RsxFlipSpinnerUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= self.count {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        let yield_reason = if n >= self.count {
+            YieldReason::Finished
+        } else {
+            YieldReason::BudgetExhausted
+        };
+        effects.push(Effect::RsxFlipRequest {
+            buffer_index: (n & 0x7) as u8,
+        });
+        ExecutionStepResult {
+            yield_reason,
+            consumed_budget: budget,
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+/// Extended multi-primitive canary. The three-unit atomic +
+/// disjoint-write canary gets a fourth unit that drives the RSX
+/// flip-status state machine through 10 WAITING -> DONE cycles.
+/// Final (memory, sync) hashes -- sync_state_hash folds the flip
+/// state, so any RSX determinism regression surfaces as a hash
+/// mismatch -- must be byte-identical across two independent runs.
+#[test]
+fn multi_primitive_determinism_canary_with_rsx_content() {
+    use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+    fn run_once() -> (u64, u64) {
+        let mut rt = build(256, 4, 2000);
+        rt.registry_mut().register_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(0x11),
+                    FakeOp::ReservationAcquire { line_addr: 0 },
+                    FakeOp::ConditionalStore { addr: 0, len: 4 },
+                    FakeOp::LoadImm(0x22),
+                    FakeOp::ReservationAcquire { line_addr: 0 },
+                    FakeOp::ConditionalStore { addr: 0, len: 4 },
+                    FakeOp::End,
+                ],
+            )
+        });
+        rt.registry_mut().register_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(0x33),
+                    FakeOp::ReservationAcquire { line_addr: 0 },
+                    FakeOp::ConditionalStore { addr: 0, len: 4 },
+                    FakeOp::End,
+                ],
+            )
+        });
+        rt.registry_mut().register_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(0x77),
+                    FakeOp::SharedStore { addr: 0x80, len: 4 },
+                    FakeOp::End,
+                ],
+            )
+        });
+        rt.registry_mut().register_with(|id| RsxFlipSpinnerUnit {
+            id,
+            steps: Cell::new(0),
+            count: 10,
+        });
+
+        for _ in 0..500 {
+            match rt.step() {
+                Ok(step) => {
+                    let _ = rt.commit_step(&step.result, &step.effects);
+                }
+                Err(_) => break,
+            }
+        }
+        (rt.memory().content_hash(), rt.sync_state_hash())
+    }
+
+    let run_a = run_once();
+    let run_b = run_once();
+    assert_eq!(
+        run_a, run_b,
+        "extended multi-primitive canary must produce byte-identical final (memory, sync) hashes across runs"
+    );
+}
+
+/// Per-commit sync-state-hash sequence must match across two runs
+/// of the extended canary. Strongest form of the determinism
+/// check: pins NOT just the final state but every intermediate
+/// commit boundary.
+#[test]
+fn multi_primitive_determinism_canary_rsx_per_step_hash_sequence_stable() {
+    use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+    fn run_once() -> Vec<u64> {
+        let mut rt = build(256, 4, 2000);
+        rt.registry_mut().register_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(0x11),
+                    FakeOp::ReservationAcquire { line_addr: 0 },
+                    FakeOp::ConditionalStore { addr: 0, len: 4 },
+                    FakeOp::End,
+                ],
+            )
+        });
+        rt.registry_mut().register_with(|id| RsxFlipSpinnerUnit {
+            id,
+            steps: Cell::new(0),
+            count: 5,
+        });
+        let mut hashes = vec![rt.sync_state_hash()];
+        for _ in 0..500 {
+            match rt.step() {
+                Ok(step) => {
+                    let _ = rt.commit_step(&step.result, &step.effects);
+                    hashes.push(rt.sync_state_hash());
+                }
+                Err(_) => break,
+            }
+        }
+        hashes
+    }
+
+    let run_a = run_once();
+    let run_b = run_once();
+    assert_eq!(
+        run_a, run_b,
+        "per-step sync_state_hash sequence must be byte-identical across two runs"
+    );
+    assert!(
+        run_a.len() >= 8,
+        "canary must have at least a handful of commits for a meaningful per-step comparison, got {}",
+        run_a.len()
+    );
 }
 
 // --- Multi-primitive determinism canary (atomic content) ---

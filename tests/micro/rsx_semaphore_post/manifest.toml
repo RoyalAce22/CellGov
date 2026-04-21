@@ -1,0 +1,32 @@
+[test]
+name = "rsx_semaphore_post"
+
+# Structural microtest. A PPU thread writes an NV4097_GET_REPORT
+# method to the FIFO, advances put, and polls the target report
+# slot for a non-zero value (timestamp). Exercises the SetReport
+# path end-to-end.
+
+[rpcs3]
+binary = "build/rsx_semaphore_post.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+content_id = "CG_RXSEM"
+short_name = "rxsem"
+display_name = "CellGov RSX semaphore-post microtest"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[cellgov.rsx]
+mirror = true
