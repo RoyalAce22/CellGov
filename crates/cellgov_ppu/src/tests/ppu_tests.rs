@@ -1457,7 +1457,7 @@ fn shadow_inv_partial_word_write() {
     );
 }
 
-// -- Phase 14 coverage: mid-block fault recovery --
+// -- Mid-block fault recovery --
 
 #[test]
 fn mid_block_fault_rolls_back_and_propagates_directly() {

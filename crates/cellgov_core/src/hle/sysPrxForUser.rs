@@ -1,10 +1,15 @@
 //! sysPrxForUser HLE implementations.
 //!
-//! Covers the userspace PRX surface exposed as sysPrxForUser (and
-//! the RPCS3 sub-files `sys_lwmutex_.cpp`, `sys_ppu_thread_.cpp`,
-//! `sys_heap.cpp`, `sys_libc.cpp`, `sys_prx_.cpp` that register
-//! into the same module). Kernel-side syscalls (`sc` trap
-//! handlers) live in `cellgov_lv2`, not here.
+//! Covers the userspace PRX surface Sony ships as sysPrxForUser:
+//! the `sys_lwmutex_*`, `sys_ppu_thread_*`, `sys_heap_*`,
+//! `sys_libc_*`, `sys_prx_*` entry points that the on-device PRX
+//! registers under this single module name. RPCS3 splits these
+//! across its own sub-files (`sys_lwmutex_.cpp`,
+//! `sys_ppu_thread_.cpp`, `sys_heap.cpp`, `sys_libc.cpp`,
+//! `sys_prx_.cpp`) for source organisation, all registering into
+//! the same PRX; we keep them in one Rust file to mirror the PRX.
+//! Kernel-side syscalls (`sc` trap handlers) live in `cellgov_lv2`,
+//! not here.
 //!
 //! The module exports a single [`dispatch`] entry that the HLE
 //! router in [`crate::hle`] chains via `.or_else()`. Each module
@@ -25,9 +30,11 @@
 //!   TLS from the ELF loader, unseeded LV2 thread table) use
 //!   `debug_assert!` so tests surface oracle bugs while release
 //!   matches historical fallback behavior.
-//! - Guest-supplied bad pointers return `CELL_EFAULT` (0x8001000e)
-//!   to match RPCS3's `vm::ptr` auto-validation semantics, rather
-//!   than silently skipping the side effect and reporting success.
+//! - Guest-supplied bad pointers return `CELL_EFAULT` (0x8001000e),
+//!   matching Sony's on-device trapping-pointer semantics (the
+//!   same behavior RPCS3 emulates via `vm::ptr` auto-validation),
+//!   rather than silently skipping the side effect and reporting
+//!   success.
 //! - `.expect(...)` stays reserved for oracle-state corruption
 //!   (heap exhaustion, ID counter exhaustion).
 
@@ -110,8 +117,8 @@ pub(crate) fn dispatch(
             // No-op. The HLE bump allocator in `hle::context`
             // cannot release individual allocations, so free,
             // delete-heap, and heap-free collapse to CELL_OK with
-            // the allocation leaked. Same compromise RPCS3's HLE
-            // path makes for the same reason.
+            // the allocation leaked. (Cross-reference: RPCS3's HLE
+            // path makes the same compromise for the same reason.)
             //
             // TODO: Replace with a real free-list allocator when a
             // scenario starts exercising the HLE heap.
@@ -373,9 +380,10 @@ pub(crate) fn lwmutex_create(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let mutex_ptr = args[1] as u32;
     let attr_ptr = args[2] as u32;
 
-    // RPCS3's `sys_lwmutex_create` accesses the attr struct via
-    // `vm::ptr<sys_lwmutex_attribute_t>`, which auto-faults on a
-    // bad pointer. Our HLE path does the analogous check
+    // Sony's `sys_lwmutex_create` dereferences the attr pointer
+    // and traps on a bad address; RPCS3 emulates this by accessing
+    // the struct via `vm::ptr<sys_lwmutex_attribute_t>` which
+    // auto-faults. Our HLE path does the analogous check
     // explicitly: bad attr_ptr -> CELL_EFAULT. The previous
     // implementation silently substituted (PRIORITY, NOT_RECURSIVE)
     // defaults and reported CELL_OK, which gave guests a mutex
@@ -414,10 +422,11 @@ pub(crate) fn lwmutex_create(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     buf[16..20].copy_from_slice(&sleep_queue.to_be_bytes());
 
     // Write the mutex struct into the guest-supplied slot. A bad
-    // mutex_ptr yields CELL_EFAULT (same as RPCS3's vm::ptr
-    // auto-validation). Prior behavior silently skipped the
-    // write, leaking the sleep_queue ID and handing the guest
-    // back CELL_OK on an uninitialized mutex struct.
+    // mutex_ptr yields CELL_EFAULT, matching Sony's on-device
+    // trap-on-write (RPCS3 observes the same via vm::ptr auto-
+    // validation). Prior behavior silently skipped the write,
+    // leaking the sleep_queue ID and handing the guest back
+    // CELL_OK on an uninitialized mutex struct.
     match ctx.write_guest(mutex_ptr as u64, &buf) {
         Ok(()) => ctx.set_return(0),
         Err(_) => ctx.set_return(CELL_EFAULT),

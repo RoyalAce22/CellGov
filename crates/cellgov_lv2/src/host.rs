@@ -339,21 +339,18 @@ impl Lv2Host {
                 hasher.write(&peek.to_le_bytes());
             }
         }
-        // Lwmutex table is folded in only when non-empty so that
-        // hosts that never create a lwmutex (every current
-        // foundation title during boot) keep the hash they had
+        // Lwmutex table is folded in only when non-empty so hosts
+        // that never create a lwmutex keep the hash they had
         // before the table field existed.
         if !self.lwmutexes.is_empty() {
             hasher.write(&self.lwmutexes.state_hash().to_le_bytes());
         }
         // Heavy mutex table is folded in only when non-empty for
-        // the same reason. Note: historical foundation-title runs
-        // did call sys_mutex_create (the old stub allocated ids
-        // from next_kernel_id without storing anything in a
-        // table); those hashes are preserved below because the
-        // upgraded handler still uses next_kernel_id for id
-        // minting and is_empty() only fires once a real entry
-        // is stored.
+        // the same reason. Historical scenarios that called
+        // sys_mutex_create under the old id-only stub are
+        // preserved because the upgraded handler still uses
+        // next_kernel_id for id minting; is_empty() only fires
+        // once a real entry is stored.
         if !self.mutexes.is_empty() {
             hasher.write(&self.mutexes.state_hash().to_le_bytes());
         }
@@ -1918,10 +1915,10 @@ impl Lv2Host {
 
     fn dispatch_ppu_thread_exit(&mut self, exit_value: u64, requester: UnitId) -> Lv2Dispatch {
         // Look up the calling thread's guest id in the table.
-        // Foundation titles do not seed the primary thread yet,
-        // so the table may not contain the caller; in that case
-        // the runtime still needs to transition the caller to
-        // Finished but no waiters exist to wake.
+        // When a caller exits before the primary is seeded the
+        // table may not contain it; the runtime still needs to
+        // transition the caller to Finished but no waiters exist
+        // to wake.
         let waiters_unit_ids = match self.ppu_threads.thread_id_for_unit(requester) {
             Some(tid) => {
                 let waiter_thread_ids = self.ppu_threads.mark_finished(tid, exit_value);

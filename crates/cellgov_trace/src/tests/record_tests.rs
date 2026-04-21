@@ -87,6 +87,10 @@ fn effect_emitted_roundtrip_each_kind() {
         TracedEffectKind::SignalUpdate,
         TracedEffectKind::FaultRaised,
         TracedEffectKind::TraceMarker,
+        TracedEffectKind::ReservationAcquire,
+        TracedEffectKind::ConditionalStore,
+        TracedEffectKind::RsxLabelWrite,
+        TracedEffectKind::RsxFlipRequest,
     ];
     for (i, k) in kinds.into_iter().enumerate() {
         roundtrip(TraceRecord::EffectEmitted {
@@ -111,6 +115,10 @@ fn effect_emitted_discriminants_locked() {
     assert_eq!(TracedEffectKind::SignalUpdate as u8, 6);
     assert_eq!(TracedEffectKind::FaultRaised as u8, 7);
     assert_eq!(TracedEffectKind::TraceMarker as u8, 8);
+    assert_eq!(TracedEffectKind::ReservationAcquire as u8, 9);
+    assert_eq!(TracedEffectKind::ConditionalStore as u8, 10);
+    assert_eq!(TracedEffectKind::RsxLabelWrite as u8, 11);
+    assert_eq!(TracedEffectKind::RsxFlipRequest as u8, 12);
 }
 
 #[test]

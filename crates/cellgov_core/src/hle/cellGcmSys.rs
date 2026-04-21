@@ -1,9 +1,10 @@
 //! cellGcmSys HLE implementations.
 //!
-//! RSX graphics library (RPCS3 `Modules/cellGcmSys.cpp`). Real
-//! behavior is gated behind the runtime's RSX-checkpoint flag; if
-//! the flag is off, [`dispatch`] returns `None` so the router
-//! falls through to the default CELL_OK fallback.
+//! Sony's RSX graphics PRX, registered on-device as `cellGcmSys`
+//! (RPCS3 cross-reference: `Modules/cellGcmSys.cpp`). Real behavior
+//! is gated behind the runtime's RSX-checkpoint flag; if the flag
+//! is off, [`dispatch`] returns `None` so the router falls through
+//! to the default CELL_OK fallback.
 //!
 //! ## Failure policy
 //!
@@ -40,6 +41,13 @@ pub(crate) const NID_CELLGCM_INIT_BODY: u32 = 0x15bae46b;
 pub(crate) const NID_CELLGCM_GET_CONFIGURATION: u32 = 0xe315a0b2;
 pub(crate) const NID_CELLGCM_GET_CONTROL_REGISTER: u32 = 0xa547adde;
 pub(crate) const NID_CELLGCM_GET_LABEL_ADDRESS: u32 = 0xf80196c1;
+/// `cellGcmSetFlipHandler` records a PPU callback address invoked
+/// on each flip completion. Sony's API takes a `void(*)(u32)` -- a
+/// PSL1GHT OPD pointer in practice. The oracle RECORDS the address
+/// into [`crate::rsx_flip::RsxFlipState::handler`] but does NOT
+/// dispatch PPU execution into the callback. Source: RPCS3's
+/// `Emu/Cell/Modules/cellGcmSys.cpp` REG_FUNC table.
+pub(crate) const NID_CELLGCM_SET_FLIP_HANDLER: u32 = 0xa41ef7e8;
 
 /// Every NID this module claims. See [`crate::hle::sys_prx_for_user::OWNED_NIDS`]
 /// for the disjointness contract and the drift-canary test pattern
@@ -54,6 +62,7 @@ pub(crate) const OWNED_NIDS: &[u32] = &[
     NID_CELLGCM_GET_CONFIGURATION,
     NID_CELLGCM_GET_CONTROL_REGISTER,
     NID_CELLGCM_GET_LABEL_ADDRESS,
+    NID_CELLGCM_SET_FLIP_HANDLER,
 ];
 
 /// Per-module state for cellGcmSys. Owned by the HLE dispatch layer,
@@ -157,6 +166,15 @@ pub(crate) fn dispatch(
             let offset = 0x10u32.wrapping_mul(index);
             let addr = state.label_addr.wrapping_add(offset) as u64;
             adapter(runtime, source, nid).set_return(addr);
+        }
+        NID_CELLGCM_SET_FLIP_HANDLER => {
+            // Record the callback address. Zero means "clear the
+            // handler" (games pass NULL when they disable flip
+            // notifications); the typed mutator accepts it. Return
+            // CELL_OK (void in Sony's signature, coerced to 0).
+            let handler_addr = args[1] as u32;
+            runtime.rsx_flip_mut().set_handler(handler_addr);
+            adapter(runtime, source, nid).set_return(0);
         }
         _ => return None,
     }
@@ -262,20 +280,20 @@ pub(crate) fn init_body(ctx: &mut dyn HleContext, args: &[u64; 9], state: &mut G
     // cmd_size is the guest-declared command-queue capacity. We do
     // not model a separate command queue: the guest's io region
     // (`io_address..io_address + io_size`) *is* the command queue
-    // for our purposes. RPCS3's HLE path also ignores this value.
-    // Do not "fix" the unused prefix -- the argument is intentional
-    // ABI padding.
+    // for our purposes. RPCS3 (cross-reference) also ignores this
+    // value. Do not "fix" the unused prefix -- the argument is
+    // intentional ABI padding.
     let _cmd_size_unused_hle = args[2] as u32;
     let io_size = args[3] as u32;
     let io_address = args[4] as u32;
 
-    // Re-init is legal. RPCS3's `_cellGcmInitBody` (see
-    // `tools/rpcs3-src/rpcs3/Emu/Cell/Modules/cellGcmSys.cpp`,
-    // ~line 397) explicitly resets its state fields at entry
-    // and proceeds; there is no ALREADY_INITIALIZED error path.
-    // Some shipped titles re-init GCM after video-mode changes
-    // or XMB return, so asserting against a second call would
-    // fire on legitimate guest behavior.
+    // Re-init is legal. Sony's `_cellGcmInitBody` resets its
+    // state fields at entry and proceeds; there is no
+    // ALREADY_INITIALIZED error path. (Cross-reference: RPCS3's
+    // `Modules/cellGcmSys.cpp` ~line 397 reproduces this.) Some
+    // shipped titles re-init GCM after video-mode changes or XMB
+    // return, so asserting against a second call would fire on
+    // legitimate guest behavior.
     //
     // Known leak: our bump allocator cannot release the first
     // init's context / control / label / command-buffer
@@ -285,7 +303,7 @@ pub(crate) fn init_body(ctx: &mut dyn HleContext, args: &[u64; 9], state: &mut G
     // plus the label region) and does not affect determinism.
     // Downstream fields (`state.context_addr` etc.) are
     // overwritten by the new heap_alloc calls below, matching
-    // RPCS3's reset-and-continue semantics.
+    // Sony's reset-and-continue semantics.
 
     // Guest-controlled pointer math on real PS3 wraps. Make that
     // explicit so release and debug agree and no release-mode
@@ -337,9 +355,13 @@ pub(crate) fn init_body(ctx: &mut dyn HleContext, args: &[u64; 9], state: &mut G
         .heap_alloc(4096, 16)
         .expect("cellGcmInitBody: HLE heap exhausted (label region)");
     state.label_addr = label_addr;
-    let label_fill = vec![0xFFu8; 4096];
-    ctx.write_guest(label_addr as u64, &label_fill)
-        .expect("cellGcmInitBody: label-region fill failed");
+    // Labels start at 0. Real method writes from the FIFO advance
+    // pass are the sole source of non-zero label values; any
+    // pre-fill would mask divergences. The bump allocator hands
+    // out freshly-mapped memory which is zero-initialised by
+    // GuestMemory, so no explicit fill is needed -- the default
+    // 0 IS the "no method has written this label yet" value a
+    // title must poll against.
 
     ctx.set_return(0);
 }
@@ -370,12 +392,14 @@ pub(crate) fn get_configuration(ctx: &mut dyn HleContext, args: &[u64; 9], state
 /// lower bound of the first window, not a valid pitch itself) and
 /// for `size > 0x10000` (above the largest supported pitch). Every
 /// other value returns the smallest pitch in [`TILED_PITCHES`] that
-/// is >= `size`. Both zero-returning cases match RPCS3 bit-for-bit
-/// (see `tools/rpcs3-src/rpcs3/Emu/Cell/Modules/cellGcmSys.cpp`
-/// `cellGcmGetTiledPitchSize`, lines 363-373: the `for` loop falls
-/// through to `return 0;` on no-match for both the below-window
-/// and above-window cases). Callers treat `0` as "no valid tiled
-/// pitch for this size" and fall back to the guest's linear path.
+/// is >= `size`. Both zero-returning cases match Sony's on-device
+/// `cellGcmGetTiledPitchSize` bit-for-bit; RPCS3's observed
+/// implementation at
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/Modules/cellGcmSys.cpp` lines
+/// 363-373 matches the same behavior (the `for` loop falls through
+/// to `return 0;` on no-match for both the below-window and above-
+/// window cases). Callers treat `0` as "no valid tiled pitch for
+/// this size" and fall back to the guest's linear path.
 ///
 /// The `0x200` boundary is inclusive on the upper side: `size ==
 /// 0x200` matches the first window `(0x000, 0x200]` and returns

@@ -61,6 +61,22 @@ pub struct TitleManifest {
     pub checkpoint: CheckpointTrigger,
     /// Where to find the executable on disk.
     pub source: GameSource,
+    /// When `true`, the title runs with the PS3 RSX region mapped
+    /// `ReadWrite` (not the default `ReservedZeroReadable`) AND
+    /// with [`cellgov_core::Runtime::set_rsx_mirror_writes`]
+    /// enabled. The guest's put-pointer write at
+    /// `0xC000_0040` succeeds and is mirrored into the runtime's
+    /// RSX cursor; the FIFO advance pass then drains the
+    /// command buffer.
+    ///
+    /// Mutually exclusive with the `FirstRsxWrite` checkpoint
+    /// kind: that checkpoint expects the put-pointer write to
+    /// fault, which cannot happen when the region is writable.
+    /// The manifest loader rejects manifests that request both.
+    /// Microtests that script FIFO writes set this `true`;
+    /// default bench manifests leave it `false` so the
+    /// FirstRsxWrite checkpoint still fires.
+    pub rsx_mirror: bool,
 }
 
 /// Stop condition for a boot. The harness picks a default from
@@ -166,6 +182,14 @@ struct ManifestFile {
     title: ManifestTitle,
     checkpoint: ManifestCheckpoint,
     source: Option<ManifestSource>,
+    rsx: Option<ManifestRsx>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestRsx {
+    #[serde(default)]
+    mirror: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -415,7 +439,7 @@ impl TitleManifest {
                 });
             }
             if let Some(table) = raw.as_table() {
-                let conflicting: Vec<&str> = ["title", "checkpoint", "source"]
+                let conflicting: Vec<&str> = ["title", "checkpoint", "source", "rsx"]
                     .iter()
                     .copied()
                     .filter(|k| table.contains_key(*k))
@@ -483,6 +507,17 @@ impl TitleManifest {
             }
             None => GameSource::Hdd,
         };
+        let rsx_mirror = file.rsx.map(|r| r.mirror).unwrap_or(false);
+        if rsx_mirror && matches!(checkpoint, CheckpointTrigger::FirstRsxWrite) {
+            return Err(ManifestError::Parse {
+                path: origin.to_path_buf(),
+                message: "`[rsx] mirror = true` is incompatible with \
+                          `checkpoint.kind = \"first-rsx-write\"`: the mirror \
+                          makes the RSX region writable, so the put-pointer \
+                          write that FirstRsxWrite watches for cannot fault."
+                    .to_string(),
+            });
+        }
         Ok(TitleManifest {
             content_id: file.title.content_id,
             short_name: file.title.short_name,
@@ -490,6 +525,7 @@ impl TitleManifest {
             eboot_candidates: file.title.eboot_candidates,
             checkpoint,
             source,
+            rsx_mirror,
         })
     }
 
@@ -506,6 +542,14 @@ impl TitleManifest {
     /// Built-in boot checkpoint default.
     pub fn checkpoint_trigger(&self) -> CheckpointTrigger {
         self.checkpoint
+    }
+
+    /// Whether this title runs with the RSX region writable and
+    /// the runtime's writeback mirror enabled. See the
+    /// [`TitleManifest::rsx_mirror`] field doc for the detailed
+    /// semantics.
+    pub fn rsx_mirror(&self) -> bool {
+        self.rsx_mirror
     }
 
     /// Build the conventional PS3 `USRDIR` path for this title
@@ -814,6 +858,73 @@ kind = "process-exit"
     }
 
     #[test]
+    fn rsx_mirror_defaults_to_false_when_table_absent() {
+        let m = parse(PROCESS_EXIT_TOML);
+        assert!(!m.rsx_mirror());
+    }
+
+    #[test]
+    fn parses_rsx_mirror_true_from_root_table() {
+        let text = r#"
+[title]
+content_id = "NPAA99999"
+short_name = "mirror-fixture"
+display_name = "Mirror fixture"
+eboot_candidates = ["EBOOT.elf"]
+
+[checkpoint]
+kind = "process-exit"
+
+[rsx]
+mirror = true
+"#;
+        let m = parse(text);
+        assert!(m.rsx_mirror());
+    }
+
+    #[test]
+    fn parses_rsx_mirror_true_from_nested_cellgov_section() {
+        let text = r#"
+[cellgov.title]
+content_id = "CG_MIRROR"
+short_name = "cgmirror"
+display_name = "CG mirror"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[cellgov.rsx]
+mirror = true
+"#;
+        let m = parse(text);
+        assert!(m.rsx_mirror());
+    }
+
+    #[test]
+    fn rsx_mirror_with_first_rsx_write_checkpoint_is_rejected() {
+        // Mutually-exclusive pair: FirstRsxWrite expects the put
+        // store to fault; rsx_mirror makes the region writable so
+        // it cannot. Loader must reject.
+        let text = r#"
+[title]
+content_id = "NPAA88888"
+short_name = "conflict"
+display_name = "Conflict"
+eboot_candidates = ["EBOOT.elf"]
+
+[checkpoint]
+kind = "first-rsx-write"
+
+[rsx]
+mirror = true
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("conflict.toml"))
+            .expect_err("must reject incompatible combination");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+    }
+
+    #[test]
     fn parses_pc_manifest() {
         let m = parse(PC_TOML);
         assert_eq!(m.checkpoint, CheckpointTrigger::Pc(0x10381ce8));
@@ -1077,6 +1188,7 @@ kind = "process-exit"
             eboot_candidates: candidates.iter().map(|s| s.to_string()).collect(),
             checkpoint: CheckpointTrigger::ProcessExit,
             source: GameSource::Hdd,
+            rsx_mirror: false,
         }
     }
 

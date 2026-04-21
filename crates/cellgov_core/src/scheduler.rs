@@ -75,7 +75,7 @@ pub trait Scheduler {
 ///    scan depends on this -- `*id > cursor` + `*id <= cursor`
 ///    partitions the registry only if iteration order matches id
 ///    order. A `HashMap`-backed registry would silently reorder
-///    selections. The [`round_robin_select_next_matches_hand_expected_sequence`]
+///    selections. The `round_robin_select_next_matches_hand_expected_sequence`
 ///    test pins a fixed mixed-status scenario to a hand-written
 ///    expected sequence, which fails loudly on any iter-order drift
 ///    (including the `HashMap` case the module docs call out as a

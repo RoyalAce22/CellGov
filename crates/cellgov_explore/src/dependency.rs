@@ -91,7 +91,13 @@ impl StepFootprint {
                     fp.shared_writes.push(*range);
                 }
                 // Faults discard the step; trace markers are no-ops.
-                Effect::FaultRaised { .. } | Effect::TraceMarker { .. } => {}
+                // RSX completion effects originate inside the commit
+                // pipeline (FIFO advance pass), not from a unit step,
+                // and will never appear in a step's emitted_effects.
+                Effect::FaultRaised { .. }
+                | Effect::TraceMarker { .. }
+                | Effect::RsxLabelWrite { .. }
+                | Effect::RsxFlipRequest { .. } => {}
             }
         }
         fp

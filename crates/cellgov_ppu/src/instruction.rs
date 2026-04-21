@@ -664,6 +664,22 @@ pub enum PpuInstruction {
         /// Mask end.
         me: u8,
     },
+    /// Rotate left word immediate then mask insert. Like
+    /// `Rlwinm` but merges the masked bits into the prior value
+    /// of `ra` instead of zeroing the unmasked bits.
+    Rlwimi {
+        /// Destination register (also an input; the unmasked bits
+        /// are preserved).
+        ra: u8,
+        /// Source register to rotate.
+        rs: u8,
+        /// Shift amount.
+        sh: u8,
+        /// Mask begin.
+        mb: u8,
+        /// Mask end.
+        me: u8,
+    },
     /// Rotate left word (variable) then AND with mask: shift amount is
     /// the low 5 bits of rb. Otherwise identical to `Rlwinm`.
     Rlwnm {
@@ -1083,6 +1099,7 @@ impl PpuInstruction {
             Self::Mfctr { .. } => "Mfctr",
             Self::Mtctr { .. } => "Mtctr",
             Self::Rlwinm { .. } => "Rlwinm",
+            Self::Rlwimi { .. } => "Rlwimi",
             Self::Rlwnm { .. } => "Rlwnm",
             Self::Rldicl { .. } => "Rldicl",
             Self::Rldicr { .. } => "Rldicr",

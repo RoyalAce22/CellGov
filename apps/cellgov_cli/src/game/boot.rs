@@ -118,6 +118,20 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     } else {
         cellgov_mem::RegionAccess::ReservedZeroReadable
     };
+    // RSX region access: titles with `[rsx] mirror = true` in
+    // their manifest need the region writable so the PPU's put-
+    // pointer store lands in memory (and the writeback mirror
+    // routes it into the runtime cursor). The `--strict-reserved`
+    // CLI flag takes precedence: it is an explicit debug override
+    // that forces ReservedStrict everywhere and supersedes title
+    // manifest preferences.
+    let rsx_access = if opts.strict_reserved {
+        reserved_access
+    } else if opts.title.rsx_mirror() {
+        cellgov_mem::RegionAccess::ReadWrite
+    } else {
+        reserved_access
+    };
     let mut mem = cellgov_mem::GuestMemory::from_regions(vec![
         cellgov_mem::Region::new(0, mem_size, "main", cellgov_mem::PageSize::Page64K),
         cellgov_mem::Region::new(
@@ -137,7 +151,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             PS3_RSX_SIZE,
             "rsx",
             cellgov_mem::PageSize::Page64K,
-            reserved_access,
+            rsx_access,
         ),
         cellgov_mem::Region::with_access(
             PS3_SPU_RESERVED_BASE,

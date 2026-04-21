@@ -110,6 +110,16 @@ pub fn run_game(opts: RunGameOptions<'_>) {
     if title.checkpoint_trigger() == manifest::CheckpointTrigger::FirstRsxWrite {
         rt.set_gcm_rsx_checkpoint(true);
     }
+    if title.rsx_mirror() {
+        // Mirror-mode titles also need the GCM HLE to place
+        // control_addr at the MMIO sentinel 0xC000_0040 so the
+        // mirror hook fires on the guest's put-pointer store.
+        // Under !mirror the HLE routes control_addr to a heap
+        // allocation instead, which would bypass the mirror and
+        // leave cursor.put never updated.
+        rt.set_gcm_rsx_checkpoint(true);
+        rt.set_rsx_mirror_writes(true);
+    }
 
     if profile {
         println!("startup timing:");

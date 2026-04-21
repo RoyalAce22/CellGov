@@ -69,6 +69,10 @@ pub fn bench_boot(
     if checkpoint == manifest::CheckpointTrigger::FirstRsxWrite {
         rt.set_gcm_rsx_checkpoint(true);
     }
+    if title.rsx_mirror() {
+        rt.set_gcm_rsx_checkpoint(true);
+        rt.set_rsx_mirror_writes(true);
+    }
 
     let mut steps: usize = 0;
     let t0 = Instant::now();

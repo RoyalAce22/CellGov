@@ -1,0 +1,32 @@
+[test]
+name = "rsx_flip_status_transition"
+
+# Structural microtest. A PPU thread writes a GCM_FLIP_COMMAND
+# method to the FIFO, advances put, and polls the flip-status
+# mirror through its WAITING -> DONE transition. Exercises the
+# RSX flip-status state machine end-to-end.
+
+[rpcs3]
+binary = "build/rsx_flip_status_transition.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+content_id = "CG_RXFLP"
+short_name = "rxflp"
+display_name = "CellGov RSX flip-status-transition microtest"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[cellgov.rsx]
+mirror = true

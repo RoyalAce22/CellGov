@@ -267,3 +267,115 @@ fn regression_overlapping_writers_not_pruned() {
         "overlapping writers should have explored alternates"
     );
 }
+
+// -- RSX schedule-stability regressions --
+
+/// Construct a runtime with a flat region at base 0 plus a
+/// ReadWrite RSX region covering 0xC000_0000..=0xC0000FFF so the
+/// PPU put-pointer write commits and the writeback mirror fires.
+fn build_rsx_runtime() -> Runtime {
+    use cellgov_mem::{PageSize, Region};
+    let regions = vec![
+        Region::new(0, 0x1000, "flat", PageSize::Page4K),
+        Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
+    ];
+    let mem = GuestMemory::from_regions(regions).expect("non-overlapping regions");
+    let mut rt = Runtime::new(mem, Budget::new(100), 100);
+    rt.set_rsx_mirror_writes(true);
+    rt
+}
+
+/// PPU put-pointer write (mirrored into rsx_cursor) on one unit
+/// vs disjoint non-RSX write on another. The two addresses never
+/// overlap -- 0xC000_0040 sits in the RSX region, addr 0x10 sits
+/// in the flat region -- so dependency analysis must classify
+/// the pair as schedule-stable. Pins the "put-pointer write is
+/// independent of unrelated memory writes" guarantee.
+#[test]
+fn regression_rsx_put_write_stable_vs_disjoint_write() {
+    let result = explore(
+        || {
+            let mut rt = build_rsx_runtime();
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xAB),
+                        FakeOp::SharedStore {
+                            addr: 0xC000_0040,
+                            len: 4,
+                        },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xCD),
+                        FakeOp::SharedStore { addr: 0x10, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt
+        },
+        &default_config(),
+    );
+    let r = result.expect("branching points exist");
+    assert_eq!(
+        r.outcome,
+        OutcomeClass::ScheduleStable,
+        "put-pointer write + disjoint write must remain schedule-stable"
+    );
+}
+
+/// Two units both writing to the RSX control register's put slot.
+/// This IS schedule-sensitive -- last write wins, and the final
+/// cursor.put differs based on order -- but the memory content at
+/// 0xC000_0040 is ALSO order-dependent. Pins the explorer's
+/// classification of same-slot writes as sensitive, matching the
+/// normal SharedWriteIntent overlap semantics.
+#[test]
+fn regression_rsx_two_writers_to_same_control_slot_sensitive() {
+    let result = explore(
+        || {
+            let mut rt = build_rsx_runtime();
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xAB),
+                        FakeOp::SharedStore {
+                            addr: 0xC000_0040,
+                            len: 4,
+                        },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xCD),
+                        FakeOp::SharedStore {
+                            addr: 0xC000_0040,
+                            len: 4,
+                        },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt
+        },
+        &default_config(),
+    );
+    let r = result.expect("branching points exist");
+    assert_eq!(
+        r.outcome,
+        OutcomeClass::ScheduleSensitive,
+        "two writers to the same RSX control slot must be schedule-sensitive"
+    );
+}

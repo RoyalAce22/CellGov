@@ -280,15 +280,15 @@ impl SyscallResponseTable {
     ///   ascending [`UnitId`] order. Replay determinism depends on
     ///   this: two tables with the same logical contents but
     ///   constructed via different insertion orders must hash
-    ///   identically. The [`tests::state_hash_is_insertion_order_independent`]
+    ///   identically. The `state_hash_is_insertion_order_independent`
     ///   test pins this.
     /// - Variant tag bytes and per-variant field byte order are
     ///   load-bearing. A refactor that reorders fields inside a
     ///   variant, or changes a tag byte, silently drifts the hash
     ///   for every existing trace. The
-    ///   [`tests::state_hash_wire_format_golden`] test pins a
-    ///   fixed scenario against a hardcoded hash value so any such
-    ///   drift fails loudly with a before/after diff.
+    ///   `state_hash_wire_format_golden` test pins a fixed
+    ///   scenario against a hardcoded hash value so any such drift
+    ///   fails loudly with a before/after diff.
     /// - All payloads are fixed-size today; see the note above
     ///   about variable-length variants.
     pub fn state_hash(&self) -> u64 {
