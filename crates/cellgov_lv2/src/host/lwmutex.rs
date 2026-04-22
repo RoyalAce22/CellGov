@@ -189,13 +189,10 @@ mod tests {
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let r = host.dispatch(Lv2Request::LwMutexDestroy { id: 42 }, UnitId::new(0), &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -255,13 +252,10 @@ mod tests {
         host.lwmutexes_mut()
             .try_acquire(id, PpuThreadId::new(0x0100_0001));
         let r = host.dispatch(Lv2Request::LwMutexDestroy { id }, source, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_000A,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EBUSY.into());
         assert!(host.lwmutexes().lookup(id).is_some());
     }
 
@@ -272,13 +266,10 @@ mod tests {
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(Lv2Request::LwMutexLock { id: 99, timeout: 0 }, src, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -449,13 +440,10 @@ mod tests {
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, owner_unit, &rt);
         // Other thread tries non-blockingly.
         let r = host.dispatch(Lv2Request::LwMutexTryLock { id }, other_unit, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_000A,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EBUSY.into());
         // Owner unchanged; waiter list untouched.
         let entry = host.lwmutexes().lookup(id).unwrap();
         assert_eq!(entry.owner(), Some(PpuThreadId::PRIMARY));
@@ -469,13 +457,10 @@ mod tests {
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(Lv2Request::LwMutexTryLock { id: 77 }, src, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -607,13 +592,10 @@ mod tests {
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, owner_unit, &rt);
         // Non-owner tries to unlock.
         let r = host.dispatch(Lv2Request::LwMutexUnlock { id }, other_unit, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0009, // CELL_EPERM
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EPERM.into());
         // Owner unchanged.
         assert_eq!(
             host.lwmutexes().lookup(id).unwrap().owner(),
@@ -628,13 +610,10 @@ mod tests {
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(Lv2Request::LwMutexUnlock { id: 99 }, src, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -785,12 +764,9 @@ mod tests {
         // Second block attempt from the same waiter without a prior
         // wake.
         let r = host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, waiter_unit, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0008, // CELL_EDEADLK
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EDEADLK.into());
     }
 }

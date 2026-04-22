@@ -203,13 +203,10 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -488,13 +485,10 @@ mod tests {
             &rt,
         );
         let r = host.dispatch(Lv2Request::MutexTryLock { mutex_id: id }, other_unit, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_000A,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EBUSY.into());
         assert_eq!(
             host.mutexes().lookup(id).unwrap().owner(),
             Some(PpuThreadId::PRIMARY),
@@ -509,13 +503,10 @@ mod tests {
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(Lv2Request::MutexTryLock { mutex_id: 77 }, src, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -562,12 +553,9 @@ mod tests {
             &rt,
         );
         let r = host.dispatch(Lv2Request::MutexUnlock { mutex_id: id }, other_unit, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0009, // CELL_EPERM
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EPERM.into());
     }
 }

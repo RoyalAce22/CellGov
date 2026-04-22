@@ -9,6 +9,7 @@
 //!    return CELL_OK.
 
 use cellgov_event::UnitId;
+use cellgov_lv2::errno::{CELL_E2BIG, CELL_ENOMEM};
 use cellgov_lv2::{Lv2Dispatch, PpuThreadAttrs, PpuThreadInitState};
 
 use super::Runtime;
@@ -45,9 +46,11 @@ impl Runtime {
         // Register the child unit via the PPU factory. Without a
         // factory we cannot construct a concrete PpuExecutionUnit
         // here (cellgov_core does not depend on cellgov_ppu), so
-        // thread creation fails cleanly with ENOSYS.
+        // thread creation fails with CELL_E2BIG (the shipped
+        // value). Preserved verbatim -- changing it would shift
+        // foundation-title baselines.
         let Some(factory) = self.ppu_factory.as_ref() else {
-            self.registry.set_syscall_return(source, 0x8001_0028);
+            self.registry.set_syscall_return(source, CELL_E2BIG.into());
             return;
         };
         let seed: PpuThreadInitState = init.clone();
@@ -69,7 +72,7 @@ impl Runtime {
             tls_base: init.tls_base as u32,
         };
         let Some(thread_id) = self.lv2_host.ppu_threads_mut().create(child_unit_id, attrs) else {
-            self.registry.set_syscall_return(source, 0x8001_0004);
+            self.registry.set_syscall_return(source, CELL_ENOMEM.into());
             return;
         };
 

@@ -30,7 +30,7 @@
 //!   TLS from the ELF loader, unseeded LV2 thread table) use
 //!   `debug_assert!` so tests surface oracle bugs while release
 //!   matches historical fallback behavior.
-//! - Guest-supplied bad pointers return `CELL_EFAULT` (0x8001000e),
+//! - Guest-supplied bad pointers return `CELL_EFAULT` (0x8001000D),
 //!   matching Sony's on-device trapping-pointer semantics (the
 //!   same behavior RPCS3 emulates via `vm::ptr` auto-validation),
 //!   rather than silently skipping the side effect and reporting
@@ -39,15 +39,10 @@
 //!   (heap exhaustion, ID counter exhaustion).
 
 use cellgov_event::UnitId;
+use cellgov_lv2::errno::CELL_EFAULT;
 
 use crate::hle::context::{HleContext, RuntimeHleAdapter};
 use crate::runtime::Runtime;
-
-/// `CELL_EFAULT`: guest supplied a pointer that could not be
-/// dereferenced. Matches the PS3 error constant; also referenced
-/// by `runtime/ppu_create.rs` which returns the same value from
-/// sys_ppu_thread_create on bad OPD.
-const CELL_EFAULT: u64 = 0x8001_000e;
 
 pub(crate) const NID_SYS_INITIALIZE_TLS: u32 = 0x744680a2;
 pub(crate) const NID_SYS_PROCESS_EXIT: u32 = 0xe6f2c1e7;
@@ -372,7 +367,7 @@ pub(crate) fn memset(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let data = vec![val; size as usize];
     match ctx.write_guest(ptr as u64, &data) {
         Ok(()) => ctx.set_return(args[1]),
-        Err(_) => ctx.set_return(CELL_EFAULT),
+        Err(_) => ctx.set_return(CELL_EFAULT.into()),
     }
 }
 
@@ -392,11 +387,11 @@ pub(crate) fn lwmutex_create(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let mem = ctx.guest_memory();
     let attr_offset = attr_ptr as usize;
     let Some(attr_end) = attr_offset.checked_add(8) else {
-        ctx.set_return(CELL_EFAULT);
+        ctx.set_return(CELL_EFAULT.into());
         return;
     };
     if attr_end > mem.len() {
-        ctx.set_return(CELL_EFAULT);
+        ctx.set_return(CELL_EFAULT.into());
         return;
     }
     let protocol = u32::from_be_bytes([
@@ -429,7 +424,7 @@ pub(crate) fn lwmutex_create(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     // CELL_OK on an uninitialized mutex struct.
     match ctx.write_guest(mutex_ptr as u64, &buf) {
         Ok(()) => ctx.set_return(0),
-        Err(_) => ctx.set_return(CELL_EFAULT),
+        Err(_) => ctx.set_return(CELL_EFAULT.into()),
     }
 }
 
