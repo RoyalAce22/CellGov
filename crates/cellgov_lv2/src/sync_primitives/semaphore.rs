@@ -1,27 +1,14 @@
-//! Counting semaphore table.
+//! Counting semaphore table. Owns state for
+//! `sys_semaphore_create` / `_destroy` / `_wait` / `_post` /
+//! `_trywait` / `_get_value`.
 //!
-//! Owns the state for `sys_semaphore_create` / `_destroy` /
-//! `_wait` / `_post` / `_trywait` / `_get_value`. Each entry is
-//! keyed by a guest-visible `u32` id minted by the host's shared
-//! kernel-object allocator and carries:
-//!
-//!   * `count: i32` -- current available resource count. Signed to
-//!     match the ABI's `sys_semaphore_value_t`. Negative values are
-//!     possible if a post arrives after callers passed the check
-//!     in a permissive implementation, but CellGov's semaphore
-//!     never goes negative because wait atomically decrements
-//!     with the runtime's serialized dispatch.
-//!   * `max: i32` -- upper bound on `count`. Posts beyond the max
-//!     return EINVAL without waking waiters.
-//!   * `waiters: WaiterList` -- FIFO queue of PPU threads parked
-//!     on `_wait` after observing count == 0.
-//!
-//! The "wake one, do not increment" rule on post is what makes a
-//! counting semaphore FIFO-fair: a post with at least one parked
-//! waiter hands the resource slot directly to that waiter rather
-//! than incrementing and letting a later caller race past. This
-//! is the observable-contract difference from an event-counter;
-//! getting it wrong produces lost wakeups under contention.
+//! Wake-or-increment rule: a post with a parked waiter hands
+//! the slot directly to the FIFO head rather than incrementing
+//! `count`. This keeps the semaphore FIFO-fair; the consequence
+//! is that `max` bounds `count` only in the quiescent state
+//! (posts consumed by waiters bypass the max check). Upstream
+//! code treating `max` as a bound on total outstanding slots
+//! is wrong.
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
@@ -30,35 +17,58 @@ use std::collections::BTreeMap;
 /// Outcome of a `try_wait` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemaphoreWait {
-    /// The caller consumed a slot (count was > 0, now decremented).
-    /// Syscall returns `CELL_OK` without parking.
+    /// Slot consumed (count was > 0, now decremented).
     Acquired,
-    /// The caller found count == 0. The syscall should park the
-    /// caller via `enqueue_waiter` (for `_wait`) or return EBUSY
-    /// (for `_trywait`).
+    /// Count was 0; caller parks or returns `EBUSY`.
     Empty,
 }
 
 /// Outcome of a `post_and_wake` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemaphorePost {
-    /// A parked waiter received the posted slot. Runtime should
-    /// wake `new_owner` with r3 = 0. Count was NOT incremented --
-    /// the waiter consumed the post directly.
+    /// Head waiter consumed the post; count NOT incremented.
     Woke {
         /// Thread that consumed the post.
         new_owner: PpuThreadId,
     },
-    /// No waiters were parked; count was incremented by 1.
+    /// No waiters; count incremented by 1.
     Incremented,
-    /// Post would push count past the semaphore's max. The table
-    /// is unchanged. Syscall returns EINVAL.
+    /// Post would push count past `max`; table unchanged.
     OverMax,
-    /// The semaphore id is unknown. Syscall returns ESRCH.
+    /// Unknown id.
     Unknown,
 }
 
+/// Failure modes of [`SemaphoreTable::create_with_id`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemaphoreCreateError {
+    /// An entry with this id was already present. Host
+    /// invariant violation (the shared allocator handed out a
+    /// live id); `debug_assert!` fires.
+    IdCollision,
+    /// `initial > max`, or either value was negative. Guest
+    /// error.
+    InvalidBounds,
+}
+
+/// Failure modes of [`SemaphoreTable::enqueue_waiter`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemaphoreEnqueueError {
+    /// No semaphore with this id.
+    UnknownId,
+    /// Thread is already parked on this semaphore. A single
+    /// PPU thread cannot be in two `sys_semaphore_wait`
+    /// syscalls at once; dispatch-layer bug. `debug_assert!`
+    /// fires.
+    DuplicateWaiter,
+}
+
 /// A single counting semaphore.
+///
+/// `count >= 0` is an invariant. `try_wait` gates the
+/// decrement on `count > 0` and `post_and_wake` only
+/// increments, so both mutators preserve it and `debug_assert!`
+/// it after the write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemaphoreEntry {
     count: i32,
@@ -80,7 +90,8 @@ impl SemaphoreEntry {
         self.count
     }
 
-    /// Upper bound on `count` set at create time.
+    /// Upper bound on `count` at create time. Bounds `count`
+    /// only in the quiescent state; see the module doc.
     pub fn max(&self) -> i32 {
         self.max
     }
@@ -91,9 +102,7 @@ impl SemaphoreEntry {
     }
 }
 
-/// Table of counting semaphores. Ids come from the host's shared
-/// kernel-object allocator; `create_with_id` is the only entry
-/// point.
+/// Table of counting semaphores.
 #[derive(Debug, Clone, Default)]
 pub struct SemaphoreTable {
     entries: BTreeMap<u32, SemaphoreEntry>,
@@ -105,25 +114,47 @@ impl SemaphoreTable {
         Self::default()
     }
 
-    /// Insert a fresh entry with the given id, initial count, and
-    /// max. Returns `false` if `id` is already present (allocator
-    /// collision) or if `initial > max` (guest error -- caller
-    /// should surface EINVAL).
-    pub fn create_with_id(&mut self, id: u32, initial: i32, max: i32) -> bool {
+    /// Insert a fresh entry. See [`SemaphoreCreateError`].
+    pub fn create_with_id(
+        &mut self,
+        id: u32,
+        initial: i32,
+        max: i32,
+    ) -> Result<(), SemaphoreCreateError> {
         if self.entries.contains_key(&id) {
-            return false;
+            debug_assert!(
+                false,
+                "semaphore {:#x} already present at create_with_id",
+                id,
+            );
+            return Err(SemaphoreCreateError::IdCollision);
         }
         if initial > max || initial < 0 || max < 0 {
-            return false;
+            return Err(SemaphoreCreateError::InvalidBounds);
         }
         self.entries.insert(id, SemaphoreEntry::new(initial, max));
-        true
+        Ok(())
     }
 
-    /// Destroy a semaphore. Returns the removed entry (for
-    /// diagnostic inspection) or `None` if the id was unknown.
+    /// Destroy a semaphore and return the removed entry, or
+    /// `None` if the id was unknown.
+    ///
+    /// `sys_semaphore_destroy` is defined to reject a
+    /// non-empty semaphore with `CELL_EBUSY` at dispatch; this
+    /// method is never reached with parked waiters under
+    /// normal flow. The `debug_assert!` is defense-in-depth. If
+    /// bypassed in release, the returned entry carries the
+    /// waiter list intact and a direct caller that accepts
+    /// destroy-with-waiters owes the wakes itself.
     pub fn destroy(&mut self, id: u32) -> Option<SemaphoreEntry> {
-        self.entries.remove(&id)
+        let entry = self.entries.remove(&id)?;
+        debug_assert!(
+            entry.waiters.is_empty(),
+            "semaphore {:#x} destroyed with {} parked waiter(s)",
+            id,
+            entry.waiters.len(),
+        );
+        Some(entry)
     }
 
     /// Read-only lookup.
@@ -141,40 +172,48 @@ impl SemaphoreTable {
         self.entries.is_empty()
     }
 
-    /// Try to consume a slot on `id`.
-    ///
-    /// Returns `None` if `id` is unknown. Otherwise returns
-    /// `Some(Acquired)` and decrements `count` when count > 0, or
-    /// `Some(Empty)` without mutation when count == 0. The caller
-    /// parks via `enqueue_waiter` for `_wait` or returns EBUSY for
-    /// `_trywait`.
+    /// Try to consume a slot on `id`. `None` if `id` is unknown.
     pub fn try_wait(&mut self, id: u32) -> Option<SemaphoreWait> {
         let entry = self.entries.get_mut(&id)?;
         if entry.count > 0 {
             entry.count -= 1;
+            debug_assert!(
+                entry.count >= 0,
+                "semaphore {:#x} count went negative after try_wait: {}",
+                id,
+                entry.count,
+            );
             Some(SemaphoreWait::Acquired)
         } else {
             Some(SemaphoreWait::Empty)
         }
     }
 
-    /// Enqueue `waiter` on the waiter list for `id`. Returns
-    /// `true` on success, `false` if `id` is unknown or `waiter`
-    /// is already parked.
-    pub fn enqueue_waiter(&mut self, id: u32, waiter: PpuThreadId) -> bool {
-        let Some(entry) = self.entries.get_mut(&id) else {
-            return false;
-        };
-        entry.waiters.enqueue(waiter)
+    /// Enqueue a waiter. See [`SemaphoreEnqueueError`].
+    pub fn enqueue_waiter(
+        &mut self,
+        id: u32,
+        waiter: PpuThreadId,
+    ) -> Result<(), SemaphoreEnqueueError> {
+        let entry = self
+            .entries
+            .get_mut(&id)
+            .ok_or(SemaphoreEnqueueError::UnknownId)?;
+        if entry.waiters.enqueue(waiter).is_err() {
+            debug_assert!(
+                false,
+                "duplicate enqueue of {:?} on semaphore {:#x}",
+                waiter, id,
+            );
+            return Err(SemaphoreEnqueueError::DuplicateWaiter);
+        }
+        Ok(())
     }
 
-    /// Post one slot to `id`.
-    ///
-    /// Wake-or-increment semantics: if any waiter is parked, the
-    /// head of the waiter list is woken and the count is NOT
-    /// incremented (the waiter consumed the post). Otherwise count
-    /// is incremented by 1. Returns `OverMax` (and does not
-    /// increment) if the post would push count past `max`.
+    /// Post one slot to `id`. Wakes the FIFO-head waiter if one
+    /// is parked (without incrementing); otherwise increments
+    /// `count`. `OverMax` when the increment branch would
+    /// exceed `max`.
     pub fn post_and_wake(&mut self, id: u32) -> SemaphorePost {
         let Some(entry) = self.entries.get_mut(&id) else {
             return SemaphorePost::Unknown;
@@ -186,16 +225,20 @@ impl SemaphoreTable {
                     SemaphorePost::OverMax
                 } else {
                     entry.count += 1;
+                    debug_assert!(
+                        entry.count <= entry.max,
+                        "semaphore {:#x} count past max after post: count={} max={}",
+                        id,
+                        entry.count,
+                        entry.max,
+                    );
                     SemaphorePost::Incremented
                 }
             }
         }
     }
 
-    /// FNV-1a digest of the table for state-hash folding. Walks
-    /// entries in BTreeMap order; within each entry folds count,
-    /// max, and the waiter list in enqueue order. Tables differing
-    /// in any of those produce distinct hashes.
+    /// FNV-1a digest for state-hash folding.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&(self.entries.len() as u64).to_le_bytes());
@@ -228,30 +271,32 @@ mod tests {
     }
 
     #[test]
-    fn create_with_id_rejects_collision() {
-        let mut t = SemaphoreTable::new();
-        assert!(t.create_with_id(5, 0, 10));
-        assert!(!t.create_with_id(5, 0, 10));
-    }
-
-    #[test]
     fn create_rejects_initial_above_max() {
         let mut t = SemaphoreTable::new();
-        assert!(!t.create_with_id(5, 11, 10));
+        assert_eq!(
+            t.create_with_id(5, 11, 10),
+            Err(SemaphoreCreateError::InvalidBounds),
+        );
         assert!(t.lookup(5).is_none());
     }
 
     #[test]
     fn create_rejects_negative_initial_or_max() {
         let mut t = SemaphoreTable::new();
-        assert!(!t.create_with_id(5, -1, 10));
-        assert!(!t.create_with_id(5, 0, -1));
+        assert_eq!(
+            t.create_with_id(5, -1, 10),
+            Err(SemaphoreCreateError::InvalidBounds),
+        );
+        assert_eq!(
+            t.create_with_id(5, 0, -1),
+            Err(SemaphoreCreateError::InvalidBounds),
+        );
     }
 
     #[test]
     fn try_wait_with_positive_count_decrements() {
         let mut t = SemaphoreTable::new();
-        t.create_with_id(1, 3, 10);
+        t.create_with_id(1, 3, 10).unwrap();
         assert_eq!(t.try_wait(1), Some(SemaphoreWait::Acquired));
         assert_eq!(t.lookup(1).unwrap().count(), 2);
         assert_eq!(t.try_wait(1), Some(SemaphoreWait::Acquired));
@@ -263,7 +308,7 @@ mod tests {
     #[test]
     fn try_wait_with_zero_count_returns_empty_and_preserves_state() {
         let mut t = SemaphoreTable::new();
-        t.create_with_id(1, 0, 10);
+        t.create_with_id(1, 0, 10).unwrap();
         assert_eq!(t.try_wait(1), Some(SemaphoreWait::Empty));
         assert_eq!(t.lookup(1).unwrap().count(), 0);
     }
@@ -275,20 +320,26 @@ mod tests {
     }
 
     #[test]
+    fn try_wait_after_destroy_returns_none() {
+        let mut t = SemaphoreTable::new();
+        t.create_with_id(1, 3, 10).unwrap();
+        t.destroy(1);
+        assert!(t.try_wait(1).is_none());
+    }
+
+    #[test]
     fn post_with_no_waiters_increments() {
         let mut t = SemaphoreTable::new();
-        t.create_with_id(1, 0, 10);
+        t.create_with_id(1, 0, 10).unwrap();
         assert_eq!(t.post_and_wake(1), SemaphorePost::Incremented);
         assert_eq!(t.lookup(1).unwrap().count(), 1);
     }
 
     #[test]
     fn post_with_one_waiter_wakes_that_waiter_and_does_not_increment() {
-        // The FIFO-fair semantics: a post with a waiter hands the
-        // resource slot directly to the waiter, count stays at 0.
         let mut t = SemaphoreTable::new();
-        t.create_with_id(1, 0, 10);
-        t.enqueue_waiter(1, tid(0x0100_0001));
+        t.create_with_id(1, 0, 10).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
         assert_eq!(
             t.post_and_wake(1),
             SemaphorePost::Woke {
@@ -302,10 +353,10 @@ mod tests {
     #[test]
     fn post_with_multiple_waiters_wakes_head_in_fifo_order() {
         let mut t = SemaphoreTable::new();
-        t.create_with_id(1, 0, 10);
-        t.enqueue_waiter(1, tid(0x0100_0001));
-        t.enqueue_waiter(1, tid(0x0100_0002));
-        t.enqueue_waiter(1, tid(0x0100_0003));
+        t.create_with_id(1, 0, 10).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0003)).unwrap();
         assert_eq!(
             t.post_and_wake(1),
             SemaphorePost::Woke {
@@ -324,7 +375,6 @@ mod tests {
                 new_owner: tid(0x0100_0003)
             },
         );
-        // After all waiters are drained, next post increments.
         assert_eq!(t.post_and_wake(1), SemaphorePost::Incremented);
         assert_eq!(t.lookup(1).unwrap().count(), 1);
     }
@@ -332,20 +382,16 @@ mod tests {
     #[test]
     fn post_past_max_with_no_waiters_returns_over_max() {
         let mut t = SemaphoreTable::new();
-        t.create_with_id(1, 5, 5);
+        t.create_with_id(1, 5, 5).unwrap();
         assert_eq!(t.post_and_wake(1), SemaphorePost::OverMax);
-        // Count unchanged.
         assert_eq!(t.lookup(1).unwrap().count(), 5);
     }
 
     #[test]
     fn post_at_max_with_waiter_still_wakes_without_incrementing() {
-        // The waiter-wake branch bypasses the max check because
-        // the post is consumed by the waiter, not added to the
-        // count. This is classical semaphore semantics.
         let mut t = SemaphoreTable::new();
-        t.create_with_id(1, 5, 5);
-        t.enqueue_waiter(1, tid(0x0100_0001));
+        t.create_with_id(1, 5, 5).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
         assert_eq!(
             t.post_and_wake(1),
             SemaphorePost::Woke {
@@ -362,6 +408,15 @@ mod tests {
     }
 
     #[test]
+    fn enqueue_waiter_unknown_id_returns_err() {
+        let mut t = SemaphoreTable::new();
+        assert_eq!(
+            t.enqueue_waiter(99, tid(0x0100_0001)),
+            Err(SemaphoreEnqueueError::UnknownId),
+        );
+    }
+
+    #[test]
     fn state_hash_empty_is_stable() {
         let a = SemaphoreTable::new();
         let b = SemaphoreTable::new();
@@ -372,8 +427,8 @@ mod tests {
     fn state_hash_distinguishes_count() {
         let mut a = SemaphoreTable::new();
         let mut b = SemaphoreTable::new();
-        a.create_with_id(1, 3, 10);
-        b.create_with_id(1, 4, 10);
+        a.create_with_id(1, 3, 10).unwrap();
+        b.create_with_id(1, 4, 10).unwrap();
         assert_ne!(a.state_hash(), b.state_hash());
     }
 
@@ -381,12 +436,79 @@ mod tests {
     fn state_hash_distinguishes_waiter_order() {
         let mut a = SemaphoreTable::new();
         let mut b = SemaphoreTable::new();
-        a.create_with_id(1, 0, 10);
-        b.create_with_id(1, 0, 10);
-        a.enqueue_waiter(1, tid(0x0100_0001));
-        a.enqueue_waiter(1, tid(0x0100_0002));
-        b.enqueue_waiter(1, tid(0x0100_0002));
-        b.enqueue_waiter(1, tid(0x0100_0001));
+        a.create_with_id(1, 0, 10).unwrap();
+        b.create_with_id(1, 0, 10).unwrap();
+        a.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
+        a.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
+        b.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
+        b.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
         assert_ne!(a.state_hash(), b.state_hash());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "already present")]
+    fn create_with_id_collision_fires_debug_assert() {
+        let mut t = SemaphoreTable::new();
+        t.create_with_id(5, 0, 10).unwrap();
+        let _ = t.create_with_id(5, 0, 10);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "duplicate enqueue")]
+    fn duplicate_enqueue_fires_debug_assert() {
+        let mut t = SemaphoreTable::new();
+        t.create_with_id(1, 0, 10).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
+        let _ = t.enqueue_waiter(1, tid(0x0100_0001));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "destroyed with")]
+    fn destroy_with_parked_waiters_fires_debug_assert() {
+        let mut t = SemaphoreTable::new();
+        t.create_with_id(1, 0, 10).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
+        let _ = t.destroy(1);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn create_with_id_collision_returns_err_in_release() {
+        let mut t = SemaphoreTable::new();
+        t.create_with_id(5, 0, 10).unwrap();
+        assert_eq!(
+            t.create_with_id(5, 0, 10),
+            Err(SemaphoreCreateError::IdCollision),
+        );
+        assert_eq!(t.len(), 1);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn duplicate_enqueue_returns_err_in_release() {
+        let mut t = SemaphoreTable::new();
+        t.create_with_id(1, 0, 10).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
+        assert_eq!(
+            t.enqueue_waiter(1, tid(0x0100_0001)),
+            Err(SemaphoreEnqueueError::DuplicateWaiter),
+        );
+        assert_eq!(t.lookup(1).unwrap().waiters().len(), 1);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn destroy_with_parked_waiters_returns_entry_unchanged_in_release() {
+        let mut t = SemaphoreTable::new();
+        t.create_with_id(1, 0, 10).unwrap();
+        let waiter = tid(0x0100_0001);
+        t.enqueue_waiter(1, waiter).unwrap();
+        let removed = t.destroy(1).unwrap();
+        let parked: Vec<_> = removed.waiters().iter().collect();
+        assert_eq!(parked, vec![waiter]);
+        assert!(t.lookup(1).is_none());
     }
 }

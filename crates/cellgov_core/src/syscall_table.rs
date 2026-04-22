@@ -65,7 +65,7 @@ const MAX_PENDING_RESPONSES: usize = 65_536;
 /// apart -- the coupling is bidirectional: the golden's failure
 /// message points back at this constant, and this doc points
 /// forward at the golden.
-const STATE_HASH_FORMAT_VERSION: u64 = 1;
+const STATE_HASH_FORMAT_VERSION: u64 = 2;
 
 impl SyscallResponseTable {
     /// Construct an empty table.
@@ -326,19 +326,19 @@ impl SyscallResponseTable {
                     hasher.write(&target.to_le_bytes());
                     hasher.write(&status_out_ptr.to_le_bytes());
                 }
-                PendingResponse::EventQueueReceive {
-                    out_ptr,
-                    source,
-                    data1,
-                    data2,
-                    data3,
-                } => {
+                PendingResponse::EventQueueReceive { out_ptr, payload } => {
                     hasher.write(&[3u8]);
                     hasher.write(&out_ptr.to_le_bytes());
-                    hasher.write(&source.to_le_bytes());
-                    hasher.write(&data1.to_le_bytes());
-                    hasher.write(&data2.to_le_bytes());
-                    hasher.write(&data3.to_le_bytes());
+                    match payload {
+                        None => hasher.write(&[0u8]),
+                        Some(p) => {
+                            hasher.write(&[1u8]);
+                            hasher.write(&p.source.to_le_bytes());
+                            hasher.write(&p.data1.to_le_bytes());
+                            hasher.write(&p.data2.to_le_bytes());
+                            hasher.write(&p.data3.to_le_bytes());
+                        }
+                    }
                 }
                 PendingResponse::CondWakeReacquire {
                     mutex_id,
@@ -754,60 +754,79 @@ mod tests {
                 "EventQueueReceive",
                 PendingResponse::EventQueueReceive {
                     out_ptr: 0x1000,
-                    source: 0x11,
-                    data1: 0x22,
-                    data2: 0x33,
-                    data3: 0x44,
+                    payload: Some(cellgov_lv2::EventPayload {
+                        source: 0x11,
+                        data1: 0x22,
+                        data2: 0x33,
+                        data3: 0x44,
+                    }),
                 },
                 vec![
                     (
                         "out_ptr",
                         PendingResponse::EventQueueReceive {
                             out_ptr: 0x9000,
-                            source: 0x11,
-                            data1: 0x22,
-                            data2: 0x33,
-                            data3: 0x44,
+                            payload: Some(cellgov_lv2::EventPayload {
+                                source: 0x11,
+                                data1: 0x22,
+                                data2: 0x33,
+                                data3: 0x44,
+                            }),
                         },
                     ),
                     (
                         "source",
                         PendingResponse::EventQueueReceive {
                             out_ptr: 0x1000,
-                            source: 0x99,
-                            data1: 0x22,
-                            data2: 0x33,
-                            data3: 0x44,
+                            payload: Some(cellgov_lv2::EventPayload {
+                                source: 0x99,
+                                data1: 0x22,
+                                data2: 0x33,
+                                data3: 0x44,
+                            }),
                         },
                     ),
                     (
                         "data1",
                         PendingResponse::EventQueueReceive {
                             out_ptr: 0x1000,
-                            source: 0x11,
-                            data1: 0x99,
-                            data2: 0x33,
-                            data3: 0x44,
+                            payload: Some(cellgov_lv2::EventPayload {
+                                source: 0x11,
+                                data1: 0x99,
+                                data2: 0x33,
+                                data3: 0x44,
+                            }),
                         },
                     ),
                     (
                         "data2",
                         PendingResponse::EventQueueReceive {
                             out_ptr: 0x1000,
-                            source: 0x11,
-                            data1: 0x22,
-                            data2: 0x99,
-                            data3: 0x44,
+                            payload: Some(cellgov_lv2::EventPayload {
+                                source: 0x11,
+                                data1: 0x22,
+                                data2: 0x99,
+                                data3: 0x44,
+                            }),
                         },
                     ),
                     (
                         "data3",
                         PendingResponse::EventQueueReceive {
                             out_ptr: 0x1000,
-                            source: 0x11,
-                            data1: 0x22,
-                            data2: 0x33,
-                            data3: 0x99,
+                            payload: Some(cellgov_lv2::EventPayload {
+                                source: 0x11,
+                                data1: 0x22,
+                                data2: 0x33,
+                                data3: 0x99,
+                            }),
+                        },
+                    ),
+                    (
+                        "payload_none",
+                        PendingResponse::EventQueueReceive {
+                            out_ptr: 0x1000,
+                            payload: None,
                         },
                     ),
                 ],
@@ -1038,10 +1057,7 @@ mod tests {
                 "EventQueueReceive",
                 PendingResponse::EventQueueReceive {
                     out_ptr: 0,
-                    source: 0,
-                    data1: 0,
-                    data2: 0,
-                    data3: 0,
+                    payload: None,
                 },
             ),
             (
@@ -1135,10 +1151,12 @@ mod tests {
             UnitId::new(3),
             PendingResponse::EventQueueReceive {
                 out_ptr: 0x3000,
-                source: 0xAA,
-                data1: 0xBB,
-                data2: 0xCC,
-                data3: 0xDD,
+                payload: Some(cellgov_lv2::EventPayload {
+                    source: 0xAA,
+                    data1: 0xBB,
+                    data2: 0xCC,
+                    data3: 0xDD,
+                }),
             },
         );
         ins(
@@ -1157,7 +1175,7 @@ mod tests {
                 observed: 0x0F0F_0F0F,
             },
         );
-        const EXPECTED: u64 = 0xFE23_1ADD_71CC_80A0;
+        const EXPECTED: u64 = 0x3A00_EF41_5539_22DE;
         assert_eq!(
             t.state_hash(),
             EXPECTED,

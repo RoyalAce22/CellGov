@@ -1,34 +1,23 @@
-//! Event queue table.
+//! Event queue table. Owns state for `sys_event_queue_create` /
+//! `_destroy` / `_receive` / `_send` / `_tryreceive`.
 //!
-//! Owns the state for `sys_event_queue_create` / `_destroy` /
-//! `_receive` / `_send` / `_tryreceive`. Each entry holds a FIFO
-//! `VecDeque<EventPayload>` of buffered payloads and a FIFO
-//! list of `EventQueueWaiter` entries (each carries the thread
-//! id plus the receive-side out pointer the wait handler stored
-//! at park time).
-//!
-//! Observable contract on send:
-//!
-//!   "A payload arrives at the queue; one waiter (if any)
-//!   receives it from the queue in send-arrival order."
-//!
-//! The implementation fast-paths the handoff: if a waiter is
-//! parked, `send_and_wake_or_enqueue` hands the payload directly
-//! to that waiter. Tests assert the observable result (payload
-//! content, wake ordering, r3 value), not a specific storage
-//! path; the fast-path and the queue-then-pop path are
-//! indistinguishable from the guest's perspective.
+//! Storage invariant: an entry never holds both buffered
+//! payloads and parked waiters. `send_and_wake_or_enqueue` hands
+//! off directly when a waiter exists; `enqueue_waiter`
+//! `debug_assert!`s the payload list is empty before parking.
+//! The invariant is what makes [`EventQueueTable::try_receive`]
+//! FIFO-correct -- pop ordering can never jump ahead of a
+//! parked waiter because parked waiters cannot coexist with
+//! buffered payloads.
 
 use crate::ppu_thread::PpuThreadId;
 use std::collections::{BTreeMap, VecDeque};
 
-/// One queued event. Matches the PS3 `sys_event_t` layout -- four
-/// u64 fields the caller's `receive` out-pointer is populated
-/// with when the event is delivered.
+/// One queued event. Matches the PS3 `sys_event_t` layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventPayload {
-    /// Source id. Typically the sending event-port id or a
-    /// user-defined tag.
+    /// Source id (typically a sending event-port id or a
+    /// user-defined tag).
     pub source: u64,
     /// First data word.
     pub data1: u64,
@@ -41,20 +30,17 @@ pub struct EventPayload {
 /// Outcome of a `try_receive` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventQueueReceive {
-    /// A payload was available and has been popped; deliver to
-    /// the caller's out pointer with r3 = 0.
+    /// A payload was popped and should be delivered.
     Delivered(EventPayload),
-    /// Queue empty and no waiter parked -- caller should park
-    /// (for `_receive`) or return ENOENT (for `_tryreceive`).
+    /// Queue empty; caller parks (for `_receive`) or returns
+    /// `ENOENT` (for `_tryreceive`).
     Empty,
 }
 
 /// Outcome of a `send_and_wake_or_enqueue` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventQueueSend {
-    /// A parked waiter received the payload directly. Runtime
-    /// should wake `new_owner` and deliver the payload to
-    /// `out_ptr` via `PendingResponse::EventQueueReceive`.
+    /// Payload handed directly to a parked waiter.
     Woke {
         /// Thread that received the payload.
         new_owner: PpuThreadId,
@@ -63,13 +49,25 @@ pub enum EventQueueSend {
         /// Payload to deliver on wake.
         payload: EventPayload,
     },
-    /// No waiters; the payload was enqueued.
+    /// No waiter; payload was buffered.
     Enqueued,
-    /// Queue full (payload count would exceed the configured
-    /// size). Caller returns EBUSY.
+    /// Buffered payload count already equals `size`; caller
+    /// returns `EBUSY`.
     Full,
-    /// Unknown queue id. Caller returns ESRCH.
+    /// Unknown id.
     Unknown,
+}
+
+/// Failure modes of [`EventQueueTable::enqueue_waiter`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventQueueEnqueueError {
+    /// No event queue with this id.
+    UnknownId,
+    /// Thread is already parked on this queue. A single PPU
+    /// thread cannot be in two `sys_event_queue_receive`
+    /// syscalls at once; dispatch-layer bug. `debug_assert!`
+    /// fires.
+    DuplicateWaiter,
 }
 
 /// A parked `sys_event_queue_receive` caller.
@@ -83,13 +81,10 @@ pub struct EventQueueWaiter {
 
 /// A single event queue.
 ///
-/// The waiter list is a `VecDeque<EventQueueWaiter>` rather than
-/// the shared `WaiterList` because each parked caller needs its
-/// own `out_ptr`. Co-locating the continuation pointer with the
-/// thread id lets the send side emit a complete
-/// `PendingResponse::EventQueueReceive` at wake time with no
-/// merge-with-previous-response logic. See the
-/// "WaiterContinuation" design note in `sync_primitives::mod`.
+/// The waiter list carries per-waiter `out_ptr`s rather than
+/// using the shared `WaiterList`, so the send side can build a
+/// complete `PendingResponse::EventQueueReceive` at wake time
+/// without a separate continuation lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventQueueEntry {
     payloads: VecDeque<EventPayload>,
@@ -116,7 +111,11 @@ impl EventQueueEntry {
         self.payloads.len()
     }
 
-    /// Whether no payloads are currently buffered.
+    /// Whether the payload buffer is empty. Does NOT consult
+    /// the waiter list -- a queue with parked receivers still
+    /// returns `true` here. Use [`Self::is_inert`] at
+    /// destruction sites; using `is_empty` there would strand
+    /// parked threads.
     pub fn is_empty(&self) -> bool {
         self.payloads.is_empty()
     }
@@ -129,6 +128,12 @@ impl EventQueueEntry {
     /// Whether no threads are currently parked on receive.
     pub fn has_no_waiters(&self) -> bool {
         self.waiters.is_empty()
+    }
+
+    /// `true` iff no payloads buffered AND no waiters parked --
+    /// the "safe to destroy" predicate.
+    pub fn is_inert(&self) -> bool {
+        self.payloads.is_empty() && self.waiters.is_empty()
     }
 
     /// Read-only iterator over buffered payloads in arrival order.
@@ -149,8 +154,8 @@ impl EventQueueTable {
         Self::default()
     }
 
-    /// Insert a fresh entry with the given id and max size.
-    /// Returns `false` if `id` is already present or `size == 0`.
+    /// Insert a fresh entry. Returns `false` if `id` is already
+    /// present or `size == 0`.
     pub fn create_with_id(&mut self, id: u32, size: u32) -> bool {
         if self.entries.contains_key(&id) || size == 0 {
             return false;
@@ -159,10 +164,23 @@ impl EventQueueTable {
         true
     }
 
-    /// Destroy an event queue. Returns the removed entry or
+    /// Destroy an event queue and return the removed entry, or
     /// `None` if the id was unknown.
+    ///
+    /// Caller contract: reject non-empty-waiters before calling.
+    /// `debug_assert!` fires on violation. If bypassed in
+    /// release, the returned entry carries the waiter list and
+    /// callers **must** drain and wake each parked thread;
+    /// skipping this strands them forever.
     pub fn destroy(&mut self, id: u32) -> Option<EventQueueEntry> {
-        self.entries.remove(&id)
+        let entry = self.entries.remove(&id)?;
+        debug_assert!(
+            entry.waiters.is_empty(),
+            "event queue {:#x} destroyed with {} parked waiter(s)",
+            id,
+            entry.waiters.len(),
+        );
+        Some(entry)
     }
 
     /// Read-only lookup.
@@ -175,28 +193,46 @@ impl EventQueueTable {
         self.entries.len()
     }
 
-    /// Whether the table has no entries.
+    /// Whether the table has no entries. Distinct from
+    /// [`EventQueueEntry::is_empty`], which reports whether a
+    /// single queue has no buffered payloads.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// Try to pop a payload for the caller.
+    /// Try to pop a payload. `None` if `id` is unknown.
     ///
-    /// Returns `None` if `id` is unknown, `Some(Delivered)` if a
-    /// payload was popped, `Some(Empty)` if the queue is empty.
+    /// A `debug_assert!` checks the storage invariant
+    /// (payloads-xor-waiters); violation would allow this call
+    /// to pop ahead of a parked waiter.
     pub fn try_receive(&mut self, id: u32) -> Option<EventQueueReceive> {
         let entry = self.entries.get_mut(&id)?;
+        debug_assert!(
+            entry.waiters.is_empty() || entry.payloads.is_empty(),
+            "event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s)",
+            id,
+            entry.payloads.len(),
+            entry.waiters.len(),
+        );
         match entry.payloads.pop_front() {
             Some(p) => Some(EventQueueReceive::Delivered(p)),
             None => Some(EventQueueReceive::Empty),
         }
     }
 
-    /// Non-blocking batch pop: drain up to `max` payloads from
-    /// `id` in arrival order. Returns `None` if `id` is unknown.
-    /// Returned `Vec` is empty when the queue had no payloads.
+    /// Non-blocking batch pop: drain up to `max` payloads in
+    /// arrival order. `None` if `id` is unknown; empty `Vec` if
+    /// no payloads buffered. Shares [`Self::try_receive`]'s
+    /// invariant assertion.
     pub fn try_receive_batch(&mut self, id: u32, max: usize) -> Option<Vec<EventPayload>> {
         let entry = self.entries.get_mut(&id)?;
+        debug_assert!(
+            entry.waiters.is_empty() || entry.payloads.is_empty(),
+            "event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s)",
+            id,
+            entry.payloads.len(),
+            entry.waiters.len(),
+        );
         let n = entry.payloads.len().min(max);
         let mut out = Vec::with_capacity(n);
         for _ in 0..n {
@@ -205,32 +241,49 @@ impl EventQueueTable {
         Some(out)
     }
 
-    /// Enqueue `waiter` on the receive-waiter list for `id`.
-    /// Returns `true` on success, `false` if `id` is unknown or
-    /// `thread` is already parked on this queue.
-    pub fn enqueue_waiter(&mut self, id: u32, thread: PpuThreadId, out_ptr: u32) -> bool {
-        let Some(entry) = self.entries.get_mut(&id) else {
-            return false;
-        };
+    /// Enqueue a receive-waiter. See [`EventQueueEnqueueError`].
+    ///
+    /// Precondition: caller must have seen
+    /// [`EventQueueReceive::Empty`] from [`Self::try_receive`].
+    /// Parking while payloads are buffered violates the storage
+    /// invariant (send's fast-path would hand directly to the
+    /// new waiter, stranding the buffered payloads); a
+    /// `debug_assert!` catches it.
+    pub fn enqueue_waiter(
+        &mut self,
+        id: u32,
+        thread: PpuThreadId,
+        out_ptr: u32,
+    ) -> Result<(), EventQueueEnqueueError> {
+        let entry = self
+            .entries
+            .get_mut(&id)
+            .ok_or(EventQueueEnqueueError::UnknownId)?;
+        debug_assert!(
+            entry.payloads.is_empty(),
+            "thread {:?} enqueued on event queue {:#x} with {} buffered payload(s)",
+            thread,
+            id,
+            entry.payloads.len(),
+        );
         if entry.waiters.iter().any(|w| w.thread == thread) {
-            return false;
+            debug_assert!(
+                false,
+                "duplicate enqueue of {:?} on event queue {:#x}",
+                thread, id,
+            );
+            return Err(EventQueueEnqueueError::DuplicateWaiter);
         }
         entry
             .waiters
             .push_back(EventQueueWaiter { thread, out_ptr });
-        true
+        Ok(())
     }
 
-    /// Send a payload into `id`.
-    ///
-    /// If a waiter is parked, the payload is handed directly to
-    /// the head of the waiter list; the returned `Woke` variant
-    /// carries both the waiter's thread id AND its recorded
-    /// `out_ptr` so the send-side dispatch can build a complete
-    /// `PendingResponse::EventQueueReceive` without consulting
-    /// the runtime's syscall-response table. Otherwise the
-    /// payload is enqueued; if the queue is already at `size`
-    /// items, the send fails with `Full`.
+    /// Send a payload. Hands off to the head waiter if one is
+    /// parked (returning `Woke` with the waiter's recorded
+    /// `out_ptr`); otherwise buffers, or returns `Full` at
+    /// `size`.
     pub fn send_and_wake_or_enqueue(&mut self, id: u32, payload: EventPayload) -> EventQueueSend {
         let Some(entry) = self.entries.get_mut(&id) else {
             return EventQueueSend::Unknown;
@@ -242,7 +295,7 @@ impl EventQueueTable {
                 payload,
             },
             None => {
-                if (entry.payloads.len() as u32) >= entry.size {
+                if entry.payloads.len() >= entry.size as usize {
                     EventQueueSend::Full
                 } else {
                     entry.payloads.push_back(payload);
@@ -252,7 +305,9 @@ impl EventQueueTable {
         }
     }
 
-    /// FNV-1a digest of the table for state-hash folding.
+    /// FNV-1a digest for state-hash folding. Walks entries in
+    /// ascending-id order; folds size, payload FIFO, and waiter
+    /// FIFO (including `out_ptr`s).
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&(self.entries.len() as u64).to_le_bytes());
@@ -269,12 +324,6 @@ impl EventQueueTable {
             hasher.write(&(entry.waiters.len() as u64).to_le_bytes());
             for w in entry.waiters.iter() {
                 hasher.write(&w.thread.raw().to_le_bytes());
-                // Include out_ptr so two tables differing only
-                // in the parked waiter's continuation pointer
-                // produce distinct hashes. Scenarios that never
-                // park event-queue waiters are unaffected -- the
-                // table is gated empty-unless-used at the host
-                // level.
                 hasher.write(&w.out_ptr.to_le_bytes());
             }
         }
@@ -341,7 +390,6 @@ mod tests {
             EventQueueSend::Enqueued
         );
         assert_eq!(t.try_receive(1), Some(EventQueueReceive::Delivered(pl(10))),);
-        // Queue back to empty.
         assert_eq!(t.try_receive(1), Some(EventQueueReceive::Empty));
     }
 
@@ -368,12 +416,9 @@ mod tests {
 
     #[test]
     fn send_with_parked_waiter_hands_off_directly_and_does_not_enqueue() {
-        // The observable contract: on send, exactly one waiter
-        // receives the payload, the queue storage is unchanged
-        // (the payload went directly to the woken waiter).
         let mut t = EventQueueTable::new();
         t.create_with_id(1, 4);
-        t.enqueue_waiter(1, tid(0x0100_0001), 0x2000);
+        t.enqueue_waiter(1, tid(0x0100_0001), 0x2000).unwrap();
         assert_eq!(
             t.send_and_wake_or_enqueue(1, pl(42)),
             EventQueueSend::Woke {
@@ -382,8 +427,6 @@ mod tests {
                 payload: pl(42),
             },
         );
-        // Queue storage is empty (payload was fast-pathed to the
-        // waiter); waiter list drained.
         assert!(t.lookup(1).unwrap().is_empty());
         assert!(t.lookup(1).unwrap().waiters().is_empty());
     }
@@ -392,10 +435,9 @@ mod tests {
     fn send_wakes_waiters_in_fifo_order() {
         let mut t = EventQueueTable::new();
         t.create_with_id(1, 4);
-        t.enqueue_waiter(1, tid(0x0100_0001), 0x2000);
-        t.enqueue_waiter(1, tid(0x0100_0002), 0x2020);
-        t.enqueue_waiter(1, tid(0x0100_0003), 0x2040);
-        // First send wakes w1.
+        t.enqueue_waiter(1, tid(0x0100_0001), 0x2000).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0002), 0x2020).unwrap();
+        t.enqueue_waiter(1, tid(0x0100_0003), 0x2040).unwrap();
         assert_eq!(
             t.send_and_wake_or_enqueue(1, pl(10)),
             EventQueueSend::Woke {
@@ -404,7 +446,6 @@ mod tests {
                 payload: pl(10),
             },
         );
-        // Second send wakes w2.
         assert_eq!(
             t.send_and_wake_or_enqueue(1, pl(20)),
             EventQueueSend::Woke {
@@ -413,7 +454,6 @@ mod tests {
                 payload: pl(20),
             },
         );
-        // Third send wakes w3.
         assert_eq!(
             t.send_and_wake_or_enqueue(1, pl(30)),
             EventQueueSend::Woke {
@@ -422,7 +462,6 @@ mod tests {
                 payload: pl(30),
             },
         );
-        // No more waiters -- next send enqueues.
         assert_eq!(
             t.send_and_wake_or_enqueue(1, pl(40)),
             EventQueueSend::Enqueued
@@ -431,16 +470,9 @@ mod tests {
 
     #[test]
     fn send_preserves_per_waiter_out_ptr_even_when_zero() {
-        // A guest passing out_ptr == 0 is legal at the ABI level
-        // (would typically be a guest bug that writes to guest
-        // address 0, but the oracle must faithfully relay what
-        // it was given). The old sentinel-merge implementation
-        // could not distinguish a legitimate zero from "preserve
-        // existing"; the new per-waiter storage handles it
-        // transparently.
         let mut t = EventQueueTable::new();
         t.create_with_id(1, 4);
-        t.enqueue_waiter(1, tid(0x0100_0001), 0);
+        t.enqueue_waiter(1, tid(0x0100_0001), 0).unwrap();
         assert_eq!(
             t.send_and_wake_or_enqueue(1, pl(42)),
             EventQueueSend::Woke {
@@ -479,11 +511,9 @@ mod tests {
         t.send_and_wake_or_enqueue(1, pl(3));
         let batch = t.try_receive_batch(1, 2).unwrap();
         assert_eq!(batch, vec![pl(1), pl(2)]);
-        // One remaining.
         assert_eq!(t.lookup(1).unwrap().len(), 1);
         let batch2 = t.try_receive_batch(1, 4).unwrap();
         assert_eq!(batch2, vec![pl(3)]);
-        // Empty now.
         assert_eq!(t.try_receive_batch(1, 4).unwrap(), vec![]);
     }
 
@@ -491,6 +521,31 @@ mod tests {
     fn try_receive_batch_unknown_is_none() {
         let mut t = EventQueueTable::new();
         assert!(t.try_receive_batch(99, 4).is_none());
+    }
+
+    #[test]
+    fn enqueue_waiter_unknown_id_returns_err() {
+        let mut t = EventQueueTable::new();
+        assert_eq!(
+            t.enqueue_waiter(99, tid(0x0100_0001), 0x2000),
+            Err(EventQueueEnqueueError::UnknownId),
+        );
+    }
+
+    #[test]
+    fn is_inert_reflects_both_axes() {
+        let mut t = EventQueueTable::new();
+        t.create_with_id(1, 4);
+        assert!(t.lookup(1).unwrap().is_inert());
+        t.send_and_wake_or_enqueue(1, pl(1));
+        assert!(!t.lookup(1).unwrap().is_empty());
+        assert!(!t.lookup(1).unwrap().is_inert());
+        let _ = t.try_receive(1);
+        assert!(t.lookup(1).unwrap().is_inert());
+        t.enqueue_waiter(1, tid(0x0100_0001), 0x2000).unwrap();
+        // Payloads empty yet queue not inert (parked waiter).
+        assert!(t.lookup(1).unwrap().is_empty());
+        assert!(!t.lookup(1).unwrap().is_inert());
     }
 
     #[test]
@@ -504,5 +559,48 @@ mod tests {
         b.send_and_wake_or_enqueue(1, pl(2));
         b.send_and_wake_or_enqueue(1, pl(1));
         assert_ne!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "duplicate enqueue")]
+    fn duplicate_enqueue_panics_in_debug() {
+        let mut t = EventQueueTable::new();
+        t.create_with_id(1, 4);
+        t.enqueue_waiter(1, tid(0x0100_0001), 0x2000).unwrap();
+        let _ = t.enqueue_waiter(1, tid(0x0100_0001), 0x2000);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "payload(s)")]
+    fn enqueue_when_payloads_present_panics_in_debug() {
+        let mut t = EventQueueTable::new();
+        t.create_with_id(1, 4);
+        t.send_and_wake_or_enqueue(1, pl(1));
+        let _ = t.enqueue_waiter(1, tid(0x0100_0001), 0x2000);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "destroyed with")]
+    fn destroy_with_parked_waiters_panics_in_debug() {
+        let mut t = EventQueueTable::new();
+        t.create_with_id(1, 4);
+        t.enqueue_waiter(1, tid(0x0100_0001), 0x2000).unwrap();
+        let _ = t.destroy(1);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn duplicate_enqueue_returns_err_in_release() {
+        let mut t = EventQueueTable::new();
+        t.create_with_id(1, 4);
+        t.enqueue_waiter(1, tid(0x0100_0001), 0x2000).unwrap();
+        assert_eq!(
+            t.enqueue_waiter(1, tid(0x0100_0001), 0x2000),
+            Err(EventQueueEnqueueError::DuplicateWaiter),
+        );
+        assert_eq!(t.lookup(1).unwrap().waiters().len(), 1);
     }
 }

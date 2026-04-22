@@ -11,6 +11,7 @@
 //! `Lv2Runtime` trait the runtime implements.
 
 pub mod dispatch;
+pub mod errno;
 pub mod host;
 pub mod image;
 pub mod ppu_thread;
@@ -25,16 +26,19 @@ pub use dispatch::{
 pub use host::{Lv2Host, Lv2Runtime};
 pub use image::{ContentStore, SpuImageRecord};
 pub use ppu_thread::{
-    EventFlagWaitMode, GuestBlockReason, PpuThread, PpuThreadAttrs, PpuThreadId,
+    AddJoinWaiter, EventFlagWaitMode, GuestBlockReason, PpuThread, PpuThreadAttrs, PpuThreadId,
     PpuThreadIdAllocator, PpuThreadState, PpuThreadTable, ThreadStack, ThreadStackAllocator,
     TlsTemplate,
 };
 pub use request::Lv2Request;
 pub use sync_primitives::{
-    CondEntry, CondTable, EventFlagEntry, EventFlagTable, EventFlagWait, EventFlagWaiter,
-    EventFlagWake, EventPayload, EventQueueEntry, EventQueueReceive, EventQueueSend,
-    EventQueueTable, EventQueueWaiter, LwMutexAcquire, LwMutexEntry, LwMutexIdAllocator,
-    LwMutexRelease, LwMutexTable, MutexAcquire, MutexAttrs, MutexEntry, MutexRelease, MutexTable,
-    SemaphoreEntry, SemaphorePost, SemaphoreTable, SemaphoreWait, WaiterList,
+    CondEntry, CondTable, DuplicateEnqueue, EventFlagCreateError, EventFlagEnqueueError,
+    EventFlagEntry, EventFlagTable, EventFlagWait, EventFlagWaiter, EventFlagWake, EventPayload,
+    EventQueueEnqueueError, EventQueueEntry, EventQueueReceive, EventQueueSend, EventQueueTable,
+    EventQueueWaiter, LwMutexAcquire, LwMutexAcquireOrEnqueue, LwMutexEnqueueError, LwMutexEntry,
+    LwMutexIdAllocator, LwMutexRelease, LwMutexTable, MutexAcquire, MutexAcquireOrEnqueue,
+    MutexAttrs, MutexCreateError, MutexEnqueueError, MutexEntry, MutexRelease, MutexTable,
+    SemaphoreCreateError, SemaphoreEnqueueError, SemaphoreEntry, SemaphorePost, SemaphoreTable,
+    SemaphoreWait, WaiterList,
 };
 pub use thread_group::{GroupState, ThreadGroup, ThreadGroupTable};

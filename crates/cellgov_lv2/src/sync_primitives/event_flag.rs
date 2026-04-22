@@ -1,38 +1,22 @@
-//! Event flag table.
+//! Event flag table. Owns state for `sys_event_flag_create` /
+//! `_destroy` / `_wait` / `_set` / `_clear` / `_trywait`. Each
+//! entry holds `bits: u64` plus a FIFO waiter list whose entries
+//! carry per-waiter mask, mode, and continuation pointer.
 //!
-//! Owns the state for `sys_event_flag_create` / `_destroy` /
-//! `_wait` / `_set` / `_clear` / `_trywait`. Each entry holds
-//! `bits: u64` (the current flag state) and a FIFO waiter list
-//! where each waiter carries its own `wait_mask` and
-//! `wait_mode`.
-//!
-//! Wait mode encodes two orthogonal bits per the PS3 ABI:
-//!   * Match policy: AND (all bits in mask must be set) vs OR
-//!     (any bit in mask set).
-//!   * Wake policy: CLEAR (matched bits are cleared on wake) vs
-//!     NO-CLEAR (bits preserved).
-//!
-//! Set semantics: OR the new bits into `bits`, then walk the
-//! waiter list in FIFO order. Any waiter whose mask now matches
-//! per its mode is woken. If the waiter's mode is CLEAR, the
-//! matched bits are cleared before the next waiter is evaluated
-//! (so a CLEAR-wake can prevent a subsequent NO-CLEAR waiter
-//! from firing on the same set). Multiple waiters can wake from
-//! a single set call when they match on disjoint bit sets.
+//! Set semantics: OR the new bits in, then walk the waiter list
+//! in FIFO order waking each waiter whose mask matches per its
+//! mode. CLEAR-wakes mutate `bits` mid-walk, so a CLEAR earlier
+//! in the FIFO can prevent a later NO-CLEAR from firing; two
+//! waiters woken by the same `set_and_wake` call can therefore
+//! observe different bit patterns. See
+//! `set_and_wake_clear_then_noclear_shows_different_observed`.
 
 use crate::ppu_thread::{EventFlagWaitMode, PpuThreadId};
 use std::collections::BTreeMap;
 
-/// One parked waiter on an event flag.
-///
-/// Each waiter carries its own `result_ptr` (the continuation
-/// pointer supplied at wait time) so `set_and_wake` can emit a
-/// complete `PendingResponse::EventFlagWake` per matched waiter
-/// without looking up the parked response in the runtime's
-/// syscall-response table. Co-locating continuation state with
-/// the waiter entry is the shared pattern across primitives
-/// whose wake delivers data to guest memory (see event queue's
-/// `EventQueueWaiter`).
+/// One parked waiter on an event flag. `result_ptr` is the
+/// guest address `set_and_wake` writes the observed bit pattern
+/// to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventFlagWaiter {
     /// Thread parked on this event flag.
@@ -45,15 +29,15 @@ pub struct EventFlagWaiter {
     pub result_ptr: u32,
 }
 
-/// One woken waiter's continuation: the thread to wake, the
-/// bit pattern it observes, and the `result_ptr` the wait
-/// handler recorded at park time. Emitted in FIFO order by
+/// One woken waiter's continuation. Emitted in FIFO order by
 /// `set_and_wake`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventFlagWake {
     /// Thread woken.
     pub thread: PpuThreadId,
-    /// Observed bit pattern at wake time.
+    /// Bit pattern as of the moment this waiter's predicate
+    /// fired (may differ across waiters from a single
+    /// `set_and_wake` call due to mid-walk CLEAR).
     pub observed: u64,
     /// Guest address to write the observed pattern to.
     pub result_ptr: u32,
@@ -62,16 +46,39 @@ pub struct EventFlagWake {
 /// Outcome of a `try_wait` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventFlagWait {
-    /// The mask matched; caller returns CELL_OK. `observed` is
-    /// the bit pattern the caller sees (after CLEAR if
-    /// applicable).
+    /// The mask matched. `observed` is the bit pattern
+    /// **before** CLEAR (caller sees the pre-clear value even
+    /// when the wake policy clears the matched bits).
     Matched {
-        /// Bits observed before any CLEAR was applied.
+        /// Pre-clear bit pattern.
         observed: u64,
     },
-    /// Mask did not match -- caller should park (for `_wait`) or
-    /// return EBUSY (for `_trywait`).
+    /// Mask did not match; caller should park (for `_wait`) or
+    /// return `EBUSY` (for `_trywait`).
     NoMatch,
+}
+
+/// Failure modes of [`EventFlagTable::create_with_id`].
+///
+/// Id collisions indicate the shared kernel-object allocator
+/// handed out a live id; a `debug_assert!` fires before the
+/// error is returned. Release builds keep the existing entry
+/// and return `Err`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventFlagCreateError {
+    /// An entry with this id was already present.
+    IdCollision,
+}
+
+/// Failure modes of [`EventFlagTable::enqueue_waiter`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventFlagEnqueueError {
+    /// No event flag with this id.
+    UnknownId,
+    /// Thread is already parked on this flag. A single PPU
+    /// thread cannot be in two `sys_event_flag_wait` syscalls
+    /// at once; dispatch-layer bug. `debug_assert!` fires.
+    DuplicateWaiter,
 }
 
 /// A single event flag.
@@ -133,19 +140,41 @@ impl EventFlagTable {
         Self::default()
     }
 
-    /// Insert a fresh entry with the given id and initial bit
-    /// state. Returns `false` if `id` is already present.
-    pub fn create_with_id(&mut self, id: u32, init: u64) -> bool {
-        if self.entries.contains_key(&id) {
-            return false;
+    /// Insert a fresh entry. See [`EventFlagCreateError`].
+    pub fn create_with_id(&mut self, id: u32, init: u64) -> Result<(), EventFlagCreateError> {
+        if let Some(existing) = self.entries.get(&id) {
+            debug_assert!(
+                false,
+                "event flag {:#x} already present (existing init={:#x} bits={:#x} waiters={}, new init={:#x})",
+                id,
+                existing.init,
+                existing.bits,
+                existing.waiters.len(),
+                init,
+            );
+            return Err(EventFlagCreateError::IdCollision);
         }
         self.entries.insert(id, EventFlagEntry::new(init));
-        true
+        Ok(())
     }
 
-    /// Destroy an event flag. Returns the removed entry or `None`.
+    /// Destroy an event flag and return the removed entry, or
+    /// `None` if the id was unknown.
+    ///
+    /// Caller contract: reject non-empty-waiters before calling.
+    /// `debug_assert!` fires on violation. If bypassed in
+    /// release, the returned entry carries the waiter list and
+    /// callers **must** drain and wake each parked thread;
+    /// skipping this strands them forever.
     pub fn destroy(&mut self, id: u32) -> Option<EventFlagEntry> {
-        self.entries.remove(&id)
+        let entry = self.entries.remove(&id)?;
+        debug_assert!(
+            entry.waiters.is_empty(),
+            "event flag {:#x} destroyed with {} parked waiter(s)",
+            id,
+            entry.waiters.len(),
+        );
+        Some(entry)
     }
 
     /// Read-only lookup.
@@ -163,9 +192,10 @@ impl EventFlagTable {
         self.entries.is_empty()
     }
 
-    /// Try to wait without parking. If the mask matches per mode,
-    /// apply the CLEAR if applicable and return the observed
-    /// pattern. Otherwise return `NoMatch` with state unchanged.
+    /// Try to wait without parking. Applies the CLEAR if the
+    /// mask matches; otherwise returns `NoMatch` with state
+    /// unchanged. `observed` in the `Matched` variant is
+    /// pre-clear.
     pub fn try_wait(
         &mut self,
         id: u32,
@@ -184,8 +214,14 @@ impl EventFlagTable {
         }
     }
 
-    /// Park `waiter` on the flag's waiter list. Returns `false`
-    /// if `id` is unknown or the thread is already parked.
+    /// Park a waiter. See [`EventFlagEnqueueError`].
+    ///
+    /// Precondition: caller must have seen
+    /// [`EventFlagWait::NoMatch`] from [`Self::try_wait`].
+    /// Parking a waiter whose mask already matches would leave
+    /// it stuck until some future set mutates `bits`, despite
+    /// the predicate being satisfiable right now. A
+    /// `debug_assert!` catches this caller-side violation.
     pub fn enqueue_waiter(
         &mut self,
         id: u32,
@@ -193,12 +229,27 @@ impl EventFlagTable {
         mask: u64,
         mode: EventFlagWaitMode,
         result_ptr: u32,
-    ) -> bool {
-        let Some(entry) = self.entries.get_mut(&id) else {
-            return false;
-        };
+    ) -> Result<(), EventFlagEnqueueError> {
+        let entry = self
+            .entries
+            .get_mut(&id)
+            .ok_or(EventFlagEnqueueError::UnknownId)?;
+        debug_assert!(
+            !mask_matches(entry.bits, mask, mode),
+            "thread {:?} enqueued on event flag {:#x}: bits {:#x} already match mask {:#x} under {:?}",
+            thread,
+            id,
+            entry.bits,
+            mask,
+            mode,
+        );
         if entry.waiters.iter().any(|w| w.thread == thread) {
-            return false;
+            debug_assert!(
+                false,
+                "duplicate enqueue of {:?} on event flag {:#x}",
+                thread, id,
+            );
+            return Err(EventFlagEnqueueError::DuplicateWaiter);
         }
         entry.waiters.push(EventFlagWaiter {
             thread,
@@ -206,13 +257,17 @@ impl EventFlagTable {
             mode,
             result_ptr,
         });
-        true
+        Ok(())
     }
 
-    /// Set (OR in) bits on the flag and walk the waiter list
-    /// in FIFO order waking any waiter whose mask now matches.
-    /// Returns one `EventFlagWake` per matched waiter in FIFO
-    /// order. Returns `None` if `id` is unknown.
+    /// OR `bits_to_set` into the flag and wake every waiter
+    /// whose mask matches, in FIFO order. `None` if `id` is
+    /// unknown.
+    ///
+    /// Each wake's `observed` captures `bits` at the moment
+    /// that waiter's predicate fired: a CLEAR-wake earlier in
+    /// the FIFO mutates `bits`, so two waiters from the same
+    /// call can report different `observed` values.
     pub fn set_and_wake(&mut self, id: u32, bits_to_set: u64) -> Option<Vec<EventFlagWake>> {
         let entry = self.entries.get_mut(&id)?;
         entry.bits |= bits_to_set;
@@ -231,11 +286,7 @@ impl EventFlagTable {
                     observed,
                     result_ptr: w.result_ptr,
                 });
-                // Do not advance `i` -- next waiter shifted into
-                // this slot. Continue walking because a CLEAR-wake
-                // may have prevented a later waiter from matching,
-                // but a NO-CLEAR wake may still match subsequent
-                // waiters on the same bits.
+                // remove(i) shifted the next waiter into slot i.
                 continue;
             }
             i += 1;
@@ -243,8 +294,10 @@ impl EventFlagTable {
         Some(woken)
     }
 
-    /// Clear (AND-NOT) bits on the flag. Does not wake anyone.
-    /// Returns `false` if `id` is unknown.
+    /// Clear (AND-NOT) bits on the flag. Never wakes anyone --
+    /// even a waiter whose predicate happens to match the
+    /// post-clear state stays parked. Returns `false` if `id`
+    /// is unknown.
     pub fn clear_bits(&mut self, id: u32, bits_to_clear: u64) -> bool {
         let Some(entry) = self.entries.get_mut(&id) else {
             return false;
@@ -253,7 +306,8 @@ impl EventFlagTable {
         true
     }
 
-    /// FNV-1a digest.
+    /// FNV-1a digest. Uses [`EventFlagWaitMode::stable_tag`] to
+    /// fold the wait mode.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&(self.entries.len() as u64).to_le_bytes());
@@ -265,7 +319,7 @@ impl EventFlagTable {
             for w in &entry.waiters {
                 hasher.write(&w.thread.raw().to_le_bytes());
                 hasher.write(&w.mask.to_le_bytes());
-                hasher.write(&[w.mode as u8]);
+                hasher.write(&[w.mode.stable_tag()]);
                 hasher.write(&w.result_ptr.to_le_bytes());
             }
         }
@@ -290,12 +344,11 @@ mod tests {
     #[test]
     fn try_wait_and_mode_requires_all_bits() {
         let mut t = EventFlagTable::new();
-        t.create_with_id(1, 0b1010);
+        t.create_with_id(1, 0b1010).unwrap();
         assert_eq!(
             t.try_wait(1, 0b1000, EventFlagWaitMode::AndNoClear),
             Some(EventFlagWait::Matched { observed: 0b1010 }),
         );
-        // bits unchanged (no clear).
         assert_eq!(t.lookup(1).unwrap().bits(), 0b1010);
         assert_eq!(
             t.try_wait(1, 0b0101, EventFlagWaitMode::AndNoClear),
@@ -306,7 +359,7 @@ mod tests {
     #[test]
     fn try_wait_or_mode_requires_any_bit() {
         let mut t = EventFlagTable::new();
-        t.create_with_id(1, 0b0010);
+        t.create_with_id(1, 0b0010).unwrap();
         assert_eq!(
             t.try_wait(1, 0b1010, EventFlagWaitMode::OrNoClear),
             Some(EventFlagWait::Matched { observed: 0b0010 }),
@@ -320,7 +373,7 @@ mod tests {
     #[test]
     fn try_wait_clear_mode_clears_matched_bits() {
         let mut t = EventFlagTable::new();
-        t.create_with_id(1, 0b1111);
+        t.create_with_id(1, 0b1111).unwrap();
         assert_eq!(
             t.try_wait(1, 0b1010, EventFlagWaitMode::AndClear),
             Some(EventFlagWait::Matched { observed: 0b1111 }),
@@ -331,7 +384,7 @@ mod tests {
     #[test]
     fn set_with_no_waiters_just_ors_bits() {
         let mut t = EventFlagTable::new();
-        t.create_with_id(1, 0b0001);
+        t.create_with_id(1, 0b0001).unwrap();
         let woken = t.set_and_wake(1, 0b1010).unwrap();
         assert!(woken.is_empty());
         assert_eq!(t.lookup(1).unwrap().bits(), 0b1011);
@@ -340,32 +393,32 @@ mod tests {
     #[test]
     fn set_wakes_matching_waiter_in_fifo_order() {
         let mut t = EventFlagTable::new();
-        t.create_with_id(1, 0);
+        t.create_with_id(1, 0).unwrap();
         t.enqueue_waiter(
             1,
             tid(0x0100_0001),
             0b0001,
             EventFlagWaitMode::AndNoClear,
             0x2000,
-        );
+        )
+        .unwrap();
         t.enqueue_waiter(
             1,
             tid(0x0100_0002),
             0b0010,
             EventFlagWaitMode::AndNoClear,
             0x2020,
-        );
+        )
+        .unwrap();
         t.enqueue_waiter(
             1,
             tid(0x0100_0003),
             0b1000,
             EventFlagWaitMode::AndNoClear,
             0x2040,
-        );
-        // Set bits 0b0011 -- waiters 1 and 2 match; waiter 3
-        // still waits (bit 0b1000 not set).
+        )
+        .unwrap();
         let woken = t.set_and_wake(1, 0b0011).unwrap();
-        // FIFO wake order; each carries its own result_ptr.
         assert_eq!(
             woken,
             vec![
@@ -381,33 +434,30 @@ mod tests {
                 },
             ],
         );
-        // w3 still parked.
         assert_eq!(t.lookup(1).unwrap().waiters().len(), 1);
         assert_eq!(t.lookup(1).unwrap().waiters()[0].thread, tid(0x0100_0003));
     }
 
     #[test]
     fn set_with_clear_waiter_clears_bits_before_next_waiter_check() {
-        // w1 has CLEAR on mask 0b0001; w2 has NO-CLEAR on mask
-        // 0b0001. Set 0b0001: w1 matches, clears bit 0. w2 then
-        // checks -- bit already cleared -- no match. w2 stays
-        // parked.
         let mut t = EventFlagTable::new();
-        t.create_with_id(1, 0);
+        t.create_with_id(1, 0).unwrap();
         t.enqueue_waiter(
             1,
             tid(0x0100_0001),
             0b0001,
             EventFlagWaitMode::AndClear,
             0x2000,
-        );
+        )
+        .unwrap();
         t.enqueue_waiter(
             1,
             tid(0x0100_0002),
             0b0001,
             EventFlagWaitMode::AndNoClear,
             0x2020,
-        );
+        )
+        .unwrap();
         let woken = t.set_and_wake(1, 0b0001).unwrap();
         assert_eq!(
             woken,
@@ -422,41 +472,62 @@ mod tests {
     }
 
     #[test]
+    fn set_and_wake_clear_then_noclear_shows_different_observed() {
+        // Pins the per-waiter `observed` snapshot claim on
+        // EventFlagWake: w1's CLEAR mutates bits mid-walk, so w2
+        // (on a disjoint mask) sees 0b0010 where w1 saw 0b0011.
+        let mut t = EventFlagTable::new();
+        t.create_with_id(1, 0).unwrap();
+        t.enqueue_waiter(
+            1,
+            tid(0x0100_0001),
+            0b0001,
+            EventFlagWaitMode::AndClear,
+            0x2000,
+        )
+        .unwrap();
+        t.enqueue_waiter(
+            1,
+            tid(0x0100_0002),
+            0b0010,
+            EventFlagWaitMode::AndNoClear,
+            0x2020,
+        )
+        .unwrap();
+        let woken = t.set_and_wake(1, 0b0011).unwrap();
+        assert_eq!(
+            woken,
+            vec![
+                EventFlagWake {
+                    thread: tid(0x0100_0001),
+                    observed: 0b0011,
+                    result_ptr: 0x2000,
+                },
+                EventFlagWake {
+                    thread: tid(0x0100_0002),
+                    observed: 0b0010,
+                    result_ptr: 0x2020,
+                },
+            ],
+        );
+        assert_eq!(t.lookup(1).unwrap().bits(), 0b0010);
+    }
+
+    #[test]
     fn clear_bits_removes_without_waking() {
         let mut t = EventFlagTable::new();
-        t.create_with_id(1, 0b1111);
+        t.create_with_id(1, 0b0111).unwrap();
         t.enqueue_waiter(
             1,
             tid(0x0100_0001),
             0b1000,
             EventFlagWaitMode::AndNoClear,
             0x2000,
-        );
+        )
+        .unwrap();
         assert!(t.clear_bits(1, 0b0101));
-        assert_eq!(t.lookup(1).unwrap().bits(), 0b1010);
-        // Waiter still parked even though its mask still matches;
-        // clear never wakes anyone.
+        assert_eq!(t.lookup(1).unwrap().bits(), 0b0010);
         assert_eq!(t.lookup(1).unwrap().waiters().len(), 1);
-    }
-
-    #[test]
-    fn duplicate_enqueue_rejected() {
-        let mut t = EventFlagTable::new();
-        t.create_with_id(1, 0);
-        assert!(t.enqueue_waiter(
-            1,
-            tid(0x0100_0001),
-            0b1,
-            EventFlagWaitMode::AndNoClear,
-            0x2000
-        ));
-        assert!(!t.enqueue_waiter(
-            1,
-            tid(0x0100_0001),
-            0b1,
-            EventFlagWaitMode::AndNoClear,
-            0x2000
-        ));
     }
 
     #[test]
@@ -465,40 +536,40 @@ mod tests {
         assert!(t.try_wait(99, 0b1, EventFlagWaitMode::AndNoClear).is_none());
         assert!(t.set_and_wake(99, 0b1).is_none());
         assert!(!t.clear_bits(99, 0b1));
+        assert_eq!(
+            t.enqueue_waiter(99, tid(1), 0b1, EventFlagWaitMode::AndNoClear, 0x100),
+            Err(EventFlagEnqueueError::UnknownId),
+        );
     }
 
     #[test]
     fn set_wakes_each_waiter_with_its_own_result_ptr() {
-        // Three waiters on the same flag, each with a distinct
-        // result_ptr. A single set that matches all three must
-        // return each waiter's own continuation pointer, not a
-        // shared placeholder. The old sentinel-merge design
-        // accidentally worked because the parked responses were
-        // populated at wait time; the new per-waiter storage
-        // makes the per-continuation tracking explicit.
         let mut t = EventFlagTable::new();
-        t.create_with_id(1, 0);
+        t.create_with_id(1, 0).unwrap();
         t.enqueue_waiter(
             1,
             tid(0x0100_0001),
             0b0001,
             EventFlagWaitMode::AndNoClear,
             0x1000,
-        );
+        )
+        .unwrap();
         t.enqueue_waiter(
             1,
             tid(0x0100_0002),
             0b0010,
             EventFlagWaitMode::AndNoClear,
             0x2000,
-        );
+        )
+        .unwrap();
         t.enqueue_waiter(
             1,
             tid(0x0100_0003),
             0b0100,
             EventFlagWaitMode::AndNoClear,
             0x3000,
-        );
+        )
+        .unwrap();
         let woken = t.set_and_wake(1, 0b0111).unwrap();
         assert_eq!(
             woken,
@@ -526,22 +597,147 @@ mod tests {
     fn state_hash_distinguishes_waiter_mode() {
         let mut a = EventFlagTable::new();
         let mut b = EventFlagTable::new();
-        a.create_with_id(1, 0);
-        b.create_with_id(1, 0);
+        a.create_with_id(1, 0).unwrap();
+        b.create_with_id(1, 0).unwrap();
         a.enqueue_waiter(
             1,
             tid(0x0100_0001),
             0b1,
             EventFlagWaitMode::AndClear,
             0x2000,
-        );
+        )
+        .unwrap();
         b.enqueue_waiter(
             1,
             tid(0x0100_0001),
             0b1,
             EventFlagWaitMode::AndNoClear,
             0x2000,
-        );
+        )
+        .unwrap();
         assert_ne!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "already present")]
+    fn create_with_id_panics_on_collision_in_debug() {
+        let mut t = EventFlagTable::new();
+        t.create_with_id(1, 0xAA).unwrap();
+        let _ = t.create_with_id(1, 0xBB);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "duplicate enqueue")]
+    fn duplicate_enqueue_panics_in_debug() {
+        let mut t = EventFlagTable::new();
+        t.create_with_id(1, 0).unwrap();
+        t.enqueue_waiter(
+            1,
+            tid(0x0100_0001),
+            0b1,
+            EventFlagWaitMode::AndNoClear,
+            0x2000,
+        )
+        .unwrap();
+        let _ = t.enqueue_waiter(
+            1,
+            tid(0x0100_0001),
+            0b1,
+            EventFlagWaitMode::AndNoClear,
+            0x2000,
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "already match")]
+    fn enqueue_on_already_matching_bits_panics_in_debug() {
+        let mut t = EventFlagTable::new();
+        t.create_with_id(1, 0b1111).unwrap();
+        let _ = t.enqueue_waiter(
+            1,
+            tid(0x0100_0001),
+            0b0001,
+            EventFlagWaitMode::AndNoClear,
+            0x2000,
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "destroyed with")]
+    fn destroy_with_parked_waiters_panics_in_debug() {
+        let mut t = EventFlagTable::new();
+        t.create_with_id(1, 0).unwrap();
+        t.enqueue_waiter(
+            1,
+            tid(0x0100_0001),
+            0b1,
+            EventFlagWaitMode::AndNoClear,
+            0x2000,
+        )
+        .unwrap();
+        let _ = t.destroy(1);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn create_with_id_returns_collision_err_in_release() {
+        let mut t = EventFlagTable::new();
+        t.create_with_id(1, 0xAA).unwrap();
+        assert_eq!(
+            t.create_with_id(1, 0xBB),
+            Err(EventFlagCreateError::IdCollision),
+        );
+        assert_eq!(t.lookup(1).unwrap().init(), 0xAA);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn duplicate_enqueue_returns_err_in_release() {
+        let mut t = EventFlagTable::new();
+        t.create_with_id(1, 0).unwrap();
+        t.enqueue_waiter(
+            1,
+            tid(0x0100_0001),
+            0b1,
+            EventFlagWaitMode::AndNoClear,
+            0x2000,
+        )
+        .unwrap();
+        assert_eq!(
+            t.enqueue_waiter(
+                1,
+                tid(0x0100_0001),
+                0b1,
+                EventFlagWaitMode::AndNoClear,
+                0x2000,
+            ),
+            Err(EventFlagEnqueueError::DuplicateWaiter),
+        );
+        assert_eq!(t.lookup(1).unwrap().waiters().len(), 1);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn enqueue_on_already_matching_bits_still_parks_in_release() {
+        // Release: the debug_assert is compiled out; the waiter
+        // is parked and will wake on the next set_and_wake
+        // because the walk re-evaluates predicates.
+        let mut t = EventFlagTable::new();
+        t.create_with_id(1, 0b1111).unwrap();
+        t.enqueue_waiter(
+            1,
+            tid(0x0100_0001),
+            0b0001,
+            EventFlagWaitMode::AndNoClear,
+            0x2000,
+        )
+        .unwrap();
+        assert_eq!(t.lookup(1).unwrap().waiters().len(), 1);
+        let woken = t.set_and_wake(1, 0).unwrap();
+        assert_eq!(woken.len(), 1);
     }
 }
