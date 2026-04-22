@@ -234,13 +234,10 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0002,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EINVAL.into());
     }
 
     #[test]
@@ -248,13 +245,10 @@ mod tests {
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(256);
         let r = host.dispatch(Lv2Request::SemaphoreDestroy { id: 77 }, UnitId::new(0), &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -284,13 +278,10 @@ mod tests {
             .enqueue_waiter(id, PpuThreadId::PRIMARY)
             .unwrap();
         let d = host.dispatch(Lv2Request::SemaphoreDestroy { id }, src, &rt);
-        assert!(matches!(
-            d,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_000A,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = d else {
+            panic!("expected Immediate, got {d:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EBUSY.into());
     }
 
     #[test]
@@ -429,13 +420,10 @@ mod tests {
             other => panic!("expected Immediate(0), got {other:?}"),
         };
         let w = host.dispatch(Lv2Request::SemaphoreTryWait { id }, src, &rt);
-        assert!(matches!(
-            w,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_000A,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = w else {
+            panic!("expected Immediate, got {w:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EBUSY.into());
         // Count unchanged and no waiter parked.
         assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
         assert!(host.semaphores().lookup(id).unwrap().waiters().is_empty());
@@ -446,13 +434,10 @@ mod tests {
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(256);
         let r = host.dispatch(Lv2Request::SemaphoreTryWait { id: 99 }, UnitId::new(0), &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -506,13 +491,10 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -524,13 +506,10 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -542,13 +521,10 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0002,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EINVAL.into());
     }
 
     #[test]
@@ -667,13 +643,10 @@ mod tests {
             other => panic!("expected Immediate(0), got {other:?}"),
         };
         let post = host.dispatch(Lv2Request::SemaphorePost { id, val: 1 }, src, &rt);
-        assert!(matches!(
-            post,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0002,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = post else {
+            panic!("expected Immediate, got {post:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EINVAL.into());
         assert_eq!(host.semaphores().lookup(id).unwrap().count(), 3);
     }
 
@@ -684,12 +657,9 @@ mod tests {
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(Lv2Request::SemaphoreWait { id: 99, timeout: 0 }, src, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 }

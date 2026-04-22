@@ -549,8 +549,7 @@ mod tests {
         let result = host.dispatch(req, UnitId::new(0), &rt);
         match result {
             Lv2Dispatch::Immediate { code, effects } => {
-                // CELL_EINVAL. Colocated numeric constant in host/spu.rs.
-                assert_eq!(code, 0x8001_0002);
+                assert_eq!(code, crate::errno::CELL_EINVAL.into());
                 assert!(effects.is_empty());
             }
             other => panic!("expected Immediate, got {other:?}"),

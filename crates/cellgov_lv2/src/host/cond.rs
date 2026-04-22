@@ -478,13 +478,10 @@ mod tests {
             src,
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
         assert!(host.conds().is_empty());
     }
 
@@ -526,13 +523,10 @@ mod tests {
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(Lv2Request::CondDestroy { id: 0xDEAD }, src, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -751,13 +745,10 @@ mod tests {
             other_unit,
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0009, // CELL_EPERM
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EPERM.into());
         // Mutex ownership unchanged.
         assert_eq!(
             host.mutexes().lookup(mutex_id).unwrap().owner(),
@@ -781,13 +772,10 @@ mod tests {
             src,
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -834,13 +822,10 @@ mod tests {
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(Lv2Request::CondSignal { id: 0xDEAD }, src, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -1336,13 +1321,10 @@ mod tests {
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(Lv2Request::CondSignalAll { id: 0xDEAD }, src, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -1590,13 +1572,10 @@ mod tests {
             signaler,
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0009,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EPERM.into());
         // w1 remains parked on cond.
         assert_eq!(
             host.conds()
@@ -1623,13 +1602,10 @@ mod tests {
             src,
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -1817,14 +1793,12 @@ mod tests {
             // later waiter could pick up.
             match variant {
                 "signal_to" => {
-                    assert!(
-                        matches!(
-                            pre_signal,
-                            Lv2Dispatch::Immediate {
-                                code: 0x8001_0009, // CELL_EPERM (target not parked)
-                                ..
-                            }
-                        ),
+                    let Lv2Dispatch::Immediate { code, .. } = pre_signal else {
+                        panic!("{variant}: expected Immediate, got {pre_signal:?}");
+                    };
+                    assert_eq!(
+                        code,
+                        crate::errno::CELL_EPERM.into(),
                         "{variant}: signal_to on target-not-parked should EPERM per RPCS3",
                     );
                 }
@@ -1992,12 +1966,9 @@ mod tests {
             &rt,
         );
         let r = host.dispatch(Lv2Request::CondDestroy { id: cond_id }, src, &rt);
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_000A,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EBUSY.into());
     }
 }

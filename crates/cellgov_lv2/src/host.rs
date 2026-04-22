@@ -738,7 +738,7 @@ mod tests {
         assert_eq!(
             result,
             Lv2Dispatch::Immediate {
-                code: 0x8001_002B,
+                code: crate::errno::CELL_EIO.into(),
                 effects: vec![],
             }
         );
@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(
             result,
             Lv2Dispatch::Immediate {
-                code: 0x8001_0002,
+                code: crate::errno::CELL_EINVAL.into(),
                 effects: vec![],
             }
         );

@@ -431,7 +431,7 @@ mod tests {
         );
         match result {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, 0x8001_0005);
+                assert_eq!(code, crate::errno::CELL_ESRCH.into());
                 assert!(effects.is_empty());
             }
             other => panic!("expected Immediate with ESRCH, got {other:?}"),
@@ -571,7 +571,7 @@ mod tests {
         assert_eq!(
             result,
             Lv2Dispatch::Immediate {
-                code: 0x8001_000D, // CELL_EFAULT
+                code: crate::errno::CELL_EFAULT.into(),
                 effects: vec![],
             }
         );

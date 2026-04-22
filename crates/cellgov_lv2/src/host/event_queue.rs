@@ -329,13 +329,10 @@ mod tests {
             .enqueue_waiter(id, PpuThreadId::PRIMARY, 0x2000)
             .unwrap();
         let d = host.dispatch(Lv2Request::EventQueueDestroy { queue_id: id }, src, &rt);
-        assert!(matches!(
-            d,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_000A,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = d else {
+            panic!("expected Immediate, got {d:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EBUSY.into());
     }
 
     #[test]
@@ -673,13 +670,10 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        assert!(matches!(
-            r,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_0005,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_ESRCH.into());
     }
 
     #[test]

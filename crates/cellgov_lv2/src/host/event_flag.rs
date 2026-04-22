@@ -533,12 +533,9 @@ mod tests {
             src,
             &rt,
         );
-        assert!(matches!(
-            w,
-            Lv2Dispatch::Immediate {
-                code: 0x8001_000A,
-                ..
-            }
-        ));
+        let Lv2Dispatch::Immediate { code, .. } = w else {
+            panic!("expected Immediate, got {w:?}");
+        };
+        assert_eq!(code, crate::errno::CELL_EBUSY.into());
     }
 }
