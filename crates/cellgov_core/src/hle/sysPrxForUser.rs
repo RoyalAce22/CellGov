@@ -208,25 +208,57 @@ pub(crate) fn dispatch(
             adapter(runtime, source, nid).set_return(1_000_000);
         }
         NID_SYS_THREAD_CREATE_EX => {
-            // PSL1GHT's sysThreadCreateEx maps directly onto
-            // sys_ppu_thread_create. Arg layout matches: r3
-            // through r8 carry id_ptr, opd_ptr, arg, priority,
-            // stacksize, flags.
+            // LV2 sys_ppu_thread_create passes a POINTER to a
+            // small parameter struct in r4 (args[1]), not the
+            // entry OPD directly. The struct carries an 8-byte
+            // big-endian entry-OPD address at offset 0 and an
+            // 8-byte TLS address at offset 8. Only the entry
+            // pointer is needed here; cellgov_lv2 reads the OPD
+            // itself (entry_code + entry_toc) at dispatch time.
+            //
+            // Register layout matching the LV2 signature: r3
+            // thread_id out, r4 param ptr, r5 arg, r6 reserved
+            // (caller passes 0), r7 prio, r8 stacksize, r9
+            // flags, r10 threadname. The reserved slot shifts
+            // prio / stacksize / flags one register up versus
+            // the naive "pack everything into r3..r8" layout,
+            // and the struct-pointer indirection on r4 is
+            // required -- reading args[1] directly as the OPD
+            // spawns a thread whose PC is whatever 8 bytes
+            // happen to live at the top of the param struct.
+            // Treat arg-read failure and a zero entry field as
+            // CELL_EFAULT without dispatching.
             //
             // ABI narrowing: id_ptr and entry_opd are 32-bit
             // guest pointers and priority is a 32-bit value, so
             // `as u32` is the canonical narrowing cast and not a
-            // lossy truncation. arg/stacksize/flags stay u64 to
-            // match the Lv2Request field types (see
+            // lossy truncation. arg / stacksize / flags stay
+            // u64 to match the Lv2Request field types (see
             // `cellgov_lv2::Lv2Request::PpuThreadCreate`).
+            let param_ptr = args[1] as u32;
+            let param_start = param_ptr as usize;
+            let entry_opd_read: Option<u32> = {
+                let ctx = adapter(runtime, source, nid);
+                let mem = ctx.guest_memory();
+                mem.get(param_start..param_start + 8)
+                    .map(|slice| u64::from_be_bytes(slice.try_into().unwrap()) as u32)
+            };
+            let entry_opd = match entry_opd_read {
+                Some(opd) if opd != 0 => opd,
+                _ => {
+                    adapter(runtime, source, nid)
+                        .set_return(cellgov_lv2::errno::CELL_EFAULT.into());
+                    return Some(());
+                }
+            };
             runtime.dispatch_lv2_request(
                 cellgov_lv2::Lv2Request::PpuThreadCreate {
                     id_ptr: args[0] as u32,
-                    entry_opd: args[1] as u32,
+                    entry_opd,
                     arg: args[2],
-                    priority: args[3] as u32,
-                    stacksize: args[4],
-                    flags: args[5],
+                    priority: args[4] as u32,
+                    stacksize: args[5],
+                    flags: args[6],
                 },
                 source,
             );
