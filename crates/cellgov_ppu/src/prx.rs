@@ -180,7 +180,7 @@ pub const HLE_SYSCALL_BASE: u32 = 0x10000;
 
 /// NIDs for which CellGov ships a dedicated HLE implementation.
 ///
-/// Consumed by two call sites that must stay in lockstep:
+/// Consumed by two call sites that must stay in concordant:
 ///
 /// 1. `cellgov_cli`'s PRX binder keeps an HLE trampoline for any
 ///    NID in this list even when the loaded firmware PRX exports

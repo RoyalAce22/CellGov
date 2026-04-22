@@ -67,6 +67,9 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+      - name: cargo test --release
+        run: cargo test --workspace --release
+
   coverage:
     name: coverage
     runs-on: ubuntu-latest
