@@ -1,0 +1,194 @@
+//! PS3 LV2 error code database.
+//!
+//! Every entry mirrors the `enum CellError : u32` block in
+//! `tools/rpcs3-src/rpcs3/Emu/Cell/ErrorCodes.h:104-166`. Symbol
+//! names, hex values, and descriptions are byte-identical to
+//! that header; the descriptions are the verbatim trailing
+//! comment from each enum line.
+//!
+//! `CELL_OK` lives in the header's `CellNotAnError : s32` enum,
+//! not `CellError`, so it is defined separately and excluded
+//! from [`ENTRIES`]. Subsystem-specific error spaces (GCM,
+//! audio, sceNp, etc.) live in their own RPCS3 headers and
+//! belong in their own modules when CellGov models those
+//! subsystems.
+
+/// A PS3 LV2 error code with its symbolic name and the header
+/// description.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lv2Error {
+    /// Numeric code as declared by `enum CellError : u32`.
+    pub code: u32,
+    /// Symbol name, e.g. `"CELL_EPERM"`. Stored as a string so
+    /// trace / divergence tooling can render a raw u32 as its
+    /// canonical name.
+    pub symbol: &'static str,
+    /// Verbatim trailing comment from the RPCS3 header.
+    pub description: &'static str,
+}
+
+/// Widen an `Lv2Error` to the `u64` shape the dispatch pipeline
+/// uses for syscall return codes. Call sites write
+/// `crate::errno::CELL_XXX.into()` instead of
+/// `crate::errno::CELL_XXX.code as u64`; `errno::` stays in the
+/// path so grep finds every errno-emitting site.
+impl From<Lv2Error> for u64 {
+    fn from(err: Lv2Error) -> u64 {
+        err.code as u64
+    }
+}
+
+/// `CELL_OK` sits in the header's `CellNotAnError : s32` enum
+/// alongside `CELL_CANCEL`; it is not a member of `CellError`
+/// and is intentionally excluded from [`ENTRIES`]. Kept here as
+/// a single `pub const` because dispatch sites that return
+/// success still want a name rather than a bare `0u64`.
+pub const CELL_OK: Lv2Error = Lv2Error {
+    code: 0,
+    symbol: "CELL_OK",
+    description: "", // CellNotAnError has no trailing comment in the header
+};
+
+// Every CellError entry below is sourced from
+// rpcs3/Emu/Cell/ErrorCodes.h:104-166. The macro binds
+// `symbol` to `stringify!($name)` so a copy-paste typo in the
+// symbol string is structurally impossible: the ident and the
+// string always agree.
+macro_rules! errno_table {
+    ( $( $name:ident = $code:literal , $desc:literal ; )* ) => {
+        $(
+            #[doc = $desc]
+            pub const $name: Lv2Error = Lv2Error {
+                code: $code,
+                symbol: stringify!($name),
+                description: $desc,
+            };
+        )*
+
+        /// Every entry in `enum CellError : u32`. Order matches
+        /// the header (ascending by code).
+        pub const ENTRIES: &[&Lv2Error] = &[
+            $( & $name , )*
+        ];
+    };
+}
+
+errno_table! {
+    CELL_EAGAIN       = 0x8001_0001, "The resource is temporarily unavailable";
+    CELL_EINVAL       = 0x8001_0002, "An invalid argument value is specified";
+    CELL_ENOSYS       = 0x8001_0003, "The feature is not yet implemented";
+    CELL_ENOMEM       = 0x8001_0004, "Memory allocation failure";
+    CELL_ESRCH        = 0x8001_0005, "The resource with the specified identifier does not exist";
+    CELL_ENOENT       = 0x8001_0006, "The file does not exist";
+    CELL_ENOEXEC      = 0x8001_0007, "The file is in unrecognized format";
+    CELL_EDEADLK      = 0x8001_0008, "Resource deadlock is avoided";
+    CELL_EPERM        = 0x8001_0009, "The operation is not permitted";
+    CELL_EBUSY        = 0x8001_000A, "The device or resource is busy";
+    CELL_ETIMEDOUT    = 0x8001_000B, "The operation is timed out";
+    CELL_EABORT       = 0x8001_000C, "The operation is aborted";
+    CELL_EFAULT       = 0x8001_000D, "Invalid memory access";
+    CELL_ENOCHILD     = 0x8001_000E, "Process has no child(s)";
+    CELL_ESTAT        = 0x8001_000F, "State of the target thread is invalid";
+    CELL_EALIGN       = 0x8001_0010, "Alignment is invalid.";
+    CELL_EKRESOURCE   = 0x8001_0011, "Shortage of the kernel resources";
+    CELL_EISDIR       = 0x8001_0012, "The file is a directory";
+    CELL_ECANCELED    = 0x8001_0013, "Operation canceled";
+    CELL_EEXIST       = 0x8001_0014, "Entry already exists";
+    CELL_EISCONN      = 0x8001_0015, "Port is already connected";
+    CELL_ENOTCONN     = 0x8001_0016, "Port is not connected";
+    CELL_EAUTHFAIL    = 0x8001_0017, "Program authentication fail";
+    CELL_ENOTMSELF    = 0x8001_0018, "The file is not a MSELF";
+    CELL_ESYSVER      = 0x8001_0019, "System version error";
+    CELL_EAUTHFATAL   = 0x8001_001A, "Fatal system error";
+    CELL_EDOM         = 0x8001_001B, "Math domain violation";
+    CELL_ERANGE       = 0x8001_001C, "Math range violation";
+    CELL_EILSEQ       = 0x8001_001D, "Illegal multi-byte sequence in input";
+    CELL_EFPOS        = 0x8001_001E, "File position error";
+    CELL_EINTR        = 0x8001_001F, "Syscall was interrupted";
+    CELL_EFBIG        = 0x8001_0020, "File too large";
+    CELL_EMLINK       = 0x8001_0021, "Too many links";
+    CELL_ENFILE       = 0x8001_0022, "File table overflow";
+    CELL_ENOSPC       = 0x8001_0023, "No space left on device";
+    CELL_ENOTTY       = 0x8001_0024, "Not a TTY";
+    CELL_EPIPE        = 0x8001_0025, "Broken pipe";
+    CELL_EROFS        = 0x8001_0026, "Read-only filesystem (write fail)";
+    CELL_ESPIPE       = 0x8001_0027, "Illegal seek (e.g. seek on pipe)";
+    CELL_E2BIG        = 0x8001_0028, "Arg list too long";
+    CELL_EACCES       = 0x8001_0029, "Access violation";
+    CELL_EBADF        = 0x8001_002A, "Invalid file descriptor";
+    CELL_EIO          = 0x8001_002B, "Filesystem mounting failed (actually IO error...EIO)";
+    CELL_EMFILE       = 0x8001_002C, "Too many files open";
+    CELL_ENODEV       = 0x8001_002D, "No device";
+    CELL_ENOTDIR      = 0x8001_002E, "Not a directory";
+    CELL_ENXIO        = 0x8001_002F, "No such device or IO";
+    CELL_EXDEV        = 0x8001_0030, "Cross-device link error";
+    CELL_EBADMSG      = 0x8001_0031, "Bad Message";
+    CELL_EINPROGRESS  = 0x8001_0032, "In progress";
+    CELL_EMSGSIZE     = 0x8001_0033, "Message size error";
+    CELL_ENAMETOOLONG = 0x8001_0034, "Name too long";
+    CELL_ENOLCK       = 0x8001_0035, "No lock";
+    CELL_ENOTEMPTY    = 0x8001_0036, "Not empty";
+    CELL_ENOTSUP      = 0x8001_0037, "Not supported";
+    CELL_EFSSPECIFIC  = 0x8001_0038, "File-system specific error";
+    CELL_EOVERFLOW    = 0x8001_0039, "Overflow occured";
+    CELL_ENOTMOUNTED  = 0x8001_003A, "Filesystem not mounted";
+    CELL_ENOTSDATA    = 0x8001_003B, "Not SData";
+    CELL_ESDKVER      = 0x8001_003C, "Incorrect version in sys_load_param";
+    CELL_ENOLICDISC   = 0x8001_003D, "Pointer is null. Similar than 0x8001003E but with some PARAM.SFO parameter (TITLE_ID?) embedded.";
+    CELL_ENOLICENT    = 0x8001_003E, "Pointer is null";
+}
+
+/// Look up an error entry by code. Returns `None` for any code
+/// outside the `enum CellError : u32` block (including
+/// `CELL_OK`, which belongs to `CellNotAnError`).
+///
+/// Linear scan over [`ENTRIES`]. The slice has ~60 entries and
+/// this is called only from diagnostic paths, so the O(n) cost
+/// is acceptable and avoids any BTreeMap init cost.
+pub fn lookup(code: u32) -> Option<&'static Lv2Error> {
+    ENTRIES.iter().copied().find(|e| e.code == code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn every_code_is_unique() {
+        let mut seen = BTreeSet::new();
+        for entry in ENTRIES {
+            assert!(
+                seen.insert(entry.code),
+                "duplicate errno code 0x{:08x} ({})",
+                entry.code,
+                entry.symbol,
+            );
+        }
+    }
+
+    #[test]
+    fn every_symbol_has_cell_e_prefix() {
+        // The `errno_table!` macro binds symbol to
+        // `stringify!($name)`, so the invariant holds
+        // structurally. This test is a canary against anyone
+        // replacing the macro call with hand-written entries
+        // whose symbol string drifts from the const name.
+        for entry in ENTRIES {
+            assert!(
+                entry.symbol.starts_with("CELL_E"),
+                "symbol {:?} (code 0x{:08x}) does not start \
+                 with CELL_E",
+                entry.symbol,
+                entry.code,
+            );
+        }
+    }
+
+    #[test]
+    fn lookup_hits_and_misses() {
+        assert_eq!(lookup(0x8001_0009), Some(&CELL_EPERM));
+        assert!(lookup(0xDEAD_BEEF).is_none());
+        assert!(lookup(0).is_none()); // CELL_OK is not in ENTRIES
+    }
+}

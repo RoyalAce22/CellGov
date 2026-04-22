@@ -1,21 +1,9 @@
-//! Lightweight mutex table.
+//! Lightweight mutex table. Owns state for `sys_lwmutex_create`
+//! / `_destroy` / `_lock` / `_unlock` / `_trylock`. Ids are
+//! minted monotonically by [`LwMutexIdAllocator`].
 //!
-//! Owns the state for `sys_lwmutex_create` / `_destroy` / `_lock` /
-//! `_unlock` / `_trylock`. Each entry is keyed by a guest-visible
-//! `u32` id, allocated monotonically by `LwMutexIdAllocator`.
-//!
-//! Lock semantics are classical mutual exclusion: the table tracks
-//! the current owner (if any) and a FIFO waiter list. `try_acquire`
-//! succeeds exactly when the mutex is unowned and sets the owner;
-//! otherwise the caller is expected to enqueue on the waiter list
-//! via `enqueue_waiter` and park. `release_and_wake_next` validates
-//! that the releaser is the current owner, pops the head of the
-//! waiter list (if any), and transfers ownership in the same call.
-//!
-//! The table is pure data: no runtime integration, no dispatch
-//! wiring. Higher-level handlers in `cellgov_lv2::host` (and the
-//! runtime's syscall-response plumbing) compose these primitives
-//! into the actual `sys_lwmutex_*` behavior.
+//! Distinct id space from the heavy mutex table; the cond-wake
+//! re-acquire path distinguishes them via `CondMutexKind`.
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
@@ -24,39 +12,64 @@ use std::collections::BTreeMap;
 /// Outcome of a `try_acquire` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LwMutexAcquire {
-    /// The caller became the owner. The caller's syscall returns
-    /// `CELL_OK` and does not park.
+    /// Caller is now the owner.
     Acquired,
-    /// The mutex is owned by another thread. The caller should
-    /// either park (for `_lock`) or return EBUSY (for `_trylock`).
+    /// Mutex is owned (by any thread; non-recursive).
     Contended,
+}
+
+/// Outcome of an `acquire_or_enqueue` call. Used by
+/// `sys_lwmutex_lock`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LwMutexAcquireOrEnqueue {
+    /// Caller is now the owner.
+    Acquired,
+    /// Caller has been appended to the waiter list.
+    Enqueued,
+    /// Caller already holds the mutex or is already on its
+    /// waiter list. Non-recursive; dispatch maps to
+    /// `CELL_EDEADLK`.
+    WouldDeadlock,
+    /// Unknown id.
+    Unknown,
 }
 
 /// Outcome of a `release_and_wake_next` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LwMutexRelease {
-    /// The mutex is now unowned. No waiter was woken.
+    /// Mutex is now unowned; no waiter was woken.
     Freed,
-    /// Ownership transferred to `new_owner`. The runtime should wake
-    /// that thread and deliver its pending `CELL_OK` response.
+    /// Ownership transferred to `new_owner`; caller must wake it.
     Transferred {
         /// Thread that just became the owner.
         new_owner: PpuThreadId,
     },
-    /// The caller did not own the mutex. The release is rejected
-    /// and the table is unchanged. The syscall returns `EPERM`.
+    /// Caller did not own the mutex; release rejected.
     NotOwner,
-    /// The mutex id is unknown (either never created or already
-    /// destroyed). Syscall returns `ESRCH`.
+    /// Unknown id.
     Unknown,
+}
+
+/// Failure modes of [`LwMutexTable::enqueue_waiter`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LwMutexEnqueueError {
+    /// No lwmutex with this id.
+    UnknownId,
+    /// Thread is already on the waiter list. Reaching this is a
+    /// dispatch-layer bug; `enqueue_waiter` fires a
+    /// `debug_assert!` before returning it.
+    DuplicateWaiter,
+    /// Thread currently owns this mutex. Parking the owner
+    /// would strand it; dispatch must surface recursive locks
+    /// through [`LwMutexAcquireOrEnqueue::WouldDeadlock`] before
+    /// calling `enqueue_waiter`. `debug_assert!` fires.
+    WaiterIsOwner,
 }
 
 /// A single lightweight mutex.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LwMutexEntry {
-    /// Current owner, if any.
     owner: Option<PpuThreadId>,
-    /// FIFO list of threads parked on this mutex.
     waiters: WaiterList,
 }
 
@@ -68,7 +81,7 @@ impl LwMutexEntry {
         }
     }
 
-    /// Current owner (if any). `None` means the mutex is free.
+    /// Current owner, or `None` if free.
     pub fn owner(&self) -> Option<PpuThreadId> {
         self.owner
     }
@@ -79,9 +92,15 @@ impl LwMutexEntry {
     }
 }
 
-/// Monotonic allocator for lwmutex ids. Starts at 1; `u32::MAX` is
-/// reserved to signal exhaustion. Two tables constructed identically
-/// allocate identical id sequences.
+/// Monotonic allocator for lwmutex ids.
+///
+/// Starts at `1` (id `0` reserved for null-handle conventions);
+/// the last id handed out is `u32::MAX - 1`, after which
+/// [`Self::allocate`] returns `None` forever. Ids are never
+/// recycled: [`LwMutexTable::destroy`] does not return ids
+/// here. Monotonicity is what makes id sequences replay-stable;
+/// the tradeoff is that a long-lived guest creating and
+/// destroying mutexes can eventually exhaust the 32-bit space.
 #[derive(Debug, Clone)]
 pub struct LwMutexIdAllocator {
     next: u32,
@@ -108,6 +127,14 @@ impl LwMutexIdAllocator {
         self.next += 1;
         Some(id)
     }
+
+    /// Fold the allocator's state into `hasher`. Centralised so
+    /// future allocator fields (e.g. a free list) are picked up
+    /// by [`LwMutexTable::state_hash`] without touching its
+    /// call site.
+    pub(crate) fn hash_into(&self, hasher: &mut cellgov_mem::Fnv1aHasher) {
+        hasher.write(&self.next.to_le_bytes());
+    }
 }
 
 /// Table of lightweight mutexes.
@@ -123,21 +150,34 @@ impl LwMutexTable {
         Self::default()
     }
 
-    /// Allocate a fresh id, create the entry, and return the id.
-    /// Returns `None` if the id space is exhausted.
+    /// Allocate a fresh id and create the entry. `None` if the
+    /// id space is exhausted.
     pub fn create(&mut self) -> Option<u32> {
         let id = self.ids.allocate()?;
         self.entries.insert(id, LwMutexEntry::new());
         Some(id)
     }
 
-    /// Destroy a lwmutex. Returns the removed entry (for diagnostic
-    /// inspection in tests) or `None` if the id was unknown. A
-    /// destroy while waiters are parked is a guest programming
-    /// error; this method does not enforce that -- the handler above
-    /// validates and rejects if non-empty.
+    /// Destroy a lwmutex and return the removed entry, or `None`
+    /// if the id was unknown.
+    ///
+    /// Caller contract: reject non-empty-waiters before calling.
+    /// A `debug_assert!` fires on violation. If bypassed in
+    /// release, the returned entry still carries its waiter
+    /// list and callers **must** drain `entry.waiters()` and
+    /// wake each parked thread; skipping this strands them
+    /// forever.
+    ///
+    /// Ids are not recycled; see [`LwMutexIdAllocator`].
     pub fn destroy(&mut self, id: u32) -> Option<LwMutexEntry> {
-        self.entries.remove(&id)
+        let entry = self.entries.remove(&id)?;
+        debug_assert!(
+            entry.waiters.is_empty(),
+            "lwmutex {:#x} destroyed with {} parked waiter(s)",
+            id,
+            entry.waiters.len(),
+        );
+        Some(entry)
     }
 
     /// Read-only lookup.
@@ -155,14 +195,13 @@ impl LwMutexTable {
         self.entries.is_empty()
     }
 
-    /// Attempt to acquire `id` on behalf of `caller`.
+    /// Check-and-set without enqueueing. Used by
+    /// `sys_lwmutex_trylock`.
     ///
-    /// Returns `None` if `id` is unknown. Otherwise returns
-    /// `Some(Acquired)` when the mutex was unowned (and sets the
-    /// owner to `caller`), or `Some(Contended)` when it is owned by
-    /// some other thread. Re-acquiring an already-held mutex by the
-    /// same caller is rejected with `Contended` -- lwmutex is not
-    /// recursive.
+    /// Non-recursive; owner re-acquiring sees `Contended`, not
+    /// `WouldDeadlock`. Blocking paths use
+    /// [`Self::acquire_or_enqueue`] to distinguish deadlock from
+    /// contention.
     pub fn try_acquire(&mut self, id: u32, caller: PpuThreadId) -> Option<LwMutexAcquire> {
         let entry = self.entries.get_mut(&id)?;
         if entry.owner.is_none() {
@@ -173,21 +212,68 @@ impl LwMutexTable {
         }
     }
 
-    /// Enqueue `waiter` on the waiter list for `id`. Returns `true`
-    /// on success, `false` if `id` is unknown or `waiter` is already
-    /// parked on this mutex.
-    pub fn enqueue_waiter(&mut self, id: u32, waiter: PpuThreadId) -> bool {
+    /// Atomic acquire-or-park. Used by `sys_lwmutex_lock`.
+    ///
+    /// Cost: O(n) scan over the waiter list on the
+    /// already-parked check. Waiter lists are short in practice;
+    /// a pathological guest piling many contenders onto one
+    /// mutex could see quadratic lock-path behavior.
+    pub fn acquire_or_enqueue(&mut self, id: u32, caller: PpuThreadId) -> LwMutexAcquireOrEnqueue {
         let Some(entry) = self.entries.get_mut(&id) else {
-            return false;
+            return LwMutexAcquireOrEnqueue::Unknown;
         };
-        entry.waiters.enqueue(waiter)
+        match entry.owner {
+            None => {
+                entry.owner = Some(caller);
+                LwMutexAcquireOrEnqueue::Acquired
+            }
+            Some(owner) if owner == caller => LwMutexAcquireOrEnqueue::WouldDeadlock,
+            Some(_) => {
+                if entry.waiters.contains(caller) {
+                    return LwMutexAcquireOrEnqueue::WouldDeadlock;
+                }
+                // Contains check above rules out duplicate.
+                if entry.waiters.enqueue(caller).is_err() {
+                    debug_assert!(
+                        false,
+                        "contains guard broken for lwmutex {id:#x} caller {caller:?}"
+                    );
+                }
+                LwMutexAcquireOrEnqueue::Enqueued
+            }
+        }
     }
 
-    /// Release `id` on behalf of `caller`. If a waiter is parked,
-    /// transfer ownership to the head of the queue and return
-    /// `Transferred { new_owner }`. Otherwise clear ownership and
-    /// return `Freed`. Returns `NotOwner` if `caller` does not own
-    /// the mutex, `Unknown` if `id` is not in the table.
+    /// Low-level enqueue. See [`LwMutexEnqueueError`].
+    ///
+    /// Prefer [`Self::acquire_or_enqueue`] for blocking lock
+    /// paths. Both failure variants fire a `debug_assert!`
+    /// because they indicate dispatch-layer bugs.
+    pub fn enqueue_waiter(
+        &mut self,
+        id: u32,
+        waiter: PpuThreadId,
+    ) -> Result<(), LwMutexEnqueueError> {
+        let entry = self
+            .entries
+            .get_mut(&id)
+            .ok_or(LwMutexEnqueueError::UnknownId)?;
+        if entry.owner == Some(waiter) {
+            debug_assert!(false, "thread {:?} already owns lwmutex {:#x}", waiter, id,);
+            return Err(LwMutexEnqueueError::WaiterIsOwner);
+        }
+        if entry.waiters.enqueue(waiter).is_err() {
+            debug_assert!(
+                false,
+                "duplicate enqueue of {:?} on lwmutex {:#x}",
+                waiter, id,
+            );
+            return Err(LwMutexEnqueueError::DuplicateWaiter);
+        }
+        Ok(())
+    }
+
+    /// Release on behalf of `caller`. See [`LwMutexRelease`].
     pub fn release_and_wake_next(&mut self, id: u32, caller: PpuThreadId) -> LwMutexRelease {
         let Some(entry) = self.entries.get_mut(&id) else {
             return LwMutexRelease::Unknown;
@@ -207,13 +293,13 @@ impl LwMutexTable {
         }
     }
 
-    /// FNV-1a digest of the table for state-hash folding. Walks
-    /// entries in BTreeMap (ascending id) order; within each entry
-    /// folds owner presence, owner id, and the waiter list in
-    /// enqueue order. Tables differing in any of those produce
-    /// distinct hashes.
+    /// FNV-1a digest for state-hash folding. Walks entries in
+    /// ascending-id order; folds owner, waiter FIFO, and the
+    /// id-allocator state so replay equivalence covers future
+    /// `create` calls.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
+        self.ids.hash_into(&mut hasher);
         hasher.write(&(self.entries.len() as u64).to_le_bytes());
         for (id, entry) in &self.entries {
             hasher.write(&id.to_le_bytes());
@@ -261,7 +347,13 @@ mod tests {
     fn id_allocator_exhaustion() {
         let mut a = LwMutexIdAllocator { next: u32::MAX };
         assert_eq!(a.allocate(), None);
-        // Stays exhausted.
+        assert_eq!(a.allocate(), None);
+    }
+
+    #[test]
+    fn id_allocator_last_handed_out_is_u32_max_minus_one() {
+        let mut a = LwMutexIdAllocator { next: u32::MAX - 1 };
+        assert_eq!(a.allocate(), Some(u32::MAX - 1));
         assert_eq!(a.allocate(), None);
     }
 
@@ -276,12 +368,13 @@ mod tests {
     }
 
     #[test]
-    fn destroy_removes_entry() {
+    fn destroy_removes_entry_and_does_not_recycle_id() {
         let mut t = LwMutexTable::new();
-        let id = t.create().unwrap();
-        assert!(t.destroy(id).is_some());
-        assert!(t.lookup(id).is_none());
-        assert!(t.destroy(id).is_none());
+        let id1 = t.create().unwrap();
+        assert!(t.destroy(id1).is_some());
+        assert!(t.lookup(id1).is_none());
+        let id2 = t.create().unwrap();
+        assert!(id2 > id1);
     }
 
     #[test]
@@ -306,8 +399,6 @@ mod tests {
 
     #[test]
     fn try_acquire_same_thread_twice_is_contended() {
-        // Lwmutex is not recursive. Re-acquiring by the owner gets
-        // Contended, matching the ABI.
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
         let a = tid(0x0100_0001);
@@ -322,14 +413,82 @@ mod tests {
     }
 
     #[test]
+    fn acquire_or_enqueue_unowned_sets_owner() {
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let a = tid(0x0100_0001);
+        assert_eq!(
+            t.acquire_or_enqueue(id, a),
+            LwMutexAcquireOrEnqueue::Acquired,
+        );
+        assert_eq!(t.lookup(id).unwrap().owner(), Some(a));
+    }
+
+    #[test]
+    fn acquire_or_enqueue_enqueues_contender() {
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let owner = tid(0x0100_0001);
+        let contender = tid(0x0100_0002);
+        t.acquire_or_enqueue(id, owner);
+        assert_eq!(
+            t.acquire_or_enqueue(id, contender),
+            LwMutexAcquireOrEnqueue::Enqueued,
+        );
+        let parked: Vec<_> = t.lookup(id).unwrap().waiters().iter().collect();
+        assert_eq!(parked, vec![contender]);
+    }
+
+    #[test]
+    fn acquire_or_enqueue_owner_retrying_is_would_deadlock() {
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let a = tid(0x0100_0001);
+        t.acquire_or_enqueue(id, a);
+        assert_eq!(
+            t.acquire_or_enqueue(id, a),
+            LwMutexAcquireOrEnqueue::WouldDeadlock,
+        );
+        assert_eq!(t.lookup(id).unwrap().owner(), Some(a));
+        assert!(t.lookup(id).unwrap().waiters().is_empty());
+    }
+
+    #[test]
+    fn acquire_or_enqueue_already_parked_is_would_deadlock() {
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let owner = tid(0x0100_0001);
+        let waiter = tid(0x0100_0002);
+        t.acquire_or_enqueue(id, owner);
+        assert_eq!(
+            t.acquire_or_enqueue(id, waiter),
+            LwMutexAcquireOrEnqueue::Enqueued,
+        );
+        assert_eq!(
+            t.acquire_or_enqueue(id, waiter),
+            LwMutexAcquireOrEnqueue::WouldDeadlock,
+        );
+        assert_eq!(t.lookup(id).unwrap().waiters().len(), 1);
+    }
+
+    #[test]
+    fn acquire_or_enqueue_unknown_id_is_unknown() {
+        let mut t = LwMutexTable::new();
+        assert_eq!(
+            t.acquire_or_enqueue(99, tid(0x0100_0001)),
+            LwMutexAcquireOrEnqueue::Unknown,
+        );
+    }
+
+    #[test]
     fn enqueue_waiter_preserves_fifo_order() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
         let owner = tid(0x0100_0001);
         t.try_acquire(id, owner);
-        assert!(t.enqueue_waiter(id, tid(0x0100_0002)));
-        assert!(t.enqueue_waiter(id, tid(0x0100_0003)));
-        assert!(t.enqueue_waiter(id, tid(0x0100_0004)));
+        t.enqueue_waiter(id, tid(0x0100_0002)).unwrap();
+        t.enqueue_waiter(id, tid(0x0100_0003)).unwrap();
+        t.enqueue_waiter(id, tid(0x0100_0004)).unwrap();
         let seen: Vec<_> = t.lookup(id).unwrap().waiters().iter().collect();
         assert_eq!(
             seen,
@@ -338,9 +497,12 @@ mod tests {
     }
 
     #[test]
-    fn enqueue_waiter_unknown_id_returns_false() {
+    fn enqueue_waiter_unknown_id_returns_err() {
         let mut t = LwMutexTable::new();
-        assert!(!t.enqueue_waiter(99, tid(0x0100_0001)));
+        assert_eq!(
+            t.enqueue_waiter(99, tid(0x0100_0001)),
+            Err(LwMutexEnqueueError::UnknownId),
+        );
     }
 
     #[test]
@@ -361,14 +523,13 @@ mod tests {
         let w1 = tid(0x0100_0002);
         let w2 = tid(0x0100_0003);
         t.try_acquire(id, owner);
-        t.enqueue_waiter(id, w1);
-        t.enqueue_waiter(id, w2);
+        t.enqueue_waiter(id, w1).unwrap();
+        t.enqueue_waiter(id, w2).unwrap();
         assert_eq!(
             t.release_and_wake_next(id, owner),
             LwMutexRelease::Transferred { new_owner: w1 },
         );
         assert_eq!(t.lookup(id).unwrap().owner(), Some(w1));
-        // w2 is still parked.
         let remaining: Vec<_> = t.lookup(id).unwrap().waiters().iter().collect();
         assert_eq!(remaining, vec![w2]);
     }
@@ -381,7 +542,6 @@ mod tests {
         let b = tid(0x0100_0002);
         t.try_acquire(id, a);
         assert_eq!(t.release_and_wake_next(id, b), LwMutexRelease::NotOwner);
-        // Owner unchanged.
         assert_eq!(t.lookup(id).unwrap().owner(), Some(a));
     }
 
@@ -423,27 +583,106 @@ mod tests {
         let owner = tid(0x0100_0001);
         a.try_acquire(id_a, owner);
         b.try_acquire(id_b, owner);
-        a.enqueue_waiter(id_a, tid(0x0100_0002));
-        a.enqueue_waiter(id_a, tid(0x0100_0003));
-        b.enqueue_waiter(id_b, tid(0x0100_0003));
-        b.enqueue_waiter(id_b, tid(0x0100_0002));
-        // Same set of waiters, different FIFO order -- must hash
-        // distinctly per the determinism contract.
+        a.enqueue_waiter(id_a, tid(0x0100_0002)).unwrap();
+        a.enqueue_waiter(id_a, tid(0x0100_0003)).unwrap();
+        b.enqueue_waiter(id_b, tid(0x0100_0003)).unwrap();
+        b.enqueue_waiter(id_b, tid(0x0100_0002)).unwrap();
         assert_ne!(a.state_hash(), b.state_hash());
     }
 
     #[test]
-    fn destroy_with_waiters_returns_entry_unchanged() {
-        // The handler above validates "cannot destroy with waiters";
-        // the table itself is permissive. This test documents that
-        // the table does not silently discard or rearrange waiters
-        // on destroy.
+    fn state_hash_distinguishes_allocator_cursor() {
+        let mut a = LwMutexTable::new();
+        let mut b = LwMutexTable::new();
+        a.create().unwrap();
+        let a_temp = a.create().unwrap();
+        a.destroy(a_temp);
+        b.create().unwrap();
+        assert_eq!(a.len(), b.len());
+        assert_ne!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "duplicate enqueue")]
+    fn duplicate_enqueue_panics_in_debug() {
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let owner = tid(0x0100_0001);
+        let waiter = tid(0x0100_0002);
+        t.try_acquire(id, owner);
+        t.enqueue_waiter(id, waiter).unwrap();
+        let _ = t.enqueue_waiter(id, waiter);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "already owns")]
+    fn enqueue_waiter_on_owner_panics_in_debug() {
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let owner = tid(0x0100_0001);
+        t.try_acquire(id, owner);
+        let _ = t.enqueue_waiter(id, owner);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "destroyed with")]
+    fn destroy_with_parked_waiters_panics_in_debug() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
         t.try_acquire(id, tid(0x0100_0001));
-        t.enqueue_waiter(id, tid(0x0100_0002));
+        t.enqueue_waiter(id, tid(0x0100_0002)).unwrap();
+        let _ = t.destroy(id);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn duplicate_enqueue_returns_err_in_release() {
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let owner = tid(0x0100_0001);
+        let waiter = tid(0x0100_0002);
+        t.try_acquire(id, owner);
+        t.enqueue_waiter(id, waiter).unwrap();
+        assert_eq!(
+            t.enqueue_waiter(id, waiter),
+            Err(LwMutexEnqueueError::DuplicateWaiter),
+        );
+        assert_eq!(t.lookup(id).unwrap().waiters().len(), 1);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn destroy_with_parked_waiters_returns_entry_unchanged_in_release() {
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let owner = tid(0x0100_0001);
+        let waiter1 = tid(0x0100_0002);
+        let waiter2 = tid(0x0100_0003);
+        t.try_acquire(id, owner);
+        t.enqueue_waiter(id, waiter1).unwrap();
+        t.enqueue_waiter(id, waiter2).unwrap();
         let removed = t.destroy(id).unwrap();
-        assert_eq!(removed.owner(), Some(tid(0x0100_0001)));
-        assert_eq!(removed.waiters().len(), 1);
+        assert_eq!(removed.owner(), Some(owner));
+        let parked: Vec<_> = removed.waiters().iter().collect();
+        assert_eq!(parked, vec![waiter1, waiter2]);
+        assert!(t.lookup(id).is_none());
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn enqueue_waiter_on_owner_returns_err_in_release() {
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let owner = tid(0x0100_0001);
+        t.try_acquire(id, owner);
+        assert_eq!(
+            t.enqueue_waiter(id, owner),
+            Err(LwMutexEnqueueError::WaiterIsOwner),
+        );
+        assert_eq!(t.lookup(id).unwrap().owner(), Some(owner));
+        assert!(t.lookup(id).unwrap().waiters().is_empty());
     }
 }

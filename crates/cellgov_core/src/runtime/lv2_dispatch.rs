@@ -17,6 +17,8 @@
 //! lives in `ppu_create.rs` because that one variant is 100 lines
 //! by itself.
 
+use std::collections::BTreeMap;
+
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus};
@@ -85,9 +87,14 @@ impl Runtime {
         source: UnitId,
     ) {
         let is_process_exit = matches!(request, cellgov_lv2::Lv2Request::ProcessExit { .. });
-        let dispatch = self
-            .lv2_host
-            .dispatch(request, source, &MemoryView(&self.memory));
+        let dispatch = self.lv2_host.dispatch(
+            request,
+            source,
+            &MemoryView {
+                memory: &self.memory,
+                current_tick: self.time,
+            },
+        );
         match dispatch {
             Lv2Dispatch::Immediate { code, effects } => {
                 self.handle_immediate(source, code, effects, is_process_exit);
@@ -164,7 +171,24 @@ impl Runtime {
             for uid in &all_ids {
                 self.registry
                     .set_status_override(*uid, UnitStatus::Finished);
-                self.lv2_host.notify_spu_finished(*uid);
+                // Process exit iterates every unit (PPU and SPU).
+                // UnknownUnit (non-SPU) and AlreadyFinished (SPU
+                // that already self-finished) are both expected;
+                // other Err variants are dispatch-layer bugs.
+                match self.lv2_host.notify_spu_finished(*uid) {
+                    Ok(_)
+                    | Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit)
+                    | Err(cellgov_lv2::thread_group::NotifySpuFinishedError::AlreadyFinished {
+                        ..
+                    }) => {}
+                    Err(err) => {
+                        eprintln!(
+                            "lv2 host invariant break at process_exit.notify_spu_finished: \
+                             unit {:?}: {err:?}",
+                            uid,
+                        );
+                    }
+                }
                 // Every registered unit may or may not have a pending
                 // response; legitimate None case on process exit. The
                 // returned Option is intentionally discarded.
@@ -178,22 +202,27 @@ impl Runtime {
     /// Register each SPU init state as a new unit via the installed
     /// `SpuFactory`, record it in `Lv2Host`, allocate a matching
     /// mailbox slot, and return `code` to the caller.
+    ///
+    /// BTreeMap iteration yields slots in ascending order, so
+    /// registration order is byte-stable across runs.
     fn handle_register_spu(
         &mut self,
         source: UnitId,
-        inits: Vec<SpuInitState>,
+        inits: BTreeMap<u32, SpuInitState>,
         effects: Vec<Effect>,
         code: u64,
     ) {
         self.apply_lv2_effects(&effects);
         if let Some(factory) = &self.spu_factory {
-            for init in inits {
+            for (slot, init) in inits {
                 let gid = init.group_id;
-                let slot = init.slot;
                 let uid = self
                     .registry
                     .register_dynamic(&|id| factory(id, init.clone()));
-                self.lv2_host.record_spu(uid, gid, slot);
+                self.lv2_host.record_spu(uid, gid, slot).expect(
+                    "record_spu rejected a freshly allocated unit: dispatch-layer \
+                     corruption in the RegisterSpu path",
+                );
                 self.mailbox_registry
                     .register_at(cellgov_sync::MailboxId::new(uid.raw()));
             }
@@ -255,9 +284,13 @@ impl Runtime {
     /// wake list (each wake target pulls its pending response and
     /// transitions Blocked -> Runnable).
     ///
-    /// No merge rule: each override is a complete replacement. If a
-    /// legitimate `out_ptr == 0` or `result_ptr == 0` arrives from
-    /// the guest it is delivered verbatim.
+    /// Each override replaces the existing pending entry rather
+    /// than merging. The debug-only
+    /// [`Self::assert_response_updates_valid`] check enforces two
+    /// invariants at apply time: every updated unit appears in
+    /// `woken_unit_ids`, and each update's variant matches the
+    /// existing entry's variant (see
+    /// [`cellgov_lv2::PendingResponse::variant_tag`]).
     fn handle_wake_and_return(
         &mut self,
         source: UnitId,
@@ -268,13 +301,17 @@ impl Runtime {
     ) {
         self.apply_lv2_effects(&effects);
         self.registry.set_syscall_return(source, code);
+        self.assert_response_updates_valid(
+            "handle_wake_and_return",
+            &woken_unit_ids,
+            &response_updates,
+        );
         for (waiter, response) in response_updates {
-            let displaced = self.syscall_responses.insert(waiter, response);
-            debug_assert!(
-                displaced.is_none(),
-                "handle_wake_and_return: waiter {waiter:?} already had a pending response: \
-                 {displaced:?}"
-            );
+            // Displacement is the expected path for partial-fill
+            // updates (e.g. EventQueueReceive None -> Some); the
+            // variant-tag check above already confirmed the update
+            // matches an existing entry, so no r3 is lost here.
+            let _ = self.syscall_responses.insert(waiter, response);
         }
         self.resolve_sync_wakes(&woken_unit_ids);
     }
@@ -292,13 +329,15 @@ impl Runtime {
         effects: Vec<Effect>,
     ) {
         self.apply_lv2_effects(&effects);
+        self.assert_response_updates_valid(
+            "handle_block_and_wake",
+            &woken_unit_ids,
+            &response_updates,
+        );
         for (waiter, response) in response_updates {
-            let displaced = self.syscall_responses.insert(waiter, response);
-            debug_assert!(
-                displaced.is_none(),
-                "handle_block_and_wake: waiter {waiter:?} already had a pending response: \
-                 {displaced:?}"
-            );
+            // See `handle_wake_and_return`: displacement is a
+            // legitimate partial-fill update path.
+            let _ = self.syscall_responses.insert(waiter, response);
         }
         self.resolve_sync_wakes(&woken_unit_ids);
         let displaced = self.syscall_responses.insert(source, pending);
@@ -309,5 +348,120 @@ impl Runtime {
         );
         self.registry
             .set_status_override(source, UnitStatus::Blocked);
+    }
+
+    /// Debug-only guard for `response_updates`: every updated unit
+    /// must be in the wake set, and each update's variant must
+    /// match the existing pending entry's variant. Silent
+    /// violations would otherwise mutate unrelated future waits or
+    /// wake a unit with a wrong-shaped response.
+    fn assert_response_updates_valid(
+        &self,
+        site: &'static str,
+        woken_unit_ids: &[UnitId],
+        response_updates: &[(UnitId, PendingResponse)],
+    ) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        check_response_updates(
+            site,
+            &self.syscall_responses,
+            woken_unit_ids,
+            response_updates,
+        );
+    }
+}
+
+/// Free-function body of the debug-only response-updates guard
+/// used by [`Runtime::handle_wake_and_return`] /
+/// [`Runtime::handle_block_and_wake`]. Extracted so tests can
+/// trigger the invariants without standing up a full `Runtime`.
+pub(crate) fn check_response_updates(
+    site: &'static str,
+    table: &crate::syscall_table::SyscallResponseTable,
+    woken_unit_ids: &[UnitId],
+    response_updates: &[(UnitId, PendingResponse)],
+) {
+    for (waiter, update) in response_updates {
+        assert!(
+            woken_unit_ids.contains(waiter),
+            "{site}: response_updates entry for {waiter:?} is not in woken_unit_ids",
+        );
+        if let Some(existing) = table.peek(*waiter) {
+            assert_eq!(
+                existing.variant_tag(),
+                update.variant_tag(),
+                "{site}: response_updates variant mismatch for {waiter:?} \
+                 (existing tag {}, update tag {})",
+                existing.variant_tag(),
+                update.variant_tag(),
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syscall_table::SyscallResponseTable;
+    use cellgov_lv2::EventPayload;
+
+    #[test]
+    #[should_panic(expected = "is not in woken_unit_ids")]
+    fn check_response_updates_rejects_update_for_non_woken_unit() {
+        let table = SyscallResponseTable::new();
+        let waiter = UnitId::new(42);
+        let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0 })];
+        // woken_unit_ids does NOT include the waiter -- silent
+        // mutation of an unrelated future wait would otherwise
+        // follow. Guard must fire.
+        check_response_updates("test", &table, &[], &updates);
+    }
+
+    #[test]
+    #[should_panic(expected = "variant mismatch")]
+    fn check_response_updates_rejects_variant_mismatch() {
+        let mut table = SyscallResponseTable::new();
+        let waiter = UnitId::new(7);
+        // Waiter is parked on EventQueueReceive (tag 3).
+        let _ = table.insert(
+            waiter,
+            PendingResponse::EventQueueReceive {
+                out_ptr: 0x1000,
+                payload: None,
+            },
+        );
+        // Update tries to replace it with a ReturnCode (tag 0).
+        let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0 })];
+        check_response_updates("test", &table, &[waiter], &updates);
+    }
+
+    #[test]
+    fn check_response_updates_accepts_same_variant_fill() {
+        let mut table = SyscallResponseTable::new();
+        let waiter = UnitId::new(7);
+        let _ = table.insert(
+            waiter,
+            PendingResponse::EventQueueReceive {
+                out_ptr: 0x1000,
+                payload: None,
+            },
+        );
+        // Partial-fill update with the same variant and the same
+        // out_ptr is the intended wake-side contract.
+        let updates = vec![(
+            waiter,
+            PendingResponse::EventQueueReceive {
+                out_ptr: 0x1000,
+                payload: Some(EventPayload {
+                    source: 0x11,
+                    data1: 0x22,
+                    data2: 0x33,
+                    data3: 0x44,
+                }),
+            },
+        )];
+        check_response_updates("test", &table, &[waiter], &updates);
     }
 }

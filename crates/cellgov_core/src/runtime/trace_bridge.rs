@@ -21,6 +21,7 @@
 use cellgov_exec::YieldReason;
 use cellgov_lv2::Lv2Runtime;
 use cellgov_mem::GuestMemory;
+use cellgov_time::GuestTicks;
 use cellgov_trace::{TracedEffectKind, TracedYieldReason};
 
 /// Map an `Effect` onto its `TracedEffectKind` twin.
@@ -73,11 +74,18 @@ pub(super) fn traced_yield_reason(y: YieldReason) -> TracedYieldReason {
     }
 }
 
-pub(super) struct MemoryView<'a>(pub(super) &'a GuestMemory);
+/// Read-only view of committed guest memory plus the caller's
+/// current guest tick, handed to `Lv2Host::dispatch`. Constructed
+/// fresh for each dispatch call so the tick snapshot is tied to
+/// the syscall that triggered the dispatch.
+pub(super) struct MemoryView<'a> {
+    pub(super) memory: &'a GuestMemory,
+    pub(super) current_tick: GuestTicks,
+}
 
 impl Lv2Runtime for MemoryView<'_> {
     fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
-        let bytes = self.0.as_bytes();
+        let bytes = self.memory.as_bytes();
         let start = addr as usize;
         let end = start.checked_add(len)?;
         if end <= bytes.len() {
@@ -85,5 +93,9 @@ impl Lv2Runtime for MemoryView<'_> {
         } else {
             None
         }
+    }
+
+    fn current_tick(&self) -> GuestTicks {
+        self.current_tick
     }
 }

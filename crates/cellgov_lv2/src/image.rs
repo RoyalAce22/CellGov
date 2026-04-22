@@ -1,10 +1,4 @@
-//! SPU image registry -- path-keyed content store with deterministic
-//! handle allocation.
-//!
-//! The test harness pre-registers SPU ELF images by path. When the PPU
-//! calls `sys_spu_image_open`, the host looks up the path in this store
-//! and returns a `SpuImageHandle`. The handle is a monotonic u32 token
-//! with no pointer semantics.
+//! Path-keyed SPU image registry returning monotonic non-zero handles.
 
 use crate::dispatch::SpuImageHandle;
 use std::collections::BTreeMap;
@@ -12,20 +6,26 @@ use std::collections::BTreeMap;
 /// A registered SPU image.
 #[derive(Debug, Clone)]
 pub struct SpuImageRecord {
-    /// Handle allocated at registration time.
+    /// Allocated at registration time; non-zero.
     pub handle: SpuImageHandle,
-    /// Raw ELF bytes (the full SPU ELF, not just the loadable segments).
+    /// Full ELF bytes, not just loadable segments.
     pub elf_bytes: Vec<u8>,
 }
 
-/// Path-keyed content store for SPU images.
+/// Path-keyed store for registered SPU images.
 ///
-/// Maps path bytes (as they appear in guest memory, typically
-/// NUL-terminated ASCII) to `SpuImageRecord`. Handles are allocated
-/// by a monotonic counter starting at 1.
+/// # Invariants
+/// `by_path` and `by_handle` agree: every handle in either map
+/// resolves through both. A future edit that mutates one without
+/// the other silently turns [`Self::lookup_by_handle`] into
+/// `None` for live handles; the debug-asserts in `register`,
+/// `lookup_by_handle`, `len`, and `is_empty` catch that in debug
+/// builds.
 ///
-/// No host filesystem access. No path normalization beyond
-/// byte-equality lookup.
+/// No host filesystem access. Lookup is byte-exact: `/a.elf`,
+/// `/a.elf/`, and `//a.elf` are three distinct entries, so the
+/// guest-side path builder must produce the exact form used at
+/// registration.
 #[derive(Debug, Clone)]
 pub struct ContentStore {
     by_path: BTreeMap<Vec<u8>, SpuImageRecord>,
@@ -49,55 +49,112 @@ impl ContentStore {
         }
     }
 
-    /// Register an SPU image under `path`. Returns the allocated
-    /// handle. If the path is already registered, returns the
-    /// existing handle without modifying the record.
+    /// Register an SPU image under `path`. Idempotent when the
+    /// same bytes are re-registered; returns the existing handle.
+    ///
+    /// # Panics
+    /// - `path` is already registered with different `elf_bytes`.
+    ///   Callers needing to swap must remove and re-register.
+    /// - The monotonic handle counter wraps past `u32::MAX`.
     pub fn register(&mut self, path: &[u8], elf_bytes: Vec<u8>) -> SpuImageHandle {
+        debug_assert!(
+            path.starts_with(b"/"),
+            "ContentStore::register: path {:?} is not absolute",
+            String::from_utf8_lossy(path),
+        );
+        debug_assert!(
+            !path.windows(2).any(|w| w == b"//"),
+            "ContentStore::register: path {:?} contains '//'",
+            String::from_utf8_lossy(path),
+        );
         if let Some(existing) = self.by_path.get(path) {
+            assert_eq!(
+                existing.elf_bytes,
+                elf_bytes,
+                "ContentStore::register: path {:?} already registered with \
+                 {} bytes; cannot re-register with {} bytes",
+                String::from_utf8_lossy(path),
+                existing.elf_bytes.len(),
+                elf_bytes.len(),
+            );
             return existing.handle;
         }
-        let handle = SpuImageHandle::new(self.next_handle);
-        self.next_handle += 1;
+        let raw = self.next_handle;
+        // SAFETY of the expect: next_handle seeds at 1 and the
+        // checked_add below panics on wrap, so raw == 0 is only
+        // reachable via `seeded_at(0)`, which exists purely to
+        // test this panic site.
+        let handle =
+            SpuImageHandle::new(raw).expect("ContentStore::register: next_handle reached 0");
+        self.next_handle = raw
+            .checked_add(1)
+            .expect("ContentStore handle counter exhausted (u32::MAX images)");
         let record = SpuImageRecord { handle, elf_bytes };
-        self.by_path.insert(path.to_vec(), record);
-        self.by_handle.insert(handle, path.to_vec());
+        let prev_path = self.by_path.insert(path.to_vec(), record);
+        debug_assert!(
+            prev_path.is_none(),
+            "by_path had an entry for a path the duplicate-check missed",
+        );
+        let prev_handle = self.by_handle.insert(handle, path.to_vec());
+        debug_assert!(
+            prev_handle.is_none(),
+            "by_handle collision on freshly-allocated handle",
+        );
         handle
     }
 
-    /// Look up an image by path. Returns `None` if the path is not
-    /// registered.
+    /// Look up an image by path.
     pub fn lookup_by_path(&self, path: &[u8]) -> Option<&SpuImageRecord> {
         self.by_path.get(path)
     }
 
-    /// Look up an image by handle. Returns `None` if the handle is
-    /// not registered.
+    /// Look up an image by handle.
     pub fn lookup_by_handle(&self, handle: SpuImageHandle) -> Option<&SpuImageRecord> {
         let path = self.by_handle.get(&handle)?;
-        self.by_path.get(path)
+        let record = self.by_path.get(path);
+        debug_assert!(
+            record.is_some(),
+            "desync: by_handle has {handle:?} but by_path does not",
+        );
+        record
     }
 
     /// Number of registered images.
     pub fn len(&self) -> usize {
+        debug_assert_eq!(self.by_path.len(), self.by_handle.len());
         self.by_path.len()
     }
 
     /// Whether the store is empty.
     pub fn is_empty(&self) -> bool {
+        debug_assert_eq!(self.by_path.is_empty(), self.by_handle.is_empty());
         self.by_path.is_empty()
     }
 
-    /// FNV-1a hash of the store contents for determinism checking.
-    ///
-    /// Covers every `(path, handle)` pair in path order. An empty
-    /// store returns the FNV offset basis.
+    /// FNV-1a over `(path, handle, elf_bytes)` in path order,
+    /// length-prefixed to avoid boundary collisions between
+    /// adjacent fields.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (path, record) in &self.by_path {
+            hasher.write(&(path.len() as u64).to_le_bytes());
             hasher.write(path);
             hasher.write(&record.handle.raw().to_le_bytes());
+            hasher.write(&(record.elf_bytes.len() as u64).to_le_bytes());
+            hasher.write(&record.elf_bytes);
         }
         hasher.finish()
+    }
+
+    /// Seed `next_handle` directly so tests can reach the two
+    /// register-panic sites that `new` makes unreachable.
+    #[cfg(test)]
+    fn seeded_at(next_handle: u32) -> Self {
+        Self {
+            by_path: BTreeMap::new(),
+            by_handle: BTreeMap::new(),
+            next_handle,
+        }
     }
 }
 
@@ -123,16 +180,24 @@ mod tests {
     }
 
     #[test]
-    fn register_same_path_returns_existing_handle() {
+    fn register_same_path_and_bytes_is_idempotent() {
         let mut s = ContentStore::new();
         let h1 = s.register(b"/app_home/spu.elf", vec![1, 2]);
-        let h2 = s.register(b"/app_home/spu.elf", vec![9, 9]);
+        let h2 = s.register(b"/app_home/spu.elf", vec![1, 2]);
         assert_eq!(h1, h2);
         assert_eq!(s.len(), 1);
         assert_eq!(
             s.lookup_by_path(b"/app_home/spu.elf").unwrap().elf_bytes,
             vec![1, 2]
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot re-register")]
+    fn register_same_path_different_bytes_panics() {
+        let mut s = ContentStore::new();
+        s.register(b"/app_home/spu.elf", vec![1, 2]);
+        s.register(b"/app_home/spu.elf", vec![9, 9]);
     }
 
     #[test]
@@ -161,7 +226,9 @@ mod tests {
     #[test]
     fn lookup_by_handle_unknown_returns_none() {
         let s = ContentStore::new();
-        assert!(s.lookup_by_handle(SpuImageHandle::new(99)).is_none());
+        assert!(s
+            .lookup_by_handle(SpuImageHandle::new(99).unwrap())
+            .is_none());
     }
 
     #[test]
@@ -176,11 +243,31 @@ mod tests {
     }
 
     #[test]
-    fn state_hash_differs_on_content() {
+    fn state_hash_differs_on_path() {
         let mut a = ContentStore::new();
         let mut b = ContentStore::new();
         a.register(b"/a.elf", vec![1]);
         b.register(b"/b.elf", vec![1]);
+        assert_ne!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    fn state_hash_differs_on_elf_bytes() {
+        // A hash that omitted elf_bytes would silently pass on image corruption.
+        let mut a = ContentStore::new();
+        let mut b = ContentStore::new();
+        a.register(b"/spu.elf", vec![0xAA, 0xBB, 0xCC]);
+        b.register(b"/spu.elf", vec![0xAA, 0xBB, 0xCD]);
+        assert_ne!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    fn state_hash_length_prefix_prevents_boundary_collision() {
+        // Without length prefixes, ("/a", "bc") and ("/ab", "c") would collide.
+        let mut a = ContentStore::new();
+        let mut b = ContentStore::new();
+        a.register(b"/a", vec![b'b', b'c']);
+        b.register(b"/ab", vec![b'c']);
         assert_ne!(a.state_hash(), b.state_hash());
     }
 
@@ -202,5 +289,36 @@ mod tests {
             let record = s.lookup_by_path(format!("/img_{i}").as_bytes()).unwrap();
             assert_ne!(record.handle.raw(), 0);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "ContentStore handle counter exhausted")]
+    fn register_panics_when_counter_exhausted() {
+        let mut s = ContentStore::seeded_at(u32::MAX);
+        s.register(b"/first.elf", vec![]);
+        s.register(b"/second.elf", vec![]);
+    }
+
+    #[test]
+    #[should_panic(expected = "next_handle reached 0")]
+    fn register_panics_when_next_handle_is_zero() {
+        let mut s = ContentStore::seeded_at(0);
+        s.register(b"/first.elf", vec![]);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "is not absolute")]
+    fn register_debug_asserts_path_starts_with_slash() {
+        let mut s = ContentStore::new();
+        s.register(b"relative/spu.elf", vec![]);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "contains '//'")]
+    fn register_debug_asserts_no_double_slash() {
+        let mut s = ContentStore::new();
+        s.register(b"/app_home//spu.elf", vec![]);
     }
 }

@@ -2917,3 +2917,57 @@ fn multi_primitive_determinism_canary_with_atomic_content() {
         "multi-primitive atomic canary must produce byte-identical final (memory, sync) hashes across runs"
     );
 }
+
+#[test]
+#[should_panic(expected = "non-empty tls_bytes requires non-zero tls_base")]
+fn ppu_thread_create_tls_base_zero_with_non_empty_tls_panics() {
+    // Host rejects this combination with CELL_EINVAL in
+    // `dispatch_ppu_thread_create`; a bad dispatch reaching the
+    // runtime apply path is a host regression, so the runtime
+    // asserts unconditionally (both debug and release) rather
+    // than silently committing the TLS image to guest address 0.
+    let mut rt = build(16, 1, 100);
+    let source = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    let dispatch = cellgov_lv2::Lv2Dispatch::PpuThreadCreate {
+        id_ptr: 0,
+        init: cellgov_lv2::PpuThreadInitState {
+            entry_code: 0,
+            entry_toc: 0,
+            arg: 0,
+            stack_top: 0,
+            tls_base: 0,
+            lr_sentinel: 0,
+        },
+        stack_base: 0,
+        stack_size: 0,
+        tls_bytes: vec![0xAB, 0xCD],
+        priority: 0,
+        effects: vec![],
+    };
+    rt.handle_ppu_thread_create_for_test(source, dispatch);
+}
+
+#[test]
+#[should_panic(expected = "unfilled payload")]
+fn event_queue_receive_wake_with_none_payload_panics() {
+    // The release side forgot to ship a response_update before
+    // waking the receiver. The wake path must panic rather than
+    // deliver four zero u64s the guest cannot distinguish from
+    // a real event.
+    let mut rt = build(16, 1, 100);
+    let waiter = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    rt.registry_mut()
+        .set_status_override(waiter, UnitStatus::Blocked);
+    let _ = rt.syscall_responses_mut().insert(
+        waiter,
+        cellgov_lv2::PendingResponse::EventQueueReceive {
+            out_ptr: 0x10,
+            payload: None,
+        },
+    );
+    rt.resolve_sync_wakes_for_test(&[waiter]);
+}

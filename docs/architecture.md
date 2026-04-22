@@ -410,7 +410,8 @@ Classified into typed `Lv2Request` variants:
 | `sys_spu_thread_group_create`     | 170              | Allocates a monotonic group id, writes it to guest pointer.                                            |
 | `sys_spu_thread_initialize`       | 172              | Records image handle and args (copied at init time) per slot.                                          |
 | `sys_spu_thread_group_start`      | 173              | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
-| `sys_spu_thread_group_join`       | 177/178          | Blocks caller; wakes when all SPUs in the group finish.                                                |
+| `sys_spu_thread_group_join`       | 177              | Blocks caller; wakes when all SPUs in the group finish.                                                |
+| `sys_spu_thread_group_terminate`  | 178              | Stub: returns CELL_OK without teardown (logged as invariant break). Split from join so dispatch cannot conflate the two ABI shapes. |
 | `sys_spu_thread_write_spu_mb`     | 190              | Deposits a value into the target SPU's inbound mailbox.                                                |
 | `sys_memory_container_create`     | 341              | Allocates a monotonic container id, writes it to guest pointer.                                        |
 | `sys_memory_allocate`             | 348              | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF). |

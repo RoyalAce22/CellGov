@@ -30,7 +30,7 @@ impl Runtime {
     ///   * Takes its `PendingResponse` from `syscall_responses`.
     ///   * Resolves the response variant:
     ///       - `ReturnCode { code }`: set r3 = code.
-    ///       - `EventQueueReceive { out_ptr, source, data1..3 }`:
+    ///       - `EventQueueReceive { out_ptr, payload: Some(..) }`:
     ///         write the 32-byte payload via a `SharedWriteIntent`
     ///         commit and set r3 = 0.
     ///       - `CondWakeReacquire { .. }`: handled by a later
@@ -38,6 +38,13 @@ impl Runtime {
     ///         and does not re-park on a mutex.
     ///       - Other variants: defensive fallback -- set r3 = 0.
     ///   * Transitions the unit from `Blocked` to `Runnable`.
+    ///
+    /// # Panics
+    /// Reaching an `EventQueueReceive { payload: None }` at wake
+    /// time is a host-level invariant break -- the send-side
+    /// dispatch forgot to install `response_updates`. Panics rather
+    /// than delivering four zero u64s the guest cannot distinguish
+    /// from a real event.
     pub(super) fn resolve_sync_wakes(&mut self, woken_unit_ids: &[UnitId]) {
         for waiter in woken_unit_ids {
             let waiter = *waiter;
@@ -46,18 +53,18 @@ impl Runtime {
                 Some(PendingResponse::ReturnCode { code }) => {
                     self.registry.set_syscall_return(waiter, code);
                 }
-                Some(PendingResponse::EventQueueReceive {
-                    out_ptr,
-                    source: ev_source,
-                    data1,
-                    data2,
-                    data3,
-                }) => {
+                Some(PendingResponse::EventQueueReceive { out_ptr, payload }) => {
+                    let payload = payload.unwrap_or_else(|| {
+                        panic!(
+                            "EventQueueReceive wake for {waiter:?} with unfilled payload \
+                             (release-side dispatch forgot response_updates)"
+                        )
+                    });
                     let mut buf = [0u8; 32];
-                    buf[0..8].copy_from_slice(&ev_source.to_be_bytes());
-                    buf[8..16].copy_from_slice(&data1.to_be_bytes());
-                    buf[16..24].copy_from_slice(&data2.to_be_bytes());
-                    buf[24..32].copy_from_slice(&data3.to_be_bytes());
+                    buf[0..8].copy_from_slice(&payload.source.to_be_bytes());
+                    buf[8..16].copy_from_slice(&payload.data1.to_be_bytes());
+                    buf[16..24].copy_from_slice(&payload.data2.to_be_bytes());
+                    buf[24..32].copy_from_slice(&payload.data3.to_be_bytes());
                     self.commit_bytes_at(out_ptr as u64, &buf);
                     self.registry.set_syscall_return(waiter, 0);
                 }
@@ -86,12 +93,26 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn resolve_sync_wakes_for_test(&mut self, woken_unit_ids: &[UnitId]) {
+        self.resolve_sync_wakes(woken_unit_ids);
+    }
+
     /// When an SPU finishes, notify the LV2 host. If the group is
     /// fully finished, find and wake the PPU blocked on that group's
     /// join with its pending response.
     pub(super) fn resolve_join_wakes(&mut self, source: UnitId) {
-        let Some(finished_group) = self.lv2_host.notify_spu_finished(source) else {
-            return;
+        let finished_group = match self.lv2_host.notify_spu_finished(source) {
+            Ok(Some(gid)) => gid,
+            Ok(None) => return,
+            Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit) => return,
+            Err(err) => {
+                eprintln!(
+                    "lv2 host invariant break at resolve_join_wakes.notify_spu_finished: \
+                     unit {source:?}: {err:?}",
+                );
+                return;
+            }
         };
         let waiters: Vec<UnitId> = self.syscall_responses.pending_ids().collect();
         for waiter_id in waiters {
