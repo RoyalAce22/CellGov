@@ -396,6 +396,67 @@ pub enum Lv2Request {
         /// Flags (captured but not interpreted).
         flags: u64,
     },
+    /// sys_rsx_memory_allocate (665). Reserves RSX-visible memory.
+    SysRsxMemoryAllocate {
+        /// Out-pointer (u32*) to the mem handle.
+        mem_handle_ptr: u32,
+        /// Out-pointer (u64*) to the allocated guest address.
+        mem_addr_ptr: u32,
+        /// Requested size in bytes.
+        size: u32,
+        /// Allocation flags.
+        flags: u64,
+        /// Reserved / unused.
+        a5: u64,
+        /// Reserved / unused.
+        a6: u64,
+        /// Reserved / unused.
+        a7: u64,
+    },
+    /// sys_rsx_memory_free (667).
+    SysRsxMemoryFree {
+        /// Handle returned from a prior `SysRsxMemoryAllocate`.
+        mem_handle: u32,
+    },
+    /// sys_rsx_context_allocate (670). Creates the DMA control /
+    /// driver info / reports regions and the RSX event queue.
+    SysRsxContextAllocate {
+        /// Out-pointer (u32*) to the context id.
+        context_id_ptr: u32,
+        /// Out-pointer (u64*) to the DMA-control base address.
+        lpar_dma_control_ptr: u32,
+        /// Out-pointer (u64*) to the driver-info base address.
+        lpar_driver_info_ptr: u32,
+        /// Out-pointer (u64*) to the reports base address.
+        lpar_reports_ptr: u32,
+        /// Memory context handle from `SysRsxMemoryAllocate`.
+        mem_ctx: u64,
+        /// System-mode flag word.
+        system_mode: u64,
+    },
+    /// sys_rsx_context_free (671).
+    SysRsxContextFree {
+        /// Context id returned from a prior `SysRsxContextAllocate`.
+        context_id: u32,
+    },
+    /// sys_rsx_context_attribute (674). Sub-command-dispatched
+    /// attribute surface; `package_id` selects FLIP_MODE,
+    /// FLIP_BUFFER, SET_DISPLAY_BUFFER, SET_FLIP_HANDLER,
+    /// SET_VBLANK_HANDLER, etc.
+    SysRsxContextAttribute {
+        /// Context id returned from a prior `SysRsxContextAllocate`.
+        context_id: u32,
+        /// Sub-command selector.
+        package_id: u32,
+        /// Sub-command argument.
+        a3: u64,
+        /// Sub-command argument.
+        a4: u64,
+        /// Sub-command argument.
+        a5: u64,
+        /// Sub-command argument.
+        a6: u64,
+    },
     /// A syscall number that does not map to any known request.
     Unsupported {
         /// The raw syscall number from GPR 11.
@@ -539,6 +600,33 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             priority: p!(3),
             stacksize: args[4],
             flags: args[5],
+        },
+        665 => Lv2Request::SysRsxMemoryAllocate {
+            mem_handle_ptr: p!(0),
+            mem_addr_ptr: p!(1),
+            size: p!(2),
+            flags: args[3],
+            a5: args[4],
+            a6: args[5],
+            a7: args[6],
+        },
+        667 => Lv2Request::SysRsxMemoryFree { mem_handle: p!(0) },
+        670 => Lv2Request::SysRsxContextAllocate {
+            context_id_ptr: p!(0),
+            lpar_dma_control_ptr: p!(1),
+            lpar_driver_info_ptr: p!(2),
+            lpar_reports_ptr: p!(3),
+            mem_ctx: args[4],
+            system_mode: args[5],
+        },
+        671 => Lv2Request::SysRsxContextFree { context_id: p!(0) },
+        674 => Lv2Request::SysRsxContextAttribute {
+            context_id: p!(0),
+            package_id: p!(1),
+            a3: args[2],
+            a4: args[3],
+            a5: args[4],
+            a6: args[5],
         },
         44 => Lv2Request::PpuThreadJoin {
             target: args[0],
@@ -1234,6 +1322,11 @@ mod tests {
         (349, &[0]),
         (352, &[0]),
         (403, &[0, 1, 2, 3]),
+        (665, &[0, 1, 2]),
+        (667, &[0]),
+        (670, &[0, 1, 2, 3]),
+        (671, &[0]),
+        (674, &[0, 1]),
     ];
 
     #[test]
@@ -1276,5 +1369,74 @@ mod tests {
             classify(115, &bad),
             Lv2Request::Malformed { number: 115, .. }
         ));
+    }
+
+    #[test]
+    fn classify_sys_rsx_memory_allocate() {
+        let args = [0x1000, 0x1008, 0x0010_0000, 0x400, 0, 0, 0, 0];
+        assert_eq!(
+            classify(665, &args),
+            Lv2Request::SysRsxMemoryAllocate {
+                mem_handle_ptr: 0x1000,
+                mem_addr_ptr: 0x1008,
+                size: 0x0010_0000,
+                flags: 0x400,
+                a5: 0,
+                a6: 0,
+                a7: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_sys_rsx_memory_free() {
+        let args = [0xA001, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(667, &args),
+            Lv2Request::SysRsxMemoryFree { mem_handle: 0xA001 }
+        );
+    }
+
+    #[test]
+    fn classify_sys_rsx_context_allocate() {
+        let args = [0x2000, 0x2008, 0x2010, 0x2018, 0xA001, 0, 0, 0];
+        assert_eq!(
+            classify(670, &args),
+            Lv2Request::SysRsxContextAllocate {
+                context_id_ptr: 0x2000,
+                lpar_dma_control_ptr: 0x2008,
+                lpar_driver_info_ptr: 0x2010,
+                lpar_reports_ptr: 0x2018,
+                mem_ctx: 0xA001,
+                system_mode: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_sys_rsx_context_free() {
+        let args = [0x5555_5555, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(671, &args),
+            Lv2Request::SysRsxContextFree {
+                context_id: 0x5555_5555,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_sys_rsx_context_attribute() {
+        let args = [0x5555_5555, 0x102, 0xAA, 0xBB, 0xCC, 0xDD, 0, 0];
+        assert_eq!(
+            classify(674, &args),
+            Lv2Request::SysRsxContextAttribute {
+                context_id: 0x5555_5555,
+                package_id: 0x102,
+                a3: 0xAA,
+                a4: 0xBB,
+                a5: 0xCC,
+                a6: 0xDD,
+            }
+        );
     }
 }

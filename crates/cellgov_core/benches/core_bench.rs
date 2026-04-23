@@ -51,7 +51,7 @@ fn bench_commit_0_effects(c: &mut Criterion) {
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
-        let mut flip = cellgov_core::rsx_flip::RsxFlipState::new();
+        let mut flip = cellgov_core::rsx::flip::RsxFlipState::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -85,7 +85,7 @@ fn bench_commit_1_effect(c: &mut Criterion) {
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
-        let mut flip = cellgov_core::rsx_flip::RsxFlipState::new();
+        let mut flip = cellgov_core::rsx::flip::RsxFlipState::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -121,7 +121,7 @@ fn bench_commit_10_effects(c: &mut Criterion) {
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
-        let mut flip = cellgov_core::rsx_flip::RsxFlipState::new();
+        let mut flip = cellgov_core::rsx::flip::RsxFlipState::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -164,7 +164,7 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
         let mut signals = SignalRegistry::new();
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
-        let mut flip = cellgov_core::rsx_flip::RsxFlipState::new();
+        let mut flip = cellgov_core::rsx::flip::RsxFlipState::new();
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,

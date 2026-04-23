@@ -44,7 +44,7 @@ pub(crate) const NID_CELLGCM_GET_LABEL_ADDRESS: u32 = 0xf80196c1;
 /// `cellGcmSetFlipHandler` records a PPU callback address invoked
 /// on each flip completion. Sony's API takes a `void(*)(u32)` -- a
 /// PSL1GHT OPD pointer in practice. The oracle RECORDS the address
-/// into [`crate::rsx_flip::RsxFlipState::handler`] but does NOT
+/// into [`crate::rsx::flip::RsxFlipState::handler`] but does NOT
 /// dispatch PPU execution into the callback. Source: RPCS3's
 /// `Emu/Cell/Modules/cellGcmSys.cpp` REG_FUNC table.
 pub(crate) const NID_CELLGCM_SET_FLIP_HANDLER: u32 = 0xa41ef7e8;
@@ -117,20 +117,13 @@ pub(crate) const TILED_PITCHES: &[u32] = &[
 
 /// Dispatch entry point for cellGcmSys handlers.
 ///
-/// Returns `None` when either (a) the NID is not owned by this
-/// module or (b) the runtime's RSX checkpoint is not enabled --
-/// disabling at the dispatch boundary keeps non-RSX boot paths
-/// on the default CELL_OK fallback instead of accidentally
-/// exercising the RSX stubs.
+/// Returns `None` when the NID is not owned by this module.
 pub(crate) fn dispatch(
     runtime: &mut Runtime,
     source: UnitId,
     nid: u32,
     args: &[u64; 9],
 ) -> Option<()> {
-    if !runtime.hle.gcm.rsx_checkpoint {
-        return None;
-    }
     match nid {
         NID_CELLGCM_GET_TILED_PITCH_SIZE => {
             get_tiled_pitch_size(&mut adapter(runtime, source, nid), args);
@@ -168,12 +161,26 @@ pub(crate) fn dispatch(
             adapter(runtime, source, nid).set_return(addr);
         }
         NID_CELLGCM_SET_FLIP_HANDLER => {
-            // Record the callback address. Zero means "clear the
-            // handler" (games pass NULL when they disable flip
-            // notifications); the typed mutator accepts it. Return
-            // CELL_OK (void in Sony's signature, coerced to 0).
+            // Zero means "clear the handler." Record in the
+            // NV-method-driven flip-status machinery
+            // (`RsxFlipState.handler`) and forward to sys_rsx so
+            // `SysRsxContext.flip_handler_addr` stays the single
+            // source of truth for any future event-driven dispatch.
             let handler_addr = args[1] as u32;
             runtime.rsx_flip_mut().set_handler(handler_addr);
+            if runtime.lv2_host().sys_rsx_context().allocated {
+                runtime.dispatch_lv2_request(
+                    cellgov_lv2::Lv2Request::SysRsxContextAttribute {
+                        context_id: runtime.lv2_host().sys_rsx_context().context_id,
+                        package_id: cellgov_lv2::host::PACKAGE_CELLGOV_SET_FLIP_HANDLER,
+                        a3: handler_addr as u64,
+                        a4: 0,
+                        a5: 0,
+                        a6: 0,
+                    },
+                    source,
+                );
+            }
             adapter(runtime, source, nid).set_return(0);
         }
         _ => return None,
@@ -204,36 +211,110 @@ fn init_body_with_runtime(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]
     // so destructure to disjoint borrows here. `heap_base` is a
     // Copy snapshot so it does not compete for the borrow of
     // `runtime.hle`.
+    let rsx_checkpoint = runtime.hle.gcm.rsx_checkpoint;
     let heap_base = runtime.hle.heap_base;
-    let Runtime {
-        memory,
-        registry,
-        hle:
-            crate::hle::HleState {
-                heap_ptr,
-                heap_watermark,
-                heap_warning_mask,
-                next_id,
-                gcm,
-                handlers_without_mutation,
-                ..
-            },
-        ..
-    } = runtime;
-    let mut ctx = RuntimeHleAdapter {
-        memory,
-        registry,
-        heap_base,
-        heap_ptr,
-        heap_watermark,
-        heap_warning_mask,
-        next_id,
+    {
+        let Runtime {
+            memory,
+            registry,
+            hle:
+                crate::hle::HleState {
+                    heap_ptr,
+                    heap_watermark,
+                    heap_warning_mask,
+                    next_id,
+                    gcm,
+                    handlers_without_mutation,
+                    ..
+                },
+            ..
+        } = runtime;
+        let mut ctx = RuntimeHleAdapter {
+            memory,
+            registry,
+            heap_base,
+            heap_ptr,
+            heap_watermark,
+            heap_warning_mask,
+            next_id,
+            source,
+            nid: NID_CELLGCM_INIT_BODY,
+            mutated: false,
+            handlers_without_mutation,
+        };
+        init_body(&mut ctx, args, gcm);
+    }
+    if !rsx_checkpoint {
+        forward_init_to_sys_rsx(runtime, source);
+    }
+}
+
+/// cellGcmInitBody's second half when rsx_checkpoint is off: fire
+/// sys_rsx_memory_allocate + sys_rsx_context_allocate via the LV2
+/// dispatch pipeline, then read back the canonical addresses from
+/// Lv2Host's SysRsxContext to populate GcmState.control_addr +
+/// label_addr.
+fn forward_init_to_sys_rsx(runtime: &mut Runtime, source: UnitId) {
+    use cellgov_lv2::Lv2Request;
+    // 24 bytes of scratch for the six out-pointers we don't need to
+    // read back (mem_handle u32, mem_addr u64, context_id u32,
+    // lpar_dma_control u64, lpar_driver_info u64, lpar_reports u64
+    // == 36 bytes; round up to 48 for 16-byte alignment). The
+    // SysRsxContext on Lv2Host is the canonical state after dispatch.
+    let scratch = runtime
+        .hle
+        .heap_ptr
+        .checked_add(16 - (runtime.hle.heap_ptr & 0xF))
+        .expect("cellGcmInitBody: heap cursor overflow aligning sys_rsx scratch");
+    runtime.hle.heap_ptr = scratch + 48;
+    if runtime.hle.heap_ptr > runtime.hle.heap_watermark {
+        runtime.hle.heap_watermark = runtime.hle.heap_ptr;
+    }
+
+    runtime.dispatch_lv2_request(
+        Lv2Request::SysRsxMemoryAllocate {
+            mem_handle_ptr: scratch,
+            mem_addr_ptr: scratch + 4,
+            size: 0x0030_0000,
+            flags: 0,
+            a5: 0,
+            a6: 0,
+            a7: 0,
+        },
         source,
-        nid: NID_CELLGCM_INIT_BODY,
-        mutated: false,
-        handlers_without_mutation,
-    };
-    init_body(&mut ctx, args, gcm);
+    );
+    // Read the mem handle back from the scratch area where the
+    // memory-allocate handler deposited it.
+    let mem_handle_bytes = runtime
+        .memory()
+        .as_bytes()
+        .get(scratch as usize..scratch as usize + 4)
+        .expect("cellGcmInitBody: scratch ptr out of bounds");
+    let mem_ctx = u64::from(u32::from_be_bytes([
+        mem_handle_bytes[0],
+        mem_handle_bytes[1],
+        mem_handle_bytes[2],
+        mem_handle_bytes[3],
+    ]));
+
+    runtime.dispatch_lv2_request(
+        Lv2Request::SysRsxContextAllocate {
+            context_id_ptr: scratch + 12,
+            lpar_dma_control_ptr: scratch + 16,
+            lpar_driver_info_ptr: scratch + 24,
+            lpar_reports_ptr: scratch + 32,
+            mem_ctx,
+            system_mode: 0,
+        },
+        source,
+    );
+
+    let rsx = *runtime.lv2_host().sys_rsx_context();
+    // `cellGcmGetControlRegister` returns the address the guest
+    // indexes at +0 / +4 / +8 for put / get / ref, so skip past the
+    // 0x40-byte reserved prefix inside RsxDmaControl.
+    runtime.hle.gcm.control_addr = rsx.dma_control_addr + 0x40;
+    runtime.hle.gcm.label_addr = rsx.reports_addr;
 }
 
 fn get_configuration_with_runtime(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]) {
@@ -459,25 +540,6 @@ mod canary_tests {
                 Some(()),
                 "gcm::dispatch returned None for NID {nid:#010x} listed in OWNED_NIDS \
                  -- the match arm was likely removed without trimming the list"
-            );
-        }
-    }
-
-    /// With `rsx_checkpoint` disabled, dispatch short-circuits to
-    /// `None` for every NID -- even ones the module owns. Pinning
-    /// this pre-gate here means a refactor that reorders the gate
-    /// vs. the match cannot silently start running gcm handlers on
-    /// non-RSX boots.
-    #[test]
-    fn rsx_checkpoint_gate_blocks_all_owned_nids() {
-        for &nid in OWNED_NIDS {
-            let (mut rt, unit_id) = canary_runtime();
-            rt.set_gcm_rsx_checkpoint(false);
-            let args: [u64; 9] = [0; 9];
-            let result = dispatch(&mut rt, unit_id, nid, &args);
-            assert_eq!(
-                result, None,
-                "gcm::dispatch claimed NID {nid:#010x} with rsx_checkpoint off"
             );
         }
     }

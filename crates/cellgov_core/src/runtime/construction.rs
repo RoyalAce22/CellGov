@@ -51,18 +51,18 @@ impl Runtime {
             rsx_cursor: crate::rsx::RsxFifoCursor::new(),
             rsx_sem_offset: 0,
             rsx_mirror_writes: false,
-            rsx_flip: crate::rsx_flip::RsxFlipState::new(),
+            rsx_flip: crate::rsx::flip::RsxFlipState::new(),
             rsx_methods: {
-                let mut t = crate::rsx_method::NvMethodTable::new();
-                crate::rsx_method::register_nv406e_label_handlers(&mut t)
+                let mut t = crate::rsx::method::NvMethodTable::new();
+                crate::rsx::method::register_nv406e_label_handlers(&mut t)
                     .expect("fresh NvMethodTable cannot collide");
-                crate::rsx_method::register_nv406e_reference_handler(&mut t)
+                crate::rsx::method::register_nv406e_reference_handler(&mut t)
                     .expect("fresh NvMethodTable cannot collide");
-                crate::rsx_method::register_nv4097_flip_handler(&mut t)
+                crate::rsx::method::register_nv4097_flip_handler(&mut t)
                     .expect("fresh NvMethodTable cannot collide");
-                crate::rsx_method::register_nv4097_report_handler(&mut t)
+                crate::rsx::method::register_nv4097_report_handler(&mut t)
                     .expect("fresh NvMethodTable cannot collide");
-                crate::rsx_method::register_nv4097_back_end_semaphore_handlers(&mut t)
+                crate::rsx::method::register_nv4097_back_end_semaphore_handlers(&mut t)
                     .expect("fresh NvMethodTable cannot collide");
                 t
             },

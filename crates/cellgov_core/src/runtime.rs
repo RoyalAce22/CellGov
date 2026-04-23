@@ -157,12 +157,12 @@ pub struct Runtime {
     /// callback is not dispatched into PPU execution). Folds into
     /// [`Self::sync_state_hash`] so a flip transition is visible
     /// in the per-step state-hash trace.
-    rsx_flip: crate::rsx_flip::RsxFlipState,
+    rsx_flip: crate::rsx::flip::RsxFlipState,
     /// NV method dispatch table for the RSX FIFO advance pass.
     /// Populated at construction with the registered handlers
     /// (NV406E semaphore / reference, NV4097 flip / report / back-
     /// end semaphore). The advance pass is the only reader.
-    rsx_methods: crate::rsx_method::NvMethodTable,
+    rsx_methods: crate::rsx::method::NvMethodTable,
     /// RSX effects produced by the FIFO advance pass at the END of
     /// commit batch N, queued for the START of batch N+1. Preserves
     /// the atomic-batch contract: FIFO method parses happen in
@@ -373,7 +373,7 @@ impl Runtime {
         // mutations are visible in THIS batch's state-hash
         // checkpoint because the pass runs before emit_commit_trace.
         if self.rsx_cursor.get() != self.rsx_cursor.put() {
-            crate::rsx_advance::rsx_advance(
+            crate::rsx::advance::rsx_advance(
                 &self.memory,
                 &mut self.rsx_cursor,
                 &mut self.rsx_sem_offset,
@@ -766,7 +766,7 @@ impl Runtime {
     /// this to observe the WAITING / DONE transition and the
     /// registered handler address.
     #[inline]
-    pub fn rsx_flip(&self) -> &crate::rsx_flip::RsxFlipState {
+    pub fn rsx_flip(&self) -> &crate::rsx::flip::RsxFlipState {
         &self.rsx_flip
     }
 
@@ -775,7 +775,7 @@ impl Runtime {
     /// HLE NID, the per-boundary DONE transition, and tests that
     /// script the state directly.
     #[inline]
-    pub fn rsx_flip_mut(&mut self) -> &mut crate::rsx_flip::RsxFlipState {
+    pub fn rsx_flip_mut(&mut self) -> &mut crate::rsx::flip::RsxFlipState {
         &mut self.rsx_flip
     }
 

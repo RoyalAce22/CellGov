@@ -6,6 +6,11 @@
 //! through the `Lv2Runtime` trait and returns an `Lv2Dispatch` telling
 //! the runtime what to do.
 
+pub use self::rsx::{
+    SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,
+    PACKAGE_CELLGOV_SET_VBLANK_HANDLER, PACKAGE_FLIP_BUFFER, PACKAGE_FLIP_MODE,
+    PACKAGE_SET_DISPLAY_BUFFER,
+};
 use crate::dispatch::Lv2Dispatch;
 use crate::image::ContentStore;
 use crate::ppu_thread::{
@@ -47,6 +52,7 @@ mod lwmutex;
 mod memory;
 mod mutex;
 mod ppu_thread;
+mod rsx;
 mod semaphore;
 mod spu;
 
@@ -69,6 +75,18 @@ pub struct Lv2Host {
     /// allocator starting at 1.
     next_kernel_id: u32,
     mem_alloc_ptr: u32,
+    /// sys_rsx_memory_allocate bump cursor. Grows upward from
+    /// [`Self::SYS_RSX_MEM_BASE`]; separate from `mem_alloc_ptr` so
+    /// the RSX-visible region cannot collide with PPU allocations.
+    rsx_mem_alloc_ptr: u32,
+    /// Monotonic handle counter returned from sys_rsx_memory_allocate.
+    rsx_mem_handle_counter: u32,
+    /// sys_rsx context bookkeeping. Populated by
+    /// `sys_rsx_context_allocate` and consumed by subsequent
+    /// `sys_rsx_context_attribute` dispatches. RPCS3 supports one
+    /// context per renderer and CellGov follows suit; see
+    /// `sys_rsx.cpp:251`.
+    rsx_context: SysRsxContext,
     lwmutexes: LwMutexTable,
     mutexes: MutexTable,
     semaphores: SemaphoreTable,
@@ -97,6 +115,16 @@ impl Default for Lv2Host {
 }
 
 impl Lv2Host {
+    /// Guest base address for sys_rsx memory allocations. Chosen so
+    /// the 256 MB RSX-visible window sits above the 16 MB ELF /
+    /// user-memory bumper and below the MEM_ALLOC_REGION_END guard
+    /// used by `dispatch_memory_allocate`.
+    pub const SYS_RSX_MEM_BASE: u32 = 0x3000_0000;
+
+    /// Upper bound (exclusive) of the sys_rsx memory region. Matches
+    /// real PS3's 256 MB RSX-visible size.
+    pub const SYS_RSX_MEM_END: u32 = Self::SYS_RSX_MEM_BASE + 0x1000_0000;
+
     /// Construct an empty host.
     pub fn new() -> Self {
         Self {
@@ -107,6 +135,9 @@ impl Lv2Host {
             stack_allocator: ThreadStackAllocator::new(),
             next_kernel_id: 0x4000_0001, // start above zero to catch uninitialized use
             mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
+            rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
+            rsx_mem_handle_counter: 1,
+            rsx_context: SysRsxContext::new(),
             lwmutexes: LwMutexTable::new(),
             mutexes: MutexTable::new(),
             semaphores: SemaphoreTable::new(),
@@ -118,9 +149,8 @@ impl Lv2Host {
         }
     }
 
-    /// Running total of invariant breaks caught by
-    /// [`Self::record_invariant_break`] /
-    /// [`Self::log_invariant_break`].
+    /// Running total of invariant breaks caught by the crate-private
+    /// `record_invariant_break` / `log_invariant_break` helpers.
     #[inline]
     pub fn invariant_break_count(&self) -> usize {
         self.invariant_break_count
@@ -179,6 +209,12 @@ impl Lv2Host {
     /// and will overwrite the image otherwise.
     pub fn set_mem_alloc_base(&mut self, base: u32) {
         self.mem_alloc_ptr = base;
+    }
+
+    /// Read the current sys_rsx context bookkeeping.
+    #[inline]
+    pub fn sys_rsx_context(&self) -> &SysRsxContext {
+        &self.rsx_context
     }
 
     pub(super) fn alloc_id(&mut self) -> u32 {
@@ -348,6 +384,9 @@ impl Lv2Host {
         }
         hasher.write(&self.next_kernel_id.to_le_bytes());
         hasher.write(&self.mem_alloc_ptr.to_le_bytes());
+        hasher.write(&self.rsx_mem_alloc_ptr.to_le_bytes());
+        hasher.write(&self.rsx_mem_handle_counter.to_le_bytes());
+        hasher.write(&self.rsx_context.state_hash().to_le_bytes());
         if !self.ppu_threads.is_empty() {
             hasher.write(&self.ppu_threads.state_hash().to_le_bytes());
         }
@@ -573,6 +612,40 @@ impl Lv2Host {
                 target,
                 status_out_ptr,
             } => self.dispatch_ppu_thread_join(target, status_out_ptr, requester),
+            Lv2Request::SysRsxMemoryAllocate {
+                mem_handle_ptr,
+                mem_addr_ptr,
+                size,
+                ..
+            } => {
+                self.dispatch_sys_rsx_memory_allocate(mem_handle_ptr, mem_addr_ptr, size, requester)
+            }
+            Lv2Request::SysRsxMemoryFree { .. } => self.dispatch_sys_rsx_memory_free_noop(),
+            Lv2Request::SysRsxContextAllocate {
+                context_id_ptr,
+                lpar_dma_control_ptr,
+                lpar_driver_info_ptr,
+                lpar_reports_ptr,
+                mem_ctx,
+                system_mode,
+            } => self.dispatch_sys_rsx_context_allocate(
+                context_id_ptr,
+                lpar_dma_control_ptr,
+                lpar_driver_info_ptr,
+                lpar_reports_ptr,
+                mem_ctx,
+                system_mode,
+                requester,
+            ),
+            Lv2Request::SysRsxContextFree { .. } => self.dispatch_sys_rsx_context_free_noop(),
+            Lv2Request::SysRsxContextAttribute {
+                context_id,
+                package_id,
+                a3,
+                a4,
+                a5,
+                a6,
+            } => self.dispatch_sys_rsx_context_attribute(context_id, package_id, a3, a4, a5, a6),
             // _sys_prx_start_module: RPCS3 returns EINVAL when
             // id == 0 or pOpt is null. CellGov's _sys_prx_load_module
             // stub returns id=0, so liblv2 calls start with id=0;

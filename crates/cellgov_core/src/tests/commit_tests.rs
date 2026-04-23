@@ -42,7 +42,7 @@ impl CommitTestBed {
         result: &ExecutionStepResult,
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
-        let mut flip = crate::rsx_flip::RsxFlipState::new();
+        let mut flip = crate::rsx::flip::RsxFlipState::new();
         let mut ctx = CommitContext {
             memory: &mut self.mem,
             units: &mut self.units,

@@ -354,6 +354,49 @@ mod tests {
         assert_eq!(rt.hle.gcm.control_addr, 0xC000_0040);
     }
 
+    #[test]
+    fn gcm_init_body_without_rsx_checkpoint_forwards_to_sys_rsx() {
+        // With rsx_checkpoint off, cellGcmInitBody forwards to
+        // sys_rsx_memory_allocate + sys_rsx_context_allocate and the
+        // resulting control / label addresses come from Lv2Host's
+        // SysRsxContext rather than the HLE heap.
+        use crate::runtime::Runtime;
+        use cellgov_mem::GuestMemory;
+        use cellgov_time::Budget;
+
+        let mut rt = Runtime::new(GuestMemory::new(0x4000_0000), Budget::new(1), 100);
+        rt.set_hle_heap_base(0x10_0000);
+        rt.set_gcm_rsx_checkpoint(false);
+
+        let unit_id = cellgov_event::UnitId::new(0);
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+
+        let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
+        rt.dispatch_hle(unit_id, NID_CELLGCM_INIT_BODY, &args);
+
+        // Addresses match the sys_rsx reservation layout: dma_control
+        // at SYS_RSX_MEM_BASE, control_addr at +0x40 (past the reserved
+        // prefix), reports at SYS_RSX_MEM_BASE + 0x200000.
+        let base = cellgov_lv2::host::Lv2Host::SYS_RSX_MEM_BASE;
+        assert_eq!(rt.hle.gcm.control_addr, base + 0x40);
+        assert_eq!(rt.hle.gcm.label_addr, base + 0x20_0000);
+
+        // Label 255 reads 0x1337_C0D3 -- the LV2 sentinel written
+        // into the reports region at sys_rsx context allocation.
+        let label_addr = rt.hle.gcm.label_addr as usize;
+        let sentinel_offset = label_addr + 255 * 0x10;
+        let mem = rt.memory().as_bytes();
+        let sentinel = u32::from_be_bytes([
+            mem[sentinel_offset],
+            mem[sentinel_offset + 1],
+            mem[sentinel_offset + 2],
+            mem[sentinel_offset + 3],
+        ]);
+        assert_eq!(sentinel, 0x1337_C0D3);
+    }
+
     /// Canary: the GET_CONTROL_REGISTER dispatch in gcm.rs uses
     /// `debug_assert_ne!(control_addr, 0, ...)` as its "init ran"
     /// witness. The witness relies on BOTH `init_body` branches
@@ -456,9 +499,45 @@ mod tests {
         // Other fields unchanged.
         assert_eq!(
             rt.rsx_flip().status(),
-            crate::rsx_flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE
+            crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE
         );
         assert!(!rt.rsx_flip().pending());
+    }
+
+    #[test]
+    fn gcm_set_flip_handler_forwards_to_sys_rsx_when_allocated() {
+        use crate::hle::cell_gcm_sys::NID_CELLGCM_SET_FLIP_HANDLER;
+        use crate::runtime::Runtime;
+        use cellgov_mem::GuestMemory;
+        use cellgov_time::Budget;
+
+        let mut rt = Runtime::new(GuestMemory::new(0x4000_0000), Budget::new(1), 100);
+        rt.set_hle_heap_base(0x10_0000);
+        rt.set_gcm_rsx_checkpoint(false);
+        let unit_id = cellgov_event::UnitId::new(0);
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+
+        // Allocate the context via cellGcmInitBody's sys_rsx path.
+        let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
+        rt.dispatch_hle(
+            unit_id,
+            crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
+            &args,
+        );
+        assert!(rt.lv2_host().sys_rsx_context().allocated);
+
+        // Register a flip handler; check it lands in both places.
+        let handler: u32 = 0x1234_5678;
+        let args: [u64; 9] = [0, handler as u64, 0, 0, 0, 0, 0, 0, 0];
+        rt.dispatch_hle(unit_id, NID_CELLGCM_SET_FLIP_HANDLER, &args);
+        assert_eq!(rt.rsx_flip().handler(), handler);
+        assert_eq!(
+            rt.lv2_host().sys_rsx_context().flip_handler_addr,
+            handler,
+            "sys_rsx authoritative state should mirror the handler address"
+        );
     }
 
     #[test]

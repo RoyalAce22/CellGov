@@ -24,8 +24,8 @@
 //!   past their argument count and continue -- the documented
 //!   unknown-method fallback.
 
+use crate::rsx::method::{decode_header, NvCommandKind, NvDispatchContext, NvMethodTable};
 use crate::rsx::RsxFifoCursor;
-use crate::rsx_method::{decode_header, NvCommandKind, NvDispatchContext, NvMethodTable};
 use cellgov_effects::Effect;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_time::GuestTicks;
@@ -312,7 +312,7 @@ pub fn rsx_advance(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rsx_method::{
+    use crate::rsx::method::{
         register_nv406e_label_handlers, register_nv406e_reference_handler, NV406E_SEMAPHORE_OFFSET,
         NV406E_SEMAPHORE_RELEASE, NV406E_SET_REFERENCE, NV_COUNT_SHIFT, NV_FLAG_JUMP,
     };

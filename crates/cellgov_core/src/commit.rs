@@ -284,7 +284,7 @@ pub struct CommitContext<'a> {
     /// `Runtime::commit_step` after a pending flip survives one
     /// full batch. Reads are not required by the commit pipeline;
     /// the pipeline only writes here.
-    pub rsx_flip: &'a mut crate::rsx_flip::RsxFlipState,
+    pub rsx_flip: &'a mut crate::rsx::flip::RsxFlipState,
 }
 
 /// The commit pipeline.
@@ -552,6 +552,20 @@ impl CommitPipeline {
                     // titles that call cellGcmInit get a non-zero
                     // label_base and the offset is interpreted
                     // relative to it.
+                    //
+                    // With sys_rsx active, label_base points at the
+                    // 37 KB reports region. Semaphore-region writes
+                    // must land in offset 0..4096; offsets 0x1000 and
+                    // beyond fall in notify / report land and are
+                    // guest bugs. The debug-assert surfaces this at
+                    // the commit boundary rather than as a silent
+                    // notify-region corruption.
+                    debug_assert!(
+                        *offset < 0x1000,
+                        "RsxLabelWrite offset {:#x} past semaphore region (guest bug? \
+                         0..0x1000 is semaphore, 0x1000+ is notify/report)",
+                        *offset
+                    );
                     let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
                     let Some(_end) = start.checked_add(4) else {
                         return Err(CommitError::OutOfRange { effect_index: idx });

@@ -24,6 +24,11 @@
 //! advance pass's job, because they depend on the FIFO geometry the
 //! cursor is too narrow to see.
 
+pub mod advance;
+pub mod flip;
+pub mod method;
+pub mod reports;
+
 /// Guest address of the RSX control register's `put` slot. Writes from
 /// the guest here are mirrored into [`RsxFifoCursor::put`].
 pub const RSX_CONTROL_PUT_ADDR: u32 = 0xC000_0040;
