@@ -729,6 +729,73 @@ the method-driven path; without that flag the RSX region
 stays `ReservedZeroReadable` and put-pointer writes fault as
 the `FirstRsxWrite` checkpoint.
 
+### LV2 sys_rsx syscall surface
+
+`cellgov_lv2::host::rsx` models the kernel-side surface the
+PS3 LV2 exposes under syscall numbers 665, 667, 670, 671, and
+674. The surface is a single allocated RSX context plus a
+bump-allocated memory region and the structures the guest
+poll paths read -- `RsxReports` (37 KB: semaphore array,
+notify array, report array), `RsxDriverInfo` (0x12F8 bytes,
+handler-queue id at offset 0x12D0), and `RsxDmaControl`
+(put / get / reference fields at offsets 0x40 / 0x44 / 0x48
+after a 0x40-byte reserved prefix). Init-time fills follow
+the same patterns as the real LV2 (semaphore sentinel
+0x1337C0D3 at index 1020, companion sentinels at 1021--1023,
+zeroed notify and report tables).
+
+| Syscall | Request                    | Behaviour                                                           |
+| ------- | -------------------------- | ------------------------------------------------------------------- |
+| 665     | `SysRsxMemoryAllocate`     | Bump a 3 MB `mem_handle` from the RSX reservation range.            |
+| 667     | `SysRsxMemoryFree`         | Noop-safe (returns CELL_OK); bump allocator does not free.          |
+| 670     | `SysRsxContextAllocate`    | Emit reports / driver-info / DMA-control init + event queue.        |
+| 671     | `SysRsxContextFree`        | Noop-safe (returns CELL_OK); single-context model.                  |
+| 674     | `SysRsxContextAttribute`   | Sub-command dispatch: FLIP_BUFFER, FLIP_MODE, SET_DISPLAY_BUFFER, handler register. |
+
+**cellGcmSys forwarding.** When the title-manifest does not
+set `rsx_checkpoint`, `_cellGcmInitBody` forwards to
+`SysRsxMemoryAllocate` + `SysRsxContextAllocate`, and
+`cellGcmSetFlipHandler` forwards to `SysRsxContextAttribute`
+with the internal `CELLGOV_SET_FLIP_HANDLER` sub-command
+(package id `0x80000108`, disjoint from LV2's public
+sub-command range to avoid collisions with the RPCS3
+vblank-frequency package id `0x108`). The `rsx_checkpoint`
+path preserves the pre-sys_rsx MMIO sentinel (`0xC0000040`)
+for titles whose test-harness expects `FirstRsxWrite` as the
+checkpoint.
+
+**Single-context constraint.** CellGov matches LV2 behaviour
+by permitting at most one live `SysRsxContextAllocate` at a
+time. A second allocation while a context is live returns
+`CELL_EINVAL`. This is consistent with the PS3 LV2 kernel
+(RPCS3's `sys_rsx.cpp` enforces the same invariant; CellGov
+does not borrow it, CellGov independently models what LV2
+guarantees).
+
+**State-hash contribution.** The `RsxContext` committed state
+folds its scalar fields (allocation addresses, counters,
+display-buffer table, flip mode, handler OPDs) into
+`sync_state_hash` at every commit boundary. Pristine state
+(no `SysRsxContextAllocate` yet) has a distinct golden hash
+from the populated post-allocate state, so cross-runner
+regressions surface immediately as a hash divergence.
+
+**Scope boundary.** What sys_rsx does NOT do: no execution
+of the RSX side (the DMA-control and driver-info structs
+describe the surface, they do not drive anything); no
+flip-handler callback dispatch (the OPD is recorded via
+`SysRsxContextAttribute`, PPU dispatch into it is deferred);
+no vblank cadence tied to sys_rsx (vblank callback
+registration is recorded, not scheduled); no
+DMA-control-driven command playback (the real kernel DMAs
+FIFO commands to the RSX over a hardware channel CellGov
+does not model); no multi-display or secondary-head
+configuration. The fidelity claim is "the bytes the CPU
+reads from the reports / driver-info / DMA-control regions
+at the points a guest polls them match the bytes the real
+PS3 LV2 places there for an equivalent single-context
+configuration."
+
 ## HLE dispatch
 
 NID-based, separate from the syscall surface. `cellgov_ppu::nid_db`
@@ -757,22 +824,31 @@ allocation, and kernel-object ID allocation.
 
 ### cellGcmSys HLE (RSX initialization)
 
-Active only when the Runtime is configured for RSX-checkpoint
-detection (`set_gcm_rsx_checkpoint`), toggled per title via the
-title-manifest. Provides the CPU-visible GCM surface the
-FIFO-cursor / method-advance path below builds on: context
-allocation, label area, control register mapping, and flip-
-handler registration.
+Provides the CPU-visible GCM surface the FIFO-cursor /
+method-advance path above builds on: context allocation,
+label area, control register mapping, and flip-handler
+registration. Behaviour splits on `set_gcm_rsx_checkpoint`,
+toggled per title via the title-manifest: the checkpoint
+path maps the control register at `0xC0000040` in the RSX
+reserved region so the first guest write triggers
+`FirstRsxWrite`; the non-checkpoint path forwards init and
+flip-handler registration to the `sys_rsx` LV2 syscall
+surface so reads land on the `RsxReports` /
+`RsxDriverInfo` / `RsxDmaControl` structs the surface
+allocates.
 
 | Function                    | NID        | Behavior                                                                 |
 | --------------------------- | ---------- | ------------------------------------------------------------------------ |
-| `_cellGcmInitBody`          | 0x15bae46b | Allocates context, command buffer, callback stub, control                |
-|                             |            | register (at 0xC0000040 in RSX space), and label area.                   |
+| `_cellGcmInitBody`          | 0x15bae46b | Checkpoint path: allocates context, command buffer, callback stub, and   |
+|                             |            | control register at `0xC0000040`. Non-checkpoint path: forwards to       |
+|                             |            | `sys_rsx` (`SysRsxMemoryAllocate` + `SysRsxContextAllocate`).            |
 | `cellGcmGetConfiguration`   | 0xe315a0b2 | Writes CellGcmConfig (24 bytes) to caller pointer.                       |
 | `cellGcmGetControlRegister` | 0xa547adde | Returns control register guest address.                                  |
 | `cellGcmGetTiledPitchSize`  | 0x055bd74d | Table lookup: smallest valid tiled pitch >= input size.                  |
 | `cellGcmGetLabelAddress`    | 0xf80196c1 | Returns label_base + 0x10 \* index.                                      |
-| `cellGcmSetFlipHandler`     | 0xa41ef7e8 | Records the callback address in `RsxFlipState::handler`; not dispatched. |
+| `cellGcmSetFlipHandler`     | 0xa41ef7e8 | Records the callback address in `RsxFlipState::handler`. When a          |
+|                             |            | `sys_rsx` context is live, forwards to `SysRsxContextAttribute` with     |
+|                             |            | the internal `CELLGOV_SET_FLIP_HANDLER` sub-command. Not dispatched.     |
 
 Without the title-manifest RSX mirror flag set, the control
 register stays in the RSX reserved region so the guest's first

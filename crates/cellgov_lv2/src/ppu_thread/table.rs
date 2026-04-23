@@ -210,8 +210,8 @@ impl PpuThreadTable {
 
     /// FNV-1a of the table for determinism checking. Folds id,
     /// unit_id, state, block reason (via
-    /// [`GuestBlockReason::stable_tag`]), attrs, exit value,
-    /// and the join-waiter list (length-prefixed to avoid
+    /// [`super::GuestBlockReason::stable_tag`]), attrs, exit
+    /// value, and the join-waiter list (length-prefixed to avoid
     /// boundary collisions) in BTreeMap order.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();

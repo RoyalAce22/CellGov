@@ -51,7 +51,10 @@ Pre-Alpha. Capability today:
   Stardust HD, WipEout HD Fury. See [docs/titles.md](docs/titles.md).
 - **PPU**: 119 instruction variants with quickening and super-pairing.
 - **SPU**: full interpreter.
-- **LV2**: 47 syscalls, 20 HLE exports.
+- **LV2**: 54 syscalls, 21 HLE exports. Includes the `sys_rsx`
+  syscall surface (memory allocate/free, context allocate/free,
+  context attribute) with `RsxReports`, `RsxDriverInfo`, and
+  `RsxDmaControl` init fidelity.
 - **Multi-PPU threading** via `sys_ppu_thread_create` / `_exit` / `_join`.
 - **Synchronization primitives**: lwmutex, heavy mutex, semaphore,
   event queue, event flag, and condition variable -- real block and
@@ -60,16 +63,17 @@ Pre-Alpha. Capability today:
   SPU `MFC_GETLLAR` / `MFC_PUTLLC` against a shared 128-byte-line
   reservation table, with cross-unit write clear-sweep.
 - **RSX CPU-side completion**: FIFO cursor, NV method decoder,
-  and flip-status state machine model the values the guest
-  polls for (labels, flips, GPU semaphores). No pixels, no
-  vblank.
+  flip-status state machine, and LV2 `sys_rsx` init surface
+  model the values the guest polls for (labels, flips, GPU
+  semaphores, reports/driver-info/DMA-control structs). No
+  pixels, no vblank.
 - **Memory**: PS3-spec sparse address space, store forwarding.
 - **Throughput**: basic-block batching over a predecoded shadow.
 - **Tracing**: per-instruction state hashes, divergence scanner.
 - **Cross-runner**: normalized observation schema against RPCS3;
   disc ISOs via `cellgov_firmware decrypt-self`.
 - **Firmware**: standalone PUP and retail SELF decrypter.
-- 1,789 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 1,965 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [`docs/architecture.md`](docs/architecture.md) for full
 technical details on the pipeline, memory model, shadow passes,

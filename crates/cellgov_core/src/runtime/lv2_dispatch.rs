@@ -48,6 +48,14 @@ impl Runtime {
                             .set_status_override(target, UnitStatus::Runnable);
                     }
                 }
+                Effect::RsxFlipRequest { buffer_index } => {
+                    // sys_rsx_context_attribute FLIP_BUFFER routes
+                    // flips through here; commit_step's per-
+                    // boundary hook then drives WAITING -> DONE on
+                    // the next boundary, matching the
+                    // NV4097_FLIP_BUFFER observable shape.
+                    self.rsx_flip.request_flip(*buffer_index);
+                }
                 _ => {}
             }
         }

@@ -1635,8 +1635,8 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
         _ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
+        use crate::rsx::method::{GCM_FLIP_COMMAND, NV_COUNT_SHIFT};
         use crate::rsx::RSX_CONTROL_PUT_ADDR;
-        use crate::rsx_method::{GCM_FLIP_COMMAND, NV_COUNT_SHIFT};
         use cellgov_effects::WritePayload;
         use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
@@ -1688,7 +1688,7 @@ fn rsx_flip_waiting_observable_between_two_commits_then_done() {
     // Batch 3 (or any later boundary): pending_at_entry=true,
     //   DONE transition fires.
     //   Flip state at end of batch 3: DONE / pending=false.
-    use crate::rsx_flip::{
+    use crate::rsx::flip::{
         CELL_GCM_DISPLAY_FLIP_STATUS_DONE, CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
     };
     const FIFO_BASE: u32 = 0x200;
@@ -1792,7 +1792,7 @@ fn rsx_flip_request_applied_same_batch_does_not_immediately_transition() {
     // batch. `flip_pending_at_entry` was false (pending hasn't
     // been set yet), so the post-apply hook skips the transition.
     // Pins the "one-batch-delay" contract the design doc calls out.
-    use crate::rsx_flip::CELL_GCM_DISPLAY_FLIP_STATUS_WAITING;
+    use crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_WAITING;
     let mut rt = build(4096, 1, 100);
     rt.registry_mut()
         .register_with(|id| RsxFlipRequestEmitterUnit {
@@ -1819,7 +1819,7 @@ fn rsx_flip_transitions_to_done_on_next_commit_boundary() {
     // RsxFlipRequest (WAITING + pending=true); step 2 is any
     // commit (no flip-related emission); DONE transition fires
     // because pending_at_entry was true.
-    use crate::rsx_flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE;
+    use crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE;
     let mut rt = build(4096, 1, 100);
     rt.registry_mut()
         .register_with(|id| RsxFlipRequestEmitterUnit {
@@ -1848,7 +1848,7 @@ fn rsx_flip_second_request_while_pending_resolves_one_transition() {
     // pending==true updates buffer_index but does
     // NOT add a second transition -- exactly one WAITING -> DONE
     // fires for the sequence.
-    use crate::rsx_flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE;
+    use crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE;
     let mut rt = build(4096, 1, 100);
     rt.registry_mut()
         .register_with(|id| RsxFlipRequestEmitterUnit {
@@ -2071,10 +2071,10 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
         _ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
-        use crate::rsx::RSX_CONTROL_PUT_ADDR;
-        use crate::rsx_method::{
+        use crate::rsx::method::{
             NV406E_SEMAPHORE_OFFSET, NV406E_SEMAPHORE_RELEASE, NV_COUNT_SHIFT,
         };
+        use crate::rsx::RSX_CONTROL_PUT_ADDR;
         use cellgov_effects::WritePayload;
         use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
@@ -2970,4 +2970,351 @@ fn event_queue_receive_wake_with_none_payload_panics() {
         },
     );
     rt.resolve_sync_wakes_for_test(&[waiter]);
+}
+
+// sys_rsx end-to-end microtests. Each runs cellGcmInitBody with
+// rsx_checkpoint off so the HLE forwards to sys_rsx, then asserts
+// observable post-conditions (reports init pattern, label-255
+// sentinel, reports region size, DMA control layout, event-port
+// registration, flip sub-command state transitions). Exercised at
+// the runtime layer rather than as guest ELFs so the full HLE +
+// LV2 dispatch + commit pipeline path runs without external build
+// dependencies.
+
+fn phase21_runtime_with_cellgcm_inited() -> (Runtime, cellgov_event::UnitId) {
+    let mut rt = Runtime::new(
+        cellgov_mem::GuestMemory::new(0x4000_0000),
+        Budget::new(1),
+        100,
+    );
+    rt.set_hle_heap_base(0x10_0000);
+    rt.set_gcm_rsx_checkpoint(false);
+    let unit_id = cellgov_event::UnitId::new(0);
+    rt.registry_mut()
+        .register_with(|id| cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End]));
+    let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
+    rt.dispatch_hle(
+        unit_id,
+        crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
+        &args,
+    );
+    (rt, unit_id)
+}
+
+fn read_guest_u32_be(rt: &Runtime, addr: u32) -> u32 {
+    let mem = rt.memory().as_bytes();
+    let a = addr as usize;
+    u32::from_be_bytes([mem[a], mem[a + 1], mem[a + 2], mem[a + 3]])
+}
+
+fn read_guest_u64_be(rt: &Runtime, addr: u32) -> u64 {
+    let mem = rt.memory().as_bytes();
+    let a = addr as usize;
+    u64::from_be_bytes([
+        mem[a],
+        mem[a + 1],
+        mem[a + 2],
+        mem[a + 3],
+        mem[a + 4],
+        mem[a + 5],
+        mem[a + 6],
+        mem[a + 7],
+    ])
+}
+
+#[test]
+fn phase21_rsx_context_allocate_init_pattern() {
+    // sys_rsx_context_allocate seeds the semaphore slots with the
+    // repeating 4-u32 pattern (0x1337C0D3 / BABE / BEEF / F001),
+    // notify timestamps with -1, and report timestamp + pad with -1.
+    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+    let reports_base = rt.lv2_host().sys_rsx_context().reports_addr;
+
+    // Semaphore sentinels at the first group-of-4.
+    assert_eq!(read_guest_u32_be(&rt, reports_base), 0x1337_C0D3);
+    assert_eq!(read_guest_u32_be(&rt, reports_base + 4), 0x1337_BABE);
+    assert_eq!(read_guest_u32_be(&rt, reports_base + 8), 0x1337_BEEF);
+    assert_eq!(read_guest_u32_be(&rt, reports_base + 12), 0x1337_F001);
+
+    // Notify[0].timestamp at reports_base + 0x1000 = u64::MAX.
+    assert_eq!(read_guest_u64_be(&rt, reports_base + 0x1000), u64::MAX);
+    // Notify[0].zero at +0x1008 = 0.
+    assert_eq!(read_guest_u64_be(&rt, reports_base + 0x1008), 0);
+
+    // Report[0].timestamp at reports_base + 0x1400 = u64::MAX.
+    assert_eq!(read_guest_u64_be(&rt, reports_base + 0x1400), u64::MAX);
+    // Report[0].val at +0x1408 = 0.
+    assert_eq!(read_guest_u32_be(&rt, reports_base + 0x1408), 0);
+    // Report[0].pad at +0x140C = u32::MAX.
+    assert_eq!(read_guest_u32_be(&rt, reports_base + 0x140C), u32::MAX);
+}
+
+#[test]
+fn phase21_rsx_label_255_sentinel_read() {
+    // cellGcmGetLabelAddress(255) returns the guest address that
+    // reads the LV2 sentinel 0x1337_C0D3 post-init. Exercise
+    // `label_addr + 255 * 0x10` directly since the label-address
+    // math mirrors what cellGcmGetLabelAddress computes.
+    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+    let label_addr = rt.hle.gcm.label_addr;
+    let label_255_addr = label_addr + 255 * 0x10;
+    assert_eq!(read_guest_u32_be(&rt, label_255_addr), 0x1337_C0D3);
+}
+
+#[test]
+fn phase21_rsx_reports_region_full_size() {
+    // Past the 4 KB semaphore region the notify and report arrays
+    // carry their init values; the pre-sys_rsx 4 KB-label-region
+    // world would have returned zeros here.
+    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+    let label_addr = rt.hle.gcm.label_addr;
+    // Notify[63] (last entry) timestamp sits at 0x1000 + 63 * 16.
+    let notify_63 = label_addr + 0x1000 + 63 * 16;
+    assert_eq!(read_guest_u64_be(&rt, notify_63), u64::MAX);
+    // Report[2047] pad at end of region.
+    let report_2047_pad = label_addr + 0x1400 + 2047 * 16 + 12;
+    assert_eq!(read_guest_u32_be(&rt, report_2047_pad), u32::MAX);
+}
+
+#[test]
+fn phase21_rsx_dma_control_layout() {
+    // put / get / ref live at +0x40 / +0x44 / +0x48 from
+    // dma_control_addr; cellGcmGetControlRegister returns
+    // dma_control_addr + 0x40 as the guest-facing handle.
+    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+    let dma_base = rt.lv2_host().sys_rsx_context().dma_control_addr;
+    let ctrl = rt.hle.gcm.control_addr;
+    assert_eq!(ctrl, dma_base + 0x40);
+    // The three slots are zero-initialised by the HLE heap; this
+    // test pins the layout, not the values.
+    assert_eq!(read_guest_u32_be(&rt, dma_base + 0x40), 0);
+    assert_eq!(read_guest_u32_be(&rt, dma_base + 0x44), 0);
+    assert_eq!(read_guest_u32_be(&rt, dma_base + 0x48), 0);
+}
+
+#[test]
+fn phase21_rsx_event_port_registered() {
+    // RsxDriverInfo.handler_queue at offset 0x12D0 holds the
+    // event-queue id sys_rsx_context_allocate created. Non-zero
+    // means the queue exists; the LV2 host tracks the same id.
+    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+    let driver_info_addr = rt.lv2_host().sys_rsx_context().driver_info_addr;
+    let handler_queue = read_guest_u32_be(&rt, driver_info_addr + 0x12D0);
+    assert_ne!(handler_queue, 0);
+    assert_eq!(
+        handler_queue,
+        rt.lv2_host().sys_rsx_context().event_queue_id
+    );
+    assert_eq!(handler_queue, rt.lv2_host().sys_rsx_context().event_port_id);
+}
+
+#[test]
+fn phase21_sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
+    // Schedule-stability check: sys_rsx syscall dispatch writes a
+    // fixed set of guest addresses (reports / driver info / dma
+    // control). If the concurrently-running PPU units touch only
+    // disjoint addresses, the final memory state does not depend
+    // on when during the run sys_rsx fires. This is the sys_rsx
+    // analogue of the exploration engine's schedule-stable
+    // classification.
+    fn run_with_dispatch_at(position: usize) -> u64 {
+        let mut rt = Runtime::new(
+            cellgov_mem::GuestMemory::new(0x4000_0000),
+            Budget::new(1),
+            100,
+        );
+        rt.set_hle_heap_base(0x10_0000);
+        rt.set_gcm_rsx_checkpoint(false);
+
+        // Two FakeIsaUnits writing disjoint addresses well outside
+        // the sys_rsx region (which starts at 0x3000_0000).
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(
+                id,
+                vec![
+                    cellgov_exec::FakeOp::LoadImm(0xAA),
+                    cellgov_exec::FakeOp::SharedStore {
+                        addr: 0x2_0000,
+                        len: 4,
+                    },
+                    cellgov_exec::FakeOp::End,
+                ],
+            )
+        });
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(
+                id,
+                vec![
+                    cellgov_exec::FakeOp::LoadImm(0xBB),
+                    cellgov_exec::FakeOp::SharedStore {
+                        addr: 0x2_0100,
+                        len: 4,
+                    },
+                    cellgov_exec::FakeOp::End,
+                ],
+            )
+        });
+        // A third unit so sys_rsx has a dispatch source.
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+        let sys_rsx_source = cellgov_event::UnitId::new(2);
+
+        let sys_rsx_init = |rt: &mut Runtime| {
+            let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
+            rt.dispatch_hle(
+                sys_rsx_source,
+                crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
+                &args,
+            );
+        };
+
+        let mut step_count = 0;
+        loop {
+            if step_count == position {
+                sys_rsx_init(&mut rt);
+            }
+            match rt.step() {
+                Ok(step) => {
+                    let _ = rt.commit_step(&step.result, &step.effects);
+                }
+                Err(_) => break,
+            }
+            step_count += 1;
+            if step_count > 20 {
+                break;
+            }
+        }
+        if step_count <= position {
+            sys_rsx_init(&mut rt);
+        }
+        rt.memory().content_hash()
+    }
+
+    let early = run_with_dispatch_at(0);
+    let mid = run_with_dispatch_at(2);
+    let late = run_with_dispatch_at(10);
+
+    assert_eq!(
+        early, mid,
+        "sys_rsx dispatch at step 0 vs step 2 must produce identical memory state"
+    );
+    assert_eq!(
+        mid, late,
+        "sys_rsx dispatch at step 2 vs step 10 must produce identical memory state"
+    );
+}
+
+#[test]
+fn phase21_multi_primitive_determinism_canary_with_sys_rsx_content() {
+    // sys_rsx extension of the multi-primitive determinism canary.
+    // Both runs must produce byte-identical (memory, sync) hashes
+    // after cellGcmInitBody forwards through sys_rsx (37 KB reports
+    // init + 0x12F8 driver info init + 0x300000 reservation +
+    // event-queue creation). If any sys_rsx output path drifts
+    // between runs, these hashes diverge.
+    fn run_once() -> (u64, u64) {
+        let mut rt = Runtime::new(
+            cellgov_mem::GuestMemory::new(0x4000_0000),
+            Budget::new(1),
+            100,
+        );
+        rt.set_hle_heap_base(0x10_0000);
+        rt.set_gcm_rsx_checkpoint(false);
+        let unit_id = cellgov_event::UnitId::new(0);
+        rt.registry_mut().register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+        let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
+        rt.dispatch_hle(
+            unit_id,
+            crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
+            &args,
+        );
+        // Drive the sub-command flip path too so rsx_flip contributes.
+        let ctx_id = rt.lv2_host().sys_rsx_context().context_id;
+        rt.dispatch_lv2_request(
+            cellgov_lv2::Lv2Request::SysRsxContextAttribute {
+                context_id: ctx_id,
+                package_id: cellgov_lv2::host::PACKAGE_FLIP_BUFFER,
+                a3: 0,
+                a4: 0x8000_0000,
+                a5: 0,
+                a6: 0,
+            },
+            unit_id,
+        );
+        // Handler registration routed through sys_rsx.
+        rt.dispatch_lv2_request(
+            cellgov_lv2::Lv2Request::SysRsxContextAttribute {
+                context_id: ctx_id,
+                package_id: cellgov_lv2::host::PACKAGE_CELLGOV_SET_FLIP_HANDLER,
+                a3: 0x1234_5678,
+                a4: 0,
+                a5: 0,
+                a6: 0,
+            },
+            unit_id,
+        );
+        (rt.memory().content_hash(), rt.sync_state_hash())
+    }
+
+    let run_a = run_once();
+    let run_b = run_once();
+    assert_eq!(
+        run_a, run_b,
+        "sys_rsx canary: memory_hash and sync_state_hash must \
+         match byte-identically across two runs"
+    );
+}
+
+#[test]
+fn phase21_rsx_context_attribute_flip_drives_status_transitions() {
+    // Dispatching FLIP_BUFFER via sub-command 0x102 emits an
+    // RsxFlipRequest effect; one commit boundary later the flip
+    // status transitions to DONE, matching the NV4097_FLIP_BUFFER
+    // path.
+    let (mut rt, unit_id) = phase21_runtime_with_cellgcm_inited();
+    let ctx_id = rt.lv2_host().sys_rsx_context().context_id;
+
+    assert_eq!(
+        rt.rsx_flip().status(),
+        crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
+        "pre-request: DONE"
+    );
+
+    rt.dispatch_lv2_request(
+        cellgov_lv2::Lv2Request::SysRsxContextAttribute {
+            context_id: ctx_id,
+            package_id: cellgov_lv2::host::PACKAGE_FLIP_BUFFER,
+            a3: 0,
+            a4: 0x8000_0001,
+            a5: 0,
+            a6: 0,
+        },
+        unit_id,
+    );
+
+    assert_eq!(
+        rt.rsx_flip().status(),
+        crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
+        "post-request: WAITING + pending"
+    );
+    assert!(rt.rsx_flip().pending());
+    assert_eq!(rt.rsx_flip().buffer_index(), 1);
+
+    // Drive one empty commit boundary to advance the pending flip
+    // to DONE, matching the NV4097_FLIP_BUFFER path's observable
+    // two-batch transition.
+    rt.registry_mut()
+        .register_with(|id| cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End]));
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+
+    assert_eq!(
+        rt.rsx_flip().status(),
+        crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
+        "post-boundary: DONE"
+    );
+    assert!(!rt.rsx_flip().pending());
 }
