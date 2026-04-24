@@ -206,6 +206,7 @@ fn rlwinm_slwi() {
             sh: 16,
             mb: 0,
             me: 15,
+            rc: false,
         },
         &mut s,
     );
@@ -260,6 +261,7 @@ fn rlwnm_rotates_by_rb_low_5_bits() {
             rb: 8,
             mb: 0,
             me: 31,
+            rc: false,
         },
         &mut s,
     );
@@ -279,6 +281,7 @@ fn rlwnm_ignores_high_bits_of_rb() {
             rb: 2,
             mb: 0,
             me: 31,
+            rc: false,
         },
         &mut s,
     );
@@ -333,14 +336,21 @@ fn stvx_aligns_ea_and_emits_store_effect() {
 fn extsw_sign_extends_low_32_bits() {
     let mut s = PpuState::new();
     s.gpr[3] = 0x0000_0000_8000_0000;
-    exec_no_mem(&PpuInstruction::Extsw { ra: 4, rs: 3 }, &mut s);
+    exec_no_mem(
+        &PpuInstruction::Extsw {
+            ra: 4,
+            rs: 3,
+            rc: false,
+        },
+        &mut s,
+    );
     assert_eq!(s.gpr[4], 0xFFFF_FFFF_8000_0000);
 }
 
 #[test]
 fn sc_returns_syscall() {
     let mut s = PpuState::new();
-    let result = exec_no_mem(&PpuInstruction::Sc, &mut s);
+    let result = exec_no_mem(&PpuInstruction::Sc { lev: 0 }, &mut s);
     assert!(matches!(result, ExecuteVerdict::Syscall));
 }
 
@@ -479,6 +489,8 @@ fn divdu_basic() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -495,6 +507,8 @@ fn divdu_divide_by_zero() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -511,6 +525,8 @@ fn divdu_large_values() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -527,6 +543,8 @@ fn divd_signed() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -543,6 +561,8 @@ fn divd_divide_by_zero() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -559,6 +579,8 @@ fn mulld_basic() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -575,6 +597,8 @@ fn mulld_wraps_on_overflow() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -593,6 +617,8 @@ fn adde_adds_with_carry_in_and_sets_carry_out() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -611,6 +637,8 @@ fn adde_without_carry_clears_ca() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -628,6 +656,7 @@ fn mulhdu_takes_high_64_bits_of_u128_product() {
             rt: 5,
             ra: 3,
             rb: 4,
+            rc: false,
         },
         &mut s,
     );
@@ -644,6 +673,7 @@ fn mulhdu_small_product_is_zero() {
             rt: 5,
             ra: 3,
             rb: 4,
+            rc: false,
         },
         &mut s,
     );
@@ -947,6 +977,7 @@ fn mulhw_signed_high_32_bits() {
             rt: 3,
             ra: 4,
             rb: 5,
+            rc: false,
         },
         &mut s,
     );
@@ -963,6 +994,7 @@ fn mulhw_positive_produces_zero_high_bits() {
             rt: 3,
             ra: 4,
             rb: 5,
+            rc: false,
         },
         &mut s,
     );
@@ -973,7 +1005,14 @@ fn mulhw_positive_produces_zero_high_bits() {
 fn cntlzd_counts_64_for_zero() {
     let mut s = PpuState::new();
     s.gpr[5] = 0;
-    exec_no_mem(&PpuInstruction::Cntlzd { ra: 3, rs: 5 }, &mut s);
+    exec_no_mem(
+        &PpuInstruction::Cntlzd {
+            ra: 3,
+            rs: 5,
+            rc: false,
+        },
+        &mut s,
+    );
     assert_eq!(s.gpr[3], 64);
 }
 
@@ -981,7 +1020,14 @@ fn cntlzd_counts_64_for_zero() {
 fn cntlzd_high_bit_set_returns_zero() {
     let mut s = PpuState::new();
     s.gpr[5] = 1u64 << 63;
-    exec_no_mem(&PpuInstruction::Cntlzd { ra: 3, rs: 5 }, &mut s);
+    exec_no_mem(
+        &PpuInstruction::Cntlzd {
+            ra: 3,
+            rs: 5,
+            rc: false,
+        },
+        &mut s,
+    );
     assert_eq!(s.gpr[3], 0);
 }
 
@@ -990,7 +1036,15 @@ fn addze_with_ca_zero_copies_ra() {
     let mut s = PpuState::new();
     s.gpr[4] = 42;
     s.set_xer_ca(false);
-    exec_no_mem(&PpuInstruction::Addze { rt: 3, ra: 4 }, &mut s);
+    exec_no_mem(
+        &PpuInstruction::Addze {
+            rt: 3,
+            ra: 4,
+            oe: false,
+            rc: false,
+        },
+        &mut s,
+    );
     assert_eq!(s.gpr[3], 42);
     assert!(!s.xer_ca());
 }
@@ -1000,7 +1054,15 @@ fn addze_with_ca_set_adds_one() {
     let mut s = PpuState::new();
     s.gpr[4] = 42;
     s.set_xer_ca(true);
-    exec_no_mem(&PpuInstruction::Addze { rt: 3, ra: 4 }, &mut s);
+    exec_no_mem(
+        &PpuInstruction::Addze {
+            rt: 3,
+            ra: 4,
+            oe: false,
+            rc: false,
+        },
+        &mut s,
+    );
     assert_eq!(s.gpr[3], 43);
     assert!(!s.xer_ca());
 }
@@ -1010,7 +1072,15 @@ fn addze_overflow_sets_ca() {
     let mut s = PpuState::new();
     s.gpr[4] = u64::MAX;
     s.set_xer_ca(true);
-    exec_no_mem(&PpuInstruction::Addze { rt: 3, ra: 4 }, &mut s);
+    exec_no_mem(
+        &PpuInstruction::Addze {
+            rt: 3,
+            ra: 4,
+            oe: false,
+            rc: false,
+        },
+        &mut s,
+    );
     assert_eq!(s.gpr[3], 0);
     assert!(s.xer_ca());
 }
@@ -1025,6 +1095,7 @@ fn orc_is_or_with_complement_rb() {
             ra: 3,
             rs: 4,
             rb: 5,
+            rc: false,
         },
         &mut s,
     );
@@ -1155,6 +1226,7 @@ fn mr_matches_or_same_reg() {
             ra: 3,
             rs: 4,
             rb: 4,
+            rc: false,
         },
         &mut s1,
     );
@@ -1588,6 +1660,7 @@ fn clrldi_matches_rldicl_sh0() {
             rs: 4,
             sh: 0,
             mb: 32,
+            rc: false,
         },
         &mut s1,
     );
@@ -1632,6 +1705,7 @@ fn sldi_matches_rldicr() {
             rs: 4,
             sh: 8,
             me: 55,
+            rc: false,
         },
         &mut s1,
     );
@@ -1669,6 +1743,7 @@ fn srdi_matches_rldicl() {
             rs: 4,
             sh: 56,
             mb: 8,
+            rc: false,
         },
         &mut s1,
     );
@@ -1866,6 +1941,8 @@ fn subfc_computes_rb_minus_ra_and_sets_ca_on_no_borrow() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -1883,6 +1960,8 @@ fn subfc_borrow_clears_ca() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -1902,6 +1981,8 @@ fn subfe_uses_carry_in() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -1913,6 +1994,8 @@ fn subfe_uses_carry_in() {
             rt: 5,
             ra: 3,
             rb: 4,
+            oe: false,
+            rc: false,
         },
         &mut s,
     );
@@ -1929,6 +2012,7 @@ fn sraw_preserves_sign_and_caps_at_31() {
             ra: 5,
             rs: 3,
             rb: 4,
+            rc: false,
         },
         &mut s,
     );
@@ -1945,6 +2029,7 @@ fn srad_signed_64_bit_shift() {
             ra: 5,
             rs: 3,
             rb: 4,
+            rc: false,
         },
         &mut s,
     );
@@ -1961,6 +2046,7 @@ fn sradi_shift_zero_clears_ca_and_preserves_value() {
             ra: 4,
             rs: 3,
             sh: 0,
+            rc: false,
         },
         &mut s,
     );
@@ -1978,6 +2064,7 @@ fn mulhd_signed_high_doubleword() {
             rt: 5,
             ra: 3,
             rb: 4,
+            rc: false,
         },
         &mut s,
     );
@@ -1990,6 +2077,7 @@ fn mulhd_signed_high_doubleword() {
             rt: 5,
             ra: 3,
             rb: 4,
+            rc: false,
         },
         &mut s,
     );
@@ -2148,4 +2236,621 @@ fn lvrx_aligned_ea_zero_bytes() {
         &mut effects,
     );
     assert_eq!(s.vr[7], 0);
+}
+
+#[test]
+fn cmpdi_compares_full_64_bits() {
+    // With only the low 32 bits examined, 0x1_0000_0000 would compare
+    // equal to zero. cmpdi must see the full doubleword.
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x1_0000_0000;
+    exec_no_mem(
+        &PpuInstruction::Cmpdi {
+            bf: 0,
+            ra: 3,
+            imm: 0,
+        },
+        &mut s,
+    );
+    assert_eq!(s.cr_field(0), 0b0100); // GT
+}
+
+#[test]
+fn cmpldi_compares_full_64_bits_unsigned() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x1_0000_0000;
+    exec_no_mem(
+        &PpuInstruction::Cmpldi {
+            bf: 1,
+            ra: 3,
+            imm: 0,
+        },
+        &mut s,
+    );
+    assert_eq!(s.cr_field(1), 0b0100); // GT
+}
+
+#[test]
+fn stbu_updates_ra_with_effective_address() {
+    let mem = vec![0u8; 0x100];
+    let mut s = PpuState::new();
+    s.gpr[1] = 0x20;
+    s.gpr[6] = 0xAB;
+    let mut effects = Vec::new();
+    exec_with_mem(
+        &PpuInstruction::Stbu {
+            rs: 6,
+            ra: 1,
+            imm: -4,
+        },
+        &mut s,
+        0,
+        &mem,
+        &mut effects,
+    );
+    // EA = 0x20 + (-4) = 0x1C; RA receives EA after the store.
+    assert_eq!(s.gpr[1], 0x1C);
+    let found = effects.iter().any(|e| match e {
+        Effect::SharedWriteIntent { range, .. } => range.start().raw() == 0x1C,
+        _ => false,
+    });
+    assert!(found, "stbu should emit a byte store at EA");
+}
+
+#[test]
+fn sthu_updates_ra_with_effective_address() {
+    let mem = vec![0u8; 0x100];
+    let mut s = PpuState::new();
+    s.gpr[1] = 0x40;
+    s.gpr[5] = 0xBEEF;
+    let mut effects = Vec::new();
+    exec_with_mem(
+        &PpuInstruction::Sthu {
+            rs: 5,
+            ra: 1,
+            imm: -8,
+        },
+        &mut s,
+        0,
+        &mem,
+        &mut effects,
+    );
+    assert_eq!(s.gpr[1], 0x38);
+    let found = effects.iter().any(|e| match e {
+        Effect::SharedWriteIntent { range, .. } => range.start().raw() == 0x38,
+        _ => false,
+    });
+    assert!(found, "sthu should emit a halfword store at EA");
+}
+
+#[test]
+fn rldic_clears_both_sides() {
+    // rldic RA, RS, SH=4, MB=32: rotate left 4, keep bits 32..=(63-4)=59.
+    // RS=0xFFFF_FFFF_FFFF_FFFF, rotated left 4 still saturated, mask zeroes
+    // bits 0..=31 and 60..=63.
+    let mut s = PpuState::new();
+    s.gpr[4] = 0xFFFF_FFFF_FFFF_FFFF;
+    exec_no_mem(
+        &PpuInstruction::Rldic {
+            ra: 5,
+            rs: 4,
+            sh: 4,
+            mb: 32,
+            rc: false,
+        },
+        &mut s,
+    );
+    // bits 32..=59 set, others clear.
+    let expected: u64 = ((1u64 << 28) - 1) << 4;
+    assert_eq!(s.gpr[5], expected);
+}
+
+#[test]
+fn rldimi_preserves_prior_ra_outside_mask() {
+    // rldimi RA, RS, SH=16, MB=0: mask = 0..=(63-16)=47, preserve 48..=63.
+    let mut s = PpuState::new();
+    s.gpr[4] = 0xDEAD_BEEF_CAFE_BABE; // RS
+    s.gpr[5] = 0x1111_2222_3333_4444; // prior RA
+    exec_no_mem(
+        &PpuInstruction::Rldimi {
+            ra: 5,
+            rs: 4,
+            sh: 16,
+            mb: 0,
+            rc: false,
+        },
+        &mut s,
+    );
+    // rotated = RS rotl 16 = 0xBEEF_CAFE_BABE_DEAD
+    // mask = 0xFFFF_FFFF_FFFF_0000 (bits 0..=47 set)
+    // merged = (rotated & mask) | (prior & !mask)
+    //        = 0xBEEF_CAFE_BABE_0000 | 0x0000_0000_0000_4444
+    //        = 0xBEEF_CAFE_BABE_4444
+    assert_eq!(s.gpr[5], 0xBEEF_CAFE_BABE_4444);
+}
+
+#[test]
+fn srad_shifts_full_64_bits_arithmetically() {
+    let mut s = PpuState::new();
+    s.gpr[4] = 0xFFFF_FFFF_FFFF_FFF0; // -16
+    s.gpr[5] = 4;
+    exec_no_mem(
+        &PpuInstruction::Srad {
+            ra: 3,
+            rs: 4,
+            rb: 5,
+            rc: false,
+        },
+        &mut s,
+    );
+    // -16 >> 4 = -1, sign-extended across all 64 bits.
+    assert_eq!(s.gpr[3], 0xFFFF_FFFF_FFFF_FFFF);
+}
+
+#[test]
+fn mftbu_returns_upper_32_bits_of_tb() {
+    let mut s = PpuState::new();
+    s.tb = 0xAAAA_BBBB_0000_0000 - 512; // post-increment lands at 0xAAAA_BBBB_0000_0000
+    exec_no_mem(&PpuInstruction::Mftbu { rt: 6 }, &mut s);
+    assert_eq!(s.gpr[6], 0xAAAA_BBBB);
+}
+
+#[test]
+fn vsldoi_shifts_by_shb_bytes() {
+    let mut s = PpuState::new();
+    s.vr[1] = u128::from_be_bytes([
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE,
+        0xFF,
+    ]);
+    s.vr[2] = u128::from_be_bytes([
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+        0x10,
+    ]);
+    exec_no_mem(
+        &PpuInstruction::Vsldoi {
+            vt: 3,
+            va: 1,
+            vb: 2,
+            shb: 4,
+        },
+        &mut s,
+    );
+    // Shift left by 4 bytes: result[0..12] = va[4..16], result[12..16] = vb[0..4].
+    let expected = u128::from_be_bytes([
+        0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x01, 0x02, 0x03,
+        0x04,
+    ]);
+    assert_eq!(s.vr[3], expected);
+}
+
+// -- Rc / OE regression tests --
+// Record form (Rc=1) must set CR0 LT/GT/EQ from the signed 64-bit
+// result, plus the sticky SO from XER. OE=1 must set XER OV and the
+// sticky SO on overflow.
+
+#[test]
+fn add_dot_sets_cr0_eq_when_result_is_zero() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 1;
+    s.gpr[4] = (-1i64) as u64;
+    exec_no_mem(
+        &PpuInstruction::Add {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: false,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0);
+    assert_eq!(s.cr_field(0), 0b0010);
+}
+
+#[test]
+fn add_dot_sets_cr0_lt_when_result_is_negative() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 1;
+    s.gpr[4] = (-2i64) as u64;
+    exec_no_mem(
+        &PpuInstruction::Add {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: false,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.cr_field(0), 0b1000);
+}
+
+#[test]
+fn add_rc_zero_leaves_cr0_untouched() {
+    let mut s = PpuState::new();
+    s.set_cr_field(0, 0b0100);
+    s.gpr[3] = 1;
+    s.gpr[4] = 2;
+    exec_no_mem(
+        &PpuInstruction::Add {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: false,
+            rc: false,
+        },
+        &mut s,
+    );
+    assert_eq!(s.cr_field(0), 0b0100, "CR0 preserved when Rc=0");
+}
+
+#[test]
+fn addo_sets_xer_ov_and_sticky_so() {
+    let mut s = PpuState::new();
+    s.gpr[3] = i64::MAX as u64;
+    s.gpr[4] = 1;
+    exec_no_mem(
+        &PpuInstruction::Add {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: true,
+            rc: false,
+        },
+        &mut s,
+    );
+    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30, "OV set");
+    assert_eq!(s.xer & (1u64 << 31), 1u64 << 31, "SO set");
+
+    // Non-overflow op clears OV but SO stays sticky.
+    s.gpr[3] = 1;
+    s.gpr[4] = 2;
+    exec_no_mem(
+        &PpuInstruction::Add {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: true,
+            rc: false,
+        },
+        &mut s,
+    );
+    assert_eq!(s.xer & (1u64 << 30), 0, "OV cleared");
+    assert_eq!(s.xer & (1u64 << 31), 1u64 << 31, "SO remains sticky");
+}
+
+#[test]
+fn or_dot_sets_cr0_without_touching_result() {
+    // Catches the regression where `or. rA, rS, rS` was quickened to
+    // `Mr`, which does not update CR0.
+    let mut s = PpuState::new();
+    s.gpr[4] = (-5i64) as u64;
+    exec_no_mem(
+        &PpuInstruction::Or {
+            ra: 3,
+            rs: 4,
+            rb: 4,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[3], (-5i64) as u64);
+    assert_eq!(s.cr_field(0), 0b1000, "LT from negative result");
+}
+
+#[test]
+fn and_dot_sets_cr0_eq_on_zero() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 0xFF00;
+    s.gpr[4] = 0x00FF;
+    exec_no_mem(
+        &PpuInstruction::And {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0);
+    assert_eq!(s.cr_field(0), 0b0010);
+}
+
+#[test]
+fn slw_dot_sets_cr0_from_sign_extended_low_32() {
+    // Result is 0x8000_0000 as u32, which sign-extends to a negative
+    // i64 -- CR0 should read LT.
+    let mut s = PpuState::new();
+    s.gpr[3] = 1;
+    s.gpr[4] = 31;
+    exec_no_mem(
+        &PpuInstruction::Slw {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0x8000_0000);
+    assert_eq!(s.cr_field(0), 0b1000);
+}
+
+#[test]
+fn srad_dot_sets_cr0_and_preserves_ca() {
+    let mut s = PpuState::new();
+    s.gpr[3] = (-1i64) as u64; // all-ones, guaranteed 1-bit shifted out.
+    s.gpr[4] = 1;
+    exec_no_mem(
+        &PpuInstruction::Srad {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            rc: true,
+        },
+        &mut s,
+    );
+    // -1 >> 1 = -1, and a 1 bit was shifted out of a negative value: CA set.
+    assert!(s.xer_ca(), "CA set from nonzero bits shifted out");
+    assert_eq!(s.cr_field(0), 0b1000, "LT from negative result");
+}
+
+#[test]
+fn sradi_dot_sets_cr0() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x8000_0000_0000_0000;
+    exec_no_mem(
+        &PpuInstruction::Sradi {
+            ra: 5,
+            rs: 3,
+            sh: 8,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.cr_field(0), 0b1000);
+}
+
+#[test]
+fn cntlzd_dot_sets_cr0_gt_when_value_nonzero() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 1u64 << 40;
+    exec_no_mem(
+        &PpuInstruction::Cntlzd {
+            ra: 5,
+            rs: 3,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 23);
+    assert_eq!(s.cr_field(0), 0b0100);
+}
+
+#[test]
+fn rldicl_dot_sets_cr0_and_does_not_quicken_to_clrldi() {
+    // Verifies the shadow-layer guard: rldicl. with sh=0 cannot be
+    // quickened to Clrldi because Clrldi does not update CR0.
+    let mut s = PpuState::new();
+    s.gpr[3] = 0;
+    exec_no_mem(
+        &PpuInstruction::Rldicl {
+            ra: 5,
+            rs: 3,
+            sh: 0,
+            mb: 32,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0);
+    assert_eq!(s.cr_field(0), 0b0010);
+}
+
+#[test]
+fn rldimi_dot_sets_cr0_from_merged_value() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x1; // RS
+    s.gpr[5] = 0xFFFF_FFFF_FFFF_FFFF; // prior RA (bits outside mask preserved)
+                                      // rldimi. rA, rS, 32, 0: mask = bits 0..=31, merge RS<<32 into high half.
+    exec_no_mem(
+        &PpuInstruction::Rldimi {
+            ra: 5,
+            rs: 3,
+            sh: 32,
+            mb: 0,
+            rc: true,
+        },
+        &mut s,
+    );
+    // rotated = 1 rotl 32 = 0x0000_0001_0000_0000
+    // mask = 0xFFFF_FFFF_0000_0000
+    // merged = (rotated & mask) | (prior & !mask)
+    //        = 0x0000_0001_0000_0000 | 0x0000_0000_FFFF_FFFF
+    //        = 0x0000_0001_FFFF_FFFF
+    assert_eq!(s.gpr[5], 0x0000_0001_FFFF_FFFF);
+    assert_eq!(s.cr_field(0), 0b0100, "positive nonzero");
+}
+
+#[test]
+fn nego_of_int_min_sets_ov() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x8000_0000_0000_0000;
+    exec_no_mem(
+        &PpuInstruction::Neg {
+            rt: 5,
+            ra: 3,
+            oe: true,
+            rc: false,
+        },
+        &mut s,
+    );
+    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30, "OV set");
+}
+
+#[test]
+fn divwo_div_by_zero_sets_ov() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 100;
+    s.gpr[4] = 0;
+    exec_no_mem(
+        &PpuInstruction::Divw {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: true,
+            rc: false,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0);
+    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30);
+}
+
+#[test]
+fn mullwo_with_overflow_sets_ov() {
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x1_0000;
+    s.gpr[4] = 0x1_0000;
+    exec_no_mem(
+        &PpuInstruction::Mullw {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: true,
+            rc: false,
+        },
+        &mut s,
+    );
+    // 0x1_0000 * 0x1_0000 = 0x1_0000_0000, overflows 32-bit signed.
+    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30);
+}
+
+#[test]
+fn cr0_so_bit_tracks_sticky_xer_so() {
+    // After an overflow, every record-form instruction must copy the
+    // current (sticky) SO into CR0.SO.
+    let mut s = PpuState::new();
+    s.gpr[3] = i64::MAX as u64;
+    s.gpr[4] = 1;
+    exec_no_mem(
+        &PpuInstruction::Add {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: true,
+            rc: false,
+        },
+        &mut s,
+    );
+    // SO is set. A subsequent dot-form should carry SO into CR0.
+    s.gpr[3] = 1;
+    s.gpr[4] = 2;
+    exec_no_mem(
+        &PpuInstruction::Add {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: false,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.cr_field(0), 0b0101, "GT plus sticky SO");
+}
+
+#[test]
+fn addo_dot_combined_sets_both_ov_and_cr0() {
+    // oe=rc=true: executor must act on both bits independently.
+    let mut s = PpuState::new();
+    s.gpr[3] = i64::MAX as u64;
+    s.gpr[4] = 1;
+    exec_no_mem(
+        &PpuInstruction::Add {
+            rt: 5,
+            ra: 3,
+            rb: 4,
+            oe: true,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30, "OV set");
+    assert_eq!(s.xer & (1u64 << 31), 1u64 << 31, "SO set");
+    // Result is INT_MIN, negative -- CR0 = LT plus sticky SO.
+    assert_eq!(s.cr_field(0), 0b1001);
+}
+
+#[test]
+fn srawi_dot_sets_both_ca_and_cr0() {
+    let mut s = PpuState::new();
+    s.gpr[3] = (-1i32) as u32 as u64;
+    exec_no_mem(
+        &PpuInstruction::Srawi {
+            ra: 5,
+            rs: 3,
+            sh: 1,
+            rc: true,
+        },
+        &mut s,
+    );
+    // -1 arithmetic-shift-right-by-1 yields -1; negative RS with a
+    // 1-bit shifted out sets CA; Rc sets CR0 LT from the negative result.
+    assert!(s.xer_ca());
+    assert_eq!(s.cr_field(0), 0b1000);
+}
+
+#[test]
+fn srawi_sh_zero_clears_ca() {
+    // Book I p. 80: "A shift amount of zero causes RA to receive
+    // EXTS(RS[32:63]), and CA to be set to 0." CA is explicitly
+    // cleared, not computed from the (nonexistent) shifted-out bits.
+    let mut s = PpuState::new();
+    s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+    s.set_xer_ca(true);
+    exec_no_mem(
+        &PpuInstruction::Srawi {
+            ra: 5,
+            rs: 3,
+            sh: 0,
+            rc: false,
+        },
+        &mut s,
+    );
+    assert!(!s.xer_ca(), "sh=0 must clear CA regardless of prior value");
+    assert_eq!(s.gpr[5], 0xFFFF_FFFF_FFFF_FFFF, "EXTS of -1 low word");
+}
+
+#[test]
+fn srad_shift_ge_64_collapses_to_sign_broadcast() {
+    // shift >= 64: RA = 64 copies of the sign bit, CA = sign bit.
+    let mut s = PpuState::new();
+    s.gpr[3] = 0x8000_0000_0000_0000;
+    s.gpr[4] = 64;
+    exec_no_mem(
+        &PpuInstruction::Srad {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            rc: false,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0xFFFF_FFFF_FFFF_FFFF);
+    assert!(s.xer_ca());
+
+    // shift > 64 with positive RS: all zeros, CA clear.
+    s.gpr[3] = 0x1;
+    s.gpr[4] = 100;
+    exec_no_mem(
+        &PpuInstruction::Srad {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            rc: false,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0);
+    assert!(!s.xer_ca());
 }

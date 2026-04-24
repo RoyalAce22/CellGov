@@ -82,7 +82,19 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
+    /// Store byte with update. Requires `ra != 0`.
+    Stbu {
+        rs: u8,
+        ra: u8,
+        imm: i16,
+    },
     Sth {
+        rs: u8,
+        ra: u8,
+        imm: i16,
+    },
+    /// Store halfword with update. Requires `ra != 0`.
+    Sthu {
         rs: u8,
         ra: u8,
         imm: i16,
@@ -126,69 +138,92 @@ pub enum PpuInstruction {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     Or {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Subf {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     Subfc {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     Subfe {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     Neg {
         rt: u8,
         ra: u8,
+        oe: bool,
+        rc: bool,
     },
     Mullw {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     Mulhwu {
         rt: u8,
         ra: u8,
         rb: u8,
+        rc: bool,
     },
     Mulhw {
         rt: u8,
         ra: u8,
         rb: u8,
+        rc: bool,
     },
     Mulhdu {
         rt: u8,
         ra: u8,
         rb: u8,
+        rc: bool,
     },
     Mulhd {
         rt: u8,
         ra: u8,
         rb: u8,
+        rc: bool,
     },
     Adde {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     Addze {
         rt: u8,
         ra: u8,
+        oe: bool,
+        rc: bool,
     },
     Mulld {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     /// Load-doubleword-and-reserve. Under the single-threaded model
     /// this is equivalent to `Ldx`.
@@ -232,41 +267,53 @@ pub enum PpuInstruction {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     Divwu {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     Divd {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     Divdu {
         rt: u8,
         ra: u8,
         rb: u8,
+        oe: bool,
+        rc: bool,
     },
     And {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Andc {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Nor {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Xor {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     AndiDot {
         ra: u8,
@@ -277,66 +324,80 @@ pub enum PpuInstruction {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Srw {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Srawi {
         ra: u8,
         rs: u8,
         sh: u8,
+        rc: bool,
     },
     Sraw {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Srad {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Sradi {
         ra: u8,
         rs: u8,
         sh: u8,
+        rc: bool,
     },
     Sld {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Srd {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Cntlzw {
         ra: u8,
         rs: u8,
+        rc: bool,
     },
     Cntlzd {
         ra: u8,
         rs: u8,
+        rc: bool,
     },
     Orc {
         ra: u8,
         rs: u8,
         rb: u8,
+        rc: bool,
     },
     Extsh {
         ra: u8,
         rs: u8,
+        rc: bool,
     },
     Extsb {
         ra: u8,
         rs: u8,
+        rc: bool,
     },
     Extsw {
         ra: u8,
         rs: u8,
+        rc: bool,
     },
     /// `imm == 0 && ra == rs` encodes `nop`.
     Ori {
@@ -358,6 +419,18 @@ pub enum PpuInstruction {
         imm: i16,
     },
     Cmplwi {
+        bf: u8,
+        ra: u8,
+        imm: u16,
+    },
+    /// 64-bit signed compare immediate (L=1 variant of primary 11).
+    Cmpdi {
+        bf: u8,
+        ra: u8,
+        imm: i16,
+    },
+    /// 64-bit unsigned compare immediate (L=1 variant of primary 10).
+    Cmpldi {
         bf: u8,
         ra: u8,
         imm: u16,
@@ -456,6 +529,10 @@ pub enum PpuInstruction {
     Mftb {
         rt: u8,
     },
+    /// Move-from-time-base-upper. Returns the upper 32 bits of TB.
+    Mftbu {
+        rt: u8,
+    },
     Mfcr {
         rt: u8,
     },
@@ -483,6 +560,7 @@ pub enum PpuInstruction {
         sh: u8,
         mb: u8,
         me: u8,
+        rc: bool,
     },
     /// `ra` is both input and output: unmasked bits are preserved.
     Rlwimi {
@@ -491,6 +569,7 @@ pub enum PpuInstruction {
         sh: u8,
         mb: u8,
         me: u8,
+        rc: bool,
     },
     Rlwnm {
         ra: u8,
@@ -498,6 +577,7 @@ pub enum PpuInstruction {
         rb: u8,
         mb: u8,
         me: u8,
+        rc: bool,
     },
     /// `sh` and `mb` are 6-bit MD-form fields; mask covers `mb..=63`.
     Rldicl {
@@ -505,6 +585,7 @@ pub enum PpuInstruction {
         rs: u8,
         sh: u8,
         mb: u8,
+        rc: bool,
     },
     /// `sh` and `me` are 6-bit MD-form fields; mask covers `0..=me`.
     Rldicr {
@@ -512,6 +593,24 @@ pub enum PpuInstruction {
         rs: u8,
         sh: u8,
         me: u8,
+        rc: bool,
+    },
+    /// Rotate left doubleword immediate then clear. Mask covers `mb..=(63-sh)`.
+    Rldic {
+        ra: u8,
+        rs: u8,
+        sh: u8,
+        mb: u8,
+        rc: bool,
+    },
+    /// Rotate left doubleword immediate then mask insert. Bits outside
+    /// `mb..=(63-sh)` preserve the prior `ra` value.
+    Rldimi {
+        ra: u8,
+        rs: u8,
+        sh: u8,
+        mb: u8,
+        rc: bool,
     },
 
     // -- Vector (AltiVec / VMX) --
@@ -536,6 +635,13 @@ pub enum PpuInstruction {
         vt: u8,
         va: u8,
         vb: u8,
+    },
+    /// Vector shift left double by octet immediate. `shb` is a 4-bit byte shift.
+    Vsldoi {
+        vt: u8,
+        va: u8,
+        vb: u8,
+        shb: u8,
     },
     Lvlx {
         vt: u8,
@@ -595,20 +701,26 @@ pub enum PpuInstruction {
     },
 
     /// Generic double-precision FP (primary 63). `xo` selects the op.
+    /// `rc` is preserved at decode but not yet honored by the executor
+    /// (FPSCR/CR1 plumbing pending).
     Fp63 {
         xo: u16,
         frt: u8,
         fra: u8,
         frb: u8,
         frc: u8,
+        rc: bool,
     },
     /// Generic single-precision FP (primary 59). `xo` selects the op.
+    /// `rc` is preserved at decode but not yet honored by the executor
+    /// (FPSCR/CR1 plumbing pending).
     Fp59 {
         xo: u16,
         frt: u8,
         fra: u8,
         frb: u8,
         frc: u8,
+        rc: bool,
     },
 
     // -- Quickened (specialized) forms --
@@ -719,8 +831,14 @@ pub enum PpuInstruction {
     Consumed,
 
     // -- System --
-    /// System call. LV2 convention: syscall number in r11.
-    Sc,
+    /// System call. LV2 convention: syscall number in r11. The 7-bit
+    /// LEV field selects the privilege level: PS3 usermode always
+    /// issues LEV=0 (kernel syscall); LEV=1 would target an LV1
+    /// hypercall. Preserved at decode so the executor can route on
+    /// it when hypercall dispatch is wired.
+    Sc {
+        lev: u8,
+    },
 }
 
 impl PpuInstruction {
@@ -740,7 +858,9 @@ impl PpuInstruction {
             Self::Stwu { .. } => "Stwu",
             Self::Stdu { .. } => "Stdu",
             Self::Stb { .. } => "Stb",
+            Self::Stbu { .. } => "Stbu",
             Self::Sth { .. } => "Sth",
+            Self::Sthu { .. } => "Sthu",
             Self::Std { .. } => "Std",
             Self::Addi { .. } => "Addi",
             Self::Addis { .. } => "Addis",
@@ -794,6 +914,8 @@ impl PpuInstruction {
             Self::Oris { .. } => "Oris",
             Self::Cmpwi { .. } => "Cmpwi",
             Self::Cmplwi { .. } => "Cmplwi",
+            Self::Cmpdi { .. } => "Cmpdi",
+            Self::Cmpldi { .. } => "Cmpldi",
             Self::Cmpw { .. } => "Cmpw",
             Self::Cmplw { .. } => "Cmplw",
             Self::Cmpd { .. } => "Cmpd",
@@ -811,6 +933,7 @@ impl PpuInstruction {
             Self::Stdux { .. } => "Stdux",
             Self::Stbx { .. } => "Stbx",
             Self::Mftb { .. } => "Mftb",
+            Self::Mftbu { .. } => "Mftbu",
             Self::Mfcr { .. } => "Mfcr",
             Self::Mtcrf { .. } => "Mtcrf",
             Self::Mflr { .. } => "Mflr",
@@ -822,9 +945,12 @@ impl PpuInstruction {
             Self::Rlwnm { .. } => "Rlwnm",
             Self::Rldicl { .. } => "Rldicl",
             Self::Rldicr { .. } => "Rldicr",
+            Self::Rldic { .. } => "Rldic",
+            Self::Rldimi { .. } => "Rldimi",
             Self::Vx { .. } => "Vx",
             Self::Va { .. } => "Va",
             Self::Vxor { .. } => "Vxor",
+            Self::Vsldoi { .. } => "Vsldoi",
             Self::Lvlx { .. } => "Lvlx",
             Self::Lvrx { .. } => "Lvrx",
             Self::Stvx { .. } => "Stvx",
@@ -857,7 +983,7 @@ impl PpuInstruction {
             Self::CmpwiBc { .. } => "CmpwiBc",
             Self::CmpwBc { .. } => "CmpwBc",
             Self::Consumed => "Consumed",
-            Self::Sc => "Sc",
+            Self::Sc { .. } => "Sc",
         }
     }
 }
@@ -891,13 +1017,14 @@ mod tests {
                 aa: false,
                 link: false,
             },
-            PpuInstruction::Sc,
+            PpuInstruction::Sc { lev: 0 },
             PpuInstruction::Fp63 {
                 xo: 0,
                 frt: 0,
                 fra: 0,
                 frb: 0,
                 frc: 0,
+                rc: false,
             },
         ];
         for insn in cases {
@@ -920,6 +1047,8 @@ mod tests {
             rt: 3,
             ra: 4,
             rb: 5,
+            oe: false,
+            rc: false,
         };
         let name: &'static str = insn.variant_name();
         assert_eq!(name, "Add");

@@ -91,6 +91,8 @@ fn bench_execute_add(c: &mut Criterion) {
         rt: 3,
         ra: 4,
         rb: 5,
+        oe: false,
+        rc: false,
     };
     let uid = UnitId::new(0);
     c.bench_function("execute/add", |b| {
@@ -233,6 +235,7 @@ fn bench_execute_rlwinm(c: &mut Criterion) {
         sh: 8,
         mb: 0,
         me: 23,
+        rc: false,
     };
     let uid = UnitId::new(0);
     c.bench_function("execute/rlwinm", |b| {

@@ -1,86 +1,73 @@
-DIVERGE region code: first byte differs at offset 0x17 (guest 0x10017) -- 00 vs 01
-DIVERGE region data: first byte differs at offset 0xffee (guest 0x86ffee) -- 00 vs 1c
+WipEout HD Fury cross-runner comparison invalidated by PPU decoder
+correctness fix.
 
-Total: 14 byte diffs in code (out of 0x848e48), 960 byte diffs in data (out of 0xd6f80).
+## History
 
-Classification: PS3-wide, non-semantic. Two distinct divergence
-families, both seen previously in flOw and SSHD.
+An earlier CellGov release tripped the `FirstRsxWrite` checkpoint on
+WipEout at step 20,569 and produced a 974-byte byte-level divergence
+against RPCS3 at that point, classified non-semantic (ELF header
+reconstruction + SYS_PROC_PARAM + HLE OPD layout).
 
-----------------------------------------------------------------------
-Code region (14 bytes, two clusters)
-----------------------------------------------------------------------
+That checkpoint was spurious. The PPU decoder was lumping `rldic`
+(primary 30, XO=2) and `rldimi` (XO=3) under the `rldicl` execution
+path. The `rldicl` path uses mask `mb..=63` and overwrites RA
+entirely, which is correct for `rldicl` but wrong for both
+neighbours: `rldic` needs mask `mb..=63-sh` (clear-both-sides), and
+`rldimi` needs to MERGE the rotated bits into RA while preserving
+bits outside the mask.
 
-Cluster 1: ELF header metadata (offsets 0x17, 0x19; guest 0x10017,
-0x10019). The first 0x40 bytes of the loaded code segment include the
-ELF header itself because PT_LOAD #0 has p_offset=0. The differing
-bytes fall inside e_version (bytes 0x14-0x17) and the high half of
-e_entry (bytes 0x18-0x1F):
+PS3 code commonly uses `rldimi rt, rs, 32, 0` (or similar) to splice
+a 32-bit value into the upper half of a 64-bit register when
+constructing pointers. Under the mis-decode the upper half was
+cleared instead of inserted, producing a pointer whose upper 32 bits
+were zero. A subsequent store through that truncated pointer landed
+on the RSX MMIO window at `0xC0000040` by accident, tripping the
+`FirstRsxWrite` checkpoint inside CellGov's `run-game` harness.
 
-  CellGov: e_version=0, e_entry=0x0001000000870530
-  RPCS3:   e_version=1, e_entry=0x0000000000870530
+With the decoder fixed (`rldic` and `rldimi` now decode to their own
+variants with correct mask semantics), WipEout's boot no longer
+trips `0xC0000040` at step 20,569. Its init sequence instead runs
+past that point and was not observed to reach a natural stopping
+event within a 100M-instruction `bench-boot` window.
 
-The actual entry point (low 32 bits = 0x00870530) matches; only the
-high metadata bytes shift. This is a SELF-decoder reconstruction
-difference between cellgov_firmware decrypt-self and RPCS3's
-in-memory SELF decryption. Not used during execution.
+## Post-fix status
 
-Cluster 2: SYS_PROC_PARAM block (offsets 0x848e00-0x848e19; guest
-0x858e00-0x858e19). This is the PT_PROC supplemental header content:
+WipEout cannot currently be compared cross-runner at the
+`FirstRsxWrite` checkpoint because CellGov no longer reaches that
+checkpoint during the captured boot window. A new mutually-reachable
+checkpoint (fault, syscall exit, or `PcReached` at a specific address
+RPCS3 can also hit) is needed before WipEout's cross-runner entry
+can be restored.
 
-  CellGov: zero-initialized (we do not populate proc-params from the
-           SELF supplemental headers)
-  RPCS3:   sdk_version, primary_prio, primary_stacksize, malloc_pagesize
-           populated from the SELF metadata
+Until that new checkpoint is chosen, WipEout is listed in the
+compatibility matrix with a `MaxSteps` outcome and no cross-runner
+verdict. The post-fix regression floor is `steps=390625` at the
+default `max_steps=100000000` cap with budget 256.
 
-CellGov reads SYS_PROC_PARAM via the loader and surfaces it to the
-banner ("sys_proc_param: not found, using malloc_pagesize=0x100000")
-but does not write the parsed struct back into guest memory. RPCS3
-keeps the bytes from the SELF in place. Functional behavior is
-identical because nothing reads from this address range during PPU
-execution -- both runners use the values via internal state.
+## Classes of divergence the prior report documented
 
-----------------------------------------------------------------------
-Data region (960 bytes)
-----------------------------------------------------------------------
+Kept here as historical context. These were all classified
+non-semantic; the fix above does not change their classification:
 
-First diff at data:0xffee (guest 0x86ffee). This region contains
-HLE OPD (function descriptor) slots for the imported PRX/HLE
-functions. The diff pattern shows OPD entry pointer fields:
+- ELF header metadata (code region, 2 bytes): `e_version` and the
+  high half of `e_entry` differ because
+  `cellgov_firmware decrypt-self` and RPCS3's in-memory SELF
+  decryption reconstruct these header bytes differently. Neither
+  side reads them during execution.
+- SYS_PROC_PARAM block (code region, 12 bytes): CellGov reads the
+  PT_PROC supplemental header through the loader but does not
+  write the parsed struct back into guest memory; RPCS3 keeps the
+  SELF bytes in place. Both runners use the values via internal
+  state.
+- HLE OPD slots (data region, 960 bytes): CellGov and RPCS3 assign
+  HLE trampoline stub slot indices in the same module order but
+  iterate within a module differently (sorted vs declaration
+  order), producing per-slot pointer differences. The guest calls
+  through either side's OPDs identically.
 
-  CellGov: 0144 0000  0144 1c30  0144 1c20  ...
-  RPCS3:   0144 05b8  0144 1938  0144 05b8  ...
+These classes are shared with flOw and SSHD (see their
+compare_report.txt files and `docs/concepts.md` for the worked
+examples).
 
-CellGov and RPCS3 assign HLE stub slot indices in the same module
-order but iterate within a module differently (sorted vs declaration
-order), producing per-byte differences in the OPD pointer field.
-Same class as:
-  - flOw: data:0x7768
-  - SSHD: data:0xbf39
-
-WipEout has a much larger HLE binding table (332 imports across 27
-modules vs SSHD's smaller surface), so the divergence cluster is
-correspondingly larger (960 vs SSHD's first-byte-only report).
-
-----------------------------------------------------------------------
-Boundary
-----------------------------------------------------------------------
-
-CellGov captures at FirstRsxWrite (put-pointer update to 0xC0000040,
-step 20,569).
-RPCS3 captures at sys_tty_write call #20 (the patched dump hook's
-TTY trigger, set high enough to land past the asterisk-banner phase
-and before the game's RSX init).
-
-The boundaries are close but not identical. The HLE OPD divergence
-exists from the moment the loader binds imports and is independent
-of the boundary choice.
-
-----------------------------------------------------------------------
-Verdict
-----------------------------------------------------------------------
-
-Verdict: equivalent (974 bytes non-semantic).
-
-974 bytes of raw byte-level divergence (14 code + 960 data), zero
-semantic divergence. The compatibility matrix
-(`docs/titles.md`) shows `equivalent (974 bytes non-semantic)`.
+Verdict: cross-runner comparison not currently available for
+WipEout; see "Post-fix status" above.

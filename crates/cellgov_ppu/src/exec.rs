@@ -2,6 +2,8 @@
 //! effects in response to a decoded `PpuInstruction`. Syscall
 //! dispatch is delegated to the runtime via `ExecuteVerdict::Syscall`.
 
+mod vec;
+
 use crate::fp;
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
@@ -286,9 +288,25 @@ pub fn execute(
             let ea = state.ea_d_form(ra, imm);
             buffer_store(store_buf, state, ea, 1, state.gpr[rs as usize])
         }
+        PpuInstruction::Stbu { rs, ra, imm } => {
+            let ea = state.ea_d_form(ra, imm);
+            let v = buffer_store(store_buf, state, ea, 1, state.gpr[rs as usize]);
+            if v == ExecuteVerdict::Continue {
+                state.gpr[ra as usize] = ea;
+            }
+            v
+        }
         PpuInstruction::Sth { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
             buffer_store(store_buf, state, ea, 2, state.gpr[rs as usize])
+        }
+        PpuInstruction::Sthu { rs, ra, imm } => {
+            let ea = state.ea_d_form(ra, imm);
+            let v = buffer_store(store_buf, state, ea, 2, state.gpr[rs as usize]);
+            if v == ExecuteVerdict::Continue {
+                state.gpr[ra as usize] = ea;
+            }
+            v
         }
         PpuInstruction::Std { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
@@ -462,23 +480,50 @@ pub fn execute(
             state.gpr[rt as usize] = a.wrapping_add(b);
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Add { rt, ra, rb } => {
-            state.gpr[rt as usize] = state.gpr[ra as usize].wrapping_add(state.gpr[rb as usize]);
+        PpuInstruction::Add { rt, ra, rb, oe, rc } => {
+            let a = state.gpr[ra as usize];
+            let b = state.gpr[rb as usize];
+            let result = a.wrapping_add(b);
+            state.gpr[rt as usize] = result;
+            if oe {
+                let ov = ((a ^ result) & (b ^ result)) as i64 >> 63 != 0;
+                state.set_xer_ov(ov);
+            }
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Subf { rt, ra, rb } => {
-            state.gpr[rt as usize] = state.gpr[rb as usize].wrapping_sub(state.gpr[ra as usize]);
+        PpuInstruction::Subf { rt, ra, rb, oe, rc } => {
+            let a = state.gpr[ra as usize];
+            let b = state.gpr[rb as usize];
+            let result = b.wrapping_sub(a);
+            state.gpr[rt as usize] = result;
+            if oe {
+                let ov = ((b ^ a) & (b ^ result)) as i64 >> 63 != 0;
+                state.set_xer_ov(ov);
+            }
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Subfc { rt, ra, rb } => {
+        PpuInstruction::Subfc { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
             let (result, borrow) = b.overflowing_sub(a);
             state.gpr[rt as usize] = result;
             state.set_xer_ca(!borrow);
+            if oe {
+                let ov = ((b ^ a) & (b ^ result)) as i64 >> 63 != 0;
+                state.set_xer_ov(ov);
+            }
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Subfe { rt, ra, rb } => {
+        PpuInstruction::Subfe { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
             let ca_in: u64 = state.xer_ca() as u64;
@@ -486,44 +531,84 @@ pub fn execute(
             let (s2, c2) = s1.overflowing_add(ca_in);
             state.gpr[rt as usize] = s2;
             state.set_xer_ca(c1 || c2);
+            if oe {
+                let ov = ((b ^ a) & (b ^ s2)) as i64 >> 63 != 0;
+                state.set_xer_ov(ov);
+            }
+            if rc {
+                state.set_cr0_from_result(s2);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Neg { rt, ra } => {
-            state.gpr[rt as usize] = (state.gpr[ra as usize] as i64).wrapping_neg() as u64;
+        PpuInstruction::Neg { rt, ra, oe, rc } => {
+            let a = state.gpr[ra as usize];
+            let result = (a as i64).wrapping_neg() as u64;
+            state.gpr[rt as usize] = result;
+            if oe {
+                state.set_xer_ov(a == 0x8000_0000_0000_0000);
+            }
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Mullw { rt, ra, rb } => {
-            let a = state.gpr[ra as usize] as i32;
-            let b = state.gpr[rb as usize] as i32;
-            state.gpr[rt as usize] = (a as i64).wrapping_mul(b as i64) as u64;
-            ExecuteVerdict::Continue
-        }
-        PpuInstruction::Mulhwu { rt, ra, rb } => {
-            let a = state.gpr[ra as usize] as u32 as u64;
-            let b = state.gpr[rb as usize] as u32 as u64;
-            state.gpr[rt as usize] = (a * b) >> 32;
-            ExecuteVerdict::Continue
-        }
-        PpuInstruction::Mulhw { rt, ra, rb } => {
+        PpuInstruction::Mullw { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i32 as i64;
             let b = state.gpr[rb as usize] as i32 as i64;
-            // Signed 32x32 -> high 32, sign-extended to 64.
-            state.gpr[rt as usize] = ((a * b) >> 32) as i32 as i64 as u64;
+            let product = a.wrapping_mul(b);
+            let result = product as u64;
+            state.gpr[rt as usize] = result;
+            if oe {
+                state.set_xer_ov(product < i32::MIN as i64 || product > i32::MAX as i64);
+            }
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Mulhdu { rt, ra, rb } => {
+        PpuInstruction::Mulhwu { rt, ra, rb, rc } => {
+            let a = state.gpr[ra as usize] as u32 as u64;
+            let b = state.gpr[rb as usize] as u32 as u64;
+            let result = (a * b) >> 32;
+            state.gpr[rt as usize] = result;
+            if rc {
+                // mulhw(u). sets CR0 from the low 32 bits of the result
+                // sign-extended (high word is all-zero for a 32->32 op).
+                state.set_cr0_from_result(result as i32 as i64 as u64);
+            }
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Mulhw { rt, ra, rb, rc } => {
+            let a = state.gpr[ra as usize] as i32 as i64;
+            let b = state.gpr[rb as usize] as i32 as i64;
+            let result = ((a * b) >> 32) as i32 as i64 as u64;
+            state.gpr[rt as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Mulhdu { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as u128;
             let b = state.gpr[rb as usize] as u128;
-            state.gpr[rt as usize] = ((a * b) >> 64) as u64;
+            let result = ((a * b) >> 64) as u64;
+            state.gpr[rt as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Mulhd { rt, ra, rb } => {
+        PpuInstruction::Mulhd { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as i64 as i128;
             let b = state.gpr[rb as usize] as i64 as i128;
-            state.gpr[rt as usize] = ((a * b) >> 64) as u64;
+            let result = ((a * b) >> 64) as u64;
+            state.gpr[rt as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Adde { rt, ra, rb } => {
+        PpuInstruction::Adde { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
             let ca_in: u64 = state.xer_ca() as u64;
@@ -531,73 +616,146 @@ pub fn execute(
             let (sum2, c2) = sum1.overflowing_add(ca_in);
             state.gpr[rt as usize] = sum2;
             state.set_xer_ca(c1 || c2);
+            if oe {
+                let ov = ((a ^ sum2) & (b ^ sum2)) as i64 >> 63 != 0;
+                state.set_xer_ov(ov);
+            }
+            if rc {
+                state.set_cr0_from_result(sum2);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Addze { rt, ra } => {
-            // adde with RB = 0: only one overflow edge.
+        PpuInstruction::Addze { rt, ra, oe, rc } => {
             let a = state.gpr[ra as usize];
             let ca_in: u64 = state.xer_ca() as u64;
             let (sum, c) = a.overflowing_add(ca_in);
             state.gpr[rt as usize] = sum;
             state.set_xer_ca(c);
+            if oe {
+                // Overflow only when adding +1 flips sign positive -> negative.
+                let ov = (a as i64) >= 0 && (sum as i64) < 0;
+                state.set_xer_ov(ov);
+            }
+            if rc {
+                state.set_cr0_from_result(sum);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Divw { rt, ra, rb } => {
+        PpuInstruction::Divw { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i32;
             let b = state.gpr[rb as usize] as i32;
-            let result = if b == 0 { 0 } else { a.wrapping_div(b) };
+            let overflow = b == 0 || (a == i32::MIN && b == -1);
+            let result = if overflow { 0 } else { a.wrapping_div(b) };
             state.gpr[rt as usize] = result as i64 as u64;
+            if oe {
+                state.set_xer_ov(overflow);
+            }
+            if rc {
+                state.set_cr0_from_result(result as i64 as u64);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Divwu { rt, ra, rb } => {
+        PpuInstruction::Divwu { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as u32;
             let b = state.gpr[rb as usize] as u32;
-            let result = a.checked_div(b).unwrap_or(0);
+            let overflow = b == 0;
+            let result = if overflow { 0 } else { a / b };
             state.gpr[rt as usize] = result as u64;
+            if oe {
+                state.set_xer_ov(overflow);
+            }
+            if rc {
+                state.set_cr0_from_result(result as i32 as i64 as u64);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Divd { rt, ra, rb } => {
+        PpuInstruction::Divd { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i64;
             let b = state.gpr[rb as usize] as i64;
-            let result = if b == 0 { 0 } else { a.wrapping_div(b) };
+            let overflow = b == 0 || (a == i64::MIN && b == -1);
+            let result = if overflow { 0 } else { a.wrapping_div(b) };
             state.gpr[rt as usize] = result as u64;
+            if oe {
+                state.set_xer_ov(overflow);
+            }
+            if rc {
+                state.set_cr0_from_result(result as u64);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Divdu { rt, ra, rb } => {
+        PpuInstruction::Divdu { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
-            let result = a.checked_div(b).unwrap_or(0);
+            let overflow = b == 0;
+            let result = if overflow { 0 } else { a / b };
             state.gpr[rt as usize] = result;
+            if oe {
+                state.set_xer_ov(overflow);
+            }
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Mulld { rt, ra, rb } => {
-            let a = state.gpr[ra as usize];
-            let b = state.gpr[rb as usize];
-            state.gpr[rt as usize] = a.wrapping_mul(b);
+        PpuInstruction::Mulld { rt, ra, rb, oe, rc } => {
+            let a = state.gpr[ra as usize] as i64;
+            let b = state.gpr[rb as usize] as i64;
+            let result = a.wrapping_mul(b) as u64;
+            state.gpr[rt as usize] = result;
+            if oe {
+                state.set_xer_ov(a.checked_mul(b).is_none());
+            }
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Or { ra, rs, rb } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] | state.gpr[rb as usize];
+        PpuInstruction::Or { ra, rs, rb, rc } => {
+            let result = state.gpr[rs as usize] | state.gpr[rb as usize];
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Orc { ra, rs, rb } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] | !state.gpr[rb as usize];
+        PpuInstruction::Orc { ra, rs, rb, rc } => {
+            let result = state.gpr[rs as usize] | !state.gpr[rb as usize];
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::And { ra, rs, rb } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] & state.gpr[rb as usize];
+        PpuInstruction::And { ra, rs, rb, rc } => {
+            let result = state.gpr[rs as usize] & state.gpr[rb as usize];
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Nor { ra, rs, rb } => {
-            state.gpr[ra as usize] = !(state.gpr[rs as usize] | state.gpr[rb as usize]);
+        PpuInstruction::Nor { ra, rs, rb, rc } => {
+            let result = !(state.gpr[rs as usize] | state.gpr[rb as usize]);
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Andc { ra, rs, rb } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] & !state.gpr[rb as usize];
+        PpuInstruction::Andc { ra, rs, rb, rc } => {
+            let result = state.gpr[rs as usize] & !state.gpr[rb as usize];
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Xor { ra, rs, rb } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] ^ state.gpr[rb as usize];
+        PpuInstruction::Xor { ra, rs, rb, rc } => {
+            let result = state.gpr[rs as usize] ^ state.gpr[rb as usize];
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
         PpuInstruction::AndiDot { ra, rs, imm } => {
@@ -613,68 +771,86 @@ pub fn execute(
             state.set_cr_field(0, cr_val);
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Slw { ra, rs, rb } => {
+        PpuInstruction::Slw { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x3F;
             let val = state.gpr[rs as usize] as u32;
-            let result = if shift < 32 { val << shift } else { 0 };
-            state.gpr[ra as usize] = result as u64;
+            let result = if shift < 32 { val << shift } else { 0 } as u64;
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result as i32 as i64 as u64);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Srw { ra, rs, rb } => {
+        PpuInstruction::Srw { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x3F;
             let val = state.gpr[rs as usize] as u32;
-            let result = if shift < 32 { val >> shift } else { 0 };
-            state.gpr[ra as usize] = result as u64;
+            let result = if shift < 32 { val >> shift } else { 0 } as u64;
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result as i32 as i64 as u64);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Srawi { ra, rs, sh } => {
+        PpuInstruction::Srawi { ra, rs, sh, rc } => {
             let val = state.gpr[rs as usize] as i32;
             let result = val >> sh;
-            let ca = val < 0 && (val as u32) << (32 - sh) != 0;
-            state.gpr[ra as usize] = result as i64 as u64;
+            let ca = val < 0 && sh > 0 && (val as u32) << (32 - sh) != 0;
+            let result_u = result as i64 as u64;
+            state.gpr[ra as usize] = result_u;
             state.set_xer_ca(ca);
+            if rc {
+                state.set_cr0_from_result(result_u);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Sraw { ra, rs, rb } => {
+        PpuInstruction::Sraw { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x3F;
             let val = state.gpr[rs as usize] as i32;
-            if shift < 32 {
-                let result = val >> shift;
-                let ca = val < 0 && (val as u32) << (32 - shift as u32) != 0;
-                state.gpr[ra as usize] = result as i64 as u64;
-                state.set_xer_ca(ca);
+            let (result, ca) = if shift < 32 {
+                let r = val >> shift;
+                let ca = val < 0 && shift > 0 && (val as u32) << (32 - shift as u32) != 0;
+                (r, ca)
             } else {
-                let result = val >> 31;
-                state.gpr[ra as usize] = result as i64 as u64;
-                state.set_xer_ca(val < 0);
+                (val >> 31, val < 0)
+            };
+            let result_u = result as i64 as u64;
+            state.gpr[ra as usize] = result_u;
+            state.set_xer_ca(ca);
+            if rc {
+                state.set_cr0_from_result(result_u);
             }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Srad { ra, rs, rb } => {
+        PpuInstruction::Srad { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x7F;
             let val = state.gpr[rs as usize] as i64;
-            if shift < 64 {
-                let result = val >> shift;
-                let ca = val < 0 && (val as u64) << (64 - shift) != 0;
-                state.gpr[ra as usize] = result as u64;
-                state.set_xer_ca(ca);
+            let (result, ca) = if shift < 64 {
+                let r = val >> shift;
+                let ca = val < 0 && shift > 0 && (val as u64) << (64 - shift) != 0;
+                (r, ca)
             } else {
-                let result = val >> 63;
-                state.gpr[ra as usize] = result as u64;
-                state.set_xer_ca(val < 0);
+                (val >> 63, val < 0)
+            };
+            state.gpr[ra as usize] = result as u64;
+            state.set_xer_ca(ca);
+            if rc {
+                state.set_cr0_from_result(result as u64);
             }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Sradi { ra, rs, sh } => {
+        PpuInstruction::Sradi { ra, rs, sh, rc } => {
             let shift = sh as u64;
             let val = state.gpr[rs as usize] as i64;
             let result = val >> shift;
             let ca = val < 0 && shift > 0 && (val as u64) << (64 - shift) != 0;
             state.gpr[ra as usize] = result as u64;
             state.set_xer_ca(ca);
+            if rc {
+                state.set_cr0_from_result(result as u64);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Sld { ra, rs, rb } => {
+        PpuInstruction::Sld { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x7F;
             let result = if shift < 64 {
                 state.gpr[rs as usize] << shift
@@ -682,9 +858,12 @@ pub fn execute(
                 0
             };
             state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Srd { ra, rs, rb } => {
+        PpuInstruction::Srd { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x7F;
             let result = if shift < 64 {
                 state.gpr[rs as usize] >> shift
@@ -692,27 +871,50 @@ pub fn execute(
                 0
             };
             state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Cntlzw { ra, rs } => {
+        PpuInstruction::Cntlzw { ra, rs, rc } => {
             let val = state.gpr[rs as usize] as u32;
-            state.gpr[ra as usize] = val.leading_zeros() as u64;
+            let result = val.leading_zeros() as u64;
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Cntlzd { ra, rs } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize].leading_zeros() as u64;
+        PpuInstruction::Cntlzd { ra, rs, rc } => {
+            let result = state.gpr[rs as usize].leading_zeros() as u64;
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Extsh { ra, rs } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] as i16 as i64 as u64;
+        PpuInstruction::Extsh { ra, rs, rc } => {
+            let result = state.gpr[rs as usize] as i16 as i64 as u64;
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Extsb { ra, rs } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] as i8 as i64 as u64;
+        PpuInstruction::Extsb { ra, rs, rc } => {
+            let result = state.gpr[rs as usize] as i8 as i64 as u64;
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Extsw { ra, rs } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] as i32 as i64 as u64;
+        PpuInstruction::Extsw { ra, rs, rc } => {
+            let result = state.gpr[rs as usize] as i32 as i64 as u64;
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
         PpuInstruction::Ori { ra, rs, imm } => {
@@ -749,6 +951,32 @@ pub fn execute(
         PpuInstruction::Cmplwi { bf, ra, imm } => {
             let a = state.gpr[ra as usize] as u32;
             let b = imm as u32;
+            let cr_val = if a < b {
+                0b1000
+            } else if a > b {
+                0b0100
+            } else {
+                0b0010
+            };
+            state.set_cr_field(bf, cr_val);
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Cmpdi { bf, ra, imm } => {
+            let a = state.gpr[ra as usize] as i64;
+            let b = imm as i64;
+            let cr_val = if a < b {
+                0b1000
+            } else if a > b {
+                0b0100
+            } else {
+                0b0010
+            };
+            state.set_cr_field(bf, cr_val);
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Cmpldi { bf, ra, imm } => {
+            let a = state.gpr[ra as usize];
+            let b = imm as u64;
             let cr_val = if a < b {
                 0b1000
             } else if a > b {
@@ -872,6 +1100,11 @@ pub fn execute(
             state.gpr[rt as usize] = state.tb;
             ExecuteVerdict::Continue
         }
+        PpuInstruction::Mftbu { rt } => {
+            state.tb += 512;
+            state.gpr[rt as usize] = (state.tb >> 32) & 0xFFFF_FFFF;
+            ExecuteVerdict::Continue
+        }
         PpuInstruction::Mfcr { rt } => {
             state.gpr[rt as usize] = state.cr as u64;
             ExecuteVerdict::Continue
@@ -907,38 +1140,100 @@ pub fn execute(
         }
 
         // Rotate / mask
-        PpuInstruction::Rlwinm { ra, rs, sh, mb, me } => {
+        PpuInstruction::Rlwinm {
+            ra,
+            rs,
+            sh,
+            mb,
+            me,
+            rc,
+        } => {
             let val = state.gpr[rs as usize] as u32;
             let rotated = val.rotate_left(sh as u32);
             let mask = rlwinm_mask(mb, me);
-            state.gpr[ra as usize] = (rotated & mask) as u64;
+            let result = (rotated & mask) as u64;
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result as i32 as i64 as u64);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Rlwimi { ra, rs, sh, mb, me } => {
+        PpuInstruction::Rlwimi {
+            ra,
+            rs,
+            sh,
+            mb,
+            me,
+            rc,
+        } => {
             let val = state.gpr[rs as usize] as u32;
             let rotated = val.rotate_left(sh as u32);
             let mask = rlwinm_mask(mb, me);
             let prior = state.gpr[ra as usize] as u32;
-            let merged = (rotated & mask) | (prior & !mask);
-            state.gpr[ra as usize] = merged as u64;
+            let merged = ((rotated & mask) | (prior & !mask)) as u64;
+            state.gpr[ra as usize] = merged;
+            if rc {
+                state.set_cr0_from_result(merged as i32 as i64 as u64);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Rlwnm { ra, rs, rb, mb, me } => {
+        PpuInstruction::Rlwnm {
+            ra,
+            rs,
+            rb,
+            mb,
+            me,
+            rc,
+        } => {
             let val = state.gpr[rs as usize] as u32;
             let n = (state.gpr[rb as usize] & 0x1F) as u32;
             let rotated = val.rotate_left(n);
             let mask = rlwinm_mask(mb, me);
-            state.gpr[ra as usize] = (rotated & mask) as u64;
+            let result = (rotated & mask) as u64;
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result as i32 as i64 as u64);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Rldicl { ra, rs, sh, mb } => {
+        PpuInstruction::Rldicl { ra, rs, sh, mb, rc } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
-            state.gpr[ra as usize] = rotated & mask64(mb, 63);
+            let result = rotated & mask64(mb, 63);
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
-        PpuInstruction::Rldicr { ra, rs, sh, me } => {
+        PpuInstruction::Rldicr { ra, rs, sh, me, rc } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
-            state.gpr[ra as usize] = rotated & mask64(0, me);
+            let result = rotated & mask64(0, me);
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Rldic { ra, rs, sh, mb, rc } => {
+            let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
+            let me = 63u8.saturating_sub(sh);
+            let result = rotated & mask64(mb, me);
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Rldimi { ra, rs, sh, mb, rc } => {
+            let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
+            let me = 63u8.saturating_sub(sh);
+            let mask = mask64(mb, me);
+            let prior = state.gpr[ra as usize];
+            let result = (rotated & mask) | (prior & !mask);
+            state.gpr[ra as usize] = result;
+            if rc {
+                state.set_cr0_from_result(result);
+            }
             ExecuteVerdict::Continue
         }
 
@@ -990,11 +1285,10 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
         PpuInstruction::Vx { xo, vt, va, vb } => {
-            crate::exec_vec::execute_vx(state, xo, vt, va, vb, region_views, store_buf)
+            vec::execute_vx(state, xo, vt, va, vb, region_views, store_buf)
         }
-        PpuInstruction::Va { xo, vt, va, vb, vc } => {
-            crate::exec_vec::execute_va(state, xo, vt, va, vb, vc)
-        }
+        PpuInstruction::Va { xo, vt, va, vb, vc } => vec::execute_va(state, xo, vt, va, vb, vc),
+        PpuInstruction::Vsldoi { vt, va, vb, shb } => vec::execute_vsldoi(state, vt, va, vb, shb),
         PpuInstruction::Stvx { vs, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]) & !15u64;
@@ -1079,13 +1373,18 @@ pub fn execute(
             )
         }
 
-        // Floating-point arithmetic (opcode 63, double precision)
+        // Floating-point arithmetic (opcode 63, double precision).
+        // TODO(fp-rc): `_rc` is preserved at decode but not yet honored.
+        // Record-form FP (`fadd.`, `fmul.`, `fmadd.`, etc.) must set CR1
+        // from FPSCR[FX|FEX|VX|OX]; that plumbing is pending (FPSCR is
+        // currently unmodeled, so all four bits would read zero).
         PpuInstruction::Fp63 {
             xo,
             frt,
             fra,
             frb,
             frc,
+            rc: _rc,
         } => fp::execute_fp63(state, xo, frt, fra, frb, frc),
         PpuInstruction::Fp59 {
             xo,
@@ -1093,6 +1392,7 @@ pub fn execute(
             fra,
             frb,
             frc,
+            rc: _rc,
         } => fp::execute_fp59(state, xo, frt, fra, frb, frc),
 
         // Quickened (specialized) forms
@@ -1305,7 +1605,10 @@ pub fn execute(
             unreachable!("Consumed slots should be skipped by the fetch loop")
         }
 
-        PpuInstruction::Sc => ExecuteVerdict::Syscall,
+        // TODO(sc-lev): `lev` is preserved at decode but not routed;
+        // LV1 hypercall (LEV=1) dispatch lands here when it exists.
+        // PS3 usermode always issues LEV=0.
+        PpuInstruction::Sc { lev: _lev } => ExecuteVerdict::Syscall,
     }
 }
 

@@ -114,14 +114,17 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let (rs, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Stb { rs, ra, imm })
         }
-        // stbu decodes as Stb; the update-to-ra semantic is dropped.
         39 => {
             let (rs, ra, imm) = d_form(raw);
-            Ok(PpuInstruction::Stb { rs, ra, imm })
+            Ok(PpuInstruction::Stbu { rs, ra, imm })
         }
         44 => {
             let (rs, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Sth { rs, ra, imm })
+        }
+        45 => {
+            let (rs, ra, imm) = d_form(raw);
+            Ok(PpuInstruction::Sthu { rs, ra, imm })
         }
         62 => {
             // DS-form: low 2 bits select between std/stdu.
@@ -166,13 +169,23 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 
         11 => {
             let bf = ((raw >> 23) & 0x7) as u8;
+            let l = ((raw >> 21) & 0x1) as u8;
             let (_, ra, imm) = d_form(raw);
-            Ok(PpuInstruction::Cmpwi { bf, ra, imm })
+            if l == 0 {
+                Ok(PpuInstruction::Cmpwi { bf, ra, imm })
+            } else {
+                Ok(PpuInstruction::Cmpdi { bf, ra, imm })
+            }
         }
         10 => {
             let bf = ((raw >> 23) & 0x7) as u8;
+            let l = ((raw >> 21) & 0x1) as u8;
             let (_, ra, imm) = d_form_u(raw);
-            Ok(PpuInstruction::Cmplwi { bf, ra, imm })
+            if l == 0 {
+                Ok(PpuInstruction::Cmplwi { bf, ra, imm })
+            } else {
+                Ok(PpuInstruction::Cmpldi { bf, ra, imm })
+            }
         }
 
         18 => {
@@ -204,13 +217,25 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 
         19 => decode_xl(raw),
 
+        // M-form (primaries 20, 21, 23): 5-bit MB at bits 21..=25 and
+        // 5-bit ME at bits 26..=30. Not to be confused with MD-form's
+        // 6-bit mask bound (primary 30, split across bits 21..=25 and
+        // bit 26).
         20 => {
             let rs = ((raw >> 21) & 0x1F) as u8;
             let ra = ((raw >> 16) & 0x1F) as u8;
             let sh = ((raw >> 11) & 0x1F) as u8;
             let mb = ((raw >> 6) & 0x1F) as u8;
             let me = ((raw >> 1) & 0x1F) as u8;
-            Ok(PpuInstruction::Rlwimi { ra, rs, sh, mb, me })
+            let rc = raw & 1 != 0;
+            Ok(PpuInstruction::Rlwimi {
+                ra,
+                rs,
+                sh,
+                mb,
+                me,
+                rc,
+            })
         }
         21 => {
             let rs = ((raw >> 21) & 0x1F) as u8;
@@ -218,7 +243,15 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let sh = ((raw >> 11) & 0x1F) as u8;
             let mb = ((raw >> 6) & 0x1F) as u8;
             let me = ((raw >> 1) & 0x1F) as u8;
-            Ok(PpuInstruction::Rlwinm { ra, rs, sh, mb, me })
+            let rc = raw & 1 != 0;
+            Ok(PpuInstruction::Rlwinm {
+                ra,
+                rs,
+                sh,
+                mb,
+                me,
+                rc,
+            })
         }
         23 => {
             let rs = ((raw >> 21) & 0x1F) as u8;
@@ -226,7 +259,15 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let rb = ((raw >> 11) & 0x1F) as u8;
             let mb = ((raw >> 6) & 0x1F) as u8;
             let me = ((raw >> 1) & 0x1F) as u8;
-            Ok(PpuInstruction::Rlwnm { ra, rs, rb, mb, me })
+            let rc = raw & 1 != 0;
+            Ok(PpuInstruction::Rlwnm {
+                ra,
+                rs,
+                rb,
+                mb,
+                me,
+                rc,
+            })
         }
         30 => decode_md(raw),
 
@@ -261,6 +302,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let (frt, fra, frb) = x_form(raw);
             let frc = ((raw >> 6) & 0x1F) as u8;
             let xo = ((raw >> 1) & 0x3FF) as u16;
+            let rc = raw & 1 != 0;
             if primary == 63 {
                 Ok(PpuInstruction::Fp63 {
                     xo,
@@ -268,6 +310,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                     fra,
                     frb,
                     frc,
+                    rc,
                 })
             } else {
                 Ok(PpuInstruction::Fp59 {
@@ -276,11 +319,17 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                     fra,
                     frb,
                     frc,
+                    rc,
                 })
             }
         }
 
-        17 => Ok(PpuInstruction::Sc),
+        17 => {
+            // SC-form (Book I Sec. 3.3.1, p. 35): LEV occupies PPC
+            // bits 20..=26 (7 bits). In Rust LSB-0 that is bits 5..=11.
+            let lev = ((raw >> 5) & 0x7F) as u8;
+            Ok(PpuInstruction::Sc { lev })
+        }
 
         _ => Err(PpuDecodeError::Unsupported(raw)),
     }
@@ -297,6 +346,16 @@ fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let xo_6 = (raw & 0x3F) as u8;
 
     if let 0x20..=0x2f = xo_6 {
+        // vsldoi puts a 4-bit byte shift (SHB) in the vc slot, with bit
+        // 21 reserved. Other VA-form ops treat the slot as a register.
+        if xo_6 == 0x2c {
+            return Ok(PpuInstruction::Vsldoi {
+                vt,
+                va,
+                vb,
+                shb: vc & 0xF,
+            });
+        }
         return Ok(PpuInstruction::Va {
             xo: xo_6,
             vt,
@@ -332,6 +391,7 @@ fn decode_md(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let sh_hi = ((raw >> 1) & 0x1) as u8;
     let sh = (sh_hi << 5) | sh_lo;
     let mask = (mask_hi << 5) | mask_lo;
+    let rc = raw & 1 != 0;
 
     match xo {
         0 => Ok(PpuInstruction::Rldicl {
@@ -339,20 +399,28 @@ fn decode_md(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             rs,
             sh,
             mb: mask,
+            rc,
         }),
         1 => Ok(PpuInstruction::Rldicr {
             ra,
             rs,
             sh,
             me: mask,
+            rc,
         }),
-        // rldic and rldimi are approximated as Rldicl; the full
-        // clear-both-sides and insert-merge semantics are not modelled.
-        2 | 3 => Ok(PpuInstruction::Rldicl {
+        2 => Ok(PpuInstruction::Rldic {
             ra,
             rs,
             sh,
             mb: mask,
+            rc,
+        }),
+        3 => Ok(PpuInstruction::Rldimi {
+            ra,
+            rs,
+            sh,
+            mb: mask,
+            rc,
         }),
         _ => Err(PpuDecodeError::Unsupported(raw)),
     }
@@ -387,65 +455,66 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let xo_10 = (raw >> 1) & 0x3FF;
     let xo_9 = (raw >> 1) & 0x1FF;
     let (rt, ra, rb) = x_form(raw);
+    let rc = raw & 1 != 0;
+    let oe = (raw >> 10) & 1 != 0;
 
     match xo_9 {
-        266 => return Ok(PpuInstruction::Add { rt, ra, rb }),
-        40 => return Ok(PpuInstruction::Subf { rt, ra, rb }),
-        8 => return Ok(PpuInstruction::Subfc { rt, ra, rb }),
-        136 => return Ok(PpuInstruction::Subfe { rt, ra, rb }),
-        104 => return Ok(PpuInstruction::Neg { rt, ra }),
-        235 => return Ok(PpuInstruction::Mullw { rt, ra, rb }),
-        11 => return Ok(PpuInstruction::Mulhwu { rt, ra, rb }),
-        9 => return Ok(PpuInstruction::Mulhdu { rt, ra, rb }),
-        73 => return Ok(PpuInstruction::Mulhd { rt, ra, rb }),
-        75 => return Ok(PpuInstruction::Mulhw { rt, ra, rb }),
-        138 => return Ok(PpuInstruction::Adde { rt, ra, rb }),
-        202 => return Ok(PpuInstruction::Addze { rt, ra }),
-        491 => return Ok(PpuInstruction::Divw { rt, ra, rb }),
-        459 => return Ok(PpuInstruction::Divwu { rt, ra, rb }),
-        489 => return Ok(PpuInstruction::Divd { rt, ra, rb }),
-        457 => return Ok(PpuInstruction::Divdu { rt, ra, rb }),
-        233 => return Ok(PpuInstruction::Mulld { rt, ra, rb }),
+        266 => return Ok(PpuInstruction::Add { rt, ra, rb, oe, rc }),
+        40 => return Ok(PpuInstruction::Subf { rt, ra, rb, oe, rc }),
+        8 => return Ok(PpuInstruction::Subfc { rt, ra, rb, oe, rc }),
+        136 => return Ok(PpuInstruction::Subfe { rt, ra, rb, oe, rc }),
+        104 => return Ok(PpuInstruction::Neg { rt, ra, oe, rc }),
+        235 => return Ok(PpuInstruction::Mullw { rt, ra, rb, oe, rc }),
+        11 => return Ok(PpuInstruction::Mulhwu { rt, ra, rb, rc }),
+        9 => return Ok(PpuInstruction::Mulhdu { rt, ra, rb, rc }),
+        73 => return Ok(PpuInstruction::Mulhd { rt, ra, rb, rc }),
+        75 => return Ok(PpuInstruction::Mulhw { rt, ra, rb, rc }),
+        138 => return Ok(PpuInstruction::Adde { rt, ra, rb, oe, rc }),
+        202 => return Ok(PpuInstruction::Addze { rt, ra, oe, rc }),
+        491 => return Ok(PpuInstruction::Divw { rt, ra, rb, oe, rc }),
+        459 => return Ok(PpuInstruction::Divwu { rt, ra, rb, oe, rc }),
+        489 => return Ok(PpuInstruction::Divd { rt, ra, rb, oe, rc }),
+        457 => return Ok(PpuInstruction::Divdu { rt, ra, rb, oe, rc }),
+        233 => return Ok(PpuInstruction::Mulld { rt, ra, rb, oe, rc }),
         _ => {}
     }
 
     match xo_10 {
-        444 => return Ok(PpuInstruction::Or { ra, rs: rt, rb }),
-        412 => return Ok(PpuInstruction::Orc { ra, rs: rt, rb }),
-        28 => return Ok(PpuInstruction::And { ra, rs: rt, rb }),
-        60 => return Ok(PpuInstruction::Andc { ra, rs: rt, rb }),
-        124 => return Ok(PpuInstruction::Nor { ra, rs: rt, rb }),
-        316 => return Ok(PpuInstruction::Xor { ra, rs: rt, rb }),
+        444 => return Ok(PpuInstruction::Or { ra, rs: rt, rb, rc }),
+        412 => return Ok(PpuInstruction::Orc { ra, rs: rt, rb, rc }),
+        28 => return Ok(PpuInstruction::And { ra, rs: rt, rb, rc }),
+        60 => return Ok(PpuInstruction::Andc { ra, rs: rt, rb, rc }),
+        124 => return Ok(PpuInstruction::Nor { ra, rs: rt, rb, rc }),
+        316 => return Ok(PpuInstruction::Xor { ra, rs: rt, rb, rc }),
 
-        24 => return Ok(PpuInstruction::Slw { ra, rs: rt, rb }),
-        536 => return Ok(PpuInstruction::Srw { ra, rs: rt, rb }),
+        24 => return Ok(PpuInstruction::Slw { ra, rs: rt, rb, rc }),
+        536 => return Ok(PpuInstruction::Srw { ra, rs: rt, rb, rc }),
 
-        27 => return Ok(PpuInstruction::Sld { ra, rs: rt, rb }),
-        539 => return Ok(PpuInstruction::Srd { ra, rs: rt, rb }),
-        // Power ISA assigns XO=792 to sraw and XO=794 to srad. The 794
-        // and 827 entries below are legacy decodes that predate ISA
-        // alignment and remain until the instruction-coverage tests
-        // are re-audited.
-        792 => return Ok(PpuInstruction::Sraw { ra, rs: rt, rb }),
-        794 => return Ok(PpuInstruction::Sraw { ra, rs: rt, rb }),
-        827 => return Ok(PpuInstruction::Srad { ra, rs: rt, rb }),
+        27 => return Ok(PpuInstruction::Sld { ra, rs: rt, rb, rc }),
+        539 => return Ok(PpuInstruction::Srd { ra, rs: rt, rb, rc }),
+        792 => return Ok(PpuInstruction::Sraw { ra, rs: rt, rb, rc }),
+        794 => return Ok(PpuInstruction::Srad { ra, rs: rt, rb, rc }),
 
         824 => {
             let sh = rb;
-            return Ok(PpuInstruction::Srawi { ra, rs: rt, sh });
+            return Ok(PpuInstruction::Srawi { ra, rs: rt, sh, rc });
         }
-        // sradi is XS-form with XO(10)=826; 827 is srad (register-shift).
-        826 => {
-            let sh = rb;
-            return Ok(PpuInstruction::Sradi { ra, rs: rt, sh });
+        // sradi is XS-form: XO(9)=413 occupies bits 21..29, raw bit 30
+        // holds the SH high bit, raw bit 31 is Rc. Extracting as a
+        // 10-bit XO captures (XO(9) << 1) | SH_hi, so both 826 (SH_hi=0)
+        // and 827 (SH_hi=1) are sradi.
+        826 | 827 => {
+            let sh_hi = ((raw >> 1) & 0x1) as u8;
+            let sh = rb | (sh_hi << 5);
+            return Ok(PpuInstruction::Sradi { ra, rs: rt, sh, rc });
         }
 
-        26 => return Ok(PpuInstruction::Cntlzw { ra, rs: rt }),
-        58 => return Ok(PpuInstruction::Cntlzd { ra, rs: rt }),
+        26 => return Ok(PpuInstruction::Cntlzw { ra, rs: rt, rc }),
+        58 => return Ok(PpuInstruction::Cntlzd { ra, rs: rt, rc }),
 
-        922 => return Ok(PpuInstruction::Extsh { ra, rs: rt }),
-        954 => return Ok(PpuInstruction::Extsb { ra, rs: rt }),
-        986 => return Ok(PpuInstruction::Extsw { ra, rs: rt }),
+        922 => return Ok(PpuInstruction::Extsh { ra, rs: rt, rc }),
+        954 => return Ok(PpuInstruction::Extsb { ra, rs: rt, rc }),
+        986 => return Ok(PpuInstruction::Extsw { ra, rs: rt, rc }),
 
         23 => return Ok(PpuInstruction::Lwzx { rt, ra, rb }),
         87 => return Ok(PpuInstruction::Lbzx { rt, ra, rb }),
@@ -504,6 +573,13 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let crm = ((raw >> 12) & 0xFF) as u8;
             return Ok(PpuInstruction::Mtcrf { rs: rt, crm });
         }
+        // SPR / TBR half-swap (Book I Sec. 3.3.15, p. 84; Book II
+        // Sec. 4.1, p. 30). The encoded register number is split
+        // across the RA and RB slots, and the halves are reversed:
+        //   rb (bits 11..=15) = SPR/TBR low 5 bits
+        //   ra (bits 16..=20) = SPR/TBR high 5 bits
+        // So `spr_raw = (rb << 5) | ra`. Do not "simplify" the
+        // shift direction; the apparent reversal is the encoding.
         339 => {
             let spr_raw = ((rb as u16) << 5) | (ra as u16);
             return match spr_raw {
@@ -512,7 +588,14 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                 _ => Err(PpuDecodeError::Unsupported(raw)),
             };
         }
-        371 => return Ok(PpuInstruction::Mftb { rt }),
+        371 => {
+            let tbr = ((rb as u16) << 5) | (ra as u16);
+            return match tbr {
+                268 => Ok(PpuInstruction::Mftb { rt }),
+                269 => Ok(PpuInstruction::Mftbu { rt }),
+                _ => Err(PpuDecodeError::Unsupported(raw)),
+            };
+        }
         467 => {
             let spr_raw = ((rb as u16) << 5) | (ra as u16);
             return match spr_raw {
@@ -570,10 +653,21 @@ mod tests {
 
     #[test]
     fn sc_decodes() {
-        // sc -> primary opcode 17 -> 0x44000002
+        // sc -> primary opcode 17 -> 0x44000002, LEV=0.
         let raw = 0x4400_0002;
         let insn = decode(raw).unwrap();
-        assert_eq!(insn, PpuInstruction::Sc);
+        assert_eq!(insn, PpuInstruction::Sc { lev: 0 });
+    }
+
+    #[test]
+    fn sc_preserves_lev_field() {
+        // LEV=1 is the LV1 hypercall form; LEV occupies raw bits
+        // 5..=11 (PPC bits 20..=26). Build LEV=1 and LEV=5.
+        for lev in [1u8, 5, 0x7F] {
+            let raw: u32 = (17u32 << 26) | ((lev as u32) << 5) | 2;
+            let insn = decode(raw).unwrap();
+            assert_eq!(insn, PpuInstruction::Sc { lev });
+        }
     }
 
     #[test]
@@ -659,6 +753,7 @@ mod tests {
                 rs: 3,
                 sh: 0,
                 mb: 61,
+                rc: false,
             }
         );
     }
@@ -674,6 +769,7 @@ mod tests {
                 rs: 3,
                 sh: 4,
                 me: 59,
+                rc: false,
             }
         );
     }
@@ -746,6 +842,7 @@ mod tests {
                 rb: 8,
                 mb: 0,
                 me: 31,
+                rc: false,
             }
         );
     }
@@ -760,6 +857,8 @@ mod tests {
                 rt: 3,
                 ra: 0,
                 rb: 29,
+                oe: false,
+                rc: false,
             }
         );
     }
@@ -774,6 +873,7 @@ mod tests {
                 rt: 0,
                 ra: 0,
                 rb: 11,
+                rc: false,
             }
         );
     }
@@ -802,6 +902,7 @@ mod tests {
                 ra: 31,
                 rs: 3,
                 rb: 3,
+                rc: false,
             }
         );
     }
@@ -816,6 +917,7 @@ mod tests {
                 ra: 0,
                 rs: 11,
                 rb: 28,
+                rc: false,
             }
         );
     }
@@ -824,14 +926,29 @@ mod tests {
     fn addze_decodes() {
         // addze r0, r0 -> XO(9)=202 -> 0x7C00_0194.
         let insn = decode(0x7C00_0194).unwrap();
-        assert_eq!(insn, PpuInstruction::Addze { rt: 0, ra: 0 });
+        assert_eq!(
+            insn,
+            PpuInstruction::Addze {
+                rt: 0,
+                ra: 0,
+                oe: false,
+                rc: false,
+            }
+        );
     }
 
     #[test]
     fn cntlzd_decodes() {
         // cntlzd r0, r11 -> XO(10)=58 -> 0x7D60_0074.
         let insn = decode(0x7D60_0074).unwrap();
-        assert_eq!(insn, PpuInstruction::Cntlzd { ra: 0, rs: 11 });
+        assert_eq!(
+            insn,
+            PpuInstruction::Cntlzd {
+                ra: 0,
+                rs: 11,
+                rc: false,
+            }
+        );
     }
 
     #[test]
@@ -872,6 +989,7 @@ mod tests {
                 rt: 0,
                 ra: 0,
                 rb: 9,
+                rc: false,
             }
         );
     }
@@ -888,5 +1006,739 @@ mod tests {
                 rb: 9,
             }
         );
+    }
+
+    #[test]
+    fn cmpi_l_bit_selects_cmpdi() {
+        // cmpdi cr0, r3, 0 -> primary 11, BF=0, L=1, RA=3, imm=0 -> 0x2C23_0000
+        let insn = decode(0x2C23_0000).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Cmpdi {
+                bf: 0,
+                ra: 3,
+                imm: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn cmpi_l_bit_zero_is_cmpwi() {
+        // cmpwi cr0, r3, 0 -> primary 11, L=0 -> 0x2C03_0000
+        let insn = decode(0x2C03_0000).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Cmpwi {
+                bf: 0,
+                ra: 3,
+                imm: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn cmpli_l_bit_selects_cmpldi() {
+        // cmpldi cr0, r3, 0 -> primary 10, L=1 -> 0x2823_0000
+        let insn = decode(0x2823_0000).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Cmpldi {
+                bf: 0,
+                ra: 3,
+                imm: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn stbu_decodes_with_update() {
+        // stbu r6, -4(r1) -> primary 39, RS=6, RA=1, D=-4 -> 0x9CC1_FFFC
+        let insn = decode(0x9CC1_FFFC).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Stbu {
+                rs: 6,
+                ra: 1,
+                imm: -4,
+            }
+        );
+    }
+
+    #[test]
+    fn sthu_decodes_with_update() {
+        // sthu r5, -8(r1) -> primary 45, RS=5, RA=1, D=-8 -> 0xB4A1_FFF8
+        let insn = decode(0xB4A1_FFF8).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Sthu {
+                rs: 5,
+                ra: 1,
+                imm: -8,
+            }
+        );
+    }
+
+    #[test]
+    fn rldic_decodes_from_xo_2() {
+        // Build rldic r5, r4, SH=4, MB=32 manually.
+        // primary=30, RS=4, RA=5, sh_lo=4 (SH&0x1F), mb_lo=32&0x1F=0,
+        // mb_hi=(32>>5)&1 = 1, xo=2, sh_hi=0, Rc=0.
+        let raw: u32 =
+            (30 << 26) | (4u32 << 21) | (5u32 << 16) | (4u32 << 11) | (1u32 << 5) | (2u32 << 2);
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Rldic {
+                ra: 5,
+                rs: 4,
+                sh: 4,
+                mb: 32,
+                rc: false,
+            }
+        );
+    }
+
+    #[test]
+    fn rldimi_decodes_from_xo_3() {
+        // rldimi r5, r4, SH=16, MB=0.
+        // primary=30, RS=4, RA=5, sh_lo=16, mb_lo=0, mb_hi=0, xo=3.
+        let raw: u32 = (30 << 26) | (4u32 << 21) | (5u32 << 16) | (16u32 << 11) | (3u32 << 2);
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Rldimi {
+                ra: 5,
+                rs: 4,
+                sh: 16,
+                mb: 0,
+                rc: false,
+            }
+        );
+    }
+
+    #[test]
+    fn xo_794_decodes_as_srad_not_sraw() {
+        // primary=31, RT=5, RA=6, RB=7, XO(10)=794, Rc=0.
+        let raw: u32 = (31u32 << 26) | (5u32 << 21) | (6u32 << 16) | (7u32 << 11) | (794u32 << 1);
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Srad {
+                ra: 6,
+                rs: 5,
+                rb: 7,
+                rc: false,
+            }
+        );
+    }
+
+    #[test]
+    fn mftb_decodes_lower_tbr() {
+        // mftb r3 -> primary 31, XO=371, TBR=268.
+        // TBR field uses the SPR swap: spr_raw = (rb<<5)|ra, so TBR=268
+        // encodes as rb = 268>>5 = 8, ra = 268 & 0x1F = 12.
+        let raw: u32 = (31u32 << 26) | (3u32 << 21) | (12u32 << 16) | (8u32 << 11) | (371u32 << 1);
+        let insn = decode(raw).unwrap();
+        assert_eq!(insn, PpuInstruction::Mftb { rt: 3 });
+    }
+
+    #[test]
+    fn mftbu_decodes_upper_tbr() {
+        // mftbu r3 -> TBR=269 -> rb = 269>>5 = 8, ra = 269 & 0x1F = 13.
+        let raw: u32 = (31u32 << 26) | (3u32 << 21) | (13u32 << 16) | (8u32 << 11) | (371u32 << 1);
+        let insn = decode(raw).unwrap();
+        assert_eq!(insn, PpuInstruction::Mftbu { rt: 3 });
+    }
+
+    #[test]
+    fn add_dot_decodes_with_rc_set() {
+        // add. r3, r4, r5 -> primary 31, XO(9)=266, Rc=1.
+        let raw: u32 =
+            (31u32 << 26) | (3u32 << 21) | (4u32 << 16) | (5u32 << 11) | (266u32 << 1) | 1;
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Add {
+                rt: 3,
+                ra: 4,
+                rb: 5,
+                oe: false,
+                rc: true,
+            }
+        );
+    }
+
+    #[test]
+    fn addo_decodes_with_oe_set() {
+        // addo r3, r4, r5 -> primary 31, RT=3, RA=4, RB=5, OE=1, XO(9)=266, Rc=0.
+        let raw: u32 = (31u32 << 26)
+            | (3u32 << 21)
+            | (4u32 << 16)
+            | (5u32 << 11)
+            | (1u32 << 10)
+            | (266u32 << 1);
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Add {
+                rt: 3,
+                ra: 4,
+                rb: 5,
+                oe: true,
+                rc: false,
+            }
+        );
+    }
+
+    #[test]
+    fn or_dot_decodes_with_rc_set() {
+        // or. r3, r4, r5 -> primary 31, XO(10)=444, Rc=1.
+        let raw: u32 =
+            (31u32 << 26) | (4u32 << 21) | (3u32 << 16) | (5u32 << 11) | (444u32 << 1) | 1;
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Or {
+                ra: 3,
+                rs: 4,
+                rb: 5,
+                rc: true,
+            }
+        );
+    }
+
+    #[test]
+    fn rldicl_dot_decodes_with_rc_set() {
+        // rldicl. r5, r4, sh=0, mb=61, Rc=1.
+        let raw: u32 = (30u32 << 26) | (4u32 << 21) | (5u32 << 16) | (29u32 << 6) | 1;
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Rldicl {
+                ra: 5,
+                rs: 4,
+                sh: 0,
+                mb: 29,
+                rc: true,
+            }
+        );
+    }
+
+    #[test]
+    fn vsldoi_decodes_with_shb_field() {
+        // vsldoi v3, v1, v2, 4 -> primary 4, VT=3, VA=1, VB=2,
+        // vc field holds SHB=4 in its low nibble, xo_6=0x2C.
+        // Layout: primary=4, VT=3, VA=1, VB=2, shb=4 in bits 21..25
+        // (vc slot), xo_6 in bits 0..5.
+        let raw: u32 =
+            (4u32 << 26) | (3u32 << 21) | (1u32 << 16) | (2u32 << 11) | (4u32 << 6) | 0x2C;
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Vsldoi {
+                vt: 3,
+                va: 1,
+                vb: 2,
+                shb: 4,
+            }
+        );
+    }
+
+    // -- Round-trip tripwire --
+    //
+    // Mini-encoder covering the variants touched by the Rc/OE slice.
+    // Catches the rldimi-as-rldicl class of mis-route structurally:
+    // if decode produced the wrong variant, re-encoding picks the
+    // wrong sub-opcode and the round-trip diverges.
+    //
+    // Not a full encoder. Only covers XO/X/M/MD/XS-form integer ops
+    // and FP (primaries 59/63). Variants outside this set return None.
+
+    fn encode(insn: &PpuInstruction) -> Option<u32> {
+        let rt = |v: u8| (v as u32 & 0x1F) << 21;
+        let ra = |v: u8| (v as u32 & 0x1F) << 16;
+        let rb = |v: u8| (v as u32 & 0x1F) << 11;
+        let frc = |v: u8| (v as u32 & 0x1F) << 6;
+        let p = |v: u32| v << 26;
+        let xo_9_oe_rc =
+            |xo: u32, oe: bool, rc: bool| -> u32 { ((oe as u32) << 10) | (xo << 1) | (rc as u32) };
+        let xo_10_rc = |xo: u32, rc: bool| -> u32 { (xo << 1) | (rc as u32) };
+
+        Some(match *insn {
+            // XO-form arithmetic (OE + Rc).
+            PpuInstruction::Add {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(266, oe, rc),
+            PpuInstruction::Subf {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(40, oe, rc),
+            PpuInstruction::Subfc {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(8, oe, rc),
+            PpuInstruction::Subfe {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(136, oe, rc),
+            PpuInstruction::Neg {
+                rt: t,
+                ra: a,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | xo_9_oe_rc(104, oe, rc),
+            PpuInstruction::Mullw {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(235, oe, rc),
+            PpuInstruction::Mulld {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(233, oe, rc),
+            PpuInstruction::Adde {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(138, oe, rc),
+            PpuInstruction::Addze {
+                rt: t,
+                ra: a,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | xo_9_oe_rc(202, oe, rc),
+            PpuInstruction::Divw {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(491, oe, rc),
+            PpuInstruction::Divwu {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(459, oe, rc),
+            PpuInstruction::Divd {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(489, oe, rc),
+            PpuInstruction::Divdu {
+                rt: t,
+                ra: a,
+                rb: b,
+                oe,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(457, oe, rc),
+
+            // Multiply-high family (Rc only, no OE).
+            PpuInstruction::Mulhwu {
+                rt: t,
+                ra: a,
+                rb: b,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(11, false, rc),
+            PpuInstruction::Mulhw {
+                rt: t,
+                ra: a,
+                rb: b,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(75, false, rc),
+            PpuInstruction::Mulhdu {
+                rt: t,
+                ra: a,
+                rb: b,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(9, false, rc),
+            PpuInstruction::Mulhd {
+                rt: t,
+                ra: a,
+                rb: b,
+                rc,
+            } => p(31) | rt(t) | ra(a) | rb(b) | xo_9_oe_rc(73, false, rc),
+
+            // X-form logical (Rc only). RS occupies the RT slot.
+            PpuInstruction::Or {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(444, rc),
+            PpuInstruction::Orc {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(412, rc),
+            PpuInstruction::And {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(28, rc),
+            PpuInstruction::Andc {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(60, rc),
+            PpuInstruction::Nor {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(124, rc),
+            PpuInstruction::Xor {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(316, rc),
+
+            // X-form shifts (Rc).
+            PpuInstruction::Slw {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(24, rc),
+            PpuInstruction::Srw {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(536, rc),
+            PpuInstruction::Sld {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(27, rc),
+            PpuInstruction::Srd {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(539, rc),
+            PpuInstruction::Sraw {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(792, rc),
+            PpuInstruction::Srad {
+                ra: a,
+                rs,
+                rb: b,
+                rc,
+            } => p(31) | rt(rs) | ra(a) | rb(b) | xo_10_rc(794, rc),
+            PpuInstruction::Srawi { ra: a, rs, sh, rc } => {
+                p(31) | rt(rs) | ra(a) | ((sh as u32 & 0x1F) << 11) | xo_10_rc(824, rc)
+            }
+            // XS-form: SH low 5 bits in bits 11..15, SH high bit at raw bit 1.
+            PpuInstruction::Sradi { ra: a, rs, sh, rc } => {
+                let sh_lo = (sh as u32 & 0x1F) << 11;
+                let sh_hi = ((sh as u32 >> 5) & 1) << 1;
+                p(31) | rt(rs) | ra(a) | sh_lo | (413u32 << 2) | sh_hi | (rc as u32)
+            }
+
+            // Cntlz/Extsh/Extsb/Extsw (Rc).
+            PpuInstruction::Cntlzw { ra: a, rs, rc } => p(31) | rt(rs) | ra(a) | xo_10_rc(26, rc),
+            PpuInstruction::Cntlzd { ra: a, rs, rc } => p(31) | rt(rs) | ra(a) | xo_10_rc(58, rc),
+            PpuInstruction::Extsh { ra: a, rs, rc } => p(31) | rt(rs) | ra(a) | xo_10_rc(922, rc),
+            PpuInstruction::Extsb { ra: a, rs, rc } => p(31) | rt(rs) | ra(a) | xo_10_rc(954, rc),
+            PpuInstruction::Extsw { ra: a, rs, rc } => p(31) | rt(rs) | ra(a) | xo_10_rc(986, rc),
+
+            // M-form rotates (Rc).
+            PpuInstruction::Rlwimi {
+                ra: a,
+                rs,
+                sh,
+                mb,
+                me,
+                rc,
+            } => {
+                p(20)
+                    | rt(rs)
+                    | ra(a)
+                    | ((sh as u32 & 0x1F) << 11)
+                    | ((mb as u32 & 0x1F) << 6)
+                    | ((me as u32 & 0x1F) << 1)
+                    | (rc as u32)
+            }
+            PpuInstruction::Rlwinm {
+                ra: a,
+                rs,
+                sh,
+                mb,
+                me,
+                rc,
+            } => {
+                p(21)
+                    | rt(rs)
+                    | ra(a)
+                    | ((sh as u32 & 0x1F) << 11)
+                    | ((mb as u32 & 0x1F) << 6)
+                    | ((me as u32 & 0x1F) << 1)
+                    | (rc as u32)
+            }
+            PpuInstruction::Rlwnm {
+                ra: a,
+                rs,
+                rb: b,
+                mb,
+                me,
+                rc,
+            } => {
+                p(23)
+                    | rt(rs)
+                    | ra(a)
+                    | rb(b)
+                    | ((mb as u32 & 0x1F) << 6)
+                    | ((me as u32 & 0x1F) << 1)
+                    | (rc as u32)
+            }
+
+            // MD-form rotates (Rc + 3-bit sub-opcode).
+            PpuInstruction::Rldicl {
+                ra: a,
+                rs,
+                sh,
+                mb,
+                rc,
+            } => encode_md(rs, a, sh, mb, 0, rc),
+            PpuInstruction::Rldicr {
+                ra: a,
+                rs,
+                sh,
+                me,
+                rc,
+            } => encode_md(rs, a, sh, me, 1, rc),
+            PpuInstruction::Rldic {
+                ra: a,
+                rs,
+                sh,
+                mb,
+                rc,
+            } => encode_md(rs, a, sh, mb, 2, rc),
+            PpuInstruction::Rldimi {
+                ra: a,
+                rs,
+                sh,
+                mb,
+                rc,
+            } => encode_md(rs, a, sh, mb, 3, rc),
+
+            // FP (Rc preserved, not yet honored).
+            PpuInstruction::Fp63 {
+                xo,
+                frt,
+                fra,
+                frb,
+                frc: c,
+                rc,
+            } => p(63) | rt(frt) | ra(fra) | rb(frb) | frc(c) | ((xo as u32) << 1) | (rc as u32),
+            PpuInstruction::Fp59 {
+                xo,
+                frt,
+                fra,
+                frb,
+                frc: c,
+                rc,
+            } => p(59) | rt(frt) | ra(fra) | rb(frb) | frc(c) | ((xo as u32) << 1) | (rc as u32),
+
+            _ => return None,
+        })
+    }
+
+    fn encode_md(rs: u8, ra_val: u8, sh: u8, mask: u8, xo: u32, rc: bool) -> u32 {
+        let sh_lo = (sh as u32 & 0x1F) << 11;
+        let sh_hi = ((sh as u32 >> 5) & 1) << 1;
+        let mask_lo = (mask as u32 & 0x1F) << 6;
+        let mask_hi = ((mask as u32 >> 5) & 1) << 5;
+        (30u32 << 26)
+            | ((rs as u32 & 0x1F) << 21)
+            | ((ra_val as u32 & 0x1F) << 16)
+            | sh_lo
+            | mask_lo
+            | mask_hi
+            | (xo << 2)
+            | sh_hi
+            | (rc as u32)
+    }
+
+    #[test]
+    fn round_trip_preserves_xo_form_rc_and_oe() {
+        // Corpus: every combination of Rc and OE where applicable,
+        // across the XO-form arithmetic, X-form logical and shift,
+        // M-form and MD-form rotates, and FP. Each entry is raw u32.
+        // Primary 31, RT=5, RA=6, RB=7 where possible. Dot/oe toggles
+        // are the bits most likely to silently drop.
+        let xo9_ops = [266u32, 40, 235, 233, 138, 491, 459, 489, 457]; // add,subf,mullw,mulld,adde,divw,divwu,divd,divdu
+        let mut corpus: Vec<u32> = Vec::new();
+        for &xo in &xo9_ops {
+            for oe in [0u32, 1] {
+                for rc in [0u32, 1] {
+                    corpus.push(
+                        (31u32 << 26)
+                            | (5u32 << 21)
+                            | (6u32 << 16)
+                            | (7u32 << 11)
+                            | (oe << 10)
+                            | (xo << 1)
+                            | rc,
+                    );
+                }
+            }
+        }
+        // addze / neg: no RB slot.
+        for &xo in &[202u32, 104] {
+            for oe in [0u32, 1] {
+                for rc in [0u32, 1] {
+                    corpus.push(
+                        (31u32 << 26) | (5u32 << 21) | (6u32 << 16) | (oe << 10) | (xo << 1) | rc,
+                    );
+                }
+            }
+        }
+        // mulh family: xo_9 only, no OE bit meaningful.
+        for &xo in &[11u32, 75, 9, 73] {
+            for rc in [0u32, 1] {
+                corpus.push(
+                    (31u32 << 26) | (5u32 << 21) | (6u32 << 16) | (7u32 << 11) | (xo << 1) | rc,
+                );
+            }
+        }
+        // X-form logical + shift (use RB=7).
+        for &xo in &[444u32, 412, 28, 60, 124, 316, 24, 536, 27, 539, 792, 794] {
+            for rc in [0u32, 1] {
+                corpus.push(
+                    (31u32 << 26) | (5u32 << 21) | (6u32 << 16) | (7u32 << 11) | (xo << 1) | rc,
+                );
+            }
+        }
+        // cntlz + extsb/h/w: reserved RB slot is zero in canonical encodings.
+        for &xo in &[26u32, 58, 922, 954, 986] {
+            for rc in [0u32, 1] {
+                corpus.push((31u32 << 26) | (5u32 << 21) | (6u32 << 16) | (xo << 1) | rc);
+            }
+        }
+        // srawi: SH in RB slot.
+        for rc in [0u32, 1] {
+            corpus.push(
+                (31u32 << 26) | (5u32 << 21) | (6u32 << 16) | (12u32 << 11) | (824u32 << 1) | rc,
+            );
+        }
+        // sradi: XS-form. SH=34 (hi=1, lo=2): sh_lo=2 at bits 11..15, sh_hi=1 at bit 1.
+        for rc in [0u32, 1] {
+            corpus.push(
+                (31u32 << 26)
+                    | (5u32 << 21)
+                    | (6u32 << 16)
+                    | (2u32 << 11)
+                    | (413u32 << 2)
+                    | (1u32 << 1)
+                    | rc,
+            );
+            // SH=3 (hi=0, lo=3).
+            corpus.push(
+                (31u32 << 26) | (5u32 << 21) | (6u32 << 16) | (3u32 << 11) | (413u32 << 2) | rc,
+            );
+        }
+        // M-form: rlwimi, rlwinm, rlwnm with sh=4, mb=8, me=20.
+        for primary in [20u32, 21] {
+            for rc in [0u32, 1] {
+                corpus.push(
+                    (primary << 26)
+                        | (5u32 << 21)
+                        | (6u32 << 16)
+                        | (4u32 << 11)
+                        | (8u32 << 6)
+                        | (20u32 << 1)
+                        | rc,
+                );
+            }
+        }
+        for rc in [0u32, 1] {
+            corpus.push(
+                (23u32 << 26)
+                    | (5u32 << 21)
+                    | (6u32 << 16)
+                    | (7u32 << 11)
+                    | (8u32 << 6)
+                    | (20u32 << 1)
+                    | rc,
+            );
+        }
+        // MD-form rotates. mask=33 (hi=1, lo=1), sh=34 (hi=1, lo=2).
+        for xo in 0..=3u32 {
+            for rc in [0u32, 1] {
+                corpus.push(
+                    (30u32 << 26)
+                        | (5u32 << 21)
+                        | (6u32 << 16)
+                        | (2u32 << 11)
+                        | (1u32 << 6)
+                        | (1u32 << 5)
+                        | (xo << 2)
+                        | (1u32 << 1)
+                        | rc,
+                );
+            }
+        }
+        // FP primary 59 and 63: xo=21 (fadd), xo=25 (fmul low 5), Rc=0/1.
+        for &primary in &[59u32, 63] {
+            for &xo in &[21u32, 50] {
+                for rc in [0u32, 1] {
+                    corpus.push(
+                        (primary << 26)
+                            | (5u32 << 21)
+                            | (6u32 << 16)
+                            | (7u32 << 11)
+                            | (2u32 << 6)
+                            | (xo << 1)
+                            | rc,
+                    );
+                }
+            }
+        }
+
+        assert!(!corpus.is_empty(), "round-trip corpus must not be empty");
+        for raw in corpus {
+            let decoded =
+                decode(raw).unwrap_or_else(|e| panic!("decode failed for {raw:#010x}: {e:?}"));
+            let reencoded = encode(&decoded).unwrap_or_else(|| {
+                panic!("encoder missing variant for decoded={decoded:?} (raw={raw:#010x})")
+            });
+            assert_eq!(
+                reencoded, raw,
+                "round-trip mismatch: raw={raw:#010x} decoded={decoded:?} re-encoded={reencoded:#010x}",
+            );
+        }
     }
 }
