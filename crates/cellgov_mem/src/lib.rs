@@ -1,16 +1,9 @@
-//! cellgov_mem -- guest memory model, address space, staging, local store.
+//! Guest memory model: committed [`GuestMemory`], pending [`StagingMemory`],
+//! and unit-private [`LocalStore`].
 //!
-//! Three layers, kept explicitly distinct:
-//!
-//! - `GuestMemory`: committed globally visible memory
-//! - `StagingMemory`: pending shared visibility changes emitted by units
-//! - `LocalStore`: execution-unit-private memory where applicable
-//!
-//! API surface must avoid direct `write_u32(addr, value)` style calls. Writes
-//! flow as `SharedWriteIntent` effects through the commit pipeline. Region
-//! metadata (page-size class, access mode) rides on the `Region` type so
-//! further additions (reservation granules, MMIO regions) slot in without
-//! changing top-level interfaces.
+//! Shared writes enter through [`StagedWrite`] batches; no direct
+//! `write_u32(addr, value)` API is exposed. Region metadata (page-size class,
+//! access mode) lives on [`Region`].
 
 pub mod addr;
 pub mod guest;

@@ -1,1 +1,12 @@
 DIVERGE region data: first byte differs at offset 0x7768 (guest 0x827768) -- 10 vs 00
+
+Classification: PS3-wide, non-semantic -- HLE binding table layout.
+
+Guest address 0x00827768 falls inside the HLE OPD (function
+descriptor) stub area. CellGov and RPCS3 populate OPD slots with
+functionally-correct pointers but iterate within a module
+differently (sorted vs declaration-order NID iteration), producing
+a one-byte difference in the OPD pointer field. The guest calls
+through the OPD identically on both sides.
+
+Verdict: equivalent (1 byte non-semantic).

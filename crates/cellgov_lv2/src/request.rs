@@ -1,59 +1,48 @@
-//! Typed LV2 syscall requests produced by the PPU at `sc` yield.
+//! Typed LV2 syscall requests decoded from PPU `sc` GPR state.
 //!
-//! The runtime decodes r3..=r10 / r11 into one of these variants
-//! and hands it to `Lv2Host::dispatch`. Actual syscall semantics
-//! live in the host dispatch handlers; this module owns only the
-//! request vocabulary.
-//!
-//! # Escape hatches
-//! `classify` is total: an unrecognised number surfaces as
-//! [`Lv2Request::Unsupported`], and a recognised number whose u32
-//! or i32 arguments are out of ABI range surfaces as
-//! [`Lv2Request::Malformed`]. Both carry the raw GPR values so the
-//! dispatcher log can show what the caller attempted.
+//! Host handlers match exhaustively on [`Lv2Request`]; [`classify`]
+//! is total so unknown numbers and malformed arguments surface as
+//! [`Lv2Request::Unsupported`] / [`Lv2Request::Malformed`] instead
+//! of panicking.
 
-/// A typed LV2 syscall request.
+/// Typed LV2 syscall request; host handlers exhaustively match.
 ///
-/// Pointer fields are guest effective addresses (u32 on PS3
-/// despite the 64-bit ELF container). `classify` rejects any
-/// u32-typed field whose source GPR has non-zero high bits
-/// rather than silently truncating.
+/// Pointer fields are guest effective addresses (u32 on PS3 despite
+/// the 64-bit ELF container). [`classify`] rejects a u32-typed field
+/// whose source GPR has non-zero high bits rather than truncating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lv2Request {
     /// sys_spu_image_open (156).
     SpuImageOpen {
-        /// Guest address to populate with the `sys_spu_image_t` struct.
+        /// Out-pointer for `sys_spu_image_t`.
         img_ptr: u32,
-        /// Guest address of the NUL-terminated path string.
+        /// NUL-terminated path string.
         path_ptr: u32,
     },
     /// sys_spu_thread_group_create (170).
     SpuThreadGroupCreate {
-        /// Guest address to write the allocated group id into.
+        /// Out-pointer for the group id.
         id_ptr: u32,
         /// Number of SPU threads in the group.
         num_threads: u32,
-        /// Priority (not used by CellGov).
+        /// Priority (not consulted by the scheduler).
         priority: u32,
-        /// Guest address of the attribute struct (opaque).
+        /// Attribute struct (opaque).
         attr_ptr: u32,
     },
     /// sys_spu_thread_initialize (172).
-    ///
-    /// ABI: r3=thread_ptr, r4=group, r5=spu_num, r6=img_ptr,
-    /// r7=attr_ptr, r8=arg_ptr.
     SpuThreadInitialize {
-        /// Guest address to write the allocated thread id into.
+        /// Out-pointer for the thread id.
         thread_ptr: u32,
-        /// Thread group id returned by a previous create call.
+        /// Thread group id.
         group_id: u32,
         /// Slot index within the group (0-based).
         thread_num: u32,
-        /// Guest address of the sys_spu_image_t struct.
+        /// `sys_spu_image_t` struct.
         img_ptr: u32,
-        /// Guest address of the attribute struct (opaque).
+        /// Attribute struct (opaque).
         attr_ptr: u32,
-        /// Guest address of `sys_spu_thread_argument`.
+        /// `sys_spu_thread_argument` struct.
         arg_ptr: u32,
     },
     /// sys_spu_thread_group_start (173).
@@ -65,16 +54,15 @@ pub enum Lv2Request {
     SpuThreadGroupJoin {
         /// Thread group id.
         group_id: u32,
-        /// Guest address to write the exit cause into.
+        /// Out-pointer for the exit cause.
         cause_ptr: u32,
-        /// Guest address to write the exit status into.
+        /// Out-pointer for the exit status.
         status_ptr: u32,
     },
     /// sys_spu_thread_group_terminate (178).
     ///
-    /// Distinct from [`Self::SpuThreadGroupJoin`] so the dispatch
-    /// cannot conflate the two ABI shapes (177 has two out-pointers;
-    /// 178 takes an in-param status).
+    /// Distinct from [`Self::SpuThreadGroupJoin`]; 177 takes two
+    /// out-pointers, 178 takes an in-param status.
     SpuThreadGroupTerminate {
         /// Thread group id.
         group_id: u32,
@@ -83,34 +71,34 @@ pub enum Lv2Request {
     },
     /// sys_tty_write (403).
     TtyWrite {
-        /// File descriptor (typically 0 for stdout).
+        /// File descriptor.
         fd: u32,
-        /// Guest address of the buffer to write.
+        /// Buffer to write.
         buf_ptr: u32,
-        /// Number of bytes to write.
+        /// Byte count.
         len: u32,
-        /// Guest address to store the number of bytes written.
+        /// Out-pointer for bytes-written count.
         nwritten_ptr: u32,
     },
     /// sys_spu_thread_write_spu_mb (190).
     SpuThreadWriteMb {
         /// SPU thread id.
         thread_id: u32,
-        /// Value to deposit into the SPU's inbound mailbox.
+        /// Value deposited into the SPU inbound mailbox.
         value: u32,
     },
     /// sys_mutex_create (100).
     MutexCreate {
-        /// Guest address to write the allocated mutex id into.
+        /// Out-pointer for the mutex id.
         id_ptr: u32,
-        /// Guest address of the attribute struct (opaque).
+        /// Attribute struct (opaque).
         attr_ptr: u32,
     },
     /// sys_mutex_lock (102).
     MutexLock {
         /// Mutex id.
         mutex_id: u32,
-        /// Timeout in microseconds (0 = infinite). Captured and ignored.
+        /// Timeout in microseconds; 0 means infinite. Ignored.
         timeout: u64,
     },
     /// sys_mutex_unlock (104).
@@ -125,9 +113,9 @@ pub enum Lv2Request {
     },
     /// sys_semaphore_create (93).
     SemaphoreCreate {
-        /// Guest address to receive the minted semaphore id (u32 BE).
+        /// Out-pointer for the semaphore id.
         id_ptr: u32,
-        /// Guest address of the attribute struct (opaque).
+        /// Attribute struct (opaque).
         attr_ptr: u32,
         /// Initial resource count.
         initial: i32,
@@ -143,14 +131,14 @@ pub enum Lv2Request {
     SemaphoreWait {
         /// Semaphore id.
         id: u32,
-        /// Timeout in microseconds (0 = infinite). Captured and ignored.
+        /// Timeout in microseconds; 0 means infinite. Ignored.
         timeout: u64,
     },
     /// sys_semaphore_post (115).
     SemaphorePost {
         /// Semaphore id.
         id: u32,
-        /// Number of slots to post. Only `val == 1` is accepted.
+        /// Slots to post; only `val == 1` is accepted.
         val: i32,
     },
     /// sys_semaphore_trywait (116).
@@ -162,14 +150,14 @@ pub enum Lv2Request {
     SemaphoreGetValue {
         /// Semaphore id.
         id: u32,
-        /// Guest address to receive the count (u32 BE).
+        /// Out-pointer for the count.
         out_ptr: u32,
     },
     /// sys_event_queue_create (128).
     EventQueueCreate {
-        /// Guest address to write the allocated queue id into.
+        /// Out-pointer for the queue id.
         id_ptr: u32,
-        /// Guest address of the attribute struct (opaque).
+        /// Attribute struct (opaque).
         attr_ptr: u32,
         /// Event queue key.
         key: u64,
@@ -185,17 +173,15 @@ pub enum Lv2Request {
     EventQueueReceive {
         /// Queue id.
         queue_id: u32,
-        /// Guest address of the `sys_event_t` output buffer (32
-        /// bytes: source / data1 / data2 / data3, each u64 BE).
+        /// Out-pointer for `sys_event_t` (32 bytes: source / data1 /
+        /// data2 / data3, each u64 BE).
         out_ptr: u32,
-        /// Timeout in microseconds (0 = infinite). Captured and ignored.
+        /// Timeout in microseconds; 0 means infinite. Ignored.
         timeout: u64,
     },
     /// sys_event_port_send (134).
     ///
-    /// The dispatcher looks up the port and validates the binding;
-    /// a port with no binding or a non-1:1 binding routes to ESRCH
-    /// rather than being silently mis-delivered.
+    /// A port with no binding or a non-1:1 binding routes to ESRCH.
     EventPortSend {
         /// Event port id.
         port_id: u32,
@@ -208,9 +194,9 @@ pub enum Lv2Request {
     },
     /// sys_event_flag_create (82).
     EventFlagCreate {
-        /// Guest address to receive the minted id (u32 BE).
+        /// Out-pointer for the flag id.
         id_ptr: u32,
-        /// Guest address of the attribute struct (opaque).
+        /// Attribute struct (opaque).
         attr_ptr: u32,
         /// Initial bit state.
         init: u64,
@@ -226,11 +212,11 @@ pub enum Lv2Request {
         id: u32,
         /// Bit mask to match.
         bits: u64,
-        /// Raw ABI wait-mode word; the handler maps to `EventFlagWaitMode`.
+        /// Raw ABI wait-mode word; handler maps to `EventFlagWaitMode`.
         mode: u32,
-        /// Guest address to write the observed bit pattern (u64 BE).
+        /// Out-pointer for the observed bit pattern.
         result_ptr: u32,
-        /// Timeout in microseconds (0 = infinite). Captured and ignored.
+        /// Timeout in microseconds; 0 means infinite. Ignored.
         timeout: u64,
     },
     /// sys_event_flag_set (86).
@@ -255,27 +241,27 @@ pub enum Lv2Request {
         bits: u64,
         /// Raw ABI wait-mode word.
         mode: u32,
-        /// Guest address to write the observed bit pattern.
+        /// Out-pointer for the observed bit pattern.
         result_ptr: u32,
     },
     /// sys_event_queue_tryreceive (133).
     EventQueueTryReceive {
         /// Queue id.
         queue_id: u32,
-        /// Guest address of the output array (32 bytes per entry).
+        /// Output array (32 bytes per entry).
         event_array: u32,
         /// Maximum number of entries to write.
         size: u32,
-        /// Guest address to receive the actual count (u32 BE).
+        /// Out-pointer for the actual count.
         count_out: u32,
     },
     /// sys_memory_allocate (348).
     MemoryAllocate {
         /// Allocation size in bytes.
         size: u64,
-        /// Page size flags: 0x400 = 1MB, 0x200 = 64KB, 0 = 1MB default.
+        /// Page-size flags: 0x400 = 1MB, 0x200 = 64KB, 0 = 1MB default.
         flags: u64,
-        /// Guest address to write the allocated address into.
+        /// Out-pointer for the allocated address.
         alloc_addr_ptr: u32,
     },
     /// sys_memory_free (349).
@@ -285,12 +271,12 @@ pub enum Lv2Request {
     },
     /// sys_memory_get_user_memory_size (352).
     MemoryGetUserMemorySize {
-        /// Guest address of `sys_memory_info_t` output struct.
+        /// Out-pointer for `sys_memory_info_t`.
         mem_info_ptr: u32,
     },
     /// sys_memory_container_create (341).
     MemoryContainerCreate {
-        /// Guest address to write the allocated container id into.
+        /// Out-pointer for the container id.
         cid_ptr: u32,
         /// Container size in bytes.
         size: u64,
@@ -309,16 +295,16 @@ pub enum Lv2Request {
     },
     /// sys_ppu_thread_join (44).
     PpuThreadJoin {
-        /// Guest thread id of the child to join on.
+        /// Child thread id.
         target: u64,
-        /// Guest address to receive the child's exit value (u64 BE).
+        /// Out-pointer for the child's exit value.
         status_out_ptr: u32,
     },
     /// sys_lwmutex_create (95).
     LwMutexCreate {
-        /// Guest address to receive the minted lwmutex id (u32 BE).
+        /// Out-pointer for the lwmutex id.
         id_ptr: u32,
-        /// Guest address of the attribute struct (opaque).
+        /// Attribute struct (opaque).
         attr_ptr: u32,
     },
     /// sys_lwmutex_destroy (96).
@@ -330,7 +316,7 @@ pub enum Lv2Request {
     LwMutexLock {
         /// Lwmutex id.
         id: u32,
-        /// Timeout in microseconds (0 = infinite). Captured and ignored.
+        /// Timeout in microseconds; 0 means infinite. Ignored.
         timeout: u64,
     },
     /// sys_lwmutex_unlock (98).
@@ -345,11 +331,11 @@ pub enum Lv2Request {
     },
     /// sys_cond_create (105).
     CondCreate {
-        /// Guest address to receive the minted cond id (u32 BE).
+        /// Out-pointer for the cond id.
         id_ptr: u32,
-        /// Guest id of the associated heavy mutex.
+        /// Associated heavy mutex id.
         mutex_id: u32,
-        /// Guest address of the attribute struct (opaque).
+        /// Attribute struct (opaque).
         attr_ptr: u32,
     },
     /// sys_cond_destroy (106).
@@ -361,7 +347,7 @@ pub enum Lv2Request {
     CondWait {
         /// Cond id.
         id: u32,
-        /// Timeout in microseconds (0 = infinite). Captured and ignored.
+        /// Timeout in microseconds; 0 means infinite. Ignored.
         timeout: u64,
     },
     /// sys_cond_signal (108).
@@ -378,56 +364,55 @@ pub enum Lv2Request {
     CondSignalTo {
         /// Cond id.
         id: u32,
-        /// Guest PPU thread id of the target.
+        /// Target PPU thread id.
         target_thread: u32,
     },
     /// sys_ppu_thread_create (52).
     PpuThreadCreate {
-        /// Guest address to receive the minted thread id (u64 BE).
+        /// Out-pointer for the thread id.
         id_ptr: u32,
         /// OPD address: first 8 bytes code, next 8 bytes TOC.
         entry_opd: u32,
-        /// Argument passed as the child's r3 on first execution.
+        /// Argument passed as the child's r3.
         arg: u64,
-        /// Priority (captured but not consulted by the scheduler).
+        /// Priority (not consulted by the scheduler).
         priority: u32,
         /// Requested child stack size in bytes.
         stacksize: u64,
-        /// Flags (captured but not interpreted).
+        /// Flags (not interpreted).
         flags: u64,
     },
-    /// sys_rsx_memory_allocate (665). Reserves RSX-visible memory.
+    /// sys_rsx_memory_allocate (665).
     SysRsxMemoryAllocate {
-        /// Out-pointer (u32*) to the mem handle.
+        /// Out-pointer for the memory handle.
         mem_handle_ptr: u32,
-        /// Out-pointer (u64*) to the allocated guest address.
+        /// Out-pointer for the allocated guest address.
         mem_addr_ptr: u32,
         /// Requested size in bytes.
         size: u32,
         /// Allocation flags.
         flags: u64,
-        /// Reserved / unused.
+        /// Reserved.
         a5: u64,
-        /// Reserved / unused.
+        /// Reserved.
         a6: u64,
-        /// Reserved / unused.
+        /// Reserved.
         a7: u64,
     },
     /// sys_rsx_memory_free (667).
     SysRsxMemoryFree {
-        /// Handle returned from a prior `SysRsxMemoryAllocate`.
+        /// Handle from a prior `SysRsxMemoryAllocate`.
         mem_handle: u32,
     },
-    /// sys_rsx_context_allocate (670). Creates the DMA control /
-    /// driver info / reports regions and the RSX event queue.
+    /// sys_rsx_context_allocate (670).
     SysRsxContextAllocate {
-        /// Out-pointer (u32*) to the context id.
+        /// Out-pointer for the context id.
         context_id_ptr: u32,
-        /// Out-pointer (u64*) to the DMA-control base address.
+        /// Out-pointer for the DMA-control base address.
         lpar_dma_control_ptr: u32,
-        /// Out-pointer (u64*) to the driver-info base address.
+        /// Out-pointer for the driver-info base address.
         lpar_driver_info_ptr: u32,
-        /// Out-pointer (u64*) to the reports base address.
+        /// Out-pointer for the reports base address.
         lpar_reports_ptr: u32,
         /// Memory context handle from `SysRsxMemoryAllocate`.
         mem_ctx: u64,
@@ -436,17 +421,15 @@ pub enum Lv2Request {
     },
     /// sys_rsx_context_free (671).
     SysRsxContextFree {
-        /// Context id returned from a prior `SysRsxContextAllocate`.
+        /// Context id from a prior `SysRsxContextAllocate`.
         context_id: u32,
     },
-    /// sys_rsx_context_attribute (674). Sub-command-dispatched
-    /// attribute surface; `package_id` selects FLIP_MODE,
-    /// FLIP_BUFFER, SET_DISPLAY_BUFFER, SET_FLIP_HANDLER,
-    /// SET_VBLANK_HANDLER, etc.
+    /// sys_rsx_context_attribute (674); `package_id` is the sub-command.
     SysRsxContextAttribute {
-        /// Context id returned from a prior `SysRsxContextAllocate`.
+        /// Context id from a prior `SysRsxContextAllocate`.
         context_id: u32,
-        /// Sub-command selector.
+        /// Sub-command selector (FLIP_MODE, FLIP_BUFFER,
+        /// SET_DISPLAY_BUFFER, SET_FLIP_HANDLER, SET_VBLANK_HANDLER, ...).
         package_id: u32,
         /// Sub-command argument.
         a3: u64,
@@ -457,33 +440,25 @@ pub enum Lv2Request {
         /// Sub-command argument.
         a6: u64,
     },
-    /// A syscall number that does not map to any known request.
+    /// Unknown syscall number; raw args preserved for trace.
     Unsupported {
-        /// The raw syscall number from GPR 11.
+        /// Raw syscall number from GPR 11.
         number: u64,
         /// Raw GPR values from r3..=r10.
         args: [u64; 8],
     },
-    /// A recognised syscall whose arguments are out of ABI range.
-    ///
-    /// A u32-typed field arriving with non-zero high bits, or an
-    /// i32-typed field that is not a clean sign extension (PPC64
-    /// promotes `int x = -1` to `0xFFFF_FFFF_FFFF_FFFF`, which
-    /// decodes to `-1`; `0x1_0000_0001` is neither a zero-extended
-    /// u32 nor a clean sign extension and is rejected). The
-    /// dispatcher routes this to CELL_EINVAL.
+    /// Recognised syscall whose arguments are out of ABI range; raw
+    /// args preserved for trace, dispatcher routes to CELL_EINVAL.
     Malformed {
-        /// The raw syscall number.
+        /// Raw syscall number.
         number: u64,
-        /// Short description of which field failed to decode.
+        /// Which field failed to decode.
         reason: &'static str,
         /// Raw GPR values from r3..=r10.
         args: [u64; 8],
     },
 }
 
-/// Per-arg reason strings used by [`classify`] on u32 high-bit
-/// rejection.
 const HIGH_BITS_REASONS: [&str; 8] = [
     "arg 0: non-zero high 32 bits in u32 field",
     "arg 1: non-zero high 32 bits in u32 field",
@@ -495,8 +470,6 @@ const HIGH_BITS_REASONS: [&str; 8] = [
     "arg 7: non-zero high 32 bits in u32 field",
 ];
 
-/// Per-arg reason strings used by [`classify`] on i32
-/// out-of-range rejection.
 const I32_RANGE_REASONS: [&str; 8] = [
     "arg 0: not representable as i32",
     "arg 1: not representable as i32",
@@ -508,18 +481,13 @@ const I32_RANGE_REASONS: [&str; 8] = [
     "arg 7: not representable as i32",
 ];
 
-/// Build an `Lv2Request` from the raw syscall number (r11) and
+/// Build an [`Lv2Request`] from the raw syscall number (r11) and
 /// argument GPRs (r3..=r10).
-///
-/// Unknown numbers produce [`Lv2Request::Unsupported`]; recognised
-/// numbers whose u32 or i32 arguments are out of ABI range produce
-/// [`Lv2Request::Malformed`]. Both variants preserve the raw args.
 pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
-    // `s!(i)` relies on `args[i] as i64` to reverse PPC64's sign
-    // extension: a guest-side `int x = -1` arrives in the GPR as
-    // 0xFFFF_FFFF_FFFF_FFFF, which `as i64` turns into -1i64, and
-    // `i32::try_from` then rejects anything that isn't a clean
-    // sign extension (e.g. 0x1_0000_0001, or 2^31).
+    // `s!` uses `as i64` to reverse PPC64 sign extension: a guest
+    // `int x = -1` arrives as 0xFFFF_FFFF_FFFF_FFFF, decodes to
+    // -1i64, and `i32::try_from` rejects anything that isn't a
+    // clean sign extension (e.g. 0x1_0000_0001 or 2^31).
     macro_rules! p {
         ($idx:expr) => {
             match u32::try_from(args[$idx]) {
@@ -753,10 +721,8 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             cid_ptr: p!(0),
             size: args[1],
         },
-        // Explicit stub list: known shapes whose effects are not
-        // yet modelled. Listed here so adding a handler later
-        // forces a review rather than silently falling through
-        // the default arm.
+        // Known shapes whose effects are not yet modelled; listing
+        // them forces a review when a handler is added.
         171 | 174 | 175 | 176 | 179 | 180 | 192 => Lv2Request::Unsupported {
             number: syscall_num,
             args: *args,
@@ -840,9 +806,6 @@ mod tests {
 
     #[test]
     fn classify_thread_group_terminate_is_separate_from_join() {
-        // Regression fence: 177 and 178 have different ABI
-        // shapes; conflating them routes r4 through the wrong
-        // interpretation.
         let args = [3, 0xFFFF_FFFF_FFFF_FFFF, 0, 0, 0, 0, 0, 0];
         let req = classify(178, &args);
         assert_eq!(
@@ -1220,9 +1183,6 @@ mod tests {
 
     #[test]
     fn narrow_i32_accepts_sign_extended_negatives() {
-        // PPC64 sign-extends negative ints; -1 must decode to
-        // i32 -1, not be rejected. The handler's existing
-        // "negative -> EINVAL" logic is the final gate.
         let args = [
             0x5000,
             0x6000,
@@ -1261,8 +1221,7 @@ mod tests {
 
     #[test]
     fn narrow_i32_rejects_large_positive() {
-        // 2^31 fits in u32 but not in i32; the old cast wrapped
-        // to i32::MIN.
+        // 2^31 fits in u32 but not in i32; old cast wrapped to i32::MIN.
         let args = [0x5000, 0x6000, 0x8000_0000, 10, 0, 0, 0, 0];
         assert!(matches!(
             classify(93, &args),
@@ -1270,10 +1229,8 @@ mod tests {
         ));
     }
 
-    /// Every syscall whose decode uses `p!(N)` for a u32 field,
-    /// listed by the GPR slot indices that must reject high bits.
-    /// Regression fence: catches `args[N] as u32` added by muscle
-    /// memory instead of `p!(N)` in a new syscall arm.
+    /// Syscalls and GPR slots that must reject high bits; regression
+    /// fence against `args[N] as u32` slipping in for a new arm.
     const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
         (22, &[0]),
         (44, &[1]),

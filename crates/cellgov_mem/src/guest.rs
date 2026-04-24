@@ -1,69 +1,44 @@
-//! `GuestMemory` -- committed globally visible memory.
+//! Committed globally visible memory.
 //!
-//! `GuestMemory` is the runtime's source of truth for what every unit
-//! sees when it reads from globally visible memory. It is read-only from
-//! the perspective of execution units; the only mutation entry point is
-//! [`GuestMemory::apply_commit`], which the commit pipeline in
-//! `cellgov_core` invokes after validating a batch of `SharedWriteIntent`
-//! effects. Execution units never call `apply_commit` directly; no
-//! execution unit may publish guest-visible state directly.
+//! Mutation entry point is [`GuestMemory::apply_commit`], invoked by the
+//! commit pipeline in `cellgov_core` after it validates a batch of
+//! `SharedWriteIntent` effects. Execution units must not call it directly.
 //!
-//! Backing layout: a `Vec<Region>` sorted by base address. Each
-//! [`Region`] owns a `Vec<u8>` sized to that region and carries a
-//! label and page-size class. Region lookup is a binary search
-//! (`partition_point`); the region count stays single-digit, so
-//! the linear scan inside partition_point is cache-friendly and
-//! faster than a BTreeMap tree walk for this size.
-//!
-//! [`GuestMemory::new`] is a convenience constructor for the common
-//! single-region case: one region at base 0 spanning `[0, size)`.
-//! Multi-region layouts use [`GuestMemory::from_regions`].
+//! Backing: a `Vec<Region>` sorted by base address; lookups use
+//! `partition_point`. Region counts stay single-digit, so the linear scan
+//! is faster than a `BTreeMap` walk.
 
 use std::cell::Cell;
 
 use crate::range::ByteRange;
 
-/// Page-size class of a region. Informational metadata; the region
-/// map does not implement page-granular protection.
+/// Page-size class of a region. Informational; no page-granular protection
+/// is enforced by the region map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageSize {
-    /// 4 KB pages. Standard Linux/PS3 small-page size.
+    /// 4 KB pages.
     Page4K,
     /// 64 KB pages. Default for PS3 LV2 user memory.
     Page64K,
-    /// 1 MB pages. Used for large allocations on PS3.
+    /// 1 MB pages.
     Page1M,
 }
 
-/// Access mode of a region.
-///
-/// Three states are encoded explicitly so the provisional
-/// zero-readable behavior of an unimplemented region stays separable
-/// from a real read-write region. The fault type surfaced by a
-/// wrong-mode access names which mode it tripped, so a "tried to
-/// write to RSX" diagnostic is distinct from a normal out-of-region
-/// fault.
+/// Access mode of a region. Commit-boundary checks consult this to decide
+/// whether a read or write faults and which fault variant to produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegionAccess {
-    /// Normal user-memory region: reads return the stored bytes,
-    /// writes via `apply_commit` succeed.
+    /// Reads return stored bytes; writes via `apply_commit` succeed.
     ReadWrite,
-    /// Reserved provisional region: reads return zero (the region's
-    /// zero-init backing), writes fault. Used as a placeholder for
-    /// regions whose semantics (RSX local memory, SPU shared) are
-    /// not yet implemented. Reads bump a counter on `GuestMemory` so
-    /// silent zero-reads surface in the divergence finder.
+    /// Reads return zero and bump `provisional_read_count`; writes fault
+    /// with [`MemError::ReservedWrite`].
     ReservedZeroReadable,
-    /// Reserved strict region: reads and writes both fault. Used by
-    /// tests asserting no code paths touch the region yet.
+    /// Reads return `None` (treated as unmapped); writes fault with
+    /// [`MemError::ReservedWrite`].
     ReservedStrict,
 }
 
 /// A single contiguous guest memory region.
-///
-/// Regions are the unit of address-space reservation. Each region knows
-/// its base, size, label, page-size class, and access mode;
-/// out-of-region addresses fault before touching any backing store.
 #[derive(Debug, Clone)]
 pub struct Region {
     base: u64,
@@ -74,13 +49,13 @@ pub struct Region {
 }
 
 impl Region {
-    /// Construct a normal read-write region (zero-filled).
+    /// Construct a zero-filled read-write region.
     #[inline]
     pub fn new(base: u64, size: usize, label: &'static str, page_size: PageSize) -> Self {
         Self::with_access(base, size, label, page_size, RegionAccess::ReadWrite)
     }
 
-    /// Construct a region with an explicit access mode.
+    /// Construct a zero-filled region with an explicit access mode.
     #[inline]
     pub fn with_access(
         base: u64,
@@ -116,8 +91,7 @@ impl Region {
         self.bytes.len() as u64
     }
 
-    /// Human-readable label used in diagnostics (e.g. `"flat"`,
-    /// `"user_heap"`, `"stack"`).
+    /// Diagnostic label for the region (e.g. `"flat"`, `"user_heap"`, `"stack"`).
     #[inline]
     pub fn label(&self) -> &'static str {
         self.label
@@ -135,8 +109,7 @@ impl Region {
         &self.bytes
     }
 
-    /// End address (exclusive). Saturates at `u64::MAX` for regions that
-    /// would otherwise wrap.
+    /// Exclusive end address, saturating at `u64::MAX`.
     #[inline]
     fn end(&self) -> u64 {
         self.base.saturating_add(self.size())
@@ -154,34 +127,24 @@ impl Region {
 
 /// Committed globally visible guest memory.
 ///
-/// Construct with [`GuestMemory::new`] for a single flat region
-/// spanning `[0, size)`, or [`GuestMemory::from_regions`] for a sparse
-/// multi-region layout. Reads are checked against the region map;
-/// out-of-region reads return `None` rather than panicking, since
-/// reading past a region boundary is a guest-induced fault, not a
-/// runtime invariant violation.
+/// Out-of-region reads via [`GuestMemory::read`] return `None` rather than
+/// panicking: a boundary miss is a guest-induced fault, not a runtime
+/// invariant violation.
 #[derive(Debug, Clone)]
 pub struct GuestMemory {
     regions: Vec<Region>,
-    /// Cached content hash. `None` means the cache is stale (a write
-    /// happened since the last hash computation). Uses `Cell` for
-    /// interior mutability so `content_hash` can stay `&self`.
+    /// Cached FNV-1a digest; `None` iff a write has happened since the last
+    /// computation. `Cell` lets [`GuestMemory::content_hash`] take `&self`.
     cached_hash: Cell<Option<u64>>,
-    /// Count of reads that landed in a `ReservedZeroReadable` region
-    /// since construction. Bumped by every successful read whose
-    /// target is provisional. Downstream diagnostics read this counter
-    /// to surface silent zero-reads from RSX/SPU placeholder regions
-    /// rather than letting them pass unnoticed.
+    /// Monotonic count of reads that hit a [`RegionAccess::ReservedZeroReadable`]
+    /// region. Diagnostics surface silent zero-reads via this counter.
     provisional_read_count: Cell<u64>,
 }
 
 /// Diagnostic context for an out-of-region access.
 ///
-/// Produced by [`GuestMemory::fault_context`] and carried by
-/// [`MemError::Unmapped`]. Names the faulting address and the labels
-/// of the nearest mapped regions below and above it, so a diagnostic
-/// at `0xB0000000` can say "between `user_heap` and `rsx`" rather
-/// than just "out of bounds".
+/// Carried by [`MemError::Unmapped`] so a fault at `0xB0000000` can name
+/// "between `user_heap` and `rsx`" rather than just "out of bounds".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FaultContext {
     /// Guest address that faulted.
@@ -193,41 +156,25 @@ pub struct FaultContext {
 }
 
 /// Why a `GuestMemory` operation failed.
-///
-/// `MemError` is local to `cellgov_mem`; there is no universal `Error`
-/// enum spanning the workspace. Boundary crates that consume
-/// these errors -- the commit pipeline in `cellgov_core` and the
-/// validation layer in `cellgov_effects` -- convert into their own
-/// error types at the crate boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemError {
-    /// The requested range is ill-formed (length overflows `u64`) or
-    /// not usable for a region-map lookup for reasons other than
-    /// being in an unmapped range. Kept for local-store and staging
-    /// call sites that do not carry a `FaultContext`.
+    /// Range is ill-formed (end overflows `u64`) or the length does not
+    /// fit `usize`. Used by call sites that do not carry a `FaultContext`.
     OutOfRange,
-    /// The supplied byte buffer's length does not match the range's
-    /// length. Only relevant for [`GuestMemory::apply_commit`].
+    /// Supplied byte buffer's length differs from the range's length.
     LengthMismatch,
-    /// `from_regions` was called with two regions whose address ranges
-    /// overlap.
+    /// `from_regions` received overlapping address ranges.
     OverlappingRegions,
-    /// The requested range is not entirely contained within any single
-    /// mapped region. The payload names the faulting address and the
-    /// nearest regions on either side for diagnostics.
+    /// Range is not entirely contained within any single mapped region.
     Unmapped(FaultContext),
-    /// Write attempted to a reserved region (RSX, SPU-shared, or any
-    /// region explicitly declared non-writable). Names the region
-    /// label for diagnostics.
+    /// Write targeted a non-`ReadWrite` region.
     ReservedWrite {
         /// Guest address of the faulting write.
         addr: u64,
         /// Label of the reserved region the write targeted.
         region: &'static str,
     },
-    /// Read attempted to a reserved region in strict mode. Distinct
-    /// from `Unmapped` so tests can tell "tried to read RSX while
-    /// strict-reserved was on" from "address not mapped at all".
+    /// Read targeted a `ReservedStrict` region.
     ReservedStrictRead {
         /// Guest address of the faulting read.
         addr: u64,
@@ -237,34 +184,21 @@ pub enum MemError {
 }
 
 impl GuestMemory {
-    /// Construct a fresh `GuestMemory` with a single region at base 0.
-    ///
-    /// Convenience constructor for the common single-region case:
-    /// one contiguous region starting at address 0. Tests and
-    /// scenarios that do not need a sparse multi-region layout use
-    /// this entry point.
-    ///
-    /// Takes a `usize` rather than a `u64` because the backing is a
-    /// `Vec<u8>` and `Vec` is `usize`-indexed. Multi-region layouts
-    /// that span the full PS3 64-bit address space use
-    /// [`GuestMemory::from_regions`].
+    /// Construct a fresh `GuestMemory` with a single `"flat"` region at base 0.
     #[inline]
     pub fn new(size: usize) -> Self {
-        // Single region at base 0 can never overlap with itself, so the
-        // construction is infallible.
         Self::from_regions(vec![Region::new(0, size, "flat", PageSize::Page64K)])
             .expect("single region at base 0 is always non-overlapping")
     }
 
     /// Construct `GuestMemory` from a set of regions.
     ///
-    /// Returns `Err(MemError::OverlappingRegions)` if any two regions'
-    /// address ranges overlap. Empty input is allowed and produces a
-    /// `GuestMemory` with no mapped addresses (every read faults).
+    /// # Errors
+    ///
+    /// Returns [`MemError::OverlappingRegions`] if any two regions' address
+    /// ranges overlap. Empty input is allowed; every read then faults.
     pub fn from_regions(mut regions: Vec<Region>) -> Result<Self, MemError> {
         regions.sort_by_key(|r| r.base());
-        // Overlap check: sorted by base, so overlaps exist iff
-        // any region's end > the next region's base.
         for pair in regions.windows(2) {
             if pair[0].end() > pair[1].base() {
                 return Err(MemError::OverlappingRegions);
@@ -277,18 +211,13 @@ impl GuestMemory {
         })
     }
 
-    /// Number of reads that have landed in a `ReservedZeroReadable`
-    /// region since construction.
+    /// Reads that have hit a `ReservedZeroReadable` region since construction.
     #[inline]
     pub fn provisional_read_count(&self) -> u64 {
         self.provisional_read_count.get()
     }
 
-    /// Total backing size in bytes (sum of every region's size).
-    ///
-    /// For a `new(size)` construction this equals `size`. For
-    /// multi-region layouts this is the sum of mapped bytes, not the
-    /// address-space span (which would include gaps between regions).
+    /// Sum of every region's size in bytes. Gaps between regions are not counted.
     #[inline]
     pub fn size(&self) -> u64 {
         self.regions.iter().map(|r| r.size()).sum()
@@ -299,17 +228,11 @@ impl GuestMemory {
         self.regions.iter()
     }
 
-    /// Read the primary region at base 0 as a byte slice.
+    /// Byte slice of the region at base 0, or an empty slice if none exists.
     ///
-    /// Convenience accessor for the base-0 region. In multi-region
-    /// layouts this returns only the region at base 0 (the "main"
-    /// region holding the loaded ELF and the user-memory allocator).
-    /// Auxiliary regions (stack at `0xD0000000+`, reserved RSX/SPU
-    /// ranges) are not visible through this accessor and must be
-    /// reached via [`GuestMemory::read`] or by iterating
+    /// Auxiliary regions (stack, reserved RSX/SPU ranges) are not visible
+    /// through this accessor; use [`GuestMemory::read`] or iterate
     /// [`GuestMemory::regions`].
-    ///
-    /// Returns an empty slice if no region exists at base 0.
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         match self.regions.first() {
@@ -318,22 +241,17 @@ impl GuestMemory {
         }
     }
 
-    /// Read the bytes covered by `range`.
+    /// Read the bytes covered by `range`, or `None` if it is not entirely
+    /// contained within a single region.
     ///
-    /// Returns `None` if the range is not entirely contained within a
-    /// single region. Zero-length ranges whose start address is mapped
-    /// (or exactly at the end of a region) return an empty slice.
-    ///
-    /// For diagnostic-rich failure information, use
-    /// [`GuestMemory::read_checked`].
+    /// A read from a `ReservedZeroReadable` region bumps
+    /// [`GuestMemory::provisional_read_count`]. For diagnostic-rich failure
+    /// information, use [`GuestMemory::read_checked`].
     pub fn read(&self, range: ByteRange) -> Option<&[u8]> {
         let start = range.start().raw();
         let length = range.length();
         let end = start.checked_add(length)?;
         let region = self.containing_region(start, length)?;
-        // ReservedStrict regions deny reads. ReservedZeroReadable
-        // regions allow reads but bump the provisional counter so the
-        // silent zeros surface in `run-game`'s end-of-boot summary.
         match region.access {
             RegionAccess::ReadWrite => {}
             RegionAccess::ReservedZeroReadable => {
@@ -349,12 +267,13 @@ impl GuestMemory {
         Some(&region.bytes[offset_usize..end_usize])
     }
 
-    /// Read the bytes covered by `range`, returning a typed error on
-    /// failure.
+    /// Read the bytes covered by `range`, returning a typed error on failure.
     ///
-    /// Returns [`MemError::Unmapped`] with a [`FaultContext`] naming
-    /// the nearest regions when the range is not contained by any
-    /// region; returns [`MemError::OutOfRange`] for length overflow.
+    /// # Errors
+    ///
+    /// - [`MemError::OutOfRange`] on length overflow.
+    /// - [`MemError::Unmapped`] with a [`FaultContext`] when no single region
+    ///   contains the range.
     pub fn read_checked(&self, range: ByteRange) -> Result<&[u8], MemError> {
         let start = range.start().raw();
         let length = range.length();
@@ -369,20 +288,17 @@ impl GuestMemory {
         Ok(&region.bytes[offset_usize..end_usize])
     }
 
-    /// Apply a committed write to `range` from `bytes`.
+    /// Apply a committed write to `range` from `bytes`. Invalidates the
+    /// cached content hash.
     ///
-    /// **This is the commit pipeline's entry point and should not be
-    /// called from execution units.** No execution unit may publish
-    /// guest-visible state directly; this method exists only so that
-    /// `cellgov_core`'s commit applier has a typed entry point to
-    /// call. Nothing enforces this at the language level -- the rule
-    /// is architectural -- but the entry point is narrow enough that
-    /// violations are visible at code review.
+    /// This is the commit pipeline's entry point; execution units must not
+    /// call it directly. The rule is architectural, not language-enforced.
     ///
-    /// Returns `Err(MemError::LengthMismatch)` if `bytes.len() as u64
-    /// != range.length()`, and `Err(MemError::Unmapped(ctx))` if the
-    /// range is not entirely contained within a single region (with
-    /// `ctx` naming the nearest mapped regions on either side).
+    /// # Errors
+    ///
+    /// - [`MemError::LengthMismatch`] if `bytes.len() as u64 != range.length()`.
+    /// - [`MemError::Unmapped`] if no single region contains the range.
+    /// - [`MemError::ReservedWrite`] if the target region is not `ReadWrite`.
     pub fn apply_commit(&mut self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
         if bytes.len() as u64 != range.length() {
             return Err(MemError::LengthMismatch);
@@ -411,15 +327,11 @@ impl GuestMemory {
         Ok(())
     }
 
-    /// 64-bit content hash of every committed byte, in address order.
+    /// 64-bit FNV-1a digest of every region's bytes, hashed in address order.
     ///
-    /// FNV-1a, no external deps, no host-specific seeding. Checkpoint
-    /// hashes must be deterministic across hosts and runs; FNV-1a
-    /// satisfies that and is small enough to inline. Replay tooling
-    /// compares pairs of these values to assert that two runs reached
-    /// bit-identical committed-memory state. Regions are hashed in
-    /// address order so the digest stays stable across clones and
-    /// across runs that build the region set in the same order.
+    /// Cached; a subsequent [`GuestMemory::apply_commit`] invalidates the
+    /// cache. The first call on a large memory is O(total bytes); cached
+    /// lookups are O(1).
     pub fn content_hash(&self) -> u64 {
         if let Some(h) = self.cached_hash.get() {
             return h;
@@ -433,11 +345,8 @@ impl GuestMemory {
         h
     }
 
-    /// Locate the region that entirely contains `[addr, addr+length)`,
-    /// if any. Public so callers (staging, local validation) can
-    /// pre-check containment without triggering an error path.
+    /// Locate the region that entirely contains `[addr, addr+length)`.
     pub fn containing_region(&self, addr: u64, length: u64) -> Option<&Region> {
-        // Binary search: find the last region whose base <= addr.
         let idx = self.regions.partition_point(|r| r.base() <= addr);
         if idx == 0 {
             return None;
@@ -450,12 +359,7 @@ impl GuestMemory {
         }
     }
 
-    /// Diagnostic context for an out-of-region access at `addr`.
-    ///
-    /// Names the addresses of the nearest mapped regions below and
-    /// above `addr`. Callers should invoke this when constructing a
-    /// fault diagnostic after [`GuestMemory::containing_region`]
-    /// returns `None`.
+    /// Build a [`FaultContext`] for an out-of-region access at `addr`.
     pub fn fault_context(&self, addr: u64) -> FaultContext {
         let idx = self.regions.partition_point(|r| r.base() <= addr);
         let below = if idx > 0 {

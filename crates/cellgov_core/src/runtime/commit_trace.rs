@@ -1,23 +1,10 @@
-//! Commit-boundary trace emission extracted from `commit_step`.
-//!
-//! One helper -- [`Runtime::emit_commit_trace`] -- owns the trace
-//! and hash-checkpoint contract documented at the top of
-//! `runtime.rs`:
-//!
-//! - One `CommitApplied` record per commit boundary (including the
-//!   validation-rejection edge, where counts are zero and
-//!   `fault_discarded = true`).
-//! - One `UnitBlocked` / `UnitWoken` per status transition produced
-//!   by this commit, including DMA-completion wakes.
-//! - Four `StateHashCheckpoint` records (committed memory, runnable
-//!   queue, unit status, sync state) taken *after* the commit and
-//!   DMA-completion firing so replay tooling sees the full
-//!   post-commit state.
-//!
-//! All of the above is skipped under `RuntimeMode::FaultDriven`.
-//! Keeping the block isolated from `commit_step` makes the trace
-//! contract auditable without reading through the commit
-//! orchestration logic.
+//! Commit-boundary trace emission. One helper --
+//! [`Runtime::emit_commit_trace`] -- writes one `CommitApplied`, one
+//! `UnitBlocked` / `UnitWoken` per status transition (including
+//! DMA-completion wakes), and the four `StateHashCheckpoint` records
+//! (committed memory, runnable queue, unit status, sync state) taken
+//! after the commit and DMA firing. Skipped under
+//! `RuntimeMode::FaultDriven`.
 
 use cellgov_dma::DmaCompletion;
 use cellgov_event::UnitId;
@@ -30,10 +17,9 @@ use crate::commit::{BlockReason, CommitError, CommitOutcome};
 use super::{Runtime, RuntimeMode};
 
 impl Runtime {
-    /// Emit the commit-boundary trace records and the four post-commit
-    /// state hash checkpoints. Called from [`Runtime::commit_step`]
-    /// after the commit pipeline has run and DMA completions have
-    /// fired; no-op under `RuntimeMode::FaultDriven`.
+    /// No-op under `RuntimeMode::FaultDriven`; called from
+    /// [`Runtime::commit_step`] after the commit pipeline runs and DMA
+    /// completions fire.
     pub(super) fn emit_commit_trace(
         &mut self,
         source: UnitId,
@@ -44,12 +30,9 @@ impl Runtime {
             return;
         }
 
-        // Trace pipeline step 7 (and the validation rejection edge): one
-        // CommitApplied record per commit boundary, carrying the
-        // post-commit epoch. On validation failure, rejection surfaces
-        // as a fault on the originating unit, so
-        // we record fault_discarded = true with zero counts -- the
-        // batch is closed, just empty.
+        // One CommitApplied per commit boundary. On validation failure
+        // the batch is closed but empty: fault_discarded = true with
+        // zero counts.
         let record = match outcome {
             Ok(o) => TraceRecord::CommitApplied {
                 unit: source,
@@ -93,11 +76,7 @@ impl Runtime {
             });
         }
 
-        // State hash checkpoints. Four kinds: committed memory,
-        // runnable queue, sync state, and unit status. All four
-        // emitted here, taken AFTER the commit (including DMA
-        // completion firing) so replay tooling sees post-commit
-        // state.
+        // State hash checkpoints taken after the commit and DMA firing.
         let mem_hash = StateHash::new(self.memory.content_hash());
         self.trace.record(&TraceRecord::StateHashCheckpoint {
             kind: HashCheckpointKind::CommittedMemory,

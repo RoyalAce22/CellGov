@@ -1,24 +1,16 @@
 //! Checkpoint observation capture for `run-game --save-observation`.
 //!
-//! The per-title manifest schema (`CheckpointManifest`) overlaps
-//! with what `bridges/rpcs3_to_observation/` consumes, so CellGov
-//! and RPCS3 read the same TOML file when comparing runs.
-//! Returns a `Result<(), String>` so `run_game` can surface save
-//! failures as a non-zero exit code -- a caller asking for a
-//! cross-runner artifact expects the artifact to exist or fail
-//! loudly.
+//! `CheckpointManifest` shares the schema `bridges/rpcs3_to_observation/`
+//! consumes so both runners read the same TOML when comparing runs.
 
 use serde::Deserialize;
 
-/// One region in a checkpoint observation manifest, sharing the
-/// schema used by `bridges/rpcs3_to_observation/` and the per-title
-/// manifests under `tests/fixtures/<SERIAL>_checkpoint.toml`.
+/// Region list in a checkpoint observation manifest.
 #[derive(Debug, Deserialize)]
 pub(super) struct CheckpointManifest {
     pub(super) regions: Vec<CheckpointRegion>,
 }
 
-/// A single named region in a checkpoint observation manifest.
 #[derive(Debug, Deserialize)]
 pub(super) struct CheckpointRegion {
     pub(super) name: String,
@@ -29,18 +21,12 @@ pub(super) struct CheckpointRegion {
 }
 
 /// Highest end address of any PT_LOAD segment whose vaddr falls in
-/// the PS3 user-memory region `[0x00010000, 0x10000000)`. Segments
-/// in higher regions (HLE metadata at `0x10000000+`) do not share
-/// address space with `sys_memory_allocate`, so they do not push the
-/// allocator base forward.
+/// `[0x00010000, 0x10000000)`. Segments above that range share no
+/// address space with `sys_memory_allocate` and do not advance the
+/// allocator base.
 ///
-/// Returns 0 for four distinguishable conditions, each of which
-/// logs a specific stderr line so the caller's "allocator base at
-/// 0" can be traced to its cause:
-///   - data is too short for an ELF64 header
-///   - ELF magic mismatch
-///   - program-header table extends past end-of-file
-///   - no PT_LOAD segments fall in the user-memory range
+/// Returns 0 with a distinct stderr line for each failure mode
+/// (short input, bad magic, truncated phdr table, no user segments).
 pub(super) fn elf_user_region_end(data: &[u8]) -> usize {
     const PT_LOAD: u32 = 1;
     fn u16_be(d: &[u8], o: usize) -> u16 {
@@ -75,10 +61,8 @@ pub(super) fn elf_user_region_end(data: &[u8]) -> usize {
     let phoff = u64_be(data, 32) as usize;
     let phentsize = u16_be(data, 54) as usize;
     let phnum = u16_be(data, 56) as usize;
-    // Validate the full program-header table up front rather than
-    // per-iteration. A corrupted phnum that overflows data.len()
-    // previously caused a mid-scan `break` that silently truncated
-    // the scan without signaling the malformed input.
+    // Up-front bound check: a corrupted phnum that overflows
+    // data.len() must not mid-scan `break` and silently truncate.
     let ph_table_end = phoff.saturating_add(phentsize.saturating_mul(phnum));
     if ph_table_end > data.len() {
         eprintln!(
@@ -114,17 +98,17 @@ fn de_hex_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     u64::from_str_radix(trimmed, 16).map_err(serde::de::Error::custom)
 }
 
-/// Build a boot-checkpoint observation and serialize it as JSON.
+/// Build a boot-checkpoint observation and write it as JSON.
 ///
-/// Region list defaults to the ELF's PT_LOAD segments (one region per
-/// segment, named `seg{index}_{ro|rw}`). When `manifest_path` is set,
-/// the regions come from that TOML manifest instead -- this is how a
-/// cross-runner comparison guarantees matching region names on both
-/// sides (CellGov and RPCS3 read the same manifest).
+/// Regions default to one per PT_LOAD segment, named
+/// `seg{index}_{ro|rw}`. With `manifest_path`, regions come from
+/// the TOML manifest instead -- cross-runner comparison relies on
+/// both runners reading the same file for matching region names.
 ///
-/// Returns `Err(message)` on any failure -- manifest read/parse,
-/// PT_LOAD enumeration, JSON serialization, or file write -- so
-/// the caller can translate it into a non-zero exit.
+/// # Errors
+///
+/// Returns `Err(message)` on any I/O, parse, or serialization
+/// failure so the caller can translate it to a non-zero exit.
 pub(super) fn save_boot_observation(
     path: &str,
     elf_data: &[u8],
@@ -186,10 +170,8 @@ pub(super) fn save_boot_observation(
 mod tests {
     use super::*;
 
-    /// Build a minimal big-endian ELF64 header with N PT_LOAD program
-    /// headers at the supplied (vaddr, memsz) tuples. Just enough
-    /// structure for `elf_user_region_end` to scan -- the segments'
-    /// payloads are not present.
+    /// Big-endian ELF64 header with N PT_LOAD phdrs at the given
+    /// (vaddr, memsz) tuples. Payloads are not materialized.
     fn synthetic_elf(loads: &[(u64, u64)]) -> Vec<u8> {
         let phoff: u64 = 64;
         let phentsize: u16 = 56;

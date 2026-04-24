@@ -1,7 +1,5 @@
-//! Firmware PRX loading, module_start execution, and TLS
-//! pre-initialization for `run-game`.
-//!
-//! Split out of `game.rs` to keep the core boot driver manageable.
+//! Firmware PRX loading, module_start execution, and TLS pre-init
+//! for `run-game`.
 
 use std::time::Instant;
 
@@ -24,21 +22,17 @@ pub(super) struct PrxLoadInfo {
     pub(super) module_start: Option<cellgov_ppu::sprx::LoadedOpd>,
 }
 
-/// Pre-initialize the TLS area from the game ELF's PT_TLS segment.
+/// Build an HLE-index to NID map for fast runtime lookup.
 ///
-/// On real PS3, the kernel does this during process creation, before
-/// any module_start runs. This copies the TLS template to the TLS base
-/// address (0x10400000 + 0x30) and zeros the BSS portion.
+/// Duplicate indices indicate an upstream bug in the binder; the
+/// debug_assert surfaces it instead of letting the later binding
+/// silently overwrite the earlier one.
 pub(super) fn build_nid_map(
     bindings: &[cellgov_ppu::prx::HleBinding],
 ) -> std::collections::BTreeMap<u32, u32> {
     let mut map = std::collections::BTreeMap::new();
     for b in bindings {
         if let Some(prev) = map.insert(b.index, b.nid) {
-            // Two bindings with the same index is an upstream bug in
-            // bind_hle_stubs_with_layout. Collect-into-BTreeMap would
-            // silently overwrite, losing the earlier NID without a
-            // trace; surface it loudly in debug builds.
             debug_assert!(
                 false,
                 "duplicate HleBinding index {idx}: previous nid 0x{prev:08x} replaced by 0x{nid:08x}",
@@ -55,10 +49,15 @@ pub(super) fn build_nid_map(
     map
 }
 
-/// TLS base address in guest memory. Matches the HLE sys_initialize_tls
+/// TLS base in guest memory. Matches the HLE sys_initialize_tls
 /// allocation in `cellgov_core::hle`.
 pub(super) const TLS_BASE: u64 = 0x10400000;
 
+/// Pre-initialize TLS from the ELF's PT_TLS segment.
+///
+/// Copies the TLS template to `TLS_BASE + 0x30` and zeros the BSS
+/// portion. On real PS3 the kernel does this during process creation
+/// before any module_start runs.
 pub(super) fn pre_init_tls(elf_data: &[u8], mem: &mut cellgov_mem::GuestMemory) {
     let tls = match cellgov_ppu::loader::find_tls_segment(elf_data) {
         Some(t) => t,
@@ -70,17 +69,12 @@ pub(super) fn pre_init_tls(elf_data: &[u8], mem: &mut cellgov_mem::GuestMemory) 
     let p_filesz = tls.filesz as usize;
     let p_memsz = tls.memsz as usize;
 
-    // Copy TLS initialization image from the ELF's loaded memory.
-    // Bounds failures and commit failures are reported to stderr so
-    // the unconditional "pre-initialized" log below does not lie: a
-    // skipped copy here means r13-relative reads in module_start and
-    // the guest's TLS will hit whatever bytes were already in the
-    // TLS region (almost always zero, but never that by design).
+    // Copy the TLS template; a skipped copy here means r13-relative
+    // reads in module_start will see uninitialized TLS bytes.
     let mut copy_ok = true;
     let m = mem.as_bytes();
-    // checked_add: a malformed ELF could present PT_TLS fields that
-    // overflow when summed with filesz; plain `+` would wrap on
-    // 32-bit usize targets and the bounds check could falsely pass.
+    // checked_add: malformed PT_TLS fields must not wrap on 32-bit
+    // usize hosts and falsely pass the bounds check.
     let src_end = p_vaddr.checked_add(p_filesz);
     let dst_end = tls_data_start.checked_add(p_filesz);
     if src_end.is_none_or(|e| e > m.len()) || dst_end.is_none_or(|e| e > m.len()) {
@@ -114,7 +108,6 @@ pub(super) fn pre_init_tls(elf_data: &[u8], mem: &mut cellgov_mem::GuestMemory) 
         }
     }
 
-    // Zero BSS portion.
     let bss_start = tls_data_start + p_filesz;
     let bss_len = p_memsz.saturating_sub(p_filesz);
     let mut bss_ok = true;
@@ -157,10 +150,12 @@ pub(super) fn pre_init_tls(elf_data: &[u8], mem: &mut cellgov_mem::GuestMemory) 
     }
 }
 
-/// Execute a PRX module's module_start function through the PPU
-/// interpreter. Takes ownership of guest memory, runs until the function
-/// returns (PC reaches the LR sentinel at 0) or a fault/stall occurs,
-/// then returns the modified memory.
+/// Run a PRX module's module_start to completion or fault.
+///
+/// Takes ownership of guest memory, runs until the function returns
+/// (PC reaches the LR=0 sentinel) or a fault/stall occurs, then
+/// returns the modified memory. A decode-error fault at PC=0 with
+/// LR=0 at fault time is treated as a clean return.
 pub(super) fn run_module_start(
     mem: cellgov_mem::GuestMemory,
     prx_info: &PrxLoadInfo,
@@ -183,21 +178,17 @@ pub(super) fn run_module_start(
         prx_info.name, ms.code, ms.toc,
     );
 
-    // Set up PPU state for module_start.
     let mut ms_state = cellgov_ppu::state::PpuState::new();
     ms_state.pc = ms.code;
     ms_state.gpr[2] = ms.toc;
-    // module_start shares the primary-thread stack region at
-    // 0xD0000000 with the game. Use a lower offset than the game's
-    // stack_top so the two do not clobber each other; real PS3 LV2
-    // runs module_start to completion before the game, so in practice
-    // they never coexist.
+    // Stack offset below the game's stack_top so the two do not
+    // clobber each other if they ever coexist (LV2 runs module_start
+    // to completion first, so in practice they do not).
     ms_state.gpr[1] = super::PS3_PRIMARY_STACK_BASE + 0x8000;
-    // TLS base: PPC64 convention is r13 = TLS_area + 0x7030.
+    // PPC64 convention: r13 = TLS_area + 0x7030.
     ms_state.gpr[13] = TLS_BASE + 0x30 + 0x7000;
-    // LR = 0: when module_start does blr, PC becomes 0. Address 0 is
-    // all-zeros which fails to decode, producing a fault that signals
-    // "module_start returned."
+    // LR=0 sentinel: blr from module_start jumps to PC=0, where the
+    // all-zero word fails to decode and the fault signals a return.
     ms_state.lr = 0;
 
     let mut rt = Runtime::new(mem, Budget::new(1), max_steps);
@@ -210,25 +201,16 @@ pub(super) fn run_module_start(
         unit
     });
 
-    // Run module_start with a simplified step loop.
     let t_start = Instant::now();
     let mut steps: usize = 0;
     let mut distinct_pcs = std::collections::BTreeSet::new();
     let mut hle_calls: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
     let mut lv2_calls: std::collections::BTreeMap<u64, usize> = std::collections::BTreeMap::new();
-    // PC-hit histogram: if module_start enters a busy loop, the loop body's
-    // PCs dominate the top entries because they are hit tens of thousands of
-    // times while initialization PCs are hit once or a few times.
     let mut pc_hits: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
-    // Ring buffer of the last MS_PC_RING_SIZE PCs. On fault, this shows
-    // the exact execution sequence leading up to the fault, which is how
-    // we identify which instruction set a register to a bad value.
     const MS_PC_RING_SIZE: usize = 32;
     let mut pc_ring: [u64; MS_PC_RING_SIZE] = [0; MS_PC_RING_SIZE];
     let mut pc_ring_pos: usize = 0;
-    // Ring of recent syscalls (pc at sc, syscall number, r3, r4, r5).
-    // On a fault that occurs post-syscall, this identifies which
-    // syscall's return value the code was processing when it faulted.
+    // Syscall ring entries: (pc, nr, r3, r4, r5).
     const MS_SC_RING_SIZE: usize = 8;
     let mut sc_ring: [(u64, u64, u64, u64, u64); MS_SC_RING_SIZE] =
         [(0, 0, 0, 0, 0); MS_SC_RING_SIZE];
@@ -246,7 +228,6 @@ pub(super) fn run_module_start(
                     pc_ring_pos += 1;
                 }
 
-                // Track HLE/LV2 calls so a busy loop reveals what it polls.
                 if let Some(args) = &step.result.syscall_args {
                     if args[0] >= 0x10000 {
                         let idx = (args[0] - 0x10000) as u32;
@@ -259,18 +240,12 @@ pub(super) fn run_module_start(
                         (sc_pc, args[0], args[1], args[2], args[3]);
                     sc_ring_pos += 1;
 
-                    // Capture TTY output from module_start.
                     if args[0] == 403 {
                         let buf = args[2] as usize;
                         let len = (args[3] as usize).min(256);
                         let m = rt.memory().as_bytes();
-                        // checked_add guards against `buf = u64::MAX`
-                        // scenarios where `buf + len` would wrap on
-                        // 32-bit usize hosts and the `<= m.len()`
-                        // check falsely passes. Guest values are
-                        // attacker-controlled in principle; preserve
-                        // the invariant even if 64-bit is our only
-                        // current target.
+                        // checked_add guards against guest-controlled
+                        // buf wrapping on 32-bit usize hosts.
                         let end = buf.checked_add(len);
                         if end.is_some_and(|e| e <= m.len()) {
                             let text = String::from_utf8_lossy(&m[buf..buf + len]);
@@ -286,7 +261,6 @@ pub(super) fn run_module_start(
                     }
                 }
 
-                // Progress checkpoint every 10K steps.
                 if steps.is_multiple_of(10_000) {
                     let hle_total: usize = hle_calls.values().sum();
                     let lv2_total: usize = lv2_calls.values().sum();
@@ -300,11 +274,8 @@ pub(super) fn run_module_start(
                 }
 
                 if let Err(e) = rt.commit_step(&step.result, &step.effects) {
-                    // A commit failure here means the step's effects
-                    // were not applied; stepping further would run
-                    // against a state the computation never blessed.
-                    // Break with a distinct outcome so the log does
-                    // not mask it as a stall or max-steps.
+                    // Stepping further would run against state the
+                    // computation never committed.
                     eprintln!("  module_start commit_step FAILED at step {steps}: {e:?}");
                     break format!("COMMIT_ERR {e:?} after {steps} steps");
                 }
@@ -316,14 +287,10 @@ pub(super) fn run_module_start(
                         _ => None,
                     };
 
-                    // "Returned normally" detection: PC=0 (blr landed on
-                    // the LR=0 sentinel), fault is the decode error on
-                    // the zero word at address 0, AND LR itself is 0 so
-                    // we know no intermediate bl overwrote it. Without
-                    // the LR==0 check a real PC=0 jump from a corrupted
-                    // call target would quietly look like a clean
-                    // return and boot would continue with a
-                    // half-initialized module.
+                    // Clean-return detection: PC=0, LR=0, decode-error
+                    // fault. The LR=0 check rejects corrupted call
+                    // targets that happen to jump to PC=0 after an
+                    // intermediate bl overwrote LR.
                     let lr_at_fault = step
                         .result
                         .local_diagnostics
@@ -341,7 +308,6 @@ pub(super) fn run_module_start(
                     let code_str = guest_code
                         .map(|c| format!("0x{c:08x}"))
                         .unwrap_or_else(|| format!("{fault:?}"));
-                    // Print register dump if available.
                     if let Some(ref regs) = step.result.local_diagnostics.fault_regs {
                         println!("  module_start fault registers:");
                         for row in 0..8 {
@@ -359,19 +325,10 @@ pub(super) fn run_module_start(
                             regs.lr, regs.ctr, regs.cr,
                         );
                     }
-                    // <unmapped> vs <baddec> distinguishes fetch failure
-                    // (PC not in any mapped region) from decode failure
-                    // (word retrieved but not a legal PPC instruction).
-                    // The fault dump previously collapsed both to "?".
                     let raw_str = match fetch_raw_at(&rt, fault_pc) {
                         Some(w) => format!("0x{w:08x}"),
                         None => "<unmapped>".to_string(),
                     };
-                    // Pre-fault syscall ring: identifies the most recent
-                    // syscall numbers and their r3/r4/r5 arguments. When
-                    // the fault is in post-syscall handling code, this
-                    // tells us which syscall's return value or output
-                    // pointer is being processed.
                     let sc_entries = sc_ring_pos.min(MS_SC_RING_SIZE);
                     if sc_entries > 0 {
                         println!("  module_start last {} syscalls before fault:", sc_entries);
@@ -395,10 +352,6 @@ pub(super) fn run_module_start(
                             );
                         }
                     }
-                    // Pre-fault PC ring: oldest-first. Useful when the
-                    // fault is a memory access using a register that was
-                    // set wrong a few instructions earlier -- we can walk
-                    // back to the exact setter.
                     let entries = pc_ring_pos.min(MS_PC_RING_SIZE);
                     if entries > 0 {
                         println!("  module_start last {} PCs before fault:", entries);
@@ -471,9 +424,6 @@ pub(super) fn run_module_start(
         }
     }
 
-    // Top-20 PC hit counts. With a pure-PPU busy loop the hottest PCs
-    // are the loop body; the raw word at each PC lets us read back the
-    // exact instruction in the cycle.
     if !pc_hits.is_empty() {
         println!("  module_start top PCs by hit count:");
         let mut sorted: Vec<_> = pc_hits.iter().collect();
@@ -496,13 +446,12 @@ pub(super) fn run_module_start(
     rt.into_memory()
 }
 
-/// Attempt to load liblv2.prx from the PS3 firmware directory and
-/// resolve game imports against its exports. The firmware directory
-/// is expected to contain decrypted PS3 system PRX modules; CellGov
-/// does not ship them, and the files are not RPCS3-specific.
+/// Load liblv2.prx and re-patch GOT entries for every exported NID.
 ///
-/// For each imported NID that the module exports, the GOT entry is
-/// re-patched to point to the real OPD instead of the HLE trampoline.
+/// Returns `None` when the firmware directory is not configured or
+/// liblv2.prx is absent; boot continues on pure HLE. Imports in the
+/// HLE-keep list stay bound to their trampolines even when the PRX
+/// exports them.
 pub(super) fn load_firmware_prx(
     firmware_dir: Option<&str>,
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
@@ -532,34 +481,12 @@ pub(super) fn load_firmware_prx(
         }
     };
 
-    // Place the PRX in the PS3 user-memory region (0x00010000 ..
-    // 0x0FFFFFFF), just past the loaded ELF and the HLE trampoline
-    // area. This matches what real PS3 LV2 does: the kernel's
-    // first-fit allocator hands firmware PRX segments the region
-    // immediately after what's already mapped, which on a fresh
-    // boot is the application binary. CellGov's placement is a
-    // deterministic reproduction of that "next free slot after the
-    // app binary" position rather than an emulation of the full
-    // allocator state machine.
-    //
-    // RPCS3 places liblv2 via `vm::alloc(..., vm::main)` (see
-    // rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp) which is also
-    // first-fit over the same region, so in practice the addresses
-    // tend to agree; but when they don't, CellGov's position of
-    // authority is what the real PS3 kernel does, not what RPCS3
-    // does. Any divergence from RPCS3 that comes from modelling the
-    // PS3 more faithfully gets documented.
-    //
-    // CELLGOV_PRX_BASE overrides the auto-computed base so callers
-    // that need a specific layout (microtests, cross-runner
-    // comparison runs where RPCS3 picked a different address, a
-    // future allocator-accuracy test) can pin it. Default for
-    // `run-game`: align(elf_user_region_end + hle_trampolines, 64K).
+    // Default placement: first free 64K-aligned page past the HLE
+    // trampoline area, reproducing what the LV2 first-fit allocator
+    // returns on a fresh boot. CELLGOV_PRX_BASE overrides for pinned
+    // microtest and cross-runner layouts.
     let prx_base = match std::env::var("CELLGOV_PRX_BASE") {
         Ok(s) => {
-            // Tolerate both `0x` and `0X` prefix forms; some
-            // operator tools lowercase env-var values and some
-            // leave the user's original case.
             let trimmed = s.trim();
             let stripped = trimmed
                 .strip_prefix("0x")
@@ -569,15 +496,6 @@ pub(super) fn load_firmware_prx(
                 .unwrap_or_else(|e| die(&format!("CELLGOV_PRX_BASE={s:?}: not a hex u64 ({e})")))
         }
         Err(_) => {
-            // Default placement: round up to a 64K page boundary
-            // just past the ELF-load end and the HLE trampoline
-            // area. That lands inside the PS3 user-memory region
-            // and is below any allocations the runtime makes later
-            // for TLS and HLE heap. tramp_base already encodes
-            // align(elf_user_region_end, 0x1000); adding the
-            // trampoline span and rounding to 64K gives the next
-            // free 64K page the real PS3 allocator would also
-            // return for the first PRX load on a fresh boot.
             let tramp_end = tramp_base as u64 + (hle_bindings.len() as u64) * 24;
             (tramp_end + 0xFFFF) & !0xFFFF
         }
@@ -591,27 +509,14 @@ pub(super) fn load_firmware_prx(
         }
     };
 
-    // NIDs with working HLE implementations that should NOT be replaced
-    // with real PRX code. These are kept as HLE trampolines because the
-    // real implementations depend on full module_start initialization
-    // (TLS, heap arenas) which may not complete. The list lives in
-    // `cellgov_ppu::prx` as a single library-level source of truth;
-    // the inventory tool (`dump-imports`) reads the same constant.
+    // NIDs kept on HLE trampolines even when PRX exports them: real
+    // implementations depend on module_start initialization that may
+    // not complete. Shared with `dump-imports`.
     let hle_keep_nids = cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS;
 
-    // Re-patch GOT entries for NIDs that the loaded module exports,
-    // unless the NID is in the HLE keep list.
-    //
-    // Four disjoint outcomes per binding; their sum equals
-    // hle_bindings.len():
-    //   resolved     - GOT entry committed to point at real OPD.
-    //   failed_patch - real code exists but byte-range or commit
-    //                  failed; import still on HLE.
-    //   kept_hle     - nid is in the HLE keep list; intentional.
-    //   no_export    - loaded PRX does not export this nid; falls
-    //                  through to the HLE trampoline. Counted
-    //                  explicitly so the summary closes the loop
-    //                  on "why is this import still on HLE?"
+    // Four disjoint per-binding outcomes whose sum equals
+    // hle_bindings.len(): resolved (GOT patched), failed_patch
+    // (commit error), kept_hle (on keep list), no_export.
     let mut resolved = 0;
     let mut failed_patch = 0;
     let mut kept_hle = 0;

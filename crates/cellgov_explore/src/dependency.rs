@@ -1,33 +1,31 @@
 //! Conservative dependency analysis for schedule exploration.
 //!
-//! A `StepFootprint` summarizes the shared resources a unit touched
-//! during one execution step. Two footprints *conflict* if swapping
-//! the execution order of their steps could produce a different
-//! observable outcome. When footprints do not conflict, the two steps
-//! are independent and the swap need not be explored.
+//! [`StepFootprint`] summarizes one step's shared-resource accesses.
+//! Two footprints conflict if swapping their execution order could
+//! produce a different observable outcome; non-conflicting steps are
+//! independent and the swap need not be explored.
 //!
-//! The analysis is conservative: it over-approximates dependency so
-//! that false independencies (which would silently skip valid
-//! alternate schedules) never occur. False dependencies are
-//! acceptable -- they only waste exploration budget.
+//! The analysis over-approximates dependency so that false
+//! independencies never occur; false dependencies only waste
+//! exploration budget.
 
 use cellgov_effects::Effect;
 use cellgov_mem::ByteRange;
 use cellgov_sync::{BarrierId, MailboxId, SignalId, RESERVATION_LINE_BYTES};
 
-/// Summary of the shared resources one execution step accessed.
+/// Shared resources one execution step accessed.
 ///
-/// Extracted from the step's `emitted_effects` list via
-/// [`StepFootprint::from_effects`].
+/// Build via [`StepFootprint::from_effects`] from the step's emitted
+/// effect list.
 #[derive(Debug, Clone, Default)]
 pub struct StepFootprint {
-    /// Byte ranges written via SharedWriteIntent.
+    /// Byte ranges written via `SharedWriteIntent` or `ConditionalStore`.
     pub shared_writes: Vec<ByteRange>,
     /// Mailboxes sent to.
     pub mailbox_sends: Vec<MailboxId>,
     /// Mailboxes read from.
     pub mailbox_receives: Vec<MailboxId>,
-    /// DMA source and destination ranges.
+    /// DMA source and destination ranges (both appended).
     pub dma_ranges: Vec<ByteRange>,
     /// Signals updated.
     pub signal_updates: Vec<SignalId>,
@@ -39,20 +37,20 @@ pub struct StepFootprint {
     pub wait_barriers: Vec<BarrierId>,
     /// Units explicitly woken.
     pub wake_targets: Vec<cellgov_event::UnitId>,
-    /// 128-byte-aligned line addresses touched by a
-    /// `ReservationAcquire`. Treated as a conflict against any
-    /// shared write that overlaps the line (because a cross-unit
-    /// store to the line would clear the reservation, changing the
-    /// next stwcx / putllc verdict).
+    /// 128-byte-aligned line addresses touched by a `ReservationAcquire`.
+    ///
+    /// A cross-unit write overlapping the line clears the reservation
+    /// and flips the next conditional-store verdict, so the pair
+    /// conflicts.
     pub reservation_lines: Vec<u64>,
 }
 
 impl StepFootprint {
     /// Extract a footprint from the effects emitted in one step.
     ///
-    /// FaultRaised and TraceMarker effects are ignored: faults discard
-    /// the entire step's effects, and trace markers have no semantic
-    /// impact.
+    /// `FaultRaised` discards the whole step's effects upstream, and
+    /// `TraceMarker` / RSX completion effects have no dependency
+    /// impact, so all four are dropped.
     pub fn from_effects(effects: &[Effect]) -> Self {
         let mut fp = Self::default();
         for effect in effects {
@@ -86,14 +84,8 @@ impl StepFootprint {
                         .push(*line_addr & !(RESERVATION_LINE_BYTES - 1));
                 }
                 Effect::ConditionalStore { range, .. } => {
-                    // Commits a write and retires a reservation --
-                    // treat as a shared write for dependency purposes.
                     fp.shared_writes.push(*range);
                 }
-                // Faults discard the step; trace markers are no-ops.
-                // RSX completion effects originate inside the commit
-                // pipeline (FIFO advance pass), not from a unit step,
-                // and will never appear in a step's emitted_effects.
                 Effect::FaultRaised { .. }
                 | Effect::TraceMarker { .. }
                 | Effect::RsxLabelWrite { .. }
@@ -103,14 +95,13 @@ impl StepFootprint {
         fp
     }
 
-    /// Whether this footprint conflicts with another.
+    /// True when swapping these two steps could change the observable
+    /// outcome.
     ///
-    /// Two footprints conflict if swapping their execution order could
-    /// produce a different guest-visible outcome. The check is
-    /// conservative: it returns `true` (dependent) unless it can prove
-    /// independence.
+    /// Returns `true` unless independence can be proved. O(n*m) in the
+    /// product of each category's populated vectors; in practice a step
+    /// touches only one or two categories so the cost is small.
     pub fn conflicts(&self, other: &StepFootprint) -> bool {
-        // Shared writes: overlapping byte ranges.
         for a in &self.shared_writes {
             for b in &other.shared_writes {
                 if a.overlaps(*b) {
@@ -119,32 +110,26 @@ impl StepFootprint {
             }
         }
 
-        // Shared write vs DMA: a write and a DMA touching the same region.
         if ranges_overlap(&self.shared_writes, &other.dma_ranges)
             || ranges_overlap(&other.shared_writes, &self.dma_ranges)
         {
             return true;
         }
 
-        // DMA vs DMA: overlapping source/destination ranges.
         if ranges_overlap(&self.dma_ranges, &other.dma_ranges) {
             return true;
         }
 
-        // Mailbox: send to a mailbox that the other reads (or vice versa).
         if ids_overlap(&self.mailbox_sends, &other.mailbox_receives)
             || ids_overlap(&other.mailbox_sends, &self.mailbox_receives)
         {
             return true;
         }
 
-        // Mailbox: both send to the same mailbox (ordering matters).
         if ids_overlap(&self.mailbox_sends, &other.mailbox_sends) {
             return true;
         }
 
-        // Signal: both update the same signal, or one updates and the
-        // other waits on it.
         if ids_overlap(&self.signal_updates, &other.signal_updates) {
             return true;
         }
@@ -154,10 +139,10 @@ impl StepFootprint {
             return true;
         }
 
-        // Wake/wait: one wakes a unit that the other is waiting for
-        // (conservative -- we treat wake_targets as conflicting with
-        // any wait on the other side). This handles barrier/mailbox
-        // wake interactions.
+        // Any wake conflicts with any wait on the other side: wake
+        // targets are often resolved indirectly through barriers or
+        // mailboxes and tracking the exact pairing is not worth the
+        // precision loss.
         if !self.wake_targets.is_empty() && other.has_any_wait() {
             return true;
         }
@@ -165,24 +150,16 @@ impl StepFootprint {
             return true;
         }
 
-        // Barrier: both wait on the same barrier (arrival order matters).
         if ids_overlap(&self.wait_barriers, &other.wait_barriers) {
             return true;
         }
 
-        // Atomic reservation: a write in one step that covers a line
-        // reserved in the other step changes the next conditional
-        // store's verdict, so the steps are dependent.
         if write_covers_any_line(&self.shared_writes, &other.reservation_lines)
             || write_covers_any_line(&other.shared_writes, &self.reservation_lines)
         {
             return true;
         }
 
-        // Atomic reservation: two reservations on the same line are
-        // order-sensitive because the first acquire plus the second
-        // acquire's conditional-store ordering produces different
-        // verdicts depending on which ran first.
         if lines_overlap(&self.reservation_lines, &other.reservation_lines) {
             return true;
         }
@@ -190,7 +167,7 @@ impl StepFootprint {
         false
     }
 
-    /// Whether this footprint touches any shared resources at all.
+    /// True when the step accessed no shared resources.
     pub fn is_local_only(&self) -> bool {
         self.shared_writes.is_empty()
             && self.mailbox_sends.is_empty()
@@ -204,7 +181,7 @@ impl StepFootprint {
             && self.reservation_lines.is_empty()
     }
 
-    /// Merge another footprint into this one, accumulating all accesses.
+    /// Append every access from `other` into `self`.
     pub fn merge(&mut self, other: &StepFootprint) {
         self.shared_writes.extend_from_slice(&other.shared_writes);
         self.mailbox_sends.extend_from_slice(&other.mailbox_sends);
@@ -227,7 +204,6 @@ impl StepFootprint {
     }
 }
 
-/// Check if any range in `a` overlaps any range in `b`.
 fn ranges_overlap(a: &[ByteRange], b: &[ByteRange]) -> bool {
     for ra in a {
         for rb in b {
@@ -239,7 +215,6 @@ fn ranges_overlap(a: &[ByteRange], b: &[ByteRange]) -> bool {
     false
 }
 
-/// Check if any ID in `a` appears in `b`.
 fn ids_overlap<T: PartialEq>(a: &[T], b: &[T]) -> bool {
     for x in a {
         for y in b {
@@ -251,8 +226,6 @@ fn ids_overlap<T: PartialEq>(a: &[T], b: &[T]) -> bool {
     false
 }
 
-/// Does any write range in `writes` overlap any 128-byte line in
-/// `lines`?
 fn write_covers_any_line(writes: &[ByteRange], lines: &[u64]) -> bool {
     for w in writes {
         let w_start = w.start().raw();
@@ -271,8 +244,6 @@ fn write_covers_any_line(writes: &[ByteRange], lines: &[u64]) -> bool {
     false
 }
 
-/// Does any 128-byte line appear in both lists (by canonical
-/// address)?
 fn lines_overlap(a: &[u64], b: &[u64]) -> bool {
     for x in a {
         for y in b {
@@ -296,8 +267,6 @@ mod tests {
     fn range(start: u64, len: u64) -> ByteRange {
         ByteRange::new(GuestAddr::new(start), len).unwrap()
     }
-
-    // -- SharedWriteIntent conflicts --
 
     #[test]
     fn overlapping_writes_conflict() {
@@ -336,8 +305,6 @@ mod tests {
         }]);
         assert!(!a.conflicts(&b));
     }
-
-    // -- Mailbox conflicts --
 
     #[test]
     fn send_receive_same_mailbox_conflicts() {
@@ -382,8 +349,6 @@ mod tests {
         assert!(a.conflicts(&b));
     }
 
-    // -- Signal conflicts --
-
     #[test]
     fn signal_update_same_signal_conflicts() {
         let a = StepFootprint::from_effects(&[Effect::SignalUpdate {
@@ -427,8 +392,6 @@ mod tests {
         }]);
         assert!(!a.conflicts(&b));
     }
-
-    // -- DMA conflicts --
 
     #[test]
     fn dma_overlapping_destination_conflicts() {
@@ -480,8 +443,6 @@ mod tests {
         assert!(a.conflicts(&b));
     }
 
-    // -- Wake/wait conflicts --
-
     #[test]
     fn wake_vs_wait_conflicts() {
         let a = StepFootprint::from_effects(&[Effect::WakeUnit {
@@ -497,7 +458,6 @@ mod tests {
 
     #[test]
     fn wait_vs_wake_conflicts_symmetric() {
-        // Reverse direction of wake_vs_wait: a waits, b wakes.
         let a = StepFootprint::from_effects(&[Effect::WaitOnEvent {
             target: cellgov_effects::WaitTarget::Mailbox(MailboxId::new(1)),
             source: UnitId::new(0),
@@ -512,8 +472,6 @@ mod tests {
         );
     }
 
-    // -- Barrier conflicts --
-
     #[test]
     fn both_wait_same_barrier_conflicts() {
         let a = StepFootprint::from_effects(&[Effect::WaitOnEvent {
@@ -526,8 +484,6 @@ mod tests {
         }]);
         assert!(a.conflicts(&b));
     }
-
-    // -- Local-only / empty --
 
     #[test]
     fn empty_footprints_are_independent() {

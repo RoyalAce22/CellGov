@@ -1,24 +1,4 @@
 //! cellgov_cli -- run scenarios, dump traces, compare observations, explore schedules.
-//!
-//! Pure dispatch. Each subcommand's logic lives in `cli/<name>.rs`;
-//! the shared support modules (arg parsing, exit helpers, title
-//! resolution, scenario registry) live alongside them.
-//!
-//! Commands:
-//!
-//! - `cellgov_cli <scenario>` -- run a scenario, print deterministic summary.
-//! - `cellgov_cli dump <scenario>` -- run a scenario, print every trace record.
-//! - `cellgov_cli compare <scenario|manifest.toml> [--mode ...] [--format ...]`
-//! - `cellgov_cli compare <scenario|manifest.toml> --save-baseline <path>`
-//! - `cellgov_cli compare <scenario|manifest.toml> --against-baseline <path>`
-//! - `cellgov_cli compare <manifest.toml> --baselines-dir <dir>`
-//! - `cellgov_cli compare-observations <a.json> <b.json>`
-//! - `cellgov_cli diverge <a.state> <b.state>`
-//! - `cellgov_cli zoom <a.zoom.state> <b.zoom.state> <step>`
-//! - `cellgov_cli explore <scenario>` / `cellgov_cli explore micro <name>`
-//! - `cellgov_cli run-game <elf-path> ...`
-//! - `cellgov_cli bench-boot` / `cellgov_cli bench-boot-once`
-//! - `cellgov_cli dump-imports --title <name>`
 
 mod cli;
 mod dump_imports;

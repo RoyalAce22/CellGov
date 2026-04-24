@@ -1,10 +1,8 @@
-//! SPU channel number constants.
+//! SPU channel numbers and MFC command opcodes.
 //!
-//! Channel numbers are architectural. Decode extracts the number;
-//! execute interprets it. These constants map names from the SPU ISA
-//! manual to the numeric values used in `rdch`/`wrch`/`rchcnt`.
+//! Architectural constants used by `rdch`/`wrch`/`rchcnt`.
 
-// MFC command channels (used to build DMA requests)
+// MFC command channels
 
 /// MFC local store address register.
 pub const MFC_LSA: u8 = 16;
@@ -16,7 +14,7 @@ pub const MFC_EAL: u8 = 18;
 pub const MFC_SIZE: u8 = 19;
 /// MFC tag ID register.
 pub const MFC_TAG_ID: u8 = 20;
-/// MFC command opcode register. Writing this submits the DMA command.
+/// MFC command opcode register; writing submits the DMA command.
 pub const MFC_CMD: u8 = 21;
 
 // MFC tag status channels
@@ -25,7 +23,7 @@ pub const MFC_CMD: u8 = 21;
 pub const MFC_WR_TAG_MASK: u8 = 22;
 /// Write tag status update request (0=immediate, 1=any, 2=all).
 pub const MFC_WR_TAG_UPDATE: u8 = 23;
-/// Read tag status (blocks until masked tags complete).
+/// Read tag status; blocks until masked tags complete.
 pub const MFC_RD_TAG_STAT: u8 = 24;
 
 // MFC atomic channels
@@ -35,7 +33,7 @@ pub const MFC_RD_ATOMIC_STAT: u8 = 27;
 
 // SPU mailbox channels
 
-/// SPU read inbound mailbox (PPU -> SPU). Blocks if empty.
+/// SPU read inbound mailbox (PPU -> SPU); blocks if empty.
 pub const SPU_RD_IN_MBOX: u8 = 29;
 /// SPU write outbound mailbox (SPU -> PPU).
 pub const SPU_WR_OUT_MBOX: u8 = 28;

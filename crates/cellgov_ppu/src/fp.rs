@@ -1,8 +1,4 @@
-//! Floating-point instruction execution helpers.
-//!
-//! Dispatches opcode-63 (double precision) and opcode-59 (single
-//! precision) A-form and X-form FP instructions. Called from
-//! `exec::execute` for `Fp63` and `Fp59` instruction variants.
+//! Dispatches opcode-63 (double) and opcode-59 (single) FP instructions.
 
 use crate::exec::ExecuteVerdict;
 use crate::state::PpuState;

@@ -1,9 +1,4 @@
-//! Golden snapshot save/load for baseline regression testing.
-//!
-//! Observations can be serialized to JSON and saved to disk, then
-//! loaded later for comparison without re-running the other runner.
-//! This enables CellGov regression testing without RPCS3 installed
-//! and fast CI iteration against saved oracle baselines.
+//! JSON save/load for `Observation` baselines on disk.
 
 use crate::observation::Observation;
 use std::io;
@@ -30,14 +25,14 @@ impl From<serde_json::Error> for BaselineError {
     }
 }
 
-/// Save an observation to a JSON file at `path`.
+/// Serialize `observation` as pretty-printed JSON to `path`.
 pub fn save(observation: &Observation, path: &Path) -> Result<(), BaselineError> {
     let json = serde_json::to_string_pretty(observation)?;
     std::fs::write(path, json)?;
     Ok(())
 }
 
-/// Load an observation from a JSON file at `path`.
+/// Deserialize an observation from a JSON file at `path`.
 pub fn load(path: &Path) -> Result<Observation, BaselineError> {
     let data = std::fs::read_to_string(path)?;
     let obs = serde_json::from_str(&data)?;
@@ -77,7 +72,6 @@ mod tests {
 
     #[test]
     fn save_load_compare_pipeline() {
-        // End-to-end: observe a scenario, save baseline, load it, compare.
         use crate::compare::{compare, Classification, CompareMode};
         use crate::runner_cellgov::{observe_with_determinism_check, RegionDescriptor};
         use cellgov_testkit::fixtures;
@@ -99,8 +93,6 @@ mod tests {
 
     #[test]
     fn multi_baseline_pipeline() {
-        // Save two baselines from the same scenario, load both, run
-        // compare_multi, verify oracle agreement and match.
         use crate::compare::{compare_multi, Classification, CompareMode};
         use crate::runner_cellgov::{observe_with_determinism_check, RegionDescriptor};
         use cellgov_testkit::fixtures;
@@ -121,8 +113,6 @@ mod tests {
         let b1 = load(&p1).expect("load 1");
         let b2 = load(&p2).expect("load 2");
 
-        // Both baselines come from the same deterministic scenario,
-        // so oracles agree and CellGov matches.
         let cellgov = observe_with_determinism_check(factory, &regions).expect("cellgov");
         let result = compare_multi(&[b1, b2], &cellgov, CompareMode::Strict);
         assert_eq!(result.classification, Classification::Match);
@@ -132,14 +122,11 @@ mod tests {
     #[cfg(feature = "rpcs3-runner")]
     #[test]
     fn rpcs3_tty_baseline_roundtrip() {
-        // Parse a real RPCS3 TTY output, build an Observation, save
-        // as JSON baseline, load it back, verify contents.
         use crate::runner_rpcs3::TtyRegion;
 
         let tty_path =
             std::path::Path::new("../../baselines/spu_fixed_value/rpcs3_interpreter.tty");
         if !tty_path.exists() {
-            // Skip if the baseline file doesn't exist (CI without RPCS3).
             return;
         }
 
@@ -177,10 +164,6 @@ mod tests {
 
     #[test]
     fn compare_cellgov_vs_rpcs3_baseline() {
-        // Load the RPCS3 baseline and compare against a CellGov
-        // observation. The CellGov mailbox_send scenario does not
-        // produce the same memory layout as the SPU fixed-value
-        // test, so this should classify as Divergence on memory.
         use crate::compare::{compare, Classification, CompareMode};
         use crate::runner_cellgov::{observe_with_determinism_check, RegionDescriptor};
         use cellgov_testkit::fixtures;
@@ -192,14 +175,11 @@ mod tests {
         }
         let rpcs3_obs = load(baseline_path).expect("load baseline");
 
-        // Run the CellGov scenario named in the manifest.
         let factory = || fixtures::mailbox_send_scenario(1);
         let regions: Vec<RegionDescriptor> = vec![];
         let cellgov_obs =
             observe_with_determinism_check(factory, &regions).expect("cellgov observe");
 
-        // Both should complete, but memory regions will differ
-        // (CellGov has none, RPCS3 has the result region).
         assert_eq!(rpcs3_obs.outcome, ObservedOutcome::Completed);
         assert_eq!(cellgov_obs.outcome, ObservedOutcome::Completed);
 

@@ -1,47 +1,43 @@
-//! Outcome classification for schedule exploration.
-//!
-//! After exploring multiple legal schedules for a bounded workload,
-//! `OutcomeClass` tells whether all schedules agreed or diverged.
+//! Outcome classification types for an exploration run.
 
 use cellgov_event::UnitId;
 
-/// Classification of a bounded exploration run.
+/// Verdict of a bounded exploration run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutcomeClass {
     /// All explored schedules produced identical committed memory.
     ScheduleStable,
     /// At least two explored schedules produced distinct committed memory.
     ScheduleSensitive,
-    /// Exploration bounds were hit before enough schedules were explored
-    /// to make a definitive classification.
+    /// Bounds were hit before a divergence was observed or ruled out.
     Inconclusive,
 }
 
-/// One explored alternate schedule and its result.
+/// One explored alternate schedule and its committed-memory hash.
 #[derive(Debug, Clone)]
 pub struct ScheduleRecord {
-    /// The branching-point step index where this schedule diverged.
+    /// Step index of the branching point this alternate diverges at.
     pub branch_step: usize,
-    /// The unit forced at the branch point.
+    /// Unit forced at the branch point.
     pub alternate_choice: UnitId,
-    /// Final committed-memory hash after this schedule ran.
+    /// Final committed-memory hash after the alternate ran.
     pub memory_hash: u64,
 }
 
-/// Result of a bounded exploration run.
+/// Aggregate result of a bounded exploration run.
 #[derive(Debug, Clone)]
 pub struct ExplorationResult {
-    /// Final committed-memory hash from the baseline (default-schedule) run.
+    /// Committed-memory hash from the default-schedule baseline run.
     pub baseline_hash: u64,
-    /// Records from each alternate schedule explored.
+    /// Records from each non-pruned alternate schedule explored.
     pub schedules: Vec<ScheduleRecord>,
-    /// Classification derived from comparing all hashes.
+    /// Verdict derived from comparing all hashes.
     pub outcome: OutcomeClass,
-    /// Total number of branching points in the baseline run.
+    /// Total branching points observed in the baseline run.
     pub total_branching_points: usize,
-    /// Whether the exploration stopped early because a bound was hit.
+    /// True if exploration stopped because a bound was hit.
     pub bounds_hit: bool,
-    /// Number of alternate schedules skipped by dependency pruning.
+    /// Alternates skipped by dependency pruning.
     pub schedules_pruned: usize,
 }
 

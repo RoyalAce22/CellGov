@@ -1,22 +1,5 @@
-//! The `Effect` enum -- the runtime's vocabulary for everything an
-//! execution unit can ask the runtime to do on its behalf.
-//!
-//! `Effect` values are immutable packets. Units construct them and append
-//! them to their step result; the runtime consumes them in emission order
-//! during validation and commit. Emission order is preserved end-to-end,
-//! even though commit batches are
-//! atomic from the standpoint of guest visibility -- validation, conflict
-//! diagnostics, fault attribution, and trace reconstruction all depend on
-//! stable intra-step ordering.
-//!
-//! The variant set is bounded. Do not add game-specific or
-//! instruction-specific variants here; architecture crates layer
-//! their own wrapper effects on top of this set if needed. The one
-//! exception is for commit-pipeline-level primitives that cut across
-//! architectures (e.g., the atomic reservation variants added
-//! alongside the PPU + SPU reservation model). Those belong in this
-//! set because the commit pipeline itself is the subsystem that
-//! arbitrates them.
+//! The `Effect` enum: the vocabulary an execution unit uses to request
+//! runtime-visible work.
 
 use crate::payload::{FaultKind, MailboxMessage, WaitTarget, WritePayload};
 use cellgov_dma::DmaRequest;
@@ -27,32 +10,29 @@ use cellgov_time::GuestTicks;
 
 /// An immutable effect packet emitted by an execution unit.
 ///
-/// `Effect` is `Clone + Eq + Debug`. It is not `Copy` because
-/// [`Effect::SharedWriteIntent`] carries a heap-allocated payload;
-/// cloning is the explicit way to duplicate an effect for the trace.
-///
-/// The variant order below is part of the runtime's stable trace
-/// contract: the binary trace format will rely on stable discriminants,
-/// so reordering or inserting variants in the middle would break replay.
-/// New variants must be appended at the end.
+/// Every effect-consuming crate (commit pipeline, trace, LV2) codes
+/// against this variant set and its field layout. Emission order is
+/// preserved end-to-end; validation, conflict resolution, fault
+/// attribution, and trace reconstruction all depend on stable
+/// intra-step ordering even though commit batches are atomic from the
+/// guest's standpoint. Variant discriminants are part of the binary
+/// trace contract: new variants must be appended; existing variants
+/// must not be reordered or have fields removed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
-    /// Stage a write to globally visible memory. The write is not
-    /// applied immediately; it flows through the commit pipeline and
-    /// becomes visible at the next epoch boundary alongside the rest of
-    /// its batch.
+    /// Stage a write to globally visible memory, applied at the next
+    /// epoch boundary with the rest of its batch.
     SharedWriteIntent {
         /// Target byte range in the guest address space.
         range: ByteRange,
-        /// Bytes to deposit into `range`. Length is checked against
-        /// `range.length()` at commit validation time.
+        /// Bytes to deposit; length checked against `range.length()`
+        /// at commit validation.
         bytes: WritePayload,
-        /// Tier-2 ordering class used by conflict resolution when two
-        /// units write to overlapping ranges in the same epoch.
+        /// Tier-2 class for conflict resolution on overlapping writes.
         ordering: PriorityClass,
-        /// The unit emitting this write.
+        /// Emitting unit.
         source: UnitId,
-        /// The guest-time stamp at which this write becomes ordered.
+        /// Guest-time stamp at which this write becomes ordered.
         source_time: GuestTicks,
     },
     /// Send a message into a mailbox.
@@ -61,154 +41,125 @@ pub enum Effect {
         mailbox: MailboxId,
         /// Message word to deposit.
         message: MailboxMessage,
-        /// The unit performing the send.
+        /// Sending unit.
         source: UnitId,
     },
-    /// Attempt to receive a message from a mailbox. The runtime decides
-    /// whether the unit blocks (mailbox empty) or wakes immediately
-    /// (message available); the unit just records its intent.
+    /// Record the unit's intent to receive from a mailbox; the runtime
+    /// decides block-vs-wake.
     MailboxReceiveAttempt {
         /// Mailbox to read from.
         mailbox: MailboxId,
-        /// The unit performing the receive.
+        /// Receiving unit.
         source: UnitId,
     },
     /// Enqueue a DMA request for the runtime to model and complete.
     DmaEnqueue {
         /// The DMA request packet.
         request: DmaRequest,
-        /// Inline payload for transfers from unit-private memory (e.g.,
-        /// SPU local store). When present, the commit pipeline writes
-        /// these bytes to the destination at completion time instead of
-        /// reading from the source address in guest memory.
+        /// Inline bytes from unit-private memory (e.g. SPU local
+        /// store); when present the commit pipeline writes these at
+        /// completion instead of reading the source range.
         payload: Option<Vec<u8>>,
     },
     /// Block this unit until the named event fires.
     WaitOnEvent {
         /// What the unit is waiting for.
         target: WaitTarget,
-        /// The unit that is going to sleep.
+        /// Blocking unit.
         source: UnitId,
     },
-    /// Wake another unit. Used for handing back roundtrip responses,
-    /// releasing barrier participants, and any other unit-to-unit
-    /// notification that does not need a sync primitive.
+    /// Wake another unit directly, outside of any sync primitive.
     WakeUnit {
-        /// The unit to wake.
+        /// Unit to wake.
         target: UnitId,
-        /// The unit performing the wake.
+        /// Unit performing the wake.
         source: UnitId,
     },
-    /// Update a signal notification register. The `value` is OR-written
-    /// into the register; the runtime applies the OR at commit time.
+    /// OR `value` into a signal notification register at commit time.
     SignalUpdate {
         /// Target signal register.
         signal: SignalId,
-        /// Value to OR into the register.
+        /// Bits to OR into the register.
         value: u32,
-        /// The unit performing the update.
+        /// Emitting unit.
         source: UnitId,
     },
-    /// Raise a fault. The runtime discards
-    /// every effect emitted in this step (including effects that
-    /// preceded `FaultRaised` in emission order) and routes the fault
-    /// to the unit's fault-handling state.
+    /// Raise a fault; every effect emitted in this step is discarded
+    /// (including those preceding `FaultRaised` in emission order).
     FaultRaised {
         /// Fault classification.
         kind: FaultKind,
-        /// The unit raising the fault.
+        /// Faulting unit.
         source: UnitId,
     },
-    /// Drop a debug breadcrumb into the trace. Has no semantic effect
-    /// on the commit pipeline; exists so units and tests can correlate
-    /// trace records with specific code paths.
+    /// Drop a debug breadcrumb into the trace. No commit-pipeline
+    /// side-effect.
     TraceMarker {
-        /// Opaque marker value, recorded as-is in the trace.
+        /// Opaque marker value, recorded as-is.
         marker: u32,
-        /// The unit emitting the marker.
+        /// Emitting unit.
         source: UnitId,
     },
     /// Install an atomic-reservation entry for `source` on the cache
     /// line containing `line_addr`.
     ///
-    /// Processed by the commit pipeline as insert-or-replace against
-    /// the reservation table (a second acquire from the same unit
-    /// drops any prior entry, matching PPC / SPU ABI). A subsequent
-    /// committed write whose range overlaps the reserved line clears
-    /// the entry. `line_addr` is canonicalized to a 128-byte-aligned
-    /// line by the pipeline; callers may pass any byte-granular
-    /// address within the intended line.
-    ///
-    /// Emitted by `lwarx` / `ldarx` on PPU and by the `MFC_GETLLAR`
-    /// channel write on SPU.
+    /// The pipeline canonicalizes `line_addr` to a 128-byte-aligned
+    /// line (low 7 bits masked); callers may pass any byte-granular
+    /// address within the intended line. A second acquire from the
+    /// same unit replaces any prior entry; a later committed write
+    /// overlapping the reserved line clears it.
     ReservationAcquire {
-        /// Byte address within the line to reserve. The commit
-        /// pipeline masks off the low 7 bits.
+        /// Byte address within the line to reserve.
         line_addr: u64,
-        /// The unit installing the reservation.
+        /// Unit installing the reservation.
         source: UnitId,
     },
-    /// Commit the success path of a conditional atomic store
-    /// (`stwcx.` / `stdcx.` on PPU, `MFC_PUTLLC` on SPU).
+    /// Success path of a conditional atomic store (`stwcx.` / `stdcx.`
+    /// / `MFC_PUTLLC`).
     ///
-    /// Processed by the commit pipeline as: apply `bytes` to
-    /// `range` via the normal SharedWriteIntent path (including the
-    /// clear sweep that drops every other unit's overlapping
-    /// reservation entries), then drop `source`'s own reservation
-    /// entry from the table.
-    ///
-    /// The effect's presence encodes success; failure is signaled
-    /// by the unit not emitting the effect at all and setting its
-    /// own CR0 EQ / atomic_status bit locally. The unit decides
-    /// success before emission by AND-ing its per-unit reservation
-    /// register with `ExecutionContext::reservation_held(source)`.
+    /// Commits `bytes` into `range` through the `SharedWriteIntent`
+    /// path (including the clear sweep over other units' overlapping
+    /// reservations), then retires `source`'s own reservation entry.
+    /// `range.length()` must be 4, 8, or 128. Presence encodes
+    /// success; on failure the unit emits nothing and sets its own
+    /// CR0 EQ / atomic_status bit locally, deciding before emission
+    /// via `ExecutionContext::reservation_held(source)`.
     ConditionalStore {
-        /// Target byte range. Width is `range.length()`; must be
-        /// 4 (stwcx), 8 (stdcx), or 128 (putllc).
+        /// Target byte range; width must be 4, 8, or 128.
         range: ByteRange,
-        /// Bytes to deposit into `range`. Length must equal
-        /// `range.length()`; enforced at commit validation time.
+        /// Bytes to deposit; length must equal `range.length()`.
         bytes: WritePayload,
-        /// Tier-2 ordering class used by conflict resolution when
-        /// two units write to overlapping ranges in the same epoch.
+        /// Tier-2 class for conflict resolution on overlapping writes.
         ordering: PriorityClass,
-        /// The unit whose reservation entry is retired by this
-        /// commit.
+        /// Unit whose reservation entry this commit retires.
         source: UnitId,
         /// Guest-time stamp at which the store becomes ordered.
         source_time: GuestTicks,
     },
-    /// Emitted by the RSX FIFO advance pass when an NV method
-    /// writes a value to the RSX label area (NV406E semaphore
-    /// release or NV4097 report writeback). The commit pipeline
-    /// resolves `offset` against the RSX label base and commits
-    /// the 32-bit value through the same path as
-    /// `SharedWriteIntent`, so the clear sweep and state-hash
-    /// contribution are automatic. Kept as a distinct variant so
-    /// the trace records the FIFO origin separately from PPU /
-    /// SPU / DMA writes.
+    /// An NV method wrote a 32-bit value into the RSX label area
+    /// (NV406E semaphore release or NV4097 report writeback).
     ///
-    /// No `source: UnitId` because the FIFO advance pass runs
-    /// inside the commit pipeline itself, not as a unit step.
+    /// The pipeline resolves `offset` against the RSX label base and
+    /// commits big-endian through the `SharedWriteIntent` path, so
+    /// clear sweep and state-hash contribution are automatic.
+    /// Distinct variant so the trace records the FIFO origin. No
+    /// `source: UnitId` because the FIFO advance pass runs inside
+    /// the commit pipeline, not as a unit step.
     RsxLabelWrite {
         /// Byte offset into the RSX label area.
         offset: u32,
-        /// 32-bit value to write. Emitted big-endian at commit
-        /// time (PS3 guest-visible byte order).
+        /// 32-bit value; emitted big-endian at commit time.
         value: u32,
     },
-    /// Emitted by the RSX FIFO advance pass on an
-    /// `NV4097_FLIP_BUFFER` method parse. The commit pipeline
-    /// transitions the flip state to `WAITING`; the next commit
-    /// boundary transitions it to `DONE`. Purely drives the flip-
-    /// status state machine; has no direct memory side-effect.
+    /// An `NV4097_FLIP_BUFFER` method parsed by the FIFO advance
+    /// pass; drives the flip-status state machine (WAITING, then
+    /// DONE at the next commit boundary) with no memory side-effect.
     ///
     /// No `source: UnitId` for the same reason as
     /// [`Effect::RsxLabelWrite`].
     RsxFlipRequest {
-        /// Back-buffer index the guest asked to flip to. Recorded
-        /// for observability; the state machine only tracks
-        /// pending vs done.
+        /// Back-buffer index recorded for observability; the state
+        /// machine only tracks pending vs done.
         buffer_index: u8,
     },
 }
@@ -292,7 +243,6 @@ mod tests {
             payload: None,
         };
         assert_eq!(e, expected);
-        // Sanity-check the carried request's fields.
         assert_eq!(req.length(), 0x40);
         assert_eq!(req.issuer(), UnitId::new(5));
     }
@@ -372,8 +322,6 @@ mod tests {
 
     #[test]
     fn variants_are_distinct() {
-        // Cross-variant inequality check: two effects with the same
-        // source but different variant kinds must never compare equal.
         let mb = Effect::MailboxReceiveAttempt {
             mailbox: MailboxId::new(0),
             source: UnitId::new(0),
@@ -497,10 +445,6 @@ mod tests {
 
     #[test]
     fn rsx_variants_distinct_from_existing_and_each_other() {
-        // Catches an accidental merge of RSX variants into any
-        // existing effect kind, and catches RsxLabelWrite /
-        // RsxFlipRequest being considered equal despite different
-        // shapes.
         let label = Effect::RsxLabelWrite {
             offset: 0,
             value: 0,
@@ -526,9 +470,6 @@ mod tests {
 
     #[test]
     fn reservation_variants_distinct_from_existing() {
-        // A ReservationAcquire at the same address as a
-        // SharedWriteIntent must compare unequal. Protects against an
-        // accidental merge of the two paths at the enum level.
         let acq = Effect::ReservationAcquire {
             line_addr: 0x1000,
             source: UnitId::new(1),

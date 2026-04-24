@@ -1,6 +1,4 @@
-//! Shared test helpers for `Lv2Host` dispatch tests. Used by both
-//! `tests/host_tests.rs` and the `#[cfg(test)] mod tests` blocks
-//! inside each primitive submodule.
+//! Shared test helpers for `Lv2Host` dispatch tests.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -49,7 +47,7 @@ impl Lv2Runtime for FakeRuntime {
     }
 }
 
-/// Extract the big-endian u32 value from a SharedWriteIntent effect.
+/// Extract the big-endian u32 payload from a `SharedWriteIntent`.
 pub(super) fn extract_write_u32(effect: &Effect) -> u32 {
     match effect {
         Effect::SharedWriteIntent { bytes, .. } => {
@@ -61,8 +59,7 @@ pub(super) fn extract_write_u32(effect: &Effect) -> u32 {
     }
 }
 
-/// Seed a primary PPU thread and map it to `requester`. Helper
-/// for lock tests that need a real PpuThreadId -> UnitId mapping.
+/// Seed a primary PPU thread mapped to `unit_id`.
 pub(super) fn seed_primary_ppu(host: &mut Lv2Host, unit_id: UnitId) {
     host.seed_primary_ppu_thread(
         unit_id,

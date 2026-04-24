@@ -1,8 +1,7 @@
-//! Memory-region LV2 dispatch methods: `sys_memory_allocate`.
+//! `sys_memory_allocate` bump-allocator dispatch.
 //!
-//! `MemoryFree`, `MemoryGetUserMemorySize`, and `MemoryContainerCreate`
-//! are inlined in the central dispatch match because each is a single
-//! arithmetic expression; only `allocate` needs a helper.
+//! The rest of the `sys_memory_*` family is inlined at the dispatch
+//! match because each is a single arithmetic expression.
 
 use cellgov_event::UnitId;
 
@@ -11,8 +10,8 @@ use crate::host::Lv2Host;
 
 /// End (exclusive) of the PS3 `main` region the LV2 allocator may
 /// hand out from. Shared with ELF PT_LOAD, TLS, and the HLE bump
-/// arena; the bound catches a runaway allocation before it walks
-/// out of `main` into unmapped space.
+/// arena; the bound catches runaways before they walk into unmapped
+/// space.
 const MEM_ALLOC_REGION_END: u32 = 0x4000_0000;
 
 impl Lv2Host {
@@ -22,11 +21,11 @@ impl Lv2Host {
         alloc_addr_ptr: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // 64KB alignment. Every arithmetic step is checked --
-        // a u32-truncating size, an alignment that wraps, or a
-        // cursor past `MEM_ALLOC_REGION_END` all return
-        // CELL_ENOMEM with the cursor unchanged. Silent wrap
-        // would hand out addresses outside user memory.
+        // 64KB alignment, every arithmetic step checked: a
+        // u32-truncating size, an alignment wrap, or a cursor past
+        // MEM_ALLOC_REGION_END all return CELL_ENOMEM with the
+        // cursor unchanged. Silent wrap would hand out addresses
+        // outside user memory.
         const ALIGN: u32 = 0x1_0000;
         let Ok(size) = u32::try_from(size) else {
             return Lv2Dispatch::Immediate {
@@ -109,11 +108,6 @@ mod tests {
 
     #[test]
     fn set_mem_alloc_base_overrides_first_allocation_address() {
-        // The allocator base is configurable so callers that load a
-        // real ELF can place sys_memory_allocate's pool above the
-        // ELF's PT_LOAD footprint. The bump pointer's 64KB alignment
-        // is preserved by the dispatch path, so the first returned
-        // address must be >= the configured base and 64KB-aligned.
         let mut host = Lv2Host::new();
         host.set_mem_alloc_base(0x008A_0000);
         let rt = FakeRuntime::new(0x10000);
@@ -156,8 +150,8 @@ mod tests {
 
     #[test]
     fn memory_get_user_memory_size_writes_info_struct() {
-        // sys_memory_info_t has two big-endian u32 fields:
-        // total_user_memory, available_user_memory.
+        // sys_memory_info_t layout: total_user_memory,
+        // available_user_memory (both big-endian u32).
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let source = UnitId::new(0);

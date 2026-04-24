@@ -1,71 +1,50 @@
 //! Streaming per-step state-hash divergence scanner.
 //!
-//! Walks two binary trace streams step by step, filters each down to
-//! its `PpuStateHash` records, and reports the first index where the
-//! two disagree. The result distinguishes a length mismatch (one
-//! side retired more instructions than the other) from a content
-//! mismatch (matched step count up to N but PC or hash differs at N).
+//! Walks two binary trace streams, filters each to its `PpuStateHash`
+//! records, and reports the first index where they disagree. Scan is
+//! O(min(len_a, len_b)) with constant auxiliary memory: both streams
+//! are consumed as iterators and never materialized.
 //!
-//! Three divergence shapes are reported in this order:
-//!
-//! 1. `LengthDiffers` -- one stream ended before the other (the
-//!    common prefix all matched). This is "same retired-step count"
-//!    failing first.
-//! 2. `Differs { field: Pc, .. }` -- step count matched up to this
-//!    index but the program counters disagree. "Same PC sequence"
-//!    failing.
-//! 3. `Differs { field: Hash, .. }` -- step count and PC matched but
-//!    the state hashes disagree. "Same state-hash sequence" failing
-//!    last; the architectural state diverged at this PC.
-//!
-//! `Identical` means every `PpuStateHash` matched and both streams
-//! reached the same length.
+//! Depends on the `TraceRecord::PpuStateHash { step, pc, hash }` shape
+//! from `cellgov_trace`; changing those fields breaks this scanner.
 
 use cellgov_trace::{TraceReader, TraceRecord};
 
 /// Which field disagreed at the first differing step.
-///
-/// Reported in order of severity: PC differing means control flow
-/// diverged (the CPUs ran different code). Hash differing at the same
-/// PC means the same instruction executed against different
-/// architectural state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DivergeField {
-    /// Both sides reached this step, but the PCs differ.
+    /// PCs differ at this step.
     Pc,
-    /// Both sides reached this step at the same PC, but the state
-    /// hashes differ.
+    /// PCs match but state hashes differ at this step.
     Hash,
 }
 
 /// Outcome of comparing two per-step state-hash streams.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DivergeReport {
-    /// Both streams produced the same `count` PpuStateHash records,
-    /// each matching pairwise.
+    /// All `count` records matched pairwise and both streams ended.
     Identical {
-        /// Number of `PpuStateHash` records matched on each side.
+        /// Records matched on each side.
         count: u64,
     },
     /// Both sides reached `step` but disagreed on `field`.
     Differs {
-        /// Step index at which the disagreement occurred (0-based).
+        /// 0-based step index where the disagreement occurred.
         step: u64,
-        /// PC reported by side A at this step.
+        /// PC on side A.
         a_pc: u64,
-        /// PC reported by side B at this step.
+        /// PC on side B.
         b_pc: u64,
-        /// State hash reported by side A at this step.
+        /// State hash on side A.
         a_hash: u64,
-        /// State hash reported by side B at this step.
+        /// State hash on side B.
         b_hash: u64,
         /// Which field broke first.
         field: DivergeField,
     },
-    /// One side ended before the other. The common prefix
-    /// (`common_count` records) matched.
+    /// One side ended before the other; `common_count` records matched.
     LengthDiffers {
-        /// Number of records that matched before either side ended.
+        /// Records matched before either side ended.
         common_count: u64,
         /// Total `PpuStateHash` records in side A.
         a_count: u64,
@@ -74,14 +53,11 @@ pub enum DivergeReport {
     },
 }
 
-/// Walk two trace byte slices, filter to `PpuStateHash`, and report
-/// the first divergence (or `Identical`).
+/// Walk two trace byte slices and report the first `PpuStateHash` divergence.
 ///
-/// Decoding errors in either input are surfaced indirectly: an error
-/// truncates that side's iterator, which then registers as a length
-/// mismatch. Tooling that needs to distinguish "stream ended" from
-/// "stream malformed" should validate the inputs separately first;
-/// this scanner's contract is "compare what is decodable".
+/// Decode errors truncate the affected iterator, which surfaces as a
+/// `LengthDiffers` result; callers needing to distinguish "malformed"
+/// from "ended" must validate the inputs separately.
 pub fn diverge(a: &[u8], b: &[u8]) -> DivergeReport {
     let mut ai = state_hash_iter(a);
     let mut bi = state_hash_iter(b);
@@ -132,8 +108,7 @@ pub fn diverge(a: &[u8], b: &[u8]) -> DivergeReport {
     }
 }
 
-/// Iterate the `PpuStateHash` records in a trace as `(pc, hash)`
-/// pairs. Other record kinds and decode errors are skipped.
+/// Iterate `PpuStateHash` records as `(pc, hash)`; other kinds and decode errors are skipped.
 fn state_hash_iter(bytes: &[u8]) -> impl Iterator<Item = (u64, u64)> + '_ {
     TraceReader::new(bytes).filter_map(|r| match r {
         Ok(TraceRecord::PpuStateHash { pc, hash, .. }) => Some((pc, hash.raw())),
@@ -141,42 +116,38 @@ fn state_hash_iter(bytes: &[u8]) -> impl Iterator<Item = (u64, u64)> + '_ {
     })
 }
 
-/// Result of a 9G zoom-in lookup at a specific step index.
+/// Result of a zoom-in lookup at a specific step index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZoomLookup {
-    /// Both zoom traces contain a `PpuStateFull` at the given step.
-    /// `diffs` lists every architectural field that disagreed (empty
-    /// vec means a hash-collision-style false positive).
+    /// Both zoom traces contained a `PpuStateFull` at `step`.
+    ///
+    /// An empty `diffs` indicates the full snapshots are byte-equal
+    /// (hash-collision false positive).
     Found {
         /// Step index that was looked up.
         step: u64,
-        /// PC reported by side A at that step.
+        /// PC on side A.
         a_pc: u64,
-        /// PC reported by side B at that step.
+        /// PC on side B.
         b_pc: u64,
-        /// Per-field diffs, in canonical order (gpr 0..32, lr, ctr,
-        /// xer, cr). Empty when the full snapshots are equal.
+        /// Per-field diffs in canonical order: `gpr0..gpr31`, `lr`, `ctr`, `xer`, `cr`.
         diffs: Vec<RegDiff>,
     },
-    /// One or both zoom traces did not include the target step.
-    /// Indicates the window was set wrong on one side.
+    /// The target step was absent from one or both zoom traces.
     MissingStep {
         /// Step that was looked up.
         step: u64,
-        /// Was side A missing this step?
+        /// Side A missing this step.
         a_missing: bool,
-        /// Was side B missing this step?
+        /// Side B missing this step.
         b_missing: bool,
     },
 }
 
-/// One register field that disagreed between two `PpuStateFull`
-/// snapshots taken at the same step.
+/// One register field that disagreed between two `PpuStateFull` snapshots.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegDiff {
-    /// Field name in canonical order (`gpr0`..`gpr31`, `lr`, `ctr`,
-    /// `xer`, `cr`). Stable strings so the diff printer can be a
-    /// dumb formatter.
+    /// Canonical field name: `gpr0..gpr31`, `lr`, `ctr`, `xer`, `cr`.
     pub field: &'static str,
     /// Value from side A.
     pub a: u64,
@@ -191,13 +162,9 @@ const GPR_FIELD_NAMES: [&str; 32] = [
     "gpr31",
 ];
 
-/// Look up the `PpuStateFull` snapshot at `step` in each zoom-trace
-/// stream and report every architectural field that disagrees.
+/// Look up the `PpuStateFull` snapshot at `step` in both zoom traces and diff each field.
 ///
-/// Used by the zoom-in driver after a `diverge` run names a step.
-/// The two zoom streams are typically much shorter than the per-step
-/// hash streams (window size, not full run), so a linear scan is
-/// fine.
+/// O(n) linear scan of each zoom stream.
 pub fn zoom_lookup(a_zoom: &[u8], b_zoom: &[u8], step: u64) -> ZoomLookup {
     let a = find_full_at(a_zoom, step);
     let b = find_full_at(b_zoom, step);
@@ -372,8 +339,6 @@ mod tests {
 
     #[test]
     fn pc_check_runs_before_hash_check() {
-        // Both PC and hash differ at step 0. The scanner orders the
-        // checks PC before hash, so the report names the PC field.
         let a = encode(&[h(0, 0x100, 0xaa)]);
         let b = encode(&[h(0, 0x200, 0xbb)]);
         match diverge(&a, &b) {
@@ -455,10 +420,6 @@ mod tests {
 
     #[test]
     fn zoom_lookup_with_identical_full_states_reports_empty_diffs() {
-        // False-collision case: PpuStateHash reported a hash
-        // mismatch at this step but the full snapshots are byte-equal.
-        // diffs.is_empty() means "this was a hash collision; safe to
-        // resume scanning after step+1".
         let gpr = [0u64; 32];
         let a = encode(&[full(5, 0x100, gpr)]);
         let b = encode(&[full(5, 0x100, gpr)]);
@@ -530,9 +491,6 @@ mod tests {
 
     #[test]
     fn non_state_hash_records_are_ignored() {
-        // Mix in a non-PpuStateHash record (StateHashCheckpoint) between
-        // PpuStateHash entries. The scanner must skip the non-PpuStateHash
-        // variants and still match.
         use cellgov_trace::HashCheckpointKind;
         let mut w = TraceWriter::new();
         w.record(&h(0, 0x100, 0xaa));

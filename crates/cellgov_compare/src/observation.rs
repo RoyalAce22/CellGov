@@ -1,25 +1,14 @@
 //! Normalized observation types for cross-runner comparison.
-//!
-//! Both runners (CellGov and RPCS3) produce an `Observation` with the
-//! same shape. The comparison layer operates only on these types, never
-//! on runner-specific internals. Each runner's adapter is responsible
-//! for coalescing raw outputs into this schema.
 
 use cellgov_trace::StateHash;
 use serde::{Deserialize, Serialize};
 
 /// How a test run terminated.
-///
-/// Both runners must map their native outcome into one of these
-/// variants. The comparison layer treats outcome mismatch as a
-/// divergence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ObservedOutcome {
-    /// Reached expected terminal state. All units finished or
-    /// explicitly blocked with no pending wakes.
+    /// All units finished or explicitly blocked with no pending wakes.
     Completed,
-    /// No runnable units, but the run did not reach a clean terminal
-    /// state (pending events remain, blocked receivers with no sender).
+    /// No runnable units, but pending events or blocked receivers remain.
     Stalled,
     /// Max steps exceeded (CellGov) or wall-clock timeout (RPCS3).
     Timeout,
@@ -29,10 +18,9 @@ pub enum ObservedOutcome {
 
 /// Semantic event kinds for normalized comparison.
 ///
-/// Raw trace events from CellGov and instrumented output from RPCS3
-/// are coalesced into these kinds by each runner's adapter. Timing
-/// values are stripped during normalization -- only kind, unit, and
-/// relative order survive.
+/// Each runner's adapter coalesces its raw events into these kinds.
+/// Timing values are stripped during normalization; only kind, unit,
+/// and relative order survive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ObservedEventKind {
     /// A unit sent a mailbox message.
@@ -49,9 +37,8 @@ pub enum ObservedEventKind {
 
 /// A single normalized event in the observation sequence.
 ///
-/// Events are ordered by `sequence` (monotonic index within the
-/// observation). This is not a guest tick -- CellGov and RPCS3 have
-/// different time models.
+/// `sequence` is a monotonic index within the observation, not a guest
+/// tick: CellGov and RPCS3 have different time models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ObservedEvent {
     /// What happened.
@@ -64,11 +51,10 @@ pub struct ObservedEvent {
 
 /// A named memory region snapshot taken at end of run.
 ///
-/// All observed memory regions must be test-owned and write-complete:
-/// the test explicitly allocates the region, fully initializes it to a
-/// known value (typically zero), and writes its result into it before
-/// terminating. No comparison may depend on uninitialized or
-/// partially-written memory.
+/// All observed regions must be test-owned and write-complete: the test
+/// allocates the region, fully initializes it to a known value, and
+/// writes its result before terminating. Comparison must not depend on
+/// uninitialized or partially-written memory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NamedMemoryRegion {
     /// Region name from the manifest.
@@ -93,11 +79,10 @@ mod state_hash_serde {
     }
 }
 
-/// CellGov-side state hashes carried through from `ScenarioResult`.
+/// CellGov-side state hashes for replay comparison (CellGov-vs-CellGov).
 ///
-/// These are CellGov-internal and used for replay comparison
-/// (CellGov-vs-CellGov), not for cross-runner comparison. The RPCS3
-/// adapter sets this to `None`.
+/// The RPCS3 adapter sets this to `None`; cross-runner comparison does
+/// not use these hashes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservedHashes {
     /// Hash of committed guest memory.
@@ -116,15 +101,18 @@ pub struct ObservedHashes {
 pub struct ObservationMetadata {
     /// Which runner produced this observation.
     pub runner: String,
-    /// Number of steps taken, or `None` when step counts are unavailable
-    /// for the runner.
+    /// Number of steps taken, or `None` when unavailable for the runner.
     pub steps: Option<usize>,
 }
 
 /// A complete normalized observation from a single test run.
 ///
-/// Both runners produce this same shape. The comparison layer diffs
-/// two observations field by field.
+/// Downstream consumers (baseline storage, the compare layer, divergence
+/// reports) depend on field stability and the serde schema. Adding or
+/// renaming fields is a breaking change for stored baselines; prefer
+/// `#[serde(default)]` only for fields where a missing value has a
+/// defined meaning, and never for required slices (see the
+/// `null_on_required_field_rejects` test).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
     /// How the test ended.
@@ -259,12 +247,9 @@ mod tests {
         assert_eq!(obs, loaded);
     }
 
-    /// Pin the rule that `null` on a required non-Option field is a
-    /// parse error, not a silent default. A regression here (e.g.,
-    /// someone adding `#[serde(default)]` to `memory_regions`) would
-    /// let malformed observations deserialize to empty vectors and
-    /// the compare-observations harness would report a trivially
-    /// vacuous MATCH. Explicit test so the property does not drift.
+    // Guards against `#[serde(default)]` creeping onto required slice
+    // fields: a `null` memory_regions would silently become an empty
+    // vector and compare to MATCH vacuously.
     #[test]
     fn null_on_required_field_rejects() {
         let json = r#"{

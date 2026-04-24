@@ -1,59 +1,39 @@
-//! PS3 LV2 error code database.
+//! PS3 LV2 `CellError` code database.
 //!
-//! Every entry mirrors the `enum CellError : u32` block in
-//! `tools/rpcs3-src/rpcs3/Emu/Cell/ErrorCodes.h:104-166`. Symbol
-//! names, hex values, and descriptions are byte-identical to
-//! that header; the descriptions are the verbatim trailing
-//! comment from each enum line.
-//!
-//! `CELL_OK` lives in the header's `CellNotAnError : s32` enum,
-//! not `CellError`, so it is defined separately and excluded
-//! from [`ENTRIES`]. Subsystem-specific error spaces (GCM,
-//! audio, sceNp, etc.) live in their own RPCS3 headers and
-//! belong in their own modules when CellGov models those
-//! subsystems.
+//! Symbols, hex codes, and descriptions mirror
+//! `tools/rpcs3-src/rpcs3/Emu/Cell/ErrorCodes.h:104-166`
+//! byte-for-byte. `CELL_OK` lives in the header's
+//! `CellNotAnError : s32` enum and is excluded from [`ENTRIES`].
 
-/// A PS3 LV2 error code with its symbolic name and the header
-/// description.
+/// A PS3 LV2 error code with its symbol and header description.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lv2Error {
-    /// Numeric code as declared by `enum CellError : u32`.
+    /// Numeric code.
     pub code: u32,
-    /// Symbol name, e.g. `"CELL_EPERM"`. Stored as a string so
-    /// trace / divergence tooling can render a raw u32 as its
-    /// canonical name.
+    /// Symbol name, e.g. `"CELL_EPERM"`.
     pub symbol: &'static str,
     /// Verbatim trailing comment from the RPCS3 header.
     pub description: &'static str,
 }
 
-/// Widen an `Lv2Error` to the `u64` shape the dispatch pipeline
-/// uses for syscall return codes. Call sites write
-/// `crate::errno::CELL_XXX.into()` instead of
-/// `crate::errno::CELL_XXX.code as u64`; `errno::` stays in the
-/// path so grep finds every errno-emitting site.
+/// Widens to the `u64` shape the dispatch pipeline uses for syscall
+/// return codes; `errno::CELL_XXX.into()` keeps `errno::` in the path
+/// so every errno-emitting site is greppable.
 impl From<Lv2Error> for u64 {
     fn from(err: Lv2Error) -> u64 {
         err.code as u64
     }
 }
 
-/// `CELL_OK` sits in the header's `CellNotAnError : s32` enum
-/// alongside `CELL_CANCEL`; it is not a member of `CellError`
-/// and is intentionally excluded from [`ENTRIES`]. Kept here as
-/// a single `pub const` because dispatch sites that return
-/// success still want a name rather than a bare `0u64`.
+/// Success sentinel. Not a `CellError` member, not in [`ENTRIES`].
 pub const CELL_OK: Lv2Error = Lv2Error {
     code: 0,
     symbol: "CELL_OK",
-    description: "", // CellNotAnError has no trailing comment in the header
+    description: "",
 };
 
-// Every CellError entry below is sourced from
-// rpcs3/Emu/Cell/ErrorCodes.h:104-166. The macro binds
-// `symbol` to `stringify!($name)` so a copy-paste typo in the
-// symbol string is structurally impossible: the ident and the
-// string always agree.
+// Binding `symbol` to `stringify!($name)` makes a typo between the
+// ident and the string structurally impossible.
 macro_rules! errno_table {
     ( $( $name:ident = $code:literal , $desc:literal ; )* ) => {
         $(
@@ -65,8 +45,7 @@ macro_rules! errno_table {
             };
         )*
 
-        /// Every entry in `enum CellError : u32`. Order matches
-        /// the header (ascending by code).
+        /// Every `CellError` entry, ascending by code.
         pub const ENTRIES: &[&Lv2Error] = &[
             $( & $name , )*
         ];
@@ -138,13 +117,10 @@ errno_table! {
     CELL_ENOLICENT    = 0x8001_003E, "Pointer is null";
 }
 
-/// Look up an error entry by code. Returns `None` for any code
-/// outside the `enum CellError : u32` block (including
-/// `CELL_OK`, which belongs to `CellNotAnError`).
+/// Look up an error entry by code; `None` for codes outside the
+/// `CellError` block, including `CELL_OK`.
 ///
-/// Linear scan over [`ENTRIES`]. The slice has ~60 entries and
-/// this is called only from diagnostic paths, so the O(n) cost
-/// is acceptable and avoids any BTreeMap init cost.
+/// O(n) scan over [`ENTRIES`] (~60 entries, diagnostic paths only).
 pub fn lookup(code: u32) -> Option<&'static Lv2Error> {
     ENTRIES.iter().copied().find(|e| e.code == code)
 }
@@ -169,11 +145,6 @@ mod tests {
 
     #[test]
     fn every_symbol_has_cell_e_prefix() {
-        // The `errno_table!` macro binds symbol to
-        // `stringify!($name)`, so the invariant holds
-        // structurally. This test is a canary against anyone
-        // replacing the macro call with hand-written entries
-        // whose symbol string drifts from the const name.
         for entry in ENTRIES {
             assert!(
                 entry.symbol.starts_with("CELL_E"),
@@ -189,6 +160,6 @@ mod tests {
     fn lookup_hits_and_misses() {
         assert_eq!(lookup(0x8001_0009), Some(&CELL_EPERM));
         assert!(lookup(0xDEAD_BEEF).is_none());
-        assert!(lookup(0).is_none()); // CELL_OK is not in ENTRIES
+        assert!(lookup(0).is_none());
     }
 }

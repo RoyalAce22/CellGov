@@ -1,41 +1,19 @@
-//! `StagingMemory` -- pending shared visibility changes awaiting commit.
+//! Pending shared-write batch awaiting commit.
 //!
-//! `StagingMemory` is the buffer the commit pipeline fills with the byte
-//! payloads of `SharedWriteIntent` effects after validation but before
-//! application. It holds them until the pipeline drains the batch into
-//! [`crate::guest::GuestMemory`] at an epoch boundary.
+//! The commit pipeline pre-sorts writes by ordering key before staging;
+//! [`StagingMemory`] applies them in stage order. Overlap policy is
+//! "last-staged-wins" by plain in-order overwrite.
 //!
-//! What it explicitly is **not**:
-//!
-//! - It does not know about `cellgov_effects::Effect` or `OrderingKey`
-//!   types. The commit pipeline pre-sorts writes by the global ordering
-//!   key (timestamp, priority class, source unit id, sequence number)
-//!   before staging them; `StagingMemory` applies them in the order they
-//!   were staged. Keeping the ordering policy out of this crate avoids
-//!   the layering pressure that would push `cellgov_mem` to depend on
-//!   `cellgov_event` for `OrderingKey`.
-//! - It does not detect or resolve overlapping writes. Overlap policy is
-//!   "last writer wins by ordering key", which the commit pipeline
-//!   already encoded by sorting before staging; the same byte ranges
-//!   simply overwrite each other when drained in order.
-//! - It does not validate effects beyond the bounds checks that
-//!   [`StagingMemory::drain_into`] performs in its pre-pass. Earlier
-//!   validation lives in `cellgov_effects`.
-//!
-//! A faulting step commits nothing. The runtime implements this by
-//! calling [`StagingMemory::clear`] before draining when the
-//! originating step yielded with `YieldReason::Fault`. This type just
-//! exposes the operations; the policy lives in the runtime.
+//! A faulting step commits nothing: the runtime calls [`StagingMemory::clear`]
+//! before draining when the originating step yielded a fault.
 
 use crate::guest::{GuestMemory, MemError};
 use crate::range::ByteRange;
 
 /// A single staged write awaiting commit.
 ///
-/// Carries the target range and the bytes to deposit. The byte buffer's
-/// length must match `range.length()`; this is checked at drain time
-/// rather than at construction so that the type can be built up cheaply
-/// and rejected wholesale if the batch is malformed.
+/// `bytes.len() as u64 == range.length()` is the caller's invariant; drain
+/// rechecks it and rejects the whole batch on mismatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StagedWrite {
     /// Target byte range in committed memory.
@@ -45,12 +23,6 @@ pub struct StagedWrite {
 }
 
 /// A buffer of staged writes pending commit.
-///
-/// `StagingMemory` is owned by the commit pipeline. Units never see it
-/// directly; they emit `SharedWriteIntent` effects which the pipeline
-/// translates into [`StagedWrite`] entries and stages here. At the
-/// epoch boundary the pipeline drains the staging buffer into
-/// [`GuestMemory`].
 #[derive(Debug, Default, Clone)]
 pub struct StagingMemory {
     pending: Vec<StagedWrite>,
@@ -63,9 +35,7 @@ impl StagingMemory {
         Self::default()
     }
 
-    /// Append a staged write to the buffer. Order is preserved -- the
-    /// commit pipeline relies on the order it stages writes matching
-    /// the order they will be applied.
+    /// Append a staged write. Stage order equals application order.
     #[inline]
     pub fn stage(&mut self, write: StagedWrite) {
         self.pending.push(write);
@@ -89,28 +59,22 @@ impl StagingMemory {
         self.pending.is_empty()
     }
 
-    /// Discard every staged write without applying any. Used by the
-    /// commit pipeline when a step yields with a fault: the entire
-    /// step commits nothing, including effects that preceded the fault
-    /// in emission order.
+    /// Discard every staged write without applying any.
     #[inline]
     pub fn clear(&mut self) {
         self.pending.clear();
     }
 
-    /// Apply every staged write to `target` in stage order, draining
-    /// the buffer.
+    /// Apply every staged write to `target` in stage order, draining the buffer.
     ///
-    /// Two-pass to keep the contract atomic: the first pass validates
-    /// every staged write against `target`'s bounds and length rules;
-    /// the second pass applies them. Either every write becomes visible
-    /// or none do, preserving atomic-batch semantics at the granularity
-    /// this type owns. Validation failure leaves the
-    /// staging buffer untouched and `target` untouched.
+    /// Atomic: a pre-pass validates bounds and length for every entry; any
+    /// failure leaves both the staging buffer and `target` untouched.
     ///
-    /// Returns the number of writes applied on success.
+    /// # Errors
+    ///
+    /// Returns any [`MemError`] that [`GuestMemory::apply_commit`] would
+    /// produce on the first offending write.
     pub fn drain_into(&mut self, target: &mut GuestMemory) -> Result<usize, MemError> {
-        // Pre-validate the whole batch.
         for w in &self.pending {
             if w.bytes.len() as u64 != w.range.length() {
                 return Err(MemError::LengthMismatch);
@@ -129,8 +93,6 @@ impl StagingMemory {
                 Some(_) => {}
             }
         }
-        // All writes are valid; apply them in order. apply_commit
-        // re-checks but cannot fail given the pre-pass.
         let count = self.pending.len();
         for w in self.pending.drain(..) {
             target
@@ -202,11 +164,6 @@ mod tests {
 
     #[test]
     fn drain_into_overlapping_last_writer_wins_in_stage_order() {
-        // The commit pipeline is responsible for sorting by ordering
-        // key before staging. From StagingMemory's standpoint the
-        // contract is "later stage entries overwrite earlier ones on
-        // overlap" -- which is exactly what plain in-order application
-        // produces.
         let mut mem = GuestMemory::new(8);
         let mut s = StagingMemory::new();
         s.stage(staged(0, &[1, 1, 1, 1]));
@@ -229,17 +186,14 @@ mod tests {
     fn drain_into_length_mismatch_rejects_whole_batch() {
         let mut mem = GuestMemory::new(8);
         let mut s = StagingMemory::new();
-        s.stage(staged(0, &[1, 1, 1, 1])); // valid
-                                           // Construct a malformed write directly: range says 4 bytes, payload 2.
+        s.stage(staged(0, &[1, 1, 1, 1]));
         s.stage(StagedWrite {
             range: range(4, 4),
             bytes: vec![9, 9],
         });
         let err = s.drain_into(&mut mem).unwrap_err();
         assert_eq!(err, MemError::LengthMismatch);
-        // Memory left untouched: even the valid first write is not applied.
         assert_eq!(mem.read(range(0, 8)).unwrap(), &[0; 8]);
-        // Staging buffer left intact for inspection.
         assert_eq!(s.len(), 2);
     }
 
@@ -247,11 +201,10 @@ mod tests {
     fn drain_into_out_of_range_rejects_whole_batch() {
         let mut mem = GuestMemory::new(8);
         let mut s = StagingMemory::new();
-        s.stage(staged(0, &[1, 1, 1, 1])); // valid
-        s.stage(staged(6, &[2, 2, 2, 2])); // overflows: end = 10 > 8
+        s.stage(staged(0, &[1, 1, 1, 1]));
+        s.stage(staged(6, &[2, 2, 2, 2]));
         let err = s.drain_into(&mut mem).unwrap_err();
         assert!(matches!(err, MemError::Unmapped(_)));
-        // Memory left untouched.
         assert_eq!(mem.read(range(0, 8)).unwrap(), &[0; 8]);
         assert_eq!(s.len(), 2);
     }
@@ -262,7 +215,6 @@ mod tests {
         let mut s = StagingMemory::new();
         s.stage(staged(0, &[5, 5, 5, 5]));
         s.drain_into(&mut mem).unwrap();
-        // Buffer empty after first drain.
         let n = s.drain_into(&mut mem).unwrap();
         assert_eq!(n, 0);
     }

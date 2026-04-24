@@ -1,4 +1,4 @@
-//! PPU thread lifecycle LV2 dispatch: create, exit, join.
+//! PPU thread lifecycle dispatch (create, exit, join).
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -22,7 +22,7 @@ impl Lv2Host {
                 effects: vec![],
             };
         };
-        // Already exited: write exit value immediately, no block.
+        // Already exited: write exit value, no block.
         if matches!(
             target_thread.state,
             crate::ppu_thread::PpuThreadState::Finished
@@ -40,9 +40,8 @@ impl Lv2Host {
                 effects: vec![write],
             };
         }
-        // Untracked caller is a host-invariant break -- falling
-        // back to the primary id would fire the exit-wake on the
-        // wrong unit.
+        // Falling back to the primary id on an untracked caller
+        // would fire the exit-wake on the wrong unit.
         let Some(caller_thread_id) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ESRCH.into(),
@@ -61,24 +60,16 @@ impl Lv2Host {
                 },
                 effects: vec![],
             },
-            // EDEADLK: a thread joining itself would park on its
-            // own exit and deadlock. RPCS3 rejects this at the
-            // syscall boundary.
             AddJoinWaiter::SelfJoin => Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_EDEADLK.into(),
                 effects: vec![],
             },
-            // Detached threads cannot be joined; their resources
-            // are released on exit without a joiner, so parking
-            // would wait forever.
             AddJoinWaiter::TargetDetached => Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
-            // UnknownTarget is structurally unreachable (target
-            // was looked up above); TargetAlreadyFinished is
-            // unreachable because dispatch is single-threaded
-            // and we pre-filtered Finished. Defend defensively.
+            // Both variants are ruled out by the pre-checks above;
+            // surface as an invariant break rather than panic.
             AddJoinWaiter::UnknownTarget | AddJoinWaiter::TargetAlreadyFinished => {
                 self.record_invariant_break(
                     "ppu_thread_join.add_join_waiter_unreachable",
@@ -104,17 +95,14 @@ impl Lv2Host {
         stacksize: u64,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // Resolve the OPD host-side (16 BE bytes: entry_code,
-        // entry_toc) so a bad address fails the syscall before
-        // any stack or TLS allocation is observable. The runtime
-        // sees this variant only with a fully materialized `init`.
-        //
-        // `Lv2Runtime::read_committed` is contracted to return
-        // Some(slice) only at the full requested length; a short
-        // read is a trait violation caught by the debug_assert
-        // below and routed to EFAULT in release.
+        // Resolve the 16-byte OPD (entry_code || entry_toc, BE) up
+        // front so a bad address fails the syscall before any stack
+        // or TLS allocation becomes observable.
         let opd_bytes = match rt.read_committed(entry_opd as u64, 16) {
             Some(bytes) => {
+                // SAFETY-style note: the trait contract promises
+                // `Some(_)` carries exactly the requested length;
+                // a short read is routed to EFAULT defensively.
                 debug_assert_eq!(
                     bytes.len(),
                     16,
@@ -141,8 +129,7 @@ impl Lv2Host {
         let entry_code = u64::from_be_bytes(opd_bytes[0..8].try_into().unwrap());
         let entry_toc = u64::from_be_bytes(opd_bytes[8..16].try_into().unwrap());
 
-        // ABI-required back-chain + register save area floor
-        // (PSL1GHT defaults to 64 KB).
+        // ABI-required back-chain + register save area floor.
         let size = stacksize.max(0x4000);
         let stack = match self.allocate_child_stack(size, 0x10) {
             Some(s) => s,
@@ -154,9 +141,8 @@ impl Lv2Host {
             }
         };
 
-        // Empty template yields an empty Vec; runtime treats
-        // that as "no TLS, r13 = 0". Non-empty: place the block
-        // 16-aligned immediately above the child stack.
+        // Empty template => empty Vec (runtime treats as "no TLS,
+        // r13 = 0"). Non-empty: 16-aligned slot above the stack.
         let tls_bytes = self.tls_template.instantiate();
         let tls_base = if tls_bytes.is_empty() {
             0
@@ -164,11 +150,9 @@ impl Lv2Host {
             (stack.end() + 0xF) & !0xF
         };
 
-        // Invariant: non-empty TLS cannot commit to guest
-        // address 0. Unreachable from the current stack
-        // allocator, but a future placement change must trip
-        // this check before the runtime's defense-in-depth
-        // assert fires.
+        // Guard against a future placement change that could land
+        // non-empty TLS at guest address 0; the runtime's own
+        // defense-in-depth assert would fire afterwards.
         if !tls_bytes.is_empty() && tls_base == 0 {
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_EINVAL.into(),
@@ -185,8 +169,8 @@ impl Lv2Host {
                 stack_top: stack.initial_sp(),
                 tls_base,
                 // Well-behaved guests call sys_ppu_thread_exit
-                // explicitly; 0 is fine as the unreachable
-                // fallthrough.
+                // explicitly, so an unreachable 0 fallthrough is
+                // safe.
                 lr_sentinel: 0,
             },
             stack_base: stack.base,
@@ -204,20 +188,19 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let waiters_unit_ids = match self.ppu_threads.thread_id_for_unit(requester) {
             Some(tid) => {
-                let waiter_thread_ids = self.ppu_threads.mark_finished(tid, exit_value);
                 // A waiter whose table entry disappears between
-                // join-time and wake is a host-invariant break;
-                // resolve_wake_thread logs and skips so surviving
-                // waiters still wake.
+                // join-time and wake is logged by
+                // resolve_wake_thread; surviving waiters still wake.
+                let waiter_thread_ids = self.ppu_threads.mark_finished(tid, exit_value);
                 waiter_thread_ids
                     .into_iter()
                     .filter_map(|wtid| self.resolve_wake_thread(wtid, "ppu_thread_exit.joiner"))
                     .collect()
             }
             None => {
-                // Empty table is legitimate pre-seed (testkit);
-                // non-empty + absent caller is a mid-run
-                // divergence that would strand joiners.
+                // Empty table = legitimate pre-seed (testkit).
+                // Non-empty + absent caller = mid-run divergence
+                // that would strand joiners.
                 if !self.ppu_threads.is_empty() {
                     self.record_invariant_break(
                         "ppu_thread_exit.unknown_caller",
@@ -247,10 +230,6 @@ mod tests {
 
     #[test]
     fn ppu_thread_exit_marks_thread_finished_with_exit_value() {
-        // sys_ppu_thread_exit marks the calling thread Finished,
-        // captures the exit value, and -- when no one is joining
-        // -- returns an empty waker list. The runtime side does
-        // the unit-state transition.
         let mut host = Lv2Host::new();
         host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
         let rt = FakeRuntime::new(256);
@@ -273,7 +252,6 @@ mod tests {
             }
             other => panic!("expected PpuThreadExit dispatch, got {other:?}"),
         }
-        // Primary thread is now Finished with the exit value.
         let primary = host.ppu_thread_for_unit(UnitId::new(0)).unwrap();
         assert_eq!(primary.state, crate::ppu_thread::PpuThreadState::Finished);
         assert_eq!(primary.exit_value, Some(0xDEAD_BEEF));
@@ -281,11 +259,6 @@ mod tests {
 
     #[test]
     fn ppu_thread_exit_unseeded_thread_still_returns_dispatch() {
-        // If the caller is not in the thread table yet (e.g. an
-        // unseeded primary on the standard boot path), the handler
-        // still returns a PpuThreadExit dispatch so the runtime
-        // transitions the unit to Finished. No waiters are waked
-        // because none can be tracked.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(256);
         let result = host.dispatch(
@@ -308,16 +281,12 @@ mod tests {
 
     #[test]
     fn ppu_thread_exit_wakes_join_waiters() {
-        // A child thread exits with waiters registered on its
-        // join list. The handler reports those waiters' unit ids
-        // so the runtime can wake them.
         let mut host = Lv2Host::new();
         host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
         let child_tid = host
             .ppu_threads_mut()
             .create(UnitId::new(1), primary_attrs())
             .expect("child create");
-        // Primary joins on the child.
         host.ppu_threads_mut()
             .add_join_waiter(child_tid, crate::ppu_thread::PpuThreadId::PRIMARY);
         let rt = FakeRuntime::new(256);
@@ -343,7 +312,6 @@ mod tests {
     fn ppu_thread_join_finished_target_returns_immediate_with_exit_value() {
         let mut host = Lv2Host::new();
         host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-        // Create a child and immediately mark it finished.
         let child = host
             .ppu_threads_mut()
             .create(UnitId::new(1), primary_attrs())
@@ -409,7 +377,6 @@ mod tests {
             }
             other => panic!("expected Block, got {other:?}"),
         }
-        // Child's join-waiter list now contains the primary's id.
         assert_eq!(
             host.ppu_threads().get(child).unwrap().join_waiters,
             vec![crate::ppu_thread::PpuThreadId::PRIMARY],
@@ -440,10 +407,6 @@ mod tests {
 
     #[test]
     fn ppu_thread_create_returns_dispatch_with_allocated_stack_and_tls() {
-        // With a non-empty TLS template captured, the handler
-        // allocates a child stack block and instantiates a fresh
-        // TLS block. Dispatch carries all fields the runtime
-        // needs to register the child PPU unit.
         let mut host = Lv2Host::new();
         host.set_tls_template(crate::ppu_thread::TlsTemplate::new(
             vec![0xAB, 0xCD, 0xEF],
@@ -494,9 +457,6 @@ mod tests {
 
     #[test]
     fn ppu_thread_create_with_empty_template_has_no_tls() {
-        // Games without PT_TLS get an empty template. The
-        // dispatch still succeeds; init.tls_base is zero and
-        // tls_bytes is empty so the runtime leaves r13=0.
         let mut host = Lv2Host::new();
         let rt = opd_runtime(0x200, 0, 0);
         let result = host.dispatch(
@@ -524,9 +484,6 @@ mod tests {
 
     #[test]
     fn ppu_thread_create_enforces_minimum_stack_size() {
-        // A stacksize below the ABI minimum (0x4000) is rounded
-        // up so the child has room for its back-chain + register
-        // save area.
         let mut host = Lv2Host::new();
         let rt = opd_runtime(0x200, 0, 0);
         let result = host.dispatch(
@@ -551,9 +508,6 @@ mod tests {
 
     #[test]
     fn ppu_thread_create_bad_opd_returns_efault() {
-        // entry_opd points outside mapped guest memory -- the host
-        // fails the syscall with CELL_EFAULT before allocating a
-        // stack, so no child is ever registered.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x100);
         let result = host.dispatch(
@@ -579,11 +533,6 @@ mod tests {
 
     #[test]
     fn ppu_thread_yield_returns_ok_with_no_effects() {
-        // sys_ppu_thread_yield is a pure scheduler hint: return
-        // CELL_OK immediately, emit no effects. The round-robin
-        // scheduler advances to the next runnable unit on the
-        // next step naturally because the caller has yielded via
-        // YieldReason::Syscall.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(256);
         let result = host.dispatch(Lv2Request::PpuThreadYield, UnitId::new(0), &rt);

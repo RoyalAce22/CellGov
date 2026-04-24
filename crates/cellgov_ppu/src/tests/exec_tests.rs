@@ -5,16 +5,13 @@ fn uid() -> UnitId {
     UnitId::new(0)
 }
 
-/// Shorthand: execute with no memory regions. Good for ALU /
-/// branch / SPR tests that never touch memory.
 fn exec_no_mem(insn: &PpuInstruction, s: &mut PpuState) -> ExecuteVerdict {
     let mut effects = Vec::new();
     let mut store_buf = crate::store_buffer::StoreBuffer::new();
     execute(insn, s, uid(), &[], &mut effects, &mut store_buf)
 }
 
-/// Execute with a single flat memory region starting at `base`.
-/// After execution, flushes the store buffer into `effects`.
+/// Flushes the store buffer into `effects` after execution.
 fn exec_with_mem(
     insn: &PpuInstruction,
     s: &mut PpuState,
@@ -174,7 +171,7 @@ fn blr_returns_to_lr() {
     let mut s = PpuState::new();
     s.pc = 0x2000;
     s.lr = 0x1000;
-    // BO=0x14 = always taken (don't test CR, don't decr CTR)
+    // BO=0x14: always taken, CTR not decremented.
     let result = exec_no_mem(
         &PpuInstruction::Bclr {
             bo: 0x14,
@@ -201,7 +198,7 @@ fn mflr_mtlr_roundtrip() {
 fn rlwinm_slwi() {
     let mut s = PpuState::new();
     s.gpr[5] = 0x0001;
-    // slwi r3, r5, 16 = rlwinm r3, r5, 16, 0, 15
+    // slwi r3, r5, 16 == rlwinm r3, r5, 16, 0, 15
     exec_no_mem(
         &PpuInstruction::Rlwinm {
             ra: 3,
@@ -224,14 +221,12 @@ fn rlwinm_mask_contiguous() {
 
 #[test]
 fn rlwinm_mask_wrapped() {
-    // Wrapped: bits [0..3] and [28..31]
+    // mb > me: mask wraps around; here bits [0..3] and [28..31].
     assert_eq!(rlwinm_mask(28, 3), 0xF000000F);
 }
 
 #[test]
 fn ldu_writes_ea_back_to_ra() {
-    // ldu r7, -8(r4): read 8 bytes at r4-8, set r4 := r4-8.
-    // Place 8 bytes of data at address 0x1018.
     let mut mem = vec![0u8; 0x1028];
     mem[0x1018..0x1020].copy_from_slice(&0xDEAD_BEEF_CAFE_BABEu64.to_be_bytes());
     let mut s = PpuState::new();
@@ -250,16 +245,14 @@ fn ldu_writes_ea_back_to_ra() {
     );
     assert_eq!(result, ExecuteVerdict::Continue);
     assert_eq!(s.gpr[7], 0xDEAD_BEEF_CAFE_BABE);
-    // Update form: RA holds the effective address after the instruction.
     assert_eq!(s.gpr[4], 0x1018);
 }
 
 #[test]
 fn rlwnm_rotates_by_rb_low_5_bits() {
-    // rlwnm r0, r0, r8, 0, 31: full-word rotate left by r8 mod 32.
     let mut s = PpuState::new();
     s.gpr[0] = 0x0000_0000_1234_5678;
-    s.gpr[8] = 8; // rotate by 8
+    s.gpr[8] = 8;
     exec_no_mem(
         &PpuInstruction::Rlwnm {
             ra: 0,
@@ -270,13 +263,12 @@ fn rlwnm_rotates_by_rb_low_5_bits() {
         },
         &mut s,
     );
-    // 0x12345678 rotated left by 8 = 0x34567812
     assert_eq!(s.gpr[0], 0x3456_7812);
 }
 
 #[test]
 fn rlwnm_ignores_high_bits_of_rb() {
-    // Only low 5 bits of RB are used. 0x20 == 32 -> 0 rotation.
+    // 0x20 == 32: only low 5 bits feed the rotate, so rotation == 0.
     let mut s = PpuState::new();
     s.gpr[1] = 0x0000_0000_DEAD_BEEF;
     s.gpr[2] = 0x20;
@@ -327,10 +319,10 @@ fn stvx_aligns_ea_and_emits_store_effect() {
         &mut effects,
     );
     assert_eq!(result, ExecuteVerdict::Continue);
-    // Should have emitted one SharedWriteIntent at aligned EA 0x1010.
     assert_eq!(effects.len(), 1);
     match &effects[0] {
         Effect::SharedWriteIntent { range, .. } => {
+            // stvx forces EA to 16-byte alignment: 0x1000+0x1F -> 0x1010.
             assert_eq!(range.start().raw(), 0x1010);
         }
         other => panic!("expected SharedWriteIntent, got {other:?}"),
@@ -340,7 +332,7 @@ fn stvx_aligns_ea_and_emits_store_effect() {
 #[test]
 fn extsw_sign_extends_low_32_bits() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x0000_0000_8000_0000; // bit 31 set in low word
+    s.gpr[3] = 0x0000_0000_8000_0000;
     exec_no_mem(&PpuInstruction::Extsw { ra: 4, rs: 3 }, &mut s);
     assert_eq!(s.gpr[4], 0xFFFF_FFFF_8000_0000);
 }
@@ -354,7 +346,6 @@ fn sc_returns_syscall() {
 
 #[test]
 fn lwz_loads_from_memory() {
-    // Place 0xDEADBEEF at address 0x1008.
     let mut mem = vec![0u8; 0x2000];
     mem[0x1008..0x100C].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
     let mut s = PpuState::new();
@@ -392,7 +383,7 @@ fn lwz_mem_fault_on_bad_address() {
 
 #[test]
 fn lha_sign_extends_halfword() {
-    // Place 0xFF80 (-128 as i16) at address 0x1002.
+    // 0xFF80 == -128 as i16; lha sign-extends to the full GPR width.
     let mut mem = vec![0u8; 0x2000];
     mem[0x1002..0x1004].copy_from_slice(&0xFF80u16.to_be_bytes());
     let mut s = PpuState::new();
@@ -445,8 +436,8 @@ fn stw_emits_store_effect() {
 fn bc_beq_taken() {
     let mut s = PpuState::new();
     s.pc = 0x1000;
-    s.set_cr_field(0, 0b0010); // EQ set
-                               // beq cr0, +8: BO=0x0C (test CR, don't decr CTR), BI=2 (EQ bit of cr0)
+    // BO=0x0C: branch on CR true, no CTR decrement. BI=2: EQ bit of cr0.
+    s.set_cr_field(0, 0b0010);
     let result = exec_no_mem(
         &PpuInstruction::Bc {
             bo: 0x0C,
@@ -464,7 +455,7 @@ fn bc_beq_taken() {
 fn bc_beq_not_taken() {
     let mut s = PpuState::new();
     s.pc = 0x1000;
-    s.set_cr_field(0, 0b0100); // GT set, not EQ
+    s.set_cr_field(0, 0b0100); // GT
     let result = exec_no_mem(
         &PpuInstruction::Bc {
             bo: 0x0C,
@@ -475,7 +466,7 @@ fn bc_beq_not_taken() {
         &mut s,
     );
     assert!(matches!(result, ExecuteVerdict::Continue));
-    assert_eq!(s.pc, 0x1000); // unchanged
+    assert_eq!(s.pc, 0x1000);
 }
 
 #[test]
@@ -594,7 +585,6 @@ fn mulld_wraps_on_overflow() {
 #[test]
 fn adde_adds_with_carry_in_and_sets_carry_out() {
     let mut s = PpuState::new();
-    // First: adde with CA=1 on overflowing low word produces carry-out.
     s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
     s.gpr[4] = 0;
     s.set_xer_ca(true);
@@ -606,7 +596,6 @@ fn adde_adds_with_carry_in_and_sets_carry_out() {
         },
         &mut s,
     );
-    // 0xFFFF... + 0 + 1 = 0, with carry.
     assert_eq!(s.gpr[5], 0);
     assert!(s.xer_ca());
 }
@@ -631,8 +620,6 @@ fn adde_without_carry_clears_ca() {
 
 #[test]
 fn mulhdu_takes_high_64_bits_of_u128_product() {
-    // 0xFFFF_FFFF_FFFF_FFFF * 2 = 0x1_FFFF_FFFF_FFFF_FFFE,
-    // high 64 bits = 1.
     let mut s = PpuState::new();
     s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
     s.gpr[4] = 2;
@@ -649,7 +636,6 @@ fn mulhdu_takes_high_64_bits_of_u128_product() {
 
 #[test]
 fn mulhdu_small_product_is_zero() {
-    // 7 * 8 = 56; fits in 64 bits, so high 64 bits = 0.
     let mut s = PpuState::new();
     s.gpr[3] = 7;
     s.gpr[4] = 8;
@@ -690,8 +676,7 @@ fn ldarx_loads_from_memory() {
 #[test]
 fn stdcx_with_matching_reservation_emits_conditional_store() {
     let mut s = PpuState::new();
-    // Pre-populate the local reservation on the line we're about
-    // to store to. This simulates a prior `ldarx` at the same line.
+    // Pre-seed the reservation the way a prior ldarx at this line would.
     s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1008));
     s.gpr[3] = 0x1000;
     s.gpr[4] = 0x8;
@@ -709,11 +694,9 @@ fn stdcx_with_matching_reservation_emits_conditional_store() {
         &mut effects,
     );
     assert_eq!(result, ExecuteVerdict::Continue);
-    // CR0 EQ must be set to indicate success.
     assert_eq!(s.cr_field(0), 0b0010);
-    // Local reservation is retired.
     assert!(s.reservation.is_none());
-    // Exactly one ConditionalStore (no SharedWriteIntent).
+    // stdcx must emit ConditionalStore, never a SharedWriteIntent.
     assert_eq!(effects.len(), 1);
     match &effects[0] {
         Effect::ConditionalStore { range, bytes, .. } => {
@@ -728,7 +711,6 @@ fn stdcx_with_matching_reservation_emits_conditional_store() {
 #[test]
 fn stdcx_without_reservation_fails_silently() {
     let mut s = PpuState::new();
-    // No reservation preloaded.
     s.gpr[3] = 0x1000;
     s.gpr[4] = 0x8;
     s.gpr[5] = 0xDEAD_BEEF_CAFE_BABE;
@@ -744,17 +726,14 @@ fn stdcx_without_reservation_fails_silently() {
         &[0u8; 0x2000],
         &mut effects,
     );
-    // CR0 EQ is NOT set (conditional store failed).
     assert_eq!(s.cr_field(0), 0b0000);
-    // No ConditionalStore emitted, no SharedWriteIntent either.
     assert!(effects.is_empty());
 }
 
 #[test]
 fn stwcx_with_reservation_on_different_line_fails() {
+    // 128-byte reservation granule: 0x1000 and 0x1080 sit on different lines.
     let mut s = PpuState::new();
-    // Reservation held on 0x1000, but we stwcx at 0x1080 (different
-    // 128-byte line).
     s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
     s.gpr[3] = 0x1000;
     s.gpr[4] = 0x80;
@@ -773,15 +752,15 @@ fn stwcx_with_reservation_on_different_line_fails() {
     );
     assert_eq!(s.cr_field(0), 0b0000);
     assert!(effects.is_empty());
-    // Even on failure the local reservation is retired per ABI.
+    // PowerPC ABI: stwcx retires the reservation even on failure.
     assert!(s.reservation.is_none());
 }
 
 #[test]
 fn same_unit_store_to_reserved_line_clears_local_reservation() {
-    // Lwarx at 0x1000 reserves line 0x1000. A plain stw to 0x1040
-    // overlaps the same line and must clear the reservation so a
-    // later stwcx fails.
+    // Cross-unit contract: any plain store overlapping the reserved
+    // 128-byte line must drop the local reservation so a later stwcx
+    // on that same line fails.
     let mut mem = vec![0u8; 0x2000];
     mem[0x1000..0x1004].copy_from_slice(&0xdeadbeefu32.to_be_bytes());
     let mut s = PpuState::new();
@@ -789,7 +768,6 @@ fn same_unit_store_to_reserved_line_clears_local_reservation() {
     s.gpr[4] = 0x0;
     let mut effects = Vec::new();
 
-    // 1) lwarx at 0x1000.
     exec_with_mem(
         &PpuInstruction::Lwarx {
             rt: 5,
@@ -803,7 +781,6 @@ fn same_unit_store_to_reserved_line_clears_local_reservation() {
     );
     assert_eq!(s.reservation.map(|l| l.addr()), Some(0x1000));
 
-    // 2) stw at 0x1040 (same line).
     s.gpr[6] = 0x1040;
     s.gpr[7] = 0xAAAA_BBBBu64;
     let mut effects2 = Vec::new();
@@ -823,7 +800,6 @@ fn same_unit_store_to_reserved_line_clears_local_reservation() {
         "same-unit store to reserved line must drop the local reservation"
     );
 
-    // 3) stwcx at 0x1000 -- local reservation is gone, must fail.
     s.gpr[3] = 0x1000;
     s.gpr[4] = 0x0;
     s.gpr[5] = 0x5555_6666u64;
@@ -868,14 +844,12 @@ fn lwarx_sets_local_reservation_and_emits_acquire() {
     );
     assert_eq!(result, ExecuteVerdict::Continue);
     assert_eq!(s.gpr[5], 0xDEAD_BEEF);
-    // Local reservation canonicalized to the enclosing 128-byte
-    // line: EA 0x1040 -> line 0x1000.
+    // Reservation tracks the enclosing 128-byte line, not the raw EA.
     assert_eq!(
         s.reservation.map(|l| l.addr()),
         Some(0x1000),
         "local reservation must be set to the enclosing line"
     );
-    // Exactly one ReservationAcquire effect at the line address.
     let acquires: Vec<_> = effects
         .iter()
         .filter_map(|e| match e {
@@ -904,7 +878,6 @@ fn ldarx_sets_local_reservation_and_emits_acquire() {
         &mem,
         &mut effects,
     );
-    // EA 0x1008 -> line 0x1000.
     assert_eq!(s.reservation.map(|l| l.addr()), Some(0x1000));
     assert!(effects.iter().any(|e| matches!(
         e,
@@ -917,9 +890,6 @@ fn ldarx_sets_local_reservation_and_emits_acquire() {
 
 #[test]
 fn stwcx_on_matching_line_retires_local_reservation() {
-    // With the reservation preloaded on the same line as the
-    // stwcx target, the verdict succeeds AND the local register
-    // is retired so the next lwarx starts from a clean slate.
     let mut s = PpuState::new();
     s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
     s.gpr[3] = 0x1000;
@@ -967,12 +937,8 @@ fn stdcx_on_matching_line_retires_local_reservation() {
     assert!(s.reservation.is_none());
 }
 
-// stfiwx / stfsu / stfdu / mulhw / cntlzd / addze / orc: one
-// exec test per variant pinning the semantics.
-
 #[test]
 fn mulhw_signed_high_32_bits() {
-    // -2 * 3 = -6; high 32 bits sign-extended == 0xFFFFFFFF.
     let mut s = PpuState::new();
     s.gpr[4] = (-2i32) as u32 as u64;
     s.gpr[5] = 3;
@@ -1000,7 +966,6 @@ fn mulhw_positive_produces_zero_high_bits() {
         },
         &mut s,
     );
-    // 0x10000 * 0x10000 = 0x1_0000_0000; high 32 = 1.
     assert_eq!(s.gpr[3], 1);
 }
 
@@ -1063,7 +1028,7 @@ fn orc_is_or_with_complement_rb() {
         },
         &mut s,
     );
-    // 0x00FF_0000 | !0x0000_00FF == 0xFFFF_FF00 sign-extended to u64
+    // orc is 32-bit, result sign-extended to 64 bits on this operand.
     assert_eq!(s.gpr[3], 0xFFFF_FFFF_FFFF_FF00);
 }
 
@@ -1085,7 +1050,7 @@ fn stfsu_updates_ra_and_emits_store_effect() {
         &mut effects,
     );
     assert_eq!(out, ExecuteVerdict::Continue);
-    assert_eq!(s.gpr[8], 0x2008, "ra is updated to ea");
+    assert_eq!(s.gpr[8], 0x2008);
     assert_eq!(effects.len(), 1);
     match &effects[0] {
         Effect::SharedWriteIntent { range, .. } => {
@@ -1126,8 +1091,8 @@ fn stfdu_updates_ra_and_emits_store_effect() {
 
 #[test]
 fn stfiwx_stores_low_32_bits_of_fpr_as_integer_word() {
-    // Unlike Stfs (single-precision round-convert), stfiwx writes
-    // the low 32 bits of the FPR bit pattern verbatim as a u32.
+    // stfiwx writes the low 32 bits of the FPR bit pattern verbatim;
+    // no single-precision round-convert (unlike stfs).
     let mut s = PpuState::new();
     s.gpr[4] = 0x1000;
     s.gpr[5] = 0x20;
@@ -1149,17 +1114,11 @@ fn stfiwx_stores_low_32_bits_of_fpr_as_integer_word() {
     match &effects[0] {
         Effect::SharedWriteIntent { range, bytes, .. } => {
             assert_eq!(range.start().raw(), 0x1020);
-            assert_eq!(
-                bytes.bytes(),
-                &0x1234_5678u32.to_be_bytes(),
-                "low 32 bits verbatim"
-            );
+            assert_eq!(bytes.bytes(), &0x1234_5678u32.to_be_bytes());
         }
         other => panic!("expected SharedWriteIntent, got {other:?}"),
     }
 }
-
-// -- Quickened instruction tests --
 
 #[test]
 fn li_matches_addi_ra0() {
@@ -1236,7 +1195,6 @@ fn clrlwi_clears_high_bits() {
         },
         &mut s,
     );
-    // clrlwi clears the top 16 bits of the 32-bit value
     assert_eq!(s.gpr[3], 0x0000_FFFF);
 }
 
@@ -1255,13 +1213,8 @@ fn clrlwi_n32_zeroes_all() {
     assert_eq!(s.gpr[3], 0);
 }
 
-// =================================================================
-// Superinstruction tests
-// =================================================================
-
 #[test]
 fn lwz_cmpwi_matches_separate_execution() {
-    // Execute lwz + cmpwi separately
     let mut mem = vec![0u8; 0x2000];
     mem[0x1008..0x100C].copy_from_slice(&42u32.to_be_bytes());
     let mut s1 = PpuState::new();
@@ -1308,13 +1261,12 @@ fn lwz_cmpwi_matches_separate_execution() {
     assert_eq!(s1.gpr[3], s2.gpr[3]);
     assert_eq!(s1.cr, s2.cr);
     assert_eq!(s2.gpr[3], 42);
-    assert_eq!(s2.cr_field(0), 0b0010); // EQ
+    assert_eq!(s2.cr_field(0), 0b0010);
 }
 
 #[test]
 fn lwz_cmpwi_lt_and_gt() {
     let mut mem = vec![0u8; 0x2000];
-    // Store value 5 (less than 10)
     mem[0x100..0x104].copy_from_slice(&5u32.to_be_bytes());
     let mut s = PpuState::new();
     s.gpr[1] = 0x100;
@@ -1335,7 +1287,6 @@ fn lwz_cmpwi_lt_and_gt() {
     assert_eq!(s.gpr[3], 5);
     assert_eq!(s.cr_field(2), 0b1000); // LT
 
-    // Store value 20 (greater than 10)
     mem[0x100..0x104].copy_from_slice(&20u32.to_be_bytes());
     let mut s2 = PpuState::new();
     s2.gpr[1] = 0x100;
@@ -1376,7 +1327,6 @@ fn lwz_cmpwi_mem_fault() {
 
 #[test]
 fn li_stw_matches_separate_execution() {
-    // Execute li + stw separately
     let mut s1 = PpuState::new();
     s1.gpr[1] = 0x1000;
     let mut effects1 = Vec::new();
@@ -1399,7 +1349,6 @@ fn li_stw_matches_separate_execution() {
         &mut effects1,
     );
 
-    // Execute fused LiStw
     let mut s2 = PpuState::new();
     s2.gpr[1] = 0x1000;
     let mut effects2 = Vec::new();
@@ -1418,7 +1367,6 @@ fn li_stw_matches_separate_execution() {
 
     assert_eq!(s1.gpr[5], s2.gpr[5]);
     assert_eq!(s2.gpr[5], 99);
-    // Both should produce a store effect at address 0x1000
     assert!(!effects1.is_empty());
     assert!(!effects2.is_empty());
 }
@@ -1445,7 +1393,6 @@ fn li_stw_negative_imm() {
 
 #[test]
 fn mflr_stw_matches_separate_execution() {
-    // Execute mflr + stw separately
     let mut s1 = PpuState::new();
     s1.lr = 0x0040_0100;
     s1.gpr[1] = 0x1000;
@@ -1469,7 +1416,6 @@ fn mflr_stw_matches_separate_execution() {
         &mut effects1,
     );
 
-    // Execute fused MflrStw
     let mut s2 = PpuState::new();
     s2.lr = 0x0040_0100;
     s2.gpr[1] = 0x1000;
@@ -1494,7 +1440,6 @@ fn mflr_stw_matches_separate_execution() {
 
 #[test]
 fn lwz_mtlr_matches_separate_execution() {
-    // Execute lwz + mtlr separately
     let mut mem = vec![0u8; 0x2000];
     mem[0x1010..0x1014].copy_from_slice(&0x0040_0100u32.to_be_bytes());
     let mut s1 = PpuState::new();
@@ -1513,7 +1458,6 @@ fn lwz_mtlr_matches_separate_execution() {
     );
     exec_no_mem(&PpuInstruction::Mtlr { rs: 0 }, &mut s1);
 
-    // Execute fused LwzMtlr
     let mut s2 = PpuState::new();
     s2.gpr[1] = 0x1000;
     let mut effects2 = Vec::new();
@@ -1550,8 +1494,6 @@ fn lwz_mtlr_mem_fault() {
     assert!(matches!(result, ExecuteVerdict::MemFault(_)));
 }
 
-// -- Nop --
-
 #[test]
 fn nop_matches_ori_same_reg_zero() {
     let mut s1 = PpuState::new();
@@ -1579,11 +1521,8 @@ fn nop_returns_continue() {
     assert_eq!(result, ExecuteVerdict::Continue);
 }
 
-// -- CmpwZero --
-
 #[test]
 fn cmpw_zero_matches_cmpwi_zero() {
-    // Positive value
     let mut s1 = PpuState::new();
     s1.gpr[3] = 42;
     exec_no_mem(
@@ -1639,8 +1578,6 @@ fn cmpw_zero_cr_field_2() {
     assert_eq!(s1.cr, s2.cr);
 }
 
-// -- Clrldi --
-
 #[test]
 fn clrldi_matches_rldicl_sh0() {
     let mut s1 = PpuState::new();
@@ -1685,8 +1622,6 @@ fn clrldi_zero_mask_clears_all() {
     assert_eq!(s.gpr[3], 0);
 }
 
-// -- Sldi --
-
 #[test]
 fn sldi_matches_rldicr() {
     let mut s1 = PpuState::new();
@@ -1724,8 +1659,6 @@ fn sldi_large_shift() {
     assert_eq!(s.gpr[3], 0x8000_0000_0000_0000);
 }
 
-// -- Srdi --
-
 #[test]
 fn srdi_matches_rldicl() {
     let mut s1 = PpuState::new();
@@ -1734,7 +1667,7 @@ fn srdi_matches_rldicl() {
         &PpuInstruction::Rldicl {
             ra: 3,
             rs: 4,
-            sh: 56, // 64 - 8
+            sh: 56,
             mb: 8,
         },
         &mut s1,
@@ -1763,12 +1696,9 @@ fn srdi_large_shift() {
     assert_eq!(s.gpr[3], 1);
 }
 
-// -- CmpwiBc --
-
 #[test]
 fn cmpwi_bc_taken_matches_separate() {
-    // cmpwi cr0, r3, 10; beq cr0, +16
-    // Separate execution:
+    // Equivalent sequence: cmpwi cr0, r3, 10 ; beq cr0, +16.
     let mut s1 = PpuState::new();
     s1.pc = 0x1000;
     s1.gpr[3] = 10;
@@ -1780,7 +1710,7 @@ fn cmpwi_bc_taken_matches_separate() {
         },
         &mut s1,
     );
-    s1.pc = 0x1004; // advance for bc
+    s1.pc = 0x1004;
     let v1 = exec_no_mem(
         &PpuInstruction::Bc {
             bo: 0x0C,
@@ -1791,9 +1721,7 @@ fn cmpwi_bc_taken_matches_separate() {
         &mut s1,
     );
 
-    // Fused execution: super is at the cmpwi slot (0x1000).
-    // The bc offset (16) is relative to the bc's original PC
-    // (super + 4 = 0x1004), so target = 0x1004 + 16 = 0x1014.
+    // Super sits at the cmpwi slot; bc offset is relative to super_pc + 4.
     let mut s2 = PpuState::new();
     s2.pc = 0x1000;
     s2.gpr[3] = 10;
@@ -1813,7 +1741,7 @@ fn cmpwi_bc_taken_matches_separate() {
     assert_eq!(v1, ExecuteVerdict::Branch);
     assert_eq!(v2, ExecuteVerdict::Branch);
     assert_eq!(s1.pc, s2.pc);
-    assert_eq!(s2.pc, 0x1014); // 0x1004 + 16
+    assert_eq!(s2.pc, 0x1014);
 }
 
 #[test]
@@ -1826,22 +1754,19 @@ fn cmpwi_bc_not_taken() {
             bf: 0,
             ra: 3,
             imm: 10,
-            bo: 0x0C, // test CR, don't decr CTR
-            bi: 2,    // EQ bit of cr0
+            bo: 0x0C,
+            bi: 2,
             target_offset: 16,
         },
         &mut s,
     );
     assert_eq!(v, ExecuteVerdict::Continue);
     assert_eq!(s.cr_field(0), 0b1000); // LT
-                                       // PC not modified by the super on not-taken; outer loop
-                                       // advances by 4, then Consumed advances by 4, total +8.
     assert_eq!(s.pc, 0x1000);
 }
 
 #[test]
 fn cmpwi_bc_gt_taken() {
-    // cmpwi cr0, r3, 5; bgt cr0, +20
     let mut s = PpuState::new();
     s.pc = 0x2000;
     s.gpr[3] = 10;
@@ -1850,21 +1775,20 @@ fn cmpwi_bc_gt_taken() {
             bf: 0,
             ra: 3,
             imm: 5,
-            bo: 0x0C, // test CR, don't decr CTR
-            bi: 1,    // GT bit of cr0
+            bo: 0x0C,
+            bi: 1, // GT bit of cr0
             target_offset: 20,
         },
         &mut s,
     );
     assert_eq!(v, ExecuteVerdict::Branch);
     assert_eq!(s.cr_field(0), 0b0100); // GT
-                                       // target = (super_pc + 4) + 20 = 0x2004 + 20 = 0x2018
     assert_eq!(s.pc, 0x2018);
 }
 
 #[test]
 fn cmpw_bc_taken_matches_separate() {
-    // cmpw cr0, r3, r4; beq cr0, +16
+    // Equivalent sequence: cmpw cr0, r3, r4 ; beq cr0, +16.
     let mut s1 = PpuState::new();
     s1.pc = 0x1000;
     s1.gpr[3] = 42;
@@ -1932,12 +1856,9 @@ fn cmpw_bc_not_taken() {
     assert_eq!(s.cr_field(0), 0b1000); // LT
 }
 
-// -- Extended instruction coverage --
-
 #[test]
 fn subfc_computes_rb_minus_ra_and_sets_ca_on_no_borrow() {
     let mut s = PpuState::new();
-    // rb(10) - ra(3) = 7; no borrow -> CA=1
     s.gpr[3] = 3;
     s.gpr[4] = 10;
     exec_no_mem(
@@ -1955,7 +1876,6 @@ fn subfc_computes_rb_minus_ra_and_sets_ca_on_no_borrow() {
 #[test]
 fn subfc_borrow_clears_ca() {
     let mut s = PpuState::new();
-    // rb(3) - ra(10) = wrapping; borrow -> CA=0
     s.gpr[3] = 10;
     s.gpr[4] = 3;
     exec_no_mem(
@@ -1972,8 +1892,7 @@ fn subfc_borrow_clears_ca() {
 
 #[test]
 fn subfe_uses_carry_in() {
-    // rt = ~ra + rb + CA. With CA=1 this is rb - ra; with CA=0
-    // this is rb - ra - 1.
+    // rt = ~ra + rb + CA: CA=1 gives rb - ra, CA=0 gives rb - ra - 1.
     let mut s = PpuState::new();
     s.gpr[3] = 3;
     s.gpr[4] = 10;
@@ -2003,8 +1922,7 @@ fn subfe_uses_carry_in() {
 #[test]
 fn sraw_preserves_sign_and_caps_at_31() {
     let mut s = PpuState::new();
-    // Sign-propagating right shift on the low 32 bits.
-    s.gpr[3] = 0xFFFF_FFFF_8000_0000; // low32 = -2147483648
+    s.gpr[3] = 0xFFFF_FFFF_8000_0000;
     s.gpr[4] = 4;
     exec_no_mem(
         &PpuInstruction::Sraw {
@@ -2053,8 +1971,7 @@ fn sradi_shift_zero_clears_ca_and_preserves_value() {
 #[test]
 fn mulhd_signed_high_doubleword() {
     let mut s = PpuState::new();
-    // -1 * -1 = 1 as i128 = 0x0000_0000_0000_0001, high 64 bits = 0
-    s.gpr[3] = u64::MAX; // -1 as i64
+    s.gpr[3] = u64::MAX;
     s.gpr[4] = u64::MAX;
     exec_no_mem(
         &PpuInstruction::Mulhd {
@@ -2066,7 +1983,6 @@ fn mulhd_signed_high_doubleword() {
     );
     assert_eq!(s.gpr[5], 0);
 
-    // -1 * 2 = -2 as i128, high 64 bits = -1 = 0xFFFF_FFFF_FFFF_FFFF
     s.gpr[3] = u64::MAX;
     s.gpr[4] = 2;
     exec_no_mem(
@@ -2082,7 +1998,6 @@ fn mulhd_signed_high_doubleword() {
 
 #[test]
 fn lhzu_loads_halfword_and_updates_base() {
-    // Place 0xBEEF at address 0x1010.
     let mut mem = vec![0u8; 0x2000];
     mem[0x1010..0x1012].copy_from_slice(&0xBEEFu16.to_be_bytes());
     let mut s = PpuState::new();
@@ -2101,7 +2016,7 @@ fn lhzu_loads_halfword_and_updates_base() {
     );
     assert_eq!(result, ExecuteVerdict::Continue);
     assert_eq!(s.gpr[3], 0xBEEF);
-    assert_eq!(s.gpr[4], 0x1010, "base register updated with EA");
+    assert_eq!(s.gpr[4], 0x1010);
 }
 
 #[test]
@@ -2124,14 +2039,13 @@ fn stdux_stores_doubleword_and_updates_base() {
         &mut effects,
     );
     assert_eq!(result, ExecuteVerdict::Continue);
-    assert_eq!(s.gpr[4], 0x1040, "base updated to EA = ra + rb");
-    // One SharedWriteIntent for the 8-byte store.
+    assert_eq!(s.gpr[4], 0x1040);
     assert!(!effects.is_empty());
 }
 
 #[test]
 fn lvlx_aligned_address_matches_lvx() {
-    // With EA already 16-aligned, lvlx == lvx (no shift).
+    // 16-aligned EA degenerates lvlx to lvx: zero-bit shift.
     let mut mem = vec![0u8; 0x2000];
     let pattern = [
         0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
@@ -2158,10 +2072,7 @@ fn lvlx_aligned_address_matches_lvx() {
 
 #[test]
 fn lvlx_unaligned_shifts_high_bytes_up() {
-    // EA has low 4 bits = 3. lvlx shifts the loaded 16 bytes
-    // left by 3*8 = 24 bits: the top 13 bytes of the aligned
-    // block become the top 13 bytes of the result, and the
-    // bottom 3 bytes are zero.
+    // lvlx: result = (aligned_block << (EA & 15) * 8), low bytes zeroed.
     let mut mem = vec![0u8; 0x2000];
     let pattern = [
         0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
@@ -2169,7 +2080,7 @@ fn lvlx_unaligned_shifts_high_bytes_up() {
     ];
     mem[0x1000..0x1010].copy_from_slice(&pattern);
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1003; // EA & 15 = 3
+    s.gpr[4] = 0x1003;
     s.gpr[5] = 0;
     let mut effects = Vec::new();
     exec_with_mem(
@@ -2189,9 +2100,7 @@ fn lvlx_unaligned_shifts_high_bytes_up() {
 
 #[test]
 fn lvrx_unaligned_shifts_low_bytes_down() {
-    // EA has low 4 bits = 3. lvrx shifts right by (16-3)*8 = 104
-    // bits: only the high 3 bytes of the aligned block survive,
-    // landing in the low 3 bytes of the result.
+    // lvrx: result = (aligned_block >> (16 - (EA & 15)) * 8), high bytes zeroed.
     let mut mem = vec![0u8; 0x2000];
     let pattern = [
         0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
@@ -2219,13 +2128,13 @@ fn lvrx_unaligned_shifts_low_bytes_down() {
 
 #[test]
 fn lvrx_aligned_ea_zero_bytes() {
-    // EA aligned (low 4 bits = 0): lvrx result is all zero.
+    // 16-aligned EA: (16 - 0)*8 == 128-bit shift, so lvrx result is zero.
     let mut mem = vec![0u8; 0x2000];
     mem[0x1000..0x1010].copy_from_slice(&[0xFF; 16]);
     let mut s = PpuState::new();
     s.gpr[4] = 0x1000;
     s.gpr[5] = 0;
-    s.vr[7] = u128::MAX; // pre-fill to verify it's overwritten
+    s.vr[7] = u128::MAX;
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvrx {

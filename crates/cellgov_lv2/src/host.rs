@@ -1,10 +1,9 @@
 //! `Lv2Host` -- the LV2 model the runtime calls into.
 //!
-//! The host owns image registry and thread group state. The runtime
-//! calls `dispatch` once per syscall yield, synchronously, during the
-//! same `step()` that processed the yield. The host reads guest memory
-//! through the `Lv2Runtime` trait and returns an `Lv2Dispatch` telling
-//! the runtime what to do.
+//! The runtime calls `dispatch` once per PPU syscall yield,
+//! synchronously during the same `step()` that observed the yield.
+//! The host reads guest memory through the `Lv2Runtime` trait and
+//! returns an `Lv2Dispatch` telling the runtime what to do.
 
 pub use self::rsx::{
     SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,
@@ -27,21 +26,21 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::GuestTicks;
 
-/// Readonly view of runtime state exposed to the host.
+/// Readonly view of runtime state exposed to the host during dispatch.
 ///
-/// The runtime implements this trait. The host calls `read_committed`
-/// to read guest memory during dispatch and `current_tick` to stamp
-/// LV2-sourced effects at the guest time the triggering syscall was
-/// issued. No other runtime internals are exposed.
+/// `read_committed` is the only channel by which the host observes
+/// guest memory; `current_tick` stamps LV2-sourced effects so they
+/// participate in commit-pipeline ordering at the triggering
+/// syscall's tick rather than tick 0.
 pub trait Lv2Runtime {
     /// Read `len` bytes of committed guest memory starting at `addr`.
-    /// Returns `None` if the range is out of bounds.
+    ///
+    /// # Contract
+    /// `Some(bytes)` must carry exactly `len` bytes; short reads are
+    /// a trait violation. `None` means the range is out of bounds.
     fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]>;
 
-    /// The global guest tick at which the current dispatch is being
-    /// handled. LV2-sourced effects use this as their `source_time`
-    /// so they participate in commit-pipeline ordering at the tick
-    /// of the triggering syscall rather than at tick 0.
+    /// Global guest tick of the in-flight dispatch.
     fn current_tick(&self) -> GuestTicks;
 }
 
@@ -59,9 +58,7 @@ mod spu;
 #[cfg(test)]
 mod test_support;
 
-/// The LV2 host model. The runtime calls [`Self::dispatch`] on
-/// every PPU syscall yield; the host mutates its own state and
-/// returns an [`Lv2Dispatch`].
+/// LV2 host model driven by [`Self::dispatch`].
 #[derive(Debug, Clone)]
 pub struct Lv2Host {
     content: ContentStore,
@@ -69,23 +66,15 @@ pub struct Lv2Host {
     ppu_threads: PpuThreadTable,
     tls_template: TlsTemplate,
     stack_allocator: ThreadStackAllocator,
-    /// Monotonic kernel-object id counter, shared across
-    /// `mutexes` / `semaphores` / `event_queues` / `event_flags` /
-    /// `conds`. Starts at `0x4000_0001`. `lwmutexes` has its own
-    /// allocator starting at 1.
+    /// Shared kernel-object id counter for mutexes, semaphores,
+    /// event queues, event flags, and conds. `lwmutexes` has its
+    /// own allocator starting at 1.
     next_kernel_id: u32,
     mem_alloc_ptr: u32,
-    /// sys_rsx_memory_allocate bump cursor. Grows upward from
-    /// [`Self::SYS_RSX_MEM_BASE`]; separate from `mem_alloc_ptr` so
-    /// the RSX-visible region cannot collide with PPU allocations.
+    /// Separate bump cursor so the RSX-visible region cannot collide
+    /// with PPU allocations.
     rsx_mem_alloc_ptr: u32,
-    /// Monotonic handle counter returned from sys_rsx_memory_allocate.
     rsx_mem_handle_counter: u32,
-    /// sys_rsx context bookkeeping. Populated by
-    /// `sys_rsx_context_allocate` and consumed by subsequent
-    /// `sys_rsx_context_attribute` dispatches. RPCS3 supports one
-    /// context per renderer and CellGov follows suit; see
-    /// `sys_rsx.cpp:251`.
     rsx_context: SysRsxContext,
     lwmutexes: LwMutexTable,
     mutexes: MutexTable,
@@ -93,18 +82,11 @@ pub struct Lv2Host {
     event_queues: EventQueueTable,
     event_flags: EventFlagTable,
     conds: CondTable,
-    /// Dispatch-local scratch: set from
-    /// [`Lv2Runtime::current_tick`] at the top of each `dispatch`
-    /// call and stamped onto every LV2-sourced
-    /// [`Effect::SharedWriteIntent`] as `source_time` so commits
-    /// land at the triggering syscall's tick. Not folded into
-    /// [`Self::state_hash`].
+    /// Dispatch-local scratch; not folded into [`Self::state_hash`].
     current_tick: GuestTicks,
-    /// Counter for host-invariant breaks caught defensively by
-    /// [`Self::record_invariant_break`] /
-    /// [`Self::log_invariant_break`]. Zero in a clean run;
-    /// non-zero means at least one primitive wake or table update
-    /// fell back to a degraded response in release. Not hashed.
+    /// Running count of host-invariant breaks caught defensively.
+    /// Zero in a clean run; non-zero means at least one wake or
+    /// table update fell back to a degraded response. Not hashed.
     invariant_break_count: usize,
 }
 
@@ -115,14 +97,12 @@ impl Default for Lv2Host {
 }
 
 impl Lv2Host {
-    /// Guest base address for sys_rsx memory allocations. Chosen so
-    /// the 256 MB RSX-visible window sits above the 16 MB ELF /
-    /// user-memory bumper and below the MEM_ALLOC_REGION_END guard
-    /// used by `dispatch_memory_allocate`.
+    /// Guest base of the 256 MB RSX-visible window. Sits above the
+    /// user-memory bumper and below `MEM_ALLOC_REGION_END` so the
+    /// two allocators cannot collide.
     pub const SYS_RSX_MEM_BASE: u32 = 0x3000_0000;
 
-    /// Upper bound (exclusive) of the sys_rsx memory region. Matches
-    /// real PS3's 256 MB RSX-visible size.
+    /// Upper bound (exclusive) of the sys_rsx memory region.
     pub const SYS_RSX_MEM_END: u32 = Self::SYS_RSX_MEM_BASE + 0x1000_0000;
 
     /// Construct an empty host.
@@ -149,8 +129,7 @@ impl Lv2Host {
         }
     }
 
-    /// Running total of invariant breaks caught by the crate-private
-    /// `record_invariant_break` / `log_invariant_break` helpers.
+    /// Running total of invariant breaks caught defensively.
     #[inline]
     pub fn invariant_break_count(&self) -> usize {
         self.invariant_break_count
@@ -166,11 +145,9 @@ impl Lv2Host {
         self.log_invariant_break(site, details);
     }
 
-    /// Log-once without `debug_assert!`. For paths reachable by
-    /// guest input under normal operation (the `Unsupported`
-    /// syscall fallthrough): at this stage of development,
-    /// real boots hit unhandled syscalls routinely, so panicking
-    /// on the first one would block development.
+    /// Log-once without `debug_assert!`, for paths reachable by
+    /// guest input during normal operation (`Unsupported` syscalls
+    /// hit during real boots).
     fn log_invariant_break(&mut self, site: &'static str, details: std::fmt::Arguments<'_>) {
         if self.invariant_break_count == 0 {
             eprintln!("lv2 host invariant break at {site}: {details}");
@@ -178,11 +155,11 @@ impl Lv2Host {
         self.invariant_break_count = self.invariant_break_count.saturating_add(1);
     }
 
-    /// Resolve a `PpuThreadId` popped from a primitive waiter list
-    /// to its `UnitId`. `None` means the thread table and the
-    /// primitive diverged: logged via
-    /// [`Self::record_invariant_break`] so the caller can fall
-    /// back defensively.
+    /// Resolve a waiter `PpuThreadId` to its `UnitId`.
+    ///
+    /// `None` means the thread table and the primitive diverged;
+    /// this is logged as an invariant break so the caller can skip
+    /// the wake and leave surviving waiters intact.
     pub(super) fn resolve_wake_thread(
         &mut self,
         thread: PpuThreadId,
@@ -203,15 +180,17 @@ impl Lv2Host {
         }
     }
 
-    /// Override the allocator cursor. `run-game` must set this to
-    /// the 64KB-aligned address above the ELF's highest PT_LOAD
-    /// end; the default (`0x0001_0000`) assumes no ELF is loaded
-    /// and will overwrite the image otherwise.
+    /// Override the bump-allocator cursor.
+    ///
+    /// Callers that load a real ELF must set this to the
+    /// 64KB-aligned address above the ELF's highest PT_LOAD end;
+    /// the default (`0x0001_0000`) assumes no ELF is loaded and
+    /// will overwrite the image otherwise.
     pub fn set_mem_alloc_base(&mut self, base: u32) {
         self.mem_alloc_ptr = base;
     }
 
-    /// Read the current sys_rsx context bookkeeping.
+    /// Current sys_rsx context bookkeeping.
     #[inline]
     pub fn sys_rsx_context(&self) -> &SysRsxContext {
         &self.rsx_context
@@ -228,7 +207,7 @@ impl Lv2Host {
         &self.content
     }
 
-    /// Mutable image registry; test harnesses pre-register images.
+    /// Mutable image registry; tests pre-register images.
     pub fn content_store_mut(&mut self) -> &mut ContentStore {
         &mut self.content
     }
@@ -238,7 +217,7 @@ impl Lv2Host {
         &self.groups
     }
 
-    /// Mutable thread group table (tests).
+    /// Mutable thread group table.
     pub fn thread_groups_mut(&mut self) -> &mut ThreadGroupTable {
         &mut self.groups
     }
@@ -248,20 +227,18 @@ impl Lv2Host {
         &self.ppu_threads
     }
 
-    /// Mutable PPU thread table (tests).
+    /// Mutable PPU thread table.
     pub fn ppu_threads_mut(&mut self) -> &mut PpuThreadTable {
         &mut self.ppu_threads
     }
 
-    /// Seed the primary PPU thread. Call exactly once after the
-    /// primary PPU unit is registered; `sys_ppu_thread_create`
-    /// handles every subsequent thread.
+    /// Seed the primary PPU thread; call exactly once after the
+    /// primary PPU unit is registered.
     pub fn seed_primary_ppu_thread(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) {
         self.ppu_threads.insert_primary(unit_id, attrs);
     }
 
-    /// Look up a PPU thread by runtime `UnitId`. `None` when the
-    /// unit is not a PPU thread (e.g. SPU).
+    /// Look up a PPU thread by runtime `UnitId`.
     pub fn ppu_thread_for_unit(&self, unit_id: UnitId) -> Option<&PpuThread> {
         self.ppu_threads.get_by_unit(unit_id)
     }
@@ -271,7 +248,7 @@ impl Lv2Host {
         self.ppu_threads.thread_id_for_unit(unit_id)
     }
 
-    /// Capture the game ELF's PT_TLS template (empty by default).
+    /// Capture the game ELF's PT_TLS template.
     pub fn set_tls_template(&mut self, template: TlsTemplate) {
         self.tls_template = template;
     }
@@ -286,7 +263,7 @@ impl Lv2Host {
         &self.lwmutexes
     }
 
-    /// Mutable lwmutex table (tests).
+    /// Mutable lwmutex table.
     pub fn lwmutexes_mut(&mut self) -> &mut LwMutexTable {
         &mut self.lwmutexes
     }
@@ -296,7 +273,7 @@ impl Lv2Host {
         &self.mutexes
     }
 
-    /// Mutable mutex table (tests).
+    /// Mutable mutex table.
     pub fn mutexes_mut(&mut self) -> &mut MutexTable {
         &mut self.mutexes
     }
@@ -306,7 +283,7 @@ impl Lv2Host {
         &self.semaphores
     }
 
-    /// Mutable semaphore table (tests).
+    /// Mutable semaphore table.
     pub fn semaphores_mut(&mut self) -> &mut SemaphoreTable {
         &mut self.semaphores
     }
@@ -316,7 +293,7 @@ impl Lv2Host {
         &self.event_queues
     }
 
-    /// Mutable event queue table (tests).
+    /// Mutable event queue table.
     pub fn event_queues_mut(&mut self) -> &mut EventQueueTable {
         &mut self.event_queues
     }
@@ -331,23 +308,22 @@ impl Lv2Host {
         &self.conds
     }
 
-    /// Mutable cond table (tests).
+    /// Mutable cond table.
     pub fn conds_mut(&mut self) -> &mut CondTable {
         &mut self.conds
     }
 
-    /// Mutable event flag table (tests).
+    /// Mutable event flag table.
     pub fn event_flags_mut(&mut self) -> &mut EventFlagTable {
         &mut self.event_flags
     }
 
-    /// Reserve a child-thread stack block (16-byte aligned by
-    /// default).
+    /// Reserve a child-thread stack block.
     pub fn allocate_child_stack(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
         self.stack_allocator.allocate(size, align)
     }
 
-    /// Record that `unit_id` is an SPU in `group_id` at `slot`.
+    /// Register `unit_id` as an SPU in `group_id` at `slot`.
     pub fn record_spu(
         &mut self,
         unit_id: cellgov_event::UnitId,
@@ -357,8 +333,10 @@ impl Lv2Host {
         self.groups.record_spu(unit_id, group_id, slot)
     }
 
-    /// Notify that the SPU `unit_id` has finished. Returns the
-    /// group id if this completes the group (all SPUs done).
+    /// Notify that the SPU `unit_id` has finished.
+    ///
+    /// Returns `Ok(Some(group_id))` when this notify drove the
+    /// group to `Finished`.
     pub fn notify_spu_finished(
         &mut self,
         unit_id: cellgov_event::UnitId,
@@ -370,13 +348,11 @@ impl Lv2Host {
     /// runtime's `sync_state_hash` at every commit boundary.
     ///
     /// # Gating
-    /// Per-primitive tables (`ppu_threads`, `tls_template`,
-    /// `lwmutexes`, `mutexes`, `semaphores`, `event_queues`,
-    /// `event_flags`, `conds`) and the child-stack allocator
-    /// cursor fold in only when non-empty / past their sentinel.
-    /// `next_kernel_id` and `mem_alloc_ptr` always contribute, so
-    /// a created-then-destroyed primitive still advances the hash
-    /// via allocator state even when the table empties again.
+    /// Per-primitive tables and the child-stack allocator contribute
+    /// only when non-empty / past their sentinel. `next_kernel_id`
+    /// and `mem_alloc_ptr` always contribute, so a
+    /// created-then-destroyed primitive still advances the hash via
+    /// allocator state once the table empties again.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for source in [self.content.state_hash(), self.groups.state_hash()] {
@@ -419,16 +395,15 @@ impl Lv2Host {
         hasher.finish()
     }
 
-    /// Dispatch a syscall request; called once per PPU syscall
-    /// yield.
+    /// Dispatch a syscall request; called once per PPU syscall yield.
     pub fn dispatch(
         &mut self,
         request: Lv2Request,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // current_tick is read by every helper below so LV2-
-        // sourced effects stamp at the triggering syscall's tick.
+        // Snapshot the tick so every helper below stamps LV2-sourced
+        // effects at the triggering syscall's tick.
         self.current_tick = rt.current_tick();
         match request {
             Lv2Request::SpuImageOpen { img_ptr, path_ptr } => {
@@ -449,10 +424,8 @@ impl Lv2Host {
                 status_ptr,
             } => self.dispatch_group_join(group_id, cause_ptr, status_ptr, requester),
             Lv2Request::SpuThreadGroupTerminate { group_id, value } => {
-                // Routed separately from Join (177) so the ABI
-                // shape distinction is preserved at dispatch
-                // time. No SPU teardown is modelled; observable
-                // effect matches the existing join stub.
+                // Routed separately from Join so the ABI shape is
+                // preserved; SPU teardown is not yet modelled.
                 self.log_invariant_break(
                     "dispatch.spu_thread_group_terminate_stub",
                     format_args!(
@@ -561,9 +534,9 @@ impl Lv2Host {
                 ..
             } => self.dispatch_memory_allocate(size, alloc_addr_ptr, requester),
             Lv2Request::MemoryFree { .. } => {
-                // Stub: no deallocation tracking. Double-free,
-                // invalid pointer, and NULL all return CELL_OK.
-                // Titles that key on free's errno will misbehave.
+                // No deallocation tracking; every call returns
+                // CELL_OK. Titles that key on free's errno will
+                // misbehave.
                 Lv2Dispatch::Immediate {
                     code: 0u64,
                     effects: vec![],
@@ -592,8 +565,8 @@ impl Lv2Host {
                 self.immediate_write_u32(id, cid_ptr, requester)
             }
             Lv2Request::PpuThreadYield => Lv2Dispatch::Immediate {
-                // Pure scheduler hint -- the round-robin walk
-                // advances on the syscall yield itself.
+                // Pure scheduler hint; the round-robin walk advances
+                // on the syscall yield itself.
                 code: 0,
                 effects: vec![],
             },
@@ -646,25 +619,20 @@ impl Lv2Host {
                 a5,
                 a6,
             } => self.dispatch_sys_rsx_context_attribute(context_id, package_id, a3, a4, a5, a6),
-            // _sys_prx_start_module: RPCS3 returns EINVAL when
-            // id == 0 or pOpt is null. CellGov's _sys_prx_load_module
-            // stub returns id=0, so liblv2 calls start with id=0;
-            // a CELL_OK stub here makes liblv2 read uninitialized
-            // stack memory and crash on a bogus pointer.
+            // _sys_prx_start_module: liblv2 calls this with id=0
+            // (our _sys_prx_load_module stub returns 0), and a
+            // CELL_OK response leaves it reading uninitialized
+            // stack. Real LV2 returns EINVAL for id=0/null pOpt.
             Lv2Request::Unsupported { number: 481, .. } => Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_EINVAL.into(),
                 effects: vec![],
             },
-            // sys_tty_read: RPCS3 returns EIO when debug console
-            // mode is off (matches retail). A CELL_OK stub spins
-            // CRT input loops indefinitely.
+            // sys_tty_read: CELL_OK spins CRT input loops forever;
+            // real LV2 returns EIO outside debug console mode.
             Lv2Request::Unsupported { number: 402, .. } => Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_EIO.into(),
                 effects: vec![],
             },
-            // Runtime's prior `matches!` drives the Finished
-            // cascade inside `handle_immediate`; the dispatch
-            // itself is a plain Immediate.
             Lv2Request::ProcessExit { .. } => Lv2Dispatch::Immediate {
                 code: 0u64,
                 effects: vec![],
@@ -706,8 +674,8 @@ impl Lv2Host {
     }
 
     /// Immediate dispatch that writes a u32 to `ptr` and returns
-    /// CELL_OK. Used by create-style syscalls that allocate a
-    /// kernel object id and return it through an out-pointer.
+    /// CELL_OK; shared by create-style syscalls that return a
+    /// freshly allocated object id through an out-pointer.
     pub(super) fn immediate_write_u32(&self, value: u32, ptr: u32, source: UnitId) -> Lv2Dispatch {
         let write = Effect::SharedWriteIntent {
             range: ByteRange::new(GuestAddr::new(ptr as u64), 4).unwrap(),
@@ -794,10 +762,6 @@ mod tests {
 
     #[test]
     fn tty_read_returns_eio() {
-        // Syscall 402 is sys_tty_read. RPCS3 returns CELL_EIO =
-        // 0x8001002B outside debug console mode; that is the retail
-        // behavior real games target. CELL_OK with no data causes
-        // CRT input loops to spin indefinitely.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(256);
         let result = host.dispatch(
@@ -819,11 +783,6 @@ mod tests {
 
     #[test]
     fn prx_start_module_returns_einval() {
-        // Syscall 481 is _sys_prx_start_module. With id=0 or a null
-        // pOpt, RPCS3 (and real LV2) returns CELL_EINVAL = 0x80010002.
-        // Our stub always returns CELL_EINVAL because we do not track
-        // PRX lifecycle state; this keeps liblv2 on a spec-correct
-        // error path rather than CELL_OK-with-garbage-output.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(256);
         let result = host.dispatch(
@@ -876,13 +835,8 @@ mod tests {
 
     #[test]
     fn state_hash_unchanged_when_ppu_table_empty() {
-        // Regression guard: an empty PpuThreadTable must not
-        // perturb Lv2Host::state_hash. Without this, every host
-        // without a seeded primary thread would see its hash
-        // change just because the PPU thread table field exists
-        // on the struct.
+        // Regression guard for the empty-table gating in state_hash.
         let fresh = Lv2Host::new();
-        // Two fresh hosts produce identical hashes (sanity).
         assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
     }
 
@@ -912,11 +866,7 @@ mod tests {
 
     #[test]
     fn state_hash_unchanged_when_tls_template_empty() {
-        // Regression guard matching the ppu_threads gating: an
-        // empty TlsTemplate must not perturb state_hash. Without
-        // this, hosts constructed before the loader captures a
-        // template would see their hash shift just because the
-        // field exists on the struct.
+        // Regression guard for the TlsTemplate gating.
         let fresh = Lv2Host::new();
         assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
     }
@@ -940,20 +890,14 @@ mod tests {
         let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
         let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
         let s3 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-        // Start at the 0xD0010000 child-stack base.
         assert_eq!(s1.base, 0xD001_0000);
-        // Monotonic and non-overlapping.
         assert!(s2.base >= s1.end());
         assert!(s3.base >= s2.end());
     }
 
     #[test]
     fn state_hash_unchanged_when_no_child_stack_allocated() {
-        // Regression guard: a fresh host (no child threads
-        // spawned) must report the same hash it would before
-        // the stack allocator field existed. Once
-        // `allocate_child_stack` has advanced the cursor past
-        // the sentinel, the contribution kicks in.
+        // Regression guard for the stack-allocator sentinel gating.
         let fresh = Lv2Host::new();
         assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
     }

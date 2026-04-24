@@ -1,10 +1,4 @@
-//! Integration test: rpcs3_to_observation output is consumable by
-//! cellgov_cli compare-observations.
-//!
-//! Proves the schema is symmetric across producers: a CellGov-style
-//! observation (state_hashes = Some) and an RPCS3-style observation
-//! (state_hashes = None) compare as a MATCH when outcome and memory
-//! regions agree, exercising the full CLI path.
+//! End-to-end tests: adapter output feeds `cellgov_cli compare-observations`.
 
 use cellgov_compare::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedHashes, ObservedOutcome,
@@ -25,10 +19,7 @@ fn adapter_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_rpcs3_to_observation"))
 }
 
-/// Ask the adapter for the expected oracle-mode config hash and
-/// return it as the "0x..." string the CLI emits. Used by tests so
-/// they do not hard-code the hash value and stay stable if the
-/// canonical YAML changes.
+/// Returns the adapter's oracle-mode config hash as a "0x..." string.
 fn expected_config_hash_hex() -> String {
     let out = Command::new(adapter_bin())
         .arg("--print-expected-config-hash")
@@ -41,10 +32,8 @@ fn expected_config_hash_hex() -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-/// Locate the sibling `cellgov_cli` executable in the same target
-/// directory as this test. `CARGO_BIN_EXE_<name>` is only populated
-/// for binaries in the same package, so we construct the path from
-/// the current binary's location instead.
+/// Locates the sibling `cellgov_cli` binary; `CARGO_BIN_EXE_<name>` only
+/// covers binaries in the same package.
 fn cellgov_cli_bin() -> PathBuf {
     let me = PathBuf::from(env!("CARGO_BIN_EXE_rpcs3_to_observation"));
     let target_dir = me.parent().expect("adapter has parent dir");
@@ -56,8 +45,6 @@ fn cellgov_cli_bin() -> PathBuf {
 fn cellgov_and_rpcs3_json_compare_as_match_on_identical_regions() {
     let work = tmp("match");
 
-    // RPCS3 side: synthesize a dump + manifest, run the adapter to
-    // produce an RPCS3-style Observation JSON (no state_hashes).
     let dump_bytes: Vec<u8> = (0..16u8).collect();
     let dump_path = work.join("rpcs3.dump");
     fs::write(&dump_path, &dump_bytes).unwrap();
@@ -98,9 +85,6 @@ size = "0x8"
         .expect("adapter runs");
     assert!(status.success(), "adapter exited non-zero");
 
-    // CellGov side: construct an equivalent observation with state
-    // hashes present, serialize to JSON at the same file layout the
-    // run-game --save-observation command would produce.
     let cellgov_obs = Observation {
         outcome: ObservedOutcome::Completed,
         memory_regions: vec![
@@ -133,7 +117,6 @@ size = "0x8"
     )
     .unwrap();
 
-    // Compare through the real CLI.
     let out = Command::new(cellgov_cli_bin())
         .args([
             "compare-observations",
@@ -158,7 +141,6 @@ size = "0x8"
 fn asymmetric_regions_report_diverge_not_schema_error() {
     let work = tmp("diverge");
 
-    // RPCS3 dump has a one-byte difference vs CellGov side.
     let dump_path = work.join("rpcs3.dump");
     fs::write(&dump_path, [0u8, 1, 2, 9]).unwrap();
 
@@ -234,11 +216,6 @@ size = "0x4"
 
 #[test]
 fn adapter_rejects_dump_with_wrong_oracle_config_hash() {
-    // A dump produced under non-oracle-mode RPCS3 settings carries a
-    // config hash that does not match the bridge's expected value.
-    // The adapter must refuse the conversion with a diagnostic naming
-    // the two hashes, not silently produce an Observation whose
-    // cross-runner comparison would be meaningless.
     let work = tmp("bad_config");
 
     let dump_path = work.join("rpcs3.dump");

@@ -1,12 +1,7 @@
-//! PPU thread creation handler extracted from `runtime.rs`.
-//!
-//! The host resolved the OPD already; this handler walks:
-//!
-//! 1. Construct the child execution unit via the installed PPU
-//!    factory and commit its initial TLS image.
-//! 2. Register the child in the LV2 PPU thread table.
-//! 3. Write the minted thread id into the caller's out pointer and
-//!    return CELL_OK.
+//! PPU thread creation: construct the child unit via the installed PPU
+//! factory, commit its initial TLS image, register it in the LV2 PPU
+//! thread table, and write the minted thread id into the caller's out
+//! pointer. The host has already resolved the OPD.
 
 use cellgov_event::UnitId;
 use cellgov_lv2::errno::{CELL_E2BIG, CELL_ENOMEM};
@@ -31,11 +26,9 @@ impl Runtime {
             }
             other => unreachable!("handle_ppu_thread_create called with {other:?}"),
         };
-        // Defense in depth: the host rejects this combination with
-        // CELL_EINVAL in `dispatch_ppu_thread_create`, so a
-        // malformed dispatch reaching here is a host regression,
-        // not a guest-triggerable error. Unconditional assert
-        // (not `debug_assert`) so a release build fails loudly
+        // The host rejects `tls_bytes && tls_base == 0` with CELL_EINVAL
+        // in `dispatch_ppu_thread_create`; reaching here is a host
+        // regression. Unconditional assert so release builds fail loudly
         // rather than committing the TLS image to guest address 0.
         assert!(
             tls_bytes.is_empty() || init.tls_base != 0,
@@ -43,12 +36,9 @@ impl Runtime {
              (host-side guard in dispatch_ppu_thread_create bypassed -- host regression)",
         );
 
-        // Register the child unit via the PPU factory. Without a
-        // factory we cannot construct a concrete PpuExecutionUnit
-        // here (cellgov_core does not depend on cellgov_ppu), so
-        // thread creation fails with CELL_E2BIG (the shipped
-        // value). Preserved verbatim -- changing it would shift
-        // foundation-title baselines.
+        // cellgov_core does not depend on cellgov_ppu; without a
+        // factory we cannot construct a concrete PpuExecutionUnit.
+        // CELL_E2BIG is the shipped error value.
         let Some(factory) = self.ppu_factory.as_ref() else {
             self.registry.set_syscall_return(source, CELL_E2BIG.into());
             return;
@@ -58,7 +48,6 @@ impl Runtime {
             .registry
             .register_dynamic(&|id| factory(id, seed.clone()));
 
-        // Commit TLS bytes into guest memory at tls_base.
         if !tls_bytes.is_empty() {
             self.commit_bytes_at(init.tls_base, &tls_bytes);
         }

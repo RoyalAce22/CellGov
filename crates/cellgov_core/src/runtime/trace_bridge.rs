@@ -1,22 +1,10 @@
-//! Two distinct concerns currently live here -- they will likely
-//! split once either grows:
-//!
-//! 1. **Trace bridges.** `traced_effect_kind` and
-//!    `traced_yield_reason` route `cellgov_effects::Effect` and
-//!    `cellgov_exec::YieldReason` variants onto their
-//!    `cellgov_trace` twins. `cellgov_trace` sits below both
-//!    source crates in the workspace DAG and cannot name the
-//!    source variants directly, so the bridges are exhaustive
-//!    matches -- adding a new variant on either source enum
-//!    breaks compilation here, forcing the trace contract to
-//!    update alongside the runtime.
-//!
-//! 2. **LV2 memory view.** `MemoryView` is the read-only window
-//!    the runtime hands to `Lv2Host::dispatch`. It is an LV2
-//!    concern, not a trace concern, and lives in this module
-//!    only because it is a one-method wrapper today. If it ever
-//!    grows (e.g. to expose reservation state or epoch to the
-//!    LV2 host), split it into `lv2_memory_view.rs`.
+//! Trace enum bridges (`cellgov_effects::Effect` /
+//! `cellgov_exec::YieldReason` onto their `cellgov_trace` twins) and
+//! the read-only `MemoryView` the runtime hands to `Lv2Host::dispatch`.
+//! The bridges are exhaustive matches: `cellgov_trace` sits below both
+//! source crates in the workspace DAG and cannot name the source
+//! variants, so adding a new variant breaks compilation here and
+//! forces the trace contract to update alongside.
 
 use cellgov_exec::YieldReason;
 use cellgov_lv2::Lv2Runtime;
@@ -25,12 +13,6 @@ use cellgov_time::GuestTicks;
 use cellgov_trace::{TracedEffectKind, TracedYieldReason};
 
 /// Map an `Effect` onto its `TracedEffectKind` twin.
-///
-/// Same DAG situation as `traced_yield_reason`: `cellgov_trace` sits
-/// below `cellgov_effects` in the workspace and cannot import the
-/// source enum, so the bridge is an exhaustive match. Adding a new
-/// `Effect` variant breaks compilation here and forces the trace
-/// contract to update at the same time.
 pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKind {
     use cellgov_effects::Effect;
     match e {
@@ -51,15 +33,6 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
 }
 
 /// Map a runtime [`YieldReason`] onto its [`TracedYieldReason`] twin.
-///
-/// The two enums live in different crates (`cellgov_exec` and
-/// `cellgov_trace`) because the trace crate sits below `cellgov_exec`
-/// in the workspace DAG and cannot depend on it. Their discriminants
-/// match one-for-one, but Rust does not let us cast between
-/// distinct enum types directly, so we route through this exhaustive
-/// match. Exhaustiveness is what ties the two enums together: if a new
-/// `YieldReason` variant is ever added, this match stops compiling and
-/// forces the trace contract to be updated alongside it.
 pub(super) fn traced_yield_reason(y: YieldReason) -> TracedYieldReason {
     match y {
         YieldReason::BudgetExhausted => TracedYieldReason::BudgetExhausted,
@@ -74,10 +47,8 @@ pub(super) fn traced_yield_reason(y: YieldReason) -> TracedYieldReason {
     }
 }
 
-/// Read-only view of committed guest memory plus the caller's
-/// current guest tick, handed to `Lv2Host::dispatch`. Constructed
-/// fresh for each dispatch call so the tick snapshot is tied to
-/// the syscall that triggered the dispatch.
+/// Read-only view of committed memory + tick snapshot, handed to
+/// `Lv2Host::dispatch`; constructed fresh per dispatch call.
 pub(super) struct MemoryView<'a> {
     pub(super) memory: &'a GuestMemory,
     pub(super) current_tick: GuestTicks,

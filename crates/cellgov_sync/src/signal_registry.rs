@@ -1,29 +1,12 @@
-//! Signal registry.
-//!
-//! Mirrors [`crate::mailbox_registry::MailboxRegistry`] for
-//! [`SignalRegister`] instances. Owns every signal-notification
-//! register known to the runtime, hands out stable [`SignalId`]s from
-//! a sequential allocator, and exposes deterministic id-order
-//! iteration via [`BTreeMap`] so the runtime never sees `HashMap`
-//! insertion order.
-//!
-//! Provides registration, lookup, iteration, and a
-//! [`SignalRegistry::state_hash`] that summarizes every register's
-//! current value into a single `u64`. `Effect::SignalUpdate` flows
-//! through the commit pipeline into this registry, and the runtime's
-//! `SyncState` checkpoint emission folds `state_hash` into its hash.
+//! Owns every [`SignalRegister`] in the runtime, allocates sequential
+//! [`SignalId`]s, and iterates in id order via `BTreeMap`.
+//! `Effect::SignalUpdate` flows through the commit pipeline into this
+//! registry.
 
 use crate::signal::{SignalId, SignalRegister};
 use std::collections::BTreeMap;
 
-/// The runtime's signal-notification register registry.
-///
-/// Allocates [`SignalId`]s from a sequential counter so ids are
-/// stable across runs of the same scenario as long as the
-/// registration order is deterministic. Stores registers in a
-/// [`BTreeMap`] keyed by `SignalId` so that
-/// iteration is in id order. No host-time inputs or hash iteration
-/// order influence the result.
+/// Runtime signal-notification register registry.
 #[derive(Debug, Clone, Default)]
 pub struct SignalRegistry {
     next_id: u64,
@@ -37,7 +20,7 @@ impl SignalRegistry {
         Self::default()
     }
 
-    /// Number of registered signal registers.
+    /// Number of registered registers.
     #[inline]
     pub fn len(&self) -> usize {
         self.registers.len()
@@ -49,8 +32,7 @@ impl SignalRegistry {
         self.registers.is_empty()
     }
 
-    /// Register a fresh zero-initialized signal register and return
-    /// its newly-assigned stable id.
+    /// Register a fresh zero-initialized signal register.
     pub fn register(&mut self) -> SignalId {
         let id = SignalId::new(self.next_id);
         self.next_id += 1;
@@ -58,20 +40,19 @@ impl SignalRegistry {
         id
     }
 
-    /// Borrow a register by id, if present.
+    /// Borrow a register by id.
     #[inline]
     pub fn get(&self, id: SignalId) -> Option<&SignalRegister> {
         self.registers.get(&id)
     }
 
-    /// Mutably borrow a register by id, if present. The commit
-    /// pipeline uses this to apply `SignalUpdate` effects.
+    /// Mutably borrow a register by id.
     #[inline]
     pub fn get_mut(&mut self, id: SignalId) -> Option<&mut SignalRegister> {
         self.registers.get_mut(&id)
     }
 
-    /// Iterate registered signal registers in id order.
+    /// Iterate registered registers in id order.
     pub fn iter(&self) -> impl Iterator<Item = (SignalId, &SignalRegister)> + '_ {
         self.registers.iter().map(|(id, r)| (*id, r))
     }
@@ -81,12 +62,9 @@ impl SignalRegistry {
         self.registers.keys().copied()
     }
 
-    /// 64-bit deterministic hash of every register's `(id, value)`
-    /// pair in id order.
-    ///
-    /// Folded into the runtime's `SyncState` checkpoint hash. FNV-1a,
-    /// no host-time inputs, no external deps. The empty registry
-    /// hashes to the FNV-1a empty-input value.
+    /// FNV-1a hash over `(id, value)` pairs in id order. Folded into
+    /// the `SyncState` checkpoint hash. Empty registry hashes to the
+    /// FNV-1a empty-input value.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (id, reg) in self.registers.iter() {
@@ -184,7 +162,6 @@ mod tests {
 
     #[test]
     fn state_hash_round_trips_after_clear() {
-        // OR-in then clear must restore the original (empty) hash.
         let mut r = SignalRegistry::new();
         let id = r.register();
         let h0 = r.state_hash();
@@ -196,8 +173,6 @@ mod tests {
 
     #[test]
     fn state_hash_distinguishes_id_position() {
-        // Same register value, different ids must hash differently.
-        // Burn an id slot in the second registry.
         let mut a = SignalRegistry::new();
         let id_a = a.register();
         a.get_mut(id_a).unwrap().or_in(0x42);
@@ -212,8 +187,6 @@ mod tests {
 
     #[test]
     fn or_in_is_commutative_at_registry_level() {
-        // OR-in different bits in different orders into the same id
-        // must produce the same final hash.
         let mut a = SignalRegistry::new();
         let id_a = a.register();
         a.get_mut(id_a).unwrap().or_in(0x0f);

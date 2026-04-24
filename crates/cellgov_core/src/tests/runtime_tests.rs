@@ -211,10 +211,8 @@ fn time_overflow_is_caught() {
     let mut rt = Runtime::new(GuestMemory::new(0), Budget::new(u64::MAX - 5), 100);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 100));
-    // First step: time goes to u64::MAX - 5.
     let s = rt.step().unwrap();
     assert_eq!(s.time_after, GuestTicks::new(u64::MAX - 5));
-    // Second step: would push past u64::MAX, caught.
     assert_eq!(rt.step().unwrap_err(), StepError::TimeOverflow);
 }
 
@@ -319,8 +317,7 @@ fn step_emits_unit_scheduled_then_step_completed_in_order() {
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
         .collect();
-    // UnitScheduled, StepCompleted, EffectEmitted (the trace marker
-    // CountingUnit emits each step).
+    // UnitScheduled, StepCompleted, EffectEmitted.
     assert_eq!(records.len(), 3);
     match records[2] {
         TraceRecord::EffectEmitted {
@@ -377,11 +374,10 @@ fn deadlock_trip_emits_nothing_for_the_failed_step() {
     let mut rt = build(16, 1, 1);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 100));
-    rt.step().unwrap(); // UnitScheduled, StepCompleted, EffectEmitted
+    rt.step().unwrap();
     let count_before = rt.trace().record_count();
     assert_eq!(count_before, 3);
-    // Second step trips the cap before the schedule decision; no
-    // new records.
+    // Second step trips the cap before the schedule decision.
     assert_eq!(rt.step().unwrap_err(), StepError::MaxStepsExceeded);
     assert_eq!(rt.trace().record_count(), count_before);
 }
@@ -390,7 +386,6 @@ fn deadlock_trip_emits_nothing_for_the_failed_step() {
 fn finished_yield_reason_is_traced_as_finished() {
     use cellgov_trace::{TraceReader, TraceRecord, TracedYieldReason};
     let mut rt = build(16, 1, 100);
-    // CountingUnit::new(_, 1) finishes on its first step.
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 1));
     rt.step().unwrap();
@@ -410,7 +405,6 @@ fn finished_yield_reason_is_traced_as_finished() {
 #[test]
 fn level_filter_drops_scheduling_records() {
     use cellgov_trace::{TraceLevel, TraceReader, TraceRecord, TraceWriter};
-    // Writer that only records commits -- scheduling records drop.
     let writer = TraceWriter::with_levels(&[TraceLevel::Commits]);
     let mut rt = Runtime::with_trace_writer(GuestMemory::new(16), Budget::new(1), 100, writer);
     rt.registry_mut().register_with(|id| WritingUnit {
@@ -424,7 +418,6 @@ fn level_filter_drops_scheduling_records() {
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
         .collect();
-    // Only the CommitApplied record survived the filter.
     assert_eq!(records.len(), 1);
     assert!(matches!(records[0], TraceRecord::CommitApplied { .. }));
 }
@@ -444,9 +437,8 @@ fn step_then_commit_emits_commit_applied_with_post_epoch() {
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
         .collect();
-    // UnitScheduled, StepCompleted, EffectEmitted (one
-    // SharedWriteIntent), CommitApplied, four StateHashCheckpoints
-    // (CommittedMemory, RunnableQueue, UnitStatus, SyncState).
+    // UnitScheduled, StepCompleted, EffectEmitted, CommitApplied,
+    // then CommittedMemory / RunnableQueue / UnitStatus / SyncState.
     assert_eq!(records.len(), 8);
     match records[4] {
         TraceRecord::StateHashCheckpoint { kind, .. } => {
@@ -497,10 +489,6 @@ fn step_emits_one_effect_record_per_effect_in_emission_order() {
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_trace::{TraceReader, TraceRecord, TracedEffectKind};
 
-    // A unit that emits three effects of different kinds in a
-    // fixed order. The trace must contain three EffectEmitted
-    // records with sequence 0..2 in the same order, sandwiched
-    // between StepCompleted and CommitApplied.
     struct MultiEffectUnit {
         id: UnitId,
         done: Cell<bool>,
@@ -579,7 +567,6 @@ fn step_emits_one_effect_record_per_effect_in_emission_order() {
 #[test]
 fn effect_records_are_filtered_by_level() {
     use cellgov_trace::{TraceLevel, TraceReader, TraceRecord};
-    // Writer that records only Scheduling -- effect records drop.
     let writer = TraceWriter::with_levels(&[TraceLevel::Scheduling]);
     let mut rt = Runtime::with_trace_writer(GuestMemory::new(16), Budget::new(1), 100, writer);
     rt.registry_mut()
@@ -607,8 +594,8 @@ fn commit_emits_state_hash_checkpoint_after_commit_applied() {
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
         .collect();
-    // The hash checkpoint must come immediately after CommitApplied
-    // so replay tooling sees a strict commit -> hash sequence.
+    // Checkpoint must come immediately after CommitApplied so replay
+    // tooling sees a strict commit -> hash sequence.
     let commit_idx = records
         .iter()
         .position(|r| matches!(r, TraceRecord::CommitApplied { .. }))
@@ -616,7 +603,6 @@ fn commit_emits_state_hash_checkpoint_after_commit_applied() {
     match records.get(commit_idx + 1) {
         Some(TraceRecord::StateHashCheckpoint { kind, hash }) => {
             assert_eq!(*kind, HashCheckpointKind::CommittedMemory);
-            // Hash matches a freshly computed hash of memory.
             assert_eq!(*hash, StateHash::new(rt.memory().content_hash()));
         }
         other => panic!("expected StateHashCheckpoint after CommitApplied, got {other:?}"),
@@ -632,9 +618,6 @@ fn committed_memory_state_hash_changes_after_write() {
         steps: Cell::new(0),
         max: 3,
     });
-    // Two successful commits: WritingUnit writes [1,1,1,1] then
-    // [2,2,2,2] to addr 0, so the two CommittedMemory checkpoints
-    // must differ.
     let s1 = rt.step().unwrap();
     rt.commit_step(&s1.result, &s1.effects).unwrap();
     let s2 = rt.step().unwrap();
@@ -657,11 +640,6 @@ fn committed_memory_state_hash_changes_after_write() {
 #[test]
 fn sync_state_checkpoint_changes_when_a_mailbox_is_registered() {
     use cellgov_trace::{HashCheckpointKind, StateHash, TraceReader, TraceRecord};
-    // Two runtimes that differ only in whether a mailbox is
-    // registered. CountingUnit doesn't touch mailboxes, so the
-    // committed memory and unit status hashes are identical
-    // across the two runs; only the SyncState checkpoint can
-    // differ.
     fn run(register_mailbox: bool) -> StateHash {
         let mut rt = build(16, 1, 100);
         rt.registry_mut()
@@ -692,8 +670,6 @@ fn sync_state_checkpoint_changes_when_a_mailbox_is_registered() {
 fn dma_completion_fires_and_applies_transfer() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
     use cellgov_mem::{ByteRange, GuestAddr};
-    // Seed committed memory with source data, enqueue a DMA
-    // completion scheduled for time 5, then step+commit past it.
     let mut rt = build(256, 5, 100);
     rt.memory
         .apply_commit(
@@ -701,8 +677,7 @@ fn dma_completion_fires_and_applies_transfer() {
             &[0xaa, 0xbb, 0xcc, 0xdd],
         )
         .unwrap();
-    // Enqueue a completion directly (bypasses the Effect path;
-    // tests the firing logic in isolation).
+    // Enqueue directly (bypasses the Effect path) to exercise firing in isolation.
     let req = DmaRequest::new(
         DmaDirection::Put,
         ByteRange::new(GuestAddr::new(0), 4).unwrap(),
@@ -714,12 +689,9 @@ fn dma_completion_fires_and_applies_transfer() {
         .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 10));
-    // Step consumes budget=5, time goes to 5. Commit fires the
-    // completion (scheduled at 3, now=5 >= 3).
     let s = rt.step().unwrap();
     let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(outcome.dma_completions_fired, 1);
-    // Destination now has the source bytes.
     assert_eq!(
         rt.memory()
             .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
@@ -733,14 +705,12 @@ fn dma_completion_wakes_issuer() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
     use cellgov_mem::{ByteRange, GuestAddr};
     let mut rt = build(256, 5, 100);
-    // Register two units. Block unit 1 (the DMA issuer) manually.
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 10));
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 10));
     rt.registry_mut()
         .set_status_override(UnitId::new(1), cellgov_exec::UnitStatus::Blocked);
-    // Enqueue a completion from unit 1.
     let req = DmaRequest::new(
         DmaDirection::Put,
         ByteRange::new(GuestAddr::new(0), 4).unwrap(),
@@ -750,12 +720,10 @@ fn dma_completion_wakes_issuer() {
     .unwrap();
     rt.dma_queue
         .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
-    // Step runs unit 0 (unit 1 is blocked). Time -> 5.
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(0));
     let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(outcome.dma_completions_fired, 1);
-    // Unit 1 is now woken (override set to Runnable).
     assert_eq!(
         rt.registry().effective_status(UnitId::new(1)),
         Some(cellgov_exec::UnitStatus::Runnable)
@@ -781,7 +749,6 @@ fn dma_completion_does_not_fire_before_its_time() {
         .enqueue(DmaCompletion::new(req, GuestTicks::new(100)), None);
     let s = rt.step().unwrap();
     let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
-    // Not yet due.
     assert_eq!(outcome.dma_completions_fired, 0);
     assert_eq!(rt.dma_queue().len(), 1);
 }
@@ -789,11 +756,6 @@ fn dma_completion_does_not_fire_before_its_time() {
 #[test]
 fn sync_state_checkpoint_changes_when_a_signal_register_value_changes() {
     use cellgov_trace::{HashCheckpointKind, StateHash, TraceReader, TraceRecord};
-    // Two runtimes, identical except one has a signal register
-    // with a non-zero value. The mailbox registry, committed
-    // memory, and unit status hashes are all identical -- the
-    // SyncState checkpoint must still differ because it folds in
-    // signal state.
     fn run(or_in_value: u32) -> StateHash {
         let mut rt = build(16, 1, 100);
         rt.registry_mut()
@@ -825,8 +787,6 @@ fn sync_state_checkpoint_changes_when_a_signal_register_value_changes() {
 #[test]
 fn sync_state_checkpoint_changes_when_a_message_lands_in_a_mailbox() {
     use cellgov_trace::{HashCheckpointKind, StateHash, TraceReader, TraceRecord};
-    // Same fixture run twice, but the second run pre-seeds the
-    // mailbox with a message. SyncState hash must differ.
     fn run(seed_message: Option<u32>) -> StateHash {
         let mut rt = build(16, 1, 100);
         rt.registry_mut()
@@ -855,11 +815,8 @@ fn sync_state_checkpoint_changes_when_a_message_lands_in_a_mailbox() {
 #[test]
 fn unit_status_state_hash_changes_when_unit_finishes() {
     use cellgov_trace::{HashCheckpointKind, StateHash, TraceReader, TraceRecord};
-    // CountingUnit::new(_, 2) starts Runnable, finishes after step 2.
-    // The first commit's UnitStatus checkpoint sees Runnable; the
-    // second sees Finished. The hashes must differ. CountingUnit
-    // doesn't emit SharedWriteIntents so the CommittedMemory hash
-    // stays constant -- this test isolates the UnitStatus signal.
+    // CountingUnit emits no SharedWriteIntents so CommittedMemory
+    // hash stays constant; this isolates the UnitStatus signal.
     let mut rt = build(16, 1, 100);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 2));
@@ -890,7 +847,6 @@ fn unit_status_state_hash_changes_when_unit_finishes() {
         .collect();
     assert_eq!(status_hashes.len(), 2);
     assert_ne!(status_hashes[0], status_hashes[1]);
-    // Memory unchanged across both commits.
     assert_eq!(mem_hashes.len(), 2);
     assert_eq!(mem_hashes[0], mem_hashes[1]);
 }
@@ -902,9 +858,6 @@ fn commit_validation_failure_traces_as_fault_discarded() {
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_trace::{TraceReader, TraceRecord};
 
-    // A unit that emits one out-of-range write -- the commit
-    // pipeline rejects the batch and the runtime traces it as
-    // fault_discarded with zero counts.
     struct OobUnit {
         id: UnitId,
         done: Cell<bool>,
@@ -929,7 +882,7 @@ fn commit_validation_failure_traces_as_fault_discarded() {
         ) -> ExecutionStepResult {
             self.done.set(true);
             effects.push(Effect::SharedWriteIntent {
-                // Range starts past end of memory -- definitely OOB.
+                // Range starts past end of 16-byte memory.
                 range: ByteRange::new(GuestAddr::new(1024), 4).unwrap(),
                 bytes: WritePayload::new(vec![0; 4]),
                 ordering: PriorityClass::Normal,
@@ -954,8 +907,8 @@ fn commit_validation_failure_traces_as_fault_discarded() {
     });
     let s = rt.step().unwrap();
     let err = rt.commit_step(&s.result, &s.effects).unwrap_err();
-    // We don't assert on the specific CommitError variant -- the
-    // commit module already does that. Just verify it's an Err.
+    // CommitError variants are exercised in commit_tests; here we
+    // just need an Err of any kind to drive the trace path.
     let _ = err;
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
@@ -977,8 +930,7 @@ fn commit_validation_failure_traces_as_fault_discarded() {
             assert_eq!(*writes_committed, 0);
             assert_eq!(*effects_deferred, 0);
             assert!(*fault_discarded);
-            // Epoch advances on every commit boundary, including
-            // failed ones.
+            // Epoch advances on every commit boundary, including failures.
             assert_eq!(*epoch_after, Epoch::new(1));
         }
         _ => unreachable!(),
@@ -987,8 +939,6 @@ fn commit_validation_failure_traces_as_fault_discarded() {
 
 #[test]
 fn trace_is_deterministic_across_two_identical_runs() {
-    // Two runtimes built identically must produce byte-identical
-    // traces. This validates the core invariant: replay determinism.
     fn run() -> Vec<u8> {
         let mut rt = Runtime::new(GuestMemory::new(16), Budget::new(1), 100);
         rt.registry_mut().register_with(|id| WritingUnit {
@@ -1015,7 +965,6 @@ fn step_then_commit_writes_become_visible() {
         steps: Cell::new(0),
         max: 5,
     });
-    // First step: writes [1,1,1,1] to addr 0.
     let s1 = rt.step().unwrap();
     let outcome1 = rt.commit_step(&s1.result, &s1.effects).unwrap();
     assert_eq!(outcome1.writes_committed, 1);
@@ -1026,10 +975,8 @@ fn step_then_commit_writes_become_visible() {
             .unwrap(),
         &[1, 1, 1, 1]
     );
-    // Epoch advanced by exactly one.
     assert_eq!(rt.epoch(), Epoch::new(1));
 
-    // Second step: overwrites with [2,2,2,2].
     let s2 = rt.step().unwrap();
     rt.commit_step(&s2.result, &s2.effects).unwrap();
     assert_eq!(
@@ -1054,7 +1001,6 @@ fn fault_driven_mode_skips_trace_records() {
     let s = rt.step().unwrap();
     rt.commit_step(&s.result, &s.effects).unwrap();
 
-    // FaultDriven should produce zero trace records.
     let reader = TraceReader::new(rt.trace().bytes());
     let records: Vec<_> = reader.collect();
     assert!(
@@ -1070,7 +1016,6 @@ fn full_trace_mode_emits_trace_records() {
 
     let mem = GuestMemory::new(64);
     let mut rt = Runtime::new(mem, Budget::new(10), 100);
-    // Default is FullTrace.
     assert_eq!(rt.mode(), RuntimeMode::FullTrace);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
@@ -1080,8 +1025,7 @@ fn full_trace_mode_emits_trace_records() {
 
     let reader = TraceReader::new(rt.trace().bytes());
     let records: Vec<_> = reader.collect();
-    // FullTrace should emit at least: UnitScheduled, StepCompleted,
-    // CommitApplied, and 4 hash checkpoints = 7 minimum.
+    // UnitScheduled + StepCompleted + CommitApplied + 4 hash checkpoints = 7 min.
     assert!(
         records.len() >= 7,
         "FullTrace mode should emit >= 7 trace records, got {}",
@@ -1098,18 +1042,17 @@ fn max_steps_zero_rejects_first_step() {
     assert_eq!(rt.step(), Err(StepError::MaxStepsExceeded));
 }
 
-/// Test unit that simulates per-step state-hash production. The
-/// runtime should drain the configured pairs after run_until_yield
-/// and emit one TraceRecord::PpuStateHash per pair, in order, with
-/// monotonically incrementing step indices that span across multiple
-/// run_until_yield calls.
+/// Simulates per-step state-hash production; runtime drains the
+/// configured pairs after run_until_yield and emits one
+/// TraceRecord::PpuStateHash per pair with monotonically
+/// incrementing step indices across calls.
 type FullStateTuple = (u64, [u64; 32], u64, u64, u64, u32);
 
 struct StateHashEmittingUnit {
     id: UnitId,
     pairs_per_step: Vec<Vec<(u64, u64)>>,
-    /// Optional 9G zoom-in snapshots, paired with `pairs_per_step`.
-    /// Inner Vec empty means no full-state records that step.
+    /// Zoom-in snapshots paired with `pairs_per_step`; empty inner
+    /// Vec means no full-state records that step.
     full_per_step: Vec<Vec<FullStateTuple>>,
     step_idx: Cell<usize>,
 }
@@ -1165,7 +1108,6 @@ fn runtime_emits_ppu_state_hash_records_with_monotonic_step_index() {
     let mut rt = build(16, 5, 100);
     rt.registry_mut().register_with(|id| StateHashEmittingUnit {
         id,
-        // First call retires 2 instructions; second retires 1; third retires 0.
         pairs_per_step: vec![
             vec![(0x100, 0xaaa), (0x104, 0xbbb)],
             vec![(0x200, 0xccc)],
@@ -1197,15 +1139,13 @@ fn runtime_emits_ppu_state_hash_records_with_monotonic_step_index() {
     assert_eq!(extract(&hashes[0]), (0, 0x100, 0xaaa));
     assert_eq!(extract(&hashes[1]), (1, 0x104, 0xbbb));
     assert_eq!(extract(&hashes[2]), (2, 0x200, 0xccc));
-    let _ = StateHash::new(0); // touch to keep the import in use even if hashes are filtered
+    let _ = StateHash::new(0); // keep the import live even when filtered out
 }
 
 #[test]
 fn runtime_emits_no_ppu_state_hash_when_unit_drains_empty() {
     use cellgov_trace::{TraceReader, TraceRecord};
-    // CountingUnit does not override drain_retired_state_hashes, so
-    // it returns the trait default (empty). Runtime must emit zero
-    // PpuStateHash records regardless of how many steps run.
+    // CountingUnit uses the trait default (empty drain).
     let mut rt = build(16, 5, 100);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
@@ -1226,16 +1166,13 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
     let mut rt = build(16, 5, 100);
     rt.registry_mut().register_with(|id| StateHashEmittingUnit {
         id,
-        // Three retired instructions, of which only the middle one
-        // is inside a hypothetical zoom-in window.
+        // Three retired instructions; only the middle one is inside the zoom window.
         pairs_per_step: vec![vec![(0x100, 0xaa), (0x104, 0xbb), (0x108, 0xcc)]],
         full_per_step: vec![vec![(0x104, [0u64; 32], 0, 0, 0, 0)]],
         step_idx: Cell::new(0),
     });
     rt.step().unwrap();
 
-    // Main trace: 3 PpuStateHash, 0 PpuStateFull (the main stream is
-    // homogeneous; full states never get mixed in).
     let main_bytes = rt.trace().bytes().to_vec();
     let main_records: Vec<_> = TraceReader::new(&main_bytes)
         .map(|r| r.expect("decode"))
@@ -1251,7 +1188,6 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
     assert_eq!(main_hashes, 3, "all hashes go to main stream");
     assert_eq!(main_fulls, 0, "full states never appear in main stream");
 
-    // Zoom trace: 1 PpuStateFull at the windowed PC.
     let zoom_bytes = rt.zoom_trace().bytes().to_vec();
     let zoom_records: Vec<_> = TraceReader::new(&zoom_bytes)
         .map(|r| r.expect("decode"))
@@ -1276,17 +1212,11 @@ fn into_memory_returns_committed_state() {
     assert_eq!(recovered.size(), 64);
 }
 
-// ---------------------------------------------------------------
-// Trivial-commit fast path -- three proof microtests.
-//
-// The trivial-step fast path must not alter the observable
-// contract in any of the following scenarios.
-// ---------------------------------------------------------------
+// Trivial-commit fast path -- observable-contract preservation.
 
 /// Unit that emits zero effects every step and finishes after
-/// `max` steps. Used by the empty-loop gate below -- its steps
-/// are exactly the kind the trivial-commit fast path short-
-/// circuits.
+/// `max` steps; exactly the shape the trivial-commit fast path
+/// short-circuits.
 struct SilentUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -1335,20 +1265,12 @@ impl ExecutionUnit for SilentUnit {
     }
 }
 
-/// Trivial-commit proof 1 -- empty loop.
-///
-/// 10K non-effect-emitting steps under FaultDriven mode must
-/// advance the epoch exactly 10K times (one per step, matching
-/// the atomic-batch boundary contract) and emit zero trace
-/// records (FaultDriven mode's existing guarantee). The fast
-/// path must not break either.
 #[test]
 fn commit_fast_path_empty_loop_advances_epoch_monotonically() {
     let mut rt = build(64, 1, 20_000);
     rt.set_mode(RuntimeMode::FaultDriven);
-    // Finished yields take the slow path; BudgetExhausted does
-    // not. Give the unit enough runway so all 10K steps are
-    // BudgetExhausted.
+    // Finished yields take the slow path; BudgetExhausted does not.
+    // Give the unit enough runway so all 10K steps are BudgetExhausted.
     rt.registry_mut().register_with(|id| SilentUnit {
         id,
         steps: Cell::new(0),
@@ -1365,27 +1287,12 @@ fn commit_fast_path_empty_loop_advances_epoch_monotonically() {
         start_epoch.raw() + 10_000,
         "epoch must advance exactly once per commit, even on the fast path"
     );
-    // FaultDriven mode already suppresses trace records; the
-    // fast path must preserve that guarantee on empty-effect
-    // steps. Empty trace bytes is the strongest assertion.
     assert!(
         rt.trace().bytes().is_empty(),
         "FaultDriven + empty-effect steps must produce no trace records"
     );
 }
 
-/// Trivial-commit proof 2 -- DMA completion near a fast-path stretch.
-///
-/// A DMA is enqueued with a fixed completion tick; the issuing
-/// unit emits nothing afterwards (silent steps). The completion
-/// must fire at the step whose accumulated time crosses the
-/// scheduled tick, not one step earlier or later, and the
-/// transfer must apply to committed memory at that boundary.
-///
-/// The fast path checks `dma_queue.is_empty()` and takes the
-/// slow path as soon as a DMA is pending, so this test also
-/// exercises the "enter slow path when async work is present"
-/// transition.
 #[test]
 fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
@@ -1406,8 +1313,7 @@ fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
         UnitId::new(0),
     )
     .unwrap();
-    // Scheduled at tick 3. Budget=1 per step, so step 3 is the
-    // first where accumulated time reaches 3.
+    // Scheduled at tick 3; budget=1 so step 3 first reaches accumulated time=3.
     rt.dma_queue
         .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
     rt.registry_mut().register_with(|id| SilentUnit {
@@ -1416,16 +1322,12 @@ fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
         max: 100,
     });
 
-    // Step 1: time -> 1. DMA pending, slow path. Not yet due.
     let s = rt.step().unwrap();
     let o1 = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(o1.dma_completions_fired, 0);
-    // Step 2: time -> 2. Still pending.
     let s = rt.step().unwrap();
     let o2 = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(o2.dma_completions_fired, 0);
-    // Step 3: time -> 3. DMA fires at its scheduled tick, and
-    // the transfer applies to memory in the same commit.
     let s = rt.step().unwrap();
     let o3 = rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(
@@ -1438,22 +1340,16 @@ fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
             .unwrap(),
         &[0x11, 0x22, 0x33, 0x44]
     );
-    // Step 4+: queue empty again. Fast path re-engages; epoch
-    // still advances.
+    // Queue empty again: fast path re-engages; epoch still advances.
     let epoch_before = rt.epoch();
     let s = rt.step().unwrap();
     rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(rt.epoch().raw(), epoch_before.raw() + 1);
 }
 
-/// Trivial-commit proof 3 -- wake visibility through a silent stretch.
-///
-/// Unit A, while blocked, is woken by a DMA completion fired on
-/// unit B's step. That wake is observed outside the commit path
-/// (via `registry().effective_status`) immediately after the
-/// firing step and must stay visible through subsequent silent
-/// (fast-path) steps -- the status flip is carried by the
-/// `status_overrides` map, which the fast path does not touch.
+/// Wake visibility is carried by `status_overrides`, which the
+/// fast path does not touch, so a DMA-completion wake on one
+/// unit stays observable through another unit's silent steps.
 #[test]
 fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
@@ -1461,8 +1357,7 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
 
     let mut rt = build(256, 1, 100);
     rt.set_mode(RuntimeMode::FaultDriven);
-    // Unit 0 is the DMA-issuing waiter; it starts Blocked so the
-    // scheduler never picks it until the completion fires.
+    // Unit 0 is the DMA-issuing waiter; starts Blocked.
     rt.registry_mut().register_with(|id| SilentUnit {
         id,
         steps: Cell::new(0),
@@ -1486,8 +1381,6 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
     rt.dma_queue
         .enqueue(DmaCompletion::new(req, GuestTicks::new(2)), None);
 
-    // Step 1: unit 1 runs (unit 0 Blocked), time -> 1. Slow path
-    // (DMA pending); nothing fires yet.
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(1));
     let o = rt.commit_step(&s.result, &s.effects).unwrap();
@@ -1496,9 +1389,7 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
         rt.registry().effective_status(UnitId::new(0)),
         Some(UnitStatus::Blocked)
     );
-    // Step 2: unit 1 runs again, time -> 2, DMA fires, unit 0
-    // wakes. The wake is a status_override flip, observable
-    // immediately.
+    // Step 2: unit 1 runs again, DMA fires, unit 0 wakes.
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(1));
     let o = rt.commit_step(&s.result, &s.effects).unwrap();
@@ -1509,16 +1400,8 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
         Some(UnitStatus::Runnable),
         "DMA completion must wake the issuer"
     );
-    // Step 3: unit 0 is now Runnable; the scheduler will pick
-    // whichever is first. We force silent steps on both units
-    // and verify the wake visibility is preserved.
     let s = rt.step().unwrap();
     rt.commit_step(&s.result, &s.effects).unwrap();
-    // Unit 0's override is cleared the first time it runs (see
-    // `clear_status_override` in step); but the wake happened
-    // at `wake_epoch`, and the epoch has advanced exactly once
-    // per subsequent commit regardless of whether the fast or
-    // slow path ran.
     assert_eq!(
         rt.epoch().raw(),
         wake_epoch.raw() + 1,
@@ -1526,13 +1409,9 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
     );
 }
 
-// --- Reservation state folds into sync_state_hash ---
-
-/// A unit that emits a single `ReservationAcquire` effect on its
-/// first step and a single `SharedWriteIntent` to the reserved
-/// line on its second step, then finishes. Used to exercise the
-/// sync_state_hash folding with a scripted acquire / release
-/// sequence.
+/// Emits `ReservationAcquire` then `SharedWriteIntent` to the
+/// same line across two steps; drives sync_state_hash folding
+/// through a scripted acquire / release sequence.
 struct ReservationDriverUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -1573,7 +1452,6 @@ impl ExecutionUnit for ReservationDriverUnit {
                 });
             }
             2 => {
-                // Overlapping write clears the reservation.
                 let range = ByteRange::new(GuestAddr::new(self.line_addr), 4).unwrap();
                 effects.push(Effect::SharedWriteIntent {
                     range,
@@ -1604,9 +1482,9 @@ impl ExecutionUnit for ReservationDriverUnit {
     }
 }
 
-/// Writes FIFO bytes encoding a single `GCM_FLIP_COMMAND` method
-/// with the given buffer index, plus advances put via the RSX
-/// control-register mirror. Finishes after one step.
+/// Writes FIFO bytes encoding `GCM_FLIP_COMMAND` with the given
+/// buffer index and advances put via the RSX control-register
+/// mirror; finishes after one step.
 struct RsxFlipCommandEmitterUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -1641,7 +1519,7 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
         use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
         self.steps.set(1);
-        // FIFO words: GCM_FLIP_COMMAND header (count=1) + arg.
+        // FIFO: GCM_FLIP_COMMAND header (count=1) + arg.
         let header: u32 = (1u32 << NV_COUNT_SHIFT) | (GCM_FLIP_COMMAND as u32);
         let mut fifo_bytes: Vec<u8> = Vec::with_capacity(8);
         fifo_bytes.extend_from_slice(&header.to_le_bytes());
@@ -1676,18 +1554,9 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
 
 #[test]
 fn rsx_flip_waiting_observable_between_two_commits_then_done() {
-    // End-to-end flip state machine:
-    // Batch 1: unit emits FLIP_BUFFER + put advance. FIFO drain
-    //   parses and queues RsxFlipRequest into pending.
-    //   Flip state at end of batch 1: DONE (unchanged) -- the
-    //   RsxFlipRequest has NOT been applied yet (lands in batch 2).
-    // Batch 2: commit pipeline applies the queued RsxFlipRequest,
-    //   flipping status to WAITING / pending=true. pending_at_entry
-    //   was false (from batch 1), so no DONE transition.
-    //   Flip state at end of batch 2: WAITING / pending=true.
-    // Batch 3 (or any later boundary): pending_at_entry=true,
-    //   DONE transition fires.
-    //   Flip state at end of batch 3: DONE / pending=false.
+    // Three-batch state machine: batch 1 queues RsxFlipRequest
+    // (flip stays DONE). Batch 2 applies it (WAITING + pending).
+    // Batch 3 observes pending_at_entry=true and fires DONE.
     use crate::rsx::flip::{
         CELL_GCM_DISPLAY_FLIP_STATUS_DONE, CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
     };
@@ -1701,7 +1570,6 @@ fn rsx_flip_waiting_observable_between_two_commits_then_done() {
             fifo_base: FIFO_BASE,
             buffer_index: 2,
         });
-    // Batch 1: emits FIFO + put; drain parses FLIP_BUFFER, queues effect.
     let s1 = rt.step().unwrap();
     rt.commit_step(&s1.result, &s1.effects).unwrap();
     assert_eq!(
@@ -1710,10 +1578,7 @@ fn rsx_flip_waiting_observable_between_two_commits_then_done() {
         "batch 1 end: effect queued, not yet applied; flip still DONE"
     );
     assert!(!rt.rsx_flip().pending());
-    // Batch 2: the unit is finished, no new unit emissions. Commit
-    // drains pending_rsx_effects (our queued RsxFlipRequest). Need
-    // a step -- but the unit is Finished, which means rt.step()
-    // would return NoRunnableUnit. Use a trivial second unit.
+    // Primary unit is Finished; need a live unit so rt.step() does not hit NoRunnableUnit.
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
     let s2 = rt.step().unwrap();
@@ -1725,7 +1590,6 @@ fn rsx_flip_waiting_observable_between_two_commits_then_done() {
     );
     assert!(rt.rsx_flip().pending());
     assert_eq!(rt.rsx_flip().buffer_index(), 2);
-    // Batch 3: pending_at_entry=true, DONE transition fires.
     let s3 = rt.step().unwrap();
     rt.commit_step(&s3.result, &s3.effects).unwrap();
     assert_eq!(
@@ -1736,10 +1600,9 @@ fn rsx_flip_waiting_observable_between_two_commits_then_done() {
     assert!(!rt.rsx_flip().pending());
 }
 
-/// Unit that emits a single `RsxFlipRequest` effect on its first
-/// step, then finishes. Used to exercise the commit pipeline's
-/// RsxFlipRequest application path without going through the FIFO
-/// drain (which adds a one-batch delay).
+/// Emits a single `RsxFlipRequest` effect on its first step.
+/// Skips the FIFO drain (which adds a one-batch delay) to exercise
+/// the commit pipeline's RsxFlipRequest application path directly.
 struct RsxFlipRequestEmitterUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -1787,11 +1650,9 @@ impl ExecutionUnit for RsxFlipRequestEmitterUnit {
 
 #[test]
 fn rsx_flip_request_applied_same_batch_does_not_immediately_transition() {
-    // Tightness probe: when a RsxFlipRequest is applied in this
-    // commit, the DONE transition must NOT fire in the same
-    // batch. `flip_pending_at_entry` was false (pending hasn't
-    // been set yet), so the post-apply hook skips the transition.
-    // Pins the "one-batch-delay" contract the design doc calls out.
+    // Pins the one-batch-delay contract: a RsxFlipRequest applied
+    // in this commit does not fire DONE in the same batch because
+    // pending_at_entry was false.
     use crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_WAITING;
     let mut rt = build(4096, 1, 100);
     rt.registry_mut()
@@ -1813,12 +1674,6 @@ fn rsx_flip_request_applied_same_batch_does_not_immediately_transition() {
 
 #[test]
 fn rsx_flip_transitions_to_done_on_next_commit_boundary() {
-    // Companion to the tightness probe: after the WAITING state
-    // has been observable for one PPU step, the NEXT commit
-    // boundary transitions to DONE. Two-step test: step 1 emits
-    // RsxFlipRequest (WAITING + pending=true); step 2 is any
-    // commit (no flip-related emission); DONE transition fires
-    // because pending_at_entry was true.
     use crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE;
     let mut rt = build(4096, 1, 100);
     rt.registry_mut()
@@ -1844,10 +1699,9 @@ fn rsx_flip_transitions_to_done_on_next_commit_boundary() {
 
 #[test]
 fn rsx_flip_second_request_while_pending_resolves_one_transition() {
-    // Corner case: a second RsxFlipRequest that arrives while
-    // pending==true updates buffer_index but does
-    // NOT add a second transition -- exactly one WAITING -> DONE
-    // fires for the sequence.
+    // A second RsxFlipRequest arriving while pending updates
+    // buffer_index but does NOT add a second transition: exactly
+    // one WAITING -> DONE fires for the whole sequence.
     use crate::rsx::flip::CELL_GCM_DISPLAY_FLIP_STATUS_DONE;
     let mut rt = build(4096, 1, 100);
     rt.registry_mut()
@@ -1864,16 +1718,12 @@ fn rsx_flip_second_request_while_pending_resolves_one_transition() {
         });
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
-    // Batch 1: first RsxFlipRequest (buffer 1) -> WAITING + pending.
     let s1 = rt.step().unwrap();
     rt.commit_step(&s1.result, &s1.effects).unwrap();
     assert!(rt.rsx_flip().pending());
     assert_eq!(rt.rsx_flip().buffer_index(), 1);
-    // Batch 2: second RsxFlipRequest (buffer 5) overwrites
-    // buffer_index BUT pending_at_entry was true so DONE fires.
-    // Post-apply: RsxFlipRequest runs first (WAITING, pending,
-    // buffer=5), then DONE transition checks pending_at_entry=true
-    // and fires. So end state: DONE + pending=false + buffer=5.
+    // Second request applies (buffer=5), then DONE transition
+    // fires because pending_at_entry was true.
     let s2 = rt.step().unwrap();
     rt.commit_step(&s2.result, &s2.effects).unwrap();
     assert_eq!(
@@ -1889,10 +1739,10 @@ fn rsx_flip_second_request_while_pending_resolves_one_transition() {
     );
 }
 
-/// Writes a u32 to a specific RSX control-register slot via a
-/// single SharedWriteIntent on its first step, then finishes. The
-/// slot address and value are constructor params so a test can
-/// target put / get / reference individually.
+/// Writes a u32 to a configurable RSX control-register slot via a
+/// single SharedWriteIntent on its first step. The slot address
+/// and value are constructor params so tests can target put / get
+/// / reference individually.
 struct RsxControlWriterUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -1992,8 +1842,7 @@ fn rsx_mirror_writes_on_routes_put_to_cursor() {
     let s = rt.step().unwrap();
     rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(rt.rsx_cursor().put(), 0x0000_1000);
-    // Memory also holds the big-endian value (byte-for-byte what
-    // the guest wrote) so a guest read-back sees its own store.
+    // Memory holds the big-endian value so a guest read-back sees its own store.
     use cellgov_mem::{ByteRange, GuestAddr};
     let mem_bytes = rt
         .memory()
@@ -2034,13 +1883,9 @@ fn rsx_mirror_writes_on_routes_reference_to_cursor() {
     assert_eq!(rt.rsx_cursor().current_reference(), 0xCAFE_BABE);
 }
 
-/// Drives a full RSX label-write round trip inside the runtime:
-/// Step 1 writes an OFFSET + RELEASE method pair to FIFO memory
-/// via SharedWriteIntents AND advances put via the RSX control
-/// register mirror. Step 2 (any subsequent commit) drains the
-/// pending RsxLabelWrite emitted by the FIFO advance pass of step 1
-/// into memory at `label_base + offset`. The test asserts the
-/// final memory byte is the expected value.
+/// Drives an RSX label-write round trip: step 1 writes an
+/// OFFSET + RELEASE method pair and advances put; step 2 drains
+/// the pending RsxLabelWrite into memory at `label_base + offset`.
 struct RsxOffsetReleaseDriverUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -2087,10 +1932,8 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
         };
         match n {
             1 => {
-                // Step 1: write FIFO words and advance put. Four
-                // FIFO words: OFFSET header, offset arg, RELEASE
-                // header, release arg. All little-endian (RSX
-                // byte order).
+                // FIFO (RSX byte order, little-endian): OFFSET
+                // header, offset arg, RELEASE header, release arg.
                 let header_offset: u32 =
                     (1u32 << NV_COUNT_SHIFT) | (NV406E_SEMAPHORE_OFFSET as u32);
                 let header_release: u32 =
@@ -2122,9 +1965,7 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
                 });
             }
             2 => {
-                // Step 2: no effects -- commit_step must drain
-                // the pending RsxLabelWrite emitted at the end of
-                // batch 1's FIFO advance pass into memory.
+                // No effects; commit_step drains the RsxLabelWrite queued in batch 1.
             }
             _ => {}
         }
@@ -2145,9 +1986,7 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
 fn build_with_rsx_and_label_region(label_base: u32) -> Runtime {
     use cellgov_mem::{GuestMemory, PageSize, Region};
     let regions = vec![
-        // Flat region for FIFO.
         Region::new(0, 0x10000, "flat", PageSize::Page4K),
-        // RSX region for control-register writes.
         Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
     ];
     let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
@@ -2158,8 +1997,6 @@ fn build_with_rsx_and_label_region(label_base: u32) -> Runtime {
 
 #[test]
 fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
-    // FIFO at 0x200. sem_offset = 0x10. label_base = 0x4000. The
-    // final label write lands at 0x4010 as big-endian 0xCAFE_BABE.
     const FIFO_BASE: u32 = 0x200;
     const LABEL_BASE: u32 = 0x4000;
     const SEM_OFFSET: u32 = 0x10;
@@ -2175,7 +2012,6 @@ fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
             sem_offset: SEM_OFFSET,
             release_value: RELEASE_VALUE,
         });
-    // Step 1: emits FIFO bytes + put advance; triggers drain; queues RsxLabelWrite.
     let s1 = rt.step().unwrap();
     rt.commit_step(&s1.result, &s1.effects).unwrap();
     assert_eq!(rt.rsx_cursor().put(), FIFO_BASE + 16);
@@ -2184,7 +2020,7 @@ fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
         FIFO_BASE + 16,
         "drain must consume the full FIFO"
     );
-    // Label memory still untouched at end of step 1 -- RSX effects
+    // Label memory untouched at end of step 1; RSX effects
     // commit in batch N+1 per the atomic-batch contract.
     use cellgov_mem::{ByteRange, GuestAddr};
     let pre_bytes = rt
@@ -2192,7 +2028,6 @@ fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
         .read(ByteRange::new(GuestAddr::new((LABEL_BASE + SEM_OFFSET) as u64), 4).unwrap())
         .unwrap();
     assert_eq!(pre_bytes, &[0, 0, 0, 0], "label still zero after batch 1");
-    // Step 2: no unit effects; commit drains pending RsxLabelWrite.
     let s2 = rt.step().unwrap();
     rt.commit_step(&s2.result, &s2.effects).unwrap();
     let post_bytes = rt
@@ -2208,9 +2043,6 @@ fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
 
 #[test]
 fn rsx_label_write_round_trip_is_deterministic_across_runs() {
-    // Same input -> byte-identical final label memory across two
-    // independent runs. Closes the "same-budget replay
-    // determinism" gate for the RSX label-write flow.
     fn run() -> Vec<u8> {
         const FIFO_BASE: u32 = 0x200;
         const LABEL_BASE: u32 = 0x4000;
@@ -2240,11 +2072,8 @@ fn rsx_label_write_round_trip_is_deterministic_across_runs() {
 
 #[test]
 fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
-    // Cross-budget final-state equivalence: identical end state
-    // after running with Budget=1 vs Budget=16. Both scenarios
-    // complete the same scripted work; the commit-pipeline path
-    // must not depend on how many instructions the unit consumes
-    // per step.
+    // Identical end state at Budget=1 vs Budget=16: commit-pipeline
+    // path must not depend on how many instructions run per step.
     fn run_with_budget(budget: u64) -> Vec<u8> {
         use cellgov_mem::{GuestMemory, PageSize, Region};
         const FIFO_BASE: u32 = 0x200;
@@ -2282,13 +2111,9 @@ fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
 
 #[test]
 fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
-    // Integration: a single SharedWriteIntent that advances put
-    // must feed the cursor AND trigger the FIFO advance pass in
-    // the same commit_step. This pins the ordering contract
-    // (mirror runs BEFORE rsx_advance in commit_step). Use an
-    // empty FIFO (no methods between get=0 and put=0x10 because
-    // memory is zero-initialised; zero-headers are NOPs). Assert
-    // cursor.get advanced to cursor.put after commit.
+    // Ordering contract: mirror runs before rsx_advance inside
+    // commit_step. Empty zero-header FIFO means advance reaches
+    // put cleanly; assertion is cursor.get == cursor.put post-commit.
     use crate::rsx::RSX_CONTROL_PUT_ADDR;
     let mut rt = build_with_rsx_writable();
     rt.set_rsx_mirror_writes(true);
@@ -2296,10 +2121,8 @@ fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
         id,
         steps: Cell::new(0),
         slot_addr: RSX_CONTROL_PUT_ADDR as u64,
-        // Point put into the flat region (address 0x40 is within
-        // the zero-initialised base-0 region). Zero-count headers
-        // decode as Increment method=0 count=0 which are
-        // unknown-method no-ops; drain reaches put cleanly.
+        // 0x40 is inside the zero-initialised flat region;
+        // zero-count headers decode as no-op method 0.
         value: 0x40,
     });
     let s = rt.step().unwrap();
@@ -2373,10 +2196,7 @@ fn sync_state_hash_deterministic_across_identical_runs() {
 
 #[test]
 fn sync_state_hash_shifts_on_rsx_cursor_put_advance() {
-    // Advancing the RSX cursor's put pointer must change
-    // sync_state_hash even with no units registered and no memory
-    // writes. Pins the cursor's fold into the sync hash so a future
-    // refactor that drops the fold breaks this test immediately.
+    // Pins the RSX cursor's fold into sync_state_hash.
     let rt_a = build(4096, 1, 100);
     let mut rt_b = build(4096, 1, 100);
     let h_a = rt_a.sync_state_hash();
@@ -2387,9 +2207,7 @@ fn sync_state_hash_shifts_on_rsx_cursor_put_advance() {
 
 #[test]
 fn sync_state_hash_distinguishes_cursor_fields() {
-    // Each of the cursor's three fields must contribute to the
-    // hash independently. Catches a fold that only mixes one field
-    // or masks one out.
+    // Each of the cursor's three fields contributes independently.
     fn hash_with(put: u32, get: u32, reference: u32) -> u64 {
         let mut rt = build(4096, 1, 100);
         rt.rsx_cursor_mut().set_put(put);
@@ -2409,10 +2227,6 @@ fn sync_state_hash_distinguishes_cursor_fields() {
 
 #[test]
 fn sync_state_hash_deterministic_across_rsx_mutation_sequence() {
-    // Scripted cursor-mutation sequence must produce a byte-
-    // identical per-step sync_state_hash sequence across two
-    // runs. This is the per-slice determinism check for the
-    // state-hash folding.
     fn run() -> Vec<u64> {
         let mut rt = build(4096, 1, 100);
         let mut hashes = vec![rt.sync_state_hash()];
@@ -2431,10 +2245,7 @@ fn sync_state_hash_deterministic_across_rsx_mutation_sequence() {
 
 #[test]
 fn sync_state_hash_shifts_on_rsx_flip_request() {
-    // A flip request from DONE to WAITING must change
-    // sync_state_hash. Pins the flip state's fold into the sync
-    // hash so a future refactor that drops the fold breaks this
-    // test immediately.
+    // Pins the flip state's fold into sync_state_hash.
     let rt_a = build(4096, 1, 100);
     let mut rt_b = build(4096, 1, 100);
     let h_a = rt_a.sync_state_hash();
@@ -2445,8 +2256,7 @@ fn sync_state_hash_shifts_on_rsx_flip_request() {
 
 #[test]
 fn sync_state_hash_distinguishes_flip_fields() {
-    // Each flip-state field contributes to the hash independently.
-    // Catches a fold that only mixes one field or masks one out.
+    // Each flip-state field contributes independently.
     fn hash_with(status: u8, handler: u32, pending: bool, buffer_index: u8) -> u64 {
         let mut rt = build(4096, 1, 100);
         rt.rsx_flip_mut()
@@ -2466,10 +2276,6 @@ fn sync_state_hash_distinguishes_flip_fields() {
 
 #[test]
 fn sync_state_hash_returns_to_empty_after_flip_completes() {
-    // Scripted round trip: request + complete must restore the
-    // pre-request sync_state_hash. Pending flips to false, status
-    // returns to DONE, handler and buffer_index are unchanged
-    // from the baseline (both zero).
     let mut rt = build(4096, 1, 100);
     let h_empty = rt.sync_state_hash();
     rt.rsx_flip_mut().request_flip(0);
@@ -2484,9 +2290,6 @@ fn sync_state_hash_returns_to_empty_after_flip_completes() {
 
 #[test]
 fn sync_state_hash_deterministic_across_rsx_flip_sequence() {
-    // Scripted flip sequence produces byte-identical per-step
-    // sync_state_hash sequences across two runs. Pins the
-    // flip-state determinism gate.
     fn run() -> Vec<u64> {
         let mut rt = build(4096, 1, 100);
         let mut hashes = vec![rt.sync_state_hash()];
@@ -2512,7 +2315,7 @@ fn sync_state_hash_distinguishes_different_reserved_lines() {
             steps: Cell::new(0),
             line_addr,
         });
-        // Step 1 only: acquire but do not write.
+        // Acquire without a subsequent write.
         let s = rt.step().unwrap();
         rt.commit_step(&s.result, &s.effects).unwrap();
         rt.sync_state_hash()
@@ -2524,35 +2327,26 @@ fn sync_state_hash_distinguishes_different_reserved_lines() {
     );
 }
 
-// --- Lost-reservation regression across write paths ---
+// -- Lost-reservation regression across write paths --
 
-/// DMA completions bypass `SharedWriteIntent` -- they are applied
-/// by `fire_dma_completions` via a direct `apply_commit` path.
-/// The clear sweep must still fire on the destination range so a
-/// cross-unit DMA does not leave a stale reservation entry that
-/// a later stwcx / putllc would spuriously read as "still held."
-///
-/// Test: unit 1 pre-holds a reservation on line 0x0. Unit 0
-/// emits a DmaPut whose destination covers the line. After
-/// scheduling runs through the DMA's latency (10 ticks), the
-/// completion fires and the reservation must be cleared.
+/// DMA completions apply via `fire_dma_completions` / direct
+/// `apply_commit`, bypassing `SharedWriteIntent`. The clear
+/// sweep must still fire on the destination so a cross-unit DMA
+/// does not leave a stale reservation entry.
 #[test]
 fn dma_completion_clears_overlapping_reservation() {
     use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
     let mut rt = build(256, 1, 100);
-    // DmaPut wants a committed source range. Pre-populate one.
+    // DmaPut requires a committed source range.
     {
         use cellgov_mem::{ByteRange, GuestAddr};
         let range = ByteRange::new(GuestAddr::new(0x80), 4).unwrap();
         rt.memory_mut().apply_commit(range, &[0x11; 4]).unwrap();
     }
-    // Pre-populate unit 1's reservation on line 0x0.
     rt.reservations_mut()
         .insert_or_replace(UnitId::new(1), cellgov_sync::ReservedLine::containing(0));
 
-    // Unit 0: emit DmaPut 0x80 -> 0x0, 4 bytes, then run many
-    // LoadImms so guest time keeps advancing past the DMA's
-    // 10-tick latency. Finally End.
+    // Trail the DMA with LoadImms so guest time advances past the 10-tick latency.
     let mut ops = vec![FakeOp::DmaPut {
         src: 0x80,
         dst: 0x0,
@@ -2588,20 +2382,15 @@ fn dma_completion_clears_overlapping_reservation() {
     );
 }
 
-/// Same-unit PPU store through the staging path is proven at the
-/// commit-pipeline level in commit_tests::shared_write_clears_
-/// reservation_covering_line. This runtime-level test pins the
-/// end-to-end invariant by driving a SharedWriteIntent through
-/// the full step / commit cycle and asserting the table clears.
+/// Runtime-level pin for the same-unit SharedWriteIntent clear
+/// path; see commit_tests for the pipeline-level proof.
 #[test]
 fn plain_shared_write_through_runtime_clears_reservation() {
     use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
     let mut rt = build(256, 1, 100);
-    // Unit 1 holds a reservation on line 0.
     rt.reservations_mut()
         .insert_or_replace(UnitId::new(1), cellgov_sync::ReservedLine::containing(0));
 
-    // Unit 0: plain shared store to line 0.
     rt.registry_mut().register_with(|id| {
         FakeIsaUnit::new(
             id,
@@ -2627,9 +2416,9 @@ fn plain_shared_write_through_runtime_clears_reservation() {
     );
 }
 
-/// ConditionalStore path drives the clear sweep against both the
-/// emitter's own reservation and any overlapping entries. Pins
-/// that a real stwcx / putllc success retires both.
+/// ConditionalStore clears both the emitter's own reservation
+/// and overlapping entries; pins stwcx / putllc success
+/// retirement across both paths.
 #[test]
 fn conditional_store_through_runtime_clears_own_and_overlapping() {
     use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
@@ -2639,9 +2428,8 @@ fn conditional_store_through_runtime_clears_own_and_overlapping() {
     rt.reservations_mut()
         .insert_or_replace(UnitId::new(1), cellgov_sync::ReservedLine::containing(0));
 
-    // Unit 0 emits a ConditionalStore to line 0. (FakeIsaUnit
-    // lacks a local reservation register; the test exercises the
-    // commit-pipeline retirement path.)
+    // FakeIsaUnit lacks a local reservation register; this
+    // exercises the commit-pipeline retirement path.
     rt.registry_mut().register_with(|id| {
         FakeIsaUnit::new(
             id,
@@ -2652,7 +2440,7 @@ fn conditional_store_through_runtime_clears_own_and_overlapping() {
             ],
         )
     });
-    // Unit 1 does nothing (it only holds a stale reservation we want to see cleared).
+    // Unit 1 holds the stale reservation that must get cleared.
     rt.registry_mut()
         .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
 
@@ -2668,11 +2456,10 @@ fn conditional_store_through_runtime_clears_own_and_overlapping() {
     assert!(!rt.reservations().is_held_by(UnitId::new(1)));
 }
 
-// --- Multi-primitive determinism canary with RSX content ---
+// -- Multi-primitive determinism canary with RSX content --
 
-/// Unit that emits `count` `RsxFlipRequest` effects, one per step,
-/// then finishes. Cycles the buffer_index across requests so each
-/// commit hash depends on the exact emission order.
+/// Emits `count` `RsxFlipRequest` effects one per step, cycling
+/// buffer_index so each commit hash depends on emission order.
 struct RsxFlipSpinnerUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -2724,12 +2511,9 @@ impl ExecutionUnit for RsxFlipSpinnerUnit {
     }
 }
 
-/// Extended multi-primitive canary. The three-unit atomic +
-/// disjoint-write canary gets a fourth unit that drives the RSX
-/// flip-status state machine through 10 WAITING -> DONE cycles.
-/// Final (memory, sync) hashes -- sync_state_hash folds the flip
-/// state, so any RSX determinism regression surfaces as a hash
-/// mismatch -- must be byte-identical across two independent runs.
+/// Four-unit canary: atomic contention + disjoint writes + 10
+/// RSX flip cycles. sync_state_hash folds flip state, so any
+/// RSX determinism drift surfaces as a final-hash mismatch.
 #[test]
 fn multi_primitive_determinism_canary_with_rsx_content() {
     use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
@@ -2795,10 +2579,8 @@ fn multi_primitive_determinism_canary_with_rsx_content() {
     );
 }
 
-/// Per-commit sync-state-hash sequence must match across two runs
-/// of the extended canary. Strongest form of the determinism
-/// check: pins NOT just the final state but every intermediate
-/// commit boundary.
+/// Per-commit hash sequence must match across two runs; pins
+/// every intermediate commit boundary, not just final state.
 #[test]
 fn multi_primitive_determinism_canary_rsx_per_step_hash_sequence_stable() {
     use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
@@ -2846,22 +2628,16 @@ fn multi_primitive_determinism_canary_rsx_per_step_hash_sequence_stable() {
     );
 }
 
-// --- Multi-primitive determinism canary (atomic content) ---
+// -- Multi-primitive determinism canary (atomic content) --
 
-/// Two units drive acquire / store / clear cycles against a
-/// shared line; a third unit independently emits disjoint shared
-/// writes. Running the full scenario twice must produce
-/// byte-identical final memory AND byte-identical final sync-
-/// state hashes. Combines the multi-unit scheduler-determinism
-/// canary with atomic-contention content so a regression on
-/// either axis fails loudly.
+/// Two units contend for line 0 via acquire + conditional-store
+/// cycles; a third emits disjoint shared writes. Combines
+/// scheduler determinism with atomic-contention content.
 #[test]
 fn multi_primitive_determinism_canary_with_atomic_content() {
     use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
     fn run_once() -> (u64, u64) {
         let mut rt = build(256, 4, 500);
-        // Unit 0 / 1: repeated acquire + conditional-store on
-        // line 0.
         rt.registry_mut().register_with(|id| {
             FakeIsaUnit::new(
                 id,
@@ -2921,11 +2697,9 @@ fn multi_primitive_determinism_canary_with_atomic_content() {
 #[test]
 #[should_panic(expected = "non-empty tls_bytes requires non-zero tls_base")]
 fn ppu_thread_create_tls_base_zero_with_non_empty_tls_panics() {
-    // Host rejects this combination with CELL_EINVAL in
-    // `dispatch_ppu_thread_create`; a bad dispatch reaching the
-    // runtime apply path is a host regression, so the runtime
-    // asserts unconditionally (both debug and release) rather
-    // than silently committing the TLS image to guest address 0.
+    // Host rejects this with CELL_EINVAL in
+    // `dispatch_ppu_thread_create`. A bad dispatch reaching the
+    // apply path is a host bug, so the runtime asserts in release too.
     let mut rt = build(16, 1, 100);
     let source = rt
         .registry_mut()
@@ -2952,10 +2726,8 @@ fn ppu_thread_create_tls_base_zero_with_non_empty_tls_panics() {
 #[test]
 #[should_panic(expected = "unfilled payload")]
 fn event_queue_receive_wake_with_none_payload_panics() {
-    // The release side forgot to ship a response_update before
-    // waking the receiver. The wake path must panic rather than
-    // deliver four zero u64s the guest cannot distinguish from
-    // a real event.
+    // Waking a receiver with no response_update must panic
+    // rather than deliver four zero u64s as if they were real.
     let mut rt = build(16, 1, 100);
     let waiter = rt
         .registry_mut()
@@ -2972,14 +2744,9 @@ fn event_queue_receive_wake_with_none_payload_panics() {
     rt.resolve_sync_wakes_for_test(&[waiter]);
 }
 
-// sys_rsx end-to-end microtests. Each runs cellGcmInitBody with
-// rsx_checkpoint off so the HLE forwards to sys_rsx, then asserts
-// observable post-conditions (reports init pattern, label-255
-// sentinel, reports region size, DMA control layout, event-port
-// registration, flip sub-command state transitions). Exercised at
-// the runtime layer rather than as guest ELFs so the full HLE +
-// LV2 dispatch + commit pipeline path runs without external build
-// dependencies.
+// sys_rsx end-to-end microtests: each runs cellGcmInitBody with
+// rsx_checkpoint off so HLE forwards to sys_rsx, exercising the
+// full HLE + LV2 dispatch + commit path without external builds.
 
 fn phase21_runtime_with_cellgcm_inited() -> (Runtime, cellgov_event::UnitId) {
     let mut rt = Runtime::new(
@@ -3024,9 +2791,6 @@ fn read_guest_u64_be(rt: &Runtime, addr: u32) -> u64 {
 
 #[test]
 fn phase21_rsx_context_allocate_init_pattern() {
-    // sys_rsx_context_allocate seeds the semaphore slots with the
-    // repeating 4-u32 pattern (0x1337C0D3 / BABE / BEEF / F001),
-    // notify timestamps with -1, and report timestamp + pad with -1.
     let (rt, _) = phase21_runtime_with_cellgcm_inited();
     let reports_base = rt.lv2_host().sys_rsx_context().reports_addr;
 
@@ -3036,25 +2800,20 @@ fn phase21_rsx_context_allocate_init_pattern() {
     assert_eq!(read_guest_u32_be(&rt, reports_base + 8), 0x1337_BEEF);
     assert_eq!(read_guest_u32_be(&rt, reports_base + 12), 0x1337_F001);
 
-    // Notify[0].timestamp at reports_base + 0x1000 = u64::MAX.
+    // Notify[0] at +0x1000: timestamp=-1, zero=0.
     assert_eq!(read_guest_u64_be(&rt, reports_base + 0x1000), u64::MAX);
-    // Notify[0].zero at +0x1008 = 0.
     assert_eq!(read_guest_u64_be(&rt, reports_base + 0x1008), 0);
 
-    // Report[0].timestamp at reports_base + 0x1400 = u64::MAX.
+    // Report[0] at +0x1400: timestamp=-1, val=0, pad=-1.
     assert_eq!(read_guest_u64_be(&rt, reports_base + 0x1400), u64::MAX);
-    // Report[0].val at +0x1408 = 0.
     assert_eq!(read_guest_u32_be(&rt, reports_base + 0x1408), 0);
-    // Report[0].pad at +0x140C = u32::MAX.
     assert_eq!(read_guest_u32_be(&rt, reports_base + 0x140C), u32::MAX);
 }
 
 #[test]
 fn phase21_rsx_label_255_sentinel_read() {
-    // cellGcmGetLabelAddress(255) returns the guest address that
-    // reads the LV2 sentinel 0x1337_C0D3 post-init. Exercise
-    // `label_addr + 255 * 0x10` directly since the label-address
-    // math mirrors what cellGcmGetLabelAddress computes.
+    // cellGcmGetLabelAddress(255) must read the LV2 sentinel
+    // 0x1337_C0D3; addr math is label_addr + 255 * 0x10.
     let (rt, _) = phase21_runtime_with_cellgcm_inited();
     let label_addr = rt.hle.gcm.label_addr;
     let label_255_addr = label_addr + 255 * 0x10;
@@ -3063,30 +2822,24 @@ fn phase21_rsx_label_255_sentinel_read() {
 
 #[test]
 fn phase21_rsx_reports_region_full_size() {
-    // Past the 4 KB semaphore region the notify and report arrays
-    // carry their init values; the pre-sys_rsx 4 KB-label-region
-    // world would have returned zeros here.
+    // Notify and report arrays carry init values past the 4 KB
+    // semaphore region; a 4 KB-label-only layout would read zeros.
     let (rt, _) = phase21_runtime_with_cellgcm_inited();
     let label_addr = rt.hle.gcm.label_addr;
-    // Notify[63] (last entry) timestamp sits at 0x1000 + 63 * 16.
     let notify_63 = label_addr + 0x1000 + 63 * 16;
     assert_eq!(read_guest_u64_be(&rt, notify_63), u64::MAX);
-    // Report[2047] pad at end of region.
     let report_2047_pad = label_addr + 0x1400 + 2047 * 16 + 12;
     assert_eq!(read_guest_u32_be(&rt, report_2047_pad), u32::MAX);
 }
 
 #[test]
 fn phase21_rsx_dma_control_layout() {
-    // put / get / ref live at +0x40 / +0x44 / +0x48 from
-    // dma_control_addr; cellGcmGetControlRegister returns
-    // dma_control_addr + 0x40 as the guest-facing handle.
+    // put / get / ref at dma_control_addr + 0x40 / 0x44 / 0x48;
+    // cellGcmGetControlRegister returns dma_control_addr + 0x40.
     let (rt, _) = phase21_runtime_with_cellgcm_inited();
     let dma_base = rt.lv2_host().sys_rsx_context().dma_control_addr;
     let ctrl = rt.hle.gcm.control_addr;
     assert_eq!(ctrl, dma_base + 0x40);
-    // The three slots are zero-initialised by the HLE heap; this
-    // test pins the layout, not the values.
     assert_eq!(read_guest_u32_be(&rt, dma_base + 0x40), 0);
     assert_eq!(read_guest_u32_be(&rt, dma_base + 0x44), 0);
     assert_eq!(read_guest_u32_be(&rt, dma_base + 0x48), 0);
@@ -3094,9 +2847,8 @@ fn phase21_rsx_dma_control_layout() {
 
 #[test]
 fn phase21_rsx_event_port_registered() {
-    // RsxDriverInfo.handler_queue at offset 0x12D0 holds the
-    // event-queue id sys_rsx_context_allocate created. Non-zero
-    // means the queue exists; the LV2 host tracks the same id.
+    // RsxDriverInfo.handler_queue at +0x12D0 holds the event-queue
+    // id that sys_rsx_context_allocate created.
     let (rt, _) = phase21_runtime_with_cellgcm_inited();
     let driver_info_addr = rt.lv2_host().sys_rsx_context().driver_info_addr;
     let handler_queue = read_guest_u32_be(&rt, driver_info_addr + 0x12D0);
@@ -3110,13 +2862,9 @@ fn phase21_rsx_event_port_registered() {
 
 #[test]
 fn phase21_sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
-    // Schedule-stability check: sys_rsx syscall dispatch writes a
-    // fixed set of guest addresses (reports / driver info / dma
-    // control). If the concurrently-running PPU units touch only
-    // disjoint addresses, the final memory state does not depend
-    // on when during the run sys_rsx fires. This is the sys_rsx
-    // analogue of the exploration engine's schedule-stable
-    // classification.
+    // Schedule-stability: sys_rsx dispatch writes a fixed set of
+    // guest addresses, so with disjoint concurrent PPU writes,
+    // final memory is independent of when sys_rsx fires.
     fn run_with_dispatch_at(position: usize) -> u64 {
         let mut rt = Runtime::new(
             cellgov_mem::GuestMemory::new(0x4000_0000),
@@ -3126,8 +2874,8 @@ fn phase21_sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
         rt.set_hle_heap_base(0x10_0000);
         rt.set_gcm_rsx_checkpoint(false);
 
-        // Two FakeIsaUnits writing disjoint addresses well outside
-        // the sys_rsx region (which starts at 0x3000_0000).
+        // PPU writers target addresses disjoint from the sys_rsx
+        // region (which starts at 0x3000_0000).
         rt.registry_mut().register_with(|id| {
             cellgov_exec::FakeIsaUnit::new(
                 id,
@@ -3154,7 +2902,7 @@ fn phase21_sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
                 ],
             )
         });
-        // A third unit so sys_rsx has a dispatch source.
+        // sys_rsx needs a dispatch source.
         rt.registry_mut().register_with(|id| {
             cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
         });
@@ -3207,12 +2955,9 @@ fn phase21_sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
 
 #[test]
 fn phase21_multi_primitive_determinism_canary_with_sys_rsx_content() {
-    // sys_rsx extension of the multi-primitive determinism canary.
-    // Both runs must produce byte-identical (memory, sync) hashes
-    // after cellGcmInitBody forwards through sys_rsx (37 KB reports
-    // init + 0x12F8 driver info init + 0x300000 reservation +
-    // event-queue creation). If any sys_rsx output path drifts
-    // between runs, these hashes diverge.
+    // sys_rsx extension of the multi-primitive canary. If any
+    // sys_rsx output path drifts between runs, the final
+    // (memory, sync) hashes diverge.
     fn run_once() -> (u64, u64) {
         let mut rt = Runtime::new(
             cellgov_mem::GuestMemory::new(0x4000_0000),
@@ -3231,7 +2976,7 @@ fn phase21_multi_primitive_determinism_canary_with_sys_rsx_content() {
             crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
             &args,
         );
-        // Drive the sub-command flip path too so rsx_flip contributes.
+        // Sub-command flip path drives rsx_flip fold-in.
         let ctx_id = rt.lv2_host().sys_rsx_context().context_id;
         rt.dispatch_lv2_request(
             cellgov_lv2::Lv2Request::SysRsxContextAttribute {
@@ -3244,7 +2989,7 @@ fn phase21_multi_primitive_determinism_canary_with_sys_rsx_content() {
             },
             unit_id,
         );
-        // Handler registration routed through sys_rsx.
+        // Handler registration via sys_rsx.
         rt.dispatch_lv2_request(
             cellgov_lv2::Lv2Request::SysRsxContextAttribute {
                 context_id: ctx_id,
@@ -3270,10 +3015,9 @@ fn phase21_multi_primitive_determinism_canary_with_sys_rsx_content() {
 
 #[test]
 fn phase21_rsx_context_attribute_flip_drives_status_transitions() {
-    // Dispatching FLIP_BUFFER via sub-command 0x102 emits an
-    // RsxFlipRequest effect; one commit boundary later the flip
-    // status transitions to DONE, matching the NV4097_FLIP_BUFFER
-    // path.
+    // FLIP_BUFFER via sub-command 0x102 emits RsxFlipRequest;
+    // one commit boundary later it transitions to DONE, matching
+    // the NV4097_FLIP_BUFFER path.
     let (mut rt, unit_id) = phase21_runtime_with_cellgcm_inited();
     let ctx_id = rt.lv2_host().sys_rsx_context().context_id;
 
@@ -3303,9 +3047,7 @@ fn phase21_rsx_context_attribute_flip_drives_status_transitions() {
     assert!(rt.rsx_flip().pending());
     assert_eq!(rt.rsx_flip().buffer_index(), 1);
 
-    // Drive one empty commit boundary to advance the pending flip
-    // to DONE, matching the NV4097_FLIP_BUFFER path's observable
-    // two-batch transition.
+    // One empty commit boundary completes the two-batch WAITING -> DONE transition.
     rt.registry_mut()
         .register_with(|id| cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End]));
     let s = rt.step().unwrap();

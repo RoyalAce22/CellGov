@@ -1,35 +1,15 @@
-//! Stable identifiers used by the event layer.
-//!
-//! Three newtypes live here: [`UnitId`], [`EventId`], and [`SequenceNumber`].
-//! They are kept distinct from each other and from the time types in
-//! [`cellgov_time`]: a tick is not a sequence number, a unit is not an event,
-//! and none of them are interchangeable with a bare `u64`. The runtime's
-//! determinism contract requires every id construction site to be visible,
-//! so there are no `From<u64>` impls -- every lift uses [`UnitId::new`] and
-//! friends.
-//!
-//! `UnitId` is defined here, not in `cellgov_core`, because the global
-//! ordering key in `cellgov_event` must mention it and `cellgov_event` sits
-//! below `cellgov_core` in the workspace dependency DAG. The unit registry
-//! in `cellgov_core` hands `UnitId` instances out at unit construction
-//! time; the type itself is plain data.
+//! Stable newtype identifiers for units, events, and sequence numbers.
 
 /// A stable identifier for an execution unit.
 ///
-/// `UnitId`s are assigned by the unit registry in `cellgov_core` and are
-/// recorded in the trace at construction time. They participate in the
-/// global ordering key as the third tier of the deterministic tie-break
-/// (after timestamp and priority class), so two units must never share an
-/// id within a single runtime instance.
+/// Distinct from [`EventId`], [`SequenceNumber`], and raw `u64`.
+/// Assigned by the `cellgov_core` unit registry; two live units must never
+/// share an id within a single runtime instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UnitId(u64);
 
 impl UnitId {
     /// Construct a `UnitId` from a raw value.
-    ///
-    /// There is no `From<u64>` impl: id assignment is the registry's job,
-    /// and ad-hoc construction outside the registry should be visible at
-    /// the call site.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
@@ -44,11 +24,8 @@ impl UnitId {
 
 /// A stable identifier for an event in the runtime's event log.
 ///
-/// `EventId`s are issued at event creation time and used for trace
-/// correlation and replay assertions. They are not part of the ordering
-/// key: ordering uses [`crate::OrderingKey`], which carries
-/// timestamp, priority, source unit, and sequence number. Event ids only
-/// disambiguate two distinct events in trace records.
+/// Distinct from [`UnitId`], [`SequenceNumber`], and raw `u64`. Not part
+/// of [`crate::OrderingKey`]; used only for trace correlation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct EventId(u64);
 
@@ -66,17 +43,11 @@ impl EventId {
     }
 }
 
-/// A monotonically increasing tie-break counter.
+/// Final tie-break counter for [`crate::OrderingKey`].
 ///
-/// `SequenceNumber` is the fourth and final tier of the global ordering
-/// key. When timestamp, priority class, and source unit id all match
-/// between two events, the sequence number breaks the tie. It is issued
-/// at event creation time by a runtime-owned counter and is therefore
-/// unique within a single runtime instance.
-///
-/// Like [`cellgov_time::Epoch`], overflow is an invariant violation rather
-/// than wraparound: [`SequenceNumber::next`] returns `None` at `u64::MAX`
-/// instead of silently rolling over and producing duplicate ordering keys.
+/// Distinct from [`UnitId`], [`EventId`], and raw `u64`. Overflow is an
+/// invariant violation: [`SequenceNumber::next`] returns `None` at
+/// `u64::MAX` rather than wrap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct SequenceNumber(u64);
 

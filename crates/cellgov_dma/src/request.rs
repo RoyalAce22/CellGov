@@ -1,54 +1,29 @@
-//! `DmaRequest` and the DMA direction enum.
+//! Immutable DMA request packet and direction enum.
 //!
-//! A DMA request is a pure value packet describing a transfer that the
-//! runtime will model. It carries the source and destination byte ranges,
-//! the direction of the transfer, and the unit that issued it -- all data,
-//! no callbacks, no host pointers, no scheduler hooks. Completion timing
-//! is decided later by an implementation of [`crate::DmaLatencyModel`];
-//! actual application of the transfer happens through the commit pipeline.
-//!
-//! DMA is not just `memcpy`: a modeled transfer has latency, an
-//! associated issuer, and a completion event. The request type is
-//! decoupled from any synchronous "do it now" entry point so an
-//! asynchronous backend can slot in without rewriting call sites.
+//! Completion timing is decided later by an implementation of
+//! [`crate::DmaLatencyModel`]; the transfer itself is applied through the
+//! commit pipeline.
 
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 
 /// Direction of a modeled DMA transfer.
 ///
-/// `Put` is "guest-private memory out to globally visible memory" --
-/// the SPU `put` shape: local store (or other unit-private region)
-/// to effective address. `Get` is the reverse. The runtime never cares
-/// about host buffers; both endpoints are in the guest model.
-///
-/// Variant order is part of the determinism contract for any code that
-/// derives `Ord` on a containing type, so do not reorder.
+/// Variant order is part of the determinism contract for any containing
+/// type that derives `Ord`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum DmaDirection {
-    /// Move bytes from the source range to the destination range,
-    /// where the destination is the globally-visible side.
+    /// Destination range is globally visible (SPU `put` shape).
     Put = 0,
-    /// Move bytes from the source range to the destination range,
-    /// where the source is the globally-visible side.
+    /// Source range is globally visible (SPU `get` shape).
     Get = 1,
 }
 
 /// An immutable DMA request packet.
 ///
-/// `DmaRequest` is constructed at issue time by the unit that wants the
-/// transfer, then handed to the runtime as data. It carries enough state
-/// to model the transfer deterministically: the two endpoints, which way
-/// the bytes flow, and which unit asked. It does not carry a completion
-/// time -- that is computed by the latency model when the request is
-/// scheduled, so the same request can be replayed under a different
-/// latency policy without rewriting the request itself.
-///
-/// Validation note: source and destination ranges must have the same
-/// length. This is checked at construction
-/// ([`DmaRequest::new`] returns `None` on mismatch) so that downstream
-/// commit-pipeline validation does not have to special-case it.
+/// Invariant: `source.length() == destination.length()`. Enforced by
+/// [`DmaRequest::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DmaRequest {
     direction: DmaDirection,
@@ -60,10 +35,10 @@ pub struct DmaRequest {
 impl DmaRequest {
     /// Construct a `DmaRequest`.
     ///
-    /// Returns `None` if `source.length() != destination.length()`.
-    /// A zero-length transfer is permitted; it is a degenerate but
-    /// well-defined no-op that still flows through the runtime so the
-    /// trace records it.
+    /// # Errors
+    ///
+    /// Returns `None` if `source.length() != destination.length()`. A
+    /// zero-length transfer is permitted.
     #[inline]
     pub const fn new(
         direction: DmaDirection,
@@ -82,36 +57,32 @@ impl DmaRequest {
         })
     }
 
-    /// Direction of the modeled transfer.
+    /// Direction of the transfer.
     #[inline]
     pub const fn direction(self) -> DmaDirection {
         self.direction
     }
 
-    /// Source byte range. The semantics of "source" depend on
-    /// [`DmaRequest::direction`].
+    /// Source range; interpretation depends on [`Self::direction`].
     #[inline]
     pub const fn source(self) -> ByteRange {
         self.source
     }
 
-    /// Destination byte range. The semantics of "destination" depend
-    /// on [`DmaRequest::direction`].
+    /// Destination range; interpretation depends on [`Self::direction`].
     #[inline]
     pub const fn destination(self) -> ByteRange {
         self.destination
     }
 
-    /// The unit that issued this request. Recorded so the runtime can
-    /// route the modeled completion event back to the right waiter and
-    /// so the trace attributes the transfer to the right source.
+    /// Unit that issued the request. Used to route the completion wake
+    /// event back to the right waiter.
     #[inline]
     pub const fn issuer(self) -> UnitId {
         self.issuer
     }
 
-    /// Length of the transfer in bytes. Always equal to both
-    /// `source().length()` and `destination().length()` by construction.
+    /// Length of the transfer in bytes.
     #[inline]
     pub const fn length(self) -> u64 {
         self.source.length()

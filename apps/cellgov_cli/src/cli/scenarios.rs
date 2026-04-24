@@ -1,18 +1,12 @@
 //! Scenario registry: named testkit scenarios, LV2 microtest
-//! fixtures, and the deterministic `report` formatter that the
-//! bare-scenario dispatch path uses.
-//!
-//! Holds the `SCENARIOS` and `MICROTESTS` lists as the single
-//! source of truth for "what the CLI knows about"; the usage
-//! banner and dispatch/validation paths all read from here
-//! instead of keeping parallel copies.
+//! fixtures, and the deterministic `report` formatter used by the
+//! bare-scenario dispatch path.
 
 use cellgov_testkit::fixtures::{self, ScenarioFixture};
 use cellgov_testkit::runner::{run, ScenarioOutcome, ScenarioResult};
 
 use super::exit::load_file_or_die;
 
-/// Supported scenario names and the fixture factories that produce them.
 pub(crate) fn run_scenario(name: &str) -> Option<(&str, ScenarioResult)> {
     let (label, fixture) = match name {
         "fairness" => (
@@ -40,8 +34,8 @@ pub(crate) fn run_scenario(name: &str) -> Option<(&str, ScenarioResult)> {
 }
 
 /// Return a closure that builds a fresh ScenarioFixture for the named
-/// scenario. Used by the compare command which needs to run the
-/// scenario twice for the determinism check.
+/// scenario. `compare` uses this to run the scenario twice for the
+/// determinism check.
 pub(crate) fn scenario_factory(name: &str) -> Option<Box<dyn Fn() -> ScenarioFixture>> {
     let factory: Box<dyn Fn() -> ScenarioFixture> = match name {
         "fairness" | "round_robin_fairness" => {
@@ -65,11 +59,8 @@ pub(crate) const SCENARIOS: &[&str] = &[
 pub(crate) const MICROTESTS: &[&str] =
     &["barrier_wakeup", "mailbox_roundtrip", "atomic_reservation"];
 
-/// Build a ScenarioFixture for an LV2-driven ELF microtest.
-///
-/// Reads PPU and SPU ELF binaries from `tests/micro/<name>/build/`,
-/// then constructs a fixture that boots the PPU, which drives SPU
-/// creation via LV2 syscalls.
+/// Build a ScenarioFixture for an LV2-driven ELF microtest. Reads
+/// PPU and SPU ELF binaries from `tests/micro/<name>/build/`.
 pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_ppu::PpuExecutionUnit;
@@ -134,7 +125,7 @@ pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
         .build()
 }
 
-/// Region specs for each microtest: (symbol_name, [(region_name, offset, size)]).
+/// Region specs for each microtest: `(symbol_name, [(region_name, offset, size)])`.
 pub(crate) fn microtest_region_defs(name: &str) -> (&str, Vec<(&str, u64, u64)>) {
     match name {
         "barrier_wakeup" => ("buf", vec![("spu0_result", 0, 8), ("spu1_result", 16, 8)]),

@@ -9,7 +9,6 @@ use super::compare::load_baselines_from_dir;
 use super::exit::{die, load_file_or_die};
 use super::scenarios::{build_lv2_fixture, microtest_region_defs, scenario_factory, MICROTESTS};
 
-/// Entry point for `cellgov_cli explore ...`.
 pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
     let target = args.get(2).map(String::as_str).unwrap_or_else(|| {
         die(
@@ -41,7 +40,6 @@ pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
     }
 }
 
-/// Run bounded schedule exploration on a testkit scenario.
 fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, format: OutputFormat) {
     let config = ExplorationConfig::default();
     let result = cellgov_explore::explore(|| factory().build_runtime(), &config);
@@ -67,7 +65,6 @@ fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, format: Output
     }
 }
 
-/// Run bounded schedule exploration on an LV2-driven ELF microtest.
 fn run_explore_micro(name: &str, format: OutputFormat) {
     if !MICROTESTS.contains(&name) {
         die(&format!(
@@ -99,7 +96,6 @@ fn run_explore_micro(name: &str, format: OutputFormat) {
     }
 }
 
-/// Run oracle-aware schedule exploration on an LV2-driven microtest.
 fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputFormat) {
     if !MICROTESTS.contains(&name) {
         die(&format!(
@@ -192,8 +188,7 @@ fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputForma
     }
 }
 
-/// Compare captured regions against oracle baselines.
-/// Returns true if all regions match at least one baseline.
+/// Returns true when every captured region matches at least one oracle baseline.
 fn compare_regions_against_oracle(
     captured: &[cellgov_explore::oracle::CapturedRegion],
     baselines: &[cellgov_compare::Observation],

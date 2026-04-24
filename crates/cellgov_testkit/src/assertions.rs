@@ -1,43 +1,20 @@
-//! Assertions: invariants, golden trace checks, state-equivalence checks.
+//! Typed assertion helpers for scenario traces and state hashes.
 //!
-//! Three kinds:
-//!
-//! - invariants: no direct mutation, no partial batches visible, blocked
-//!   units not scheduled, monotonic event ordering, guest time never
-//!   reverses
-//! - golden trace: exact equality for the curated core set,
-//!   prefix/fragment matching for in-flux scenarios
-//! - state equivalence: committed memory, runnable queue, sync state,
-//!   unit status hashes
-//!
-//! All assertions consume structured trace records and hashes. Never
-//! assert on human-readable logs.
-//!
-//! Provides state-equivalence replay assertions
-//! ([`assert_deterministic_replay`]), runtime-invariant assertions
-//! ([`assert_guest_time_monotonic`], [`assert_epoch_strictly_increasing`],
-//! [`assert_finished_units_not_rescheduled`]), and golden-trace
-//! assertions (see [`crate::golden`]).
+//! Assertions consume structured trace records and hashes; never human-readable
+//! logs.
 
 use crate::fixtures::ScenarioFixture;
 use crate::runner::{run, ScenarioResult};
 use cellgov_trace::{TraceReader, TraceRecord};
 
-/// Build a fresh fixture `runs` times via `factory`, run each via the
-/// canonical [`crate::runner::run`] path, and assert that every run
-/// produced byte-equal trace bytes and equal final state hashes
-/// against the first run.
+/// Run `factory` `runs` times and assert every run's trace bytes and final
+/// hashes match the first.
 ///
-/// The same scenario must reproduce identically across repeated runs.
-/// Tests use it as the one-call shorthand for "this scenario is
-/// deterministic".
+/// Returns the first run's [`ScenarioResult`].
 ///
-/// `runs` must be at least 2; `runs == 0` or `runs == 1` panics
-/// because no replay comparison is possible.
+/// # Panics
 ///
-/// Returns the first run's [`ScenarioResult`] so callers can assert
-/// further on the canonical run (steps taken, terminal outcome,
-/// specific trace contents) without rebuilding the fixture.
+/// Panics if `runs < 2` (no comparison possible), or on any cross-run mismatch.
 pub fn assert_deterministic_replay<F>(mut factory: F, runs: usize) -> ScenarioResult
 where
     F: FnMut() -> ScenarioFixture,
@@ -78,17 +55,11 @@ where
     first
 }
 
-/// Assert that guest time in `UnitScheduled` trace records never
-/// decreases across the run.
+/// Assert guest time in `UnitScheduled` records never decreases.
 ///
-/// Guest time must be monotonic across the entire runtime, not
-/// per-unit. A violation
-/// here means the runtime advanced time backward, which would break
-/// ordering guarantees for every downstream consumer (event queue,
-/// commit ordering, replay).
+/// # Panics
 ///
-/// Panics with a descriptive message naming the two records where
-/// the regression occurred.
+/// Panics naming the two records on regression.
 pub fn assert_guest_time_monotonic(trace_bytes: &[u8]) {
     let mut prev_time = None;
     let mut prev_index = 0usize;
@@ -111,14 +82,7 @@ pub fn assert_guest_time_monotonic(trace_bytes: &[u8]) {
     }
 }
 
-/// Assert that epoch values in `CommitApplied` trace records are
-/// strictly increasing across the run.
-///
-/// Epoch advances at commit boundaries. Two commits
-/// must never share the same epoch, and the sequence must never go
-/// backward. A violation here means the commit pipeline skipped or
-/// duplicated an epoch, which would break state-hash checkpoints and
-/// replay comparison.
+/// Assert `CommitApplied.epoch_after` values are strictly increasing.
 pub fn assert_epoch_strictly_increasing(trace_bytes: &[u8]) {
     let mut prev_epoch = None;
     let mut prev_index = 0usize;
@@ -141,21 +105,12 @@ pub fn assert_epoch_strictly_increasing(trace_bytes: &[u8]) {
     }
 }
 
-/// Assert that no `UnitScheduled` record names a unit whose most
-/// recent effective status (as implied by the trace) was `Blocked`
-/// or `Finished`.
+/// Assert no `UnitScheduled` record names a unit whose last `StepCompleted`
+/// yield was `Finished`.
 ///
-/// This is a trace-level proxy for the rule that blocked units must
-/// not be scheduled. It walks `UnitScheduled` and
-/// `StepCompleted` records to track the last observed yield reason
-/// per unit: `Finished` means the unit should never be scheduled
-/// again, and blocking yield reasons (`MailboxAccess`,
-/// `DmaSubmitted`, `DmaWait`, `WaitingSync`) mean the unit should
-/// stay out of the runnable set until explicitly woken. The check is
-/// approximate (the trace does not record explicit wake events as
-/// separate records in this slice), so it only flags the most
-/// obvious violations: scheduling a unit whose last yield was
-/// `Finished`.
+/// Approximate: only catches the most obvious reschedule-after-finish
+/// violations, since the trace does not record explicit wake events as
+/// separate records.
 pub fn assert_finished_units_not_rescheduled(trace_bytes: &[u8]) {
     use cellgov_trace::TracedYieldReason;
     use std::collections::BTreeMap;
@@ -223,8 +178,6 @@ mod tests {
 
     #[test]
     fn writing_unit_scenario_replays_identically() {
-        // A WritingUnit mutates committed memory; the final memory
-        // hash is non-trivial and must still match across runs.
         let result = assert_deterministic_replay(
             || {
                 ScenarioFixture::builder()

@@ -1,15 +1,9 @@
-//! Condition variable table. Owns state for `sys_cond_create` /
-//! `_destroy` / `_wait` / `_signal` / `_signal_all` /
-//! `_signal_to`.
+//! Condition variable table.
 //!
-//! Non-sticky: a `_signal` call with no parked waiter is
-//! observably lost. No pending-signal counter is maintained.
-//!
-//! The two-hop wake protocol (release the associated mutex on
-//! `_wait` entry, re-acquire it on wake) lives in the host
-//! dispatch layer, where both this table and the mutex tables
-//! are in scope. This table only parks and dequeues cond
-//! waiters.
+//! Signals are non-sticky: `_signal` with no parked waiter is
+//! lost. The two-hop release/re-acquire of the associated mutex
+//! lives in the dispatch layer; this table only parks and
+//! dequeues cond waiters.
 
 use crate::dispatch::CondMutexKind;
 use crate::ppu_thread::PpuThreadId;
@@ -38,10 +32,10 @@ impl CondEntry {
         self.mutex_id
     }
 
-    /// Which mutex table the associated mutex lives in. The
-    /// heavy and lightweight mutex tables have distinct id
-    /// spaces, so the wake-side re-acquire needs the kind to
-    /// route correctly.
+    /// Which mutex table holds the associated mutex.
+    ///
+    /// Heavy and lightweight mutex tables have distinct id
+    /// spaces; the wake-side re-acquire needs this to route.
     pub fn mutex_kind(&self) -> CondMutexKind {
         self.mutex_kind
     }
@@ -52,21 +46,16 @@ impl CondEntry {
     }
 }
 
-/// Failure modes of [`CondTable::create_with_id`]. Both variants
-/// indicate a dispatch-layer bug; `debug_assert!` fires before
-/// the error is returned.
+/// Failure modes of [`CondTable::create_with_id`].
 ///
-/// The variants split by severity in release: re-registering an
-/// identical binding leaves the table unchanged (harmless);
-/// re-registering a different binding keeps the existing entry
-/// and discards the caller's new binding, which can silently
-/// route future operations to the wrong cond.
+/// Both variants indicate a dispatch-layer bug and fire a
+/// `debug_assert!`. In release the existing entry is preserved
+/// and the caller's binding is dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CondCreateError {
-    /// Same id, same binding. Release behavior: no-op.
+    /// Same id, same binding.
     RedundantRegistration,
-    /// Same id, different binding. Release behavior: existing
-    /// entry wins, caller's binding dropped.
+    /// Same id, different binding.
     IdCollision {
         /// `mutex_id` of the pre-existing entry.
         existing_mutex_id: u32,
@@ -80,14 +69,12 @@ pub enum CondCreateError {
 pub enum CondEnqueueError {
     /// No cond with this id.
     UnknownId,
-    /// Thread is already parked on this cond. A single PPU
-    /// thread cannot be in two `sys_cond_wait` syscalls at once;
-    /// dispatch-layer bug. `debug_assert!` fires.
+    /// Thread is already parked on this cond; dispatch-layer bug
+    /// (fires `debug_assert!`).
     DuplicateWaiter,
 }
 
-/// Failure modes of [`CondTable::signal_to`]. The PS3
-/// `sys_cond_signal_to` ABI distinguishes these two cases.
+/// Failure modes of [`CondTable::signal_to`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CondSignalToError {
     /// No cond with this id.
@@ -140,14 +127,12 @@ impl CondTable {
         Ok(())
     }
 
-    /// Destroy a cond and return the removed entry, or `None`
-    /// if the id was unknown.
+    /// Remove the entry; `None` if the id was unknown.
     ///
-    /// Caller contract: reject non-empty-waiters before calling.
-    /// `debug_assert!` fires on violation. If bypassed in
-    /// release, the returned entry carries the waiter list and
-    /// callers **must** drain and wake each parked thread;
-    /// skipping this strands them forever.
+    /// Caller contract: reject non-empty-waiters before calling
+    /// (`debug_assert!` fires on violation). If bypassed in
+    /// release, callers **must** drain `entry.waiters()` and wake
+    /// each parked thread; skipping this strands them forever.
     pub fn destroy(&mut self, id: u32) -> Option<CondEntry> {
         let entry = self.entries.remove(&id)?;
         debug_assert!(
@@ -188,26 +173,23 @@ impl CondTable {
     }
 
     /// Pop the head of the waiter list. `None` if the cond is
-    /// unknown or empty (non-sticky: no pending-signal state).
-    /// Used by `sys_cond_signal`.
+    /// unknown or empty.
     pub fn signal_one(&mut self, id: u32) -> Option<PpuThreadId> {
         let entry = self.entries.get_mut(&id)?;
         entry.waiters.dequeue_one()
     }
 
-    /// Drain all waiters in FIFO order. Used by
-    /// `sys_cond_signal_all`.
+    /// Drain all waiters in FIFO order.
     ///
-    /// `None` means the cond is unknown; `Some(empty)` means
-    /// the cond exists but has no waiters. The distinction
-    /// matters at the ABI level.
+    /// `None` vs `Some(empty)` distinguishes unknown-id from
+    /// present-but-empty; the ABI surfaces different errors for
+    /// each.
     pub fn signal_all(&mut self, id: u32) -> Option<Vec<PpuThreadId>> {
         let entry = self.entries.get_mut(&id)?;
         Some(entry.waiters.drain_all().collect())
     }
 
-    /// Remove `target` from the waiter list. See
-    /// [`CondSignalToError`]. Used by `sys_cond_signal_to`.
+    /// Remove `target` from the waiter list.
     pub fn signal_to(&mut self, id: u32, target: PpuThreadId) -> Result<(), CondSignalToError> {
         let entry = self
             .entries
@@ -220,9 +202,7 @@ impl CondTable {
         }
     }
 
-    /// FNV-1a digest for state-hash folding. Walks entries in
-    /// ascending-id order; folds mutex id, mutex-kind tag, and
-    /// the waiter list.
+    /// FNV-1a digest of the table's state.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&(self.entries.len() as u64).to_le_bytes());
@@ -316,7 +296,6 @@ mod tests {
                 existing_mutex_kind: CondMutexKind::LwMutex,
             })
         );
-        // Existing binding preserved; caller's new binding dropped.
         let e = t.lookup(5).unwrap();
         assert_eq!(e.mutex_id(), 1);
         assert_eq!(e.mutex_kind(), CondMutexKind::LwMutex);
@@ -402,8 +381,6 @@ mod tests {
 
     #[test]
     fn signal_one_with_no_waiters_is_lost() {
-        // Non-sticky: lost signals produce no pending state; a
-        // later enqueue still parks the waiter.
         let mut t = CondTable::new();
         t.create_with_id(5, 1, CondMutexKind::LwMutex).unwrap();
         assert_eq!(t.signal_one(5), None);
@@ -528,8 +505,6 @@ mod tests {
 
     #[test]
     fn state_hash_ignores_ephemeral_signal_attempts() {
-        // Pins the non-sticky contract at the hash level: lost
-        // signals leave no trace.
         let mut a = CondTable::new();
         let mut b = CondTable::new();
         a.create_with_id(5, 1, CondMutexKind::LwMutex).unwrap();

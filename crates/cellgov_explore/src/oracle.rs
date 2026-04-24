@@ -1,10 +1,5 @@
-//! Oracle-aware exploration: run schedule exploration and extract
-//! memory regions from each schedule for comparison against external
-//! baselines (e.g., RPCS3).
-//!
-//! `explore_with_regions` is like `explore` but also captures named
-//! memory regions after each run, allowing callers to compare each
-//! schedule's output against oracle baselines.
+//! Exploration wrapper that also captures named memory regions from
+//! each run for comparison against external baselines.
 
 use crate::classify::ExplorationResult;
 use crate::config::ExplorationConfig;
@@ -14,7 +9,7 @@ use crate::util::{build_overrides, classify_iteration, for_each_alternate, run_t
 use cellgov_core::Runtime;
 use cellgov_mem::{ByteRange, GuestAddr};
 
-/// Specification for a memory region to extract after each run.
+/// One named memory region to capture after each run.
 #[derive(Debug, Clone)]
 pub struct MemoryRegionSpec {
     /// Human-readable region name.
@@ -25,12 +20,12 @@ pub struct MemoryRegionSpec {
     pub size: u64,
 }
 
-/// Captured memory region from a single run.
+/// Bytes captured from one region of one run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapturedRegion {
     /// Region name (from the spec).
     pub name: String,
-    /// Raw bytes extracted from committed memory.
+    /// Raw bytes from committed memory.
     pub data: Vec<u8>,
 }
 
@@ -39,28 +34,27 @@ pub struct CapturedRegion {
 pub struct ScheduleSnapshot {
     /// Final committed-memory hash.
     pub memory_hash: u64,
-    /// Extracted memory regions.
+    /// Captured regions, in spec order.
     pub regions: Vec<CapturedRegion>,
 }
 
 /// Result of an oracle-aware exploration run.
+///
+/// `alternates` is parallel to `exploration.schedules`.
 #[derive(Debug, Clone)]
 pub struct OracleExplorationResult {
-    /// The core exploration result (classification, schedules, pruning).
+    /// Core exploration verdict and per-alternate records.
     pub exploration: ExplorationResult,
-    /// Memory snapshot from the baseline (default-schedule) run.
+    /// Snapshot from the baseline run.
     pub baseline: ScheduleSnapshot,
-    /// Memory snapshots from each alternate schedule, parallel to
-    /// `exploration.schedules`.
+    /// Snapshot from each non-pruned alternate, in exploration order.
     pub alternates: Vec<ScheduleSnapshot>,
 }
 
-/// Run bounded schedule exploration and extract memory regions from
-/// each schedule.
+/// Like [`crate::explore`] but also captures named regions from every
+/// run.
 ///
-/// Like `explore`, but also captures the named memory regions after
-/// each run for downstream oracle comparison. Returns `None` if the
-/// baseline has no branching points.
+/// Returns `None` if the baseline has no branching points.
 pub fn explore_with_regions<F>(
     mut make_runtime: F,
     config: &ExplorationConfig,
@@ -105,7 +99,6 @@ where
     })
 }
 
-/// Extract named memory regions from committed guest memory.
 fn extract_regions(
     memory: &cellgov_mem::GuestMemory,
     specs: &[MemoryRegionSpec],
@@ -178,7 +171,6 @@ mod tests {
         );
 
         let r = result.expect("should have branching points");
-        // Baseline regions should have the written data.
         assert_eq!(r.baseline.regions.len(), 2);
         assert_eq!(r.baseline.regions[0].name, "region_a");
         assert_eq!(r.baseline.regions[0].data, vec![0xAA; 4]);
@@ -225,7 +217,6 @@ mod tests {
 
         let r = result.expect("should have branching points");
         assert_eq!(r.exploration.outcome, OutcomeClass::ScheduleSensitive);
-        // At least one alternate should differ from baseline.
         let baseline_data = &r.baseline.regions[0].data;
         let any_different = r
             .alternates

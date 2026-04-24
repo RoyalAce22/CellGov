@@ -1,7 +1,12 @@
 //! Immutable TLS template captured from the game's PT_TLS at load time.
 
 /// Immutable TLS template captured from the game's PT_TLS
-/// program header at ELF load time.
+/// program header.
+///
+/// Fields correspond to ELF PT_TLS: `initial_bytes` is the
+/// `.tdata` payload (filesz), `mem_size` is the full per-thread
+/// footprint (memsz) including the `.tbss` zero tail, and
+/// `vaddr` is where the primary thread's TLS landed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TlsTemplate {
     initial_bytes: Vec<u8>,
@@ -16,18 +21,12 @@ impl TlsTemplate {
         Self::default()
     }
 
-    /// Construct a template from captured ELF PT_TLS data.
-    ///
-    /// `initial_bytes` is the `.tdata` payload (filesz);
-    /// `mem_size` is the total per-thread size including the
-    /// `.tbss` zero-init tail (memsz); `align` is the segment
-    /// alignment; `vaddr` is where the primary thread's TLS
-    /// landed.
+    /// Construct a template from captured PT_TLS data.
     ///
     /// # Panics
     /// If `initial_bytes.len() > mem_size`. A malformed PT_TLS
     /// is a loader input error; silently truncating would mask
-    /// it behind `instantiate`'s `.min(mem)` clamp.
+    /// it behind `instantiate`'s clamp.
     pub fn new(initial_bytes: Vec<u8>, mem_size: u64, align: u64, vaddr: u64) -> Self {
         assert!(
             initial_bytes.len() as u64 <= mem_size,
@@ -43,8 +42,8 @@ impl TlsTemplate {
         }
     }
 
-    /// Initialised bytes copied into every new thread's TLS
-    /// block. Length is `<= mem_size`.
+    /// `.tdata` payload copied into each new thread's TLS block;
+    /// length is `<= mem_size`.
     pub fn initial_bytes(&self) -> &[u8] {
         &self.initial_bytes
     }
@@ -59,8 +58,7 @@ impl TlsTemplate {
         self.align
     }
 
-    /// Guest virtual address where the primary thread's TLS was
-    /// placed by the loader.
+    /// Guest virtual address of the primary thread's TLS.
     pub fn vaddr(&self) -> u64 {
         self.vaddr
     }
@@ -70,7 +68,7 @@ impl TlsTemplate {
         self.mem_size == 0 && self.initial_bytes.is_empty()
     }
 
-    /// FNV-1a contribution used by `Lv2Host::state_hash`.
+    /// FNV-1a contribution to `Lv2Host::state_hash`.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&self.mem_size.to_le_bytes());
@@ -80,12 +78,13 @@ impl TlsTemplate {
         hasher.finish()
     }
 
-    /// Instantiate a fresh per-thread TLS block.
+    /// Instantiate a fresh per-thread TLS block: `initial_bytes`
+    /// at the front, zero tail out to `mem_size`.
     ///
     /// # Panics
     /// If `mem_size` exceeds `usize::MAX` (possible on 32-bit
-    /// hosts for a 64-bit ELF memsz). `as usize` would truncate
-    /// silently and return a too-small buffer.
+    /// hosts for a 64-bit ELF memsz); an `as usize` truncation
+    /// would return a too-small buffer.
     pub fn instantiate(&self) -> Vec<u8> {
         let mem = usize::try_from(self.mem_size).expect("TLS memsz exceeds host usize");
         let init = self.initial_bytes.len().min(mem);

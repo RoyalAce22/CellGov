@@ -1,4 +1,4 @@
-//! Human-readable and JSON report formatting for exploration results.
+//! ASCII and JSON formatters for [`ExplorationResult`].
 
 use crate::classify::{ExplorationResult, OutcomeClass};
 

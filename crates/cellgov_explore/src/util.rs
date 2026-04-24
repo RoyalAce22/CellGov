@@ -1,4 +1,4 @@
-//! Shared utilities for the exploration engine.
+//! Shared helpers used by the exploration entry points.
 
 use crate::classify::{ExplorationResult, OutcomeClass, ScheduleRecord};
 use crate::config::ExplorationConfig;
@@ -6,8 +6,8 @@ use crate::decision::DecisionLog;
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;
 
-/// Run a runtime to stall or max-steps, pairing each `step` with an
-/// immediate `commit_step`.
+/// Drive `rt` until no unit is runnable or `max_steps` is reached,
+/// committing each step immediately.
 pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) {
     let mut steps = 0;
     loop {
@@ -27,30 +27,31 @@ pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) {
     }
 }
 
-/// Build a PrescribedScheduler override list: `None` for all steps
-/// before `branch_step`, then `Some(choice)` at the branch step.
+/// Build an override list that defers steps `0..branch_step` to the
+/// fallback and forces `choice` at `branch_step`.
 pub fn build_overrides(branch_step: usize, choice: UnitId) -> Vec<Option<UnitId>> {
     let mut v = vec![None; branch_step];
     v.push(Some(choice));
     v
 }
 
-/// Result of iterating over branching-point alternates.
+/// Tally of a pass over branching-point alternates.
 pub struct AlternateIteration {
     /// Per-schedule outcomes.
     pub schedules: Vec<ScheduleRecord>,
-    /// True if the exploration hit the max-schedule or max-step bound.
+    /// True if the `max_schedules` bound was hit.
     pub bounds_hit: bool,
     /// True if at least one alternate produced a different memory hash.
     pub found_divergence: bool,
-    /// Number of alternates skipped by dependency pruning.
+    /// Alternates skipped by dependency pruning.
     pub schedules_pruned: usize,
 }
 
-/// Iterate over branching points in a decision log, calling
-/// `process` for each non-pruned alternate. `process` receives
-/// (branch_step, alternate_unit_id) and returns the memory hash
-/// for that alternate schedule.
+/// Iterate each non-pruned alternate at every branching point.
+///
+/// `process` is called with `(branch_step, alternate_unit)` and returns
+/// that alternate's final memory hash. Iteration stops early when the
+/// `max_schedules` bound is reached.
 pub fn for_each_alternate<F>(
     log: &DecisionLog,
     config: &ExplorationConfig,
@@ -77,7 +78,6 @@ where
                 break 'outer;
             }
 
-            // Dependency pruning via aggregate footprints.
             if let Some(alt_agg) = log.aggregate_footprint(alt) {
                 if let Some(def_agg) = log.aggregate_footprint(default_choice) {
                     if !def_agg.conflicts(&alt_agg) {
@@ -107,7 +107,8 @@ where
     }
 }
 
-/// Classify an `AlternateIteration` into an `ExplorationResult`.
+/// Collapse an [`AlternateIteration`] tally into an
+/// [`ExplorationResult`].
 pub fn classify_iteration(
     iter: AlternateIteration,
     baseline_hash: u64,

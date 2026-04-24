@@ -1,11 +1,6 @@
-//! Decrypted PS3 PRX (SPRX) module parser and loader.
-//!
-//! Parses decrypted firmware PRX files (ELF64 type 0xFFA4) produced by
-//! RPCS3's `--decrypt` command, then loads them into guest memory with
-//! relocations applied.
-//!
-//! This handles the firmware side of PRX loading. The game-side import
-//! table parsing lives in `prx.rs`.
+//! Parser and loader for decrypted PS3 firmware PRX (ELF64 type
+//! 0xFFA4). Handles the firmware side of PRX loading; game-side
+//! import parsing lives in [`crate::prx`].
 
 use crate::loader;
 use std::collections::BTreeMap;
@@ -113,11 +108,9 @@ pub struct PrxOpd {
 
 /// A single ELF64 RELA relocation entry.
 ///
-/// In PS3 PRX format, the `sym` field encodes two segment indices:
-///   - `sym & 0xFF` = target segment index (which segment the offset
-///     is relative to: 0=text, 1=data)
-///   - `(sym >> 8) & 0xFF` = value segment index (which segment the
-///     addend is relative to: 0=text, 1=data)
+/// The PS3 PRX `sym` field packs two segment indices:
+/// `sym & 0xFF` is the target segment (0 = text, 1 = data) and
+/// `(sym >> 8) & 0xFF` is the value segment the addend is relative to.
 #[derive(Debug, Clone, Copy)]
 pub struct PrxRelocation {
     /// Offset within the target segment to patch.
@@ -151,12 +144,11 @@ pub enum PrxParseError {
 
 // -- Parsing --
 
-/// Parse a decrypted PRX ELF file into its structural components.
+/// Parse a decrypted PRX (ELF64 type 0xFFA4) into its components.
 ///
-/// The input must be a decrypted ELF64 file (type 0xFFA4), not an
-/// SCE-encrypted SELF. Use RPCS3 `--decrypt` to produce these.
+/// Input must already be decrypted (e.g. via RPCS3 `--decrypt`), not
+/// a raw SCE-encrypted SELF.
 pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
-    // Validate ELF header.
     if data.len() < ELF_HEADER_SIZE {
         return Err(PrxParseError::TooSmall);
     }
@@ -175,7 +167,6 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     let phentsize = loader::read_u16(data, 54) as usize;
     let phnum = loader::read_u16(data, 56) as usize;
 
-    // Collect PT_LOAD segments and locate the relocation segment.
     let mut loads: Vec<RawPhdr> = Vec::new();
     let mut reloc_phdr: Option<RawPhdr> = None;
 
@@ -211,7 +202,6 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
         return Err(PrxParseError::MissingSegments);
     }
 
-    // Build segment map for vaddr-to-file translation.
     let seg_map: Vec<SegEntry> = loads
         .iter()
         .filter(|l| l.p_filesz > 0)
@@ -222,22 +212,18 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
         })
         .collect();
 
-    // Extract segment data.
     let text = extract_segment(data, &loads[0])?;
     let data_seg = extract_segment(data, &loads[1])?;
 
-    // Locate module_info via PT_LOAD[0].paddr (= file offset of module_info).
+    // PT_LOAD[0].paddr doubles as the file offset of module_info.
     let mi_file_off = loads[0].p_paddr as usize;
     let (name, toc, exports_range, _imports_range) = parse_module_info(data, mi_file_off)?;
 
-    // Parse export table.
     let exports = parse_export_table(data, &seg_map, exports_range)?;
 
-    // Find module_start/module_stop from the system export entry.
     let module_start = find_system_opd(data, &seg_map, &exports_range, NID_MODULE_START)?;
     let module_stop = find_system_opd(data, &seg_map, &exports_range, NID_MODULE_STOP)?;
 
-    // Parse relocations.
     let relocations = match reloc_phdr {
         Some(rp) => parse_relocations(data, &rp)?,
         None => Vec::new(),
@@ -295,17 +281,11 @@ fn extract_segment(data: &[u8], phdr: &RawPhdr) -> Result<PrxSegment, PrxParseEr
     })
 }
 
-/// Parse sys_prx_module_info_t at the given file offset.
+/// Parse `sys_prx_module_info_t` at `file_off`.
 ///
-/// Layout:
-///   +0:  u16 attributes
-///   +2:  `u8[2]` version
-///   +4:  `char[28]` name
-///   +32: u32 toc
-///   +36: u32 exports_start (vaddr)
-///   +40: u32 exports_end (vaddr)
-///   +44: u32 imports_start (vaddr)
-///   +48: u32 imports_end (vaddr)
+/// Layout: `+0` u16 attributes, `+2` u8[2] version, `+4` char[28] name,
+/// `+32` u32 toc, `+36/+40` u32 exports_{start,end} (vaddr),
+/// `+44/+48` u32 imports_{start,end} (vaddr).
 fn parse_module_info(
     data: &[u8],
     file_off: usize,
@@ -392,7 +372,6 @@ fn parse_export_table(
         let nid_table_ptr = loader::read_u32(data, pos + 20);
         let stub_table_ptr = loader::read_u32(data, pos + 24);
 
-        // Skip system export entries (attrs & 0x8000).
         if (attrs & EXPORT_ATTR_SYSTEM) == 0 {
             let lib_name = if lib_name_ptr != 0 {
                 read_cstring(data, seg_map, lib_name_ptr as usize)
@@ -424,8 +403,8 @@ fn parse_export_table(
     Ok(libs)
 }
 
-/// Read the export NID and stub tables and return the split list of
-/// exported functions and variables as `(functions, variables)`.
+/// Read the NID and stub tables into `(functions, variables)`;
+/// entries at `[0, num_func)` are functions, the remainder variables.
 fn read_export_entries(
     data: &[u8],
     seg_map: &[SegEntry],
@@ -511,7 +490,6 @@ fn find_system_opd(
                     }
                     let nid = loader::read_u32(data, n_off);
                     if nid == target_nid {
-                        // Read the OPD at the stub vaddr.
                         let opd_vaddr = loader::read_u32(data, stub_foff + i * 4) as usize;
                         let opd_foff = v2f(seg_map, opd_vaddr).ok_or(PrxParseError::OutOfBounds)?;
                         if opd_foff + 8 > data.len() {
@@ -544,7 +522,6 @@ fn parse_relocations(data: &[u8], phdr: &RawPhdr) -> Result<Vec<PrxRelocation>, 
         return Err(PrxParseError::OutOfBounds);
     }
 
-    // ELF64 RELA: 24 bytes per entry.
     const RELA_SIZE: usize = 24;
     let count = size / RELA_SIZE;
     let mut relocs = Vec::with_capacity(count);
@@ -603,14 +580,12 @@ pub struct LoadedPrx {
     /// End of data segment in guest memory.
     pub data_end: u64,
     /// Exported function NIDs mapped to relocated OPD guest addresses.
-    /// The OPD itself lives in guest memory and contains (code_addr, toc).
     pub exports: BTreeMap<u32, u64>,
-    /// module_start entry point, ready to use: (code_addr, toc).
-    /// Computed from the parsed module_start OPD + base address.
-    /// Not all OPD fields are relocated by the standard relocation table,
-    /// so this is computed directly rather than read from guest memory.
+    /// module_start entry point, computed from base + parsed OPD. Not
+    /// every OPD field has a relocation entry, so this is derived
+    /// rather than read back from guest memory.
     pub module_start: Option<LoadedOpd>,
-    /// module_stop entry point: (code_addr, toc).
+    /// module_stop entry point.
     pub module_stop: Option<LoadedOpd>,
     /// Number of relocations applied.
     pub relocs_applied: usize,
@@ -641,13 +616,8 @@ pub enum PrxLoadError {
     UnsupportedReloc(u32),
 }
 
-/// Load a parsed PRX into guest memory at `base` and apply relocations.
-///
-/// Copies text and data segments, applies all relocation entries, and
-/// returns a `LoadedPrx` with the relocated export map. Call this during
-/// initialization, before the runtime step loop begins.
-///
-/// `base` must be page-aligned and above the game's own memory footprint.
+/// Load a parsed PRX at `base` and apply relocations. `base` must be
+/// page-aligned and above the game's own memory footprint.
 pub fn load_prx(
     prx: &ParsedPrx,
     memory: &mut cellgov_mem::GuestMemory,
@@ -655,18 +625,13 @@ pub fn load_prx(
 ) -> Result<LoadedPrx, PrxLoadError> {
     let mem_size = memory.size();
 
-    // Write text segment.
     write_segment(memory, base, &prx.text, mem_size)?;
-
-    // Write data segment.
     write_segment(memory, base, &prx.data, mem_size)?;
 
-    // Apply relocations.
-    // Segment vaddr table indexed by segment number (0=text, 1=data).
+    // seg_vaddrs indexed by segment number: 0 = text, 1 = data.
     let seg_vaddrs = [prx.text.vaddr, prx.data.vaddr];
     let relocs_applied = apply_relocations(memory, base, &seg_vaddrs, &prx.relocations)?;
 
-    // Build relocated export map: NID -> (base + unrelocated OPD vaddr).
     let mut exports = BTreeMap::new();
     for lib in &prx.exports {
         for func in &lib.functions {
@@ -674,10 +639,9 @@ pub fn load_prx(
         }
     }
 
-    // Compute relocated module_start/stop entry points.
-    // The OPD code field is text-relative; toc is from module_info.
-    // Not all OPD fields have relocation entries (code field often does
-    // not), so we compute these from the parsed values + base.
+    // Derive module_start/stop from parsed OPD + base: the code field
+    // is often not covered by the reloc table, so reading it back from
+    // guest memory after relocation is unreliable.
     let module_toc = base + prx.toc as u64;
     let module_start = prx.module_start.map(|opd| LoadedOpd {
         code: base + prx.text.vaddr + opd.code as u64,
@@ -703,7 +667,6 @@ pub fn load_prx(
     })
 }
 
-/// Write a segment into guest memory at base + segment.vaddr.
 fn write_segment(
     memory: &mut cellgov_mem::GuestMemory,
     base: u64,
@@ -720,7 +683,6 @@ fn write_segment(
         });
     }
 
-    // Write file data.
     if !seg.data.is_empty() {
         let range =
             cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(guest_addr), seg.filesz);
@@ -731,7 +693,6 @@ fn write_segment(
         }
     }
 
-    // Zero-fill BSS (memsz > filesz).
     let bss_size = seg.memsz.saturating_sub(seg.filesz);
     if bss_size > 0 {
         let bss_addr = guest_addr + seg.filesz;
@@ -747,13 +708,7 @@ fn write_segment(
     Ok(())
 }
 
-/// Apply all relocations to guest memory.
-///
-/// The `sym` field encodes two segment indices:
-///   - `sym & 0xFF` = target segment (offset is relative to this)
-///   - `(sym >> 8) & 0xFF` = value segment (addend is relative to this)
-///
-/// `seg_vaddrs` maps segment index to unrelocated vaddr: [text_vaddr, data_vaddr].
+/// Apply every relocation. `seg_vaddrs` is `[text_vaddr, data_vaddr]`.
 fn apply_relocations(
     memory: &mut cellgov_mem::GuestMemory,
     base: u64,
@@ -782,7 +737,7 @@ fn apply_relocations(
                 write_u16(memory, target, ((value >> 16) & 0xFFFF) as u16)?;
             }
             R_PPC64_ADDR16_HA => {
-                // Adjusted high: compensate for sign extension of low 16.
+                // +0x8000 before shift: cancels sign extension of the paired LO.
                 let ha = ((value.wrapping_add(0x8000)) >> 16) as u16;
                 write_u16(memory, target, ha)?;
             }
@@ -823,69 +778,54 @@ mod tests {
     use super::*;
 
     /// Build a minimal PRX ELF64 binary for testing.
+    ///
+    /// File layout: ELF header at 0, three 56-byte program headers at
+    /// 0x40, text segment at 0x0F0 (vaddr 0x0), data segment at 0x1F0
+    /// (vaddr 0x100, holds module_info, export tables, OPDs),
+    /// relocation segment at 0x3F0.
     fn make_test_prx() -> Vec<u8> {
-        // Layout:
-        //   0x000: ELF header (64 bytes)
-        //   0x040: 3 program headers (3 * 56 = 168 bytes, ends at 0x0E8)
-        //   0x0F0: text segment data (module code placeholder)
-        //   0x1F0: data segment (module_info + export tables + OPDs)
-        //   0x3F0: relocation segment
         let mut buf = vec![0u8; 0x500];
 
-        // -- ELF header --
         buf[0..4].copy_from_slice(&ELF_MAGIC);
-        buf[4] = 2; // EI_CLASS = 64-bit
-        buf[5] = 2; // EI_DATA = big-endian
-        buf[16..18].copy_from_slice(&ET_PRX.to_be_bytes()); // e_type
-        buf[32..40].copy_from_slice(&64u64.to_be_bytes()); // e_phoff
-        buf[54..56].copy_from_slice(&56u16.to_be_bytes()); // e_phentsize
-        buf[56..58].copy_from_slice(&3u16.to_be_bytes()); // e_phnum
+        buf[4] = 2;
+        buf[5] = 2;
+        buf[16..18].copy_from_slice(&ET_PRX.to_be_bytes());
+        buf[32..40].copy_from_slice(&64u64.to_be_bytes());
+        buf[54..56].copy_from_slice(&56u16.to_be_bytes());
+        buf[56..58].copy_from_slice(&3u16.to_be_bytes());
 
-        // -- Program headers --
         let phdr_base = 64;
 
-        // PT_LOAD[0] (text): offset=0x0F0, vaddr=0x0, paddr=points to module_info
+        // PT_LOAD[0] text. paddr points to module_info inside the data segment.
         let ph0 = phdr_base;
         buf[ph0..ph0 + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
-        buf[ph0 + 8..ph0 + 16].copy_from_slice(&0xF0u64.to_be_bytes()); // p_offset
-        buf[ph0 + 16..ph0 + 24].copy_from_slice(&0u64.to_be_bytes()); // p_vaddr
-                                                                      // p_paddr = file offset of module_info = 0x1F0 (in data segment)
+        buf[ph0 + 8..ph0 + 16].copy_from_slice(&0xF0u64.to_be_bytes());
+        buf[ph0 + 16..ph0 + 24].copy_from_slice(&0u64.to_be_bytes());
         buf[ph0 + 24..ph0 + 32].copy_from_slice(&0x1F0u64.to_be_bytes());
-        buf[ph0 + 32..ph0 + 40].copy_from_slice(&0x100u64.to_be_bytes()); // p_filesz
-        buf[ph0 + 40..ph0 + 48].copy_from_slice(&0x100u64.to_be_bytes()); // p_memsz
+        buf[ph0 + 32..ph0 + 40].copy_from_slice(&0x100u64.to_be_bytes());
+        buf[ph0 + 40..ph0 + 48].copy_from_slice(&0x100u64.to_be_bytes());
 
-        // PT_LOAD[1] (data): offset=0x1F0, vaddr=0x100
+        // PT_LOAD[1] data.
         let ph1 = phdr_base + 56;
         buf[ph1..ph1 + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
-        buf[ph1 + 8..ph1 + 16].copy_from_slice(&0x1F0u64.to_be_bytes()); // p_offset
-        buf[ph1 + 16..ph1 + 24].copy_from_slice(&0x100u64.to_be_bytes()); // p_vaddr
-        buf[ph1 + 24..ph1 + 32].copy_from_slice(&0u64.to_be_bytes()); // p_paddr
-        buf[ph1 + 32..ph1 + 40].copy_from_slice(&0x200u64.to_be_bytes()); // p_filesz
-        buf[ph1 + 40..ph1 + 48].copy_from_slice(&0x200u64.to_be_bytes()); // p_memsz
+        buf[ph1 + 8..ph1 + 16].copy_from_slice(&0x1F0u64.to_be_bytes());
+        buf[ph1 + 16..ph1 + 24].copy_from_slice(&0x100u64.to_be_bytes());
+        buf[ph1 + 24..ph1 + 32].copy_from_slice(&0u64.to_be_bytes());
+        buf[ph1 + 32..ph1 + 40].copy_from_slice(&0x200u64.to_be_bytes());
+        buf[ph1 + 40..ph1 + 48].copy_from_slice(&0x200u64.to_be_bytes());
 
-        // PT_PRX_RELOC: offset=0x3F0
+        // PT_PRX_RELOC (3 entries).
         let ph2 = phdr_base + 112;
         buf[ph2..ph2 + 4].copy_from_slice(&PT_PRX_RELOC.to_be_bytes());
-        buf[ph2 + 8..ph2 + 16].copy_from_slice(&0x3F0u64.to_be_bytes()); // p_offset
-        buf[ph2 + 32..ph2 + 40].copy_from_slice(&72u64.to_be_bytes()); // p_filesz (3 entries)
+        buf[ph2 + 8..ph2 + 16].copy_from_slice(&0x3F0u64.to_be_bytes());
+        buf[ph2 + 32..ph2 + 40].copy_from_slice(&72u64.to_be_bytes());
 
-        // -- Text segment (0x0F0..0x1F0) --
-        // Fill with a recognizable pattern (nop = 0x60000000).
+        // Fill text with nops.
         for i in (0x0F0..0x1F0).step_by(4) {
             buf[i..i + 4].copy_from_slice(&0x6000_0000u32.to_be_bytes());
         }
 
-        // -- Data segment (0x1F0..0x3F0, vaddr 0x100..0x300) --
-
-        // module_info at file offset 0x1F0 (= paddr of PT_LOAD[0]):
-        //   +0:  u16 attrs = 0x0006
-        //   +2:  u8[2] version = 1.1
-        //   +4:  char[28] name = "testmod"
-        //   +32: u32 toc = 0x200
-        //   +36: u32 exports_start = 0x130 (vaddr)
-        //   +40: u32 exports_end = 0x130 + 56 = 0x168 (2 entries)
-        //   +44: u32 imports_start = 0x168
-        //   +48: u32 imports_end = 0x168
+        // module_info at file offset 0x1F0 (= PT_LOAD[0].paddr).
         let mi = 0x1F0;
         buf[mi..mi + 2].copy_from_slice(&0x0006u16.to_be_bytes());
         buf[mi + 2] = 1;
@@ -897,90 +837,77 @@ mod tests {
         buf[mi + 44..mi + 48].copy_from_slice(&0x168u32.to_be_bytes()); // imports_start
         buf[mi + 48..mi + 52].copy_from_slice(&0x168u32.to_be_bytes()); // imports_end
 
-        // Export table at vaddr 0x130 (file offset = 0x1F0 + (0x130 - 0x100) = 0x220):
-        // Entry 0: system export (attrs=0x8000, 2 funcs, 1 var)
+        // System export entry at vaddr 0x130 (file 0x220): 2 funcs + 1 var.
         let exp0 = 0x220;
-        buf[exp0] = 0x1C; // size = 28
-        buf[exp0 + 4..exp0 + 6].copy_from_slice(&0x8000u16.to_be_bytes()); // attrs
-        buf[exp0 + 6..exp0 + 8].copy_from_slice(&2u16.to_be_bytes()); // num_func
-        buf[exp0 + 8..exp0 + 10].copy_from_slice(&1u16.to_be_bytes()); // num_var
-                                                                       // nid_table at vaddr 0x1A0 (file = 0x290)
+        buf[exp0] = 0x1C;
+        buf[exp0 + 4..exp0 + 6].copy_from_slice(&0x8000u16.to_be_bytes());
+        buf[exp0 + 6..exp0 + 8].copy_from_slice(&2u16.to_be_bytes());
+        buf[exp0 + 8..exp0 + 10].copy_from_slice(&1u16.to_be_bytes());
         buf[exp0 + 20..exp0 + 24].copy_from_slice(&0x1A0u32.to_be_bytes());
-        // stub_table at vaddr 0x1B0 (file = 0x2A0)
         buf[exp0 + 24..exp0 + 28].copy_from_slice(&0x1B0u32.to_be_bytes());
 
-        // Entry 1: user export (attrs=0x0001, 3 funcs, 0 vars)
+        // User export entry at vaddr 0x14C (file 0x23C): 3 funcs.
         let exp1 = exp0 + 28;
-        buf[exp1] = 0x1C; // size = 28
-        buf[exp1 + 4..exp1 + 6].copy_from_slice(&0x0001u16.to_be_bytes()); // attrs
-        buf[exp1 + 6..exp1 + 8].copy_from_slice(&3u16.to_be_bytes()); // num_func
-                                                                      // lib name at vaddr 0x1C0 (file = 0x2B0)
+        buf[exp1] = 0x1C;
+        buf[exp1 + 4..exp1 + 6].copy_from_slice(&0x0001u16.to_be_bytes());
+        buf[exp1 + 6..exp1 + 8].copy_from_slice(&3u16.to_be_bytes());
         buf[exp1 + 16..exp1 + 20].copy_from_slice(&0x1C0u32.to_be_bytes());
-        // nid_table at vaddr 0x1D0 (file = 0x2C0)
         buf[exp1 + 20..exp1 + 24].copy_from_slice(&0x1D0u32.to_be_bytes());
-        // stub_table at vaddr 0x1E0 (file = 0x2D0)
         buf[exp1 + 24..exp1 + 28].copy_from_slice(&0x1E0u32.to_be_bytes());
 
-        // System export NID table at file 0x290 (vaddr 0x1A0):
-        //   NID_MODULE_START, NID_MODULE_STOP, some_var_nid
+        // System NID table (vaddr 0x1A0, file 0x290): module_start,
+        // module_stop, and a variable NID.
         let nid0 = 0x290;
         buf[nid0..nid0 + 4].copy_from_slice(&NID_MODULE_START.to_be_bytes());
         buf[nid0 + 4..nid0 + 8].copy_from_slice(&NID_MODULE_STOP.to_be_bytes());
-        buf[nid0 + 8..nid0 + 12].copy_from_slice(&0xD7F43016u32.to_be_bytes()); // module_info var
+        buf[nid0 + 8..nid0 + 12].copy_from_slice(&0xD7F43016u32.to_be_bytes());
 
-        // System export stub table at file 0x2A0 (vaddr 0x1B0):
-        //   OPD pointers (vaddrs pointing to OPDs in data segment)
+        // System stub table (vaddr 0x1B0, file 0x2A0): OPD vaddrs.
         let stub0 = 0x2A0;
-        buf[stub0..stub0 + 4].copy_from_slice(&0x1F0u32.to_be_bytes()); // module_start OPD vaddr
-        buf[stub0 + 4..stub0 + 8].copy_from_slice(&0x1F8u32.to_be_bytes()); // module_stop OPD
+        buf[stub0..stub0 + 4].copy_from_slice(&0x1F0u32.to_be_bytes());
+        buf[stub0 + 4..stub0 + 8].copy_from_slice(&0x1F8u32.to_be_bytes());
 
-        // OPDs at vaddr 0x1F0 (file = 0x2E0) and 0x1F8 (file = 0x2E8):
+        // OPDs at vaddr 0x1F0 / 0x1F8 (file 0x2E0 / 0x2E8).
         let opd_base = 0x2E0;
-        // module_start OPD: code=0x10, toc=0x200
         buf[opd_base..opd_base + 4].copy_from_slice(&0x10u32.to_be_bytes());
         buf[opd_base + 4..opd_base + 8].copy_from_slice(&0x200u32.to_be_bytes());
-        // module_stop OPD: code=0x20, toc=0x200
         buf[opd_base + 8..opd_base + 12].copy_from_slice(&0x20u32.to_be_bytes());
         buf[opd_base + 12..opd_base + 16].copy_from_slice(&0x200u32.to_be_bytes());
 
-        // Library name "testlib" at file 0x2B0 (vaddr 0x1C0)
+        // Library name "testlib" (vaddr 0x1C0, file 0x2B0).
         buf[0x2B0..0x2B7].copy_from_slice(b"testlib");
 
-        // User export NID table at file 0x2C0 (vaddr 0x1D0):
+        // User NID table (vaddr 0x1D0, file 0x2C0).
         let nid1 = 0x2C0;
         buf[nid1..nid1 + 4].copy_from_slice(&0xAAAAAAAAu32.to_be_bytes());
         buf[nid1 + 4..nid1 + 8].copy_from_slice(&0xBBBBBBBBu32.to_be_bytes());
         buf[nid1 + 8..nid1 + 12].copy_from_slice(&0xCCCCCCCCu32.to_be_bytes());
 
-        // User export stub table at file 0x2D0 (vaddr 0x1E0):
+        // User stub table (vaddr 0x1E0, file 0x2D0).
         let stub1 = 0x2D0;
         buf[stub1..stub1 + 4].copy_from_slice(&0x40u32.to_be_bytes());
         buf[stub1 + 4..stub1 + 8].copy_from_slice(&0x50u32.to_be_bytes());
         buf[stub1 + 8..stub1 + 12].copy_from_slice(&0x60u32.to_be_bytes());
 
-        // -- Relocation segment (0x3F0) --
-        // 3 RELA entries (24 bytes each = 72 bytes total)
+        // Three RELA entries (24 bytes each) at 0x3F0.
         let rel0 = 0x3F0;
-        // Entry 0: R_PPC64_ADDR32, sym=0 (text->text), offset 0x50, addend 0x80
+        // ADDR32 text->text at offset 0x50, addend 0x80.
         buf[rel0..rel0 + 8].copy_from_slice(&0x50u64.to_be_bytes());
-        let r_info0: u64 = R_PPC64_ADDR32 as u64; // sym=0x0000
+        let r_info0: u64 = R_PPC64_ADDR32 as u64;
         buf[rel0 + 8..rel0 + 16].copy_from_slice(&r_info0.to_be_bytes());
         buf[rel0 + 16..rel0 + 24].copy_from_slice(&0x80i64.to_be_bytes());
 
-        // Entry 1: R_PPC64_ADDR16_HA, sym=0 (text->text), offset 0x54, addend 0x200
+        // ADDR16_HA text->text at offset 0x54, addend 0x200.
         let rel1 = rel0 + 24;
         buf[rel1..rel1 + 8].copy_from_slice(&0x54u64.to_be_bytes());
-        let r_info1: u64 = R_PPC64_ADDR16_HA as u64; // sym=0x0000
+        let r_info1: u64 = R_PPC64_ADDR16_HA as u64;
         buf[rel1 + 8..rel1 + 16].copy_from_slice(&r_info1.to_be_bytes());
         buf[rel1 + 16..rel1 + 24].copy_from_slice(&0x200i64.to_be_bytes());
 
-        // Entry 2: R_PPC64_ADDR32, sym=0x0001 (target=data, value=text),
-        // offset 0xF0, addend 0x10.
-        // Patches the module_start OPD code field in the data segment.
-        // OPD is at data-relative offset 0xF0 (vaddr 0x1F0 - data_vaddr 0x100).
+        // ADDR32 target=data value=text at data-relative 0xF0 (OPD
+        // code field of module_start), addend 0x10.
         let rel2 = rel1 + 24;
         buf[rel2..rel2 + 8].copy_from_slice(&0xF0u64.to_be_bytes());
-        // sym encoding: lower byte = target_seg(1=data), upper byte = value_seg(0=text).
         let r_info2: u64 = (0x0001u64 << 32) | R_PPC64_ADDR32 as u64;
         buf[rel2 + 8..rel2 + 16].copy_from_slice(&r_info2.to_be_bytes());
         buf[rel2 + 16..rel2 + 24].copy_from_slice(&0x10i64.to_be_bytes());
@@ -1013,7 +940,7 @@ mod tests {
         let data = make_test_prx();
         let prx = parse_prx(&data).unwrap();
 
-        // Should have 1 user export library (system entry is filtered out).
+        // Only the user library survives; the system entry is filtered.
         assert_eq!(prx.exports.len(), 1);
         assert_eq!(prx.exports[0].name, "testlib");
         assert_eq!(prx.exports[0].functions.len(), 3);
@@ -1045,16 +972,13 @@ mod tests {
         let prx = parse_prx(&data).unwrap();
 
         assert_eq!(prx.relocations.len(), 3);
-        // text->text ADDR32
         assert_eq!(prx.relocations[0].offset, 0x50);
         assert_eq!(prx.relocations[0].rtype, R_PPC64_ADDR32);
         assert_eq!(prx.relocations[0].sym, 0);
         assert_eq!(prx.relocations[0].addend, 0x80);
-        // text->text ADDR16_HA
         assert_eq!(prx.relocations[1].offset, 0x54);
         assert_eq!(prx.relocations[1].rtype, R_PPC64_ADDR16_HA);
         assert_eq!(prx.relocations[1].addend, 0x200);
-        // target=data, value=text ADDR32 (OPD code field fixup)
         assert_eq!(prx.relocations[2].offset, 0xF0);
         assert_eq!(prx.relocations[2].rtype, R_PPC64_ADDR32);
         assert_eq!(prx.relocations[2].sym, 0x0001);
@@ -1067,7 +991,8 @@ mod tests {
         data[0..4].copy_from_slice(&ELF_MAGIC);
         data[4] = 2;
         data[5] = 2;
-        data[16..18].copy_from_slice(&0x0002u16.to_be_bytes()); // ET_EXEC, not PRX
+        // ET_EXEC, not PRX.
+        data[16..18].copy_from_slice(&0x0002u16.to_be_bytes());
         assert!(matches!(parse_prx(&data), Err(PrxParseError::NotPrx(2))));
     }
 
@@ -1082,14 +1007,13 @@ mod tests {
         assert!(matches!(parse_prx(&data), Err(PrxParseError::BadMagic)));
     }
 
-    /// Integration test: parse the real decrypted liblv2.prx if present.
     #[test]
     fn parse_real_liblv2() {
         let path = std::path::PathBuf::from(
             "../../tools/rpcs3/dev_flash_decrypted/sys/external/liblv2.prx",
         );
         if !path.exists() {
-            return; // skip if firmware not available
+            return;
         }
         let data = std::fs::read(&path).unwrap();
         let prx = parse_prx(&data).unwrap();
@@ -1097,7 +1021,6 @@ mod tests {
         assert_eq!(prx.name, "liblv2");
         assert_eq!(prx.toc, 0x1c620);
 
-        // liblv2 exports sysPrxForUser with 157 functions.
         let spy = prx
             .exports
             .iter()
@@ -1105,19 +1028,16 @@ mod tests {
             .expect("liblv2 should export sysPrxForUser");
         assert_eq!(spy.functions.len(), 157);
 
-        // module_start should exist (code at vaddr 0x0).
         let ms = prx.module_start.expect("liblv2 should have module_start");
         assert_eq!(ms.code, 0x0);
         assert_eq!(ms.toc, 0x1c620);
 
-        // Relocations should be present (~1042 entries).
         assert!(
             prx.relocations.len() > 1000,
             "expected >1000 relocs, got {}",
             prx.relocations.len()
         );
 
-        // All relocation types should be in the known set.
         for r in &prx.relocations {
             assert!(
                 matches!(
@@ -1130,8 +1050,6 @@ mod tests {
             );
         }
     }
-
-    // -- load_prx tests --
 
     #[test]
     fn load_test_prx_segments() {
@@ -1161,7 +1079,6 @@ mod tests {
         let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
         let loaded = load_prx(&prx, &mut mem, base).unwrap();
 
-        // 3 exported functions from the user library.
         assert_eq!(loaded.exports.len(), 3);
         assert_eq!(loaded.exports[&0xAAAAAAAA], base + 0x40);
         assert_eq!(loaded.exports[&0xBBBBBBBB], base + 0x50);
@@ -1177,12 +1094,10 @@ mod tests {
         let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
         let loaded = load_prx(&prx, &mut mem, base).unwrap();
 
-        // module_start: code = base + text_vaddr + 0x10, toc = base + 0x200
         let ms = loaded.module_start.expect("module_start");
         assert_eq!(ms.code, base + 0x10);
         assert_eq!(ms.toc, base + 0x200);
 
-        // module_stop: code = base + text_vaddr + 0x20, toc = base + 0x200
         let mstop = loaded.module_stop.expect("module_stop");
         assert_eq!(mstop.code, base + 0x20);
         assert_eq!(mstop.toc, base + 0x200);
@@ -1199,9 +1114,7 @@ mod tests {
 
         assert_eq!(loaded.relocs_applied, 3);
 
-        // Reloc 0: ADDR32 sym=0 (text->text), offset 0x50, addend 0x80.
-        // target = base + text_vaddr + 0x50 = base + 0x50
-        // value = base + text_vaddr + 0x80 = base + 0x80
+        // ADDR32 text->text: target base+0x50, value base+0x80.
         let addr = (base + 0x50) as usize;
         let val = u32::from_be_bytes([
             mem.as_bytes()[addr],
@@ -1211,17 +1124,12 @@ mod tests {
         ]);
         assert_eq!(val, 0x1000_0080, "ADDR32 text->text mismatch");
 
-        // Reloc 1: ADDR16_HA sym=0, offset 0x54, addend 0x200.
-        // value = base + 0x200 = 0x1000_0200.
-        // HA = (0x1000_0200 + 0x8000) >> 16 = 0x1000.
+        // ADDR16_HA: value 0x1000_0200, HA = (value + 0x8000) >> 16.
         let addr2 = (base + 0x54) as usize;
         let val2 = u16::from_be_bytes([mem.as_bytes()[addr2], mem.as_bytes()[addr2 + 1]]);
         assert_eq!(val2, 0x1000, "ADDR16_HA mismatch");
 
-        // Reloc 2: ADDR32 sym=0x0001 (target=data, value=text), offset 0xF0, addend 0x10.
-        // target = base + data_vaddr + 0xF0 = base + 0x100 + 0xF0 = base + 0x1F0
-        // value = base + text_vaddr + 0x10 = base + 0x10
-        // This patches the module_start OPD's code field.
+        // ADDR32 data->text patches module_start OPD code field.
         let addr3 = (base + 0x1F0) as usize;
         let val3 = u32::from_be_bytes([
             mem.as_bytes()[addr3],
@@ -1234,22 +1142,18 @@ mod tests {
 
     #[test]
     fn load_test_prx_addr16_lo_and_hi() {
-        // Manually create a PRX with only ADDR16_LO and ADDR16_HI relocs.
         let mut data = make_test_prx();
 
-        // Shrink relocation segment to 2 entries (48 bytes).
-        let ph2 = 64 + 112; // third program header
+        // Shrink the relocation segment to 2 entries.
+        let ph2 = 64 + 112;
         data[ph2 + 32..ph2 + 40].copy_from_slice(&48u64.to_be_bytes());
 
-        // Override the first 2 relocation entries.
         let rel0 = 0x3F0;
-        // ADDR16_LO at offset 0x58, addend 0x12345678
         data[rel0..rel0 + 8].copy_from_slice(&0x58u64.to_be_bytes());
         let r_info0: u64 = R_PPC64_ADDR16_LO as u64;
         data[rel0 + 8..rel0 + 16].copy_from_slice(&r_info0.to_be_bytes());
         data[rel0 + 16..rel0 + 24].copy_from_slice(&0x12345678i64.to_be_bytes());
 
-        // ADDR16_HI at offset 0x5A, addend 0x12345678
         let rel1 = rel0 + 24;
         data[rel1..rel1 + 8].copy_from_slice(&0x5Au64.to_be_bytes());
         let r_info1: u64 = R_PPC64_ADDR16_HI as u64;
@@ -1262,13 +1166,11 @@ mod tests {
         let loaded = load_prx(&prx, &mut mem, base).unwrap();
         assert_eq!(loaded.relocs_applied, 2);
 
-        // value = 0x1000_0000 + 0x12345678 = 0x2234_5678
-        // LO = 0x5678
+        // value = 0x1000_0000 + 0x12345678 = 0x2234_5678.
         let addr_lo = (base + 0x58) as usize;
         let lo = u16::from_be_bytes([mem.as_bytes()[addr_lo], mem.as_bytes()[addr_lo + 1]]);
         assert_eq!(lo, 0x5678, "ADDR16_LO mismatch");
 
-        // HI = (0x2234_5678 >> 16) & 0xFFFF = 0x2234
         let addr_hi = (base + 0x5A) as usize;
         let hi = u16::from_be_bytes([mem.as_bytes()[addr_hi], mem.as_bytes()[addr_hi + 1]]);
         assert_eq!(hi, 0x2234, "ADDR16_HI mismatch");
@@ -1279,7 +1181,6 @@ mod tests {
         let data = make_test_prx();
         let prx = parse_prx(&data).unwrap();
 
-        // Memory too small for segments at this base.
         let mut mem = cellgov_mem::GuestMemory::new(0x100);
         let result = load_prx(&prx, &mut mem, 0x1000_0000);
         assert!(matches!(
@@ -1292,7 +1193,6 @@ mod tests {
     fn load_prx_rejects_unsupported_reloc() {
         let mut data = make_test_prx();
 
-        // Change first reloc type to something unsupported (type 99).
         let rel0 = 0x3F0;
         let r_info: u64 = 99;
         data[rel0 + 8..rel0 + 16].copy_from_slice(&r_info.to_be_bytes());
@@ -1303,7 +1203,6 @@ mod tests {
         assert!(matches!(result, Err(PrxLoadError::UnsupportedReloc(99))));
     }
 
-    /// Integration test: load real liblv2.prx into guest memory.
     #[test]
     fn load_real_liblv2() {
         let path = std::path::PathBuf::from(
@@ -1315,7 +1214,6 @@ mod tests {
         let data = std::fs::read(&path).unwrap();
         let prx = parse_prx(&data).unwrap();
 
-        // Load at a base address above the typical game footprint.
         let base: u64 = 0x1000_0000;
         let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
         let loaded = load_prx(&prx, &mut mem, base).unwrap();
@@ -1325,14 +1223,10 @@ mod tests {
         assert_eq!(loaded.toc, base + 0x1c620);
         assert!(loaded.relocs_applied > 1000);
 
-        // module_start should be present with correct relocated values.
         let ms = loaded.module_start.expect("module_start");
-        // code = base + text_vaddr(0) + code(0) = base
         assert_eq!(ms.code, base, "module_start code should be at base");
-        // toc = base + 0x1c620
         assert_eq!(ms.toc, base + 0x1c620, "module_start TOC");
 
-        // Verify text starts with valid PPC64 instructions (not all zeros).
         let text_start = base as usize;
         let first_insn = u32::from_be_bytes([
             mem.as_bytes()[text_start],
@@ -1347,7 +1241,6 @@ mod tests {
             first_insn
         );
 
-        // Exports should contain known sysPrxForUser NIDs.
         assert!(
             loaded.exports.contains_key(&0x744680a2),
             "should export sys_initialize_tls"

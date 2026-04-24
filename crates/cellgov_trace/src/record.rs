@@ -1,25 +1,17 @@
 //! Structured trace record types and their binary encoding.
 //!
-//! The trace format is binary. Records are encoded directly into a
-//! `Vec<u8>` by the writer and decoded out of a `&[u8]` by the reader
-//! -- there is no intermediate Rust-value buffer that would later need
-//! to be "ported to binary".
-//!
 //! ## Wire format
 //!
-//! Each record is a 1-byte tag followed by a fixed-length variant
-//! payload. All multi-byte integers are little-endian. The tag and
-//! per-variant field layout below are part of the binary trace
-//! contract: do not reorder fields, do not change tags, do not change
-//! the discriminants of any helper enums (`YieldReason`,
-//! `HashCheckpointKind`). New record variants must be appended at the
-//! end with new tag values strictly greater than the current maximum.
+//! Each record is a 1-byte tag followed by a fixed-length variant payload. All
+//! multi-byte integers are little-endian. Tags, per-variant field layouts, and
+//! helper-enum discriminants (`TracedYieldReason`, `HashCheckpointKind`,
+//! `TracedEffectKind`, `TracedBlockReason`, `TracedWakeReason`) are part of the
+//! binary trace contract: do not reorder, do not change tags, do not change
+//! discriminants. New record variants append with strictly greater tags.
 //!
-//! There is no length field after the tag because the current record
-//! set is all fixed-size. When the first variable-size record lands
-//! (e.g. a record carrying a payload byte slice), the encoding will
-//! grow a length field at that variant only -- the fixed-size variants
-//! stay binary-compatible.
+//! There is no length field after the tag because the current record set is
+//! fixed-size. The first variable-size variant will grow a length field at
+//! that variant only; fixed-size variants stay binary-compatible.
 //!
 //! ## Variants and tags
 //!
@@ -40,32 +32,30 @@ use cellgov_time::{Budget, Epoch, GuestTicks};
 
 /// Yield reasons as the trace records them.
 ///
-/// This is a parallel enum to `cellgov_exec::YieldReason` because the
-/// trace crate must not depend on `cellgov_exec` (which sits above it
-/// in the workspace DAG -- `effects --> exec`, `effects --> trace`).
-/// The encoded discriminants here mirror those of
-/// `cellgov_exec::YieldReason` so a future bridge layer can map between
-/// the two without a translation table.
+/// Parallel enum to `cellgov_exec::YieldReason`; discriminants mirror the
+/// source so a bridge layer can map without a translation table. The trace
+/// crate cannot depend on `cellgov_exec` (DAG: effects -> exec, effects ->
+/// trace).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedYieldReason {
-    /// Unit's budget was consumed.
+    /// Budget consumed.
     BudgetExhausted = 0,
-    /// Unit accessed a mailbox (send or receive).
+    /// Mailbox send or receive.
     MailboxAccess = 1,
-    /// Unit submitted a DMA request.
+    /// DMA request submitted.
     DmaSubmitted = 2,
-    /// Unit is waiting for DMA completion.
+    /// Waiting for DMA completion.
     DmaWait = 3,
-    /// Unit is waiting on a sync primitive (barrier, signal).
+    /// Waiting on a sync primitive.
     WaitingSync = 4,
-    /// Unit hit a syscall boundary.
+    /// Hit a syscall boundary.
     Syscall = 5,
-    /// Unit yielded at an interrupt boundary.
+    /// Yielded at an interrupt boundary.
     InterruptBoundary = 6,
-    /// Unit faulted.
+    /// Faulted.
     Fault = 7,
-    /// Unit execution completed normally.
+    /// Completed normally.
     Finished = 8,
 }
 
@@ -90,13 +80,13 @@ impl TracedYieldReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum HashCheckpointKind {
-    /// Hash of committed guest memory.
+    /// Committed guest memory.
     CommittedMemory = 0,
-    /// Hash of the runnable queue.
+    /// Runnable queue.
     RunnableQueue = 1,
-    /// Hash of all sync object states.
+    /// All sync object states.
     SyncState = 2,
-    /// Hash of unit statuses.
+    /// Unit statuses.
     UnitStatus = 3,
 }
 
@@ -116,9 +106,9 @@ impl HashCheckpointKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedBlockReason {
-    /// Blocked by a `WaitOnEvent` effect.
+    /// `WaitOnEvent` effect.
     WaitOnEvent = 0,
-    /// Blocked by a `MailboxReceiveAttempt` on an empty mailbox.
+    /// `MailboxReceiveAttempt` on an empty mailbox.
     MailboxEmpty = 1,
 }
 
@@ -136,9 +126,9 @@ impl TracedBlockReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedWakeReason {
-    /// Woken by a `WakeUnit` effect from another unit.
+    /// `WakeUnit` effect from another unit.
     WakeEffect = 0,
-    /// Woken by a DMA completion firing.
+    /// DMA completion firing.
     DmaCompletion = 1,
 }
 
@@ -154,16 +144,9 @@ impl TracedWakeReason {
 
 /// Effect kinds as the trace records them.
 ///
-/// Parallel enum to `cellgov_effects::Effect` because the trace crate
-/// must not depend on `cellgov_effects` (the workspace DAG runs
-/// effects -> trace, not the other way around). The encoded
-/// discriminants here mirror the source enum's variant order so a
-/// future bridge layer can map between the two without a translation
-/// table.
-///
-/// Discriminants are part of the binary trace contract. Do not reorder,
-/// do not insert variants in the middle, do not change the explicit
-/// values. New effect kinds must be appended at the end.
+/// Parallel enum to `cellgov_effects::Effect`; discriminants mirror the source
+/// variant order so a bridge layer can map without a translation table. The
+/// trace crate cannot depend on `cellgov_effects` (DAG: effects -> trace).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedEffectKind {
@@ -175,7 +158,7 @@ pub enum TracedEffectKind {
     MailboxReceiveAttempt = 2,
     /// DMA transfer enqueued.
     DmaEnqueue = 3,
-    /// Wait on a sync primitive (barrier, signal).
+    /// Wait on a sync primitive.
     WaitOnEvent = 4,
     /// Wake another unit.
     WakeUnit = 5,
@@ -219,42 +202,34 @@ impl TracedEffectKind {
 /// Why decoding a trace record stream failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeError {
-    /// The byte stream ended in the middle of a record.
+    /// Byte stream ended mid-record.
     Truncated,
-    /// The tag byte does not name a known record variant.
+    /// Tag byte does not name a known record variant.
     UnknownTag(u8),
-    /// A `YieldReason` discriminant byte was out of range.
+    /// `YieldReason` discriminant out of range.
     UnknownYieldReason(u8),
-    /// A `HashCheckpointKind` discriminant byte was out of range.
+    /// `HashCheckpointKind` discriminant out of range.
     UnknownHashKind(u8),
-    /// The `fault_discarded` flag in `CommitApplied` was neither 0 nor 1.
+    /// `fault_discarded` flag was neither 0 nor 1.
     InvalidBool(u8),
-    /// A `TracedEffectKind` discriminant byte was out of range.
+    /// `TracedEffectKind` discriminant out of range.
     UnknownEffectKind(u8),
-    /// A `TracedBlockReason` discriminant byte was out of range.
+    /// `TracedBlockReason` discriminant out of range.
     UnknownBlockReason(u8),
-    /// A `TracedWakeReason` discriminant byte was out of range.
+    /// `TracedWakeReason` discriminant out of range.
     UnknownWakeReason(u8),
 }
 
 /// A single structured trace record.
-///
-/// The variants here cover the records the runtime produces: scheduler
-/// decisions, step completions, commit outcomes, state-hash
-/// checkpoints, per-effect emissions, block/wake transitions, and PPU
-/// per-step fingerprints. Each new variant must use a strictly greater
-/// tag than the current maximum to preserve binary compatibility with
-/// existing traces.
-// PpuStateFull carries 32 GPRs by value, making it ~300 bytes vs
-// ~30 for every other variant. Records are encoded to bytes
-// immediately and the enum value is not stored long-term, so the
-// layout difference does not justify a heap allocation per record.
+// PpuStateFull carries 32 GPRs by value (~300 bytes vs ~30 for every other
+// variant). Records are encoded to bytes immediately and not stored long-term,
+// so the layout difference does not justify a heap allocation per record.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TraceRecord {
-    /// The scheduler selected a unit and granted it a budget.
+    /// Scheduler selected a unit and granted it a budget.
     UnitScheduled {
-        /// Which unit was scheduled.
+        /// Unit scheduled.
         unit: UnitId,
         /// Budget granted for this step.
         granted_budget: Budget,
@@ -265,93 +240,92 @@ pub enum TraceRecord {
     },
     /// A unit's `run_until_yield` returned.
     StepCompleted {
-        /// Which unit completed a step.
+        /// Unit that completed a step.
         unit: UnitId,
         /// Why the unit yielded.
         yield_reason: TracedYieldReason,
-        /// How much budget was consumed.
+        /// Budget consumed.
         consumed_budget: Budget,
         /// Guest time after the step.
         time_after: GuestTicks,
     },
-    /// The commit pipeline finished processing a step's effects.
+    /// Commit pipeline finished processing a step's effects.
     CommitApplied {
-        /// Which unit's effects were committed.
+        /// Unit whose effects were committed.
         unit: UnitId,
-        /// Number of shared writes applied.
+        /// Shared writes applied.
         writes_committed: u32,
-        /// Number of effects deferred for later processing.
+        /// Effects deferred for later processing.
         effects_deferred: u32,
         /// Whether a fault discarded all effects.
         fault_discarded: bool,
         /// Epoch after commit.
         epoch_after: Epoch,
     },
-    /// A state hash was captured at a controlled checkpoint.
+    /// State hash captured at a controlled checkpoint.
     StateHashCheckpoint {
-        /// Which hash category this checkpoint covers.
+        /// Hash category this checkpoint covers.
         kind: HashCheckpointKind,
-        /// The hash value.
+        /// Hash value.
         hash: StateHash,
     },
-    /// A unit emitted an effect during its step. Recorded once per
-    /// effect, in emission order, with `sequence` running 0..N within
-    /// the step. Carries the effect kind only -- effect payloads
-    /// (write bytes, mailbox messages, DMA descriptors) are not
-    /// included in the record.
+    /// A unit emitted an effect during its step.
+    ///
+    /// One record per effect, in emission order, with `sequence` running 0..N
+    /// within the step. Effect payloads (write bytes, mailbox messages, DMA
+    /// descriptors) are not included.
     EffectEmitted {
-        /// Which unit emitted the effect.
+        /// Unit that emitted the effect.
         unit: UnitId,
         /// Index within this step's effect list.
         sequence: u32,
-        /// What kind of effect was emitted.
+        /// Effect kind.
         kind: TracedEffectKind,
     },
-    /// A unit's status was overridden to `Blocked` by the commit
-    /// pipeline. Emitted once per block transition, after CommitApplied.
+    /// A unit's status was overridden to `Blocked` by the commit pipeline.
+    ///
+    /// Emitted once per block transition, after `CommitApplied`.
     UnitBlocked {
-        /// Which unit was blocked.
+        /// Unit blocked.
         unit: UnitId,
         /// Why it blocked.
         reason: TracedBlockReason,
     },
-    /// A unit's status was overridden to `Runnable` by the commit
-    /// pipeline or a DMA completion. Emitted once per wake transition,
-    /// after CommitApplied.
+    /// A unit's status was overridden to `Runnable` by the commit pipeline or a
+    /// DMA completion.
+    ///
+    /// Emitted once per wake transition, after `CommitApplied`.
     UnitWoken {
-        /// Which unit was woken.
+        /// Unit woken.
         unit: UnitId,
         /// Why it was woken.
         reason: TracedWakeReason,
     },
     /// Per-step PPU state fingerprint captured at instruction retire.
     ///
-    /// Per-step divergence trace. Emitted once per retired PPU
-    /// instruction when per-step tracing is active. The `hash` field
-    /// covers GPR + LR + CTR + XER + CR under a canonical
-    /// tooling-local byte layout.
+    /// `hash` covers GPR + LR + CTR + XER + CR under a canonical tooling-local
+    /// byte layout. Emitted once per retired instruction when per-step tracing
+    /// is active.
     PpuStateHash {
-        /// Monotonically increasing step index within the run.
+        /// Monotonic step index within the run.
         step: u64,
-        /// Program counter of the instruction that just retired.
+        /// PC of the instruction that just retired.
         pc: u64,
-        /// 64-bit fingerprint of the live register file.
+        /// Fingerprint of the live register file.
         hash: StateHash,
     },
     /// Full PPU register snapshot captured at instruction retire.
     ///
-    /// Zoom-in mode. Emitted only inside an opt-in window `[lo, hi]`
-    /// configured on the unit; never on the hot path. The payload is
-    /// the same architectural surface `PpuStateHash` covers but
-    /// uncompressed, so a divergence diff can name the exact
-    /// register that disagrees rather than just "the hash differs".
+    /// Opt-in `[lo, hi]` window only, never on the hot path. Covers the same
+    /// architectural surface as `PpuStateHash` but uncompressed, so a
+    /// divergence diff can name the exact disagreeing register.
     PpuStateFull {
-        /// Monotonically increasing step index within the run. Matches
-        /// the `step` field on `PpuStateHash` for the same instruction.
+        /// Monotonic step index. Matches `PpuStateHash::step` for the same
+        /// instruction.
         step: u64,
-        /// Program counter of the instruction that just retired.
+        /// PC of the instruction that just retired.
         pc: u64,
-        /// 32 x 64-bit general-purpose registers, GPR[0..32].
+        /// GPR[0..32].
         gpr: [u64; 32],
         /// Link register.
         lr: u64,
@@ -375,8 +349,7 @@ const TAG_PPU_STATE_HASH: u8 = 0x07;
 const TAG_PPU_STATE_FULL: u8 = 0x08;
 
 impl TraceRecord {
-    /// The category this record belongs to. Used by readers and
-    /// filters that only care about a subset of the trace.
+    /// Category this record belongs to.
     pub fn level(&self) -> TraceLevel {
         match self {
             TraceRecord::UnitScheduled { .. }
@@ -486,8 +459,7 @@ impl TraceRecord {
         }
     }
 
-    /// Decode the next record from `bytes`, returning the record and
-    /// the number of bytes consumed.
+    /// Decode the next record from `bytes`, returning the record and bytes consumed.
     pub fn decode(bytes: &[u8]) -> Result<(Self, usize), DecodeError> {
         let mut pos = 0usize;
         let tag = read_u8(bytes, &mut pos)?;
@@ -602,8 +574,6 @@ impl TraceRecord {
         Ok((record, pos))
     }
 }
-
-// Encoding helpers. Internal-only; exposed via TraceRecord::encode/decode.
 
 fn write_u32(buf: &mut Vec<u8>, v: u32) {
     buf.extend_from_slice(&v.to_le_bytes());

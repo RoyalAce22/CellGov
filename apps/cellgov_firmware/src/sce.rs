@@ -1,4 +1,9 @@
 //! SCE/SELF package decrypter for PS3 firmware and game binaries.
+//!
+//! All SCE/SELF headers are big-endian. The ELF produced by
+//! [`decrypt_self_to_elf`] is plaintext only: segment signatures and the
+//! outer SCE signature are dropped, so callers must not re-sign or feed the
+//! output to anything that verifies signatures.
 
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
@@ -131,7 +136,6 @@ pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, String> {
     let phdr_dst = 0x40usize;
     elf[phdr_dst..phdr_dst + e_phnum * e_phentsize]
         .copy_from_slice(&data[phdr_offset..phdr_offset + e_phnum * e_phentsize]);
-    // Patch e_phoff to point to our program header location.
     elf[0x20..0x28].copy_from_slice(&(phdr_dst as u64).to_be_bytes());
 
     for (sec_idx, sec_data) in sections.iter().enumerate() {
@@ -197,10 +201,10 @@ fn decrypt_sce_sections(
         return Err("SCE file truncated at metadata info".into());
     }
 
-    // Step 1: Decrypt MetadataInfo (AES-256-CBC)
     let mut meta_info_buf = [0u8; 0x40];
     meta_info_buf.copy_from_slice(&data[meta_offset..meta_offset + 0x40]);
 
+    // Debug SELFs ship MetadataInfo in cleartext; retail encrypts with AES-256-CBC.
     let is_debug = (hdr.se_flags & 0x8000) != 0;
     if !is_debug {
         let decryptor = Aes256CbcDec::new(
@@ -215,6 +219,8 @@ fn decrypt_sce_sections(
     let meta_key: [u8; 16] = meta_info_buf[0..16].try_into().unwrap();
     let meta_iv: [u8; 16] = meta_info_buf[0x20..0x30].try_into().unwrap();
 
+    // The two 16-byte pad regions must decrypt to zero; non-zero means the ERK/RIV
+    // does not match this SELF revision.
     if !is_debug
         && (meta_info_buf[0x10..0x20].iter().any(|&b| b != 0)
             || meta_info_buf[0x30..0x40].iter().any(|&b| b != 0))
@@ -222,7 +228,6 @@ fn decrypt_sce_sections(
         return Err("MetadataInfo padding validation failed (wrong key?)".into());
     }
 
-    // Step 2: Decrypt metadata headers (AES-128-CTR)
     let headers_offset = meta_offset + 0x40;
     let headers_end = hdr.se_hsize as usize;
     if headers_end > data.len() || headers_offset >= headers_end {
@@ -237,7 +242,6 @@ fn decrypt_sce_sections(
     ctr_cipher.seek(0u64);
     ctr_cipher.apply_keystream(&mut headers_buf);
 
-    // Step 3: Parse decrypted metadata headers
     if headers_buf.len() < 0x20 {
         return Err("decrypted metadata too small for header".into());
     }
@@ -258,7 +262,6 @@ fn decrypt_sce_sections(
 
     let data_keys = &headers_buf[keys_start..keys_end];
 
-    // Step 4: Decrypt each section
     let mut sections: Vec<Vec<u8>> = Vec::new();
 
     for i in 0..section_count {
@@ -340,7 +343,7 @@ mod tests {
     fn parse_sce_header_accepts_valid() {
         let mut data = [0u8; 0x20];
         data[0..4].copy_from_slice(&0x53434500u32.to_be_bytes());
-        data[16..24].copy_from_slice(&256u64.to_be_bytes()); // se_hsize
+        data[16..24].copy_from_slice(&256u64.to_be_bytes());
         let hdr = parse_sce_header(&data).unwrap();
         assert_eq!(hdr.se_magic, 0x53434500);
         assert_eq!(hdr.se_hsize, 256);

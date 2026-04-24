@@ -1,30 +1,12 @@
-//! The single canonical execution path. Build a runtime from a
-//! [`ScenarioFixture`], drive it until it stalls or trips the deadlock
-//! detector, capture the binary trace, snapshot final state hashes,
-//! and return a structured [`ScenarioResult`].
+//! The canonical execution path. Build a runtime from a [`ScenarioFixture`],
+//! step it until stall or max-steps, capture the trace and final hashes,
+//! return a [`ScenarioResult`].
 //!
-//! Tests build a fixture and hand it to [`run`]; the result is the
-//! surface they assert against.
-//!
-//! ## What the runner does
-//!
-//! 1. Build a [`Runtime`] using the fixture's memory size, per-step
-//!    budget, and max-steps cap.
-//! 2. Run the fixture's one-shot registration callback against the
-//!    runtime's `UnitRegistry`.
-//! 3. Loop, calling `step()` and `commit_step()`, until either the
-//!    scheduler returns `NoRunnableUnit` (clean stall: every unit
-//!    finished or blocked) or the runtime returns `MaxStepsExceeded`
-//!    (deadlock detector tripped).
-//! 4. Snapshot the trace bytes, the final committed-memory hash, the
-//!    final unit-status hash, the steps actually taken, and the
-//!    terminal reason. Return them in [`ScenarioResult`].
-//!
-//! Commit failures from `commit_step()` are surfaced through the
-//! existing fault-routing trace records (the runtime emits a
-//! `CommitApplied { fault_discarded: true, ... }` record on validation
-//! rejection); the runner does not abort on them. Stepping continues
-//! until the scheduler is empty.
+//! Tests build a fixture and hand it to [`run`]; the result is the assertion
+//! surface. The loop calls `step()` then `commit_step()` each iteration;
+//! commit failures surface as `fault_discarded` trace records and do not
+//! abort the run. Stepping ends when the scheduler returns
+//! `NoRunnableUnit`/`AllBlocked` (stall) or `MaxStepsExceeded`.
 
 use crate::fixtures::ScenarioFixture;
 use cellgov_core::{Runtime, StepError};
@@ -34,69 +16,42 @@ use cellgov_trace::StateHash;
 /// How a scenario run terminated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScenarioOutcome {
-    /// Every registered unit finished or blocked. The scheduler had
-    /// nothing to run; the run is over. The expected terminal state
-    /// for well-formed scenarios.
+    /// Scheduler empty: every unit finished or blocked. Expected terminal
+    /// state for well-formed scenarios.
     Stalled,
-    /// The runtime's max-steps cap fired before the scheduler emptied.
-    /// The scenario looped, starved a unit, or otherwise failed to
-    /// make progress; tests should treat this as a failure.
+    /// Max-steps cap fired before the scheduler emptied. Treated as failure.
     MaxStepsExceeded,
 }
 
-/// Structured result of a scenario run.
-///
-/// Carries everything tests need to assert against: how the run ended,
-/// how many steps it took, the captured binary trace, and the final
-/// state hashes. Tests use the trace bytes via
-/// [`cellgov_trace::TraceReader`] for golden-trace assertions and the
-/// hashes for state-equivalence assertions.
+/// Structured result of a scenario run; the assertion surface for tests.
 #[derive(Debug, Clone)]
 pub struct ScenarioResult {
     /// How the run terminated.
     pub outcome: ScenarioOutcome,
-    /// Successful `Runtime::step` calls during the run. Does not count
-    /// the final failing call that produced `outcome`.
+    /// Successful `Runtime::step` calls. Excludes the final failing call.
     pub steps_taken: usize,
-    /// Binary trace bytes captured from the runtime's writer. Decode
-    /// with [`cellgov_trace::TraceReader`].
+    /// Binary trace bytes. Decode with [`cellgov_trace::TraceReader`].
     pub trace_bytes: Vec<u8>,
-    /// Hash of committed memory at the end of the run.
+    /// Committed-memory hash at end of run.
     pub final_memory_hash: StateHash,
-    /// Hash of unit statuses at the end of the run.
+    /// Unit-status hash at end of run.
     pub final_unit_status_hash: StateHash,
-    /// Hash of the runtime's sync-registry contents at the end of the
-    /// run. Aggregates mailboxes, signals, lv2 host state, and
-    /// syscall responses into a single digest (see
-    /// [`cellgov_core::Runtime::sync_state_hash`]).
+    /// Combined sync-registry hash; see [`cellgov_core::Runtime::sync_state_hash`].
     pub final_sync_hash: StateHash,
-    /// Contents of the base-0 region at end of run. Auxiliary regions
-    /// (stack, reserved) are not included. Used by the comparison
-    /// harness to extract named memory regions.
+    /// Base-0 region bytes at end of run. Auxiliary regions not included.
     pub final_memory: Vec<u8>,
 }
 
-/// Drive a scenario fixture to completion via the canonical execution
-/// path. See the module documentation for the contract.
+/// Drive a scenario fixture to completion via the canonical path.
 pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
     let mut memory = GuestMemory::new(fixture.memory_size);
-    // Seed initial memory content (if any) before constructing the
-    // runtime. Fixtures that need a pre-loaded image or trampoline
-    // write it here.
     (fixture.seed_memory)(&mut memory);
     let mut rt = Runtime::new(memory, fixture.budget, fixture.max_steps);
-    // Run the fixture's one-shot setup callback against the live
-    // runtime so it can register units, mailboxes, signals, and any
-    // other runtime-owned state in one place.
     (fixture.register)(&mut rt);
 
     let outcome = loop {
         match rt.step() {
             Ok(step) => {
-                // Commit failures (validation rejection) are surfaced
-                // by the runtime's commit trace record; the runner
-                // does not abort. The next iteration handles whatever
-                // state the failure left behind.
                 let _ = rt.commit_step(&step.result, &step.effects);
             }
             Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
@@ -104,19 +59,15 @@ pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
             }
             Err(StepError::MaxStepsExceeded) => break ScenarioOutcome::MaxStepsExceeded,
             Err(StepError::TimeOverflow) => {
-                // TimeOverflow is a runtime invariant violation rather
-                // than a scenario outcome. Treat it as a stall in the
-                // surfaced result so tests still see the trace and
-                // hashes; tests that care will assert on the trace.
+                // Invariant violation; surface as stall so the trace and
+                // hashes are still available for inspection.
                 break ScenarioOutcome::Stalled;
             }
         }
     };
 
-    // Flush any DMA completions still in the queue. A scenario may
-    // stall before enough guest time elapses for all enqueued DMAs to
-    // fire on their scheduled tick; draining ensures the final memory
-    // snapshot includes every committed transfer.
+    // DMA completions still in-flight at stall must land before the final
+    // memory snapshot is taken.
     rt.drain_pending_dma();
 
     ScenarioResult {
@@ -159,7 +110,6 @@ mod tests {
             .build());
         assert_eq!(result.outcome, ScenarioOutcome::Stalled);
         assert_eq!(result.steps_taken, 5);
-        // Trace should contain at least 5 UnitScheduled records.
         let scheduled_count = TraceReader::new(&result.trace_bytes)
             .map(|r| r.expect("decode"))
             .filter(|r| matches!(r, TraceRecord::UnitScheduled { .. }))
@@ -173,9 +123,6 @@ mod tests {
             .memory_size(16)
             .budget(Budget::new(1))
             .max_steps(3)
-            // A unit that never finishes -- forces the deadlock
-            // detector to fire after exactly `max_steps` successful
-            // steps.
             .register(|rt: &mut Runtime| {
                 let r = rt.registry_mut();
                 r.register_with(|id| CountingUnit::new(id, u64::MAX));
@@ -187,8 +134,6 @@ mod tests {
 
     #[test]
     fn two_runs_of_the_same_fixture_are_byte_identical() {
-        // Two fixtures built and run identically must produce
-        // byte-identical traces and equal final hashes.
         fn build_and_run() -> ScenarioResult {
             run(ScenarioFixture::builder()
                 .memory_size(16)

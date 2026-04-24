@@ -1,17 +1,8 @@
-//! Reusable fake [`ExecutionUnit`] implementations used by scenario
+//! Reusable fake [`ExecutionUnit`] implementations composed by scenario
 //! fixtures.
 //!
-//! Each fake unit models a minimal behavior shape -- step counting,
-//! writing to committed memory, mailbox produce/consume, signal updates,
-//! DMA submission, mailbox roundtrip -- so fixtures can compose them
-//! without redeclaring the same shapes in every test. The fakes are
-//! clean-room runtime probes that coexist with the real PPU/SPU
-//! execution units; they test runtime wiring directly, independent of
-//! any architectural interpreter.
-//!
-//! Memory seeding lives on [`crate::fixtures::ScenarioFixtureBuilder::seed_memory`];
-//! mailbox and signal seeding is performed inside the fixture's
-//! registration callback via the runtime's `*_mut` accessors.
+//! The fakes probe runtime wiring directly, independent of any real
+//! architectural interpreter.
 
 use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::{Effect, MailboxMessage, WritePayload};
@@ -24,11 +15,8 @@ use cellgov_sync::{MailboxId, SignalId};
 use cellgov_time::{Budget, GuestTicks};
 use std::cell::Cell;
 
-/// Fake unit that consumes its full granted budget every step, emits a
-/// single `TraceMarker` effect, and finishes after `max` steps.
-///
-/// The default general-purpose fake. Useful for fairness, scheduling, and
-/// trace-shape tests where the actual effect content does not matter.
+/// Consumes its full budget each step, emits one `TraceMarker`, finishes
+/// after `max` steps.
 pub struct CountingUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -45,7 +33,7 @@ impl CountingUnit {
         }
     }
 
-    /// Number of steps this unit has executed so far.
+    /// Steps executed so far.
     pub fn steps_taken(&self) -> u64 {
         self.steps.get()
     }
@@ -93,13 +81,8 @@ impl ExecutionUnit for CountingUnit {
     }
 }
 
-/// Fake unit that emits one `SharedWriteIntent` per step against a
-/// fixed range, writing the step number byte-replicated across the
-/// range, then finishes after `max` steps.
-///
-/// Useful for commit-pipeline, hash-sensitivity, and replay tests.
-/// The write target is configurable so multiple `WritingUnit`s can
-/// coexist in the same scenario without colliding.
+/// Emits one `SharedWriteIntent` per step against `range`, payload is
+/// the step number byte-replicated; finishes after `max` steps.
 pub struct WritingUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -108,9 +91,8 @@ pub struct WritingUnit {
 }
 
 impl WritingUnit {
-    /// Construct a unit that writes into `range` once per step and
-    /// finishes after `max` steps. The write payload is the step
-    /// number cast to a byte and replicated across the range.
+    /// Construct a unit writing into `range` once per step, finishing
+    /// after `max` steps.
     pub fn new(id: UnitId, max: u64, range: ByteRange) -> Self {
         Self {
             id,
@@ -120,7 +102,7 @@ impl WritingUnit {
         }
     }
 
-    /// Convenience constructor: write 4 bytes at address 0.
+    /// 4 bytes at address 0.
     pub fn at_zero(id: UnitId, max: u64) -> Self {
         Self::new(id, max, ByteRange::new(GuestAddr::new(0), 4).unwrap())
     }
@@ -172,13 +154,8 @@ impl ExecutionUnit for WritingUnit {
     }
 }
 
-/// Fake unit that emits one [`Effect::MailboxSend`] per step into a
-/// configured mailbox, with sequential message words `1..=max`, then
-/// finishes after `max` steps.
-///
-/// Useful for end-to-end mailbox-send pipeline tests through the
-/// runner. The mailbox id is configured at construction time so the
-/// fixture decides which mailbox the producer feeds.
+/// Emits one [`Effect::MailboxSend`] per step into `target` with message
+/// words `1..=max`; finishes after `max` steps.
 pub struct MailboxProducer {
     id: UnitId,
     target: MailboxId,
@@ -187,7 +164,7 @@ pub struct MailboxProducer {
 }
 
 impl MailboxProducer {
-    /// Construct a producer that sends `max` messages into `target`.
+    /// Construct a producer sending `max` messages into `target`.
     pub fn new(id: UnitId, target: MailboxId, max: u64) -> Self {
         Self {
             id,
@@ -241,18 +218,9 @@ impl ExecutionUnit for MailboxProducer {
     }
 }
 
-/// Fake unit that emits one [`Effect::SignalUpdate`] per step into a
-/// configured signal register, OR-ing in a unique bit on each step
-/// (`1 << (step - 1)`), then finishes after `bit_count` steps.
-///
-/// After `bit_count` steps, the target register's value is
-/// `(1 << bit_count) - 1` -- the low `bit_count` bits set. Useful for
-/// end-to-end signal pipeline tests through the runner. The signal id
-/// is configured at construction time so the fixture decides which
-/// register the emitter feeds.
-///
-/// `bit_count` must be at most 32 (the register is `u32`); the
-/// constructor panics on larger values rather than silently wrapping.
+/// Emits one [`Effect::SignalUpdate`] per step into `target`, OR-ing in
+/// `1 << (step - 1)`; finishes after `bit_count` steps leaving
+/// `(1 << bit_count) - 1` in the register.
 pub struct SignalEmitter {
     id: UnitId,
     target: SignalId,
@@ -261,8 +229,11 @@ pub struct SignalEmitter {
 }
 
 impl SignalEmitter {
-    /// Construct an emitter that performs `bit_count` OR-merges into
-    /// `target`, one per step.
+    /// Construct an emitter performing `bit_count` OR-merges into `target`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bit_count > 32` (the signal register is `u32`).
     pub fn new(id: UnitId, target: SignalId, bit_count: u64) -> Self {
         assert!(
             bit_count <= 32,
@@ -302,7 +273,6 @@ impl ExecutionUnit for SignalEmitter {
         } else {
             YieldReason::WaitingSync
         };
-        // Bit `n - 1` so the first step OR-s in 0x1, second 0x2, etc.
         let value = 1u32 << (n - 1) as u32;
         effects.push(Effect::SignalUpdate {
             signal: self.target,
@@ -322,13 +292,8 @@ impl ExecutionUnit for SignalEmitter {
     }
 }
 
-/// Fake unit that exercises the DMA block/unblock path. Seeds source
-/// bytes into committed memory, submits a DMA Put transfer, and
-/// blocks. When the completion fires (at `now + latency`), the
-/// runtime wakes this unit. On wake it emits a `TraceMarker` and
-/// finishes.
-///
-/// Two stages: Seed+Submit+Block, then Wake+Finish.
+/// Two-stage DMA block/unblock probe: seed source, submit Put, block;
+/// then on wake emit a `TraceMarker` and finish.
 pub struct DmaSubmitter {
     id: UnitId,
     source: ByteRange,
@@ -338,10 +303,12 @@ pub struct DmaSubmitter {
 }
 
 impl DmaSubmitter {
-    /// Construct a submitter that writes `seed_bytes` to `source`,
-    /// then enqueues a DMA Put from `source` to `destination`.
-    /// `seed_bytes.len()` must equal `source.length()` and
-    /// `destination.length()`.
+    /// Construct a submitter writing `seed_bytes` to `source` then
+    /// enqueuing a DMA Put from `source` to `destination`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `seed_bytes.len() != source.length()`.
     pub fn new(id: UnitId, source: ByteRange, destination: ByteRange, seed_bytes: Vec<u8>) -> Self {
         assert_eq!(
             seed_bytes.len() as u64,
@@ -380,7 +347,6 @@ impl ExecutionUnit for DmaSubmitter {
         self.phase.set(p + 1);
         match p {
             0 => {
-                // Seed source bytes, submit DMA, block.
                 let req =
                     DmaRequest::new(DmaDirection::Put, self.source, self.destination, self.id)
                         .expect("source and destination lengths match");
@@ -408,7 +374,6 @@ impl ExecutionUnit for DmaSubmitter {
                 }
             }
             _ => {
-                // Woken after DMA completed. Marker + finish.
                 effects.push(Effect::TraceMarker {
                     marker: 0xd0d0,
                     source: self.id,
@@ -428,16 +393,11 @@ impl ExecutionUnit for DmaSubmitter {
     }
 }
 
-/// Fake "PPU" unit that drives the mailbox-roundtrip path. Sends a
-/// command word to `cmd_mailbox`, wakes `responder`, blocks itself,
-/// then -- on its next scheduled step -- receives the response from
-/// `resp_mailbox` and finishes with a `TraceMarker` carrying the
-/// response value.
+/// Three-stage PPU-like sender: send command + wake responder + wait;
+/// receive attempt; consume response and emit a `TraceMarker`.
 ///
-/// Requires explicit `WakeUnit` because the commit pipeline does not
-/// auto-wake on message delivery. The three internal stages are: Send
-/// (emit send + wake + wait), Receive (emit receive attempt), Consume
-/// (read `received_messages`, emit marker, finish).
+/// Explicit `WakeUnit` is required: the commit pipeline does not auto-wake
+/// on message delivery.
 pub struct MailboxSender {
     id: UnitId,
     responder: UnitId,
@@ -448,7 +408,7 @@ pub struct MailboxSender {
 }
 
 impl MailboxSender {
-    /// Create a new mailbox sender unit.
+    /// Construct a sender.
     pub fn new(
         id: UnitId,
         responder: UnitId,
@@ -489,7 +449,6 @@ impl ExecutionUnit for MailboxSender {
         self.phase.set(p + 1);
         match p {
             0 => {
-                // Send command, wake responder, block self.
                 effects.push(Effect::MailboxSend {
                     mailbox: self.cmd_mailbox,
                     message: MailboxMessage::new(self.command),
@@ -512,7 +471,6 @@ impl ExecutionUnit for MailboxSender {
                 }
             }
             1 => {
-                // Attempt to receive response.
                 effects.push(Effect::MailboxReceiveAttempt {
                     mailbox: self.resp_mailbox,
                     source: self.id,
@@ -526,7 +484,6 @@ impl ExecutionUnit for MailboxSender {
                 }
             }
             _ => {
-                // Consume the received response and finish.
                 let response = ctx.received_messages().first().copied().unwrap_or(0);
                 effects.push(Effect::TraceMarker {
                     marker: response,
@@ -547,13 +504,8 @@ impl ExecutionUnit for MailboxSender {
     }
 }
 
-/// Fake "SPU" unit that pairs with [`MailboxSender`] on the mailbox-
-/// roundtrip path. Receives a command from `cmd_mailbox`, computes a
-/// response (`command + 1`), sends it to `resp_mailbox`, wakes the
-/// `sender`, and finishes.
-///
-/// Two internal stages: Receive (emit receive attempt), Respond
-/// (read received, emit send + wake, finish).
+/// Two-stage SPU-like responder paired with [`MailboxSender`]: receive
+/// attempt; then read command, send `command + 1` response, wake sender.
 pub struct MailboxResponder {
     id: UnitId,
     sender: UnitId,
@@ -563,7 +515,7 @@ pub struct MailboxResponder {
 }
 
 impl MailboxResponder {
-    /// Create a new mailbox responder unit.
+    /// Construct a responder.
     pub fn new(
         id: UnitId,
         sender: UnitId,
@@ -602,7 +554,6 @@ impl ExecutionUnit for MailboxResponder {
         self.phase.set(p + 1);
         match p {
             0 => {
-                // Attempt to receive command.
                 effects.push(Effect::MailboxReceiveAttempt {
                     mailbox: self.cmd_mailbox,
                     source: self.id,
@@ -616,7 +567,6 @@ impl ExecutionUnit for MailboxResponder {
                 }
             }
             _ => {
-                // Read command, send response, wake sender, finish.
                 let cmd = ctx.received_messages().first().copied().unwrap_or(0);
                 let response = cmd.wrapping_add(1);
                 effects.push(Effect::MailboxSend {

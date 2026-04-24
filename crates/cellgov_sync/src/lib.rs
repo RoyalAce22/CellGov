@@ -1,9 +1,5 @@
-//! cellgov_sync -- mailboxes, signals, barrier identifiers, and the
-//! atomic reservation table.
-//!
-//! These are abstract state machines that produce block conditions, wake
-//! conditions, and effect validation results. They never decide scheduling
-//! order. The scheduler loop lives elsewhere.
+//! Mailboxes, signal registers, barrier ids, and the atomic reservation
+//! table. State machines only; the scheduler decides wake order.
 
 pub mod barrier;
 pub mod mailbox;

@@ -1,17 +1,4 @@
-//! `DmaCompletion` -- modeled completion event for a single
-//! [`DmaRequest`].
-//!
-//! A completion is the runtime's way of saying "this DMA transfer
-//! becomes guest-visible at this guest tick". It is a pure value
-//! packet: no callbacks, no host pointers, no scheduler hooks. The
-//! request that produced it is carried verbatim so the commit pipeline
-//! can apply the modeled transfer when the completion fires, without
-//! needing a separate side table to look the request up.
-//!
-//! This module owns the completion value type and its accessors. The
-//! DMA queue in [`crate::queue`] orders completions by
-//! `(completion_time, sequence)`, and the commit pipeline applies the
-//! modeled transfer when each completion fires.
+//! Modeled completion event for a single [`DmaRequest`].
 
 use crate::request::{DmaDirection, DmaRequest};
 use cellgov_event::UnitId;
@@ -20,18 +7,9 @@ use cellgov_time::GuestTicks;
 
 /// A modeled DMA completion event.
 ///
-/// Pairs the original [`DmaRequest`] with the [`GuestTicks`] at which
-/// the runtime considers the transfer guest-visible. The completion
-/// time is computed by an implementation of
-/// [`crate::DmaLatencyModel`] when the request is enqueued; this type
-/// just carries the result.
-///
-/// `DmaCompletion` is `Copy + Eq + Hash`. Ordering is **not** derived:
-/// the DMA queue orders completions by
-/// `(completion_time, sequence_number)` where the sequence number is
-/// queue-assigned, not part of the completion value itself. Deriving
-/// `Ord` here would pin a different ordering and fight the queue's
-/// tiebreak scheme.
+/// `Ord` is deliberately not derived: [`crate::DmaQueue`] orders
+/// completions by `(completion_time, queue-assigned sequence)`, and the
+/// sequence is not part of this value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DmaCompletion {
     request: DmaRequest,
@@ -39,8 +17,7 @@ pub struct DmaCompletion {
 }
 
 impl DmaCompletion {
-    /// Construct a `DmaCompletion` for `request`, scheduled to fire at
-    /// `completion_time`.
+    /// Pair `request` with the tick at which it becomes visible.
     #[inline]
     pub const fn new(request: DmaRequest, completion_time: GuestTicks) -> Self {
         Self {
@@ -49,47 +26,44 @@ impl DmaCompletion {
         }
     }
 
-    /// The request that produced this completion.
+    /// The originating request.
     #[inline]
     pub const fn request(self) -> DmaRequest {
         self.request
     }
 
-    /// The guest-time tick at which the runtime considers this
-    /// transfer visible to the rest of the guest model.
+    /// Guest tick at which the transfer becomes visible to the rest of
+    /// the guest model.
     #[inline]
     pub const fn completion_time(self) -> GuestTicks {
         self.completion_time
     }
 
-    /// Convenience: the unit that issued the underlying request.
-    /// Recorded so the runtime can route the wake event back to the
-    /// right waiter.
+    /// Issuer of the underlying request.
     #[inline]
     pub const fn issuer(self) -> UnitId {
         self.request.issuer()
     }
 
-    /// Convenience: the direction of the underlying transfer.
+    /// Direction of the underlying request.
     #[inline]
     pub const fn direction(self) -> DmaDirection {
         self.request.direction()
     }
 
-    /// Convenience: the source byte range of the underlying transfer.
+    /// Source range of the underlying request.
     #[inline]
     pub const fn source(self) -> ByteRange {
         self.request.source()
     }
 
-    /// Convenience: the destination byte range of the underlying
-    /// transfer.
+    /// Destination range of the underlying request.
     #[inline]
     pub const fn destination(self) -> ByteRange {
         self.request.destination()
     }
 
-    /// Convenience: the length of the underlying transfer in bytes.
+    /// Transfer length in bytes.
     #[inline]
     pub const fn length(self) -> u64 {
         self.request.length()
@@ -161,12 +135,9 @@ mod tests {
 
     #[test]
     fn copy_semantics_hold() {
-        // DmaCompletion is Copy by construction. This test exists so
-        // accidental field changes that break Copy are caught loudly.
         let c = DmaCompletion::new(sample_request(), GuestTicks::new(7));
         let d = c;
         assert_eq!(c, d);
-        // Both still usable after the copy.
         assert_eq!(c.completion_time(), d.completion_time());
     }
 
@@ -186,8 +157,6 @@ mod tests {
 
     #[test]
     fn completion_time_zero_is_legal() {
-        // A latency model is free to return GuestTicks::ZERO for an
-        // immediate completion; the value type does not reject it.
         let c = DmaCompletion::new(sample_request(), GuestTicks::ZERO);
         assert_eq!(c.completion_time(), GuestTicks::ZERO);
     }

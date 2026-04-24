@@ -1,35 +1,22 @@
-//! `DmaQueue` -- deterministic priority queue of [`DmaCompletion`]s.
+//! Deterministic priority queue of [`DmaCompletion`]s.
 //!
-//! Stores completions keyed by `(completion_time, sequence_number)`,
-//! where the sequence number is assigned by the queue at enqueue time.
-//! That tiebreaker is what makes the order total even when multiple
-//! completions land at exactly the same `GuestTicks`, so two runs of
-//! the same scenario walk the queue in the same order regardless of
-//! host timing or `HashMap` iteration order.
-//!
+//! Entries are keyed by `(completion_time, queue-assigned sequence)`,
+//! giving a total order that preserves enqueue order among equal times.
 //! `Effect::DmaEnqueue` flows through the commit pipeline into this
-//! queue, and completions emit wake events as they fire.
-//!
-//! Why a [`BTreeMap`] keyed by `(GuestTicks, u64)` rather than a
-//! [`std::collections::BinaryHeap`]: replay determinism. Stable ordered
-//! collections are required everywhere ordering matters,
-//! and `BinaryHeap` does not preserve insertion order among equal-key
-//! elements. The `(time, sequence)` `BTreeMap` does, by construction.
+//! queue; completions emit wake events as they drain.
 
 use crate::completion::DmaCompletion;
 use cellgov_time::GuestTicks;
 use std::collections::BTreeMap;
 
-/// A queued entry: the completion metadata plus optional inline data
-/// for transfers from unit-private memory.
+/// Completion plus optional inline bytes for transfers from
+/// unit-private memory.
 type QueueEntry = (DmaCompletion, Option<Vec<u8>>);
 
-/// A deterministic priority queue of modeled DMA completions.
+/// Deterministic priority queue of modeled DMA completions.
 ///
-/// Drains in `(completion_time, sequence)` order. The sequence number
-/// is queue-assigned at enqueue time and breaks ties between
-/// completions that share a `GuestTicks` value, so the drain order is
-/// total and stable across runs.
+/// Drains in `(completion_time, sequence)` order. Sequence is assigned
+/// at [`DmaQueue::enqueue`] time.
 #[derive(Debug, Clone, Default)]
 pub struct DmaQueue {
     entries: BTreeMap<(GuestTicks, u64), QueueEntry>,
@@ -55,21 +42,13 @@ impl DmaQueue {
         self.entries.is_empty()
     }
 
-    /// Enqueue `completion` with an optional inline `payload`.
+    /// Enqueue `completion` with optional inline `payload`, returning
+    /// the assigned sequence number.
     ///
-    /// The queue assigns a fresh sequence number to break ties with any
-    /// other completion that shares the same `completion_time`; the
-    /// assigned ordering key is the pair
-    /// `(completion.completion_time(), sequence_number)`.
-    ///
-    /// When `payload` is `Some`, the runtime uses those bytes at
-    /// completion time instead of reading from the source address in
-    /// guest memory. This supports transfers from unit-private memory
-    /// (e.g., SPU local store) that is not mapped into the guest
-    /// address space.
-    ///
-    /// Returns the assigned sequence number for callers that want to
-    /// trace it; most callers ignore it.
+    /// When `payload` is `Some`, the commit pipeline uses those bytes
+    /// at completion time instead of reading from the source address.
+    /// This supports transfers from unit-private memory (e.g. SPU local
+    /// store) that is not mapped into the guest address space.
     pub fn enqueue(&mut self, completion: DmaCompletion, payload: Option<Vec<u8>>) -> u64 {
         let seq = self.next_seq;
         self.next_seq += 1;
@@ -79,26 +58,18 @@ impl DmaQueue {
     }
 
     /// Borrow the earliest pending completion without removing it.
-    /// Returns `None` if the queue is empty.
     pub fn peek(&self) -> Option<&DmaCompletion> {
         self.entries.values().next().map(|(c, _)| c)
     }
 
-    /// Remove and return the earliest pending completion and its
-    /// payload. Returns `None` if the queue is empty.
+    /// Remove and return the earliest pending completion.
     pub fn pop_next(&mut self) -> Option<(DmaCompletion, Option<Vec<u8>>)> {
         let key = *self.entries.keys().next()?;
         self.entries.remove(&key)
     }
 
-    /// Drain every completion whose `completion_time` is less than or
-    /// equal to `now`, returning them in `(time, sequence)` order.
-    ///
-    /// "Less than or equal" because a completion scheduled to fire at
-    /// exactly `now` is considered visible at `now`. The relative
-    /// order between two completions that share a `completion_time` is
-    /// decided by their queue sequence numbers, which preserves
-    /// enqueue order.
+    /// Drain every completion with `completion_time <= now`, in
+    /// `(time, sequence)` order.
     pub fn pop_due(&mut self, now: GuestTicks) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
         match now.raw().checked_add(1) {
             Some(split_time) => {
@@ -107,7 +78,6 @@ impl DmaQueue {
                 due.into_values().collect()
             }
             None => {
-                // now == u64::MAX: everything is due.
                 let all = std::mem::take(&mut self.entries);
                 all.into_values().collect()
             }
@@ -170,8 +140,6 @@ mod tests {
 
     #[test]
     fn pop_next_breaks_ties_by_enqueue_order() {
-        // Three completions all scheduled for the same tick. Drain
-        // order must equal enqueue order (sequence number tiebreak).
         let mut q = DmaQueue::new();
         q.enqueue(completion_at(100, 7), None);
         q.enqueue(completion_at(100, 8), None);
@@ -284,9 +252,6 @@ mod tests {
 
     #[test]
     fn pop_due_at_max_ticks_drains_everything() {
-        // Completions scheduled at u64::MAX should still be drained
-        // when pop_due is called with u64::MAX. The saturating_add(1)
-        // in pop_due must not cause these to be missed.
         let mut q = DmaQueue::new();
         q.enqueue(completion_at(u64::MAX, 0), None);
         q.enqueue(completion_at(u64::MAX - 1, 1), None);

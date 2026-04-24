@@ -1,17 +1,9 @@
-//! cellgov_time -- guest virtual time, progress budgets, timestamp arithmetic.
+//! Distinct numeric types for the runtime's three time-like quantities.
 //!
-//! This crate owns the runtime's notion of time. Guest time is the authoritative
-//! ordering clock for all guest-visible events. It is monotonic across the entire
-//! runtime, not per-unit.
-//!
-//! Three concepts live here and must remain distinct types -- never plain `u64`,
-//! never implicitly convertible:
-//!
-//! - guest ticks: the authoritative ordering clock
-//! - budget units: a policy input granted to a unit at scheduling time
-//! - logical epoch: advances at commit boundaries, granularity for state hashes
-//!
-//! No scheduler policy lives in this crate.
+//! Guest ticks order guest-visible events, budgets bound per-step progress,
+//! and epochs number commit batches. The three are separate types with no
+//! implicit conversions so guest time can never silently become wall time
+//! or scheduler currency. Scheduler policy lives elsewhere.
 
 pub mod budget;
 pub mod epoch;

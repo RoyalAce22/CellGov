@@ -1,14 +1,12 @@
 //! Guest-facing PPU thread id and its monotonic allocator.
 
-/// Guest-facing PPU thread id. Values below `0x0100_0000` are
-/// reserved; the primary is [`Self::PRIMARY`] and child threads
-/// allocate from `0x0100_0001` upward.
+/// Guest-facing PPU thread id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PpuThreadId(u64);
 
 impl PpuThreadId {
-    /// The primary thread's id. Reserved -- the allocator never
-    /// returns this value.
+    /// The primary thread's reserved id; [`PpuThreadIdAllocator`]
+    /// never returns this value.
     pub const PRIMARY: PpuThreadId = PpuThreadId(0x0100_0000);
 
     /// Construct a thread id from a raw u64.
@@ -23,20 +21,16 @@ impl PpuThreadId {
 }
 
 /// Monotonic allocator for child-thread ids.
-///
-/// `peek` and `allocate` agree: `peek` returns `Some(id)` iff
-/// the next `allocate` will also return `Some(id)` for the
-/// same `id`, including when `id == u64::MAX`.
 #[derive(Debug, Clone)]
 pub struct PpuThreadIdAllocator {
-    /// `None` means exhausted. Storing the post-state this way
-    /// (rather than eagerly reserving `next + 1`) is what makes
-    /// `u64::MAX` itself reachable.
+    /// `None` means exhausted. Storing the current slot (rather
+    /// than eagerly reserving `next + 1`) keeps `u64::MAX`
+    /// reachable as the last hand-out.
     next: Option<u64>,
 }
 
 impl PpuThreadIdAllocator {
-    /// Construct a fresh allocator. The first `allocate` returns
+    /// Construct a fresh allocator; first `allocate` returns
     /// `PpuThreadId(0x0100_0001)`.
     pub fn new() -> Self {
         Self {
@@ -44,15 +38,15 @@ impl PpuThreadIdAllocator {
         }
     }
 
-    /// Allocate the next thread id. Returns `None` only after
-    /// `u64::MAX` has itself been handed out.
+    /// Allocate the next thread id; `None` only after `u64::MAX`
+    /// has itself been handed out.
     pub fn allocate(&mut self) -> Option<PpuThreadId> {
         let cur = self.next?;
         self.next = cur.checked_add(1);
         Some(PpuThreadId(cur))
     }
 
-    /// Peek the id that the next `allocate` will return.
+    /// Peek the id that the next `allocate` would return.
     pub fn peek(&self) -> Option<PpuThreadId> {
         self.next.map(PpuThreadId)
     }
@@ -66,8 +60,8 @@ impl Default for PpuThreadIdAllocator {
 
 #[cfg(test)]
 impl PpuThreadIdAllocator {
-    /// Seed the next-id directly to exercise exhaustion near
-    /// `u64::MAX` without allocating 2^64 times.
+    /// Seed the next slot directly; exercises exhaustion near
+    /// `u64::MAX` without 2^64 allocations.
     pub(crate) fn with_next(next: u64) -> Self {
         Self { next: Some(next) }
     }

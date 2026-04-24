@@ -6,8 +6,8 @@ use super::thread::{AddJoinWaiter, PpuThread, PpuThreadAttrs, PpuThreadState};
 use cellgov_event::UnitId;
 use std::collections::BTreeMap;
 
-/// Table of PPU threads owned by the LV2 host. Lookup by
-/// `PpuThreadId` (guest-facing) or `UnitId` (runtime).
+/// Table of PPU threads; lookup by `PpuThreadId` (guest-facing)
+/// or `UnitId` (runtime).
 #[derive(Debug, Clone, Default)]
 pub struct PpuThreadTable {
     allocator: PpuThreadIdAllocator,
@@ -21,22 +21,18 @@ impl PpuThreadTable {
         Self::default()
     }
 
-    /// Insert the primary thread. Must be called exactly once
-    /// at host construction, before any `create` call.
+    /// Insert the primary thread; must be called exactly once at
+    /// host construction, before any `create`.
     ///
     /// # Panics
     /// - If a primary thread has already been inserted.
     /// - If `create` has already run.
-    /// - If `unit_id` already maps to another thread (debug).
+    /// - Debug-only if `unit_id` already maps to another thread.
     pub fn insert_primary(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) {
-        // These two are `assert!` rather than `debug_assert!`
-        // because they guard a single-shot construction
-        // invariant: the host calls this exactly once at boot,
-        // so a release violation is a catastrophic wiring bug
-        // that must not silently leave the host half-initialised.
-        // The unit-id check below is `debug_assert!` because it
-        // covers repeated per-thread bookkeeping where the
-        // release-mode cost would add up.
+        // Hard `assert!`s guard a single-shot boot invariant; a
+        // release violation would leave the host
+        // half-initialised. The unit-id check is debug-only
+        // because it repeats for every thread.
         assert!(
             !self.threads.contains_key(&PpuThreadId::PRIMARY),
             "primary thread already inserted",
@@ -62,12 +58,11 @@ impl PpuThreadTable {
         self.unit_to_thread.insert(unit_id, PpuThreadId::PRIMARY);
     }
 
-    /// Create a new child thread and record its attributes.
-    /// Returns the allocated id, or `None` if the id space is
-    /// exhausted.
+    /// Create a child thread and record its attributes; `None`
+    /// if the id space is exhausted.
     ///
-    /// # Panics (debug)
-    /// If `unit_id` already maps to another thread.
+    /// # Panics
+    /// Debug-only if `unit_id` already maps to another thread.
     pub fn create(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) -> Option<PpuThreadId> {
         debug_assert!(
             !self.unit_to_thread.contains_key(&unit_id),
@@ -115,16 +110,18 @@ impl PpuThreadTable {
         self.unit_to_thread.get(&unit_id).copied()
     }
 
-    /// Mark a thread finished with the given exit value.
-    /// Returns the list of joiners; the caller must transition
-    /// those units back to `Runnable` and clear their block
-    /// state.
+    /// Mark a thread finished and return its drained joiners.
     ///
-    /// Returns an empty list if the thread does not exist or
-    /// is already terminal.
+    /// Caller must transition every returned unit back to
+    /// `Runnable` and clear its block state; leaking the list
+    /// leaks parked threads.
     ///
-    /// # Panics (debug)
-    /// If called on a thread already `Finished` or `Detached`.
+    /// Empty result if the thread does not exist or is already
+    /// terminal.
+    ///
+    /// # Panics
+    /// Debug-only if called on a thread already `Finished` or
+    /// `Detached`.
     pub fn mark_finished(&mut self, id: PpuThreadId, exit_value: u64) -> Vec<PpuThreadId> {
         let Some(thread) = self.threads.get_mut(&id) else {
             return Vec::new();
@@ -138,9 +135,9 @@ impl PpuThreadTable {
             "mark_finished on {id:?} which is already {:?}",
             thread.state,
         );
-        // Release guard matching the debug_assert: a second
-        // call must not overwrite exit_value or drop Detached.
-        // Joiners were drained on the first call.
+        // Release guard: a second call must not overwrite
+        // exit_value or drop Detached. Joiners drained on the
+        // first call.
         if already_terminal {
             return Vec::new();
         }
@@ -149,9 +146,9 @@ impl PpuThreadTable {
         std::mem::take(&mut thread.join_waiters)
     }
 
-    /// Destructively take the list of joiners parked on `id`
-    /// without changing thread state. For non-destructive
-    /// access use `get(id)?.join_waiters.as_slice()`.
+    /// Destructively take the joiner list without changing
+    /// thread state; for read-only access use
+    /// `get(id)?.join_waiters.as_slice()`.
     pub fn take_join_waiters(&mut self, id: PpuThreadId) -> Vec<PpuThreadId> {
         match self.threads.get_mut(&id) {
             Some(t) => std::mem::take(&mut t.join_waiters),
@@ -159,9 +156,9 @@ impl PpuThreadTable {
         }
     }
 
-    /// Append a waiter to the target's join list. The return
-    /// variant names the exact outcome so callers can route
-    /// each case to the right errno: see [`AddJoinWaiter`].
+    /// Append a waiter to the target's join list; the returned
+    /// [`AddJoinWaiter`] variant names the exact outcome so
+    /// callers can route each case to the right errno.
     pub fn add_join_waiter(&mut self, target: PpuThreadId, waiter: PpuThreadId) -> AddJoinWaiter {
         if target == waiter {
             return AddJoinWaiter::SelfJoin;
@@ -179,9 +176,8 @@ impl PpuThreadTable {
         }
     }
 
-    /// Mark a thread `Detached`. Detached Finished threads are
-    /// garbage-collected without a join. Returns `true` if the
-    /// target exists.
+    /// Mark a thread `Detached` so it garbage-collects on
+    /// finish without a join; `true` if the target exists.
     pub fn detach(&mut self, id: PpuThreadId) -> bool {
         match self.threads.get_mut(&id) {
             Some(t) => {
@@ -192,8 +188,7 @@ impl PpuThreadTable {
         }
     }
 
-    /// Number of threads (including Finished / Detached that
-    /// have not been purged).
+    /// Number of threads, including unpurged Finished / Detached.
     pub fn len(&self) -> usize {
         self.threads.len()
     }
@@ -203,16 +198,18 @@ impl PpuThreadTable {
         self.threads.is_empty()
     }
 
-    /// Iterate all thread ids in deterministic BTreeMap order.
+    /// Iterate all thread ids in BTreeMap order.
     pub fn iter_ids(&self) -> impl Iterator<Item = PpuThreadId> + '_ {
         self.threads.keys().copied()
     }
 
-    /// FNV-1a of the table for determinism checking. Folds id,
-    /// unit_id, state, block reason (via
+    /// FNV-1a fold for determinism checking.
+    ///
+    /// Walks entries in BTreeMap order and folds id, unit_id,
+    /// state tag, block-reason tag + payload (via
     /// [`super::GuestBlockReason::stable_tag`]), attrs, exit
-    /// value, and the join-waiter list (length-prefixed to avoid
-    /// boundary collisions) in BTreeMap order.
+    /// value, and the join-waiter list length-prefixed so
+    /// `([X,Y], [])` cannot collide with `([X], [Y])`.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (id, thread) in &self.threads {
@@ -557,8 +554,6 @@ mod tests {
 
     #[test]
     fn state_hash_folds_tls_base() {
-        // tls_base is host-chosen, so a bug picking a wrong
-        // TLS placement would otherwise go undetected.
         let mut a = PpuThreadTable::new();
         let mut b = PpuThreadTable::new();
         let mut attrs_a = dummy_attrs();
@@ -572,8 +567,8 @@ mod tests {
 
     #[test]
     fn state_hash_join_waiter_list_length_is_load_bearing() {
-        // (A=[X,Y], B=[]) vs (A=[X], B=[Y]) collide without a
-        // length prefix.
+        // Without a length prefix, ([X,Y], []) collides with
+        // ([X], [Y]).
         let mut a = PpuThreadTable::new();
         let mut b = PpuThreadTable::new();
         a.insert_primary(UnitId::new(1), dummy_attrs());

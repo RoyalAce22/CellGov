@@ -1,40 +1,22 @@
-//! `TraceLevel` -- categorical filter for trace records.
+//! Categorical filter tag attached to every trace record.
 //!
-//! Trace levels let high-volume categories be filtered without
-//! reworking the writer later. These are *categories* rather than
-//! severity levels: a unit-scheduled record is not "more important"
-//! than a commit-applied record, but a replay tool may want only
-//! commit records, or only state-hash records, depending on what it
-//! is verifying.
-//!
-//! The variants and their `#[repr(u8)]` discriminants are part of the
-//! binary trace contract. Do not reorder, do not insert variants in the
-//! middle, do not change the explicit discriminant values. New levels
-//! must be appended at the end with discriminants strictly greater than
+//! Variants and their `#[repr(u8)]` discriminants are part of the binary trace
+//! contract: do not reorder, do not insert in the middle, do not change values.
+//! New levels append with discriminants strictly greater than
 //! [`TraceLevel::Hashes`].
 
 /// Category of a structured trace record.
-///
-/// Used by the writer to tag records and by the reader (and replay
-/// tools) to filter them. Each record produced by the runtime carries
-/// exactly one `TraceLevel`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum TraceLevel {
-    /// Scheduler decisions: unit selected, budget granted, unit blocked,
-    /// unit woken, unit finished. The default category for runtime
-    /// orchestration records.
+    /// Scheduler decisions: select, grant, block, wake, finish.
     #[default]
     Scheduling = 0,
-    /// Effect emission and per-effect lifecycle: an effect was emitted
-    /// by a unit, an effect was validated, an effect was rejected.
+    /// Effect emission and per-effect lifecycle.
     Effects = 1,
-    /// Commit pipeline activity: batch built, batch staged, batch
-    /// applied, batch rolled back due to fault.
+    /// Commit pipeline activity.
     Commits = 2,
-    /// State hash checkpoints used for deterministic replay
-    /// comparison: committed memory hash, runnable queue hash, sync
-    /// object state hash, unit status hash.
+    /// State-hash checkpoints used for replay comparison.
     Hashes = 3,
 }
 

@@ -1,71 +1,35 @@
-//! `ExecutionContext` -- the readonly view exposed to a running unit.
+//! The readonly view exposed to a running execution unit.
 //!
-//! An execution context exposes only:
-//!
-//! - unit-local readable state needed to continue (lives in the unit, not here)
-//! - readonly committed shared memory view
-//! - readonly runtime-facing handles for querying abstract device state
-//!
-//! The determinism rule: the shared committed-memory view
-//! must be **frozen** for the entire duration of a single `run_until_yield`
-//! call. A unit cannot observe commits made by other units mid-step. Any
-//! new commits become visible only on the unit's next scheduled
-//! invocation. This eliminates read/observe nondeterminism by
-//! construction.
-//!
-//! This crate enforces the freeze rule structurally: `ExecutionContext`
-//! holds an immutable borrow of `GuestMemory`, and `run_until_yield`
-//! takes `&ExecutionContext`. Rust's borrow checker ensures the runtime
-//! cannot mutate the underlying memory while the context is alive,
-//! which is exactly the duration of the unit's step.
+//! The shared memory view is frozen for the entire duration of a
+//! single `run_until_yield` call. A unit cannot observe commits made
+//! by other units mid-step; new commits become visible only on the
+//! unit's next scheduled invocation. The freeze is enforced
+//! structurally by the borrow checker: `ExecutionContext` holds an
+//! immutable borrow of `GuestMemory`, and `run_until_yield` takes
+//! `&ExecutionContext`.
 
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
 use cellgov_sync::ReservationTable;
 
-/// The readonly view of runtime state exposed to an execution unit
-/// during a single `run_until_yield` call.
+/// Readonly view of runtime state passed into `run_until_yield`.
 ///
-/// `ExecutionContext` is narrow by construction. Everything it carries is
-/// shared-borrowed from the runtime. There is no mutable access to
-/// anything; units publish changes only by emitting `Effect` packets in
-/// their step result, never by reaching through the context.
-///
-/// Exposes the committed shared memory view, any messages the
-/// runtime delivered on the unit's behalf during the preceding
-/// commit (e.g. from `MailboxReceiveAttempt`), an optional syscall
-/// return code from a previous `YieldReason::Syscall` yield that
-/// the runtime serviced, and any register writes injected by HLE
-/// stubs alongside that return. Readonly runtime-facing handles
-/// for querying abstract device state can be added as additional
-/// borrowed fields when abstract devices exist; that is a
-/// non-breaking addition because context construction goes through
-/// named constructors (`new`, `with_received`, `with_syscall_return`,
-/// `with_syscall_return_and_regs`) rather than exposing the struct
-/// literal.
+/// Units publish changes only by emitting `Effect` packets in their
+/// step result; there is no mutable access through the context.
+/// Constructors are named (`new`, `with_received`, `with_syscall_return`,
+/// `with_syscall_return_and_regs`, `with_reservations`) so that
+/// adding a borrowed field is a non-breaking change.
 #[derive(Debug, Clone, Copy)]
 pub struct ExecutionContext<'a> {
     memory: &'a GuestMemory,
     received: &'a [u32],
     syscall_return: Option<u64>,
-    /// Register writes injected by HLE stubs alongside a syscall
-    /// return. Each entry is `(gpr_index, value)`; the unit applies
-    /// these in addition to writing the syscall return into r3.
-    /// Empty unless the context was built with
-    /// `with_syscall_return_and_regs`.
     register_writes: &'a [(u8, u64)],
-    /// Read-only view of the committed atomic reservation table.
-    /// `None` when the runtime has not installed a table (e.g. in
-    /// microtests or contexts built before the reservation model is
-    /// wired); in that case [`Self::reservation_held`] returns
-    /// `false` for every unit. Set via
-    /// [`Self::with_reservations`].
     reservations: Option<&'a ReservationTable>,
 }
 
 impl<'a> ExecutionContext<'a> {
-    /// Construct an `ExecutionContext` over the given committed memory
-    /// with no pending received messages and no syscall return.
+    /// Context over the given committed memory with no pending inputs.
     #[inline]
     pub const fn new(memory: &'a GuestMemory) -> Self {
         Self {
@@ -77,9 +41,8 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Construct an `ExecutionContext` with pending received messages.
-    /// The runtime calls this when `drain_receives` returned a
-    /// non-empty vec for the unit about to run.
+    /// Context carrying messages the runtime drained for this unit
+    /// during the preceding commit cycle.
     #[inline]
     pub fn with_received(memory: &'a GuestMemory, received: &'a [u32]) -> Self {
         Self {
@@ -91,11 +54,10 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Construct an `ExecutionContext` with a syscall return code.
-    /// The runtime calls this when the unit previously yielded with
-    /// `YieldReason::Syscall` and the LV2 host produced an immediate
-    /// response. The unit reads the return code via
-    /// `syscall_return()` and writes it into its own r3.
+    /// Context for resuming a unit whose previous step yielded
+    /// `YieldReason::Syscall` and was serviced with an immediate
+    /// return. The unit writes `code` into its syscall-return
+    /// register and advances past the syscall instruction.
     #[inline]
     pub fn with_syscall_return(memory: &'a GuestMemory, received: &'a [u32], code: u64) -> Self {
         Self {
@@ -107,9 +69,9 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Construct an `ExecutionContext` with a syscall return code and
-    /// additional register writes. Used by HLE stubs that need to set
-    /// registers beyond r3 (e.g., r13 for TLS initialization).
+    /// Variant of [`Self::with_syscall_return`] for HLE stubs that
+    /// also need to write registers beyond the return register
+    /// (e.g. TLS setup).
     #[inline]
     pub fn with_syscall_return_and_regs(
         memory: &'a GuestMemory,
@@ -126,10 +88,8 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Return a copy of this context with the atomic reservation
-    /// table attached. Any prior reservation view is replaced.
-    /// Chainable after any of the other constructors because
-    /// `ExecutionContext` is `Copy`.
+    /// Attach the committed reservation table, replacing any prior
+    /// reservation view. Chainable because `ExecutionContext` is `Copy`.
     #[inline]
     pub const fn with_reservations(self, table: &'a ReservationTable) -> Self {
         Self {
@@ -141,22 +101,18 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Borrow the committed memory view. The returned reference shares
-    /// this context's lifetime, so it cannot outlive the step.
+    /// Committed memory view, borrowed for the step's lifetime.
     #[inline]
     pub const fn memory(&self) -> &GuestMemory {
         self.memory
     }
 
-    /// Whether the committed reservation table currently lists
-    /// `unit` as holding an atomic reservation. Returns `false`
-    /// when no reservation view has been attached to this context
-    /// (`Self::with_reservations` was not called).
-    ///
-    /// The committed-state half of the conditional-store verdict.
-    /// The unit's own local reservation register is the other
-    /// half; a `stwcx` / `putllc` succeeds only when both signals
-    /// say the reservation is held.
+    /// Committed-state half of the conditional-store verdict: whether
+    /// `unit` currently holds a reservation per the installed table.
+    /// Returns `false` when no table was attached via
+    /// [`Self::with_reservations`]. The unit's own local reservation
+    /// register is the other half; `stwcx` / `putllc` succeed only
+    /// when both agree.
     #[inline]
     pub fn reservation_held(&self, unit: UnitId) -> bool {
         match self.reservations {
@@ -166,26 +122,23 @@ impl<'a> ExecutionContext<'a> {
     }
 
     /// Messages delivered to this unit by the runtime during the
-    /// preceding commit cycle (e.g. popped from a mailbox via
-    /// `MailboxReceiveAttempt`). Empty if no messages were delivered.
-    /// The slice is in delivery order.
+    /// preceding commit cycle, in delivery order.
     #[inline]
     pub const fn received_messages(&self) -> &[u32] {
         self.received
     }
 
-    /// Syscall return code from the LV2 host, if the unit previously
-    /// yielded with `YieldReason::Syscall` and the runtime serviced
-    /// it with an `Lv2Dispatch::Immediate`. The unit should write
-    /// this value into its r3 and advance PC past the `sc`.
+    /// Syscall return code from the LV2 host, if the unit's prior
+    /// step yielded `YieldReason::Syscall` and the runtime serviced
+    /// it immediately.
     #[inline]
     pub const fn syscall_return(&self) -> Option<u64> {
         self.syscall_return
     }
 
-    /// Register writes injected by HLE stubs. Each entry is
-    /// (gpr_index, value). The unit applies these alongside the
-    /// syscall return.
+    /// Extra `(gpr_index, value)` writes accompanying a syscall
+    /// return, for HLE stubs that touch registers beyond the return
+    /// register.
     #[inline]
     pub const fn register_writes(&self) -> &[(u8, u64)] {
         self.register_writes
@@ -216,7 +169,6 @@ mod tests {
         let mem = GuestMemory::new(8);
         let ctx = ExecutionContext::new(&mem);
         let copy = ctx;
-        // Both still usable; would not compile if Copy were absent.
         assert_eq!(ctx.memory().size(), copy.memory().size());
     }
 

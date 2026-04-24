@@ -1,94 +1,47 @@
-//! `dump-imports` subcommand: read a title's EBOOT, parse its HLE
-//! import table, and print a markdown inventory of every bound
-//! function alongside its NID-DB name, stub classification, and
-//! whether CellGov has dedicated handling.
+//! `dump-imports` subcommand: parse a title's EBOOT import table and
+//! print a markdown inventory bucketed by classification.
 //!
-//! The regenerated artifacts live under `docs/titles/`, one file
-//! per title keyed by PSN content id or disc serial (e.g.
-//! `docs/titles/<SERIAL>_hle_inventory.md`).
+//! Each imported NID falls into exactly one of six buckets:
+//! `Impl` (CellGov has dedicated handling), `Stateful` /
+//! `UnsafeToStub` / `NoopSafe` (stub-safety tier from the NID DB),
+//! `UnknownNid` (not in the DB), `UnknownClass` (DB returned an
+//! unrecognized classifier string). The buckets drive the summary
+//! arithmetic at the end of `run`.
 //!
-//! Regenerate one with:
-//!
-//! ```text
-//! cellgov_cli dump-imports --title <shortname> \
-//!     > docs/titles/<content-id>_hle_inventory.md
-//! ```
-//!
-//! Title resolution accepts any of `--title <shortname>`,
-//! `--content-id <NPUAXXXXX>`, or `--title-manifest <path>`; the
-//! VFS lookup path is the same as `run-game` / `bench-boot`
-//! (`--vfs-root`, `$CELLGOV_PS3_VFS_ROOT`,
-//! `tools/rpcs3/dev_hdd0`).
+//! Artifacts land in `docs/titles/<content-id>_hle_inventory.md`.
 
-/// NIDs with dedicated CellGov HLE handling. Re-exported from
-/// `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` so the inventory tool
-/// and the runtime PRX binder read from a single source of truth;
-/// adding a new HLE implementation only requires updating the
-/// library constant.
+/// NIDs with dedicated CellGov HLE handling. Shared with the runtime
+/// PRX binder; adding an HLE impl means updating this library constant.
 const CELLGOV_HLE_IMPLEMENTED_NIDS: &[u32] = cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS;
 
-/// Column width for the Name field in the markdown table. Names
-/// longer than this get truncated with a trailing "...". Padding
-/// alone (the old `{:<49}` format) did not truncate, so a long
-/// mangled C++ symbol would blow the column and misalign the
-/// downstream cells in any markdown renderer that honors pipes.
+/// Column width for the Name field in the markdown table.
 const NAME_COLUMN_WIDTH: usize = 49;
 
-/// Truncate `name` to at most `NAME_COLUMN_WIDTH` chars by keeping
-/// the head and appending "..." when it overflows. Char-aware so a
-/// non-ASCII byte in a demangled C++ symbol cannot land the cut
-/// mid-codepoint and panic the tool. Padding is left to the
-/// formatter.
+/// Char-aware truncation to `NAME_COLUMN_WIDTH`, appending "..." on
+/// overflow. Padding is left to the format specifier.
 ///
-/// Caveat: the Rust format-width specifier (`{:<width$}`) pads by
-/// byte count, not by display width. Combining sequences or
-/// wide-glyph characters in the NID DB will still misalign the
-/// table because the formatter counts one byte per display slot.
-/// PS3 NID DB entries are overwhelmingly mangled C identifiers
-/// or sys_ / cell* prefixes, so in practice this is theoretical;
-/// the comment exists so the next person reading this does not
-/// chase a phantom alignment bug.
+/// Caveat: `{:<width$}` pads by byte count, so combining sequences
+/// or wide glyphs still misalign the table. PS3 NID DB entries are
+/// overwhelmingly ASCII C identifiers, so this is theoretical.
 fn fit_name_column(name: &str) -> String {
     if name.chars().count() <= NAME_COLUMN_WIDTH {
         name.to_string()
     } else {
-        // Reserve 3 chars for the ellipsis marker. Iterate chars
-        // rather than byte-slice so we cannot cut mid-codepoint.
+        // chars().take to avoid cutting mid-codepoint.
         let head: String = name.chars().take(NAME_COLUMN_WIDTH - 3).collect();
         format!("{head}...")
     }
 }
 
-/// Classification result for a single imported NID. Mutually
-/// exclusive buckets; each function lands in exactly one. Totals
-/// across the run must sum to `total_functions` -- the invariant
-/// is asserted at the end of `run`, so a future refactor that
-/// double-counts or forgets a bucket fails loudly instead of
-/// producing a silently wrong "noop-safe" count via unsigned
-/// subtraction underflow.
+/// Per-bucket counters. Sum across all fields equals
+/// `total_functions`; `run` asserts the invariant.
 #[derive(Debug, Default, Clone, Copy)]
 struct InventoryCounts {
-    /// NID is in CELLGOV_HLE_IMPLEMENTED_NIDS; dispatch has
-    /// dedicated handling.
     impl_count: usize,
-    /// NID is not implemented and classified "stateful"; needs a
-    /// real impl, stub to 0 would be wrong.
     stateful_unstubbed: usize,
-    /// NID is not implemented and classified "unsafe-to-stub";
-    /// stub to 0 may cause incorrect behavior.
     unsafe_unstubbed: usize,
-    /// NID is not implemented and classified "noop-safe"; stub to
-    /// 0 is fine.
     noop_safe: usize,
-    /// NID is not in the NID DB at all. We have no name, cannot
-    /// classify, and must not assume the default stub is safe.
-    /// Kept in its own bucket so operators see unknowns instead of
-    /// having them folded into the "noop-safe" count.
     unknown_nid: usize,
-    /// NID is in the DB but `stub_classification` returned a
-    /// string we did not expect. A library-side schema change
-    /// would otherwise get silently reclassified as noop-safe by
-    /// the old subtraction arithmetic.
     unknown_class: usize,
 }
 
@@ -114,9 +67,8 @@ impl InventoryCounts {
     }
 }
 
-/// Disjoint classification outcomes; `InventoryCounts` has one
-/// field per variant. Adding a new bucket means one new arm in
-/// `classify_import` and one in `InventoryCounts::bump`.
+/// Disjoint classification outcomes; `InventoryCounts` has one field
+/// per variant, and `classify_import` returns one per NID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Bucket {
     Impl,
@@ -127,22 +79,15 @@ enum Bucket {
     UnknownClass,
 }
 
-/// Single decision point: given a NID plus its nid_db lookup
-/// result, pick a bucket and the string that belongs in the Class
-/// column. Previously the counter increment and the cell text came
-/// from two separate matches, which is the same "two places must
-/// agree" shape the original file got wrong. One function, one
-/// truth.
+/// Map a NID and its nid_db lookup to a bucket plus the Class-column
+/// string and whether the NID is on the impl list.
 fn classify_import(
     nid: u32,
     lookup: Option<(&'static str, &'static str)>,
 ) -> (Bucket, &'static str, bool) {
     if lookup.is_none() {
-        // Invariant asserted by the `every_implemented_nid_is_in_nid_db`
-        // test: any NID the runtime dispatch handles must also be
-        // in nid_db. If that ever regresses, this branch would
-        // silently render an impl NID as `stub <unknown-nid>`; the
-        // debug_assert turns the first dev-run into a loud failure.
+        // Mirrors the `every_implemented_nid_is_in_nid_db` test: an
+        // impl NID missing from nid_db would render as stub here.
         debug_assert!(
             !CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&nid),
             "NID 0x{nid:08x} is in HLE_IMPLEMENTED_NIDS but nid_db has no entry -- \
@@ -183,11 +128,7 @@ pub(crate) fn run(args: &[String]) {
     });
     let total_functions: usize = modules.iter().map(|m| m.functions.len()).sum();
 
-    // Zero-module output is almost always the wrong artifact to
-    // commit over a previously-correct inventory. Exit non-zero so
-    // a regenerate-in-CI loop does not silently overwrite a real
-    // doc with an empty one (ELF stripped of imports, not-a-PRX
-    // binary, parser returning Ok(vec![]) on a near-miss).
+    // Refuse to overwrite a real inventory with an empty one.
     if modules.is_empty() {
         eprintln!(
             "dump-imports: parse_imports returned zero modules for {}; refusing to produce an empty inventory",
@@ -198,12 +139,8 @@ pub(crate) fn run(args: &[String]) {
 
     println!("# {} HLE Import Inventory", title.display_name());
     println!();
-    // Path rendering: use to_str() first so a round-trippable form
-    // lands in the doc. On non-UTF-8 paths (possible on Linux with
-    // exotic filenames) to_string_lossy substitutes U+FFFD and the
-    // rendered path cannot be used to re-open the file. Flag that
-    // to stderr so an operator pasting the path from the doc is
-    // not silently confused.
+    // Try to_str first so a round-trippable path lands in the doc;
+    // lossy form warns on stderr.
     let path_str: String = match elf_path.to_str() {
         Some(s) => s.replace('\\', "/"),
         None => {
@@ -237,29 +174,17 @@ pub(crate) fn run(args: &[String]) {
     println!();
 
     let mut counts = InventoryCounts::default();
-    // Suspected collisions: binding's module (from the game's ELF
-    // import table) disagrees with the nid_db's module for the
-    // same NID. NIDs are hashes and collisions across modules
-    // have happened historically in PS3 tooling; surface the
-    // mismatch so a mis-attributed "impl" mark is not silent.
-    //
-    // Exact-string comparison caveat: PS3 module names have
-    // historical variants (versioned stubs, trailing-underscore
-    // aliases, internal-init entrypoints) so this check can fire
-    // false positives on titles that import via a variant the
-    // nid_db does not normalize. If that becomes a flood, the
-    // expected fix is an allow-list of known-equivalent name
-    // pairs or a `--ignore-module-name-mismatch` flag -- not a
-    // reason to relax the default.
+    // Surface NID/module mismatches: the binding's module disagrees
+    // with nid_db's module for the same NID. PS3 NIDs are hashes
+    // and cross-module collisions have occurred historically.
+    // Exact-string comparison may false-positive on module-name
+    // variants (versioned stubs, internal-init entrypoints).
     let mut module_collisions: Vec<(String, u32, String, String)> = Vec::new();
     let mut empty_modules: Vec<String> = Vec::new();
 
     for module in &modules {
         if module.functions.is_empty() {
-            // Emit a strange empty section into the doc is worse
-            // than omitting it; record the name for a stderr note
-            // instead of producing a zero-row table that looks
-            // like a parse glitch to the next reviewer.
+            // Omit from the doc; note on stderr.
             empty_modules.push(module.name.clone());
             continue;
         }
@@ -273,10 +198,8 @@ pub(crate) fn run(args: &[String]) {
             let (bucket, class_cell, is_impl) = classify_import(f.nid, lookup);
             counts.bump(bucket);
 
-            // Collision cross-check runs only for bindings marked
-            // impl -- there is no ambiguity to flag when dispatch
-            // does not handle the NID at all. Keeps the check
-            // close to where the mis-attribution would matter.
+            // Only cross-check bindings that claim impl status: a
+            // mismatch only misattributes the impl mark.
             if is_impl {
                 if let Some((db_mod, _)) = lookup {
                     if !db_mod.is_empty() && db_mod != module.name {
@@ -303,13 +226,8 @@ pub(crate) fn run(args: &[String]) {
         println!();
     }
 
-    // Flush every collected diagnostic to stderr BEFORE the
-    // counter invariant check. If the invariant panics, the
-    // operator most needs the collision and empty-module notes
-    // to diagnose what happened -- emitting them after a panic
-    // loses them. Summary stdout print is after the assert so
-    // the happy path keeps the tidy "data, then advisories"
-    // ordering on stderr/stdout split consumers.
+    // Flush diagnostics before the counter assertion so a panic
+    // does not swallow them.
     if !empty_modules.is_empty() {
         eprintln!(
             "dump-imports: {} module(s) imported with zero functions; omitted from the inventory:",
@@ -332,10 +250,6 @@ pub(crate) fn run(args: &[String]) {
     }
 
     // Invariant: every function landed in exactly one bucket.
-    // Panics (even in release) are appropriate here because the
-    // summary arithmetic feeds operator decisions about what is
-    // safe to leave stubbed. A double-count or miss is a real bug
-    // to surface, not a warning to tolerate.
     assert_eq!(
         counts.sum(),
         total_functions,
@@ -377,9 +291,7 @@ mod tests {
 
     #[test]
     fn implemented_nids_is_nonempty_and_contains_tls_init() {
-        // Every PS3 ELF boot calls sys_initialize_tls; dropping the
-        // NID from this list silently downgrades the inventory for
-        // every title.
+        // sys_initialize_tls is called by every PS3 ELF boot.
         assert!(CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&0x744680a2));
         assert!(CELLGOV_HLE_IMPLEMENTED_NIDS.len() > 4);
     }
@@ -393,11 +305,6 @@ mod tests {
         assert_eq!(sorted.len(), deduped.len(), "duplicate NID in list");
     }
 
-    /// Every NID marked "CellGov-implemented" must exist in the
-    /// NID DB. A NID that dispatch handles but nid_db does not
-    /// know would render as `impl  <unknown>` in every inventory;
-    /// a typo'd NID in the list would never match a real import
-    /// and would quietly stay there forever.
     #[test]
     fn every_implemented_nid_is_in_nid_db() {
         for &nid in CELLGOV_HLE_IMPLEMENTED_NIDS {
@@ -408,11 +315,6 @@ mod tests {
         }
     }
 
-    /// Every NID marked implemented must classify as one of the
-    /// three expected strings. A library-side rename or new class
-    /// would otherwise land in the tool's `unknown_class` bucket
-    /// at runtime, which is a real regression a test can catch
-    /// before any inventory regenerates.
     #[test]
     fn every_implemented_nid_classifies_to_known_string() {
         for &nid in CELLGOV_HLE_IMPLEMENTED_NIDS {
@@ -427,7 +329,6 @@ mod tests {
     #[test]
     fn fit_name_column_passes_short_names_unchanged() {
         assert_eq!(fit_name_column("short"), "short");
-        // Exactly at the width stays intact.
         let exact = "x".repeat(NAME_COLUMN_WIDTH);
         assert_eq!(fit_name_column(&exact), exact);
     }
@@ -436,19 +337,13 @@ mod tests {
     fn fit_name_column_truncates_overlong_names_with_ellipsis() {
         let long = "x".repeat(NAME_COLUMN_WIDTH + 50);
         let fit = fit_name_column(&long);
-        // Assert char count, not byte length: the char-aware cut
-        // keeps the invariant on graphemes, not bytes.
         assert_eq!(fit.chars().count(), NAME_COLUMN_WIDTH);
         assert!(fit.ends_with("..."));
     }
 
     #[test]
     fn fit_name_column_does_not_panic_on_multibyte_input() {
-        // Non-ASCII characters in a NID DB entry (demangled C++
-        // symbols can legitimately contain them) must not panic
-        // the tool. Case 1: a bulk-multibyte string exercises the
-        // char-aware cut generally.
-        let long_multibyte: String = "ab\u{00e9}".repeat(30); // 90 chars, 120 bytes
+        let long_multibyte: String = "ab\u{00e9}".repeat(30);
         let fit = fit_name_column(&long_multibyte);
         assert_eq!(fit.chars().count(), NAME_COLUMN_WIDTH);
         assert!(fit.ends_with("..."));
@@ -456,21 +351,13 @@ mod tests {
 
     #[test]
     fn fit_name_column_handles_codepoint_straddling_the_cut_boundary() {
-        // The cut index is NAME_COLUMN_WIDTH - 3. Construct a
-        // string where a two-byte codepoint starts at exactly that
-        // position, so the old byte-slicing implementation
-        // `&name[..NAME_COLUMN_WIDTH - 3]` would panic with
-        // "byte index is not a char boundary". The char-aware
-        // cut via `chars().take(N)` succeeds and preserves char
-        // count invariants.
+        // A two-byte codepoint starts exactly at the cut index so a
+        // byte-slice implementation would panic on the char-boundary.
         let cut = NAME_COLUMN_WIDTH - 3;
-        let prefix = "a".repeat(cut); // ASCII padding up to the boundary
-        let straddler = "\u{00e9}"; // 2-byte UTF-8 starting at byte `cut`
-        let tail = "z".repeat(100); // pad past the width
+        let prefix = "a".repeat(cut);
+        let straddler = "\u{00e9}";
+        let tail = "z".repeat(100);
         let input = format!("{prefix}{straddler}{tail}");
-        // Sanity: the straddling codepoint does begin at byte
-        // index `cut`, confirming the byte-slice path would
-        // have failed here.
         assert_eq!(input.as_bytes()[cut], 0xC3);
         let fit = fit_name_column(&input);
         assert_eq!(fit.chars().count(), NAME_COLUMN_WIDTH);
@@ -492,9 +379,6 @@ mod tests {
 
     #[test]
     fn classify_import_routes_unknown_nid_to_unknown_bucket() {
-        // A NID that is not in the DB must land in UnknownNid,
-        // not silently flow through stub_classification's
-        // _ => "noop-safe" fallthrough.
         let (bucket, cell, is_impl) = classify_import(0xDEAD_BEEF, None);
         assert_eq!(bucket, Bucket::UnknownNid);
         assert_eq!(cell, "<unknown-nid>");
@@ -503,8 +387,7 @@ mod tests {
 
     #[test]
     fn classify_import_routes_implemented_nid_to_impl_bucket() {
-        // sys_initialize_tls: present in nid_db and in the
-        // implemented list, classified "stateful".
+        // sys_initialize_tls: stateful and in the implemented list.
         let nid = 0x744680a2;
         let lookup = cellgov_ppu::nid_db::lookup(nid);
         assert!(lookup.is_some(), "test precondition: nid_db knows this NID");
@@ -516,15 +399,9 @@ mod tests {
 
     #[test]
     fn classify_import_routes_noop_safe_nid_while_sce_np_remains_unimplemented() {
-        // Purpose: exercise the NoopSafe arm of classify_import.
-        // Picks a real NID (sceNpManagerSubSignout) that is in
-        // nid_db, classifies as noop-safe, and is not in the
-        // implemented list today. This test name flags the
-        // assumption: if someone adds this NID to
-        // HLE_IMPLEMENTED_NIDS or the NID DB retags it, the
-        // precondition below fires first with a message telling
-        // the reader to pick a different noop-safe witness.
-        let nid = 0x000e53cc; // sceNpManagerSubSignout
+        // Witness: sceNpManagerSubSignout. If its status drifts, the
+        // precondition asserts guide swapping to another noop-safe NID.
+        let nid = 0x000e53cc;
         assert!(
             !CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&nid),
             "precondition drifted: 0x{nid:08x} is now implemented; swap to another noop-safe NID"
@@ -542,9 +419,6 @@ mod tests {
 
     #[test]
     fn bump_agrees_with_sum_for_all_buckets() {
-        // Walking every variant and asserting sum tracks catches
-        // a future refactor where a new bucket is added to the
-        // enum and to classify_import but not to bump().
         let mut c = InventoryCounts::default();
         for bucket in [
             Bucket::Impl,

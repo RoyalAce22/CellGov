@@ -103,9 +103,8 @@ fn effect_emitted_roundtrip_each_kind() {
 
 #[test]
 fn effect_emitted_discriminants_locked() {
-    // Pinned to match cellgov_effects::Effect variant order. If
-    // either side reorders, replay against an existing trace
-    // breaks; this test catches local drift before that happens.
+    // Pinned to match cellgov_effects::Effect variant order; drift on either
+    // side breaks replay against existing traces.
     assert_eq!(TracedEffectKind::SharedWriteIntent as u8, 0);
     assert_eq!(TracedEffectKind::MailboxSend as u8, 1);
     assert_eq!(TracedEffectKind::MailboxReceiveAttempt as u8, 2);
@@ -180,7 +179,6 @@ fn truncated_input_returns_error() {
     };
     let mut buf = Vec::new();
     r.encode(&mut buf);
-    // Drop the last byte: should fail to decode.
     let truncated = &buf[..buf.len() - 1];
     assert_eq!(TraceRecord::decode(truncated), Err(DecodeError::Truncated));
 }
@@ -197,10 +195,10 @@ fn unknown_tag_returns_error() {
 #[test]
 fn unknown_yield_reason_returns_error() {
     let mut buf = vec![TAG_STEP_COMPLETED];
-    write_u64(&mut buf, 0); // unit
-    buf.push(99); // bogus yield reason
-    write_u64(&mut buf, 0); // consumed
-    write_u64(&mut buf, 0); // time_after
+    write_u64(&mut buf, 0);
+    buf.push(99);
+    write_u64(&mut buf, 0);
+    write_u64(&mut buf, 0);
     assert_eq!(
         TraceRecord::decode(&buf),
         Err(DecodeError::UnknownYieldReason(99))
@@ -210,7 +208,7 @@ fn unknown_yield_reason_returns_error() {
 #[test]
 fn unknown_hash_kind_returns_error() {
     let mut buf = vec![TAG_STATE_HASH_CHECKPOINT];
-    buf.push(99); // bogus kind
+    buf.push(99);
     write_u64(&mut buf, 0);
     assert_eq!(
         TraceRecord::decode(&buf),
@@ -224,14 +222,14 @@ fn invalid_bool_returns_error() {
     write_u64(&mut buf, 0);
     write_u32(&mut buf, 0);
     write_u32(&mut buf, 0);
-    buf.push(2); // not 0 or 1
+    buf.push(2);
     write_u64(&mut buf, 0);
     assert_eq!(TraceRecord::decode(&buf), Err(DecodeError::InvalidBool(2)));
 }
 
 #[test]
 fn fixed_sizes_match_documentation() {
-    // Verify the wire-size table in the module doc comment.
+    // Pins the wire-size table in the module doc comment.
     let mut buf = Vec::new();
     TraceRecord::UnitScheduled {
         unit: UnitId::new(0),
@@ -345,8 +343,6 @@ fn ppu_state_hash_roundtrip() {
 
 #[test]
 fn ppu_state_hash_boundary_values_roundtrip() {
-    // step=0, pc=0 exercises the first-record case;
-    // u64::MAX on every field exercises the byte-order edge.
     roundtrip(TraceRecord::PpuStateHash {
         step: 0,
         pc: 0,
@@ -368,8 +364,6 @@ fn ppu_state_hash_truncated_input_is_rejected() {
         hash: StateHash::new(3),
     }
     .encode(&mut buf);
-    // Drop every trailing byte in turn; each truncation must fail
-    // (not decode to a garbage record).
     for drop in 1..buf.len() {
         let truncated = &buf[..buf.len() - drop];
         assert_eq!(
@@ -434,7 +428,6 @@ fn ppu_state_full_truncated_input_is_rejected() {
     }
     .encode(&mut buf);
     assert_eq!(buf.len(), 301, "documented wire size");
-    // Drop the last byte: must not silently decode.
     let truncated = &buf[..buf.len() - 1];
     assert_eq!(TraceRecord::decode(truncated), Err(DecodeError::Truncated));
 }
@@ -471,8 +464,8 @@ fn ppu_state_full_level_is_hashes() {
 
 #[test]
 fn ppu_state_hash_tag_is_0x07() {
-    // Pin the wire-format contract: tag 0x07 is allocated for
-    // PpuStateHash. New variants must use strictly greater tags.
+    // Tag 0x07 is allocated for PpuStateHash; new variants must use strictly
+    // greater tags.
     let r = TraceRecord::PpuStateHash {
         step: 0,
         pc: 0,

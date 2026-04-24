@@ -1,9 +1,4 @@
-//! Regression tests for exploration classifications.
-//!
-//! These tests lock down the classification of known workloads. If a
-//! code change alters the classification of a workload that was
-//! previously schedule-stable or schedule-sensitive, these tests fail
-//! and the change must be investigated.
+//! Regression tests pinning the classification of known workloads.
 
 use cellgov_core::Runtime;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
@@ -15,9 +10,6 @@ fn default_config() -> ExplorationConfig {
     ExplorationConfig::default()
 }
 
-// -- Schedule-stable regressions --
-
-/// Two units writing to disjoint addresses: always schedule-stable.
 #[test]
 fn regression_disjoint_writes_stable() {
     let result = explore(
@@ -56,7 +48,6 @@ fn regression_disjoint_writes_stable() {
     );
 }
 
-/// Three units writing to disjoint addresses: always schedule-stable.
 #[test]
 fn regression_three_disjoint_writers_stable() {
     let result = explore(
@@ -89,9 +80,6 @@ fn regression_three_disjoint_writers_stable() {
     );
 }
 
-// -- Schedule-sensitive regressions --
-
-/// Two units writing to the SAME address: always schedule-sensitive.
 #[test]
 fn regression_overlapping_writes_sensitive() {
     let result = explore(
@@ -130,7 +118,6 @@ fn regression_overlapping_writes_sensitive() {
     );
 }
 
-/// Three units writing to the same address: always schedule-sensitive.
 #[test]
 fn regression_three_overlapping_writers_sensitive() {
     let result = explore(
@@ -161,9 +148,6 @@ fn regression_three_overlapping_writers_sensitive() {
     );
 }
 
-// -- No branching regressions --
-
-/// Single unit: no branching points, explore returns None.
 #[test]
 fn regression_single_unit_no_branching() {
     let result = explore(
@@ -182,9 +166,6 @@ fn regression_single_unit_no_branching() {
     );
 }
 
-// -- Pruning regressions --
-
-/// Disjoint writers should be pruned by dependency analysis.
 #[test]
 fn regression_disjoint_writers_pruned() {
     let result = explore(
@@ -226,7 +207,6 @@ fn regression_disjoint_writers_pruned() {
     );
 }
 
-/// Overlapping writers should NOT be pruned.
 #[test]
 fn regression_overlapping_writers_not_pruned() {
     let result = explore(
@@ -268,11 +248,8 @@ fn regression_overlapping_writers_not_pruned() {
     );
 }
 
-// -- RSX schedule-stability regressions --
-
-/// Construct a runtime with a flat region at base 0 plus a
-/// ReadWrite RSX region covering 0xC000_0000..=0xC0000FFF so the
-/// PPU put-pointer write commits and the writeback mirror fires.
+/// Flat region at base 0 plus an RSX region at 0xC000_0000, with
+/// the put-pointer writeback mirror enabled.
 fn build_rsx_runtime() -> Runtime {
     use cellgov_mem::{PageSize, Region};
     let regions = vec![
@@ -285,12 +262,6 @@ fn build_rsx_runtime() -> Runtime {
     rt
 }
 
-/// PPU put-pointer write (mirrored into rsx_cursor) on one unit
-/// vs disjoint non-RSX write on another. The two addresses never
-/// overlap -- 0xC000_0040 sits in the RSX region, addr 0x10 sits
-/// in the flat region -- so dependency analysis must classify
-/// the pair as schedule-stable. Pins the "put-pointer write is
-/// independent of unrelated memory writes" guarantee.
 #[test]
 fn regression_rsx_put_write_stable_vs_disjoint_write() {
     let result = explore(
@@ -331,12 +302,6 @@ fn regression_rsx_put_write_stable_vs_disjoint_write() {
     );
 }
 
-/// Two units both writing to the RSX control register's put slot.
-/// This IS schedule-sensitive -- last write wins, and the final
-/// cursor.put differs based on order -- but the memory content at
-/// 0xC000_0040 is ALSO order-dependent. Pins the explorer's
-/// classification of same-slot writes as sensitive, matching the
-/// normal SharedWriteIntent overlap semantics.
 #[test]
 fn regression_rsx_two_writers_to_same_control_slot_sensitive() {
     let result = explore(

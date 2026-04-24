@@ -1,6 +1,4 @@
 //! Core runtime microbenchmarks.
-//!
-//! Measures: commit_step with 0, 1, and 10 SharedWriteIntent effects.
 
 #![allow(missing_docs)]
 
@@ -144,7 +142,6 @@ fn bench_commit_10_effects(c: &mut Criterion) {
 
 fn bench_commit_fault_discard(c: &mut Criterion) {
     let mut pipeline = CommitPipeline::new();
-    // Fault step with 10 effects -- all should be discarded
     let effects: Vec<Effect> = (0..10)
         .map(|i| make_write_effect(i * 8, &[0xAB; 8]))
         .collect();

@@ -1,4 +1,9 @@
-//! Heavy mutex LV2 dispatch: create, lock, trylock, unlock.
+//! LV2 dispatch for heavy mutexes.
+//!
+//! `acquire_or_enqueue` is atomic: recursive-lock-by-owner
+//! (EDEADLK) and contention (park on FIFO waiter list) are
+//! distinguished in one call. Splitting into try-then-enqueue
+//! would race with a concurrent unlock.
 
 use cellgov_event::UnitId;
 
@@ -14,11 +19,9 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // Decode the attribute bag if the guest handed us one. PS3
-        // `sys_mutex_attribute_t` is a 32-byte struct where the
-        // first three big-endian u32s encode protocol, recursive
-        // flag, and pshared. The remaining fields (adaptive, name)
-        // are captured but not surfaced at this layer.
+        // `sys_mutex_attribute_t`: first three big-endian u32s
+        // carry protocol, recursive flag, and pshared. Remaining
+        // fields (adaptive, name) are not surfaced here.
         let attrs = if attr_ptr == 0 {
             MutexAttrs::default()
         } else if let Some(bytes) = rt.read_committed(attr_ptr as u64, 12) {
@@ -34,9 +37,8 @@ impl Lv2Host {
         };
         let id = self.alloc_id();
         if self.mutexes.create_with_id(id, attrs).is_err() {
-            // IdCollision is a host-invariant break (debug_assert
-            // in debug); release surfaces ENOMEM so the caller
-            // cannot use the bad id.
+            // IdCollision is a host-invariant break; surface
+            // ENOMEM so the guest cannot use the bad id.
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ENOMEM.into(),
                 effects: vec![],
@@ -52,9 +54,6 @@ impl Lv2Host {
                 effects: vec![],
             };
         };
-        // acquire_or_enqueue atomically distinguishes
-        // recursive-lock-by-owner (EDEADLK) from contention;
-        // try_acquire + enqueue_waiter would race.
         match self.mutexes.acquire_or_enqueue(id, caller) {
             crate::sync_primitives::MutexAcquireOrEnqueue::Unknown => Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ESRCH.into(),
@@ -322,8 +321,6 @@ mod tests {
             }
             other => panic!("expected Block on Mutex, got {other:?}"),
         }
-        // Owner unlocks -> ownership transfers to waiter and wake
-        // dispatch names the waiter's unit id.
         let wake = host.dispatch(Lv2Request::MutexUnlock { mutex_id: id }, owner_unit, &rt);
         match wake {
             Lv2Dispatch::WakeAndReturn {
@@ -338,8 +335,6 @@ mod tests {
 
     #[test]
     fn mutex_create_default_attrs_when_attr_ptr_zero() {
-        // attr_ptr = 0 -- handler must fall back to MutexAttrs::default()
-        // without panicking or reading guest memory.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let src = UnitId::new(0);
@@ -367,9 +362,6 @@ mod tests {
 
     #[test]
     fn mutex_create_decodes_attr_ptr() {
-        // Plant a real attribute struct in guest memory and verify
-        // dispatch_mutex_create decodes protocol / recursive flags
-        // and surfaces them on the table entry.
         let mut mem = cellgov_mem::GuestMemory::new(0x10000);
         let attr_bytes = [
             0x00, 0x00, 0x00, 0x20, // protocol = 0x20 (PRIORITY_INHERIT)

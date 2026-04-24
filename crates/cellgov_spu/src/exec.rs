@@ -1,13 +1,7 @@
 //! SPU instruction execution.
 //!
-//! Takes a decoded `SpuInstruction` and an `SpuState`, applies the
-//! instruction's semantics (register/LS mutation), and returns an
-//! `SpuStepOutcome` indicating whether execution should continue,
-//! yield with Effects, or fault.
-//!
-//! This is the only layer that translates decoded instructions into
-//! local state changes and `Effect` packets. Decode does not know
-//! about state; state does not know about Effects.
+//! Translates decoded instructions into `SpuState` mutations and
+//! `Effect` packets. The only layer that couples state to Effects.
 
 use crate::channels;
 use crate::instruction::SpuInstruction;
@@ -19,24 +13,26 @@ use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::GuestTicks;
 
-/// What happened after executing one instruction.
+/// Outcome of executing a single SPU instruction.
 #[derive(Debug)]
 pub enum SpuStepOutcome {
-    /// Instruction executed, advance PC by 4, keep running.
+    /// Advance PC by 4 and continue.
     Continue,
-    /// PC was set explicitly (branch taken). Do not advance.
+    /// PC was set by the instruction; do not advance.
     Branch,
-    /// Instruction requires runtime mediation.
+    /// Yield to runtime with Effects.
     Yield {
         /// Effects to commit.
         effects: Vec<Effect>,
         /// Why the unit is yielding.
         reason: YieldReason,
     },
-    /// Read from guest memory into local store. The execute layer
-    /// does not hold the `ExecutionContext`; `run_until_yield`
-    /// fulfills the read from the frozen committed snapshot exposed
-    /// by the context.
+    /// Memory read the caller must service from the committed snapshot.
+    ///
+    /// The execute layer does not hold the `ExecutionContext`;
+    /// `run_until_yield` copies `size` bytes from `ea` into LS at `lsa`.
+    /// When `acquire_line` is set (MFC_GETLLAR), the caller also
+    /// emits an `Effect::ReservationAcquire` for that line.
     MemoryRead {
         /// Guest effective address to read from.
         ea: u64,
@@ -44,10 +40,7 @@ pub enum SpuStepOutcome {
         lsa: u32,
         /// Number of bytes to read.
         size: u32,
-        /// When `Some(line_addr)`, `run_until_yield` also emits an
-        /// `Effect::ReservationAcquire` for the line after
-        /// fulfilling the read. Set by `MFC_GETLLAR`. `None` for
-        /// regular reads.
+        /// Canonical line address to install a reservation for, or `None`.
         acquire_line: Option<u64>,
     },
     /// Instruction caused an architecture fault.
@@ -70,8 +63,6 @@ pub enum SpuFault {
     UnsupportedMfcCommand(u32),
 }
 
-// -- Helper: compute LS address and validate --
-
 fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
     let a = (raw & 0x3FFF0) as usize;
     if a + 16 > ls_len {
@@ -84,9 +75,6 @@ fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
 /// Execute a single decoded SPU instruction.
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
-        // =================================================================
-        // Loads / stores
-        // =================================================================
         SpuInstruction::Lqd { rt, ra, imm } => {
             let raw = state.reg_word(ra).wrapping_add((imm as i32 as u32) << 4);
             match ls_addr(raw, state.ls.len()) {
@@ -148,9 +136,6 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
         }
 
-        // =================================================================
-        // Constant formation
-        // =================================================================
         SpuInstruction::Il { rt, imm } => {
             state.set_reg_word_splat(rt, imm as i32 as u32);
             SpuStepOutcome::Continue
@@ -192,9 +177,6 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Continue
         }
 
-        // =================================================================
-        // Integer arithmetic
-        // =================================================================
         SpuInstruction::A { rt, ra, rb } => {
             for slot in 0..4 {
                 let a = state.reg_word_slot(ra, slot);
@@ -228,11 +210,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Continue
         }
 
-        // =================================================================
-        // Logical
-        // =================================================================
         SpuInstruction::Ori { rt, ra, imm } => {
-            // ori is RI10 with sign-extended 10-bit immediate, applied per-word
             let v = imm as i32 as u32;
             for slot in 0..4 {
                 let a = state.reg_word_slot(ra, slot);
@@ -248,9 +226,6 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Continue
         }
 
-        // =================================================================
-        // Shuffle / shift / rotate
-        // =================================================================
         SpuInstruction::Shufb { rt, ra, rb, rc } => {
             let a = state.regs[ra as usize];
             let b = state.regs[rb as usize];
@@ -259,7 +234,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             for i in 0..16 {
                 let sel = c[i];
                 result[i] = if sel & 0xC0 == 0xC0 {
-                    // Special pattern
+                    // Constant-generation patterns in the high bits of sel.
                     if sel & 0xE0 == 0xC0 {
                         0x00
                     } else if sel & 0xE0 == 0xE0 {
@@ -297,9 +272,6 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Continue
         }
 
-        // =================================================================
-        // Generate controls
-        // =================================================================
         SpuInstruction::Cbd { rt, ra, imm } => {
             let addr = state.reg_word(ra).wrapping_add(imm as u32);
             let pos = (addr & 0xF) as usize;
@@ -325,9 +297,6 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Continue
         }
 
-        // =================================================================
-        // Compare
-        // =================================================================
         SpuInstruction::Ceq { rt, ra, rb } => {
             for slot in 0..4 {
                 let a = state.reg_word_slot(ra, slot);
@@ -345,9 +314,6 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Continue
         }
 
-        // =================================================================
-        // Branch
-        // =================================================================
         SpuInstruction::Br { offset } => {
             state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
             SpuStepOutcome::Branch
@@ -378,15 +344,9 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Branch
         }
 
-        // =================================================================
-        // Channel operations
-        // =================================================================
         SpuInstruction::Wrch { channel, rt } => execute_wrch(channel, rt, state, unit_id),
         SpuInstruction::Rdch { rt, channel } => execute_rdch(rt, channel, state, unit_id),
 
-        // =================================================================
-        // Hint / nop / sync / control
-        // =================================================================
         SpuInstruction::Nop
         | SpuInstruction::Lnop
         | SpuInstruction::Hbr
@@ -401,8 +361,6 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         },
     }
 }
-
-// -- Channel helpers (unchanged from previous implementation) --
 
 fn execute_wrch(channel: u8, rt: u8, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     let val = state.reg_word(rt);
@@ -433,13 +391,11 @@ fn execute_wrch(channel: u8, rt: u8, state: &mut SpuState, unit_id: UnitId) -> S
             SpuStepOutcome::Continue
         }
         channels::MFC_WR_TAG_UPDATE => {
-            // Tag status update request. In our simplified model, tag
-            // completion is immediate, so this is a no-op.
+            // Tag completion is immediate in this model.
             SpuStepOutcome::Continue
         }
         channels::SPU_WR_OUT_MBOX => {
-            // Outbound mailbox write (SPU -> PPU). In the interpreter
-            // we treat this as a no-op; the value is discarded.
+            // Outbound mailbox values are discarded.
             SpuStepOutcome::Continue
         }
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
@@ -501,9 +457,8 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             let request =
                 DmaRequest::new(DmaDirection::Put, src, dst, unit_id).expect("matching sizes");
             state.channels.tag_status |= 1 << state.channels.mfc_tag_id;
-            // Same-unit self-invalidation: a regular PUT whose
-            // destination overlaps this unit's reserved line drops
-            // the local reservation per ABI.
+            // Same-unit self-invalidation: PUT overlapping the reserved
+            // line drops the local reservation (Cell BE ABI).
             if let Some(line) = state.reservation {
                 if line.overlaps_range(ea, size as u64) {
                     state.reservation = None;
@@ -526,7 +481,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             }
         }
         channels::MFC_GETLLAR => {
-            state.channels.atomic_status = 0; // reservation acquired
+            state.channels.atomic_status = 0;
             let line = cellgov_sync::ReservedLine::containing(ea);
             state.reservation = Some(line);
             SpuStepOutcome::MemoryRead {
@@ -537,12 +492,10 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             }
         }
         channels::MFC_PUTLLC => {
-            // Verdict: local reservation held AND its line matches
-            // the PUTLLC's 128-byte line. Same AND rule as PPU
-            // stwcx / stdcx. Cross-unit invalidation is handled at
-            // step start via the context refresh; same-unit self-
-            // invalidation is handled on every MFC_PUT that
-            // overlaps the reserved line.
+            // Succeeds when the local reservation holds and its line
+            // matches the PUTLLC target. Cross-unit invalidation is
+            // mirrored at step entry; self-invalidation happens in
+            // MFC_PUT when it overlaps the reserved line.
             let line = cellgov_sync::ReservedLine::containing(ea);
             let success = match state.reservation {
                 Some(l) => l.addr() == line.addr(),
@@ -565,9 +518,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                     reason: YieldReason::DmaSubmitted,
                 }
             } else {
-                // Conditional store failed; no effect emitted.
-                // atomic_status = 1 indicates PUTLLC failure per
-                // Cell BE channel semantics.
+                // atomic_status = 1 signals PUTLLC failure.
                 state.channels.atomic_status = 1;
                 SpuStepOutcome::Continue
             }
@@ -649,7 +600,6 @@ mod tests {
             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
             0x1E, 0x1F,
         ];
-        // Identity pattern: bytes 0..15
         s.regs[3] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
         execute(
             &SpuInstruction::Shufb {
@@ -679,8 +629,8 @@ mod tests {
         s.pc = 0x100;
         let outcome = execute(&SpuInstruction::Brsl { rt: 0, offset: 16 }, &mut s, uid());
         assert!(matches!(outcome, SpuStepOutcome::Branch));
-        assert_eq!(s.reg_word(0), 0x104); // link = PC + 4
-        assert_eq!(s.pc, 0x140); // 0x100 + 16*4
+        assert_eq!(s.reg_word(0), 0x104);
+        assert_eq!(s.pc, 0x140);
     }
 
     #[test]
@@ -696,19 +646,17 @@ mod tests {
             &mut s,
             uid(),
         );
-        // addr & 0xC = 0, so word insertion at bytes 0-3
         assert_eq!(s.regs[5][0], 0x00);
         assert_eq!(s.regs[5][1], 0x01);
         assert_eq!(s.regs[5][2], 0x02);
         assert_eq!(s.regs[5][3], 0x03);
-        assert_eq!(s.regs[5][4], 0x14); // 0x10 + 4
+        assert_eq!(s.regs[5][4], 0x14);
     }
 
     #[test]
     fn lqa_stqa_roundtrip() {
         let mut s = SpuState::new();
         s.set_reg_word_splat(5, 0xCAFEBABE);
-        // stqa at address based on imm (imm << 2, masked)
         let addr_imm: i16 = (0x3000u16 >> 2) as i16;
         execute(
             &SpuInstruction::Stqa {
@@ -732,10 +680,8 @@ mod tests {
     #[test]
     fn fsmbi_creates_byte_mask() {
         let mut s = SpuState::new();
-        // imm = 0xFFFF -> all bytes = 0xFF
         execute(&SpuInstruction::Fsmbi { rt: 3, imm: 0xFFFF }, &mut s, uid());
         assert!(s.regs[3].iter().all(|&b| b == 0xFF));
-        // imm = 0x0000 -> all bytes = 0x00
         execute(&SpuInstruction::Fsmbi { rt: 4, imm: 0x0000 }, &mut s, uid());
         assert!(s.regs[4].iter().all(|&b| b == 0x00));
     }

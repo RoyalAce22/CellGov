@@ -1,10 +1,6 @@
-//! Shared waiter-list infrastructure for LV2 synchronization
-//! primitives (lwmutex, mutex, semaphore, event queue, event flag,
-//! cond).
+//! Per-primitive state tables and the shared FIFO waiter list.
 //!
-//! Wake order is strictly FIFO by enqueue order. This is the
-//! oracle's determinism contract: no priority reordering, no
-//! set-based iteration, no host-timed tiebreakers.
+//! Wake order is strictly FIFO by enqueue order.
 
 pub mod cond;
 pub mod event_flag;
@@ -40,24 +36,22 @@ use std::collections::VecDeque;
 
 /// [`WaiterList::enqueue`] rejection: `id` was already parked.
 ///
-/// Ignoring this drops the second wait's `PendingResponse` and
-/// produces a lost-wake mismatch against the RPCS3 baseline;
-/// callers must route it to `record_invariant_break`.
+/// Callers must route this to `record_invariant_break`; ignoring
+/// it drops the second wait's `PendingResponse`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DuplicateEnqueue {
-    /// The thread id that was already parked.
+    /// Thread id that was already parked.
     pub id: PpuThreadId,
 }
 
-/// FIFO queue of PPU threads parked on a single synchronization
-/// primitive. Duplicate enqueue returns [`DuplicateEnqueue`].
+/// FIFO queue of PPU threads parked on a single primitive.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WaiterList {
     queue: VecDeque<PpuThreadId>,
 }
 
 impl WaiterList {
-    /// Construct an empty waiter list.
+    /// Construct an empty list.
     pub fn new() -> Self {
         Self {
             queue: VecDeque::new(),
@@ -92,8 +86,7 @@ impl WaiterList {
         self.queue.iter().any(|&existing| existing == id)
     }
 
-    /// Remove `id` from anywhere in the queue, preserving the
-    /// relative order of the remaining waiters.
+    /// Remove `id`, preserving the order of the remaining waiters.
     pub fn remove(&mut self, id: PpuThreadId) -> bool {
         if let Some(pos) = self.queue.iter().position(|&existing| existing == id) {
             self.queue.remove(pos);
@@ -113,9 +106,7 @@ impl WaiterList {
         self.queue.is_empty()
     }
 
-    /// Read-only iterator in enqueue order. Waking requires one
-    /// of [`Self::dequeue_one`], [`Self::drain_all`], or
-    /// [`Self::remove`].
+    /// Read-only iterator in enqueue order.
     pub fn iter(&self) -> impl Iterator<Item = PpuThreadId> + '_ {
         self.queue.iter().copied()
     }
@@ -218,17 +209,12 @@ mod tests {
             seen,
             vec![tid(0x0100_0001), tid(0x0100_0002), tid(0x0100_0003)],
         );
-        // iter is read-only; list unchanged.
         assert_eq!(w.len(), 3);
     }
 
-    /// Byte trace encoding every observable outcome of a fixed
-    /// xorshift sequence: `E`+id on enqueue-ok, `e` on rejection,
-    /// `D`+id on dequeue, `d` on empty, `R`/`r` on remove
-    /// hit/miss, `F`+id on final drain. A process-local
-    /// non-deterministic backing store (e.g. `HashSet<_,
-    /// RandomState>`) self-compares equal in one process; the
-    /// pinned length and FNV-1a digest below catch it.
+    /// Byte trace of a fixed xorshift sequence: `E`+id on
+    /// enqueue-ok, `e` on rejection, `D`+id on dequeue, `d` on
+    /// empty, `R`/`r` on remove hit/miss, `F`+id on final drain.
     fn determinism_trace() -> Vec<u8> {
         let mut w = WaiterList::new();
         let mut state: u64 = 0xDEAD_BEEF_CAFE_F00D;
@@ -279,8 +265,7 @@ mod tests {
         assert_eq!(
             hasher.finish(),
             EXPECTED_HASH,
-            "trace content drifted; update EXPECTED_HASH only after \
-             auditing the change",
+            "trace content drifted; update EXPECTED_HASH only after auditing the change",
         );
         assert_eq!(trace, determinism_trace());
     }

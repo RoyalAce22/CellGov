@@ -1,10 +1,5 @@
-//! Bounded schedule exploration loop.
-//!
-//! `explore` runs a workload once to collect the baseline decision log,
-//! then replays with alternate choices at each branching point. It
-//! respects configurable bounds on how many schedules to try and
-//! classifies the result as schedule-stable, schedule-sensitive, or
-//! inconclusive.
+//! Main bounded enumerator: baseline run then one replay per
+//! non-pruned alternate branching-point choice.
 
 use crate::classify::ExplorationResult;
 use crate::config::ExplorationConfig;
@@ -15,11 +10,14 @@ use cellgov_core::Runtime;
 
 /// Run bounded schedule exploration on a workload.
 ///
-/// `make_runtime` is called once for the baseline run and once per
-/// alternate schedule. Each call must produce an independent runtime
-/// from identical initial state.
-///
 /// Returns `None` if the baseline run has no branching points.
+///
+/// `make_runtime` is called once for the baseline and once per
+/// non-pruned alternate; each call must produce an independent runtime
+/// from identical initial state. Exploration stops after
+/// `config.max_schedules` alternates or when every alternate has been
+/// replayed, and each replay stops after `config.max_steps_per_run`
+/// steps.
 pub fn explore<F>(mut make_runtime: F, config: &ExplorationConfig) -> Option<ExplorationResult>
 where
     F: FnMut() -> Runtime,
@@ -92,24 +90,6 @@ mod tests {
         assert!(!r.bounds_hit);
     }
 
-    /// Two-unit atomic contention under exploration.
-    ///
-    /// Two units both acquire a reservation on the same line and
-    /// then emit a conditional store. The commit pipeline's
-    /// clear-sweep rule means whichever unit's ConditionalStore
-    /// commits second has its reservation already cleared by the
-    /// first committer's write -- but the FakeIsaUnit harness
-    /// doesn't model a local reservation register, so both
-    /// ConditionalStores commit unconditionally and the final
-    /// counter byte reflects whichever value landed last.
-    ///
-    /// The gate is not a specific final value -- it is that
-    /// exploration enumerates the orderings without crashing and
-    /// classifies outcomes reproducibly across two runs. When both
-    /// units write the same byte value, all orderings collapse to
-    /// one class (stable). When they write different values, the
-    /// engine classifies as ScheduleSensitive. Both shapes prove
-    /// the explorer handles reservation effects without panicking.
     #[test]
     fn explore_two_unit_atomic_contention_is_reproducible() {
         let make = || {
@@ -140,33 +120,21 @@ mod tests {
             rt
         };
 
-        // First exploration run.
         let r1 = explore(make, &ExplorationConfig::default())
             .expect("contention workload must have branching points");
-
-        // Second exploration run from identical initial state.
         let r2 = explore(make, &ExplorationConfig::default())
             .expect("contention workload must have branching points");
 
-        // Classification is reproducible across runs.
         assert_eq!(
             r1.outcome, r2.outcome,
             "exploration classification must be stable across runs",
         );
-        // Different-byte atomic writes produce schedule-sensitive
-        // outcomes; same-byte writes are schedule-stable. Either
-        // classification is valid for the gate; what matters is
-        // the engine enumerated the orderings without crashing
-        // and produced the same verdict twice.
         assert!(matches!(
             r1.outcome,
             OutcomeClass::ScheduleStable | OutcomeClass::ScheduleSensitive
         ));
     }
 
-    /// Two-unit contention with matching stored values
-    /// collapses to a single class. Proves the engine does not
-    /// mislabel equivalent final states as schedule-sensitive.
     #[test]
     fn explore_two_unit_atomic_same_value_is_stable() {
         let result = explore(
@@ -249,9 +217,6 @@ mod tests {
         assert!(result.is_none());
     }
 
-    /// Three units writing to disjoint addresses. Multiple branching
-    /// points exist (3 runnable at step 0, 2 at step 1). All schedules
-    /// should produce identical memory.
     #[test]
     fn three_unit_disjoint_is_stable() {
         let result = explore(
@@ -296,13 +261,10 @@ mod tests {
         let r = result.expect("should have branching points");
         assert_eq!(r.outcome, OutcomeClass::ScheduleStable);
         assert!(r.total_branching_points >= 2);
-        // Disjoint writes: all alternates pruned by dependency analysis.
         assert!(r.schedules.is_empty());
         assert!(r.schedules_pruned >= 3);
     }
 
-    /// Three units all writing to the same address. Should be
-    /// schedule-sensitive because last-writer-wins depends on order.
     #[test]
     fn three_unit_overlapping_is_sensitive() {
         let result = explore(
@@ -348,17 +310,12 @@ mod tests {
         assert_eq!(r.outcome, OutcomeClass::ScheduleSensitive);
     }
 
-    /// When max_schedules is 1, the explorer stops after one alternate
-    /// and reports Inconclusive (bounds hit before full coverage).
     #[test]
     fn max_schedules_bound_produces_inconclusive() {
         let config = ExplorationConfig {
             max_schedules: 1,
             max_steps_per_run: 10_000,
         };
-        // 3 units writing to the SAME address so pruning does not
-        // eliminate any alternates. With max_schedules=1, the
-        // explorer tries one alternate and stops.
         let result = explore(
             || {
                 let mem = GuestMemory::new(64);
@@ -401,16 +358,14 @@ mod tests {
         let r = result.expect("should have branching points");
         assert_eq!(r.schedules.len(), 1, "should stop after 1 schedule");
         assert!(r.bounds_hit);
-        // The single explored alternate swaps only the LoadImm order;
-        // the last writer (unit 2) stays the same, so no divergence
-        // is found yet. With bounds hit and no divergence: Inconclusive.
+        // The one explored alternate swaps LoadImm order but not the
+        // last writer, so no divergence is visible; bounds-hit without
+        // divergence classifies as Inconclusive.
         assert_eq!(r.outcome, OutcomeClass::Inconclusive);
     }
 
-    /// Verify ExplorationResult fields are populated correctly.
     #[test]
     fn result_fields_are_populated() {
-        // Overlapping writes so pruning does not remove all alternates.
         let result = explore(
             || {
                 let mem = GuestMemory::new(64);
@@ -447,7 +402,6 @@ mod tests {
         assert_eq!(r.outcome, OutcomeClass::ScheduleSensitive);
     }
 
-    /// Disjoint writers: pruning eliminates all alternates.
     #[test]
     fn disjoint_pruning_skips_all_alternates() {
         let result = explore(

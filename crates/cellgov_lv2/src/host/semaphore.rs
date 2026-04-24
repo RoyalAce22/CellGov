@@ -1,5 +1,9 @@
-//! Counting semaphore LV2 dispatch: create, destroy, wait, trywait,
-//! post, get_value.
+//! LV2 dispatch for counting semaphores.
+//!
+//! `post_and_wake` preserves the count invariant: a post with a
+//! parked waiter hands off directly (no increment), otherwise the
+//! count grows up to `max`. Over-max post with no waiter is EINVAL,
+//! so the count can never exceed `max`.
 
 use cellgov_event::UnitId;
 
@@ -14,7 +18,7 @@ impl Lv2Host {
         max: i32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Check bounds before id allocation so an invalid request
+        // Reject bad bounds before alloc_id so an invalid request
         // does not burn a kernel id.
         if initial > max || initial < 0 || max < 0 {
             return Lv2Dispatch::Immediate {
@@ -26,16 +30,15 @@ impl Lv2Host {
         match self.semaphores.create_with_id(id, initial, max) {
             Ok(()) => {}
             Err(crate::sync_primitives::SemaphoreCreateError::IdCollision) => {
-                // Host-invariant break: ENOMEM is a best-effort
-                // disguise since no Cell OS errno maps to
-                // "allocator handed me a live id".
+                // Host-invariant break; ENOMEM is a best-effort
+                // errno since no Cell OS code maps to "allocator
+                // handed me a live id".
                 return Lv2Dispatch::Immediate {
                     code: crate::errno::CELL_ENOMEM.into(),
                     effects: vec![],
                 };
             }
             Err(crate::sync_primitives::SemaphoreCreateError::InvalidBounds) => {
-                // Upstream bounds check should have caught this.
                 return Lv2Dispatch::Immediate {
                     code: crate::errno::CELL_EINVAL.into(),
                     effects: vec![],
@@ -84,11 +87,11 @@ impl Lv2Host {
             Some(crate::sync_primitives::SemaphoreWait::Empty) => {
                 match self.semaphores.enqueue_waiter(id, caller) {
                     Ok(()) => {}
-                    // Both errors are host-invariant breaks in
-                    // this path (try_wait just confirmed the id;
-                    // a blocked caller can't re-enter wait). Real
+                    // Both errors are host-invariant breaks here
+                    // (try_wait just confirmed the id; a blocked
+                    // caller cannot re-enter wait). Real
                     // sys_semaphore_wait never returns EDEADLK,
-                    // so surface ESRCH in release.
+                    // so ESRCH is the safest surface.
                     Err(
                         crate::sync_primitives::SemaphoreEnqueueError::UnknownId
                         | crate::sync_primitives::SemaphoreEnqueueError::DuplicateWaiter,
@@ -142,7 +145,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_semaphore_post(&mut self, id: u32, val: i32) -> Lv2Dispatch {
-        // val > 1 would require waking multiple waiters in one
+        // val != 1 would require waking multiple waiters in one
         // WakeAndReturn; not wired.
         if val != 1 {
             return Lv2Dispatch::Immediate {
@@ -164,10 +167,10 @@ impl Lv2Host {
                 effects: vec![],
             },
             crate::sync_primitives::SemaphorePost::Woke { new_owner } => {
-                // Waiter is already off the list; releaser returns
-                // CELL_OK even if resolve_wake_thread fires the
-                // host-invariant break (waiter is stranded by the
-                // time we get here).
+                // Waiter is already off the list; releaser
+                // returns CELL_OK even if resolve_wake_thread
+                // fires the host-invariant break, since the
+                // waiter is already stranded at that point.
                 match self.resolve_wake_thread(new_owner, "semaphore_post.Woke") {
                     Some(unit) => Lv2Dispatch::WakeAndReturn {
                         code: 0,
@@ -424,7 +427,6 @@ mod tests {
             panic!("expected Immediate, got {w:?}");
         };
         assert_eq!(code, crate::errno::CELL_EBUSY.into());
-        // Count unchanged and no waiter parked.
         assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
         assert!(host.semaphores().lookup(id).unwrap().waiters().is_empty());
     }
@@ -598,13 +600,11 @@ mod tests {
             } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate(0), got {other:?}"),
         };
-        // Waiter parks.
         host.dispatch(
             Lv2Request::SemaphoreWait { id, timeout: 0 },
             waiter_unit,
             &rt,
         );
-        // Poster posts.
         let post = host.dispatch(Lv2Request::SemaphorePost { id, val: 1 }, poster_unit, &rt);
         match post {
             Lv2Dispatch::WakeAndReturn {
@@ -614,7 +614,6 @@ mod tests {
             } => assert_eq!(woken_unit_ids, vec![waiter_unit]),
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // Count unchanged; waiter list empty.
         assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
         assert!(host.semaphores().lookup(id).unwrap().waiters().is_empty());
     }

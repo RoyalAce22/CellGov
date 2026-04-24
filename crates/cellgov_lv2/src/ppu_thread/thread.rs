@@ -1,4 +1,4 @@
-//! Per-thread vocabulary: lifecycle state, creation attrs, join outcome, and record.
+//! Per-thread record: lifecycle state, creation attrs, join outcome.
 
 use super::block_reason::GuestBlockReason;
 use super::id::PpuThreadId;
@@ -11,38 +11,35 @@ pub enum PpuThreadState {
     Runnable,
     /// Parked on a guest-LV2 condition.
     Blocked(GuestBlockReason),
-    /// Called `sys_ppu_thread_exit`; exit value is available.
+    /// Called `sys_ppu_thread_exit`; `exit_value` is populated.
     Finished,
-    /// Explicitly detached; resources released on exit without
-    /// a join.
+    /// Detached; resources release on exit without a join.
     Detached,
 }
 
 /// Attributes captured from `sys_ppu_thread_create`.
 #[derive(Debug, Clone)]
 pub struct PpuThreadAttrs {
-    /// Guest entry-point PC resolved from the OPD's first word
-    /// (what the PPC64 ABI loads into NIP).
+    /// Entry-point PC resolved from the OPD's first word.
     pub entry: u64,
-    /// Argument passed in `r3` at entry.
+    /// Argument loaded into `r3` at entry.
     pub arg: u64,
     /// Lowest address of the child's stack region; stack grows
-    /// downward from `stack_base + stack_size`.
+    /// down from `stack_base + stack_size`.
     pub stack_base: u32,
     /// Size in bytes of the child's stack region.
     pub stack_size: u32,
-    /// Scheduling priority. Captured but not consulted by the
-    /// current round-robin scheduler.
+    /// Scheduling priority; not consulted by the round-robin
+    /// scheduler.
     pub priority: u32,
-    /// Base address of the child's per-thread TLS block.
-    /// Host-chosen, not guest-provided.
+    /// Host-chosen base of the child's per-thread TLS block.
     pub tls_base: u32,
 }
 
 /// Outcome of [`super::PpuThreadTable::add_join_waiter`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddJoinWaiter {
-    /// Waiter enqueued.
+    /// Waiter enqueued on the target.
     Parked,
     /// Target is not in the table.
     UnknownTarget,
@@ -63,11 +60,10 @@ pub struct PpuThread {
     pub unit_id: UnitId,
     /// Current lifecycle state.
     pub state: PpuThreadState,
-    /// Creation attributes. Immutable after create.
+    /// Creation attributes; immutable after create.
     pub attrs: PpuThreadAttrs,
-    /// Value returned via `sys_ppu_thread_exit`, if any.
+    /// Exit value from `sys_ppu_thread_exit`.
     pub exit_value: Option<u64>,
-    /// Drained by `mark_finished`; appended by
-    /// `add_join_waiter`.
+    /// Appended by `add_join_waiter`; drained by `mark_finished`.
     pub join_waiters: Vec<PpuThreadId>,
 }

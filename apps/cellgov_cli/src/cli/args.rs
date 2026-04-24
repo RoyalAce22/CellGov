@@ -1,25 +1,16 @@
-//! Command-line argument parsing primitives.
-//!
-//! Pure over `&[String]` input: every function here either returns
-//! a parsed value or calls [`die`] on malformed input. No IO, no
-//! scenario knowledge, no subcommand logic -- those live in the
-//! per-command modules under `cli/`. The single dependency is
-//! [`crate::cli::exit::die`], the leaf error channel used across
-//! the CLI.
+//! Command-line argument parsing primitives. Pure over `&[String]`:
+//! every function returns a parsed value or calls [`die`] on malformed input.
 
 use cellgov_compare::CompareMode;
 
 use super::exit::die;
 
-/// Output-format selector for commands that support both
-/// human-readable and JSON output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OutputFormat {
     Human,
     Json,
 }
 
-/// Parse `--format human|json` from CLI args. Defaults to `Human`.
 pub(crate) fn parse_output_format(args: &[String]) -> OutputFormat {
     match find_flag_value(args, "--format") {
         None => OutputFormat::Human,
@@ -33,7 +24,6 @@ pub(crate) fn parse_output_format(args: &[String]) -> OutputFormat {
     }
 }
 
-/// Parse `--mode <mode>` from CLI args. Defaults to `Memory`.
 pub(crate) fn parse_compare_mode(args: &[String]) -> CompareMode {
     match find_flag_value(args, "--mode") {
         None => CompareMode::Memory,
@@ -51,15 +41,8 @@ pub(crate) fn parse_compare_mode(args: &[String]) -> CompareMode {
 
 /// Find a `--flag <value>` pair in args.
 ///
-/// Returns:
-/// - `None` if the flag does not appear at all.
-/// - `Some(value)` if the flag appears exactly once and is followed
-///   by a value token.
-/// - Calls [`die`] when the flag appears more than once (the previous
-///   first-wins behavior silently dropped subsequent flags; scripts
-///   that append flags produced non-obvious results).
-/// - Calls [`die`] when the flag is the last token (trailing flag
-///   with no value silently became "flag not present").
+/// Calls [`die`] when the flag appears more than once, or when it is
+/// the last token with no following value.
 pub(crate) fn find_flag_value(args: &[String], flag: &str) -> Option<String> {
     let mut found: Option<String> = None;
     let mut i = 0;
@@ -78,24 +61,15 @@ pub(crate) fn find_flag_value(args: &[String], flag: &str) -> Option<String> {
             .cloned()
             .unwrap_or_else(|| die(&format!("{flag} requires a value")));
         found = Some(val);
-        // Skip the value token so it cannot match a later `flag`
-        // comparison if the value coincidentally equals `flag`
-        // (pathological but possible with arbitrary strings).
+        // Skip the value token so it cannot match a later flag
+        // comparison if the value coincidentally equals `flag`.
         i += 2;
     }
     found
 }
 
-/// Parse a `--flag <value>` pair where `value` is a `FromStr`
-/// instance. Malformed input dies with a specific message instead
-/// of silently falling back to the caller-supplied default -- the
-/// old `.and_then(|v| v.parse().ok()).unwrap_or(default)` pattern
-/// hid typos in long-running benches.
-///
-/// Intended T set: unsigned integer types (usize, u32, u64). The
-/// trait bound only requires `T::Err: Display`, so odd T::Err
-/// types would not produce helpful errors; stick with integer
-/// types until a concrete need arises.
+/// Parse a `--flag <value>` pair where `value: FromStr`. Malformed
+/// input dies with the flag name and the parse error.
 pub(crate) fn parse_flag_value<T: std::str::FromStr>(args: &[String], flag: &str) -> Option<T>
 where
     T::Err: std::fmt::Display,
@@ -106,17 +80,13 @@ where
     })
 }
 
-/// Parse a `--flag <hex>` pair where `value` is interpreted as a
-/// hex u64 (with optional `0x`/`0X` prefix). Malformed input dies.
+/// Parse a `--flag <hex>` pair as a hex u64 with optional `0x`/`0X` prefix.
 pub(crate) fn parse_hex_flag(args: &[String], flag: &str) -> Option<u64> {
     find_flag_value(args, flag).map(|v| parse_hex_u64(&v, flag))
 }
 
-/// Parse `s` as a hex u64 with optional `0x`/`0X` prefix.
-/// `context` names the flag / field for the error message so the
-/// hex-parsing sites (--dump-at-pc, --dump-mem entries,
-/// --patch-byte halves) route through one helper and emit a
-/// consistent error shape.
+/// Parse `s` as a hex u64 with optional `0x`/`0X` prefix. `context`
+/// names the flag or field for the error message.
 pub(crate) fn parse_hex_u64(s: &str, context: &str) -> u64 {
     let trimmed = s.trim();
     let stripped = strip_hex_prefix(trimmed);
@@ -124,8 +94,6 @@ pub(crate) fn parse_hex_u64(s: &str, context: &str) -> u64 {
         .unwrap_or_else(|e| die(&format!("{context}: cannot parse hex {s:?}: {e}")))
 }
 
-/// Parse `s` as a hex u8 with optional `0x`/`0X` prefix. Used by
-/// `--patch-byte` where the value half must fit in a single byte.
 pub(crate) fn parse_hex_u8(s: &str, context: &str) -> u8 {
     let trimmed = s.trim();
     let stripped = strip_hex_prefix(trimmed);
@@ -139,10 +107,7 @@ pub(crate) fn strip_hex_prefix(s: &str) -> &str {
         .unwrap_or(s)
 }
 
-/// Parse one `ADDR=VALUE` pair from the `--patch-byte` CLI flag.
-/// Both halves are hex (with optional `0x` prefix). Dies with a
-/// specific message when the `=` is missing or either half fails
-/// to parse.
+/// Parse one `ADDR=VALUE` pair (both hex) from `--patch-byte`.
 pub(crate) fn parse_patch_byte_pair(pair: &str) -> (u64, u8) {
     let mut parts = pair.splitn(2, '=');
     let a_raw = parts.next().unwrap_or("");
@@ -156,10 +121,9 @@ pub(crate) fn parse_patch_byte_pair(pair: &str) -> (u64, u8) {
     (addr, val)
 }
 
-/// Flags that `run-game` / `bench-boot` accept which take a
-/// following value argument. Used by [`find_run_game_elf_path`] to
-/// skip over `--flag VALUE` pairs when locating the positional
-/// ELF path.
+/// Flags consumed by `run-game` / `bench-boot` that take a following
+/// value argument. [`find_run_game_elf_path`] skips past these pairs
+/// when locating the positional ELF path.
 pub(crate) const RUN_GAME_VALUE_FLAGS: &[&str] = &[
     "--title",
     "--content-id",
@@ -177,21 +141,18 @@ pub(crate) const RUN_GAME_VALUE_FLAGS: &[&str] = &[
     "--checkpoint",
 ];
 
-/// Locate the positional ELF path in a `run-game` invocation,
-/// skipping over recognized `--flag VALUE` pairs and standalone
-/// `--flag` toggles. Accepts both orderings -- `run-game <elf>
-/// --title flow` and `run-game --title flow <elf>` -- without
-/// caring which came first.
+/// Locate the positional ELF path in a `run-game` invocation. Accepts
+/// either ordering of positional path vs. flag pairs.
 pub(crate) fn find_run_game_elf_path(args: &[String]) -> Option<String> {
     let mut i = 2; // skip argv[0] and "run-game"
     while i < args.len() {
         let a = &args[i];
         if RUN_GAME_VALUE_FLAGS.contains(&a.as_str()) {
-            i += 2; // skip flag and its value
+            i += 2;
             continue;
         }
         if a.starts_with("--") {
-            i += 1; // boolean flag
+            i += 1;
             continue;
         }
         return Some(a.clone());

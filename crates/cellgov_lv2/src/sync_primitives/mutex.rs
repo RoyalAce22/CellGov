@@ -1,12 +1,9 @@
-//! Heavy mutex table. Owns state for `sys_mutex_create` /
-//! `_destroy` / `_lock` / `_unlock` / `_trylock`. Ids come from
-//! the host's shared kernel-object allocator (not the lwmutex
-//! allocator; the id spaces are distinct and the cond-wake
-//! re-acquire path distinguishes them via `CondMutexKind`).
+//! Heavy mutex table.
 //!
-//! Attributes (recursion, priority policy, protocol) are captured
-//! and returned but never honored by the blocking / waking
-//! contract; see [`MutexAttrs`].
+//! Ids come from the shared kernel-object allocator, distinct
+//! from the lwmutex id space. Attributes captured from
+//! `sys_mutex_create` are stored and hashed but never honored;
+//! see [`MutexAttrs`].
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
@@ -17,32 +14,25 @@ use std::collections::BTreeMap;
 pub enum MutexAcquire {
     /// Caller is now the owner.
     Acquired,
-    /// Mutex is owned (by any thread; non-recursive).
+    /// Mutex is owned.
     Contended,
 }
 
-/// Outcome of an `acquire_or_enqueue` call. Used by
-/// `sys_mutex_lock`.
+/// Outcome of an `acquire_or_enqueue` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutexAcquireOrEnqueue {
     /// Caller is now the owner.
     Acquired,
-    /// Caller has been appended to the waiter list.
+    /// Caller was appended to the waiter list.
     Enqueued,
-    /// Caller already holds the mutex or is already on its
-    /// waiter list. Non-recursive regardless of
-    /// [`MutexAttrs::recursive`]; dispatch maps to
-    /// `CELL_EDEADLK`.
+    /// Caller already holds the mutex or is already parked.
+    /// Non-recursive regardless of [`MutexAttrs::recursive`].
     WouldDeadlock,
     /// Unknown id.
     Unknown,
 }
 
 /// Outcome of a `release_and_wake_next` call.
-///
-/// Dropping a `Transferred` result strands the new owner
-/// (blocked forever with the mutex pointing at them), hence
-/// `#[must_use]`.
 #[must_use = "ignoring a MutexRelease drops the wake-up for any transferred owner"]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutexRelease {
@@ -53,7 +43,7 @@ pub enum MutexRelease {
         /// Thread that just became the owner.
         new_owner: PpuThreadId,
     },
-    /// Caller did not own the mutex; release rejected.
+    /// Caller did not own the mutex.
     NotOwner,
     /// Unknown id.
     Unknown,
@@ -61,10 +51,8 @@ pub enum MutexRelease {
 
 /// Failure modes of [`MutexTable::create_with_id`].
 ///
-/// An id collision indicates the shared kernel-object allocator
-/// handed out a live id; a `debug_assert!` fires before the
-/// error is returned. Release builds keep the existing entry
-/// and return `Err`.
+/// `IdCollision` indicates an allocator bug; `debug_assert!`
+/// fires. Release keeps the existing entry and returns `Err`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutexCreateError {
     /// An entry with this id was already present.
@@ -77,33 +65,23 @@ pub enum MutexEnqueueError {
     /// No mutex with this id.
     UnknownId,
     /// Thread is already on the waiter list. Always state
-    /// corruption under the single-threaded commit model;
-    /// callers route to `record_invariant_break`.
+    /// corruption; callers route to `record_invariant_break`.
     DuplicateWaiter,
     /// Thread is the current owner. Reachable from guest
-    /// recursive-lock attempts (not a dispatch-layer bug); no
-    /// `debug_assert!` fires.
+    /// recursive-lock attempts.
     WaiterIsOwner,
 }
 
 /// Attribute bag captured from `sys_mutex_create`. No field
-/// affects the table's blocking / waking behavior; [`recursive`]
-/// in particular is not honored (recursive locks surface as
-/// `WouldDeadlock` / `WaiterIsOwner`). Hashed by [`state_hash`]
-/// so state-level replay equivalence covers what the guest
-/// asked for at create time.
-///
-/// [`recursive`]: MutexAttrs::recursive
-/// [`state_hash`]: MutexTable::state_hash
+/// affects blocking or waking; recursive locks surface as
+/// `WouldDeadlock` / `WaiterIsOwner` regardless of `recursive`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MutexAttrs {
-    /// Priority-ordering policy (FIFO vs priority). Diagnostic
-    /// only; the waiter list is strictly FIFO.
+    /// Priority-ordering policy; diagnostic only.
     pub priority_policy: u32,
-    /// Recursive flag. Not honored.
+    /// Recursive flag; not honored.
     pub recursive: bool,
-    /// Raw protocol bits (`SYS_SYNC_FIFO` / `SYS_SYNC_PRIORITY`
-    /// / `SYS_SYNC_PRIORITY_INHERIT`). Diagnostic only.
+    /// Raw protocol bits; diagnostic only.
     pub protocol: u32,
 }
 
@@ -166,19 +144,13 @@ impl MutexTable {
         Ok(())
     }
 
-    /// Destroy a mutex and return the removed entry, or `None`
-    /// if the id was unknown.
+    /// Remove the entry; `None` if the id was unknown.
     ///
-    /// Caller contract: reject held / non-empty-waiters before
-    /// calling. `debug_assert!`s fire on violation. If the
-    /// asserts are bypassed in release, the returned entry
-    /// still carries its owner and waiter list, and callers
-    /// **must** drain `entry.waiters()` and wake each parked
-    /// thread -- the table itself cannot do this, and skipping
-    /// the wake strands those threads forever.
-    ///
-    /// No `sys_mutex_destroy` dispatch exists today; reached
-    /// only from tests and whole-table teardown.
+    /// Caller contract: reject held or non-empty-waiters before
+    /// calling (`debug_assert!`s fire on violation). If bypassed
+    /// in release, callers **must** drain `entry.waiters()` and
+    /// wake each parked thread; skipping this strands them
+    /// forever.
     pub fn destroy(&mut self, id: u32) -> Option<MutexEntry> {
         let entry = self.entries.remove(&id)?;
         debug_assert!(
@@ -211,13 +183,8 @@ impl MutexTable {
         self.entries.is_empty()
     }
 
-    /// Check-and-set without enqueueing. Used by
-    /// `sys_mutex_trylock`.
-    ///
-    /// Non-recursive; owner re-acquiring sees `Contended`, not
-    /// `WouldDeadlock`. Blocking paths use
-    /// [`Self::acquire_or_enqueue`] to distinguish deadlock from
-    /// contention.
+    /// Check-and-set without enqueueing. Non-recursive: the
+    /// owner re-acquiring sees `Contended`, not `WouldDeadlock`.
     pub fn try_acquire(&mut self, id: u32, caller: PpuThreadId) -> Option<MutexAcquire> {
         let entry = self.entries.get_mut(&id)?;
         if entry.owner.is_none() {
@@ -228,15 +195,10 @@ impl MutexTable {
         }
     }
 
-    /// Atomic acquire-or-park. Used by `sys_mutex_lock`.
+    /// Atomic acquire-or-park.
     ///
-    /// The `already-parked -> WouldDeadlock` arm is defensive: a
-    /// PPU thread can execute only one syscall at a time, so
-    /// normal dispatch cannot produce that state.
-    ///
-    /// Cost: O(n) scan over the waiter list on the
-    /// already-parked check (never fires under normal
-    /// dispatch).
+    /// O(n) scan over the waiter list on the already-parked
+    /// check; defensive (normal dispatch cannot reach it).
     pub fn acquire_or_enqueue(&mut self, id: u32, caller: PpuThreadId) -> MutexAcquireOrEnqueue {
         let Some(entry) = self.entries.get_mut(&id) else {
             return MutexAcquireOrEnqueue::Unknown;
@@ -270,9 +232,8 @@ impl MutexTable {
     /// - [`MutexEnqueueError::WaiterIsOwner`] if `waiter` holds
     ///   the mutex.
     /// - [`MutexEnqueueError::DuplicateWaiter`] if `waiter` is
-    ///   already parked. The single-threaded commit model means
-    ///   this is always state corruption: callers must route it
-    ///   to `record_invariant_break`.
+    ///   already parked; callers must route to
+    ///   `record_invariant_break`.
     pub fn enqueue_waiter(
         &mut self,
         id: u32,
@@ -291,7 +252,7 @@ impl MutexTable {
         Ok(())
     }
 
-    /// Release on behalf of `caller`. See [`MutexRelease`].
+    /// Release on behalf of `caller`.
     pub fn release_and_wake_next(&mut self, id: u32, caller: PpuThreadId) -> MutexRelease {
         let Some(entry) = self.entries.get_mut(&id) else {
             return MutexRelease::Unknown;
@@ -311,8 +272,7 @@ impl MutexTable {
         }
     }
 
-    /// FNV-1a digest for state-hash folding. Walks entries in
-    /// ascending-id order; folds owner, waiter FIFO, and attrs.
+    /// FNV-1a digest of the table's state, including attrs.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&(self.entries.len() as u64).to_le_bytes());

@@ -1,36 +1,17 @@
-//! `StateHash` -- a deterministic hash of some piece of runtime state,
-//! captured at a controlled checkpoint for replay comparison.
+//! 64-bit state-hash wrapper used at replay-comparison checkpoints.
 //!
-//! Four checkpoint targets are supported: committed memory, runnable
-//! queue, sync object state, and unit status. Each produces its own
-//! `StateHash` value. Replay tooling compares pairs of values: identical
-//! hashes mean the underlying state is bit-for-bit identical (modulo
-//! hash collisions, which `u64` is wide enough to make negligible at
-//! the scale of one runtime instance).
-//!
-//! `StateHash` is algorithm-agnostic at the type level. It carries a
-//! `u64` and nothing more; the producer of the hash decides which
-//! algorithm to use, as long as it is deterministic across hosts and
-//! runs. The committed-memory producer (`GuestMemory::content_hash`)
-//! uses FNV-1a; other checkpoint producers are free to pick their own
-//! algorithm and record the result here. The trace writer serializes
-//! hashes in stable byte order so that text rendering tools can
-//! compare them across builds.
+//! The committed-memory producer (`GuestMemory::content_hash`) uses FNV-1a;
+//! other checkpoint producers pick their own algorithm as long as it is
+//! deterministic across hosts.
 
-/// A 64-bit deterministic hash of some piece of runtime state.
+/// 64-bit deterministic hash of some piece of runtime state.
 ///
-/// `StateHash` is `Copy + Eq + Hash + Ord`. It is the value the trace
-/// records at every state checkpoint and the value replay tooling
-/// compares when it asserts equivalence between two runs of the same
-/// scenario. `StateHash` omits a `From<u64>` impl so that producing a
-/// state hash stays an explicit operation; ad-hoc construction outside
-/// the hash producer should be visible at the call site.
+/// Omits `From<u64>` so hash construction stays explicit at call sites.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct StateHash(u64);
 
 impl StateHash {
-    /// The zero hash. Useful as the empty-state sentinel and as a
-    /// `Default`.
+    /// Empty-state sentinel.
     pub const ZERO: Self = Self(0);
 
     /// Construct a `StateHash` from a raw 64-bit value.
@@ -39,7 +20,7 @@ impl StateHash {
         Self(raw)
     }
 
-    /// Return the underlying 64-bit value.
+    /// Underlying 64-bit value.
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0

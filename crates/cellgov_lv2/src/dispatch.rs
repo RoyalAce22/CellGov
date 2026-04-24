@@ -1,15 +1,12 @@
-//! Dispatch result types returned by `Lv2Host::dispatch`.
-//!
-//! `Lv2Dispatch` tells the runtime how to complete a syscall. Every
-//! variant carries plain data -- no closures, no runtime references.
+//! [`Lv2Dispatch`] packets: pure-data replies from `Lv2Host::dispatch`
+//! telling the runtime how to complete a syscall.
 //!
 //! # Source-unit invariant
-//! The *source* is the caller's `UnitId`, passed to
-//! `Lv2Host::dispatch`. Variants that block or mutate the caller
-//! ([`Lv2Dispatch::Block`], [`Lv2Dispatch::BlockAndWake`],
+//! The *source* is the caller's `UnitId`. Variants that block or mutate
+//! the caller ([`Lv2Dispatch::Block`], [`Lv2Dispatch::BlockAndWake`],
 //! [`Lv2Dispatch::PpuThreadCreate`], [`Lv2Dispatch::PpuThreadExit`])
-//! do so implicitly. A dispatch never mutates a unit other than the
-//! caller's own, absent an explicit `woken_unit_ids` entry.
+//! do so implicitly; other units are touched only through an explicit
+//! `woken_unit_ids` entry.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
@@ -22,71 +19,67 @@ use crate::sync_primitives::EventPayload;
 /// How the runtime should complete a dispatched syscall.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Lv2Dispatch {
-    /// Immediate syscall return: commit `effects`, then write `code`
-    /// to r3.
+    /// Commit `effects`, then write `code` (0 = `CELL_OK`) to r3.
     ///
-    /// Effects commit regardless of `code`, so host MUST emit
-    /// `effects = vec![]` for error codes -- otherwise a
-    /// `SharedWriteIntent` paired with an error return still
-    /// commits the write.
+    /// Effects commit regardless of `code`, so error paths MUST emit
+    /// `effects = vec![]` -- otherwise a `SharedWriteIntent` paired
+    /// with an error return still commits the write.
     Immediate {
-        /// Value for r3 (0 = CELL_OK).
+        /// Value for r3.
         code: u64,
-        /// Side effects to commit.
+        /// Effects to commit.
         effects: Vec<Effect>,
     },
-    /// Construct and register SPUs for a thread group.
+    /// Construct and register SPUs for a thread group; `code` -> r3.
     ///
-    /// Keyed by slot index -- guests may leave slots uninitialized
-    /// (sparse groups are legal), so the slot lives in the key
-    /// rather than the Vec position. BTreeMap iteration is ascending
-    /// by slot, giving byte-stable registration order.
+    /// Keyed by slot index because guests may leave slots
+    /// uninitialized. `BTreeMap` iteration gives byte-stable
+    /// ascending-slot registration order.
     RegisterSpu {
-        /// Slot-keyed per-SPU init state.
+        /// Per-slot init state.
         inits: BTreeMap<u32, SpuInitState>,
-        /// Side effects to commit.
+        /// Effects to commit.
         effects: Vec<Effect>,
         /// Value for the caller's r3.
         code: u64,
     },
-    /// Park the caller until a condition resolves.
+    /// Park the caller; `pending` is applied at wake time.
     Block {
         /// Why the caller is blocking.
         reason: Lv2BlockReason,
-        /// Applied at wake time.
+        /// Resolves the caller at wake time.
         pending: PendingResponse,
-        /// Commit before blocking.
+        /// Effects to commit before blocking.
         effects: Vec<Effect>,
     },
-    /// Source called `sys_ppu_thread_exit`; source becomes Finished
-    /// and each joiner in `woken_unit_ids` wakes.
+    /// `sys_ppu_thread_exit`: source becomes Finished, joiners wake.
     ///
-    /// Joiners hold a [`PendingResponse::PpuThreadJoin`], so the wake
+    /// Joiners hold a [`PendingResponse::PpuThreadJoin`]; the wake
     /// writes `exit_value` (u64 BE) to the joiner's `status_out_ptr`
-    /// and sets r3 = 0. No r3 is written for the source.
+    /// and sets r3 = 0. The source's r3 is not written.
     PpuThreadExit {
-        /// Delivered to joiners via their `status_out_ptr`, not r3.
+        /// Delivered to joiners via their `status_out_ptr`.
         exit_value: u64,
         /// Joiners to transition Blocked -> Runnable.
         woken_unit_ids: Vec<UnitId>,
-        /// Side effects to commit.
+        /// Effects to commit.
         effects: Vec<Effect>,
     },
-    /// Release-side completion: source returns `code`, units in
-    /// `woken_unit_ids` resolve their pending responses.
+    /// Release-side completion: source returns `code`, each unit in
+    /// `woken_unit_ids` resolves its pending response.
     ///
     /// Emitted by lwmutex/mutex unlock, semaphore post, event-queue
-    /// send, event-flag set, cond signal. `response_updates` carries
-    /// per-waiter pending-response overrides for primitives whose
-    /// wake payload is only known at release time
-    /// (`sys_event_queue_send`, `sys_event_flag_set`).
+    /// send, event-flag set, and cond signal. `response_updates`
+    /// carries per-waiter overrides for primitives whose wake payload
+    /// is known only at release time (`sys_event_queue_send`,
+    /// `sys_event_flag_set`).
     ///
     /// # Invariants
-    /// - Every `response_updates` key MUST be in `woken_unit_ids`;
-    ///   an update for a non-woken unit would silently mutate an
-    ///   unrelated future wait.
-    /// - An update's [`PendingResponse::variant_tag`] MUST match
-    ///   the existing entry's tag. Updates are partial fills, not
+    /// - Every `response_updates` key MUST appear in
+    ///   `woken_unit_ids`; an update for a non-woken unit would
+    ///   silently mutate an unrelated future wait.
+    /// - An update's [`PendingResponse::variant_tag`] MUST match the
+    ///   existing entry's tag -- updates are partial fills, not
     ///   variant replacements.
     WakeAndReturn {
         /// Value for the release caller's r3.
@@ -95,19 +88,18 @@ pub enum Lv2Dispatch {
         woken_unit_ids: Vec<UnitId>,
         /// Per-waiter pending-response overrides.
         response_updates: Vec<(UnitId, PendingResponse)>,
-        /// Commit alongside the wakes.
+        /// Effects to commit alongside the wakes.
         effects: Vec<Effect>,
     },
-    /// Source blocks AND other units wake in the same dispatch.
+    /// Source blocks and other units wake in the same dispatch.
     ///
-    /// Emitted by `sys_cond_wait`: releasing the cond's associated
-    /// mutex can transfer ownership to a parked mutex waiter, which
-    /// wakes in the same step the cond caller blocks. The source's
-    /// r3 is not set here -- the eventual wake resolves `pending`.
+    /// Emitted by `sys_cond_wait`: releasing the associated mutex can
+    /// transfer ownership to a parked mutex waiter, which wakes in the
+    /// same step the cond caller blocks. The source's r3 resolves at
+    /// wake time via `pending`.
     ///
-    /// # Invariants
-    /// Same `woken_unit_ids` / `response_updates` correspondence and
-    /// variant-tag match rules as [`Self::WakeAndReturn`].
+    /// Same `woken_unit_ids` / `response_updates` invariants as
+    /// [`Self::WakeAndReturn`].
     BlockAndWake {
         /// Why the source is blocking.
         reason: Lv2BlockReason,
@@ -117,37 +109,35 @@ pub enum Lv2Dispatch {
         woken_unit_ids: Vec<UnitId>,
         /// Per-waiter pending-response overrides.
         response_updates: Vec<(UnitId, PendingResponse)>,
-        /// Commit alongside the transitions.
+        /// Effects to commit alongside the transitions.
         effects: Vec<Effect>,
     },
-    /// Source called `sys_ppu_thread_create`.
+    /// `sys_ppu_thread_create` with the OPD already resolved.
     ///
-    /// OPD resolution (16 BE bytes at the descriptor address) runs
-    /// host-side via `Lv2Runtime::read_committed` before this variant
-    /// is emitted. Bad addresses surface as
-    /// `Immediate { code: CELL_EFAULT }` and no child is registered,
-    /// so the runtime sees this variant only when `init` is fully
-    /// materialized.
+    /// The host reads the 16 BE OPD bytes via
+    /// `Lv2Runtime::read_committed` before emitting this variant; a
+    /// bad descriptor address surfaces as
+    /// `Immediate { code: CELL_EFAULT }` and no child is registered.
     ///
     /// # Invariants
     /// - `tls_bytes.is_empty()` OR `init.tls_base != 0` -- a
     ///   non-empty TLS image cannot commit to guest address 0. The
-    ///   host rejects the violation with `CELL_EINVAL` upstream and
-    ///   the runtime asserts defensively.
+    ///   host rejects the violation with `CELL_EINVAL` upstream; the
+    ///   runtime asserts defensively.
     PpuThreadCreate {
-        /// Guest address for the minted thread id (u64 BE).
+        /// Guest address to receive the minted thread id (u64 BE).
         id_ptr: u32,
-        /// PPC64-ABI seed values (OPD already resolved).
+        /// PPC64-ABI seed values.
         init: PpuThreadInitState,
         /// Lowest address of the child's stack block.
         stack_base: u64,
         /// Size of the child's stack block.
         stack_size: u64,
-        /// Initial bytes to commit at `init.tls_base`.
+        /// Bytes to commit at `init.tls_base` before entry.
         tls_bytes: Vec<u8>,
-        /// Captured in thread attrs.
+        /// Thread priority captured in attrs.
         priority: u32,
-        /// Commit alongside the create transition.
+        /// Effects to commit alongside the create.
         effects: Vec<Effect>,
     },
 }
@@ -175,18 +165,17 @@ impl SpuImageHandle {
 
 /// PPC64-ABI seed values for a new child PPU thread.
 ///
-/// `entry_code` and `entry_toc` are resolved OPD words read from
-/// guest memory upstream, not the OPD descriptor address.
+/// `entry_code` / `entry_toc` are the resolved OPD words, not the OPD
+/// descriptor address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PpuThreadInitState {
-    /// First word of the OPD -- NIP for the child.
+    /// First OPD word -- NIP for the child.
     pub entry_code: u64,
-    /// Second word of the OPD -- r2 (TOC) for the child.
+    /// Second OPD word -- r2 (TOC) for the child.
     pub entry_toc: u64,
     /// r3 argument.
     pub arg: u64,
-    /// r1: points at the 16-byte back-chain area at the top of the
-    /// child's stack.
+    /// r1: 16-byte back-chain area at the top of the stack.
     pub stack_top: u64,
     /// r13. Zero when the ELF has no PT_TLS segment.
     pub tls_base: u64,
@@ -194,10 +183,8 @@ pub struct PpuThreadInitState {
     pub lr_sentinel: u64,
 }
 
-/// Per-slot SPU init state.
-///
-/// The slot index is the [`Lv2Dispatch::RegisterSpu`]`::inits` key,
-/// not a field here.
+/// Per-slot SPU init state; the slot index is the
+/// [`Lv2Dispatch::RegisterSpu`]`::inits` key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpuInitState {
     /// Bytes to copy into the SPU's local store.
@@ -208,7 +195,7 @@ pub struct SpuInitState {
     pub stack_ptr: u32,
     /// r3..=r6.
     pub args: [u64; 4],
-    /// Owning thread group (used for join tracking).
+    /// Owning thread group, used for join tracking.
     pub group_id: u32,
 }
 
@@ -250,16 +237,14 @@ pub enum Lv2BlockReason {
         /// Event-flag id.
         id: u32,
     },
-    /// `sys_cond_wait`. Caller has released `mutex_id` on the way
-    /// in and re-acquires on wake via
-    /// [`PendingResponse::CondWakeReacquire`]. `mutex_kind`
-    /// disambiguates lwmutex vs heavy mutex (distinct id spaces).
+    /// `sys_cond_wait`. Caller released `mutex_id` on entry and
+    /// re-acquires on wake via [`PendingResponse::CondWakeReacquire`].
     Cond {
         /// Cond id.
         id: u32,
-        /// Associated mutex the caller released on the way in.
+        /// Mutex the caller released on the way in.
         mutex_id: u32,
-        /// Which mutex table `mutex_id` names.
+        /// Which mutex table `mutex_id` names (distinct id spaces).
         mutex_kind: CondMutexKind,
     },
 }
@@ -275,8 +260,8 @@ pub enum PendingResponse {
         /// Value for r3.
         code: u64,
     },
-    /// On wake, set r3 = `code` and write `cause` / `status` to
-    /// the guest out-pointers.
+    /// On wake, set r3 = `code` and write `cause` / `status` to the
+    /// guest out-pointers.
     ThreadGroupJoin {
         /// Used for wake matching.
         group_id: u32,
@@ -291,24 +276,24 @@ pub enum PendingResponse {
         /// Filled in at wake time.
         status: u32,
     },
-    /// On wake, write the exit value (u64 BE) into `status_out_ptr`
+    /// On wake, write the exit value (u64 BE) to `status_out_ptr`
     /// and set r3 = 0.
     PpuThreadJoin {
-        /// Trace/diagnostic; wake matching uses the pending-table
-        /// entry, not this field.
+        /// Trace/diagnostic only; wake matching uses the pending
+        /// table entry, not this field.
         target: u64,
         /// Out-pointer for the child's exit value.
         status_out_ptr: u32,
     },
-    /// On wake, write the event payload (4x u64 BE matching
-    /// PSL1GHT's `sys_event_t`: offsets 0 / 8 / 16 / 24 =
+    /// On wake, write the event payload (4x u64 BE matching PSL1GHT's
+    /// `sys_event_t`: offsets 0 / 8 / 16 / 24 =
     /// source / data1 / data2 / data3) to `out_ptr` and set r3 = 0.
     ///
     /// # Panics
-    /// Reaching the wake path with `payload = None` means the
-    /// send-side dispatch forgot a `response_updates` entry. The
-    /// runtime panics rather than delivering zero u64s the guest
-    /// cannot distinguish from a real event.
+    /// `payload = None` at wake time: the send-side dispatch forgot a
+    /// `response_updates` entry. The runtime panics rather than
+    /// deliver zero u64s the guest cannot distinguish from a real
+    /// event.
     EventQueueReceive {
         /// Out-pointer for the `sys_event_t` buffer.
         out_ptr: u32,
@@ -324,33 +309,27 @@ pub enum PendingResponse {
         /// Filled in at wake time by the set side.
         observed: u64,
     },
-    /// On wake, re-acquire `mutex_id` before returning r3 = 0. If
-    /// the mutex is held, the caller re-parks on its waiter list
-    /// and the pending entry is replaced by
-    /// `ReturnCode { code: 0 }`.
-    ///
-    /// `mutex_kind` disambiguates lwmutex vs heavy mutex (distinct
-    /// id spaces).
+    /// On wake, re-acquire `mutex_id` before returning r3 = 0. A held
+    /// mutex re-parks the caller on its waiter list; the pending
+    /// entry is replaced by `ReturnCode { code: 0 }`.
     ///
     /// # Invariant
-    /// The target mutex is alive: `sys_mutex_destroy` /
-    /// `sys_lwmutex_destroy` MUST reject with `CELL_EBUSY` while
-    /// any cond waiter references it. An empty table entry at
-    /// wake time is a host-level invariant break.
+    /// The target mutex is alive -- `sys_mutex_destroy` /
+    /// `sys_lwmutex_destroy` MUST reject with `CELL_EBUSY` while any
+    /// cond waiter references it. An empty table entry at wake time
+    /// is a host-level invariant break.
     CondWakeReacquire {
         /// Mutex to re-acquire on wake.
         mutex_id: u32,
-        /// Which mutex table `mutex_id` names.
+        /// Which mutex table `mutex_id` names (distinct id spaces).
         mutex_kind: CondMutexKind,
     },
 }
 
 impl PendingResponse {
-    /// Stable variant discriminant for `response_updates`
-    /// variant-match checks in [`Lv2Dispatch::WakeAndReturn`] and
-    /// [`Lv2Dispatch::BlockAndWake`]. The runtime asserts
-    /// `existing.variant_tag() == update.variant_tag()` before
-    /// installing an override.
+    /// Stable variant discriminant for `response_updates` variant-tag
+    /// checks in [`Lv2Dispatch::WakeAndReturn`] and
+    /// [`Lv2Dispatch::BlockAndWake`].
     pub fn variant_tag(&self) -> u8 {
         match self {
             PendingResponse::ReturnCode { .. } => 0,

@@ -1,14 +1,5 @@
 //! `run-game` subcommand: load a decrypted PS3 ELF and run the PPU
 //! until fault, stall, or step limit.
-//!
-//! Split into submodules by responsibility:
-//! - `ps3_layout`: PS3 guest-memory constants
-//! - `bench`: bench-boot family (throughput measurement)
-//! - `step_loop`: shared step-loop machinery (run-game diagnostic
-//!   loop and bench minimal loop, plus the RSX-checkpoint
-//!   classifier they both route through)
-//! - `observation`: cross-runner checkpoint manifest + save
-//! - `boot` / `diag` / `manifest` / `prx`: existing submodules
 
 mod bench;
 mod boot;
@@ -21,7 +12,6 @@ mod step_loop;
 
 pub use bench::{bench_boot_one_run, bench_boot_pair};
 
-// Re-export for main.rs which reaches through `game::agreement_percent`.
 pub(crate) use bench::agreement_percent;
 pub(crate) use ps3_layout::{
     PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
@@ -38,11 +28,8 @@ use step_loop::{
     compute_untracked, pct, step_loop, StepLoopCtx, StepTiming, PC_RING_SIZE, SYSCALL_RING_SIZE,
 };
 
-/// Tunables for one `run-game` invocation. Fields map directly
-/// onto the equivalent CLI flags; the struct exists so the
-/// function signature stays flat when a future flag lands (add a
-/// field, one call-site line changes) and so `run_game`'s shape
-/// matches `boot::PrepareOptions` already used in this crate.
+/// Tunables for one `run-game` invocation; fields map 1:1 onto
+/// the equivalent CLI flags.
 pub struct RunGameOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
@@ -111,12 +98,9 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         rt.set_gcm_rsx_checkpoint(true);
     }
     if title.rsx_mirror() {
-        // Mirror-mode titles also need the GCM HLE to place
-        // control_addr at the MMIO sentinel 0xC000_0040 so the
-        // mirror hook fires on the guest's put-pointer store.
-        // Under !mirror the HLE routes control_addr to a heap
-        // allocation instead, which would bypass the mirror and
-        // leave cursor.put never updated.
+        // Mirror mode requires GCM's control_addr at the MMIO
+        // sentinel 0xC000_0040; routing it to the HLE heap would
+        // bypass the mirror and leave cursor.put unobserved.
         rt.set_gcm_rsx_checkpoint(true);
         rt.set_rsx_mirror_writes(true);
     }
@@ -171,22 +155,14 @@ pub fn run_game(opts: RunGameOptions<'_>) {
 
     println!("outcome: {outcome}");
     println!("steps: {steps}");
-    // HLE heap watermark: peak address the bump allocator reached.
-    // Subtract the base set in boot::prepare (0x10410000 today) to
-    // get cumulative bytes leaked through the leak-on-free policy.
-    // Reported unconditionally so any run becomes a data point for
-    // sizing the arena and deciding when real individual-allocation
-    // release becomes necessary (see `NID_SYS_FREE` TODO in
-    // cellgov_core::hle::sys_prx_for_user).
+    // Peak bump-allocator address minus the HLE heap base set in
+    // boot::prepare. Cumulative bytes leaked under leak-on-free.
     const HLE_HEAP_BASE: u32 = 0x10410000;
     let watermark = rt.hle_heap_watermark();
     let used = watermark.saturating_sub(HLE_HEAP_BASE);
     println!(
         "hle_heap_watermark: 0x{watermark:08x} ({used} bytes used above base 0x{HLE_HEAP_BASE:08x})"
     );
-    // Report any reads that landed in a provisional RSX/SPU region. A
-    // nonzero count surfaces silent zero-reads that would otherwise be
-    // invisible at this scale.
     let prov = rt.memory().provisional_read_count();
     if prov > 0 {
         println!("provisional_reads: {prov} (reserved RSX/SPU regions returned zero)");
@@ -210,11 +186,9 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         println!();
         println!("profile:");
         if t_loop.is_zero() {
-            // pct() clamps to 0.0 on zero total to avoid div-by-0,
-            // which makes every percentage print as 0% and looks
-            // identical to "nothing happened." Distinguish the two
-            // with an explicit line so the operator does not
-            // misread a clock-resolution artifact as a broken run.
+            // pct() clamps to 0.0 on zero total, which is visually
+            // indistinguishable from "nothing happened"; tag the
+            // clock-resolution artifact explicitly.
             println!(
                 "  WARN: t_loop is zero (clock resolution artifact or instantaneous loop); percentages below are meaningless"
             );
@@ -235,9 +209,8 @@ pub fn run_game(opts: RunGameOptions<'_>) {
             t.coverage_time,
             pct(t.coverage_time, t_loop)
         );
-        // Untracked = t_loop - (step + commit + coverage). Any
-        // tracked-overflow surfaces as a WARN line rather than a
-        // silent saturating_sub to zero.
+        // Untracked = t_loop - (step + commit + coverage); overflow
+        // prints WARN instead of saturating to zero.
         match compute_untracked(t_loop, t.step_time, t.commit_time, t.coverage_time) {
             Ok(overhead) => {
                 println!(
@@ -292,10 +265,8 @@ pub fn run_game(opts: RunGameOptions<'_>) {
     }
 
     if let Some(path) = save_observation {
-        // Exit non-zero on save failure. A caller that asked for
-        // --save-observation is almost always feeding a downstream
-        // cross-runner comparison; reporting the write error but
-        // exiting 0 would make the harness think the file exists.
+        // Non-zero exit on save failure: callers feed the JSON into a
+        // cross-runner diff that would accept a missing file as empty.
         if let Err(msg) = save_boot_observation(
             path,
             &elf_data,

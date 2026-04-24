@@ -1,8 +1,4 @@
 //! sys_rsx LV2 dispatch.
-//!
-//! Unimplemented handlers return `CELL_ENOSYS` so a guest that
-//! reaches the syscall surface sees a deterministic "not
-//! implemented" rather than a CELL_OK masquerade.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -12,29 +8,25 @@ use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
 
 /// Fixed `context_id` returned from `sys_rsx_context_allocate`.
-/// RPCS3 `sys_rsx.cpp:332`.
 pub const RSX_CONTEXT_ID: u32 = 0x5555_5555;
 
-/// Offsets from the sys_rsx memory base for the three kernel regions.
-/// RPCS3 `sys_rsx.cpp:264-266`.
+/// Offset from the sys_rsx memory base to the DMA control region.
 pub const DMA_CONTROL_OFFSET: u32 = 0x0000_0000;
-/// Driver-info region offset.
+/// Offset from the sys_rsx memory base to the driver-info region.
 pub const DRIVER_INFO_OFFSET: u32 = 0x0010_0000;
-/// Reports region offset.
+/// Offset from the sys_rsx memory base to the reports region.
 pub const REPORTS_OFFSET: u32 = 0x0020_0000;
 
-/// Bytes reserved per sys_rsx context. RPCS3 `sys_rsx.cpp:255`
-/// (`area->alloc(0x300000)`).
+/// Bytes reserved per sys_rsx context.
 pub const RSX_CONTEXT_RESERVATION: u32 = 0x0030_0000;
 
 /// Size of the reports region (semaphore + notify + report).
 pub const RSX_REPORTS_SIZE: usize = 0x9400;
 
-/// Size of the driver info region. RPCS3 `sys_rsx.h:59`.
+/// Size of the driver info region.
 pub const RSX_DRIVER_INFO_SIZE: usize = 0x12F8;
 
-/// RPCS3 values populated at `sys_rsx_context_allocate`. Source:
-/// `sys_rsx.cpp:293-302`. Hand-maintained.
+/// Values `sys_rsx_context_allocate` stamps into the driver-info region.
 pub mod driver_info_init {
     /// Driver version word.
     pub const VERSION_DRIVER: u32 = 0x211;
@@ -52,24 +44,18 @@ pub mod driver_info_init {
     pub const REPORTS_REPORT_OFFSET: u32 = 0x1400;
     /// Hardware channel (games = 1, VSH = 0).
     pub const HARDWARE_CHANNEL: u32 = 1;
-    /// Default local RSX memory exposed to games. Matches the
-    /// historical CellGov cellGcmSys setting and RPCS3's
-    /// post-firmware-reservation value.
+    /// Default local RSX memory exposed to games.
     pub const MEMORY_SIZE: u32 = 0x0F90_0000;
 }
 
-/// Semaphore init sentinel pattern. RPCS3 `sys_rsx.cpp:274-280`
-/// writes this 4-u32 group repeatedly across the 1024 slots.
+/// Semaphore init sentinel pattern, repeated across all 1024 slots.
 pub const SEMAPHORE_INIT_PATTERN: [u32; 4] = [0x1337_C0D3, 0x1337_BABE, 0x1337_BEEF, 0x1337_F001];
 
 /// Offset of the `handler_queue` field within `RsxDriverInfo`.
-/// RPCS3 `sys_rsx.h:47`.
 pub const DRIVER_INFO_HANDLER_QUEUE_OFFSET: usize = 0x12D0;
 
 /// Fill `buf` with the bytes `sys_rsx_context_allocate` writes into
-/// the driver-info region. Mirrors RPCS3 `sys_rsx.cpp:291-325`:
-/// memset to zero, then stamp the 10 RPCS3-supplied fields plus the
-/// `handler_queue` handle created via the event-queue primitives.
+/// the driver-info region.
 ///
 /// # Panics
 ///
@@ -102,27 +88,22 @@ pub fn write_rsx_driver_info_init(
     put(DRIVER_INFO_HANDLER_QUEUE_OFFSET, handler_queue);
 }
 
-/// Default event-queue size for the RSX handler queue. RPCS3
-/// `sys_rsx.cpp:324` passes 0x20.
+/// Default event-queue size for the RSX handler queue.
 pub const RSX_EVENT_QUEUE_SIZE: u32 = 0x20;
 
-/// sys_rsx_context_attribute package id: set flip mode (vsync /
-/// hsync). RPCS3 `sys_rsx.cpp:545`.
+/// sys_rsx_context_attribute package id: set flip mode (vsync / hsync).
 pub const PACKAGE_FLIP_MODE: u32 = 0x101;
 
 /// sys_rsx_context_attribute package id: trigger a flip buffer.
-/// RPCS3 `sys_rsx.cpp:550`.
 pub const PACKAGE_FLIP_BUFFER: u32 = 0x102;
 
-/// sys_rsx_context_attribute package id: record display-buffer
-/// metadata. RPCS3 `sys_rsx.cpp:624`.
+/// sys_rsx_context_attribute package id: record display-buffer metadata.
 pub const PACKAGE_SET_DISPLAY_BUFFER: u32 = 0x104;
 
 /// Maximum number of display buffer slots.
 pub const DISPLAY_BUFFER_COUNT: usize = 8;
 
-/// Per-slot display buffer metadata. Fields decoded from the a4/a5
-/// payload of package 0x104.
+/// Per-slot display buffer metadata decoded from a `SET_DISPLAY_BUFFER` payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RsxDisplayBuffer {
     /// Guest-memory offset of the buffer.
@@ -135,22 +116,17 @@ pub struct RsxDisplayBuffer {
     pub height: u32,
 }
 
-/// CellGov-internal package id for registering the flip-handler
-/// callback. Distinct from RPCS3's 0x108 (which is vblank
-/// frequency) to avoid collision if future guest-visible sys_rsx
-/// service lands.
+/// CellGov-internal package id for registering the flip-handler callback.
+///
+/// High bit is set to keep it disjoint from guest-visible package ids.
 pub const PACKAGE_CELLGOV_SET_FLIP_HANDLER: u32 = 0x8000_0108;
-/// CellGov-internal package id for registering the vblank-handler
-/// callback.
+/// CellGov-internal package id for registering the vblank-handler callback.
 pub const PACKAGE_CELLGOV_SET_VBLANK_HANDLER: u32 = 0x8000_010C;
-/// CellGov-internal package id for registering the user-handler
-/// callback.
+/// CellGov-internal package id for registering the user-handler callback.
 pub const PACKAGE_CELLGOV_SET_USER_HANDLER: u32 = 0x8000_010D;
 
 /// Fill `buf` with the bytes `sys_rsx_context_allocate` writes into
-/// the reports region on real PS3. Mirrors RPCS3 `sys_rsx.cpp:269-287`:
-/// memset to zero, then semaphore sentinels, notify timestamps,
-/// report fields.
+/// the reports region.
 ///
 /// # Panics
 ///
@@ -182,9 +158,9 @@ pub fn write_rsx_reports_init(buf: &mut [u8]) {
     }
 }
 
-/// Per-context bookkeeping. Populated by
-/// `sys_rsx_context_allocate` and consumed by subsequent handlers.
-/// One instance per [`Lv2Host`]; multi-context support would require
+/// Per-context bookkeeping.
+///
+/// Single-instance per [`Lv2Host`]; multi-context support would require
 /// keying by `context_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SysRsxContext {
@@ -206,11 +182,8 @@ pub struct SysRsxContext {
     pub mem_ctx: u64,
     /// System-mode flag word passed in by the caller.
     pub system_mode: u64,
-    /// Guest address returned by the most recent
-    /// sys_rsx_memory_allocate. Consumed by
-    /// sys_rsx_context_allocate as the base for its three-region
-    /// layout, in place of bumping `rsx_mem_alloc_ptr` a second
-    /// time; zero means memory_allocate has not fired.
+    /// Base reserved by the most recent `sys_rsx_memory_allocate`, reused
+    /// by `sys_rsx_context_allocate`; zero means memory_allocate has not fired.
     pub pending_mem_addr: u32,
     /// Flip-handler callback OPD address (0 = unregistered).
     pub flip_handler_addr: u32,
@@ -218,11 +191,9 @@ pub struct SysRsxContext {
     pub vblank_handler_addr: u32,
     /// User-handler callback OPD address (0 = unregistered).
     pub user_handler_addr: u32,
-    /// Display-buffer metadata slots. Slots `0..display_buffers_count`
-    /// are populated; the rest are default-zero.
+    /// Display-buffer metadata. Slots `0..display_buffers_count` are populated.
     pub display_buffers: [RsxDisplayBuffer; DISPLAY_BUFFER_COUNT],
-    /// Count of populated display-buffer slots (monotonic; matches
-    /// RPCS3 sys_rsx.cpp:646).
+    /// Count of populated display-buffer slots (monotonic).
     pub display_buffers_count: u32,
     /// Flip mode flag (1 = hsync, 2 = vsync). 0 until FLIP_MODE fires.
     pub flip_mode: u32,
@@ -311,12 +282,13 @@ impl Default for SysRsxContext {
 
 impl Lv2Host {
     /// sys_rsx_memory_allocate (665). Bump-allocates `size` bytes
-    /// out of the sys_rsx region and writes `mem_handle` (u32 BE)
-    /// and `mem_addr` (u64 BE) into the guest out-pointers.
+    /// and writes `mem_handle` (u32 BE) and `mem_addr` (u64 BE) into
+    /// the guest out-pointers.
     ///
-    /// Returns `CELL_ENOMEM` if `size == 0`, if the requested size
-    /// would wrap the cursor, or if the resulting end address
-    /// exceeds [`Lv2Host::SYS_RSX_MEM_END`].
+    /// # Errors
+    ///
+    /// `CELL_ENOMEM` if `size == 0`, the cursor would wrap, or the end
+    /// address exceeds [`Lv2Host::SYS_RSX_MEM_END`].
     pub(super) fn dispatch_sys_rsx_memory_allocate(
         &mut self,
         mem_handle_ptr: u32,
@@ -347,11 +319,8 @@ impl Lv2Host {
         let addr = self.rsx_mem_alloc_ptr;
         self.rsx_mem_alloc_ptr = end;
         self.rsx_mem_handle_counter = handle.wrapping_add(1);
-        // Record the base so a subsequent sys_rsx_context_allocate
-        // reuses this reservation instead of bumping the cursor
-        // again. RPCS3 does its real reservation inside
-        // context_allocate; CellGov pre-reserves here and lets
-        // context_allocate consume the same slice.
+        // Reserved slice a subsequent sys_rsx_context_allocate will consume
+        // instead of bumping the cursor a second time.
         self.rsx_context.pending_mem_addr = addr;
 
         let handle_write = Effect::SharedWriteIntent {
@@ -375,9 +344,7 @@ impl Lv2Host {
         }
     }
 
-    /// sys_rsx_memory_free (667). No-op: the bump allocator never
-    /// reclaims. Returns CELL_OK matching the `sys_memory_free`
-    /// stub; titles that key on errno will misbehave.
+    /// sys_rsx_memory_free (667). No-op: the bump allocator never reclaims.
     pub(super) fn dispatch_sys_rsx_memory_free_noop(&self) -> Lv2Dispatch {
         Lv2Dispatch::Immediate {
             code: 0,
@@ -385,16 +352,15 @@ impl Lv2Host {
         }
     }
 
-    /// sys_rsx_context_allocate (670). Allocates a 0x300000-byte
-    /// reservation out of the sys_rsx region, splits it into
-    /// DMA-control / driver-info / reports sub-regions at the LV2
-    /// fixed offsets, writes the four out-pointers + `context_id`,
-    /// seeds the init patterns into reports and driver-info, and
-    /// creates the handler event-queue / port pair.
+    /// sys_rsx_context_allocate (670). Reserves a 0x300000-byte slice,
+    /// splits it into DMA-control / driver-info / reports sub-regions,
+    /// emits init effects for reports and driver-info, and creates the
+    /// handler event-queue / port pair.
     ///
-    /// Returns `CELL_EINVAL` on double-allocate (single-context
-    /// invariant) and `CELL_ENOMEM` if the 0x300000-byte reservation
-    /// does not fit in the remaining sys_rsx region.
+    /// # Errors
+    ///
+    /// `CELL_EINVAL` on double-allocate (single-context invariant);
+    /// `CELL_ENOMEM` if the reservation does not fit in the remaining region.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn dispatch_sys_rsx_context_allocate(
         &mut self,
@@ -412,9 +378,6 @@ impl Lv2Host {
                 effects: vec![],
             };
         }
-        // If a prior sys_rsx_memory_allocate reserved the slice,
-        // reuse its base. Otherwise carve out a fresh 0x300000
-        // region at the cursor and advance.
         let base = if self.rsx_context.pending_mem_addr != 0 {
             self.rsx_context.pending_mem_addr
         } else {
@@ -438,11 +401,8 @@ impl Lv2Host {
         let driver_info_addr = base + DRIVER_INFO_OFFSET;
         let reports_addr = base + REPORTS_OFFSET;
 
-        // LV2 creates a local event port + queue pair and writes
-        // the queue handle (overwriting the port handle) into
-        // driver_info.handler_queue. CellGov's event model uses
-        // port_id == queue_id as a 1:1 binding, so a single kernel
-        // id serves both roles.
+        // port_id == queue_id: the event model uses a single kernel id
+        // for the 1:1 port/queue binding driver_info.handler_queue exposes.
         let queue_id = self.alloc_id();
         let queue_created = self
             .event_queues
@@ -452,9 +412,6 @@ impl Lv2Host {
             "sys_rsx event queue id {queue_id:#x} collided with existing queue"
         );
 
-        // Preserve the pending_mem_addr (and any future carry-over
-        // state) set by sys_rsx_memory_allocate; context_allocate
-        // only claims the slice, it does not clear the tracking.
         self.rsx_context = SysRsxContext {
             allocated: true,
             context_id: RSX_CONTEXT_ID,
@@ -527,10 +484,8 @@ impl Lv2Host {
         }
     }
 
-    /// sys_rsx_context_free (671). No-op: the single-context model
-    /// does not tear down state. Returns CELL_OK; a subsequent
-    /// `sys_rsx_context_allocate` would still be rejected by the
-    /// `allocated` flag.
+    /// sys_rsx_context_free (671). No-op: the single-context model does not
+    /// tear down state, and a subsequent allocate is still rejected.
     pub(super) fn dispatch_sys_rsx_context_free_noop(&self) -> Lv2Dispatch {
         Lv2Dispatch::Immediate {
             code: 0,
@@ -539,10 +494,8 @@ impl Lv2Host {
     }
 
     /// sys_rsx_context_attribute (674). Dispatches on `package_id`.
-    /// Each sub-command lands in a later slice; the scaffold returns
-    /// CELL_OK for unknown / not-yet-wired sub-commands and logs one
-    /// invariant-break entry so the first unhandled package_id is
-    /// visible without silent success.
+    /// Unknown sub-commands return CELL_OK and log an invariant-break
+    /// so the first unhandled id is visible without silent success.
     pub(super) fn dispatch_sys_rsx_context_attribute(
         &mut self,
         context_id: u32,
@@ -593,9 +546,8 @@ impl Lv2Host {
         }
     }
 
-    /// 0x104 SET_DISPLAY_BUFFER: decodes and records a slot per
-    /// RPCS3 `sys_rsx.cpp:624-647`. `display_buffers_count` rises
-    /// monotonically to `id + 1`.
+    /// 0x104 SET_DISPLAY_BUFFER: records a slot and advances
+    /// `display_buffers_count` monotonically to `id + 1`.
     fn sys_rsx_attribute_set_display_buffer(&mut self, a3: u64, a4: u64, a5: u64) -> Lv2Dispatch {
         let id = (a3 & 0xFF) as usize;
         if id >= DISPLAY_BUFFER_COUNT {
@@ -625,16 +577,11 @@ impl Lv2Host {
     }
 
     /// 0x102 FLIP_BUFFER: emits an [`Effect::RsxFlipRequest`] so the
-    /// commit pipeline drives WAITING -> DONE on the flip-status
-    /// state machine. `a3` is the head index; `a4` is the flip
-    /// target encoding. Observable transition matches
-    /// NV4097_FLIP_BUFFER.
+    /// commit pipeline drives WAITING -> DONE on the flip-status state machine.
     fn sys_rsx_attribute_flip(&self, _head: u64, flip_target: u64) -> Lv2Dispatch {
-        // Queued-path high bit: low 4 bits hold the buffer index
-        // (RPCS3 sys_rsx.cpp:562). Direct-path: we don't track
-        // display_buffers here, so record 0 as the index. The flip-
-        // status state machine only keys on pending/done transitions,
-        // not the recorded index.
+        // Queued path (high bit set): low 4 bits are the buffer index.
+        // Direct path: record 0; the flip-status state machine keys on
+        // pending/done transitions, not the index.
         let buffer_index: u8 = if (flip_target & 0x8000_0000) != 0 {
             (flip_target & 0x0F) as u8
         } else {
@@ -783,8 +730,6 @@ mod tests {
             (Lv2Host::SYS_RSX_MEM_BASE + REPORTS_OFFSET) as u64
         );
 
-        // Fifth effect: 37 KB init targeting reports_addr.
-        // Sanity-check the LV2 sentinel at label 255 (offset 0xFF0).
         let Effect::SharedWriteIntent { range, bytes, .. } = &effects[4] else {
             panic!("expected SharedWriteIntent for reports init");
         };
@@ -799,7 +744,6 @@ mod tests {
         assert_eq!(&b[0x1000..0x1008], &[0xFF; 8]);
         assert_eq!(&b[0x140C..0x1410], &[0xFF; 4]);
 
-        // Sixth effect: 0x12F8-byte driver-info init at driver_info_addr.
         let Effect::SharedWriteIntent { range, bytes, .. } = &effects[5] else {
             panic!("expected SharedWriteIntent for driver-info init");
         };
@@ -1099,7 +1043,6 @@ mod tests {
         allocate_context(&mut host, source);
 
         let rt = FakeRuntime::new(0x1_0000);
-        // Slot 1: width=1920, height=1080, pitch=0x2000, offset=0x10_0000
         host.dispatch(
             Lv2Request::SysRsxContextAttribute {
                 context_id: RSX_CONTEXT_ID,

@@ -1,7 +1,7 @@
 //! Managed SPU thread group table.
 //!
-//! Owns group lifecycle from create/initialize/start through finish.
-//! Group ids are monotonic u32 tokens starting at 1 (0 reserved).
+//! Owns group lifecycle from create through finish. Group ids are
+//! monotonic u32 tokens starting at 1; 0 is reserved.
 
 use crate::dispatch::{SpuImageHandle, SpuInitState};
 use cellgov_event::UnitId;
@@ -16,8 +16,8 @@ pub const MAX_SLOTS_PER_GROUP: u32 = 256;
 pub struct ThreadSlot {
     /// Image handle from `sys_spu_image_open`.
     pub image_handle: SpuImageHandle,
-    /// Captured at initialize time: the PPU may reuse the same
-    /// stack variable across initialize calls.
+    /// Snapshot of the argument block at initialize time; the PPU
+    /// may reuse the same stack variable across initialize calls.
     pub args: [u64; 4],
     /// `None` until `sys_spu_thread_group_start` resolves the image.
     pub init: Option<SpuInitState>,
@@ -45,8 +45,8 @@ pub struct ThreadGroup {
     pub slots: BTreeMap<u32, ThreadSlot>,
     /// Current lifecycle state.
     pub state: GroupState,
-    /// Drives the terminal transition: the group flips to
-    /// [`GroupState::Finished`] when this reaches 0.
+    /// Drives the terminal transition to [`GroupState::Finished`]
+    /// when it reaches 0.
     pub remaining_unfinished: u32,
 }
 
@@ -118,19 +118,19 @@ pub enum NotifySpuFinishedError {
 }
 
 /// Table of managed SPU thread groups.
+///
+/// `unit_to_group` and `finished_units` partition the SPU
+/// registration space: a unit lives in exactly one of them, and
+/// `notify_spu_finished` moves entries from the former to the
+/// latter. Keeping them distinct is what lets a double-notify
+/// surface as [`NotifySpuFinishedError::AlreadyFinished`] rather
+/// than re-decrementing the counter.
 #[derive(Debug, Clone, Default)]
 pub struct ThreadGroupTable {
     groups: BTreeMap<u32, ThreadGroup>,
-    /// Live SPU registrations. `notify_spu_finished` moves entries
-    /// out of here and into `finished_units`; that move is what
-    /// lets a double-notify surface as
-    /// [`NotifySpuFinishedError::AlreadyFinished`].
     unit_to_group: BTreeMap<UnitId, u32>,
-    /// Units whose notify has already fired. Separate from
-    /// `unit_to_group` so `UnknownUnit` and `AlreadyFinished`
-    /// stay distinguishable.
     finished_units: BTreeMap<UnitId, u32>,
-    /// Synthetic thread_id (`group_id * 256 + slot`) to runtime UnitId.
+    /// Synthetic `group_id * 256 + slot` -> runtime `UnitId`.
     thread_id_to_unit: BTreeMap<u32, UnitId>,
     next_id: u32,
 }
@@ -148,6 +148,7 @@ impl ThreadGroupTable {
     }
 
     /// Create a group with `num_threads` slots.
+    ///
     /// Returns `None` if the u32 id space is exhausted.
     pub fn create(&mut self, num_threads: u32) -> Option<u32> {
         let id = self.next_id;
@@ -229,16 +230,17 @@ impl ThreadGroupTable {
 
     /// Register `unit_id` as an SPU in `group_id` at `slot`.
     ///
+    /// All validation runs before any insert, so `Err` leaves the
+    /// table untouched.
+    ///
     /// # Errors
-    /// See [`RecordSpuError`]. No state is mutated on failure.
+    /// See [`RecordSpuError`].
     pub fn record_spu(
         &mut self,
         unit_id: UnitId,
         group_id: u32,
         slot: u32,
     ) -> Result<(), RecordSpuError> {
-        // All validation runs before any insert so an Err leaves
-        // the table untouched.
         {
             let group = self
                 .groups
@@ -281,10 +283,9 @@ impl ThreadGroupTable {
 
     /// Thread-id lookup filtered to [`GroupState::Running`].
     ///
-    /// Mailbox writes and other state-sensitive paths must use
-    /// this so writes to not-yet-started or already-finished
-    /// threads surface as `ESRCH` rather than queuing in a dead
-    /// mailbox.
+    /// Mailbox writes and other state-sensitive paths must use this
+    /// so writes to not-yet-started or already-finished threads
+    /// surface as `ESRCH` rather than queuing in a dead mailbox.
     pub fn running_unit_for_thread(&self, thread_id: u32) -> Option<UnitId> {
         let unit_id = self.unit_for_thread(thread_id)?;
         let group_id = self.unit_to_group.get(&unit_id)?;
@@ -334,8 +335,8 @@ impl ThreadGroupTable {
         if terminal {
             group.state = GroupState::Finished;
         }
-        // Move to `finished_units` so a second notify hits
-        // AlreadyFinished instead of re-decrementing.
+        // Move across the unit_to_group/finished_units boundary so
+        // a second notify hits AlreadyFinished, not re-decrement.
         self.unit_to_group.remove(&unit_id);
         self.finished_units.insert(unit_id, group_id);
         if terminal {
@@ -347,10 +348,10 @@ impl ThreadGroupTable {
 
     /// FNV-1a hash of the table for determinism checking.
     ///
-    /// Folds `unit_to_group`, `finished_units`, and
-    /// `thread_id_to_unit` independently even though the latter
-    /// two overlap: each is separately mutable, so a desync is
-    /// only catchable if each is hashed on its own.
+    /// `unit_to_group`, `finished_units`, and `thread_id_to_unit`
+    /// are each folded independently: they are separately mutable,
+    /// so a desync between them is only catchable by hashing each
+    /// on its own.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (id, group) in &self.groups {
@@ -543,7 +544,6 @@ mod tests {
 
     #[test]
     fn state_hash_folds_slot_args() {
-        // Two tables differing only in args must hash differently.
         let mut a = ThreadGroupTable::new();
         let mut b = ThreadGroupTable::new();
         let ga = a.create(1).unwrap();
@@ -625,7 +625,6 @@ mod tests {
     fn running_unit_for_thread_returns_none_for_created_group() {
         let mut t = ThreadGroupTable::new();
         let gid = t.create(1).unwrap();
-        // Group left in Created state (not started).
         let uid = UnitId::new(42);
         t.record_spu(uid, gid, 0).unwrap();
         let thread_id = gid * MAX_SLOTS_PER_GROUP;
@@ -715,7 +714,7 @@ mod tests {
     #[test]
     fn record_spu_rejects_thread_id_overflow() {
         let mut t = ThreadGroupTable::new();
-        // Force a group id that overflows `group_id * 256`.
+        // group_id * 256 must overflow u32.
         t.next_id = 0x0100_0000;
         let gid = t.create(1).unwrap();
         t.get_mut(gid).unwrap().state = GroupState::Running;
@@ -753,13 +752,8 @@ mod tests {
 
     #[test]
     fn notify_double_finish_on_live_group_is_rejected() {
-        // The dangerous case: a group with 3 SPUs, unit 10 gets
-        // notified twice while 11 and 12 are still running. The
-        // old code decremented the counter twice (3 -> 2 -> 1)
-        // and would trip the terminal transition one notify
-        // early. After moving the unit from `unit_to_group` to
-        // `finished_units` on the first notify, the second one
-        // returns `AlreadyFinished`.
+        // Regression: double-notify on unit 10 must not decrement
+        // the counter twice or flip the group early.
         let mut t = ThreadGroupTable::new();
         let gid = t.create(3).unwrap();
         t.get_mut(gid).unwrap().state = GroupState::Running;
@@ -768,8 +762,6 @@ mod tests {
         t.record_spu(UnitId::new(12), gid, 2).unwrap();
         assert_eq!(t.notify_spu_finished(UnitId::new(10)), Ok(None));
         assert_eq!(t.get(gid).unwrap().remaining_unfinished, 2);
-        // Second notify on unit 10 must not decrement the counter
-        // again or flip the group's state.
         assert_eq!(
             t.notify_spu_finished(UnitId::new(10)),
             Err(NotifySpuFinishedError::AlreadyFinished { group_id: gid }),
@@ -802,7 +794,6 @@ mod tests {
         t.get_mut(gid).unwrap().state = GroupState::Running;
         t.record_spu(UnitId::new(10), gid, 0).unwrap();
         t.notify_spu_finished(UnitId::new(10)).unwrap();
-        // Same unit id, fresh group.
         let gid2 = t.create(1).unwrap();
         t.get_mut(gid2).unwrap().state = GroupState::Running;
         assert_eq!(
@@ -813,10 +804,8 @@ mod tests {
 
     #[test]
     fn state_hash_folds_finished_units() {
-        // Two tables where one has completed a notify and the
-        // other hasn't must hash differently, even though
-        // unit_to_group is empty in both (post-move for one,
-        // never-populated for the other).
+        // Regression: post-move vs never-populated must hash apart
+        // even though unit_to_group is empty in both.
         let mut a = ThreadGroupTable::new();
         let mut b = ThreadGroupTable::new();
         let ga = a.create(1).unwrap();
@@ -826,17 +815,15 @@ mod tests {
         a.record_spu(UnitId::new(10), ga, 0).unwrap();
         b.record_spu(UnitId::new(10), gb, 0).unwrap();
         a.notify_spu_finished(UnitId::new(10)).unwrap();
-        // b has not notified; states diverge.
         assert_ne!(a.state_hash(), b.state_hash());
     }
 
     #[test]
     fn notify_on_created_group_is_rejected() {
-        // Finish-before-start used to decrement the counter and
-        // leave the group stuck in Created forever.
+        // Regression: finish-before-start used to decrement the
+        // counter and strand the group in Created.
         let mut t = ThreadGroupTable::new();
         let gid = t.create(1).unwrap();
-        // State stays Created.
         t.record_spu(UnitId::new(10), gid, 0).unwrap();
         assert_eq!(
             t.notify_spu_finished(UnitId::new(10)),
@@ -844,17 +831,14 @@ mod tests {
                 state: GroupState::Created
             }),
         );
-        // Counter untouched.
         assert_eq!(t.get(gid).unwrap().remaining_unfinished, 1);
     }
 
     #[test]
     fn notify_counter_underflow_is_explicit() {
-        // Construct a state where the counter is 0 but the group
-        // is still Running (only reachable by direct harness
-        // manipulation; normal dispatch cannot produce it). The
-        // old saturating_sub path hid this; the new code surfaces
-        // it via CounterUnderflow.
+        // Counter=0 + Running is only reachable via direct harness
+        // manipulation; surfacing it as CounterUnderflow (rather
+        // than a saturating_sub) guards against future regressions.
         let mut t = ThreadGroupTable::new();
         let gid = t.create(1).unwrap();
         t.record_spu(UnitId::new(10), gid, 0).unwrap();

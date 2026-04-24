@@ -1,42 +1,16 @@
 //! sysPrxForUser HLE implementations.
 //!
-//! Covers the userspace PRX surface Sony ships as sysPrxForUser:
-//! the `sys_lwmutex_*`, `sys_ppu_thread_*`, `sys_heap_*`,
-//! `sys_libc_*`, `sys_prx_*` entry points that the on-device PRX
-//! registers under this single module name. RPCS3 splits these
-//! across its own sub-files (`sys_lwmutex_.cpp`,
-//! `sys_ppu_thread_.cpp`, `sys_heap.cpp`, `sys_libc.cpp`,
-//! `sys_prx_.cpp`) for source organisation, all registering into
-//! the same PRX; we keep them in one Rust file to mirror the PRX.
-//! Kernel-side syscalls (`sc` trap handlers) live in `cellgov_lv2`,
-//! not here.
-//!
-//! The module exports a single [`dispatch`] entry that the HLE
-//! router in [`crate::hle`] chains via `.or_else()`. Each module
-//! file follows the same shape so adding a new library is an
-//! additive change to the router and a new file, never a shared
-//! match statement.
-//!
-//! Handler NID constants are module-local. The workspace name
-//! database (`cellgov_ppu::nid_db`) is the global reverse lookup
-//! for diagnostics and tracing, distinct from dispatch.
+//! Kernel-side syscalls (`sc` trap handlers) live in `cellgov_lv2`.
 //!
 //! ## Failure policy
 //!
-//! Same framework as [`crate::hle::cell_gcm_sys`]: fidelity to real PS3
-//! beats defensiveness.
-//!
 //! - Invariants that only our loader/runtime can violate (malformed
-//!   TLS from the ELF loader, unseeded LV2 thread table) use
-//!   `debug_assert!` so tests surface oracle bugs while release
-//!   matches historical fallback behavior.
-//! - Guest-supplied bad pointers return `CELL_EFAULT` (0x8001000D),
-//!   matching Sony's on-device trapping-pointer semantics (the
-//!   same behavior RPCS3 emulates via `vm::ptr` auto-validation),
-//!   rather than silently skipping the side effect and reporting
-//!   success.
-//! - `.expect(...)` stays reserved for oracle-state corruption
-//!   (heap exhaustion, ID counter exhaustion).
+//!   TLS, unseeded LV2 thread table) use `debug_assert!`; release
+//!   keeps the historical fallback.
+//! - Guest-supplied bad pointers return `CELL_EFAULT` (matching
+//!   Sony's trap-on-bad-pointer via RPCS3's `vm::ptr`).
+//! - `.expect(...)` is reserved for oracle-state corruption (heap
+//!   exhaustion, ID counter exhaustion).
 
 use cellgov_event::UnitId;
 use cellgov_lv2::errno::CELL_EFAULT;
@@ -60,13 +34,9 @@ pub(crate) const NID_SYS_THREAD_CREATE_EX: u32 = 0x24a1ea07;
 pub(crate) const NID_SYS_THREAD_EXIT: u32 = 0xaff080a4;
 pub(crate) const NID_SYS_TIME_GET_SYSTEM_TIME: u32 = 0x8461e528;
 
-/// Every NID this module claims. Consumed by two test-only canaries
-/// in `crate::hle::tests` and the module-local `canary_tests` block:
-/// (a) the disjointness test asserts no NID overlaps with another
-/// module's list, (b) the dispatch-coverage test asserts every NID
-/// here is actually claimed by [`dispatch`]. The reverse drift
-/// (new `match` arm whose NID is absent from this list) is surfaced
-/// operator-side via [`crate::Runtime::hle_unclaimed_nids`].
+/// Every NID this module claims. Consumed by the disjointness and
+/// dispatch-coverage canaries in `crate::hle::tests` and
+/// `canary_tests`.
 #[cfg(test)]
 pub(crate) const OWNED_NIDS: &[u32] = &[
     NID_SYS_INITIALIZE_TLS,
@@ -86,12 +56,7 @@ pub(crate) const OWNED_NIDS: &[u32] = &[
     NID_SYS_TIME_GET_SYSTEM_TIME,
 ];
 
-/// Dispatch entry point for sysPrxForUser handlers.
-///
-/// Returns `Some(())` if the NID was handled (the handler has
-/// already written r3 and any out-pointer effects). Returns
-/// `None` if the NID is not owned by this module; the caller
-/// chains to the next module.
+/// Dispatch entry point; returns `None` if the NID is not owned here.
 pub(crate) fn dispatch(
     runtime: &mut Runtime,
     source: UnitId,
@@ -109,52 +74,13 @@ pub(crate) fn dispatch(
             malloc(&mut adapter(runtime, source, nid), args);
         }
         NID_SYS_FREE | NID_SYS_HEAP_DELETE_HEAP | NID_SYS_HEAP_FREE => {
-            // No-op. The HLE bump allocator in `hle::context`
-            // cannot release individual allocations, so free,
-            // delete-heap, and heap-free collapse to CELL_OK with
-            // the allocation leaked. (Cross-reference: RPCS3's HLE
-            // path makes the same compromise for the same reason.)
+            // No-op: the HLE bump allocator in `hle::context` cannot
+            // release individual allocations, so free / delete-heap
+            // / heap-free collapse to CELL_OK with the allocation
+            // leaked (RPCS3's HLE path makes the same compromise).
             //
-            // TODO: Replace with a real free-list allocator when a
-            // scenario starts exercising the HLE heap.
-            //
-            //   TRIGGER: watch [`crate::Runtime::hle_heap_watermark`]
-            //   in run-game output. Today (04/19/26) every scenario we run
-            //   reports "0 bytes used above base" -- no scenario allocates
-            //   on the HLE heap at all. Post-boot game-loop code
-            //   will hit it eventually (asset streaming, per-frame
-            //   scene allocations). When any run shows nonzero
-            //   usage, or when usage crosses ~50% of the configured
-            //   arena size, switch from bump to free-list.
-            //
-            //   DESIGN (~80-120 lines):
-            //     struct HleHeap {
-            //         heap_ptr: u32,              // bump cursor
-            //         live: BTreeMap<u32, u32>,   // addr -> size
-            //         free: BTreeMap<u32, u32>,   // addr -> size
-            //     }
-            //   heap_alloc: first-fit over `free` (iterate, find
-            //     smallest chunk >= size, split remainder back),
-            //     fall back to bump. Insert into `live`.
-            //   free_alloc(ptr): look up size in `live`, remove,
-            //     insert into `free`, coalesce with immediate
-            //     predecessor/successor ranges in `free`.
-            //   Determinism: BTreeMap iteration is stable, so
-            //   alloc sequences stay reproducible.
-            //
-            //   RISKS to re-evaluate at implementation time:
-            //     - Address recycling changes observation shape.
-            //       Cross-runner comparison currently tolerates
-            //       bump addresses via delta-from-base
-            //       normalization; recycled addresses may need
-            //       additional comparison-side logic.
-            //     - Guest UAF becomes observable. Reclaimed bytes
-            //       will differ from the UAF'd pointer's
-            //       expectation, producing divergence from RPCS3's
-            //       leak-mode. This is strictly better oracle
-            //       behavior (surfaces real bugs) but is a
-            //       behavior change for the specific case of
-            //       buggy guests.
+            // TODO: switch to a real free-list allocator when
+            // `hle_heap_watermark` shows non-trivial usage.
             adapter(runtime, source, nid).set_return(0);
         }
         NID_SYS_MEMSET => {
@@ -173,15 +99,9 @@ pub(crate) fn dispatch(
             heap_memalign(&mut adapter(runtime, source, nid), args);
         }
         NID_SYS_PPU_THREAD_GET_ID => {
-            // Look up the caller's guest-facing PPU thread id
-            // from the LV2 host's thread table. By the time guest
-            // code runs, the table must be seeded -- an unseeded
-            // table means two distinct units both collapse to the
-            // fallback 0x01000000 and break any guest code keyed
-            // on thread-id (TLS-keyed maps, reader/writer
-            // tracking). Debug builds assert; release keeps the
-            // fallback so shipped boots do not panic on an
-            // unexpected call ordering.
+            // Look up the guest-facing thread id via the LV2 table.
+            // An unseeded table collapses every unit to the fallback
+            // 0x01000000, which breaks thread-id-keyed state.
             let table_id = runtime.lv2_host().ppu_thread_id_for_unit(source);
             debug_assert!(
                 table_id.is_some(),
@@ -196,45 +116,23 @@ pub(crate) fn dispatch(
             ctx.set_return(0);
         }
         NID_SYS_TIME_GET_SYSTEM_TIME => {
-            // Deterministic fixed time (1 second since boot in
-            // microseconds). The oracle values replay determinism
-            // over wall-clock accuracy: guest code that seeds RNG
-            // from this value produces the same sequence across
-            // runs, and guest code that computes time deltas will
-            // always see zero elapsed. If a future scenario needs
-            // monotonic advance, wire through `runtime.time()`
-            // (GuestTicks) rather than a host clock -- host time
-            // would break the determinism contract.
+            // Fixed 1 second in microseconds. Determinism beats
+            // wall-clock accuracy; a monotonic source would have to
+            // come from `runtime.time()` (GuestTicks), never a host
+            // clock.
             adapter(runtime, source, nid).set_return(1_000_000);
         }
         NID_SYS_THREAD_CREATE_EX => {
-            // LV2 sys_ppu_thread_create passes a POINTER to a
-            // small parameter struct in r4 (args[1]), not the
-            // entry OPD directly. The struct carries an 8-byte
-            // big-endian entry-OPD address at offset 0 and an
-            // 8-byte TLS address at offset 8. Only the entry
-            // pointer is needed here; cellgov_lv2 reads the OPD
-            // itself (entry_code + entry_toc) at dispatch time.
+            // r4 (args[1]) is a POINTER to a param struct, not the
+            // entry OPD: the struct carries the 8-byte BE entry-OPD
+            // at offset 0 and the TLS address at offset 8. Reading
+            // args[1] as an OPD directly would spawn a thread whose
+            // PC is whatever 8 bytes live at the top of the struct.
             //
-            // Register layout matching the LV2 signature: r3
-            // thread_id out, r4 param ptr, r5 arg, r6 reserved
-            // (caller passes 0), r7 prio, r8 stacksize, r9
-            // flags, r10 threadname. The reserved slot shifts
-            // prio / stacksize / flags one register up versus
-            // the naive "pack everything into r3..r8" layout,
-            // and the struct-pointer indirection on r4 is
-            // required -- reading args[1] directly as the OPD
-            // spawns a thread whose PC is whatever 8 bytes
-            // happen to live at the top of the param struct.
-            // Treat arg-read failure and a zero entry field as
-            // CELL_EFAULT without dispatching.
-            //
-            // ABI narrowing: id_ptr and entry_opd are 32-bit
-            // guest pointers and priority is a 32-bit value, so
-            // `as u32` is the canonical narrowing cast and not a
-            // lossy truncation. arg / stacksize / flags stay
-            // u64 to match the Lv2Request field types (see
-            // `cellgov_lv2::Lv2Request::PpuThreadCreate`).
+            // Register layout: r3 thread_id out, r4 param ptr, r5
+            // arg, r6 reserved (0), r7 prio, r8 stacksize, r9
+            // flags, r10 threadname. The reserved slot at r6 shifts
+            // prio / stacksize / flags one register up.
             let param_ptr = args[1] as u32;
             let param_start = param_ptr as usize;
             let entry_opd_read: Option<u32> = {
@@ -297,13 +195,8 @@ pub(crate) fn initialize_tls(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let tls_seg_size = args[3] as u32;
     let tls_mem_size = args[4] as u32;
 
-    // ELF PT_TLS invariant: p_filesz (tls_seg_size) <= p_memsz
-    // (tls_mem_size). The args reach this handler from the ELF
-    // loader, not the guest -- violating this invariant means
-    // either the loader is buggy or the ELF is malformed. Assert
-    // so test harnesses surface it; release falls through to the
-    // prior "skip on out-of-range" behavior so shipped boots do
-    // not panic on unusual-but-valid TLS layouts.
+    // ELF PT_TLS invariant: p_filesz <= p_memsz. A violation means
+    // a buggy loader or malformed ELF.
     debug_assert!(
         tls_seg_size <= tls_mem_size,
         "sys_initialize_tls: malformed TLS (p_filesz={tls_seg_size:#x} > \
@@ -313,7 +206,6 @@ pub(crate) fn initialize_tls(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let tls_base: u32 = 0x10400000;
 
     let src = tls_seg_addr as usize;
-    // tls_base + 0x30 is constant + constant; no wrap possible.
     let dst = (tls_base + 0x30) as usize;
     let copy_len = tls_seg_size as usize;
     let src_end = src.saturating_add(copy_len);
@@ -322,9 +214,7 @@ pub(crate) fn initialize_tls(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     debug_assert!(
         src_end <= mem_len && dst_end <= mem_len,
         "sys_initialize_tls: TLS segment [{src:#x}..{src_end:#x}] or slot \
-         [{dst:#x}..{dst_end:#x}] out of guest memory (len={mem_len:#x}); \
-         unplaceable TLS segment (normally from the ELF loader, but also \
-         reachable from fuzz/synthetic test args)"
+         [{dst:#x}..{dst_end:#x}] out of guest memory (len={mem_len:#x})"
     );
     let init_data: Vec<u8> = if src_end <= mem_len && dst_end <= mem_len {
         ctx.guest_memory()[src..src_end].to_vec()
@@ -337,12 +227,8 @@ pub(crate) fn initialize_tls(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     }
 
     let bss_start = dst_end;
-    // bss_len = tls_mem_size - tls_seg_size (after cancellation of
-    // the 0x30 header offset both sides). Uses wrapping_sub;
-    // malformed ELFs with p_filesz > p_memsz wrap to a huge value
-    // here and get rejected by the bounds check below. The
-    // debug_assert at the top of the function catches that case
-    // in tests.
+    // Malformed p_filesz > p_memsz wraps here to a huge value and
+    // is rejected by the bounds check below.
     let bss_len = tls_mem_size.wrapping_sub(tls_seg_size) as usize;
     let bss_end = bss_start.saturating_add(bss_len);
     if bss_len > 0 && bss_end <= mem_len {
@@ -351,7 +237,6 @@ pub(crate) fn initialize_tls(ctx: &mut dyn HleContext, args: &[u64; 9]) {
             .expect("sys_initialize_tls: TLS bss zeroing failed");
     }
 
-    // tls_base + 0x30 + 0x7000 = 0x10407030; all constants, no wrap.
     let r13_val = (tls_base + 0x30 + 0x7000) as u64;
     ctx.set_register(13, r13_val);
     ctx.set_return(0);
@@ -369,33 +254,14 @@ pub(crate) fn memset(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let ptr = args[1] as u32;
     let val = args[2] as u8;
     let size = args[3] as u32;
-    // Zero-length memset is a libc-legal no-op: return the
-    // pointer, touch nothing.
     if size == 0 {
         ctx.set_return(args[1]);
         return;
     }
-    // Real libc memset does not validate; it writes and faults if
-    // the page is bad. The oracle cannot produce PPU page faults
-    // from a guest-supplied bad pointer, so route through
-    // write_guest and map any error (invalid range, unmapped
-    // region) to CELL_EFAULT. Prior behavior silently skipped the
-    // write and returned the pointer as though it succeeded; the
-    // guest then read uninitialized memory and diverged
-    // non-deterministically.
-    //
-    // Known divergence from real libc semantics: real memset never
-    // returns an error -- it returns the destination pointer
-    // unconditionally and faults internally on a bad page. A
-    // caller doing `if (memset(p, 0, n) == NULL)` on real hardware
-    // would never take the error branch because memset never
-    // returns NULL (or CELL_EFAULT, which is also non-zero and
-    // pointer-shaped). Well-behaved libc callers do not check
-    // memset's return value, so this divergence is acceptable for
-    // the oracle's purposes; the tradeoff is a visible diff in
-    // behavior for buggy guests that do check it, in exchange for
-    // the oracle not silently reporting success on a skipped
-    // write.
+    // Real libc memset never returns an error; it faults on a bad
+    // page, which the oracle cannot produce. Map a failed write to
+    // CELL_EFAULT instead of silently skipping it. Guests that
+    // check memset's return value see a visible diff here.
     let data = vec![val; size as usize];
     match ctx.write_guest(ptr as u64, &data) {
         Ok(()) => ctx.set_return(args[1]),
@@ -407,15 +273,9 @@ pub(crate) fn lwmutex_create(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let mutex_ptr = args[1] as u32;
     let attr_ptr = args[2] as u32;
 
-    // Sony's `sys_lwmutex_create` dereferences the attr pointer
-    // and traps on a bad address; RPCS3 emulates this by accessing
-    // the struct via `vm::ptr<sys_lwmutex_attribute_t>` which
-    // auto-faults. Our HLE path does the analogous check
-    // explicitly: bad attr_ptr -> CELL_EFAULT. The previous
-    // implementation silently substituted (PRIORITY, NOT_RECURSIVE)
-    // defaults and reported CELL_OK, which gave guests a mutex
-    // with attributes they never requested and broke any code
-    // that depended on PRIO or recursive semantics.
+    // Sony's sys_lwmutex_create traps on a bad attr_ptr; match that
+    // with an explicit CELL_EFAULT rather than substituting
+    // (PRIORITY, NOT_RECURSIVE) defaults.
     let mem = ctx.guest_memory();
     let attr_offset = attr_ptr as usize;
     let Some(attr_end) = attr_offset.checked_add(8) else {
@@ -448,12 +308,7 @@ pub(crate) fn lwmutex_create(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     buf[8..12].copy_from_slice(&(recursive | protocol).to_be_bytes());
     buf[16..20].copy_from_slice(&sleep_queue.to_be_bytes());
 
-    // Write the mutex struct into the guest-supplied slot. A bad
-    // mutex_ptr yields CELL_EFAULT, matching Sony's on-device
-    // trap-on-write (RPCS3 observes the same via vm::ptr auto-
-    // validation). Prior behavior silently skipped the write,
-    // leaking the sleep_queue ID and handing the guest back
-    // CELL_OK on an uninitialized mutex struct.
+    // Bad mutex_ptr -> CELL_EFAULT, matching on-device trap-on-write.
     match ctx.write_guest(mutex_ptr as u64, &buf) {
         Ok(()) => ctx.set_return(0),
         Err(_) => ctx.set_return(CELL_EFAULT.into()),
@@ -485,24 +340,12 @@ pub(crate) fn heap_memalign(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 }
 
 pub(crate) fn process_exit(ctx: &mut dyn HleContext, args: &[u64; 9]) {
-    // Forward the guest-supplied exit code. The unit transitions
-    // to Finished so it never resumes, but set_return records the
-    // value in the registry's syscall-return slot so a harness
-    // comparing process-exit codes can distinguish a clean exit
-    // (0) from a crash-path exit (0x80). Mirrors the
-    // NID_SYS_THREAD_EXIT path which already forwards args[0] as
-    // exit_value to the LV2 dispatcher.
-    //
-    // Design note: set_return now carries two orthogonal
-    // meanings -- "value r3 will hold on the unit's next resume"
-    // (every other call site) and "value to record for
-    // post-mortem inspection on a unit that will never resume"
-    // (this call site alone, for now). The registry does not
-    // distinguish them, so if a future change clears the return
-    // slot on Finished units this exit code vanishes. If this
-    // coupling grows a second caller, promote to an explicit
-    // HleContext::set_exit_code method that the registry handles
-    // as a distinct slot.
+    // Finished units never resume; set_return here repurposes the
+    // registry's syscall-return slot as a post-mortem exit-code
+    // carrier. A registry change that clears the return slot on
+    // Finished units would silently drop the exit code; if a
+    // second caller needs this, promote to a dedicated
+    // `HleContext::set_exit_code` method.
     ctx.set_unit_finished();
     ctx.set_return(args[0]);
 }
@@ -517,12 +360,9 @@ mod canary_tests {
     use cellgov_mem::GuestMemory;
     use cellgov_time::Budget;
 
-    /// Build a runtime wired up just enough for any single sys-module
-    /// NID dispatch to reach its handler: a registered primary unit,
-    /// a seeded LV2 PPU thread table (for PPU_THREAD_GET_ID), a heap
-    /// base (for the malloc family), and a stub PPU factory (for
-    /// THREAD_CREATE_EX). The canary is indifferent to what the
-    /// handlers *do*; it only checks that dispatch claims the NID.
+    /// Runtime wired up just enough for any sys-module NID to reach
+    /// its handler (registered unit, seeded LV2 thread table, heap
+    /// base, stub PPU factory).
     fn canary_runtime() -> (Runtime, UnitId) {
         let mut rt = Runtime::new(GuestMemory::new(0x10_0000), Budget::new(1), 100);
         let unit_id = UnitId::new(0);
@@ -544,32 +384,10 @@ mod canary_tests {
         (rt, unit_id)
     }
 
-    /// Drift canary for [`OWNED_NIDS`] vs the [`dispatch`] match arms.
-    ///
-    /// For every NID named in the list, invoke `dispatch` and assert
-    /// it claimed the NID (either returned `Some(())` or reached the
-    /// handler and panicked on synthetic-zero args). A match arm
-    /// removed without also removing its NID from the list flips
-    /// the corresponding call to `None` and this test fires with
-    /// the specific NID that drifted. Keeps the list honest without
-    /// a macro refactor.
-    ///
-    /// ## Why `catch_unwind` is load-bearing
-    ///
-    /// The contract this canary pins is "dispatch routed the NID to
-    /// a handler," not "the handler succeeded." Handlers dispatched
-    /// with all-zero args may legitimately trip their own
-    /// `debug_assert!` invariants (e.g., `initialize_tls` asserts its
-    /// ELF-supplied TLS segment fits in guest memory; our 1 MiB
-    /// canary fixture is smaller than the hardcoded TLS base).
-    /// `catch_unwind` treats those panics as evidence the handler
-    /// was reached, which is precisely what the canary needs. Do
-    /// not "fix" the canary by seeding every possible handler
-    /// precondition -- that would be a different test (handler
-    /// correctness) and would mask genuine drift by hiding it
-    /// behind a compounding fixture. If a handler panics on
-    /// routing-only args and you want a separate test of its
-    /// behavior with real args, write a dedicated test.
+    /// Drift canary: every NID in [`OWNED_NIDS`] must reach a
+    /// handler. A handler panic on synthetic-zero args counts as
+    /// "routed" -- `catch_unwind` captures it as evidence of
+    /// dispatch reaching the body.
     #[test]
     fn owned_nids_all_claimed_by_dispatch() {
         for &nid in OWNED_NIDS {
@@ -585,22 +403,14 @@ mod canary_tests {
                      -- the match arm was likely removed without trimming the list"
                 ),
                 Err(_) => {
-                    // Handler panicked -> NID was claimed and routed
-                    // into a handler body. Canary's "is this NID
-                    // dispatched?" question is answered yes.
+                    // Handler panicked => NID reached the body.
                 }
             }
         }
     }
 
-    /// Negative companion to the coverage canary: NIDs that do not
-    /// belong to this module must not be claimed by it. Sampling a
-    /// handful of gcm NIDs and a synthetic never-registered NID
-    /// catches the other drift direction (a NID added to
-    /// [`OWNED_NIDS`] that does not appear in any match arm would
-    /// make the positive canary pass, but this negative check pins
-    /// the policy that sys really does return `None` outside its
-    /// owned set).
+    /// Negative companion: gcm-owned and synthetic NIDs must return
+    /// `None`.
     #[test]
     fn unowned_nids_are_rejected_by_dispatch() {
         let probes: &[u32] = &[

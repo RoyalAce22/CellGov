@@ -1,16 +1,10 @@
-//! SPU execution unit for CellGov.
+//! Synergistic Processing Unit execution unit.
 //!
-//! Implements the `ExecutionUnit` trait for a Synergistic Processing
-//! Unit. The fetch-decode-execute loop lives here; instruction
-//! semantics live in `exec.rs`; decoding lives in `decode.rs`.
-//!
-//! The SPU operates on its own 256 KB local store and emits runtime
-//! side-effects exclusively through `Effect` packets (DMA requests,
-//! mailbox access, signal operations) -- it never writes committed
-//! shared memory directly. On the read path, DMA Get and atomic
-//! reservation loads are fulfilled from the frozen committed snapshot
-//! exposed by [`cellgov_exec::ExecutionContext::memory`]; see the
-//! handling of `SpuStepOutcome::MemoryRead` and `pending_get` below.
+//! Owns the fetch-decode-execute loop; instruction semantics live in
+//! [`exec`], decoding in [`decode`]. Guest-visible writes flow through
+//! `Effect` packets; reads into the 256 KB local store are serviced
+//! from the frozen committed snapshot exposed by
+//! [`cellgov_exec::ExecutionContext::memory`].
 
 pub mod channels;
 pub mod decode;
@@ -27,7 +21,7 @@ use cellgov_exec::{
 };
 use cellgov_time::Budget;
 
-/// Fault code constants for SPU faults encoded into `FaultKind::Guest`.
+/// Fault code constants encoded into `FaultKind::Guest`.
 const FAULT_LS_OUT_OF_RANGE: u32 = 0x0002_0000;
 const FAULT_UNSUPPORTED_CHANNEL: u32 = 0x0003_0000;
 const FAULT_UNSUPPORTED_MFC_CMD: u32 = 0x0004_0000;
@@ -42,17 +36,12 @@ pub struct SpuSnapshot {
     pub pc: u32,
     /// Local store contents.
     pub ls: Vec<u8>,
-    /// Canonical line address of the per-unit atomic reservation,
-    /// or `None` when the unit does not hold a reservation.
+    /// Canonical line address of the atomic reservation; `None` when
+    /// no reservation is held.
     pub reservation_line: Option<u64>,
 }
 
 /// A Synergistic Processing Unit execution unit.
-///
-/// Owns its architectural state (registers, local store, PC, channel
-/// state) and implements the `ExecutionUnit` trait. The runtime
-/// schedules this unit, grants it budget, and processes the Effects
-/// it emits.
 pub struct SpuExecutionUnit {
     id: UnitId,
     state: state::SpuState,
@@ -70,8 +59,6 @@ impl SpuExecutionUnit {
     }
 
     /// Mutable access to the SPU's architectural state.
-    /// Used by the loader to place code/data into local store and
-    /// set initial register values.
     pub fn state_mut(&mut self) -> &mut state::SpuState {
         &mut self.state
     }
@@ -99,21 +86,14 @@ impl ExecutionUnit for SpuExecutionUnit {
         ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
-        // Deliver received mailbox messages to the register that was
-        // waiting in the rdch instruction that triggered the yield.
-        // Also advance PC past the rdch that yielded MailboxAccess
-        // (the yield handler leaves PC pointing at rdch so the
-        // instruction can be retried if the mailbox was empty).
+        // Mailbox yield leaves PC at the rdch so retry is possible when
+        // the mailbox was empty; on message delivery we advance past it.
         if let Some(&msg) = ctx.received_messages().first() {
             let rt = self.state.channels.pending_mbox_rt.take().unwrap_or(2);
             self.state.set_reg_word_splat(rt, msg);
             self.state.pc += 4;
         }
 
-        // Fulfill a pending DMA Get from the current committed memory
-        // snapshot. This runs after the runtime has potentially fired
-        // DMA completions from other units, so the data reflects the
-        // latest committed state.
         if let Some((ea, lsa, size)) = self.state.channels.pending_get.take() {
             let src_start = ea as usize;
             let src_end = src_start + size as usize;
@@ -127,13 +107,9 @@ impl ExecutionUnit for SpuExecutionUnit {
             }
         }
 
-        // Refresh the per-unit atomic reservation register against
-        // the committed reservation table at step start. A cross-
-        // unit store committed in a previous commit cycle clears
-        // the committed entry; the local register is stale until
-        // we mirror the clear. The ExecutionContext view is frozen
-        // for the duration of this step so this single check is
-        // sufficient.
+        // Mirror cross-unit invalidation of the atomic reservation
+        // from the committed table. The context view is frozen for
+        // this step, so one check at entry suffices.
         if self.state.reservation.is_some() && !ctx.reservation_held(self.id) {
             self.state.reservation = None;
         }
@@ -143,7 +119,6 @@ impl ExecutionUnit for SpuExecutionUnit {
 
         loop {
             let step_pc = self.state.pc as u64;
-            // Fetch
             let raw = match self.state.fetch() {
                 Some(w) => w,
                 None => {
@@ -158,7 +133,6 @@ impl ExecutionUnit for SpuExecutionUnit {
                 }
             };
 
-            // Decode
             let insn = match decode::decode(raw) {
                 Ok(i) => i,
                 Err(_) => {
@@ -173,14 +147,11 @@ impl ExecutionUnit for SpuExecutionUnit {
                 }
             };
 
-            // Execute
             match exec::execute(&insn, &mut self.state, self.id) {
                 SpuStepOutcome::Continue => {
                     self.state.pc += 4;
                 }
-                SpuStepOutcome::Branch => {
-                    // PC already set by the branch instruction.
-                }
+                SpuStepOutcome::Branch => {}
                 SpuStepOutcome::Yield {
                     effects: step_effects,
                     reason,
@@ -189,14 +160,9 @@ impl ExecutionUnit for SpuExecutionUnit {
                     if reason == YieldReason::Finished {
                         self.status = UnitStatus::Finished;
                     } else if reason == YieldReason::MailboxAccess {
-                        // Don't advance PC: the rdch hasn't completed
-                        // yet. The mailbox may be empty, in which case
-                        // the SPU will be blocked and resumed later.
-                        // PC advances in the delivery code at the top
-                        // of run_until_yield when the message arrives.
+                        // PC stays on the rdch; advance occurs at the
+                        // top of run_until_yield on message delivery.
                     } else {
-                        // Advance past the yielding instruction so we
-                        // don't re-execute it when the runtime resumes us.
                         self.state.pc += 4;
                     }
                     return ExecutionStepResult {
@@ -224,10 +190,8 @@ impl ExecutionUnit for SpuExecutionUnit {
                                 .copy_from_slice(&mem[src_start..src_end]);
                         }
                     }
-                    // MFC_GETLLAR-style reads also emit a
-                    // ReservationAcquire effect so the commit
-                    // pipeline installs the unit's entry in the
-                    // reservation table.
+                    // MFC_GETLLAR additionally installs the unit's
+                    // entry in the reservation table.
                     if let Some(line_addr) = acquire_line {
                         effects.push(Effect::ReservationAcquire {
                             line_addr,

@@ -1,5 +1,10 @@
-//! Event queue LV2 dispatch: create, destroy, receive, tryreceive,
-//! port send.
+//! LV2 dispatch for event queues.
+//!
+//! Waiters are FIFO. Receive parks with `payload = None`; the
+//! send-side dispatch installs `Some(payload)` through
+//! response_updates at wake time. The wake path panics on `None`
+//! so a missing update surfaces rather than delivering four zero
+//! u64s indistinguishable from a real event.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -16,8 +21,8 @@ impl Lv2Host {
         size: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // size == 0 is guest-invalid but RPCS3's permissive ABI
-        // defaults to EQUEUE_MAX_RECV_EVENT (127).
+        // size == 0 defaults to EQUEUE_MAX_RECV_EVENT (127) per
+        // the permissive ABI.
         let effective_size = if size == 0 { 127 } else { size };
         let id = self.alloc_id();
         if !self.event_queues.create_with_id(id, effective_size) {
@@ -67,7 +72,7 @@ impl Lv2Host {
                 effects: vec![],
             },
             Some(crate::sync_primitives::EventQueueReceive::Delivered(payload)) => {
-                // Write the 4-u64 sys_event_t to out_ptr.
+                // sys_event_t: four big-endian u64s at out_ptr.
                 let mut buf = [0u8; 32];
                 buf[0..8].copy_from_slice(&payload.source.to_be_bytes());
                 buf[8..16].copy_from_slice(&payload.data1.to_be_bytes());
@@ -101,11 +106,6 @@ impl Lv2Host {
                         };
                     }
                 }
-                // Park with payload = None -- send-side installs
-                // Some(payload) via response_updates at wake time;
-                // the wake path panics on None so a missing
-                // update surfaces instead of delivering four zero
-                // u64s indistinguishable from a real event.
                 Lv2Dispatch::Block {
                     reason: crate::dispatch::Lv2BlockReason::EventQueue { id },
                     pending: PendingResponse::EventQueueReceive {
@@ -126,10 +126,10 @@ impl Lv2Host {
         count_out: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // try_receive_batch drains destructively -- validate
-        // every output ByteRange up front so a bad address
-        // cannot discard events while count_out still claims
-        // them.
+        // try_receive_batch drains destructively, so every
+        // output ByteRange must be validated up front or a bad
+        // address could silently discard events while count_out
+        // still claims them.
         if ByteRange::new(GuestAddr::new(count_out as u64), 4).is_none() {
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_EFAULT.into(),
@@ -191,8 +191,7 @@ impl Lv2Host {
         data2: u64,
         data3: u64,
     ) -> Lv2Dispatch {
-        // Port id == queue id (1:1 binding); the payload's
-        // `source` field carries the port id for the receiver.
+        // Port id == queue id (1:1 binding).
         let payload = EventPayload {
             source: port_id as u64,
             data1,
@@ -217,11 +216,8 @@ impl Lv2Host {
                 out_ptr,
                 payload,
             } => {
-                // The waiter's recorded out_ptr rides along with
-                // the thread id so response_update is complete
-                // without merging into a parked response. Missing
-                // thread entry is a host-invariant break; payload
-                // is lost.
+                // Missing thread entry is a host-invariant break;
+                // payload is lost rather than delivered blind.
                 match self.resolve_wake_thread(new_owner, "event_port_send.Woke") {
                     Some(unit) => Lv2Dispatch::WakeAndReturn {
                         code: 0,
@@ -358,7 +354,6 @@ mod tests {
             } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate(0), got {other:?}"),
         };
-        // Pre-buffer a payload directly via the table.
         host.event_queues_mut().send_and_wake_or_enqueue(
             id,
             crate::sync_primitives::EventPayload {
@@ -381,28 +376,24 @@ mod tests {
             Lv2Dispatch::Immediate {
                 code: 0,
                 effects: e,
-            } => {
-                // Payload written via a single SharedWriteIntent.
-                match &e[0] {
-                    Effect::SharedWriteIntent { range, bytes, .. } => {
-                        assert_eq!(range.start().raw(), 0x2000);
-                        assert_eq!(range.length(), 32);
-                        let payload_bytes = bytes.bytes();
-                        assert_eq!(
-                            u64::from_be_bytes(payload_bytes[0..8].try_into().unwrap()),
-                            0x11
-                        );
-                        assert_eq!(
-                            u64::from_be_bytes(payload_bytes[8..16].try_into().unwrap()),
-                            0x22
-                        );
-                    }
-                    other => panic!("expected SharedWriteIntent, got {other:?}"),
+            } => match &e[0] {
+                Effect::SharedWriteIntent { range, bytes, .. } => {
+                    assert_eq!(range.start().raw(), 0x2000);
+                    assert_eq!(range.length(), 32);
+                    let payload_bytes = bytes.bytes();
+                    assert_eq!(
+                        u64::from_be_bytes(payload_bytes[0..8].try_into().unwrap()),
+                        0x11
+                    );
+                    assert_eq!(
+                        u64::from_be_bytes(payload_bytes[8..16].try_into().unwrap()),
+                        0x22
+                    );
                 }
-            }
+                other => panic!("expected SharedWriteIntent, got {other:?}"),
+            },
             other => panic!("expected Immediate(0), got {other:?}"),
         }
-        // Queue now empty.
         assert!(host.event_queues().lookup(id).unwrap().is_empty());
     }
 
@@ -446,8 +437,6 @@ mod tests {
             } => {
                 assert_eq!(bid, id);
                 assert_eq!(out_ptr, 0x2000);
-                // Parked waiter has no payload yet -- the send-side
-                // dispatch fills it in via response_updates at wake time.
                 assert_eq!(payload, None);
             }
             other => panic!("expected Block on EventQueue, got {other:?}"),
@@ -500,7 +489,6 @@ mod tests {
             } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate(0), got {other:?}"),
         };
-        // Waiter parks.
         host.dispatch(
             Lv2Request::EventQueueReceive {
                 queue_id: id,
@@ -510,7 +498,6 @@ mod tests {
             waiter_unit,
             &rt,
         );
-        // Sender sends.
         let send = host.dispatch(
             Lv2Request::EventPortSend {
                 port_id: id,
@@ -546,8 +533,8 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // Queue storage unchanged (fast-path handoff), waiter
-        // list drained.
+        // Fast-path handoff: queue storage unchanged, waiter list
+        // drained.
         assert!(host.event_queues().lookup(id).unwrap().is_empty());
         assert!(host.event_queues().lookup(id).unwrap().waiters().is_empty());
     }
@@ -575,7 +562,6 @@ mod tests {
             } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate(0), got {other:?}"),
         };
-        // Pre-buffer three payloads.
         for i in 1..=3u64 {
             host.event_queues_mut().send_and_wake_or_enqueue(
                 id,
@@ -602,12 +588,11 @@ mod tests {
                 code: 0,
                 effects: e,
             } => {
-                // 2 payload writes + 1 count_out write.
+                // Two payload writes plus the count_out write.
                 assert_eq!(e.len(), 3);
             }
             other => panic!("expected Immediate(0), got {other:?}"),
         }
-        // Queue has one remaining (3rd payload).
         assert_eq!(host.event_queues().lookup(id).unwrap().len(), 1);
     }
 
@@ -649,7 +634,6 @@ mod tests {
                 code: 0,
                 effects: e,
             } => {
-                // Only the count_out write (value 0).
                 assert_eq!(e.len(), 1);
             }
             other => panic!("expected Immediate(0), got {other:?}"),

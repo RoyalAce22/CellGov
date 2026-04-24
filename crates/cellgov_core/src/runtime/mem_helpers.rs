@@ -1,31 +1,13 @@
-//! Thin helpers around `GuestMemory::apply_commit`.
-//!
-//! The pattern
-//!
-//! ```ignore
-//! if let Some(range) = cellgov_mem::ByteRange::new(
-//!     cellgov_mem::GuestAddr::new(ptr as u64),
-//!     bytes.len() as u64,
-//! ) {
-//!     let _ = self.memory.apply_commit(range, &bytes);
-//! }
-//! ```
-//!
-//! shows up across LV2 dispatch, PPU thread creation, and sync
-//! wake resolution -- anywhere the runtime writes a small
-//! continuation payload through a caller-supplied pointer. The
-//! helper on this module collapses it to a single call so the
-//! surrounding logic stays readable.
+//! Shared `commit_bytes_at` helper used by LV2 dispatch, PPU thread
+//! creation, and sync wake resolution to write small continuation
+//! payloads through a caller-supplied pointer.
 
 use super::Runtime;
 
 impl Runtime {
-    /// Commit `bytes` to `ptr` via the runtime's guest-memory view.
-    ///
-    /// Fails silently if `ptr..(ptr + bytes.len())` is not a valid
-    /// guest range, matching the prior inline pattern. Callers that
-    /// need to distinguish "bad pointer" from "committed" must go
-    /// through `GuestMemory::apply_commit` directly.
+    /// Commit `bytes` to `ptr` through guest memory. Fails silently on
+    /// an invalid guest range; callers that need to distinguish "bad
+    /// pointer" from "committed" must use `GuestMemory::apply_commit`.
     pub(super) fn commit_bytes_at(&mut self, ptr: u64, bytes: &[u8]) {
         if let Some(range) =
             cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(ptr), bytes.len() as u64)

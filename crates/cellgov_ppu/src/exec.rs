@@ -1,10 +1,6 @@
-//! PPU instruction execution.
-//!
-//! Takes a decoded `PpuInstruction` and a `PpuState`, applies the
-//! instruction's semantics (register mutation, inlined loads/stores),
-//! and returns an `ExecuteVerdict`. Syscalls emit
-//! `ExecuteVerdict::Syscall`; actual dispatch lives in
-//! `lib.rs::run_until_yield` and `syscall.rs`.
+//! PPU instruction execution: mutates `PpuState` and stages memory
+//! effects in response to a decoded `PpuInstruction`. Syscall
+//! dispatch is delegated to the runtime via `ExecuteVerdict::Syscall`.
 
 use crate::fp;
 use crate::instruction::PpuInstruction;
@@ -16,36 +12,37 @@ use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::ReservedLine;
 use cellgov_time::GuestTicks;
 
-/// What happened after executing one instruction.
+/// Outcome of a single `execute` call.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ExecuteVerdict {
-    /// Instruction executed, advance PC by 4.
+    /// Advance PC by 4.
     Continue,
-    /// PC was set explicitly (branch taken). Do not advance PC.
+    /// PC was written explicitly; caller must not advance.
     Branch,
-    /// Syscall: yield for runtime dispatch.
+    /// Yield to runtime syscall dispatch.
     Syscall,
-    /// Instruction caused an architecture fault.
+    /// Architectural fault.
     Fault(PpuFault),
-    /// Memory access at an invalid address. The u64 is the faulting EA.
+    /// Memory access at invalid effective address.
     MemFault(u64),
-    /// Store buffer capacity exceeded. The outer loop should flush the
-    /// buffer, yield BudgetExhausted, and retry the instruction.
+    /// Store buffer full; caller flushes, yields, then retries the
+    /// same instruction.
     BufferFull,
 }
 
 /// PPU-specific fault categories.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PpuFault {
-    /// PC is outside addressable memory.
+    /// PC outside addressable memory.
     PcOutOfRange(u64),
-    /// Memory access at an invalid address.
+    /// Invalid memory access address.
     InvalidAddress(u64),
     /// Unsupported syscall number.
     UnsupportedSyscall(u64),
 }
 
-/// Look up a byte slice in the region views table.
+/// Linear search for a `[ea, ea+len)` slice covered entirely by one
+/// region view.
 #[inline]
 pub(crate) fn load_slice<'a>(
     region_views: &[(u64, &'a [u8])],
@@ -63,8 +60,7 @@ pub(crate) fn load_slice<'a>(
     None
 }
 
-/// Zero-extending load from guest memory, checking the store buffer
-/// first for forwarding.
+/// Zero-extending load; store buffer is checked first for forwarding.
 #[inline]
 fn load_ze(
     region_views: &[(u64, &[u8])],
@@ -87,8 +83,7 @@ fn load_ze(
     })
 }
 
-/// Sign-extending load from guest memory, checking the store buffer
-/// first for forwarding.
+/// Sign-extending load; store buffer is checked first for forwarding.
 #[inline]
 fn load_se(
     region_views: &[(u64, &[u8])],
@@ -108,15 +103,10 @@ fn load_se(
     })
 }
 
-/// Insert a store into the store buffer. Returns `BufferFull` if the
-/// buffer has no room; returns `Continue` on success.
-///
-/// Also clears the unit's local atomic reservation if the store's
-/// byte range overlaps the reserved line. This is the architectural
-/// rule "a same-unit store to the reserved line drops the
-/// reservation" -- it applies intra-step so that a subsequent
-/// `stwcx` at the same line observes the invalidation without
-/// waiting for commit.
+/// Stage a store and drop any same-unit reservation that overlaps
+/// the written byte range. Clearing must happen intra-step so a
+/// subsequent `stwcx` on the same line observes the invalidation
+/// without waiting for commit.
 #[inline]
 fn buffer_store(
     store_buf: &mut StoreBuffer,
@@ -137,11 +127,11 @@ fn buffer_store(
     }
 }
 
-/// Execute a single decoded PPU instruction against the given state.
+/// Execute one decoded PPU instruction.
 ///
-/// Loads check the store buffer first for forwarding, then fall back
-/// to `region_views`. Stores insert into the store buffer; the
-/// caller flushes the buffer to effects at block/step boundaries.
+/// Loads check the store buffer before falling back to `region_views`.
+/// Stores stage into the buffer; the caller flushes to `effects` at
+/// block or step boundaries.
 pub fn execute(
     insn: &PpuInstruction,
     state: &mut PpuState,
@@ -151,9 +141,7 @@ pub fn execute(
     store_buf: &mut StoreBuffer,
 ) -> ExecuteVerdict {
     match *insn {
-        // =================================================================
-        // Integer loads (inlined: read from region_views)
-        // =================================================================
+        // Integer loads
         PpuInstruction::Lwz { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 4) {
@@ -248,7 +236,6 @@ pub fn execute(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
-        // Indexed loads
         PpuInstruction::Lwzx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 4) {
@@ -290,9 +277,7 @@ pub fn execute(
             }
         }
 
-        // =================================================================
-        // Integer stores (buffered: insert into store buffer)
-        // =================================================================
+        // Integer stores
         PpuInstruction::Stw { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
             buffer_store(store_buf, state, ea, 4, state.gpr[rs as usize])
@@ -325,7 +310,6 @@ pub fn execute(
             }
             v
         }
-        // Indexed stores
         PpuInstruction::Stwx { rs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             buffer_store(store_buf, state, ea, 4, state.gpr[rs as usize])
@@ -359,31 +343,25 @@ pub fn execute(
             }
         }
         PpuInstruction::Stdcx { rs, ra, rb } => {
-            // Verdict is local.is_some() && local line matches EA's
-            // line. Cross-unit invalidation is handled at step
-            // start via the context refresh; same-unit self-
-            // invalidation is handled in buffer_store on every
-            // overlapping store. So by the time stwcx / stdcx
-            // executes, local state alone is authoritative.
+            // Local reservation alone is authoritative here:
+            // cross-unit invalidation is applied at step start by
+            // the context refresh, and same-unit overlap is cleared
+            // in `buffer_store` for every preceding store.
             let ea = state.ea_x_form(ra, rb);
             let success = match state.reservation {
                 Some(line) => line.addr() == ReservedLine::containing(ea).addr(),
                 None => false,
             };
             if success {
-                state.set_cr_field(0, 0b0010); // EQ
+                state.set_cr_field(0, 0b0010);
                 let range = match ByteRange::new(GuestAddr::new(ea), 8) {
                     Some(r) => r,
                     None => return ExecuteVerdict::MemFault(ea),
                 };
                 let value = state.gpr[rs as usize];
                 let bytes = value.to_be_bytes();
-                // Flush any buffered plain stores before the
-                // ConditionalStore so both commit in program order.
-                // The flush also drops any stale conditional
-                // forwarding entries from earlier stwcx's in the
-                // same step; their ConditionalStore effects were
-                // already emitted at that time.
+                // Flush plain stores first so ConditionalStore
+                // follows them in program order.
                 store_buf.flush(effects, unit_id);
                 effects.push(Effect::ConditionalStore {
                     range,
@@ -392,14 +370,13 @@ pub fn execute(
                     source: unit_id,
                     source_time: GuestTicks::ZERO,
                 });
-                // Park a forwarding-only entry so a subsequent
-                // lwarx in the same step sees the bytes this stwcx
-                // committed, rather than the pre-step committed
-                // memory. The flush pass skips conditional entries
-                // so no SharedWriteIntent is emitted for them.
+                // Forwarding-only entry: a subsequent lwarx in the
+                // same step sees the bytes this stwcx committed
+                // rather than pre-step memory. The flush pass skips
+                // conditional entries so no SharedWriteIntent fires.
                 store_buf.insert_conditional(ea, 8, value as u128);
             } else {
-                state.set_cr_field(0, 0b0000); // !EQ
+                state.set_cr_field(0, 0b0000);
             }
             state.reservation = None;
             ExecuteVerdict::Continue
@@ -421,22 +398,21 @@ pub fn execute(
             }
         }
         PpuInstruction::Stwcx { rs, ra, rb } => {
-            // See Stdcx above for the verdict derivation rationale.
+            // See `Stdcx` for the reservation / flush / forward-entry
+            // contract.
             let ea = state.ea_x_form(ra, rb);
             let success = match state.reservation {
                 Some(line) => line.addr() == ReservedLine::containing(ea).addr(),
                 None => false,
             };
             if success {
-                state.set_cr_field(0, 0b0010); // EQ
+                state.set_cr_field(0, 0b0010);
                 let range = match ByteRange::new(GuestAddr::new(ea), 4) {
                     Some(r) => r,
                     None => return ExecuteVerdict::MemFault(ea),
                 };
                 let value32 = state.gpr[rs as usize] as u32;
                 let bytes = value32.to_be_bytes();
-                // See Stdcx above for the flush / forward-entry
-                // rationale.
                 store_buf.flush(effects, unit_id);
                 effects.push(Effect::ConditionalStore {
                     range,
@@ -447,7 +423,7 @@ pub fn execute(
                 });
                 store_buf.insert_conditional(ea, 4, value32 as u128);
             } else {
-                state.set_cr_field(0, 0b0000); // !EQ
+                state.set_cr_field(0, 0b0000);
             }
             state.reservation = None;
             ExecuteVerdict::Continue
@@ -457,9 +433,7 @@ pub fn execute(
             buffer_store(store_buf, state, ea, 1, state.gpr[rs as usize])
         }
 
-        // =================================================================
         // Integer arithmetic / logical
-        // =================================================================
         PpuInstruction::Addi { rt, ra, imm } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             state.gpr[rt as usize] = base.wrapping_add(imm as i64 as u64);
@@ -486,7 +460,6 @@ pub fn execute(
             let a = state.gpr[ra as usize];
             let b = imm as i64 as u64;
             state.gpr[rt as usize] = a.wrapping_add(b);
-            // CA bit would be set here but we don't track XER yet
             ExecuteVerdict::Continue
         }
         PpuInstruction::Add { rt, ra, rb } => {
@@ -532,9 +505,9 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
         PpuInstruction::Mulhw { rt, ra, rb } => {
-            // Signed 32x32 -> high 32 bits, sign-extended to 64-bit.
             let a = state.gpr[ra as usize] as i32 as i64;
             let b = state.gpr[rb as usize] as i32 as i64;
+            // Signed 32x32 -> high 32, sign-extended to 64.
             state.gpr[rt as usize] = ((a * b) >> 32) as i32 as i64 as u64;
             ExecuteVerdict::Continue
         }
@@ -561,8 +534,7 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
         PpuInstruction::Addze { rt, ra } => {
-            // Equivalent to adde with RB = 0, so only one overflow
-            // edge matters (ra overflowing when ca_in = 1).
+            // adde with RB = 0: only one overflow edge.
             let a = state.gpr[ra as usize];
             let ca_in: u64 = state.xer_ca() as u64;
             let (sum, c) = a.overflowing_add(ca_in);
@@ -631,7 +603,6 @@ pub fn execute(
         PpuInstruction::AndiDot { ra, rs, imm } => {
             let result = state.gpr[rs as usize] & imm as u64;
             state.gpr[ra as usize] = result;
-            // andi. always updates CR0
             let cr_val = if (result as i64) < 0 {
                 0b1000
             } else if result > 0 {
@@ -761,9 +732,7 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
 
-        // =================================================================
         // Compare
-        // =================================================================
         PpuInstruction::Cmpwi { bf, ra, imm } => {
             let a = state.gpr[ra as usize] as i32;
             let b = imm as i32;
@@ -843,9 +812,7 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
 
-        // =================================================================
         // Branch
-        // =================================================================
         PpuInstruction::B { offset, aa, link } => {
             if link {
                 state.lr = state.pc + 4;
@@ -897,11 +864,11 @@ pub fn execute(
             }
         }
 
-        // =================================================================
         // Special-purpose register moves
-        // =================================================================
         PpuInstruction::Mftb { rt } => {
-            state.tb += 512; // advance deterministically per read
+            // Deterministic per-read advance; host wall time is
+            // not observable.
+            state.tb += 512;
             state.gpr[rt as usize] = state.tb;
             ExecuteVerdict::Continue
         }
@@ -910,8 +877,8 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
         PpuInstruction::Mtcrf { rs, crm } => {
-            let val = (state.gpr[rs as usize] >> 32) as u32;
             // Each bit in CRM selects a 4-bit CR field.
+            let val = (state.gpr[rs as usize] >> 32) as u32;
             for i in 0..8u8 {
                 if crm & (1 << (7 - i)) != 0 {
                     let shift = (7 - i) * 4;
@@ -939,9 +906,7 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
 
-        // =================================================================
         // Rotate / mask
-        // =================================================================
         PpuInstruction::Rlwinm { ra, rs, sh, mb, me } => {
             let val = state.gpr[rs as usize] as u32;
             let rotated = val.rotate_left(sh as u32);
@@ -950,9 +915,6 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
         PpuInstruction::Rlwimi { ra, rs, sh, mb, me } => {
-            // Rotate-left-word + mask-insert: merge the masked
-            // bits of the rotated rs into the unmasked slots of
-            // the prior ra. Standard PPC bitfield-insert idiom.
             let val = state.gpr[rs as usize] as u32;
             let rotated = val.rotate_left(sh as u32);
             let mask = rlwinm_mask(mb, me);
@@ -980,9 +942,7 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
 
-        // =================================================================
         // Vector (AltiVec / VMX)
-        // =================================================================
         PpuInstruction::Vxor { vt, va, vb } => {
             state.vr[vt as usize] = state.vr[va as usize] ^ state.vr[vb as usize];
             ExecuteVerdict::Continue
@@ -1045,12 +1005,7 @@ pub fn execute(
             }
         }
 
-        // =================================================================
-        // System call
-        // =================================================================
-        // =================================================================
         // Floating-point loads/stores
-        // =================================================================
         PpuInstruction::Lfs { frt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 4) {
@@ -1111,9 +1066,8 @@ pub fn execute(
                 ExecuteVerdict::BufferFull
             }
         }
-        // stfiwx: store the low 32 bits of the FPR as an integer word
-        // at the x-form effective address. Unlike stfs it does NOT
-        // round-convert to single precision; the bits go out verbatim.
+        // Unlike stfs, stfiwx stores the low 32 FPR bits verbatim
+        // (no round-convert to single precision).
         PpuInstruction::Stfiwx { frs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             buffer_store(
@@ -1125,9 +1079,7 @@ pub fn execute(
             )
         }
 
-        // =================================================================
         // Floating-point arithmetic (opcode 63, double precision)
-        // =================================================================
         PpuInstruction::Fp63 {
             xo,
             frt,
@@ -1143,9 +1095,7 @@ pub fn execute(
             frc,
         } => fp::execute_fp59(state, xo, frt, fra, frb, frc),
 
-        // =================================================================
         // Quickened (specialized) forms
-        // =================================================================
         PpuInstruction::Li { rt, imm } => {
             state.gpr[rt as usize] = imm as i64 as u64;
             ExecuteVerdict::Continue
@@ -1197,9 +1147,7 @@ pub fn execute(
             ExecuteVerdict::Continue
         }
 
-        // =================================================================
         // Superinstructions (compound 2-instruction pairs)
-        // =================================================================
         PpuInstruction::LwzCmpwi {
             rt,
             ra_load,
@@ -1307,7 +1255,6 @@ pub fn execute(
             bi,
             target_offset,
         } => {
-            // Compare word immediate
             let a = state.gpr[ra as usize] as i32;
             let b = imm as i32;
             let cr_val = if a < b {
@@ -1318,15 +1265,12 @@ pub fn execute(
                 0b0010
             };
             state.set_cr_field(bf, cr_val);
-            // Branch conditional. The bc offset is relative to the bc
-            // instruction's PC (super slot + 4), so add 4.
+            // target_offset is relative to the bc slot (super + 4).
             if branch_condition(state, bo, bi) {
                 state.pc =
                     (state.pc.wrapping_add(4) as i64).wrapping_add(target_offset as i64) as u64;
                 ExecuteVerdict::Branch
             } else {
-                // Not taken: outer loop advances PC by 4 (super slot),
-                // then Consumed handler advances by 4 more. Total +8.
                 ExecuteVerdict::Continue
             }
         }
@@ -1338,7 +1282,6 @@ pub fn execute(
             bi,
             target_offset,
         } => {
-            // Compare word (register-register)
             let a = state.gpr[ra as usize] as i32;
             let b = state.gpr[rb as usize] as i32;
             let cr_val = if a < b {
@@ -1349,8 +1292,7 @@ pub fn execute(
                 0b0010
             };
             state.set_cr_field(bf, cr_val);
-            // Branch conditional. The bc offset is relative to the bc
-            // instruction's PC (super slot + 4), so add 4.
+            // target_offset is relative to the bc slot (super + 4).
             if branch_condition(state, bo, bi) {
                 state.pc =
                     (state.pc.wrapping_add(4) as i64).wrapping_add(target_offset as i64) as u64;
@@ -1367,14 +1309,11 @@ pub fn execute(
     }
 }
 
-/// Evaluate a PPC branch condition (BO/BI fields).
+/// Evaluate a PPC BO/BI branch condition. Decrements CTR as a side
+/// effect when BO bit 0x04 is clear.
 ///
-/// BO encoding (5 bits):
-/// - bit 0 (0x10): if set, do not test CR
-/// - bit 1 (0x08): CR condition to test against (true/false)
-/// - bit 2 (0x04): if set, do not decrement CTR
-/// - bit 3 (0x02): CTR condition (branch if CTR==0 vs !=0)
-/// - bit 4 (0x01): branch prediction hint (ignored)
+/// BO bits (MSB->LSB): 0x10 skip CR test, 0x08 CR polarity,
+/// 0x04 skip CTR decrement, 0x02 CTR-zero polarity, 0x01 hint.
 fn branch_condition(state: &mut PpuState, bo: u8, bi: u8) -> bool {
     let decr_ctr = (bo & 0x04) == 0;
     if decr_ctr {
@@ -1387,24 +1326,21 @@ fn branch_condition(state: &mut PpuState, bo: u8, bi: u8) -> bool {
     ctr_ok && cr_ok
 }
 
-/// Compute the 32-bit mask for rlwinm given MB and ME fields.
+/// 32-bit rlwinm mask. `mb > me` wraps to bits `[0..me]` and `[mb..31]`.
 fn rlwinm_mask(mb: u8, me: u8) -> u32 {
     if mb <= me {
-        // Contiguous mask from bit mb to bit me (inclusive)
         let top = 0xFFFF_FFFFu32 >> mb;
         let bottom = 0xFFFF_FFFFu32 << (31 - me);
         top & bottom
     } else {
-        // Wrapped mask: bits [0..me] and [mb..31]
         let top = 0xFFFF_FFFFu32 << (31 - me);
         let bottom = 0xFFFF_FFFFu32 >> mb;
         top | bottom
     }
 }
 
-/// Compute a 64-bit PPC mask from `mb` to `me` (inclusive). Bit 0 is
-/// the MSB. When mb > me the mask is the wrapped complement (bits
-/// 0..me and mb..63). Used by rldicl / rldicr / rldic.
+/// 64-bit PPC mask from MSB-numbered bits `mb..=me`; `mb > me` wraps
+/// to `[0..me]` and `[mb..63]`.
 fn mask64(mb: u8, me: u8) -> u64 {
     let all = 0xFFFF_FFFF_FFFF_FFFFu64;
     if mb <= me {
@@ -1417,8 +1353,6 @@ fn mask64(mb: u8, me: u8) -> u64 {
         top | bottom
     }
 }
-
-// Vector (VMX / AltiVec) execution helpers live in exec_vec.rs.
 
 #[cfg(test)]
 #[path = "tests/exec_tests.rs"]

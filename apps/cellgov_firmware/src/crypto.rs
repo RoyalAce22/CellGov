@@ -1,4 +1,4 @@
-//! Crypto keys for PS3 firmware and SELF decryption.
+//! AES keys and per-revision APP keys used to decrypt PS3 firmware and SELF files.
 
 pub const PUP_KEY: [u8; 0x40] = [
     CELLGOV-REDACTED-KEY

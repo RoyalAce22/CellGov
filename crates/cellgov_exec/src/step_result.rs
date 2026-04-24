@@ -1,15 +1,9 @@
-//! `ExecutionStepResult` -- the value an execution unit returns from
-//! `run_until_yield`.
+//! Return shape of `ExecutionUnit::run_until_yield`.
 //!
-//! A step result carries four fields: the yield reason, the budget the
-//! unit actually consumed, per-step local diagnostics, and optional
-//! fault data. Effects are collected separately via the `&mut Vec<Effect>`
-//! parameter on `run_until_yield` and are not part of this struct.
-//!
-//! The fault rule is enforced at the runtime layer, not
-//! here: a step that yields with [`crate::YieldReason::Fault`] has all
-//! of its effects discarded. This type just carries the data; the
-//! discarding is the commit pipeline's job.
+//! Effects are collected separately via the `&mut Vec<Effect>`
+//! parameter and are not carried on this struct. A step yielding
+//! [`crate::YieldReason::Fault`] has all of its effects discarded by
+//! the commit pipeline; this type only carries the data.
 
 use crate::yield_reason::YieldReason;
 use cellgov_effects::FaultKind;
@@ -17,29 +11,22 @@ use cellgov_time::Budget;
 
 /// Per-step local diagnostics surfaced by an execution unit.
 ///
-/// Carries the program counter at step start, an optional faulting
-/// effective address, and an optional register snapshot captured at
-/// fault time. All fields are optional because synthetic and
-/// test-only step results may omit them; arch units populate what
-/// they can. Adding non-breaking fields later is the same shape as
-/// any other Rust struct: append, derive `Default`, done.
+/// All fields are optional: synthetic and test-only step results may
+/// omit them, and arch units populate what they can. `fault_regs` is
+/// populated only on fault steps by units that support it.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct LocalDiagnostics {
-    /// Program counter at the start of the step (the instruction
-    /// that was fetched, or attempted). Set by PPU/SPU on every
-    /// step; `None` only from synthetic/test step results.
+    /// PC at the start of the step. `None` only from synthetic/test
+    /// step results.
     pub pc: Option<u64>,
     /// Effective address that caused a memory fault, if applicable.
     pub faulting_ea: Option<u64>,
-    /// Register snapshot at fault time. Populated only on fault
-    /// steps by arch units that support it (PPU). `None` on
-    /// non-fault steps and from units that do not populate it.
+    /// Register snapshot captured at fault time.
     pub fault_regs: Option<FaultRegisterDump>,
 }
 
-/// Snapshot of key registers captured at fault time for diagnostics.
-/// Arch-neutral: carries named u64 slots that the CLI can format
-/// without knowing PPU vs SPU specifics.
+/// Arch-neutral register snapshot captured at fault time for the CLI
+/// to format without knowing PPU vs SPU specifics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FaultRegisterDump {
     /// GPR[0..31].
@@ -53,9 +40,7 @@ pub struct FaultRegisterDump {
 }
 
 impl LocalDiagnostics {
-    /// An empty diagnostics record. Equivalent to
-    /// [`LocalDiagnostics::default`]; spelled out as a constructor so
-    /// call sites can be explicit about producing one.
+    /// Empty diagnostics; equivalent to [`LocalDiagnostics::default`].
     #[inline]
     pub const fn empty() -> Self {
         Self {
@@ -65,7 +50,7 @@ impl LocalDiagnostics {
         }
     }
 
-    /// Diagnostics with a program counter.
+    /// Diagnostics with only `pc` set.
     #[inline]
     pub const fn with_pc(pc: u64) -> Self {
         Self {
@@ -75,7 +60,7 @@ impl LocalDiagnostics {
         }
     }
 
-    /// Diagnostics with a program counter and faulting effective address.
+    /// Diagnostics with `pc` and `faulting_ea` set.
     #[inline]
     pub const fn with_pc_ea(pc: u64, ea: u64) -> Self {
         Self {
@@ -86,44 +71,41 @@ impl LocalDiagnostics {
     }
 }
 
-/// The result of a single `run_until_yield` call.
+/// The value returned by a single `run_until_yield` call.
 ///
-/// Construction is explicit (the struct fields are `pub`) because the
-/// field set is fixed and any future addition is a contract change to
-/// the runtime, not a drive-by edit. There is no `new(...)` constructor
-/// to maintain -- units build the struct directly.
+/// Fields are `pub` because the set is fixed and any future addition
+/// is a contract change, not a drive-by edit.
 ///
 /// **Invariant on `fault`:** `fault` is `Some` if and only if
-/// `yield_reason == YieldReason::Fault`. The runtime relies on this to
-/// route fault attribution; constructing a result with a `Fault` reason
-/// and no fault data, or with non-`Fault` reason and `Some` fault data,
-/// is a programming error and is checked by [`ExecutionStepResult::is_well_formed`].
-/// The check is exposed rather than enforced at construction so tests
-/// and the future commit pipeline can run it explicitly without paying
-/// for redundant checks at every emission site.
+/// `yield_reason == YieldReason::Fault`. The runtime relies on this
+/// to route fault attribution. Violations are programming errors and
+/// are checked by [`ExecutionStepResult::is_well_formed`]; the check
+/// is exposed rather than enforced at construction so callers can
+/// run it explicitly without paying for redundant checks at every
+/// emission site.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionStepResult {
-    /// Why the unit yielded control back to the runtime.
+    /// Why the unit yielded.
     pub yield_reason: YieldReason,
-    /// How much budget the unit actually used during this step.
-    /// May be less than the granted budget if the unit yielded early.
+    /// Budget the unit actually used; may be less than granted when
+    /// the unit yielded early.
     pub consumed_budget: Budget,
     /// Per-step diagnostics for trace and assertion consumers.
     pub local_diagnostics: LocalDiagnostics,
     /// Fault data, present iff `yield_reason == YieldReason::Fault`.
     pub fault: Option<FaultKind>,
-    /// Raw syscall arguments, present iff `yield_reason == YieldReason::Syscall`.
-    /// Index 0 is the syscall number (from the architecture's syscall-number
-    /// register, e.g. GPR 11 on PPC64). Indices 1..=8 are the argument
-    /// registers (e.g. GPR 3..=10). The runtime reads these to classify
-    /// the request and dispatch through the LV2 host.
+    /// Raw syscall arguments, present iff
+    /// `yield_reason == YieldReason::Syscall`. Index 0 is the
+    /// syscall number (from the arch's syscall-number register, e.g.
+    /// GPR 11 on PPC64); indices 1..=8 are the argument registers
+    /// (e.g. GPR 3..=10).
     pub syscall_args: Option<[u64; 9]>,
 }
 
 impl ExecutionStepResult {
-    /// Whether this result satisfies the `fault`/`yield_reason`
-    /// invariant. The runtime should call this on every step result
-    /// before processing it; failure indicates a unit bug.
+    /// Whether the `fault`/`yield_reason` invariant holds. Callers
+    /// should run this on every step result before processing it; a
+    /// `false` return indicates a unit bug.
     #[inline]
     pub fn is_well_formed(&self) -> bool {
         match (self.yield_reason, &self.fault) {

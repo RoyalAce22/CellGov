@@ -1,10 +1,4 @@
-//! Runtime constructors extracted from `runtime.rs`.
-//!
-//! [`Runtime::new`] and [`Runtime::with_trace_writer`] set the default
-//! field values for every registry, pipeline, and bookkeeping slot
-//! the orchestrator owns. The body is mechanical but verbose --
-//! moving it here keeps the facade focused on the step/commit
-//! pipeline.
+//! Runtime constructors.
 
 use cellgov_dma::{DmaQueue, FixedLatency};
 use cellgov_lv2::Lv2Host;
@@ -21,22 +15,15 @@ use crate::syscall_table::SyscallResponseTable;
 use super::{Runtime, RuntimeMode};
 
 impl Runtime {
-    /// Construct a runtime over the given memory, with the given
-    /// per-step budget grant and the given max-steps cap. The
-    /// scheduler starts at the beginning of the registry; time and
-    /// epoch start at zero; no units are registered.
-    ///
-    /// Use [`Runtime::registry_mut`] to register units before stepping.
+    /// Construct a runtime with a default [`TraceWriter`]. Time, epoch,
+    /// and `steps_taken` start at zero; no units are registered. Use
+    /// [`Runtime::registry_mut`] to register units before stepping.
     pub fn new(memory: GuestMemory, budget_per_step: Budget, max_steps: usize) -> Self {
         Self::with_trace_writer(memory, budget_per_step, max_steps, TraceWriter::new())
     }
 
-    /// Construct a runtime with a caller-supplied [`TraceWriter`].
-    ///
-    /// Used by tests and the testkit runner to install a writer with a
-    /// specific level filter (for example, commits + hashes only) so the
-    /// high-volume categories can be filtered, exercising that contract
-    /// end-to-end. Behaviorally identical to [`Runtime::new`] otherwise.
+    /// Like [`Runtime::new`] but takes a caller-supplied [`TraceWriter`]
+    /// (e.g. one configured with a specific level filter).
     pub fn with_trace_writer(
         memory: GuestMemory,
         budget_per_step: Budget,

@@ -25,3 +25,5 @@ update to 0xC0000040); RPCS3 captures at sys_tty_write call #10.
 The boundaries are close but not identical -- CellGov reaches the
 RSX control register write while RPCS3 dumps at the last TTY write
 before that point.
+
+Verdict: equivalent (1 byte non-semantic).

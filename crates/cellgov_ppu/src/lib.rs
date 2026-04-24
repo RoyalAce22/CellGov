@@ -1,13 +1,6 @@
-//! PPU execution unit for CellGov.
-//!
-//! Implements the `ExecutionUnit` trait for a Power Processing Unit.
-//! The fetch-decode-execute loop lives here; instruction semantics
-//! live in `exec.rs`; decoding lives in `decode.rs`.
-//!
-//! The PPU reads from committed shared memory (via `ExecutionContext`)
-//! and communicates with the runtime through `Effect` packets.
-//! Syscall dispatch translates LV2 syscall numbers into Effects
-//! (managed SPU thread group lifecycle, TTY write, process exit).
+//! PPU `ExecutionUnit`: fetch-decode-execute loop, emitting `Effect`s
+//! for all guest-visible writes. Instruction semantics live in
+//! `exec`; decoding in `decode`.
 
 pub mod decode;
 pub mod exec;
@@ -44,7 +37,7 @@ pub const FAULT_UNSUPPORTED_SYSCALL: u32 = 0x0107_0000;
 /// Debug breakpoint fired at a user-requested PC.
 pub const FAULT_DEBUG_BREAK: u32 = 0x0108_0000;
 
-/// PPU execution unit snapshot for replay.
+/// PPU architectural state snapshot for replay.
 #[derive(Debug, Clone)]
 pub struct PpuSnapshot {
     /// General-purpose registers.
@@ -57,92 +50,45 @@ pub struct PpuSnapshot {
     pub lr: u64,
     /// Count register.
     pub ctr: u64,
-    /// Canonical line address of the per-unit atomic reservation,
-    /// or `None` when the unit does not hold a reservation.
+    /// Canonical reservation-line address, or `None` when no reservation is held.
     pub reservation_line: Option<u64>,
 }
 
-/// A Power Processing Unit execution unit.
-///
-/// Owns its architectural state (registers, PC, CR, LR, CTR, XER) and
-/// implements the `ExecutionUnit` trait. The PPU fetches instructions
-/// from committed guest memory, executes them, and emits Effects for
-/// stores and syscalls.
+/// PPU `ExecutionUnit`: owns architectural state, fetches and executes
+/// instructions, emits `Effect`s for stores and syscalls.
 pub struct PpuExecutionUnit {
     id: UnitId,
     state: state::PpuState,
     status: UnitStatus,
-    /// If set, `run_until_yield` entries matching `break_pc` skip the
-    /// first `break_skip` hits, then on the next hit emit a synthetic
-    /// FAULT_DEBUG_BREAK fault with full register capture.
+    /// Fires a synthetic `FAULT_DEBUG_BREAK` after `break_skip` prior hits.
     break_pc: Option<u64>,
-    /// Number of hits to skip before firing the break (0 = first hit).
     break_skip: u32,
-    /// When true, `run_until_yield` pushes one `(pc, state_hash)` pair
-    /// into `per_step_hashes` after every retired instruction. Off by
-    /// default -- the inner loop skips the push entirely when off.
     per_step_trace: bool,
-    /// Per-step fingerprints collected during the current
-    /// `run_until_yield`. Drained by the runtime via
-    /// `ExecutionUnit::drain_retired_state_hashes`.
+    /// Drained by the runtime via `drain_retired_state_hashes`.
     per_step_hashes: Vec<(u64, u64)>,
-    /// Optional inclusive window of step indices (relative to this
-    /// unit's own retirement counter) for the zoom-in trace. When
-    /// the unit's retirement counter is in `[lo, hi]`, the unit
-    /// pushes a full register snapshot into `per_step_full_states`
-    /// after retiring the instruction. None disables the zoom-in
-    /// path entirely; the hot loop's check is one branch when the
-    /// window is None and an integer-range test when it is Some.
+    /// Inclusive `[lo, hi]` retirement-index window for full-state capture.
     full_state_window: Option<(u64, u64)>,
-    /// Per-unit retirement counter used to test against
-    /// `full_state_window`. Increments only on successful retirement,
-    /// matching the gate the per-step hash uses.
+    /// Increments on successful retirement only; matches the per-step-hash gate.
     retirement_counter: u64,
-    /// Full-state snapshots collected during the current
-    /// `run_until_yield`. Drained by the runtime via
-    /// `ExecutionUnit::drain_retired_state_full`. Each entry is
-    /// `(pc, gpr, lr, ctr, xer, cr)` for one retired instruction
-    /// inside the configured window.
+    /// Drained by the runtime via `drain_retired_state_full`.
     per_step_full_states: Vec<(u64, [u64; 32], u64, u64, u64, u32)>,
-    /// Predecoded instruction shadow for the main text region.
-    /// Built once after boot loading; the hot-path fetch checks
-    /// this before falling back to raw memory + decode. Stale
-    /// slots (from guest-visible code writes) re-decode on the
-    /// next fetch.
+    /// Predecoded shadow of the main text region; stale slots re-decode on miss.
     instruction_shadow: Option<shadow::PredecodedShadow>,
-    /// Diagnostic counters for the instruction-fetch path. Incremented
-    /// once per retired instruction: `shadow_hits` when the predecoded
-    /// shadow returned Some at the fetch PC, `shadow_misses` when the
-    /// fallback decode-on-fetch path was taken (out-of-shadow address,
-    /// stale slot, or first-time fill). A steadily rising miss rate at
-    /// the same PCs across runs is a silent perf cliff -- code has
-    /// moved outside the shadowed base-0 region.
+    /// Sustained miss growth at stable PCs signals code outside the shadowed region.
     shadow_hits: u64,
     shadow_misses: u64,
-    /// Intra-block store-forwarding buffer. Pending stores
-    /// accumulate here during the inner loop and are flushed to
-    /// effects at every yield/fault/budget-exhaustion point.
+    /// Flushed to `effects` at every yield/fault/budget-exhaustion point.
     store_buf: StoreBuffer,
-    /// When Some(1), force Budget=1 on the next run_until_yield
-    /// call regardless of the caller's budget. Set after a mid-block
-    /// fault so the re-execution path commits instructions one at a
-    /// time up to the faulting instruction.
+    /// Forces `Budget=1` on the next `run_until_yield` for post-fault single-step replay.
     budget_override: Option<u64>,
-    /// When true, each retired instruction is re-decoded from
-    /// committed memory (bypassing the shadow) and counted in
-    /// `profile_insns` and `profile_pairs`. Off by default.
     profile_mode: bool,
-    /// Individual instruction variant frequency (raw decoded stream).
     profile_insns: std::collections::BTreeMap<&'static str, u64>,
-    /// Adjacent instruction-pair frequency (raw decoded stream,
-    /// pc and pc+4 both decoded from committed memory).
     profile_pairs: std::collections::BTreeMap<(&'static str, &'static str), u64>,
-    /// Previous instruction's variant name for pair counting.
     profile_prev: Option<&'static str>,
 }
 
 impl PpuExecutionUnit {
-    /// Create a new PPU execution unit with zeroed state.
+    /// Create a unit with zeroed architectural state.
     pub fn new(id: UnitId) -> Self {
         Self {
             id,
@@ -167,57 +113,43 @@ impl PpuExecutionUnit {
         }
     }
 
-    /// Turn per-step state-hash tracing on or off.
-    ///
-    /// When on, `run_until_yield` pushes one `(pc, state_hash)` pair
-    /// into an internal buffer after every retired instruction. The
-    /// runtime drains the buffer through
-    /// `ExecutionUnit::drain_retired_state_hashes` and converts each
-    /// entry into a `TraceRecord::PpuStateHash`. Off by default.
+    /// Enable per-step `(pc, state_hash)` tracing.
     pub fn set_per_step_trace(&mut self, on: bool) {
         self.per_step_trace = on;
     }
 
-    /// Whether per-step state-hash tracing is currently on.
+    /// Returns whether per-step state-hash tracing is enabled.
     pub fn per_step_trace(&self) -> bool {
         self.per_step_trace
     }
 
-    /// Configure a zoom-in window: full-register snapshots are
-    /// captured for instructions retired with index in `[lo, hi]`
-    /// (inclusive). Index counting is per-unit and starts at 0 for
-    /// the first retired instruction. Pass `None` to disable.
-    ///
-    /// The full snapshots are collected separately from per-step
-    /// hashes and drained via a separate trait method, so the main
-    /// per-step trace stream stays homogeneous.
+    /// Configure the inclusive retirement-index window for full-register snapshots.
     pub fn set_full_state_window(&mut self, window: Option<(u64, u64)>) {
         self.full_state_window = window;
     }
 
-    /// Current zoom-in window, if any.
+    /// Returns the current full-state capture window, if any.
     pub fn full_state_window(&self) -> Option<(u64, u64)> {
         self.full_state_window
     }
 
-    /// Set a breakpoint: fires on the `skip`-th-plus-one hit at `pc`
-    /// (skip=0 means first hit). Emits a synthetic FAULT_DEBUG_BREAK.
+    /// Set a counted debug breakpoint: skip `skip` hits at `pc`, then fault.
     pub fn set_break_pc(&mut self, pc: u64, skip: u32) {
         self.break_pc = Some(pc);
         self.break_skip = skip;
     }
 
-    /// Turn instruction profiling on or off.
+    /// Enable instruction-frequency profiling.
     pub fn set_profile_mode(&mut self, on: bool) {
         self.profile_mode = on;
     }
 
-    /// Accumulated instruction frequency data (raw decoded stream).
+    /// Accumulated instruction-variant frequencies.
     pub fn profile_insns(&self) -> &std::collections::BTreeMap<&'static str, u64> {
         &self.profile_insns
     }
 
-    /// Accumulated adjacent-pair frequency data (raw decoded stream).
+    /// Accumulated adjacent-pair frequencies.
     pub fn profile_pairs(&self) -> &std::collections::BTreeMap<(&'static str, &'static str), u64> {
         &self.profile_pairs
     }
@@ -232,22 +164,16 @@ impl PpuExecutionUnit {
         &self.state
     }
 
-    /// Attach a predecoded instruction shadow. The shadow must be
-    /// built from the same memory the PPU will fetch from; the
-    /// caller is responsible for building it after all boot-time
-    /// code writes (ELF load, PRX load, HLE stub planting) have
-    /// finished and before the step loop begins.
+    /// Attach a predecoded shadow built from the same memory the PPU will fetch.
+    ///
+    /// The shadow must be built after all boot-time code writes (ELF/PRX load,
+    /// HLE stub planting) and before the step loop begins.
     pub fn set_instruction_shadow(&mut self, shadow: shadow::PredecodedShadow) {
         self.instruction_shadow = Some(shadow);
     }
 
-    /// Return `(shadow_hits, shadow_misses)` counters. Hits +
-    /// misses equals the number of instructions this unit has
-    /// fetched; a high miss ratio indicates code executing outside
-    /// the predecoded shadow region (e.g. in a PRX body above
-    /// 0x10000000 or in a stub trampoline past the shadow end)
-    /// and falling back to decode-on-fetch. Correctness is
-    /// preserved on misses; only the fast path is lost.
+    /// Returns `(hits, misses)` counters; high miss ratios signal code
+    /// executing outside the shadowed region (correctness preserved, fast path lost).
     pub fn shadow_stats(&self) -> (u64, u64) {
         (self.shadow_hits, self.shadow_misses)
     }
@@ -305,14 +231,8 @@ impl ExecutionUnit for PpuExecutionUnit {
         effects.clear();
         self.store_buf.clear();
 
-        // Refresh the per-unit atomic reservation register against
-        // the committed reservation table at step start. A cross-
-        // unit store committed in a previous commit cycle clears
-        // the committed entry; the local register is stale until we
-        // mirror that clear. The ExecutionContext view is frozen for
-        // the duration of this step, so this single read is
-        // sufficient -- no cross-unit clear can fire while the step
-        // runs.
+        // Mirror cross-unit reservation clears from the committed table.
+        // The ctx view is frozen for this step, so one read suffices.
         if self.state.reservation.is_some() && !ctx.reservation_held(self.id) {
             self.state.reservation = None;
         }
@@ -333,8 +253,6 @@ impl ExecutionUnit for PpuExecutionUnit {
             }
         }
 
-        // Counted debug breakpoint. Skips `break_skip` hits, then fires
-        // a synthetic FAULT_DEBUG_BREAK with full register capture.
         if self.break_pc == Some(self.state.pc) {
             if self.break_skip > 0 {
                 self.break_skip -= 1;
@@ -351,21 +269,10 @@ impl ExecutionUnit for PpuExecutionUnit {
         }
 
         let mem = ctx.memory().as_bytes();
-        // Cache every region as (base, bytes) pairs so load paths can
-        // resolve effective addresses against the primary-thread stack
-        // at 0xD0000000 and any other auxiliary region without paying
-        // a BTreeMap lookup on every access. The fetch path keeps
-        // using `mem` (the base-0 region) since code always lives in
-        // the main region.
-        //
-        // Stack-allocated fixed-size table: PS3 runs with <= 4 regions
-        // (main, stack, rsx, spu_reserved) and no production codepath
-        // adds more. Avoiding the heap allocation matters here because
-        // `run_until_yield` is called once per retired instruction in
-        // Budget=1 mode (run-game, bench-boot, fault-driven replay),
-        // so a per-call `Vec::new` is a per-step allocation on the hot
-        // path. `MAX_REGIONS` is wider than the current usage to keep
-        // headroom without an assertion-failure risk.
+        // Stack-allocated region table avoids per-call heap alloc on the
+        // Budget=1 hot path (one call per retired instruction). Code
+        // always lives in the base-0 region (`mem`); this table serves
+        // loads/stores against auxiliary regions (stack, rsx, ...).
         const MAX_REGIONS: usize = 8;
         let mut region_views_storage: [(u64, &[u8]); MAX_REGIONS] =
             [(0, &[] as &[u8]); MAX_REGIONS];
@@ -383,12 +290,9 @@ impl ExecutionUnit for PpuExecutionUnit {
         let region_views = &region_views_storage[..n_regions];
 
         loop {
-            // Capture PC before fetch/decode/execute for diagnostics.
             let step_pc = self.state.pc;
 
-            // Fetch + Decode: try the predecoded shadow first (O(1)
-            // index). On miss (stale, out-of-range, decode error)
-            // fall back to the raw-memory path.
+            // Shadow is O(1); fallback decodes from raw memory.
             let insn = if let Some(cached) = self
                 .instruction_shadow
                 .as_ref()
@@ -430,9 +334,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                 }
             };
 
-            // Consumed slots are placeholders left by superinstruction
-            // pairing. The preceding superinstruction already did the
-            // work; just advance PC and burn one budget tick.
+            // Placeholder left by superinstruction pairing: advance PC, burn a tick.
             if matches!(insn, instruction::PpuInstruction::Consumed) {
                 self.state.pc += 4;
                 remaining = remaining.saturating_sub(1);
@@ -449,7 +351,6 @@ impl ExecutionUnit for PpuExecutionUnit {
                 continue;
             }
 
-            // Execute
             match exec::execute(
                 &insn,
                 &mut self.state,
@@ -461,9 +362,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                 ExecuteVerdict::Continue => {
                     self.state.pc += 4;
                 }
-                ExecuteVerdict::Branch => {
-                    // PC already set by the branch instruction.
-                }
+                ExecuteVerdict::Branch => {}
                 ExecuteVerdict::Syscall => {
                     self.store_buf.flush(effects, self.id);
                     let s = &self.state;
@@ -480,14 +379,10 @@ impl ExecutionUnit for PpuExecutionUnit {
                     };
                 }
                 ExecuteVerdict::Fault(f) => {
-                    // Capture fault diagnostic at the failing instruction
-                    // BEFORE any state rollback so registers reflect the
-                    // actual fault context (not the batch-start snapshot).
+                    // Capture diag before rollback so registers reflect the fault site.
                     let diag = self.fault_diag(step_pc);
-                    // Roll back to snapshot when faulting mid-batch: the
-                    // fault rule discards every effect emitted in this
-                    // batch, so state must roll back to keep register
-                    // and memory views consistent.
+                    // Fault-discards-all: mid-batch rollback keeps state consistent
+                    // with the dropped effect batch.
                     if remaining < max_budget {
                         if let Some(snap) = snapshot.as_ref() {
                             self.state = snap.clone();
@@ -512,9 +407,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     };
                 }
                 ExecuteVerdict::MemFault(ea) => {
-                    // Same rollback policy as Fault above: capture diag
-                    // first, then roll back state if mid-batch, propagate
-                    // the fault directly.
+                    // Same rollback policy as `Fault` above.
                     let diag = self.fault_diag_ea(step_pc, ea);
                     if remaining < max_budget {
                         if let Some(snap) = snapshot.as_ref() {
@@ -535,9 +428,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     };
                 }
                 ExecuteVerdict::BufferFull => {
-                    // Store buffer capacity exceeded. Flush buffered
-                    // stores and yield without advancing PC so the
-                    // overflowing instruction retries on the next step.
+                    // Yield without advancing PC so the store retries next step.
                     self.store_buf.flush(effects, self.id);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::BudgetExhausted,
@@ -574,9 +465,6 @@ impl ExecutionUnit for PpuExecutionUnit {
                     .push((step_pc, self.state.state_hash()));
             }
 
-            // Zoom-in window. The window check is gated on the
-            // window being Some so the hot path stays one branch when
-            // off.
             if let Some((lo, hi)) = self.full_state_window {
                 if self.retirement_counter >= lo && self.retirement_counter <= hi {
                     let s = &self.state;

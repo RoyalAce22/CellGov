@@ -1,20 +1,12 @@
-//! cellgov_exec -- generic execution unit trait and resumable unit interface.
+//! Seam between architecture interpreters and the runtime.
 //!
-//! Owns:
+//! Owns the `ExecutionUnit` trait, its input `ExecutionContext`, its
+//! return-shape `ExecutionStepResult`, the `YieldReason` vocabulary,
+//! and a `FakeIsaUnit` for pressure-testing the runtime contract
+//! without a real arch unit.
 //!
-//! - the `ExecutionUnit` trait
-//! - `ExecutionContext` (readonly view exposed to a running unit)
-//! - `YieldReason` enum
-//! - `ExecutionStepResult` (yield reason, consumed budget, emitted effects in
-//!   stable emission order, local diagnostics, optional fault data, optional
-//!   syscall arguments)
-//!
-//! Must not depend on a concrete scheduler implementation. Fake PPU/SPU units
-//! for early testing live here too. Architecture-specific decoding does not.
-//!
-//! `Self::Snapshot` must be pure deterministic data: no raw pointers, no host
-//! handles, no allocator-dependent internals. Snapshots must be reconstructible
-//! into an equivalent unit state on a different host.
+//! No dependency on a concrete scheduler. Architecture-specific
+//! decoding lives in `cellgov_ppu` / `cellgov_spu`, not here.
 
 pub mod context;
 pub mod fake_isa;

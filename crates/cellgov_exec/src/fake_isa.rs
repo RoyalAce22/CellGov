@@ -1,16 +1,8 @@
-//! Tiny fake ISA for pressure-testing runtime seams.
+//! Tiny fake ISA for pressure-testing the runtime contract.
 //!
-//! Each opcode maps to at least one distinct `Effect` path so the
-//! fake ISA exercises the full effect/commit pipeline from a single
-//! unit type. This is not a real instruction set; it exists so the
-//! runtime contract can be exercised under multi-effect workloads
-//! without standing up a real PPU or SPU unit.
-//!
-//! A `FakeIsaUnit` holds a `Vec<FakeOp>` program and a program
-//! counter. Each `run_until_yield` call decodes one opcode, emits the
-//! corresponding effect(s), and advances the PC. When the PC reaches
-//! `End` or runs off the end of the program, the unit yields
-//! `Finished`.
+//! Each opcode maps to at least one distinct `Effect` so a single unit
+//! type can exercise every path through the effect/commit pipeline.
+//! Not a real instruction set and not tied to any PS3 architecture.
 
 use crate::context::ExecutionContext;
 use crate::step_result::ExecutionStepResult;
@@ -24,39 +16,33 @@ use cellgov_time::{Budget, GuestTicks};
 
 /// A single fake-ISA opcode.
 ///
-/// The variant set maps each opcode to at least one `Effect`
-/// variant so the pipeline sees every path. Atomic opcodes
-/// (`ReservationAcquire`, `ConditionalStore`) are straight
-/// pass-throughs to their effect counterparts; the unit carries
-/// no local reservation register -- the test harness installs a
-/// schedule that drives the committed reservation table directly.
+/// Atomic opcodes (`ReservationAcquire`, `ConditionalStore`) are
+/// pass-throughs to their effect counterparts; the unit carries no
+/// local reservation register, so the test harness is responsible
+/// for driving the committed reservation table directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FakeOp {
-    /// Load `value` into the unit's accumulator register.
-    /// No effect emitted; yields `BudgetExhausted`.
+    /// Load `value` into the accumulator. No effect emitted.
     LoadImm(u32),
     /// Emit `SharedWriteIntent` writing the accumulator's low byte
-    /// (replicated) across the given address range.
+    /// (replicated) across the range.
     SharedStore {
-        /// Start address of the write region.
+        /// Start address.
         addr: u64,
-        /// Byte count of the write region.
+        /// Byte count.
         len: u64,
     },
     /// Emit `Effect::ReservationAcquire` for the 128-byte line
-    /// containing `line_addr`. The unit itself does not track
-    /// local reservation state; this opcode exists to drive the
-    /// committed reservation table for exploration-engine tests.
+    /// containing `line_addr`.
     ReservationAcquire {
-        /// Byte address anywhere inside the line to reserve.
+        /// Byte address anywhere inside the line.
         line_addr: u64,
     },
-    /// Emit `Effect::ConditionalStore` writing the accumulator's
-    /// low byte (replicated) across the range. Unconditionally
-    /// assumes the reservation is held at emit time (the test
-    /// harness is responsible for ordering).
+    /// Emit `Effect::ConditionalStore` writing the accumulator's low
+    /// byte (replicated) across the range. Assumes the reservation
+    /// is held; the harness orders this against the table.
     ConditionalStore {
-        /// Start address of the conditional-store region.
+        /// Start address.
         addr: u64,
         /// Byte count. Must be 4, 8, or 128.
         len: u64,
@@ -66,13 +52,12 @@ pub enum FakeOp {
         /// Target mailbox id.
         mailbox: u64,
     },
-    /// Emit `MailboxReceiveAttempt`. The commit pipeline pops from
-    /// the mailbox if non-empty or blocks the unit if empty.
+    /// Emit `MailboxReceiveAttempt`.
     MailboxRecv {
         /// Source mailbox id.
         mailbox: u64,
     },
-    /// Emit `DmaEnqueue` (Put direction, `src` -> `dst`, `len` bytes).
+    /// Emit `DmaEnqueue` (Put direction).
     DmaPut {
         /// Source address.
         src: u64,
@@ -93,16 +78,12 @@ pub enum FakeOp {
         /// Barrier id.
         barrier: u64,
     },
-    /// Yield `Finished`. Terminal opcode.
+    /// Terminal: yield `Finished`.
     End,
 }
 
-/// A fake execution unit that decodes a `Vec<FakeOp>` program.
-///
-/// One opcode per `run_until_yield` call. The unit owns a single
-/// `u32` accumulator (`acc`) that `LoadImm` writes and other opcodes
-/// read. The program counter (`pc`) advances by one per step; running
-/// off the end or hitting `End` yields `Finished`.
+/// Execution unit that interprets a `Vec<FakeOp>` program one opcode
+/// per `run_until_yield`.
 pub struct FakeIsaUnit {
     id: UnitId,
     program: Vec<FakeOp>,
@@ -112,8 +93,7 @@ pub struct FakeIsaUnit {
 }
 
 impl FakeIsaUnit {
-    /// Construct a unit with the given program. Execution starts at
-    /// opcode 0.
+    /// Build a unit whose program starts at opcode 0.
     pub fn new(id: UnitId, program: Vec<FakeOp>) -> Self {
         Self {
             id,
@@ -156,8 +136,6 @@ impl ExecutionUnit for FakeIsaUnit {
         ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
-        // If any received messages are pending (from a prior
-        // MailboxRecv), load the first into the accumulator.
         if let Some(&msg) = ctx.received_messages().first() {
             self.acc = msg;
         }
@@ -333,9 +311,9 @@ mod tests {
             ],
         );
         let mut effects = Vec::new();
-        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects); // LoadImm
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
         effects.clear();
-        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects); // SharedStore
+        u.run_until_yield(Budget::new(1), &ctx(&mem), &mut effects);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             Effect::SharedWriteIntent { bytes, .. } => {
@@ -450,7 +428,6 @@ mod tests {
     fn received_messages_load_into_accumulator() {
         let mem = GuestMemory::new(16);
         let mut u = FakeIsaUnit::new(UnitId::new(0), vec![FakeOp::End]);
-        // Simulate the runtime delivering a message.
         let received = vec![0xcafe_u32];
         let ctx = ExecutionContext::with_received(&mem, &received);
         let mut effects = Vec::new();

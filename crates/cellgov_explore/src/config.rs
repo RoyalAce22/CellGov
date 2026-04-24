@@ -1,11 +1,14 @@
-//! Exploration configuration.
+//! Exploration bounds.
 
-/// Bounds and mode settings for a schedule exploration run.
+/// Upper bounds on an exploration run.
+///
+/// Exceeding either bound forces `OutcomeClass::Inconclusive` when no
+/// divergence has been observed.
 #[derive(Debug, Clone)]
 pub struct ExplorationConfig {
-    /// Maximum number of distinct schedules to explore.
+    /// Maximum number of distinct alternate schedules to explore.
     pub max_schedules: usize,
-    /// Maximum runtime steps per individual run.
+    /// Maximum runtime steps per individual replay.
     pub max_steps_per_run: usize,
 }
 

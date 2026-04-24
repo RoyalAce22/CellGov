@@ -1,9 +1,7 @@
-//! Lightweight mutex table. Owns state for `sys_lwmutex_create`
-//! / `_destroy` / `_lock` / `_unlock` / `_trylock`. Ids are
-//! minted monotonically by [`LwMutexIdAllocator`].
+//! Lightweight mutex table.
 //!
-//! Distinct id space from the heavy mutex table; the cond-wake
-//! re-acquire path distinguishes them via `CondMutexKind`.
+//! Ids are minted monotonically by [`LwMutexIdAllocator`]. The
+//! id space is distinct from the heavy mutex table.
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
@@ -14,21 +12,19 @@ use std::collections::BTreeMap;
 pub enum LwMutexAcquire {
     /// Caller is now the owner.
     Acquired,
-    /// Mutex is owned (by any thread; non-recursive).
+    /// Mutex is owned.
     Contended,
 }
 
-/// Outcome of an `acquire_or_enqueue` call. Used by
-/// `sys_lwmutex_lock`.
+/// Outcome of an `acquire_or_enqueue` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LwMutexAcquireOrEnqueue {
     /// Caller is now the owner.
     Acquired,
-    /// Caller has been appended to the waiter list.
+    /// Caller was appended to the waiter list.
     Enqueued,
-    /// Caller already holds the mutex or is already on its
-    /// waiter list. Non-recursive; dispatch maps to
-    /// `CELL_EDEADLK`.
+    /// Caller already holds the mutex or is already parked
+    /// (non-recursive).
     WouldDeadlock,
     /// Unknown id.
     Unknown,
@@ -44,25 +40,25 @@ pub enum LwMutexRelease {
         /// Thread that just became the owner.
         new_owner: PpuThreadId,
     },
-    /// Caller did not own the mutex; release rejected.
+    /// Caller did not own the mutex.
     NotOwner,
     /// Unknown id.
     Unknown,
 }
 
 /// Failure modes of [`LwMutexTable::enqueue_waiter`].
+///
+/// All non-`UnknownId` variants indicate dispatch-layer bugs and
+/// fire `debug_assert!`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LwMutexEnqueueError {
     /// No lwmutex with this id.
     UnknownId,
-    /// Thread is already on the waiter list. Reaching this is a
-    /// dispatch-layer bug; `enqueue_waiter` fires a
-    /// `debug_assert!` before returning it.
+    /// Thread is already on the waiter list.
     DuplicateWaiter,
-    /// Thread currently owns this mutex. Parking the owner
-    /// would strand it; dispatch must surface recursive locks
-    /// through [`LwMutexAcquireOrEnqueue::WouldDeadlock`] before
-    /// calling `enqueue_waiter`. `debug_assert!` fires.
+    /// Thread currently owns this mutex; parking would strand
+    /// it. Dispatch must surface recursive locks through
+    /// [`LwMutexAcquireOrEnqueue::WouldDeadlock`].
     WaiterIsOwner,
 }
 
@@ -94,13 +90,8 @@ impl LwMutexEntry {
 
 /// Monotonic allocator for lwmutex ids.
 ///
-/// Starts at `1` (id `0` reserved for null-handle conventions);
-/// the last id handed out is `u32::MAX - 1`, after which
-/// [`Self::allocate`] returns `None` forever. Ids are never
-/// recycled: [`LwMutexTable::destroy`] does not return ids
-/// here. Monotonicity is what makes id sequences replay-stable;
-/// the tradeoff is that a long-lived guest creating and
-/// destroying mutexes can eventually exhaust the 32-bit space.
+/// Starts at `1`; last handed-out id is `u32::MAX - 1`. Ids are
+/// never recycled.
 #[derive(Debug, Clone)]
 pub struct LwMutexIdAllocator {
     next: u32,
@@ -113,7 +104,7 @@ impl Default for LwMutexIdAllocator {
 }
 
 impl LwMutexIdAllocator {
-    /// Construct a fresh allocator. The first `allocate` returns 1.
+    /// Fresh allocator; the first `allocate` returns 1.
     pub fn new() -> Self {
         Self { next: 1 }
     }
@@ -128,10 +119,7 @@ impl LwMutexIdAllocator {
         Some(id)
     }
 
-    /// Fold the allocator's state into `hasher`. Centralised so
-    /// future allocator fields (e.g. a free list) are picked up
-    /// by [`LwMutexTable::state_hash`] without touching its
-    /// call site.
+    /// Fold the allocator's state into `hasher`.
     pub(crate) fn hash_into(&self, hasher: &mut cellgov_mem::Fnv1aHasher) {
         hasher.write(&self.next.to_le_bytes());
     }
@@ -150,7 +138,7 @@ impl LwMutexTable {
         Self::default()
     }
 
-    /// Allocate a fresh id and create the entry. `None` if the
+    /// Allocate a fresh id and create the entry; `None` if the
     /// id space is exhausted.
     pub fn create(&mut self) -> Option<u32> {
         let id = self.ids.allocate()?;
@@ -158,17 +146,13 @@ impl LwMutexTable {
         Some(id)
     }
 
-    /// Destroy a lwmutex and return the removed entry, or `None`
-    /// if the id was unknown.
+    /// Remove the entry; `None` if the id was unknown. Ids are
+    /// not recycled.
     ///
-    /// Caller contract: reject non-empty-waiters before calling.
-    /// A `debug_assert!` fires on violation. If bypassed in
-    /// release, the returned entry still carries its waiter
-    /// list and callers **must** drain `entry.waiters()` and
-    /// wake each parked thread; skipping this strands them
-    /// forever.
-    ///
-    /// Ids are not recycled; see [`LwMutexIdAllocator`].
+    /// Caller contract: reject non-empty-waiters before calling
+    /// (`debug_assert!` fires on violation). If bypassed in
+    /// release, callers **must** drain `entry.waiters()` and wake
+    /// each parked thread; skipping this strands them forever.
     pub fn destroy(&mut self, id: u32) -> Option<LwMutexEntry> {
         let entry = self.entries.remove(&id)?;
         debug_assert!(
@@ -195,13 +179,8 @@ impl LwMutexTable {
         self.entries.is_empty()
     }
 
-    /// Check-and-set without enqueueing. Used by
-    /// `sys_lwmutex_trylock`.
-    ///
-    /// Non-recursive; owner re-acquiring sees `Contended`, not
-    /// `WouldDeadlock`. Blocking paths use
-    /// [`Self::acquire_or_enqueue`] to distinguish deadlock from
-    /// contention.
+    /// Check-and-set without enqueueing. Non-recursive: the
+    /// owner re-acquiring sees `Contended`, not `WouldDeadlock`.
     pub fn try_acquire(&mut self, id: u32, caller: PpuThreadId) -> Option<LwMutexAcquire> {
         let entry = self.entries.get_mut(&id)?;
         if entry.owner.is_none() {
@@ -212,12 +191,10 @@ impl LwMutexTable {
         }
     }
 
-    /// Atomic acquire-or-park. Used by `sys_lwmutex_lock`.
+    /// Atomic acquire-or-park.
     ///
-    /// Cost: O(n) scan over the waiter list on the
-    /// already-parked check. Waiter lists are short in practice;
-    /// a pathological guest piling many contenders onto one
-    /// mutex could see quadratic lock-path behavior.
+    /// O(n) scan over the waiter list on the already-parked
+    /// check.
     pub fn acquire_or_enqueue(&mut self, id: u32, caller: PpuThreadId) -> LwMutexAcquireOrEnqueue {
         let Some(entry) = self.entries.get_mut(&id) else {
             return LwMutexAcquireOrEnqueue::Unknown;
@@ -244,11 +221,8 @@ impl LwMutexTable {
         }
     }
 
-    /// Low-level enqueue. See [`LwMutexEnqueueError`].
-    ///
-    /// Prefer [`Self::acquire_or_enqueue`] for blocking lock
-    /// paths. Both failure variants fire a `debug_assert!`
-    /// because they indicate dispatch-layer bugs.
+    /// Low-level enqueue. Prefer [`Self::acquire_or_enqueue`]
+    /// for blocking lock paths.
     pub fn enqueue_waiter(
         &mut self,
         id: u32,
@@ -273,7 +247,7 @@ impl LwMutexTable {
         Ok(())
     }
 
-    /// Release on behalf of `caller`. See [`LwMutexRelease`].
+    /// Release on behalf of `caller`.
     pub fn release_and_wake_next(&mut self, id: u32, caller: PpuThreadId) -> LwMutexRelease {
         let Some(entry) = self.entries.get_mut(&id) else {
             return LwMutexRelease::Unknown;
@@ -293,10 +267,8 @@ impl LwMutexTable {
         }
     }
 
-    /// FNV-1a digest for state-hash folding. Walks entries in
-    /// ascending-id order; folds owner, waiter FIFO, and the
-    /// id-allocator state so replay equivalence covers future
-    /// `create` calls.
+    /// FNV-1a digest of the table's state, including the
+    /// id-allocator cursor.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         self.ids.hash_into(&mut hasher);

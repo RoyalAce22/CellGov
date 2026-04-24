@@ -1,12 +1,10 @@
-//! cellgov_compare -- microtest comparison harness.
+//! Microtest comparison harness.
 //!
 //! Collects observable outcomes from CellGov and an external oracle
-//! (RPCS3), normalizes them into a shared `Observation` schema, and
-//! reports agreement or classifiable divergence.
-//!
-//! The comparison layer operates only on normalized observations, never
-//! on runner-specific internals. Each runner's adapter is responsible
-//! for coalescing raw outputs into the shared schema.
+//! (RPCS3), normalizes them into a shared [`Observation`] schema, and
+//! reports agreement or classifiable divergence. Each runner's adapter
+//! coalesces raw outputs into the shared schema; the comparison layer
+//! never touches runner-specific internals.
 
 pub mod baseline;
 pub mod compare;

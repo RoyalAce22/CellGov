@@ -1,10 +1,9 @@
 //! Intra-block store-forwarding buffer.
 //!
-//! Tracks pending stores within a basic-block execution window so
-//! that subsequent loads can see values written earlier in the same
-//! block before they are committed to guest memory. The buffer is
-//! flushed to `Effect::SharedWriteIntent` packets at block
-//! boundaries and cleared between steps.
+//! Forwarding contract: a load that is fully covered by an earlier
+//! store in the same block observes that store's bytes; committed
+//! memory still holds the pre-block state until [`StoreBuffer::flush`]
+//! emits `Effect::SharedWriteIntent` packets at the block boundary.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -15,11 +14,10 @@ const CAPACITY: usize = 64;
 
 /// A single pending store entry.
 ///
-/// `conditional` is true for entries that carry the bytes of a
-/// successful `stwcx` / `stdcx`. The flush pass skips these (the
-/// ConditionalStore effect was emitted separately), but the
-/// forwarding pass sees them so a subsequent same-step lwarx
-/// observes its own prior conditional-store's bytes.
+/// `conditional == true` entries are visible to [`StoreBuffer::forward`]
+/// but skipped by [`StoreBuffer::flush`] -- the `ConditionalStore`
+/// effect is emitted directly by `stwcx`/`stdcx`, so flushing again
+/// would double-commit.
 #[derive(Clone, Copy)]
 struct StoreEntry {
     addr: u64,
@@ -28,11 +26,11 @@ struct StoreEntry {
     value: u128,
 }
 
-/// Fixed-capacity store-forwarding buffer.
+/// Fixed-capacity (64-entry) store-forwarding buffer.
 ///
-/// Stores are appended in program order. Loads check the buffer
-/// via reverse scan (most-recent store wins). At block end the
-/// buffer is flushed to effects and cleared.
+/// Stores are appended in program order; [`Self::forward`] scans in
+/// reverse so the most recent covering store wins. Full buffer
+/// returns `false` from `insert`; the caller must yield the block.
 pub struct StoreBuffer {
     entries: Vec<StoreEntry>,
 }
@@ -76,8 +74,8 @@ impl StoreBuffer {
         self.entries.clear();
     }
 
-    /// Insert a pending store. Returns false if the buffer is full
-    /// (the caller should yield the block before retrying).
+    /// Insert a pending store. Returns `false` when the buffer is
+    /// full; caller must flush (yield the block) before retrying.
     #[inline]
     pub fn insert(&mut self, addr: u64, len: u8, value: u128) -> bool {
         if self.entries.len() >= CAPACITY {
@@ -92,12 +90,10 @@ impl StoreBuffer {
         true
     }
 
-    /// Insert a successful conditional store (stwcx / stdcx) for
-    /// intra-step forwarding only. The flush pass skips these
-    /// entries because the ConditionalStore effect was emitted
-    /// directly by the instruction handler; this insert just lets
-    /// a subsequent same-step lwarx see its own prior bytes.
-    /// Returns false if the buffer is full.
+    /// Insert a successful `stwcx` / `stdcx` for forwarding only.
+    ///
+    /// Flush skips this entry (see [`StoreEntry`]). Returns `false`
+    /// when the buffer is full.
     #[inline]
     pub fn insert_conditional(&mut self, addr: u64, len: u8, value: u128) -> bool {
         if self.entries.len() >= CAPACITY {
@@ -112,17 +108,15 @@ impl StoreBuffer {
         true
     }
 
-    /// Try to forward a load from the buffer. Scans in reverse
-    /// (most-recent store wins). Returns `Some(value)` if a pending
-    /// store fully covers the load range `[addr, addr+len)`.
-    /// Returns `None` if no covering store exists (caller falls
-    /// back to committed memory).
+    /// Forward a load from the buffer, or `None` to fall through to
+    /// committed memory.
     ///
-    /// Partial overlaps are not forwarded -- the caller reads from
-    /// committed memory, which is correct because committed memory
-    /// contains the pre-block state and no partial store has been
-    /// committed yet. A future update can add byte-merge for
-    /// partial overlaps if profiling shows it matters.
+    /// Only full-coverage matches forward. Partial overlaps return
+    /// `None`: committed memory still holds the pre-block state, so
+    /// the fallback read is correct.
+    ///
+    /// # Performance
+    /// O(n) reverse scan over up to 64 entries per load.
     #[inline]
     pub fn forward(&self, addr: u64, len: u8) -> Option<u128> {
         let load_end = addr + len as u64;
@@ -142,15 +136,12 @@ impl StoreBuffer {
         None
     }
 
-    /// Flush all pending stores to the effects vec as
-    /// `SharedWriteIntent` packets in program order, then clear.
+    /// Emit pending stores as `SharedWriteIntent` effects in program
+    /// order and clear the buffer. Conditional entries are skipped.
     pub fn flush(&mut self, effects: &mut Vec<Effect>, source: UnitId) {
         for i in 0..self.entries.len() {
             let e = &self.entries[i];
             if e.conditional {
-                // ConditionalStore effects are emitted separately
-                // by stwcx / stdcx. The buffer entry exists only
-                // for intra-step forwarding; do not double-emit.
                 continue;
             }
             let bytes = &e.value.to_be_bytes();
@@ -169,9 +160,10 @@ impl StoreBuffer {
         self.entries.clear();
     }
 
-    /// Check whether any pending store targets an address within
-    /// the given shadow range `[shadow_base, shadow_end)`. Used to
-    /// detect stores to code regions that require an early block yield.
+    /// Whether any pending store overlaps `[shadow_base, shadow_end)`.
+    ///
+    /// A `true` result forces an early block yield so the shadow is
+    /// re-decoded before fetch observes stale bytes.
     #[inline]
     pub fn has_store_in_range(&self, shadow_base: u64, shadow_end: u64) -> bool {
         for e in &self.entries {
@@ -200,12 +192,10 @@ mod tests {
     #[test]
     fn insert_and_forward_u32() {
         let mut buf = StoreBuffer::new();
-        // Store 0xDEADBEEF at addr 0x100, 4 bytes
         let val = 0xDEADBEEF_u128;
         assert!(buf.insert(0x100, 4, val));
         assert_eq!(buf.len(), 1);
 
-        // Forward a 4-byte load at the same address
         let fwd = buf.forward(0x100, 4);
         assert_eq!(fwd, Some(0xDEADBEEF));
     }
@@ -237,9 +227,7 @@ mod tests {
     #[test]
     fn forward_partial_overlap_returns_none() {
         let mut buf = StoreBuffer::new();
-        // Store 2 bytes at 0x100
         assert!(buf.insert(0x100, 2, 0xBBCC));
-        // Load 4 bytes at 0x100 -- partial overlap, not forwarded
         assert!(buf.forward(0x100, 4).is_none());
     }
 
@@ -255,9 +243,7 @@ mod tests {
     #[test]
     fn wider_store_covers_narrower_load() {
         let mut buf = StoreBuffer::new();
-        // Store 8 bytes at 0x100
         assert!(buf.insert(0x100, 8, 0x1122334455667788));
-        // Load 4 bytes at 0x100 -- covered by the 8-byte store
         let fwd = buf.forward(0x100, 4);
         assert_eq!(fwd, Some(0x11223344));
     }
@@ -265,9 +251,7 @@ mod tests {
     #[test]
     fn wider_store_covers_offset_load() {
         let mut buf = StoreBuffer::new();
-        // Store 8 bytes at 0x100
         assert!(buf.insert(0x100, 8, 0x1122334455667788));
-        // Load 4 bytes at 0x104 -- middle of the 8-byte store
         let fwd = buf.forward(0x104, 4);
         assert_eq!(fwd, Some(0x55667788));
     }
@@ -334,12 +318,9 @@ mod tests {
     #[test]
     fn forward_u16_from_u32_store() {
         let mut buf = StoreBuffer::new();
-        // Store 4 bytes: value 0xAABBCCDD at addr 0x100
         assert!(buf.insert(0x100, 4, 0xAABBCCDD));
-        // Load 2 bytes at 0x100 -- should get high halfword
         let fwd = buf.forward(0x100, 2);
         assert_eq!(fwd, Some(0xAABB));
-        // Load 2 bytes at 0x102 -- should get low halfword
         let fwd = buf.forward(0x102, 2);
         assert_eq!(fwd, Some(0xCCDD));
     }

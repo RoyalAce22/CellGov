@@ -1,22 +1,8 @@
-//! Barrier identifier.
-//!
-//! This module exposes the leaf identifier. A full barrier state
-//! machine (participant count, waiting set, release logic) would
-//! require scheduler integration to wake blocked participants on
-//! release; in the present runtime, `WaitOnEvent` with a
-//! `WaitTarget::Barrier` unconditionally blocks the issuing unit.
-//!
-//! `BarrierId` is the handle a unit references when it raises an
-//! `Effect::WaitOnEvent` against a barrier.
+//! Barrier identifier. Shared id type for barrier-shaped primitives
+//! (barriers, mutexes, semaphores); the state machine behind the id
+//! lives at the registry that owns the primitive.
 
-/// A stable identifier for a barrier (or barrier-shaped sync primitive)
-/// in the runtime.
-///
-/// Barriers, mutexes, and semaphores share this id type because they
-/// share the same wait-and-release shape. The state machine
-/// behind the id is what differs; the runtime's identification scheme
-/// does not. There is no `From<u64>` impl: id construction stays at
-/// registry sites.
+/// Stable identifier for a barrier-shaped sync primitive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct BarrierId(u64);
 
@@ -27,7 +13,7 @@ impl BarrierId {
         Self(raw)
     }
 
-    /// Return the underlying id value.
+    /// Underlying id value.
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0

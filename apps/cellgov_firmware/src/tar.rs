@@ -1,4 +1,7 @@
 //! USTAR TAR archive parser and extractor.
+//!
+//! Only regular files are returned; symlinks and other non-regular types are
+//! skipped. Records are padded to 512-byte boundaries.
 
 use std::path::{Path, PathBuf};
 
@@ -97,15 +100,10 @@ mod tests {
     #[test]
     fn parse_minimal_tar_entry() {
         let mut block = [0u8; 1024];
-        // name: "hello.txt"
         block[0..9].copy_from_slice(b"hello.txt");
-        // size: "5" in octal at offset 0x7C
         block[0x7C..0x7C + 2].copy_from_slice(b"5\0");
-        // filetype: '0' (regular file)
         block[0x9C] = b'0';
-        // magic: "ustar" at offset 0x101
         block[0x101..0x106].copy_from_slice(b"ustar");
-        // data: "hello" at offset 512
         block[512..517].copy_from_slice(b"hello");
 
         let entries = parse(&block);

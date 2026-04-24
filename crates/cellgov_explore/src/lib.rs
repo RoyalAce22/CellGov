@@ -1,13 +1,6 @@
-//! Schedule exploration engine for CellGov.
-//!
-//! Sits above `cellgov_core` and orchestrates bounded exploration of
-//! alternate legal schedules. The explorer detects decision points
-//! (where more than one unit is runnable), replays from snapshots
-//! with alternate choices, and classifies outcomes.
-//!
-//! The underlying deterministic runtime is unmodified; this crate
-//! drives it externally through `Runtime::step` and
-//! `Runtime::registry().runnable_ids()`.
+//! Bounded enumeration of legal alternate schedules over an unmodified
+//! runtime, classifying outcomes as schedule-stable, schedule-sensitive,
+//! or inconclusive.
 
 pub mod classify;
 pub mod config;
