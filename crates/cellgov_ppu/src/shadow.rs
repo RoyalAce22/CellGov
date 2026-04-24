@@ -34,7 +34,7 @@ fn is_block_terminator(insn: &PpuInstruction) -> bool {
             | PpuInstruction::Bcctr { .. }
             | PpuInstruction::CmpwiBc { .. }
             | PpuInstruction::CmpwBc { .. }
-            | PpuInstruction::Sc
+            | PpuInstruction::Sc { .. }
     )
 }
 
@@ -442,36 +442,68 @@ fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
     match insn {
         // addi rT, 0, imm => Li
         PpuInstruction::Addi { rt, ra: 0, imm } => Some(PpuInstruction::Li { rt, imm }),
-        // or rA, rS, rS => Mr
-        PpuInstruction::Or { ra, rs, rb } if rs == rb => Some(PpuInstruction::Mr { ra, rs }),
+        // or rA, rS, rS => Mr (only when Rc=0; or. must keep CR0 update).
+        PpuInstruction::Or {
+            ra,
+            rs,
+            rb,
+            rc: false,
+        } if rs == rb => Some(PpuInstruction::Mr { ra, rs }),
         // rlwinm rA, rS, sh, 0, 31-sh => Slwi
-        PpuInstruction::Rlwinm { ra, rs, sh, mb, me } if mb == 0 && me == 31 - sh => {
-            Some(PpuInstruction::Slwi { ra, rs, n: sh })
-        }
+        PpuInstruction::Rlwinm {
+            ra,
+            rs,
+            sh,
+            mb,
+            me,
+            rc: false,
+        } if mb == 0 && me == 31 - sh => Some(PpuInstruction::Slwi { ra, rs, n: sh }),
         // rlwinm rA, rS, 32-n, n, 31 => Srwi
-        PpuInstruction::Rlwinm { ra, rs, sh, mb, me } if me == 31 && sh != 0 && mb == (32 - sh) => {
-            Some(PpuInstruction::Srwi { ra, rs, n: mb })
-        }
+        PpuInstruction::Rlwinm {
+            ra,
+            rs,
+            sh,
+            mb,
+            me,
+            rc: false,
+        } if me == 31 && sh != 0 && mb == (32 - sh) => Some(PpuInstruction::Srwi { ra, rs, n: mb }),
         // rlwinm rA, rS, 0, n, 31 => Clrlwi
-        PpuInstruction::Rlwinm { ra, rs, sh, mb, me } if sh == 0 && me == 31 => {
-            Some(PpuInstruction::Clrlwi { ra, rs, n: mb })
-        }
+        PpuInstruction::Rlwinm {
+            ra,
+            rs,
+            sh,
+            mb,
+            me,
+            rc: false,
+        } if sh == 0 && me == 31 => Some(PpuInstruction::Clrlwi { ra, rs, n: mb }),
         // ori rA, rA, 0 => Nop
         PpuInstruction::Ori { ra, rs, imm: 0 } if ra == rs => Some(PpuInstruction::Nop),
         // cmpwi crF, rA, 0 => CmpwZero
         PpuInstruction::Cmpwi { bf, ra, imm: 0 } => Some(PpuInstruction::CmpwZero { bf, ra }),
         // rldicl rA, rS, 0, n => Clrldi
-        PpuInstruction::Rldicl { ra, rs, sh: 0, mb } => {
-            Some(PpuInstruction::Clrldi { ra, rs, n: mb })
-        }
+        PpuInstruction::Rldicl {
+            ra,
+            rs,
+            sh: 0,
+            mb,
+            rc: false,
+        } => Some(PpuInstruction::Clrldi { ra, rs, n: mb }),
         // rldicr rA, rS, n, 63-n => Sldi
-        PpuInstruction::Rldicr { ra, rs, sh, me } if sh != 0 && me == 63 - sh => {
-            Some(PpuInstruction::Sldi { ra, rs, n: sh })
-        }
+        PpuInstruction::Rldicr {
+            ra,
+            rs,
+            sh,
+            me,
+            rc: false,
+        } if sh != 0 && me == 63 - sh => Some(PpuInstruction::Sldi { ra, rs, n: sh }),
         // rldicl rA, rS, 64-n, n => Srdi
-        PpuInstruction::Rldicl { ra, rs, sh, mb } if sh != 0 && mb == 64 - sh => {
-            Some(PpuInstruction::Srdi { ra, rs, n: mb })
-        }
+        PpuInstruction::Rldicl {
+            ra,
+            rs,
+            sh,
+            mb,
+            rc: false,
+        } if sh != 0 && mb == 64 - sh => Some(PpuInstruction::Srdi { ra, rs, n: mb }),
         _ => None,
     }
 }
@@ -726,7 +758,8 @@ mod tests {
             Some(PpuInstruction::Or {
                 ra: 3,
                 rs: 4,
-                rb: 5
+                rb: 5,
+                rc: false,
             })
         );
     }

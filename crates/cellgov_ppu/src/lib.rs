@@ -4,7 +4,6 @@
 
 pub mod decode;
 pub mod exec;
-mod exec_vec;
 mod fp;
 pub mod instruction;
 pub mod loader;

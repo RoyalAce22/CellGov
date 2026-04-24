@@ -92,6 +92,39 @@ impl PpuState {
         }
     }
 
+    /// Write OV and update the sticky SO bit. PPC bit 32 (SO) = Rust
+    /// bit 31; PPC bit 33 (OV) = Rust bit 30. SO is sticky: OR-in on
+    /// overflow, never cleared here (only `mtxer` clears it).
+    pub fn set_xer_ov(&mut self, overflow: bool) {
+        if overflow {
+            self.xer |= (1u64 << 31) | (1u64 << 30);
+        } else {
+            self.xer &= !(1u64 << 30);
+        }
+    }
+
+    /// Set CR0 from a signed 64-bit result: LT/GT/EQ based on the
+    /// value as `i64`, plus the sticky SO bit copied from XER.
+    ///
+    /// Assumes 64-bit mode. In 32-bit mode, dot-form integer
+    /// arithmetic compares the sign-extended low 32 bits, not the
+    /// full 64-bit result. PS3 PPU always runs in 64-bit mode; this
+    /// function is unsafe to call from a 32-bit-mode code path.
+    pub fn set_cr0_from_result(&mut self, result: u64) {
+        let signed = result as i64;
+        let mut nib = if signed < 0 {
+            0b1000
+        } else if signed > 0 {
+            0b0100
+        } else {
+            0b0010
+        };
+        if (self.xer >> 31) & 1 != 0 {
+            nib |= 0b0001;
+        }
+        self.set_cr_field(0, nib);
+    }
+
     /// D-form effective address `(ra|0) + sign_extend(imm)`; `ra == 0`
     /// selects a literal zero base, not `GPR[0]`.
     pub fn ea_d_form(&self, ra: u8, imm: i16) -> u64 {
@@ -298,6 +331,41 @@ mod tests {
         s.reservation = Some(ReservedLine::containing(0x1000));
         s.reservation = None;
         assert_eq!(s.state_hash(), baseline);
+    }
+
+    #[test]
+    fn set_xer_ov_sets_ov_and_sticky_so() {
+        let mut s = PpuState::new();
+        s.set_xer_ov(true);
+        assert_eq!(s.xer & (1u64 << 30), 1u64 << 30, "OV set");
+        assert_eq!(s.xer & (1u64 << 31), 1u64 << 31, "SO set");
+        s.set_xer_ov(false);
+        assert_eq!(s.xer & (1u64 << 30), 0, "OV cleared");
+        assert_eq!(
+            s.xer & (1u64 << 31),
+            1u64 << 31,
+            "SO remains sticky across clear"
+        );
+    }
+
+    #[test]
+    fn set_cr0_from_result_negative_gt_eq() {
+        let mut s = PpuState::new();
+        s.set_cr0_from_result((-1i64) as u64);
+        assert_eq!(s.cr_field(0), 0b1000);
+        s.set_cr0_from_result(1);
+        assert_eq!(s.cr_field(0), 0b0100);
+        s.set_cr0_from_result(0);
+        assert_eq!(s.cr_field(0), 0b0010);
+    }
+
+    #[test]
+    fn set_cr0_from_result_copies_sticky_so() {
+        let mut s = PpuState::new();
+        s.set_xer_ov(true);
+        s.set_xer_ov(false);
+        s.set_cr0_from_result(0);
+        assert_eq!(s.cr_field(0), 0b0011, "EQ set plus SO copied from XER");
     }
 
     #[test]

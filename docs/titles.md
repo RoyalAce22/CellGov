@@ -42,9 +42,28 @@ Column definitions:
 
 | Serial | Title | Year | Engine | Format | Checkpoint | Steps | Insns | Cross-runner |
 |--------|-------|------|--------|--------|------------|------:|------:|--------------|
-| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | ProcessExit | 9,942 | ~10K | equivalent (1 byte non-semantic) |
+| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | ProcessExit | 9,963 | ~10K | equivalent (1 byte non-semantic) |
 | NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,109,359 | ~3.6B | equivalent (1 byte non-semantic) |
-| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | FirstRsxWrite | 20,569 | ~5M | equivalent (974 bytes non-semantic) |
+| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | MaxSteps (100M) | 390,625 | 100M | not available (see note below) |
+
+## WipEout HD Fury cross-runner note
+
+The earlier CellGov release tripped `FirstRsxWrite` on WipEout at
+step 20,569 and reported a 974-byte non-semantic divergence against
+RPCS3 at that checkpoint. That checkpoint turned out to be spurious:
+a PPU decoder bug (`rldimi` mis-decoded as `rldicl`) was corrupting
+the upper half of 64-bit pointers during init, producing a stray
+store to the RSX MMIO register at `0xC0000040` that tripped the
+checkpoint inside CellGov's own harness.
+
+With the decoder fix in place, WipEout's init runs past that point.
+Its boot was not observed to reach a natural stopping event within
+a 100M-instruction window, so the regression floor for this title is
+now recorded as a `MaxSteps` outcome at 390,625 steps. A new
+mutually-reachable checkpoint needs to be chosen before WipEout's
+cross-runner entry can be restored. See
+`tests/fixtures/BCES00664_cross_runner/compare_report.txt` for
+details.
 
 ## flOw ProcessExit
 

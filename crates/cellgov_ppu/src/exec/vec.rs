@@ -109,15 +109,29 @@ pub(crate) fn execute_va(
     let c = state.vr[vc as usize];
 
     let result = match xo {
-        0x2a => vsel(a, b, c),    // vsel
-        0x2b => vperm(a, b, c),   // vperm
-        0x2c => vsldoi(a, b, vc), // vsldoi (vc field is the shift amount)
+        0x2a => vsel(a, b, c),  // vsel
+        0x2b => vperm(a, b, c), // vperm
         _ => {
             return ExecuteVerdict::Fault(PpuFault::UnsupportedSyscall(xo as u64));
         }
     };
 
     state.vr[vt as usize] = result;
+    ExecuteVerdict::Continue
+}
+
+/// Execute `vsldoi`. `shb` is the 4-bit byte-shift immediate carved out
+/// of the VA-form vc slot by the decoder.
+pub(crate) fn execute_vsldoi(
+    state: &mut PpuState,
+    vt: u8,
+    va: u8,
+    vb: u8,
+    shb: u8,
+) -> ExecuteVerdict {
+    let a = state.vr[va as usize];
+    let b = state.vr[vb as usize];
+    state.vr[vt as usize] = vsldoi(a, b, shb);
     ExecuteVerdict::Continue
 }
 
