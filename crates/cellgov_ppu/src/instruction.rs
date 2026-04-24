@@ -830,6 +830,16 @@ pub enum PpuInstruction {
     /// The fetch loop advances PC past this without executing.
     Consumed,
 
+    // -- Cache block management --
+    /// Data cache block set to zero (Book II Sec. 3.2.2). The 128-byte
+    /// block containing `(RA|0)+(RB)` is written with zeros. No
+    /// cache modelling is implied; under the deterministic model the
+    /// visible effect is a 128-byte zero store at the aligned EA.
+    Dcbz {
+        ra: u8,
+        rb: u8,
+    },
+
     // -- System --
     /// System call. LV2 convention: syscall number in r11. The 7-bit
     /// LEV field selects the privilege level: PS3 usermode always
@@ -983,6 +993,7 @@ impl PpuInstruction {
             Self::CmpwiBc { .. } => "CmpwiBc",
             Self::CmpwBc { .. } => "CmpwBc",
             Self::Consumed => "Consumed",
+            Self::Dcbz { .. } => "Dcbz",
             Self::Sc { .. } => "Sc",
         }
     }

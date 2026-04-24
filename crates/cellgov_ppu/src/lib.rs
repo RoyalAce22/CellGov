@@ -236,6 +236,15 @@ impl ExecutionUnit for PpuExecutionUnit {
             self.state.reservation = None;
         }
 
+        // Resync the TB register to the global tick counter's
+        // current-step value. `max` preserves strict monotonicity
+        // across steps in the case where a prior step retired more
+        // mftb reads than the inter-step tick-derived delta.
+        let tb_from_tick = cellgov_time::ticks_to_tb(ctx.current_tick().raw());
+        if tb_from_tick > self.state.tb {
+            self.state.tb = tb_from_tick;
+        }
+
         let snapshot = if max_budget > 1 {
             Some(self.state.clone())
         } else {

@@ -133,6 +133,25 @@ fn unknown_syscall_yields_with_args() {
 }
 
 #[test]
+fn mftb_resyncs_to_ctx_current_tick_at_step_entry() {
+    use cellgov_time::GuestTicks;
+    let mut mem = GuestMemory::new(64);
+    // mftb r3 -> read TB into r3.
+    let mftb: u32 = (31u32 << 26) | (3u32 << 21) | (12u32 << 16) | (8u32 << 11) | (371u32 << 1);
+    place_insn(&mut mem, 0, mftb);
+    place_insn(&mut mem, 4, 0x4400_0002); // sc
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    // 1 simulated second of ticks -> TB = 79_800_000.
+    let ctx = ExecutionContext::new(&mem).with_current_tick(GuestTicks::new(
+        cellgov_time::SIMULATED_INSTRUCTIONS_PER_SECOND,
+    ));
+    let _ = unit.run_until_yield(Budget::new(2), &ctx, &mut Vec::new());
+    // mftb advances TB by +1 after resync; base + 1 = 79_800_001.
+    assert_eq!(unit.state().gpr[3], cellgov_time::CELL_PPU_TIMEBASE_HZ + 1);
+}
+
+#[test]
 fn decode_failure_faults() {
     let mut mem = GuestMemory::new(256);
     place_insn(&mut mem, 0, 0xFFFF_FFFF);

@@ -605,10 +605,15 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             };
         }
 
+        // dcbz: Book II Sec. 3.2.2. 128-byte zero store to the block
+        // containing the EA. Unlike the cache hints below, dcbz has
+        // architecturally visible effects and needs a real variant.
+        1014 => return Ok(PpuInstruction::Dcbz { ra, rb }),
+
         // Cache and memory-barrier hints: dcbst(54), dcbf(86), dcbt(278),
-        // sync/lwsync(598), dcbtst(854), icbi(982), dcbz(1014). The
-        // deterministic model collapses all to a nop.
-        86 | 54 | 278 | 598 | 854 | 982 | 1014 => {
+        // sync/lwsync(598), dcbtst(854), icbi(982). Under the
+        // deterministic single-unit model these collapse to a nop.
+        86 | 54 | 278 | 598 | 854 | 982 => {
             return Ok(PpuInstruction::Ori {
                 ra: 0,
                 rs: 0,
@@ -1225,6 +1230,29 @@ mod tests {
     }
 
     #[test]
+    fn dcbz_decodes_with_real_variant() {
+        // dcbz r6, r7 -> primary 31, RA=6, RB=7, XO=1014.
+        let raw: u32 = (31u32 << 26) | (6u32 << 16) | (7u32 << 11) | (1014u32 << 1);
+        let insn = decode(raw).unwrap();
+        assert_eq!(insn, PpuInstruction::Dcbz { ra: 6, rb: 7 });
+    }
+
+    #[test]
+    fn cache_hints_still_collapse_to_nop() {
+        // icbi (XO=982) remains nopped.
+        let raw: u32 = (31u32 << 26) | (982u32 << 1);
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Ori {
+                ra: 0,
+                rs: 0,
+                imm: 0,
+            }
+        );
+    }
+
+    #[test]
     fn vsldoi_decodes_with_shb_field() {
         // vsldoi v3, v1, v2, 4 -> primary 4, VT=3, VA=1, VB=2,
         // vc field holds SHB=4 in its low nibble, xo_6=0x2C.
@@ -1554,6 +1582,9 @@ mod tests {
                 rc,
             } => encode_md(rs, a, sh, mb, 3, rc),
 
+            // dcbz: X-form, no fields beyond RA/RB.
+            PpuInstruction::Dcbz { ra: a, rb: b } => p(31) | ra(a) | rb(b) | xo_10_rc(1014, false),
+
             // FP (Rc preserved, not yet honored).
             PpuInstruction::Fp63 {
                 xo,
@@ -1711,6 +1742,9 @@ mod tests {
                 );
             }
         }
+        // dcbz: RA=6, RB=7.
+        corpus.push((31u32 << 26) | (6u32 << 16) | (7u32 << 11) | (1014u32 << 1));
+
         // FP primary 59 and 63: xo=21 (fadd), xo=25 (fmul low 5), Rc=0/1.
         for &primary in &[59u32, 63] {
             for &xo in &[21u32, 50] {
