@@ -570,6 +570,31 @@ impl Lv2Host {
                 code: 0,
                 effects: vec![],
             },
+            Lv2Request::TimeGetTimebaseFrequency => Lv2Dispatch::Immediate {
+                code: cellgov_time::CELL_PPU_TIMEBASE_HZ,
+                effects: vec![],
+            },
+            Lv2Request::TimeGetCurrentTime { sec_ptr, nsec_ptr } => {
+                let (sec, nsec) = cellgov_time::ticks_to_sec_nsec(rt.current_tick().raw());
+                let sec_write = Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(sec_ptr as u64), 8).unwrap(),
+                    bytes: WritePayload::from_slice(&sec.to_be_bytes()),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: self.current_tick,
+                };
+                let nsec_write = Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(nsec_ptr as u64), 8).unwrap(),
+                    bytes: WritePayload::from_slice(&nsec.to_be_bytes()),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: self.current_tick,
+                };
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![sec_write, nsec_write],
+                }
+            }
             Lv2Request::PpuThreadExit { exit_value } => {
                 self.dispatch_ppu_thread_exit(exit_value, requester)
             }
@@ -725,6 +750,102 @@ mod tests {
             }
             other => panic!("expected Immediate, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn time_get_current_time_writes_sec_and_nsec_at_zero_tick() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let result = host.dispatch(
+            Lv2Request::TimeGetCurrentTime {
+                sec_ptr: 0x8000,
+                nsec_ptr: 0x8008,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0);
+                assert_eq!(effects.len(), 2);
+                for eff in &effects {
+                    if let Effect::SharedWriteIntent { range, bytes, .. } = eff {
+                        assert_eq!(range.length(), 8);
+                        assert_eq!(bytes.bytes(), &0u64.to_be_bytes());
+                    } else {
+                        panic!("expected SharedWriteIntent");
+                    }
+                }
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn time_get_current_time_splits_at_billion_tick() {
+        // tick = 1_500_000_001 -> sec = 1, nsec = 500_000_001.
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000).with_tick(cellgov_time::GuestTicks::new(1_500_000_001));
+        let result = host.dispatch(
+            Lv2Request::TimeGetCurrentTime {
+                sec_ptr: 0x1000,
+                nsec_ptr: 0x1008,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        let effects = match result {
+            Lv2Dispatch::Immediate { effects, .. } => effects,
+            other => panic!("expected Immediate, got {other:?}"),
+        };
+        // First effect is sec at 0x1000, second is nsec at 0x1008.
+        if let Effect::SharedWriteIntent { bytes, .. } = &effects[0] {
+            let v = u64::from_be_bytes(bytes.bytes().try_into().unwrap());
+            assert_eq!(v, 1);
+        } else {
+            panic!();
+        }
+        if let Effect::SharedWriteIntent { bytes, .. } = &effects[1] {
+            let v = u64::from_be_bytes(bytes.bytes().try_into().unwrap());
+            assert_eq!(v, 500_000_001);
+        } else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn time_get_current_time_and_timebase_frequency_are_coherent() {
+        // A title that reads both and cross-checks gets the same
+        // elapsed interval. Elapsed ticks converted to seconds via
+        // SIM_IPS must equal the TB delta divided by TB_HZ.
+        let tick_later = 3 * cellgov_time::SIMULATED_INSTRUCTIONS_PER_SECOND + 500_000_000;
+        let (sec, nsec) = cellgov_time::ticks_to_sec_nsec(tick_later);
+        let tb = cellgov_time::ticks_to_tb(tick_later);
+        let as_nsec_from_time_syscall = sec * 1_000_000_000 + nsec;
+        // TB reading converted via freq: ticks_us = tb * 1e6 / freq.
+        let us_from_tb = tb * 1_000_000 / cellgov_time::CELL_PPU_TIMEBASE_HZ;
+        let nsec_from_tb = us_from_tb * 1_000;
+        // Within 1us of each other (TB granularity is ~12.5 ns).
+        let diff = as_nsec_from_time_syscall.abs_diff(nsec_from_tb);
+        assert!(
+            diff < 1_000,
+            "time syscall and mftb must agree within 1 us: got {diff} ns"
+        );
+    }
+
+    #[test]
+    fn time_get_timebase_frequency_returns_cell_ppu_timebase_hz() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(Lv2Request::TimeGetTimebaseFrequency, UnitId::new(0), &rt);
+        assert_eq!(
+            result,
+            Lv2Dispatch::Immediate {
+                code: cellgov_time::CELL_PPU_TIMEBASE_HZ,
+                effects: vec![],
+            }
+        );
+        assert_eq!(cellgov_time::CELL_PPU_TIMEBASE_HZ, 79_800_000);
     }
 
     #[test]

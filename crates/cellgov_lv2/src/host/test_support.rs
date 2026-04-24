@@ -28,6 +28,11 @@ impl FakeRuntime {
             tick: GuestTicks::ZERO,
         }
     }
+
+    pub(super) fn with_tick(mut self, tick: GuestTicks) -> Self {
+        self.tick = tick;
+        self
+    }
 }
 
 impl Lv2Runtime for FakeRuntime {

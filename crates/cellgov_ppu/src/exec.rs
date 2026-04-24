@@ -1094,14 +1094,18 @@ pub fn execute(
 
         // Special-purpose register moves
         PpuInstruction::Mftb { rt } => {
-            // Deterministic per-read advance; host wall time is
-            // not observable.
-            state.tb += 512;
+            // Coarse-granularity advance: the per-step resync in
+            // `PpuExecutionUnit::run_until_yield` aligns TB with the
+            // global tick counter; the +1 here keeps two adjacent
+            // mftb reads within the same step strictly increasing,
+            // so a guest using a `delta = t2 - t1` idiom never
+            // observes zero.
+            state.tb = state.tb.saturating_add(1);
             state.gpr[rt as usize] = state.tb;
             ExecuteVerdict::Continue
         }
         PpuInstruction::Mftbu { rt } => {
-            state.tb += 512;
+            state.tb = state.tb.saturating_add(1);
             state.gpr[rt as usize] = (state.tb >> 32) & 0xFFFF_FFFF;
             ExecuteVerdict::Continue
         }
@@ -1605,12 +1609,36 @@ pub fn execute(
             unreachable!("Consumed slots should be skipped by the fetch loop")
         }
 
+        PpuInstruction::Dcbz { ra, rb } => {
+            let ea = state.ea_x_form(ra, rb) & !(DCBZ_BLOCK_BYTES as u64 - 1);
+            debug_assert!(
+                !(0xC000_0000..0xC010_0000).contains(&ea),
+                "dcbz into RSX MMIO window at 0x{ea:x} likely indicates pointer corruption",
+            );
+            // 16 doubleword zero stores via the normal forwarding
+            // path: load-after-dcbz in the same block sees zeros, and
+            // the block-boundary flush emits the effect packets.
+            let mut v = ExecuteVerdict::Continue;
+            for i in 0..(DCBZ_BLOCK_BYTES / 8) {
+                let step = buffer_store(store_buf, state, ea + (i as u64) * 8, 8, 0);
+                if step != ExecuteVerdict::Continue {
+                    v = step;
+                    break;
+                }
+            }
+            v
+        }
         // TODO(sc-lev): `lev` is preserved at decode but not routed;
         // LV1 hypercall (LEV=1) dispatch lands here when it exists.
         // PS3 usermode always issues LEV=0.
         PpuInstruction::Sc { lev: _lev } => ExecuteVerdict::Syscall,
     }
 }
+
+/// Data cache block size on the Cell PPU. Book II Sec. 3.2.2 defines
+/// the `dcbz` block as the implementation's data cache line; Cell
+/// PPU is 128 bytes.
+const DCBZ_BLOCK_BYTES: usize = 128;
 
 /// Evaluate a PPC BO/BI branch condition. Decrements CTR as a side
 /// effect when BO bit 0x04 is clear.

@@ -11,6 +11,7 @@
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
 use cellgov_sync::ReservationTable;
+use cellgov_time::GuestTicks;
 
 /// Readonly view of runtime state passed into `run_until_yield`.
 ///
@@ -26,6 +27,7 @@ pub struct ExecutionContext<'a> {
     syscall_return: Option<u64>,
     register_writes: &'a [(u8, u64)],
     reservations: Option<&'a ReservationTable>,
+    current_tick: GuestTicks,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -38,6 +40,7 @@ impl<'a> ExecutionContext<'a> {
             syscall_return: None,
             register_writes: &[],
             reservations: None,
+            current_tick: GuestTicks::ZERO,
         }
     }
 
@@ -51,6 +54,7 @@ impl<'a> ExecutionContext<'a> {
             syscall_return: None,
             register_writes: &[],
             reservations: None,
+            current_tick: GuestTicks::ZERO,
         }
     }
 
@@ -66,6 +70,7 @@ impl<'a> ExecutionContext<'a> {
             syscall_return: Some(code),
             register_writes: &[],
             reservations: None,
+            current_tick: GuestTicks::ZERO,
         }
     }
 
@@ -85,6 +90,20 @@ impl<'a> ExecutionContext<'a> {
             syscall_return: Some(code),
             register_writes,
             reservations: None,
+            current_tick: GuestTicks::ZERO,
+        }
+    }
+
+    /// Attach the runtime's current guest-tick count, replacing any
+    /// prior value. Default is `GuestTicks::ZERO`; the runtime sets
+    /// this to `Runtime::time()` before each step so PPU code paths
+    /// that read the TB register see a monotonic counter coherent
+    /// with `sys_time_get_current_time`.
+    #[inline]
+    pub const fn with_current_tick(self, current_tick: GuestTicks) -> Self {
+        Self {
+            current_tick,
+            ..self
         }
     }
 
@@ -98,6 +117,7 @@ impl<'a> ExecutionContext<'a> {
             syscall_return: self.syscall_return,
             register_writes: self.register_writes,
             reservations: Some(table),
+            current_tick: self.current_tick,
         }
     }
 
@@ -142,6 +162,12 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn register_writes(&self) -> &[(u8, u64)] {
         self.register_writes
+    }
+
+    /// Runtime's current guest-tick count at the start of this step.
+    #[inline]
+    pub const fn current_tick(&self) -> GuestTicks {
+        self.current_tick
     }
 }
 

@@ -2390,9 +2390,25 @@ fn srad_shifts_full_64_bits_arithmetically() {
 #[test]
 fn mftbu_returns_upper_32_bits_of_tb() {
     let mut s = PpuState::new();
-    s.tb = 0xAAAA_BBBB_0000_0000 - 512; // post-increment lands at 0xAAAA_BBBB_0000_0000
+    s.tb = 0xAAAA_BBBB_0000_0000 - 1; // post-increment lands at 0xAAAA_BBBB_0000_0000
     exec_no_mem(&PpuInstruction::Mftbu { rt: 6 }, &mut s);
     assert_eq!(s.gpr[6], 0xAAAA_BBBB);
+}
+
+#[test]
+fn mftb_returns_strictly_increasing_values_within_step() {
+    // Two consecutive mftb reads in the same step must differ so a
+    // guest doing `delta = t2 - t1` never observes zero.
+    let mut s = PpuState::new();
+    s.tb = 100;
+    exec_no_mem(&PpuInstruction::Mftb { rt: 3 }, &mut s);
+    let t1 = s.gpr[3];
+    exec_no_mem(&PpuInstruction::Mftb { rt: 4 }, &mut s);
+    let t2 = s.gpr[4];
+    assert!(
+        t2 > t1,
+        "mftb must strictly increase per read: {t1} -> {t2}"
+    );
 }
 
 #[test]
@@ -2819,6 +2835,72 @@ fn srawi_sh_zero_clears_ca() {
     );
     assert!(!s.xer_ca(), "sh=0 must clear CA regardless of prior value");
     assert_eq!(s.gpr[5], 0xFFFF_FFFF_FFFF_FFFF, "EXTS of -1 low word");
+}
+
+#[test]
+fn dcbz_zeroes_128_byte_aligned_block() {
+    // Buffer spans three cache lines with sentinel bytes before and
+    // after the target block so we can confirm dcbz does not spill.
+    let base = 0x1000u64;
+    let mut mem = vec![0xAAu8; 384];
+    let mut s = PpuState::new();
+    // ea = 0x1000 + 100 = 0x1064; aligned block starts at 0x1000.
+    s.gpr[3] = 100;
+    s.gpr[4] = 0x1000;
+    let mut effects = Vec::new();
+    let v = exec_with_mem(
+        &PpuInstruction::Dcbz { ra: 3, rb: 4 },
+        &mut s,
+        base,
+        &mem,
+        &mut effects,
+    );
+    assert_eq!(v, ExecuteVerdict::Continue);
+    // Reconstruct what committed memory would look like after the 16
+    // SharedWriteIntent effects land.
+    for eff in &effects {
+        if let cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. } = eff {
+            let start = (range.start().raw() - base) as usize;
+            let end = start + range.length() as usize;
+            mem[start..end].copy_from_slice(bytes.bytes());
+        }
+    }
+    // Bytes outside the 128-byte aligned block are untouched.
+    for (i, b) in mem.iter().enumerate().take(384) {
+        let in_block = i < 128;
+        let expected = if in_block { 0 } else { 0xAA };
+        assert_eq!(*b, expected, "mem[{i}] (in_block={in_block})");
+    }
+    assert_eq!(effects.len(), 16, "16 doubleword zero effects");
+}
+
+#[test]
+fn dcbz_ea_is_aligned_down_to_block_boundary() {
+    let base = 0x2000u64;
+    let mem = vec![0xFFu8; 256];
+    let mut s = PpuState::new();
+    // EA = 0x2000 + 0x7F = 0x207F. Aligned EA = 0x2000.
+    s.gpr[3] = 0x7F;
+    s.gpr[4] = 0x2000;
+    let mut effects = Vec::new();
+    let v = exec_with_mem(
+        &PpuInstruction::Dcbz { ra: 3, rb: 4 },
+        &mut s,
+        base,
+        &mem,
+        &mut effects,
+    );
+    assert_eq!(v, ExecuteVerdict::Continue);
+    // All effect ranges must start in [0x2000, 0x2080).
+    for eff in &effects {
+        if let cellgov_effects::Effect::SharedWriteIntent { range, .. } = eff {
+            let addr = range.start().raw();
+            assert!(
+                (0x2000..0x2080).contains(&addr),
+                "effect addr 0x{addr:x} outside aligned block [0x2000, 0x2080)",
+            );
+        }
+    }
 }
 
 #[test]

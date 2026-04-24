@@ -661,7 +661,9 @@ impl Runtime {
             } else {
                 ExecutionContext::with_received(&self.memory, &received)
             };
-            let ctx = ctx.with_reservations(&self.reservations);
+            let ctx = ctx
+                .with_reservations(&self.reservations)
+                .with_current_tick(self.time);
             let unit = self
                 .registry
                 .get_mut(unit_id)

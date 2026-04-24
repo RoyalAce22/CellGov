@@ -69,6 +69,19 @@ pub enum Lv2Request {
         /// Termination status delivered to any subsequent joiner.
         value: i32,
     },
+    /// sys_time_get_current_time (145). Writes `(sec, nsec)` into
+    /// two 64-bit out-pointers. `nsec` is `0..=999_999_999`.
+    TimeGetCurrentTime {
+        /// Out-pointer for seconds since an implementation-defined
+        /// origin (CellGov uses runtime start).
+        sec_ptr: u32,
+        /// Out-pointer for the nanosecond remainder `0..=999_999_999`.
+        nsec_ptr: u32,
+    },
+    /// sys_time_get_timebase_frequency (147). Return-only; no
+    /// arguments. The dispatch arm answers with the PPU timebase
+    /// register frequency from `cellgov_time::CELL_PPU_TIMEBASE_HZ`.
+    TimeGetTimebaseFrequency,
     /// sys_tty_write (403).
     TtyWrite {
         /// File descriptor.
@@ -550,6 +563,11 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             thread_id: p!(0),
             value: p!(1),
         },
+        145 => Lv2Request::TimeGetCurrentTime {
+            sec_ptr: p!(0),
+            nsec_ptr: p!(1),
+        },
+        147 => Lv2Request::TimeGetTimebaseFrequency,
         403 => Lv2Request::TtyWrite {
             fd: p!(0),
             buf_ptr: p!(1),
@@ -843,6 +861,24 @@ mod tests {
     fn classify_ppu_thread_yield() {
         let args = [0xDEAD, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(classify(43, &args), Lv2Request::PpuThreadYield);
+    }
+
+    #[test]
+    fn classify_time_get_timebase_frequency_ignores_args() {
+        let args = [0xDEAD, 0xBEEF, 0, 0, 0, 0, 0, 0];
+        assert_eq!(classify(147, &args), Lv2Request::TimeGetTimebaseFrequency);
+    }
+
+    #[test]
+    fn classify_time_get_current_time_captures_out_pointers() {
+        let args = [0x9000, 0x9008, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(145, &args),
+            Lv2Request::TimeGetCurrentTime {
+                sec_ptr: 0x9000,
+                nsec_ptr: 0x9008,
+            }
+        );
     }
 
     #[test]
@@ -1267,6 +1303,7 @@ mod tests {
         (130, &[0, 1]),
         (133, &[0, 1, 2, 3]),
         (134, &[0]),
+        (145, &[0, 1]),
         (156, &[0, 1]),
         (170, &[0, 1, 2, 3]),
         (172, &[0, 1, 2, 3, 4, 5]),
