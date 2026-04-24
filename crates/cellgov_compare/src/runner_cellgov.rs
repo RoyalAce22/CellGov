@@ -1,11 +1,8 @@
-//! CellGov runner adapter.
-//!
-//! Converts a `ScenarioResult` into a normalized `Observation` by:
-//!
-//! 1. Mapping `ScenarioOutcome` to `ObservedOutcome`.
-//! 2. Extracting named memory regions from the final committed memory.
-//! 3. Decoding the binary trace and coalescing semantic events.
-//! 4. Carrying state hashes through.
+//! CellGov runner adapter: produces `Observation` values from scenarios
+//! (`observe`) or from long-running boots (`observe_from_boot`). The two
+//! paths are separate because the testkit runner has no notion of
+//! process-exit, hard faults, or HLE-driven termination that a boot
+//! reports.
 
 use crate::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,
@@ -15,8 +12,7 @@ use cellgov_testkit::fixtures::ScenarioFixture;
 use cellgov_testkit::runner::{self, ScenarioOutcome, ScenarioResult};
 use cellgov_trace::{TraceReader, TraceRecord, TracedEffectKind, TracedWakeReason};
 
-/// Descriptor for a memory region to extract from the final committed
-/// memory. Address and size are in guest address space.
+/// Memory region to extract from final committed memory (guest address space).
 #[derive(Debug, Clone)]
 pub struct RegionDescriptor {
     /// Region name for the observation.
@@ -27,12 +23,7 @@ pub struct RegionDescriptor {
     pub size: u64,
 }
 
-/// How a long-running boot (e.g. `cellgov_cli run-game`) terminated.
-///
-/// Separate from `ScenarioOutcome` because the testkit runner has no
-/// notion of guest-initiated process exit, hard faults, or HLE-driven
-/// termination. Each of these maps onto a normalized `ObservedOutcome`
-/// when an `Observation` is built from a boot run.
+/// How a long-running boot terminated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootOutcome {
     /// Guest reached `sys_process_exit` cleanly.
@@ -41,35 +32,27 @@ pub enum BootOutcome {
     Fault,
     /// Max-step cap reached without termination.
     MaxSteps,
-    /// First PPU write into the RSX command region (0xC0000000+)
-    /// was attempted. The harness treats this as a success signal
-    /// for titles whose attract-mode loops never exit on their own;
-    /// the observation captured at this point is the cross-runner
-    /// comparison checkpoint. Both runners reach it deterministically
-    /// once per boot.
+    /// First PPU write into the RSX command region was attempted;
+    /// used as a cross-runner checkpoint for titles whose attract-mode
+    /// loops never exit on their own.
     RsxWriteCheckpoint,
-    /// A step retired with its `local_diagnostics.pc` equal to a
-    /// PC supplied via the CLI's `--checkpoint pc=0xADDR` flag.
-    /// The payload is that PC. Used by the bench harness to stop
-    /// at a named instruction for A/B measurements; not a
-    /// title-default trigger.
+    /// A step retired with its PC equal to a caller-supplied checkpoint PC.
     PcReached(u64),
-    /// Internal time counter overflowed. Distinct from `Fault`
-    /// because this is a harness-level resource exhaustion, not a
-    /// guest-visible error. A reproducibility pair that yields
-    /// `TimeOverflow` on one side and `Fault` on the other would be
-    /// miscategorized as "both faulted" if we collapsed the two.
+    /// Internal time counter overflowed. Distinct from `Fault` so a pair
+    /// yielding `TimeOverflow` on one side and `Fault` on the other is
+    /// not miscategorized as "both faulted".
     TimeOverflow,
 }
 
-/// Build an `Observation` from a completed `run-game`-style boot.
+/// Build an `Observation` from a completed boot run.
 ///
-/// Unlike `observe()` (which consumes a scenario's trace and hashes),
-/// this variant takes a raw final-memory snapshot plus the boot outcome
-/// and step count. State hashes are set to `None` because the
-/// game-boot path does not retain the per-step hashes the testkit
-/// runner accumulates; the `ObservedHashes` field is reserved for
-/// scenario comparisons, not long-boot checkpoints.
+/// State hashes are `None`: the boot path does not retain the per-step
+/// hashes the scenario runner accumulates.
+///
+/// Outcome mapping:
+/// - `ProcessExit`, `RsxWriteCheckpoint`, `PcReached` -> `Completed`
+/// - `MaxSteps`, `TimeOverflow` -> `Timeout`
+/// - `Fault` -> `Fault`
 pub fn observe_from_boot(
     final_memory: &[u8],
     outcome: BootOutcome,
@@ -80,18 +63,8 @@ pub fn observe_from_boot(
         BootOutcome::ProcessExit => ObservedOutcome::Completed,
         BootOutcome::Fault => ObservedOutcome::Fault,
         BootOutcome::MaxSteps => ObservedOutcome::Timeout,
-        // RSX-write checkpoint is a success signal: the guest
-        // reached the agreed-upon cross-runner stopping point.
         BootOutcome::RsxWriteCheckpoint => ObservedOutcome::Completed,
-        // A PC-checkpoint stop is likewise a success signal: the
-        // named instruction retired. The harness uses this for
-        // bench-boot A/B measurements; classifying it as Completed
-        // keeps it symmetric with the RSX-write and process-exit
-        // signals for any downstream comparator.
         BootOutcome::PcReached(_) => ObservedOutcome::Completed,
-        // Harness-level resource exhaustion maps to Timeout (same
-        // shape as MaxSteps) rather than Fault: the guest did not
-        // misbehave, the harness simply ran out of time-counter.
         BootOutcome::TimeOverflow => ObservedOutcome::Timeout,
     };
 
@@ -127,10 +100,10 @@ pub fn observe_from_boot(
 
 /// Convert a `ScenarioResult` into a normalized `Observation`.
 ///
-/// `regions` declares which memory regions to extract. Each region
-/// must be within bounds of the final committed memory; out-of-bounds
-/// regions are silently filled with zeros (the comparison layer will
-/// catch the mismatch).
+/// Out-of-bounds regions are filled with zeros; the comparison layer
+/// catches the mismatch.
+///
+/// Outcome mapping: `Stalled` -> `Completed`, `MaxStepsExceeded` -> `Timeout`.
 pub fn observe(result: &ScenarioResult, regions: &[RegionDescriptor]) -> Observation {
     let outcome = match result.outcome {
         ScenarioOutcome::Stalled => ObservedOutcome::Completed,
@@ -177,10 +150,6 @@ pub fn observe(result: &ScenarioResult, regions: &[RegionDescriptor]) -> Observa
 }
 
 /// Decode the binary trace and coalesce into semantic events.
-///
-/// Filters for `EffectEmitted` (mailbox/DMA kinds), `UnitBlocked`,
-/// and `UnitWoken` records. Each maps to one `ObservedEvent` with a
-/// monotonically increasing sequence index.
 fn extract_events(trace_bytes: &[u8]) -> Vec<ObservedEvent> {
     let mut events = Vec::new();
     let mut seq: u32 = 0;
@@ -199,7 +168,6 @@ fn extract_events(trace_bytes: &[u8]) -> Vec<ObservedEvent> {
                 Some((ObservedEventKind::UnitBlock, unit.raw()))
             }
             TraceRecord::UnitWoken { unit, reason } => {
-                // DMA completion wakes map to DmaComplete, not UnitWake.
                 let kind = match reason {
                     TracedWakeReason::DmaCompletion => ObservedEventKind::DmaComplete,
                     TracedWakeReason::WakeEffect => ObservedEventKind::UnitWake,
@@ -235,12 +203,8 @@ pub enum DeterminismError {
     HashMismatch,
 }
 
-/// Run a scenario factory twice, observe both runs, and verify the
-/// observations are identical. Returns the observation on success, or
-/// a `DeterminismError` describing the first field that diverged.
-///
-/// This catches silent determinism regressions without relying on an
-/// external oracle.
+/// Run a scenario factory twice and verify both observations match;
+/// returns the observation, or the first field that diverged.
 pub fn observe_with_determinism_check(
     factory: impl Fn() -> ScenarioFixture,
     regions: &[RegionDescriptor],
@@ -328,8 +292,6 @@ mod tests {
     fn observe_extracts_events_from_mailbox_scenario() {
         let result = run(fixtures::mailbox_send_scenario(3));
         let obs = observe(&result, &[]);
-        // The mailbox send scenario should produce at least some
-        // MailboxSend events.
         assert!(
             obs.events
                 .iter()
@@ -435,10 +397,6 @@ mod tests {
 
     #[test]
     fn observe_from_boot_maps_pc_reached_to_completed() {
-        // A PC-checkpoint stop is a success signal on the same
-        // footing as process-exit and RSX-write; classify as
-        // Completed so the cross-runner comparator can diff
-        // observations produced with --checkpoint pc=ADDR.
         let mem = vec![0u8; 16];
         let obs = observe_from_boot(&mem, BootOutcome::PcReached(0x10381ce8), 1402388, &[]);
         assert_eq!(obs.outcome, ObservedOutcome::Completed);
@@ -447,10 +405,6 @@ mod tests {
 
     #[test]
     fn observe_from_boot_maps_rsx_write_checkpoint_to_completed() {
-        // RSX-write checkpoint is a success signal: the boot reached
-        // the agreed-upon cross-runner stopping point. It must map
-        // to Completed so the cross-runner comparator treats two
-        // checkpoint captures as comparable.
         let mem = vec![0u8; 16];
         let obs = observe_from_boot(&mem, BootOutcome::RsxWriteCheckpoint, 12_345, &[]);
         assert_eq!(obs.outcome, ObservedOutcome::Completed);

@@ -1,42 +1,30 @@
 //! Predecoded instruction shadow for PT_LOAD text ranges.
 //!
-//! Decodes every instruction word in a guest memory range once at
-//! construction time, storing the result in a flat
-//! `Vec<PpuInstruction>` indexed by `(pc - base) / 4`. The PPU's
-//! hot-path fetch becomes a bounds check + array index instead of
-//! a raw-memory read + `decode::decode` match cascade.
+//! Fetch is a bounds check plus array index; slots are produced once
+//! at construction, with a quickening and super-pairing pass applied
+//! before first use.
 //!
-//! Invalidation: callers mark a byte range stale after any commit
-//! that writes into the shadowed region. The next fetch of a stale
-//! slot re-decodes from committed memory and clears the stale bit.
 //! Self-modifying code (CRT0 relocations, HLE trampoline planting)
-//! works through this path.
+//! goes through [`invalidate_range`](PredecodedShadow::invalidate_range)
+//! followed by [`refresh`](PredecodedShadow::refresh); the stale bit
+//! forces the caller onto the raw fetch + decode path until the
+//! slot is repopulated from committed memory.
 
 use crate::decode;
 use crate::instruction::PpuInstruction;
 
-/// A predecoded instruction shadow covering one contiguous guest
-/// memory range. Each 4-byte-aligned slot holds either a valid
-/// `PpuInstruction` or a stale marker that forces re-decode on
-/// the next fetch.
+/// Predecoded instruction shadow covering one contiguous guest range.
 pub struct PredecodedShadow {
     base: u64,
-    /// Decoded instructions. `Some(insn)` for successfully decoded
-    /// words, `None` for words that failed to decode. A `None`
-    /// slot behaves the same as a stale slot: the caller falls
-    /// back to raw fetch + decode, which will produce the same
-    /// decode error the non-shadowed path would.
+    /// `None` means decode failed; callers treat it like a stale slot
+    /// and fall through to the raw fetch + decode path.
     slots: Vec<Option<PpuInstruction>>,
     stale: Vec<bool>,
     /// Instructions remaining to end of basic block (inclusive).
-    /// A branch/syscall has `block_len = 1`. The first instruction
-    /// of a basic block has `block_len = N`. Stale slots are reset
-    /// to 1 (conservative single-instruction block).
+    /// Stale slots collapse to 1 (conservative single-instruction block).
     block_len: Vec<u16>,
 }
 
-/// Whether an instruction is a basic-block terminator (branches,
-/// syscall, or anything that unconditionally transfers control).
 fn is_block_terminator(insn: &PpuInstruction) -> bool {
     matches!(
         insn,
@@ -53,14 +41,10 @@ fn is_block_terminator(insn: &PpuInstruction) -> bool {
 impl PredecodedShadow {
     /// Build a shadow from raw guest memory bytes.
     ///
-    /// `base` is the guest address of `bytes[0]`. Every aligned
-    /// 4-byte word in `bytes` is decoded; words that fail to
-    /// decode store `None` (the caller falls back to the raw
-    /// fetch + decode path, producing the same decode-error fault
-    /// the non-shadowed interpreter would).
-    ///
-    /// After decoding, a quickening pass rewrites common idioms
-    /// (li, mr, slwi, srwi, clrlwi) into specialized variants.
+    /// `base` is the guest address of `bytes[0]`. Decode is followed
+    /// by a quickening pass and a super-pairing pass; block lengths
+    /// are recomputed once super-pairing has fixed terminator status
+    /// for the fused variants.
     pub fn build(base: u64, bytes: &[u8]) -> Self {
         let n_slots = bytes.len() / 4;
         let mut slots = Vec::with_capacity(n_slots);
@@ -80,22 +64,18 @@ impl PredecodedShadow {
         };
         shadow.quicken();
         shadow.super_pair();
-        // Recompute block lengths after super-pairing since
-        // branch-crossing supers (CmpwiBc, CmpwBc) change
-        // terminator status.
+        // CmpwiBc/CmpwBc promote non-terminators to terminators.
         shadow.block_len = Self::compute_block_lengths(&shadow.slots);
         shadow
     }
 
-    /// Backward scan to fill block_len. A branch/syscall gets 1.
-    /// Each preceding non-terminator gets `next + 1`.
     fn compute_block_lengths(slots: &[Option<PpuInstruction>]) -> Vec<u16> {
         let n = slots.len();
         let mut bl = vec![1u16; n];
         if n == 0 {
             return bl;
         }
-        // Last slot is always block_len=1 (end of shadow = implicit boundary)
+        // End of shadow is an implicit block boundary.
         for i in (0..n.saturating_sub(1)).rev() {
             match &slots[i] {
                 Some(insn) if !is_block_terminator(insn) => {
@@ -133,12 +113,11 @@ impl PredecodedShadow {
         self.base + (self.slots.len() as u64) * 4
     }
 
-    /// Fetch the instruction at `pc`. Returns `Some(insn)` if the
-    /// slot is valid (not stale, successfully decoded) and `pc`
-    /// falls inside the shadowed range on a 4-byte boundary.
-    /// Returns `None` if the slot is stale, was a decode error,
-    /// out of range, or misaligned. A `None` return tells the
-    /// caller to fall back to the raw fetch + decode path.
+    /// Fetch the instruction at `pc`.
+    ///
+    /// `None` means the caller must fall back to raw fetch + decode:
+    /// slot is stale, decode failed at build time, `pc` is out of
+    /// range, or `pc` is misaligned.
     #[inline]
     pub fn get(&self, pc: u64) -> Option<PpuInstruction> {
         if pc < self.base {
@@ -158,10 +137,12 @@ impl PredecodedShadow {
         self.slots[idx]
     }
 
-    /// Mark every slot overlapping the byte range
-    /// `[addr, addr + len)` as stale. The next `get` for those
-    /// PCs will return `None`, forcing the caller to re-decode
-    /// from committed memory via [`refresh`](Self::refresh).
+    /// Mark every slot overlapping `[addr, addr + len)` as stale.
+    ///
+    /// Predecessor `block_len` entries are not recomputed here; they
+    /// may overshoot, but the per-slot `stale`/`None` check on each
+    /// fetch re-bounds the block. Pair with [`refresh`](Self::refresh)
+    /// to repopulate once new bytes are committed.
     pub fn invalidate_range(&mut self, addr: u64, len: u64) {
         if len == 0 {
             return;
@@ -182,12 +163,12 @@ impl PredecodedShadow {
         }
     }
 
-    /// Re-decode a single slot from a raw instruction word and
-    /// clear its stale bit. `pc` must be inside the shadow and
-    /// 4-byte aligned. Returns `None` if the slot is out of range
-    /// or misaligned; `Some(None)` if the decode failed (the slot
-    /// stores `None`, matching the build-time decode-error path);
-    /// `Some(Some(insn))` on a successful re-decode.
+    /// Re-decode a single slot and clear its stale bit.
+    ///
+    /// Outer `None` means `pc` is out of range or misaligned.
+    /// `Some(None)` means decode failed (same slot state as the
+    /// build-time decode-error path). Quickening is re-applied;
+    /// super-pairing is not.
     pub fn refresh(&mut self, pc: u64, raw: u32) -> Option<Option<PpuInstruction>> {
         if pc < self.base {
             return None;
@@ -208,9 +189,11 @@ impl PredecodedShadow {
         Some(quickened)
     }
 
-    /// Instructions remaining in the basic block starting at `pc`
-    /// (inclusive). Returns 1 for out-of-range, misaligned, or stale
-    /// slots (conservative: treat as single-instruction block).
+    /// Instructions remaining in the basic block at `pc` (inclusive).
+    ///
+    /// Upper bound only: invalidation without a subsequent refresh
+    /// leaves predecessor counts unchanged. Returns 1 for out-of-range
+    /// or misaligned `pc`.
     #[inline]
     pub fn block_len_at(&self, pc: u64) -> u16 {
         if pc < self.base {
@@ -227,11 +210,7 @@ impl PredecodedShadow {
         self.block_len[idx]
     }
 
-    /// Re-scan block_len for slot `idx` and its predecessors back to
-    /// the previous block boundary. Called after refresh to keep
-    /// block_len accurate for the affected region.
     fn rescan_block_len(&mut self, idx: usize) {
-        // Set this slot's block_len based on whether it's a terminator.
         let is_term = match &self.slots[idx] {
             Some(insn) => is_block_terminator(insn),
             None => true,
@@ -241,7 +220,6 @@ impl PredecodedShadow {
         } else {
             self.block_len[idx] = self.block_len[idx + 1].saturating_add(1);
         }
-        // Walk backwards to update predecessors.
         let mut i = idx;
         while i > 0 {
             i -= 1;
@@ -257,9 +235,8 @@ impl PredecodedShadow {
         }
     }
 
-    /// Rewrite decoded slots in place, replacing common idioms with
-    /// specialized instruction variants that execute faster (fewer
-    /// field reads, no redundant operations).
+    /// Rewrite decoded slots in place into specialized instruction
+    /// variants. See [`quicken_insn`] for the idioms recognized.
     pub fn quicken(&mut self) {
         for i in 0..self.slots.len() {
             if self.stale[i] {
@@ -273,11 +250,13 @@ impl PredecodedShadow {
         }
     }
 
-    /// Rewrite adjacent instruction pairs into compound
-    /// superinstructions. Runs after quickening. Only pairs where
-    /// neither instruction is a block terminator are considered
-    /// (no control-flow crossing). The second slot of a fused pair
-    /// becomes `Consumed`.
+    /// Fuse adjacent instruction pairs into superinstructions.
+    ///
+    /// Runs after [`quicken`](Self::quicken); the second slot of a
+    /// fused pair is replaced with `Consumed`. Pairs that cross a
+    /// block boundary (first operand is a terminator) are skipped,
+    /// but fusions that *produce* a terminator (CmpwiBc/CmpwBc) are
+    /// allowed -- callers must recompute `block_len` after this runs.
     pub fn super_pair(&mut self) {
         let n = self.slots.len();
         if n < 2 {
@@ -299,8 +278,7 @@ impl PredecodedShadow {
             if let Some(super_insn) = make_super_pair(a, b) {
                 self.slots[i] = Some(super_insn);
                 self.slots[i + 1] = Some(PpuInstruction::Consumed);
-                // Skip the Consumed slot so we don't try to pair it
-                // with the next instruction.
+                // Skip Consumed so it is not fused with slot i+2.
                 i += 2;
             } else {
                 i += 1;
@@ -309,8 +287,7 @@ impl PredecodedShadow {
     }
 }
 
-/// Try to fuse two adjacent instructions into a single
-/// superinstruction. Returns `None` when no fusion applies.
+/// Fuse two adjacent instructions, or `None` if no rule applies.
 fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<PpuInstruction> {
     match (a, b) {
         // lwz rT, off(rA) + cmpwi crF, rT, imm
@@ -459,13 +436,13 @@ fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<PpuInstructio
     }
 }
 
-/// Try to rewrite a generic instruction into a specialized variant.
-/// Returns `None` when no specialization applies.
+/// Rewrite one decoded instruction into a specialized variant, or
+/// `None` if no rule applies.
 fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
     match insn {
         // addi rT, 0, imm => Li
         PpuInstruction::Addi { rt, ra: 0, imm } => Some(PpuInstruction::Li { rt, imm }),
-        // or rA, rS, rS => Mr (when rs == rb)
+        // or rA, rS, rS => Mr
         PpuInstruction::Or { ra, rs, rb } if rs == rb => Some(PpuInstruction::Mr { ra, rs }),
         // rlwinm rA, rS, sh, 0, 31-sh => Slwi
         PpuInstruction::Rlwinm { ra, rs, sh, mb, me } if mb == 0 && me == 31 - sh => {
@@ -479,7 +456,7 @@ fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
         PpuInstruction::Rlwinm { ra, rs, sh, mb, me } if sh == 0 && me == 31 => {
             Some(PpuInstruction::Clrlwi { ra, rs, n: mb })
         }
-        // ori rA, rS, 0 where rA == rS => Nop
+        // ori rA, rA, 0 => Nop
         PpuInstruction::Ori { ra, rs, imm: 0 } if ra == rs => Some(PpuInstruction::Nop),
         // cmpwi crF, rA, 0 => CmpwZero
         PpuInstruction::Cmpwi { bf, ra, imm: 0 } => Some(PpuInstruction::CmpwZero { bf, ra }),
@@ -546,11 +523,11 @@ mod tests {
         assert!(shadow.get(4).is_some());
         assert!(shadow.get(8).is_some());
 
+        // Byte range 2..6 overlaps slots 0 and 1.
         shadow.invalidate_range(2, 4);
-        // Byte range 2..6 overlaps slots at offset 0 and 4.
-        assert!(shadow.get(0).is_none(), "slot 0 should be stale");
-        assert!(shadow.get(4).is_none(), "slot 1 should be stale");
-        assert!(shadow.get(8).is_some(), "slot 2 untouched");
+        assert!(shadow.get(0).is_none());
+        assert!(shadow.get(4).is_none());
+        assert!(shadow.get(8).is_some());
     }
 
     #[test]
@@ -570,7 +547,7 @@ mod tests {
 
         let new_raw = li_raw(3, 99);
         let insn = shadow.refresh(0, new_raw);
-        // refresh applies quickening: addi r3, r0, 99 => Li { rt: 3, imm: 99 }
+        // Quickening applies: addi r3, r0, 99 => Li.
         assert_eq!(insn, Some(Some(PpuInstruction::Li { rt: 3, imm: 99 })));
         assert!(shadow.get(0).is_some());
     }
@@ -621,7 +598,6 @@ mod tests {
 
     #[test]
     fn block_len_straight_line() {
-        // 4 addi instructions, no branches
         let shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), li_raw(5, 3), li_raw(6, 4)]);
         assert_eq!(shadow.block_len_at(0), 4);
         assert_eq!(shadow.block_len_at(4), 3);
@@ -631,40 +607,30 @@ mod tests {
 
     #[test]
     fn block_len_branch_terminates() {
-        // addi, addi, b, addi
         let shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), b_raw(), li_raw(5, 3)]);
         assert_eq!(shadow.block_len_at(0), 3);
         assert_eq!(shadow.block_len_at(4), 2);
-        assert_eq!(shadow.block_len_at(8), 1); // branch itself
-        assert_eq!(shadow.block_len_at(12), 1); // new block
+        assert_eq!(shadow.block_len_at(8), 1);
+        assert_eq!(shadow.block_len_at(12), 1);
     }
 
     #[test]
     fn block_len_syscall_terminates() {
-        // addi, sc, addi
         let shadow = build_from_words(0, &[li_raw(3, 1), sc_raw(), li_raw(4, 2)]);
         assert_eq!(shadow.block_len_at(0), 2);
-        assert_eq!(shadow.block_len_at(4), 1); // sc
-        assert_eq!(shadow.block_len_at(8), 1); // next block
+        assert_eq!(shadow.block_len_at(4), 1);
+        assert_eq!(shadow.block_len_at(8), 1);
     }
 
     #[test]
     fn block_len_invalidation_resets() {
         let mut shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), li_raw(5, 3)]);
         assert_eq!(shadow.block_len_at(0), 3);
-        shadow.invalidate_range(4, 4); // stale slot 1
-        assert_eq!(shadow.block_len_at(0), 3); // slot 0 unchanged (already computed)
-
-        // Wait -- invalidation should also reset predecessors.
-        // Actually per design: invalidation resets the STALED slots to 1,
-        // but predecessors' block_len is NOT recalculated on invalidation
-        // (too expensive). The safe behavior is: block_len_at for a slot
-        // whose successor is stale may overcount. The outer loop must
-        // re-check stale/None on every fetch within the block, which it
-        // already does (shadow.get returns None for stale slots).
-        // The block_len is an upper bound, not exact.
-        assert_eq!(shadow.block_len_at(4), 1); // staled slot
-        assert_eq!(shadow.block_len_at(8), 1); // end of shadow
+        shadow.invalidate_range(4, 4);
+        // Predecessor block_len is an upper bound post-invalidation.
+        assert_eq!(shadow.block_len_at(0), 3);
+        assert_eq!(shadow.block_len_at(4), 1);
+        assert_eq!(shadow.block_len_at(8), 1);
     }
 
     #[test]
@@ -673,11 +639,9 @@ mod tests {
         assert_eq!(shadow.block_len_at(0), 3);
         shadow.invalidate_range(4, 4);
         assert_eq!(shadow.block_len_at(4), 1);
-        // Refresh slot 1 with a non-branch instruction
         shadow.refresh(4, li_raw(4, 99));
-        // Now slot 1 is no longer stale, block_len should be rescanned
-        assert_eq!(shadow.block_len_at(4), 2); // slots 1,2
-        assert_eq!(shadow.block_len_at(0), 3); // predecessor updated
+        assert_eq!(shadow.block_len_at(4), 2);
+        assert_eq!(shadow.block_len_at(0), 3);
     }
 
     #[test]
@@ -993,9 +957,7 @@ mod tests {
 
     #[test]
     fn super_pair_consumed_not_chained() {
-        // Three instructions: li r3, 1; stw r3, 0(r1); li r4, 2
-        // The first two should fuse; the consumed slot should not
-        // chain with the third instruction.
+        // Consumed must not pair forward with slot i+2.
         let shadow = build_from_words(0, &[li_raw(3, 1), stw_raw(3, 1, 0), li_raw(4, 2)]);
         assert!(matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })));
         assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
@@ -1004,8 +966,6 @@ mod tests {
 
     #[test]
     fn super_pair_branch_blocks_fusion() {
-        // b_raw is a branch; it cannot be the first of a fused pair.
-        // branch + li: no fusion should happen.
         let shadow = build_from_words(0, &[b_raw(), li_raw(3, 1)]);
         assert!(matches!(shadow.get(0), Some(PpuInstruction::B { .. })));
         assert!(matches!(shadow.get(4), Some(PpuInstruction::Li { .. })));
@@ -1014,17 +974,13 @@ mod tests {
     #[test]
     fn super_pair_stale_slot_blocks_fusion() {
         let mut shadow = build_from_words(0, &[li_raw(3, 42), stw_raw(3, 1, 0)]);
-        // Before invalidation, they should have been fused
         assert!(matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })));
-        // Invalidate the first slot; refreshing should NOT re-pair
         shadow.invalidate_range(0, 4);
-        assert!(shadow.get(0).is_none()); // stale
+        assert!(shadow.get(0).is_none());
     }
 
     #[test]
     fn super_pair_multiple_pairs() {
-        // Two independent fusible pairs in sequence:
-        // mflr r0, stw r0, 16(r1), lwz r3, 8(r1), cmpwi cr0, r3, 0
         let shadow = build_from_words(
             0,
             &[
@@ -1048,7 +1004,6 @@ mod tests {
 
     #[test]
     fn super_pair_single_instruction_shadow() {
-        // Single instruction: no pairing possible
         let shadow = build_from_words(0, &[li_raw(3, 1)]);
         assert_eq!(shadow.get(0), Some(PpuInstruction::Li { rt: 3, imm: 1 }));
     }
@@ -1245,27 +1200,21 @@ mod tests {
 
     #[test]
     fn super_pair_cmpwi_bc_link_no_fuse() {
-        // cmpwi + bcl (link=true): should NOT fuse
-        let bc_link = bc_raw(0x0C, 2, 8) | 1; // set LK bit
+        let bc_link = bc_raw(0x0C, 2, 8) | 1; // LK bit
         let shadow = build_from_words(0, &[cmpwi_raw(0, 3, 42), bc_link]);
-        // First should stay as Cmpwi (or CmpwZero if imm==0)
         assert!(matches!(shadow.get(0), Some(PpuInstruction::Cmpwi { .. })));
         assert!(matches!(shadow.get(4), Some(PpuInstruction::Bc { .. })));
     }
 
     #[test]
     fn super_pair_cmpwi_bc_is_block_terminator() {
-        // CmpwiBc should be treated as a block terminator.
-        // Block: li r3, 5; cmpwi cr0, r3, 5; bc ...
         let shadow = build_from_words(0, &[li_raw(3, 5), cmpwi_raw(0, 3, 5), bc_raw(0x0C, 2, 8)]);
-        // li at slot 0, CmpwiBc at slot 1, Consumed at slot 2
         assert!(matches!(shadow.get(0), Some(PpuInstruction::Li { .. })));
         assert!(matches!(
             shadow.get(4),
             Some(PpuInstruction::CmpwiBc { .. })
         ));
         assert_eq!(shadow.get(8), Some(PpuInstruction::Consumed));
-        // block_len: li=2, CmpwiBc=1 (terminator), Consumed=1
         assert_eq!(shadow.block_len_at(0), 2);
         assert_eq!(shadow.block_len_at(4), 1);
     }

@@ -1,9 +1,4 @@
 //! Shared fixtures for `cellgov_compare` unit tests.
-//!
-//! Every private `meta`/`obs`/`region`/`event`/`sample_observation` helper
-//! that test modules used to define separately lives here. Also exposes a
-//! panic-safe `TempDir` guard for tests that need to write JSON baselines
-//! to disk.
 
 use crate::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,
@@ -38,11 +33,11 @@ pub fn event(kind: ObservedEventKind, unit: u64, sequence: u32) -> ObservedEvent
     }
 }
 
-/// Build an observation with the given outcome, memory regions, and events.
+/// Build an observation with the given outcome, regions, and events.
 ///
-/// Metadata is tagged `"test"`, state hashes are absent. Tests that need
-/// hashes should use `sample_observation` or construct `Observation`
-/// directly.
+/// Metadata is tagged `"test"` and state hashes are absent. Tests that
+/// need hashes should use [`sample_observation`] or construct
+/// [`Observation`] directly.
 pub fn obs(
     outcome: ObservedOutcome,
     regions: Vec<NamedMemoryRegion>,
@@ -57,13 +52,7 @@ pub fn obs(
     }
 }
 
-/// A fully populated observation used by baseline roundtrip and
-/// observation-equality tests.
-///
-/// Contains one memory region, three events, state hashes, and
-/// "cellgov" metadata with a step count. Any test that needs a
-/// realistic observation without caring about specific values should
-/// use this.
+/// A fully populated observation for baseline roundtrip and equality tests.
 pub fn sample_observation() -> Observation {
     Observation {
         outcome: ObservedOutcome::Completed,
@@ -103,8 +92,8 @@ pub fn sample_observation() -> Observation {
 
 /// RAII guard for a per-test temp directory under `std::env::temp_dir()`.
 ///
-/// The directory is created on `new` and removed recursively on drop,
-/// so tests that panic mid-body do not leak temp state across runs.
+/// Removes the directory recursively on drop so panicking tests do not
+/// leak temp state across runs.
 pub struct TempDir {
     path: PathBuf,
 }
@@ -113,8 +102,6 @@ impl TempDir {
     /// Create a fresh temp directory named `cellgov_<name>`.
     pub fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!("cellgov_{name}"));
-        // Remove any stale leftovers from a previous panicking run
-        // before re-creating the directory.
         std::fs::remove_dir_all(&path).ok();
         std::fs::create_dir_all(&path).ok();
         Self { path }

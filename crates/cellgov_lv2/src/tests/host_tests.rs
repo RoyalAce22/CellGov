@@ -1,28 +1,14 @@
-//! Cross-primitive dispatch tests.
-//!
-//! Tests that exercise more than one LV2 primitive at once, and
-//! therefore would arbitrarily pick a home if placed in any one
-//! submodule's tests block. Per-primitive tests live next to the
-//! dispatch code they exercise (`src/host/<primitive>.rs`);
-//! host-scope tests (construction, state_hash gating, stub
-//! syscalls) live in `src/host.rs`.
+//! Cross-primitive dispatch tests: shapes that touch more than
+//! one LV2 primitive at once. Per-primitive tests live next to
+//! their dispatch code in `src/host/<primitive>.rs`; host-scope
+//! tests (construction, state_hash gating, stub syscalls) live
+//! in `src/host.rs`.
 
 use super::*;
 use crate::host::test_support::*;
 
-// ---------------------------------------------------------------
-// Cross-primitive isolation.
-//
-// lwmutex and heavy mutex share neither their id space nor their
-// waiter lists. A caller touching one primitive must not leak
-// into the other's table state.
-// ---------------------------------------------------------------
-
 #[test]
 fn lwmutex_and_mutex_id_spaces_are_independent() {
-    // The two tables must not collide on ids: a lwmutex id and
-    // a mutex id can legitimately share the same u32 value.
-    // Acquiring one must not affect the other.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let src = UnitId::new(0);
@@ -58,12 +44,9 @@ fn lwmutex_and_mutex_id_spaces_are_independent() {
         other => panic!("expected Immediate(0), got {other:?}"),
     };
     // lwmutex ids start at 1; heavy mutex ids come from the
-    // shared `next_kernel_id` allocator (0x4000_0001+). They
-    // MUST NOT collide regardless of that layout; the table
-    // types are distinct.
+    // shared `next_kernel_id` allocator (0x4000_0001+).
     assert_eq!(lw_id, 1);
     assert!(hv_id >= 0x4000_0001);
-    // Acquire both with the primary.
     host.dispatch(
         Lv2Request::LwMutexLock {
             id: lw_id,
@@ -80,7 +63,6 @@ fn lwmutex_and_mutex_id_spaces_are_independent() {
         src,
         &rt,
     );
-    // Both owned by primary, independently.
     assert_eq!(
         host.lwmutexes().lookup(lw_id).unwrap().owner(),
         Some(PpuThreadId::PRIMARY),
@@ -89,14 +71,12 @@ fn lwmutex_and_mutex_id_spaces_are_independent() {
         host.mutexes().lookup(hv_id).unwrap().owner(),
         Some(PpuThreadId::PRIMARY),
     );
-    // Release lwmutex; heavy mutex unchanged.
     host.dispatch(Lv2Request::LwMutexUnlock { id: lw_id }, src, &rt);
     assert_eq!(host.lwmutexes().lookup(lw_id).unwrap().owner(), None);
     assert_eq!(
         host.mutexes().lookup(hv_id).unwrap().owner(),
         Some(PpuThreadId::PRIMARY),
     );
-    // Release heavy mutex; lwmutex still free.
     host.dispatch(Lv2Request::MutexUnlock { mutex_id: hv_id }, src, &rt);
     assert_eq!(host.mutexes().lookup(hv_id).unwrap().owner(), None);
     assert_eq!(host.lwmutexes().lookup(lw_id).unwrap().owner(), None);
@@ -104,9 +84,6 @@ fn lwmutex_and_mutex_id_spaces_are_independent() {
 
 #[test]
 fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
-    // A thread parked on a lwmutex must not appear as a waiter
-    // on a heavy mutex or vice versa, even when both primitives
-    // have the same thread as owner.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let owner_unit = UnitId::new(0);
@@ -154,7 +131,6 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
             other => panic!("expected Immediate, got {other:?}"),
         }
     };
-    // Owner acquires both.
     host.dispatch(
         Lv2Request::LwMutexLock {
             id: lw_id,
@@ -171,7 +147,6 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
         owner_unit,
         &rt,
     );
-    // Waiter parks on the lwmutex only.
     host.dispatch(
         Lv2Request::LwMutexLock {
             id: lw_id,
@@ -180,8 +155,6 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
         waiter_unit,
         &rt,
     );
-    // lwmutex waiter list has waiter_tid; heavy mutex list is
-    // empty.
     assert_eq!(
         host.lwmutexes()
             .lookup(lw_id)
@@ -192,8 +165,6 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
         vec![waiter_tid],
     );
     assert!(host.mutexes().lookup(hv_id).unwrap().waiters().is_empty());
-    // Releasing the heavy mutex must not wake the lwmutex
-    // waiter.
     let r = host.dispatch(Lv2Request::MutexUnlock { mutex_id: hv_id }, owner_unit, &rt);
     assert!(matches!(
         r,
@@ -202,7 +173,6 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
             effects: _,
         }
     ));
-    // lwmutex waiter still parked.
     assert_eq!(
         host.lwmutexes()
             .lookup(lw_id)
@@ -212,7 +182,6 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
             .collect::<Vec<_>>(),
         vec![waiter_tid],
     );
-    // Releasing the lwmutex wakes the waiter.
     let r = host.dispatch(Lv2Request::LwMutexUnlock { id: lw_id }, owner_unit, &rt);
     match r {
         Lv2Dispatch::WakeAndReturn { woken_unit_ids, .. } => {
@@ -221,18 +190,6 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
         other => panic!("expected WakeAndReturn, got {other:?}"),
     }
 }
-
-// ---------------------------------------------------------------
-// Multi-primitive determinism canary.
-//
-// Two identical Lv2Host instances fed the same syscall sequence
-// -- spanning PPU thread creation, heavy mutex lock/unlock,
-// lwmutex lock/unlock, and semaphore wait/post cycles -- must
-// produce byte-identical state hashes and byte-identical
-// dispatch-outcome tags at every step. This is the guard
-// against ordering nondeterminism: any such regression must
-// trip this test before it ever reaches a real title.
-// ---------------------------------------------------------------
 
 #[test]
 fn multi_primitive_determinism_canary() {
@@ -276,10 +233,6 @@ fn multi_primitive_determinism_canary() {
             other => panic!("unexpected {other:?}"),
         };
 
-        // Fixed syscall script. Each entry is (label, unit,
-        // request). The label travels into the trace so test
-        // output identifies which step first diverged if the
-        // canary ever fails.
         let script: Vec<(&'static str, UnitId, Lv2Request)> = vec![
             (
                 "t0-mtx-lock",
@@ -391,12 +344,9 @@ fn multi_primitive_determinism_canary() {
         let mut trace = Vec::with_capacity(script.len());
         for (label, unit, req) in script {
             let d = host.dispatch(req, unit, &rt);
-            // Classify the dispatch outcome as a short tag.
-            // Payload details (effect vectors, specific woken
-            // ids) are intentionally excluded: the canary
-            // guards scheduler selection order, which the tag
-            // plus the post-dispatch state hash together
-            // capture.
+            // Tag omits effect payloads; scheduler selection
+            // order is already covered by the post-dispatch
+            // state hash paired with this tag.
             let tag = match &d {
                 Lv2Dispatch::Immediate { code, .. } => format!("Imm({code:#x})"),
                 Lv2Dispatch::Block { .. } => "Block".into(),
@@ -432,30 +382,15 @@ fn multi_primitive_determinism_canary() {
             "determinism canary diverged at step {i}: run_a = {a:?}, run_b = {b:?}",
         );
     }
-    // Script covers lock/unlock/wait/post cycles on 3 distinct
-    // PPU threads; a run with an empty script would trivially
-    // pass. Guard against regression by asserting the script
-    // actually ran non-empty state changes.
+    // Guard against accidentally neutering the script.
     assert!(run_a.len() >= 15);
 }
 
-// ---------------------------------------------------------------
-// Lost-wake regression tests.
-//
-// For each primitive in the "release is remembered" family
-// (lwmutex, mutex, semaphore, event queue, event flag), the
-// release scheduled BEFORE the wait must observably unblock the
-// would-be waiter. Test shape: run the release first on an empty
-// primitive, then run the wait; the wait must complete Immediate,
-// not Block. A handler that split the check-and-mutate across
-// commit boundaries would park the waiter even though the
-// release already landed -- a classic lost-wake bug.
-//
-// Cond is NOT in this family. A cond signal-before-wait is
-// observably lost (covered by
-// cond_signal_before_wait_does_not_wake_subsequent_waiter in
-// src/host/cond.rs).
-// ---------------------------------------------------------------
+// Lost-wake family: lwmutex, mutex, semaphore, event queue, and
+// event flag all remember a release issued before the
+// corresponding wait. Cond does not (see
+// `cond_signal_before_wait_does_not_wake_subsequent_waiter` in
+// `src/host/cond.rs`).
 
 #[test]
 fn lost_wake_lwmutex_unlock_before_lock_does_not_park_waiter() {

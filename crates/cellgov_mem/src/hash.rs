@@ -1,9 +1,5 @@
-//! Deterministic FNV-1a hashing for state snapshots.
-//!
-//! Used by the runtime, registries, and sync primitives to produce
-//! reproducible state hashes at every commit boundary. The algorithm
-//! is simple and stable -- no randomized seed, no platform-dependent
-//! behavior.
+//! FNV-1a hashing for state snapshots. No randomized seed; stable across
+//! platforms and runs.
 
 /// FNV-1a offset basis (64-bit).
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -11,9 +7,7 @@ const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 /// FNV-1a prime (64-bit).
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// Compute the FNV-1a hash of a byte sequence.
-///
-/// An empty input returns the offset basis (0xcbf29ce484222325).
+/// FNV-1a hash of a byte sequence. Empty input returns the offset basis.
 #[inline]
 pub fn fnv1a(bytes: &[u8]) -> u64 {
     let mut h = FNV_OFFSET;
@@ -24,13 +18,13 @@ pub fn fnv1a(bytes: &[u8]) -> u64 {
     h
 }
 
-/// Incremental FNV-1a hasher for building hashes from multiple sources.
+/// Incremental FNV-1a hasher.
 pub struct Fnv1aHasher {
     state: u64,
 }
 
 impl Fnv1aHasher {
-    /// Create a new hasher with the FNV offset basis.
+    /// Create a new hasher seeded with the FNV offset basis.
     #[inline]
     pub fn new() -> Self {
         Self { state: FNV_OFFSET }

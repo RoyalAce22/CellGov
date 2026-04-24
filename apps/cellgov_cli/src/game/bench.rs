@@ -1,11 +1,9 @@
 //! `bench-boot` / `bench-boot-once` / `bench-boot-pair` machinery.
 //!
-//! Two-process harness for PS3 boot throughput measurement. Each
-//! bench pair runs two subprocesses back-to-back, parses a single
-//! machine-readable `BENCH_RESULT` line from each, and reports an
-//! agreement percentage as the reproducibility gate. The boot
-//! setup is byte-identical to `run-game`; only the step loop and
-//! the bookkeeping differ.
+//! Two-process harness for boot throughput measurement. A pair runs
+//! two subprocesses back-to-back, parses a `BENCH_RESULT` line from
+//! each, and reports an agreement percentage as the reproducibility
+//! gate.
 
 use std::time::Instant;
 
@@ -13,9 +11,7 @@ use super::boot;
 use super::manifest::{self, TitleManifest};
 use super::step_loop::bench_step_loop;
 
-/// Result of one [`bench_boot`] invocation. Reports only what the
-/// reproducibility harness needs: how many steps ran, how long the
-/// step loop took, and how the boot terminated.
+/// Result of one [`bench_boot`] invocation.
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct BenchBootResult {
@@ -36,10 +32,8 @@ impl BenchBootResult {
 }
 
 /// Run one boot with the minimum step-loop bookkeeping needed to
-/// detect termination. The companion to `run_game` for throughput
-/// measurement: no per-step HashMap entry, no BTreeSet insert, no
-/// decode-again-for-coverage, no progress checkpoint. The boot setup
-/// is byte-identical; only the step loop differs.
+/// detect termination. Shares `boot::prepare` with `run-game`; only
+/// the step loop differs.
 pub fn bench_boot(
     title: &TitleManifest,
     elf_path: &str,
@@ -86,16 +80,14 @@ pub fn bench_boot(
     }
 }
 
-/// Run a single bench invocation and print one machine-parseable
-/// result line to stdout. Used as the inner call when
-/// `bench_boot_pair` spawns a subprocess per measurement.
+/// Run a single bench invocation and print one `BENCH_RESULT` line
+/// to stdout.
 ///
-/// The subprocess-per-measurement shape keeps two back-to-back
-/// measurements comparable: running them in the same process sees
-/// ~60 percent wall-time drift between run 1 and run 2 on Windows,
-/// dominated by 1 GB guest-memory allocation / page-commit reuse
-/// patterns. Each measurement needs a fresh heap, fresh page
-/// tables, and fresh CPU caches to be comparable.
+/// Each measurement runs in its own subprocess: in-process
+/// back-to-back runs drift ~60 percent in wall time on Windows due
+/// to 1 GB guest-memory page-commit reuse. A fresh heap, page
+/// tables, and CPU caches are required for the two runs to be
+/// comparable.
 pub fn bench_boot_one_run(
     title: &TitleManifest,
     elf_path: &str,
@@ -125,10 +117,7 @@ pub fn bench_boot_one_run(
 }
 
 /// Render a [`cellgov_compare::BootOutcome`] for a `BENCH_RESULT`
-/// line. Kept in one place so the emit side and the
-/// [`parse_bench_result`] side share the canonical string form for
-/// every variant, including the `PcReached(0xADDR)` shape which
-/// carries a payload.
+/// line. The canonical string form shared with [`parse_bench_result`].
 pub(crate) fn format_bench_outcome(outcome: cellgov_compare::BootOutcome) -> String {
     use cellgov_compare::BootOutcome;
     match outcome {
@@ -141,10 +130,9 @@ pub(crate) fn format_bench_outcome(outcome: cellgov_compare::BootOutcome) -> Str
     }
 }
 
-/// Run `bench_boot_one_run` twice in two subprocesses and print a
-/// pair report with the agreement percentage between the two runs.
-/// The harness rejects a pair whose wall times disagree by more
-/// than 5 percent.
+/// Run `bench_boot_one_run` twice in separate subprocesses and
+/// print a pair report. Rejects the pair when wall times disagree
+/// by more than 5 percent.
 pub fn bench_boot_pair(
     title: &TitleManifest,
     elf_path: &str,
@@ -207,11 +195,8 @@ pub fn bench_boot_pair(
     (r1, r2)
 }
 
-/// Fork-and-exec the current binary to run one `bench-boot-once`
-/// invocation; parse the `BENCH_RESULT` line from stdout.
-///
-/// Inherits the subprocess's stderr so TTS and startup chatter still
-/// reach the user; only stdout is captured for the parseable line.
+/// Fork-and-exec the current binary as `bench-boot-once` and parse
+/// its `BENCH_RESULT` line from stdout. Stderr is inherited.
 fn spawn_one_run(
     title: &TitleManifest,
     elf_path: &str,
@@ -248,11 +233,8 @@ fn spawn_one_run(
     cmd.arg(elf_path);
     let output = cmd.output().expect("subprocess runs");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Reject a nonzero-exit subprocess even if it happened to
-    // emit a BENCH_RESULT line before crashing (e.g., a panic in
-    // cleanup after the bench timing finished). Measurement
-    // accepted from a failed run is worse than a hard error: it
-    // feeds bogus data into a pair's agreement gate.
+    // A nonzero-exit subprocess that emitted BENCH_RESULT before
+    // crashing would feed bogus data into the agreement gate.
     if !output.status.success() {
         eprintln!(
             "bench-boot: subprocess exited nonzero (status={:?}); refusing to accept its BENCH_RESULT",
@@ -271,8 +253,12 @@ fn spawn_one_run(
 }
 
 /// Parse a `BENCH_RESULT steps=N wall_ms=M steps_per_sec=X outcome=O`
-/// line out of captured stdout. Returns `None` if no such line is
-/// present or if any required field is missing / malformed.
+/// line out of captured stdout.
+///
+/// # Errors
+///
+/// Returns `None` when no such line is present or any required field
+/// is missing or malformed.
 pub(crate) fn parse_bench_result(stdout: &str) -> Option<BenchBootResult> {
     let line = stdout.lines().find(|l| l.starts_with("BENCH_RESULT "))?;
     let mut steps: Option<usize> = None;
@@ -284,10 +270,8 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Option<BenchBootResult> {
         } else if let Some(v) = tok.strip_prefix("wall_ms=") {
             wall_ms = v.parse().ok();
         } else if tok.starts_with("steps_per_sec=") {
-            // Parse and discard: the field is emitted by the
-            // formatter for human readers but derivable from steps
-            // and wall_ms. Explicitly recognizing it keeps a future
-            // "unknown token" warning from firing on this one.
+            // Derivable from steps and wall_ms; recognized so the
+            // unknown-token warning below does not fire on it.
         } else if let Some(v) = tok.strip_prefix("outcome=") {
             outcome = match v {
                 "ProcessExit" => Some(cellgov_compare::BootOutcome::ProcessExit),
@@ -296,9 +280,9 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Option<BenchBootResult> {
                 "MaxSteps" => Some(cellgov_compare::BootOutcome::MaxSteps),
                 "TimeOverflow" => Some(cellgov_compare::BootOutcome::TimeOverflow),
                 other => {
-                    // PcReached carries a hex payload: `PcReached(0xADDR)`.
-                    // Keep the parse strict -- malformed payloads return
-                    // None so a corrupted `BENCH_RESULT` line fails loudly.
+                    // PcReached(0xADDR) is the one variant that
+                    // carries a payload; malformed payloads return
+                    // None so the line fails loudly.
                     if let Some(addr_hex) = other
                         .strip_prefix("PcReached(0x")
                         .and_then(|s| s.strip_suffix(')'))
@@ -312,11 +296,8 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Option<BenchBootResult> {
                 }
             };
         } else {
-            // Unknown token: warn to stderr so a future field
-            // added to the formatter without a matching parser
-            // arm is visible in the agreement report instead of
-            // silently skipped. Parsing continues because the
-            // required fields may still be present.
+            // Surfaces a formatter/parser drift; parsing continues
+            // so required fields may still yield a result.
             eprintln!(
                 "parse_bench_result: warning: unknown token {tok:?} in BENCH_RESULT line; parser may be stale"
             );
@@ -330,8 +311,7 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Option<BenchBootResult> {
 }
 
 /// Relative wall-time difference between two runs, as a percentage
-/// of the faster run. Used as the reproducibility gate: two bench
-/// invocations must agree within 5 percent.
+/// of the faster run.
 pub(crate) fn agreement_percent(a: std::time::Duration, b: std::time::Duration) -> f64 {
     let aa = a.as_secs_f64();
     let bb = b.as_secs_f64();

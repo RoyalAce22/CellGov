@@ -1,10 +1,8 @@
 //! PPU architectural state.
 //!
-//! Owns the general-purpose register file, floating-point registers
-//! (FPR), vector registers (VR), program counter, condition register,
-//! link register, count register, XER, the time base, and the atomic
-//! reservation register. No runtime knowledge -- this is pure data
-//! that `exec.rs` reads and writes.
+//! Pure data owned and mutated by `exec.rs`: GPR/FPR/VR register
+//! banks, PC, CR, LR, CTR, XER, the time base, and the per-unit
+//! reservation register.
 
 use cellgov_sync::ReservedLine;
 
@@ -20,36 +18,32 @@ pub const VR_COUNT: usize = 32;
 /// Full PPU architectural state.
 #[derive(Clone)]
 pub struct PpuState {
-    /// 32 x 64-bit general-purpose registers.
+    /// General-purpose registers.
     pub gpr: [u64; GPR_COUNT],
-    /// 32 x 64-bit floating-point registers (stored as f64 bits).
+    /// Floating-point registers (raw f64 bit pattern).
     pub fpr: [u64; FPR_COUNT],
-    /// 32 x 128-bit vector registers (AltiVec / VMX).
+    /// Vector registers, stored big-endian (byte 0 is the MSB).
     pub vr: [u128; VR_COUNT],
     /// Program counter.
     pub pc: u64,
-    /// Condition register (8 x 4-bit fields, packed into low 32 bits).
+    /// Condition register: 8 x 4-bit fields packed into the low 32 bits.
     pub cr: u32,
-    /// Link register (return address for bl/blr).
+    /// Link register.
     pub lr: u64,
-    /// Count register (loop counter for bc/bcctr).
+    /// Count register.
     pub ctr: u64,
-    /// Fixed-point exception register (carry, overflow, summary overflow).
+    /// Fixed-point exception register.
     pub xer: u64,
-    /// Time base counter (monotonically increasing, deterministic).
+    /// Time base counter.
     pub tb: u64,
-    /// Per-unit atomic reservation register. `Some(line)` when the
-    /// unit has executed an `lwarx` / `ldarx` and no subsequent same-
-    /// unit store to the line has cleared it locally. The committed-
-    /// state half of the conditional-store verdict lives in the
-    /// runtime's [`cellgov_sync::ReservationTable`] and is consulted
-    /// via `ExecutionContext::reservation_held`. A `stwcx` / `stdcx`
-    /// succeeds only when both signals say the reservation is held.
+    /// Per-unit reservation; the committed-side verdict lives in
+    /// [`cellgov_sync::ReservationTable`]. A `stwcx` / `stdcx`
+    /// succeeds only when both signals agree.
     pub reservation: Option<ReservedLine>,
 }
 
 impl PpuState {
-    /// Create a new PPU state with zeroed registers and PC at 0.
+    /// Zeroed state: all registers, PC, and reservation cleared.
     pub fn new() -> Self {
         Self {
             gpr: [0u64; GPR_COUNT],
@@ -65,33 +59,31 @@ impl PpuState {
         }
     }
 
-    /// Read a CR field (0-7). Each field is 4 bits: LT, GT, EQ, SO.
+    /// Read CR field `field` (0..=7) as a 4-bit LT/GT/EQ/SO nibble.
     pub fn cr_field(&self, field: u8) -> u8 {
         let shift = (7 - field) * 4;
         ((self.cr >> shift) & 0xF) as u8
     }
 
-    /// Write a CR field (0-7).
+    /// Write CR field `field` (0..=7) with a 4-bit nibble.
     pub fn set_cr_field(&mut self, field: u8, val: u8) {
         let shift = (7 - field) * 4;
         let mask = !(0xFu32 << shift);
         self.cr = (self.cr & mask) | (((val & 0xF) as u32) << shift);
     }
 
-    /// Read a single CR bit by index (0-31). Bit 0 is the MSB of CR.
+    /// Read a single CR bit in PPC numbering (bit 0 = MSB of CR).
     pub fn cr_bit(&self, bit: u8) -> bool {
         let shift = 31 - bit;
         (self.cr >> shift) & 1 != 0
     }
 
-    /// XER carry bit: CA = bit 34 counting from the 64-bit MSB (PPC
-    /// numbering), which is bit 29 counting from the LSB. Used by
-    /// extended add/subtract instructions (adde, subfe, addme, addze).
+    /// XER carry bit (PPC bit 34 from the MSB = bit 29 from the LSB).
     pub fn xer_ca(&self) -> bool {
         (self.xer >> 29) & 1 != 0
     }
 
-    /// Set the XER carry bit.
+    /// Set the XER carry bit without touching adjacent OV/SO bits.
     pub fn set_xer_ca(&mut self, value: bool) {
         if value {
             self.xer |= 1 << 29;
@@ -100,32 +92,28 @@ impl PpuState {
         }
     }
 
-    /// Effective address for a D-form load/store: `(ra|0) + sign_extend(imm)`.
-    /// When `ra == 0`, the base is literal zero, not `GPR[0]`.
+    /// D-form effective address `(ra|0) + sign_extend(imm)`; `ra == 0`
+    /// selects a literal zero base, not `GPR[0]`.
     pub fn ea_d_form(&self, ra: u8, imm: i16) -> u64 {
         let base = if ra == 0 { 0 } else { self.gpr[ra as usize] };
         base.wrapping_add(imm as i64 as u64)
     }
 
-    /// Effective address for an X-form load/store: `(ra|0) + rb`.
-    /// When `ra == 0`, the base is literal zero, not `GPR[0]`.
+    /// X-form effective address `(ra|0) + rb`; `ra == 0` selects a
+    /// literal zero base, not `GPR[0]`.
     pub fn ea_x_form(&self, ra: u8, rb: u8) -> u64 {
         let base = if ra == 0 { 0 } else { self.gpr[ra as usize] };
         base.wrapping_add(self.gpr[rb as usize])
     }
 
-    /// 64-bit fingerprint of the architectural register file used by
-    /// the per-step divergence trace.
+    /// FNV-1a fingerprint over GPR[0..32], LR, CTR, XER, CR, and the
+    /// reservation register; PC, FPR, VR are excluded.
     ///
-    /// Coverage: 32 x GPR, LR, CTR, XER (all u64), and CR (u32). FPR
-    /// and VR are excluded to keep the fingerprint cheap; if a real
-    /// divergence is suspected to be hidden by the GPR-only coverage,
-    /// a wider variant is added then.
-    ///
-    /// Encoding: each field is appended in little-endian byte order
-    /// in a fixed sequence (GPR[0..32], LR, CTR, XER, CR). This is a
-    /// tooling-local serialization for cross-runner reproducibility,
-    /// not a statement about PPC architectural endianness.
+    /// Encoding: fields appended in little-endian byte order, in the
+    /// fixed sequence above, then a one-byte reservation tag (0
+    /// absent, 1 present) followed by the line address when present.
+    /// This is a tooling-local serialization, not a PPC endianness
+    /// statement.
     pub fn state_hash(&self) -> u64 {
         let mut h = cellgov_mem::Fnv1aHasher::new();
         for r in &self.gpr {
@@ -135,10 +123,6 @@ impl PpuState {
         h.write(&self.ctr.to_le_bytes());
         h.write(&self.xer.to_le_bytes());
         h.write(&self.cr.to_le_bytes());
-        // Reservation register: one-byte tag + canonical line addr.
-        // Absent reservations fold the tag only; present ones fold
-        // both so two states differing only in reserved line produce
-        // distinct hashes.
         match self.reservation {
             None => h.write(&[0u8]),
             Some(line) => {
@@ -175,7 +159,6 @@ mod tests {
         let mut s = PpuState::new();
         s.set_cr_field(0, 0b1010);
         assert_eq!(s.cr_field(0), 0b1010);
-        // Other fields unaffected
         assert_eq!(s.cr_field(1), 0);
         assert_eq!(s.cr_field(7), 0);
     }
@@ -185,17 +168,16 @@ mod tests {
         let mut s = PpuState::new();
         // CR field 0 = LT(1) GT(0) EQ(1) SO(0) = 0b1010
         s.set_cr_field(0, 0b1010);
-        assert!(s.cr_bit(0)); // LT
-        assert!(!s.cr_bit(1)); // GT
-        assert!(s.cr_bit(2)); // EQ
-        assert!(!s.cr_bit(3)); // SO
+        assert!(s.cr_bit(0));
+        assert!(!s.cr_bit(1));
+        assert!(s.cr_bit(2));
+        assert!(!s.cr_bit(3));
     }
 
     #[test]
     fn ea_d_form_ra_zero_uses_literal_zero() {
         let mut s = PpuState::new();
         s.gpr[0] = 0xDEAD;
-        // ra=0 means base is 0, NOT gpr[0]
         assert_eq!(s.ea_d_form(0, 100), 100);
     }
 
@@ -216,14 +198,9 @@ mod tests {
         assert!(!s.xer_ca());
     }
 
-    /// Setting CA must not disturb adjacent XER bits. PPC numbers
-    /// XER[CA] as bit 34 (from MSB), which is bit 29 from the LSB --
-    /// a common off-by-one mistake would be to use bit 30 or 28
-    /// instead, which would silently corrupt SO or OV.
     #[test]
     fn set_xer_ca_does_not_touch_other_bits() {
         let mut s = PpuState::new();
-        // Set every other bit besides CA to 1.
         s.xer = !(1u64 << 29);
         s.set_xer_ca(true);
         assert_eq!(s.xer, !0u64, "set CA should preserve all other bits");
@@ -254,9 +231,6 @@ mod tests {
 
     #[test]
     fn state_hash_distinguishes_every_covered_field() {
-        // For every architectural field the fingerprint covers, mutating
-        // that field alone must flip the hash. If a field is silently
-        // dropped from coverage, this test fails on the dropped field.
         let base = PpuState::new();
         let baseline = base.state_hash();
 
@@ -289,10 +263,6 @@ mod tests {
 
     #[test]
     fn state_hash_ignores_pc_fpr_vr() {
-        // Contract: PC and the wider register banks (FPR, VR) are
-        // not part of the fingerprint. Mutating them must NOT flip
-        // the hash. If we later widen coverage, this test will need
-        // to change; until then it pins the documented surface.
         let base = PpuState::new();
         let baseline = base.state_hash();
 
@@ -319,13 +289,11 @@ mod tests {
         let h_a = s.state_hash();
         assert_ne!(h_a, baseline, "setting a reservation must flip the hash");
 
-        // Different reserved line must hash differently again.
         let mut s = base.clone();
         s.reservation = Some(ReservedLine::containing(0x2000));
         let h_b = s.state_hash();
         assert_ne!(h_a, h_b, "different reserved lines must hash distinctly");
 
-        // Clearing restores the baseline.
         let mut s = base.clone();
         s.reservation = Some(ReservedLine::containing(0x1000));
         s.reservation = None;
@@ -335,10 +303,8 @@ mod tests {
     #[test]
     fn xer_ca_reads_only_bit_29() {
         let mut s = PpuState::new();
-        // Set every bit EXCEPT bit 29: CA must read as false.
         s.xer = !(1u64 << 29);
         assert!(!s.xer_ca());
-        // Now set only bit 29: CA must read as true.
         s.xer = 1u64 << 29;
         assert!(s.xer_ca());
     }

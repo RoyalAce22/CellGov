@@ -1,12 +1,10 @@
 //! Step-loop machinery for `run-game` and `bench-boot`.
 //!
-//! Two loops live here: `step_loop` is the diagnostic-heavy driver
-//! the `run-game` command uses (ring buffers, TTY capture, progress
-//! checkpoints, timing breakdown); `bench_step_loop` is the minimal
-//! throughput driver for `bench-boot`. Both share the
-//! RSX-checkpoint classifier so a refactor cannot let them drift
-//! on what counts as a checkpoint hit -- that drift is the likely
-//! future bug when two near-parallel loops live in separate files.
+//! `step_loop` is the diagnostic driver (ring buffers, TTY capture,
+//! progress checkpoints, timing breakdown); `bench_step_loop` is
+//! the minimal throughput driver. Both route through
+//! [`rsx_write_checkpoint_addr`] so the two loops cannot diverge
+//! on what counts as a checkpoint hit.
 
 use std::time::Instant;
 
@@ -37,53 +35,38 @@ pub(super) struct StepLoopCtx<'a> {
     pub(super) trace: bool,
     pub(super) timing: &'a mut Option<StepTiming>,
     pub(super) loop_start: Instant,
-    /// Ring buffer of recent PCs for mini-trace on fault. The
-    /// `usize` position counter increments monotonically and indexes
-    /// via `% PC_RING_SIZE`. On 64-bit hosts (our only current
-    /// target) wraparound is effectively impossible. On a 32-bit
-    /// host the modulo still yields a valid index after wrap, but
-    /// the pre-wrap "how many steps" reading becomes meaningless;
-    /// the ring itself stays consistent.
+    /// Ring buffer of recent PCs for mini-trace on fault.
     pub(super) pc_ring: [u64; PC_RING_SIZE],
     pub(super) pc_ring_pos: usize,
     /// Last TTY write buffer (raw bytes) for diagnostic artifact.
     pub(super) last_tty: Option<TtyCapture>,
-    /// Set when sys_process_exit is dispatched.
+    /// Set when `sys_process_exit` is dispatched.
     pub(super) last_exit: Option<ProcessExitInfo>,
     /// Ring buffer of recent LV2 syscall numbers for exit diagnostic.
-    /// Same wraparound reasoning as `pc_ring_pos`.
     pub(super) syscall_ring: [(u64, u64); SYSCALL_RING_SIZE],
     pub(super) syscall_ring_pos: usize,
-    /// Per-PC hit counts. Identifies busy-loop bodies when the run
-    /// hits max-steps without faulting: the loop's PCs dominate the
-    /// top entries.
+    /// Per-PC hit counts. Top entries identify busy-loop bodies
+    /// when the run hits max-steps.
     pub(super) pc_hits: &'a mut std::collections::HashMap<u64, u64>,
-    /// The boot checkpoint the harness is looking for. See
-    /// [`manifest::CheckpointTrigger`]. Controls whether a
-    /// reserved-region write is treated as a checkpoint reach or as
-    /// a normal fault (the commit pipeline discards either way).
+    /// The boot checkpoint the harness is looking for. Classifies
+    /// a reserved-region write as a checkpoint reach vs. a fault;
+    /// the commit pipeline discards either way.
     pub(super) checkpoint: manifest::CheckpointTrigger,
-    /// `sys_tty_write` calls where `buf + len` overflowed memory
-    /// bounds and the capture had to be skipped. Nonzero indicates
-    /// a guest bug or corrupted caller, surfaced once in the final
-    /// report rather than silently dropped per-call.
+    /// `sys_tty_write` calls skipped because `buf + len` overflowed
+    /// guest memory bounds.
     pub(super) tty_oob_count: usize,
-    /// `sys_tty_write` calls whose `args[1]` fd value did not fit
-    /// in `u32`. Normal PS3 fds are 0/1/2; any wider value signals
-    /// a corrupted caller. We narrow to `u32::MAX` so the print is
-    /// obviously bogus; the counter ensures the operator knows how
-    /// many times the sentinel fired.
+    /// `sys_tty_write` calls whose `args[1]` fd did not fit in u32;
+    /// narrowed to `u32::MAX` as a visible sentinel.
     pub(super) bogus_fd_count: usize,
 }
 
-/// Classify a `commit_step` outcome as a checkpoint hit, if the
-/// title's trigger is [`manifest::CheckpointTrigger::FirstRsxWrite`]
-/// and the commit failed with a `ReservedWrite` to the RSX region.
+/// Classify a `commit_step` outcome as an RSX-write checkpoint hit.
 ///
-/// Returns the triggering guest address when the checkpoint fires,
-/// `None` otherwise. Pulled out as a free function so a unit test
-/// can pin the detection shape without spinning up a full runtime,
-/// and so both loops route through the same decision.
+/// Returns the triggering guest address when the title's trigger is
+/// [`manifest::CheckpointTrigger::FirstRsxWrite`] and the commit
+/// failed with a `ReservedWrite` to the `"rsx"` region; `None`
+/// otherwise. Both step loops route through this so their decisions
+/// cannot drift.
 pub(super) fn rsx_write_checkpoint_addr(
     trigger: manifest::CheckpointTrigger,
     commit_result: &Result<cellgov_core::CommitOutcome, cellgov_core::CommitError>,
@@ -102,24 +85,18 @@ pub(super) fn rsx_write_checkpoint_addr(
     }
 }
 
-/// Decision for one `sys_tty_write` call, extracted so the bounds
-/// and fd-narrowing logic is unit-testable without a full runtime.
-///
-/// Pure over (args, mem_bytes): no stdout, no counter mutation,
-/// no allocation of TtyCapture. The step-loop call site turns
-/// the decision into the side effects.
+/// Decision for one `sys_tty_write` call. Pure over
+/// `(args, mem_bytes)`; no I/O and no counter mutation.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum TtyCaptureDecision {
-    /// Buffer fits entirely in mapped memory; carries the
-    /// bytes, the narrowed fd, and a flag for whether the
-    /// incoming `args[1]` value overflowed `u32`.
+    /// Buffer fits entirely in mapped memory.
     InBounds {
         fd: u32,
         fd_was_bogus: bool,
         bytes: Vec<u8>,
     },
-    /// `buf + len` overflows mapped memory. The helper carries
-    /// the raw values back so the caller can log them verbatim.
+    /// `buf + len` overflows mapped memory; raw values echoed back
+    /// for the caller's log.
     Oob {
         buf: usize,
         len: usize,
@@ -129,17 +106,13 @@ pub(super) enum TtyCaptureDecision {
 
 /// Classify a `sys_tty_write` guest call without touching runtime
 /// state. `args` is the raw syscall-args array; `mem_bytes` is the
-/// currently-committed guest memory slice.
-///
-/// `checked_add` on `buf + len` is load-bearing: a guest value near
-/// `usize::MAX` could wrap past the `<= mem.len()` check if plain
-/// addition were used, letting OOB captures slip through.
+/// currently-committed guest memory slice. `len` is clamped to 4096
+/// to match the PS3 cap.
 pub(super) fn classify_tty_capture(args: &[u64; 9], mem_bytes: &[u8]) -> TtyCaptureDecision {
     let buf = args[2] as usize;
-    // PS3 sys_tty_write caps output at 4096 bytes; match that so a
-    // guest that passes a gigantic len does not allocate a huge
-    // preview vector.
     let len = (args[3] as usize).min(4096);
+    // checked_add: a guest `buf` near `usize::MAX` would wrap past
+    // the `<= mem.len()` check under plain addition.
     let end = buf.checked_add(len);
     if end.is_none_or(|e| e > mem_bytes.len()) {
         return TtyCaptureDecision::Oob {
@@ -148,11 +121,8 @@ pub(super) fn classify_tty_capture(args: &[u64; 9], mem_bytes: &[u8]) -> TtyCapt
             mem_len: mem_bytes.len(),
         };
     }
-    // Narrow the fd via try_from so a guest passing a >32-bit
-    // value surfaces as u32::MAX (an obviously-bogus sentinel)
-    // rather than silently aliasing to a plausible low fd.
-    // sys_tty_write uses 0/1/2 in practice; any wider value
-    // signals a corrupted caller.
+    // fd > u32::MAX surfaces as u32::MAX rather than aliasing to a
+    // plausible low fd. `sys_tty_write` uses 0/1/2 in practice.
     let (fd, fd_was_bogus) = match u32::try_from(args[1]) {
         Ok(fd) => (fd, false),
         Err(_) => (u32::MAX, true),
@@ -165,14 +135,13 @@ pub(super) fn classify_tty_capture(args: &[u64; 9], mem_bytes: &[u8]) -> TtyCapt
     }
 }
 
-/// Compute the untracked time inside the step loop.
+/// Compute untracked time inside the step loop.
 ///
-/// `Ok(overhead)` is `t_loop - (step + commit + coverage)` when
-/// the tracked buckets fit inside the loop. `Err(excess)` is the
-/// amount by which the buckets overflow -- a timing-invariant
-/// violation that means either the timed regions overlap, a
-/// region double-counts, or `t_loop` starts after the loop
-/// actually began.
+/// # Errors
+///
+/// Returns `Err(excess)` when tracked buckets overflow `t_loop` --
+/// a timing invariant violation (overlapping regions,
+/// double-counting, or `t_loop` sampled after the loop began).
 pub(super) fn compute_untracked(
     t_loop: std::time::Duration,
     step: std::time::Duration,
@@ -219,7 +188,6 @@ pub(super) fn step_loop(
                     *ctx.pc_hits.entry(pc).or_insert(0) += 1;
                 }
 
-                // Progress checkpoint every 10K steps.
                 if (*ctx.steps).is_multiple_of(10_000) {
                     let elapsed = ctx.loop_start.elapsed();
                     println!(
@@ -231,7 +199,6 @@ pub(super) fn step_loop(
                     );
                 }
 
-                // Tally instruction coverage from the PC.
                 let t_cov_start = Instant::now();
                 if let Some(pc) = step.result.local_diagnostics.pc {
                     if let Some(raw) = fetch_raw_at(rt, pc) {
@@ -247,13 +214,15 @@ pub(super) fn step_loop(
                 if ctx.trace {
                     print_trace_line(rt, &step.result, *ctx.steps, ctx.hle_bindings);
                 }
-                // Track HLE/LV2 calls and capture TTY/exit before commit.
+                // Capture HLE/LV2 calls, TTY, and sys_process_exit
+                // before commit so the final report has them even
+                // when commit then fails.
                 if let Some(args) = &step.result.syscall_args {
                     let pc = step.result.local_diagnostics.pc.unwrap_or(0);
                     if args[0] >= 0x10000 {
                         let idx = (args[0] - 0x10000) as u32;
                         *ctx.hle_calls.entry(idx).or_insert(0) += 1;
-                        // Detect sys_process_exit via HLE dispatch.
+                        // NID 0xe6f2c1e7 is sys_process_exit.
                         if let Some(binding) = ctx.hle_bindings.get(idx as usize) {
                             if binding.nid == 0xe6f2c1e7 {
                                 ctx.last_exit = Some(ProcessExitInfo {
@@ -263,10 +232,7 @@ pub(super) fn step_loop(
                             }
                         }
                     } else if args[0] == 403 {
-                        // sys_tty_write: classify once via the
-                        // pure helper so the bounds and fd-narrowing
-                        // logic is unit-testable without a full
-                        // runtime + step loop.
+                        // sys_tty_write
                         match classify_tty_capture(args, rt.memory().as_bytes()) {
                             TtyCaptureDecision::InBounds {
                                 fd,
@@ -276,19 +242,17 @@ pub(super) fn step_loop(
                                 if fd_was_bogus {
                                     ctx.bogus_fd_count += 1;
                                 }
-                                // Sanitize to ASCII so binary payloads
-                                // (e.g. microtest result structs) do
-                                // not emit control bytes or U+FFFD
-                                // replacements that cp1252 / cp437
-                                // Windows consoles mangle.
+                                // ASCII-safe so binary payloads do
+                                // not emit bytes a cp1252/cp437
+                                // Windows console mangles.
                                 let preview = super::diag::ascii_safe_preview(&bytes);
                                 print!("  tty[fd={fd}]: {preview}");
                                 if !preview.ends_with('\n') {
                                     println!();
                                 }
-                                // Flush so the TTY line reaches stdout
-                                // before any subsequent fault stack
-                                // print lands on stderr.
+                                // Flush so a subsequent fault stack
+                                // on stderr does not land before the
+                                // TTY line.
                                 use std::io::Write;
                                 let _ = std::io::stdout().flush();
                                 ctx.last_tty = Some(TtyCapture {
@@ -306,13 +270,12 @@ pub(super) fn step_loop(
                             }
                         }
                     } else if args[0] == 22 {
-                        // sys_process_exit: capture exit code and PC.
+                        // sys_process_exit
                         ctx.last_exit = Some(ProcessExitInfo {
                             code: args[1] as u32,
                             call_pc: pc,
                         });
                     }
-                    // Track all syscalls (HLE and LV2) in ring buffer.
                     ctx.syscall_ring[ctx.syscall_ring_pos % SYSCALL_RING_SIZE] = (args[0], pc);
                     ctx.syscall_ring_pos += 1;
                 }
@@ -395,12 +358,18 @@ pub(super) fn step_loop(
     }
 }
 
-/// Minimal step loop: only the state needed to detect a termination
-/// condition. A ProcessExit fires when the runtime reports no
-/// runnable unit (the `sys_process_exit` path removes the primary
-/// unit); a FirstRsxWrite fires when `commit_step` returns
-/// `ReservedWrite` into the rsx region; a fault breaks with Fault;
-/// and exhausting `max_steps` breaks with MaxSteps.
+/// Minimal step loop: only the state needed to detect termination.
+///
+/// Termination classification:
+/// - `ProcessExit` on `NoRunnableUnit`/`AllBlocked` (the
+///   `sys_process_exit` path removes the primary unit).
+/// - `RsxWriteCheckpoint` when `commit_step` returns `ReservedWrite`
+///   into the `"rsx"` region under `FirstRsxWrite`.
+/// - `PcReached(addr)` when the step's PC hits `Pc(addr)`.
+/// - `Fault` on a step-result fault.
+/// - `MaxSteps` on `MaxStepsExceeded`.
+/// - `TimeOverflow` on `TimeOverflow` (clock saturation, distinct
+///   from a guest-visible fault).
 pub(super) fn bench_step_loop(
     rt: &mut Runtime,
     checkpoint: manifest::CheckpointTrigger,
@@ -433,11 +402,6 @@ pub(super) fn bench_step_loop(
                 return BootOutcome::ProcessExit;
             }
             Err(StepError::MaxStepsExceeded) => return BootOutcome::MaxSteps,
-            // TimeOverflow is a harness-level resource exhaustion
-            // (the time counter saturated), not a guest-visible
-            // error. Keeping it distinct from Fault lets a
-            // reproducibility pair tell "clock rolled over" from
-            // "guest triggered a decode error or bad address."
             Err(StepError::TimeOverflow) => return BootOutcome::TimeOverflow,
         }
     }
@@ -570,10 +534,6 @@ mod tests {
     }
 
     fn tty_args(fd: u64, buf: u64, len: u64) -> [u64; 9] {
-        // args[0] is the syscall number (403 for tty_write) but
-        // classify_tty_capture does not inspect it; set it anyway
-        // so the fixture matches how the step loop constructs
-        // the value.
         [403, fd, buf, len, 0, 0, 0, 0, 0]
     }
 
@@ -594,8 +554,6 @@ mod tests {
 
     #[test]
     fn classify_tty_capture_narrows_wide_fd_and_flags_bogus() {
-        // fd = u32::MAX + 1: does not fit in u32, so the narrowed
-        // value must be u32::MAX and fd_was_bogus must be true.
         let mem = b"ok".to_vec();
         let args = tty_args(u64::from(u32::MAX) + 1, 0, 2);
         let decision = classify_tty_capture(&args, &mem);
@@ -611,9 +569,6 @@ mod tests {
 
     #[test]
     fn classify_tty_capture_flags_oob_when_end_exceeds_mem() {
-        // buf + len = 10, but mem is only 5 bytes. Classified as
-        // Oob with the raw buf/len/mem_len echoed back so the
-        // caller's log can name exact values.
         let mem = b"tiny!".to_vec();
         let args = tty_args(1, 0, 10);
         let decision = classify_tty_capture(&args, &mem);
@@ -629,10 +584,6 @@ mod tests {
 
     #[test]
     fn classify_tty_capture_flags_oob_on_checked_add_overflow() {
-        // buf = usize::MAX with any nonzero len overflows
-        // `buf + len`; plain `+` would wrap past the bounds check
-        // and let OOB captures slip through. Classify as Oob
-        // without panicking.
         let mem = vec![0u8; 16];
         let buf = usize::MAX as u64;
         let args = tty_args(1, buf, 8);
@@ -645,10 +596,6 @@ mod tests {
 
     #[test]
     fn classify_tty_capture_clamps_len_at_4kib() {
-        // len of 8000 must be capped at 4096 so a guest passing a
-        // huge len does not allocate a huge preview vector. When
-        // backing memory is large enough, the clamped slice is
-        // exactly 4096 bytes.
         let mem = vec![b'x'; 8192];
         let args = tty_args(1, 0, 8000);
         let decision = classify_tty_capture(&args, &mem);

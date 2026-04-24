@@ -1,36 +1,18 @@
-//! Commit pipeline -- pipeline steps 5-7 (validate, stage, apply).
+//! Commit pipeline: validate, stage, apply a unit's emitted effects.
 //!
-//! This module owns the journey from a single unit's
-//! [`ExecutionStepResult`] to a mutation of [`GuestMemory`]. The
-//! contract:
+//! Contract (none of these are expressible in the type system):
 //!
-//! - **One commit batch per unit yield.** No cross-unit
-//!   batching. The commit applier is trivial and the trace is one-to-one
-//!   with scheduling decisions.
-//! - **Atomic from guest visibility.** Either every
-//!   [`Effect::SharedWriteIntent`] in the batch becomes visible at the
-//!   same epoch boundary, or none do.
-//! - **Fault rule.** A step that yields with
-//!   [`YieldReason::Fault`] commits nothing -- including effects that
-//!   preceded the fault in emission order. The fault is recorded but no
-//!   partial commit is permitted.
-//! - **Validation rejection.** Validation may reject an entire batch
-//!   (malformed effects, out-of-range writes). A rejected batch commits
+//! - One commit batch per unit yield; no cross-unit batching.
+//! - Atomic from guest visibility: every `SharedWriteIntent` in the
+//!   batch becomes visible at the same epoch boundary, or none do.
+//! - Fault rule: `YieldReason::Fault` discards the whole batch,
+//!   including effects emitted before the fault.
+//! - Validation rejects the whole batch; a rejected batch commits
 //!   nothing and surfaces as a fault on the originating unit.
-//!
-//! The pipeline handles these effect types end to end:
-//! `SharedWriteIntent` (memory commits), `MailboxSend` (FIFO push),
-//! `MailboxReceiveAttempt` (pop or block), `SignalUpdate` (OR-merge),
-//! `DmaEnqueue` (latency-modeled completion queue), `WakeUnit`
-//! (status override to Runnable), `WaitOnEvent` (status override
-//! to Blocked), `ReservationAcquire` (insert or replace a
-//! per-unit entry in the atomic reservation table), and
-//! `ConditionalStore` (apply the store, drop the emitter's
-//! reservation entry, clear other units' entries covering the
-//! line). Every committed `SharedWriteIntent` also runs the clear
-//! sweep against the reservation table so a cross-unit store
-//! invalidates any conflicting reservations. `FaultRaised` and
-//! `TraceMarker` are counted but do not mutate runtime state.
+//! - Every committed `SharedWriteIntent` runs the reservation-table
+//!   clear sweep against overlapping lines.
+//! - `RsxLabelWrite` is bounds-checked against the resolved label
+//!   base before staging.
 
 use crate::registry::UnitRegistry;
 use cellgov_dma::{DmaCompletion, DmaLatencyModel, DmaQueue};
@@ -44,195 +26,114 @@ use cellgov_sync::{
 use cellgov_time::GuestTicks;
 
 /// Why a commit batch could not be applied.
-///
-/// Crate-local; there is no universal `Error` enum across the workspace. The
-/// runtime layer maps these onto whatever fault reporting it uses
-/// when it surfaces them to the originating unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommitError {
-    /// A `SharedWriteIntent`'s payload byte length did not match the
-    /// length of its target range. The index identifies the offending
-    /// effect's position in the original `emitted_effects` vector.
+    /// A `SharedWriteIntent` payload length did not match its range length.
     PayloadLengthMismatch {
         /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
     },
-    /// A `SharedWriteIntent`'s target range is not entirely contained
-    /// within a single registered memory region, or its end address
-    /// overflows `u64`.
+    /// A `SharedWriteIntent` target range escapes any registered region.
     OutOfRange {
         /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
     },
-    /// A `MailboxSend` referenced a `MailboxId` that is not registered
-    /// in the runtime's mailbox registry. Aborts the entire batch
-    /// atomically.
+    /// A `MailboxSend` targeted an unregistered mailbox.
     UnknownMailbox {
         /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
         /// The unregistered mailbox.
         mailbox: MailboxId,
     },
-    /// A `SignalUpdate` referenced a `SignalId` that is not registered
-    /// in the runtime's signal registry. Aborts the entire batch
-    /// atomically.
+    /// A `SignalUpdate` targeted an unregistered signal.
     UnknownSignal {
         /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
         /// The unregistered signal.
         signal: SignalId,
     },
-    /// A `WakeUnit` referenced a `UnitId` that is not registered in
-    /// the runtime's unit registry. Aborts the entire batch
-    /// atomically.
+    /// A `WakeUnit` targeted an unregistered unit.
     UnknownWakeTarget {
         /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
         /// The unregistered unit.
         target: UnitId,
     },
-    /// A source-side effect (`MailboxReceiveAttempt`, `WaitOnEvent`,
-    /// `ReservationAcquire`, or `ConditionalStore`) referenced a
-    /// `UnitId` that is not registered. Rejecting these up front
-    /// prevents ghost entries from polluting the reservation table
-    /// and stops message/status deliveries from silently no-oping
-    /// against an invalid id. Aborts the entire batch atomically.
+    /// A source-side effect named an unregistered unit; rejecting keeps
+    /// the reservation table and pending-receive inbox registry-consistent.
     UnknownSourceUnit {
         /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
         /// The unregistered unit.
         source: UnitId,
     },
-    /// A `DmaEnqueue` targeted a destination range that is not
-    /// entirely contained within a single registered memory region
-    /// (or whose end address overflows `u64`). Rejecting at enqueue
-    /// time surfaces the bad-target at the offending unit's step
-    /// rather than later when the completion fires and
-    /// `apply_commit` rejects the destination far from the
-    /// originating context.
+    /// A `DmaEnqueue` destination range escapes any registered region.
     ///
-    /// Only the destination is validated. Source ranges may
-    /// legitimately reference SPU local stores, staging buffers,
-    /// or other non-guest-memory regions that the completion
-    /// handler resolves by path (payload override, MFC channel,
-    /// etc.); pre-validating source against the guest-memory
-    /// region map would reject those legitimate flows.
+    /// Only destination is pre-validated; source ranges may legitimately
+    /// reference SPU local stores or staging buffers that the completion
+    /// handler resolves by path.
     DmaDestinationOutOfRange {
         /// Position of the offending effect in `emitted_effects`.
         effect_index: usize,
     },
-    /// The underlying memory layer rejected the drain. Reachable when
-    /// a staged write lands in a region whose permissions reject
-    /// writes, or when pre-validation and drain disagree about
-    /// containment. Surfaced rather than panicked so tests and tooling
-    /// can assert on it.
+    /// The memory layer rejected the drain (permissions, or a
+    /// pre-validation/drain disagreement on containment).
     Memory(MemError),
 }
 
 /// Summary of what a commit pass accomplished.
-///
-/// Returned by [`CommitPipeline::process`] on success. Counts the
-/// writes that became visible, the effects that were deferred (passed
-/// through unhandled), and whether the entire batch was discarded
-/// because the originating step yielded with a fault.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CommitOutcome {
-    /// Number of `SharedWriteIntent` effects that were validated,
-    /// staged, and applied to committed memory.
+    /// Committed `SharedWriteIntent` count (includes `RsxLabelWrite`).
     pub writes_committed: usize,
-    /// Number of `MailboxSend` effects that were validated and pushed
-    /// onto their target mailbox FIFOs.
+    /// Committed `MailboxSend` count.
     pub mailbox_sends_committed: usize,
-    /// Number of `SignalUpdate` effects that were validated and
-    /// OR-merged into their target signal-notification registers.
+    /// Committed `SignalUpdate` count.
     pub signal_updates_committed: usize,
-    /// Number of `MailboxReceiveAttempt` effects where the mailbox was
-    /// non-empty and a message was popped and delivered to the unit's
-    /// pending-receives inbox.
+    /// `MailboxReceiveAttempt`s that popped a message.
     pub mailbox_receives_committed: usize,
-    /// Number of `MailboxReceiveAttempt` effects where the mailbox was
-    /// empty, causing the source unit to be blocked.
+    /// `MailboxReceiveAttempt`s that blocked on an empty mailbox.
     pub mailbox_receives_blocked: usize,
-    /// Number of `DmaEnqueue` effects that were scheduled into the
-    /// DMA completion queue via the latency model.
+    /// `DmaEnqueue`s scheduled into the completion queue.
     pub dma_enqueued: usize,
-    /// Number of `WakeUnit` effects that transitioned their target
-    /// unit to `Runnable` via a status override.
+    /// `WakeUnit`s applied as `Runnable` overrides.
     pub wakes_committed: usize,
-    /// Number of `WaitOnEvent` effects that transitioned their source
-    /// unit to `Blocked` via a status override.
+    /// `WaitOnEvent`s applied as `Blocked` overrides.
     pub waits_committed: usize,
-    /// Number of previously-enqueued DMA completions that fired at
-    /// this commit boundary (`completion_time <= now`). The runtime
-    /// applies their transfers and wakes their issuers.
+    /// DMA completions that fired at this boundary. Filled by the runtime,
+    /// always zero from [`CommitPipeline::process`].
     pub dma_completions_fired: usize,
-    /// Number of `ReservationAcquire` effects that installed or
-    /// replaced a reservation entry. Counts attempts that
-    /// succeeded at the table level, not net-new entries: a
-    /// second acquire on the same unit (whether the raw
-    /// `line_addr` canonicalizes to the same line or a different
-    /// one) bumps this counter, bumps `reservations_cleared` on
-    /// the replacement, and leaves the table size unchanged.
-    /// Tooling that cares about net installs subtracts
-    /// `reservations_cleared`'s acquire-clobber contribution; the
-    /// commit pipeline does not split that sub-count out.
+    /// `ReservationAcquire`s that installed or replaced an entry.
+    ///
+    /// A second acquire on the same unit bumps this counter AND
+    /// `reservations_cleared`; the table size is unchanged. Tooling that
+    /// wants net installs must reconcile both counters.
     pub reservation_acquires_committed: usize,
-    /// Number of `ConditionalStore` effects whose write was applied
-    /// to committed memory. These are always successful stores by
-    /// construction -- the emitting unit decides success before
-    /// emission.
+    /// `ConditionalStore`s whose write was applied.
     pub conditional_stores_committed: usize,
-    /// Number of `ConditionalStore` effects that reached the apply
-    /// path without a prior reservation entry for the emitter.
-    /// Under LL/SC semantics a real emitter must hold a
-    /// reservation at store time; reaching the apply path with no
-    /// entry means either (a) the emitter is a synthetic test
-    /// unit (e.g. `FakeIsaUnit`) that does not model the local
-    /// pre-check, or (b) a real emitter has an ordering bug. The
-    /// pipeline commits the store either way (soft contract --
-    /// see `process` doc) but surfaces the count so real-emitter
-    /// CI can assert this counter stays 0 across whole scenarios.
+    /// `ConditionalStore`s that reached apply without a prior reservation
+    /// for the emitter. Zero for correct real emitters (PPU, SPU); non-zero
+    /// for synthetic test units that skip the LL/SC pre-check, or an
+    /// emitter-side ordering bug. Whole-scenario CI asserts zero for real
+    /// emitters.
     pub conditional_stores_without_prior_reservation: usize,
-    /// Number of reservation-table entries dropped during this
-    /// commit. Three sources contribute:
+    /// Reservation-table entries dropped during this commit.
     ///
-    /// 1. `SharedWriteIntent` clear-sweep drops every entry whose
-    ///    line overlaps the written range.
-    /// 2. `ConditionalStore` drops the emitter's own entry plus
-    ///    every other unit's entry whose line overlaps the store.
-    /// 3. `ReservationAcquire` clobber: when a unit acquires a
-    ///    second reservation before releasing the first, the
-    ///    prior entry is silently overwritten; that drop counts
-    ///    here so replay tooling can see an entry disappeared
-    ///    from the table.
-    ///
-    /// Invariant: `reservations_cleared` equals the difference
-    /// between reservation entries that existed at start-of-
-    /// commit and entries that exist at end-of-commit, minus net
-    /// `reservation_acquires_committed` that installed fresh
-    /// entries without clobber.
+    /// Sources: `SharedWriteIntent` clear-sweep, `ConditionalStore`
+    /// emitter-entry drop and cross-unit sweep, and `ReservationAcquire`
+    /// clobbers of prior entries on the same unit.
     pub reservations_cleared: usize,
-    /// Number of effects of other variants (fault, trace) that the
-    /// pipeline saw and passed through unhandled.
+    /// Effects the pipeline saw and did not act on (fault, trace).
     pub effects_deferred: usize,
-    /// `true` if the originating step yielded with `YieldReason::Fault`
-    /// and the entire batch was discarded because the step faulted.
+    /// `true` if the step faulted and the whole batch was discarded.
     pub fault_discarded: bool,
-    /// Number of effects dropped by the fault rule. Zero on any
-    /// successful commit; equals `effects.len()` when
-    /// `fault_discarded` is `true`. Kept as a scalar rather than a
-    /// full per-kind breakdown because per-effect kinds are already
-    /// emitted into the trace stream via
-    /// `TraceRecord::EffectEmitted` at step time; replay tooling
-    /// that needs per-kind discard detail joins the trace records
-    /// with this outcome.
+    /// Count of effects dropped by the fault rule. Equals `effects.len()`
+    /// when `fault_discarded`, else zero. Per-kind detail lives in the
+    /// trace stream.
     pub effects_discarded_on_fault: usize,
-    /// Units whose status was overridden to `Blocked` during this
-    /// commit, with the reason for the block.
+    /// Units blocked during this commit.
     pub blocked_units: Vec<(UnitId, BlockReason)>,
-    /// Units whose status was overridden to `Runnable` during this
-    /// commit (wake effect). Does not include DMA completion wakes,
-    /// which are tracked by the runtime.
+    /// Units woken during this commit (excludes DMA-completion wakes).
     pub woken_units: Vec<UnitId>,
 }
 
@@ -245,54 +146,33 @@ pub enum BlockReason {
     WaitOnEvent,
 }
 
-/// Mutable references to every runtime subsystem the commit pipeline
-/// touches. Bundled into a struct so `CommitPipeline::process` takes
-/// two arguments instead of eight, and so adding a new subsystem
-/// extends this struct rather than widening a function signature.
+/// Mutable references to every subsystem the commit pipeline touches.
 pub struct CommitContext<'a> {
     /// Committed guest memory.
     pub memory: &'a mut GuestMemory,
-    /// Unit registry (for status overrides and receive delivery).
+    /// Unit registry (status overrides, receive delivery).
     pub units: &'a mut UnitRegistry,
-    /// Mailbox registry (for send/receive).
+    /// Mailbox registry.
     pub mailboxes: &'a mut MailboxRegistry,
-    /// Signal-notification register registry (for OR-merge updates).
+    /// Signal-notification register registry.
     pub signals: &'a mut SignalRegistry,
     /// DMA completion queue.
     pub dma_queue: &'a mut DmaQueue,
-    /// Latency model for computing DMA completion times.
+    /// Latency model for DMA completion times.
     pub dma_latency: &'a dyn DmaLatencyModel,
-    /// Current guest time (used for DMA scheduling).
+    /// Current guest time.
     pub now: GuestTicks,
-    /// Atomic reservation table. Updated in place by
-    /// `ReservationAcquire` (insert/replace), `ConditionalStore`
-    /// (drop emitter's entry), and by the clear sweep that runs
-    /// after every committed write (drops overlapping entries from
-    /// other units).
+    /// Atomic reservation table.
     pub reservations: &'a mut ReservationTable,
-    /// Base address of the RSX label area -- the address returned
-    /// by `cellGcmGetLabelAddress(0)` and published by
-    /// `cellGcmInitBody` into `hle::cell_gcm_sys::GcmState`.
-    /// Zero if GCM has not been initialised. An `Effect::RsxLabelWrite`
-    /// commits as a 4-byte big-endian write at
-    /// `rsx_label_base + offset`; the offset is interpreted against
-    /// this base, NOT against the raw guest address space.
+    /// RSX label area base address; zero means GCM has not been initialised.
+    /// `RsxLabelWrite` commits as a 4-byte big-endian store at
+    /// `rsx_label_base + offset`.
     pub rsx_label_base: u32,
-    /// RSX flip-status state machine. Mutated by `RsxFlipRequest`
-    /// effect processing (sets WAITING + pending + records buffer
-    /// index) and by the per-boundary DONE transition fired from
-    /// `Runtime::commit_step` after a pending flip survives one
-    /// full batch. Reads are not required by the commit pipeline;
-    /// the pipeline only writes here.
+    /// RSX flip-status state machine; write-only from this pipeline.
     pub rsx_flip: &'a mut crate::rsx::flip::RsxFlipState,
 }
 
 /// The commit pipeline.
-///
-/// Holds no persistent state (the staging buffer is per-call because
-/// there is one commit batch per unit yield with no cross-unit
-/// batching). The struct exists so future state can be added without
-/// changing the public API shape.
 #[derive(Debug, Default)]
 pub struct CommitPipeline {}
 
@@ -305,42 +185,15 @@ impl CommitPipeline {
 
     /// Process the effects produced by a single unit step.
     ///
-    /// Behavior:
+    /// See the module docs for the full contract (atomic-batch,
+    /// fault-discards-all, validation-rejects-whole-batch). Validation
+    /// runs over every effect first; staged memory writes drain as one
+    /// atomic operation before any other subsystem is mutated.
     ///
-    /// 1. If `result.yield_reason == YieldReason::Fault`, every effect
-    ///    is discarded (the fault rule). Returns
-    ///    `CommitOutcome { fault_discarded: true, .. }`.
-    /// 2. Otherwise, walks `result.emitted_effects` in order:
-    ///    - `SharedWriteIntent` is validated (length match, in-bounds),
-    ///      staged into a fresh [`StagingMemory`]. After the write
-    ///      commits the clear sweep drops any reservation entries
-    ///      whose line overlaps the write.
-    ///    - `MailboxSend` pushes onto the target FIFO.
-    ///    - `MailboxReceiveAttempt` pops or blocks the source unit.
-    ///    - `SignalUpdate` OR-merges into the target register.
-    ///    - `DmaEnqueue` schedules a completion via the latency model.
-    ///    - `WakeUnit` overrides the target's status to Runnable.
-    ///    - `WaitOnEvent` overrides the source's status to Blocked.
-    ///    - `ReservationAcquire` inserts / replaces the source's
-    ///      atomic-reservation entry, canonicalized to a 128-byte
-    ///      line.
-    ///    - `ConditionalStore` applies the write (same validation
-    ///      and staging as `SharedWriteIntent`), drops the emitter's
-    ///      reservation entry, and runs the clear sweep against
-    ///      every other unit's entry covering the line.
-    ///    - `FaultRaised` and `TraceMarker` fall through and are
-    ///      counted as deferred.
-    /// 3. Validation failure aborts the whole batch atomically:
-    ///    nothing is committed, the staging buffer (which never reached
-    ///    `drain_into`) is discarded with the function return, and the
-    ///    error names the offending effect's index.
-    /// 4. After all effects are validated and staged, drains the
-    ///    staging buffer into `memory`. Either every staged write
-    ///    becomes visible or none do (atomic-batch guarantee).
+    /// # Errors
     ///
-    /// The `dma_completions_fired` field of the returned outcome is
-    /// always zero from this method; `Runtime::commit_step` fills it
-    /// in after popping the DMA queue against current guest time.
+    /// Returns `CommitError` on validation failure or memory-drain
+    /// rejection; the batch commits nothing on error.
     pub fn process(
         &mut self,
         result: &ExecutionStepResult,
@@ -355,7 +208,6 @@ impl CommitPipeline {
             });
         }
 
-        // Fast path: no effects means nothing to validate, stage, or apply.
         if effects.is_empty() {
             return Ok(CommitOutcome::default());
         }
@@ -377,11 +229,8 @@ impl CommitPipeline {
         let mut woken_units = Vec::new();
         let mut deferred = 0usize;
 
-        // Pre-validation pass. Walk effects in emission order; reject
-        // the entire batch on the first failure (atomic-batch rule).
-        // Mailbox sends are validated against the registry but not yet
-        // applied -- mailbox state mutates only in the apply pass
-        // below, which runs after every effect has been validated.
+        // Pre-validation pass: reject the whole batch on the first
+        // failure. Subsystem state mutates only in the apply pass below.
         for (idx, effect) in effects.iter().enumerate() {
             match effect {
                 Effect::SharedWriteIntent { range, bytes, .. } => {
@@ -420,10 +269,6 @@ impl CommitPipeline {
                             mailbox: *mailbox,
                         });
                     }
-                    // Validate the source: the apply pass calls
-                    // push_receive / set_status_override on this id,
-                    // which would silently drop the message or
-                    // panic mid-commit if the unit is unregistered.
                     if ctx.units.get(*source).is_none() {
                         return Err(CommitError::UnknownSourceUnit {
                             effect_index: idx,
@@ -441,15 +286,9 @@ impl CommitPipeline {
                     signal_updates += 1;
                 }
                 Effect::DmaEnqueue { request, .. } => {
-                    // Pre-validate the destination range: the
-                    // completion path will `apply_commit` to this
-                    // range far from the originating step, and a
-                    // bad target there would surface as an obscure
-                    // commit failure with no link back to the
-                    // emitter. Source may legitimately be a local
-                    // store or staging buffer outside the guest
-                    // memory regions, so we only check the
-                    // destination.
+                    // Pre-validate only the destination; source ranges
+                    // may legitimately reference SPU local stores or
+                    // staging buffers outside the region map.
                     let dst = request.destination();
                     let start = dst.start().raw();
                     let length = dst.length();
@@ -470,11 +309,6 @@ impl CommitPipeline {
                     wakes += 1;
                 }
                 Effect::WaitOnEvent { source, .. } => {
-                    // Validate source: apply pass calls
-                    // set_status_override on this id. An
-                    // unregistered source either silently no-ops
-                    // or panics mid-commit (see the similar
-                    // concern on MailboxReceiveAttempt).
                     if ctx.units.get(*source).is_none() {
                         return Err(CommitError::UnknownSourceUnit {
                             effect_index: idx,
@@ -489,10 +323,6 @@ impl CommitPipeline {
                     source,
                     ..
                 } => {
-                    // Same validation rules as SharedWriteIntent:
-                    // payload length matches range, range lies fully
-                    // within one registered region. A failure here
-                    // aborts the whole batch atomically.
                     if bytes.len() as u64 != range.length() {
                         return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
                     }
@@ -504,13 +334,6 @@ impl CommitPipeline {
                     if ctx.memory.containing_region(start, length).is_none() {
                         return Err(CommitError::OutOfRange { effect_index: idx });
                     }
-                    // Validate source: the apply pass calls
-                    // remove_if_present on this id to drop the
-                    // emitter's reservation entry. An unregistered
-                    // source would silently bypass the
-                    // "drop emitter's entry" invariant and the
-                    // store would commit anyway -- worse than
-                    // rejecting.
                     if ctx.units.get(*source).is_none() {
                         return Err(CommitError::UnknownSourceUnit {
                             effect_index: idx,
@@ -524,13 +347,6 @@ impl CommitPipeline {
                     conditional_stores += 1;
                 }
                 Effect::ReservationAcquire { source, .. } => {
-                    // Validate source: an unregistered id would
-                    // still populate the reservation table (the
-                    // table has no registry awareness), producing
-                    // a ghost entry that survives until some other
-                    // unit's overlapping write sweeps it. Rejecting
-                    // here keeps the table registry-consistent
-                    // with the rest of the pipeline.
                     if ctx.units.get(*source).is_none() {
                         return Err(CommitError::UnknownSourceUnit {
                             effect_index: idx,
@@ -539,27 +355,10 @@ impl CommitPipeline {
                     }
                 }
                 Effect::RsxLabelWrite { offset, value } => {
-                    // Resolve against the RSX label base and stage
-                    // as a 4-byte big-endian write. When label_base
-                    // is zero, the offset is treated as an
-                    // absolute guest address -- the
-                    // `containing_region` check below still rejects
-                    // writes outside mapped memory, so a stray
-                    // offset produces a commit error rather than
-                    // corrupting random addresses. Microtests that
-                    // skip cellGcmInit and allocate their own
-                    // label region use this path; foundation
-                    // titles that call cellGcmInit get a non-zero
-                    // label_base and the offset is interpreted
-                    // relative to it.
-                    //
-                    // With sys_rsx active, label_base points at the
-                    // 37 KB reports region. Semaphore-region writes
-                    // must land in offset 0..4096; offsets 0x1000 and
-                    // beyond fall in notify / report land and are
-                    // guest bugs. The debug-assert surfaces this at
-                    // the commit boundary rather than as a silent
-                    // notify-region corruption.
+                    // Offsets 0..0x1000 are the semaphore region; 0x1000+
+                    // is notify/report space under sys_rsx and is a guest
+                    // bug. Surface at the commit boundary rather than as
+                    // silent notify corruption.
                     debug_assert!(
                         *offset < 0x1000,
                         "RsxLabelWrite offset {:#x} past semaphore region (guest bug? \
@@ -591,51 +390,11 @@ impl CommitPipeline {
             }
         }
 
-        // Apply pass. Memory writes drain atomically through the
-        // staging buffer, then mailbox sends push onto their FIFOs,
-        // signal updates OR-merge into their registers, and DMA
-        // requests are scheduled into the completion queue via the
-        // latency model. All happen in the same emission order the
-        // units produced them. Pre-validation guarantees every
-        // lookup here succeeds.
-        //
-        // Atomicity contract. The `drain_into` below is the only
-        // operation between here and function return that can
-        // represent failure as `CommitError`. The ops that run
-        // after it (mb.send, signal.or_in, dma_queue.enqueue,
-        // reservations.*, payload.clone in DmaEnqueue) are
-        // infallible in the current design:
-        //
-        //   - `Mailbox::send` pushes onto a Vec.
-        //   - `Signal::or_in` is a bitwise OR into a register.
-        //   - `DmaQueue::enqueue` pushes onto a BinaryHeap.
-        //   - `DmaLatencyModel::completion_time` is a pure function.
-        //   - `ReservationTable` ops are BTreeMap operations.
-        //   - `payload.clone` copies a `Vec<u8>`.
-        //
-        // None of these can fail absent host-side allocation
-        // failure. The project's stance is: host OOM aborts the
-        // process via the Rust allocator's default behavior; we
-        // do not model it as a recoverable error and no
-        // `CommitError` variant represents it. The module-level
-        // atomicity guarantee ("either every staged write becomes
-        // visible or none do") is predicated on that assumption;
-        // under host OOM the process is already dying and guest-
-        // visible consistency is no longer meaningful.
-        //
-        // The `.expect(...)` calls below likewise cannot fire
-        // because `ctx` is held by `&mut` for the duration of
-        // this call and nothing external can deregister a
-        // mailbox/signal between the pre-validation and apply
-        // passes.
-        //
-        // If any of those guarantees change (new registry impl,
-        // new latency model with fallible ops, a future
-        // representation of host-OOM as a recoverable error), the
-        // atomicity contract from the module-level doc becomes
-        // load-bearing on behavior that post-dates `drain_into`,
-        // and rollback machinery becomes necessary. Audit this
-        // block when adding a new fallible op in the apply pass.
+        // Apply pass. `drain_into` is the only operation below that
+        // can fail; every op that follows (mailbox send, signal OR,
+        // DMA enqueue, reservation mutations, payload clone) is
+        // infallible absent host OOM. Adding a new fallible op here
+        // breaks the atomicity guarantee and needs rollback machinery.
         staging
             .drain_into(ctx.memory)
             .map_err(CommitError::Memory)?;
@@ -688,32 +447,15 @@ impl CommitPipeline {
                     blocked_units.push((*source, BlockReason::WaitOnEvent));
                 }
                 Effect::SharedWriteIntent { range, .. } => {
-                    // Clear sweep: any committed write to a reserved
-                    // line drops every unit's entry covering the
-                    // line. Runs in the apply pass so cross-unit
-                    // invalidation follows the same emission order
-                    // as the write itself.
+                    // Cross-unit reservation invalidation in emission order.
                     reservations_cleared += ctx
                         .reservations
                         .clear_covering(range.start().raw(), range.length());
                 }
                 Effect::ReservationAcquire { line_addr, source } => {
-                    // Canonicalize to line granule at insert time.
-                    // The unit may have passed the raw EA; the table
-                    // only ever stores line-aligned addresses.
-                    //
-                    // A prior reservation for the same unit is
-                    // clobbered. That is legal under LL/SC
-                    // semantics (a new lwarx/getllar overwrites the
-                    // previous reservation) but the clobber still
-                    // counts as a reservation dropped at this
-                    // commit boundary, so replay and audit tooling
-                    // can tell that an entry disappeared. Bumping
-                    // `reservations_cleared` on the prior-entry
-                    // return keeps the counter's invariant
-                    // "reservations that were in the table at
-                    // start-of-commit and are no longer at
-                    // end-of-commit."
+                    // Canonicalize to 128-byte line at insert; callers may
+                    // pass a raw EA. A prior entry on the same unit is
+                    // clobbered (LL/SC re-reservation) and counted as cleared.
                     let prior = ctx
                         .reservations
                         .insert_or_replace(*source, ReservedLine::containing(*line_addr));
@@ -723,40 +465,18 @@ impl CommitPipeline {
                     reservation_acquires += 1;
                 }
                 Effect::ConditionalStore { range, source, .. } => {
-                    // The write has already been drained into memory
-                    // by the staging pass above. Drop the emitter's
-                    // own reservation entry, then run the clear sweep
-                    // against every OTHER unit's entries covering
-                    // the line. Order matters: removing the emitter
-                    // first means its entry is never subject to the
-                    // sweep (avoids double-counting in
-                    // `reservations_cleared`).
+                    // Drop the emitter's own entry first so it is never
+                    // double-counted by the subsequent cross-unit sweep.
                     //
-                    // Contract note: the pipeline does not verify
-                    // that the emitter's reservation was still held
-                    // (or that it covered the store line) at apply
-                    // time. `ConditionalStore` is a soft emitter-side
-                    // contract -- the emitting unit decides success
-                    // before emission based on its own local
-                    // reservation register. A cross-unit
-                    // SharedWriteIntent earlier in the same batch
-                    // can in principle clear the emitter's table
-                    // entry between emission and this apply point.
-                    // Synthetic emitters (e.g. `FakeIsaUnit` in
-                    // tests) may not model the local pre-check and
-                    // will reach here with no prior entry; that is
-                    // not an invariant violation at the pipeline
-                    // layer. Real emitters (`cellgov_ppu`,
-                    // `cellgov_spu`) pre-check; if they ever reach
-                    // here without a prior entry, that is an
-                    // emitter-side bug to fix there, not here.
+                    // Soft contract: the pipeline does not re-check that
+                    // the emitter still holds a reservation covering the
+                    // line. Synthetic emitters reach this branch with no
+                    // prior entry and bump the unconditional counter; real
+                    // emitters hitting that path indicate an emitter-side
+                    // LL/SC bug.
                     if ctx.reservations.remove_if_present(*source).is_some() {
                         reservations_cleared += 1;
                     } else {
-                        // Observability hook for emitter-side LL/SC
-                        // bugs. Synthetic emitters (FakeIsaUnit) hit
-                        // this every time; real emitter scenarios
-                        // must assert this counter stays 0.
                         conditional_stores_without_prior_reservation += 1;
                     }
                     reservations_cleared += ctx
@@ -764,15 +484,6 @@ impl CommitPipeline {
                         .clear_covering(range.start().raw(), range.length());
                 }
                 Effect::RsxFlipRequest { buffer_index } => {
-                    // Transition the flip state: status -> WAITING,
-                    // pending -> true, record buffer_index. The
-                    // WAITING -> DONE transition fires at the next
-                    // commit boundary via Runtime::commit_step's
-                    // post-apply hook. If a flip was ALREADY
-                    // pending when this effect arrives, the corner
-                    // case is last-writer-wins on buffer_index,
-                    // pending stays true, status stays WAITING.
-                    // `request_flip` implements that policy.
                     ctx.rsx_flip.request_flip(*buffer_index);
                 }
                 _ => {}

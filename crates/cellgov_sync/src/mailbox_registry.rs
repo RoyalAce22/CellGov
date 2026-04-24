@@ -1,29 +1,12 @@
-//! Mailbox registry.
-//!
-//! Mirrors `cellgov_core::UnitRegistry` for [`Mailbox`] instances.
-//! Owns every mailbox known to the runtime, hands out stable
-//! [`MailboxId`]s from a sequential allocator, and exposes
-//! deterministic id-order iteration via [`BTreeMap`] so the runtime
-//! never sees `HashMap` insertion order.
-//!
-//! Provides registration, lookup, iteration, and a
-//! [`MailboxRegistry::state_hash`] that summarizes every mailbox's
-//! queue contents into a single `u64`. `Effect::MailboxSend` and
-//! `Effect::MailboxReceiveAttempt` flow through the commit pipeline
-//! into this registry, and the `SyncState` checkpoint emission in
-//! `cellgov_core` folds `state_hash` into its hash.
+//! Owns every [`Mailbox`] in the runtime, allocates sequential
+//! [`MailboxId`]s, and iterates in id order via `BTreeMap`.
+//! `Effect::MailboxSend` / `Effect::MailboxReceiveAttempt` flow through
+//! the commit pipeline into this registry.
 
 use crate::mailbox::{Mailbox, MailboxId};
 use std::collections::BTreeMap;
 
-/// The runtime's mailbox registry.
-///
-/// Allocates [`MailboxId`]s from a sequential counter so ids are
-/// stable across runs of the same scenario as long as the
-/// registration order is deterministic. Stores mailboxes in a
-/// [`BTreeMap`] keyed by `MailboxId` so that
-/// iteration is in id order. No host-time inputs or hash iteration
-/// order influence the result.
+/// Runtime mailbox registry.
 #[derive(Debug, Clone, Default)]
 pub struct MailboxRegistry {
     next_id: u64,
@@ -49,8 +32,7 @@ impl MailboxRegistry {
         self.mailboxes.is_empty()
     }
 
-    /// Register a fresh empty mailbox and return its newly-assigned
-    /// stable id.
+    /// Register a fresh empty mailbox.
     pub fn register(&mut self) -> MailboxId {
         let id = MailboxId::new(self.next_id);
         self.next_id += 1;
@@ -58,8 +40,9 @@ impl MailboxRegistry {
         id
     }
 
-    /// Register an empty mailbox at a specific id. Used by the runtime
-    /// to align MailboxId with UnitId for dynamically created SPUs.
+    /// Register an empty mailbox at `id`, leaving the id counter above
+    /// it. Used to align `MailboxId` with externally-chosen `UnitId`
+    /// values for dynamically created SPUs.
     pub fn register_at(&mut self, id: MailboxId) {
         self.mailboxes.entry(id).or_default();
         if id.raw() >= self.next_id {
@@ -67,15 +50,13 @@ impl MailboxRegistry {
         }
     }
 
-    /// Borrow a mailbox by id, if present.
+    /// Borrow a mailbox by id.
     #[inline]
     pub fn get(&self, id: MailboxId) -> Option<&Mailbox> {
         self.mailboxes.get(&id)
     }
 
-    /// Mutably borrow a mailbox by id, if present. The commit pipeline
-    /// uses this to apply `MailboxSend` / `MailboxReceiveAttempt`
-    /// effects.
+    /// Mutably borrow a mailbox by id.
     #[inline]
     pub fn get_mut(&mut self, id: MailboxId) -> Option<&mut Mailbox> {
         self.mailboxes.get_mut(&id)
@@ -91,28 +72,14 @@ impl MailboxRegistry {
         self.mailboxes.keys().copied()
     }
 
-    /// 64-bit deterministic hash of every mailbox's queued messages
-    /// in id order.
-    ///
-    /// Used as part of the `SyncState` checkpoint hash. FNV-1a, no host-time
-    /// inputs, no external deps. Walks the underlying [`BTreeMap`] in
-    /// id order, then folds (id_le_bytes, message_count_le_bytes,
-    /// each_message_le_bytes) into the running hash so that any
-    /// difference in id assignment, queue length, or message contents
-    /// shows up in the result.
-    ///
-    /// Replay tooling compares pairs of these values to assert that
-    /// two runs reached the same set of mailbox states. The empty
-    /// registry hashes to the FNV-1a empty-input value.
+    /// FNV-1a hash over `(id, len, messages...)` in id order. Folded
+    /// into the `SyncState` checkpoint hash. Empty registry hashes to
+    /// the FNV-1a empty-input value.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (id, mailbox) in self.mailboxes.iter() {
             hasher.write(&id.raw().to_le_bytes());
             hasher.write(&(mailbox.len() as u64).to_le_bytes());
-            // Walk front-to-back, the same order try_receive would
-            // observe, so replay sees identical bytes across runs.
-            // Mailbox does not expose iter() yet; the helper below
-            // clones the queue once and drains the clone.
             for word in mailbox_iter(mailbox) {
                 hasher.write(&word.to_le_bytes());
             }
@@ -121,10 +88,8 @@ impl MailboxRegistry {
     }
 }
 
-/// Internal: walk a mailbox's queued messages front-to-back without
-/// consuming them. Equivalent to what a `Mailbox::iter()` method
-/// would expose; kept private to the registry because the only
-/// current caller is the state-hash path.
+/// Front-to-back walk of a mailbox's queued messages. Clones the queue
+/// once and drains the clone; only the state-hash path needs this.
 fn mailbox_iter(mailbox: &Mailbox) -> impl Iterator<Item = u32> + '_ {
     let mut clone = mailbox.clone();
     std::iter::from_fn(move || clone.try_receive())
@@ -234,8 +199,6 @@ mod tests {
 
     #[test]
     fn state_hash_round_trips_after_drain() {
-        // Sending then fully draining must restore the original hash:
-        // hash is a pure function of (id, queue contents).
         let mut r = MailboxRegistry::new();
         let id = r.register();
         let h0 = r.state_hash();
@@ -249,8 +212,6 @@ mod tests {
 
     #[test]
     fn state_hash_distinguishes_id_position() {
-        // Same single message, different mailbox ids must hash
-        // differently. Burn an id slot in the second registry.
         let mut a = MailboxRegistry::new();
         let id_a = a.register();
         a.get_mut(id_a).unwrap().send(99);

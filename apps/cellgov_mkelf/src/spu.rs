@@ -1,6 +1,5 @@
-//! Minimal SPU instruction encoder.
+//! Minimal SPU instruction encoder for microtest SPU programs.
 //!
-//! Encodes only the instructions needed for microtest SPU programs.
 //! All instructions are 32-bit big-endian.
 
 #![allow(dead_code)]
@@ -31,8 +30,9 @@ pub fn rdch(rt: u32, ca: u32) -> u32 {
 }
 
 /// Encode `stqd $rt, imm($ra)` (store quadword d-form).
-/// `imm` is in bytes and must be a multiple of 16. The I10 field
-/// stores `imm / 16` as a signed 10-bit value.
+///
+/// `imm` is in bytes and must be a multiple of 16; the I10 field stores `imm / 16`
+/// as a signed 10-bit value.
 pub fn stqd(rt: u32, ra: u32, imm: i16) -> u32 {
     let i10 = ((imm / 16) as u16 as u32) & 0x3FF;
     (0x24 << 24) | (i10 << 14) | (ra << 7) | rt
@@ -58,35 +58,30 @@ mod tests {
 
     #[test]
     fn ilhu_encodes_correctly() {
-        // ilhu $3, 0x1337
         let inst = ilhu(3, 0x1337);
         assert_eq!(inst.to_be_bytes(), [0x41, 0x09, 0x9B, 0x83]);
     }
 
     #[test]
     fn iohl_encodes_correctly() {
-        // iohl $3, 0xBAAD
         let inst = iohl(3, 0xBAAD);
         assert_eq!(inst.to_be_bytes(), [0x60, 0xDD, 0x56, 0x83]);
     }
 
     #[test]
     fn il_encodes_correctly() {
-        // il $3, 4
         let inst = il(3, 4);
         assert_eq!(inst.to_be_bytes(), [0x40, 0x80, 0x02, 0x03]);
     }
 
     #[test]
     fn wrch_encodes_correctly() {
-        // wrch $16, $3 (MFC_LSA)
         let inst = wrch(16, 3);
         assert_eq!(inst.to_be_bytes(), [0x20, 0xA0, 0x08, 0x03]);
     }
 
     #[test]
     fn rdch_encodes_correctly() {
-        // rdch $9, $24 (MFC_RdTagStat)
         let inst = rdch(9, 24);
         assert_eq!(inst.to_be_bytes(), [0x01, 0xA0, 0x0C, 0x09]);
     }

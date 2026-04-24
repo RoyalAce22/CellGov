@@ -1,248 +1,171 @@
 //! Typed PPU instruction forms.
 //!
-//! Each variant carries decoded fields (register indices, immediates,
-//! flags). Decode produces these; execute consumes them. The variant
-//! set does not know about runtime state, Effects, or scheduling.
-//!
-//! PPC64 has many instruction forms. Only those required by the
-//! microtest corpus are represented. The rest decode as
-//! `PpuDecodeError::Unsupported`.
+//! Variants carry decoded register indices, immediates, and flags.
+//! Decode produces these; execute consumes them. Unknown encodings
+//! decode to `PpuDecodeError::Unsupported` rather than a variant.
 
-/// A decoded PPU instruction.
-///
-/// Variant fields are PPC register indices (rt, ra, rb) and immediates
-/// (imm, offset, link) -- self-documenting by PPC naming convention.
+/// A decoded PPU instruction. Field names follow PPC ISA conventions
+/// (`rt`/`rs`/`ra`/`rb`, `imm`, `offset`, `link`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum PpuInstruction {
     // -- Integer loads --
-    /// Load word and zero: rt = mem[ra + imm] (32-bit, zero-extended).
     Lwz {
-        /// Destination register.
         rt: u8,
-        /// Base register (0 means literal zero, not GPR0).
         ra: u8,
-        /// Signed 16-bit displacement.
         imm: i16,
     },
-    /// Load byte and zero: rt = mem[ra + imm] (8-bit, zero-extended).
     Lbz {
-        /// Destination register.
         rt: u8,
-        /// Base register.
         ra: u8,
-        /// Signed 16-bit displacement.
         imm: i16,
     },
-    /// Load halfword and zero: rt = mem[ra + imm] (16-bit, zero-extended).
     Lhz {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Load halfword algebraic: rt = mem[ra + imm] (16-bit, sign-extended).
     Lha {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Load word with update: rt = mem[ra + imm] (32-bit), ra = ra + imm.
     Lwzu {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Load byte with update: rt = mem[ra + imm] (8-bit), ra = ra + imm.
     Lbzu {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Load halfword and zero with update: rt = mem[ra + imm] (16-bit zero-ext),
-    /// ra = ra + imm. Requires ra != 0 and ra != rt.
+    /// Load halfword zero with update. Requires `ra != 0 && ra != rt`.
     Lhzu {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Load doubleword with update: rt = mem[ra + imm] (64-bit),
-    /// ra = ra + imm. DS-form (imm low 2 bits always 0).
+    /// Load doubleword with update (DS-form). `imm & 3 == 0`.
     Ldu {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Load doubleword: rt = mem[ra + imm] (64-bit).
+    /// Load doubleword (DS-form). `imm & 3 == 0`.
     Ld {
-        /// Destination register.
         rt: u8,
-        /// Base register.
         ra: u8,
-        /// Signed 16-bit displacement (low 2 bits must be 0).
         imm: i16,
     },
 
     // -- Integer stores --
-    /// Store word: mem[ra + imm] = rs (low 32 bits).
     Stw {
-        /// Source register.
         rs: u8,
-        /// Base register.
         ra: u8,
-        /// Signed 16-bit displacement.
         imm: i16,
     },
-    /// Store word with update: mem[ra + imm] = rs, then ra = ra + imm.
-    /// Requires ra != 0 and ra != rs.
+    /// Store word with update. Requires `ra != 0 && ra != rs`.
     Stwu {
-        /// Source register.
         rs: u8,
-        /// Base register (updated).
         ra: u8,
-        /// Signed 16-bit displacement.
         imm: i16,
     },
-    /// Store doubleword with update: mem[ra + imm] = rs (64 bits), then ra = ra + imm.
-    /// Requires ra != 0 and ra != rs. Low 2 bits of imm must be 0.
+    /// Store doubleword with update. Requires `ra != 0 && ra != rs` and `imm & 3 == 0`.
     Stdu {
-        /// Source register.
         rs: u8,
-        /// Base register (updated).
         ra: u8,
-        /// Signed 16-bit displacement (low 2 bits must be 0).
         imm: i16,
     },
-    /// Store byte: mem[ra + imm] = rs (low 8 bits).
     Stb {
-        /// Source register.
         rs: u8,
-        /// Base register.
         ra: u8,
-        /// Signed 16-bit displacement.
         imm: i16,
     },
-    /// Store halfword: mem[ra + imm] = rs (low 16 bits, big-endian).
     Sth {
-        /// Source register.
         rs: u8,
-        /// Base register.
         ra: u8,
-        /// Signed 16-bit displacement.
         imm: i16,
     },
-    /// Store doubleword: mem[ra + imm] = rs (64 bits).
+    /// Store doubleword (DS-form). `imm & 3 == 0`.
     Std {
-        /// Source register.
         rs: u8,
-        /// Base register.
         ra: u8,
-        /// Signed 16-bit displacement (low 2 bits must be 0).
         imm: i16,
     },
 
     // -- Integer arithmetic / immediate --
-    /// Add immediate: rt = (ra|0) + sign_extend(imm).
-    /// When ra == 0, this is `li rt, imm`.
+    /// `ra == 0` means literal zero (not GPR0); this is how `li` is encoded.
     Addi {
-        /// Destination register.
         rt: u8,
-        /// Source register (0 = literal zero).
         ra: u8,
-        /// Signed 16-bit immediate.
         imm: i16,
     },
-    /// Add immediate shifted: rt = (ra|0) + (imm << 16).
-    /// When ra == 0, this is `lis rt, imm`.
+    /// `ra == 0` means literal zero; this is how `lis` is encoded.
     Addis {
-        /// Destination register.
         rt: u8,
-        /// Source register (0 = literal zero).
         ra: u8,
-        /// Signed 16-bit immediate (shifted left 16 at execution).
         imm: i16,
     },
-    /// Subtract from immediate carrying: rt = sign_extend(imm) - ra.
     Subfic {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Multiply low immediate: rt = ra * sign_extend(imm) (low 64 bits).
     Mulli {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Add immediate carrying: rt = ra + sign_extend(imm), update CA.
     Addic {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Add: rt = ra + rb.
     Add {
-        /// Destination register.
         rt: u8,
-        /// Source register A.
         ra: u8,
-        /// Source register B.
         rb: u8,
     },
-    /// OR: ra = rs | rb. When rs == rb, this is `mr ra, rs`.
     Or {
-        /// Destination register.
         ra: u8,
-        /// Source register.
         rs: u8,
-        /// Source register.
         rb: u8,
     },
-    /// Subtract from: rt = rb - ra.
     Subf {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Subtract from carrying: rt = ~ra + rb + 1, set `XER[CA]`.
     Subfc {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Subtract from extended: rt = ~ra + rb + `CA`, set `XER[CA]`.
     Subfe {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Negate: rt = -(ra).
     Neg {
         rt: u8,
         ra: u8,
     },
-    /// Multiply low word: rt = (ra * rb) as i32 (low 32 bits).
     Mullw {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Multiply high word unsigned: rt = ((ra as u32) * (rb as u32)) >> 32.
     Mulhwu {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Multiply high word signed: rt = high 32 bits of (int32(ra) *
-    /// int32(rb)), sign-extended to 64-bit. Used by games that do
-    /// signed fixed-point math on words.
     Mulhw {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Multiply high doubleword unsigned: rt = high 64 bits of
-    /// ((ra as u128) * (rb as u128)). Used by compilers to lower
-    /// unsigned 64-bit division by a constant.
     Mulhdu {
         rt: u8,
         ra: u8,
@@ -253,134 +176,113 @@ pub enum PpuInstruction {
         ra: u8,
         rb: u8,
     },
-    /// Add extended: rt = ra + rb + `XER[CA]`. Sets `XER[CA]` to the
-    /// unsigned overflow. Used for multi-word addition chains.
     Adde {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Add to Zero Extended: rt = ra + `XER[CA]`; sets `XER[CA]`.
-    /// Short form of adde with the RB operand replaced by zero.
-    /// Common in arbitrary-precision addition loops after the first
-    /// addc.
     Addze {
         rt: u8,
         ra: u8,
     },
-    /// Multiply low doubleword: rt = ra * rb (low 64 bits, wrapping).
     Mulld {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Load doubleword and reserve indexed (atomic load): rt = mem[(ra|0) + rb].
-    /// Single-threaded: equivalent to Ldx.
+    /// Load-doubleword-and-reserve. Under the single-threaded model
+    /// this is equivalent to `Ldx`.
     Ldarx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Store doubleword conditional indexed (atomic CAS store): mem[(ra|0) + rb] = rs.
-    /// Single-threaded: always succeeds, sets CR0 EQ.
+    /// Store-doubleword-conditional. Under the single-threaded model
+    /// this always succeeds and sets CR0 EQ.
     Stdcx {
         rs: u8,
         ra: u8,
         rb: u8,
     },
-    /// Load word and reserve indexed (atomic 32-bit load): rt = zext32(mem[(ra|0) + rb]).
-    /// Single-threaded: equivalent to Lwzx.
+    /// Load-word-and-reserve. Under the single-threaded model this
+    /// is equivalent to `Lwzx`.
     Lwarx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Store word conditional indexed (atomic 32-bit CAS store): mem[(ra|0) + rb] = rs as u32.
-    /// Single-threaded: always succeeds, sets CR0 EQ.
+    /// Store-word-conditional. Under the single-threaded model this
+    /// always succeeds and sets CR0 EQ.
     Stwcx {
         rs: u8,
         ra: u8,
         rb: u8,
     },
-    /// XOR immediate: ra = rs ^ zero_extend(imm).
     Xori {
         ra: u8,
         rs: u8,
         imm: u16,
     },
-    /// XOR immediate shifted: ra = rs ^ (zero_extend(imm) << 16).
     Xoris {
         ra: u8,
         rs: u8,
         imm: u16,
     },
-    /// Divide word: rt = (ra as i32) / (rb as i32).
     Divw {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Divide word unsigned: rt = (ra as u32) / (rb as u32).
     Divwu {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Divide doubleword: rt = (ra as i64) / (rb as i64).
     Divd {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Divide doubleword unsigned: rt = ra / rb (64-bit unsigned).
     Divdu {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// AND: ra = rs & rb.
     And {
         ra: u8,
         rs: u8,
         rb: u8,
     },
-    /// AND with complement: ra = rs & !rb.
     Andc {
         ra: u8,
         rs: u8,
         rb: u8,
     },
-    /// NOR: ra = ~(rs | rb). When rs==rb, this is `not`.
     Nor {
         ra: u8,
         rs: u8,
         rb: u8,
     },
-    /// XOR: ra = rs ^ rb.
     Xor {
         ra: u8,
         rs: u8,
         rb: u8,
     },
-    /// AND immediate: ra = rs & zero_extend(imm).
     AndiDot {
         ra: u8,
         rs: u8,
         imm: u16,
     },
-    /// Shift left word: ra = (rs as u32) << (rb & 0x3F), zero-extended.
     Slw {
         ra: u8,
         rs: u8,
         rb: u8,
     },
-    /// Shift right word: ra = (rs as u32) >> (rb & 0x3F), zero-extended.
     Srw {
         ra: u8,
         rs: u8,
         rb: u8,
     },
-    /// Shift right algebraic word immediate: ra = sign_extend((rs as i32) >> sh).
     Srawi {
         ra: u8,
         rs: u8,
@@ -401,218 +303,148 @@ pub enum PpuInstruction {
         rs: u8,
         sh: u8,
     },
-    /// Shift left doubleword: ra = rs << (rb & 0x7F).
     Sld {
         ra: u8,
         rs: u8,
         rb: u8,
     },
-    /// Shift right doubleword: ra = rs >> (rb & 0x7F).
     Srd {
         ra: u8,
         rs: u8,
         rb: u8,
     },
-    /// Count leading zeros word: ra = clz(rs as u32), zero-extended.
     Cntlzw {
         ra: u8,
         rs: u8,
     },
-    /// Count leading zeros doubleword: ra = leading_zeros(rs) as u64,
-    /// evaluating rs as a full 64-bit value.
     Cntlzd {
         ra: u8,
         rs: u8,
     },
-    /// OR with complement: ra = rs | ~rb. Logical X-form under opcode
-    /// 31, XO 412. Common in games that mask partial words with an
-    /// inverted bitmask.
     Orc {
         ra: u8,
         rs: u8,
         rb: u8,
     },
-    /// Extend sign halfword: ra = sign_extend_16_to_64(rs).
     Extsh {
         ra: u8,
         rs: u8,
     },
-    /// Extend sign byte: ra = sign_extend_8_to_64(rs).
     Extsb {
         ra: u8,
         rs: u8,
     },
-    /// Extend sign word: ra = sign_extend_32_to_64(rs).
     Extsw {
-        /// Destination register.
         ra: u8,
-        /// Source register (low 32 bits are sign-extended).
         rs: u8,
     },
-    /// OR immediate: ra = rs | zero_extend(imm).
-    /// When imm == 0, this is `mr ra, rs`.
+    /// `imm == 0 && ra == rs` encodes `nop`.
     Ori {
-        /// Destination register.
         ra: u8,
-        /// Source register.
         rs: u8,
-        /// Unsigned 16-bit immediate.
         imm: u16,
     },
-    /// OR immediate shifted: ra = rs | (zero_extend(imm) << 16).
     Oris {
-        /// Destination register.
         ra: u8,
-        /// Source register.
         rs: u8,
-        /// Unsigned 16-bit immediate (shifted left 16 at execution).
         imm: u16,
     },
 
     // -- Compare --
-    /// Compare word immediate: `CR[bf] = compare(ra, sign_extend(imm))`.
+    // `bf` is the CR field index (0..=7).
     Cmpwi {
-        /// Condition register field (0-7).
         bf: u8,
-        /// Source register.
         ra: u8,
-        /// Signed 16-bit immediate.
         imm: i16,
     },
-    /// Compare logical word immediate (unsigned).
     Cmplwi {
-        /// Condition register field (0-7).
         bf: u8,
-        /// Source register.
         ra: u8,
-        /// Unsigned 16-bit immediate.
         imm: u16,
     },
-    /// Compare word (register-register, signed 32-bit).
     Cmpw {
-        /// Condition register field (0-7).
         bf: u8,
-        /// First source register.
         ra: u8,
-        /// Second source register.
         rb: u8,
     },
-    /// Compare logical word (register-register, unsigned 32-bit).
     Cmplw {
-        /// Condition register field (0-7).
         bf: u8,
-        /// First source register.
         ra: u8,
-        /// Second source register.
         rb: u8,
     },
-    /// Compare doubleword (register-register, signed 64-bit).
     Cmpd {
-        /// Condition register field (0-7).
         bf: u8,
-        /// First source register.
         ra: u8,
-        /// Second source register.
         rb: u8,
     },
-    /// Compare logical doubleword (register-register, unsigned 64-bit).
     Cmpld {
-        /// Condition register field (0-7).
         bf: u8,
-        /// First source register.
         ra: u8,
-        /// Second source register.
         rb: u8,
     },
 
     // -- Branch --
-    /// Unconditional branch. Optionally sets LR.
+    /// `offset` is the already-sign-extended 26-bit LI field in bytes.
+    /// `aa` selects absolute (target = offset) vs relative (PC + offset).
     B {
-        /// Signed 26-bit offset (already sign-extended, in bytes).
         offset: i32,
-        /// Absolute address flag. When true, the target is
-        /// `offset` directly; when false, the target is
-        /// `PC + offset`.
         aa: bool,
-        /// Whether to set LR = PC + 4 (bl / bla).
         link: bool,
     },
-    /// Conditional branch: if condition(BO, BI) then PC += offset.
     Bc {
-        /// Branch operation field.
         bo: u8,
-        /// Bit index into CR.
         bi: u8,
-        /// Signed 16-bit offset (in bytes).
         offset: i16,
-        /// Whether to set LR = PC + 4.
         link: bool,
     },
-    /// Branch to LR: PC = LR. Optionally sets LR.
     Bclr {
-        /// Branch operation field.
         bo: u8,
-        /// Bit index into CR.
         bi: u8,
-        /// Whether to set LR = PC + 4.
         link: bool,
     },
-    /// Branch to CTR: PC = CTR. Optionally sets LR.
     Bcctr {
-        /// Branch operation field.
         bo: u8,
-        /// Bit index into CR.
         bi: u8,
-        /// Whether to set LR = PC + 4.
         link: bool,
     },
 
-    // -- Special-purpose register moves --
     // -- Indexed loads/stores --
-    /// Load word and zero indexed: rt = mem[(ra|0) + rb] (32-bit).
     Lwzx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Load byte and zero indexed: rt = mem[(ra|0) + rb] (8-bit).
     Lbzx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Load doubleword indexed: rt = mem[(ra|0) + rb] (64-bit).
     Ldx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Load halfword and zero indexed: rt = mem[(ra|0) + rb] (16-bit).
     Lhzx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Store word indexed: mem[(ra|0) + rb] = rs (32-bit).
     Stwx {
         rs: u8,
         ra: u8,
         rb: u8,
     },
-    /// Store doubleword indexed: mem[(ra|0) + rb] = rs (64-bit).
     Stdx {
         rs: u8,
         ra: u8,
         rb: u8,
     },
-    /// Store doubleword with update indexed: mem[ra + rb] = rs, ra = ra + rb.
-    /// Requires ra != 0.
+    /// Store-doubleword-with-update-indexed. Requires `ra != 0`.
     Stdux {
         rs: u8,
         ra: u8,
         rb: u8,
     },
-    /// Store byte indexed: mem[(ra|0) + rb] = rs (8-bit).
     Stbx {
         rs: u8,
         ra: u8,
@@ -620,228 +452,149 @@ pub enum PpuInstruction {
     },
 
     // -- Special-purpose register moves --
-    /// Move from time base: rt = TB, then TB += 1 (deterministic).
+    /// Move-from-time-base. The model advances TB by 1 per read.
     Mftb {
         rt: u8,
     },
-    /// Move from CR: rt = CR (32 bits, zero-extended to 64).
     Mfcr {
         rt: u8,
     },
-    /// Move to CR fields: CR = (rs >> 32) masked by CRM.
     Mtcrf {
         rs: u8,
         crm: u8,
     },
-    /// Move from LR: rt = LR.
     Mflr {
         rt: u8,
     },
-    /// Move to LR: LR = rs.
     Mtlr {
         rs: u8,
     },
-    /// Move from CTR: rt = CTR.
     Mfctr {
         rt: u8,
     },
-    /// Move to CTR: CTR = rs.
     Mtctr {
         rs: u8,
     },
 
     // -- Rotate/shift (subset) --
-    /// Rotate left word immediate then AND with mask.
     Rlwinm {
-        /// Destination register.
         ra: u8,
-        /// Source register.
         rs: u8,
-        /// Shift amount.
         sh: u8,
-        /// Mask begin.
         mb: u8,
-        /// Mask end.
         me: u8,
     },
-    /// Rotate left word immediate then mask insert. Like
-    /// `Rlwinm` but merges the masked bits into the prior value
-    /// of `ra` instead of zeroing the unmasked bits.
+    /// `ra` is both input and output: unmasked bits are preserved.
     Rlwimi {
-        /// Destination register (also an input; the unmasked bits
-        /// are preserved).
         ra: u8,
-        /// Source register to rotate.
         rs: u8,
-        /// Shift amount.
         sh: u8,
-        /// Mask begin.
         mb: u8,
-        /// Mask end.
         me: u8,
     },
-    /// Rotate left word (variable) then AND with mask: shift amount is
-    /// the low 5 bits of rb. Otherwise identical to `Rlwinm`.
     Rlwnm {
-        /// Destination register.
         ra: u8,
-        /// Source register.
         rs: u8,
-        /// Register whose low 5 bits give the shift amount.
         rb: u8,
-        /// Mask begin.
         mb: u8,
-        /// Mask end.
         me: u8,
     },
-    /// Rotate left doubleword immediate then clear left: mask bits
-    /// mb..63. Implements aliases `clrldi`, `srdi`, `extrdi`.
+    /// `sh` and `mb` are 6-bit MD-form fields; mask covers `mb..=63`.
     Rldicl {
-        /// Destination register.
         ra: u8,
-        /// Source register.
         rs: u8,
-        /// 6-bit shift amount.
         sh: u8,
-        /// 6-bit mask begin (mask covers mb..63 inclusive).
         mb: u8,
     },
-    /// Rotate left doubleword immediate then clear right: mask bits
-    /// 0..me. Implements aliases `clrrdi`, `sldi`, `extldi`.
+    /// `sh` and `me` are 6-bit MD-form fields; mask covers `0..=me`.
     Rldicr {
-        /// Destination register.
         ra: u8,
-        /// Source register.
         rs: u8,
-        /// 6-bit shift amount.
         sh: u8,
-        /// 6-bit mask end (mask covers 0..me inclusive).
         me: u8,
     },
 
     // -- Vector (AltiVec / VMX) --
-    /// Vector XOR: `vr[vt] = vr[va] XOR vr[vb]`. With `va == vb`, this
-    /// zeros `vr[vt]` and is commonly emitted by compilers to clear a
-    /// vector register (including in the PPC64 stdarg / varargs save
-    /// area setup).
-    /// Generic VX-form VMX instruction. The XO field selects the
-    /// operation; execution dispatches on it. This avoids 160+
-    /// individual enum variants for every VMX opcode.
+    /// Generic VX-form. `xo` is the 11-bit extended opcode; execution
+    /// dispatches on it rather than opening a new variant per VMX op.
     Vx {
-        /// 11-bit extended opcode selecting the VMX operation.
         xo: u16,
-        /// Destination vector register (or source for stores).
         vt: u8,
-        /// Source vector register A (or immediate for vspltis*).
         va: u8,
-        /// Source vector register B.
         vb: u8,
     },
-    /// Generic VA-form VMX instruction (4-register, 6-bit sub-opcode).
+    /// Generic VA-form (four register operands, 6-bit sub-opcode).
     Va {
-        /// 6-bit sub-opcode.
         xo: u8,
-        /// Destination vector register.
         vt: u8,
-        /// Source vector register A.
         va: u8,
-        /// Source vector register B.
         vb: u8,
-        /// Source vector register C.
         vc: u8,
     },
-    /// Vector XOR (kept as named variant for backward compatibility
-    /// with existing tests; decodes as Vx { xo: 0x4c4, ... } going forward).
+    /// Vector XOR. Also decodable as `Vx { xo: 0x4c4, .. }`.
     Vxor {
-        /// Destination vector register.
         vt: u8,
-        /// Source vector register A.
         va: u8,
-        /// Source vector register B.
         vb: u8,
     },
-    /// Cell unaligned vector load (left): load 16 bytes at EA & ~15
-    /// then shift left by (EA & 15) * 8 bits to align the high
-    /// portion of an unaligned 16-byte value.
     Lvlx {
         vt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Cell unaligned vector load (right): load 16 bytes at EA & ~15
-    /// then shift right by (16 - (EA & 15)) * 8 bits to align the
-    /// low portion of an unaligned 16-byte value.
     Lvrx {
         vt: u8,
         ra: u8,
         rb: u8,
     },
-    /// Store vector indexed: `mem[((ra|0) + rb) & !15] = vr[vs]` (16
-    /// bytes, big-endian). The effective address is always aligned
-    /// down to a 16-byte boundary before the store.
+    /// Store-vector-indexed. The effective address is aligned down to
+    /// a 16-byte boundary before the store.
     Stvx {
-        /// Source vector register.
         vs: u8,
-        /// Base register (0 = literal zero).
         ra: u8,
-        /// Offset register.
         rb: u8,
     },
 
     // -- Floating-point loads/stores --
-    /// Load float single: frt = (float)mem[ra + imm], converted to double.
     Lfs {
         frt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Load float double: frt = mem[ra + imm] (64-bit).
     Lfd {
         frt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Store float single: mem[ra + imm] = (float)frs.
     Stfs {
         frs: u8,
         ra: u8,
         imm: i16,
     },
-    /// Store float double: mem[ra + imm] = frs (64-bit).
     Stfd {
         frs: u8,
         ra: u8,
         imm: i16,
     },
-    /// Store float single with update: mem[ra + imm] = (float)frs,
-    /// ra = ra + imm. D-form with primary opcode 53.
     Stfsu {
         frs: u8,
         ra: u8,
         imm: i16,
     },
-    /// Store float double with update: mem[ra + imm] = frs (64-bit),
-    /// ra = ra + imm. D-form with primary opcode 55.
     Stfdu {
         frs: u8,
         ra: u8,
         imm: i16,
     },
-    /// Store floating-point as integer word indexed: stores the low 32
-    /// bits of `fpr[frs]` at `(ra == 0 ? 0 : gpr[ra]) + gpr[rb]`
-    /// without any float-to-int conversion -- the FPR is already the
-    /// integer the instruction is about to store. Used by titles that
-    /// keep an integer in a floating-point register across a memory
-    /// store (common pattern after float-to-int conversion via fctiwz
-    /// or similar).
+    /// Store-float-as-integer-word. The low 32 bits of `fpr[frs]` are
+    /// written verbatim -- there is no float-to-int conversion.
     Stfiwx {
         frs: u8,
         ra: u8,
         rb: u8,
     },
 
-    /// Generic floating-point instruction (opcode 63, A-form/X-form).
-    /// XO selects the operation; execution dispatches on it.
+    /// Generic double-precision FP (primary 63). `xo` selects the op.
     Fp63 {
         xo: u16,
         frt: u8,
@@ -849,7 +602,7 @@ pub enum PpuInstruction {
         frb: u8,
         frc: u8,
     },
-    /// Generic floating-point instruction (opcode 59, single-precision).
+    /// Generic single-precision FP (primary 59). `xo` selects the op.
     Fp59 {
         xo: u16,
         frt: u8,
@@ -859,55 +612,45 @@ pub enum PpuInstruction {
     },
 
     // -- Quickened (specialized) forms --
-    /// li rT, imm -- specialized from addi rT, 0, imm (skips GPR read).
     Li {
         rt: u8,
         imm: i16,
     },
-    /// mr rA, rS -- specialized from or rA, rS, rS (register copy, no OR).
     Mr {
         ra: u8,
         rs: u8,
     },
-    /// slwi rA, rS, n -- specialized from rlwinm rA, rS, n, 0, 31-n.
     Slwi {
         ra: u8,
         rs: u8,
         n: u8,
     },
-    /// srwi rA, rS, n -- specialized from rlwinm rA, rS, 32-n, n, 31.
     Srwi {
         ra: u8,
         rs: u8,
         n: u8,
     },
-    /// clrlwi rA, rS, n -- specialized from rlwinm rA, rS, 0, n, 31.
     Clrlwi {
         ra: u8,
         rs: u8,
         n: u8,
     },
-    /// nop -- ori rA, rS, 0 where rA == rS. Does nothing.
     Nop,
-    /// cmpwi crF, rA, 0 -- compare word immediate against zero.
-    /// Eliminates sign-extension of imm=0 and the subtraction.
+    /// Quickened form of `cmpwi crF, rA, 0`.
     CmpwZero {
         bf: u8,
         ra: u8,
     },
-    /// clrldi rA, rS, n -- rldicl rA, rS, 0, n. Mask low (64-n) bits.
     Clrldi {
         ra: u8,
         rs: u8,
         n: u8,
     },
-    /// sldi rA, rS, n -- rldicr rA, rS, n, 63-n. Shift left doubleword.
     Sldi {
         ra: u8,
         rs: u8,
         n: u8,
     },
-    /// srdi rA, rS, n -- rldicl rA, rS, 64-n, n. Shift right doubleword.
     Srdi {
         ra: u8,
         rs: u8,
@@ -915,8 +658,6 @@ pub enum PpuInstruction {
     },
 
     // -- Superinstructions (compound 2-instruction pairs) --
-    /// lwz + cmpwi: load word then compare immediate.
-    /// Fused prologue/loop pattern: loads a word and compares it in one step.
     LwzCmpwi {
         rt: u8,
         ra_load: u8,
@@ -924,55 +665,39 @@ pub enum PpuInstruction {
         bf: u8,
         cmp_imm: i16,
     },
-    /// li + stw: load immediate then store word.
-    /// Common in struct zeroing and initialization sequences.
     LiStw {
         rt: u8,
         imm: i16,
         ra_store: u8,
         store_offset: i16,
     },
-    /// mflr + stw: move from LR then store word.
-    /// Function prologue: save return address to stack.
     MflrStw {
         rt: u8,
         ra_store: u8,
         store_offset: i16,
     },
-    /// lwz + mtlr: load word then move to LR.
-    /// Function epilogue: restore return address from stack.
     LwzMtlr {
         rt: u8,
         ra_load: u8,
         offset: i16,
     },
-    /// mflr + std: move from LR then store doubleword.
-    /// PPC64 function prologue: save 64-bit LR to stack.
     MflrStd {
         rt: u8,
         ra_store: u8,
         store_offset: i16,
     },
-    /// ld + mtlr: load doubleword then move to LR.
-    /// PPC64 function epilogue: restore 64-bit LR from stack.
     LdMtlr {
         rt: u8,
         ra_load: u8,
         offset: i16,
     },
-    /// std + std: two adjacent doubleword stores to the same base
-    /// register (off2 = off1 + 8). Common in register spills and
-    /// struct initialization on PPC64.
+    /// Two adjacent `std` stores with `off2 == off1 + 8`.
     StdStd {
         rs1: u8,
         rs2: u8,
         ra: u8,
         offset1: i16,
     },
-    /// cmpwi + bc: compare word immediate then branch conditional.
-    /// One of the densest adjacent-pair idioms in PPC output (loop
-    /// exit tests, range checks, null-pointer branches). Fusing
-    /// saves the second decode and the intermediate CR-field stash.
     CmpwiBc {
         bf: u8,
         ra: u8,
@@ -981,10 +706,6 @@ pub enum PpuInstruction {
         bi: u8,
         target_offset: i16,
     },
-    /// cmpw + bc: compare word (register) then branch conditional.
-    /// Register-compare counterpart to CmpwiBc, common where the
-    /// comparison bound is not an immediate (array length held in
-    /// a GPR, dynamic sentinel values).
     CmpwBc {
         bf: u8,
         ra: u8,
@@ -993,19 +714,17 @@ pub enum PpuInstruction {
         bi: u8,
         target_offset: i16,
     },
-    /// Consumed by a preceding superinstruction. The fetch loop
-    /// advances PC past this slot without executing.
+    /// Placeholder for a slot absorbed by a preceding superinstruction.
+    /// The fetch loop advances PC past this without executing.
     Consumed,
 
     // -- System --
-    /// System call. Syscall number is in r11 by LV2 convention.
+    /// System call. LV2 convention: syscall number in r11.
     Sc,
 }
 
 impl PpuInstruction {
-    /// Return the variant name as a static string, without formatting
-    /// the fields. Used for instruction coverage tallying without
-    /// per-step heap allocation.
+    /// Variant name as a `&'static str`, without allocation.
     pub fn variant_name(&self) -> &'static str {
         match self {
             Self::Lwz { .. } => "Lwz",
@@ -1156,8 +875,6 @@ mod tests {
 
     #[test]
     fn variant_name_matches_debug_prefix() {
-        // Spot-check that variant_name returns the same string as the
-        // Debug impl's variant prefix.
         let cases: &[PpuInstruction] = &[
             PpuInstruction::Addi {
                 rt: 0,

@@ -7,8 +7,7 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_sync::ReservationTable;
 use cellgov_time::{Budget, GuestTicks};
 
-// cellgov_testkit depends on cellgov_core, so a reverse dev-dependency
-// would create a cycle. Local test doubles live here instead.
+// cellgov_testkit depends on cellgov_core; local test doubles avoid the cycle.
 
 struct CommitTestBed {
     pipeline: CommitPipeline,

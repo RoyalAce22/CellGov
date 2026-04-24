@@ -1,16 +1,20 @@
-//! A scheduler that follows a prescribed sequence of unit choices,
-//! falling back to round-robin for steps beyond the sequence.
+//! Scheduler that replays a recorded per-step choice list, falling
+//! back to round-robin beyond the list or when the prescribed unit
+//! is not currently runnable.
 //!
-//! Used by the explorer to replay a scenario with an alternate
-//! scheduling decision at a specific branching point.
+//! Observation-only: installing a `PrescribedScheduler` never mutates
+//! the runtime's state; it only biases which runnable unit the
+//! runtime picks next.
 
 use cellgov_core::{RoundRobinScheduler, Scheduler, UnitRegistry};
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 
 /// Scheduler that picks from a prescribed list, then falls back to
-/// round-robin. At step `i`, if `overrides[i]` is set and the unit
-/// is runnable, that unit is chosen. Otherwise the fallback picks.
+/// round-robin.
+///
+/// At step `i`, if `overrides[i] == Some(uid)` and `uid` is runnable,
+/// `uid` is chosen. Otherwise the fallback picks.
 pub struct PrescribedScheduler {
     overrides: Vec<Option<UnitId>>,
     step: usize,
@@ -18,9 +22,8 @@ pub struct PrescribedScheduler {
 }
 
 impl PrescribedScheduler {
-    /// Create a scheduler with the given per-step overrides.
-    /// `overrides[i] = Some(uid)` forces unit `uid` at step `i`;
-    /// `None` defers to round-robin.
+    /// Create a scheduler with per-step overrides; `None` at index `i`
+    /// defers step `i` to the round-robin fallback.
     pub fn new(overrides: Vec<Option<UnitId>>) -> Self {
         Self {
             overrides,
@@ -39,7 +42,6 @@ impl Scheduler for PrescribedScheduler {
                     return Some(uid);
                 }
             }
-            // Override not applicable; fall through.
             None
         } else {
             None
@@ -56,9 +58,8 @@ impl Scheduler for PrescribedScheduler {
 mod tests {
     use super::*;
 
-    // Minimal test unit for scheduler tests. We cannot import from
-    // cellgov_testkit (it depends on cellgov_core which depends on
-    // the scheduler), so we use a local double.
+    // Local stub: cellgov_testkit depends transitively on this crate's
+    // scheduler trait, so we cannot pull its fixtures in here.
     use cellgov_core::UnitRegistry;
     use cellgov_effects::Effect;
     use cellgov_exec::{
@@ -111,13 +112,11 @@ mod tests {
     #[test]
     fn override_forces_specific_unit() {
         let mut r = UnitRegistry::new();
-        r.register_with(StubUnit::new); // 0
-        r.register_with(StubUnit::new); // 1
+        r.register_with(StubUnit::new);
+        r.register_with(StubUnit::new);
 
-        // Force unit 1 at step 0 (round-robin would pick 0).
         let mut s = PrescribedScheduler::new(vec![Some(UnitId::new(1))]);
         assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
-        // Step 1: no override, falls back to round-robin.
         assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
     }
 
@@ -128,9 +127,7 @@ mod tests {
         r.register_with(StubUnit::new);
 
         let mut s = PrescribedScheduler::new(vec![None, Some(UnitId::new(0))]);
-        // Step 0: None -> fallback picks unit 0.
         assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
-        // Step 1: override picks unit 0.
         assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
     }
 }

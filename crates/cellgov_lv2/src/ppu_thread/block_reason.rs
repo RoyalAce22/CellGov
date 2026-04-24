@@ -3,9 +3,6 @@
 use super::id::PpuThreadId;
 
 /// Why a PPU thread is currently blocked.
-///
-/// The scheduler never branches on this; the LV2 host reads it
-/// to decide how to transition the unit back to runnable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestBlockReason {
     /// Waiting for `target` to call `sys_ppu_thread_exit`.
@@ -23,8 +20,8 @@ pub enum GuestBlockReason {
         /// Heavy mutex guest id.
         id: u32,
     },
-    /// Waiting for `sys_semaphore_post` on `id` to hand the
-    /// slot to this waiter.
+    /// Waiting for `sys_semaphore_post` on `id` to hand this
+    /// waiter a slot.
     WaitingOnSemaphore {
         /// Semaphore guest id.
         id: u32,
@@ -40,19 +37,18 @@ pub enum GuestBlockReason {
     WaitingOnEventFlag {
         /// Event flag guest id.
         id: u32,
-        /// Bit mask under the `mode` predicate.
+        /// Bit mask evaluated under `mode`.
         mask: u64,
-        /// Match + clear-on-wake policy.
+        /// Match plus clear-on-wake policy.
         mode: EventFlagWaitMode,
     },
     /// Waiting for `sys_cond_signal` / `_signal_all` on
-    /// `cond_id`; the wake path re-acquires `mutex_id` (or
-    /// parks on it if held).
+    /// `cond_id`; the wake path re-acquires `mutex_id` or parks
+    /// on it if held.
     WaitingOnCond {
         /// Cond guest id.
         cond_id: u32,
-        /// Heavy mutex released at cond_wait entry; the wake
-        /// path re-acquires it.
+        /// Heavy mutex released at `cond_wait` entry.
         mutex_id: u32,
     },
 }
@@ -60,12 +56,9 @@ pub enum GuestBlockReason {
 impl GuestBlockReason {
     /// Stable `u8` tag for determinism-sensitive hashing.
     ///
-    /// Tags start at 1 so no reason tag can coincide with the
-    /// `Runnable` lifecycle tag 0 if layouts ever reorder. Do
-    /// not introduce a catch-all arm: two variants sharing a
-    /// tag would make observably different tables hash
-    /// identically, and the exhaustive match here is what
-    /// catches a new variant that forgot to pick a tag.
+    /// Tags are 1..=7 so none coincide with the `Runnable`
+    /// lifecycle tag 0. The match is exhaustive: a new variant
+    /// that forgets to pick a tag fails to compile.
     pub fn stable_tag(&self) -> u8 {
         match self {
             GuestBlockReason::WaitingOnJoin { .. } => 1,
@@ -79,9 +72,8 @@ impl GuestBlockReason {
     }
 }
 
-/// Event-flag wait policy encoded as the two orthogonal bits
-/// PS3 ABI exposes at `sys_event_flag_wait`: mask-match semantics
-/// (AND = all set, OR = any set) and clear-on-wake.
+/// Event-flag wait policy: mask-match semantics (AND/OR) crossed
+/// with clear-on-wake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventFlagWaitMode {
     /// All bits in `mask` must be set; do not clear on wake.
@@ -95,8 +87,7 @@ pub enum EventFlagWaitMode {
 }
 
 impl EventFlagWaitMode {
-    /// Stable `u8` tag for determinism-sensitive hashing. Do
-    /// not introduce a catch-all arm.
+    /// Stable `u8` tag for determinism-sensitive hashing.
     pub fn stable_tag(self) -> u8 {
         match self {
             EventFlagWaitMode::AndNoClear => 0,
@@ -107,16 +98,12 @@ impl EventFlagWaitMode {
     }
 }
 
-/// Width budget for [`block_reason_payload`]. Per-variant
-/// usage:
-/// - `WaitingOnJoin`: 8 (PpuThreadId).
-/// - `WaitingOn{LwMutex,Mutex,Semaphore,EventQueue}`: 4 (u32).
-/// - `WaitingOnEventFlag`: 4 + 8 + 1 = 13.
-/// - `WaitingOnCond`: 4 + 4 = 8.
+/// Width budget for [`block_reason_payload`].
 ///
-/// A future variant exceeding this budget panics in
-/// `copy_from_slice`. Bump the constant and propagate through
-/// the `[u8; N]` signature when that happens.
+/// Per-variant usage: `WaitingOnJoin` 8; lw/heavy/sem/queue 4;
+/// `WaitingOnEventFlag` 4+8+1 = 13; `WaitingOnCond` 4+4 = 8. A
+/// variant exceeding this panics in `copy_from_slice`; bump the
+/// constant and propagate through the `[u8; N]` signature.
 pub(super) const BLOCK_REASON_PAYLOAD_WIDTH: usize = 24;
 
 /// Fixed-width payload encoding the non-tag fields of a
@@ -207,10 +194,7 @@ mod tests {
         let mut seen = std::collections::BTreeSet::new();
         for r in reasons {
             let t = r.stable_tag();
-            assert_ne!(
-                t, 0,
-                "reason tag must be non-zero to avoid Runnable collision"
-            );
+            assert_ne!(t, 0, "reason tag collides with Runnable lifecycle tag");
             assert!(seen.insert(t), "duplicate reason tag {t}");
         }
         assert_eq!(seen.len(), 7);

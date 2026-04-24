@@ -1,21 +1,7 @@
-//! LV2 syscall dispatch extracted from `runtime.rs`.
-//!
-//! Three entry points form a cohesive unit: each touches
-//! `lv2_host`, `syscall_responses`, `registry`, and the
-//! mailbox/memory registries together.
-//!
-//! - [`Runtime::dispatch_syscall`] classifies a `YieldReason::Syscall`
-//!   into a typed `Lv2Request` (or routes the HLE-import range).
-//! - [`Runtime::dispatch_lv2_request`] runs the request through
-//!   `Lv2Host::dispatch`, then routes each resulting `Lv2Dispatch`
-//!   variant to its own `handle_<variant>` method.
-//! - [`Runtime::apply_lv2_effects`] replays the effect-stream the
-//!   LV2 host side-produces (memory commits + mailbox push/wake)
-//!   uniformly across every dispatch variant.
-//!
-//! `handle_ppu_thread_create` is called from here but its body
-//! lives in `ppu_create.rs` because that one variant is 100 lines
-//! by itself.
+//! LV2 syscall dispatch: classify a `YieldReason::Syscall`, route it
+//! through `Lv2Host::dispatch`, and fold the result back into runtime
+//! state (syscall response, registry status, mailbox push/wake).
+//! `handle_ppu_thread_create` lives in `ppu_create.rs`.
 
 use std::collections::BTreeMap;
 
@@ -27,9 +13,10 @@ use cellgov_lv2::{Lv2Dispatch, PendingResponse, SpuInitState};
 use super::{trace_bridge::MemoryView, Runtime};
 
 impl Runtime {
-    /// Apply effects produced by an LV2 dispatch. Handles
-    /// SharedWriteIntent (memory commit) and MailboxSend (FIFO push
-    /// + blocked-SPU wake) uniformly across all dispatch variants.
+    /// Apply LV2-produced effects: memory commits, mailbox FIFO push +
+    /// blocked-unit wake, and RSX flip requests. `commit_step`'s
+    /// per-boundary hook then drives WAITING -> DONE on the next
+    /// boundary, matching the NV4097_FLIP_BUFFER observable shape.
     pub(super) fn apply_lv2_effects(&mut self, effects: &[Effect]) {
         for effect in effects {
             match effect {
@@ -49,11 +36,6 @@ impl Runtime {
                     }
                 }
                 Effect::RsxFlipRequest { buffer_index } => {
-                    // sys_rsx_context_attribute FLIP_BUFFER routes
-                    // flips through here; commit_step's per-
-                    // boundary hook then drives WAITING -> DONE on
-                    // the next boundary, matching the
-                    // NV4097_FLIP_BUFFER observable shape.
                     self.rsx_flip.request_flip(*buffer_index);
                 }
                 _ => {}
@@ -62,7 +44,7 @@ impl Runtime {
     }
 
     /// Classify a syscall yield, dispatch through the LV2 host, and
-    /// handle the result (immediate return, SPU registration, or block).
+    /// fold the result back into runtime state.
     pub(super) fn dispatch_syscall(&mut self, result: &ExecutionStepResult, source: UnitId) {
         let Some(args) = &result.syscall_args else {
             return;
@@ -85,10 +67,8 @@ impl Runtime {
         self.dispatch_lv2_request(request, source);
     }
 
-    /// Route a typed LV2 request through the host, then hand the
-    /// resulting `Lv2Dispatch` to its per-variant handler. Exposed
-    /// to tests that need to exercise specific dispatch paths
-    /// without plumbing a full PPU yield.
+    /// Route a typed LV2 request through the host and hand each
+    /// `Lv2Dispatch` variant to its per-variant handler.
     pub(crate) fn dispatch_lv2_request(
         &mut self,
         request: cellgov_lv2::Lv2Request,
@@ -161,11 +141,9 @@ impl Runtime {
         }
     }
 
-    /// Apply an `Immediate` dispatch: commit LV2-produced effects,
-    /// then either (a) for `ProcessExit`, transition every unit to
-    /// `Finished` and wind down any parked syscall responses, or
-    /// (b) for every other syscall, write `code` into r3 of the
-    /// source unit.
+    /// `ProcessExit` transitions every unit to `Finished` and winds
+    /// down any parked syscall responses; other syscalls write `code`
+    /// into r3 of the source unit.
     fn handle_immediate(
         &mut self,
         source: UnitId,
@@ -179,10 +157,9 @@ impl Runtime {
             for uid in &all_ids {
                 self.registry
                     .set_status_override(*uid, UnitStatus::Finished);
-                // Process exit iterates every unit (PPU and SPU).
-                // UnknownUnit (non-SPU) and AlreadyFinished (SPU
-                // that already self-finished) are both expected;
-                // other Err variants are dispatch-layer bugs.
+                // UnknownUnit (non-SPU) and AlreadyFinished (self-finished
+                // SPU) are expected during the per-unit sweep; other Err
+                // variants are dispatch-layer bugs.
                 match self.lv2_host.notify_spu_finished(*uid) {
                     Ok(_)
                     | Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit)
@@ -197,9 +174,8 @@ impl Runtime {
                         );
                     }
                 }
-                // Every registered unit may or may not have a pending
-                // response; legitimate None case on process exit. The
-                // returned Option is intentionally discarded.
+                // A unit may or may not have a pending response; None
+                // is legitimate on process exit.
                 let _ = self.syscall_responses.try_take(*uid);
             }
         } else {
@@ -207,12 +183,10 @@ impl Runtime {
         }
     }
 
-    /// Register each SPU init state as a new unit via the installed
-    /// `SpuFactory`, record it in `Lv2Host`, allocate a matching
-    /// mailbox slot, and return `code` to the caller.
-    ///
-    /// BTreeMap iteration yields slots in ascending order, so
-    /// registration order is byte-stable across runs.
+    /// Register each SPU init via the `SpuFactory`, record it in
+    /// `Lv2Host`, allocate a matching mailbox slot, and return `code`
+    /// to the caller. `BTreeMap` iteration keeps registration order
+    /// byte-stable across runs.
     fn handle_register_spu(
         &mut self,
         source: UnitId,
@@ -238,9 +212,8 @@ impl Runtime {
         self.registry.set_syscall_return(source, code);
     }
 
-    /// Park the source on a primitive: install `pending` on the
-    /// syscall response table and flip status to Blocked. The
-    /// eventual wake resolves `pending` and writes r3.
+    /// Install `pending` on the syscall response table and flip status
+    /// to Blocked; the eventual wake resolves `pending` and writes r3.
     fn handle_block(&mut self, source: UnitId, pending: PendingResponse, effects: Vec<Effect>) {
         self.apply_lv2_effects(&effects);
         let displaced = self.syscall_responses.insert(source, pending);
@@ -252,13 +225,11 @@ impl Runtime {
             .set_status_override(source, UnitStatus::Blocked);
     }
 
-    /// The source PPU thread is gone. Flip its status to Finished
-    /// and wake each join waiter -- each is expected to have a
-    /// `PendingResponse::PpuThreadJoin` recorded when it blocked on
-    /// sys_ppu_thread_join. Consume the pending response, write
-    /// the exit value through its output pointer, and return
-    /// CELL_OK via r3. Waiters without a matching pending response
-    /// wake with the raw exit value in r3 as a defensive fallback.
+    /// Flip source to Finished and wake each join waiter: consume its
+    /// `PpuThreadJoin` pending response, write the exit value through
+    /// the out pointer, return CELL_OK via r3. Waiters without a
+    /// matching pending response wake with the raw exit value in r3
+    /// as a defensive fallback.
     fn handle_ppu_thread_exit(
         &mut self,
         source: UnitId,
@@ -275,11 +246,9 @@ impl Runtime {
                 self.commit_bytes_at(status_out_ptr as u64, &exit_value.to_be_bytes());
                 self.registry.set_syscall_return(waiter, 0);
             } else {
-                // Only sys_ppu_thread_join parks a waiter on a PPU-
-                // thread exit under the current sync surface. If a
-                // future primitive parks differently this branch
-                // wakes with the raw exit value in r3 rather than
-                // writing to an out pointer.
+                // Fallback for a waiter parked without a matching
+                // PpuThreadJoin entry; wake with the raw exit value
+                // in r3 rather than writing to an out pointer.
                 self.registry.set_syscall_return(waiter, exit_value);
             }
             self.registry
@@ -287,18 +256,12 @@ impl Runtime {
         }
     }
 
-    /// Release path: caller returns `code` and stays runnable. Apply
-    /// per-waiter pending-response overrides, then resolve the
-    /// wake list (each wake target pulls its pending response and
-    /// transitions Blocked -> Runnable).
-    ///
-    /// Each override replaces the existing pending entry rather
-    /// than merging. The debug-only
-    /// [`Self::assert_response_updates_valid`] check enforces two
-    /// invariants at apply time: every updated unit appears in
-    /// `woken_unit_ids`, and each update's variant matches the
-    /// existing entry's variant (see
-    /// [`cellgov_lv2::PendingResponse::variant_tag`]).
+    /// Release path: caller returns `code` and stays runnable, each
+    /// waiter pulls its pending response and transitions Blocked ->
+    /// Runnable. Overrides replace (not merge) the existing entry;
+    /// [`Self::assert_response_updates_valid`] enforces that every
+    /// updated unit is in `woken_unit_ids` and each update's variant
+    /// matches the existing entry.
     fn handle_wake_and_return(
         &mut self,
         source: UnitId,
@@ -315,19 +278,17 @@ impl Runtime {
             &response_updates,
         );
         for (waiter, response) in response_updates {
-            // Displacement is the expected path for partial-fill
-            // updates (e.g. EventQueueReceive None -> Some); the
-            // variant-tag check above already confirmed the update
-            // matches an existing entry, so no r3 is lost here.
+            // Displacement is expected for partial-fill updates (e.g.
+            // EventQueueReceive None -> Some); the variant-tag check
+            // above confirmed shape compatibility.
             let _ = self.syscall_responses.insert(waiter, response);
         }
         self.resolve_sync_wakes(&woken_unit_ids);
     }
 
-    /// Park-and-release path (used by e.g. cond_wait): wake any
-    /// held waiters first, then park the source on `pending` and
-    /// flip it Blocked. No r3 is set here; the eventual wake that
-    /// resolves `pending` writes r3.
+    /// Park-and-release (e.g. cond_wait): wake held waiters first, then
+    /// park source on `pending` and flip it Blocked. No r3 is set here;
+    /// the eventual wake that resolves `pending` writes r3.
     fn handle_block_and_wake(
         &mut self,
         source: UnitId,
@@ -343,8 +304,6 @@ impl Runtime {
             &response_updates,
         );
         for (waiter, response) in response_updates {
-            // See `handle_wake_and_return`: displacement is a
-            // legitimate partial-fill update path.
             let _ = self.syscall_responses.insert(waiter, response);
         }
         self.resolve_sync_wakes(&woken_unit_ids);
@@ -358,11 +317,8 @@ impl Runtime {
             .set_status_override(source, UnitStatus::Blocked);
     }
 
-    /// Debug-only guard for `response_updates`: every updated unit
-    /// must be in the wake set, and each update's variant must
-    /// match the existing pending entry's variant. Silent
-    /// violations would otherwise mutate unrelated future waits or
-    /// wake a unit with a wrong-shaped response.
+    /// Debug-only: every updated unit is in the wake set, and each
+    /// update's variant matches the existing pending entry.
     fn assert_response_updates_valid(
         &self,
         site: &'static str,
@@ -381,10 +337,8 @@ impl Runtime {
     }
 }
 
-/// Free-function body of the debug-only response-updates guard
-/// used by [`Runtime::handle_wake_and_return`] /
-/// [`Runtime::handle_block_and_wake`]. Extracted so tests can
-/// trigger the invariants without standing up a full `Runtime`.
+/// Extracted from [`Runtime::assert_response_updates_valid`] so tests
+/// can trigger the invariants without standing up a full `Runtime`.
 pub(crate) fn check_response_updates(
     site: &'static str,
     table: &crate::syscall_table::SyscallResponseTable,
@@ -421,9 +375,6 @@ mod tests {
         let table = SyscallResponseTable::new();
         let waiter = UnitId::new(42);
         let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0 })];
-        // woken_unit_ids does NOT include the waiter -- silent
-        // mutation of an unrelated future wait would otherwise
-        // follow. Guard must fire.
         check_response_updates("test", &table, &[], &updates);
     }
 
@@ -432,7 +383,6 @@ mod tests {
     fn check_response_updates_rejects_variant_mismatch() {
         let mut table = SyscallResponseTable::new();
         let waiter = UnitId::new(7);
-        // Waiter is parked on EventQueueReceive (tag 3).
         let _ = table.insert(
             waiter,
             PendingResponse::EventQueueReceive {
@@ -440,7 +390,6 @@ mod tests {
                 payload: None,
             },
         );
-        // Update tries to replace it with a ReturnCode (tag 0).
         let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0 })];
         check_response_updates("test", &table, &[waiter], &updates);
     }
@@ -456,8 +405,6 @@ mod tests {
                 payload: None,
             },
         );
-        // Partial-fill update with the same variant and the same
-        // out_ptr is the intended wake-side contract.
         let updates = vec![(
             waiter,
             PendingResponse::EventQueueReceive {

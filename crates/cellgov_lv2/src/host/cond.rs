@@ -1,5 +1,11 @@
-//! Condition variable LV2 dispatch: create, destroy, wait, signal,
-//! signal_all, signal_to.
+//! LV2 dispatch for condition variables.
+//!
+//! Implements the two-hop cond-wake protocol: `cond_wait` drops the
+//! caller's mutex and parks on the cond; `cond_signal*` moves the
+//! waker off the cond, tries to reacquire the mutex, and either wakes
+//! with `ReturnCode{0}` or re-parks on the mutex waiter list so the
+//! next unlock-wake resolves it. Signals are non-sticky: a signal
+//! with no parked waiter is lost.
 
 use cellgov_event::UnitId;
 
@@ -14,8 +20,6 @@ impl Lv2Host {
         mutex_id: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Cond binds to an existing heavy mutex -- reject at
-        // create time (matches RPCS3 lv2_obj::idm_get).
         if self.mutexes.lookup(mutex_id).is_none() {
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ESRCH.into(),
@@ -28,9 +32,6 @@ impl Lv2Host {
             .create_with_id(id, mutex_id, CondMutexKind::Mutex)
             .is_err()
         {
-            // Same-binding duplicate OR different-binding (the
-            // latter fires the cond-table debug_assert). Either
-            // way the guest cannot use the id.
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ENOMEM.into(),
                 effects: vec![],
@@ -80,8 +81,8 @@ impl Lv2Host {
         let release = match mutex_kind {
             CondMutexKind::Mutex => self.mutexes.release_and_wake_next(mutex_id, caller),
             CondMutexKind::LwMutex => {
-                // Defensive forward-compat for sys_lwcond;
-                // sys_cond itself is heavy-only.
+                // sys_cond is heavy-only; lwmutex binding would
+                // need sys_lwcond routing.
                 return Lv2Dispatch::Immediate {
                     code: crate::errno::CELL_EPERM.into(),
                     effects: vec![],
@@ -98,9 +99,8 @@ impl Lv2Host {
                 effects: vec![],
             },
             crate::sync_primitives::MutexRelease::Freed => {
-                // Mutex had no waiter; park the caller on the
-                // cond. DuplicateWaiter is a host-invariant break
-                // (a cond waiter is Blocked and cannot re-enter).
+                // DuplicateWaiter is a host-invariant break: a
+                // cond waiter is Blocked and cannot re-enter wait.
                 match self.conds.enqueue_waiter(id, caller) {
                     Ok(()) => {}
                     Err(crate::sync_primitives::CondEnqueueError::UnknownId) => {
@@ -135,8 +135,7 @@ impl Lv2Host {
             }
             crate::sync_primitives::MutexRelease::Transferred { new_owner } => {
                 // Mutex waiter inherited ownership and wakes in
-                // the same dispatch as the cond park. See Freed
-                // for DuplicateWaiter rationale.
+                // the same dispatch as the cond park.
                 match self.conds.enqueue_waiter(id, caller) {
                     Ok(()) => {}
                     Err(crate::sync_primitives::CondEnqueueError::UnknownId) => {
@@ -194,13 +193,10 @@ impl Lv2Host {
                 effects: vec![],
             };
         }
-        // expect() is load-bearing: a future refactor that
-        // slipped a destroy between `lookup` and `signal_all`
-        // would silently wake zero threads under unwrap_or_default.
         let wakers = self
             .conds
             .signal_all(id)
-            .expect("cond looked up just above must still exist: no intervening destroy");
+            .expect("cond looked up just above must still exist");
         if wakers.is_empty() {
             return Lv2Dispatch::Immediate {
                 code: 0,
@@ -208,7 +204,7 @@ impl Lv2Host {
             };
         }
         // FIFO: first acquirer wakes cleanly if the mutex is
-        // free; the rest re-park on the mutex with their pending
+        // free; the rest re-park on the mutex with pending
         // response swapped to ReturnCode{0} so unlock-wake
         // resolves them as CELL_OK.
         let mut woken_unit_ids: Vec<UnitId> = Vec::new();
@@ -223,11 +219,10 @@ impl Lv2Host {
                     response_updates.push((unit, PendingResponse::ReturnCode { code: 0u64 }));
                 }
                 Some(crate::sync_primitives::MutexAcquire::Contended) => {
-                    // DuplicateWaiter / WaiterIsOwner / UnknownId
-                    // are all state corruption under the
-                    // single-threaded commit model: record and
-                    // wake with ESRCH rather than strand the
-                    // waker off the mutex queue.
+                    // Enqueue errors are host-invariant breaks
+                    // under the single-threaded commit model;
+                    // record and wake with ESRCH rather than
+                    // strand the waker off the mutex queue.
                     match self.mutexes.enqueue_waiter(mutex_id, waker) {
                         Ok(()) => response_updates
                             .push((unit, PendingResponse::ReturnCode { code: 0u64 })),
@@ -250,9 +245,9 @@ impl Lv2Host {
                     }
                 }
                 None => {
-                    // Destroyed mutex -- mutex_destroy should
-                    // reject EBUSY while cond waiters exist; this
-                    // branch is a host-invariant break.
+                    // mutex_destroy should reject EBUSY while
+                    // cond waiters exist; reaching this branch
+                    // means that invariant broke.
                     self.record_invariant_break(
                         "cond_signal_all.DestroyedMutex",
                         format_args!("cond waiter {waker:?} references destroyed mutex {mutex_id}"),
@@ -291,8 +286,7 @@ impl Lv2Host {
             };
         }
         let target = PpuThreadId::new(target_thread as u64);
-        // Unknown cond is ESRCH; target-not-parked is EPERM
-        // (RPCS3 `rpcs3/Emu/Cell/lv2/sys_cond.cpp:391-396`).
+        // Unknown cond is ESRCH; target-not-parked is EPERM.
         // Collapsing both would leak waiter state through the
         // signaler's errno.
         match self.conds.signal_to(id, target) {
@@ -332,19 +326,18 @@ impl Lv2Host {
         match mutex_kind {
             CondMutexKind::Mutex => self.cond_reacquire_wake(waker, mutex_id, false),
             CondMutexKind::LwMutex => Lv2Dispatch::Immediate {
-                // sys_cond is heavy-only; lwmutex is EPERM.
                 code: crate::errno::CELL_EPERM.into(),
                 effects: vec![],
             },
         }
     }
 
-    /// Cond-wake re-acquire for one thread. The waker holds a
-    /// `PendingResponse::CondWakeReacquire` from the wait side;
-    /// this helper either acquires the mutex on its behalf and
-    /// wakes it with `ReturnCode{0}`, or re-parks it on the mutex
-    /// waiter list so the next unlock-wake resolves it.
-    /// `use_lwmutex` is forward-compat for sys_lwcond.
+    /// Cond-wake mutex reacquire for one thread.
+    ///
+    /// The waker holds a `PendingResponse::CondWakeReacquire` from
+    /// the wait side; this helper either acquires the mutex on its
+    /// behalf and wakes with `ReturnCode{0}`, or re-parks on the
+    /// mutex waiter list so the next unlock-wake resolves it.
     fn cond_reacquire_wake(
         &mut self,
         waker: PpuThreadId,
@@ -352,8 +345,6 @@ impl Lv2Host {
         use_lwmutex: bool,
     ) -> Lv2Dispatch {
         debug_assert!(!use_lwmutex, "lwmutex cond re-acquire not wired");
-        // Waker is already off the cond; missing thread-table
-        // entry strands it.
         let Some(waker_unit) = self.resolve_wake_thread(waker, "cond_reacquire_wake") else {
             return Lv2Dispatch::Immediate {
                 code: 0u64,
@@ -368,9 +359,8 @@ impl Lv2Host {
                 effects: vec![],
             },
             Some(crate::sync_primitives::MutexAcquire::Contended) => {
-                // See `cond_signal_all` Contended: Err is state
-                // corruption under the single-threaded commit
-                // model; wake with ESRCH rather than strand.
+                // Err is a host-invariant break; wake with ESRCH
+                // rather than strand. See `cond_signal_all`.
                 if let Err(err) = self.mutexes.enqueue_waiter(mutex_id, waker) {
                     self.record_invariant_break(
                         "cond_reacquire_wake.Contended.enqueue",
@@ -402,9 +392,9 @@ impl Lv2Host {
                 }
             }
             None => {
-                // Destroyed mutex: wake the waker with ESRCH
-                // rather than strand them. Signaler stays CELL_OK
-                // so its errno does not leak waker presence.
+                // Wake with ESRCH rather than strand. Signaler
+                // stays CELL_OK so its errno does not leak waker
+                // presence.
                 self.record_invariant_break(
                     "cond_reacquire_wake.DestroyedMutex",
                     format_args!("cond waiter {waker:?} references destroyed mutex {mutex_id}"),
@@ -531,15 +521,11 @@ mod tests {
 
     #[test]
     fn cond_wait_releases_mutex_and_parks_caller() {
-        // Caller holds the mutex, no mutex waiters. cond_wait must
-        // drop the mutex (owner cleared) and park the caller on the
-        // cond with a CondWakeReacquire pending response.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let mutex_id = create_mutex_host(&mut host, src, &rt);
-        // Acquire the mutex.
         host.dispatch(
             Lv2Request::MutexLock {
                 mutex_id,
@@ -548,7 +534,6 @@ mod tests {
             src,
             &rt,
         );
-        // Create the cond.
         let created = host.dispatch(
             Lv2Request::CondCreate {
                 id_ptr: 0x200,
@@ -562,7 +547,6 @@ mod tests {
             Lv2Dispatch::Immediate { effects: e, .. } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate, got {other:?}"),
         };
-        // Wait.
         let r = host.dispatch(
             Lv2Request::CondWait {
                 id: cond_id,
@@ -593,9 +577,7 @@ mod tests {
             }
             other => panic!("expected Block, got {other:?}"),
         }
-        // Mutex is now unowned.
         assert_eq!(host.mutexes().lookup(mutex_id).unwrap().owner(), None);
-        // Cond has the caller parked.
         assert_eq!(
             host.conds()
                 .lookup(cond_id)
@@ -609,10 +591,6 @@ mod tests {
 
     #[test]
     fn cond_wait_transfers_mutex_to_waiter_via_block_and_wake() {
-        // Two threads contend on the mutex. When the owner calls
-        // cond_wait, the mutex waiter inherits ownership and must
-        // wake alongside the owner's cond park. The handler emits
-        // BlockAndWake.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let owner_unit = UnitId::new(0);
@@ -639,7 +617,6 @@ mod tests {
             waiter_unit,
             &rt,
         );
-        // waiter is now parked on the mutex.
         assert_eq!(
             host.mutexes()
                 .lookup(mutex_id)
@@ -686,12 +663,10 @@ mod tests {
             }
             other => panic!("expected BlockAndWake, got {other:?}"),
         }
-        // Ownership transferred to the waiter.
         assert_eq!(
             host.mutexes().lookup(mutex_id).unwrap().owner(),
             Some(waiter_tid),
         );
-        // Owner is now parked on the cond.
         assert_eq!(
             host.conds()
                 .lookup(cond_id)
@@ -735,8 +710,6 @@ mod tests {
             Lv2Dispatch::Immediate { effects: e, .. } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate, got {other:?}"),
         };
-        // Non-owner attempts cond_wait; mutex release rejects with
-        // NotOwner -> EPERM.
         let r = host.dispatch(
             Lv2Request::CondWait {
                 id: cond_id,
@@ -749,12 +722,10 @@ mod tests {
             panic!("expected Immediate, got {r:?}");
         };
         assert_eq!(code, crate::errno::CELL_EPERM.into());
-        // Mutex ownership unchanged.
         assert_eq!(
             host.mutexes().lookup(mutex_id).unwrap().owner(),
             Some(PpuThreadId::PRIMARY),
         );
-        // Cond is still empty.
         assert!(host.conds().lookup(cond_id).unwrap().waiters().is_empty());
     }
 
@@ -780,8 +751,6 @@ mod tests {
 
     #[test]
     fn cond_signal_no_waiter_is_observably_lost() {
-        // Non-sticky: signal on a cond with no waiters returns
-        // CELL_OK and does not record any pending state.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let src = UnitId::new(0);
@@ -808,10 +777,6 @@ mod tests {
                 effects: _,
             }
         ));
-        // Cond stays empty; hash-level: same as a cond that never
-        // received a signal (anchored by
-        // state_hash_ignores_ephemeral_signal_attempts in cond
-        // table tests).
         assert!(host.conds().lookup(cond_id).unwrap().waiters().is_empty());
     }
 
@@ -830,10 +795,6 @@ mod tests {
 
     #[test]
     fn cond_signal_wakes_waiter_cleanly_when_mutex_free() {
-        // Waiter parked via cond_wait, no other thread holds the
-        // mutex. Signaler wakes the waiter; the waker acquires the
-        // mutex and its pending response is swapped to
-        // ReturnCode { 0 }.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let waiter_unit = UnitId::new(0);
@@ -872,7 +833,6 @@ mod tests {
             waiter_unit,
             &rt,
         );
-        // Mutex now free (waiter released on cond_wait).
         assert_eq!(host.mutexes().lookup(mutex_id).unwrap().owner(), None);
         let r = host.dispatch(Lv2Request::CondSignal { id: cond_id }, signaler_unit, &rt);
         match r {
@@ -893,23 +853,15 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // Waker is now the mutex owner.
         assert_eq!(
             host.mutexes().lookup(mutex_id).unwrap().owner(),
             Some(PpuThreadId::PRIMARY),
         );
-        // Cond is empty.
         assert!(host.conds().lookup(cond_id).unwrap().waiters().is_empty());
     }
 
     #[test]
     fn cond_signal_reparks_waiter_on_mutex_when_held() {
-        // Waiter parked via cond_wait. Before signal, a THIRD
-        // thread acquires the mutex. Signal fires but finds the
-        // mutex held; the cond waiter transitions to the mutex
-        // waiter list (its pending response swaps from
-        // CondWakeReacquire to ReturnCode { 0 }). Signaler returns
-        // CELL_OK with no wake.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let waiter_unit = UnitId::new(0);
@@ -924,7 +876,6 @@ mod tests {
             .create(signaler_unit, primary_attrs())
             .expect("signaler create");
         let mutex_id = create_mutex_host(&mut host, waiter_unit, &rt);
-        // Waiter takes the mutex.
         host.dispatch(
             Lv2Request::MutexLock {
                 mutex_id,
@@ -946,7 +897,6 @@ mod tests {
             Lv2Dispatch::Immediate { effects: e, .. } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate, got {other:?}"),
         };
-        // Waiter calls cond_wait (releases mutex).
         host.dispatch(
             Lv2Request::CondWait {
                 id: cond_id,
@@ -955,7 +905,6 @@ mod tests {
             waiter_unit,
             &rt,
         );
-        // Third thread now takes the mutex.
         host.dispatch(
             Lv2Request::MutexLock {
                 mutex_id,
@@ -968,7 +917,6 @@ mod tests {
             host.mutexes().lookup(mutex_id).unwrap().owner(),
             Some(third_tid),
         );
-        // Signaler fires. Waiter should re-park on mutex.
         let r = host.dispatch(Lv2Request::CondSignal { id: cond_id }, signaler_unit, &rt);
         match r {
             Lv2Dispatch::WakeAndReturn {
@@ -991,12 +939,10 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn with empty wake, got {other:?}"),
         }
-        // Mutex owner unchanged (still the third thread).
         assert_eq!(
             host.mutexes().lookup(mutex_id).unwrap().owner(),
             Some(third_tid),
         );
-        // Waiter is now parked on the mutex waiter list.
         assert_eq!(
             host.mutexes()
                 .lookup(mutex_id)
@@ -1006,14 +952,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![PpuThreadId::PRIMARY],
         );
-        // Cond list is empty.
         assert!(host.conds().lookup(cond_id).unwrap().waiters().is_empty());
     }
 
     #[test]
     fn cond_signal_wakes_fifo_head_when_multiple_waiters() {
-        // Two waiters parked in cond. First signal wakes the head;
-        // second waiter stays parked.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let w1_unit = UnitId::new(0);
@@ -1028,7 +971,6 @@ mod tests {
             .create(signaler_unit, primary_attrs())
             .expect("signaler create");
         let mutex_id = create_mutex_host(&mut host, w1_unit, &rt);
-        // Waiter 1 acquires mutex and parks on cond.
         host.dispatch(
             Lv2Request::MutexLock {
                 mutex_id,
@@ -1058,7 +1000,6 @@ mod tests {
             w1_unit,
             &rt,
         );
-        // Waiter 2 acquires mutex and parks on cond.
         host.dispatch(
             Lv2Request::MutexLock {
                 mutex_id,
@@ -1075,7 +1016,6 @@ mod tests {
             w2_unit,
             &rt,
         );
-        // First signal wakes w1 (FIFO head).
         let r = host.dispatch(Lv2Request::CondSignal { id: cond_id }, signaler_unit, &rt);
         match r {
             Lv2Dispatch::WakeAndReturn { woken_unit_ids, .. } => {
@@ -1083,7 +1023,6 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // w2 still parked.
         assert_eq!(
             host.conds()
                 .lookup(cond_id)
@@ -1097,10 +1036,6 @@ mod tests {
 
     #[test]
     fn cond_signal_all_wakes_first_reparks_rest_when_mutex_free() {
-        // Three cond waiters parked. Mutex free at signal_all
-        // time: first waiter acquires and wakes; second and third
-        // re-park on the mutex waiter list. Order preserved (FIFO
-        // from the cond list).
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let w1 = UnitId::new(0);
@@ -1151,7 +1086,6 @@ mod tests {
                 &rt,
             );
         }
-        // All three are now parked on cond; mutex free.
         assert_eq!(host.conds().lookup(cond_id).unwrap().waiters().len(), 3);
         assert_eq!(host.mutexes().lookup(mutex_id).unwrap().owner(), None);
         let r = host.dispatch(Lv2Request::CondSignalAll { id: cond_id }, signaler, &rt);
@@ -1161,15 +1095,12 @@ mod tests {
                 response_updates,
                 ..
             } => {
-                // Only w1 (head of FIFO) wakes cleanly.
                 assert_eq!(woken_unit_ids, vec![w1]);
-                // All three get response swapped.
                 let updated_units: Vec<_> = response_updates.iter().map(|(u, _)| *u).collect();
                 assert_eq!(updated_units, vec![w1, w2, w3]);
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // w1 owns mutex; w2, w3 parked on mutex waiter list FIFO.
         assert_eq!(
             host.mutexes().lookup(mutex_id).unwrap().owner(),
             Some(PpuThreadId::PRIMARY),
@@ -1188,9 +1119,6 @@ mod tests {
 
     #[test]
     fn cond_signal_all_reparks_all_when_mutex_held() {
-        // Three cond waiters parked, then a fourth thread takes
-        // the mutex. signal_all: all three waiters re-park on the
-        // mutex list; no one wakes.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let w1 = UnitId::new(0);
@@ -1246,7 +1174,6 @@ mod tests {
                 &rt,
             );
         }
-        // Holder takes the mutex.
         host.dispatch(
             Lv2Request::MutexLock {
                 mutex_id,
@@ -1271,7 +1198,6 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // All three waiters parked on mutex in FIFO order.
         assert_eq!(
             host.mutexes()
                 .lookup(mutex_id)
@@ -1330,15 +1256,8 @@ mod tests {
     #[test]
     #[cfg(not(debug_assertions))]
     fn cond_signal_all_flags_invariant_break_on_double_parked_waker() {
-        // The single-threaded commit model forecloses any
-        // dispatch path that leaves a waiter on both the cond and
-        // the mutex queue; this test seeds that state via direct
-        // table manipulation to verify the release-mode
-        // diagnostic path.
-        //
-        // Expected: record_invariant_break fires; the waker is
-        // woken with CELL_ESRCH rather than stranded; the mutex
-        // queue retains its single existing entry.
+        // No dispatch path produces this state; seed directly to
+        // exercise the release-mode diagnostic path.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let waker_unit = UnitId::new(0);
@@ -1398,8 +1317,8 @@ mod tests {
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
         assert!(host.invariant_break_count() > breaks_before);
-        // Mutex queue retains the pre-existing entry; the
-        // duplicate enqueue was rejected at the primitive layer.
+        // Mutex queue retains the pre-existing entry; duplicate
+        // enqueue was rejected at the primitive layer.
         assert_eq!(
             host.mutexes()
                 .lookup(mutex_id)
@@ -1414,9 +1333,6 @@ mod tests {
 
     #[test]
     fn cond_signal_to_targets_specific_waiter_and_preserves_order() {
-        // Three cond waiters parked (w1, w2, w3). signal_to(w2)
-        // must wake exactly w2, leaving w1 and w3 parked in their
-        // original relative order.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let w1 = UnitId::new(0);
@@ -1467,10 +1383,8 @@ mod tests {
                 &rt,
             );
         }
-        // Mutex free; all three parked on cond.
         assert_eq!(host.mutexes().lookup(mutex_id).unwrap().owner(), None);
         assert_eq!(host.conds().lookup(cond_id).unwrap().waiters().len(), 3);
-        // Signal specifically at w2.
         let r = host.dispatch(
             Lv2Request::CondSignalTo {
                 id: cond_id,
@@ -1497,12 +1411,10 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // w2 now owns the mutex.
         assert_eq!(
             host.mutexes().lookup(mutex_id).unwrap().owner(),
             Some(w2_tid)
         );
-        // Cond still has w1 then w3 (relative order preserved).
         assert_eq!(
             host.conds()
                 .lookup(cond_id)
@@ -1516,9 +1428,6 @@ mod tests {
 
     #[test]
     fn cond_signal_to_target_not_waiting_returns_eperm() {
-        // target is a real thread but not parked on this cond. Per
-        // RPCS3 sys_cond.cpp:391-396 the errno is EPERM, distinct
-        // from the "unknown cond" ESRCH case.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let w1 = UnitId::new(0);
@@ -1546,7 +1455,8 @@ mod tests {
             Lv2Dispatch::Immediate { effects: e, .. } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate, got {other:?}"),
         };
-        // Park w1 on cond; do NOT park `other`.
+        // Park w1; leave `other` un-parked so signal_to targets
+        // a thread that is not a waiter.
         host.dispatch(
             Lv2Request::MutexLock {
                 mutex_id,
@@ -1563,7 +1473,6 @@ mod tests {
             w1,
             &rt,
         );
-        // signal_to at `other` (not parked) -> EPERM per RPCS3.
         let r = host.dispatch(
             Lv2Request::CondSignalTo {
                 id: cond_id,
@@ -1576,7 +1485,6 @@ mod tests {
             panic!("expected Immediate, got {r:?}");
         };
         assert_eq!(code, crate::errno::CELL_EPERM.into());
-        // w1 remains parked on cond.
         assert_eq!(
             host.conds()
                 .lookup(cond_id)
@@ -1610,9 +1518,6 @@ mod tests {
 
     #[test]
     fn cond_signal_to_reparks_target_on_mutex_when_held() {
-        // Two cond waiters parked (w1, w2). A third thread (holder)
-        // takes the mutex. signal_to(w1) must re-park w1 on the
-        // mutex waiter list (no wake), leaving w2 on cond.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let w1 = UnitId::new(0);
@@ -1695,12 +1600,10 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // Mutex owner unchanged.
         assert_eq!(
             host.mutexes().lookup(mutex_id).unwrap().owner(),
             Some(holder_tid),
         );
-        // w1 re-parked on mutex.
         assert_eq!(
             host.mutexes()
                 .lookup(mutex_id)
@@ -1710,7 +1613,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![PpuThreadId::PRIMARY],
         );
-        // w2 still parked on cond.
         assert_eq!(
             host.conds()
                 .lookup(cond_id)
@@ -1724,24 +1626,11 @@ mod tests {
 
     #[test]
     fn cond_signal_before_wait_does_not_wake_subsequent_waiter() {
-        // Non-sticky signal contract:
-        //
-        //   Thread A signals (signal / signal_all / signal_to) on
-        //   a cond with no parked waiters. The signal is
-        //   observably lost -- no pending-signal counter is
-        //   maintained, no spurious wake token is buffered.
-        //
-        //   Thread B subsequently calls sys_cond_wait. B must
-        //   block on the cond with PendingResponse::
-        //   CondWakeReacquire, not wake spuriously with a
-        //   CELL_OK from the earlier signal.
-        //
-        // This test covers all three signal variants
-        // (signal / signal_all / signal_to) to prove none of them
-        // introduces buffering. A regression in which the table
-        // grew a "pending signal count" field (semaphore-style)
-        // would fail this test: the subsequent cond_wait would
-        // complete Immediate instead of Block.
+        // Anchors the non-sticky signal contract across all three
+        // variants. A regression that added a semaphore-style
+        // pending-signal counter would fail this test: the
+        // subsequent cond_wait would complete Immediate instead
+        // of Block.
         for variant in ["signal_one", "signal_all", "signal_to"] {
             let mut host = Lv2Host::new();
             let rt = FakeRuntime::new(0x10000);
@@ -1765,8 +1654,6 @@ mod tests {
                 Lv2Dispatch::Immediate { effects: e, .. } => extract_write_u32(&e[0]),
                 other => panic!("expected Immediate, got {other:?}"),
             };
-            // Fire the chosen signal variant on a cond that has
-            // no parked waiter yet.
             let pre_signal = match variant {
                 "signal_one" => {
                     host.dispatch(Lv2Request::CondSignal { id: cond_id }, signaler_unit, &rt)
@@ -1786,11 +1673,10 @@ mod tests {
                 ),
                 _ => unreachable!(),
             };
-            // signal / signal_all return CELL_OK regardless of
-            // waiter presence (non-sticky). signal_to returns
-            // ESRCH because the specific target is not parked.
-            // Neither outcome leaves observable state that a
-            // later waiter could pick up.
+            // signal / signal_all return CELL_OK (non-sticky);
+            // signal_to returns EPERM because the target is not
+            // parked. Neither path must leave state a later
+            // waiter could pick up.
             match variant {
                 "signal_to" => {
                     let Lv2Dispatch::Immediate { code, .. } = pre_signal else {
@@ -1799,7 +1685,7 @@ mod tests {
                     assert_eq!(
                         code,
                         crate::errno::CELL_EPERM.into(),
-                        "{variant}: signal_to on target-not-parked should EPERM per RPCS3",
+                        "{variant}: signal_to on target-not-parked must EPERM",
                     );
                 }
                 _ => {
@@ -1824,9 +1710,6 @@ mod tests {
                 None,
                 "{variant}: mutex must not be acquired by the lost signal",
             );
-            // Waiter now locks mutex and cond_waits. It MUST
-            // block -- not be satisfied by the earlier lost
-            // signal.
             host.dispatch(
                 Lv2Request::MutexLock {
                     mutex_id,
@@ -1873,10 +1756,8 @@ mod tests {
 
     #[test]
     fn cond_many_lost_signals_do_not_accumulate() {
-        // Fire 20 signals (alternating signal_one / signal_all)
-        // against an empty cond, then cond_wait. The waiter must
-        // still block. Anchors the "no pending count" invariant:
-        // even N lost signals cannot produce a single wake.
+        // Anchors the no-pending-count invariant: even 20 lost
+        // signals cannot produce a single wake.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let waiter_unit = UnitId::new(0);

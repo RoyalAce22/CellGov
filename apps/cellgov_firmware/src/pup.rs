@@ -1,4 +1,7 @@
 //! PUP (PlayStation Update Package) container parser.
+//!
+//! All multi-byte fields are big-endian. Payloads are themselves SCE-encrypted;
+//! decryption is the caller's responsibility (see `sce`).
 
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
@@ -141,7 +144,6 @@ mod tests {
     fn parse_accepts_valid_empty_pup() {
         let mut data = [0u8; 0x30];
         data[0..8].copy_from_slice(b"SCEUF\0\0\0");
-        // file_count = 0
         let pup = parse(&data).unwrap();
         assert_eq!(pup.entries.len(), 0);
     }

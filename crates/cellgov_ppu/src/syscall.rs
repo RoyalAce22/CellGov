@@ -1,12 +1,9 @@
-//! LV2 syscall number constants and stub classification.
+//! LV2 syscall numbers and PPU-only stub classification.
 //!
-//! Only the syscalls the microtests actually use are listed by name.
-//! The SPU thread group family (numbers 170..=192) is treated as a
-//! single range stub: the microtest CRT0 calls several operations in
-//! that range (create, initialize, start, join, priority-related
-//! calls, plus local-store and signal access up to 192), and they
-//! are all classified as benign no-op returns during PPU-only runs
-//! until real SPU execution takes over.
+//! Owns the numeric LV2 constants the PPU execution unit recognizes
+//! and a classifier that picks out syscalls treated as benign no-op
+//! returns when no SPU execution unit is attached. Real dispatch
+//! lives in the runtime's LV2 host.
 
 /// sys_process_exit.
 pub const SYS_PROCESS_EXIT: u64 = 22;
@@ -14,28 +11,19 @@ pub const SYS_PROCESS_EXIT: u64 = 22;
 /// sys_tty_write.
 pub const SYS_TTY_WRITE: u64 = 403;
 
-/// sys_spu_image_open (load SPU ELF from filesystem).
+/// sys_spu_image_open.
 pub const SYS_SPU_IMAGE_OPEN: u64 = 156;
 
-/// First SPU management syscall (SPU thread group lifecycle).
+/// First SPU management syscall (thread group lifecycle).
 pub const SYS_SPU_THREAD_GROUP_FIRST: u64 = 170;
 
-/// Last SPU management syscall (inclusive). Covers thread group
-/// lifecycle (170..=178) plus the SPU thread local-store and signal
-/// access ops (179..=192) that PSL1GHT microtests use (e.g. writing
-/// an SPU mailbox from the PPU).
+/// Last SPU management syscall (inclusive: thread group lifecycle
+/// plus local-store and signal access ops).
 pub const SYS_SPU_THREAD_GROUP_LAST: u64 = 192;
 
-/// Classify a syscall as a stub that returns CELL_OK without doing
-/// anything. The stub set covers `sys_spu_image_open`, the managed
-/// SPU thread group lifecycle range, and TTY write. Returning
-/// success without side effects lets the PPU CRT0 advance past its
-/// host boundaries so the runtime can observe its final state.
-///
-/// Returns `Some(0)` when the syscall is a known stub and the
-/// execution unit should set `r3 = 0` and advance past the `sc`.
-/// Returns `None` when the syscall is not recognized and the unit
-/// should fault.
+/// Returns `Some(0)` for syscalls the PPU-only path treats as a
+/// successful no-op (r3 = 0, advance past `sc`), `None` for numbers
+/// the unit should fault on.
 pub fn lv2_stub_return_value(syscall_num: u64) -> Option<u64> {
     match syscall_num {
         SYS_SPU_IMAGE_OPEN => Some(0),
@@ -65,7 +53,6 @@ mod tests {
                 n
             );
         }
-        // Bounds are exclusive outside the range.
         assert_eq!(lv2_stub_return_value(SYS_SPU_THREAD_GROUP_FIRST - 1), None);
         assert_eq!(lv2_stub_return_value(SYS_SPU_THREAD_GROUP_LAST + 1), None);
     }

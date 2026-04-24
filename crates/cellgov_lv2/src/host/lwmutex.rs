@@ -1,4 +1,9 @@
-//! Lightweight mutex LV2 dispatch: create, destroy, lock, trylock, unlock.
+//! LV2 dispatch for lightweight mutexes.
+//!
+//! `acquire_or_enqueue` is atomic: a single call either takes the
+//! lock, rejects recursive-lock-by-owner with EDEADLK, or parks the
+//! caller on the FIFO waiter list. Splitting into try-then-enqueue
+//! would race a concurrent unlock.
 
 use cellgov_event::UnitId;
 
@@ -11,8 +16,8 @@ impl Lv2Host {
         id_ptr: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Lwmutex has its own id allocator (starts at 1); out
-        // pointer is not written on overflow.
+        // Lwmutex uses a dedicated id allocator starting at 1.
+        // id_ptr is not written on overflow.
         let Some(id) = self.lwmutexes.create() else {
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ENOMEM.into(),
@@ -29,8 +34,6 @@ impl Lv2Host {
                 effects: vec![],
             };
         };
-        // See `dispatch_mutex_lock` for the acquire_or_enqueue
-        // TOCTOU rationale.
         match self.lwmutexes.acquire_or_enqueue(id, caller) {
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Unknown => Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ESRCH.into(),
@@ -98,7 +101,9 @@ impl Lv2Host {
                 effects: vec![],
             },
             crate::sync_primitives::LwMutexRelease::Transferred { new_owner } => {
-                // See `dispatch_mutex_unlock.Transferred`.
+                // Ownership already transferred; missing
+                // thread-table entry leaves the mutex naming an
+                // owner the runtime cannot wake.
                 match self.resolve_wake_thread(new_owner, "lwmutex_unlock.Transferred") {
                     Some(unit) => Lv2Dispatch::WakeAndReturn {
                         code: 0,
@@ -116,7 +121,6 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_lwmutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
-        // Destroy-with-waiters would strand them -- EBUSY.
         let Some(entry) = self.lwmutexes.lookup(id) else {
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ESRCH.into(),
@@ -228,9 +232,6 @@ mod tests {
 
     #[test]
     fn lwmutex_destroy_with_waiter_returns_ebusy() {
-        // Preload the table: create an lwmutex, set an owner, and
-        // enqueue a waiter. Destroy must reject with EBUSY without
-        // tearing down state.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let source = UnitId::new(0);
@@ -315,8 +316,6 @@ mod tests {
         let owner_unit = UnitId::new(0);
         let waiter_unit = UnitId::new(1);
         seed_primary_ppu(&mut host, owner_unit);
-        // Register a second PPU thread so the waiter has a
-        // distinct thread id.
         let waiter_tid = host
             .ppu_threads_mut()
             .create(
@@ -331,7 +330,6 @@ mod tests {
                 },
             )
             .unwrap();
-        // Owner creates and acquires.
         let created = host.dispatch(
             Lv2Request::LwMutexCreate {
                 id_ptr: 0x100,
@@ -348,7 +346,6 @@ mod tests {
             other => panic!("expected Immediate(0), got {other:?}"),
         };
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, owner_unit, &rt);
-        // Waiter tries to acquire and blocks.
         let r = host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, waiter_unit, &rt);
         match r {
             Lv2Dispatch::Block {
@@ -360,7 +357,6 @@ mod tests {
             }
             other => panic!("expected Block on LwMutex, got {other:?}"),
         }
-        // Owner unchanged; waiter enqueued.
         let entry = host.lwmutexes().lookup(id).unwrap();
         assert_eq!(entry.owner(), Some(PpuThreadId::PRIMARY));
         let seen: Vec<_> = entry.waiters().iter().collect();
@@ -438,13 +434,11 @@ mod tests {
             other => panic!("expected Immediate(0), got {other:?}"),
         };
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, owner_unit, &rt);
-        // Other thread tries non-blockingly.
         let r = host.dispatch(Lv2Request::LwMutexTryLock { id }, other_unit, &rt);
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
         assert_eq!(code, crate::errno::CELL_EBUSY.into());
-        // Owner unchanged; waiter list untouched.
         let entry = host.lwmutexes().lookup(id).unwrap();
         assert_eq!(entry.owner(), Some(PpuThreadId::PRIMARY));
         assert!(entry.waiters().is_empty());
@@ -534,7 +528,6 @@ mod tests {
         };
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, owner_unit, &rt);
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, waiter_unit, &rt);
-        // Owner unlocks.
         let r = host.dispatch(Lv2Request::LwMutexUnlock { id }, owner_unit, &rt);
         match r {
             Lv2Dispatch::WakeAndReturn {
@@ -548,7 +541,6 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // Ownership transferred to the waiter.
         let entry = host.lwmutexes().lookup(id).unwrap();
         assert_eq!(entry.owner(), Some(waiter_tid));
         assert!(entry.waiters().is_empty());
@@ -590,13 +582,11 @@ mod tests {
             other => panic!("expected Immediate(0), got {other:?}"),
         };
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, owner_unit, &rt);
-        // Non-owner tries to unlock.
         let r = host.dispatch(Lv2Request::LwMutexUnlock { id }, other_unit, &rt);
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
         assert_eq!(code, crate::errno::CELL_EPERM.into());
-        // Owner unchanged.
         assert_eq!(
             host.lwmutexes().lookup(id).unwrap().owner(),
             Some(PpuThreadId::PRIMARY),
@@ -618,9 +608,6 @@ mod tests {
 
     #[test]
     fn lwmutex_unlock_with_three_waiters_wakes_head_in_fifo_order() {
-        // Waiters parked in order w1, w2, w3. First unlock wakes w1.
-        // w1 unlocks -> wakes w2. w2 unlocks -> wakes w3. w3 unlocks
-        // -> mutex free.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let u0 = UnitId::new(0);
@@ -689,7 +676,6 @@ mod tests {
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, u1, &rt);
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, u2, &rt);
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, u3, &rt);
-        // u0 unlocks -> u1 gets it.
         match host.dispatch(Lv2Request::LwMutexUnlock { id }, u0, &rt) {
             Lv2Dispatch::WakeAndReturn { woken_unit_ids, .. } => {
                 assert_eq!(woken_unit_ids, vec![u1]);
@@ -697,7 +683,6 @@ mod tests {
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
         assert_eq!(host.lwmutexes().lookup(id).unwrap().owner(), Some(t1));
-        // u1 unlocks -> u2 gets it.
         match host.dispatch(Lv2Request::LwMutexUnlock { id }, u1, &rt) {
             Lv2Dispatch::WakeAndReturn { woken_unit_ids, .. } => {
                 assert_eq!(woken_unit_ids, vec![u2]);
@@ -705,7 +690,6 @@ mod tests {
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
         assert_eq!(host.lwmutexes().lookup(id).unwrap().owner(), Some(t2));
-        // u2 unlocks -> u3 gets it.
         match host.dispatch(Lv2Request::LwMutexUnlock { id }, u2, &rt) {
             Lv2Dispatch::WakeAndReturn { woken_unit_ids, .. } => {
                 assert_eq!(woken_unit_ids, vec![u3]);
@@ -713,7 +697,6 @@ mod tests {
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
         assert_eq!(host.lwmutexes().lookup(id).unwrap().owner(), Some(t3));
-        // u3 unlocks -> mutex free.
         match host.dispatch(Lv2Request::LwMutexUnlock { id }, u3, &rt) {
             Lv2Dispatch::Immediate { code: 0, .. } => {}
             other => panic!("expected Immediate(0), got {other:?}"),
@@ -723,9 +706,9 @@ mod tests {
 
     #[test]
     fn lwmutex_lock_duplicate_park_returns_edeadlk() {
-        // A caller that is already parked on the same mutex cannot
-        // park again. The table's duplicate-enqueue rejection
-        // surfaces as EDEADLK at the dispatch level.
+        // Anchors the errno mapping: the table's duplicate-enqueue
+        // rejection surfaces as EDEADLK (not ESRCH / EFAULT) at
+        // the dispatch level.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let owner_unit = UnitId::new(0);
@@ -761,8 +744,8 @@ mod tests {
         };
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, owner_unit, &rt);
         host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, waiter_unit, &rt);
-        // Second block attempt from the same waiter without a prior
-        // wake.
+        // Already-parked caller tries to park again without a
+        // prior wake.
         let r = host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, waiter_unit, &rt);
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");

@@ -1,5 +1,5 @@
-//! SPU-lifecycle LV2 dispatch methods: image open, thread
-//! group create / start / initialize / join, and mailbox write.
+//! SPU-lifecycle LV2 dispatch: image open, thread-group
+//! create/start/initialize/join, and mailbox write.
 
 use cellgov_effects::{Effect, MailboxMessage, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -11,17 +11,14 @@ use crate::host::{Lv2Host, Lv2Runtime};
 use crate::request::Lv2Request;
 use crate::thread_group::GroupState;
 
-/// Maximum bytes `sys_spu_image_open` walks searching for the
-/// path NUL terminator.
+/// Maximum bytes `sys_spu_image_open` scans for the path NUL terminator.
 const SPU_IMAGE_PATH_MAX: usize = 256;
 
-/// Upper bound on per-group slot index. Keeps the synthetic
-/// thread-id packing `group_id * MAX_SLOTS_PER_GROUP + slot`
-/// collision-free; real PS3 groups hold at most six threads.
+/// Upper bound on per-group slot index; keeps the synthetic thread-id
+/// packing `group_id * MAX_SLOTS_PER_GROUP + slot` collision-free.
 const MAX_SLOTS_PER_GROUP: u32 = 256;
 
-/// `SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT`. Source: RPCS3
-/// `Emu/Cell/lv2/sys_spu.h:28`.
+/// `SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT`.
 const GROUP_JOIN_CAUSE_GROUP_EXIT: u32 = 0x0001;
 
 impl Lv2Host {
@@ -41,8 +38,7 @@ impl Lv2Host {
                 };
             }
         };
-        // Missing NUL inside the window is malformed input
-        // (EINVAL), not "not found" (ENOENT).
+        // Missing NUL: EINVAL (malformed), not ENOENT (not found).
         let path_len = match path_bytes.iter().position(|&b| b == 0) {
             Some(n) => n,
             None => {
@@ -64,11 +60,11 @@ impl Lv2Host {
             }
         };
 
-        // sys_spu_image_t layout (16 bytes, big-endian):
+        // sys_spu_image_t (16 bytes, big-endian):
         //   [0..4]   type/handle (u32)
-        //   [4..8]   entry point (u32) -- 0, resolved at thread init
+        //   [4..8]   entry point (u32) -- resolved at thread init
         //   [8..12]  segments addr (u32) -- opaque, unused
-        //   [12..16] nsegs (i32) -- 0
+        //   [12..16] nsegs (i32)
         let handle = record.handle;
         let mut img_struct = [0u8; 16];
         img_struct[0..4].copy_from_slice(&handle.raw().to_be_bytes());
@@ -95,8 +91,7 @@ impl Lv2Host {
         num_threads: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Reject up front rather than letting the caller discover
-        // the packing limit one initialize_thread call at a time.
+        // Enforce the thread-id packing limit up front.
         if num_threads > MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_EINVAL.into(),
@@ -106,8 +101,7 @@ impl Lv2Host {
         let group_id = match self.groups.create(num_threads) {
             Some(id) => id,
             None => {
-                // Id space exhausted (u32 wrap). Unreachable in
-                // practice; EAGAIN so retries terminate.
+                // u32 id space exhausted; EAGAIN so retries terminate.
                 return Lv2Dispatch::Immediate {
                     code: crate::errno::CELL_EAGAIN.into(),
                     effects: vec![],
@@ -142,11 +136,9 @@ impl Lv2Host {
             }
         };
 
-        // Two-pass: validate every handle first, then build
-        // `inits`. Soundness of the second pass's
-        // `expect("handle validated above")` depends on
-        // `ContentStore::lookup_by_handle` being a pure read --
-        // an LRU promotion on lookup would break it.
+        // Two-pass: validate every handle, then build `inits`. The
+        // second pass's `expect` relies on `ContentStore::lookup_by_handle`
+        // being a pure read.
         let slot_entries: Vec<_> = group.slots.iter().map(|(&k, v)| (k, v.clone())).collect();
         for (_slot_idx, slot) in &slot_entries {
             if self.content.lookup_by_handle(slot.image_handle).is_none() {
@@ -214,8 +206,7 @@ impl Lv2Host {
             }
         };
 
-        // Short read from `read_committed` is a runtime-level
-        // invariant break; EFAULT, don't panic on try_into.
+        // Short read surfaces as EFAULT rather than panicking.
         let image_handle = match rt.read_committed(img_ptr as u64, 4) {
             Some(bytes) if bytes.len() >= 4 => {
                 let fixed: [u8; 4] = bytes[0..4].try_into().expect("slice length checked above");
@@ -229,10 +220,10 @@ impl Lv2Host {
             }
         };
 
-        // Read args now, not at group_start: the PPU may reuse
-        // the same stack variable across initialize calls.
-        // arg_ptr=0 is an explicit opt-out; a non-zero arg_ptr
-        // whose read fails is EFAULT, not silently zeroed.
+        // Snapshot args here rather than at group_start: the PPU may reuse
+        // the same stack variable across initialize calls. `arg_ptr == 0`
+        // is an explicit opt-out; a non-zero pointer whose read fails is
+        // EFAULT, not silently zeroed.
         let args = if arg_ptr == 0 {
             [0u64; 4]
         } else {
@@ -261,8 +252,7 @@ impl Lv2Host {
                 effects: vec![],
             };
         }
-        // Checked arithmetic: a pathological group_id near
-        // u32::MAX surfaces as EINVAL, not a silent wrap.
+        // Surface a wrap near u32::MAX as EINVAL, not a silent collision.
         let thread_id = match group_id
             .checked_mul(MAX_SLOTS_PER_GROUP)
             .and_then(|base| base.checked_add(thread_num))
@@ -276,9 +266,8 @@ impl Lv2Host {
             }
         };
 
-        // Zero is reserved and never allocated by ContentStore, so
-        // a guest-supplied handle of 0 is an invalid reference --
-        // fail with ESRCH rather than constructing a dead handle.
+        // ContentStore never allocates handle 0; a guest-supplied 0 is
+        // an invalid reference, surfaced as ESRCH.
         let Some(handle) = crate::dispatch::SpuImageHandle::new(image_handle) else {
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ESRCH.into(),
@@ -342,11 +331,9 @@ impl Lv2Host {
             }
         };
 
-        // TODO(spu): patch hard-coded GROUP_EXIT / status=0 from
-        // the group's recorded termination reason once abnormal
-        // causes (TERMINATED, ALL_THREADS_EXIT) are tracked.
-        // Applies to both the Running wake path and the Finished
-        // Immediate path below.
+        // TODO(spu): source cause/status from the group's recorded
+        // termination reason once abnormal causes are tracked, instead
+        // of hard-coding GROUP_EXIT / status 0 for both branches below.
         match group.state {
             GroupState::Created => Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_EINVAL.into(),
@@ -401,7 +388,7 @@ impl Lv2Host {
         value: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Reject non-running targets. A silent no-op here would
+        // Non-running target: ESRCH; silently dropping the message would
         // lose mailbox data on a dead thread.
         let target_uid = match self.groups.running_unit_for_thread(thread_id) {
             Some(uid) => uid,
@@ -467,7 +454,6 @@ mod tests {
                 if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
                     assert_eq!(range.start().raw(), 0x3000);
                     assert_eq!(range.length(), 4);
-                    // Group id 1, big-endian.
                     assert_eq!(bytes.bytes(), &1u32.to_be_bytes());
                 } else {
                     panic!("expected SharedWriteIntent");
@@ -504,7 +490,6 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        // First group gets id 1, second gets id 2.
         if let Lv2Dispatch::Immediate { effects, .. } = r1 {
             assert_eq!(
                 effects[0].clone(),
@@ -533,11 +518,6 @@ mod tests {
 
     #[test]
     fn group_create_rejects_oversized_num_threads() {
-        // num_threads above MAX_SLOTS_PER_GROUP (256) cannot be fully
-        // represented by the synthetic `group_id * 256 + slot` packing
-        // used by `dispatch_thread_initialize`. The dispatch refuses
-        // up front so the group never reaches a permanently un-fully-
-        // initializable state.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x4000);
         let req = Lv2Request::SpuThreadGroupCreate {
@@ -554,7 +534,6 @@ mod tests {
             }
             other => panic!("expected Immediate, got {other:?}"),
         }
-        // No group is allocated on rejection.
         assert_eq!(host.thread_groups().len(), 0);
     }
 
@@ -563,14 +542,12 @@ mod tests {
         let mut host = Lv2Host::new();
         host.content_store_mut().register(b"/spu.elf", vec![0xAA]);
 
-        // Guest memory: image struct at 0x200 (handle=1 in first 4
-        // bytes, written by a previous image_open dispatch).
+        // img_ptr at 0x200: handle=1 pre-populated (as image_open would write).
         let mut mem = GuestMemory::new(0x4000);
         let img_range = ByteRange::new(GuestAddr::new(0x200), 4).unwrap();
         mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
         let rt = FakeRuntime::with_memory(mem);
 
-        // Create group.
         host.dispatch(
             Lv2Request::SpuThreadGroupCreate {
                 id_ptr: 0x100,
@@ -581,7 +558,6 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        // Initialize slot 0 -- reads image handle from img_ptr.
         let result = host.dispatch(
             Lv2Request::SpuThreadInitialize {
                 thread_ptr: 0x300,
@@ -597,7 +573,7 @@ mod tests {
         match result {
             Lv2Dispatch::Immediate { code, effects } => {
                 assert_eq!(code, 0);
-                assert_eq!(effects.len(), 1); // thread_id write
+                assert_eq!(effects.len(), 1);
             }
             other => panic!("expected Immediate, got {other:?}"),
         }
@@ -668,9 +644,6 @@ mod tests {
         host.content_store_mut()
             .register(b"/app_home/spu.elf", vec![0xAA]);
 
-        // Place the path string "/app_home/spu.elf\0" at address 0x100
-        // in guest memory, and reserve 16 bytes at 0x200 for the output
-        // struct.
         let mut mem = GuestMemory::new(0x300);
         let path = b"/app_home/spu.elf\0";
         let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
@@ -689,7 +662,6 @@ mod tests {
                 if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
                     assert_eq!(range.start().raw(), 0x200);
                     assert_eq!(range.length(), 16);
-                    // First 4 bytes: handle in big-endian (handle 1)
                     assert_eq!(&bytes.bytes()[0..4], &1u32.to_be_bytes());
                 } else {
                     panic!("expected SharedWriteIntent");
@@ -702,7 +674,6 @@ mod tests {
     #[test]
     fn image_open_unknown_path_returns_error() {
         let mut host = Lv2Host::new();
-        // No images registered.
         let mut mem = GuestMemory::new(0x300);
         let path = b"/nonexistent.elf\0";
         let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
@@ -730,7 +701,6 @@ mod tests {
             h.content_store_mut().register(b"/spu.elf", vec![]);
             h
         };
-        // path_ptr points past end of memory.
         let rt = FakeRuntime::new(64);
         let req = Lv2Request::SpuImageOpen {
             img_ptr: 0,
@@ -785,8 +755,6 @@ mod tests {
         host.content_store_mut()
             .register(b"/spu.elf", vec![0xAA, 0xBB]);
 
-        // Prepare guest memory: path at 0x100, arg struct at 0x200,
-        // image struct at 0x300 (handle=1 pre-populated).
         let mut mem = GuestMemory::new(0x4000);
         let path = b"/spu.elf\0";
         let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
@@ -794,8 +762,7 @@ mod tests {
         let img_range = ByteRange::new(GuestAddr::new(0x300), 4).unwrap();
         mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
 
-        // sys_spu_thread_argument: 4x u64 big-endian.
-        // arg1 = 0x1000 (result EA)
+        // sys_spu_thread_argument: 4 x u64 big-endian; arg0 = 0x1000.
         let mut arg_bytes = [0u8; 32];
         arg_bytes[0..8].copy_from_slice(&0x1000u64.to_be_bytes());
         let arg_range = ByteRange::new(GuestAddr::new(0x200), 32).unwrap();
@@ -803,7 +770,6 @@ mod tests {
 
         let rt = FakeRuntime::with_memory(mem);
 
-        // image_open
         host.dispatch(
             Lv2Request::SpuImageOpen {
                 img_ptr: 0x300,
@@ -813,7 +779,6 @@ mod tests {
             &rt,
         );
 
-        // group_create (1 thread)
         host.dispatch(
             Lv2Request::SpuThreadGroupCreate {
                 id_ptr: 0x400,
@@ -825,7 +790,6 @@ mod tests {
             &rt,
         );
 
-        // thread_initialize (slot 0, img_ptr 0x300 has handle, arg_ptr 0x200)
         host.dispatch(
             Lv2Request::SpuThreadInitialize {
                 thread_ptr: 0x500,
@@ -839,7 +803,6 @@ mod tests {
             &rt,
         );
 
-        // group_start
         let result = host.dispatch(
             Lv2Request::SpuThreadGroupStart { group_id: 1 },
             UnitId::new(0),

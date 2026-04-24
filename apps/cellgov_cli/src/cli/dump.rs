@@ -1,5 +1,4 @@
-//! `dump <scenario>` -- run a scenario and print every trace
-//! record, one per line.
+//! `dump <scenario>` -- run a scenario and print every trace record.
 
 use cellgov_testkit::runner::ScenarioResult;
 use cellgov_trace::TraceReader;
@@ -7,7 +6,6 @@ use cellgov_trace::TraceReader;
 use super::exit::die;
 use super::scenarios::run_scenario;
 
-/// Entry point for `cellgov_cli dump <scenario>`.
 pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
     let name = args
         .get(2)
@@ -22,14 +20,9 @@ pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
     }
 }
 
-/// Print every trace record from a scenario run, one per line.
 fn dump_trace(result: &ScenarioResult) {
     use cellgov_trace::{TraceRecord, TracedBlockReason, TracedWakeReason};
 
-    // Track count in the single decoding pass. The old
-    // implementation decoded the whole trace once for display and
-    // then a second time just to count -- a real O(n) waste on
-    // large traces. Single pass: `count = i + 1` on each iteration.
     let mut count = 0usize;
     for (i, rec) in TraceReader::new(&result.trace_bytes).enumerate() {
         let rec =

@@ -1,25 +1,18 @@
-//! Payload types carried inside `Effect` variants.
-//!
-//! Each type here is a small immutable value: a write byte buffer, a
-//! mailbox message word, a wait target classifier, and a fault kind. They
-//! live in their own module so the [`crate::effect::Effect`] enum stays
-//! scannable, and so the payload types can be tested in isolation.
+//! Payload types carried inside `Effect` variants: write buffer, mailbox
+//! word, wait-target classifier, fault kind.
 
 use cellgov_sync::{BarrierId, MailboxId, SignalId};
 
 /// Max bytes stored inline without heap allocation.
 const INLINE_CAP: usize = 16;
 
-/// The bytes a `SharedWriteIntent` will deposit into its target range.
+/// Bytes a `SharedWriteIntent` or `ConditionalStore` will deposit.
 ///
-/// Payloads up to 16 bytes are stored inline on the stack. Larger
-/// payloads spill to a heap-allocated `Vec<u8>`. All current PPU
-/// stores (1/2/4/8/16 bytes) and LV2 writes fit within the inline
-/// buffer, so the hot path never allocates.
-///
-/// The runtime checks that `payload.len() == range.length()` at commit
-/// validation time; that check is not duplicated here so that this type
-/// can be constructed in isolation in tests.
+/// Payloads up to 16 bytes stay inline on the stack; larger payloads
+/// spill to `Vec<u8>`. All current PPU stores (1/2/4/8/16 bytes) and
+/// LV2 writes fit inline, so the hot path does not allocate. Length
+/// is matched against `range.length()` at commit validation rather
+/// than at construction so the type stays test-constructible.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WritePayload {
     storage: PayloadStorage,
@@ -32,7 +25,7 @@ enum PayloadStorage {
 }
 
 impl WritePayload {
-    /// Construct a `WritePayload` from owned bytes.
+    /// Construct from owned bytes.
     #[inline]
     pub fn new(bytes: Vec<u8>) -> Self {
         if bytes.len() <= INLINE_CAP {
@@ -51,8 +44,8 @@ impl WritePayload {
         }
     }
 
-    /// Construct a `WritePayload` from a byte slice. Avoids an
-    /// intermediate `Vec` allocation for slices that fit inline.
+    /// Construct from a slice, avoiding an intermediate `Vec` when the
+    /// payload fits inline.
     #[inline]
     pub fn from_slice(src: &[u8]) -> Self {
         if src.len() <= INLINE_CAP {
@@ -80,7 +73,7 @@ impl WritePayload {
         }
     }
 
-    /// Length of the payload in bytes.
+    /// Length in bytes.
     #[inline]
     pub fn len(&self) -> usize {
         match &self.storage {
@@ -89,24 +82,20 @@ impl WritePayload {
         }
     }
 
-    /// Whether the payload carries zero bytes. Zero-length writes are
-    /// degenerate but legal -- the runtime trace still records them.
+    /// Whether the payload carries zero bytes; zero-length writes are
+    /// legal and still recorded in the trace.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
 
-/// A single mailbox message.
-///
-/// Cell hardware mailboxes carry 32-bit words. This type stays faithful
-/// to that width; wider or structured payloads can land later as
-/// additional effect variants without disturbing this one.
+/// A single mailbox message: one 32-bit word, matching Cell hardware.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct MailboxMessage(u32);
 
 impl MailboxMessage {
-    /// Construct a mailbox message from a raw 32-bit word.
+    /// Construct from a raw 32-bit word.
     #[inline]
     pub const fn new(raw: u32) -> Self {
         Self(raw)
@@ -121,16 +110,9 @@ impl MailboxMessage {
 
 /// What an `Effect::WaitOnEvent` is waiting for.
 ///
-/// Covers the three sync primitive families that have leaf identifiers
-/// in `cellgov_sync`: mailboxes, signal notification registers, and
-/// barriers (which share their id type with mutexes and semaphores).
-/// DMA waits are not represented here -- the
-/// [`crate::Effect::DmaEnqueue`] flow uses the dedicated
-/// `YieldReason::DmaWait` path on the unit side and a separate
-/// completion-correlation mechanism on the runtime side. Folding DMA
-/// waits into `WaitTarget` would require per-request tag handles
-/// distinct from the sync primitive ids, so the two flows stay
-/// separate.
+/// Covers the three `cellgov_sync` primitive families with leaf ids.
+/// DMA waits use a separate `YieldReason::DmaWait` path paired with
+/// request-tag correlation, not `WaitTarget`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WaitTarget {
     /// Wait for a message to arrive in a mailbox.
@@ -141,20 +123,16 @@ pub enum WaitTarget {
     Barrier(BarrierId),
 }
 
-/// Coarse classification of a fault raised by a unit or by validation.
+/// Coarse fault classification.
 ///
-/// The variant set is kept small. Validation faults
-/// are produced by the commit pipeline when an effect batch is malformed
-/// (length mismatch, out-of-range write, etc.). Guest faults are produced
-/// by the unit itself; the `code` is opaque to the runtime and rides
-/// through the trace untouched. Architecture-specific fault taxonomies
-/// (PPU machine check, SPU invalid channel, etc.) belong in their crates
-/// later as wrapper enums on top of `Guest`.
+/// Architecture-specific taxonomies (PPU machine check, SPU invalid
+/// channel, etc.) layer as wrapper enums over `Guest(u32)`; the runtime
+/// treats the code as opaque and passes it through the trace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FaultKind {
-    /// The runtime rejected an effect during pre-commit validation.
+    /// Commit pipeline rejected an effect during pre-commit validation.
     Validation,
-    /// The unit raised a fault with an opaque architecture-defined code.
+    /// Unit raised a fault with an architecture-defined code.
     Guest(u32),
 }
 
@@ -206,18 +184,15 @@ mod tests {
 
     #[test]
     fn inline_at_boundary() {
-        // Exactly INLINE_CAP bytes should stay inline.
         let data = [0xAB; INLINE_CAP];
         let p = WritePayload::from_slice(&data);
         assert_eq!(p.len(), INLINE_CAP);
         assert_eq!(p.bytes(), &data);
-        // Verify it matches the Vec path.
         assert_eq!(p, WritePayload::new(data.to_vec()));
     }
 
     #[test]
     fn heap_above_boundary() {
-        // INLINE_CAP + 1 bytes should spill to heap.
         let data = vec![0xCD; INLINE_CAP + 1];
         let p = WritePayload::from_slice(&data);
         assert_eq!(p.len(), INLINE_CAP + 1);

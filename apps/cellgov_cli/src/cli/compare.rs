@@ -1,13 +1,6 @@
-//! All `compare`-family subcommand handlers:
-//!
-//! - `compare <scenario>` / `compare <manifest.toml>` -- run a
-//!   scenario or manifest-driven compare against saved baselines.
-//! - `compare-observations <a.json> <b.json>` -- diff two
-//!   JSON-encoded `Observation` files.
-//! - `diverge <a.state> <b.state>` -- streaming per-step state
-//!   scan reporting the first divergence.
-//! - `zoom <a.zoom.state> <b.zoom.state> <step>` -- per-field
-//!   register diff at a named step.
+//! `compare`-family subcommand handlers: scenario/manifest compare,
+//! observation diff, streaming state-trace divergence, and per-step
+//! register-level zoom.
 
 use cellgov_compare::{
     compare, compare_multi, format_human, format_json, format_multi_human, format_multi_json,
@@ -21,7 +14,6 @@ use super::scenarios::scenario_factory;
 
 // -- compare dispatch (top-level) --
 
-/// Entry point for `cellgov_cli compare ...`.
 pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
     let target = args.get(2).map(String::as_str).unwrap_or_else(|| {
         die(
@@ -64,15 +56,9 @@ fn require_determinism(
         .unwrap_or_else(|e| die(&format!("determinism check FAILED for {name}: {e:?}")))
 }
 
-/// Run a scenario, observe it with determinism check, and save to disk.
 fn save_baseline(factory: &dyn Fn() -> ScenarioFixture, name: &str, path: &str) {
     let obs = require_determinism(factory, name, &[]);
     let p = std::path::Path::new(path);
-    // Propagate create_dir_all failures rather than dropping them
-    // with `.ok()`. A permission error or a file-vs-directory
-    // collision used to land as a lower-quality "No such file or
-    // directory" from the subsequent save; naming the real cause
-    // saves operators a round of diagnosis.
     if let Some(parent) = p.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).unwrap_or_else(|e| {
@@ -88,7 +74,6 @@ fn save_baseline(factory: &dyn Fn() -> ScenarioFixture, name: &str, path: &str) 
     println!("saved baseline for {name} to {path}");
 }
 
-/// Run a scenario, observe it, load a saved baseline, and compare.
 fn compare_against_baseline(
     factory: &dyn Fn() -> ScenarioFixture,
     name: &str,
@@ -119,7 +104,6 @@ fn compare_against_baseline(
     }
 }
 
-/// Run a scenario with determinism check and print the observation.
 fn run_compare(
     factory: &dyn Fn() -> ScenarioFixture,
     name: &str,
@@ -156,8 +140,6 @@ fn run_compare(
     }
 }
 
-/// Manifest-driven comparison: load a manifest, run the CellGov
-/// scenario if present, and compare against a saved baseline.
 fn run_manifest_compare(
     manifest_path: &str,
     mode: CompareMode,
@@ -171,7 +153,6 @@ fn run_manifest_compare(
 
     let test_name = &manifest.test.name;
 
-    // Build region descriptors from the manifest's [observe] section.
     let regions: Vec<RegionDescriptor> = manifest
         .observe
         .memory_regions
@@ -183,7 +164,6 @@ fn run_manifest_compare(
         })
         .collect();
 
-    // Run CellGov if the manifest has a [cellgov] section.
     let cellgov_section = match &manifest.cellgov {
         Some(cg) => cg,
         None => {
@@ -297,10 +277,8 @@ fn run_manifest_compare(
 }
 
 /// Load all `.json` baseline files from a directory, sorted by name.
-/// Propagates `DirEntry` errors via [`die`] so a permission-denied
-/// or broken-symlink entry does not silently disappear -- the
-/// caller's "no baselines found" check would otherwise conflate
-/// "none exist" with "all were unreadable".
+/// `DirEntry` errors die via [`die`] so unreadable entries do not
+/// silently collapse into "no baselines found".
 pub(crate) fn load_baselines_from_dir(dir: &str) -> Vec<Observation> {
     let rd = std::fs::read_dir(dir)
         .unwrap_or_else(|e| die(&format!("failed to read baselines directory {dir}: {e}")));
@@ -333,10 +311,8 @@ pub(crate) fn load_baselines_from_dir(dir: &str) -> Vec<Observation> {
 
 // -- compare-observations --
 
-/// `cellgov_cli compare-observations <a.json> <b.json>` -- diffs two
-/// JSON-encoded `Observation` files (region-by-region byte equality
-/// plus outcome match). Stops at the first divergence with a typed
-/// label.
+/// `cellgov_cli compare-observations <a.json> <b.json>` -- diff two
+/// JSON-encoded `Observation` files. Stops at the first divergence.
 pub(crate) fn run_compare_observations(a_path: &str, b_path: &str) {
     let a_bytes = load_file_or_die(a_path);
     let b_bytes = load_file_or_die(b_path);
@@ -365,10 +341,9 @@ pub(crate) fn run_compare_observations(a_path: &str, b_path: &str) {
             );
             std::process::exit(1);
         }
-        // Length check FIRST: if one side is a prefix of the other,
+        // Length check must precede byte compare: for a prefix match
         // `zip(...).position(x != y)` returns None and unwrap_or(0)
-        // would report "first byte differs at 0x0" with identical
-        // bytes.
+        // would misreport "first byte differs at 0x0".
         if ra.data.len() != rb.data.len() {
             println!(
                 "DIVERGE region {}: length {} vs {} bytes",
@@ -379,8 +354,6 @@ pub(crate) fn run_compare_observations(a_path: &str, b_path: &str) {
             std::process::exit(1);
         }
         if ra.data != rb.data {
-            // Lengths are equal here, so `position` is guaranteed to
-            // find the first differing byte when the slices differ.
             let first_diff = ra
                 .data
                 .iter()
@@ -412,8 +385,8 @@ pub(crate) fn run_compare_observations(a_path: &str, b_path: &str) {
             "WARN: both observations carry zero memory regions; comparison is trivially vacuous"
         );
     }
-    // Same runner + different step counts = determinism failure.
-    // Cross-runner mismatch is expected (different step-count units).
+    // Same runner with differing step counts is a determinism failure;
+    // cross-runner step mismatches are expected.
     if let (Some(sa), Some(sb)) = (a.metadata.steps, b.metadata.steps) {
         if sa != sb {
             if a.metadata.runner == b.metadata.runner {
@@ -434,8 +407,7 @@ pub(crate) fn run_compare_observations(a_path: &str, b_path: &str) {
 // -- diverge --
 
 /// `cellgov_cli diverge <a.state> <b.state>` -- streaming scan of two
-/// per-step state-trace files. Prints IDENTICAL / DIVERGE / LENGTH_DIFFERS
-/// and exits non-zero on any non-identical outcome.
+/// per-step state-trace files. Exits non-zero on any non-identical outcome.
 pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
     use cellgov_compare::{diverge, DivergeField, DivergeReport};
     let a_bytes = load_file_or_die(a_path);
@@ -481,9 +453,10 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
 
 // -- zoom --
 
-/// `cellgov_cli zoom <a.zoom.state> <b.zoom.state> <step>` -- loads
-/// two zoom-trace byte streams, runs `cellgov_compare::zoom_lookup`
-/// at the named step, and prints a per-field register diff.
+/// `cellgov_cli zoom <a.zoom.state> <b.zoom.state> <step>` -- per-field
+/// register diff at the named step.
+///
+/// # Errors
 ///
 /// Exit codes: 0 on identical-state hash collision, 1 on a real diff,
 /// 2 when the requested step is missing from one or both windows.
@@ -516,8 +489,6 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
             a_missing,
             b_missing,
         } => {
-            // Positive-sense locals so the format string reads
-            // cleanly; the `!` lives in exactly one place.
             let a_has_step = !a_missing;
             let b_has_step = !b_missing;
             println!(

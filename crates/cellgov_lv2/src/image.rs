@@ -15,17 +15,11 @@ pub struct SpuImageRecord {
 /// Path-keyed store for registered SPU images.
 ///
 /// # Invariants
-/// `by_path` and `by_handle` agree: every handle in either map
-/// resolves through both. A future edit that mutates one without
-/// the other silently turns [`Self::lookup_by_handle`] into
-/// `None` for live handles; the debug-asserts in `register`,
-/// `lookup_by_handle`, `len`, and `is_empty` catch that in debug
-/// builds.
-///
-/// No host filesystem access. Lookup is byte-exact: `/a.elf`,
-/// `/a.elf/`, and `//a.elf` are three distinct entries, so the
-/// guest-side path builder must produce the exact form used at
-/// registration.
+/// - `by_path` and `by_handle` agree: every handle in either map
+///   resolves through both. Debug-asserts in `register`,
+///   `lookup_by_handle`, `len`, and `is_empty` guard the pairing.
+/// - No host filesystem access; lookup is byte-exact, so `/a.elf`,
+///   `/a.elf/`, and `//a.elf` are three distinct entries.
 #[derive(Debug, Clone)]
 pub struct ContentStore {
     by_path: BTreeMap<Vec<u8>, SpuImageRecord>,
@@ -49,12 +43,11 @@ impl ContentStore {
         }
     }
 
-    /// Register an SPU image under `path`. Idempotent when the
-    /// same bytes are re-registered; returns the existing handle.
+    /// Register an SPU image under `path`. Idempotent for identical
+    /// bytes; returns the existing handle.
     ///
     /// # Panics
     /// - `path` is already registered with different `elf_bytes`.
-    ///   Callers needing to swap must remove and re-register.
     /// - The monotonic handle counter wraps past `u32::MAX`.
     pub fn register(&mut self, path: &[u8], elf_bytes: Vec<u8>) -> SpuImageHandle {
         debug_assert!(
@@ -80,10 +73,9 @@ impl ContentStore {
             return existing.handle;
         }
         let raw = self.next_handle;
-        // SAFETY of the expect: next_handle seeds at 1 and the
-        // checked_add below panics on wrap, so raw == 0 is only
-        // reachable via `seeded_at(0)`, which exists purely to
-        // test this panic site.
+        // next_handle seeds at 1 and the checked_add below panics on
+        // wrap, so raw == 0 is reachable only via `seeded_at(0)`,
+        // which exists to test this panic.
         let handle =
             SpuImageHandle::new(raw).expect("ContentStore::register: next_handle reached 0");
         self.next_handle = raw
@@ -131,8 +123,8 @@ impl ContentStore {
         self.by_path.is_empty()
     }
 
-    /// FNV-1a over `(path, handle, elf_bytes)` in path order,
-    /// length-prefixed to avoid boundary collisions between
+    /// Length-prefixed FNV-1a over `(path, handle, elf_bytes)` in
+    /// path order; prefixes prevent boundary collisions between
     /// adjacent fields.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
@@ -147,7 +139,7 @@ impl ContentStore {
     }
 
     /// Seed `next_handle` directly so tests can reach the two
-    /// register-panic sites that `new` makes unreachable.
+    /// register-panic sites `new` makes unreachable.
     #[cfg(test)]
     fn seeded_at(next_handle: u32) -> Self {
         Self {
@@ -253,7 +245,6 @@ mod tests {
 
     #[test]
     fn state_hash_differs_on_elf_bytes() {
-        // A hash that omitted elf_bytes would silently pass on image corruption.
         let mut a = ContentStore::new();
         let mut b = ContentStore::new();
         a.register(b"/spu.elf", vec![0xAA, 0xBB, 0xCC]);
@@ -263,7 +254,7 @@ mod tests {
 
     #[test]
     fn state_hash_length_prefix_prevents_boundary_collision() {
-        // Without length prefixes, ("/a", "bc") and ("/ab", "c") would collide.
+        // Without length prefixes, ("/a", "bc") and ("/ab", "c") collide.
         let mut a = ContentStore::new();
         let mut b = ContentStore::new();
         a.register(b"/a", vec![b'b', b'c']);

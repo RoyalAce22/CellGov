@@ -74,3 +74,13 @@ and before the game's RSX init).
 The boundaries are close but not identical. The HLE OPD divergence
 exists from the moment the loader binds imports and is independent
 of the boundary choice.
+
+----------------------------------------------------------------------
+Verdict
+----------------------------------------------------------------------
+
+Verdict: equivalent (974 bytes non-semantic).
+
+974 bytes of raw byte-level divergence (14 code + 960 data), zero
+semantic divergence. The compatibility matrix
+(`docs/titles.md`) shows `equivalent (974 bytes non-semantic)`.

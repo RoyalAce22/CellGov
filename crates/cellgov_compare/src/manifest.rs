@@ -1,9 +1,8 @@
 //! Microtest manifest parsing.
 //!
-//! Each manifest is a TOML file that ties together a CellGov scenario
-//! and an RPCS3 test binary, declares which memory regions to observe,
-//! and specifies the expected outcome. The harness reads one manifest
-//! per microtest.
+//! A manifest is a TOML file that ties a CellGov scenario to an RPCS3
+//! test binary, declares memory regions to observe, and specifies the
+//! expected outcome. One manifest per microtest.
 
 use crate::observation::ObservedOutcome;
 #[cfg(feature = "rpcs3-runner")]
@@ -37,12 +36,12 @@ pub struct TestSection {
 /// CellGov-side configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CellGovSection {
-    /// Name of a registered ScenarioFixture factory.
+    /// Name of a registered `ScenarioFixture` factory.
     pub scenario: String,
     /// Key-value arguments passed to the factory.
     #[serde(default)]
     pub scenario_args: BTreeMap<String, toml::Value>,
-    /// Max steps for the CellGov run. Defaults to 10000.
+    /// Max steps for the CellGov run.
     #[serde(default = "default_max_steps")]
     pub max_steps: usize,
 }
@@ -68,14 +67,14 @@ fn default_timeout_ms() -> u64 {
     5000
 }
 
-/// Decoder field that deserializes from a string.
+/// RPCS3 decoder selection.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DecoderField {
-    /// PPU Interpreter + SPU Interpreter.
+    /// PPU + SPU interpreter.
     #[default]
     Interpreter,
-    /// PPU LLVM Recompiler + SPU LLVM Recompiler.
+    /// PPU + SPU LLVM recompiler.
     Llvm,
 }
 
@@ -124,7 +123,7 @@ pub struct ExpectSection {
     pub outcome: OutcomeField,
 }
 
-/// Outcome field that deserializes from a lowercase string.
+/// Expected-outcome field (lowercase string in TOML).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutcomeField {
@@ -259,7 +258,6 @@ outcome = "completed"
         let m = parse(text).expect("parse");
         assert!(m.cellgov.is_some());
         assert!(m.rpcs3.is_none());
-        // Defaults
         assert_eq!(m.cellgov.unwrap().max_steps, 10000);
     }
 
@@ -347,7 +345,6 @@ outcome = "{text}"
     #[test]
     fn missing_required_field_returns_error() {
         let result = parse("[test]\n[observe]\n[expect]\noutcome = \"completed\"");
-        // Missing test.name
         assert!(result.is_err());
     }
 
@@ -358,7 +355,7 @@ outcome = "{text}"
             let m = load(path).expect("load manifest");
             assert_eq!(m.test.name, "spu_mailbox_write");
             assert!(m.cellgov.is_some());
-            assert!(m.rpcs3.is_none()); // RPCS3 section is commented out
+            assert!(m.rpcs3.is_none());
         }
     }
 
@@ -368,7 +365,7 @@ outcome = "{text}"
         if path.exists() {
             let m = load(path).expect("load manifest");
             assert_eq!(m.test.name, "spu_fixed_value");
-            assert!(m.cellgov.is_none()); // RPCS3-only test
+            assert!(m.cellgov.is_none());
             assert!(m.rpcs3.is_some());
             let rpcs3 = m.rpcs3.unwrap();
             assert!(matches!(rpcs3.decoder, DecoderField::Interpreter));

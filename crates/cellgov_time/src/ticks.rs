@@ -1,35 +1,24 @@
-//! Guest ticks -- the authoritative monotonic ordering clock.
-//!
-//! `GuestTicks` is the runtime-wide clock used to order every guest-visible
-//! event. It must never move backward, must never be derived from host time,
-//! and must never be implicitly convertible to or from `Budget` or `Epoch`.
-//! Conversions across these types are scheduler policy and live elsewhere.
+//! The runtime's monotonic ordering clock for guest-visible events.
 
-/// A point in guest virtual time, measured in ticks since runtime start.
+/// A point in guest virtual time, in ticks since runtime start.
 ///
-/// `GuestTicks` is a totally ordered, monotonically non-decreasing counter.
-/// It is the authoritative ordering clock for every guest-visible event in
-/// the runtime. It is a distinct type from [`crate::budget::Budget`] and
-/// [`crate::epoch::Epoch`]: the three concepts must not implicitly convert.
+/// Totally ordered, monotonically non-decreasing, never derived from host
+/// time. Distinct from [`crate::budget::Budget`] and [`crate::epoch::Epoch`];
+/// the three do not implicitly convert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct GuestTicks(u64);
 
 impl GuestTicks {
-    /// The zero point of guest time. This is the only sanctioned origin.
+    /// Origin of guest time.
     pub const ZERO: Self = Self(0);
 
-    /// Construct a `GuestTicks` from a raw count.
-    ///
-    /// This is the only way to lift a `u64` into guest time. There is no
-    /// `From<u64>` impl: every site that produces a tick value must be
-    /// explicit so the time domain is auditable from the call graph.
+    /// Lift a raw count into a `GuestTicks`.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Return the underlying tick count. Use sparingly -- prefer ordering
-    /// comparisons against other `GuestTicks` values.
+    /// Underlying tick count.
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
@@ -37,9 +26,7 @@ impl GuestTicks {
 
     /// Advance by `delta` ticks, returning `None` on overflow.
     ///
-    /// Guest time is monotonic, so the only failure mode is overflow of the
-    /// underlying counter. Callers must handle this explicitly; there is no
-    /// silent wraparound.
+    /// Overflow is the only failure mode; there is no silent wraparound.
     #[inline]
     pub const fn checked_add(self, delta: GuestTicks) -> Option<Self> {
         match self.0.checked_add(delta.0) {
@@ -49,18 +36,16 @@ impl GuestTicks {
     }
 
     /// Advance by `delta` ticks, saturating at `u64::MAX`.
-    ///
-    /// Saturation is a defined, deterministic behavior; it does not depend on
-    /// host state. Use this only when overflow truly is unreachable in the
-    /// runtime's design and you want a total operation.
     #[inline]
     pub const fn saturating_add(self, delta: GuestTicks) -> Self {
         Self(self.0.saturating_add(delta.0))
     }
 
-    /// Compute the elapsed ticks from `earlier` to `self`, or `None` if
-    /// `earlier` is in the future. Guest time never moves backward, so a
-    /// `None` here is a runtime invariant violation at the call site.
+    /// Ticks elapsed from `earlier` to `self`, or `None` if `earlier` is in
+    /// the future.
+    ///
+    /// Guest time never moves backward, so `None` here is an invariant
+    /// violation at the call site.
     #[inline]
     pub const fn checked_duration_since(self, earlier: GuestTicks) -> Option<GuestTicks> {
         match self.0.checked_sub(earlier.0) {

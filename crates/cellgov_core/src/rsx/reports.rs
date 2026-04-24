@@ -1,11 +1,10 @@
 //! sys_rsx committed-state layouts.
 //!
-//! Mirrors RPCS3's `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.h`:
-//! `RsxDmaControl` (0x58 B), `RsxDriverInfo` (0x12F8 B), `RsxReports`
-//! (37888 B). The Rust structs are layout descriptors -- the bytes
-//! live in guest memory and are covered by the memory-state hash.
-//! Only [`RsxContext`]'s base addresses and allocation flags fold
-//! into the sync-state hash.
+//! Mirrors RPCS3's `Emu/Cell/lv2/sys_rsx.h`: `RsxDmaControl`,
+//! `RsxDriverInfo`, `RsxReports`. The Rust structs are layout
+//! descriptors; the bytes live in guest memory and are covered by
+//! the memory-state hash. Only [`RsxContext`]'s base addresses and
+//! allocation flags fold into the sync-state hash.
 
 use core::mem::size_of;
 
@@ -14,7 +13,6 @@ use core::mem::size_of;
 pub const STATE_HASH_FORMAT_VERSION: u8 = 2;
 
 /// Fixed `context_id` returned from `sys_rsx_context_allocate`.
-/// RPCS3 `sys_rsx.cpp:332`.
 pub const RSX_CONTEXT_ID: u32 = 0x5555_5555;
 
 /// DMA-control offset within the reservation.
@@ -24,13 +22,13 @@ pub const DRIVER_INFO_OFFSET: u32 = 0x0010_0000;
 /// Reports offset within the reservation.
 pub const REPORTS_OFFSET: u32 = 0x0020_0000;
 
-/// Bytes reserved per sys_rsx context. RPCS3 `sys_rsx.cpp:255`.
+/// Bytes reserved per sys_rsx context.
 pub const RSX_CONTEXT_RESERVATION: u32 = 0x0030_0000;
 
 /// BE u32 semaphore slot.
 pub type RsxSemaphore = u32;
 
-/// Notify entry. 16-byte aligned per RPCS3 `sys_rsx.h:92`.
+/// Notify entry; 16-byte aligned.
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RsxNotify {
@@ -40,7 +38,7 @@ pub struct RsxNotify {
     pub zero: u64,
 }
 
-/// Report entry. 16-byte aligned per RPCS3 `sys_rsx.h:98`.
+/// Report entry; 16-byte aligned.
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RsxReport {
@@ -53,14 +51,12 @@ pub struct RsxReport {
 }
 
 /// Reports region: 1024 semaphore + 64 notify + 2048 report entries.
-/// RPCS3 `sys_rsx.h:105`.
 ///
-/// Labels stride 16 bytes: `cellGcmGetLabelAddress(i)` returns
-/// `reports_base + i * 0x10` and a u32 read there lands on
-/// `semaphore[i * 4]`. 256 addressable labels cover the full 4096-byte
-/// semaphore array; each label's trailing 12 bytes overlap the three
-/// tail sentinels of the init pattern until a guest NV method writes
-/// them.
+/// Label addressing strides 16 bytes: label `i` lands on
+/// `semaphore[i * 4]` and overlaps the three trailing sentinels of
+/// the init pattern until a guest NV method overwrites them. Label
+/// 255 lands on semaphore index 1020, which LV2 init seeds with the
+/// sentinel value.
 #[repr(C)]
 pub struct RsxReports {
     /// Semaphore slots.
@@ -77,10 +73,8 @@ pub const LABEL_STRIDE: u32 = 0x10;
 /// Count of addressable labels.
 pub const LABEL_COUNT: u32 = 256;
 
-/// DMA-control region. `cellGcmGetControlRegister` returns
-/// `dma_control_addr + 0x40`; put / get / ref live at +0x40 / +0x44
-/// / +0x48. Total 0x58 bytes; RPCS3 `sys_rsx.h:80-88` does not
-/// `static_assert` the aggregate.
+/// DMA-control region. Put / get / ref live at +0x40 / +0x44 / +0x48;
+/// total 0x58 bytes.
 #[repr(C)]
 pub struct RsxDmaControl {
     /// Reserved prefix.
@@ -97,8 +91,7 @@ pub struct RsxDmaControl {
     pub unk1: u32,
 }
 
-/// Per-display head state. RPCS3 `sys_rsx.h:25`; `static_assert`s to
-/// 0x40 bytes.
+/// Per-display head state; 0x40 bytes.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RsxDriverHead {
@@ -128,9 +121,8 @@ pub struct RsxDriverHead {
     pub last_vtime_high: u32,
 }
 
-/// Driver info region. RPCS3 `sys_rsx.h:8`; `static_assert`s to
-/// 0x12F8 bytes. Fields are BE in guest memory; init writers convert
-/// at write time.
+/// Driver info region; 0x12F8 bytes. Fields are BE in guest memory;
+/// init writers convert at write time.
 #[repr(C)]
 pub struct RsxDriverInfo {
     /// Driver version word.
@@ -152,9 +144,8 @@ pub struct RsxDriverInfo {
     /// Guest-visible offset from reports_base to the notify array.
     pub reports_notify_offset: u32,
     /// Guest-visible offset from reports_base to the semaphore block.
-    /// Name is RPCS3's `reportsOffset`; "reports" is overloaded
-    /// (semaphore here, report entries via `reports_report_offset`,
-    /// full region via the struct name).
+    /// Name is RPCS3's `reportsOffset`; "reports" is overloaded across
+    /// three regions.
     pub reports_offset: u32,
     /// Guest-visible offset from reports_base to the report entries.
     pub reports_report_offset: u32,
@@ -178,9 +169,8 @@ pub struct RsxDriverInfo {
     pub unk10: u32,
     /// User-command callback param.
     pub user_cmd_param: u32,
-    /// Event-queue handle. Games read this via cellGcmGetReport and
-    /// pass it to sys_event_queue_receive; it is the RSX -> PPU
-    /// event-delivery substrate.
+    /// Event-queue handle at offset 0x12D0; the RSX -> PPU event
+    /// delivery substrate guests pass to `sys_event_queue_receive`.
     pub handler_queue: u32,
     /// Reserved.
     pub unk11: u32,
@@ -200,8 +190,8 @@ pub struct RsxDriverInfo {
     pub last_error: u32,
 }
 
-/// RPCS3 values populated at `sys_rsx_context_allocate`. Source:
-/// `sys_rsx.cpp:293-302`. Hand-maintained -- no compile-time tether.
+/// RPCS3 values populated at `sys_rsx_context_allocate`.
+/// Hand-maintained; no compile-time tether to RPCS3.
 pub mod driver_info_init {
     /// Driver version word.
     pub const VERSION_DRIVER: u32 = 0x211;
@@ -221,25 +211,20 @@ pub mod driver_info_init {
     pub const HARDWARE_CHANNEL: u32 = 1;
 }
 
-/// Semaphore init sentinel pattern. RPCS3 `sys_rsx.cpp:274-280`
-/// writes this 4-u32 group repeatedly across the 1024 slots. Values
-/// are native-endian; init writers must use [`semaphore_init_word_be`]
-/// to produce BE guest-memory bytes.
+/// Semaphore init sentinel pattern, repeated across the 1024 slots.
+/// Values are native-endian; use [`semaphore_init_word_be`] for BE
+/// guest-memory bytes.
 pub const SEMAPHORE_INIT_PATTERN: [u32; 4] = [0x1337_C0D3, 0x1337_BABE, 0x1337_BEEF, 0x1337_F001];
 
-/// Initial notify timestamp. RPCS3 `sys_rsx.cpp:271-272`.
-///
-/// The value is an all-ones palindrome, so a writer that forgets
-/// `to_be_bytes()` appears to work until someone copies the path for
-/// a real timestamp. Use [`notify_init_timestamp_be`] as the single
-/// choke point.
+/// Initial notify timestamp. All-ones palindrome hides a missing BE
+/// swap; use [`notify_init_timestamp_be`] as the single choke point.
 pub const NOTIFY_INIT_TIMESTAMP: u64 = u64::MAX;
 
-/// Initial report timestamp. RPCS3 `sys_rsx.cpp:282-287`. Same
-/// BE-conversion hazard as [`NOTIFY_INIT_TIMESTAMP`].
+/// Initial report timestamp. Same BE-conversion hazard as
+/// [`NOTIFY_INIT_TIMESTAMP`].
 pub const REPORT_INIT_TIMESTAMP: u64 = u64::MAX;
 
-/// Initial report pad. RPCS3 `sys_rsx.cpp:286`.
+/// Initial report pad.
 pub const REPORT_INIT_PAD: u32 = u32::MAX;
 
 /// BE bytes for the `i % 4`-th slot of the semaphore init pattern.
@@ -267,9 +252,8 @@ pub const fn report_init_pad_be() -> [u8; 4] {
 }
 
 /// Fill `buf` with the guest-memory bytes `sys_rsx_context_allocate`
-/// writes into the reports region. Mirrors RPCS3 `sys_rsx.cpp:269-287`:
-/// memset to zero, then the three init loops (semaphore pattern,
-/// notify timestamps, report fields).
+/// writes into the reports region: zero, then the semaphore-pattern,
+/// notify-timestamp, and report-field init loops.
 ///
 /// # Panics
 ///
@@ -282,17 +266,13 @@ pub fn write_rsx_reports_init(buf: &mut [u8]) {
     );
     buf.fill(0);
 
-    // Semaphore sentinels: 4-u32 pattern repeated across 1024 slots,
-    // offset 0.
     let semaphore_base = 0usize;
     for i in 0..1024 {
         let offset = semaphore_base + i * 4;
         buf[offset..offset + 4].copy_from_slice(&semaphore_init_word_be(i));
     }
 
-    // Notify: timestamp = u64::MAX, zero = 0. Entry stride 16; the
-    // RPCS3 memset already zeroed the `zero` field, so only the
-    // timestamp write is needed.
+    // Notify stride 16; `zero` stays zero from the initial fill.
     let notify_base = 0x1000usize;
     let ts_be = notify_init_timestamp_be();
     for i in 0..64 {
@@ -300,15 +280,13 @@ pub fn write_rsx_reports_init(buf: &mut [u8]) {
         buf[offset..offset + 8].copy_from_slice(&ts_be);
     }
 
-    // Report: timestamp = u64::MAX, val = 0, pad = u32::MAX. Entry
-    // stride 16; the memset already set `val` to 0.
+    // Report stride 16; `val` stays zero from the initial fill.
     let report_base = 0x1400usize;
     let ts_be = report_init_timestamp_be();
     let pad_be = report_init_pad_be();
     for i in 0..2048 {
         let offset = report_base + i * 16;
         buf[offset..offset + 8].copy_from_slice(&ts_be);
-        // val u32 at +8 stays zero from the memset.
         buf[offset + 12..offset + 16].copy_from_slice(&pad_be);
     }
 }
@@ -337,14 +315,9 @@ pub fn label_address(reports_base: u32, index: u32) -> u32 {
 
 /// Committed state for the single sys_rsx context.
 ///
-/// RPCS3 rejects a second `sys_rsx_context_allocate` (`sys_rsx.cpp:251`)
-/// and CellGov follows suit: [`RSX_CONTEXT_ID`] is fixed and
-/// multi-context support would need an out-of-module registry.
-///
-/// Every field folds into [`Self::state_hash`]; the destructure there
-/// makes adding a field a compile error. The pristine- and fully-
-/// populated-hash goldens cover "bound but not hashed" and "hashed
-/// but version not bumped."
+/// Only one context is supported; [`RSX_CONTEXT_ID`] is fixed.
+/// Every field folds into [`Self::state_hash`] via destructure, so
+/// adding a field is a compile error until the hash is updated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RsxContext {
     /// `sys_rsx_memory_allocate` has fired.
@@ -390,11 +363,13 @@ impl RsxContext {
 
     /// Record the result of `sys_rsx_memory_allocate`.
     ///
+    /// Must run before [`Self::set_context_allocated`]; the latter
+    /// debug-asserts that this one fired.
+    ///
     /// # Panics
     ///
     /// Debug-asserts `!self.memory_allocated` and `mem_addr != 0`
-    /// (the LV2 allocator never returns 0; it doubles as the
-    /// pristine sentinel).
+    /// (zero is the pristine sentinel).
     pub fn set_memory_allocated(&mut self, mem_handle: u32, mem_addr: u32) {
         debug_assert!(!self.memory_allocated, "set_memory_allocated called twice");
         debug_assert!(
@@ -408,9 +383,7 @@ impl RsxContext {
 
     /// Record the result of `sys_rsx_context_allocate`.
     ///
-    /// Derives the three region addresses from `mem_addr +
-    /// *_OFFSET`. The reservation layout is fixed, so deriving keeps
-    /// the three addresses internally consistent.
+    /// Derives the three region addresses from `mem_addr + *_OFFSET`.
     ///
     /// # Panics
     ///
@@ -463,7 +436,7 @@ impl RsxContext {
     }
 
     /// FNV-1a hash over every field prefixed with
-    /// [`STATE_HASH_FORMAT_VERSION`].
+    /// [`STATE_HASH_FORMAT_VERSION`]. Folds into the sync-state hash.
     pub fn state_hash(&self) -> u64 {
         let Self {
             memory_allocated,
@@ -592,9 +565,6 @@ mod tests {
 
     #[test]
     fn reports_notify_offset_matches_driver_info_constant() {
-        // Cross-tie: if `RsxReports` layout and the init constant
-        // disagree, the guest reads notifies at a different address
-        // than the kernel writes them.
         assert_eq!(
             offset_of!(RsxReports, notify) as u32,
             driver_info_init::REPORTS_NOTIFY_OFFSET
@@ -631,8 +601,7 @@ mod tests {
         assert_eq!(DRIVER_INFO_OFFSET, 0x0010_0000);
         assert_eq!(REPORTS_OFFSET, 0x0020_0000);
         assert_eq!(RSX_CONTEXT_RESERVATION, 0x0030_0000);
-        // u64 arithmetic guards against a future size growing past
-        // u32 and silently truncating via `as u32`.
+        // u64 guards against future sizes truncating via `as u32`.
         let dma = RSX_DMA_CONTROL_SIZE as u64;
         let dri = RSX_DRIVER_INFO_SIZE as u64;
         let rep = RSX_REPORTS_SIZE as u64;
@@ -645,11 +614,8 @@ mod tests {
     fn rsx_context_pristine_state_hash_golden() {
         let mut h = cellgov_mem::Fnv1aHasher::new();
         h.write(&[STATE_HASH_FORMAT_VERSION]);
-        h.write(&[u8::from(false)]); // memory_allocated
-        h.write(&[u8::from(false)]); // allocated
-                                     // context_id, dma_control_addr, driver_info_addr,
-                                     // reports_addr, event_queue_id, event_port_id, mem_handle,
-                                     // mem_addr -- all zero.
+        h.write(&[u8::from(false)]);
+        h.write(&[u8::from(false)]);
         for _ in 0..8 {
             h.write(&0u32.to_le_bytes());
         }
@@ -711,8 +677,6 @@ mod tests {
             assert!(sem_index < 1024);
             let expected = SEMAPHORE_INIT_PATTERN[sem_index % 4];
             if i == 255 {
-                // Label 255 maps to semaphore index 1020, which the
-                // LV2 init pattern seeds with 0x1337_C0D3.
                 assert_eq!(sem_index, 1020);
                 assert_eq!(expected, 0x1337_C0D3);
             }
@@ -794,27 +758,22 @@ mod tests {
 
     #[test]
     fn write_rsx_reports_init_matches_rpcs3_fills() {
-        // Independent reference: construct the expected buffer
-        // directly from the RPCS3 loops (sys_rsx.cpp:269-287) without
-        // going through the module's helpers, then byte-compare.
+        // Independent reference: build expected bytes from the RPCS3
+        // loops without going through module helpers, then compare.
         let mut expected = vec![0u8; RSX_REPORTS_SIZE];
 
-        // semaphore[i] = pattern[i % 4] as BE u32
         let pattern: [u32; 4] = [0x1337_C0D3, 0x1337_BABE, 0x1337_BEEF, 0x1337_F001];
         for i in 0..1024 {
             let offset = i * 4;
             expected[offset..offset + 4].copy_from_slice(&pattern[i % 4].to_be_bytes());
         }
-        // notify[i].timestamp = -1 (BE), notify[i].zero = 0 (stays).
         for i in 0..64 {
             let offset = 0x1000 + i * 16;
             expected[offset..offset + 8].copy_from_slice(&u64::MAX.to_be_bytes());
         }
-        // report[i].timestamp = -1, val = 0, pad = -1.
         for i in 0..2048 {
             let offset = 0x1400 + i * 16;
             expected[offset..offset + 8].copy_from_slice(&u64::MAX.to_be_bytes());
-            // val at +8 stays zero.
             expected[offset + 12..offset + 16].copy_from_slice(&u32::MAX.to_be_bytes());
         }
 
@@ -828,8 +787,6 @@ mod tests {
 
     #[test]
     fn write_rsx_reports_init_label_255_is_1337c0d3() {
-        // The LV2 init-pattern sentinel lives at
-        // label_address(0, 255) = 0xFF0 and reads 0x1337_C0D3.
         let mut buf = vec![0u8; RSX_REPORTS_SIZE];
         write_rsx_reports_init(&mut buf);
         let sentinel = u32::from_be_bytes([buf[0xFF0], buf[0xFF1], buf[0xFF2], buf[0xFF3]]);
@@ -878,9 +835,8 @@ mod tests {
 
     #[test]
     fn be_byte_helpers_produce_be_order() {
-        // Non-palindromic input: 0x1337_C0D3 -> [0x13, 0x37, 0xC0, 0xD3].
-        // Palindromic all-ones values pass under either byte order
-        // and would not catch a missing swap.
+        // Non-palindromic input catches a missing BE swap; the
+        // all-ones values alone would pass under either byte order.
         assert_eq!(semaphore_init_word_be(0), [0x13, 0x37, 0xC0, 0xD3]);
         assert_eq!(semaphore_init_word_be(4), [0x13, 0x37, 0xC0, 0xD3]);
         assert_eq!(semaphore_init_word_be(1), [0x13, 0x37, 0xBA, 0xBE]);

@@ -1,35 +1,23 @@
-//! Budget units -- a policy input granted to an execution unit at scheduling time.
-//!
-//! `Budget` is the scheduler's currency. It is granted to a unit when it is
-//! scheduled and consumed as the unit makes progress. Consuming budget may
-//! also consume guest ticks, but `Budget` and [`crate::ticks::GuestTicks`]
-//! are distinct types and do not implicitly convert. The conversion policy
-//! (uniform, weighted, ISA-specific) lives in the scheduler, not here.
+//! Scheduler-granted progress allowance for an execution unit.
 
-/// A non-negative quantity of work a scheduler has authorized a unit to
-/// perform before yielding.
+/// Work a scheduler has authorized a unit to perform before yielding.
 ///
-/// `Budget` is a distinct type from [`crate::ticks::GuestTicks`] and
-/// [`crate::epoch::Epoch`]: the three concepts must not implicitly convert.
+/// Distinct from [`crate::ticks::GuestTicks`] and [`crate::epoch::Epoch`];
+/// the three do not implicitly convert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Budget(u64);
 
 impl Budget {
-    /// An empty budget. A unit holding `ZERO` budget cannot make further
-    /// progress and must yield with `BudgetExhausted` on its next step.
+    /// A unit holding `ZERO` must yield with `BudgetExhausted` on its next step.
     pub const ZERO: Self = Self(0);
 
-    /// Construct a `Budget` from a raw amount.
-    ///
-    /// There is no `From<u64>` impl: every grant site must be explicit so
-    /// that scheduler policy is auditable from the call graph.
+    /// Lift a raw amount into a `Budget`.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Return the underlying budget amount. Use sparingly -- prefer
-    /// `is_exhausted` and `try_consume` over arithmetic on raw values.
+    /// Underlying budget amount.
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
@@ -41,11 +29,10 @@ impl Budget {
         self.0 == 0
     }
 
-    /// Attempt to consume `amount` from this budget, returning the remaining
-    /// budget on success or `None` if the budget cannot cover the cost.
+    /// Consume `amount`, returning the remainder, or `None` if the budget
+    /// cannot cover the cost.
     ///
-    /// A `None` here is the scheduler's signal that the unit must yield with
-    /// `BudgetExhausted` -- it is not an error.
+    /// `None` is the scheduler's yield signal, not an error.
     #[inline]
     pub const fn try_consume(self, amount: Budget) -> Option<Budget> {
         match self.0.checked_sub(amount.0) {

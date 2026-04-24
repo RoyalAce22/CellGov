@@ -1,14 +1,9 @@
-//! Counting semaphore table. Owns state for
-//! `sys_semaphore_create` / `_destroy` / `_wait` / `_post` /
-//! `_trywait` / `_get_value`.
+//! Counting semaphore table.
 //!
-//! Wake-or-increment rule: a post with a parked waiter hands
-//! the slot directly to the FIFO head rather than incrementing
-//! `count`. This keeps the semaphore FIFO-fair; the consequence
-//! is that `max` bounds `count` only in the quiescent state
-//! (posts consumed by waiters bypass the max check). Upstream
-//! code treating `max` as a bound on total outstanding slots
-//! is wrong.
+//! Wake-or-increment: a post with a parked waiter hands the slot
+//! to the FIFO head rather than incrementing `count`. `max`
+//! therefore bounds `count` only in the quiescent state; posts
+//! consumed by waiters bypass the check.
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
@@ -17,16 +12,16 @@ use std::collections::BTreeMap;
 /// Outcome of a `try_wait` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemaphoreWait {
-    /// Slot consumed (count was > 0, now decremented).
+    /// Slot consumed.
     Acquired,
-    /// Count was 0; caller parks or returns `EBUSY`.
+    /// Count was 0.
     Empty,
 }
 
 /// Outcome of a `post_and_wake` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemaphorePost {
-    /// Head waiter consumed the post; count NOT incremented.
+    /// Head waiter consumed the post; count not incremented.
     Woke {
         /// Thread that consumed the post.
         new_owner: PpuThreadId,
@@ -42,12 +37,10 @@ pub enum SemaphorePost {
 /// Failure modes of [`SemaphoreTable::create_with_id`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemaphoreCreateError {
-    /// An entry with this id was already present. Host
-    /// invariant violation (the shared allocator handed out a
-    /// live id); `debug_assert!` fires.
+    /// An entry with this id was already present; allocator bug
+    /// (fires `debug_assert!`).
     IdCollision,
-    /// `initial > max`, or either value was negative. Guest
-    /// error.
+    /// `initial > max`, or either value was negative.
     InvalidBounds,
 }
 
@@ -56,19 +49,14 @@ pub enum SemaphoreCreateError {
 pub enum SemaphoreEnqueueError {
     /// No semaphore with this id.
     UnknownId,
-    /// Thread is already parked on this semaphore. A single
-    /// PPU thread cannot be in two `sys_semaphore_wait`
-    /// syscalls at once; dispatch-layer bug. `debug_assert!`
-    /// fires.
+    /// Thread is already parked on this semaphore;
+    /// dispatch-layer bug (fires `debug_assert!`).
     DuplicateWaiter,
 }
 
 /// A single counting semaphore.
 ///
-/// `count >= 0` is an invariant. `try_wait` gates the
-/// decrement on `count > 0` and `post_and_wake` only
-/// increments, so both mutators preserve it and `debug_assert!`
-/// it after the write.
+/// Invariant: `0 <= count <= max` in the quiescent state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemaphoreEntry {
     count: i32,
@@ -90,8 +78,7 @@ impl SemaphoreEntry {
         self.count
     }
 
-    /// Upper bound on `count` at create time. Bounds `count`
-    /// only in the quiescent state; see the module doc.
+    /// Upper bound on `count` captured at create time.
     pub fn max(&self) -> i32 {
         self.max
     }
@@ -136,16 +123,12 @@ impl SemaphoreTable {
         Ok(())
     }
 
-    /// Destroy a semaphore and return the removed entry, or
-    /// `None` if the id was unknown.
+    /// Remove the entry; `None` if the id was unknown.
     ///
-    /// `sys_semaphore_destroy` is defined to reject a
-    /// non-empty semaphore with `CELL_EBUSY` at dispatch; this
-    /// method is never reached with parked waiters under
-    /// normal flow. The `debug_assert!` is defense-in-depth. If
-    /// bypassed in release, the returned entry carries the
-    /// waiter list intact and a direct caller that accepts
-    /// destroy-with-waiters owes the wakes itself.
+    /// Dispatch rejects non-empty destroy with `CELL_EBUSY`, so
+    /// the `debug_assert!` here is defense-in-depth. If bypassed
+    /// in release, callers **must** drain `entry.waiters()` and
+    /// wake each parked thread.
     pub fn destroy(&mut self, id: u32) -> Option<SemaphoreEntry> {
         let entry = self.entries.remove(&id)?;
         debug_assert!(
@@ -172,7 +155,7 @@ impl SemaphoreTable {
         self.entries.is_empty()
     }
 
-    /// Try to consume a slot on `id`. `None` if `id` is unknown.
+    /// Try to consume a slot; `None` if `id` is unknown.
     pub fn try_wait(&mut self, id: u32) -> Option<SemaphoreWait> {
         let entry = self.entries.get_mut(&id)?;
         if entry.count > 0 {
@@ -189,7 +172,7 @@ impl SemaphoreTable {
         }
     }
 
-    /// Enqueue a waiter. See [`SemaphoreEnqueueError`].
+    /// Enqueue a waiter.
     pub fn enqueue_waiter(
         &mut self,
         id: u32,
@@ -210,9 +193,8 @@ impl SemaphoreTable {
         Ok(())
     }
 
-    /// Post one slot to `id`. Wakes the FIFO-head waiter if one
-    /// is parked (without incrementing); otherwise increments
-    /// `count`. `OverMax` when the increment branch would
+    /// Post one slot. Wakes the FIFO head (without incrementing)
+    /// or increments `count`; `OverMax` if the increment would
     /// exceed `max`.
     pub fn post_and_wake(&mut self, id: u32) -> SemaphorePost {
         let Some(entry) = self.entries.get_mut(&id) else {
@@ -238,7 +220,7 @@ impl SemaphoreTable {
         }
     }
 
-    /// FNV-1a digest for state-hash folding.
+    /// FNV-1a digest of the table's state.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&(self.entries.len() as u64).to_le_bytes());

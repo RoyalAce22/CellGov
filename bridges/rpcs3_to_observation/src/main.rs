@@ -1,10 +1,4 @@
-//! RPCS3 dump -> `Observation` adapter.
-//!
-//! Converts the raw binary dump produced by the RPCS3 patch
-//! (`bridges/rpcs3-patch/`) into a normalized `Observation` JSON that
-//! the CellGov `compare-observations` subcommand can consume.
-//!
-//! Usage:
+//! Adapter from RPCS3 dump + manifest into `cellgov_compare::Observation` JSON.
 //!
 //! ```text
 //! rpcs3_to_observation --dump <path> --manifest <path> --outcome <kind> \
@@ -12,22 +6,8 @@
 //! rpcs3_to_observation --print-expected-config-hash
 //! ```
 //!
-//! Where `<kind>` is one of `completed|stalled|timeout|fault`.
-//!
-//! `--config-hash` is the 16-char hexadecimal FNV-1a hash of the
-//! canonical RPCS3 oracle-mode config; a dump produced under any
-//! other config is rejected. `--print-expected-config-hash` prints
-//! the value derived from the embedded `oracle_mode_config.yml` so
-//! it can be diffed against a dump-side value without running a
-//! conversion.
-//!
-//! The manifest is a TOML file matching the one consumed by the
-//! RPCS3 patch and by CellGov's own observation producer; see
-//! [`Manifest`] for the schema.
-//!
-//! The adapter performs a single read of the dump, slices it into
-//! regions in manifest order, and writes the resulting
-//! `Observation` as pretty JSON.
+//! `<kind>` is one of `completed|stalled|timeout|fault`. `--config-hash` is the
+//! 16-char hex FNV-1a of the canonical oracle-mode YAML; a mismatch is rejected.
 
 use cellgov_compare::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedOutcome,
@@ -37,18 +17,12 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-/// TOML region-manifest schema.
-///
-/// Describes the regions the dump contains, in declaration order.
-/// The RPCS3 patch writes regions to the dump in the same order, so
-/// the adapter reads them off the dump file by walking the manifest
-/// and advancing a byte cursor.
+/// Region list in dump order; the RPCS3 patch writes regions in the same order.
 #[derive(Debug, Deserialize)]
 struct Manifest {
     regions: Vec<ManifestRegion>,
 }
 
-/// One named guest-memory region entry in the manifest.
 #[derive(Debug, Deserialize)]
 struct ManifestRegion {
     name: String,
@@ -73,16 +47,10 @@ struct Args {
     config_hash: u64,
 }
 
-/// Canonical RPCS3 oracle-mode config, checked in at
-/// `bridges/rpcs3-patch/oracle_mode_config.yml`. Any cross-runner
-/// dump that was not produced under these settings is not
-/// comparable, so the bridge rejects it at the point of conversion
-/// rather than letting the divergence propagate into a confusing
-/// byte-diff downstream.
+/// Canonical RPCS3 oracle-mode config; dumps produced under any other settings
+/// are not cross-runner comparable and are rejected at conversion time.
 const ORACLE_MODE_CONFIG_YAML: &str = include_str!("../../rpcs3-patch/oracle_mode_config.yml");
 
-/// FNV-1a 64-bit hash over raw bytes. Deterministic, no dependency,
-/// same algorithm family used elsewhere in CellGov's trace tooling.
 fn fnv1a_64(bytes: &[u8]) -> u64 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -94,8 +62,6 @@ fn fnv1a_64(bytes: &[u8]) -> u64 {
     h
 }
 
-/// Hash of the canonical oracle-mode YAML. Computed at call time so
-/// a new checked-in file value surfaces as a single-commit change.
 fn expected_config_hash() -> u64 {
     fnv1a_64(ORACLE_MODE_CONFIG_YAML.as_bytes())
 }
@@ -115,8 +81,6 @@ fn parse_outcome(s: &str) -> Result<ObservedOutcome, String> {
     }
 }
 
-/// Parser outcome: either a full conversion request, or a request
-/// to print the expected oracle-mode config hash.
 enum ParsedArgs {
     Convert(Args),
     PrintExpectedConfigHash,
@@ -132,8 +96,6 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, String> {
 
     let mut it = argv.into_iter().skip(1);
     while let Some(flag) = it.next() {
-        // Handle value-less flags first so they don't trip the
-        // "flag requires a value" check below.
         if flag == "--print-expected-config-hash" {
             return Ok(ParsedArgs::PrintExpectedConfigHash);
         }
@@ -163,12 +125,11 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, String> {
     }))
 }
 
-/// Convert a dump + manifest into an `Observation`.
+/// Slice `dump` into regions by walking the manifest and advancing a byte cursor.
 ///
-/// Pure function so it can be tested without file I/O. Returns an
-/// error if the dump is smaller than the sum of manifest region
-/// sizes, which means the RPCS3 side wrote fewer bytes than the
-/// manifest promised (usually a mismatched manifest).
+/// # Errors
+///
+/// Returns `Err` when the dump is shorter than the sum of manifest region sizes.
 fn build_observation(
     dump: &[u8],
     manifest: &Manifest,
@@ -209,10 +170,6 @@ fn build_observation(
     })
 }
 
-/// Enforce the oracle-mode config contract: the supplied hash must
-/// equal the hash of the checked-in canonical YAML. On mismatch,
-/// both hashes are included in the diagnostic so the user can see
-/// whether the YAML or their RPCS3 config drifted.
 fn check_config_hash(supplied: u64) -> Result<(), String> {
     let expected = expected_config_hash();
     if supplied != expected {
@@ -343,10 +300,6 @@ mod tests {
 
     #[test]
     fn checkpoint_manifest_parses_and_fits_guest_memory() {
-        // A checked-in per-title manifest must parse and its regions
-        // must fit inside CellGov's 1 GB guest memory. run-game uses
-        // 0x4000_0000 bytes (see apps/cellgov_cli/src/game.rs), which
-        // matches the PS3 LV2 user-region size.
         let root = env!("CARGO_MANIFEST_DIR");
         let path = std::path::Path::new(root)
             .join("..")
@@ -390,8 +343,6 @@ mod tests {
 
     #[test]
     fn fnv1a_64_matches_known_vector() {
-        // Standard FNV-1a 64 test vector for the empty input is the
-        // offset-basis constant itself; for "abc" it is 0xe71fa2190541574b.
         assert_eq!(fnv1a_64(b""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a_64(b"abc"), 0xe71f_a219_0541_574b);
     }
@@ -400,7 +351,6 @@ mod tests {
     fn expected_config_hash_is_stable_and_nonzero() {
         let h = expected_config_hash();
         assert_ne!(h, 0);
-        // Sanity: running twice produces the same value.
         assert_eq!(h, expected_config_hash());
     }
 
@@ -436,12 +386,6 @@ mod tests {
 
     #[test]
     fn oracle_mode_yaml_contains_four_required_settings() {
-        // Sanity: the checked-in YAML describes the four settings the
-        // oracle-mode contract covers (Video.Renderer = Null,
-        // Audio.Renderer = Null, PPU Decoder = Recompiler (LLVM),
-        // SPU Decoder = Recompiler (LLVM)). If a maintainer drops one
-        // by accident the hash still changes, but this test names
-        // the omission at the layer a reader would look.
         let y = ORACLE_MODE_CONFIG_YAML;
         assert!(y.contains("Renderer: \"Null\""));
         assert!(y.contains("PPU Decoder: Recompiler (LLVM)"));

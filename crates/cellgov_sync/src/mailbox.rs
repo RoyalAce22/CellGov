@@ -1,29 +1,11 @@
-//! Mailbox identifier and the mailbox FIFO state machine.
+//! Mailbox FIFO state machine and its leaf identifier. Empty-receive
+//! and full-send outcomes become block/wake events upstream; this
+//! module does not decide scheduling.
 //!
-//! `MailboxId` is the leaf identifier the runtime hands out at mailbox
-//! registration time and is the payload of `Effect::MailboxSend` and
-//! `Effect::MailboxReceiveAttempt`.
-//!
-//! `Mailbox` is the abstract FIFO. It owns the queued message words
-//! and exposes deterministic `send` / `try_receive` operations. The
-//! FIFO itself does not produce block/wake conditions; the commit
-//! pipeline and event queue translate empty-receive and full-send
-//! outcomes into block/wake events. Sync state machines do not
-//! themselves decide scheduling order -- this type stays free of any
-//! scheduler awareness.
-//!
-//! Messages are stored as raw `u32` words rather than as
-//! `cellgov_effects::MailboxMessage` because the workspace DAG runs
-//! `effects -> sync`, not the other way around. The integration layer
-//! wraps/unwraps at the effect boundary.
+//! Messages are raw `u32` words rather than `cellgov_effects::MailboxMessage`
+//! because the crate DAG runs `effects -> sync`, not the reverse.
 
-/// A stable identifier for a mailbox instance in the runtime.
-///
-/// `MailboxId`s are assigned by the runtime at mailbox registration time
-/// and are recorded in the trace. They must be unique within a single
-/// runtime instance; reuse across runs is allowed and expected for
-/// replay. There is no `From<u64>` impl -- ad-hoc id fabrication outside
-/// the registry should be visible at the call site.
+/// Stable identifier for a mailbox instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct MailboxId(u64);
 
@@ -34,24 +16,16 @@ impl MailboxId {
         Self(raw)
     }
 
-    /// Return the underlying id value.
+    /// Underlying id value.
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
     }
 }
 
-/// A deterministic FIFO mailbox.
+/// Deterministic unbounded FIFO mailbox.
 ///
-/// Backed by a `VecDeque<u32>` which preserves insertion order
-/// independent of host `HashMap` iteration order or thread timing.
-/// No host-time inputs or hash iteration order influence the
-/// result. The FIFO is unbounded; capacity and blocking-on-full
-/// semantics can be added when a concrete workload requires them.
-///
-/// `Mailbox` owns the queued words and nothing else: no `MailboxId`
-/// (the registry that owns the mailbox knows its id), no event-queue
-/// handle, no waiter list. Those are integration-layer concerns.
+/// Backed by `VecDeque<u32>`; insertion order is the only order.
 #[derive(Debug, Clone, Default)]
 pub struct Mailbox {
     queue: std::collections::VecDeque<u32>,
@@ -70,23 +44,20 @@ impl Mailbox {
         self.queue.push_back(message);
     }
 
-    /// Pop the oldest queued message, if any. Returns `None` when the
-    /// FIFO is empty; the integration layer translates that into a
-    /// block condition for the receiving unit.
+    /// Pop the oldest queued message. `None` means the integration
+    /// layer should translate the attempt into a block condition.
     #[inline]
     pub fn try_receive(&mut self) -> Option<u32> {
         self.queue.pop_front()
     }
 
-    /// Borrow the oldest queued message without removing it. Useful
-    /// for trace and assertion paths that need to inspect mailbox
-    /// state at a checkpoint.
+    /// Inspect the oldest queued message without removing it.
     #[inline]
     pub fn peek(&self) -> Option<u32> {
         self.queue.front().copied()
     }
 
-    /// Number of messages currently queued.
+    /// Number of queued messages.
     #[inline]
     pub fn len(&self) -> usize {
         self.queue.len()
@@ -145,7 +116,6 @@ mod tests {
     fn try_receive_on_empty_returns_none() {
         let mut m = Mailbox::new();
         assert_eq!(m.try_receive(), None);
-        // Repeated receives stay None; no spurious side effects.
         assert_eq!(m.try_receive(), None);
         assert!(m.is_empty());
     }
@@ -163,7 +133,6 @@ mod tests {
 
     #[test]
     fn interleaved_send_and_receive_preserves_order() {
-        // A roundtrip pattern: send a, receive a, send b c, receive b c.
         let mut m = Mailbox::new();
         m.send(10);
         assert_eq!(m.try_receive(), Some(10));

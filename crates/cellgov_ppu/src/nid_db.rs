@@ -1,17 +1,9 @@
-//! NID-to-function-name database for PS3 system libraries.
+//! NID -> `(module, function)` lookup for PS3 system libraries.
 //!
-//! NIDs (Numeric IDs) are 32-bit hashes that identify PS3 system
-//! library functions. They are computed as the first 4 bytes
-//! (little-endian u32) of SHA-1(function_name + fixed_suffix).
-//!
-//! This database covers the standard PS3 SDK modules. It is not
-//! game-specific -- the same NID always maps to the same function
-//! regardless of which game imports it.
+//! NIDs are the first 4 bytes (little-endian u32) of
+//! SHA-1(function_name + fixed_suffix) and are game-independent.
 
-/// Look up a function name by its NID.
-///
-/// Returns `Some((module, function_name))` if the NID is known,
-/// `None` otherwise.
+/// Returns `Some((module, function))` if the NID is known.
 pub fn lookup(nid: u32) -> Option<(&'static str, &'static str)> {
     NID_TABLE
         .binary_search_by_key(&nid, |entry| entry.0)
@@ -19,11 +11,7 @@ pub fn lookup(nid: u32) -> Option<(&'static str, &'static str)> {
         .map(|i| (NID_TABLE[i].1, NID_TABLE[i].2))
 }
 
-/// Classify how safe a HLE stub is for a given NID.
-///
-/// Returns one of: "stateful" (needs real implementation),
-/// "unsafe-to-stub" (stub may cause incorrect behavior),
-/// or "noop-safe" (returning 0 is correct).
+/// HLE stub safety class: `"stateful"`, `"unsafe-to-stub"`, or `"noop-safe"`.
 pub fn stub_classification(nid: u32) -> &'static str {
     match nid {
         0x744680a2 => "stateful",       // sys_initialize_tls
@@ -34,7 +22,7 @@ pub fn stub_classification(nid: u32) -> &'static str {
     }
 }
 
-/// (NID, module_name, function_name) -- sorted by NID for binary search.
+/// `(NID, module, function)` sorted by NID for binary search.
 static NID_TABLE: &[(u32, &str, &str)] = &[
     (0x000e53cc, "sceNp", "sceNpManagerSubSignout"),
     (0x001074d0, "cellSysutilAvcExt", "cellSysutilAvcExtIsMicAttached"),

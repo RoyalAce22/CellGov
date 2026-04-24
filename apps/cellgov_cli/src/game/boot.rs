@@ -1,10 +1,8 @@
 //! Boot preparation shared between `run-game` and `bench-boot`.
 //!
-//! Centralizes ELF load + HLE stub bind + firmware PRX load +
-//! module_start + stack/register setup + Runtime construction so both
-//! the diagnostic run-game step loop and the throughput-focused bench
-//! run off a byte-identical setup path. A bench is only a useful
-//! signal if it exercises the setup the real harness uses.
+//! Owns the full boot pipeline: ELF load, HLE stub binding, firmware
+//! PRX load, `module_start`, stack/register setup, and `Runtime`
+//! construction. Both step loops see a byte-identical setup.
 
 use std::time::{Duration, Instant};
 
@@ -35,9 +33,7 @@ pub(super) struct PreparedBoot {
     pub timings: StartupTimings,
 }
 
-/// Wall-time spans for each startup phase. Populated regardless of
-/// whether the caller wants them printed; the bench uses only
-/// `total()` and run-game's `--profile` flag uses the breakdown.
+/// Wall-time spans for each startup phase.
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct StartupTimings {
     pub mem_alloc: Duration,
@@ -52,9 +48,8 @@ impl StartupTimings {
     }
 }
 
-/// Tunables for a single boot setup. Every field maps onto the
-/// equivalent `run-game` CLI flag; `bench-boot` uses the same
-/// structure so the two paths cannot diverge in meaning.
+/// Tunables for a single boot setup. Every field maps onto a
+/// `run-game` CLI flag.
 pub(super) struct PrepareOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
@@ -62,41 +57,28 @@ pub(super) struct PrepareOptions<'a> {
     pub strict_reserved: bool,
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,
-    /// Passed into `run_module_start` as its max-steps cap. Not
-    /// related to the caller's own step-loop cap.
+    /// Max-steps cap for `run_module_start`; separate from the
+    /// caller's own step-loop cap.
     pub module_start_max_steps: usize,
-    /// When true, prints `run-game`'s startup banner lines ("elf:",
-    /// "memory:", "entry:", "max_steps:", etc.). The bench sets this
-    /// to false so its output is just the bench result line plus
-    /// whatever chatty PRX/HLE prints the libraries emit.
+    /// Whether to print the startup banner (title / memory / entry /
+    /// etc.). `bench-boot` sets this to false.
     pub print_banner: bool,
-    /// When true, enables instruction profiling on the PPU unit.
+    /// Enable PPU instruction profiling.
     pub profile_pairs: bool,
-    /// Value the caller will pass to `Runtime::new`. Needed here
-    /// because the banner prints it.
+    /// The max-steps value the caller will pass to `Runtime::new`;
+    /// echoed in the banner.
     pub runtime_max_steps: usize,
-    /// Byte patches applied after module_start and before `Runtime`
-    /// construction. Investigative only; bench passes an empty slice.
+    /// Byte patches applied after `module_start`, before `Runtime`
+    /// construction.
     pub patch_bytes: &'a [(u64, u8)],
-    /// Guest addresses to print 32 bytes at, after patches. Bench
-    /// passes an empty slice.
+    /// Guest addresses to dump 32 bytes at after patches.
     pub dump_mem_addrs: &'a [u64],
-    /// Per-step budget override. `None` -> use the natural default
-    /// for the runtime mode (currently FaultDriven -> 256). The
-    /// override is what `--budget N` on the CLI sets, useful for
-    /// triage runs (Budget=1 yields one instruction at a time, so
-    /// the PC trace and per-step diagnostic line up exactly with
-    /// the instruction stream) and throughput sweeps.
+    /// Per-step budget override. `None` uses
+    /// `default_budget_for_mode` for the current mode.
     pub budget_override: Option<u64>,
 }
 
 /// Build a fully-initialized `Runtime` for the given title.
-///
-/// The function owns the full boot pipeline: ELF parse, memory
-/// allocation, HLE stub binding, firmware PRX load, TLS pre-init,
-/// module_start, register setup, and runtime construction. Callers
-/// (run-game, bench-boot) receive a ready-to-step `Runtime` plus the
-/// metadata they need for diagnostic reporting.
 pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let t_start = Instant::now();
     let elf_data = load_file_or_die(opts.elf_path);
@@ -104,11 +86,9 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let required_size = cellgov_ppu::loader::required_memory_size(&elf_data)
         .unwrap_or_else(|e| die(&format!("failed to parse ELF: {e:?}")));
 
-    // Round up to 64KB alignment and ensure enough headroom for the
-    // game, PRX modules, and PS3 user-memory allocations starting at
-    // 0x00010000. The flat main region covers both the user-memory
-    // region (0x00010000+) and the EBOOT load region (0x10000000+)
-    // with a contiguous 1 GB backing.
+    // The main region is a contiguous 1 GB backing that spans both
+    // the user-memory region (0x00010000+) and the EBOOT load region
+    // (0x10000000+); 64KB alignment plus 2 MiB headroom for PRX.
     let min_for_kernel = 0x4000_0000usize;
     let game_size = ((required_size + 0xFFFF) & !0xFFFF) + 0x200000;
     let mem_size = game_size.max(min_for_kernel);
@@ -118,13 +98,10 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     } else {
         cellgov_mem::RegionAccess::ReservedZeroReadable
     };
-    // RSX region access: titles with `[rsx] mirror = true` in
-    // their manifest need the region writable so the PPU's put-
-    // pointer store lands in memory (and the writeback mirror
-    // routes it into the runtime cursor). The `--strict-reserved`
-    // CLI flag takes precedence: it is an explicit debug override
-    // that forces ReservedStrict everywhere and supersedes title
-    // manifest preferences.
+    // `[rsx] mirror = true` needs the region writable so the PPU's
+    // put-pointer store lands in memory for the writeback mirror to
+    // route into the runtime cursor. `--strict-reserved` wins: it is
+    // an explicit debug override that forces ReservedStrict everywhere.
     let rsx_access = if opts.strict_reserved {
         reserved_access
     } else if opts.title.rsx_mirror() {
@@ -169,10 +146,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let t_elf_load = t_start.elapsed();
 
     let tramp_base = ((required_size + 0xFFF) & !0xFFF) as u32;
-    // Ps3Spec layout places 256 OPDs (stride 8 = 0x800 bytes) followed
-    // by 256 bodies (stride 16 = 0x1000 bytes), so the total extent
-    // from opd_base is 0x1800. Any override must leave that window
-    // entirely inside the base-0 region.
+    // Ps3Spec: 256 OPDs (stride 8 = 0x800) + 256 bodies (stride 16 =
+    // 0x1000) = 0x1800 bytes from `opd_base`.
     const HLE_PS3_SPEC_EXTENT: u64 = 0x1800;
     let opd_override: Option<u32> = match std::env::var("CELLGOV_HLE_OPD_BASE") {
         Ok(s) => {
@@ -185,10 +160,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
                     "CELLGOV_HLE_OPD_BASE=0x{v:x} overlaps ELF load region (must be >= 0x{tramp_base:x})"
                 ));
             }
-            // end is the exclusive upper bound; mem_size is the
-            // region length. end == mem_size places the last byte
-            // at mem_size - 1, which is in bounds, so only strict
-            // > is a fault.
+            // `end` is exclusive; only strict `>` is a fault.
             let end = v as u64 + HLE_PS3_SPEC_EXTENT;
             if end > mem_size as u64 {
                 die(&format!(
@@ -249,9 +221,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
 
     pre_init_tls(&elf_data, &mut mem);
 
-    // Policy: unset and set-empty both mean "do not skip." Some
-    // shells distinguish `unset VAR` from `VAR=`; here they are
-    // treated identically.
+    // Unset and set-empty both mean "do not skip."
     let skip_ms = match std::env::var("CELLGOV_SKIP_MODULE_START") {
         Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => true,
@@ -267,10 +237,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             mem = run_module_start(mem, info, &hle_bindings, opts.module_start_max_steps);
         }
         (Some(_), true) => {
-            // Always stderr so log-scrapers see this line in the same
-            // stream regardless of whether the caller asked for the
-            // banner. Keeping the banner pure-stdout means one less
-            // asymmetry between run-game and bench-boot output.
+            // stderr: keeps the banner pure-stdout across run-game
+            // and bench-boot.
             eprintln!("module_start: skipped (CELLGOV_SKIP_MODULE_START set)");
         }
         (None, true) => {
@@ -288,13 +256,9 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let trampoline_area_end = match opd_override {
         Some(opd_base) => (opd_base as usize) + HLE_PS3_SPEC_EXTENT as usize,
         None => {
-            // Legacy24 layout plants one 24-byte stub per binding at
-            // tramp_base. `bind_hle_stubs_with_layout` emits exactly
-            // one HleBinding per parsed function and advances offset
-            // by TRAMPOLINE_SIZE (24) once per binding, so
-            // hle_bindings.len() * 24 is the exact reserved region.
-            // alloc_floor must clear that or user-memory allocations
-            // can overwrite HLE stubs.
+            // Legacy24: one 24-byte stub per binding at tramp_base.
+            // `alloc_floor` must clear the full span or user-memory
+            // allocations can overwrite HLE stubs.
             let end = (tramp_base as usize) + hle_bindings.len() * 24;
             (end + 0xFFFF) & !0xFFFF
         }
@@ -326,23 +290,17 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let malloc_pagesize = proc_param.map(|p| p.malloc_pagesize).unwrap_or(0x100000);
     state.gpr[12] = malloc_pagesize as u64;
 
-    // Budget selection: CLI override beats mode default. The mode is
-    // FaultDriven for both run-game and bench-boot today; if a future
-    // command sets a different mode, the default tracks the mode via
-    // default_budget_for_mode. max_steps is divided by the budget so
-    // the user-visible cap stays in instruction units regardless of
-    // batch size.
+    // CLI override beats mode default. `max_steps` is divided by the
+    // budget so the user-visible cap stays in instruction units
+    // regardless of batch size.
     let mode = RuntimeMode::FaultDriven;
     let step_budget: u64 = opts
         .budget_override
         .unwrap_or_else(|| default_budget_for_mode(mode).raw())
         .max(1);
-    // On 32-bit targets `step_budget as usize` truncates to the low
-    // 32 bits. That yields 0 only when step_budget is a nonzero
-    // multiple of 2^32 (e.g. a CLI --budget of exactly 0x1_0000_0000),
-    // but clamping the divisor directly keeps the division invariant
-    // enforced at the point it is used rather than inferred from the
-    // producer chain above.
+    // On 32-bit hosts `as usize` can truncate a u64 to 0 when
+    // step_budget is a nonzero multiple of 2^32; clamp the divisor
+    // at the point of use.
     let step_budget_usize = (step_budget as usize).max(1);
     let adjusted_max_steps = (opts.runtime_max_steps / step_budget_usize).max(1);
 
@@ -419,16 +377,10 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    // Build the predecoded instruction shadow from the base-0
-    // region's bytes BEFORE moving `mem` into the Runtime. All
-    // boot-time writes into region 0 (ELF load, HLE stub
-    // planting, TLS init, byte patches, module_start) are
-    // committed at this point. Code outside region 0 (PRX bodies
-    // placed above 0x10000000, for example) is not captured here
-    // and falls through to decode-on-fetch at runtime;
-    // correctness is preserved, only the shadow's fast path.
-    // Runtime stepping invalidates stale slots via
-    // `invalidate_code` on each committed SharedWriteIntent.
+    // Snapshot the base-0 region before `mem` moves into `Runtime`.
+    // Code outside region 0 (PRX bodies above 0x10000000) falls
+    // through to decode-on-fetch; Runtime stepping invalidates stale
+    // slots via `invalidate_code` on each committed SharedWriteIntent.
     let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, mem.as_bytes());
 
     let mut rt = Runtime::new(mem, Budget::new(step_budget), adjusted_max_steps);
@@ -452,15 +404,11 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
         unit
     });
-    // Register the primary unit in the LV2 host's PPU thread table
-    // so sync primitives (lwmutex / mutex / semaphore / event queue /
-    // cond) can resolve the caller's PpuThreadId from its UnitId.
-    // Without this seeding, the primary's sync calls would fall
-    // back to ESRCH and the primary would never participate in
-    // real block / wake protocols. The join handler used to
-    // defensively use PpuThreadId::PRIMARY when the lookup
-    // failed; richer sync primitives need the bidirectional
-    // mapping to be accurate.
+    // Seed the LV2 host's PPU thread table so sync primitives
+    // (lwmutex, mutex, semaphore, event queue, cond) can resolve
+    // the caller's PpuThreadId from its UnitId. Without this the
+    // primary's sync calls fall back to ESRCH and cannot participate
+    // in block/wake protocols.
     rt.lv2_host_mut().seed_primary_ppu_thread(
         primary_unit_id,
         cellgov_lv2::PpuThreadAttrs {
@@ -473,14 +421,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         },
     );
 
-    // Install a PPU factory so `sys_ppu_thread_create` can spawn
-    // child units mid-run. Child threads start with zeroed state
-    // plus the ABI fields the init state specifies; they run
-    // through the decode-on-fetch fallback rather than a
-    // per-thread predecoded shadow (the shadow is not Clone
-    // today, and spawning enough child threads to make
-    // rebuilding per child worth the complexity is not a
-    // workload we currently exercise).
+    // PPU factory for `sys_ppu_thread_create`. Child threads have
+    // no predecoded shadow and fall through to decode-on-fetch.
     rt.set_ppu_factory(|id, init| {
         let mut unit = PpuExecutionUnit::new(id);
         {
@@ -495,11 +437,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         Box::new(unit)
     });
 
-    // Install an SPU factory so `sys_spu_thread_group_start` can
-    // spawn SPU units from the content store's registered image.
-    // Mirrors the scenarios path so PPU-plus-SPU microtests run
-    // through `run-game`. Args 0..3 are splatted across the SPU's
-    // r3..r6 which is the Cell BE convention (arg0 -> r3, etc.).
+    // SPU factory for `sys_spu_thread_group_start`. Args 0..3 map
+    // to r3..r6 per the Cell BE convention (arg0 -> r3, etc.).
     rt.set_spu_factory(|id, init| {
         use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
         let mut unit = SpuExecutionUnit::new(id);
@@ -513,12 +452,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         Box::new(unit)
     });
 
-    // Auto-register any `spu_main.elf` sitting next to the EBOOT so
-    // `sysSpuImageOpen("/app_home/spu_main.elf")` resolves against
-    // it. Matches how scenarios.rs stages SPU ELFs and lets
-    // PPU-plus-SPU microtests (atomic_reservation /
-    // spu_atomic_cross_spu / etc.) run through `run-game` without
-    // needing a separate manifest field.
+    // Resolve `sysSpuImageOpen("/app_home/spu_main.elf")` against a
+    // `spu_main.elf` sitting next to the EBOOT.
     if let Some(parent) = std::path::Path::new(opts.elf_path).parent() {
         let spu_candidate = parent.join("spu_main.elf");
         if spu_candidate.exists() {

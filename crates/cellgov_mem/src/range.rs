@@ -1,23 +1,11 @@
-//! Byte range over the guest address space.
-//!
-//! `ByteRange` is a half-open `[start, start + length)` interval used
-//! everywhere the runtime needs to talk about a contiguous span of guest
-//! memory: `SharedWriteIntent` payloads, `DmaRequest` source/destination
-//! windows, page descriptors, and conflict-detection between staged
-//! writes. It is a small value type with no allocation and no host
-//! references.
+//! Half-open `[start, start + length)` byte range over the guest address space.
 
 use crate::addr::GuestAddr;
 
-/// A half-open byte range `[start, start + length)` in the guest address
-/// space.
+/// Half-open byte range `[start, start + length)` in the guest address space.
 ///
-/// Length is stored separately rather than as an end address so that a
-/// zero-length range is representable without ambiguity (`start == end`
-/// would otherwise be indistinguishable from "the empty range that begins
-/// at `start`"). Construction is fallible: a range whose end would
-/// overflow `u64` is rejected by [`ByteRange::new`] rather than silently
-/// wrapping into the low end of the address space.
+/// Length rather than end address is stored so a zero-length range at a
+/// particular start is unambiguously representable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ByteRange {
     start: GuestAddr,
@@ -25,11 +13,8 @@ pub struct ByteRange {
 }
 
 impl ByteRange {
-    /// Construct a `ByteRange` of `length` bytes starting at `start`.
-    ///
-    /// Returns `None` if `start + length` would overflow `u64`. A
-    /// zero-length range is allowed and is the canonical "empty" range
-    /// at a particular address.
+    /// Construct a `ByteRange` of `length` bytes starting at `start`, or
+    /// `None` if `start + length` would overflow `u64`.
     #[inline]
     pub const fn new(start: GuestAddr, length: u64) -> Option<Self> {
         match start.raw().checked_add(length) {
@@ -38,34 +23,31 @@ impl ByteRange {
         }
     }
 
-    /// The inclusive lower bound of the range.
+    /// Inclusive lower bound.
     #[inline]
     pub const fn start(self) -> GuestAddr {
         self.start
     }
 
-    /// The length of the range in bytes.
+    /// Length in bytes.
     #[inline]
     pub const fn length(self) -> u64 {
         self.length
     }
 
-    /// The exclusive upper bound of the range. Constructing the range
-    /// already verified this does not overflow, so this is infallible.
+    /// Exclusive upper bound. Infallible because `new` validated non-overflow.
     #[inline]
     pub const fn end(self) -> GuestAddr {
-        // Safe: validated at construction.
         GuestAddr::new(self.start.raw() + self.length)
     }
 
-    /// Whether the range contains zero bytes.
+    /// Whether the range is zero bytes long.
     #[inline]
     pub const fn is_empty(self) -> bool {
         self.length == 0
     }
 
-    /// Whether `addr` falls inside this range. Empty ranges contain
-    /// nothing, even their own start address.
+    /// Whether `addr` falls inside this range. Empty ranges contain nothing.
     #[inline]
     pub const fn contains_addr(self, addr: GuestAddr) -> bool {
         if self.length == 0 {
@@ -77,12 +59,8 @@ impl ByteRange {
 
     /// Whether this range and `other` share at least one byte.
     ///
-    /// Two empty ranges never overlap. A non-empty range never overlaps
-    /// an empty range. Two non-empty ranges overlap iff their half-open
-    /// intervals intersect: `self.start < other.end && other.start <
-    /// self.end`. Adjacent ranges (one ending exactly where the next
-    /// begins) do not overlap -- contiguous-but-disjoint is the correct
-    /// answer for write conflict detection.
+    /// Any range involving an empty range returns false. Adjacent ranges
+    /// (one ending exactly where the next begins) do not overlap.
     #[inline]
     pub const fn overlaps(self, other: ByteRange) -> bool {
         if self.length == 0 || other.length == 0 {
@@ -180,7 +158,6 @@ mod tests {
 
     #[test]
     fn overlap_adjacent_is_false() {
-        // [0x100, 0x110) and [0x110, 0x120) share no byte.
         let a = r(0x100, 0x10);
         let b = r(0x110, 0x10);
         assert!(!a.overlaps(b));

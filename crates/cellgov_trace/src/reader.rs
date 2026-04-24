@@ -1,21 +1,11 @@
-//! Binary trace reader.
+//! Iterator decoding a byte slice produced by [`crate::writer::TraceWriter`].
 //!
-//! `TraceReader` decodes a byte slice produced by
-//! [`crate::writer::TraceWriter`] back into a stream of [`TraceRecord`]
-//! values. It is the input side of the replay machinery: golden trace
-//! assertions, replay tests, and any text rendering tool consume traces
-//! through this reader.
-//!
-//! The reader is a simple iterator over a borrowed `&[u8]`. It does
-//! not own the buffer, does not allocate beyond what each decoded
-//! record needs, and does not buffer ahead. A truncated or otherwise
-//! malformed input surfaces as `Some(Err(...))` exactly once and then
-//! the iterator yields `None` -- it does not retry, does not skip
-//! ahead, does not "recover".
+//! On decode failure the iterator yields `Some(Err(...))` once and then `None`
+//! forever -- no recovery, no skip-ahead.
 
 use crate::record::{DecodeError, TraceRecord};
 
-/// Iterator over the records encoded in a trace byte buffer.
+/// Iterator over records encoded in a trace byte buffer.
 pub struct TraceReader<'a> {
     bytes: &'a [u8],
     pos: usize,
@@ -33,8 +23,7 @@ impl<'a> TraceReader<'a> {
         }
     }
 
-    /// Number of bytes consumed so far. Useful for diagnostics when
-    /// the reader has surfaced a decode error.
+    /// Bytes consumed so far.
     #[inline]
     pub fn position(&self) -> usize {
         self.pos
@@ -129,17 +118,13 @@ mod tests {
     fn truncated_buffer_surfaces_error_then_stops() {
         let w = make_writer();
         let bytes = w.bytes();
-        // Truncate inside the second record.
         let truncated = &bytes[..40];
         let mut r = TraceReader::new(truncated);
-        // First record (UnitScheduled, 33 bytes) decodes fine.
         assert!(matches!(
             r.next(),
             Some(Ok(TraceRecord::UnitScheduled { .. }))
         ));
-        // Second record decode fails.
         assert!(matches!(r.next(), Some(Err(_))));
-        // After failure, iterator stops.
         assert!(r.next().is_none());
     }
 

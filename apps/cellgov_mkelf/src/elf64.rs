@@ -1,56 +1,46 @@
-//! Minimal ELF64 big-endian builder for PS3 PPU executables.
+//! ELF64 big-endian container writer for PPU microtest binaries.
 //!
-//! Produces a valid ELF64 that RPCS3 can load directly (no SELF
-//! wrapper needed). Supports two PT_LOAD segments (code R+X, data
-//! R+W) and an optional PROC_PARAM segment (type 0x60000001) for
-//! process parameters.
+//! Emits two PT_LOAD segments (code R+X, data R+W) and an optional
+//! PROC_PARAM segment (p_type 0x60000001) that lv2 scans for
+//! `process_param_t` during ELF load.
 
-/// ELF64 header constants.
 const ELFCLASS64: u8 = 2;
-const ELFDATA2MSB: u8 = 2; // big-endian
+const ELFDATA2MSB: u8 = 2;
 const EV_CURRENT: u8 = 1;
 const ET_EXEC: u16 = 2;
 const EM_PPC64: u16 = 21;
 const ELF64_EHDR_SIZE: u16 = 64;
 const ELF64_PHDR_SIZE: u16 = 56;
 
-/// Program header types.
 const PT_LOAD: u32 = 1;
 const PT_PROC_PARAM: u32 = 0x60000001;
 
-/// Program header flags.
 const PF_X: u32 = 1;
 const PF_W: u32 = 2;
 const PF_R: u32 = 4;
 
-/// PS3 process_param_t size (8 fields x 4 bytes = 32 bytes).
+/// Size of a `process_param_t` record in the data segment.
 pub const PROC_PARAM_SIZE: u64 = 32;
 
 /// Build a `process_param_t` structure (32 bytes, big-endian).
 pub fn proc_param(sdk_version: u32) -> Vec<u8> {
     let mut buf = Vec::with_capacity(PROC_PARAM_SIZE as usize);
-    write_u32(&mut buf, 0x40); // size (padded)
-    write_u32(&mut buf, 0x13bcc5f6); // magic
-    write_u32(&mut buf, sdk_version); // version
-    write_u32(&mut buf, sdk_version); // sdk_version
-    write_u32(&mut buf, 1001); // primary_prio
-    write_u32(&mut buf, 0x00100000); // primary_stacksize (1MB)
-    write_u32(&mut buf, 0x00100000); // malloc_pagesize (1MB)
-    write_u32(&mut buf, 0); // ppc_seg
+    write_u32(&mut buf, 0x40);
+    write_u32(&mut buf, 0x13bcc5f6);
+    write_u32(&mut buf, sdk_version);
+    write_u32(&mut buf, sdk_version);
+    write_u32(&mut buf, 1001);
+    write_u32(&mut buf, 0x00100000);
+    write_u32(&mut buf, 0x00100000);
+    write_u32(&mut buf, 0);
     buf
 }
 
-/// Build a PS3 PPU ELF64 with code, data, and optional PROC_PARAM.
+/// Build a PPU ELF64 with code, data, and optional PROC_PARAM.
 ///
-/// - `entry_vaddr`: virtual address of the entry point (OPD).
-/// - `code_vaddr`: virtual address where code segment loads.
-/// - `code`: raw code bytes (OPD at the start).
-/// - `data_vaddr`: virtual address where data segment loads.
-/// - `data`: raw data bytes (may include process_param_t).
-/// - `proc_param_offset`: if `Some(offset)`, emits a PROC_PARAM
-///   program header pointing to `data_vaddr + offset` with size
-///   `PROC_PARAM_SIZE`. The data at that offset must be a valid
-///   `process_param_t`.
+/// `entry_vaddr` points at the OPD in the code segment. When
+/// `proc_param_offset` is `Some`, the data at `data_vaddr + offset`
+/// must be a valid `process_param_t` of length [`PROC_PARAM_SIZE`].
 pub fn build(
     entry_vaddr: u64,
     code_vaddr: u64,
@@ -62,75 +52,70 @@ pub fn build(
     let phnum: u16 = if proc_param_offset.is_some() { 3 } else { 2 };
     let phoff: u64 = ELF64_EHDR_SIZE as u64;
 
-    // Code segment starts after headers.
     let code_file_offset = align_up(phoff + (phnum as u64) * (ELF64_PHDR_SIZE as u64), 16);
-    // Data segment starts after code.
     let data_file_offset = align_up(code_file_offset + code.len() as u64, 16);
     let total_size = data_file_offset + data.len() as u64;
 
     let mut buf = Vec::with_capacity(total_size as usize);
 
-    // ELF64 header (64 bytes)
-    buf.extend_from_slice(&[0x7f, b'E', b'L', b'F']); // e_ident magic
-    buf.push(ELFCLASS64); // EI_CLASS
-    buf.push(ELFDATA2MSB); // EI_DATA
-    buf.push(EV_CURRENT); // EI_VERSION
+    // ELF64 header
+    buf.extend_from_slice(&[0x7f, b'E', b'L', b'F']);
+    buf.push(ELFCLASS64);
+    buf.push(ELFDATA2MSB);
+    buf.push(EV_CURRENT);
     buf.push(0x66); // EI_OSABI: lv2
-    buf.extend_from_slice(&[0u8; 8]); // EI_ABIVERSION + padding
-    write_u16(&mut buf, ET_EXEC); // e_type
-    write_u16(&mut buf, EM_PPC64); // e_machine
-    write_u32(&mut buf, 1); // e_version
-    write_u64(&mut buf, entry_vaddr); // e_entry (OPD address)
-    write_u64(&mut buf, phoff); // e_phoff
-    write_u64(&mut buf, 0); // e_shoff (no sections)
-    write_u32(&mut buf, 0); // e_flags
-    write_u16(&mut buf, ELF64_EHDR_SIZE); // e_ehsize
-    write_u16(&mut buf, ELF64_PHDR_SIZE); // e_phentsize
-    write_u16(&mut buf, phnum); // e_phnum
-    write_u16(&mut buf, 0); // e_shentsize
-    write_u16(&mut buf, 0); // e_shnum
-    write_u16(&mut buf, 0); // e_shstrndx
+    buf.extend_from_slice(&[0u8; 8]);
+    write_u16(&mut buf, ET_EXEC);
+    write_u16(&mut buf, EM_PPC64);
+    write_u32(&mut buf, 1);
+    write_u64(&mut buf, entry_vaddr);
+    write_u64(&mut buf, phoff);
+    write_u64(&mut buf, 0);
+    write_u32(&mut buf, 0);
+    write_u16(&mut buf, ELF64_EHDR_SIZE);
+    write_u16(&mut buf, ELF64_PHDR_SIZE);
+    write_u16(&mut buf, phnum);
+    write_u16(&mut buf, 0);
+    write_u16(&mut buf, 0);
+    write_u16(&mut buf, 0);
     assert_eq!(buf.len(), 64);
 
-    // Program header 0: code segment (R+X)
-    write_u32(&mut buf, PT_LOAD); // p_type
-    write_u32(&mut buf, PF_R | PF_X); // p_flags
-    write_u64(&mut buf, code_file_offset); // p_offset
-    write_u64(&mut buf, code_vaddr); // p_vaddr
-    write_u64(&mut buf, code_vaddr); // p_paddr
-    write_u64(&mut buf, code.len() as u64); // p_filesz
-    write_u64(&mut buf, code.len() as u64); // p_memsz
-    write_u64(&mut buf, 16); // p_align
+    // PT_LOAD code (R+X)
+    write_u32(&mut buf, PT_LOAD);
+    write_u32(&mut buf, PF_R | PF_X);
+    write_u64(&mut buf, code_file_offset);
+    write_u64(&mut buf, code_vaddr);
+    write_u64(&mut buf, code_vaddr);
+    write_u64(&mut buf, code.len() as u64);
+    write_u64(&mut buf, code.len() as u64);
+    write_u64(&mut buf, 16);
 
-    // Program header 1: data segment (R+W)
-    write_u32(&mut buf, PT_LOAD); // p_type
-    write_u32(&mut buf, PF_R | PF_W); // p_flags
-    write_u64(&mut buf, data_file_offset); // p_offset
-    write_u64(&mut buf, data_vaddr); // p_vaddr
-    write_u64(&mut buf, data_vaddr); // p_paddr
-    write_u64(&mut buf, data.len() as u64); // p_filesz
-    write_u64(&mut buf, data.len() as u64); // p_memsz
-    write_u64(&mut buf, 16); // p_align
+    // PT_LOAD data (R+W)
+    write_u32(&mut buf, PT_LOAD);
+    write_u32(&mut buf, PF_R | PF_W);
+    write_u64(&mut buf, data_file_offset);
+    write_u64(&mut buf, data_vaddr);
+    write_u64(&mut buf, data_vaddr);
+    write_u64(&mut buf, data.len() as u64);
+    write_u64(&mut buf, data.len() as u64);
+    write_u64(&mut buf, 16);
 
-    // Program header 2 (optional): PROC_PARAM
     if let Some(pp_offset) = proc_param_offset {
         let pp_vaddr = data_vaddr + pp_offset;
         let pp_file_offset = data_file_offset + pp_offset;
-        write_u32(&mut buf, PT_PROC_PARAM); // p_type
-        write_u32(&mut buf, PF_R); // p_flags
-        write_u64(&mut buf, pp_file_offset); // p_offset
-        write_u64(&mut buf, pp_vaddr); // p_vaddr
-        write_u64(&mut buf, pp_vaddr); // p_paddr
-        write_u64(&mut buf, PROC_PARAM_SIZE); // p_filesz
-        write_u64(&mut buf, PROC_PARAM_SIZE); // p_memsz
-        write_u64(&mut buf, 4); // p_align
+        write_u32(&mut buf, PT_PROC_PARAM);
+        write_u32(&mut buf, PF_R);
+        write_u64(&mut buf, pp_file_offset);
+        write_u64(&mut buf, pp_vaddr);
+        write_u64(&mut buf, pp_vaddr);
+        write_u64(&mut buf, PROC_PARAM_SIZE);
+        write_u64(&mut buf, PROC_PARAM_SIZE);
+        write_u64(&mut buf, 4);
     }
 
-    // Pad to code offset
     buf.resize(code_file_offset as usize, 0);
     buf.extend_from_slice(code);
 
-    // Pad to data offset
     buf.resize(data_file_offset as usize, 0);
     buf.extend_from_slice(data);
 

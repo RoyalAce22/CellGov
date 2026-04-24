@@ -1,52 +1,32 @@
 //! Guest address newtype.
 //!
-//! `GuestAddr` is the runtime's representation of a location in the guest's
-//! flat address space. It is a distinct type from a host pointer or a bare
-//! `u64`: every site that produces an address must be explicit, since
-//! address arithmetic is the easiest place to introduce aliasing and
-//! overflow bugs that are invisible until they corrupt committed memory.
-//!
-//! There are no `From<u64>` or `Into<u64>` impls. Use [`GuestAddr::new`]
-//! to lift, [`GuestAddr::raw`] to lower.
+//! No `From<u64>`/`Into<u64>` impls: every lift site is explicit via
+//! [`GuestAddr::new`] / [`GuestAddr::raw`].
 
-/// A location in the guest's flat address space, in bytes from address zero.
+/// A location in the guest's flat address space, in bytes from zero.
 ///
-/// `GuestAddr` is `Copy + Ord + Hash`. It does not implement `Add<u64>`
-/// because silent overflow on address arithmetic would be a determinism
-/// hazard: out-of-range writes are validation failures the runtime must
-/// surface as faults, not wrap around to a different region. Use
-/// [`GuestAddr::checked_offset`] for the explicit, fallible form.
+/// No `Add<u64>`: overflow on address arithmetic must surface as a fault
+/// rather than wrap. Use [`GuestAddr::checked_offset`] for the fallible form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct GuestAddr(u64);
 
 impl GuestAddr {
-    /// The lowest possible guest address. Mostly useful as a default
-    /// in tests and as a sentinel for "no address yet".
+    /// The lowest possible guest address.
     pub const ZERO: Self = Self(0);
 
     /// Lift a raw `u64` into the guest address space.
-    ///
-    /// There is no `From<u64>` impl: every lift site should be visible
-    /// at the call graph so the runtime can audit who is fabricating
-    /// addresses out of integer literals.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Return the underlying byte offset. Use sparingly; prefer ordering
-    /// comparisons or [`GuestAddr::checked_offset`] for arithmetic.
+    /// Return the underlying byte offset.
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
     }
 
     /// Advance this address by `bytes`, returning `None` on overflow.
-    ///
-    /// Overflow here is a real failure mode: a guest may legitimately
-    /// compute an address near `u64::MAX`, and silently wrapping would
-    /// alias the low end of the address space. Callers must handle the
-    /// `None` case explicitly.
     #[inline]
     pub const fn checked_offset(self, bytes: u64) -> Option<Self> {
         match self.0.checked_add(bytes) {
@@ -55,9 +35,7 @@ impl GuestAddr {
         }
     }
 
-    /// Distance in bytes from `earlier` to `self`, or `None` if `earlier`
-    /// is above `self`. Useful for computing the length of a range whose
-    /// endpoints are known but whose direction is not statically obvious.
+    /// Distance in bytes from `earlier` to `self`, or `None` if `earlier > self`.
     #[inline]
     pub const fn checked_distance_from(self, earlier: GuestAddr) -> Option<u64> {
         self.0.checked_sub(earlier.0)

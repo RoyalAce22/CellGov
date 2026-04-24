@@ -1,14 +1,9 @@
-//! cellgov_lv2 -- LV2 host model for managed SPU thread group lifecycle.
+//! LV2 host model: image registry, thread group table, sync primitives,
+//! and the dispatch function that answers PPU syscall requests.
 //!
-//! This crate owns the LV2 concepts (image registry, thread group
-//! table, request/response shapes, the dispatch function) and nothing
-//! else. It does not depend on `cellgov_core`. The runtime owns
-//! orchestration; this crate owns the state machine.
-//!
-//! Direction of the boundary: the runtime drives the host, the host
-//! answers with pure data. The host never reaches into the runtime.
-//! The only way the host reads guest memory is through the
-//! `Lv2Runtime` trait the runtime implements.
+//! The runtime drives the host and reads guest memory on its behalf
+//! through [`Lv2Runtime`]; the host returns pure-data [`Lv2Dispatch`]
+//! packets and never calls back into the runtime.
 
 pub mod dispatch;
 pub mod errno;

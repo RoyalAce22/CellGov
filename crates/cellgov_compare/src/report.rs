@@ -1,19 +1,11 @@
-//! Human-readable and machine-readable comparison reports.
-//!
-//! Formats a `CompareResult` (plus the two observations that produced it)
-//! for terminal display or JSON serialization. The comparison layer
-//! produces structured divergence data; this module turns it into output.
+//! Human-readable and machine-readable comparison report rendering.
 
 use crate::compare::{Classification, CompareMode, CompareResult, MultiCompareResult};
 use crate::observation::Observation;
 use serde::Serialize;
 use std::fmt::Write;
 
-/// Format a comparison result as human-readable text for terminal output.
-///
-/// Includes classification, mode, and first-divergence details when the
-/// result is a divergence. Does not include full observations -- use
-/// `format_json` for offline diffing.
+/// Format a comparison result as human-readable terminal text.
 pub fn format_human(result: &CompareResult) -> String {
     let mut out = String::new();
 
@@ -72,11 +64,11 @@ pub fn format_human(result: &CompareResult) -> String {
     out
 }
 
-/// Machine-readable JSON report with both full observations embedded
-/// for offline diffing.
+/// Serialize a comparison result plus both full observations as pretty JSON.
 ///
-/// The `expected` observation is typically the oracle (RPCS3 or saved
-/// baseline). The `actual` observation is typically CellGov.
+/// Top-level shape: `classification`, `mode`, optional `outcome_mismatch`,
+/// optional `memory_divergence`, optional `event_divergence`, `expected`,
+/// `actual`. Consumers rely on this schema.
 pub fn format_json(
     result: &CompareResult,
     expected: &Observation,
@@ -112,10 +104,7 @@ pub fn format_json(
     serde_json::to_string_pretty(&report)
 }
 
-/// Format a multi-baseline comparison result as human-readable text.
-///
-/// Reports oracle agreement status and, if settled, the CellGov
-/// comparison result.
+/// Format a multi-baseline comparison result as human-readable terminal text.
 pub fn format_multi_human(result: &MultiCompareResult, baseline_count: usize) -> String {
     let mut out = String::new();
 
@@ -138,7 +127,7 @@ pub fn format_multi_human(result: &MultiCompareResult, baseline_count: usize) ->
     out
 }
 
-/// Machine-readable JSON for multi-baseline comparison.
+/// Serialize a multi-baseline comparison result as pretty JSON.
 pub fn format_multi_json(
     result: &MultiCompareResult,
     baselines: &[Observation],
@@ -358,7 +347,6 @@ mod tests {
         let json = format_json(&result, &a, &a).expect("json");
         assert!(json.contains("\"match\""));
         assert!(json.contains("\"memory\""));
-        // Full observations are embedded.
         assert!(json.contains("\"expected\""));
         assert!(json.contains("\"actual\""));
     }
@@ -393,7 +381,6 @@ mod tests {
         assert!(json.contains("\"divergence\""));
         assert!(json.contains("\"outcome_mismatch\""));
         assert!(json.contains("\"memory_divergence\""));
-        // event_divergence should be absent (skip_serializing_if)
         assert!(!json.contains("\"event_divergence\""));
     }
 

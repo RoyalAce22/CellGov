@@ -52,7 +52,6 @@ fn commit_writes_visible_on_read() {
     mem.apply_commit(range(0, 4), &[0xde, 0xad, 0xbe, 0xef])
         .unwrap();
     assert_eq!(mem.read(range(0, 4)).unwrap(), &[0xde, 0xad, 0xbe, 0xef]);
-    // Untouched tail still zero.
     assert_eq!(mem.read(range(4, 4)).unwrap(), &[0, 0, 0, 0]);
 }
 
@@ -61,7 +60,6 @@ fn commit_length_mismatch_rejected() {
     let mut mem = GuestMemory::new(16);
     let err = mem.apply_commit(range(0, 4), &[1, 2, 3]).unwrap_err();
     assert_eq!(err, MemError::LengthMismatch);
-    // Memory left untouched.
     assert_eq!(mem.read(range(0, 4)).unwrap(), &[0, 0, 0, 0]);
 }
 
@@ -70,15 +68,11 @@ fn commit_out_of_range_rejected() {
     let mut mem = GuestMemory::new(8);
     let err = mem.apply_commit(range(6, 4), &[1, 2, 3, 4]).unwrap_err();
     assert!(matches!(err, MemError::Unmapped(_)));
-    // Memory left untouched.
     assert_eq!(mem.read(range(0, 8)).unwrap(), &[0; 8]);
 }
 
 #[test]
 fn read_checked_reports_unmapped_with_nearest_regions() {
-    // Two regions with a gap between them: user_heap ends at
-    // 0x100, rsx begins at 0x200. An access at 0x150 should name
-    // both neighbors.
     let mem = GuestMemory::from_regions(vec![
         Region::new(0, 0x100, "user_heap", PageSize::Page64K),
         Region::new(0x200, 0x100, "rsx", PageSize::Page64K),
@@ -126,7 +120,6 @@ fn containing_region_finds_matching_region() {
     assert_eq!(mem.containing_region(0x50, 16).unwrap().label(), "a");
     assert_eq!(mem.containing_region(0x250, 16).unwrap().label(), "b");
     assert!(mem.containing_region(0x150, 16).is_none());
-    // Straddling the boundary fails.
     assert!(mem.containing_region(0xF0, 0x20).is_none());
 }
 
@@ -139,9 +132,6 @@ fn commit_zero_length_is_noop() {
 
 #[test]
 fn overlapping_commits_apply_in_call_order() {
-    // The commit pipeline guarantees deterministic ordering at a
-    // higher level; this test just confirms `apply_commit` itself
-    // does not silently buffer or reorder.
     let mut mem = GuestMemory::new(8);
     mem.apply_commit(range(0, 4), &[1, 1, 1, 1]).unwrap();
     mem.apply_commit(range(2, 4), &[2, 2, 2, 2]).unwrap();
@@ -166,9 +156,6 @@ fn content_hash_changes_on_commit() {
 
 #[test]
 fn content_hash_is_size_sensitive() {
-    // Two zero-initialized buffers of different sizes must hash
-    // differently, otherwise replay would mistake a 16-byte zero
-    // memory for an 8-byte zero memory.
     let a = GuestMemory::new(8);
     let b = GuestMemory::new(16);
     assert_ne!(a.content_hash(), b.content_hash());
@@ -176,8 +163,6 @@ fn content_hash_is_size_sensitive() {
 
 #[test]
 fn content_hash_is_position_sensitive() {
-    // Same bytes at different addresses must produce different
-    // hashes; FNV-1a's order dependence guarantees this.
     let mut a = GuestMemory::new(8);
     let mut b = GuestMemory::new(8);
     a.apply_commit(range(0, 1), &[0xff]).unwrap();
@@ -187,8 +172,6 @@ fn content_hash_is_position_sensitive() {
 
 #[test]
 fn content_hash_round_trips_after_revert() {
-    // Hashing is a pure function of bytes: writing X then writing
-    // back the original bytes restores the original hash.
     let mut mem = GuestMemory::new(4);
     let h0 = mem.content_hash();
     mem.apply_commit(range(0, 4), &[1, 2, 3, 4]).unwrap();
@@ -244,7 +227,6 @@ fn from_regions_rejects_overlap_at_base() {
 
 #[test]
 fn from_regions_rejects_partial_overlap() {
-    // [0, 0x100) and [0x80, 0x180) overlap at [0x80, 0x100).
     let err = GuestMemory::from_regions(vec![
         Region::new(0, 0x100, "a", PageSize::Page64K),
         Region::new(0x80, 0x100, "b", PageSize::Page64K),
@@ -255,7 +237,6 @@ fn from_regions_rejects_partial_overlap() {
 
 #[test]
 fn from_regions_rejects_containment() {
-    // [0, 0x200) fully contains [0x80, 0x100).
     let err = GuestMemory::from_regions(vec![
         Region::new(0, 0x200, "big", PageSize::Page64K),
         Region::new(0x80, 0x100, "small", PageSize::Page64K),
@@ -266,7 +247,6 @@ fn from_regions_rejects_containment() {
 
 #[test]
 fn from_regions_accepts_adjacent_non_overlapping() {
-    // [0, 0x100) and [0x100, 0x200) touch but do not overlap.
     let mem = GuestMemory::from_regions(vec![
         Region::new(0, 0x100, "a", PageSize::Page64K),
         Region::new(0x100, 0x100, "b", PageSize::Page64K),
@@ -289,7 +269,6 @@ fn reserved_zero_readable_region_reads_zero_and_bumps_counter() {
     let bytes = mem.read(range(0xC000_0000, 8)).unwrap();
     assert_eq!(bytes, &[0u8; 8]);
     assert_eq!(mem.provisional_read_count(), 1);
-    // Second read also bumps the counter.
     let _ = mem.read(range(0xC000_0040, 4)).unwrap();
     assert_eq!(mem.provisional_read_count(), 2);
 }
@@ -320,9 +299,7 @@ fn reserved_strict_region_blocks_both_reads_and_writes() {
         RegionAccess::ReservedStrict,
     )])
     .unwrap();
-    // Reads return None (treated as unmapped from the caller's POV).
     assert_eq!(mem.read(range(0xE000_0000, 4)), None);
-    // Writes get the typed reserved-write fault.
     let err = mem
         .apply_commit(range(0xE000_0000, 4), &[1, 2, 3, 4])
         .unwrap_err();
@@ -333,7 +310,6 @@ fn reserved_strict_region_blocks_both_reads_and_writes() {
             ..
         }
     ));
-    // Reads do not bump the provisional counter under strict mode.
     assert_eq!(mem.provisional_read_count(), 0);
 }
 
@@ -355,6 +331,5 @@ fn multi_region_read_and_commit_route_by_address() {
     mem.apply_commit(range(0x1010, 4), &[9, 9, 9, 9]).unwrap();
     assert_eq!(mem.read(range(0x10, 4)).unwrap(), &[1, 2, 3, 4]);
     assert_eq!(mem.read(range(0x1010, 4)).unwrap(), &[9, 9, 9, 9]);
-    // Addresses between the two regions are unmapped.
     assert_eq!(mem.read(range(0x500, 4)), None);
 }

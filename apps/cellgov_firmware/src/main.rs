@@ -1,10 +1,4 @@
-//! PS3 firmware and SELF decryption tools.
-//!
-//! Subcommands:
-//! ```text
-//!   install <PUP_PATH> [--output <dir>]  -- decrypt firmware PUP
-//!   decrypt-self <SELF_PATH> [--output <path>] -- decrypt SELF to ELF
-//! ```
+//! PS3 firmware and SELF decryption CLI.
 
 mod crypto;
 mod pup;

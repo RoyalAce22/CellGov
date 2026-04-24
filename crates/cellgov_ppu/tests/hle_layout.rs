@@ -1,28 +1,8 @@
-//! HLE binding layout: semantic-equivalence test.
+//! HLE binding layout semantic-equivalence checks.
 //!
-//! Backs the divergence-policy classification "HLE binding table
-//! layout convention". The cross-runner data divergence in HLE-OPD
-//! GOT entries boils down to: CellGov packs HLE OPDs in game-import-
-//! table order, RPCS3 packs them in source-static-registration order.
-//! The bytes differ, but the dispatch semantics do not.
-//!
-//! This test demonstrates that property without depending on RPCS3:
-//! it builds two CellGov binding sets from the same NID set in
-//! different module orderings, and asserts that
-//!
-//! 1. each binding produces a structurally-identical 8-byte OPD
-//!    `{ body_addr, toc=0 }`,
-//! 2. each body trampoline is the same 16-byte `lis/ori/sc/blr`
-//!    sequence,
-//! 3. the body's encoded syscall number, when resolved against that
-//!    layout's binding list, dispatches to the SAME NID -- so a
-//!    guest that calls the OPD reaches the same HLE handler under
-//!    either ordering.
-//!
-//! The two layouts differ in the GOT pointer values written into
-//! the game's import table (low 16 bits encode the slot index), but
-//! they are semantically interchangeable from the guest's
-//! perspective. That is the property the divergence policy relies on.
+//! Invariant exercised: two module orderings of the same NID set produce
+//! OPDs whose bytes differ (slot indices move) but whose dispatch resolves
+//! to the same NID under each layout's own binding list.
 
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
 use cellgov_ppu::prx::{
@@ -30,9 +10,9 @@ use cellgov_ppu::prx::{
     HLE_SYSCALL_BASE,
 };
 
-const NID_A: u32 = 0x0b168f92; // cellAudioInit (real NID, used as a fixture)
+const NID_A: u32 = 0x0b168f92; // cellAudioInit
 const NID_B: u32 = 0x4129fe2d; // cellAudioPortClose
-const NID_C: u32 = 0xa4c9ba65; // some libsysutil NID
+const NID_C: u32 = 0xa4c9ba65; // libsysutil
 
 const OPD_BASE: u32 = 0x0090_0000;
 const BODY_BASE: u32 = 0x0090_2000;
@@ -49,10 +29,10 @@ fn read_word(mem: &GuestMemory, addr: u32) -> u32 {
     u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
 }
 
+/// Recover the encoded syscall number from an HLE trampoline body.
+///
+/// Body layout: `lis r11, hi ; ori r11, r11, lo ; sc ; blr`.
 fn read_body_syscall_nr(mem: &GuestMemory, body_addr: u32) -> u32 {
-    // Body layout: lis r11, hi (0x3D60_HHHH); ori r11, r11, lo (0x616B_LLLL);
-    // sc; blr. Recover the encoded syscall number from the lis/ori
-    // immediates.
     let lis = read_word(mem, body_addr);
     let ori = read_word(mem, body_addr + 4);
     let hi = (lis & 0xFFFF) as u16 as u32;
@@ -80,9 +60,6 @@ fn dispatch_nid_for(bindings: &[HleBinding], syscall_nr: u32) -> u32 {
 
 #[test]
 fn two_orderings_produce_semantically_equivalent_dispatch() {
-    // Two ImportedModule lists with the same NIDs in different module
-    // order. This models the actual divergence: CellGov's
-    // game-import-order versus RPCS3's source-registration-order.
     let layout_a = vec![
         module("cellAudio", &[(NID_A, STUB_BASE), (NID_B, STUB_BASE + 4)]),
         module("cellSysutil", &[(NID_C, STUB_BASE + 8)]),
@@ -117,17 +94,11 @@ fn two_orderings_produce_semantically_equivalent_dispatch() {
         0,
     );
 
-    // Property 1: every NID is reachable in both layouts. Set
-    // equality of NIDs proves that swapping module order does not
-    // drop any binding.
     let nids_a: std::collections::BTreeSet<u32> = bindings_a.iter().map(|b| b.nid).collect();
     let nids_b: std::collections::BTreeSet<u32> = bindings_b.iter().map(|b| b.nid).collect();
     assert_eq!(nids_a, nids_b, "NID sets must match across layouts");
 
-    // Property 2: for every NID, both layouts produce structurally
-    // identical 8-byte OPDs. The bytes at the OPD address differ
-    // (different body_addr), but the SHAPE is the same: 8 bytes,
-    // first 4 = body pointer in user memory, last 4 = TOC = 0.
+    // Every NID gets an 8-byte OPD { body_addr, toc=0 } in both layouts.
     for binding_a in &bindings_a {
         let nid = binding_a.nid;
         let binding_b = bindings_b
@@ -155,13 +126,8 @@ fn two_orderings_produce_semantically_equivalent_dispatch() {
         );
     }
 
-    // Property 3: dispatching the body trampoline's encoded syscall
-    // number through the layout's binding list resolves to the same
-    // NID. This is the property that makes the divergence non-semantic:
-    // even though the syscall numbers differ between layouts (because
-    // the slot index differs), each layout's number maps to the SAME
-    // guest-callable NID under that layout's binding list. A guest that
-    // calls the OPD reaches the right HLE handler in either case.
+    // Encoded syscall numbers diverge when slot indices do, but each
+    // layout's number resolves to the same NID under its own binding list.
     for binding_a in &bindings_a {
         let nid = binding_a.nid;
         let binding_b = bindings_b.iter().find(|b| b.nid == nid).unwrap();
@@ -172,9 +138,6 @@ fn two_orderings_produce_semantically_equivalent_dispatch() {
         let sc_a = read_body_syscall_nr(&mem_a, body_a_addr);
         let sc_b = read_body_syscall_nr(&mem_b, body_b_addr);
 
-        // The encoded syscall numbers WILL differ between layouts
-        // (proving the bytes diverge) -- this is the whole point of
-        // the divergence policy classification.
         if binding_a.index != binding_b.index {
             assert_ne!(
                 sc_a, sc_b,
@@ -182,9 +145,6 @@ fn two_orderings_produce_semantically_equivalent_dispatch() {
             );
         }
 
-        // But: each runner's syscall number, looked up in that
-        // runner's binding list, must resolve to the same NID. That
-        // is what makes the divergence non-semantic.
         assert_eq!(
             dispatch_nid_for(&bindings_a, sc_a),
             nid,
@@ -200,10 +160,8 @@ fn two_orderings_produce_semantically_equivalent_dispatch() {
 
 #[test]
 fn high_16_bits_of_opd_pointers_match_across_orderings() {
-    // The divergence-policy entry promises that the high 16 bits of
-    // every HLE-OPD GOT pointer are identical between runners.
-    // Verify this for two different orderings: the high page bits
-    // come from `opd_base`, which is layout-policy and shared.
+    // High 16 bits of OPD pointers come from `opd_base` and are shared
+    // across orderings; low 16 bits encode the (diverging) slot index.
     let layout_a = vec![
         module("cellAudio", &[(NID_A, STUB_BASE), (NID_B, STUB_BASE + 4)]),
         module("cellSysutil", &[(NID_C, STUB_BASE + 8)]),

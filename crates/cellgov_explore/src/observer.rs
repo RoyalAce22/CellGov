@@ -1,17 +1,14 @@
-//! Decision observer -- runs a scenario and records every scheduling
-//! decision the runtime makes, including the full runnable set at
-//! each step.
+//! Runs the baseline schedule and records every scheduling decision
+//! with the full runnable set at each step.
 
 use crate::decision::{DecisionLog, DecisionPoint};
 use crate::dependency::StepFootprint;
 use cellgov_core::Runtime;
 
-/// Run the runtime to completion (stall or max-steps) and record
-/// every scheduling decision into a `DecisionLog`.
+/// Drive `rt` to stall and return the recorded [`DecisionLog`].
 ///
-/// Returns the populated `DecisionLog`. The runtime is driven in
-/// place; callers who need the final state should inspect it after
-/// the call, or use the log to identify branching points for replay.
+/// The runtime is advanced in place; callers who need the final state
+/// should inspect `rt` after the call.
 pub fn observe_decisions(rt: &mut Runtime) -> DecisionLog {
     let mut log = DecisionLog::new();
     loop {
@@ -45,9 +42,6 @@ mod tests {
     use cellgov_mem::GuestMemory;
     use cellgov_time::Budget;
 
-    /// Two independent units that each run one step and finish.
-    /// The first step should have both runnable (a branching point);
-    /// the second step should have only one (not branching).
     #[test]
     fn two_units_produces_branching_point() {
         let mem = GuestMemory::new(64);
@@ -75,7 +69,6 @@ mod tests {
         );
     }
 
-    /// A single unit that finishes in 1 step. No branching points.
     #[test]
     fn single_unit_no_branching() {
         let mem = GuestMemory::new(64);

@@ -1,4 +1,9 @@
-//! Event flag LV2 dispatch: create, destroy, wait, trywait, set, clear.
+//! LV2 dispatch for event flags.
+//!
+//! Waiters are FIFO. `set` delivers the observed bit pattern back
+//! through each woken waiter's recorded `result_ptr`, so a missing
+//! thread-table entry discards its wake without merging into a
+//! parked response.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -8,10 +13,9 @@ use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
 
 impl Lv2Host {
-    // `sys_event_flag_wait_mode` bit layout (from PS3 SDK):
+    // `sys_event_flag_wait_mode` bit layout:
     //   bit 1 (0x02): OR match (else AND)
     //   bit 4 (0x10): CLEAR on match (else NO-CLEAR)
-    // The common AND|CLEAR = 0x11 thus maps to AndClear, etc.
     fn decode_event_flag_mode(raw: u32) -> crate::ppu_thread::EventFlagWaitMode {
         let or_match = (raw & 0x02) != 0;
         let clear = (raw & 0x10) != 0;
@@ -31,7 +35,6 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let id = self.alloc_id();
         if self.event_flags.create_with_id(id, init).is_err() {
-            // See `dispatch_mutex_create` IdCollision rationale.
             return Lv2Dispatch::Immediate {
                 code: crate::errno::CELL_ENOMEM.into(),
                 effects: vec![],
@@ -112,10 +115,10 @@ impl Lv2Host {
                         };
                     }
                 }
-                // set-side replaces this with a complete
-                // EventFlagWake carrying the observed bits; the
-                // result_ptr stored on the waiter entry is what
-                // enables that without reading the parked response.
+                // set-side replaces this with an EventFlagWake
+                // carrying the observed bits; the result_ptr
+                // recorded on the waiter entry makes that wake
+                // complete without reading the parked response.
                 Lv2Dispatch::Block {
                     reason: crate::dispatch::Lv2BlockReason::EventFlag { id },
                     pending: PendingResponse::EventFlagWake {
@@ -175,9 +178,6 @@ impl Lv2Host {
                 effects: vec![],
             };
         }
-        // set_and_wake returns recorded result_ptr alongside the
-        // observed bits so each response_update is complete; no
-        // merge with a parked response.
         let mut unit_ids: Vec<UnitId> = Vec::new();
         let mut updates: Vec<(UnitId, PendingResponse)> = Vec::new();
         for wake in woken {
@@ -268,7 +268,7 @@ mod tests {
             } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate(0), got {other:?}"),
         };
-        // AND + NO-CLEAR: mode = 0x01.
+        // mode 0x01 = AND + NO-CLEAR.
         let w = host.dispatch(
             Lv2Request::EventFlagWait {
                 id,
@@ -289,7 +289,6 @@ mod tests {
             }
             other => panic!("expected Immediate(0), got {other:?}"),
         }
-        // NO-CLEAR -- bits unchanged.
         assert_eq!(host.event_flags().lookup(id).unwrap().bits(), 0b1111);
     }
 
@@ -397,7 +396,6 @@ mod tests {
             } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate(0), got {other:?}"),
         };
-        // u1 waits on 0b0001 (matches).
         host.dispatch(
             Lv2Request::EventFlagWait {
                 id,
@@ -409,7 +407,6 @@ mod tests {
             u1,
             &rt,
         );
-        // u2 waits on 0b0010 (matches).
         host.dispatch(
             Lv2Request::EventFlagWait {
                 id,
@@ -421,7 +418,7 @@ mod tests {
             u2,
             &rt,
         );
-        // u3 waits on 0b1000 (NO match after set).
+        // u3 waits on 0b1000; the set below won't match it.
         host.dispatch(
             Lv2Request::EventFlagWait {
                 id,
@@ -433,7 +430,6 @@ mod tests {
             u3,
             &rt,
         );
-        // Set bits 0b0011 -- wakes u1 and u2 in FIFO order.
         let s = host.dispatch(Lv2Request::EventFlagSet { id, bits: 0b0011 }, u1, &rt);
         match s {
             Lv2Dispatch::WakeAndReturn {
@@ -444,7 +440,6 @@ mod tests {
             } => {
                 assert_eq!(woken_unit_ids, vec![u1, u2]);
                 assert_eq!(response_updates.len(), 2);
-                // Each carries the observed bit pattern.
                 for (_, resp) in &response_updates {
                     match resp {
                         PendingResponse::EventFlagWake { observed, .. } => {
@@ -456,7 +451,6 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // u3 still parked.
         let remaining: Vec<_> = host
             .event_flags()
             .lookup(id)

@@ -1,36 +1,30 @@
-//! Schedule decision detection and logging.
-//!
-//! A decision point occurs when the runtime has more than one runnable
-//! unit at a scheduling boundary. The `DecisionLog` records every
-//! decision point encountered during a run so the explorer can later
-//! identify backtracking opportunities.
+//! Per-step scheduling decisions recorded during a baseline run so
+//! the explorer can locate branching points for replay.
 
 use crate::dependency::StepFootprint;
 use cellgov_event::UnitId;
 
-/// A single scheduling decision point.
+/// A single scheduling decision the runtime made at one step.
 #[derive(Debug, Clone)]
 pub struct DecisionPoint {
     /// Step index within the run.
     pub step: usize,
     /// All units that were runnable when the decision was made.
     pub runnable: Vec<UnitId>,
-    /// The unit the scheduler actually chose.
+    /// Unit the scheduler actually chose.
     pub chosen: UnitId,
-    /// Summary of shared resources the chosen unit touched.
+    /// Shared resources the chosen unit touched during this step.
     pub footprint: StepFootprint,
 }
 
 impl DecisionPoint {
-    /// Whether this decision point had a real choice (more than one
-    /// runnable unit). Only branching points are interesting for
-    /// schedule exploration.
+    /// True when more than one unit was runnable (a real choice).
     pub fn is_branching(&self) -> bool {
         self.runnable.len() > 1
     }
 }
 
-/// Log of all decision points from a single run.
+/// All decision points from a single run, in step order.
 #[derive(Debug, Clone, Default)]
 pub struct DecisionLog {
     points: Vec<DecisionPoint>,
@@ -42,7 +36,7 @@ impl DecisionLog {
         Self::default()
     }
 
-    /// Record a decision point.
+    /// Append a decision point.
     pub fn push(&mut self, point: DecisionPoint) {
         self.points.push(point);
     }
@@ -57,24 +51,24 @@ impl DecisionLog {
         self.points.iter().filter(|p| p.is_branching())
     }
 
-    /// Number of branching points (decision points with >1 runnable).
+    /// Count of branching points.
     pub fn branching_count(&self) -> usize {
         self.points.iter().filter(|p| p.is_branching()).count()
     }
 
-    /// Total number of decision points recorded.
+    /// Total decision points recorded.
     pub fn len(&self) -> usize {
         self.points.len()
     }
 
-    /// Whether the log is empty.
+    /// True when no decision points have been recorded.
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }
 
-    /// Compute the aggregate footprint for a unit across all its
-    /// execution steps in this log. Returns `None` if the unit never
-    /// ran.
+    /// Merged footprint across every step `uid` ran in this log.
+    ///
+    /// Returns `None` if `uid` never ran. O(n) in log length.
     pub fn aggregate_footprint(&self, uid: UnitId) -> Option<StepFootprint> {
         let mut agg: Option<StepFootprint> = None;
         for p in &self.points {

@@ -1,8 +1,5 @@
-//! cellgov_dma -- DMA request objects, queue model, modeled completions.
-//!
-//! DMA is not just memcpy. Represented here as `DmaRequest`, `DmaCompletion`,
-//! and a `DmaLatencyModel` trait so the runtime seam is preserved against
-//! later asynchronous backends. No actual platform async I/O lives here.
+//! DMA request/completion value types, a deterministic completion queue,
+//! and a pluggable latency-model trait.
 
 pub mod completion;
 pub mod latency;

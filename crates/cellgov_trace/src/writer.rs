@@ -1,33 +1,12 @@
-//! Binary trace writer.
+//! Binary trace writer: append-only `Vec<u8>` of encoded [`TraceRecord`]s.
 //!
-//! `TraceWriter` is a thin wrapper around a `Vec<u8>` that appends
-//! [`TraceRecord`] encodings in the order they were emitted. The trace
-//! format is binary; this writer produces binary directly, so the
-//! buffer it accumulates is the same shape any on-disk format would
-//! use.
-//!
-//! The writer buffers records in memory: a Vec, no file I/O, no
-//! flushing policy. The runtime calls `record(...)` for each event;
-//! tests and the testkit runner pull the bytes out at the end and
-//! feed them to [`crate::reader::TraceReader`] for assertions. An
-//! on-disk sink could swap the backing buffer for a `Write`-trait
-//! target without changing the public surface here.
-//!
-//! ## Filtering
-//!
-//! Each record carries a [`TraceLevel`] via [`TraceRecord::level`].
-//! The writer supports an optional filter that drops records whose
-//! level is not enabled, so that high-volume categories can be
-//! filtered without reworking the writer later. The filter is set at construction time and applied
-//! per call to [`TraceWriter::record`].
+//! Records are appended in emission order; replay relies on this. The writer
+//! buffers in memory with no file I/O and no flushing policy.
 
 use crate::level::TraceLevel;
 use crate::record::TraceRecord;
 
-/// A binary trace writer.
-///
-/// Owns the buffer of encoded records. Records are appended in
-/// emission order; the runtime relies on this for replay.
+/// Binary trace writer.
 #[derive(Debug, Clone, Default)]
 pub struct TraceWriter {
     buf: Vec<u8>,
@@ -47,10 +26,6 @@ impl TraceWriter {
     }
 
     /// Construct a writer that only records the given levels.
-    ///
-    /// A record whose [`TraceRecord::level`] is not in `levels` is
-    /// dropped at the boundary -- it never reaches the buffer and
-    /// does not increment [`TraceWriter::record_count`].
     pub fn with_levels(levels: &[TraceLevel]) -> Self {
         let mut mask = 0u8;
         for l in levels {
@@ -63,9 +38,7 @@ impl TraceWriter {
         }
     }
 
-    /// Append `record` to the trace, if its level passes the filter.
-    /// Returns `true` if the record was actually written, `false` if
-    /// it was dropped by the level filter.
+    /// Append `record` if its level passes the filter; returns whether it was written.
     pub fn record(&mut self, record: &TraceRecord) -> bool {
         let level_bit = 1u8 << (record.level() as u8);
         if self.enabled_mask & level_bit == 0 {
@@ -76,20 +49,19 @@ impl TraceWriter {
         true
     }
 
-    /// Number of records actually written (post-filter).
+    /// Records actually written (post-filter).
     #[inline]
     pub fn record_count(&self) -> usize {
         self.record_count
     }
 
-    /// Total number of bytes in the trace buffer.
+    /// Bytes in the trace buffer.
     #[inline]
     pub fn byte_len(&self) -> usize {
         self.buf.len()
     }
 
-    /// Borrow the trace bytes. Suitable for feeding into
-    /// [`crate::reader::TraceReader`] or for serialization.
+    /// Borrow the trace bytes.
     #[inline]
     pub fn bytes(&self) -> &[u8] {
         &self.buf
@@ -161,13 +133,11 @@ mod tests {
         assert!(w.record(&step()));
         assert!(w.record(&commit()));
         assert_eq!(w.record_count(), 3);
-        // 33 + 26 + 26 = 85 bytes per the format documentation.
         assert_eq!(w.byte_len(), 85);
     }
 
     #[test]
     fn level_filter_drops_disabled_records() {
-        // Only record commits and hashes; scheduling drops out.
         let mut w = TraceWriter::with_levels(&[TraceLevel::Commits, TraceLevel::Hashes]);
         assert!(!w.record(&scheduled()));
         assert!(!w.record(&step()));

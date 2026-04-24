@@ -12,8 +12,7 @@ fn new_unit_is_runnable() {
 #[test]
 fn stop_instruction_yields_finished() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(1));
-    // Place `stop 0` (0x00000000) at PC=0
-    // (LS is already zeroed, and 0x00000000 decodes to stop)
+    // LS is zeroed; 0x00000000 decodes to stop.
     let mem = GuestMemory::new(16);
     let ctx = ExecutionContext::new(&mem);
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
@@ -24,13 +23,10 @@ fn stop_instruction_yields_finished() {
 #[test]
 fn il_then_stop_executes_two_instructions() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(2));
-    // il $3, 42 at PC=0, stop 0 at PC=4
     // il $3, 42: op9=0x081, rt=3, imm=42
-    // Encoding: 0x081 << 23 | 42 << 7 | 3 = 0x40800D43
     let il_raw: u32 = 0x081 << 23 | (42u32 << 7) | 3;
     let il_bytes = il_raw.to_be_bytes();
     unit.state_mut().ls[0..4].copy_from_slice(&il_bytes);
-    // stop 0 at PC=4 is already 0x00000000
 
     let mem = GuestMemory::new(16);
     let ctx = ExecutionContext::new(&mem);
@@ -42,7 +38,6 @@ fn il_then_stop_executes_two_instructions() {
 #[test]
 fn budget_exhaustion_yields() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(3));
-    // Place nop (0x40200000) at every 4-byte boundary
     let nop_bytes = 0x4020_0000u32.to_be_bytes();
     for i in (0..256).step_by(4) {
         unit.state_mut().ls[i..i + 4].copy_from_slice(&nop_bytes);
@@ -53,13 +48,12 @@ fn budget_exhaustion_yields() {
     let result = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
     assert_eq!(result.consumed_budget, Budget::new(5));
-    assert_eq!(unit.state().pc, 20); // 5 nops * 4 bytes
+    assert_eq!(unit.state().pc, 20);
 }
 
 #[test]
 fn decode_failure_faults() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(4));
-    // Place an invalid instruction
     let bad = 0xFFFF_FFFFu32.to_be_bytes();
     unit.state_mut().ls[0..4].copy_from_slice(&bad);
 
@@ -73,17 +67,12 @@ fn decode_failure_faults() {
 
 #[test]
 fn lqa_out_of_range_local_store_faults() {
-    // The ls_addr helper guards against a local-store access that
-    // would overflow the current LS buffer. Under normal conditions
-    // (256KB LS + 18-bit masked address) this cannot fire -- the
-    // mask always produces a value within bounds. Verify the
-    // defensive path works by truncating the LS so the masked
-    // address is now past the end, and issuing an Lqa that the
-    // ls_addr helper must reject.
+    // Under normal conditions (256KB LS + 18-bit masked address) the
+    // ls_addr bounds check cannot fire. Truncate LS so the masked
+    // address lands past the end and the helper must reject.
     //
-    // lqa rt=3, imm = 0x7FFE: effective LS offset = 0x7FFE << 2 = 0x1FFF8
-    // which, masked to 0x3FFF0, gives 0x1FFF0. With LS truncated to
-    // 0x1_0000 bytes, 0x1FFF0 + 16 > 0x1_0000 and the helper faults.
+    // lqa rt=3, imm=0x7FFE: offset 0x7FFE << 2 = 0x1FFF8, masked to
+    // 0x1FFF0; with LS at 0x1_0000, 0x1FFF0 + 16 > 0x1_0000.
     let raw = (0x061u32 << 23) | 3 | ((0x7FFEu32 & 0xFFFF) << 7);
     let mut unit = SpuExecutionUnit::new(UnitId::new(0));
     unit.state_mut().ls.truncate(0x1_0000);
@@ -94,8 +83,6 @@ fn lqa_out_of_range_local_store_faults() {
     let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
-    // The fault must be a guest-side LS out-of-range encoded with
-    // the FAULT_LS_OUT_OF_RANGE marker in the high bits.
     if let Some(FaultKind::Guest(code)) = result.fault {
         assert_eq!(code & FAULT_LS_OUT_OF_RANGE, FAULT_LS_OUT_OF_RANGE);
     } else {
@@ -129,21 +116,18 @@ fn mfc_getllar_sets_local_reservation_and_emits_acquire() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(7));
     let s = unit.state_mut();
 
-    // Program: il $10, 0xD0 (MFC_GETLLAR); wrch $ch21, $10.
     s.channels.mfc_lsa = 0x200;
-    // EA within a PS3 main-memory region. Line 0x1000 is the one we
-    // want the reservation on; 0x1040 is mid-line.
     s.channels.mfc_eah = 0;
     s.channels.mfc_eal = 0x1040;
     s.channels.mfc_size = 128;
     s.channels.mfc_tag_id = 0;
 
+    // il $10, 0xD0 (MFC_GETLLAR); wrch $ch21, $10.
     let il_raw: u32 = 0x081 << 23 | (0xD0u32 << 7) | 10;
     s.ls[0..4].copy_from_slice(&il_raw.to_be_bytes());
     let wrch_raw: u32 = 0x10D << 21 | (21u32 << 7) | 10;
     s.ls[4..8].copy_from_slice(&wrch_raw.to_be_bytes());
 
-    // Put some content at 0x1040 so the read produces observable bytes.
     let mut mem = GuestMemory::new(0x2000);
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x1040), 8).unwrap();
     mem.apply_commit(range, &[0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFA, 0xCE])
@@ -153,11 +137,8 @@ fn mfc_getllar_sets_local_reservation_and_emits_acquire() {
     let mut effects = Vec::new();
     let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
-    // Local reservation: canonical line 0x1000.
     assert_eq!(unit.state().reservation.map(|l| l.addr()), Some(0x1000));
-    // Atomic status = 0 (reservation acquired / success indicator).
     assert_eq!(unit.state().channels.atomic_status, 0);
-    // Exactly one ReservationAcquire effect at the line address.
     let acquires: Vec<_> = effects
         .iter()
         .filter_map(|e| match e {
@@ -174,9 +155,7 @@ fn mfc_getllar_sets_local_reservation_and_emits_acquire() {
 fn mfc_putllc_with_matching_reservation_emits_conditional_store() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(8));
     let s = unit.state_mut();
-    // Pre-populate the reservation on the line we're about to PUTLLC.
     s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
-    // Seed some distinctive bytes in LS at the PUTLLC source.
     s.channels.mfc_lsa = 0x200;
     s.channels.mfc_eal = 0x1000;
     s.channels.mfc_size = 128;
@@ -189,8 +168,8 @@ fn mfc_putllc_with_matching_reservation_emits_conditional_store() {
     s.ls[4..8].copy_from_slice(&wrch_raw.to_be_bytes());
 
     let mem = GuestMemory::new(0x2000);
-    // Install a reservation table with unit 8 holding line 0x1000
-    // so the step-start refresh does not clear the local register.
+    // Install matching reservation in the table; step-start refresh
+    // would otherwise clear the local register before the PUTLLC.
     let mut table = cellgov_sync::ReservationTable::new();
     table.insert_or_replace(
         UnitId::new(8),
@@ -201,11 +180,8 @@ fn mfc_putllc_with_matching_reservation_emits_conditional_store() {
     let mut effects = Vec::new();
     let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
-    // Local reservation retired on the success path.
     assert!(unit.state().reservation.is_none());
-    // atomic_status = 0 (success).
     assert_eq!(unit.state().channels.atomic_status, 0);
-    // Exactly one ConditionalStore at EA 0x1000 / 128 bytes.
     let conds: Vec<_> = effects
         .iter()
         .filter(|e| matches!(e, cellgov_effects::Effect::ConditionalStore { .. }))
@@ -234,7 +210,6 @@ fn mfc_putllc_with_matching_reservation_emits_conditional_store() {
 fn mfc_putllc_without_reservation_fails_silently() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(9));
     let s = unit.state_mut();
-    // No reservation preloaded.
     s.channels.mfc_lsa = 0x200;
     s.channels.mfc_eal = 0x1000;
     s.channels.mfc_size = 128;
@@ -252,7 +227,6 @@ fn mfc_putllc_without_reservation_fails_silently() {
 
     // atomic_status = 1 indicates failure per Cell BE channel semantics.
     assert_eq!(unit.state().channels.atomic_status, 1);
-    // No ConditionalStore emitted.
     assert!(!effects
         .iter()
         .any(|e| matches!(e, cellgov_effects::Effect::ConditionalStore { .. })));
@@ -262,7 +236,6 @@ fn mfc_putllc_without_reservation_fails_silently() {
 fn mfc_putllc_with_reservation_on_different_line_fails() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(10));
     let s = unit.state_mut();
-    // Reservation on 0x1000; PUTLLC targets 0x1100 (different line).
     s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
     s.channels.mfc_lsa = 0x200;
     s.channels.mfc_eal = 0x1100;
@@ -288,7 +261,6 @@ fn mfc_putllc_with_reservation_on_different_line_fails() {
     assert!(!effects
         .iter()
         .any(|e| matches!(e, cellgov_effects::Effect::ConditionalStore { .. })));
-    // Retired regardless of verdict.
     assert!(unit.state().reservation.is_none());
 }
 
@@ -297,7 +269,6 @@ fn mfc_put_overlapping_reserved_line_clears_local_reservation() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(11));
     let s = unit.state_mut();
     s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
-    // MFC_PUT to 0x1040 (same line as reservation), 16 bytes.
     s.channels.mfc_lsa = 0x200;
     s.channels.mfc_eal = 0x1040;
     s.channels.mfc_size = 16;
@@ -320,10 +291,7 @@ fn mfc_put_overlapping_reserved_line_clears_local_reservation() {
     let mut effects = Vec::new();
     let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
-    assert!(
-        unit.state().reservation.is_none(),
-        "MFC_PUT to reserved line must clear the local reservation"
-    );
+    assert!(unit.state().reservation.is_none());
 }
 
 #[test]
@@ -331,18 +299,14 @@ fn wrch_mfc_cmd_yields_dma_submitted() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(6));
     let s = unit.state_mut();
 
-    // Build MFC DMA put command in LS as a sequence of wrch instructions.
-    // We'll set up channel state directly and just place wrch MFC_CMD.
     s.channels.mfc_lsa = 0x3000;
     s.channels.mfc_eal = 0x10000;
     s.channels.mfc_size = 16;
     s.channels.mfc_tag_id = 0;
 
-    // il $10, 0x20 (MFC_PUT) at PC=0
+    // il $10, 0x20 (MFC_PUT); wrch $ch21, $10 (MFC_CMD = 21).
     let il_raw: u32 = 0x081 << 23 | (0x20u32 << 7) | 10;
     s.ls[0..4].copy_from_slice(&il_raw.to_be_bytes());
-    // wrch $ch21, $10 at PC=4 (MFC_CMD = 21)
-    // wrch encoding: op11=0x10D, ra=channel(21), rt=10
     let wrch_raw: u32 = 0x10D << 21 | (21u32 << 7) | 10;
     s.ls[4..8].copy_from_slice(&wrch_raw.to_be_bytes());
 
@@ -365,25 +329,23 @@ fn wrch_mfc_cmd_yields_dma_submitted() {
 fn run_spu_fixed_value_binary() {
     let path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
     if !path.exists() {
-        return; // skip if not built
+        return;
     }
     let elf_data = std::fs::read(path).unwrap();
 
     let mut unit = SpuExecutionUnit::new(UnitId::new(10));
     loader::load_spu_elf(&elf_data, unit.state_mut()).unwrap();
 
-    // Bypass the C runtime -- jump directly to main() at 0x80.
-    // Set up stack pointer ($1) and ABI registers as _start would.
-    // main(speid=$3, argp=$4, envp=$5) -- argp is the result EA.
+    // Bypass the C runtime: jump directly to main() at 0x80, with
+    // stack in $1 and ABI args main(speid=$3, argp=$4, envp=$5).
     unit.state_mut().pc = 0x80;
-    unit.state_mut().set_reg_word_splat(1, 0x3FFF0); // stack
+    unit.state_mut().set_reg_word_splat(1, 0x3FFF0);
     let result_ea: u32 = 0x1_0000;
     unit.state_mut().set_reg_word_splat(4, result_ea);
 
     let mem = GuestMemory::new(0x2_0000);
     let ctx = ExecutionContext::new(&mem);
 
-    // Run until the SPU finishes or faults. Collect all DMA effects.
     let mut all_effects = Vec::new();
     let max_steps = 50;
     for _ in 0..max_steps {
@@ -414,8 +376,6 @@ fn run_spu_fixed_value_binary() {
 
     assert_eq!(unit.status(), UnitStatus::Finished);
 
-    // The SPU should have emitted at least one DmaEnqueue effect
-    // (the mfc_put of the result buffer).
     let dma_count = all_effects
         .iter()
         .filter(|e| matches!(e, cellgov_effects::Effect::DmaEnqueue { .. }))
@@ -426,9 +386,6 @@ fn run_spu_fixed_value_binary() {
         dma_count
     );
 
-    // The DMA put carries LS bytes as an inline payload. The first
-    // 8 bytes must match the RPCS3 baseline (the compiled binary
-    // may DMA more than 8 bytes due to SPU alignment rounding).
     let dma = all_effects
         .iter()
         .find(|e| matches!(e, cellgov_effects::Effect::DmaEnqueue { .. }))
@@ -439,8 +396,8 @@ fn run_spu_fixed_value_binary() {
     {
         assert_eq!(request.destination().start().raw(), result_ea as u64);
         let data = payload.as_ref().expect("DMA put should carry payload");
-        // RPCS3 baseline: [0, 0, 0, 0, 19, 55, 186, 173]
-        // = 0x00000000 (status) + 0x1337BAAD (value)
+        // RPCS3 baseline: 0x00000000 (status) || 0x1337BAAD (value).
+        // Compiled binary may round up the DMA length past 8 bytes.
         assert_eq!(
             &data[..8],
             &[0x00, 0x00, 0x00, 0x00, 0x13, 0x37, 0xBA, 0xAD],
@@ -465,8 +422,7 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
 
     let elf_data = std::fs::read(elf_path).unwrap();
     let result_ea: u64 = 0x1_0000;
-    // PPU sends 0x42 to SPU inbound mailbox. SPU XORs with
-    // 0xFFFFFFFF -> 0xFFFFFFBD. Baseline: [0,0,0,0, 255,255,255,189].
+    // SPU XORs inbound 0x42 with 0xFFFFFFFF -> 0xFFFFFFBD.
     let mailbox_value: u32 = 0x42;
 
     let factory = || {
@@ -476,9 +432,9 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
             .budget(Budget::new(10_000))
             .max_steps(1_000)
             .register(move |rt| {
-                // Register the mailbox first (gets ID 0), then the
-                // unit (also gets ID 0). The SPU's rdch handler
-                // looks up MailboxId(unit_id), so the IDs must match.
+                // Mailbox must be registered before the unit so both
+                // receive ID 0: the SPU rdch handler looks up
+                // MailboxId(unit_id) and they must match.
                 let mbox_id = rt.mailbox_registry_mut().register();
                 rt.mailbox_registry_mut()
                     .get_mut(mbox_id)
@@ -529,14 +485,9 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
     );
 }
 
-/// Two SPUs contend on a shared 128-byte line via the
-/// `spu_atomic_cross_spu` ELF. Each SPU performs
-/// `INCREMENTS_PER_THREAD` (32 by default) getllar / putllc retry
-/// increments. Correctness gate: the shared counter ends at
-/// exactly 2 * INCREMENTS_PER_THREAD (64) regardless of the
-/// scheduler's interleaving. Without real contention
-/// (always-succeed putllc) concurrent increments would drop
-/// updates and the counter would be less than 64.
+/// Correctness gate for real getllar/putllc contention: without it,
+/// always-succeed putllc would drop updates and the counter would
+/// fall below 2 * INCREMENTS_PER_THREAD.
 #[test]
 fn spu_atomic_cross_spu_counter_is_exactly_2n() {
     const INCREMENTS_PER_THREAD: u32 = 32;
@@ -547,9 +498,8 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
     }
     let elf_data = std::fs::read(elf_path).unwrap();
 
-    // Fixed EAs inside the main-memory region. Atomic line at
-    // 0x10000 (128-byte aligned). Each SPU writes its 16-byte
-    // result slot at 0x11000 / 0x11010.
+    // Atomic line at 0x10000 (128-byte aligned); per-SPU 16-byte
+    // result slots at 0x11000 and 0x11010.
     let atomic_ea: u32 = 0x10000;
     let result_ea_a: u32 = 0x11000;
     let result_ea_b: u32 = 0x11010;
@@ -567,8 +517,7 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
                 loader::load_spu_elf(&elf, unit.state_mut()).unwrap();
                 unit.state_mut().pc = 0x80;
                 unit.state_mut().set_reg_word_splat(1, 0x3FFF0);
-                // r3 = spe_id (informational, use unit id),
-                // r4 = atomic_ea, r5 = result_ea_a.
+                // r3 = spe_id (informational), r4 = atomic_ea, r5 = result_ea.
                 unit.state_mut().set_reg_word_splat(3, 0xA);
                 unit.state_mut().set_reg_word_splat(4, atomic_ea);
                 unit.state_mut().set_reg_word_splat(5, result_ea_a);
@@ -595,9 +544,6 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
         result.outcome
     );
 
-    // The first 4 bytes of the atomic line at 0x10000 is the
-    // counter. After both SPUs finish, it must equal 2 *
-    // INCREMENTS_PER_THREAD.
     let mem = &result.final_memory;
     let counter_bytes = &mem[atomic_ea as usize..atomic_ea as usize + 4];
     let counter = u32::from_be_bytes([
@@ -612,10 +558,9 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
         "shared counter must equal 2 * INCREMENTS_PER_THREAD under real contention"
     );
 
-    // Each SPU writes its 16-byte result slot. Word 0 is status
-    // (expected 0), word 1 is the final counter the SPU saw on its
-    // last successful CAS. Retry counts vary with interleaving
-    // and are not asserted here.
+    // Slot layout: word 0 = status (0 on success), word 1 = final
+    // counter on the last successful CAS. Retry counts vary with
+    // interleaving and are not asserted.
     for &result_ea in &[result_ea_a, result_ea_b] {
         let slot = &mem[result_ea as usize..result_ea as usize + 16];
         let status = u32::from_be_bytes([slot[0], slot[1], slot[2], slot[3]]);
@@ -717,7 +662,7 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
     }
 
     let elf_data = std::fs::read(elf_path).unwrap();
-    // Buffer is 256-byte aligned. Low byte encodes thread index.
+    // 256-byte aligned; low byte of argp encodes thread index.
     let base_ea: u64 = 0x1_0000;
 
     let factory = || {
@@ -727,7 +672,6 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
             .budget(Budget::new(10_000))
             .max_steps(100_000)
             .register(move |rt| {
-                // SPU 0: argp = base_ea | 0
                 let elf0 = elf.clone();
                 rt.registry_mut().register_with(|id| {
                     let mut unit = SpuExecutionUnit::new(id);
@@ -738,7 +682,6 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
                     unit
                 });
 
-                // SPU 1: argp = base_ea | 1
                 let elf1 = elf;
                 rt.registry_mut().register_with(|id| {
                     let mut unit = SpuExecutionUnit::new(id);
@@ -906,19 +849,18 @@ fn dma_completion_payloads_are_correct() {
     assert_eq!(unit.status(), UnitStatus::Finished);
     assert_eq!(dma_payloads.len(), 2, "expected 2 DMA puts");
 
-    // DMA #1: 128 bytes of [DE AD BE EF] pattern to EA+16
+    // DMA #1: 128 bytes of [DE AD BE EF] pattern to EA+16.
     let (dest1, len1, pay1) = &dma_payloads[0];
-    assert_eq!(*dest1, 0x1_0010); // EA + 16
+    assert_eq!(*dest1, 0x1_0010);
     assert_eq!(*len1, 128);
     let data1 = pay1.as_ref().unwrap();
     assert_eq!(data1[0..4], [0xDE, 0xAD, 0xBE, 0xEF]);
 
-    // DMA #2: 16 bytes status header to EA
+    // DMA #2: 16-byte status header to EA: [status=0, pattern_size=128, 0, 0] BE u32s.
     let (dest2, len2, pay2) = &dma_payloads[1];
-    assert_eq!(*dest2, 0x1_0000); // EA
+    assert_eq!(*dest2, 0x1_0000);
     assert_eq!(*len2, 16);
     let data2 = pay2.as_ref().unwrap();
-    // [status=0, pattern_size=128, 0, 0] as big-endian u32s
     assert_eq!(
         &data2[..8],
         &[0, 0, 0, 0, 0, 0, 0, 128],
@@ -964,7 +906,6 @@ fn dma_completion_matches_rpcs3_baseline() {
             .build()
     };
 
-    // header: 8 bytes at EA+0, pattern: 128 bytes at EA+16
     let regions = vec![
         cellgov_compare::RegionDescriptor {
             name: "header".into(),
@@ -1006,20 +947,19 @@ fn dma_completion_matches_rpcs3_baseline() {
 fn spu_fixed_value_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
     if !elf_path.exists() {
-        return; // skip if not built
+        return;
     }
 
     let baseline_dir = std::path::Path::new("../../baselines/spu_fixed_value");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
     if !interp_path.exists() || !llvm_path.exists() {
-        return; // skip if baselines not collected
+        return;
     }
 
     let elf_data = std::fs::read(elf_path).unwrap();
     let result_ea: u64 = 0x1_0000;
 
-    // Run through the full runtime via ScenarioFixture.
     let factory = || {
         let elf = elf_data.clone();
         cellgov_testkit::fixtures::ScenarioFixture::builder()

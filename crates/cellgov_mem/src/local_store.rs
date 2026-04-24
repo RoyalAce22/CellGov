@@ -1,42 +1,15 @@
-//! `LocalStore` -- per-unit private memory.
+//! Per-unit private memory (e.g. an SPU's 256 KiB local store).
 //!
-//! `LocalStore` is the third of the three memory layers, alongside
-//! [`crate::guest::GuestMemory`] and
-//! [`crate::staging::StagingMemory`]. It models the unit-private
-//! memory regions that exist on Cell-style architectures: an SPU's
-//! 256 KiB local store is the canonical example, but any execution
-//! unit that holds a private byte region the runtime never makes
-//! globally visible can use this type.
-//!
-//! Critically, **local store writes do not flow through the commit
-//! pipeline.** No other unit can ever observe a `LocalStore`'s
-//! contents, so there is no determinism hazard from immediate
-//! mutation. The "publish only via Effect" rule is about
-//! *guest-visible* state; local store is not guest-visible to
-//! anyone but its owning unit. The unit's `run_until_yield` may read
-//! and write its own local store freely.
-//!
-//! What `LocalStore` is **not**:
-//!
-//! - It is not a cache of `GuestMemory`. There is no automatic
-//!   coherence; movements between local store and global memory go
-//!   through DMA effects, which the runtime translates into commit
-//!   pipeline activity.
-//! - It is not shared across units. Two units never reference the
-//!   same `LocalStore` instance. The runtime is responsible for
-//!   ensuring this.
+//! Writes do not flow through the commit pipeline: a `LocalStore` is only
+//! observable by its owning unit, so immediate mutation is determinism-safe.
+//! Transfers to/from [`crate::guest::GuestMemory`] happen through DMA effects,
+//! not through direct sharing.
 
 use crate::guest::MemError;
 use crate::range::ByteRange;
 
-/// A unit-private flat byte region.
-///
-/// Construct with [`LocalStore::new`] sized in bytes. Reads and writes
-/// are bounds-checked against the configured size; out-of-range
-/// operations return `Err`/`None` rather than panicking, since the
-/// owning unit may compute its own addresses and a local-store fault
-/// is a guest-induced condition rather than a runtime invariant
-/// violation.
+/// A unit-private flat byte region. Out-of-range operations return
+/// `None`/`Err` rather than panic.
 #[derive(Debug, Clone)]
 pub struct LocalStore {
     bytes: Vec<u8>,
@@ -57,12 +30,10 @@ impl LocalStore {
         self.bytes.len() as u64
     }
 
-    /// Read the bytes covered by `range`.
+    /// Read the bytes covered by `range`, or `None` if it extends past `size()`.
     ///
-    /// Returns `None` if the range extends past the end of local store.
-    /// A zero-length range whose start is in bounds (or exactly at
-    /// `size()`) returns an empty slice -- consistent with
-    /// [`crate::GuestMemory::read`].
+    /// A zero-length range at any in-bounds start (including exactly `size()`)
+    /// returns an empty slice.
     pub fn read(&self, range: ByteRange) -> Option<&[u8]> {
         let start = range.start().raw();
         let end = start.checked_add(range.length())?;
@@ -75,16 +46,13 @@ impl LocalStore {
         Some(&self.bytes[start_usize..end_usize])
     }
 
-    /// Write `bytes` to `range`.
+    /// Write `bytes` to `range`. Not gated by the commit pipeline: the owning
+    /// unit may call this freely.
     ///
-    /// Unlike [`crate::GuestMemory::apply_commit`], this is the unit's
-    /// own write -- it is not gated by the commit pipeline because
-    /// nothing outside this unit can observe the result. The owning
-    /// unit may call this freely from inside `run_until_yield`.
+    /// # Errors
     ///
-    /// Returns `Err(MemError::LengthMismatch)` if `bytes.len() as u64
-    /// != range.length()`, and `Err(MemError::OutOfRange)` if the
-    /// range extends past the end of local store.
+    /// - [`MemError::LengthMismatch`] if `bytes.len() as u64 != range.length()`.
+    /// - [`MemError::OutOfRange`] if the range extends past `size()`.
     pub fn write(&mut self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
         if bytes.len() as u64 != range.length() {
             return Err(MemError::LengthMismatch);
@@ -125,7 +93,6 @@ mod tests {
         let mut ls = LocalStore::new(8);
         ls.write(range(2, 4), &[1, 2, 3, 4]).unwrap();
         assert_eq!(ls.read(range(2, 4)).unwrap(), &[1, 2, 3, 4]);
-        // Surrounding bytes still zero.
         assert_eq!(ls.read(range(0, 2)).unwrap(), &[0, 0]);
         assert_eq!(ls.read(range(6, 2)).unwrap(), &[0, 0]);
     }

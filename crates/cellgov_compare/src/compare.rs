@@ -1,21 +1,17 @@
-//! Comparison engine for normalized observations.
-//!
-//! Takes two `Observation` values and a `CompareMode`, diffs the
-//! selected fields, and returns a `CompareResult` with classification
-//! and the first point of divergence for each field that mismatched.
+//! Field-by-field diff between two `Observation` values, returning the first point of divergence.
 
 use crate::observation::{NamedMemoryRegion, Observation, ObservedEvent, ObservedOutcome};
 
 /// Which fields to compare.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompareMode {
-    /// Outcome + memory regions + full event sequence.
+    /// Outcome + memory + full event sequence.
     Strict,
-    /// Outcome + memory regions only; events ignored.
+    /// Outcome + memory; events ignored.
     Memory,
-    /// Outcome + event sequence only; memory ignored.
+    /// Outcome + events; memory ignored.
     Events,
-    /// Outcome + event prefix match (shorter sequence length).
+    /// Outcome + events up to the shorter sequence length.
     Prefix,
 }
 
@@ -28,61 +24,55 @@ pub enum Classification {
     Divergence,
     /// CellGov has no matching scenario for this test.
     Unsupported,
-    /// RPCS3 decoder modes disagree with each other. The oracle is
-    /// unreliable for this test, so CellGov divergence is inconclusive.
+    /// Baselines disagree with each other; CellGov result is inconclusive.
     UnsettledOracle,
 }
 
-/// Where two memory regions first differ.
+/// First byte-level difference between two named memory regions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryDivergence {
-    /// Name of the region from the manifest.
+    /// Region name from the manifest.
     pub region: String,
-    /// Byte offset within the region where the first difference occurs.
+    /// Byte offset of the first differing byte.
     pub offset: usize,
-    /// Value in the expected (first) observation.
+    /// Byte in the expected observation.
     pub expected: u8,
-    /// Value in the actual (second) observation.
+    /// Byte in the actual observation.
     pub actual: u8,
 }
 
-/// Where two event sequences first differ.
+/// First difference between two event sequences.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventDivergence {
-    /// Index in the event sequence where the first difference occurs.
+    /// Index of the first differing event.
     pub index: usize,
-    /// Event in the expected (first) observation, if present.
+    /// Event in the expected observation, if present.
     pub expected: Option<ObservedEvent>,
-    /// Event in the actual (second) observation, if present.
+    /// Event in the actual observation, if present.
     pub actual: Option<ObservedEvent>,
 }
 
-/// Result of a multi-baseline comparison.
+/// Result of comparing CellGov against multiple baselines.
 ///
-/// Compares a CellGov observation against multiple oracle baselines
-/// (e.g. RPCS3 interpreter + RPCS3 LLVM). First checks whether the
-/// oracles agree with each other; if they disagree the result is
-/// `UnsettledOracle` regardless of what CellGov produced.
+/// Unsettled when baselines disagree: if any two baselines differ under `mode`,
+/// classification is `UnsettledOracle` regardless of CellGov, and
+/// `cellgov_result` is `None`. Otherwise CellGov is compared against the first
+/// baseline (all baselines are equivalent under `mode` when the oracle settles).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultiCompareResult {
     /// Overall classification.
     pub classification: Classification,
-    /// Which comparison mode was used.
+    /// Mode used for every sub-comparison.
     pub mode: CompareMode,
-    /// If the oracles disagree, this holds the comparison between
-    /// the first two baselines that diverged.
+    /// First pairwise baseline disagreement, if oracles did not settle.
     pub oracle_divergence: Option<CompareResult>,
-    /// If the oracles agree, this holds the comparison between
-    /// the agreed oracle and the CellGov observation.
+    /// CellGov vs. first baseline, if oracles settled.
     pub cellgov_result: Option<CompareResult>,
 }
 
-/// Compare a CellGov observation against multiple oracle baselines.
+/// Compare a CellGov observation against multiple baselines.
 ///
-/// Returns `UnsettledOracle` if any two baselines disagree under the
-/// given mode. Returns `Match` or `Divergence` based on comparing
-/// CellGov against the first baseline (all baselines are identical
-/// under the mode if the oracle is settled).
+/// # Panics
 ///
 /// Panics if `baselines` is empty.
 pub fn compare_multi(
@@ -92,7 +82,6 @@ pub fn compare_multi(
 ) -> MultiCompareResult {
     assert!(!baselines.is_empty(), "at least one baseline required");
 
-    // Check oracle agreement: compare every baseline against the first.
     for i in 1..baselines.len() {
         let oracle_cmp = compare(&baselines[0], &baselines[i], mode);
         if oracle_cmp.classification == Classification::Divergence {
@@ -105,7 +94,6 @@ pub fn compare_multi(
         }
     }
 
-    // Oracles agree. Compare CellGov against the first baseline.
     let result = compare(&baselines[0], cellgov, mode);
     let classification = result.classification;
     MultiCompareResult {
@@ -121,20 +109,17 @@ pub fn compare_multi(
 pub struct CompareResult {
     /// Overall classification.
     pub classification: Classification,
-    /// Which comparison mode was used.
+    /// Mode used.
     pub mode: CompareMode,
     /// Set when outcomes differ.
     pub outcome_mismatch: Option<(ObservedOutcome, ObservedOutcome)>,
-    /// First memory divergence found, if any.
+    /// First memory divergence, if any.
     pub memory_divergence: Option<MemoryDivergence>,
-    /// First event divergence found, if any.
+    /// First event divergence, if any.
     pub event_divergence: Option<EventDivergence>,
 }
 
-/// Compare two observations under the given mode.
-///
-/// `expected` is typically the oracle (RPCS3 or saved baseline).
-/// `actual` is typically the CellGov observation.
+/// Compare two observations under `mode`, returning the first differing field.
 pub fn compare(expected: &Observation, actual: &Observation, mode: CompareMode) -> CompareResult {
     let outcome_mismatch = if expected.outcome != actual.outcome {
         Some((expected.outcome, actual.outcome))
@@ -175,9 +160,7 @@ pub fn compare(expected: &Observation, actual: &Observation, mode: CompareMode) 
     }
 }
 
-/// Find the first byte-level difference between two sets of named
-/// memory regions. Regions are matched by name. A region present in
-/// one set but not the other counts as a divergence at offset 0.
+/// Regions match by name; a region in one side but not the other diverges at offset 0.
 fn find_memory_divergence(
     expected: &[NamedMemoryRegion],
     actual: &[NamedMemoryRegion],
@@ -210,7 +193,6 @@ fn find_memory_divergence(
             }
         }
     }
-    // Also check for regions in actual that are not in expected.
     for act in actual {
         if !expected.iter().any(|r| r.name == act.name) {
             return Some(MemoryDivergence {
@@ -224,8 +206,7 @@ fn find_memory_divergence(
     None
 }
 
-/// Find the first difference between two event sequences. In prefix
-/// mode, only compares up to the length of the shorter sequence.
+/// In prefix mode, compares only up to the shorter sequence length.
 fn find_event_divergence(
     expected: &[ObservedEvent],
     actual: &[ObservedEvent],
@@ -543,8 +524,6 @@ mod tests {
         let r = compare(&a, &b, CompareMode::Strict);
         assert_eq!(r.classification, Classification::Match);
     }
-
-    // -- multi-baseline tests --
 
     #[test]
     fn multi_single_baseline_match() {

@@ -1,10 +1,7 @@
 //! SPU instruction decoder.
 //!
-//! Pure function: 32-bit raw word in, typed `SpuInstruction` out.
-//! No state, no Effects, no runtime knowledge. Field extraction only.
-//!
-//! SPU instructions are fixed-width 32-bit, big-endian. The opcode
-//! occupies the most significant bits, with format-dependent lengths:
+//! SPU instructions are fixed-width 32-bit, big-endian. Opcode width
+//! varies by format:
 //!
 //! - RRR  (4-bit opcode):  bits `[0:3]`
 //! - RR   (11-bit opcode): bits `[0:10]`
@@ -17,8 +14,10 @@ use crate::instruction::{SpuDecodeError, SpuInstruction};
 
 /// Decode a 32-bit SPU instruction word.
 ///
-/// Returns `Err(SpuDecodeError::Unsupported(raw))` for any encoding
-/// not yet implemented.
+/// # Errors
+///
+/// Returns [`SpuDecodeError::Unsupported`] for encodings not
+/// implemented.
 pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
     let op4 = (raw >> 28) & 0xF;
     let op7 = (raw >> 25) & 0x7F;
@@ -26,14 +25,12 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
     let op9 = (raw >> 23) & 0x1FF;
     let op11 = (raw >> 21) & 0x7FF;
 
-    // Extract common fields
     let rt7 = (raw & 0x7F) as u8;
     let ra7 = ((raw >> 7) & 0x7F) as u8;
     let rb7 = ((raw >> 14) & 0x7F) as u8;
 
-    // RRR format (4-bit opcode) -- shufb
+    // RRR: OP[0:3] RT[4:10] RB[11:17] RA[18:24] RC[25:31].
     if op4 == 0xB {
-        // RRR format: OP[0:3] RT[4:10] RB[11:17] RA[18:24] RC[25:31]
         return Ok(SpuInstruction::Shufb {
             rt: ((raw >> 21) & 0x7F) as u8,
             ra: ((raw >> 7) & 0x7F) as u8,
@@ -42,9 +39,8 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         });
     }
 
-    // RR format / RI7 format (11-bit opcode)
+    // RR / RI7 (11-bit opcode).
     match op11 {
-        // Channel operations
         0x00D => {
             return Ok(SpuInstruction::Rdch {
                 rt: rt7,
@@ -57,23 +53,18 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 rt: rt7,
             })
         }
-        // Stop
         0x000 => {
             return Ok(SpuInstruction::Stop {
                 signal: (raw & 0x3FFF) as u16,
             })
         }
-        // Branch indirect
         0x1A8 => return Ok(SpuInstruction::Bi { ra: ra7 }),
-        // Nop / lnop / sync / heq
         0x201 => return Ok(SpuInstruction::Nop),
         0x001 => return Ok(SpuInstruction::Lnop),
         0x002 => return Ok(SpuInstruction::Sync),
         0x3D8 => return Ok(SpuInstruction::Heq),
-        // Hint for branch
         0x1AC => return Ok(SpuInstruction::Hbr),
         0x1B0 | 0x1B1 => return Ok(SpuInstruction::Hbrp),
-        // RR arithmetic/logical
         0x0C0 => {
             return Ok(SpuInstruction::A {
                 rt: rt7,
@@ -109,7 +100,6 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 rb: rb7,
             })
         }
-        // Generate controls
         0x1F4 => {
             return Ok(SpuInstruction::Cbd {
                 rt: rt7,
@@ -127,10 +117,9 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         _ => {}
     }
 
-    // RI7 format (11-bit opcode, 7-bit immediate in bits [11:17])
-    let i7 = rb7; // same bit position as rb in RR format
+    // RI7: 7-bit immediate shares bit position with rb in RR format.
+    let i7 = rb7;
     if op11 == 0x1FF {
-        // shlqbyi: shift left quadword by bytes immediate
         return Ok(SpuInstruction::Shlqbyi {
             rt: rt7,
             ra: ra7,
@@ -138,7 +127,7 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         });
     }
 
-    // RI10 format (8-bit opcode)
+    // RI10 (8-bit opcode, 10-bit immediate at [14:23]).
     let i10 = ((raw >> 14) & 0x3FF) as u16;
     match op8 {
         0x34 => {
@@ -200,7 +189,7 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         _ => {}
     }
 
-    // RI16 format (9-bit opcode)
+    // RI16 (9-bit opcode, 16-bit immediate at [7:22]).
     let i16_raw = ((raw >> 7) & 0xFFFF) as u16;
     let i16_signed = i16_raw as i16;
     let i16_offset = i16_signed as i32;
@@ -269,13 +258,13 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         _ => {}
     }
 
-    // RI18 format (7-bit opcode)
+    // RI18 (7-bit opcode, 18-bit immediate at [7:24]).
     if op7 == 0x21 {
         let imm = (raw >> 7) & 0x3FFFF;
         return Ok(SpuInstruction::Ila { rt: rt7, imm });
     }
 
-    // hbrr: 7-bit prefix 0001001 (bits [0:6]), ROH in [7:8]
+    // hbrr: prefix 0001001 in bits [0:6], ROH in [7:8].
     if op7 == 0x09 {
         return Ok(SpuInstruction::Hbrr);
     }
@@ -283,7 +272,6 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
     Err(SpuDecodeError::Unsupported(raw))
 }
 
-/// Sign-extend a 10-bit value to i16.
 fn sign_extend_10(val: u16) -> i16 {
     if val & 0x200 != 0 {
         (val | 0xFC00) as i16

@@ -1,32 +1,8 @@
 #![deny(unused_must_use)]
-//! cellgov_core -- top-level runtime orchestration.
-//!
-//! Owns:
-//!
-//! - the `Runtime` struct
-//! - the scheduler loop
-//! - the unit registry seam (assigns `UnitId`, records constructor params,
-//!   handles dynamic spawning through the same path used by static units)
-//! - commit cycle coordination
-//! - stable ordering rules
-//!
-//! No device-specific logic beyond orchestration. Concrete scheduler types
-//! must not be exposed across crate boundaries -- only traits and small
-//! immutable data packets cross.
-//!
-//! Runtime pipeline (one pass per unit yield):
-//!
-//! 1. select runnable unit deterministically
-//! 2. grant budget
-//! 3. run unit until yield
-//! 4. collect emitted effects
-//! 5. validate effects
-//! 6. stage commit batch
-//! 7. apply commit batch to shared visible state
-//! 8. inject resulting events/wakeups via status overrides, the DMA
-//!    completion queue, and the syscall response table
-//! 9. advance guest time / epoch deterministically
-//! 10. trace every decision
+//! Top-level runtime orchestration: the `Runtime` struct, scheduler loop,
+//! unit registry, commit coordination, and stable-ordering rules. No
+//! architecture-specific logic; only traits and immutable data packets
+//! cross crate boundaries.
 
 pub mod commit;
 pub mod hle;

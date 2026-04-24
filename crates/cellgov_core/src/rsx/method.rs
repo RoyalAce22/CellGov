@@ -780,18 +780,7 @@ mod tests {
         decode_header(cmd)
     }
 
-    // Helper: construct a well-formed increment method header
-    // (method << 0 | count << 18). The advance pass reads FIFO
-    // bytes as little-endian u32 and passes host-endian values
-    // to decode_header; this helper matches that path by producing
-    // the host-endian u32 directly.
-    //
-    // Both fields are masked to their valid widths. A typo like
-    // `0x800` in an unmasked shift would produce bit 29 =
-    // NV_FLAG_JUMP, silently building a control-flow command.
-    // Callers that want to deliberately construct a malformed or
-    // out-of-range header do so by combining raw bits directly,
-    // not through this helper.
+    // Mask both fields so a typo cannot silently set a control-flow flag bit.
     fn method_header(method: u32, count: u32) -> u32 {
         ((count & NV_COUNT_MASK_11) << NV_COUNT_SHIFT) | (method & NV_METHOD_MASK)
     }
@@ -802,17 +791,12 @@ mod tests {
 
     #[test]
     fn nop_is_zero_count_increment() {
-        // Sony: CELL_GCM_METHOD_NOP = 0x00000000. "It is also
-        // possible for the method NOP to deem the method count in
-        // the method header to be 0."
         let h = hdr(0x0000_0000);
         assert_eq!(h, NvMethodHeader::normal(NvCommandKind::Increment, 0, 0));
     }
 
     #[test]
     fn increment_normal_method() {
-        // A cellGcmSetReferenceCommand call emits one increment
-        // method at NV406E_SET_REFERENCE with one arg.
         let h = hdr(method_header(NV406E_SET_REFERENCE as u32, 1));
         assert_eq!(h.kind, NvCommandKind::Increment);
         assert_eq!(h.method, NV406E_SET_REFERENCE);
@@ -821,8 +805,6 @@ mod tests {
 
     #[test]
     fn increment_semaphore_pair() {
-        // SEMAPHORE_OFFSET + SEMAPHORE_RELEASE are each issued as
-        // single-arg increment methods.
         let off = hdr(method_header(NV406E_SEMAPHORE_OFFSET as u32, 1));
         let rel = hdr(method_header(NV406E_SEMAPHORE_RELEASE as u32, 1));
         assert_eq!(off.method, 0x0064);
@@ -833,7 +815,6 @@ mod tests {
 
     #[test]
     fn non_increment_method() {
-        // DrawIndexArray-style NI header with NV_FLAG_NON_INCREMENT.
         let h = hdr(method_header_ni(0x1818, 32));
         assert_eq!(h.kind, NvCommandKind::NonIncrement);
         assert_eq!(h.method, 0x1818);
@@ -842,8 +823,6 @@ mod tests {
 
     #[test]
     fn count_field_spans_11_bits() {
-        // Max count is 2047 (CELL_GCM_MAX_METHOD_COUNT). Higher values
-        // truncate to the 11-bit field.
         let h = hdr(method_header(0x0100, 2047));
         assert_eq!(h.count, 2047);
         let h = hdr(method_header(0x0100, 0x7FF));
@@ -852,30 +831,21 @@ mod tests {
 
     #[test]
     fn method_address_preserves_subchannel_bits() {
-        // Sony's method address range includes the Nvidia-level
-        // subchannel bits (13..=15). We preserve the full 14-bit
-        // field: 0xFEAC (GCM_FLIP_COMMAND) round-trips.
         let h = hdr(method_header(GCM_FLIP_COMMAND as u32, 1));
         assert_eq!(h.method, 0xFEAC);
     }
 
     #[test]
     fn method_address_zero_in_low_bits() {
-        // Bits 0..=1 of the method field are always zero. A
-        // caller-side bug that passes a non-aligned method is
-        // silently masked; the decoder never sees nonzero low bits
-        // because NV_METHOD_MASK (0xFFFC) drops them.
-        let raw = method_header(0x0053, 1); // 0x53 has bit 0 set
+        let raw = method_header(0x0053, 1);
         let h = hdr(raw);
         assert_eq!(h.method, 0x0050, "low 2 bits masked off");
     }
 
     #[test]
     fn old_jump_decodes() {
-        // Sony's CELL_GCM_JUMP(offset) = offset | 0x20000000.
-        let h = hdr(0x2000_1000 | NV_FLAG_JUMP); // offset 0x1000, JUMP flag
+        let h = hdr(0x2000_1000 | NV_FLAG_JUMP);
         assert_eq!(h.kind, NvCommandKind::Jump { offset: 0x1000 });
-        // A realistic jump: offset 0x40000 set with the flag.
         let h = hdr(NV_FLAG_JUMP | 0x0004_0000);
         assert_eq!(
             h.kind,
@@ -887,13 +857,6 @@ mod tests {
 
     #[test]
     fn old_jump_maximum_offset_fits_29_bits() {
-        // The old-JUMP offset field occupies bits 2..=28 (bottom 2
-        // zero, top limit is bit 28 because bit 29 is the JUMP flag
-        // itself). The maximum representable offset is 0x1FFF_FFFC.
-        // A header with the JUMP flag + this maximum offset decodes
-        // cleanly; any bit above 28 that is not the JUMP flag would
-        // fail the classification mask and take the malformed path,
-        // not the Jump path.
         let h = hdr(NV_FLAG_JUMP | 0x1FFF_FFFC);
         assert_eq!(
             h.kind,
@@ -905,11 +868,6 @@ mod tests {
 
     #[test]
     fn old_jump_with_bit_31_set_is_malformed() {
-        // Bit 31 is a reserved bit that the old-JUMP classification
-        // mask (0xE000_0003) requires to be zero. A cmd that sets
-        // both NV_FLAG_JUMP and bit 31 fails the mask -- it is NOT
-        // a Jump, it is Malformed. This pins the priority of the
-        // NON_METHOD_MASK check over loose offset interpretation.
         let h = hdr(0x8000_0000 | NV_FLAG_JUMP);
         match h.kind {
             NvCommandKind::Malformed { .. } => {}
@@ -919,8 +877,6 @@ mod tests {
 
     #[test]
     fn new_jump_decodes() {
-        // NEW_JUMP = bit 0 set, bits 29..=30 clear. 30-bit offset
-        // via NV_NEW_JUMP_OFFSET_MASK.
         let h = hdr(NV_FLAG_NEW_JUMP | 0x0003_0000);
         assert_eq!(
             h.kind,
@@ -932,7 +888,6 @@ mod tests {
 
     #[test]
     fn call_decodes() {
-        // CALL = bit 1 set. Offset bits 2..=28.
         let h = hdr(NV_FLAG_CALL | 0x0010_1000);
         assert_eq!(
             h.kind,
@@ -944,15 +899,12 @@ mod tests {
 
     #[test]
     fn return_decodes() {
-        // RETURN = 0x00020000 exactly.
         let h = hdr(NV_FLAG_RETURN);
         assert_eq!(h.kind, NvCommandKind::Return);
     }
 
     #[test]
     fn return_with_extra_bits_is_malformed() {
-        // RETURN has a strict mask. Any extra count / method bits
-        // trip the malformed path.
         let h = hdr(NV_FLAG_RETURN | 0x0004_0000);
         match h.kind {
             NvCommandKind::Malformed { raw } => {
@@ -964,8 +916,6 @@ mod tests {
 
     #[test]
     fn malformed_with_bit_31_set() {
-        // Bit 31 is reserved; a set bit 31 with no recognised
-        // control-flow mask is malformed.
         let h = hdr(0x8000_0000);
         match h.kind {
             NvCommandKind::Malformed { raw } => assert_eq!(raw, 0x8000_0000),
@@ -975,8 +925,6 @@ mod tests {
 
     #[test]
     fn malformed_with_reserved_bit_16_set() {
-        // Bits 16..=17 are reserved (outside RETURN's specific
-        // pattern). Bit 16 alone is malformed.
         let h = hdr(0x0001_0000);
         match h.kind {
             NvCommandKind::Malformed { raw } => assert_eq!(raw, 0x0001_0000),
@@ -986,18 +934,6 @@ mod tests {
 
     #[test]
     fn jump_plus_new_jump_is_malformed() {
-        // Both JUMP flags set simultaneously: bits 0 and 29 both
-        // set. Hardware / RPCS3 checks are: NEW_JUMP requires
-        // (cmd & 0xE0000003) == 0x1. With bit 29 also set, the
-        // non-method prefix is 0x20000001 != 0x1, so NEW_JUMP
-        // fails. OLD_JUMP requires (cmd & 0xE0000003) == 0x20000000;
-        // prefix is 0x20000001 != 0x20000000, so OLD_JUMP fails
-        // too. Falls to the NON_METHOD_MASK catch-all -> Malformed.
-        //
-        // This test pins the edge case where BOTH flags set
-        // produces Malformed, because neither classifier's strict
-        // prefix check accepts it. Single-flag combinations of
-        // CALL + other flags land as CALL (see below).
         let h = hdr(NV_FLAG_JUMP | NV_FLAG_NEW_JUMP);
         match h.kind {
             NvCommandKind::Malformed { .. } => {}
@@ -1007,21 +943,6 @@ mod tests {
 
     #[test]
     fn return_plus_call_decodes_as_call_per_hardware() {
-        // RETURN bit + CALL bit set. Hardware / RPCS3 behaviour:
-        // RETURN's strict exact-equal check fails (0x00020002 !=
-        // 0x00020000). CALL's check is `(cmd & 0x3) == 0x2`, which
-        // succeeds. Result: Call with offset derived from the full
-        // word masked to the 29-bit offset field. The RETURN bit
-        // is folded into the Call offset.
-        //
-        // This is arguably silent-laundering from a bug-detection
-        // standpoint, but it matches real NV2A behaviour -- the
-        // FIFO parser identifies a CALL by bits 0..=1 alone and
-        // ignores stray high bits. Diverging from this would break
-        // cross-runner comparison against RPCS3 on pathological
-        // inputs. Other oracle machinery (state hashing, cross-
-        // runner observation) is responsible for catching corrupt
-        // commands.
         let h = hdr(NV_FLAG_RETURN | NV_FLAG_CALL);
         match h.kind {
             NvCommandKind::Call { offset } => {
@@ -1033,12 +954,6 @@ mod tests {
 
     #[test]
     fn return_plus_new_jump_decodes_as_new_jump_per_hardware() {
-        // Analogous to RETURN + CALL. RETURN's strict check fails.
-        // CALL check fails (bits 0..=1 == 0b01, not 0b10).
-        // NEW_JUMP check: (cmd & 0xE0000003) == 0x00000001?
-        // cmd = 0x00020001, masked = 0x00000001 == NV_FLAG_NEW_JUMP.
-        // Succeeds. Offset masked from bits 2..=31 folds the
-        // RETURN bit in.
         let h = hdr(NV_FLAG_RETURN | NV_FLAG_NEW_JUMP);
         match h.kind {
             NvCommandKind::NewJump { offset } => {
@@ -1050,19 +965,9 @@ mod tests {
 
     #[test]
     fn call_with_bit_31_set_decodes_as_call_per_hardware() {
-        // CALL + reserved bit 31. CALL's mask is just 0x3, so this
-        // passes CALL classification. Bit 31 is masked off when
-        // computing the offset (NV_CALL_OFFSET_MASK = 0x1FFFFFFC).
-        //
-        // Hardware-matching behaviour: real NV2A FIFO accepts this
-        // as CALL and the high bits are ignored. A strict-
-        // classification decoder would flag it as Malformed, but
-        // we prefer cross-runner fidelity.
         let h = hdr(0x8000_0000 | NV_FLAG_CALL);
         match h.kind {
             NvCommandKind::Call { offset } => {
-                // Bit 31 masked out; offset is zero because no
-                // other bits in 2..=28 were set.
                 assert_eq!(offset, 0);
             }
             other => panic!("expected Call, got {:?}", other),
@@ -1071,10 +976,6 @@ mod tests {
 
     #[test]
     fn call_with_jump_flag_decodes_as_call_per_hardware() {
-        // JUMP (bit 29) + CALL (bit 1). CALL check wins because
-        // it runs first and only looks at bits 0..=1. The JUMP
-        // flag is folded into the CALL offset. Same trade-off as
-        // above: matches hardware / RPCS3, not strictness.
         let h = hdr(NV_FLAG_JUMP | NV_FLAG_CALL);
         match h.kind {
             NvCommandKind::Call { offset } => {
@@ -1086,8 +987,6 @@ mod tests {
 
     #[test]
     fn bit_31_alone_is_malformed() {
-        // Bit 31 set with no control-flow flag. Fails every
-        // recognised pattern and hits the NON_METHOD_MASK catch-all.
         let h = hdr(0x8000_0000);
         match h.kind {
             NvCommandKind::Malformed { raw } => assert_eq!(raw, 0x8000_0000),
@@ -1097,20 +996,6 @@ mod tests {
 
     #[test]
     fn return_bit_with_stray_method_is_malformed() {
-        // RETURN's strict exact-equal check requires cmd ==
-        // 0x00020000. Any stray method-address bits alongside
-        // the RETURN flag take the malformed path via
-        // NON_METHOD_MASK (bit 17 is set, other patterns fail).
-        // CellGov is stricter than RPCS3 here -- RPCS3 accepts
-        // (cmd & 0xffff0003) == 0x00020000, allowing stray method-
-        // address bits to ride along. The asymmetry with CALL /
-        // JUMP / NEW_JUMP (which we match RPCS3 loosely on) is
-        // principled: RETURN has no offset or argument field, so
-        // every bit outside bit 17 is unambiguously garbage. The
-        // other control-flow forms carry wide offset fields
-        // (bits 2..=28 or 2..=31), so strict classification there
-        // would reject legitimate offsets. Being strict costs
-        // nothing where there is nothing legitimate to reject.
         let h = hdr(NV_FLAG_RETURN | 0x0000_0050);
         match h.kind {
             NvCommandKind::Malformed { raw } => {
@@ -1135,8 +1020,6 @@ mod tests {
         assert!(t.lookup(GCM_FLIP_COMMAND).is_none());
     }
 
-    // Helper: build a fresh context wired to local state. Tests
-    // inspect the locals afterward to see what the handler did.
     fn fresh_state() -> (RsxFifoCursor, u32, Vec<Effect>) {
         (RsxFifoCursor::new(), 0u32, Vec::new())
     }
@@ -1201,10 +1084,7 @@ mod tests {
         assert_eq!(t.len(), 1, "failed unique-registration does not mutate");
     }
 
-    // Shared atomic counters observable per handler. Any future test
-    // that reuses `trun_*_handler` must reset these in its setup;
-    // `table_register_unique_does_not_overwrite_on_failure` is
-    // currently the only consumer.
+    // Reset TRUN_*_CALLS before each test that reuses trun_*_handler.
     use std::sync::atomic::{AtomicU32, Ordering};
     static TRUN_A_CALLS: AtomicU32 = AtomicU32::new(0);
     static TRUN_B_CALLS: AtomicU32 = AtomicU32::new(0);
@@ -1217,11 +1097,9 @@ mod tests {
 
     #[test]
     fn table_register_unique_does_not_overwrite_on_failure() {
-        // Side-channel verification: each handler increments its own
-        // atomic counter. After a failed register_unique, dispatching
-        // the stored handler must increment A's counter, not B's.
-        // A plain "lookup returns Some" check would pass even if the
-        // registration overwrote on failure, because B is also Some.
+        // Side-channel check: a lookup-returns-Some assertion would
+        // pass even if the overwrite had succeeded, so observe which
+        // handler actually fires via its counter.
         TRUN_A_CALLS.store(0, Ordering::SeqCst);
         TRUN_B_CALLS.store(0, Ordering::SeqCst);
 
@@ -1262,9 +1140,6 @@ mod tests {
 
     #[test]
     fn nv406e_semaphore_offset_noop_on_empty_args() {
-        // Malformed FIFO shape: zero arguments where one is expected.
-        // Handler must leave prior sem_offset untouched rather than
-        // pretending the stream was valid by defaulting to zero.
         let mut cursor = RsxFifoCursor::new();
         let mut sem_offset: u32 = 0xDEAD_BEEF;
         let mut emitted: Vec<Effect> = Vec::new();
@@ -1299,10 +1174,6 @@ mod tests {
 
     #[test]
     fn nv406e_offset_release_pair_threads_offset_through_emitted_write() {
-        // Canonical pattern: OFFSET then RELEASE. The release must
-        // carry the offset set by the prior OFFSET, not the initial
-        // zero. This is the core correctness contract between the
-        // two handlers.
         let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
         let mut ctx = ctx_for(&mut cursor, &mut sem_offset, &mut emitted);
         nv406e_semaphore_offset(&mut ctx, &[0x100]);
@@ -1318,10 +1189,6 @@ mod tests {
 
     #[test]
     fn nv406e_release_without_prior_offset_uses_current_sem_offset() {
-        // Stream bug reproduction: RELEASE fires with no prior
-        // OFFSET. Handler emits using sem_offset's current value
-        // (zero by default). Oracle semantics: do not invent an
-        // offset, record what the stream produced.
         let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
         let mut ctx = ctx_for(&mut cursor, &mut sem_offset, &mut emitted);
         nv406e_semaphore_release(&mut ctx, &[9]);
@@ -1348,9 +1215,6 @@ mod tests {
 
     #[test]
     fn nv406e_set_reference_noop_on_empty_args() {
-        // Malformed FIFO shape: zero args where one is expected.
-        // Leave cursor.current_reference unchanged. Mirrors the
-        // semaphore_offset noop-on-empty contract.
         let mut cursor = RsxFifoCursor::new();
         cursor.set_reference(0xDEAD_BEEF);
         let mut sem_offset = 0u32;
@@ -1390,10 +1254,6 @@ mod tests {
 
     #[test]
     fn nv4097_flip_buffer_truncates_large_arg_to_buffer_index_byte() {
-        // Sony's cellGcmSetFlip packs the display buffer id (0..=7)
-        // into the low byte of the method argument; higher bits are
-        // unused on shipping titles. The handler preserves the low
-        // 8 bits and truncates the rest; the test pins this rule.
         let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
         let mut ctx = ctx_for(&mut cursor, &mut sem_offset, &mut emitted);
         nv4097_flip_buffer(&mut ctx, &[0x1234_56FF]);
@@ -1436,11 +1296,6 @@ mod tests {
             &mut emitted,
             GuestTicks::new(0x1234),
         );
-        // Report arg: the full 32 bits reach through to the
-        // emitted offset so a microtest with label_base=0 can
-        // target statics at their absolute guest addresses. Real
-        // titles with cellGcmInit set label_base to the label
-        // region and the low 24 bits address into it.
         let report_arg = 0x0100_0040u32;
         nv4097_get_report(&mut ctx, &[report_arg]);
         assert_eq!(
@@ -1454,8 +1309,6 @@ mod tests {
 
     #[test]
     fn nv4097_get_report_uses_guest_ticks_as_value() {
-        // Same arg, different clock, different emitted value.
-        // Pins the "value = now.raw() as u32" contract.
         fn emit_with_time(ticks: u64) -> u32 {
             let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
             let mut ctx = ctx_with_time(
@@ -1472,20 +1325,12 @@ mod tests {
         }
         assert_eq!(emit_with_time(0), 0);
         assert_eq!(emit_with_time(1_000), 1_000);
-        // High-order bits truncate because real PS3 reports only
-        // the low 32 bits of the timestamp fit in the 4-byte slot
-        // the oracle writes.
+        // Truncation to low 32 bits is the oracle's timestamp-slot contract.
         assert_eq!(emit_with_time(0x1_0000_0001), 1);
     }
 
     #[test]
     fn nv4097_get_report_passes_full_u32_as_offset() {
-        // Upper 8 bits of the arg carry a report-type tag on real
-        // PS3 hardware but are included in the emitted offset by
-        // the oracle. This lets microtests with label_base=0
-        // target statics by absolute address; real titles set
-        // label_base to the cellGcmInit label region and the
-        // low 24 bits address into it.
         let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
         let mut ctx = ctx_with_time(
             &mut cursor,
@@ -1537,9 +1382,6 @@ mod tests {
 
     #[test]
     fn back_end_semaphore_value_swap_is_its_own_inverse() {
-        // Sony's pre-swap is an involution: swap(swap(x)) == x.
-        // Round-tripping the guest-side pre-swap and the hardware
-        // un-swap recovers the original value.
         for sample in [
             0x0000_0000u32,
             0xFFFF_FFFFu32,
@@ -1557,9 +1399,6 @@ mod tests {
 
     #[test]
     fn back_end_semaphore_value_swap_exchanges_bytes_0_and_2() {
-        // Direct invariant: bytes 0 and 2 swap, bytes 1 and 3
-        // stay in place. Pins the exact bit layout documented in
-        // Sony's cellGcmSetWriteBackEndLabel inline.
         assert_eq!(
             back_end_semaphore_value_swap(0x1122_3344),
             0x1144_3322,
@@ -1588,14 +1427,11 @@ mod tests {
 
     #[test]
     fn nv4097_back_end_release_emits_label_write_with_byte_swap() {
-        // Guest pre-swaps 0x1122_3344 -> 0x1144_3322 before emitting.
-        // Oracle un-swaps: the final RsxLabelWrite carries
-        // 0x1122_3344 (the original intent).
         let mut cursor = RsxFifoCursor::new();
         let mut sem_offset: u32 = 0x20;
         let mut emitted: Vec<Effect> = Vec::new();
         let mut ctx = ctx_for(&mut cursor, &mut sem_offset, &mut emitted);
-        // The "FIFO arg" is the ALREADY-pre-swapped value the guest wrote.
+        // fifo_arg is the already-pre-swapped value the guest wrote.
         let fifo_arg = 0x1144_3322u32;
         nv4097_back_end_write_semaphore_release(&mut ctx, &[fifo_arg]);
         assert_eq!(
@@ -1617,15 +1453,10 @@ mod tests {
 
     #[test]
     fn nv4097_back_end_pair_threads_offset_through_emitted_write_post_swap() {
-        // End-to-end: the guest-level cellGcmSetWriteBackEndLabel
-        // emits OFFSET + BACK_END_RELEASE in sequence. The oracle
-        // reproduces the pair with byte-swap undone on the
-        // release. Pins the round-trip identity for the canonical
-        // write sequence.
         let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
         let mut ctx = ctx_for(&mut cursor, &mut sem_offset, &mut emitted);
         nv4097_set_semaphore_offset(&mut ctx, &[0x10]);
-        // Pre-swap of 0xAABB_CCDD is 0xAADD_CCBB.
+        // 0xAADD_CCBB is the pre-swap of 0xAABB_CCDD.
         nv4097_back_end_write_semaphore_release(&mut ctx, &[0xAADD_CCBB]);
         assert_eq!(
             emitted.as_slice(),
@@ -1718,8 +1549,6 @@ mod tests {
         let err = register_nv406e_label_handlers(&mut t)
             .expect_err("OFFSET already present must collide");
         assert_eq!(err.method, NV406E_SEMAPHORE_OFFSET);
-        // Release was not inserted because the function bails on
-        // the first collision.
         assert!(t.lookup(NV406E_SEMAPHORE_RELEASE).is_none());
     }
 
@@ -1731,20 +1560,13 @@ mod tests {
         let err = register_nv406e_label_handlers(&mut t)
             .expect_err("RELEASE already present must collide");
         assert_eq!(err.method, NV406E_SEMAPHORE_RELEASE);
-        // Offset WAS inserted (it registered first before the
-        // release collided). Callers that treat
-        // `register_nv406e_label_handlers` as all-or-nothing must
-        // build on a fresh table.
+        // Offset registers before the release collision, so it
+        // remains in the table. The helper is not all-or-nothing.
         assert!(t.lookup(NV406E_SEMAPHORE_OFFSET).is_some());
     }
 
     #[test]
     fn nv_constant_values_pin_rpcs3_lineage() {
-        // Pin the numeric values sourced from RPCS3's RSX headers
-        // (Emu/RSX/nv406e.h, Emu/RSX/nv4097.h, Emu/RSX/gcm_enums.h)
-        // and the NV2A hardware conventions documented in envytools.
-        // Any drift here means a constant was transcribed wrong or
-        // the upstream source changed incompatibly.
         assert_eq!(NV406E_SET_REFERENCE, 0x0050);
         assert_eq!(NV406E_SEMAPHORE_OFFSET, 0x0064);
         assert_eq!(NV406E_SEMAPHORE_ACQUIRE, 0x0068);

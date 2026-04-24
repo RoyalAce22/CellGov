@@ -1,13 +1,8 @@
-//! PS3 PRX import/export table parser.
+//! PS3 PRX import table parser and HLE trampoline binder.
 //!
-//! Parses the `ppu_proc_prx_param_t` structure from the PT_0x60000002
-//! program header and walks the `ppu_prx_module_info` entries in the
-//! import (libstub) array. This is the standard PS3 SDK format used
-//! by every PS3 executable to declare its imported system library
-//! functions.
-//!
-//! The parser works on raw ELF bytes and committed guest memory. It
-//! does not depend on any specific game title.
+//! Walks the `ppu_proc_prx_param_t` in PT_0x60000002 to enumerate
+//! imported modules / NIDs / OPD slots, then writes HLE trampolines
+//! into guest memory and patches the GOT to point at them.
 
 use crate::loader;
 
@@ -25,10 +20,8 @@ pub struct ImportedModule {
 pub struct ImportedFunction {
     /// Function NID (Numeric ID) -- a 32-bit hash identifying the function.
     pub nid: u32,
-    /// Guest address of the GOT-style slot for this import. The
-    /// binder patches this slot with the guest address of an OPD
-    /// (function descriptor) so callers dereference it as a normal
-    /// PPC function pointer.
+    /// GOT slot the binder overwrites with an OPD guest address so
+    /// callers dereference it as a normal PPC function pointer.
     pub stub_addr: u32,
 }
 
@@ -49,16 +42,9 @@ const PT_PRX_PARAM: u32 = 0x6000_0002;
 /// Expected magic value in ppu_proc_prx_param_t.
 const PRX_PARAM_MAGIC: u32 = 0x1b43_4cec;
 
-/// Parse all imported modules from a PS3 ELF binary.
-///
-/// Reads the PT_0x60000002 program header to locate the
-/// `ppu_proc_prx_param_t`, then walks the libstub array to enumerate
-/// every imported module and its function NIDs + OPD addresses.
-///
-/// `data` is the full ELF image; addresses inside the PRX param
-/// structure are resolved against the ELF's own segments.
+/// Enumerate every imported module and its (NID, GOT slot) entries
+/// by walking the libstub array in PT_0x60000002.
 pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseError> {
-    // Find PT_0x60000002 program header.
     if data.len() < 64 {
         return Err(ImportParseError::OutOfBounds);
     }
@@ -85,15 +71,8 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
         return Err(ImportParseError::OutOfBounds);
     }
 
-    // ppu_proc_prx_param_t layout:
-    //   u32 size
-    //   u32 magic (0x1b434cec)
-    //   u32 version
-    //   u32 unk0
-    //   u32 libent_start (exports)
-    //   u32 libent_end
-    //   u32 libstub_start (imports)
-    //   u32 libstub_end
+    // ppu_proc_prx_param_t: { u32 size, magic, version, unk0,
+    //   libent_start, libent_end, libstub_start, libstub_end }.
     let magic = loader::read_u32(data, param_off + 4);
     if magic != PRX_PARAM_MAGIC {
         return Err(ImportParseError::BadMagic(magic));
@@ -102,10 +81,8 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
     let libstub_start = loader::read_u32(data, param_off + 24) as usize;
     let libstub_end = loader::read_u32(data, param_off + 28) as usize;
 
-    // Build a segment map for vaddr-to-file-offset translation.
     let segments = build_segment_map(data, phoff, phentsize, phnum);
 
-    // Walk the libstub array. Each entry is a ppu_prx_module_info.
     let mut modules = Vec::new();
     let mut addr = libstub_start;
     while addr < libstub_end {
@@ -114,20 +91,9 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
             return Err(ImportParseError::OutOfBounds);
         }
 
-        // ppu_prx_module_info layout:
-        //   u8  size
-        //   u8  unk0
-        //   u16 version
-        //   u16 attributes
-        //   u16 num_func
-        //   u16 num_var
-        //   u16 num_tlsvar
-        //   u8  info_hash
-        //   u8  info_tlshash
-        //   u8  unk1[2]
-        //   u32 name_ptr
-        //   u32 nid_ptr
-        //   u32 stub_ptr
+        // ppu_prx_module_info: { u8 size, unk0, u16 version, attributes,
+        //   num_func, num_var, num_tlsvar, u8 info_hash, info_tlshash,
+        //   u8[2] unk1, u32 name_ptr, nid_ptr, stub_ptr }.
         let entry_size = data[foff] as usize;
         if entry_size == 0 {
             break;
@@ -141,10 +107,8 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
         let nid_ptr = loader::read_u32(data, foff + 20) as usize;
         let stub_ptr = loader::read_u32(data, foff + 24) as usize;
 
-        // Read module name.
         let name = read_cstring(data, &segments, name_ptr);
 
-        // Read NIDs and stub OPD addresses.
         let mut functions = Vec::with_capacity(num_func);
         let nid_foff = vaddr_to_file(&segments, nid_ptr).unwrap_or(0);
         for i in 0..num_func {
@@ -174,30 +138,16 @@ pub fn import_summary(modules: &[ImportedModule]) -> String {
     out
 }
 
-/// Base syscall number for HLE import stubs. Real LV2 syscalls use
-/// numbers below 1024; HLE stubs start at 0x10000 to avoid collision.
+/// Base syscall number for HLE import stubs. Real LV2 syscalls stay
+/// below 1024; HLE stubs start at 0x10000 to avoid collision.
 pub const HLE_SYSCALL_BASE: u32 = 0x10000;
 
 /// NIDs for which CellGov ships a dedicated HLE implementation.
 ///
-/// Consumed by two call sites that must stay in concordant:
-///
-/// 1. `cellgov_cli`'s PRX binder keeps an HLE trampoline for any
-///    NID in this list even when the loaded firmware PRX exports
-///    a real body for it, because the real body depends on
-///    module_start completing full initialization (TLS, heap
-///    arenas) that may not have happened yet.
-/// 2. `cellgov_cli`'s `dump-imports` inventory tool marks each
-///    import as `impl` or `stub` based on whether its NID appears
-///    here.
-///
-/// Previously duplicated across both call sites. Promoted to a
-/// single library-level source of truth so adding a new HLE
-/// implementation in `cellgov_core::hle::dispatch_hle` only
-/// requires updating this list once.
-///
-/// Ordering is by NID value for stable diffing; no runtime code
-/// depends on the order.
+/// Read by the PRX binder (to keep an HLE trampoline over a firmware
+/// body whose init prerequisites may not have run) and by
+/// `dump-imports` (to tag each import `impl` vs `stub`). Ordering is
+/// by NID value for stable diffing.
 pub const HLE_IMPLEMENTED_NIDS: &[u32] = &[
     0x055bd74d, // cellGcmGetTiledPitchSize
     0x15bae46b, // _cellGcmInitBody
@@ -235,43 +185,30 @@ pub struct HleBinding {
     pub stub_addr: u32,
 }
 
-/// Size of each HLE trampoline in guest memory (bytes) for the
-/// `Legacy24` layout. The `Ps3Spec` layout uses a different split
-/// (8-byte OPD plus a separate 16-byte body per binding) and does
-/// not use this constant.
+/// Per-binding trampoline size used by [`HleLayout::Legacy24`]
+/// (8-byte OPD + 16-byte body). `Ps3Spec` splits OPD and body and
+/// does not use this constant.
 pub const TRAMPOLINE_SIZE: u32 = 24;
 
 /// Layout strategy for HLE trampolines.
 #[derive(Debug, Clone, Copy)]
 pub enum HleLayout {
-    /// Legacy: 24-byte trampolines packed at `trampoline_base`. Each
-    /// trampoline carries its own inline `lis/ori/sc/blr` body. The
-    /// OPD points to the inline body. Simple and self-contained, but
-    /// the resulting GOT pointer values do not match RPCS3, which
-    /// uses a different layout.
+    /// 24 bytes per binding at `trampoline_base`: 8-byte OPD followed
+    /// by an inline 16-byte `lis/ori/sc/blr` body.
     Legacy24,
-    /// PS3-spec: 8-byte OPDs packed at `opd_base`, body trampolines
-    /// packed at `body_base`. Each 8-byte OPD = `{ body_addr, toc=0 }`
-    /// where `body_addr` points to a separate per-NID 16-byte body
-    /// (lis/ori/sc/blr). This matches RPCS3's HLE OPD shape (8-byte
-    /// stride in user memory) and the byte size of each GOT entry
-    /// becomes a packed pointer rather than a 24-byte-aligned one.
+    /// 8-byte OPD at `opd_base + i*8`, 16-byte body at
+    /// `body_base + i*16`. Matches RPCS3's `vm::alloc(N*8, vm::main)`
+    /// HLE table shape so GOT entries are packed 8-byte pointers.
     Ps3Spec {
-        /// Guest address of the first 8-byte OPD slot. Subsequent
-        /// bindings get slots at `opd_base + index * 8`.
+        /// First 8-byte OPD slot.
         opd_base: u32,
-        /// Guest address of the first 16-byte body trampoline.
-        /// Subsequent bindings get bodies at `body_base + index * 16`.
+        /// First 16-byte body trampoline.
         body_base: u32,
     },
 }
 
-/// Write HLE stub trampolines into guest memory and patch each
-/// imported function's GOT entry to point at the trampoline.
-///
-/// Thin wrapper around [`bind_hle_stubs_with_layout`] that selects
-/// the [`HleLayout::Legacy24`] packing (24 bytes per binding at
-/// `trampoline_base`).
+/// [`bind_hle_stubs_with_layout`] with the [`HleLayout::Legacy24`]
+/// packing.
 pub fn bind_hle_stubs(
     modules: &[ImportedModule],
     memory: &mut cellgov_mem::GuestMemory,
@@ -280,12 +217,8 @@ pub fn bind_hle_stubs(
     bind_hle_stubs_with_layout(modules, memory, HleLayout::Legacy24, trampoline_base)
 }
 
-/// Write HLE stub trampolines using the configured layout.
-///
-/// In `Ps3Spec` mode, 8-byte OPDs land at `opd_base` (in stride-8
-/// order matching RPCS3's `vm::alloc(N*8, vm::main)` HLE table) and
-/// body trampolines land at `body_base` with stride 16. The GOT
-/// entries point at the OPDs.
+/// Write HLE OPDs and body trampolines into guest memory per `layout`
+/// and patch each imported GOT entry to point at its OPD.
 pub fn bind_hle_stubs_with_layout(
     modules: &[ImportedModule],
     memory: &mut cellgov_mem::GuestMemory,
@@ -312,14 +245,13 @@ pub fn bind_hle_stubs_with_layout(
 
             let hi = (syscall_nr >> 16) & 0xFFFF;
             let lo = syscall_nr & 0xFFFF;
-            // lis r11, hi  =  addis r11, r0, hi
+            // Body: lis r11, hi; ori r11, r11, lo; sc; blr.
             let lis_r11: u32 = (15 << 26) | (11 << 21) | hi;
-            // ori r11, r11, lo
             let ori_r11: u32 = (24 << 26) | (11 << 21) | (11 << 16) | lo;
             let sc: u32 = 0x4400_0002;
             let blr: u32 = 0x4E80_0020;
 
-            // Write OPD: { body_addr, toc=0 }.
+            // OPD: { body_addr, toc=0 }.
             let opd_range =
                 cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(opd_addr as u64), 8);
             if let Some(range) = opd_range {
@@ -328,7 +260,6 @@ pub fn bind_hle_stubs_with_layout(
                 bytes[4..8].copy_from_slice(&0u32.to_be_bytes());
                 let _ = memory.apply_commit(range, &bytes);
             }
-            // Write body: lis r11, hi; ori r11, r11, lo; sc; blr.
             let body_range =
                 cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(body_addr as u64), 16);
             if let Some(range) = body_range {
@@ -340,7 +271,6 @@ pub fn bind_hle_stubs_with_layout(
                 let _ = memory.apply_commit(range, &bytes);
             }
 
-            // Patch the GOT entry to point at the OPD.
             let got_range =
                 cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(func.stub_addr as u64), 4);
             if let Some(range) = got_range {
@@ -378,7 +308,6 @@ fn build_segment_map(data: &[u8], phoff: usize, phentsize: usize, phnum: usize) 
         }
         let p_type = loader::read_u32(data, base);
         if p_type != 1 {
-            // PT_LOAD only
             continue;
         }
         let p_offset = loader::read_u64(data, base + 8) as usize;
@@ -439,17 +368,12 @@ mod tests {
 
     #[test]
     fn hle_implemented_nids_contains_tls_init() {
-        // sys_initialize_tls is called by every PS3 ELF boot; if
-        // it drops off this list every boot silently downgrades.
+        // sys_initialize_tls is required by every PS3 ELF boot.
         assert!(HLE_IMPLEMENTED_NIDS.contains(&0x744680a2));
     }
 
     #[test]
     fn parse_retail_eboot_imports() {
-        // Exercises the import parser against a real retail EBOOT
-        // (the fixture under tools/rpcs3/dev_hdd0/). Any PS3 game
-        // binary will work; the assertions pin this specific fixture
-        // so the test fails if the import layout is misparsed.
         let path =
             std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
         if !path.exists() {
@@ -464,9 +388,6 @@ mod tests {
         assert_eq!(modules.len(), 12);
         assert_eq!(total_funcs, 140);
 
-        // Spot-check three modules nearly every retail PS3 game imports:
-        // the sysutil helper library, the sysPrxForUser CRT layer, and
-        // cellGcmSys for the RSX command-buffer setup.
         let names: Vec<&str> = modules.iter().map(|m| m.name.as_str()).collect();
         assert!(names.contains(&"cellSysutil"));
         assert!(names.contains(&"sysPrxForUser"));
@@ -475,12 +396,10 @@ mod tests {
 
     #[test]
     fn no_prx_param_returns_error() {
-        // A minimal ELF with no PT_0x60000002.
         let mut data = vec![0u8; 128];
         data[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
-        data[4] = 2; // 64-bit
-        data[5] = 2; // big-endian
-                     // phoff = 64, phentsize = 56, phnum = 0
+        data[4] = 2;
+        data[5] = 2;
         data[32..40].copy_from_slice(&64u64.to_be_bytes());
         data[54..56].copy_from_slice(&56u16.to_be_bytes());
         data[56..58].copy_from_slice(&0u16.to_be_bytes());
@@ -514,11 +433,8 @@ mod tests {
 
         assert_eq!(bindings.len(), 140);
 
-        // Each trampoline is 24 bytes: OPD (8) + code (16).
-        // Verify each trampoline's code portion.
         for (i, binding) in bindings.iter().enumerate() {
             let base = (tramp_base + (i as u32) * TRAMPOLINE_SIZE) as usize;
-            // OPD at base: code_addr should point to base + 8
             let opd_code = u32::from_be_bytes([
                 mem.as_bytes()[base],
                 mem.as_bytes()[base + 1],
@@ -531,7 +447,6 @@ mod tests {
                 "trampoline {i} OPD code_addr mismatch"
             );
 
-            // Code at base + 8: lis r11, hi; ori r11, r11, lo; sc; blr
             let code_base = base + 8;
             let word = |off: usize| -> u32 {
                 let p = code_base + off;
@@ -563,8 +478,6 @@ mod tests {
             assert_eq!(word(12), 0x4E80_0020, "trampoline {i} blr mismatch");
         }
 
-        // Verify the last binding's GOT entry was patched to point
-        // to the trampoline OPD.
         let last = bindings.last().unwrap();
         let got_addr = last.stub_addr as usize;
         let patched = u32::from_be_bytes([

@@ -1,36 +1,28 @@
-//! SPU architectural state.
-//!
-//! Owns the register file, local store, program counter, channel
-//! state, and the per-unit atomic reservation register. No runtime
-//! knowledge -- this is pure data that `exec.rs` reads and writes.
+//! SPU architectural state (registers, LS, PC, channels, reservation).
 
 use cellgov_sync::ReservedLine;
 
 /// SPU local store size: 256 KB.
 pub const LS_SIZE: usize = 256 * 1024;
 
-/// SPU register count: 128 quadword (128-bit) registers.
+/// Number of 128-bit general-purpose SPU registers.
 pub const REG_COUNT: usize = 128;
 
 /// Full SPU architectural state.
 #[derive(Clone)]
 pub struct SpuState {
-    /// 128 x 128-bit general-purpose registers.
-    /// Each register is 16 bytes, stored big-endian (byte 0 is MSB).
+    /// 128 x 128-bit GPRs; each register is 16 bytes, byte 0 is MSB.
     pub regs: [[u8; 16]; REG_COUNT],
     /// 256 KB local store.
     pub ls: Vec<u8>,
-    /// Program counter (masked to valid LS range on fetch).
+    /// Program counter.
     pub pc: u32,
-    /// MFC/channel state for DMA, mailbox, signal, and tag operations.
+    /// MFC/channel state for DMA, mailbox, and tag operations.
     pub channels: ChannelState,
-    /// Per-unit atomic reservation register. `Some(line)` when the
-    /// unit has executed `MFC_GETLLAR` and no subsequent same-unit
-    /// store to the line has cleared it locally. The committed
-    /// half of the conditional-store verdict lives in the runtime's
-    /// [`cellgov_sync::ReservationTable`] and is consulted via
-    /// `ExecutionContext::reservation_held`. `MFC_PUTLLC` succeeds
-    /// only when both signals say the reservation is held.
+    /// Local half of the atomic reservation. MFC_PUTLLC succeeds only
+    /// when this is `Some(line)` *and* the committed
+    /// [`cellgov_sync::ReservationTable`] entry (queried via
+    /// `ExecutionContext::reservation_held`) still holds the line.
     pub reservation: Option<ReservedLine>,
 }
 
@@ -46,17 +38,13 @@ impl SpuState {
         }
     }
 
-    /// Read the preferred slot (word 0, bytes 0..4) of a register as a
-    /// big-endian u32. This is the slot most SPU word-level instructions
-    /// operate on.
+    /// Read the preferred slot (word 0) of a register as big-endian u32.
     pub fn reg_word(&self, r: u8) -> u32 {
         let b = &self.regs[r as usize];
         u32::from_be_bytes([b[0], b[1], b[2], b[3]])
     }
 
-    /// Write a 32-bit value to all 4 word slots of a register.
-    /// This is the correct semantic for SPU word-level instructions
-    /// (il, ila, a, ai, etc.) which operate SIMD across all slots.
+    /// Splat a 32-bit value across all four word slots of a register.
     pub fn set_reg_word_splat(&mut self, r: u8, val: u32) {
         let bytes = val.to_be_bytes();
         let reg = &mut self.regs[r as usize];
@@ -87,8 +75,7 @@ impl SpuState {
         reg[base + 3] = bytes[3];
     }
 
-    /// Fetch a 32-bit instruction word from local store at `self.pc`.
-    /// Returns `None` if PC is out of LS range.
+    /// Fetch the 32-bit word at `self.pc`, or `None` if PC is out of LS range.
     pub fn fetch(&self) -> Option<u32> {
         let addr = self.pc as usize;
         if addr + 4 > self.ls.len() {
@@ -109,12 +96,7 @@ impl Default for SpuState {
     }
 }
 
-/// MFC and channel state.
-///
-/// SPU channel operations (rdch, wrch, rchcnt) read and write fields
-/// here. The execute layer translates channel state changes into
-/// Effects when they cross the runtime boundary (DMA submission,
-/// mailbox access, etc.).
+/// MFC and channel state read/written by rdch/wrch/rchcnt.
 #[derive(Clone, Default)]
 pub struct ChannelState {
     /// MFC_LSA: local store address for next DMA command.
@@ -129,17 +111,15 @@ pub struct ChannelState {
     pub mfc_tag_id: u32,
     /// Tag mask written by mfc_write_tag_mask.
     pub tag_mask: u32,
-    /// Tag completion status bits (set by runtime via DMA completion).
+    /// Tag completion status bits, set on DMA completion.
     pub tag_status: u32,
-    /// Atomic operation status (set by runtime after getllar/putllc).
+    /// Atomic operation status set after getllar/putllc.
     pub atomic_status: u32,
-    /// Target register for a pending rdch SPU_RdInMbox that yielded
-    /// waiting for a message. Set by execute_rdch, consumed by
-    /// run_until_yield when delivering received messages.
+    /// Target register for a pending rdch SPU_RdInMbox yield; consumed
+    /// by `run_until_yield` on message delivery.
     pub pending_mbox_rt: Option<u8>,
-    /// Pending DMA Get: (ea, lsa, size). Set by MFC_GET, fulfilled at
-    /// the start of the next run_until_yield from the committed memory
-    /// snapshot.
+    /// Pending DMA Get (ea, lsa, size); serviced at the start of the
+    /// next `run_until_yield` from the committed memory snapshot.
     pub pending_get: Option<(u64, u32, u32)>,
 }
 
@@ -197,7 +177,6 @@ mod tests {
     #[test]
     fn fetch_from_ls() {
         let mut s = SpuState::new();
-        // Place a big-endian instruction at PC=0
         s.ls[0] = 0x12;
         s.ls[1] = 0x34;
         s.ls[2] = 0x56;

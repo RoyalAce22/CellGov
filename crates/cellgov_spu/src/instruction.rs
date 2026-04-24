@@ -1,19 +1,8 @@
-//! Typed SPU instruction forms.
-//!
-//! Each variant carries the decoded fields (register indices, immediates,
-//! channel numbers) with no raw encoding bits. Decode produces these;
-//! execute consumes them. Neither the variant set nor the field types
-//! know about runtime state, Effects, or scheduling.
-//!
-//! Only add variants exercised by tests. Do not introduce instruction
-//! forms speculatively.
+//! Typed SPU instruction forms produced by decode and consumed by exec.
 
 /// A decoded SPU instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpuInstruction {
-    // =====================================================================
-    // Loads / stores
-    // =====================================================================
     /// Load quadword, d-form: rt = LS[(ra + imm*16) & ~0xF].
     Lqd {
         /// Destination register.
@@ -65,9 +54,6 @@ pub enum SpuInstruction {
         imm: i16,
     },
 
-    // =====================================================================
-    // Constant formation
-    // =====================================================================
     /// Immediate load word: all 4 word slots = sign_extend(imm16).
     Il {
         /// Destination register.
@@ -111,9 +97,6 @@ pub enum SpuInstruction {
         imm: u16,
     },
 
-    // =====================================================================
-    // Integer arithmetic
-    // =====================================================================
     /// Add word: all 4 word slots, `rt[i] = ra[i] + rb[i]`.
     A {
         /// Destination register.
@@ -142,16 +125,13 @@ pub enum SpuInstruction {
         rb: u8,
     },
 
-    // =====================================================================
-    // Logical
-    // =====================================================================
-    /// OR immediate: all 4 word slots, `rt[i] = ra[i] | zero_extend(imm)`.
+    /// OR immediate: all 4 word slots, `rt[i] = ra[i] | sign_extend(imm)`.
     Ori {
         /// Destination register.
         rt: u8,
         /// Source register.
         ra: u8,
-        /// 10-bit signed immediate (zero-extended to 32 bits? Actually sign-extended per ISA).
+        /// 10-bit signed immediate.
         imm: i16,
     },
     /// NOR: rt = ~(ra | rb). Used as NOT when ra == rb.
@@ -173,9 +153,6 @@ pub enum SpuInstruction {
         imm: i16,
     },
 
-    // =====================================================================
-    // Shuffle / shift / rotate
-    // =====================================================================
     /// Shuffle bytes: rt = shufb(ra, rb, rc).
     Shufb {
         /// Destination register.
@@ -206,10 +183,7 @@ pub enum SpuInstruction {
         rb: u8,
     },
 
-    // =====================================================================
-    // Generate controls (for shufb insertion patterns)
-    // =====================================================================
-    /// Generate controls for byte insertion d-form.
+    /// Generate controls for byte insertion d-form (shufb mask).
     Cbd {
         /// Destination register.
         rt: u8,
@@ -228,9 +202,6 @@ pub enum SpuInstruction {
         imm: u8,
     },
 
-    // =====================================================================
-    // Compare
-    // =====================================================================
     /// Compare equal word: `rt[i] = (ra[i] == rb[i]) ? 0xFFFFFFFF : 0`.
     Ceq {
         /// Destination register.
@@ -250,9 +221,6 @@ pub enum SpuInstruction {
         imm: i16,
     },
 
-    // =====================================================================
-    // Branch
-    // =====================================================================
     /// Branch relative: PC = PC + offset * 4.
     Br {
         /// Signed word offset.
@@ -285,9 +253,6 @@ pub enum SpuInstruction {
         ra: u8,
     },
 
-    // =====================================================================
-    // Channel operations
-    // =====================================================================
     /// Read channel: `rt = channel[channel]`.
     Rdch {
         /// Destination register.
@@ -303,22 +268,19 @@ pub enum SpuInstruction {
         rt: u8,
     },
 
-    // =====================================================================
-    // Hint / nop / sync / control
-    // =====================================================================
     /// No operation (even pipeline).
     Nop,
     /// No operation (odd pipeline).
     Lnop,
-    /// Hint for branch (ignored in interpreter).
+    /// Branch hint; ignored by the interpreter.
     Hbr,
-    /// Hint for branch relative (ignored in interpreter).
+    /// Branch-relative hint; ignored by the interpreter.
     Hbrr,
-    /// Hint for branch predict (ignored in interpreter).
+    /// Branch-predict hint; ignored by the interpreter.
     Hbrp,
-    /// Synchronize (ordering barrier, treated as nop in interpreter).
+    /// Ordering barrier; no-op in the interpreter.
     Sync,
-    /// Halt if equal (traps -- treated as nop unless debugging).
+    /// Halt if equal; no-op outside debug.
     Heq,
     /// Stop and signal.
     Stop {
@@ -327,7 +289,7 @@ pub enum SpuInstruction {
     },
 }
 
-/// Why decoding failed.
+/// Decode failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpuDecodeError {
     /// No matching encoding for this 32-bit word.

@@ -1,12 +1,5 @@
-//! Minimal PPU ELF64 loader.
-//!
-//! Reads an ELF64 binary (PPU ELFs are 64-bit big-endian), extracts
-//! LOAD program headers, and copies each segment into guest memory at
-//! the specified virtual address. Sets the program counter to the ELF
-//! entry point.
-//!
-//! This is a test loader, not a production ELF loader. It handles the
-//! subset of ELF features that PSL1GHT-compiled PPU binaries use.
+//! PPU ELF64 loader: copies PT_LOAD segments into guest memory and
+//! resolves the entry-point OPD into `(pc, toc)`.
 
 use crate::state::PpuState;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -40,8 +33,8 @@ const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 /// PT_LOAD segment type.
 const PT_LOAD: u32 = 1;
 
-/// Result of loading a PPU ELF: the entry point and the minimum guest
-/// memory size needed to hold all LOAD segments.
+/// Entry point and the minimum guest memory size needed to hold every
+/// PT_LOAD segment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoadResult {
     /// ELF entry point (set as state.pc).
@@ -50,9 +43,7 @@ pub struct LoadResult {
     pub min_memory_size: usize,
 }
 
-/// Scan program headers and return the minimum guest memory size
-/// needed to hold all PT_LOAD segments (including BSS). Does not
-/// modify any state.
+/// Minimum guest memory needed to host every PT_LOAD (including BSS).
 pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
     if data.len() < ELF_HEADER_SIZE {
         return Err(LoadError::TooSmall);
@@ -94,13 +85,12 @@ pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
     Ok(max_addr)
 }
 
-/// Load a PPU ELF64 binary into guest memory and set the PC.
+/// Load a PPU ELF64 into `memory` and set `state.pc` / `state.gpr[2]`
+/// by dereferencing the entry-point OPD.
 ///
-/// Copies all PT_LOAD segments with nonzero memsz into guest memory
-/// at the specified virtual addresses. The `.bss` portion
-/// (memsz > filesz) is zeroed. Resolves the ELF entry point through
-/// its OPD: sets `state.pc` to the code address read from the OPD
-/// and `state.gpr[2]` to the accompanying TOC pointer.
+/// `.bss` (memsz > filesz) is zero-filled. If the entry address does
+/// not point at a valid OPD the raw entry is written to `state.pc`
+/// unchanged.
 pub fn load_ppu_elf(
     data: &[u8],
     memory: &mut GuestMemory,
@@ -109,38 +99,24 @@ pub fn load_ppu_elf(
     if data.len() < ELF_HEADER_SIZE {
         return Err(LoadError::TooSmall);
     }
-
-    // Validate ELF magic
     if data[0..4] != ELF_MAGIC {
         return Err(LoadError::BadMagic);
     }
-
-    // EI_CLASS must be 2 (64-bit)
     if data[4] != 2 {
         return Err(LoadError::Not64Bit);
     }
-
-    // EI_DATA must be 2 (big-endian)
     if data[5] != 2 {
         return Err(LoadError::NotBigEndian);
     }
 
-    // Entry point: offset 24, 8 bytes BE
     let entry = read_u64(data, 24);
-
-    // Program header table offset: offset 32, 8 bytes BE
     let phoff = read_u64(data, 32) as usize;
-
-    // Program header entry size: offset 54, 2 bytes BE
     let phentsize = read_u16(data, 54) as usize;
-
-    // Number of program headers: offset 56, 2 bytes BE
     let phnum = read_u16(data, 56) as usize;
 
     let mem_size = memory.as_bytes().len();
     let mut max_addr: usize = 0;
 
-    // Process each program header
     for i in 0..phnum {
         let base = phoff + i * phentsize;
         if base + phentsize > data.len() {
@@ -157,12 +133,10 @@ pub fn load_ppu_elf(
         let p_filesz = read_u64(data, base + 32) as usize;
         let p_memsz = read_u64(data, base + 40) as usize;
 
-        // Skip empty segments
         if p_memsz == 0 {
             continue;
         }
 
-        // Validate segment fits in guest memory
         let end = p_vaddr as usize + p_memsz;
         if end > mem_size {
             return Err(LoadError::SegmentOutOfRange {
@@ -171,12 +145,10 @@ pub fn load_ppu_elf(
             });
         }
 
-        // Validate file data is available
         if p_filesz > 0 && p_offset + p_filesz > data.len() {
             return Err(LoadError::SegmentTruncated);
         }
 
-        // Copy file data into guest memory
         if p_filesz > 0 {
             let range =
                 ByteRange::new(GuestAddr::new(p_vaddr), p_filesz as u64).expect("valid range");
@@ -185,7 +157,6 @@ pub fn load_ppu_elf(
                 .expect("segment fits in memory");
         }
 
-        // Zero BSS (memsz > filesz)
         if p_memsz > p_filesz {
             let bss_start = p_vaddr + p_filesz as u64;
             let bss_size = p_memsz - p_filesz;
@@ -201,10 +172,9 @@ pub fn load_ppu_elf(
         }
     }
 
-    // PPC64 ELF ABI v1: e_entry points to a function descriptor in
-    // the .opd section, not directly to code. The descriptor layout
-    // is { u32 code_addr, u32 toc } (PS3 uses 32-bit effective
-    // addresses despite the 64-bit ELF container).
+    // PPC64 ELF ABI v1: e_entry names a descriptor { u32 code, u32 toc }
+    // in .opd. PS3 effective addresses are 32-bit despite the 64-bit
+    // container.
     let entry_off = entry as usize;
     let mem_bytes = memory.as_bytes();
     if entry_off + 8 <= mem_bytes.len() {
@@ -259,11 +229,6 @@ pub(crate) fn read_u16(data: &[u8], offset: usize) -> u16 {
 }
 
 /// A PT_LOAD segment's address range and permission bits.
-///
-/// Used to derive memory-region descriptors for cross-runner comparison:
-/// read-only segments (code / rodata) must be byte-identical between
-/// runners at any checkpoint; writable segments (data / bss) depend on
-/// boot state and compare meaningfully only at matched checkpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoadSegment {
     /// Index of the program header within the ELF.
@@ -282,12 +247,8 @@ pub struct LoadSegment {
     pub readable: bool,
 }
 
-/// Enumerate every PT_LOAD segment in a PPU ELF64 binary.
-///
-/// Skips zero-sized segments. The returned order matches program header
-/// order, which is the order `load_ppu_elf` copies them into guest
-/// memory. Readers can classify a segment as code/rodata (not writable)
-/// versus data/bss (writable) via the permission bits.
+/// Enumerate PT_LOAD segments in program-header order (zero-sized
+/// segments omitted). Matches the order `load_ppu_elf` copies them.
 pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
     if data.len() < ELF_HEADER_SIZE {
         return Err(LoadError::TooSmall);
@@ -345,13 +306,7 @@ pub struct TlsInfo {
     pub memsz: u64,
 }
 
-/// PT_TLS program header with every field the per-thread TLS
-/// allocator needs: the offset into the ELF bytes where the
-/// initialized template data starts, plus the vaddr / filesz /
-/// memsz / align fields.
-///
-/// Used by [`extract_tls_template_bytes`] to build a template
-/// that per-thread TLS instantiation can copy.
+/// Full PT_TLS layout for per-thread TLS block reconstruction.
 #[derive(Debug, Clone, Copy)]
 pub struct TlsProgramHeader {
     /// Offset into the ELF file where the initialized bytes start.
@@ -366,9 +321,7 @@ pub struct TlsProgramHeader {
     pub align: u64,
 }
 
-/// Find the PT_TLS program header in an ELF64 binary.
-///
-/// Returns `None` if the ELF has no TLS segment.
+/// PT_TLS segment info, or `None` if the ELF has no TLS segment.
 pub fn find_tls_segment(data: &[u8]) -> Option<TlsInfo> {
     if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC {
         return None;
@@ -393,10 +346,8 @@ pub fn find_tls_segment(data: &[u8]) -> Option<TlsInfo> {
     None
 }
 
-/// Find the PT_TLS program header and return every layout field
-/// (including `p_offset` and `p_align`) required to reconstruct a
-/// per-thread TLS block. Returns `None` if the ELF has no TLS
-/// segment.
+/// PT_TLS program header (including `p_offset` and `p_align`), or
+/// `None` if absent.
 pub fn find_tls_program_header(data: &[u8]) -> Option<TlsProgramHeader> {
     if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC {
         return None;
@@ -423,12 +374,9 @@ pub fn find_tls_program_header(data: &[u8]) -> Option<TlsProgramHeader> {
     None
 }
 
-/// Extract the initialized bytes of the PT_TLS template from an
-/// ELF64 binary, alongside the per-thread layout fields.
+/// PT_TLS initialized bytes plus `(memsz, align, vaddr)`.
 ///
-/// Returns `(initial_bytes, memsz, align, vaddr)` where
-/// `initial_bytes.len() == filesz` on success. `None` if the ELF
-/// has no PT_TLS or the file offset/length are out of bounds.
+/// `initial_bytes.len() == filesz` on success.
 pub fn extract_tls_template_bytes(data: &[u8]) -> Option<(Vec<u8>, u64, u64, u64)> {
     let hdr = find_tls_program_header(data)?;
     let start = hdr.file_offset as usize;
@@ -439,15 +387,11 @@ pub fn extract_tls_template_bytes(data: &[u8]) -> Option<(Vec<u8>, u64, u64, u64
     Some((data[start..end].to_vec(), hdr.memsz, hdr.align, hdr.vaddr))
 }
 
-/// SYS_PROCESS_PARAM_MAGIC -- marks the .sys_proc_param section.
+/// Magic marking the `.sys_proc_param` section.
 const SYS_PROCESS_PARAM_MAGIC: u32 = 0x13bcc5f6;
 
-/// Parsed sys_process_param_t from the game ELF's .sys_proc_param section.
-///
-/// The PS3 kernel reads this section during process startup to configure
-/// the primary PPU thread and the libc heap. CellGov mirrors RPCS3 in
-/// passing `malloc_pagesize` into the game entry via r12 so the CRT0 can
-/// initialize its allocator with the correct page size.
+/// Parsed `sys_process_param_t`. The caller passes `malloc_pagesize`
+/// into the game entry via `r12` so the CRT0 sizes its allocator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SysProcessParam {
     /// SDK version that built the ELF (e.g., 0x150004 = SDK 1.5.0.4).
@@ -462,18 +406,13 @@ pub struct SysProcessParam {
     pub ppc_seg: u32,
 }
 
-/// Scan the raw ELF bytes for a `.sys_proc_param` section by magic.
-///
-/// The section is normally at a fixed offset in a PT_LOAD segment; locating
-/// it by magic lets us find it without parsing section headers. Returns
-/// `None` if the magic is not present.
+/// Locate `.sys_proc_param` by scanning for its magic (avoids parsing
+/// section headers). `None` if the magic is absent.
 pub fn find_sys_process_param(data: &[u8]) -> Option<SysProcessParam> {
     let magic_bytes = SYS_PROCESS_PARAM_MAGIC.to_be_bytes();
-    // The struct layout is:
-    //   u32 size, magic, version, sdk_version,
-    //   i32 primary_prio,
-    //   u32 primary_stacksize, malloc_pagesize, ppc_seg
-    // Magic is at byte offset 4 of the struct.
+    // Struct: { u32 size, magic, version, sdk_version, i32 primary_prio,
+    //           u32 primary_stacksize, malloc_pagesize, ppc_seg }. Magic
+    // is at offset 4 of the struct.
     let mut idx = 0;
     while idx + 32 <= data.len() {
         if let Some(found) = data[idx..].windows(4).position(|w| w == magic_bytes) {
@@ -504,9 +443,8 @@ pub fn find_sys_process_param(data: &[u8]) -> Option<SysProcessParam> {
 /// ELF section type: symbol table.
 const SHT_SYMTAB: u32 = 2;
 
-/// Look up a symbol by name in an ELF64 big-endian binary and return
-/// its value (address). Returns `None` if the ELF has no symbol table
-/// or the symbol is not found.
+/// Symbol address by name, or `None` if not found or the ELF has no
+/// symbol table.
 pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
     if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC {
         return None;
@@ -515,7 +453,6 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
     let shentsize = read_u16(data, 58) as usize;
     let shnum = read_u16(data, 60) as usize;
 
-    // Find the SHT_SYMTAB section.
     for i in 0..shnum {
         let sh = shoff + i * shentsize;
         if sh + shentsize > data.len() {
@@ -530,7 +467,6 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
         let sym_entsize = read_u64(data, sh + 56) as usize;
         let strtab_idx = read_u32(data, sh + 40) as usize;
 
-        // Read the associated string table section header.
         let str_sh = shoff + strtab_idx * shentsize;
         if str_sh + shentsize > data.len() {
             return None;
@@ -542,7 +478,6 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
         }
         let strtab = &data[str_off..str_off + str_size];
 
-        // Scan symbols.
         if sym_entsize == 0 {
             return None;
         }
@@ -565,7 +500,7 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
                 return Some(read_u64(data, entry + 8));
             }
         }
-        return None; // only one SYMTAB expected
+        return None;
     }
     None
 }
@@ -625,25 +560,17 @@ mod tests {
         );
     }
 
-    /// Build a minimal big-endian ELF64 header describing `phnum`
-    /// program headers immediately following the file header. The
-    /// program-header table starts at offset 64 (right after the
-    /// ELF header) and each entry is 56 bytes.
     fn mk_elf_header(phnum: u16) -> Vec<u8> {
         let mut data = vec![0u8; 64 + 56 * phnum as usize];
         data[0..4].copy_from_slice(&ELF_MAGIC);
-        data[4] = 2; // 64-bit
-        data[5] = 2; // big-endian
-                     // e_phoff at offset 32: 8 bytes BE = 64
+        data[4] = 2;
+        data[5] = 2;
         data[32..40].copy_from_slice(&64u64.to_be_bytes());
-        // e_phentsize at offset 54: 2 bytes BE = 56
         data[54..56].copy_from_slice(&56u16.to_be_bytes());
-        // e_phnum at offset 56: 2 bytes BE
         data[56..58].copy_from_slice(&phnum.to_be_bytes());
         data
     }
 
-    /// Patch a PT_LOAD program header at `data[64 + slot * 56..]`.
     fn write_ph(
         data: &mut [u8],
         slot: usize,
@@ -653,23 +580,16 @@ mod tests {
         p_memsz: u64,
     ) {
         let base = 64 + slot * 56;
-        // p_type = PT_LOAD at offset 0 (4 bytes)
         data[base..base + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
-        // p_offset at offset 8 (8 bytes)
         data[base + 8..base + 16].copy_from_slice(&p_offset.to_be_bytes());
-        // p_vaddr at offset 16 (8 bytes)
         data[base + 16..base + 24].copy_from_slice(&p_vaddr.to_be_bytes());
-        // p_filesz at offset 32 (8 bytes)
         data[base + 32..base + 40].copy_from_slice(&p_filesz.to_be_bytes());
-        // p_memsz at offset 40 (8 bytes)
         data[base + 40..base + 48].copy_from_slice(&p_memsz.to_be_bytes());
     }
 
     #[test]
     fn rejects_segment_out_of_range() {
-        // A PT_LOAD segment whose vaddr + memsz exceeds guest memory.
         let mut data = mk_elf_header(1);
-        // Segment at vaddr 0 with memsz 512, into a 256-byte memory.
         write_ph(&mut data, 0, 64 + 56, 0, 0, 512);
         let mut s = PpuState::new();
         let mut mem = GuestMemory::new(256);
@@ -684,11 +604,7 @@ mod tests {
 
     #[test]
     fn rejects_segment_truncated() {
-        // A PT_LOAD segment whose p_offset + p_filesz exceeds the
-        // actual file size.
         let mut data = mk_elf_header(1);
-        // Segment claims 100 bytes of file data starting at offset
-        // 64 + 56 = 120, but the file is only 120 bytes long.
         write_ph(&mut data, 0, 120, 0, 100, 100);
         let mut s = PpuState::new();
         let mut mem = GuestMemory::new(256);
@@ -700,9 +616,6 @@ mod tests {
 
     #[test]
     fn skips_empty_segment() {
-        // A PT_LOAD with memsz == 0 must be skipped cleanly (not
-        // faulted, not touching memory). A second empty segment
-        // keeps the loop traversing program headers after the skip.
         let mut data = mk_elf_header(2);
         write_ph(&mut data, 0, 0, 0, 0, 0);
         write_ph(&mut data, 1, 0, 0, 0, 0);
@@ -721,15 +634,10 @@ mod tests {
         }
         let data = std::fs::read(path).unwrap();
         let mut s = PpuState::new();
-        // PS3 PPU binaries need ~256MB+ for the 0x10000000 region
         let mut mem = GuestMemory::new(0x10020000);
         let result = load_ppu_elf(&data, &mut mem, &mut s).unwrap();
-        // ELF e_entry is the function descriptor at 0x10000000, but
-        // the loader resolves it to the actual code address.
         assert_eq!(result.entry, 0x10000000);
-        // PSL1GHT descriptor points to code at 0x10200 in .text.
         assert_eq!(s.pc, 0x10200);
-        // First instruction at the code address should be real code.
         let pc = s.pc as usize;
         let first_insn = u32::from_be_bytes([
             mem.as_bytes()[pc],
@@ -748,12 +656,9 @@ mod tests {
         }
         let data = std::fs::read(path).unwrap();
         let mut s = PpuState::new();
-        // SDK-compiled binaries use low addresses (~215KB)
         let mut mem = GuestMemory::new(0x40000);
         let result = load_ppu_elf(&data, &mut mem, &mut s).unwrap();
         assert_eq!(result.entry, 0x301c0);
-        // SDK descriptor at 0x301c0 points to code at 0x1022c,
-        // TOC at 0x38b50.
         assert_eq!(s.pc, 0x1022c);
         assert_eq!(s.gpr[2], 0x38b50);
         let pc = s.pc as usize;
@@ -776,8 +681,7 @@ mod tests {
         let data = std::fs::read(path).unwrap();
         let addr = find_symbol(&data, "result");
         assert!(addr.is_some(), "symbol 'result' not found in ELF");
-        // The address should be 128-byte aligned (the C code uses
-        // __attribute__((aligned(128)))).
+        // `result` is declared with __attribute__((aligned(128))).
         assert_eq!(addr.unwrap() % 128, 0);
     }
 
@@ -792,17 +696,14 @@ mod tests {
         assert!(find_symbol(&data, "nonexistent_symbol_xyz").is_none());
     }
 
-    /// Build a minimal ELF64 with a PT_TLS program header for testing.
     fn make_elf_with_tls(tls_vaddr: u64, tls_filesz: u64, tls_memsz: u64) -> Vec<u8> {
         let mut buf = vec![0u8; 256];
         buf[0..4].copy_from_slice(&ELF_MAGIC);
-        buf[4] = 2; // 64-bit
-        buf[5] = 2; // big-endian
-                    // phoff = 64, phentsize = 56, phnum = 1
+        buf[4] = 2;
+        buf[5] = 2;
         buf[32..40].copy_from_slice(&64u64.to_be_bytes());
         buf[54..56].copy_from_slice(&56u16.to_be_bytes());
         buf[56..58].copy_from_slice(&1u16.to_be_bytes());
-        // PT_TLS at phdr[0]
         let ph = 64;
         buf[ph..ph + 4].copy_from_slice(&PT_TLS.to_be_bytes());
         buf[ph + 16..ph + 24].copy_from_slice(&tls_vaddr.to_be_bytes());
@@ -820,30 +721,21 @@ mod tests {
         assert_eq!(tls.memsz, 0x1dc);
     }
 
-    /// Build an ELF64 with a PT_TLS program header including a
-    /// concrete p_offset, p_align, and a filesz-byte initialized
-    /// payload at that offset. Returns `(elf_bytes, initial)` so
-    /// tests can compare the extracted template against the
-    /// original payload.
     fn make_elf_with_tls_payload(
         tls_vaddr: u64,
         initial: &[u8],
         tls_memsz: u64,
         tls_align: u64,
     ) -> Vec<u8> {
-        // Reserve room for the ELF header, one 56-byte program
-        // header, and the TLS payload itself at the tail.
         let payload_offset = 128u64;
         let total = (payload_offset as usize) + initial.len() + 16;
         let mut buf = vec![0u8; total];
         buf[0..4].copy_from_slice(&ELF_MAGIC);
-        buf[4] = 2; // 64-bit
-        buf[5] = 2; // big-endian
-                    // phoff = 64, phentsize = 56, phnum = 1
+        buf[4] = 2;
+        buf[5] = 2;
         buf[32..40].copy_from_slice(&64u64.to_be_bytes());
         buf[54..56].copy_from_slice(&56u16.to_be_bytes());
         buf[56..58].copy_from_slice(&1u16.to_be_bytes());
-        // PT_TLS at phdr[0]
         let ph = 64;
         buf[ph..ph + 4].copy_from_slice(&PT_TLS.to_be_bytes());
         buf[ph + 8..ph + 16].copy_from_slice(&payload_offset.to_be_bytes());
@@ -851,7 +743,6 @@ mod tests {
         buf[ph + 32..ph + 40].copy_from_slice(&(initial.len() as u64).to_be_bytes());
         buf[ph + 40..ph + 48].copy_from_slice(&tls_memsz.to_be_bytes());
         buf[ph + 48..ph + 56].copy_from_slice(&tls_align.to_be_bytes());
-        // Place the initialized bytes at payload_offset.
         let start = payload_offset as usize;
         buf[start..start + initial.len()].copy_from_slice(initial);
         buf
@@ -902,7 +793,6 @@ mod tests {
         data[5] = 2;
         data[32..40].copy_from_slice(&64u64.to_be_bytes());
         data[54..56].copy_from_slice(&56u16.to_be_bytes());
-        // PT_LOAD, not PT_TLS
         data[56..58].copy_from_slice(&1u16.to_be_bytes());
         data[64..68].copy_from_slice(&PT_LOAD.to_be_bytes());
         assert!(find_tls_segment(&data).is_none());
@@ -921,13 +811,12 @@ mod tests {
 
     #[test]
     fn pt_load_segments_enumerates_all() {
-        // Two PT_LOAD segments with different permission bits.
         let mut data = mk_elf_header(2);
         write_ph(&mut data, 0, 0x100, 0x1000, 0x40, 0x40);
-        // Set PF_R|PF_X (0x5) on segment 0.
+        // PF_R | PF_X
         data[64 + 4..64 + 8].copy_from_slice(&0x5u32.to_be_bytes());
         write_ph(&mut data, 1, 0x200, 0x2000, 0x20, 0x80);
-        // Set PF_R|PF_W (0x6) on segment 1.
+        // PF_R | PF_W
         data[64 + 56 + 4..64 + 56 + 8].copy_from_slice(&0x6u32.to_be_bytes());
         let segs = pt_load_segments(&data).expect("parses");
         assert_eq!(segs.len(), 2);
@@ -956,11 +845,6 @@ mod tests {
 
     #[test]
     fn find_tls_on_real_elf() {
-        // Every retail PS3 game binary has a PT_TLS segment because
-        // sysPrxForUser's CRT expects thread-local storage to be set
-        // up at load time. Pin the parse against the fixture under
-        // tools/rpcs3/dev_hdd0/ so a TLS-parser regression fails the
-        // test.
         let path =
             std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
         if !path.exists() {

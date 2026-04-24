@@ -1,19 +1,11 @@
-//! Pending-response wake protocol for blocked units.
+//! Pending-response wake protocol for blocked units: consume a
+//! `PendingResponse`, commit any continuation payload, and transition
+//! the waiter from `Blocked` to `Runnable`.
 //!
-//! Two resolution paths, sharing the same mental model: each walks
-//! `syscall_responses`, consumes a `PendingResponse`, writes any
-//! continuation payload through `SharedWriteIntent`-style commits,
-//! and transitions the waiter from `Blocked` back to `Runnable`.
-//!
-//! - [`Runtime::resolve_sync_wakes`] fires when an LV2 release
-//!   (`sys_mutex_unlock`, `sys_lwmutex_unlock`, `sys_semaphore_post`,
-//!   `sys_event_queue_send`, event-flag set, cond-signal) produces a
-//!   `WakeAndReturn` or `BlockAndWake` dispatch with a list of waiter
-//!   ids.
-//! - [`Runtime::resolve_join_wakes`] fires when an SPU finishes and
-//!   the LV2 host reports the enclosing thread group has gone fully
-//!   finished; any PPU parked on `sys_spu_thread_group_join` for that
-//!   group is released.
+//! [`Runtime::resolve_sync_wakes`] handles releases on sync primitives
+//! (mutex, lwmutex, semaphore, event queue, event flag, cond).
+//! [`Runtime::resolve_join_wakes`] handles PPUs parked on
+//! `sys_spu_thread_group_join` when the group finishes.
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
@@ -22,29 +14,15 @@ use cellgov_lv2::PendingResponse;
 use super::Runtime;
 
 impl Runtime {
-    /// Apply the pending-response wake protocol for a set of units
-    /// parked on a synchronization primitive (lwmutex, mutex,
-    /// semaphore, event queue, or cond).
-    ///
-    /// For each unit the runtime:
-    ///   * Takes its `PendingResponse` from `syscall_responses`.
-    ///   * Resolves the response variant:
-    ///       - `ReturnCode { code }`: set r3 = code.
-    ///       - `EventQueueReceive { out_ptr, payload: Some(..) }`:
-    ///         write the 32-byte payload via a `SharedWriteIntent`
-    ///         commit and set r3 = 0.
-    ///       - `CondWakeReacquire { .. }`: handled by a later
-    ///         phase; the current implementation wakes with r3 = 0
-    ///         and does not re-park on a mutex.
-    ///       - Other variants: defensive fallback -- set r3 = 0.
-    ///   * Transitions the unit from `Blocked` to `Runnable`.
+    /// Resolve each waiter's `PendingResponse`, commit continuation
+    /// payloads, and flip Blocked -> Runnable.
     ///
     /// # Panics
-    /// Reaching an `EventQueueReceive { payload: None }` at wake
-    /// time is a host-level invariant break -- the send-side
-    /// dispatch forgot to install `response_updates`. Panics rather
-    /// than delivering four zero u64s the guest cannot distinguish
-    /// from a real event.
+    ///
+    /// Panics on `EventQueueReceive { payload: None }` at wake time:
+    /// the send-side dispatch forgot to install `response_updates`.
+    /// Delivering four zero u64s would be indistinguishable from a
+    /// real event.
     pub(super) fn resolve_sync_wakes(&mut self, woken_unit_ids: &[UnitId]) {
         for waiter in woken_unit_ids {
             let waiter = *waiter;
@@ -76,15 +54,13 @@ impl Runtime {
                     self.registry.set_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::CondWakeReacquire { .. }) => {
-                    // The full re-acquire path lands with the
-                    // cond primitive. For now treat the wake as a
-                    // plain CELL_OK wake.
+                    // Full re-acquire belongs with the cond primitive;
+                    // for now wake with CELL_OK and do not re-park.
                     self.registry.set_syscall_return(waiter, 0);
                 }
                 Some(_) | None => {
-                    // Defensive: an ill-formed pending or an absent
-                    // entry still transitions the waiter back to
-                    // runnable so it is not stranded.
+                    // Defensive: an ill-formed or absent entry still
+                    // transitions the waiter back to runnable.
                     self.registry.set_syscall_return(waiter, 0);
                 }
             }
@@ -98,9 +74,8 @@ impl Runtime {
         self.resolve_sync_wakes(woken_unit_ids);
     }
 
-    /// When an SPU finishes, notify the LV2 host. If the group is
-    /// fully finished, find and wake the PPU blocked on that group's
-    /// join with its pending response.
+    /// Notify the LV2 host that `source` finished; if the enclosing
+    /// group is fully finished, wake any PPU blocked on its join.
     pub(super) fn resolve_join_wakes(&mut self, source: UnitId) {
         let finished_group = match self.lv2_host.notify_spu_finished(source) {
             Ok(Some(gid)) => gid,
@@ -126,13 +101,9 @@ impl Runtime {
             if !is_match {
                 continue;
             }
-            // `peek` above just confirmed the waiter holds a
-            // matching ThreadGroupJoin -- presence is a contract
-            // here, not a hopeful check. Use `take_expected` so a
-            // future change that accidentally drains the entry
-            // between the peek and the take (a refactor that adds
-            // an intervening call, say) fails loudly with a panic
-            // rather than silently dropping into the `else` branch.
+            // `peek` confirmed a matching ThreadGroupJoin; use
+            // `take_expected` so an accidental intervening drain
+            // panics rather than silently dropping into `else`.
             let pending = self.syscall_responses.take_expected(waiter_id);
             {
                 match &pending {
@@ -159,13 +130,10 @@ impl Runtime {
                     | PendingResponse::EventQueueReceive { .. }
                     | PendingResponse::CondWakeReacquire { .. }
                     | PendingResponse::EventFlagWake { .. } => {
-                        // SPU thread-group wake path should not
-                        // reach a PPU-thread-join / event-queue /
-                        // cond-wake waiter. The phase that wires
-                        // each of those primitives installs its
-                        // own wake path; recover defensively here
-                        // by setting the waiter runnable without
-                        // writing to the out pointer.
+                        // The SPU thread-group wake path should not
+                        // reach these variants; each has its own wake
+                        // path. Defensive recovery without writing to
+                        // the out pointer.
                         self.registry
                             .set_status_override(waiter_id, UnitStatus::Runnable);
                     }

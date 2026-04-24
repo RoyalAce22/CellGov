@@ -1,25 +1,18 @@
-//! Stored binary traces and normalized trace snapshots for golden
-//! assertions.
+//! Golden-trace assertions: pin the exact record sequence a curated scenario
+//! produces.
 //!
-//! Golden trace assertions pin the exact record sequence a curated
-//! scenario produces. They catch structural drift (new records
-//! inserted, order changed, field values shifted) that replay
-//! assertions alone cannot detect because replay only compares two
-//! runs against each other, not against a known baseline.
-//!
-//! Expected record sequences live as in-source `Vec` literals in
-//! tests.
+//! Replay assertions only compare two runs against each other; goldens pin
+//! against a known baseline and catch structural drift no replay check
+//! observes.
 
 use cellgov_trace::{TraceReader, TraceRecord};
 
-/// Decode `actual_bytes` into a `Vec<TraceRecord>` and assert exact
-/// equality against `expected`. On mismatch, panics with the scenario
-/// name, the index of the first divergent record, and the two
-/// differing records.
+/// Decode `actual_bytes` and assert exact equality against `expected`.
 ///
-/// Use this for the curated core set of scenarios whose trace shape
-/// is considered stable. For in-flux scenarios, prefer
-/// [`assert_golden_trace_prefix`] or invariant assertions.
+/// # Panics
+///
+/// Panics with scenario name, divergent record index, and the two records
+/// on mismatch.
 pub fn assert_golden_trace(scenario: &str, actual_bytes: &[u8], expected: &[TraceRecord]) {
     let actual: Vec<TraceRecord> = TraceReader::new(actual_bytes)
         .map(|r| r.expect("golden trace decode failed"))
@@ -39,10 +32,10 @@ pub fn assert_golden_trace(scenario: &str, actual_bytes: &[u8], expected: &[Trac
     }
 }
 
-/// Like [`assert_golden_trace`], but only checks that the first
-/// `expected.len()` records match. The actual trace may be longer.
-/// Useful for scenarios under active development where the tail is
-/// still changing but the prefix is stable.
+/// Like [`assert_golden_trace`], but only checks the first `expected.len()`
+/// records.
+///
+/// For scenarios whose tail is in flux but whose prefix is stable.
 pub fn assert_golden_trace_prefix(
     scenario: &str,
     actual_bytes: &[u8],
@@ -78,18 +71,17 @@ mod tests {
     use cellgov_time::{Budget, Epoch, GuestTicks};
     use cellgov_trace::{HashCheckpointKind, StateHash, TracedEffectKind, TracedYieldReason};
 
-    /// Build the expected golden record sequence for the fake-ISA
-    /// scenario. This is the curated core-set pinning: if any change
-    /// to the runtime, commit pipeline, or trace emission shifts a
-    /// single record, this test fails and the author must update the
-    /// expectation to match the new trace shape.
+    /// Expected golden record sequence for `fake_isa_scenario`.
+    ///
+    /// Hash fields are `StateHash::ZERO` placeholders; the test patches them
+    /// in from the actual run. Any structural drift fails the test.
     fn fake_isa_golden_records() -> Vec<TraceRecord> {
-        // The program is: LoadImm(0xAB), SharedStore{0,4}, MailboxSend{0}, End
+        // Program: LoadImm(0xAB), SharedStore{0,4}, MailboxSend{0}, End.
         // 4 steps, budget=1, time advances 1 per step.
         let u0 = UnitId::new(0);
         let b1 = Budget::new(1);
         vec![
-            // -- Step 1: LoadImm(0xAB) --
+            // Step 1: LoadImm(0xAB)
             TraceRecord::UnitScheduled {
                 unit: u0,
                 granted_budget: b1,
@@ -102,7 +94,6 @@ mod tests {
                 consumed_budget: b1,
                 time_after: GuestTicks::new(1),
             },
-            // LoadImm emits no effects
             TraceRecord::CommitApplied {
                 unit: u0,
                 writes_committed: 0,
@@ -110,10 +101,9 @@ mod tests {
                 fault_discarded: false,
                 epoch_after: Epoch::new(1),
             },
-            // 4 hash checkpoints
             TraceRecord::StateHashCheckpoint {
                 kind: HashCheckpointKind::CommittedMemory,
-                hash: StateHash::ZERO, // placeholder -- filled below
+                hash: StateHash::ZERO,
             },
             TraceRecord::StateHashCheckpoint {
                 kind: HashCheckpointKind::RunnableQueue,
@@ -127,7 +117,7 @@ mod tests {
                 kind: HashCheckpointKind::SyncState,
                 hash: StateHash::ZERO,
             },
-            // -- Step 2: SharedStore{addr:0, len:4} --
+            // Step 2: SharedStore{addr:0, len:4}
             TraceRecord::UnitScheduled {
                 unit: u0,
                 granted_budget: b1,
@@ -168,7 +158,7 @@ mod tests {
                 kind: HashCheckpointKind::SyncState,
                 hash: StateHash::ZERO,
             },
-            // -- Step 3: MailboxSend{mailbox:0} --
+            // Step 3: MailboxSend{mailbox:0}
             TraceRecord::UnitScheduled {
                 unit: u0,
                 granted_budget: b1,
@@ -209,7 +199,7 @@ mod tests {
                 kind: HashCheckpointKind::SyncState,
                 hash: StateHash::ZERO,
             },
-            // -- Step 4: End --
+            // Step 4: End
             TraceRecord::UnitScheduled {
                 unit: u0,
                 granted_budget: b1,
@@ -222,7 +212,6 @@ mod tests {
                 consumed_budget: b1,
                 time_after: GuestTicks::new(4),
             },
-            // End emits no effects
             TraceRecord::CommitApplied {
                 unit: u0,
                 writes_committed: 0,
@@ -251,10 +240,8 @@ mod tests {
 
     #[test]
     fn fake_isa_golden_trace_structure() {
-        // Compare the structural shape (record types, unit ids,
-        // yield reasons, effect kinds, epoch progression, time
-        // progression) but fill in actual hash values from the run
-        // since those depend on FNV output.
+        // Patch hash placeholders from the run so the test pins structure
+        // (record types, ids, yield reasons, epoch/time progression) only.
         let result = run(fake_isa_scenario());
         let actual: Vec<TraceRecord> = TraceReader::new(&result.trace_bytes)
             .map(|r| r.expect("decode"))
@@ -263,7 +250,6 @@ mod tests {
         let mut expected = fake_isa_golden_records();
         assert_eq!(actual.len(), expected.len());
 
-        // Patch hash placeholders from the actual run.
         for (a, e) in actual.iter().zip(expected.iter_mut()) {
             if let (
                 TraceRecord::StateHashCheckpoint { hash: ah, kind: ak },
@@ -284,7 +270,6 @@ mod tests {
         let actual: Vec<TraceRecord> = TraceReader::new(&result.trace_bytes)
             .map(|r| r.expect("decode"))
             .collect();
-        // Just the first 3 records as a prefix.
         assert_golden_trace_prefix("fake-isa-prefix", &result.trace_bytes, &actual[..3]);
     }
 

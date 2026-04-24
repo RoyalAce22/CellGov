@@ -1,19 +1,14 @@
-//! RPCS3 runner adapter.
+//! RPCS3 runner adapter: invokes the patched RPCS3 binary headless,
+//! then extracts the microtest result from either a binary memory dump
+//! or the RPCS3 TTY log, and packs it into an `Observation`.
 //!
-//! Invokes RPCS3 as an external process in headless mode, waits for
-//! it to exit or timeout, reads the test result from a memory dump
-//! file or TTY log, and converts the output into a normalized
-//! `Observation`.
+//! # TTY frame format
 //!
-//! Every RPCS3 microtest writes results into a fixed-layout buffer.
-//! The adapter supports two extraction methods:
-//!
-//! - **Dump file**: reads a binary memory dump at a known path.
-//! - **TTY log**: scans RPCS3's TTY.log for a tagged binary payload.
-//!   The test writes `CGOV` (4 bytes) + big-endian u32 length + raw
-//!   payload bytes via `sys_tty_write`. The adapter finds the tag and
-//!   extracts the payload. This is the preferred method for managed
-//!   SPU thread group tests compiled with PSL1GHT.
+//! The test writes `CGOV` (4 bytes) + big-endian u32 payload length +
+//! raw payload bytes via `sys_tty_write`. The adapter locates the magic
+//! tag in the log and slices regions from the payload in declaration
+//! order. `DumpFile` extraction is the alternate path when TTY capture
+//! is unavailable.
 
 use crate::observation::{NamedMemoryRegion, Observation, ObservationMetadata, ObservedOutcome};
 use std::io;
@@ -21,12 +16,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-/// Magic tag written to TTY before the result payload.
-/// The test writes these 4 bytes followed by a big-endian u32 length
-/// and then the raw payload bytes.
+/// Magic tag that precedes the big-endian u32 length and payload bytes.
 pub const TTY_MAGIC: &[u8; 4] = b"CGOV";
 
-/// Minimum TTY frame size: 4-byte magic + 4-byte length.
+/// TTY frame header: 4-byte magic + 4-byte length.
 const TTY_HEADER_SIZE: usize = 8;
 
 /// RPCS3 installation and global settings.
@@ -38,29 +31,27 @@ pub struct Rpcs3Config {
     pub decoder: Rpcs3Decoder,
 }
 
-/// Which decoder combination to use.
+/// Which RPCS3 decoder combination to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rpcs3Decoder {
-    /// PPU Interpreter + SPU Interpreter. Slower but safer baseline.
+    /// PPU Interpreter + SPU Interpreter.
     Interpreter,
-    /// PPU LLVM + SPU LLVM. Optimized path.
+    /// PPU LLVM + SPU LLVM.
     Llvm,
 }
 
 /// How to extract the result buffer from RPCS3 after a test run.
 #[derive(Debug, Clone)]
 pub enum ExtractionMethod {
-    /// Read a binary memory dump file at the given path. Each region
-    /// is extracted at its byte offset within the dump.
+    /// Read regions at byte offsets within a binary memory dump file.
     DumpFile {
         /// Path to the dump file.
         path: PathBuf,
         /// Regions to extract from the dump.
         regions: Vec<DumpRegion>,
     },
-    /// Scan RPCS3's TTY log for the tagged result payload. The test
-    /// writes `CGOV` + length + payload via `sys_tty_write`. Regions
-    /// are sliced from the payload in declaration order.
+    /// Scan the TTY log for the `CGOV` frame and slice regions from its
+    /// payload in declaration order.
     TtyLog {
         /// Path to RPCS3's TTY.log.
         path: PathBuf,
@@ -93,8 +84,8 @@ pub struct DumpRegion {
     pub guest_addr: u64,
 }
 
-/// A region to extract from the TTY payload. Regions are packed
-/// contiguously in the payload in declaration order.
+/// A region to extract from the TTY payload; regions are packed
+/// contiguously in declaration order.
 #[derive(Debug, Clone)]
 pub struct TtyRegion {
     /// Region name.
@@ -134,13 +125,7 @@ pub enum Rpcs3Error {
     },
 }
 
-/// Invoke RPCS3 and produce a normalized observation.
-///
-/// 1. Launches RPCS3 in headless mode with the given binary.
-/// 2. Waits for exit or kills on timeout.
-/// 3. Maps the exit code to `ObservedOutcome`.
-/// 4. Extracts declared memory regions via the configured method.
-/// 5. Packs into `Observation`.
+/// Invoke RPCS3 headless, then extract regions via the configured method.
 pub fn observe(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<Observation, Rpcs3Error> {
     let outcome = invoke(config, test)?;
     let memory_regions = match &test.extraction {
@@ -151,7 +136,6 @@ pub fn observe(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<Observati
     Ok(Observation {
         outcome,
         memory_regions,
-        // Event extraction from RPCS3 is not implemented.
         events: vec![],
         state_hashes: None,
         metadata: ObservationMetadata {
@@ -161,9 +145,8 @@ pub fn observe(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<Observati
     })
 }
 
-/// Build an observation from a saved TTY log file without invoking
-/// RPCS3. Assumes the test completed successfully (outcome = Completed).
-/// Used for baseline collection from previously captured TTY output.
+/// Build an observation from a saved TTY log without invoking RPCS3;
+/// the outcome is forced to `Completed`.
 pub fn observe_from_tty(
     tty_path: &Path,
     regions: &[TtyRegion],
@@ -190,9 +173,6 @@ fn invoke(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<ObservedOutcom
         .spawn()
         .map_err(Rpcs3Error::Launch)?;
 
-    // Wait with timeout. std::process::Child::wait doesn't support
-    // timeout directly, so we poll with a sleep loop up to the
-    // deadline. This is acceptable for test harness use.
     let deadline = std::time::Instant::now() + test.timeout;
     let exit_status = loop {
         match child.try_wait().map_err(Rpcs3Error::Launch)? {
@@ -217,8 +197,6 @@ fn invoke(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<ObservedOutcom
 }
 
 /// Read a memory dump file and extract the declared regions.
-///
-/// Public so it can be tested independently of process invocation.
 pub fn parse_dump(
     dump_path: &Path,
     regions: &[DumpRegion],
@@ -245,21 +223,14 @@ pub fn parse_dump(
     Ok(result)
 }
 
-/// Scan an RPCS3 TTY log file for the tagged result payload and
-/// extract declared regions.
-///
-/// The TTY protocol is: `CGOV` (4 bytes) + big-endian u32 payload
-/// length + raw payload bytes. Regions are packed contiguously in the
-/// payload in declaration order.
-///
-/// Public so it can be tested independently of process invocation.
+/// Scan a TTY log for the `CGOV` frame and slice the declared regions
+/// from its payload in declaration order.
 pub fn parse_tty_log(
     tty_path: &Path,
     regions: &[TtyRegion],
 ) -> Result<Vec<NamedMemoryRegion>, Rpcs3Error> {
     let data = std::fs::read(tty_path).map_err(Rpcs3Error::TtyRead)?;
 
-    // Find the magic tag in the TTY output.
     let magic_pos = data
         .windows(TTY_MAGIC.len())
         .position(|w| w == TTY_MAGIC.as_slice())
@@ -273,7 +244,6 @@ pub fn parse_tty_log(
         });
     }
 
-    // Read payload length (big-endian u32 after the magic).
     let len_bytes: [u8; 4] = data[magic_pos + 4..header_end].try_into().expect("4 bytes");
     let payload_len = u32::from_be_bytes(len_bytes) as usize;
 
@@ -288,7 +258,6 @@ pub fn parse_tty_log(
 
     let payload = &data[payload_start..payload_end];
 
-    // Slice regions from the contiguous payload.
     let total_needed: u64 = regions.iter().map(|r| r.size).sum();
     if total_needed > payload_len as u64 {
         return Err(Rpcs3Error::TtyPayloadTooSmall {
@@ -308,7 +277,6 @@ pub fn parse_tty_log(
         });
         offset += size;
     }
-
     Ok(result)
 }
 
@@ -412,14 +380,13 @@ mod tests {
 
     #[test]
     fn decoder_format_in_metadata() {
-        // Verify the runner name encodes the decoder mode.
         let name = format!("rpcs3-{:?}", Rpcs3Decoder::Interpreter).to_lowercase();
         assert_eq!(name, "rpcs3-interpreter");
         let name = format!("rpcs3-{:?}", Rpcs3Decoder::Llvm).to_lowercase();
         assert_eq!(name, "rpcs3-llvm");
     }
 
-    /// Build a TTY log file with the tagged protocol: CGOV + len + payload.
+    /// Build a TTY log file with the framed protocol: CGOV + len + payload.
     fn write_tty_log(prefix: &[u8], payload: &[u8], suffix: &[u8]) -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join("cellgov_rpcs3_test");
@@ -473,7 +440,6 @@ mod tests {
 
     #[test]
     fn parse_tty_log_finds_tag_after_noise() {
-        // Simulate TTY output with printf noise before the tag.
         let noise = b"SPU Thread Group [0x1] started\nTest running...\n";
         let payload = vec![0x42, 0x00, 0x00, 0x00];
         let path = write_tty_log(noise, &payload, b"\nDone.\n");
@@ -497,15 +463,14 @@ mod tests {
 
     #[test]
     fn parse_tty_log_truncated_payload_returns_error() {
-        // Payload is shorter than the length field claims.
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join("cellgov_rpcs3_test");
         std::fs::create_dir_all(&dir).ok();
         let path = dir.join(format!("tty_trunc_{n}.log"));
         let mut f = std::fs::File::create(&path).expect("create");
         f.write_all(TTY_MAGIC).expect("magic");
-        f.write_all(&100_u32.to_be_bytes()).expect("len"); // claims 100 bytes
-        f.write_all(&[0u8; 10]).expect("short payload"); // only 10
+        f.write_all(&100_u32.to_be_bytes()).expect("len");
+        f.write_all(&[0u8; 10]).expect("short payload");
         drop(f);
         let result = parse_tty_log(&path, &[tty_region("r", 8, 0)]);
         assert!(matches!(result, Err(Rpcs3Error::TtyPayloadTooSmall { .. })));
@@ -514,10 +479,9 @@ mod tests {
 
     #[test]
     fn parse_tty_log_regions_exceed_payload_returns_error() {
-        // Payload is valid but regions want more bytes than it contains.
         let payload = vec![0u8; 4];
         let path = write_tty_log(b"", &payload, b"");
-        let regions = vec![tty_region("big", 8, 0)]; // wants 8, payload is 4
+        let regions = vec![tty_region("big", 8, 0)];
         let result = parse_tty_log(&path, &regions);
         assert!(matches!(result, Err(Rpcs3Error::TtyPayloadTooSmall { .. })));
         std::fs::remove_file(&path).ok();

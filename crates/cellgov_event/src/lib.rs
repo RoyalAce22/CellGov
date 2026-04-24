@@ -1,18 +1,7 @@
-//! cellgov_event -- event identifiers, ordering logic, priority classes.
+//! Event identifiers, ordering key, and priority classes.
 //!
-//! Owns `UnitId`, `EventId`, `SequenceNumber`, `OrderingKey`,
-//! `PriorityClass`, and the deterministic tie-break metadata used by the
-//! scheduler.
-//!
-//! Global ordering key (do not deviate):
-//!
-//! 1. event timestamp
-//! 2. event priority class
-//! 3. source unit id
-//! 4. event sequence number
-//!
-//! Do not rely on insertion order from `HashMap` or host thread timing. Use
-//! stable ordered collections where determinism matters.
+//! Global ordering tie-break: timestamp, priority class, source unit,
+//! sequence number.
 
 pub mod ids;
 pub mod ordering;

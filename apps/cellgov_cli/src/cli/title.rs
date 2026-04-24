@@ -1,40 +1,22 @@
 //! Title / VFS-root / checkpoint resolution shared by run-game,
 //! bench-boot, and bench-boot-once.
-//!
-//! All three commands need to turn CLI flags into a
-//! [`crate::game::manifest::TitleManifest`] plus a guest-VFS root
-//! path. This module encapsulates that lookup layer so the
-//! command modules can depend on a small, well-typed resolver
-//! interface.
 
 use super::args::find_flag_value;
 use super::exit::die;
 use crate::game;
 
-/// Location the `TitleRegistry` scans by default. Absolute path is
-/// not required -- callers run CellGov from the repo root, where
-/// `docs/titles/` sits alongside `tools/rpcs3`. Kept as a constant
-/// so error diagnostics can name the resolved directory.
 const DEFAULT_TITLE_REGISTRY_DIR: &str = "docs/titles";
 
 /// Resolve the active [`game::manifest::TitleManifest`] for a
-/// subcommand, in priority order:
+/// subcommand, in priority order: `--title-manifest <path>`,
+/// `--content-id <SERIAL>`, `--title <shortname>`.
 ///
-/// 1. `--title-manifest <path>` -- load that single TOML file
-///    directly (no registry scan needed).
-/// 2. `--content-id <SERIAL>` -- scan `DEFAULT_TITLE_REGISTRY_DIR`
-///    and look up by PSN content id or disc serial.
-/// 3. `--title <shortname>` -- scan the registry and look up by
-///    short name.
+/// # Errors
 ///
 /// Any error in flag parsing or file loading prints a diagnostic
-/// prefixed with `subcmd` and exits with status 1.
-///
-/// Flags written without a value (e.g. `cellgov_cli run-game
-/// --title-manifest` with nothing after it) hard-error via
-/// [`find_flag_value`] rather than silently falling through to
-/// the next lookup, so a typo surfaces at the flag it was written
-/// on instead of as an "unknown title" further down.
+/// prefixed with `subcmd` and exits with status 1. A flag written
+/// without a value hard-errors rather than falling through to the
+/// next lookup.
 pub(crate) fn resolve_title_manifest(
     args: &[String],
     subcmd: &str,
@@ -68,8 +50,6 @@ pub(crate) fn resolve_title_manifest(
     ));
 }
 
-/// Parse `--checkpoint <kind>` out of args, surfacing malformed
-/// values as a `subcmd`-prefixed error and clean exit.
 pub(crate) fn resolve_checkpoint_override(
     args: &[String],
     subcmd: &str,
@@ -81,12 +61,9 @@ pub(crate) fn resolve_checkpoint_override(
     }
 }
 
-/// Resolve the PS3 VFS root (a directory that acts as
-/// `/dev_hdd0` from the guest's perspective) using, in order:
-/// `--vfs-root <path>`, the `CELLGOV_PS3_VFS_ROOT` env var, then the
-/// repo-local default `tools/rpcs3/dev_hdd0`. Existence of the path
-/// is not verified here -- callers report "no executable found"
-/// against whichever root was chosen.
+/// Resolve the PS3 VFS root using, in priority order: `--vfs-root
+/// <path>`, `CELLGOV_PS3_VFS_ROOT` env var, then `tools/rpcs3/dev_hdd0`.
+/// Existence is not verified here.
 pub(crate) fn resolve_ps3_vfs_root(args: &[String]) -> std::path::PathBuf {
     if let Some(p) = find_flag_value(args, "--vfs-root") {
         return std::path::PathBuf::from(p);
@@ -105,13 +82,8 @@ mod tests {
         parts.iter().map(|s| s.to_string()).collect()
     }
 
-    /// RAII env-var scrubber: snapshots the current value on
-    /// construction, removes the var, and restores the original
-    /// value on drop (including panic unwinding). The previous
-    /// hand-written save/remove/restore sequence left the var
-    /// permanently unset if the assertion between `remove_var` and
-    /// `set_var` panicked, silently breaking any parallel test
-    /// that reads the same env var.
+    /// RAII env-var scrubber: snapshots the current value, unsets it,
+    /// and restores on drop (including during unwinding).
     struct EnvGuard {
         key: &'static str,
         prev: Option<String>,
@@ -152,10 +124,6 @@ mod tests {
 
     #[test]
     fn resolve_ps3_vfs_root_default_is_project_relative() {
-        // With no flag and no env var, fall back to the repo-local
-        // default. EnvGuard restores the original env var on drop
-        // so a panicking assertion cannot leave this var unset for
-        // other tests running in the same process.
         let _guard = EnvGuard::unset("CELLGOV_PS3_VFS_ROOT");
         let args = sv(&["cli", "run-game", "--title", "flow"]);
         let got = resolve_ps3_vfs_root(&args);

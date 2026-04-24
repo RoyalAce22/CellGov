@@ -2,11 +2,8 @@
 
 /// A reserved stack block for a child PPU thread.
 ///
-/// Fields are `pub(crate)` so external construction must go
-/// through [`ThreadStack::new`] or
-/// [`ThreadStackAllocator::allocate`], both of which enforce
-/// `size >= 0x10` (the ABI-required save-area reserve below
-/// `r1`).
+/// Construction enforces `size >= 0x10` (the ABI-required
+/// save-area reserve below `r1`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ThreadStack {
     pub(crate) base: u64,
@@ -38,9 +35,9 @@ impl ThreadStack {
 
     /// Top-of-stack address to load into `r1`.
     ///
-    /// # Panics (debug)
-    /// If `size < 0x10`. Structurally unreachable via `new` or
-    /// the allocator.
+    /// # Panics
+    /// Debug-only if `size < 0x10`; unreachable via `new` or the
+    /// allocator.
     pub fn initial_sp(&self) -> u64 {
         debug_assert!(
             self.size >= 0x10,
@@ -57,18 +54,15 @@ impl ThreadStack {
 }
 
 /// Deterministic bump allocator for child-thread stacks.
-///
-/// Two instances with the same construction parameters produce
-/// byte-identical allocation sequences.
 #[derive(Debug, Clone)]
 pub struct ThreadStackAllocator {
     next: u64,
 }
 
 impl ThreadStackAllocator {
-    /// Lowest address the allocator will hand out. Sits
-    /// immediately above the primary thread's 64 KB stack at
-    /// `0xD0000000-0xD000FFFF`.
+    /// Lowest address the allocator will hand out; sits directly
+    /// above the primary thread's 64 KB stack at
+    /// `0xD0000000..0xD0010000`.
     pub const CHILD_STACK_BASE: u64 = 0xD001_0000;
 
     /// Construct a fresh allocator.
@@ -79,9 +73,7 @@ impl ThreadStackAllocator {
     }
 
     /// Allocate a stack block of `size` bytes, aligned to
-    /// `max(align, 16)`. Returns `None` on overflow or when
-    /// `size < 0x10` (the ABI-required save-area reserve below
-    /// `r1`).
+    /// `max(align, 16)`; `None` on overflow or `size < 0x10`.
     pub fn allocate(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
         if size < 0x10 {
             return None;
@@ -94,8 +86,8 @@ impl ThreadStackAllocator {
         Some(ThreadStack { base, size })
     }
 
-    /// Peek the address where the next allocation of a given
-    /// alignment would start, without advancing the allocator.
+    /// Peek the next allocation's base for the given alignment
+    /// without advancing the allocator.
     pub fn peek_next(&self, align: u64) -> Option<u64> {
         let align = align.max(0x10);
         let mask = align - 1;

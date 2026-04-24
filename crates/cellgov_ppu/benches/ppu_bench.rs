@@ -1,7 +1,4 @@
-//! PPU microbenchmarks.
-//!
-//! Measures: decode throughput, execute per-variant latency,
-//! run_until_yield with Budget=100 on a synthetic instruction stream.
+//! PPU microbenchmarks: decode, execute per-variant, and `run_until_yield`.
 
 #![allow(missing_docs)]
 
@@ -18,40 +15,32 @@ use cellgov_ppu::store_buffer::StoreBuffer;
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_time::Budget;
 
-// --- Decode throughput ---
-
 fn bench_decode_addi(c: &mut Criterion) {
-    // addi r3, r0, 1 => opcode 14, rt=3, ra=0, imm=1
     let raw: u32 = (14 << 26) | (3 << 21) | 1;
     c.bench_function("decode/addi", |b| b.iter(|| decode(black_box(raw))));
 }
 
 fn bench_decode_lwz(c: &mut Criterion) {
-    // lwz r3, 0(r1) => opcode 32, rt=3, ra=1, imm=0
     let raw: u32 = (32 << 26) | (3 << 21) | (1 << 16);
     c.bench_function("decode/lwz", |b| b.iter(|| decode(black_box(raw))));
 }
 
 fn bench_decode_stw(c: &mut Criterion) {
-    // stw r3, 0(r1) => opcode 36, rs=3, ra=1, imm=0
     let raw: u32 = (36 << 26) | (3 << 21) | (1 << 16);
     c.bench_function("decode/stw", |b| b.iter(|| decode(black_box(raw))));
 }
 
 fn bench_decode_bc(c: &mut Criterion) {
-    // bc 12, 2, +8 => opcode 16, BO=12, BI=2, BD=8
     let raw: u32 = (16 << 26) | (12 << 21) | (2 << 16) | 8;
     c.bench_function("decode/bc", |b| b.iter(|| decode(black_box(raw))));
 }
 
 fn bench_decode_xo_add(c: &mut Criterion) {
-    // add r3, r4, r5 => opcode 31, XO=266, rt=3, ra=4, rb=5
     let raw: u32 = (31 << 26) | (3 << 21) | (4 << 16) | (5 << 11) | (266 << 1);
     c.bench_function("decode/add_xo", |b| b.iter(|| decode(black_box(raw))));
 }
 
 fn bench_decode_mixed_batch(c: &mut Criterion) {
-    // Batch of 8 different instruction types to measure average throughput
     let words: [u32; 8] = [
         (14 << 26) | (3 << 21) | 1,                                  // addi
         (32 << 26) | (3 << 21) | (1 << 16),                          // lwz
@@ -70,8 +59,6 @@ fn bench_decode_mixed_batch(c: &mut Criterion) {
         })
     });
 }
-
-// --- Execute per-variant latency ---
 
 fn bench_execute_addi(c: &mut Criterion) {
     let insn = PpuInstruction::Addi {
@@ -128,7 +115,6 @@ fn bench_execute_add(c: &mut Criterion) {
 }
 
 fn bench_execute_lwz(c: &mut Criterion) {
-    // Execute now reads memory inline, so provide a region.
     let insn = PpuInstruction::Lwz {
         rt: 3,
         ra: 1,
@@ -269,17 +255,12 @@ fn bench_execute_rlwinm(c: &mut Criterion) {
     });
 }
 
-// --- run_until_yield with Budget=100 ---
-
 fn bench_run_until_yield_100(c: &mut Criterion) {
-    // Fill memory with a tight loop of `addi r3, r3, 1` instructions.
-    // addi r3, r3, 1 => opcode 14, rt=3, ra=3, imm=1
     let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
     let addi_bytes = addi_word.to_be_bytes();
 
     let mem_size = 4096;
     let mut mem = GuestMemory::new(mem_size);
-    // Write 1000 addi instructions starting at address 0
     for i in 0..1000 {
         let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(i * 4), 4).unwrap();
         mem.apply_commit(range, &addi_bytes).unwrap();
@@ -295,7 +276,7 @@ fn bench_run_until_yield_100(c: &mut Criterion) {
 }
 
 fn bench_run_until_yield_budget_1(c: &mut Criterion) {
-    // Single-step mode (Budget=1), matching run-game usage.
+    // Budget=1: single-step mode, matching run-game usage.
     let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
     let addi_bytes = addi_word.to_be_bytes();
 
@@ -316,24 +297,17 @@ fn bench_run_until_yield_budget_1(c: &mut Criterion) {
 }
 
 fn bench_run_until_yield_mixed(c: &mut Criterion) {
-    // A mix of instructions: addi, add, cmpwi, b (loop back).
-    // Simulates a realistic tight loop.
     let mut mem = GuestMemory::new(4096);
+    // Straight-line sequence (no back-branch) tiled 250x; runs to budget exhaustion.
     let instructions: &[(u64, u32)] = &[
-        // 0x00: addi r3, r3, 1
         (0x00, (14 << 26) | (3 << 21) | (3 << 16) | 1),
-        // 0x04: add r4, r3, r5
         (
             0x04,
             (31 << 26) | (4 << 21) | (3 << 16) | (5 << 11) | (266 << 1),
         ),
-        // 0x08: cmpwi cr0, r3, 100
         (0x08, (11 << 26) | (3 << 16) | 100),
-        // 0x0C: addi r5, r5, 1 -- straight-line so the bench runs to budget
-        // exhaustion without an infinite loop.
         (0x0C, (14 << 26) | (5 << 21) | (5 << 16) | 1),
     ];
-    // Tile this 4-instruction block across memory
     for rep in 0..250 {
         for &(off, word) in instructions {
             let addr = rep * 16 + off;
@@ -372,12 +346,8 @@ criterion_group!(
     bench_execute_rlwinm,
 );
 
-// --- per-step state-hash trace cost ---
-
-/// Run the same 100-instruction addi loop with per-step state-hash
-/// tracing OFF. Pairs with `bench_run_until_yield_per_step_on` to
-/// quantify the cost of leaving the per-step path enabled. The OFF
-/// branch is the zero-cost path the runtime defaults to.
+/// Zero-cost default path: per-step state-hash trace OFF. Pairs with
+/// [`bench_run_until_yield_per_step_on`] to quantify the overhead.
 fn bench_run_until_yield_per_step_off(c: &mut Criterion) {
     let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
     let addi_bytes = addi_word.to_be_bytes();
@@ -390,17 +360,14 @@ fn bench_run_until_yield_per_step_off(c: &mut Criterion) {
     c.bench_function("run_until_yield/per_step_off_addi100", |b| {
         b.iter(|| {
             let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
-            // Default: per_step_trace == false.
             let ctx = ExecutionContext::new(&mem);
             ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new())
         })
     });
 }
 
-/// Same workload with per-step tracing ON. This pays the
-/// `state_hash()` call plus a Vec push every retired instruction.
-/// The runtime opts in only when the dev explicitly requests
-/// per-step trace.
+/// Per-step trace ON: pays one `state_hash()` and one Vec push per retired
+/// instruction.
 fn bench_run_until_yield_per_step_on(c: &mut Criterion) {
     let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
     let addi_bytes = addi_word.to_be_bytes();
@@ -416,21 +383,14 @@ fn bench_run_until_yield_per_step_on(c: &mut Criterion) {
             ppu.set_per_step_trace(true);
             let ctx = ExecutionContext::new(&mem);
             let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
-            // Drain every iteration so the buffer does not grow
-            // unbounded across criterion samples.
+            // Drain per iteration; buffer would otherwise grow unbounded.
             let _ = ppu.drain_retired_state_hashes();
             r
         })
     });
 }
 
-// --- per-call cost of PpuState::state_hash() ---
-
-/// Cost of one PpuState::state_hash() call. Pulled out of the
-/// per-step emission bench so a regression in the hash function
-/// itself can be distinguished from a regression in the surrounding
-/// emission path. Hash input is 324 bytes (32 GPRs + LR + CTR + XER
-/// + CR).
+/// Cost of one `PpuState::state_hash()` call in isolation.
 fn bench_state_hash(c: &mut Criterion) {
     let mut s = PpuState::new();
     for (i, r) in s.gpr.iter_mut().enumerate() {

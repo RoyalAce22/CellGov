@@ -1,44 +1,35 @@
-//! Logical epoch -- advances at commit boundaries.
-//!
-//! An epoch tick marks a point at which the set of committed effects is
-//! closed and visible. Epoch is the granularity at which determinism
-//! comparisons -- state hashes, replay checkpoints -- are taken.
-//!
-//! `Epoch` is a distinct type from [`crate::ticks::GuestTicks`] and
-//! [`crate::budget::Budget`]: the three concepts must not implicitly convert.
+//! Commit-batch counter used as the granularity for state hashes.
 
-/// A logical epoch counter. Advances exactly once per commit batch.
+/// A commit-batch counter; advances once per closed batch.
 ///
-/// Within a single epoch the set of committed effects is closed: all writes
-/// in a batch become visible together, or none do. Epoch boundaries are the
-/// only points at which the runtime takes state hashes for replay.
+/// Within one epoch the set of committed effects is closed: all writes in
+/// the batch become visible together, or none do. State hashes are taken
+/// only at epoch boundaries.
+///
+/// Distinct from [`crate::ticks::GuestTicks`] and [`crate::budget::Budget`];
+/// the three do not implicitly convert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Epoch(u64);
 
 impl Epoch {
-    /// The first epoch. Every runtime starts here before any commits.
+    /// Starting epoch before any commit has run.
     pub const ZERO: Self = Self(0);
 
-    /// Construct an `Epoch` from a raw count.
-    ///
-    /// There is no `From<u64>` impl: epoch values are produced by the
-    /// commit pipeline, not by ad-hoc arithmetic at call sites.
+    /// Lift a raw count into an `Epoch`.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Return the underlying epoch number. Use sparingly -- prefer ordering
-    /// and `next` over arithmetic on raw values.
+    /// Underlying epoch number.
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
     }
 
-    /// The successor epoch, or `None` on overflow.
+    /// Successor epoch, or `None` on overflow.
     ///
-    /// Overflow is a runtime invariant violation, not a recoverable
-    /// condition; callers must handle it explicitly rather than wrapping.
+    /// Overflow is an invariant violation; callers must not silently wrap.
     #[inline]
     pub const fn next(self) -> Option<Self> {
         match self.0.checked_add(1) {
