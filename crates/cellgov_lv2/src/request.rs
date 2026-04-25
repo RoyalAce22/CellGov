@@ -82,6 +82,16 @@ pub enum Lv2Request {
     /// arguments. The dispatch arm answers with the PPU timebase
     /// register frequency from `cellgov_time::CELL_PPU_TIMEBASE_HZ`.
     TimeGetTimebaseFrequency,
+    /// sys_time_get_timezone (144). Writes the timezone offset and
+    /// summer-time offset as two 32-bit big-endian integers. CellGov
+    /// is a deterministic oracle with no host-time dependency, so
+    /// both slots receive zero (UTC, no DST).
+    TimeGetTimezone {
+        /// Out-pointer for the timezone offset in minutes (be_t<s32>).
+        timezone_ptr: u32,
+        /// Out-pointer for the summer-time offset in minutes (be_t<s32>).
+        summer_time_ptr: u32,
+    },
     /// sys_tty_write (403).
     TtyWrite {
         /// File descriptor.
@@ -563,6 +573,10 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             thread_id: p!(0),
             value: p!(1),
         },
+        144 => Lv2Request::TimeGetTimezone {
+            timezone_ptr: p!(0),
+            summer_time_ptr: p!(1),
+        },
         145 => Lv2Request::TimeGetCurrentTime {
             sec_ptr: p!(0),
             nsec_ptr: p!(1),
@@ -877,6 +891,18 @@ mod tests {
             Lv2Request::TimeGetCurrentTime {
                 sec_ptr: 0x9000,
                 nsec_ptr: 0x9008,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_time_get_timezone_captures_out_pointers() {
+        let args = [0xd000_fd10, 0xd000_fd14, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(144, &args),
+            Lv2Request::TimeGetTimezone {
+                timezone_ptr: 0xd000_fd10,
+                summer_time_ptr: 0xd000_fd14,
             }
         );
     }

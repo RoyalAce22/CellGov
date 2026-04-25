@@ -574,6 +574,30 @@ impl Lv2Host {
                 code: cellgov_time::CELL_PPU_TIMEBASE_HZ,
                 effects: vec![],
             },
+            Lv2Request::TimeGetTimezone {
+                timezone_ptr,
+                summer_time_ptr,
+            } => {
+                let zero = 0i32.to_be_bytes();
+                let tz_write = Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(timezone_ptr as u64), 4).unwrap(),
+                    bytes: WritePayload::from_slice(&zero),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: self.current_tick,
+                };
+                let dst_write = Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(summer_time_ptr as u64), 4).unwrap(),
+                    bytes: WritePayload::from_slice(&zero),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: self.current_tick,
+                };
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![tz_write, dst_write],
+                }
+            }
             Lv2Request::TimeGetCurrentTime { sec_ptr, nsec_ptr } => {
                 let (sec, nsec) = cellgov_time::ticks_to_sec_nsec(rt.current_tick().raw());
                 let sec_write = Effect::SharedWriteIntent {
@@ -846,6 +870,42 @@ mod tests {
             }
         );
         assert_eq!(cellgov_time::CELL_PPU_TIMEBASE_HZ, 79_800_000);
+    }
+
+    #[test]
+    fn time_get_timezone_writes_zero_through_both_out_pointers() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let result = host.dispatch(
+            Lv2Request::TimeGetTimezone {
+                timezone_ptr: 0xd000_fd10,
+                summer_time_ptr: 0xd000_fd14,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0);
+                assert_eq!(effects.len(), 2);
+                let expected_zero = 0i32.to_be_bytes();
+                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
+                    assert_eq!(range.start().raw(), 0xd000_fd10);
+                    assert_eq!(range.length(), 4);
+                    assert_eq!(bytes.bytes(), &expected_zero);
+                } else {
+                    panic!("expected SharedWriteIntent for timezone_ptr");
+                }
+                if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[1] {
+                    assert_eq!(range.start().raw(), 0xd000_fd14);
+                    assert_eq!(range.length(), 4);
+                    assert_eq!(bytes.bytes(), &expected_zero);
+                } else {
+                    panic!("expected SharedWriteIntent for summer_time_ptr");
+                }
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
     }
 
     #[test]
