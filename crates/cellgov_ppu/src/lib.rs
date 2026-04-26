@@ -13,7 +13,6 @@ pub mod shadow;
 pub mod sprx;
 pub mod state;
 pub mod store_buffer;
-pub mod syscall;
 
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::store_buffer::StoreBuffer;
@@ -31,16 +30,41 @@ pub const FAULT_PC_OUT_OF_RANGE: u32 = 0x0102_0000;
 pub const FAULT_DECODE_ERROR: u32 = 0x0105_0000;
 /// Load or store targeted an out-of-bounds guest address.
 pub const FAULT_INVALID_ADDRESS: u32 = 0x0106_0000;
-/// Syscall number or VMX sub-opcode has no handler.
+/// Syscall number has no handler.
 pub const FAULT_UNSUPPORTED_SYSCALL: u32 = 0x0107_0000;
 /// Debug breakpoint fired at a user-requested PC.
 pub const FAULT_DEBUG_BREAK: u32 = 0x0108_0000;
+/// Decoded instruction (typically a VMX sub-opcode) had no exec arm.
+pub const FAULT_UNIMPLEMENTED_INSN: u32 = 0x0109_0000;
+
+/// Whether `insn` is a 2-instruction super-pair fusion. The shadow
+/// build emits a `Consumed` placeholder at the +4 slot for these
+/// variants; quickenings (1-instruction rewrites like `Mr`, `Slwi`)
+/// don't.
+fn is_super_pair(insn: &instruction::PpuInstruction) -> bool {
+    matches!(
+        insn,
+        instruction::PpuInstruction::LwzCmpwi { .. }
+            | instruction::PpuInstruction::LiStw { .. }
+            | instruction::PpuInstruction::MflrStw { .. }
+            | instruction::PpuInstruction::LwzMtlr { .. }
+            | instruction::PpuInstruction::MflrStd { .. }
+            | instruction::PpuInstruction::LdMtlr { .. }
+            | instruction::PpuInstruction::StdStd { .. }
+            | instruction::PpuInstruction::CmpwiBc { .. }
+            | instruction::PpuInstruction::CmpwBc { .. }
+    )
+}
 
 /// PPU architectural state snapshot for replay.
 #[derive(Debug, Clone)]
 pub struct PpuSnapshot {
     /// General-purpose registers.
     pub gpr: [u64; 32],
+    /// Floating-point registers (raw f64 bit patterns, matching `PpuState`).
+    pub fpr: [u64; 32],
+    /// Vector registers, big-endian (byte 0 in MSB).
+    pub vr: [u128; 32],
     /// Program counter.
     pub pc: u64,
     /// Condition register.
@@ -49,6 +73,10 @@ pub struct PpuSnapshot {
     pub lr: u64,
     /// Count register.
     pub ctr: u64,
+    /// Fixed-point exception register.
+    pub xer: u64,
+    /// Time base counter.
+    pub tb: u64,
     /// Canonical reservation-line address, or `None` when no reservation is held.
     pub reservation_line: Option<u64>,
 }
@@ -286,14 +314,12 @@ impl ExecutionUnit for PpuExecutionUnit {
             [(0, &[] as &[u8]); MAX_REGIONS];
         let mut n_regions = 0usize;
         for r in ctx.memory().regions() {
-            debug_assert!(
+            assert!(
                 n_regions < MAX_REGIONS,
                 "region_views table too small; bump MAX_REGIONS"
             );
-            if n_regions < MAX_REGIONS {
-                region_views_storage[n_regions] = (r.base(), r.bytes());
-                n_regions += 1;
-            }
+            region_views_storage[n_regions] = (r.base(), r.bytes());
+            n_regions += 1;
         }
         let region_views = &region_views_storage[..n_regions];
 
@@ -343,8 +369,23 @@ impl ExecutionUnit for PpuExecutionUnit {
             };
 
             // Placeholder left by superinstruction pairing: advance PC, burn a tick.
+            // The slot represents the second architectural instruction of a fused
+            // super-pair, so it retires for trace and counter purposes too -- otherwise
+            // retirement_counter and consumed_budget drift apart on every super-pair.
             if matches!(insn, instruction::PpuInstruction::Consumed) {
                 self.state.pc += 4;
+                if self.per_step_trace {
+                    self.per_step_hashes
+                        .push((step_pc, self.state.state_hash()));
+                }
+                if let Some((lo, hi)) = self.full_state_window {
+                    if self.retirement_counter >= lo && self.retirement_counter <= hi {
+                        let s = &self.state;
+                        self.per_step_full_states
+                            .push((step_pc, s.gpr, s.lr, s.ctr, s.xer, s.cr));
+                    }
+                }
+                self.retirement_counter += 1;
                 remaining = remaining.saturating_sub(1);
                 if remaining == 0 {
                     self.store_buf.flush(effects, self.id);
@@ -369,6 +410,27 @@ impl ExecutionUnit for PpuExecutionUnit {
             ) {
                 ExecuteVerdict::Continue => {
                     self.state.pc += 4;
+                    // Super-pair variants must be followed by a
+                    // `Consumed` placeholder; otherwise the second
+                    // half of the original pair would re-execute.
+                    // Contract is locked from the outside by the
+                    // `fetch_loop_advances_past_consumed_after_super_pair`
+                    // and `fetch_loop_super_pair_taken_branch_uses_target_not_consumed_skip`
+                    // tests in tests/ppu_tests.rs.
+                    debug_assert!(
+                        !is_super_pair(&insn)
+                            || self
+                                .instruction_shadow
+                                .as_ref()
+                                .and_then(|s| s.get(self.state.pc))
+                                .is_none_or(|next| matches!(
+                                    next,
+                                    instruction::PpuInstruction::Consumed
+                                )),
+                        "super-pair {} at 0x{step_pc:x} not followed by Consumed at 0x{:x}",
+                        insn.variant_name(),
+                        self.state.pc,
+                    );
                 }
                 ExecuteVerdict::Branch => {}
                 ExecuteVerdict::Syscall => {
@@ -388,7 +450,13 @@ impl ExecutionUnit for PpuExecutionUnit {
                 }
                 ExecuteVerdict::Fault(f) => {
                     // Capture diag before rollback so registers reflect the fault site.
-                    let diag = self.fault_diag(step_pc);
+                    // Address-bearing variants route the address through diag.faulting_ea
+                    // so the 16-bit low slot of the fault code stays clean of upper bits.
+                    let diag = match f {
+                        PpuFault::InvalidAddress(a) => self.fault_diag_ea(step_pc, a),
+                        PpuFault::PcOutOfRange(a) => self.fault_diag_ea(step_pc, a),
+                        _ => self.fault_diag(step_pc),
+                    };
                     // Fault-discards-all: mid-batch rollback keeps state consistent
                     // with the dropped effect batch.
                     if remaining < max_budget {
@@ -401,10 +469,18 @@ impl ExecutionUnit for PpuExecutionUnit {
                     }
                     effects.clear();
                     self.status = UnitStatus::Faulted;
+                    // Syscall numbers (<= ~1024) and VMX sub-opcodes (<= 11 bits) fit
+                    // in the low 16 bits; mask defensively so a stray high bit cannot
+                    // corrupt the upper-16 fault category prefix.
                     let code = match f {
-                        PpuFault::PcOutOfRange(a) => FAULT_PC_OUT_OF_RANGE | a as u32,
-                        PpuFault::InvalidAddress(a) => FAULT_INVALID_ADDRESS | a as u32,
-                        PpuFault::UnsupportedSyscall(n) => FAULT_UNSUPPORTED_SYSCALL | n as u32,
+                        PpuFault::PcOutOfRange(_) => FAULT_PC_OUT_OF_RANGE,
+                        PpuFault::InvalidAddress(_) => FAULT_INVALID_ADDRESS,
+                        PpuFault::UnsupportedSyscall(n) => {
+                            FAULT_UNSUPPORTED_SYSCALL | (n as u32 & 0xFFFF)
+                        }
+                        PpuFault::UnimplementedInstruction(xo) => {
+                            FAULT_UNIMPLEMENTED_INSN | (xo as u32 & 0xFFFF)
+                        }
                     };
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
@@ -449,23 +525,16 @@ impl ExecutionUnit for PpuExecutionUnit {
             }
 
             if self.profile_mode {
-                let pc_usize = step_pc as usize;
-                if pc_usize + 4 <= mem.len() {
-                    let raw = u32::from_be_bytes([
-                        mem[pc_usize],
-                        mem[pc_usize + 1],
-                        mem[pc_usize + 2],
-                        mem[pc_usize + 3],
-                    ]);
-                    if let Ok(raw_insn) = decode::decode(raw) {
-                        let name = raw_insn.variant_name();
-                        *self.profile_insns.entry(name).or_insert(0) += 1;
-                        if let Some(prev) = self.profile_prev {
-                            *self.profile_pairs.entry((prev, name)).or_insert(0) += 1;
-                        }
-                        self.profile_prev = Some(name);
-                    }
+                // Profile the variant the unit actually dispatched, including
+                // quickenings (Mr, Slwi, ...) and super-pairs (LwzCmpwi, ...);
+                // re-decoding the raw word would attribute fused/quickened work
+                // back to its pre-rewrite encoding.
+                let name = insn.variant_name();
+                *self.profile_insns.entry(name).or_insert(0) += 1;
+                if let Some(prev) = self.profile_prev {
+                    *self.profile_pairs.entry((prev, name)).or_insert(0) += 1;
                 }
+                self.profile_prev = Some(name);
             }
 
             if self.per_step_trace {
@@ -499,10 +568,14 @@ impl ExecutionUnit for PpuExecutionUnit {
     fn snapshot(&self) -> PpuSnapshot {
         PpuSnapshot {
             gpr: self.state.gpr,
+            fpr: self.state.fpr,
+            vr: self.state.vr,
             pc: self.state.pc,
             cr: self.state.cr,
             lr: self.state.lr,
             ctr: self.state.ctr,
+            xer: self.state.xer,
+            tb: self.state.tb,
             reservation_line: self.state.reservation.map(|l| l.addr()),
         }
     }
@@ -516,13 +589,15 @@ impl ExecutionUnit for PpuExecutionUnit {
     }
 
     fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {
-        let mut v: Vec<_> = self.profile_insns.iter().map(|(&k, &v)| (k, v)).collect();
+        let map = std::mem::take(&mut self.profile_insns);
+        let mut v: Vec<_> = map.into_iter().collect();
         v.sort_by_key(|e| std::cmp::Reverse(e.1));
         v
     }
 
     fn drain_profile_pairs(&mut self) -> Vec<((&'static str, &'static str), u64)> {
-        let mut v: Vec<_> = self.profile_pairs.iter().map(|(&k, &v)| (k, v)).collect();
+        let map = std::mem::take(&mut self.profile_pairs);
+        let mut v: Vec<_> = map.into_iter().collect();
         v.sort_by_key(|e| std::cmp::Reverse(e.1));
         v
     }

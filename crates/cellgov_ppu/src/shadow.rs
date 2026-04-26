@@ -9,9 +9,26 @@
 //! followed by [`refresh`](PredecodedShadow::refresh); the stale bit
 //! forces the caller onto the raw fetch + decode path until the
 //! slot is repopulated from committed memory.
+//!
+//! The two passes that run during `build` live in their own
+//! submodules so each can be tested in isolation:
+//!
+//! - [`quicken`]: rewrite a single decoded instruction into a
+//!   specialized variant (e.g. `addi r3, 0, imm` -> `Li`).
+//! - [`superpair`]: fuse two adjacent instructions into a single
+//!   super-instruction variant (e.g. `lwz` + `cmpwi` -> `LwzCmpwi`),
+//!   replacing the second slot with `Consumed`.
+
+mod quicken;
+mod superpair;
+#[cfg(test)]
+mod test_support;
 
 use crate::decode;
 use crate::instruction::PpuInstruction;
+
+use quicken::quicken_insn;
+use superpair::make_super_pair;
 
 /// Predecoded instruction shadow covering one contiguous guest range.
 pub struct PredecodedShadow {
@@ -139,6 +156,15 @@ impl PredecodedShadow {
 
     /// Mark every slot overlapping `[addr, addr + len)` as stale.
     ///
+    /// Super-pair partners are widened in: invalidating just the
+    /// `Consumed` half of a fused pair would leave the head's fused
+    /// operation still firing for an instruction that may have been
+    /// rewritten; invalidating just the head would leave an orphan
+    /// `Consumed` that the fetch loop skips without executing what
+    /// was actually written there. Both halves are staled as a unit
+    /// so the runtime falls back to raw fetch + decode for either
+    /// side until the caller refreshes them.
+    ///
     /// Predecessor `block_len` entries are not recomputed here; they
     /// may overshoot, but the per-slot `stale`/`None` check on each
     /// fetch re-bounds the block. Pair with [`refresh`](Self::refresh)
@@ -154,9 +180,23 @@ impl PredecodedShadow {
         }
         let clamp_lo = addr.max(self.base);
         let clamp_hi = end.min(shadow_end);
-        let first_slot = ((clamp_lo - self.base) / 4) as usize;
-        let last_slot = ((clamp_hi - self.base) as usize).div_ceil(4);
-        let last_slot = last_slot.min(self.slots.len());
+        let mut first_slot = ((clamp_lo - self.base) / 4) as usize;
+        let mut last_slot = ((clamp_hi - self.base) as usize).div_ceil(4);
+        last_slot = last_slot.min(self.slots.len());
+
+        // Super-pair partner widening. A super-pair has its head at
+        // index k and a `Consumed` placeholder at k+1; the two slots
+        // must transition to stale together or the fused dispatch and
+        // the freshly-written byte at the partner slot disagree.
+        if first_slot > 0 && matches!(self.slots[first_slot], Some(PpuInstruction::Consumed)) {
+            first_slot -= 1;
+        }
+        if last_slot < self.slots.len()
+            && matches!(self.slots[last_slot], Some(PpuInstruction::Consumed))
+        {
+            last_slot += 1;
+        }
+
         for i in first_slot..last_slot {
             self.stale[i] = true;
             self.block_len[i] = 1;
@@ -167,8 +207,18 @@ impl PredecodedShadow {
     ///
     /// Outer `None` means `pc` is out of range or misaligned.
     /// `Some(None)` means decode failed (same slot state as the
-    /// build-time decode-error path). Quickening is re-applied;
-    /// super-pairing is not.
+    /// build-time decode-error path).
+    ///
+    /// Quickening is re-applied; super-pairing is intentionally not.
+    /// Re-pairing on a single refreshed slot would have to inspect
+    /// both neighbors, possibly tear down or re-form an adjacent
+    /// fusion, and reason about a partner that may itself be stale
+    /// or freshly written. The cost is that two slots whose new
+    /// content forms a fusable pair (e.g., post-relocation `lwz +
+    /// cmpwi`) will run as separate dispatches until a full shadow
+    /// rebuild. The correctness vs perf tradeoff favors correctness:
+    /// a partly-rewritten fusion state is harder to reason about
+    /// than a missed optimization.
     pub fn refresh(&mut self, pc: u64, raw: u32) -> Option<Option<PpuInstruction>> {
         if pc < self.base {
             return None;
@@ -236,8 +286,10 @@ impl PredecodedShadow {
     }
 
     /// Rewrite decoded slots in place into specialized instruction
-    /// variants. See [`quicken_insn`] for the idioms recognized.
-    pub fn quicken(&mut self) {
+    /// variants. Run once during [`build`](Self::build); not exposed
+    /// externally since the shadow's invariants assume quickening
+    /// has already happened by the time `get` is called.
+    fn quicken(&mut self) {
         for i in 0..self.slots.len() {
             if self.stale[i] {
                 continue;
@@ -256,8 +308,9 @@ impl PredecodedShadow {
     /// fused pair is replaced with `Consumed`. Pairs that cross a
     /// block boundary (first operand is a terminator) are skipped,
     /// but fusions that *produce* a terminator (CmpwiBc/CmpwBc) are
-    /// allowed -- callers must recompute `block_len` after this runs.
-    pub fn super_pair(&mut self) {
+    /// allowed -- the caller in [`build`](Self::build) recomputes
+    /// `block_len` after this runs.
+    fn super_pair(&mut self) {
         let n = self.slots.len();
         if n < 2 {
             return;
@@ -287,242 +340,12 @@ impl PredecodedShadow {
     }
 }
 
-/// Fuse two adjacent instructions, or `None` if no rule applies.
-fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<PpuInstruction> {
-    match (a, b) {
-        // lwz rT, off(rA) + cmpwi crF, rT, imm
-        (
-            PpuInstruction::Lwz { rt, ra, imm },
-            PpuInstruction::Cmpwi {
-                bf,
-                ra: cmp_ra,
-                imm: cmp_imm,
-            },
-        ) if rt == cmp_ra => Some(PpuInstruction::LwzCmpwi {
-            rt,
-            ra_load: ra,
-            offset: imm,
-            bf,
-            cmp_imm,
-        }),
-        // li rT, imm + stw rT, off(rA)
-        (
-            PpuInstruction::Li { rt, imm },
-            PpuInstruction::Stw {
-                rs,
-                ra,
-                imm: st_off,
-            },
-        ) if rt == rs => Some(PpuInstruction::LiStw {
-            rt,
-            imm,
-            ra_store: ra,
-            store_offset: st_off,
-        }),
-        // mflr rT + stw rT, off(rA)
-        (PpuInstruction::Mflr { rt }, PpuInstruction::Stw { rs, ra, imm }) if rt == rs => {
-            Some(PpuInstruction::MflrStw {
-                rt,
-                ra_store: ra,
-                store_offset: imm,
-            })
-        }
-        // lwz rT, off(rA) + mtlr rT
-        (PpuInstruction::Lwz { rt, ra, imm }, PpuInstruction::Mtlr { rs }) if rt == rs => {
-            Some(PpuInstruction::LwzMtlr {
-                rt,
-                ra_load: ra,
-                offset: imm,
-            })
-        }
-        // mflr rT + std rT, off(rA) (PPC64 prologue)
-        (PpuInstruction::Mflr { rt }, PpuInstruction::Std { rs, ra, imm }) if rt == rs => {
-            Some(PpuInstruction::MflrStd {
-                rt,
-                ra_store: ra,
-                store_offset: imm,
-            })
-        }
-        // ld rT, off(rA) + mtlr rT (PPC64 epilogue)
-        (PpuInstruction::Ld { rt, ra, imm }, PpuInstruction::Mtlr { rs }) if rt == rs => {
-            Some(PpuInstruction::LdMtlr {
-                rt,
-                ra_load: ra,
-                offset: imm,
-            })
-        }
-        // std rS1, off1(rA) + std rS2, off2(rA) where off2 = off1 + 8
-        (
-            PpuInstruction::Std {
-                rs: rs1,
-                ra: ra1,
-                imm: off1,
-            },
-            PpuInstruction::Std {
-                rs: rs2,
-                ra: ra2,
-                imm: off2,
-            },
-        ) if ra1 == ra2 && off2 == off1.wrapping_add(8) => Some(PpuInstruction::StdStd {
-            rs1,
-            rs2,
-            ra: ra1,
-            offset1: off1,
-        }),
-        // lwz rT, off(rA) + CmpwZero crF, rT (quickened cmpwi-zero)
-        (PpuInstruction::Lwz { rt, ra, imm }, PpuInstruction::CmpwZero { bf, ra: cmp_ra })
-            if rt == cmp_ra =>
-        {
-            Some(PpuInstruction::LwzCmpwi {
-                rt,
-                ra_load: ra,
-                offset: imm,
-                bf,
-                cmp_imm: 0,
-            })
-        }
-        // cmpwi crF, rA, imm + bc BO, BI, offset (non-linking)
-        (
-            PpuInstruction::Cmpwi { bf, ra, imm },
-            PpuInstruction::Bc {
-                bo,
-                bi,
-                offset,
-                link: false,
-            },
-        ) => Some(PpuInstruction::CmpwiBc {
-            bf,
-            ra,
-            imm,
-            bo,
-            bi,
-            target_offset: offset,
-        }),
-        // CmpwZero + bc (quickened cmpwi-zero still fuses)
-        (
-            PpuInstruction::CmpwZero { bf, ra },
-            PpuInstruction::Bc {
-                bo,
-                bi,
-                offset,
-                link: false,
-            },
-        ) => Some(PpuInstruction::CmpwiBc {
-            bf,
-            ra,
-            imm: 0,
-            bo,
-            bi,
-            target_offset: offset,
-        }),
-        // cmpw crF, rA, rB + bc BO, BI, offset (non-linking)
-        (
-            PpuInstruction::Cmpw { bf, ra, rb },
-            PpuInstruction::Bc {
-                bo,
-                bi,
-                offset,
-                link: false,
-            },
-        ) => Some(PpuInstruction::CmpwBc {
-            bf,
-            ra,
-            rb,
-            bo,
-            bi,
-            target_offset: offset,
-        }),
-        _ => None,
-    }
-}
-
-/// Rewrite one decoded instruction into a specialized variant, or
-/// `None` if no rule applies.
-fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
-    match insn {
-        // addi rT, 0, imm => Li
-        PpuInstruction::Addi { rt, ra: 0, imm } => Some(PpuInstruction::Li { rt, imm }),
-        // or rA, rS, rS => Mr (only when Rc=0; or. must keep CR0 update).
-        PpuInstruction::Or {
-            ra,
-            rs,
-            rb,
-            rc: false,
-        } if rs == rb => Some(PpuInstruction::Mr { ra, rs }),
-        // rlwinm rA, rS, sh, 0, 31-sh => Slwi
-        PpuInstruction::Rlwinm {
-            ra,
-            rs,
-            sh,
-            mb,
-            me,
-            rc: false,
-        } if mb == 0 && me == 31 - sh => Some(PpuInstruction::Slwi { ra, rs, n: sh }),
-        // rlwinm rA, rS, 32-n, n, 31 => Srwi
-        PpuInstruction::Rlwinm {
-            ra,
-            rs,
-            sh,
-            mb,
-            me,
-            rc: false,
-        } if me == 31 && sh != 0 && mb == (32 - sh) => Some(PpuInstruction::Srwi { ra, rs, n: mb }),
-        // rlwinm rA, rS, 0, n, 31 => Clrlwi
-        PpuInstruction::Rlwinm {
-            ra,
-            rs,
-            sh,
-            mb,
-            me,
-            rc: false,
-        } if sh == 0 && me == 31 => Some(PpuInstruction::Clrlwi { ra, rs, n: mb }),
-        // ori rA, rA, 0 => Nop
-        PpuInstruction::Ori { ra, rs, imm: 0 } if ra == rs => Some(PpuInstruction::Nop),
-        // cmpwi crF, rA, 0 => CmpwZero
-        PpuInstruction::Cmpwi { bf, ra, imm: 0 } => Some(PpuInstruction::CmpwZero { bf, ra }),
-        // rldicl rA, rS, 0, n => Clrldi
-        PpuInstruction::Rldicl {
-            ra,
-            rs,
-            sh: 0,
-            mb,
-            rc: false,
-        } => Some(PpuInstruction::Clrldi { ra, rs, n: mb }),
-        // rldicr rA, rS, n, 63-n => Sldi
-        PpuInstruction::Rldicr {
-            ra,
-            rs,
-            sh,
-            me,
-            rc: false,
-        } if sh != 0 && me == 63 - sh => Some(PpuInstruction::Sldi { ra, rs, n: sh }),
-        // rldicl rA, rS, 64-n, n => Srdi
-        PpuInstruction::Rldicl {
-            ra,
-            rs,
-            sh,
-            mb,
-            rc: false,
-        } if sh != 0 && mb == 64 - sh => Some(PpuInstruction::Srdi { ra, rs, n: mb }),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::test_support::{
+        b_raw, build_from_words, cmpwi_raw, li_raw, lwz_raw, sc_raw, stw_raw,
+    };
     use super::*;
-
-    fn li_raw(rd: u32, simm: i16) -> u32 {
-        (14 << 26) | (rd << 21) | ((simm as u16) as u32)
-    }
-
-    fn build_from_words(base: u64, words: &[u32]) -> PredecodedShadow {
-        let mut bytes = Vec::with_capacity(words.len() * 4);
-        for &w in words {
-            bytes.extend_from_slice(&w.to_be_bytes());
-        }
-        PredecodedShadow::build(base, &bytes)
-    }
 
     #[test]
     fn build_decodes_all_slots() {
@@ -616,18 +439,6 @@ mod tests {
         );
     }
 
-    // -- block_len tests --
-
-    fn b_raw() -> u32 {
-        // b +8 (unconditional branch, offset=8, not AA, not LK)
-        (18 << 26) | 8
-    }
-
-    fn sc_raw() -> u32 {
-        // sc (syscall)
-        (17 << 26) | 2
-    }
-
     #[test]
     fn block_len_straight_line() {
         let shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), li_raw(5, 3), li_raw(6, 4)]);
@@ -639,7 +450,7 @@ mod tests {
 
     #[test]
     fn block_len_branch_terminates() {
-        let shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), b_raw(), li_raw(5, 3)]);
+        let shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), b_raw(8), li_raw(5, 3)]);
         assert_eq!(shadow.block_len_at(0), 3);
         assert_eq!(shadow.block_len_at(4), 2);
         assert_eq!(shadow.block_len_at(8), 1);
@@ -689,566 +500,77 @@ mod tests {
         assert_eq!(shadow.block_len_at(0), 1);
     }
 
-    // -- quickening tests --
-
-    /// Encode `or rA, rS, rB` (opcode 31, XO 444).
-    fn or_raw(rs: u32, ra: u32, rb: u32) -> u32 {
-        (31 << 26) | (rs << 21) | (ra << 16) | (rb << 11) | (444 << 1)
-    }
-
-    /// Encode `rlwinm rA, rS, sh, mb, me` (opcode 21).
-    fn rlwinm_raw(rs: u32, ra: u32, sh: u32, mb: u32, me: u32) -> u32 {
-        (21 << 26) | (rs << 21) | (ra << 16) | (sh << 11) | (mb << 6) | (me << 1)
-    }
-
     #[test]
-    fn quicken_addi_ra0_becomes_li() {
-        // addi r3, r0, 42 => Li { rt: 3, imm: 42 }
-        let shadow = build_from_words(0, &[li_raw(3, 42)]);
-        assert_eq!(shadow.get(0), Some(PpuInstruction::Li { rt: 3, imm: 42 }));
-    }
-
-    #[test]
-    fn quicken_or_same_reg_becomes_mr() {
-        // or r3, r4, r4 => Mr { ra: 3, rs: 4 }
-        let shadow = build_from_words(0, &[or_raw(4, 3, 4)]);
-        assert_eq!(shadow.get(0), Some(PpuInstruction::Mr { ra: 3, rs: 4 }));
-    }
-
-    #[test]
-    fn quicken_rlwinm_slwi() {
-        // rlwinm r3, r4, 8, 0, 23 => Slwi { ra: 3, rs: 4, n: 8 }
-        let shadow = build_from_words(0, &[rlwinm_raw(4, 3, 8, 0, 23)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::Slwi { ra: 3, rs: 4, n: 8 })
-        );
-    }
-
-    #[test]
-    fn quicken_rlwinm_srwi() {
-        // srwi r3, r4, 8 => rlwinm r3, r4, 24, 8, 31
-        let shadow = build_from_words(0, &[rlwinm_raw(4, 3, 24, 8, 31)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::Srwi { ra: 3, rs: 4, n: 8 })
-        );
-    }
-
-    #[test]
-    fn quicken_rlwinm_clrlwi() {
-        // clrlwi r3, r4, 16 => rlwinm r3, r4, 0, 16, 31
-        let shadow = build_from_words(0, &[rlwinm_raw(4, 3, 0, 16, 31)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::Clrlwi {
-                ra: 3,
-                rs: 4,
-                n: 16
-            })
-        );
-    }
-
-    #[test]
-    fn quicken_non_specializable_unchanged() {
-        // or r3, r4, r5 (rs != rb, not mr) stays as Or
-        let shadow = build_from_words(0, &[or_raw(4, 3, 5)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::Or {
-                ra: 3,
-                rs: 4,
-                rb: 5,
-                rc: false,
-            })
-        );
-    }
-
-    #[test]
-    fn quicken_addi_nonzero_ra_unchanged() {
-        // addi r3, r5, 42 (ra != 0) stays as Addi
-        let raw = (14 << 26) | (3 << 21) | (5 << 16) | (42u16 as u32);
-        let shadow = build_from_words(0, &[raw]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::Addi {
-                rt: 3,
-                ra: 5,
-                imm: 42
-            })
-        );
-    }
-
-    #[test]
-    fn refresh_applies_quickening() {
-        let mut shadow = build_from_words(0, &[li_raw(3, 10)]);
-        assert_eq!(shadow.get(0), Some(PpuInstruction::Li { rt: 3, imm: 10 }));
-        // Invalidate and refresh with a new li instruction
-        shadow.invalidate_range(0, 4);
-        assert!(shadow.get(0).is_none());
-        let refreshed = shadow.refresh(0, li_raw(4, 99));
-        assert_eq!(refreshed, Some(Some(PpuInstruction::Li { rt: 4, imm: 99 })));
-        assert_eq!(shadow.get(0), Some(PpuInstruction::Li { rt: 4, imm: 99 }));
-    }
-
-    #[test]
-    fn refresh_applies_quickening_or_to_mr() {
-        let mut shadow = build_from_words(0, &[li_raw(3, 1)]);
-        shadow.invalidate_range(0, 4);
-        // Refresh with `or r5, r6, r6` => should quicken to Mr
-        let refreshed = shadow.refresh(0, or_raw(6, 5, 6));
-        assert_eq!(refreshed, Some(Some(PpuInstruction::Mr { ra: 5, rs: 6 })));
-    }
-
-    // -- super-pairing tests --
-
-    /// Encode `lwz rT, off(rA)` (opcode 32).
-    fn lwz_raw(rt: u32, ra: u32, off: i16) -> u32 {
-        (32 << 26) | (rt << 21) | (ra << 16) | (off as u16 as u32)
-    }
-
-    /// Encode `cmpwi crF, rA, imm` (opcode 11, L=0).
-    fn cmpwi_raw(bf: u32, ra: u32, imm: i16) -> u32 {
-        (11 << 26) | (bf << 23) | (ra << 16) | (imm as u16 as u32)
-    }
-
-    /// Encode `stw rS, off(rA)` (opcode 36).
-    fn stw_raw(rs: u32, ra: u32, off: i16) -> u32 {
-        (36 << 26) | (rs << 21) | (ra << 16) | (off as u16 as u32)
-    }
-
-    /// Encode `mflr rT` (opcode 31, XO 339, spr=8 -> sprn bits: 0x100).
-    fn mflr_raw(rt: u32) -> u32 {
-        // mfspr rt, 8: spr field is split: spr[0:4] in bits 16-20,
-        // spr[5:9] in bits 11-15. SPR 8 = 0b0000001000.
-        // spr[0:4] = 0b01000 = 8, spr[5:9] = 0b00000 = 0.
-        (31 << 26) | (rt << 21) | (8 << 16) | (339 << 1)
-    }
-
-    /// Encode `mtlr rS` (opcode 31, XO 467, spr=8).
-    fn mtlr_raw(rs: u32) -> u32 {
-        (31 << 26) | (rs << 21) | (8 << 16) | (467 << 1)
-    }
-
-    /// Encode `ld rT, off(rA)` (opcode 58, DS-form with sub=0).
-    fn ld_raw(rt: u32, ra: u32, off: i16) -> u32 {
-        (58 << 26) | (rt << 21) | (ra << 16) | ((off as u16 as u32) & 0xFFFC)
-    }
-
-    /// Encode `std rS, off(rA)` (opcode 62, DS-form with sub=0).
-    fn std_raw(rs: u32, ra: u32, off: i16) -> u32 {
-        (62 << 26) | (rs << 21) | (ra << 16) | ((off as u16 as u32) & 0xFFFC)
-    }
-
-    #[test]
-    fn super_pair_lwz_cmpwi() {
-        // lwz r3, 8(r1) + cmpwi cr0, r3, 42
-        let shadow = build_from_words(0, &[lwz_raw(3, 1, 8), cmpwi_raw(0, 3, 42)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::LwzCmpwi {
-                rt: 3,
-                ra_load: 1,
-                offset: 8,
-                bf: 0,
-                cmp_imm: 42,
-            })
-        );
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_lwz_cmpwi_different_reg_no_fuse() {
-        // lwz r3, 8(r1) + cmpwi cr0, r4, 42 -- different register, no fuse
-        let shadow = build_from_words(0, &[lwz_raw(3, 1, 8), cmpwi_raw(0, 4, 42)]);
-        // Should stay as separate instructions
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Lwz { .. })));
-        assert!(matches!(shadow.get(4), Some(PpuInstruction::Cmpwi { .. })));
-    }
-
-    #[test]
-    fn super_pair_li_stw() {
-        // li r5, 99 + stw r5, 0(r1)
-        let shadow = build_from_words(0, &[li_raw(5, 99), stw_raw(5, 1, 0)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::LiStw {
-                rt: 5,
-                imm: 99,
-                ra_store: 1,
-                store_offset: 0,
-            })
-        );
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_li_stw_different_reg_no_fuse() {
-        // li r5, 99 + stw r6, 0(r1) -- different register, no fuse
-        let shadow = build_from_words(0, &[li_raw(5, 99), stw_raw(6, 1, 0)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Li { .. })));
-        assert!(matches!(shadow.get(4), Some(PpuInstruction::Stw { .. })));
-    }
-
-    #[test]
-    fn super_pair_mflr_stw() {
-        // mflr r0 + stw r0, 16(r1)
-        let shadow = build_from_words(0, &[mflr_raw(0), stw_raw(0, 1, 16)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::MflrStw {
-                rt: 0,
-                ra_store: 1,
-                store_offset: 16,
-            })
-        );
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_lwz_mtlr() {
-        // lwz r0, 16(r1) + mtlr r0
-        let shadow = build_from_words(0, &[lwz_raw(0, 1, 16), mtlr_raw(0)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::LwzMtlr {
-                rt: 0,
-                ra_load: 1,
-                offset: 16,
-            })
-        );
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_lwz_mtlr_different_reg_no_fuse() {
-        // lwz r3, 16(r1) + mtlr r0 -- different register, no fuse
-        let shadow = build_from_words(0, &[lwz_raw(3, 1, 16), mtlr_raw(0)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Lwz { .. })));
-        assert!(matches!(shadow.get(4), Some(PpuInstruction::Mtlr { .. })));
-    }
-
-    #[test]
-    fn super_pair_mflr_std() {
-        let shadow = build_from_words(0, &[mflr_raw(0), std_raw(0, 1, 16)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::MflrStd {
-                rt: 0,
-                ra_store: 1,
-                store_offset: 16,
-            })
-        );
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_ld_mtlr() {
-        let shadow = build_from_words(0, &[ld_raw(0, 1, 16), mtlr_raw(0)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::LdMtlr {
-                rt: 0,
-                ra_load: 1,
-                offset: 16,
-            })
-        );
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_std_std_adjacent() {
-        // std r3, 0(r1) + std r4, 8(r1): fuse (same base, off2 = off1+8).
-        let shadow = build_from_words(0, &[std_raw(3, 1, 0), std_raw(4, 1, 8)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::StdStd {
-                rs1: 3,
-                rs2: 4,
-                ra: 1,
-                offset1: 0,
-            })
-        );
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_std_std_nonadjacent_no_fuse() {
-        // std r3, 0(r1) + std r4, 16(r1): offset gap != 8, no fuse.
-        let shadow = build_from_words(0, &[std_raw(3, 1, 0), std_raw(4, 1, 16)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Std { .. })));
-        assert!(matches!(shadow.get(4), Some(PpuInstruction::Std { .. })));
-    }
-
-    #[test]
-    fn super_pair_std_std_different_base_no_fuse() {
-        // std r3, 0(r1) + std r4, 8(r2): different base, no fuse.
-        let shadow = build_from_words(0, &[std_raw(3, 1, 0), std_raw(4, 2, 8)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Std { .. })));
-        assert!(matches!(shadow.get(4), Some(PpuInstruction::Std { .. })));
-    }
-
-    #[test]
-    fn super_pair_consumed_not_chained() {
-        // Consumed must not pair forward with slot i+2.
-        let shadow = build_from_words(0, &[li_raw(3, 1), stw_raw(3, 1, 0), li_raw(4, 2)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })));
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-        assert_eq!(shadow.get(8), Some(PpuInstruction::Li { rt: 4, imm: 2 }));
-    }
-
-    #[test]
-    fn super_pair_branch_blocks_fusion() {
-        let shadow = build_from_words(0, &[b_raw(), li_raw(3, 1)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::B { .. })));
-        assert!(matches!(shadow.get(4), Some(PpuInstruction::Li { .. })));
-    }
-
-    #[test]
-    fn super_pair_stale_slot_blocks_fusion() {
-        let mut shadow = build_from_words(0, &[li_raw(3, 42), stw_raw(3, 1, 0)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })));
-        shadow.invalidate_range(0, 4);
-        assert!(shadow.get(0).is_none());
-    }
-
-    #[test]
-    fn super_pair_multiple_pairs() {
-        let shadow = build_from_words(
-            0,
-            &[
-                mflr_raw(0),
-                stw_raw(0, 1, 16),
-                lwz_raw(3, 1, 8),
-                cmpwi_raw(0, 3, 0),
-            ],
-        );
+    fn invalidate_just_consumed_widens_to_super_pair_head() {
+        // lwz + cmpwi fused at slot 0, Consumed at slot 4. Invalidating
+        // only the Consumed slot must widen to include the head;
+        // otherwise the head's fused dispatch would still execute (firing
+        // both the lwz and the cmpwi) and the freshly-written instruction
+        // at slot 4 would also execute -- a double-execute.
+        let mut shadow = build_from_words(0, &[lwz_raw(3, 1, 8), cmpwi_raw(0, 3, 42)]);
         assert!(matches!(
             shadow.get(0),
-            Some(PpuInstruction::MflrStw { .. })
-        ));
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-        assert!(matches!(
-            shadow.get(8),
             Some(PpuInstruction::LwzCmpwi { .. })
         ));
-        assert_eq!(shadow.get(12), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_single_instruction_shadow() {
-        let shadow = build_from_words(0, &[li_raw(3, 1)]);
-        assert_eq!(shadow.get(0), Some(PpuInstruction::Li { rt: 3, imm: 1 }));
-    }
-
-    #[test]
-    fn super_pair_empty_shadow() {
-        let shadow = PredecodedShadow::build(0, &[]);
-        assert!(shadow.is_empty());
-    }
-
-    // -- 14.5B quickening tests --
-
-    /// Encode `ori rA, rS, imm` (opcode 24).
-    fn ori_raw(rs: u32, ra: u32, imm: u16) -> u32 {
-        (24 << 26) | (rs << 21) | (ra << 16) | (imm as u32)
-    }
-
-    /// Encode `rldicl rA, rS, sh, mb` (opcode 30, xo=0).
-    fn rldicl_raw(rs: u32, ra: u32, sh: u32, mb: u32) -> u32 {
-        let sh_lo = sh & 0x1F;
-        let sh_hi = (sh >> 5) & 1;
-        let mb_lo = mb & 0x1F;
-        let mb_hi = (mb >> 5) & 1;
-        // xo=0 for rldicl (no bits set in xo field)
-        (30 << 26)
-            | (rs << 21)
-            | (ra << 16)
-            | (sh_lo << 11)
-            | (mb_lo << 6)
-            | (mb_hi << 5)
-            | (sh_hi << 1)
-    }
-
-    /// Encode `rldicr rA, rS, sh, me` (opcode 30, xo=1).
-    fn rldicr_raw(rs: u32, ra: u32, sh: u32, me: u32) -> u32 {
-        let sh_lo = sh & 0x1F;
-        let sh_hi = (sh >> 5) & 1;
-        let me_lo = me & 0x1F;
-        let me_hi = (me >> 5) & 1;
-        (30 << 26)
-            | (rs << 21)
-            | (ra << 16)
-            | (sh_lo << 11)
-            | (me_lo << 6)
-            | (me_hi << 5)
-            | (1 << 2) // xo=1 for rldicr
-            | (sh_hi << 1)
-    }
-
-    #[test]
-    fn quicken_ori_same_reg_zero_becomes_nop() {
-        // ori r5, r5, 0 => Nop
-        let shadow = build_from_words(0, &[ori_raw(5, 5, 0)]);
-        assert_eq!(shadow.get(0), Some(PpuInstruction::Nop));
-    }
-
-    #[test]
-    fn quicken_ori_different_reg_unchanged() {
-        // ori r3, r5, 0 -- different regs, not nop
-        let shadow = build_from_words(0, &[ori_raw(5, 3, 0)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Ori { .. })));
-    }
-
-    #[test]
-    fn quicken_ori_nonzero_imm_unchanged() {
-        // ori r5, r5, 1 -- nonzero imm, not nop
-        let shadow = build_from_words(0, &[ori_raw(5, 5, 1)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Ori { .. })));
-    }
-
-    #[test]
-    fn quicken_cmpwi_zero_becomes_cmpw_zero() {
-        // cmpwi cr0, r3, 0 => CmpwZero { bf: 0, ra: 3 }
-        let shadow = build_from_words(0, &[cmpwi_raw(0, 3, 0)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::CmpwZero { bf: 0, ra: 3 })
-        );
-    }
-
-    #[test]
-    fn quicken_cmpwi_nonzero_unchanged() {
-        // cmpwi cr0, r3, 42 -- nonzero imm, stays Cmpwi
-        let shadow = build_from_words(0, &[cmpwi_raw(0, 3, 42)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Cmpwi { .. })));
-    }
-
-    #[test]
-    fn quicken_rldicl_sh0_becomes_clrldi() {
-        // rldicl r3, r4, 0, 32 => Clrldi { ra: 3, rs: 4, n: 32 }
-        let shadow = build_from_words(0, &[rldicl_raw(4, 3, 0, 32)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::Clrldi {
-                ra: 3,
-                rs: 4,
-                n: 32
-            })
-        );
-    }
-
-    #[test]
-    fn quicken_rldicr_sldi_pattern() {
-        // sldi r3, r4, 8 => rldicr r3, r4, 8, 55
-        let shadow = build_from_words(0, &[rldicr_raw(4, 3, 8, 55)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::Sldi { ra: 3, rs: 4, n: 8 })
-        );
-    }
-
-    #[test]
-    fn quicken_rldicl_srdi_pattern() {
-        // srdi r3, r4, 8 => rldicl r3, r4, 56, 8
-        let shadow = build_from_words(0, &[rldicl_raw(4, 3, 56, 8)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::Srdi { ra: 3, rs: 4, n: 8 })
-        );
-    }
-
-    #[test]
-    fn quicken_rldicl_nonzero_sh_non_srdi_unchanged() {
-        // rldicl with sh != 0 and mb != 64-sh stays as Rldicl
-        let shadow = build_from_words(0, &[rldicl_raw(4, 3, 10, 20)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Rldicl { .. })));
-    }
-
-    // -- 14.5C super-pair tests --
-
-    /// Encode `bc BO, BI, offset` (opcode 16, no link, no AA).
-    fn bc_raw(bo: u32, bi: u32, offset: i16) -> u32 {
-        (16 << 26) | (bo << 21) | (bi << 16) | ((offset as u16) as u32)
-    }
-
-    #[test]
-    fn super_pair_cmpwi_bc() {
-        // cmpwi cr0, r3, 42; beq cr0, +8
-        let shadow = build_from_words(0, &[cmpwi_raw(0, 3, 42), bc_raw(0x0C, 2, 8)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::CmpwiBc {
-                bf: 0,
-                ra: 3,
-                imm: 42,
-                bo: 0x0C,
-                bi: 2,
-                target_offset: 8,
-            })
-        );
         assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_cmpwi_zero_bc() {
-        // cmpwi cr0, r3, 0 (quickened to CmpwZero) + bc
-        let shadow = build_from_words(0, &[cmpwi_raw(0, 3, 0), bc_raw(0x0C, 2, 8)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::CmpwiBc {
-                bf: 0,
-                ra: 3,
-                imm: 0,
-                bo: 0x0C,
-                bi: 2,
-                target_offset: 8,
-            })
+        // Invalidate ONLY slot 4 (byte range [4..8)).
+        shadow.invalidate_range(4, 4);
+        assert!(
+            shadow.get(0).is_none(),
+            "super-pair head must be staled when its Consumed partner is invalidated"
         );
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    /// Encode `cmpw crF, rA, rB` (opcode 31, XO 0, L=0).
-    fn cmpw_raw(bf: u32, ra: u32, rb: u32) -> u32 {
-        (31 << 26) | (bf << 23) | (ra << 16) | (rb << 11)
+        assert!(shadow.get(4).is_none());
     }
 
     #[test]
-    fn super_pair_cmpw_bc() {
-        // cmpw cr0, r3, r4; beq cr0, +12
-        let shadow = build_from_words(0, &[cmpw_raw(0, 3, 4), bc_raw(0x0C, 2, 12)]);
-        assert_eq!(
-            shadow.get(0),
-            Some(PpuInstruction::CmpwBc {
-                bf: 0,
-                ra: 3,
-                rb: 4,
-                bo: 0x0C,
-                bi: 2,
-                target_offset: 12,
-            })
-        );
-        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    }
-
-    #[test]
-    fn super_pair_cmpwi_bc_link_no_fuse() {
-        let bc_link = bc_raw(0x0C, 2, 8) | 1; // LK bit
-        let shadow = build_from_words(0, &[cmpwi_raw(0, 3, 42), bc_link]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Cmpwi { .. })));
-        assert!(matches!(shadow.get(4), Some(PpuInstruction::Bc { .. })));
-    }
-
-    #[test]
-    fn super_pair_cmpwi_bc_is_block_terminator() {
-        let shadow = build_from_words(0, &[li_raw(3, 5), cmpwi_raw(0, 3, 5), bc_raw(0x0C, 2, 8)]);
-        assert!(matches!(shadow.get(0), Some(PpuInstruction::Li { .. })));
+    fn invalidate_just_super_pair_head_widens_to_consumed() {
+        // Symmetric case: invalidate only the head (slot 0) and verify
+        // the Consumed at slot 4 also goes stale. Otherwise the fetch
+        // loop would skip slot 4 forever (treating Consumed as the
+        // already-retired second half of a pair the head no longer
+        // represents).
+        let mut shadow = build_from_words(0, &[lwz_raw(3, 1, 8), cmpwi_raw(0, 3, 42)]);
         assert!(matches!(
-            shadow.get(4),
-            Some(PpuInstruction::CmpwiBc { .. })
+            shadow.get(0),
+            Some(PpuInstruction::LwzCmpwi { .. })
         ));
-        assert_eq!(shadow.get(8), Some(PpuInstruction::Consumed));
-        assert_eq!(shadow.block_len_at(0), 2);
-        assert_eq!(shadow.block_len_at(4), 1);
+        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
+        // Invalidate ONLY slot 0 (byte range [0..4)).
+        shadow.invalidate_range(0, 4);
+        assert!(shadow.get(0).is_none());
+        assert!(
+            shadow.get(4).is_none(),
+            "Consumed partner must be staled when its super-pair head is invalidated"
+        );
+    }
+
+    #[test]
+    fn invalidate_partner_widening_preserves_unrelated_pairs() {
+        // Two adjacent pairs at slots 0..2 and 2..4. Invalidating only
+        // slot 1 (the Consumed of pair A) must widen to slot 0 (head of
+        // pair A) but not touch pair B at slots 2..4.
+        let mut shadow = build_from_words(
+            0,
+            &[
+                li_raw(3, 1),
+                stw_raw(3, 1, 0),
+                li_raw(4, 2),
+                stw_raw(4, 1, 8),
+            ],
+        );
+        assert!(matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })));
+        assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
+        assert!(matches!(shadow.get(8), Some(PpuInstruction::LiStw { .. })));
+        assert_eq!(shadow.get(12), Some(PpuInstruction::Consumed));
+        // Invalidate only slot 1 (the Consumed at byte 4).
+        shadow.invalidate_range(4, 4);
+        assert!(shadow.get(0).is_none(), "pair A head must be staled");
+        assert!(shadow.get(4).is_none(), "pair A Consumed must be staled");
+        assert!(shadow.get(8).is_some(), "pair B head must remain intact");
+        assert_eq!(
+            shadow.get(12),
+            Some(PpuInstruction::Consumed),
+            "pair B Consumed must remain intact"
+        );
     }
 }

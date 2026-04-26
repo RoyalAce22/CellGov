@@ -3,6 +3,14 @@
 //! Variants carry decoded register indices, immediates, and flags.
 //! Decode produces these; execute consumes them. Unknown encodings
 //! decode to `PpuDecodeError::Unsupported` rather than a variant.
+//!
+//! **DS-form immediates** (`Ld`, `Ldu`, `Std`, `Stdu`, `Lwa`) are
+//! stored as byte offsets with the low 2 bits always zero, not the
+//! raw 14-bit DS field. The decoder produces them via
+//! `(raw & 0xFFFC) as i16`, which keeps the field shifted into bits
+//! 2:15 and sign-extended via the `i16` representation. Executors
+//! can consume `imm` directly as a signed byte offset; no further
+//! shift is needed.
 
 /// A decoded PPU instruction. Field names follow PPC ISA conventions
 /// (`rt`/`rs`/`ra`/`rb`, `imm`, `offset`, `link`).
@@ -30,11 +38,13 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
+    /// Load word zero with update. Requires `ra != 0 && ra != rt`.
     Lwzu {
         rt: u8,
         ra: u8,
         imm: i16,
     },
+    /// Load byte zero with update. Requires `ra != 0 && ra != rt`.
     Lbzu {
         rt: u8,
         ra: u8,
@@ -46,14 +56,25 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
-    /// Load doubleword with update (DS-form). `imm & 3 == 0`.
+    /// Load doubleword with update (DS-form). Requires
+    /// `ra != 0 && ra != rt`; `imm` is a byte offset with low 2
+    /// bits zero.
     Ldu {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    /// Load doubleword (DS-form). `imm & 3 == 0`.
+    /// Load doubleword (DS-form). `imm` is a byte offset with low
+    /// 2 bits zero.
     Ld {
+        rt: u8,
+        ra: u8,
+        imm: i16,
+    },
+    /// Load word algebraic (DS-form, primary 58 sub=2). Sign-extends
+    /// the 32-bit value into the 64-bit RT. `imm` is a byte offset
+    /// with low 2 bits zero.
+    Lwa {
         rt: u8,
         ra: u8,
         imm: i16,
@@ -65,13 +86,17 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
-    /// Store word with update. Requires `ra != 0 && ra != rs`.
+    /// Store word with update. Requires `ra != 0`. (Unlike load
+    /// with update, the ISA permits `rs == ra` here -- the store
+    /// happens first, then EA is written to RA.)
     Stwu {
         rs: u8,
         ra: u8,
         imm: i16,
     },
-    /// Store doubleword with update. Requires `ra != 0 && ra != rs` and `imm & 3 == 0`.
+    /// Store doubleword with update (DS-form). Requires `ra != 0`;
+    /// `rs == ra` is permitted (see `Stwu`). `imm` is a byte offset
+    /// with low 2 bits zero.
     Stdu {
         rs: u8,
         ra: u8,
@@ -99,7 +124,8 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
-    /// Store doubleword (DS-form). `imm & 3 == 0`.
+    /// Store doubleword (DS-form). `imm` is a byte offset with low
+    /// 2 bits zero.
     Std {
         rs: u8,
         ra: u8,
@@ -130,6 +156,14 @@ pub enum PpuInstruction {
         imm: i16,
     },
     Addic {
+        rt: u8,
+        ra: u8,
+        imm: i16,
+    },
+    /// `addic.` (primary 13). Same arithmetic as `Addic` but
+    /// always records to CR0; the ISA exposes the dot form as a
+    /// distinct primary opcode rather than an Rc bit.
+    AddicDot {
         rt: u8,
         ra: u8,
         imm: i16,
@@ -320,6 +354,14 @@ pub enum PpuInstruction {
         rs: u8,
         imm: u16,
     },
+    /// `andis.` (primary 29). ANDs RS with `(imm as u32) << 16`
+    /// and always records to CR0. The decoder stores the raw 16-bit
+    /// UI; the executor handles the shift.
+    AndisDot {
+        ra: u8,
+        rs: u8,
+        imm: u16,
+    },
     Slw {
         ra: u8,
         rs: u8,
@@ -468,6 +510,7 @@ pub enum PpuInstruction {
         bo: u8,
         bi: u8,
         offset: i16,
+        aa: bool,
         link: bool,
     },
     Bclr {
@@ -851,153 +894,7 @@ pub enum PpuInstruction {
     },
 }
 
-impl PpuInstruction {
-    /// Variant name as a `&'static str`, without allocation.
-    pub fn variant_name(&self) -> &'static str {
-        match self {
-            Self::Lwz { .. } => "Lwz",
-            Self::Lbz { .. } => "Lbz",
-            Self::Lhz { .. } => "Lhz",
-            Self::Lha { .. } => "Lha",
-            Self::Lwzu { .. } => "Lwzu",
-            Self::Lbzu { .. } => "Lbzu",
-            Self::Lhzu { .. } => "Lhzu",
-            Self::Ldu { .. } => "Ldu",
-            Self::Ld { .. } => "Ld",
-            Self::Stw { .. } => "Stw",
-            Self::Stwu { .. } => "Stwu",
-            Self::Stdu { .. } => "Stdu",
-            Self::Stb { .. } => "Stb",
-            Self::Stbu { .. } => "Stbu",
-            Self::Sth { .. } => "Sth",
-            Self::Sthu { .. } => "Sthu",
-            Self::Std { .. } => "Std",
-            Self::Addi { .. } => "Addi",
-            Self::Addis { .. } => "Addis",
-            Self::Subfic { .. } => "Subfic",
-            Self::Mulli { .. } => "Mulli",
-            Self::Addic { .. } => "Addic",
-            Self::Add { .. } => "Add",
-            Self::Or { .. } => "Or",
-            Self::Subf { .. } => "Subf",
-            Self::Subfc { .. } => "Subfc",
-            Self::Subfe { .. } => "Subfe",
-            Self::Neg { .. } => "Neg",
-            Self::Mullw { .. } => "Mullw",
-            Self::Mulhwu { .. } => "Mulhwu",
-            Self::Mulhw { .. } => "Mulhw",
-            Self::Mulhdu { .. } => "Mulhdu",
-            Self::Mulhd { .. } => "Mulhd",
-            Self::Adde { .. } => "Adde",
-            Self::Addze { .. } => "Addze",
-            Self::Divw { .. } => "Divw",
-            Self::Divwu { .. } => "Divwu",
-            Self::Divd { .. } => "Divd",
-            Self::Divdu { .. } => "Divdu",
-            Self::Mulld { .. } => "Mulld",
-            Self::Ldarx { .. } => "Ldarx",
-            Self::Stdcx { .. } => "Stdcx",
-            Self::Lwarx { .. } => "Lwarx",
-            Self::Stwcx { .. } => "Stwcx",
-            Self::Xori { .. } => "Xori",
-            Self::Xoris { .. } => "Xoris",
-            Self::And { .. } => "And",
-            Self::Andc { .. } => "Andc",
-            Self::Nor { .. } => "Nor",
-            Self::Xor { .. } => "Xor",
-            Self::AndiDot { .. } => "AndiDot",
-            Self::Slw { .. } => "Slw",
-            Self::Srw { .. } => "Srw",
-            Self::Srawi { .. } => "Srawi",
-            Self::Sraw { .. } => "Sraw",
-            Self::Srad { .. } => "Srad",
-            Self::Sradi { .. } => "Sradi",
-            Self::Sld { .. } => "Sld",
-            Self::Srd { .. } => "Srd",
-            Self::Cntlzw { .. } => "Cntlzw",
-            Self::Cntlzd { .. } => "Cntlzd",
-            Self::Orc { .. } => "Orc",
-            Self::Extsh { .. } => "Extsh",
-            Self::Extsb { .. } => "Extsb",
-            Self::Extsw { .. } => "Extsw",
-            Self::Ori { .. } => "Ori",
-            Self::Oris { .. } => "Oris",
-            Self::Cmpwi { .. } => "Cmpwi",
-            Self::Cmplwi { .. } => "Cmplwi",
-            Self::Cmpdi { .. } => "Cmpdi",
-            Self::Cmpldi { .. } => "Cmpldi",
-            Self::Cmpw { .. } => "Cmpw",
-            Self::Cmplw { .. } => "Cmplw",
-            Self::Cmpd { .. } => "Cmpd",
-            Self::Cmpld { .. } => "Cmpld",
-            Self::B { .. } => "B",
-            Self::Bc { .. } => "Bc",
-            Self::Bclr { .. } => "Bclr",
-            Self::Bcctr { .. } => "Bcctr",
-            Self::Lwzx { .. } => "Lwzx",
-            Self::Lbzx { .. } => "Lbzx",
-            Self::Ldx { .. } => "Ldx",
-            Self::Lhzx { .. } => "Lhzx",
-            Self::Stwx { .. } => "Stwx",
-            Self::Stdx { .. } => "Stdx",
-            Self::Stdux { .. } => "Stdux",
-            Self::Stbx { .. } => "Stbx",
-            Self::Mftb { .. } => "Mftb",
-            Self::Mftbu { .. } => "Mftbu",
-            Self::Mfcr { .. } => "Mfcr",
-            Self::Mtcrf { .. } => "Mtcrf",
-            Self::Mflr { .. } => "Mflr",
-            Self::Mtlr { .. } => "Mtlr",
-            Self::Mfctr { .. } => "Mfctr",
-            Self::Mtctr { .. } => "Mtctr",
-            Self::Rlwinm { .. } => "Rlwinm",
-            Self::Rlwimi { .. } => "Rlwimi",
-            Self::Rlwnm { .. } => "Rlwnm",
-            Self::Rldicl { .. } => "Rldicl",
-            Self::Rldicr { .. } => "Rldicr",
-            Self::Rldic { .. } => "Rldic",
-            Self::Rldimi { .. } => "Rldimi",
-            Self::Vx { .. } => "Vx",
-            Self::Va { .. } => "Va",
-            Self::Vxor { .. } => "Vxor",
-            Self::Vsldoi { .. } => "Vsldoi",
-            Self::Lvlx { .. } => "Lvlx",
-            Self::Lvrx { .. } => "Lvrx",
-            Self::Stvx { .. } => "Stvx",
-            Self::Lfs { .. } => "Lfs",
-            Self::Lfd { .. } => "Lfd",
-            Self::Stfs { .. } => "Stfs",
-            Self::Stfd { .. } => "Stfd",
-            Self::Stfsu { .. } => "Stfsu",
-            Self::Stfdu { .. } => "Stfdu",
-            Self::Stfiwx { .. } => "Stfiwx",
-            Self::Fp63 { .. } => "Fp63",
-            Self::Fp59 { .. } => "Fp59",
-            Self::Li { .. } => "Li",
-            Self::Mr { .. } => "Mr",
-            Self::Slwi { .. } => "Slwi",
-            Self::Srwi { .. } => "Srwi",
-            Self::Clrlwi { .. } => "Clrlwi",
-            Self::Nop => "Nop",
-            Self::CmpwZero { .. } => "CmpwZero",
-            Self::Clrldi { .. } => "Clrldi",
-            Self::Sldi { .. } => "Sldi",
-            Self::Srdi { .. } => "Srdi",
-            Self::LwzCmpwi { .. } => "LwzCmpwi",
-            Self::LiStw { .. } => "LiStw",
-            Self::MflrStw { .. } => "MflrStw",
-            Self::LwzMtlr { .. } => "LwzMtlr",
-            Self::MflrStd { .. } => "MflrStd",
-            Self::LdMtlr { .. } => "LdMtlr",
-            Self::StdStd { .. } => "StdStd",
-            Self::CmpwiBc { .. } => "CmpwiBc",
-            Self::CmpwBc { .. } => "CmpwBc",
-            Self::Consumed => "Consumed",
-            Self::Dcbz { .. } => "Dcbz",
-            Self::Sc { .. } => "Sc",
-        }
-    }
-}
+mod display;
 
 /// Why decoding failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1036,6 +933,22 @@ mod tests {
                 frb: 0,
                 frc: 0,
                 rc: false,
+            },
+            PpuInstruction::Consumed,
+            PpuInstruction::Lwa {
+                rt: 0,
+                ra: 0,
+                imm: 0,
+            },
+            PpuInstruction::AddicDot {
+                rt: 0,
+                ra: 0,
+                imm: 0,
+            },
+            PpuInstruction::AndisDot {
+                ra: 0,
+                rs: 0,
+                imm: 0,
             },
         ];
         for insn in cases {

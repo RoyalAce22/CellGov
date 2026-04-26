@@ -166,6 +166,12 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     let phoff = loader::read_u64(data, 32) as usize;
     let phentsize = loader::read_u16(data, 54) as usize;
     let phnum = loader::read_u16(data, 56) as usize;
+    // ELF64 phdr is 56 bytes; we read fields up to base + 40 + 8 = 48.
+    // phentsize < 48 would either OOB-read into adjacent entries or, if
+    // 0, duplicate-read the same phdr every iteration.
+    if phentsize < 56 {
+        return Err(PrxParseError::OutOfBounds);
+    }
 
     let mut loads: Vec<RawPhdr> = Vec::new();
     let mut reloc_phdr: Option<RawPhdr> = None;
@@ -347,7 +353,11 @@ fn parse_export_table(
     }
 
     let start_foff = v2f(seg_map, range.start as usize).ok_or(PrxParseError::OutOfBounds)?;
-    let end_foff = v2f(seg_map, range.end as usize).ok_or(PrxParseError::OutOfBounds)?;
+    // Compute end_foff from the size rather than translating range.end
+    // through v2f: range.end is exclusive and may equal seg.vaddr +
+    // seg.size for a table that fills its segment to the boundary, in
+    // which case v2f's strict-less-than upper-bound check returns None.
+    let end_foff = start_foff + size;
 
     let mut libs = Vec::new();
     let mut pos = start_foff;
@@ -455,7 +465,9 @@ fn find_system_opd(
 
     let start_foff =
         v2f(seg_map, exports_range.start as usize).ok_or(PrxParseError::OutOfBounds)?;
-    let end_foff = v2f(seg_map, exports_range.end as usize).ok_or(PrxParseError::OutOfBounds)?;
+    // See parse_export_table: compute end_foff from the size to handle
+    // tables that fill a segment to its exclusive boundary.
+    let end_foff = start_foff + (exports_range.end - exports_range.start) as usize;
 
     let mut pos = start_foff;
     while pos < end_foff {
@@ -546,12 +558,15 @@ fn parse_relocations(data: &[u8], phdr: &RawPhdr) -> Result<Vec<PrxRelocation>, 
 }
 
 fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
+    // Failed lookups embed the vaddr so a corrupt name pointer is
+    // visible in the parsed module rather than indistinguishable from
+    // a legitimately-empty string.
     let foff = match v2f(seg_map, vaddr) {
         Some(o) => o,
-        None => return String::new(),
+        None => return format!("<unmapped:0x{vaddr:x}>"),
     };
     if foff >= data.len() {
-        return String::new();
+        return format!("<oob:0x{vaddr:x}>");
     }
     let end = data[foff..]
         .iter()
@@ -614,6 +629,16 @@ pub enum PrxLoadError {
     MemoryWrite(u64),
     /// An unsupported relocation type was encountered.
     UnsupportedReloc(u32),
+    /// A relocation referenced a segment index outside the loaded
+    /// `[text, data]` pair. PS3 PRX modules have at most 2 PT_LOAD
+    /// segments today, so any higher index indicates corruption or a
+    /// firmware shape the loader does not yet model.
+    RelocSegmentOutOfRange {
+        /// The packed `r_sym` value of the offending relocation.
+        sym: u32,
+        /// The decoded segment index that exceeded the table.
+        seg: usize,
+    },
 }
 
 /// Load a parsed PRX at `base` and apply relocations. `base` must be
@@ -641,15 +666,21 @@ pub fn load_prx(
 
     // Derive module_start/stop from parsed OPD + base: the code field
     // is often not covered by the reloc table, so reading it back from
-    // guest memory after relocation is unreliable.
-    let module_toc = base + prx.toc as u64;
+    // guest memory after relocation is unreliable. opd.code and opd.toc
+    // are both unrelocated absolute vaddrs (within the PRX's address
+    // space), so adding text.vaddr again would double-count for any
+    // module whose text segment is not at vaddr 0. opd.toc is honored
+    // per entry point rather than collapsed onto module_info's toc:
+    // every shipping firmware module has the two equal, but the
+    // per-OPD field exists to allow divergence and we read what the
+    // OPD actually says.
     let module_start = prx.module_start.map(|opd| LoadedOpd {
-        code: base + prx.text.vaddr + opd.code as u64,
-        toc: module_toc,
+        code: base + opd.code as u64,
+        toc: base + opd.toc as u64,
     });
     let module_stop = prx.module_stop.map(|opd| LoadedOpd {
-        code: base + prx.text.vaddr + opd.code as u64,
-        toc: module_toc,
+        code: base + opd.code as u64,
+        toc: base + opd.toc as u64,
     });
 
     Ok(LoadedPrx {
@@ -720,25 +751,44 @@ fn apply_relocations(
         let target_seg = (r.sym & 0xFF) as usize;
         let value_seg = ((r.sym >> 8) & 0xFF) as usize;
 
-        let target_base = seg_vaddrs.get(target_seg).copied().unwrap_or(0);
-        let value_base = seg_vaddrs.get(value_seg).copied().unwrap_or(0);
+        let target_base =
+            seg_vaddrs
+                .get(target_seg)
+                .copied()
+                .ok_or(PrxLoadError::RelocSegmentOutOfRange {
+                    sym: r.sym,
+                    seg: target_seg,
+                })?;
+        let value_base =
+            seg_vaddrs
+                .get(value_seg)
+                .copied()
+                .ok_or(PrxLoadError::RelocSegmentOutOfRange {
+                    sym: r.sym,
+                    seg: value_seg,
+                })?;
 
         let target = base + target_base + r.offset;
         let value = (base + value_base).wrapping_add(r.addend as u64);
+        // PS3 PRX uses PPC32-style 16-bit halves for ADDR16_LO/HI/HA;
+        // mask to u32 so a base above 4 GiB does not silently truncate
+        // bits 32..47 into the halfword. ADDR32 already truncates by
+        // the cast.
+        let value32 = value as u32;
 
         match r.rtype {
             R_PPC64_ADDR32 => {
-                write_u32(memory, target, value as u32)?;
+                write_u32(memory, target, value32)?;
             }
             R_PPC64_ADDR16_LO => {
-                write_u16(memory, target, (value & 0xFFFF) as u16)?;
+                write_u16(memory, target, value32 as u16)?;
             }
             R_PPC64_ADDR16_HI => {
-                write_u16(memory, target, ((value >> 16) & 0xFFFF) as u16)?;
+                write_u16(memory, target, (value32 >> 16) as u16)?;
             }
             R_PPC64_ADDR16_HA => {
                 // +0x8000 before shift: cancels sign extension of the paired LO.
-                let ha = ((value.wrapping_add(0x8000)) >> 16) as u16;
+                let ha = (value32.wrapping_add(0x8000) >> 16) as u16;
                 write_u16(memory, target, ha)?;
             }
             other => return Err(PrxLoadError::UnsupportedReloc(other)),
@@ -1187,6 +1237,125 @@ mod tests {
             result,
             Err(PrxLoadError::SegmentOutOfRange { .. })
         ));
+    }
+
+    #[test]
+    fn load_prx_rejects_reloc_with_out_of_range_segment() {
+        // sym packs target_seg in low 8 bits and value_seg in next 8.
+        // Set value_seg = 0x02 (third segment); the loader has only
+        // [text, data] (2 entries), so this must error rather than
+        // silently substitute segment 0's vaddr.
+        let mut data = make_test_prx();
+        let rel0 = 0x3F0;
+        let r_info: u64 = (0x0200u64 << 32) | R_PPC64_ADDR32 as u64;
+        data[rel0 + 8..rel0 + 16].copy_from_slice(&r_info.to_be_bytes());
+
+        let prx = parse_prx(&data).unwrap();
+        let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
+        let result = load_prx(&prx, &mut mem, 0x1000_0000);
+        assert!(matches!(
+            result,
+            Err(PrxLoadError::RelocSegmentOutOfRange { seg: 2, .. })
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_phentsize_below_minimum() {
+        // ELF64 phdr is 56 bytes; phentsize < 56 (including 0) means
+        // either OOB-read or duplicate-read of the same phdr.
+        let mut data = make_test_prx();
+        data[54..56].copy_from_slice(&8u16.to_be_bytes());
+        assert!(matches!(parse_prx(&data), Err(PrxParseError::OutOfBounds)));
+    }
+
+    #[test]
+    fn read_cstring_unmapped_pointer_produces_diagnostic_string() {
+        // Point the user library's name pointer at a vaddr no PT_LOAD
+        // covers. Pre-fix, read_cstring returned "" silently and the
+        // export library showed up with a blank name; now it carries
+        // the failing vaddr so corruption is visible in parsed output.
+        let mut data = make_test_prx();
+        let exp1 = 0x220 + 28; // user export entry
+        let unmapped: u32 = 0xDEAD_0000;
+        data[exp1 + 16..exp1 + 20].copy_from_slice(&unmapped.to_be_bytes());
+
+        let prx = parse_prx(&data).unwrap();
+        assert_eq!(prx.exports.len(), 1);
+        assert!(
+            prx.exports[0].name.starts_with("<unmapped:0x"),
+            "expected diagnostic name for unmapped lib_name_ptr, got {:?}",
+            prx.exports[0].name
+        );
+    }
+
+    #[test]
+    fn load_module_start_not_double_added_when_text_vaddr_nonzero() {
+        // Synthesize a fixture where text.vaddr != 0 by patching the
+        // PT_LOAD[0] vaddr field and shifting all the data-segment
+        // pointers. Pre-fix code computed
+        //   ms.code = base + text.vaddr + opd.code
+        // and double-counted text.vaddr; the fix expects ms.code to be
+        // base + opd.code (which is already absolute within the PRX
+        // address space).
+        let mut data = make_test_prx();
+        // Set PT_LOAD[0].p_vaddr to 0x1000 (was 0).
+        let ph0 = 64;
+        let new_text_vaddr: u64 = 0x1000;
+        data[ph0 + 16..ph0 + 24].copy_from_slice(&new_text_vaddr.to_be_bytes());
+
+        let prx = parse_prx(&data).unwrap();
+        assert_eq!(prx.text.vaddr, 0x1000);
+        // opd.code is read as 0x10 from the OPD bytes regardless of
+        // text.vaddr -- OPD code is an absolute PRX vaddr, not an
+        // offset into the text segment.
+        assert_eq!(
+            prx.module_start.expect("module_start").code,
+            0x10,
+            "OPD code field is unrelocated absolute, not text-relative"
+        );
+
+        let base: u64 = 0x1000_0000;
+        let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
+        let loaded = load_prx(&prx, &mut mem, base).unwrap();
+
+        let ms = loaded.module_start.expect("module_start");
+        assert_eq!(
+            ms.code,
+            base + 0x10,
+            "module_start.code must be base + opd.code, not base + text.vaddr + opd.code"
+        );
+    }
+
+    #[test]
+    fn load_uses_per_opd_toc_not_module_info_toc() {
+        // Patch the module_start OPD's toc field to a value distinct
+        // from module_info.toc. Pre-fix, load_prx unconditionally used
+        // base + prx.toc for both module_start and module_stop and
+        // would silently mask any divergence between the two TOC
+        // sources; the fix honors the per-OPD toc value.
+        let mut data = make_test_prx();
+        let opd_base = 0x2E0;
+        let alt_toc: u32 = 0x300;
+        data[opd_base + 4..opd_base + 8].copy_from_slice(&alt_toc.to_be_bytes());
+
+        let prx = parse_prx(&data).unwrap();
+        assert_eq!(prx.toc, 0x200);
+        assert_eq!(prx.module_start.expect("module_start").toc, alt_toc);
+
+        let base: u64 = 0x1000_0000;
+        let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
+        let loaded = load_prx(&prx, &mut mem, base).unwrap();
+
+        let ms = loaded.module_start.expect("module_start");
+        assert_eq!(
+            ms.toc,
+            base + alt_toc as u64,
+            "module_start.toc must come from the OPD's toc field, not module_info.toc"
+        );
+        // module_stop's OPD still carries 0x200, so it diverges from
+        // module_start in this fixture and confirms per-OPD handling.
+        let mstop = loaded.module_stop.expect("module_stop");
+        assert_eq!(mstop.toc, base + 0x200);
     }
 
     #[test]

@@ -49,6 +49,21 @@ fn place_insn(mem: &mut GuestMemory, offset: usize, raw: u32) {
     mem.apply_commit(range, &raw.to_be_bytes()).unwrap();
 }
 
+/// Returns `true` (and emits a stderr notice) if `path` is absent.
+/// Under `CELLGOV_REQUIRE_MICROTESTS` (CI), a missing fixture
+/// becomes a hard panic so a broken microtest build cannot pass
+/// silently as it would with a bare `if !exists { return; }`.
+fn skip_if_missing(path: &std::path::Path) -> bool {
+    if path.exists() {
+        return false;
+    }
+    if std::env::var("CELLGOV_REQUIRE_MICROTESTS").is_ok() {
+        panic!("required microtest fixture missing: {}", path.display());
+    }
+    eprintln!("[skip] microtest fixture missing: {}", path.display());
+    true
+}
+
 #[test]
 fn new_unit_is_runnable() {
     let unit = PpuExecutionUnit::new(UnitId::new(0));
@@ -73,6 +88,12 @@ fn li_then_sc_exit() {
 #[test]
 fn store_emits_shared_write_intent() {
     // li r3, 0xBEEF; stw r3, 0(r0)
+    //
+    // The cast chain `0xBEEFu16 as i16 as u16 as u32` round-trips
+    // through i16 to assert the bit pattern survives the signed
+    // reinterpretation D-form expects: the encoder reads the
+    // 16-bit field as signed, and `0xBEEF` (== -16657i16)
+    // sign-extends to 0xFFFF_FFFF_FFFF_BEEF in r3 at execute time.
     let mut mem = GuestMemory::new(256);
     let li: u32 = (14 << 26) | (3 << 21) | (0xBEEFu16 as i16 as u16 as u32);
     place_insn(&mut mem, 0, li);
@@ -112,9 +133,12 @@ fn load_reads_from_guest_memory() {
     place_insn(&mut mem, 8, 0x4400_0002);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    // Pre-dirty bits 0..32 of r3 so a partial-write implementation
+    // that only touches the low 32 bits is observable as a failure.
+    unit.state_mut().gpr[3] = 0xFFFF_FFFF_0000_0000;
     let (result, _effects) = run_to_completion(&mut unit, &mem, Budget::new(100));
     assert_eq!(result.yield_reason, YieldReason::Finished);
-    assert_eq!(unit.state().gpr[3], 0xDEAD_BEEF);
+    assert_eq!(unit.state().gpr[3], 0x0000_0000_DEAD_BEEF);
 }
 
 #[test]
@@ -153,18 +177,39 @@ fn mftb_resyncs_to_ctx_current_tick_at_step_entry() {
 
 #[test]
 fn decode_failure_faults() {
-    let mut mem = GuestMemory::new(256);
-    place_insn(&mut mem, 0, 0xFFFF_FFFF);
-
-    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(unit.status(), UnitStatus::Faulted);
+    // Cover several distinct illegal-encoding shapes: all-ones,
+    // primary opcode 0 (architecturally guaranteed illegal), and
+    // primary opcode 31 with an unassigned XO that falls through
+    // both the xo_9 and xo_10 tables in `decode_x31`.
+    for &(label, raw) in &[
+        ("all-ones", 0xFFFF_FFFFu32),
+        ("opcode-0", 0x0000_0000u32),
+        ("opcode-31-xo-1023", (31u32 << 26) | (1023 << 1)),
+    ] {
+        let mut mem = GuestMemory::new(256);
+        place_insn(&mut mem, 0, raw);
+        let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+        let ctx = ExecutionContext::new(&mem);
+        let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
+        assert_eq!(
+            result.yield_reason,
+            YieldReason::Fault,
+            "{label}: 0x{raw:08X} did not fault",
+        );
+        assert_eq!(
+            unit.status(),
+            UnitStatus::Faulted,
+            "{label}: 0x{raw:08X} did not transition to Faulted",
+        );
+    }
 }
 
 #[test]
 fn budget_exhaustion_yields() {
+    // No instruction shadow attached, so the quickening pass that
+    // would rewrite `ori 0,0,0` (0x6000_0000) into the Nop variant
+    // does not run. Each raw word retires for one budget unit on
+    // the slow path, so PC = budget * 4 = 20.
     let mut mem = GuestMemory::new(256);
     for i in (0..64).step_by(4) {
         place_insn(&mut mem, i, 0x6000_0000);
@@ -225,7 +270,7 @@ fn plant_exit_stub(mem: &mut GuestMemory) {
 /// consumed_budget, pc), or None when the binary has not been built.
 fn run_microtest_ppu(rel_path: &str) -> Option<(YieldReason, u64, u64, u64)> {
     let path = std::path::Path::new(rel_path);
-    if !path.exists() {
+    if skip_if_missing(path) {
         return None;
     }
     let data = std::fs::read(path).unwrap();
@@ -263,7 +308,7 @@ fn dma_completion_runs_to_process_exit() {
         consumed,
         r11
     );
-    assert_eq!(r11, syscall::SYS_PROCESS_EXIT);
+    assert_eq!(r11, 22, "r11 should hold sys_process_exit (LV2 #22)");
 }
 
 #[test]
@@ -280,7 +325,7 @@ fn spu_fixed_value_runs_to_process_exit() {
         consumed,
         r11
     );
-    assert_eq!(r11, syscall::SYS_PROCESS_EXIT);
+    assert_eq!(r11, 22, "r11 should hold sys_process_exit (LV2 #22)");
 }
 
 #[test]
@@ -405,7 +450,7 @@ fn spu_fixed_value_runs_through_scenario_runner() {
 
     let elf_path =
         std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
-    if !elf_path.exists() {
+    if skip_if_missing(elf_path) {
         return;
     }
     let elf_data = std::fs::read(elf_path).unwrap();
@@ -486,11 +531,116 @@ fn snapshot_captures_state() {
 }
 
 #[test]
+fn snapshot_captures_fpr_vr_xer_tb() {
+    // Snapshot must be reconstructible per the trait contract; FPR/VR/XER/TB
+    // are part of architectural state and must round-trip.
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().fpr[7] = 0x4034_0000_0000_0000; // f64 bits for 20.0
+    unit.state_mut().vr[3] = 0x0102_0304_0506_0708_090A_0B0C_0D0E_0F10;
+    unit.state_mut().xer = 0xDEAD_BEEF_CAFE_BABE;
+    unit.state_mut().tb = 0x1122_3344_5566_7788;
+    let snap = unit.snapshot();
+    assert_eq!(snap.fpr[7], 0x4034_0000_0000_0000);
+    assert_eq!(snap.vr[3], 0x0102_0304_0506_0708_090A_0B0C_0D0E_0F10);
+    assert_eq!(snap.xer, 0xDEAD_BEEF_CAFE_BABE);
+    assert_eq!(snap.tb, 0x1122_3344_5566_7788);
+}
+
+#[test]
+fn consumed_slot_records_per_step_hash_and_full_state() {
+    // After a super-pair retires, the Consumed placeholder represents the
+    // second architectural instruction's retirement. Per-step trace and
+    // full-state-window must record it so retirement_counter and
+    // consumed_budget stay aligned.
+    let mut mem = GuestMemory::new(256);
+    let lwz: u32 = (32 << 26) | (3 << 21) | 128;
+    let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
+    place_insn(&mut mem, 0, lwz);
+    place_insn(&mut mem, 4, cmpwi);
+    let load_target = ByteRange::new(GuestAddr::new(128), 4).unwrap();
+    mem.apply_commit(load_target, &7u32.to_be_bytes()).unwrap();
+
+    let mut unit = unit_with_shadow_for_pair(&mem, lwz, cmpwi);
+    unit.set_per_step_trace(true);
+    unit.set_full_state_window(Some((0, 1)));
+
+    let ctx = ExecutionContext::new(&mem);
+    let result = unit.run_until_yield(Budget::new(2), &ctx, &mut Vec::new());
+    assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
+
+    let hashes = unit.drain_retired_state_hashes();
+    assert_eq!(
+        hashes.len(),
+        2,
+        "super-pair + Consumed should record two retirements"
+    );
+    assert_eq!(hashes[0].0, 0, "first retirement at super-pair PC");
+    assert_eq!(hashes[1].0, 4, "second retirement at Consumed PC");
+
+    let full = unit.drain_retired_state_full();
+    assert_eq!(full.len(), 2, "full-state window covers both retirements");
+    assert_eq!(full[0].0, 0);
+    assert_eq!(full[1].0, 4);
+}
+
+#[test]
+fn profile_mode_attributes_to_dispatched_variant_not_raw_decode() {
+    // A super-pair (LwzCmpwi) executes once but represents two architectural
+    // instructions. Profiling must attribute to the dispatched variant
+    // (LwzCmpwi + Consumed), not the raw Lwz/Cmpwi the bytes decode to.
+    let mut mem = GuestMemory::new(256);
+    let lwz: u32 = (32 << 26) | (3 << 21) | 128;
+    let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
+    place_insn(&mut mem, 0, lwz);
+    place_insn(&mut mem, 4, cmpwi);
+    let load_target = ByteRange::new(GuestAddr::new(128), 4).unwrap();
+    mem.apply_commit(load_target, &7u32.to_be_bytes()).unwrap();
+
+    let mut unit = unit_with_shadow_for_pair(&mem, lwz, cmpwi);
+    unit.set_profile_mode(true);
+
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(2), &ctx, &mut Vec::new());
+
+    let drained = unit.drain_profile_insns();
+    let names: Vec<_> = drained.iter().map(|(n, _)| *n).collect();
+    assert!(
+        names.contains(&"LwzCmpwi"),
+        "expected LwzCmpwi in profile, got {names:?}"
+    );
+    assert!(
+        !names.contains(&"Lwz") && !names.contains(&"Cmpwi"),
+        "profile must not re-decode raw bytes; got {names:?}"
+    );
+}
+
+#[test]
+fn drain_profile_insns_actually_drains() {
+    // Drain semantics: a second drain on an unchanged unit should be empty.
+    let mut mem = GuestMemory::new(64);
+    let li: u32 = (14 << 26) | (3 << 21); // li r3, 0  (addi rt=3, ra=0, imm=0)
+    place_insn(&mut mem, 0, li);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.set_profile_mode(true);
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
+
+    let first = unit.drain_profile_insns();
+    assert!(!first.is_empty(), "first drain returns recorded entries");
+    let second = unit.drain_profile_insns();
+    assert!(
+        second.is_empty(),
+        "second drain on unchanged unit must be empty"
+    );
+}
+
+#[test]
 fn spu_fixed_value_image_open_writes_handle_to_guest_memory() {
     let ppu_path =
         std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
     let spu_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
-    if !ppu_path.exists() || !spu_path.exists() {
+    if skip_if_missing(ppu_path) || skip_if_missing(spu_path) {
         return;
     }
     let ppu_elf = std::fs::read(ppu_path).unwrap();
@@ -520,7 +670,7 @@ fn spu_fixed_value_lv2_driven_factory_fires_and_completes() {
     let ppu_path =
         std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
     let spu_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
-    if !ppu_path.exists() || !spu_path.exists() {
+    if skip_if_missing(ppu_path) || skip_if_missing(spu_path) {
         return;
     }
     let ppu_elf = std::fs::read(ppu_path).unwrap();
@@ -556,7 +706,7 @@ fn run_lv2_driven_microtest(name: &str) -> Option<Vec<u8>> {
         std::path::PathBuf::from(format!("../../tests/micro/{}/build/{}.elf", name, name));
     let spu_path =
         std::path::PathBuf::from(format!("../../tests/micro/{}/build/spu_main.elf", name));
-    if !ppu_path.exists() || !spu_path.exists() {
+    if skip_if_missing(&ppu_path) || skip_if_missing(&spu_path) {
         return None;
     }
     let ppu_elf = std::fs::read(&ppu_path).unwrap();
@@ -593,7 +743,11 @@ fn run_lv2_driven_baseline_check(microtest: &str, symbol: &str, region_defs: &[(
     let baseline_dir = std::path::PathBuf::from(format!("../../baselines/{}", microtest));
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
-    if !ppu_path.exists() || !spu_path.exists() || !interp_path.exists() || !llvm_path.exists() {
+    if skip_if_missing(&ppu_path)
+        || skip_if_missing(&spu_path)
+        || skip_if_missing(&interp_path)
+        || skip_if_missing(&llvm_path)
+    {
         return;
     }
     let ppu_elf = std::fs::read(&ppu_path).unwrap();
@@ -767,7 +921,7 @@ fn retail_eboot_loads_into_guest_memory() {
     // Fixture: NPUA80001 EBOOT; highest PT_LOAD sits at 0x10000000.
     let path =
         std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
-    if !path.exists() {
+    if skip_if_missing(&path) {
         return;
     }
     let data = std::fs::read(&path).unwrap();
@@ -803,7 +957,7 @@ fn retail_boot_progress() {
 
     let path =
         std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
-    if !path.exists() {
+    if skip_if_missing(&path) {
         return;
     }
     let data = std::fs::read(&path).unwrap();
@@ -834,9 +988,11 @@ fn retail_boot_progress() {
 
     let mut steps = 0;
     let mut faulted = false;
+    let mut total_consumed = 0u64;
     loop {
         match rt.step() {
             Ok(step) => {
+                total_consumed += step.result.consumed_budget.raw();
                 let _ = rt.commit_step(&step.result, &step.effects);
                 steps += 1;
                 if step.result.fault.is_some() {
@@ -850,9 +1006,16 @@ fn retail_boot_progress() {
         }
     }
 
+    // `steps` counts blocks (a single rt.step() can retire many
+    // instructions before yielding), so `steps >= 1` admits a
+    // regression that faults on instruction 0 of block 0. Assert
+    // on aggregated consumed budget instead -- that counts actual
+    // retired instructions and forces the test to observe real
+    // CRT0 progress, not just "at least one block executed".
     assert!(
-        steps >= 1,
-        "PPU should execute at least 1 step, got {steps}"
+        total_consumed >= 10,
+        "PPU should retire at least 10 instructions before fault, got \
+         consumed={total_consumed} across {steps} step(s)"
     );
     assert!(
         faulted,
@@ -895,6 +1058,9 @@ fn lha_sign_extends_negative_halfword() {
     place_insn(&mut mem, 0, lha);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    // Pre-dirty all 64 bits with a non-zero sentinel so a partial-
+    // write that leaves bits 0..47 alone is detectable.
+    unit.state_mut().gpr[3] = 0x1111_1111_1111_1111;
     let ctx = ExecutionContext::new(&mem);
     let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
@@ -902,7 +1068,14 @@ fn lha_sign_extends_negative_halfword() {
 }
 
 #[test]
-fn lha_zero_extends_positive_halfword() {
+fn lha_sign_extends_positive_halfword_full_64_bit_width() {
+    // `lha` always sign-extends; for a non-negative halfword the
+    // result happens to look like a zero-extension, but the
+    // operation is still EXTS, not ZE. Pre-dirty the destination
+    // so a truncate-only implementation that fails to clear the
+    // upper 48 bits would fail this check (a pure zero-or-sign
+    // distinction wouldn't catch it because both produce 0x0000
+    // in the high half for positive inputs).
     let mut mem = GuestMemory::new(64);
     let pos_range = ByteRange::new(GuestAddr::new(8), 2).unwrap();
     mem.apply_commit(pos_range, &0x1234u16.to_be_bytes())
@@ -911,10 +1084,11 @@ fn lha_zero_extends_positive_halfword() {
     place_insn(&mut mem, 0, lha);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().gpr[4] = 0xDEAD_DEAD_DEAD_DEAD;
     let ctx = ExecutionContext::new(&mem);
     let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
-    assert_eq!(unit.state().gpr[4], 0x1234);
+    assert_eq!(unit.state().gpr[4], 0x0000_0000_0000_1234);
 }
 
 /// Guards the decoder from silently aliasing `lbzu` to `lbz` and skipping
@@ -944,6 +1118,40 @@ fn lbzu_advances_ra_to_effective_address() {
         target_byte as u64,
         "lbzu must load the byte at the effective address into RT",
     );
+}
+
+/// Mirrors the `lbzu` writeback guard for the store-with-update
+/// family: a decoder that aliased `stwu` to `stw` would silently
+/// drop the RA update that prologue stack frames depend on.
+#[test]
+fn stwu_advances_ra_and_emits_shared_write_intent() {
+    let mut mem = GuestMemory::new(256);
+    // stwu r3, 16(r4)
+    let stwu: u32 = (37 << 26) | (3 << 21) | (4 << 16) | 16;
+    place_insn(&mut mem, 0, stwu);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().gpr[3] = 0xCAFE_F00D;
+    unit.state_mut().gpr[4] = 0x40;
+    let ctx = ExecutionContext::new(&mem);
+    let mut effects = Vec::new();
+    let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut effects);
+
+    assert_eq!(
+        unit.state().gpr[4],
+        0x50,
+        "stwu must update RA to the effective address (0x40 + 16)",
+    );
+    let writes: Vec<_> = effects
+        .iter()
+        .filter(|e| matches!(e, cellgov_effects::Effect::SharedWriteIntent { .. }))
+        .collect();
+    assert_eq!(writes.len(), 1, "stwu must emit exactly one write");
+    if let cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. } = &writes[0] {
+        assert_eq!(range.start().raw(), 0x50);
+        assert_eq!(range.length(), 4);
+        assert_eq!(bytes.bytes(), &0xCAFE_F00Du32.to_be_bytes());
+    }
 }
 
 #[test]
@@ -1322,6 +1530,95 @@ fn mid_block_fault_rolls_back_and_propagates_directly() {
 }
 
 #[test]
+fn mid_block_fault_rolls_back_lr_ctr_cr_xer() {
+    // The mid-block-fault snapshot covers the full architectural
+    // state, not just GPRs. Each pre-fault instruction below
+    // mutates exactly one of LR / CTR / CR / XER so the rollback
+    // is observable on every restored register independently:
+    //   mtlr r5         -- writes LR
+    //   mtctr r6        -- writes CTR
+    //   addic. r7,r7,1  -- writes CR0 (record form) and XER[CA]
+    //   lwz r4, 0(r1)   -- faults (r1 = 0xFFFF_0000, no mapping)
+    let mut mem = GuestMemory::new(256);
+    let mtlr: u32 = (31 << 26) | (5 << 21) | (8 << 16) | (467 << 1);
+    let mtctr: u32 = (31 << 26) | (6 << 21) | (9 << 16) | (467 << 1);
+    let addic_dot: u32 = (13 << 26) | (7 << 21) | (7 << 16) | 1;
+    let lwz_bad: u32 = (32 << 26) | (4 << 21) | (1 << 16);
+    place_insn(&mut mem, 0, mtlr);
+    place_insn(&mut mem, 4, mtctr);
+    place_insn(&mut mem, 8, addic_dot);
+    place_insn(&mut mem, 12, lwz_bad);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().lr = 0xAAAA_AAAA_AAAA_AAAA;
+    unit.state_mut().ctr = 0xBBBB_BBBB_BBBB_BBBB;
+    unit.state_mut().cr = 0x1234_5678;
+    unit.state_mut().xer = 0xDEAD_BEEF_CAFE_BABE;
+    unit.state_mut().gpr[5] = 0x1111_1111_1111_1111;
+    unit.state_mut().gpr[6] = 0x2222_2222_2222_2222;
+    unit.state_mut().gpr[7] = 0x7FFF_FFFF;
+    unit.state_mut().gpr[1] = 0xFFFF_0000;
+
+    let ctx = ExecutionContext::new(&mem);
+    let mut effects = Vec::new();
+    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
+
+    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert_eq!(unit.status(), UnitStatus::Faulted);
+    assert_eq!(
+        unit.state().lr,
+        0xAAAA_AAAA_AAAA_AAAA,
+        "LR must roll back; mtlr's update should have been discarded",
+    );
+    assert_eq!(
+        unit.state().ctr,
+        0xBBBB_BBBB_BBBB_BBBB,
+        "CTR must roll back; mtctr's update should have been discarded",
+    );
+    assert_eq!(
+        unit.state().cr,
+        0x1234_5678,
+        "CR must roll back; addic.'s CR0 update should have been discarded",
+    );
+    assert_eq!(
+        unit.state().xer,
+        0xDEAD_BEEF_CAFE_BABE,
+        "XER must roll back; addic.'s CA update should have been discarded",
+    );
+    assert_eq!(unit.state().pc, 0, "PC rolls back to block start");
+}
+
+#[test]
+fn mid_block_fault_discards_buffered_stores_from_pre_fault_instructions() {
+    // Stronger rollback check than `mid_block_fault_rolls_back_*`:
+    // a `stw` retires before the bad `lwz` and would normally emit
+    // a `SharedWriteIntent` at flush. The fault rule must clear
+    // every buffered effect; a regression that leaks the pre-fault
+    // store would land here as a non-empty effects vec.
+    let mut mem = GuestMemory::new(256);
+    let stw: u32 = (36 << 26) | (3 << 21) | 0x80;
+    let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16);
+    place_insn(&mut mem, 0, stw);
+    place_insn(&mut mem, 4, lwz_bad);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().gpr[3] = 0xCAFE_BABE;
+    unit.state_mut().gpr[5] = 0xFFFF_0000;
+
+    let ctx = ExecutionContext::new(&mem);
+    let mut effects = Vec::new();
+    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
+
+    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert_eq!(unit.status(), UnitStatus::Faulted);
+    assert!(
+        effects.is_empty(),
+        "fault rollback must drop the pre-fault stw's SharedWriteIntent; \
+         leaked effects: {effects:?}"
+    );
+}
+
+#[test]
 fn first_instruction_fault_reports_directly_at_budget_gt_1() {
     let mut mem = GuestMemory::new(256);
     let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16);
@@ -1379,7 +1676,7 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
 
     let spu_elf_path =
         std::path::Path::new("../../tests/micro/spu_atomic_cross_spu/build/spu_main.elf");
-    if !spu_elf_path.exists() {
+    if skip_if_missing(spu_elf_path) {
         return;
     }
     let spu_elf = std::fs::read(spu_elf_path).unwrap();
@@ -1468,9 +1765,103 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
         ])
     }
 
+    // Sweep budgets that exercise different PPU/SPU interleaving
+    // granularities. 1 forces interleaving on every retire; small
+    // primes (2, 3, 7) and 15 land a CAS attempt mid-block where
+    // the reservation can be cleared by the cross-unit write before
+    // the stwcx; 256 batches the whole CAS retry into one block.
     let expected = PPU_N + SPU_N;
-    let counter_b1 = run_at_budget(spu_elf.clone(), ppu_pc, atomic_ea, spu_result_ea, 1);
-    assert_eq!(counter_b1, expected, "Budget=1");
-    let counter_b256 = run_at_budget(spu_elf, ppu_pc, atomic_ea, spu_result_ea, 256);
-    assert_eq!(counter_b256, expected, "Budget=256");
+    for &b in &[1u64, 2, 3, 7, 15, 256] {
+        let counter = run_at_budget(spu_elf.clone(), ppu_pc, atomic_ea, spu_result_ea, b);
+        assert_eq!(counter, expected, "Budget={b}");
+    }
+}
+
+/// Build a 2-slot shadow over `mem[0..8]` and confirm the pairing
+/// pass produced the expected fusion. Returns the unit with the
+/// shadow attached and its initial PC at 0.
+fn unit_with_shadow_for_pair(mem: &GuestMemory, raw0: u32, raw1: u32) -> PpuExecutionUnit {
+    let mut shadow_bytes = [0u8; 8];
+    shadow_bytes[0..4].copy_from_slice(&raw0.to_be_bytes());
+    shadow_bytes[4..8].copy_from_slice(&raw1.to_be_bytes());
+    let shadow = shadow::PredecodedShadow::build(0, &shadow_bytes);
+    assert_eq!(
+        shadow.get(4),
+        Some(instruction::PpuInstruction::Consumed),
+        "test precondition (super-pair fusion) failed: PredecodedShadow::build did not \
+         emit Consumed at slot 1 for raw0=0x{raw0:08X} raw1=0x{raw1:08X} -- the pair \
+         either stopped being fusion-eligible or the helper is being called with a \
+         non-pair sequence",
+    );
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.set_instruction_shadow(shadow);
+    let _ = mem; // mem only seeds raw bytes; shadow is the source of truth at PC.
+    unit
+}
+
+#[test]
+fn fetch_loop_advances_past_consumed_after_super_pair() {
+    // Source: lwz r3, 128(r0); cmpwi cr0, r3, 5
+    // The shadow build fuses these into LwzCmpwi at slot 0 with a
+    // Consumed placeholder at slot 1. With Budget=2, the fetch
+    // loop must run the super-pair (PC: 0 -> 4) and then skip the
+    // Consumed slot (PC: 4 -> 8). PC ending at 8 is the contract
+    // that the +4 advance plus the Consumed skip is observable.
+    let mut mem = GuestMemory::new(256);
+    let lwz: u32 = (32 << 26) | (3 << 21) | 128;
+    let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
+    place_insn(&mut mem, 0, lwz);
+    place_insn(&mut mem, 4, cmpwi);
+    let load_target = ByteRange::new(GuestAddr::new(128), 4).unwrap();
+    mem.apply_commit(load_target, &7u32.to_be_bytes()).unwrap();
+
+    let mut unit = unit_with_shadow_for_pair(&mem, lwz, cmpwi);
+    assert!(matches!(
+        unit.instruction_shadow.as_ref().unwrap().get(0),
+        Some(instruction::PpuInstruction::LwzCmpwi { .. })
+    ));
+
+    let ctx = ExecutionContext::new(&mem);
+    let result = unit.run_until_yield(Budget::new(2), &ctx, &mut Vec::new());
+    assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
+    assert_eq!(
+        unit.state().pc,
+        8,
+        "fetch loop must advance past both the super-pair slot and \
+         the Consumed placeholder"
+    );
+}
+
+#[test]
+fn fetch_loop_super_pair_taken_branch_uses_target_not_consumed_skip() {
+    // Source: cmpwi cr0, r3, 5; bc 12, 2, +20  (beq cr0, +20)
+    // The shadow build fuses these into CmpwiBc at slot 0 with a
+    // Consumed placeholder at slot 1. With r3=5, EQ is true and
+    // the branch fires: PC must land at the computed target
+    // (super_pc + 4 + 20 = 24), NOT at base + 8 (which would
+    // happen if the Branch verdict were silently routed through
+    // the Continue arm's PC += 4 plus the Consumed skip).
+    let mut mem = GuestMemory::new(256);
+    let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
+    let bc: u32 = (16 << 26) | (12 << 21) | (2 << 16) | (20u16 as u32);
+    place_insn(&mut mem, 0, cmpwi);
+    place_insn(&mut mem, 4, bc);
+
+    let mut unit = unit_with_shadow_for_pair(&mem, cmpwi, bc);
+    assert!(matches!(
+        unit.instruction_shadow.as_ref().unwrap().get(0),
+        Some(instruction::PpuInstruction::CmpwiBc { .. })
+    ));
+    unit.state_mut().gpr[3] = 5; // r3 == 5 -> cmpwi sets cr0.EQ -> beq taken
+
+    let ctx = ExecutionContext::new(&mem);
+    let result = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
+    assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
+    assert_eq!(
+        unit.state().pc,
+        24,
+        "Branch verdict must land at the computed target, not at \
+         super_pc + 8 (the Consumed-skip path is for the not-taken \
+         Continue verdict only)"
+    );
 }

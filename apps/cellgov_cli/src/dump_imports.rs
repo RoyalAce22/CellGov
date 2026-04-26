@@ -1,12 +1,12 @@
 //! `dump-imports` subcommand: parse a title's EBOOT import table and
 //! print a markdown inventory bucketed by classification.
 //!
-//! Each imported NID falls into exactly one of six buckets:
+//! Each imported NID falls into exactly one of five buckets:
 //! `Impl` (CellGov has dedicated handling), `Stateful` /
 //! `UnsafeToStub` / `NoopSafe` (stub-safety tier from the NID DB),
-//! `UnknownNid` (not in the DB), `UnknownClass` (DB returned an
-//! unrecognized classifier string). The buckets drive the summary
-//! arithmetic at the end of `run`.
+//! or `UnknownNid` (not in the DB). The buckets drive the summary
+//! arithmetic at the end of `run`. The classifier returns a typed
+//! `StubClass` so a typo cannot create an unknown-class drift bucket.
 //!
 //! Artifacts land in `docs/titles/<content-id>_hle_inventory.md`.
 
@@ -42,7 +42,6 @@ struct InventoryCounts {
     unsafe_unstubbed: usize,
     noop_safe: usize,
     unknown_nid: usize,
-    unknown_class: usize,
 }
 
 impl InventoryCounts {
@@ -52,7 +51,6 @@ impl InventoryCounts {
             + self.unsafe_unstubbed
             + self.noop_safe
             + self.unknown_nid
-            + self.unknown_class
     }
 
     fn bump(&mut self, bucket: Bucket) {
@@ -62,7 +60,6 @@ impl InventoryCounts {
             Bucket::UnsafeToStub => self.unsafe_unstubbed += 1,
             Bucket::NoopSafe => self.noop_safe += 1,
             Bucket::UnknownNid => self.unknown_nid += 1,
-            Bucket::UnknownClass => self.unknown_class += 1,
         }
     }
 }
@@ -76,7 +73,6 @@ enum Bucket {
     UnsafeToStub,
     NoopSafe,
     UnknownNid,
-    UnknownClass,
 }
 
 /// Map a NID and its nid_db lookup to a bucket plus the Class-column
@@ -86,28 +82,28 @@ fn classify_import(
     lookup: Option<(&'static str, &'static str)>,
 ) -> (Bucket, &'static str, bool) {
     if lookup.is_none() {
-        // Mirrors the `every_implemented_nid_is_in_nid_db` test: an
-        // impl NID missing from nid_db would render as stub here.
-        debug_assert!(
+        // Hard-assert (not debug-only): an implemented NID missing from
+        // nid_db would silently classify as UnknownNid + stub here in
+        // release builds -- the worst possible outcome for a function
+        // CellGov claims to dispatch. The every_implemented_nid_is_in_nid_db
+        // test catches this offline; this guard catches it in any
+        // dump-imports invocation regardless of test coverage.
+        assert!(
             !CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&nid),
-            "NID 0x{nid:08x} is in HLE_IMPLEMENTED_NIDS but nid_db has no entry -- \
-             every_implemented_nid_is_in_nid_db test must have been skipped or regressed"
+            "NID 0x{nid:08x} is in HLE_IMPLEMENTED_NIDS but nid_db has no entry"
         );
         return (Bucket::UnknownNid, "<unknown-nid>", false);
     }
-    let class_str = cellgov_ppu::nid_db::stub_classification(nid);
+    use cellgov_ppu::nid_db::StubClass;
+    let class = cellgov_ppu::nid_db::stub_classification(nid);
     let is_impl = CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&nid);
-    let (bucket, class_cell) = match (is_impl, class_str) {
-        (true, "stateful") => (Bucket::Impl, "stateful"),
-        (true, "unsafe-to-stub") => (Bucket::Impl, "unsafe-to-stub"),
-        (true, "noop-safe") => (Bucket::Impl, "noop-safe"),
-        (true, _) => (Bucket::Impl, "<unknown-class>"),
-        (false, "stateful") => (Bucket::Stateful, "stateful"),
-        (false, "unsafe-to-stub") => (Bucket::UnsafeToStub, "unsafe-to-stub"),
-        (false, "noop-safe") => (Bucket::NoopSafe, "noop-safe"),
-        (false, _) => (Bucket::UnknownClass, "<unknown-class>"),
+    let bucket = match (is_impl, class) {
+        (true, _) => Bucket::Impl,
+        (false, StubClass::Stateful) => Bucket::Stateful,
+        (false, StubClass::UnsafeToStub) => Bucket::UnsafeToStub,
+        (false, StubClass::NoopSafe) => Bucket::NoopSafe,
     };
-    (bucket, class_cell, is_impl)
+    (bucket, class.as_str(), is_impl)
 }
 
 /// Entry point for `cellgov_cli dump-imports --title <name>`.
@@ -163,10 +159,7 @@ pub(crate) fn run(args: &[String]) {
     println!("  `stateful` / `unsafe-to-stub` need real impls; `noop-safe`");
     println!("  is fine returning 0. `<unknown-nid>` distinguishes the");
     println!("  case where the NID itself is missing from the DB (same");
-    println!("  condition that shows `<unknown>` in the Name column);");
-    println!("  `<unknown-class>` means the NID is in the DB but the");
-    println!("  classifier returned a string this tool does not recognize");
-    println!("  (library-side schema drift).");
+    println!("  condition that shows `<unknown>` in the Name column).");
     println!("- **CellGov**: `impl` if the NID has dedicated handling in");
     println!("  `cellgov_core::hle::dispatch_hle` or the HLE-keep list in");
     println!("  `game::prx::load_firmware_prx`; `stub` otherwise (default");
@@ -277,12 +270,6 @@ pub(crate) fn run(args: &[String]) {
             counts.unknown_nid
         );
     }
-    if counts.unknown_class > 0 {
-        println!(
-            "- Unknown classification (schema drift?): {}",
-            counts.unknown_class
-        );
-    }
 }
 
 #[cfg(test)]
@@ -316,13 +303,27 @@ mod tests {
     }
 
     #[test]
-    fn every_implemented_nid_classifies_to_known_string() {
+    fn no_implemented_nid_falls_through_to_default_noop_safe() {
+        // Implementation list and stub classifier are kept in sync by
+        // hand. Every implemented NID must have an explicit arm in
+        // stub_classification; falling through to the catch-all NoopSafe
+        // means the classifier silently considers a stateful function
+        // safe to leave unstubbed. _sys_free is the lone genuine
+        // NoopSafe in the impl list (memory leak is acceptable for
+        // triage runs).
+        use cellgov_ppu::nid_db::StubClass;
+        const SYS_FREE_NID: u32 = 0xf7f7fb20;
         for &nid in CELLGOV_HLE_IMPLEMENTED_NIDS {
             let c = cellgov_ppu::nid_db::stub_classification(nid);
-            assert!(
-                matches!(c, "stateful" | "unsafe-to-stub" | "noop-safe"),
-                "NID 0x{nid:08x} classified as unexpected string {c:?}"
-            );
+            if nid == SYS_FREE_NID {
+                assert_eq!(c, StubClass::NoopSafe);
+            } else {
+                assert!(
+                    matches!(c, StubClass::Stateful | StubClass::UnsafeToStub),
+                    "NID 0x{nid:08x} fell through to default NoopSafe; \
+                     add an explicit StubClass arm to nid_db::stub_classification"
+                );
+            }
         }
     }
 
@@ -372,9 +373,8 @@ mod tests {
             unsafe_unstubbed: 3,
             noop_safe: 4,
             unknown_nid: 5,
-            unknown_class: 6,
         };
-        assert_eq!(c.sum(), 21);
+        assert_eq!(c.sum(), 15);
     }
 
     #[test]
@@ -426,10 +426,9 @@ mod tests {
             Bucket::UnsafeToStub,
             Bucket::NoopSafe,
             Bucket::UnknownNid,
-            Bucket::UnknownClass,
         ] {
             c.bump(bucket);
         }
-        assert_eq!(c.sum(), 6);
+        assert_eq!(c.sum(), 5);
     }
 }

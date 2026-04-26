@@ -1,9 +1,15 @@
 //! NID -> `(module, function)` lookup for PS3 system libraries.
 //!
-//! NIDs are the first 4 bytes (little-endian u32) of
-//! SHA-1(function_name + fixed_suffix) and are game-independent.
+//! Per the PS3 NID algorithm, a NID is the first 4 bytes (little-endian
+//! u32) of SHA-1(name || suffix). The suffix differs by export kind:
+//! named exports use `0x6759659904250490566427499489741A`, while noname
+//! exports (e.g., `module_start`, `module_stop`) use
+//! `0xc1b886af5c31846467e7ba5e2cffd64a`. NIDs are game-independent.
 
-/// Returns `Some((module, function))` if the NID is known.
+/// Returns `Some((module, function))` if the NID is known. `module` may
+/// be the empty string for symbols that ship outside any named PS3
+/// library (libstdc++ mangled names, libm helpers, etc.); the caller
+/// can treat `("", _)` as "name resolved, module unknown".
 pub fn lookup(nid: u32) -> Option<(&'static str, &'static str)> {
     NID_TABLE
         .binary_search_by_key(&nid, |entry| entry.0)
@@ -11,14 +17,70 @@ pub fn lookup(nid: u32) -> Option<(&'static str, &'static str)> {
         .map(|i| (NID_TABLE[i].1, NID_TABLE[i].2))
 }
 
-/// HLE stub safety class: `"stateful"`, `"unsafe-to-stub"`, or `"noop-safe"`.
-pub fn stub_classification(nid: u32) -> &'static str {
+/// HLE-stub safety class. The class governs whether returning 0 from a
+/// stubbed import is safe for short triage runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StubClass {
+    /// Returning 0 leaves correctness intact for the duration of a
+    /// triage run (cosmetic-output, GUI-only, or genuine no-ops).
+    NoopSafe,
+    /// The function maintains kernel/runtime state the program reads
+    /// back later (heap handles, mutex IDs, thread IDs, time values).
+    /// A stub must mint stable values, not return 0.
+    Stateful,
+    /// The function returns a resource the program will dereference.
+    /// Returning 0 (null pointer / invalid handle) faults on next use.
+    UnsafeToStub,
+}
+
+impl StubClass {
+    /// Hyphenated label used in `dump-imports` inventory tables.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NoopSafe => "noop-safe",
+            Self::Stateful => "stateful",
+            Self::UnsafeToStub => "unsafe-to-stub",
+        }
+    }
+}
+
+/// Class for `nid`. Implemented NIDs (`prx::HLE_IMPLEMENTED_NIDS`) are
+/// classified explicitly; everything else defaults to `NoopSafe`. The
+/// default is presumptive, not verified -- a NID we haven't reviewed
+/// could be `Stateful` or `UnsafeToStub`. Any NID added to
+/// `HLE_IMPLEMENTED_NIDS` should grow an explicit arm here.
+pub fn stub_classification(nid: u32) -> StubClass {
     match nid {
-        0x744680a2 => "stateful",       // sys_initialize_tls
-        0xbdb18f83 => "unsafe-to-stub", // _sys_malloc
-        0x68b9b011 => "stateful",       // _sys_memset
-        0xe6f2c1e7 => "stateful",       // sys_process_exit
-        _ => "noop-safe",
+        // RSX / GCM library: every implemented surface mutates or reads
+        // driver state, so a 0-returning stub corrupts later GCM calls.
+        0x055bd74d => StubClass::Stateful, // cellGcmGetTiledPitchSize
+        0x15bae46b => StubClass::Stateful, // _cellGcmInitBody
+        0xa547adde => StubClass::Stateful, // cellGcmGetControlRegister
+        0xe315a0b2 => StubClass::Stateful, // cellGcmGetConfiguration
+        0xf80196c1 => StubClass::Stateful, // cellGcmGetLabelAddress
+        // sysPrxForUser TLS / memory primitives.
+        0x744680a2 => StubClass::Stateful, // sys_initialize_tls
+        0xbdb18f83 => StubClass::UnsafeToStub, // _sys_malloc
+        0xf7f7fb20 => StubClass::NoopSafe, // _sys_free (leak is OK)
+        0x68b9b011 => StubClass::Stateful, // _sys_memset
+        0xe6f2c1e7 => StubClass::Stateful, // sys_process_exit
+        // User-mode heap allocator.
+        0xb2fcf2c8 => StubClass::Stateful, // _sys_heap_create_heap
+        0x35168520 => StubClass::UnsafeToStub, // _sys_heap_malloc
+        0x44265c08 => StubClass::UnsafeToStub, // _sys_heap_memalign
+        // Lightweight mutex family: every entry mutates sync state.
+        0x2f85c0ef => StubClass::Stateful, // sys_lwmutex_create
+        0x1573dc3f => StubClass::Stateful, // sys_lwmutex_lock
+        0xc3476d0c => StubClass::Stateful, // sys_lwmutex_destroy
+        0x1bc200f4 => StubClass::Stateful, // sys_lwmutex_unlock
+        0xaeb78725 => StubClass::Stateful, // sys_lwmutex_trylock
+        // Time / thread / process queries.
+        0x8461e528 => StubClass::Stateful, // sys_time_get_system_time
+        0x350d454e => StubClass::Stateful, // sys_ppu_thread_get_id
+        0x24a1ea07 => StubClass::Stateful, // sys_ppu_thread_create
+        0x4f7172c9 => StubClass::Stateful, // sys_process_is_stack
+        0xa2c7ba64 => StubClass::Stateful, // sys_prx_exitspawn_with_level
+        _ => StubClass::NoopSafe,
     }
 }
 
@@ -5352,3 +5414,38 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
     (0xfff6ef55, "", "_ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERb"),
     (0xfffe79bf, "", "_LCmulcc"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stub_class_as_str_round_trips_inventory_labels() {
+        assert_eq!(StubClass::NoopSafe.as_str(), "noop-safe");
+        assert_eq!(StubClass::Stateful.as_str(), "stateful");
+        assert_eq!(StubClass::UnsafeToStub.as_str(), "unsafe-to-stub");
+    }
+
+    #[test]
+    fn classification_covers_user_listed_misclassifications() {
+        // Witnesses for the catch-all "noop-safe" gap that prompted the
+        // explicit-arm pass: heap allocators must be UnsafeToStub, heap
+        // creation and lwmutex creation must be Stateful, _sys_free is
+        // genuinely NoopSafe.
+        assert_eq!(stub_classification(0x35168520), StubClass::UnsafeToStub); // _sys_heap_malloc
+        assert_eq!(stub_classification(0x44265c08), StubClass::UnsafeToStub); // _sys_heap_memalign
+        assert_eq!(stub_classification(0xb2fcf2c8), StubClass::Stateful); // _sys_heap_create_heap
+        assert_eq!(stub_classification(0x2f85c0ef), StubClass::Stateful); // sys_lwmutex_create
+        assert_eq!(stub_classification(0xf7f7fb20), StubClass::NoopSafe); // _sys_free
+    }
+
+    #[test]
+    fn lookup_returns_empty_module_for_libstdcxx_symbols() {
+        // _Feraise has no PS3 module; lookup must signal that via "" so
+        // the caller can render it as "name-known, module-unknown"
+        // rather than treating the empty module as a real module name.
+        let (m, n) = lookup(0x003395d9).expect("_Feraise is in nid_db");
+        assert_eq!(m, "");
+        assert_eq!(n, "_Feraise");
+    }
+}

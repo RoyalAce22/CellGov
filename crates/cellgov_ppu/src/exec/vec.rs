@@ -1,39 +1,20 @@
 //! VMX / AltiVec execution helpers. Vector registers are 128-bit,
 //! stored big-endian (byte 0 is the MSB); the per-operation helpers
 //! in this module take and return `u128` values in that order.
+//!
+//! Memory-touching vector ops (`lvx`, `lvlx`, `lvrx`, `stvx`) live in
+//! the [`mem`](super::mem) module so all loads / stores share one
+//! store-buffer-forward / region-view fallback.
 
-use crate::exec::{load_slice, ExecuteVerdict, PpuFault};
+use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::state::PpuState;
-use crate::store_buffer::StoreBuffer;
 
 /// Execute a VX-form VMX instruction (primary=4, 11-bit sub-opcode, 3 registers).
-pub(crate) fn execute_vx(
-    state: &mut PpuState,
-    xo: u16,
-    vt: u8,
-    va: u8,
-    vb: u8,
-    region_views: &[(u64, &[u8])],
-    store_buf: &StoreBuffer,
-) -> ExecuteVerdict {
-    // lvx: 16-byte vector load.
-    if xo == 103 {
-        let base = if va == 0 { 0 } else { state.gpr[va as usize] };
-        let ea = (base.wrapping_add(state.gpr[vb as usize])) & !0xF;
-        if let Some(val) = store_buf.forward(ea, 16) {
-            state.vr[vt as usize] = val;
-            return ExecuteVerdict::Continue;
-        }
-        let slice = match load_slice(region_views, ea, 16) {
-            Some(s) => s,
-            None => return ExecuteVerdict::MemFault(ea),
-        };
-        let mut bytes = [0u8; 16];
-        bytes.copy_from_slice(slice);
-        state.vr[vt as usize] = u128::from_be_bytes(bytes);
-        return ExecuteVerdict::Continue;
-    }
-
+///
+/// Pure register-in / register-out: the parent dispatcher peels off
+/// `xo == 103` (`lvx`) and routes it to `mem::execute_lvx` before this
+/// function is reached.
+pub(crate) fn execute_vx(state: &mut PpuState, xo: u16, vt: u8, va: u8, vb: u8) -> ExecuteVerdict {
     let a = state.vr[va as usize];
     let b = state.vr[vb as usize];
 
@@ -61,12 +42,12 @@ pub(crate) fn execute_vx(
         0x304 => vsrab(a, b), // vsrab
 
         // -- Splat (PPC AltiVec ISA XO values) --
-        0x20c => vspltb(b, va),    // vspltb (va is byte index)
-        0x24c => vsplth(b, va),    // vsplth (va is halfword index)
-        0x28c => vspltw(a, b, va), // vspltw (va is word index, signature kept)
-        0x30c => vspltisb(va),     // vspltisb (sign-extended 5-bit imm)
-        0x34c => vspltish(va),     // vspltish
-        0x38c => vspltisw(va),     // vspltisw
+        0x20c => vspltb(b, va), // vspltb (va is byte index)
+        0x24c => vsplth(b, va), // vsplth (va is halfword index)
+        0x28c => vspltw(b, va), // vspltw (va is word index)
+        0x30c => vspltisb(va),  // vspltisb (sign-extended 5-bit imm)
+        0x34c => vspltish(va),  // vspltish
+        0x38c => vspltisw(va),  // vspltisw
 
         // -- Merge --
         0x00c => vmrghb(a, b), // vmrghb
@@ -87,7 +68,7 @@ pub(crate) fn execute_vx(
         0x38a => vcfux(b, va), // vcfux
 
         _ => {
-            return ExecuteVerdict::Fault(PpuFault::UnsupportedSyscall(xo as u64));
+            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(xo as u64));
         }
     };
 
@@ -112,7 +93,7 @@ pub(crate) fn execute_va(
         0x2a => vsel(a, b, c),  // vsel
         0x2b => vperm(a, b, c), // vperm
         _ => {
-            return ExecuteVerdict::Fault(PpuFault::UnsupportedSyscall(xo as u64));
+            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(xo as u64));
         }
     };
 
@@ -253,7 +234,7 @@ fn vsrab(a: u128, b: u128) -> u128 {
     u128::from_be_bytes(r)
 }
 
-fn vspltw(_a: u128, b: u128, idx: u8) -> u128 {
+fn vspltw(b: u128, idx: u8) -> u128 {
     let bb = b.to_be_bytes();
     let start = (idx as usize & 3) * 4;
     let word = u32::from_be_bytes([bb[start], bb[start + 1], bb[start + 2], bb[start + 3]]);
@@ -437,7 +418,8 @@ fn vperm(a: u128, b: u128, c: u128) -> u128 {
 
 fn vsldoi(a: u128, b: u128, sh: u8) -> u128 {
     // Left-shift the a:b concatenation by `sh` bytes, return the
-    // high 16.
+    // high 16. PEM constrains SH to 0..=15, so the [shift, shift+15]
+    // window always falls inside the 32-byte concat.
     let ab = a.to_be_bytes();
     let bb = b.to_be_bytes();
     let mut concat = [0u8; 32];
@@ -445,16 +427,14 @@ fn vsldoi(a: u128, b: u128, sh: u8) -> u128 {
     concat[16..32].copy_from_slice(&bb);
     let shift = (sh & 0xF) as usize;
     let mut r = [0u8; 16];
-    for i in 0..16 {
-        r[i] = concat[(i + shift) % 32];
-    }
+    r.copy_from_slice(&concat[shift..shift + 16]);
     u128::from_be_bytes(r)
 }
 
 fn vcfsx(b: u128, uimm: u8) -> u128 {
     let bytes = b.to_be_bytes();
     let mut r = [0u8; 16];
-    let scale = (1u32 << uimm) as f32;
+    let scale = (1u32 << (uimm & 0x1F)) as f32;
     for i in 0..4 {
         let off = i * 4;
         let v = i32::from_be_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
@@ -467,7 +447,7 @@ fn vcfsx(b: u128, uimm: u8) -> u128 {
 fn vcfux(b: u128, uimm: u8) -> u128 {
     let bytes = b.to_be_bytes();
     let mut r = [0u8; 16];
-    let scale = (1u32 << uimm) as f32;
+    let scale = (1u32 << (uimm & 0x1F)) as f32;
     for i in 0..4 {
         let off = i * 4;
         let v = u32::from_be_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
@@ -480,6 +460,53 @@ fn vcfux(b: u128, uimm: u8) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exec::test_support::exec_no_mem;
+    use crate::exec::ExecuteVerdict;
+    use crate::instruction::PpuInstruction;
+
+    #[test]
+    fn vxor_self_zeros_vector_register() {
+        let mut s = PpuState::new();
+        s.vr[5] = 0xDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEFu128;
+        let v = exec_no_mem(
+            &PpuInstruction::Vxor {
+                vt: 5,
+                va: 5,
+                vb: 5,
+            },
+            &mut s,
+        );
+        assert_eq!(v, ExecuteVerdict::Continue);
+        assert_eq!(s.vr[5], 0);
+    }
+
+    #[test]
+    fn vsldoi_shifts_by_shb_bytes() {
+        let mut s = PpuState::new();
+        s.vr[1] = u128::from_be_bytes([
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+            0xEE, 0xFF,
+        ]);
+        s.vr[2] = u128::from_be_bytes([
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10,
+        ]);
+        exec_no_mem(
+            &PpuInstruction::Vsldoi {
+                vt: 3,
+                va: 1,
+                vb: 2,
+                shb: 4,
+            },
+            &mut s,
+        );
+        // Shift left by 4 bytes: result[0..12] = va[4..16], result[12..16] = vb[0..4].
+        let expected = u128::from_be_bytes([
+            0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x01, 0x02,
+            0x03, 0x04,
+        ]);
+        assert_eq!(s.vr[3], expected);
+    }
 
     fn pack_u32x4(lanes: [u32; 4]) -> u128 {
         let mut r = [0u8; 16];
