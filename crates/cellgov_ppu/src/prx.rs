@@ -179,6 +179,7 @@ pub const HLE_IMPLEMENTED_NIDS: &[u32] = &[
     0xa547adde, // cellGcmGetControlRegister
     0xe315a0b2, // cellGcmGetConfiguration
     0xf80196c1, // cellGcmGetLabelAddress
+    0x21ac3697, // cellGcmAddressToOffset
     0x744680a2, // sys_initialize_tls
     0xbdb18f83, // _sys_malloc
     0xf7f7fb20, // _sys_free
@@ -195,6 +196,8 @@ pub const HLE_IMPLEMENTED_NIDS: &[u32] = &[
     0x24a1ea07, // sys_ppu_thread_create
     0x4f7172c9, // sys_process_is_stack
     0xa2c7ba64, // sys_prx_exitspawn_with_level
+    0x887572d5, // cellVideoOutGetState
+    0xe558748d, // cellVideoOutGetResolution
 ];
 
 /// Bind result: maps each HLE index to its module and NID.

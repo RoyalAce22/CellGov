@@ -20,6 +20,8 @@ use crate::runtime::Runtime;
 
 #[path = "hle/cellGcmSys.rs"]
 pub(crate) mod cell_gcm_sys;
+#[path = "hle/cellSysutil.rs"]
+pub(crate) mod cell_sysutil;
 pub mod context;
 #[path = "hle/sysPrxForUser.rs"]
 pub(crate) mod sys_prx_for_user;
@@ -79,7 +81,8 @@ impl Runtime {
     /// contract.
     pub(crate) fn dispatch_hle(&mut self, source: UnitId, nid: u32, args: &[u64; 9]) {
         let handled = sys_prx_for_user::dispatch(self, source, nid, args)
-            .or_else(|| cell_gcm_sys::dispatch(self, source, nid, args));
+            .or_else(|| cell_gcm_sys::dispatch(self, source, nid, args))
+            .or_else(|| cell_sysutil::dispatch(self, source, nid, args));
         if handled.is_none() {
             let entry = self.hle.unclaimed_nids.entry(nid).or_insert(0);
             if *entry == 0 {

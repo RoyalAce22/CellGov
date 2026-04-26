@@ -26,10 +26,22 @@ pub(crate) const NID_CELLGCM_INIT_BODY: u32 = 0x15bae46b;
 pub(crate) const NID_CELLGCM_GET_CONFIGURATION: u32 = 0xe315a0b2;
 pub(crate) const NID_CELLGCM_GET_CONTROL_REGISTER: u32 = 0xa547adde;
 pub(crate) const NID_CELLGCM_GET_LABEL_ADDRESS: u32 = 0xf80196c1;
+pub(crate) const NID_CELLGCM_ADDRESS_TO_OFFSET: u32 = 0x21ac3697;
 /// `cellGcmSetFlipHandler`. The oracle records the callback address
 /// into [`crate::rsx::flip::RsxFlipState::handler`] but does not
 /// dispatch PPU execution into it.
 pub(crate) const NID_CELLGCM_SET_FLIP_HANDLER: u32 = 0xa41ef7e8;
+
+/// `cellGcmAddressToOffset` failure code. The CELL_GCM error namespace
+/// uses `0x802100xx`; the GCM module returns this single value across
+/// every "the address is not mappable" condition.
+const CELL_GCM_ERROR_FAILURE: u32 = 0x8021_00ff;
+
+/// Base of the RSX-local memory region in PS3 VA space. Addresses
+/// `[RSX_LOCAL_BASE, RSX_LOCAL_BASE + RSX_LOCAL_SIZE)` translate to
+/// RSX-side offsets `[0, RSX_LOCAL_SIZE)`.
+const RSX_LOCAL_BASE: u32 = 0xC000_0000;
+const RSX_LOCAL_SIZE: u32 = 0x1000_0000;
 
 /// Every NID this module claims. See
 /// [`crate::hle::sys_prx_for_user::OWNED_NIDS`] for the disjointness
@@ -41,6 +53,7 @@ pub(crate) const OWNED_NIDS: &[u32] = &[
     NID_CELLGCM_GET_CONFIGURATION,
     NID_CELLGCM_GET_CONTROL_REGISTER,
     NID_CELLGCM_GET_LABEL_ADDRESS,
+    NID_CELLGCM_ADDRESS_TO_OFFSET,
     NID_CELLGCM_SET_FLIP_HANDLER,
 ];
 
@@ -110,6 +123,23 @@ pub(crate) fn dispatch(
             let offset = 0x10u32.wrapping_mul(index);
             let addr = state.label_addr.wrapping_add(offset) as u64;
             adapter(runtime, source, nid).set_return(addr);
+        }
+        NID_CELLGCM_ADDRESS_TO_OFFSET => {
+            let address = args[1] as u32;
+            let offset_ptr = args[2] as u32;
+            let gcm = &runtime.hle.gcm;
+            let result = address_to_offset(gcm, address);
+            let mut ctx = adapter(runtime, source, nid);
+            match result {
+                Some(offset) => {
+                    ctx.write_guest(offset_ptr as u64, &offset.to_be_bytes())
+                        .expect("cellGcmAddressToOffset: write to caller out-ptr failed");
+                    ctx.set_return(0);
+                }
+                None => {
+                    ctx.set_return(CELL_GCM_ERROR_FAILURE as u64);
+                }
+            }
         }
         NID_CELLGCM_SET_FLIP_HANDLER => {
             // Zero clears. Record in `RsxFlipState.handler` and
@@ -380,6 +410,35 @@ pub(crate) fn get_configuration(ctx: &mut dyn HleContext, args: &[u64; 9], state
     ctx.set_return(0);
 }
 
+/// Translate a guest virtual address into the RSX-side offset the GPU
+/// consults for that memory.
+///
+/// Two ranges are recognised:
+///
+/// - **IO map**: `[gcm.io_address, gcm.io_address + gcm.io_size)` after
+///   `cellGcmInitBody` runs. The offset is `address - gcm.io_address`.
+/// - **RSX local**: `[0xC000_0000, 0xD000_0000)`. The offset is
+///   `address - 0xC000_0000`.
+///
+/// Returns `None` for any address outside both ranges (and for
+/// pre-init queries where `gcm.io_address` is still zero -- the IO
+/// map check requires a non-zero base). Tile / zcull / surface
+/// region translations are deferred until a foundation title
+/// surfaces them; until then they fall through to `None` and
+/// surface as `CELL_GCM_ERROR_FAILURE`.
+pub(crate) fn address_to_offset(gcm: &GcmState, address: u32) -> Option<u32> {
+    if gcm.io_address != 0 {
+        let io_end = gcm.io_address.wrapping_add(gcm.io_size);
+        if address >= gcm.io_address && address < io_end {
+            return Some(address - gcm.io_address);
+        }
+    }
+    if (RSX_LOCAL_BASE..RSX_LOCAL_BASE.wrapping_add(RSX_LOCAL_SIZE)).contains(&address) {
+        return Some(address - RSX_LOCAL_BASE);
+    }
+    None
+}
+
 /// Smallest tiled pitch in [`TILED_PITCHES`] >= `size`.
 ///
 /// Returns `0` for `size == 0` and for `size > 0x10000`; callers
@@ -391,6 +450,139 @@ pub fn tiled_pitch_lookup(size: u32) -> u32 {
         .find(|w| w[0] < size && size <= w[1])
         .map(|w| w[1])
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod address_to_offset_tests {
+    use super::{
+        address_to_offset, GcmState, CELL_GCM_ERROR_FAILURE, NID_CELLGCM_ADDRESS_TO_OFFSET,
+        RSX_LOCAL_BASE,
+    };
+    use crate::runtime::Runtime;
+    use cellgov_event::UnitId;
+    use cellgov_exec::{FakeIsaUnit, FakeOp};
+    use cellgov_mem::GuestMemory;
+    use cellgov_time::Budget;
+
+    fn fixture() -> (Runtime, UnitId) {
+        let mut rt = Runtime::new(GuestMemory::new(0xD000_2000), Budget::new(1), 100);
+        let unit_id = UnitId::new(0);
+        rt.registry_mut()
+            .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+        rt.set_hle_heap_base(0x10_0000);
+        // Mimic post-init GCM state: io_address = 0x20000, io_size =
+        // 0x80000. Address 0x40000 lands inside the IO map at offset
+        // 0x20000.
+        rt.hle.gcm.io_address = 0x0002_0000;
+        rt.hle.gcm.io_size = 0x0008_0000;
+        (rt, unit_id)
+    }
+
+    #[test]
+    fn address_to_offset_io_map_translation() {
+        let gcm = GcmState {
+            io_address: 0x0002_0000,
+            io_size: 0x0008_0000,
+            ..GcmState::default()
+        };
+        // Within IO map.
+        assert_eq!(address_to_offset(&gcm, 0x0002_0000), Some(0));
+        assert_eq!(address_to_offset(&gcm, 0x0004_0000), Some(0x0002_0000));
+        // Last valid byte.
+        assert_eq!(address_to_offset(&gcm, 0x0009_FFFF), Some(0x0007_FFFF));
+        // One past the IO map end falls through to the RSX-local check
+        // (which also rejects), so the call returns None.
+        assert_eq!(address_to_offset(&gcm, 0x000A_0000), None);
+    }
+
+    #[test]
+    fn address_to_offset_rsx_local_translation() {
+        let gcm = GcmState::default();
+        assert_eq!(address_to_offset(&gcm, RSX_LOCAL_BASE), Some(0));
+        assert_eq!(
+            address_to_offset(&gcm, RSX_LOCAL_BASE + 0x1000),
+            Some(0x1000)
+        );
+        assert_eq!(
+            address_to_offset(&gcm, RSX_LOCAL_BASE + 0x0FFF_FFFF),
+            Some(0x0FFF_FFFF)
+        );
+    }
+
+    #[test]
+    fn address_to_offset_out_of_range_rejected() {
+        let gcm = GcmState {
+            io_address: 0x0002_0000,
+            io_size: 0x0008_0000,
+            ..GcmState::default()
+        };
+        // Below IO map.
+        assert_eq!(address_to_offset(&gcm, 0x0001_FFFF), None);
+        // Between IO map end and RSX local base.
+        assert_eq!(address_to_offset(&gcm, 0x4000_0000), None);
+        // Past RSX local end.
+        assert_eq!(address_to_offset(&gcm, 0xD000_0000), None);
+    }
+
+    #[test]
+    fn address_to_offset_pre_init_rejects_io_addresses() {
+        // Without io_address seeded, the IO-map check is skipped and
+        // any non-RSX-local address returns None.
+        let gcm = GcmState::default();
+        assert_eq!(address_to_offset(&gcm, 0x0002_0000), None);
+        // RSX-local still works pre-init -- it is a fixed mapping, not
+        // an init-time configuration.
+        assert_eq!(address_to_offset(&gcm, RSX_LOCAL_BASE), Some(0));
+    }
+
+    #[test]
+    fn dispatch_io_map_writes_offset() {
+        let (mut rt, unit_id) = fixture();
+        let address: u32 = 0x0004_0000;
+        let offset_ptr: u32 = 0x10_1000;
+        let args: [u64; 9] = [0x10000, address as u64, offset_ptr as u64, 0, 0, 0, 0, 0, 0];
+        rt.dispatch_hle(unit_id, NID_CELLGCM_ADDRESS_TO_OFFSET, &args);
+
+        let m = rt.memory().as_bytes();
+        let written = u32::from_be_bytes([
+            m[offset_ptr as usize],
+            m[offset_ptr as usize + 1],
+            m[offset_ptr as usize + 2],
+            m[offset_ptr as usize + 3],
+        ]);
+        assert_eq!(written, 0x0002_0000, "offset = address - io_address");
+        assert_eq!(
+            rt.registry_mut()
+                .drain_syscall_return(unit_id)
+                .expect("set_return"),
+            0,
+            "CELL_OK"
+        );
+    }
+
+    #[test]
+    fn dispatch_out_of_range_returns_failure_without_writing() {
+        let (mut rt, unit_id) = fixture();
+        let address: u32 = 0x4000_0000; // outside both ranges
+        let offset_ptr: u32 = 0x10_1000;
+        let args: [u64; 9] = [0x10000, address as u64, offset_ptr as u64, 0, 0, 0, 0, 0, 0];
+        rt.dispatch_hle(unit_id, NID_CELLGCM_ADDRESS_TO_OFFSET, &args);
+
+        let m = rt.memory().as_bytes();
+        let written = u32::from_be_bytes([
+            m[offset_ptr as usize],
+            m[offset_ptr as usize + 1],
+            m[offset_ptr as usize + 2],
+            m[offset_ptr as usize + 3],
+        ]);
+        assert_eq!(written, 0, "no out-pointer write on failure");
+        assert_eq!(
+            rt.registry_mut()
+                .drain_syscall_return(unit_id)
+                .expect("set_return"),
+            CELL_GCM_ERROR_FAILURE as u64
+        );
+    }
 }
 
 #[cfg(test)]

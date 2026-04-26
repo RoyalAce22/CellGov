@@ -355,7 +355,7 @@ The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
 4 relocation types, PS3 PRX import-table parser, and a NID database.
 The NID database serves two distinct roles in one sorted table:
-`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (currently 21 entries) is
+`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (currently 24 entries) is
 the dispatch surface the runtime PRX binder consults; the larger
 `cellgov_ppu::nid_db::NID_TABLE` (~5,300 entries imported from
 upstream coverage) supplies human-readable name resolution for
@@ -814,15 +814,16 @@ configuration."
 ## HLE dispatch
 
 NID-based, separate from the syscall surface. `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`
-holds the 21 NIDs CellGov dispatches directly; `cellgov_ppu::nid_db::NID_TABLE`
+holds the 24 NIDs CellGov dispatches directly; `cellgov_ppu::nid_db::NID_TABLE`
 is the larger ~5,300-entry diagnostic table used for name resolution in
 `dump-imports` and fault output, not for dispatch. Module implementations
 are decoupled from the Runtime via the
 `HleContext` trait (`cellgov_core::hle_context`). Each module file
-(`hle_sys.rs`, `hle_gcm.rs`) contains free functions that operate
-through `&mut dyn HleContext` -- 7 methods covering guest memory
-read/write, return value, register write, unit status, heap
-allocation, and kernel-object ID allocation.
+(`sysPrxForUser.rs`, `cellGcmSys.rs`, `cellSysutil.rs`) contains
+free functions that operate through `&mut dyn HleContext` -- 7
+methods covering guest memory read/write, return value, register
+write, unit status, heap allocation, and kernel-object ID
+allocation.
 
 ### sysPrxForUser (`hle_sys.rs`)
 
@@ -863,9 +864,27 @@ allocates.
 | `cellGcmGetControlRegister` | 0xa547adde | Returns control register guest address.                                  |
 | `cellGcmGetTiledPitchSize`  | 0x055bd74d | Table lookup: smallest valid tiled pitch >= input size.                  |
 | `cellGcmGetLabelAddress`    | 0xf80196c1 | Returns label_base + 0x10 \* index.                                      |
+| `cellGcmAddressToOffset`    | 0x21ac3697 | Translates guest VA into RSX-side offset for IO map and RSX local        |
+|                             |            | regions. Returns CELL_GCM_ERROR_FAILURE for out-of-range addresses.      |
 | `cellGcmSetFlipHandler`     | 0xa41ef7e8 | Records the callback address in `RsxFlipState::handler`. When a          |
 |                             |            | `sys_rsx` context is live, forwards to `SysRsxContextAttribute` with     |
 |                             |            | the internal `CELLGOV_SET_FLIP_HANDLER` sub-command. Not dispatched.     |
+
+### cellSysutil HLE (video-out query surface)
+
+Reports a deterministic primary 720p RGB display configuration
+that any title polling the video-out surface during init reads
+back. CellGov models exactly one device on `CELL_VIDEO_OUT_PRIMARY`
+and zero on `CELL_VIDEO_OUT_SECONDARY`.
+
+| Function                    | NID        | Behavior                                                                 |
+| --------------------------- | ---------- | ------------------------------------------------------------------------ |
+| `cellVideoOutGetState`      | 0x887572d5 | Writes a 16-byte CellVideoOutState (state ENABLED, RGB, 720p / 16:9 /    |
+|                             |            | 59.94Hz). Out-of-range videoOut returns UNSUPPORTED_VIDEO_OUT;           |
+|                             |            | deviceIndex out of range returns DEVICE_NOT_FOUND.                       |
+| `cellVideoOutGetResolution` | 0xe558748d | Writes 4-byte CellVideoOutResolution from the PS3 spec table             |
+|                             |            | (1080/720/480/576/1600x1080/1440x1080/1280x1080/960x1080).               |
+|                             |            | Unknown id returns ILLEGAL_PARAMETER.                                    |
 
 Without the title-manifest RSX mirror flag set, the control
 register stays in the RSX reserved region so the guest's first
