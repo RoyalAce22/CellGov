@@ -125,7 +125,7 @@ impl Runtime {
             && self.rsx_cursor.get() == self.rsx_cursor.put()
             && !self.rsx_flip.pending()
         {
-            self.epoch = self.epoch.next().expect("epoch overflow");
+            self.epoch.advance();
             return Ok(CommitOutcome::default());
         }
 
@@ -186,7 +186,7 @@ impl Runtime {
             self.dispatch_syscall(result, source);
         }
 
-        self.epoch = self.epoch.next().expect("epoch overflow");
+        self.epoch.advance();
         let due = self.fire_dma_completions();
         if let Ok(ref mut o) = outcome {
             o.dma_completions_fired = due.len();

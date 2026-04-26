@@ -1,5 +1,5 @@
 //! FNV-1a hashing for state snapshots. No randomized seed; stable across
-//! platforms and runs.
+//! platforms, runs, and Rust versions.
 
 /// FNV-1a offset basis (64-bit).
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;

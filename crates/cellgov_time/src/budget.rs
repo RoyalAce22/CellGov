@@ -5,6 +5,7 @@
 //! from consumed work to guest time.
 
 use crate::GuestTicks;
+use core::fmt;
 
 /// Cost of a unit of work in retired guest instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -38,6 +39,13 @@ impl From<InstructionCost> for GuestTicks {
     }
 }
 
+impl fmt::Display for InstructionCost {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
+
 /// A remaining instruction allowance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Budget(u64);
@@ -68,6 +76,7 @@ impl Budget {
     }
 
     /// Attempt to charge `cost` against this budget.
+    #[must_use = "try_consume returns the new remainder; assign or pattern-match it"]
     #[inline]
     pub const fn try_consume(self, cost: InstructionCost) -> Consume {
         match self.0.checked_sub(cost.0) {
@@ -80,9 +89,17 @@ impl Budget {
     }
 
     /// Initial grant minus a remainder. Saturates at zero.
+    #[must_use = "consumed_since returns the consumed amount; assign it"]
     #[inline]
     pub const fn consumed_since(self, remaining: Budget) -> InstructionCost {
         InstructionCost(self.0.saturating_sub(remaining.0))
+    }
+}
+
+impl fmt::Display for Budget {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
     }
 }
 
@@ -245,6 +262,23 @@ mod tests {
         let cost = InstructionCost::new(256);
         let ticks: GuestTicks = cost.into();
         assert_eq!(ticks, GuestTicks::new(256));
+    }
+
+    #[test]
+    fn budget_display_is_bare_number() {
+        assert_eq!(format!("{}", Budget::ZERO), "0");
+        assert_eq!(format!("{}", Budget::DEFAULT_STEP), "256");
+        assert_eq!(
+            format!("{}", Budget::new(u64::MAX)),
+            format!("{}", u64::MAX)
+        );
+    }
+
+    #[test]
+    fn instruction_cost_display_is_bare_number() {
+        assert_eq!(format!("{}", InstructionCost::ZERO), "0");
+        assert_eq!(format!("{}", InstructionCost::ONE), "1");
+        assert_eq!(format!("{}", InstructionCost::new(42)), "42");
     }
 
     #[test]
