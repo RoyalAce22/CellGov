@@ -447,6 +447,7 @@ mod tests {
     use super::*;
     use cellgov_exec::{LocalDiagnostics, YieldReason};
     use cellgov_mem::GuestMemory;
+    use cellgov_time::InstructionCost;
 
     struct CountingUnit {
         id: UnitId,
@@ -477,7 +478,7 @@ mod tests {
             });
             ExecutionStepResult {
                 yield_reason: YieldReason::BudgetExhausted,
-                consumed_budget: budget,
+                consumed_cost: InstructionCost::new(budget.raw()),
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -510,7 +511,7 @@ mod tests {
         ) -> ExecutionStepResult {
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
-                consumed_budget: budget,
+                consumed_cost: InstructionCost::new(budget.raw()),
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -564,7 +565,7 @@ mod tests {
         let u = r.get_mut(id).expect("present");
         let mut effects = Vec::new();
         let step = u.run_until_yield(Budget::new(5), &ctx, &mut effects);
-        assert_eq!(step.consumed_budget, Budget::new(5));
+        assert_eq!(step.consumed_cost, InstructionCost::new(5));
         assert_eq!(effects.len(), 1);
     }
 
@@ -630,7 +631,7 @@ mod tests {
         ) -> ExecutionStepResult {
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
-                consumed_budget: budget,
+                consumed_cost: InstructionCost::new(budget.raw()),
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,

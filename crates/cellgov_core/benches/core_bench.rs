@@ -12,7 +12,7 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::{ExecutionStepResult, LocalDiagnostics, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_sync::{MailboxRegistry, ReservationTable, SignalRegistry};
-use cellgov_time::{Budget, GuestTicks};
+use cellgov_time::{GuestTicks, InstructionCost};
 
 fn make_write_effect(addr: u64, data: &[u8]) -> Effect {
     Effect::SharedWriteIntent {
@@ -28,7 +28,7 @@ fn make_step_result(effects: Vec<Effect>) -> (ExecutionStepResult, Vec<Effect>) 
     (
         ExecutionStepResult {
             yield_reason: YieldReason::BudgetExhausted,
-            consumed_budget: Budget::new(1),
+            consumed_cost: InstructionCost::ONE,
             local_diagnostics: LocalDiagnostics::with_pc(0x1000),
             fault: None,
             syscall_args: None,
@@ -147,7 +147,7 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
         .collect();
     let result = ExecutionStepResult {
         yield_reason: YieldReason::Fault,
-        consumed_budget: Budget::new(1),
+        consumed_cost: InstructionCost::ONE,
         local_diagnostics: LocalDiagnostics::with_pc(0x1000),
         fault: Some(cellgov_effects::FaultKind::Guest(0x0106_0000)),
         syscall_args: None,

@@ -5,7 +5,7 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::LocalDiagnostics;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_sync::ReservationTable;
-use cellgov_time::{Budget, GuestTicks};
+use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
 // cellgov_testkit depends on cellgov_core; local test doubles avoid the cycle.
 
@@ -98,7 +98,7 @@ impl cellgov_exec::ExecutionUnit for DummyUnit {
     ) -> cellgov_exec::ExecutionStepResult {
         cellgov_exec::ExecutionStepResult {
             yield_reason: YieldReason::BudgetExhausted,
-            consumed_budget: b,
+            consumed_cost: InstructionCost::new(b.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -136,7 +136,7 @@ fn step_with(
     (
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: Budget::new(1),
+            consumed_cost: InstructionCost::ONE,
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,

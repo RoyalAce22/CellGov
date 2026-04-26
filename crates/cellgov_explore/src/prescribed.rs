@@ -65,7 +65,7 @@ mod tests {
     use cellgov_exec::{
         ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, YieldReason,
     };
-    use cellgov_time::Budget;
+    use cellgov_time::{Budget, InstructionCost};
     use std::cell::Cell;
 
     struct StubUnit {
@@ -100,7 +100,7 @@ mod tests {
             });
             ExecutionStepResult {
                 yield_reason: YieldReason::BudgetExhausted,
-                consumed_budget: b,
+                consumed_cost: InstructionCost::new(b.raw()),
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,

@@ -433,7 +433,7 @@ pub struct NvDispatchContext<'a> {
     /// by handlers whose emitted value depends on the oracle's
     /// monotonic clock (e.g. `NV4097_GET_REPORT` uses it as the
     /// report timestamp). GuestTicks advances by
-    /// `result.consumed_budget` per commit; the value here is
+    /// `result.consumed_cost` per commit; the value here is
     /// frozen for the duration of the drain.
     pub now: GuestTicks,
 }
@@ -584,7 +584,7 @@ pub(crate) const NV4097_REPORT_OFFSET_MASK_U: u32 = NV4097_REPORT_OFFSET_MASK;
 /// `label_base + (arg & NV4097_REPORT_OFFSET_MASK)`. The payload
 /// is the low 32 bits of the current guest-ticks clock --
 /// deterministic across runs because GuestTicks advances by
-/// `consumed_budget` per commit, which is itself deterministic.
+/// `consumed_cost` per commit, which is itself deterministic.
 /// The observable 16-byte report envelope (timestamp low / high /
 /// value / type) is the shape retail titles poll (see RPCS3's
 /// `Emu/RSX/rsx_methods.cpp` GET_REPORT handler). The oracle

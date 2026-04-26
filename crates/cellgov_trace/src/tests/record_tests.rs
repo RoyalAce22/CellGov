@@ -35,7 +35,7 @@ fn step_completed_roundtrip_each_yield_reason() {
         roundtrip(TraceRecord::StepCompleted {
             unit: UnitId::new(1),
             yield_reason: r,
-            consumed_budget: Budget::new(50),
+            consumed_cost: InstructionCost::new(50),
             time_after: GuestTicks::new(100),
         });
     }
@@ -143,7 +143,7 @@ fn level_classification() {
     let step = TraceRecord::StepCompleted {
         unit: UnitId::new(0),
         yield_reason: TracedYieldReason::Finished,
-        consumed_budget: Budget::new(0),
+        consumed_cost: InstructionCost::ZERO,
         time_after: GuestTicks::ZERO,
     };
     let commit = TraceRecord::CommitApplied {
@@ -244,7 +244,7 @@ fn fixed_sizes_match_documentation() {
     TraceRecord::StepCompleted {
         unit: UnitId::new(0),
         yield_reason: TracedYieldReason::BudgetExhausted,
-        consumed_budget: Budget::new(0),
+        consumed_cost: InstructionCost::ZERO,
         time_after: GuestTicks::ZERO,
     }
     .encode(&mut buf);

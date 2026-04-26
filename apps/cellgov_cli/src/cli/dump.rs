@@ -46,14 +46,14 @@ fn dump_trace(result: &ScenarioResult) {
             TraceRecord::StepCompleted {
                 unit,
                 yield_reason,
-                consumed_budget,
+                consumed_cost,
                 time_after,
             } => {
                 println!(
                     "{i:4}  StepCompleted      unit={} yield={:?} consumed={} time_after={}",
                     unit.raw(),
                     yield_reason,
-                    consumed_budget.raw(),
+                    consumed_cost.raw(),
                     time_after.raw()
                 );
             }

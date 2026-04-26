@@ -7,7 +7,7 @@
 
 use crate::yield_reason::YieldReason;
 use cellgov_effects::FaultKind;
-use cellgov_time::Budget;
+use cellgov_time::InstructionCost;
 
 /// Per-step local diagnostics surfaced by an execution unit.
 ///
@@ -87,9 +87,10 @@ impl LocalDiagnostics {
 pub struct ExecutionStepResult {
     /// Why the unit yielded.
     pub yield_reason: YieldReason,
-    /// Budget the unit actually used; may be less than granted when
-    /// the unit yielded early.
-    pub consumed_budget: Budget,
+    /// Work the unit actually retired; may be less than granted when
+    /// the unit yielded early. Bridges to [`cellgov_time::GuestTicks`]
+    /// via `From<InstructionCost>` at step 8 of the commit pipeline.
+    pub consumed_cost: InstructionCost,
     /// Per-step diagnostics for trace and assertion consumers.
     pub local_diagnostics: LocalDiagnostics,
     /// Fault data, present iff `yield_reason == YieldReason::Fault`.
@@ -130,13 +131,13 @@ mod tests {
     fn empty_step_constructs() {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::BudgetExhausted,
-            consumed_budget: Budget::new(0),
+            consumed_cost: InstructionCost::ZERO,
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
         };
         assert_eq!(r.yield_reason, YieldReason::BudgetExhausted);
-        assert_eq!(r.consumed_budget, Budget::new(0));
+        assert_eq!(r.consumed_cost, InstructionCost::ZERO);
         assert!(r.fault.is_none());
         assert!(r.is_well_formed());
     }
@@ -145,7 +146,7 @@ mod tests {
     fn fault_step_carries_fault_kind() {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::Fault,
-            consumed_budget: Budget::new(7),
+            consumed_cost: InstructionCost::new(7),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: Some(FaultKind::Guest(0xbad)),
             syscall_args: None,
@@ -158,7 +159,7 @@ mod tests {
     fn fault_without_data_is_malformed() {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::Fault,
-            consumed_budget: Budget::new(0),
+            consumed_cost: InstructionCost::ZERO,
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -170,7 +171,7 @@ mod tests {
     fn non_fault_with_fault_data_is_malformed() {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::Finished,
-            consumed_budget: Budget::new(0),
+            consumed_cost: InstructionCost::ZERO,
             local_diagnostics: LocalDiagnostics::empty(),
             fault: Some(FaultKind::Validation),
             syscall_args: None,
@@ -182,7 +183,7 @@ mod tests {
     fn finished_step_is_well_formed() {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::Finished,
-            consumed_budget: Budget::new(100),
+            consumed_cost: InstructionCost::new(100),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -194,7 +195,7 @@ mod tests {
     fn clone_preserves_fields() {
         let r = ExecutionStepResult {
             yield_reason: YieldReason::DmaWait,
-            consumed_budget: Budget::new(13),
+            consumed_cost: InstructionCost::new(13),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,

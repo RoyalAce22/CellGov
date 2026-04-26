@@ -47,7 +47,7 @@ fn budget_exhaustion_yields() {
     let ctx = ExecutionContext::new(&mem);
     let result = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
-    assert_eq!(result.consumed_budget, Budget::new(5));
+    assert_eq!(result.consumed_cost, InstructionCost::new(5));
     assert_eq!(unit.state().pc, 20);
 }
 

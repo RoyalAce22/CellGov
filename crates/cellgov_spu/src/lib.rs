@@ -19,7 +19,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
-use cellgov_time::Budget;
+use cellgov_time::{Budget, InstructionCost};
 
 /// Fault code constants encoded into `FaultKind::Guest`.
 const FAULT_LS_OUT_OF_RANGE: u32 = 0x0002_0000;
@@ -125,7 +125,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     self.status = UnitStatus::Faulted;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_budget: Budget::new(budget.raw() - remaining),
+                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(FaultKind::Guest(FAULT_LS_OUT_OF_RANGE | self.state.pc)),
                         syscall_args: None,
@@ -139,7 +139,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     self.status = UnitStatus::Faulted;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_budget: Budget::new(budget.raw() - remaining),
+                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
                         syscall_args: None,
@@ -167,7 +167,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     }
                     return ExecutionStepResult {
                         yield_reason: reason,
-                        consumed_budget: Budget::new(budget.raw() - remaining),
+                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
@@ -211,7 +211,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     };
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_budget: Budget::new(budget.raw() - remaining),
+                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(FaultKind::Guest(code)),
                         syscall_args: None,
@@ -223,7 +223,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             if remaining == 0 {
                 return ExecutionStepResult {
                     yield_reason: YieldReason::BudgetExhausted,
-                    consumed_budget: budget,
+                    consumed_cost: InstructionCost::new(budget.raw()),
                     local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: None,
                     syscall_args: None,

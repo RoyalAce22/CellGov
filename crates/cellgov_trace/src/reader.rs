@@ -60,7 +60,7 @@ mod tests {
     use crate::record::{HashCheckpointKind, TracedYieldReason};
     use crate::writer::TraceWriter;
     use cellgov_event::UnitId;
-    use cellgov_time::{Budget, Epoch, GuestTicks};
+    use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 
     fn make_writer() -> TraceWriter {
         let mut w = TraceWriter::new();
@@ -73,7 +73,7 @@ mod tests {
         w.record(&TraceRecord::StepCompleted {
             unit: UnitId::new(0),
             yield_reason: TracedYieldReason::BudgetExhausted,
-            consumed_budget: Budget::new(10),
+            consumed_cost: InstructionCost::new(10),
             time_after: GuestTicks::new(10),
         });
         w.record(&TraceRecord::CommitApplied {
@@ -150,7 +150,7 @@ mod tests {
             TraceRecord::StepCompleted {
                 unit: UnitId::new(1),
                 yield_reason: TracedYieldReason::Finished,
-                consumed_budget: Budget::new(7),
+                consumed_cost: InstructionCost::new(7),
                 time_after: GuestTicks::new(10),
             },
             TraceRecord::CommitApplied {
