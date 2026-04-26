@@ -58,6 +58,7 @@ pub fn stub_classification(nid: u32) -> StubClass {
         0xa547adde => StubClass::Stateful, // cellGcmGetControlRegister
         0xe315a0b2 => StubClass::Stateful, // cellGcmGetConfiguration
         0xf80196c1 => StubClass::Stateful, // cellGcmGetLabelAddress
+        0x21ac3697 => StubClass::Stateful, // cellGcmAddressToOffset
         // sysPrxForUser TLS / memory primitives.
         0x744680a2 => StubClass::Stateful, // sys_initialize_tls
         0xbdb18f83 => StubClass::UnsafeToStub, // _sys_malloc
@@ -80,6 +81,9 @@ pub fn stub_classification(nid: u32) -> StubClass {
         0x24a1ea07 => StubClass::Stateful, // sys_ppu_thread_create
         0x4f7172c9 => StubClass::Stateful, // sys_process_is_stack
         0xa2c7ba64 => StubClass::Stateful, // sys_prx_exitspawn_with_level
+        // cellSysutil video-out queries.
+        0x887572d5 => StubClass::Stateful, // cellVideoOutGetState
+        0xe558748d => StubClass::Stateful, // cellVideoOutGetResolution
         _ => StubClass::NoopSafe,
     }
 }
