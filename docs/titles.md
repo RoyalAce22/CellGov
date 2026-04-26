@@ -42,9 +42,9 @@ Column definitions:
 
 | Serial | Title | Year | Engine | Format | Checkpoint | Steps | Insns | Cross-runner |
 |--------|-------|------|--------|--------|------------|------:|------:|--------------|
-| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | ProcessExit | 9,963 | ~10K | equivalent (1 byte non-semantic) |
-| NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,109,359 | ~3.6B | equivalent (1 byte non-semantic) |
-| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | MaxSteps (100M) | 390,625 | 100M | not available (see note below) |
+| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | ProcessExit (0x80010005) | 10,872 | ~2.78M | regressed (cellgov captures pre-`_cellGcmInitBody`) |
+| NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,341,466 | ~3.7B | code:0x35 ELF-header byte (non-semantic) |
+| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | MaxSteps (1B) | 3,906,250 | 1B | not available (see note below) |
 
 ## WipEout HD Fury cross-runner note
 
@@ -58,10 +58,9 @@ checkpoint inside CellGov's own harness.
 
 With the decoder fix in place, WipEout's init runs past that point.
 Its boot was not observed to reach a natural stopping event within
-a 100M-instruction window, so the regression floor for this title is
-now recorded as a `MaxSteps` outcome at 390,625 steps. A new
-mutually-reachable checkpoint needs to be chosen before WipEout's
-cross-runner entry can be restored. See
+a 1B-instruction window (3,906,250 scheduler steps with budget 256).
+A new mutually-reachable checkpoint needs to be chosen before
+WipEout's cross-runner entry can be restored. See
 `tests/fixtures/BCES00664_cross_runner/compare_report.txt` for
 details.
 

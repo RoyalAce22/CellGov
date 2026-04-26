@@ -560,12 +560,12 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             arg_ptr: p!(5),
         },
         173 => Lv2Request::SpuThreadGroupStart { group_id: p!(0) },
-        177 => Lv2Request::SpuThreadGroupJoin {
+        178 => Lv2Request::SpuThreadGroupJoin {
             group_id: p!(0),
             cause_ptr: p!(1),
             status_ptr: p!(2),
         },
-        178 => Lv2Request::SpuThreadGroupTerminate {
+        177 => Lv2Request::SpuThreadGroupTerminate {
             group_id: p!(0),
             value: s!(1),
         },
@@ -601,7 +601,7 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             stacksize: args[4],
             flags: args[5],
         },
-        665 => Lv2Request::SysRsxMemoryAllocate {
+        668 => Lv2Request::SysRsxMemoryAllocate {
             mem_handle_ptr: p!(0),
             mem_addr_ptr: p!(1),
             size: p!(2),
@@ -610,7 +610,7 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             a6: args[5],
             a7: args[6],
         },
-        667 => Lv2Request::SysRsxMemoryFree { mem_handle: p!(0) },
+        669 => Lv2Request::SysRsxMemoryFree { mem_handle: p!(0) },
         670 => Lv2Request::SysRsxContextAllocate {
             context_id_ptr: p!(0),
             lpar_dma_control_ptr: p!(1),
@@ -653,23 +653,23 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
         },
         104 => Lv2Request::MutexUnlock { mutex_id: p!(0) },
         103 => Lv2Request::MutexTryLock { mutex_id: p!(0) },
-        93 => Lv2Request::SemaphoreCreate {
+        90 => Lv2Request::SemaphoreCreate {
             id_ptr: p!(0),
             attr_ptr: p!(1),
             initial: s!(2),
             max: s!(3),
         },
-        94 => Lv2Request::SemaphoreDestroy { id: p!(0) },
-        114 => Lv2Request::SemaphoreWait {
+        91 => Lv2Request::SemaphoreDestroy { id: p!(0) },
+        92 => Lv2Request::SemaphoreWait {
             id: p!(0),
             timeout: args[1],
         },
-        115 => Lv2Request::SemaphorePost {
+        94 => Lv2Request::SemaphorePost {
             id: p!(0),
             val: s!(1),
         },
-        116 => Lv2Request::SemaphoreTryWait { id: p!(0) },
-        117 => Lv2Request::SemaphoreGetValue {
+        93 => Lv2Request::SemaphoreTryWait { id: p!(0) },
+        114 => Lv2Request::SemaphoreGetValue {
             id: p!(0),
             out_ptr: p!(1),
         },
@@ -691,34 +691,34 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             init: args[2],
         },
         83 => Lv2Request::EventFlagDestroy { id: p!(0) },
-        84 => Lv2Request::EventFlagWait {
+        85 => Lv2Request::EventFlagWait {
             id: p!(0),
             bits: args[1],
             mode: p!(2),
             result_ptr: p!(3),
             timeout: args[4],
         },
-        85 => Lv2Request::EventFlagTryWait {
+        86 => Lv2Request::EventFlagTryWait {
             id: p!(0),
             bits: args[1],
             mode: p!(2),
             result_ptr: p!(3),
         },
-        86 => Lv2Request::EventFlagSet {
+        87 => Lv2Request::EventFlagSet {
             id: p!(0),
             bits: args[1],
         },
-        87 => Lv2Request::EventFlagClear {
+        118 => Lv2Request::EventFlagClear {
             id: p!(0),
             bits: args[1],
         },
-        133 => Lv2Request::EventQueueTryReceive {
+        131 => Lv2Request::EventQueueTryReceive {
             queue_id: p!(0),
             event_array: p!(1),
             size: p!(2),
             count_out: p!(3),
         },
-        134 => Lv2Request::EventPortSend {
+        138 => Lv2Request::EventPortSend {
             port_id: p!(0),
             data1: args[1],
             data2: args[2],
@@ -825,7 +825,7 @@ mod tests {
     #[test]
     fn classify_thread_group_join() {
         let args = [3, 0x6000, 0x7000, 0, 0, 0, 0, 0];
-        let req = classify(177, &args);
+        let req = classify(178, &args);
         assert_eq!(
             req,
             Lv2Request::SpuThreadGroupJoin {
@@ -839,7 +839,7 @@ mod tests {
     #[test]
     fn classify_thread_group_terminate_is_separate_from_join() {
         let args = [3, 0xFFFF_FFFF_FFFF_FFFF, 0, 0, 0, 0, 0, 0];
-        let req = classify(178, &args);
+        let req = classify(177, &args);
         assert_eq!(
             req,
             Lv2Request::SpuThreadGroupTerminate {
@@ -903,6 +903,17 @@ mod tests {
             Lv2Request::TimeGetTimezone {
                 timezone_ptr: 0xd000_fd10,
                 summer_time_ptr: 0xd000_fd14,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_memory_get_user_memory_size_captures_out_pointer() {
+        let args = [0xd000_fdf4, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(352, &args),
+            Lv2Request::MemoryGetUserMemorySize {
+                mem_info_ptr: 0xd000_fdf4,
             }
         );
     }
@@ -1058,7 +1069,7 @@ mod tests {
             }
         );
         assert_eq!(
-            classify(134, &[7, 0xaa, 0xbb, 0xcc, 0, 0, 0, 0]),
+            classify(138, &[7, 0xaa, 0xbb, 0xcc, 0, 0, 0, 0]),
             Lv2Request::EventPortSend {
                 port_id: 7,
                 data1: 0xaa,
@@ -1067,7 +1078,7 @@ mod tests {
             }
         );
         assert_eq!(
-            classify(133, &[7, 0x2000, 4, 0x3000, 0, 0, 0, 0]),
+            classify(131, &[7, 0x2000, 4, 0x3000, 0, 0, 0, 0]),
             Lv2Request::EventQueueTryReceive {
                 queue_id: 7,
                 event_array: 0x2000,
@@ -1080,11 +1091,11 @@ mod tests {
     #[test]
     fn classify_semaphore_trywait_and_get_value() {
         assert_eq!(
-            classify(116, &[7, 0, 0, 0, 0, 0, 0, 0]),
+            classify(93, &[7, 0, 0, 0, 0, 0, 0, 0]),
             Lv2Request::SemaphoreTryWait { id: 7 }
         );
         assert_eq!(
-            classify(117, &[7, 0x1000, 0, 0, 0, 0, 0, 0]),
+            classify(114, &[7, 0x1000, 0, 0, 0, 0, 0, 0]),
             Lv2Request::SemaphoreGetValue {
                 id: 7,
                 out_ptr: 0x1000
@@ -1096,7 +1107,7 @@ mod tests {
     fn classify_semaphore_post() {
         let args = [7, 1, 0, 0, 0, 0, 0, 0];
         assert_eq!(
-            classify(115, &args),
+            classify(94, &args),
             Lv2Request::SemaphorePost { id: 7, val: 1 }
         );
     }
@@ -1105,7 +1116,7 @@ mod tests {
     fn classify_semaphore_create_destroy_wait() {
         let create_args = [0x5000, 0x6000, 2, 10, 0, 0, 0, 0];
         assert_eq!(
-            classify(93, &create_args),
+            classify(90, &create_args),
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x5000,
                 attr_ptr: 0x6000,
@@ -1115,12 +1126,12 @@ mod tests {
         );
         let destroy_args = [7, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(
-            classify(94, &destroy_args),
+            classify(91, &destroy_args),
             Lv2Request::SemaphoreDestroy { id: 7 }
         );
         let wait_args = [7, 100, 0, 0, 0, 0, 0, 0];
         assert_eq!(
-            classify(114, &wait_args),
+            classify(92, &wait_args),
             Lv2Request::SemaphoreWait {
                 id: 7,
                 timeout: 100
@@ -1256,7 +1267,7 @@ mod tests {
             0,
         ];
         assert_eq!(
-            classify(93, &args),
+            classify(90, &args),
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x5000,
                 attr_ptr: 0x6000,
@@ -1269,9 +1280,9 @@ mod tests {
     #[test]
     fn narrow_i32_rejects_values_outside_i32_range() {
         let args = [0x5000, 0x6000, 0x1_0000_0001, 10, 0, 0, 0, 0];
-        match classify(93, &args) {
+        match classify(90, &args) {
             Lv2Request::Malformed { number, reason, .. } => {
-                assert_eq!(number, 93);
+                assert_eq!(number, 90);
                 assert!(
                     reason.contains("arg 2") && reason.contains("i32"),
                     "unexpected reason: {reason}",
@@ -1286,8 +1297,8 @@ mod tests {
         // 2^31 fits in u32 but not in i32; old cast wrapped to i32::MIN.
         let args = [0x5000, 0x6000, 0x8000_0000, 10, 0, 0, 0, 0];
         assert!(matches!(
-            classify(93, &args),
-            Lv2Request::Malformed { number: 93, .. }
+            classify(90, &args),
+            Lv2Request::Malformed { number: 90, .. }
         ));
     }
 
@@ -1299,11 +1310,13 @@ mod tests {
         (52, &[0, 1, 3]),
         (82, &[0, 1]),
         (83, &[0]),
-        (84, &[0, 2, 3]),
         (85, &[0, 2, 3]),
-        (86, &[0]),
+        (86, &[0, 2, 3]),
         (87, &[0]),
-        (93, &[0, 1]),
+        (90, &[0, 1]),
+        (91, &[0]),
+        (92, &[0]),
+        (93, &[0]),
         (94, &[0]),
         (95, &[0, 1]),
         (96, &[0]),
@@ -1320,30 +1333,28 @@ mod tests {
         (108, &[0]),
         (109, &[0]),
         (110, &[0, 1]),
-        (114, &[0]),
-        (115, &[0]),
-        (116, &[0]),
-        (117, &[0, 1]),
+        (114, &[0, 1]),
+        (118, &[0]),
         (128, &[0, 1, 3]),
         (129, &[0]),
         (130, &[0, 1]),
-        (133, &[0, 1, 2, 3]),
-        (134, &[0]),
+        (131, &[0, 1, 2, 3]),
+        (138, &[0]),
         (145, &[0, 1]),
         (156, &[0, 1]),
         (170, &[0, 1, 2, 3]),
         (172, &[0, 1, 2, 3, 4, 5]),
         (173, &[0]),
-        (177, &[0, 1, 2]),
-        (178, &[0]),
+        (177, &[0]),
+        (178, &[0, 1, 2]),
         (190, &[0, 1]),
         (341, &[0]),
         (348, &[2]),
         (349, &[0]),
         (352, &[0]),
         (403, &[0, 1, 2, 3]),
-        (665, &[0, 1, 2]),
-        (667, &[0]),
+        (668, &[0, 1, 2]),
+        (669, &[0]),
         (670, &[0, 1, 2, 3]),
         (671, &[0]),
         (674, &[0, 1]),
@@ -1381,13 +1392,13 @@ mod tests {
     fn semaphore_post_val_narrowing() {
         let ok = [7u64, 0xFFFF_FFFF_FFFF_FFFF, 0, 0, 0, 0, 0, 0];
         assert_eq!(
-            classify(115, &ok),
+            classify(94, &ok),
             Lv2Request::SemaphorePost { id: 7, val: -1 }
         );
         let bad = [7u64, 0x1_0000_0001, 0, 0, 0, 0, 0, 0];
         assert!(matches!(
-            classify(115, &bad),
-            Lv2Request::Malformed { number: 115, .. }
+            classify(94, &bad),
+            Lv2Request::Malformed { number: 94, .. }
         ));
     }
 
@@ -1395,7 +1406,7 @@ mod tests {
     fn classify_sys_rsx_memory_allocate() {
         let args = [0x1000, 0x1008, 0x0010_0000, 0x400, 0, 0, 0, 0];
         assert_eq!(
-            classify(665, &args),
+            classify(668, &args),
             Lv2Request::SysRsxMemoryAllocate {
                 mem_handle_ptr: 0x1000,
                 mem_addr_ptr: 0x1008,
@@ -1412,7 +1423,7 @@ mod tests {
     fn classify_sys_rsx_memory_free() {
         let args = [0xA001, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(
-            classify(667, &args),
+            classify(669, &args),
             Lv2Request::SysRsxMemoryFree { mem_handle: 0xA001 }
         );
     }

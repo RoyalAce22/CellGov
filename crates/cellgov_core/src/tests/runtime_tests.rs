@@ -217,7 +217,7 @@ fn time_overflow_is_caught() {
 }
 
 #[test]
-fn epoch_does_not_advance_in_this_slice() {
+fn epoch_does_not_advance_within_a_single_step() {
     let mut rt = build(16, 1, 100);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
@@ -2748,7 +2748,7 @@ fn event_queue_receive_wake_with_none_payload_panics() {
 // rsx_checkpoint off so HLE forwards to sys_rsx, exercising the
 // full HLE + LV2 dispatch + commit path without external builds.
 
-fn phase21_runtime_with_cellgcm_inited() -> (Runtime, cellgov_event::UnitId) {
+fn runtime_with_cellgcm_inited() -> (Runtime, cellgov_event::UnitId) {
     let mut rt = Runtime::new(
         cellgov_mem::GuestMemory::new(0x4000_0000),
         Budget::new(1),
@@ -2790,8 +2790,8 @@ fn read_guest_u64_be(rt: &Runtime, addr: u32) -> u64 {
 }
 
 #[test]
-fn phase21_rsx_context_allocate_init_pattern() {
-    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+fn rsx_context_allocate_init_pattern() {
+    let (rt, _) = runtime_with_cellgcm_inited();
     let reports_base = rt.lv2_host().sys_rsx_context().reports_addr;
 
     // Semaphore sentinels at the first group-of-4.
@@ -2811,20 +2811,20 @@ fn phase21_rsx_context_allocate_init_pattern() {
 }
 
 #[test]
-fn phase21_rsx_label_255_sentinel_read() {
+fn rsx_label_255_sentinel_read() {
     // cellGcmGetLabelAddress(255) must read the LV2 sentinel
     // 0x1337_C0D3; addr math is label_addr + 255 * 0x10.
-    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+    let (rt, _) = runtime_with_cellgcm_inited();
     let label_addr = rt.hle.gcm.label_addr;
     let label_255_addr = label_addr + 255 * 0x10;
     assert_eq!(read_guest_u32_be(&rt, label_255_addr), 0x1337_C0D3);
 }
 
 #[test]
-fn phase21_rsx_reports_region_full_size() {
+fn rsx_reports_region_full_size() {
     // Notify and report arrays carry init values past the 4 KB
     // semaphore region; a 4 KB-label-only layout would read zeros.
-    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+    let (rt, _) = runtime_with_cellgcm_inited();
     let label_addr = rt.hle.gcm.label_addr;
     let notify_63 = label_addr + 0x1000 + 63 * 16;
     assert_eq!(read_guest_u64_be(&rt, notify_63), u64::MAX);
@@ -2833,10 +2833,10 @@ fn phase21_rsx_reports_region_full_size() {
 }
 
 #[test]
-fn phase21_rsx_dma_control_layout() {
+fn rsx_dma_control_layout() {
     // put / get / ref at dma_control_addr + 0x40 / 0x44 / 0x48;
     // cellGcmGetControlRegister returns dma_control_addr + 0x40.
-    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+    let (rt, _) = runtime_with_cellgcm_inited();
     let dma_base = rt.lv2_host().sys_rsx_context().dma_control_addr;
     let ctrl = rt.hle.gcm.control_addr;
     assert_eq!(ctrl, dma_base + 0x40);
@@ -2846,10 +2846,10 @@ fn phase21_rsx_dma_control_layout() {
 }
 
 #[test]
-fn phase21_rsx_event_port_registered() {
+fn rsx_event_port_registered() {
     // RsxDriverInfo.handler_queue at +0x12D0 holds the event-queue
     // id that sys_rsx_context_allocate created.
-    let (rt, _) = phase21_runtime_with_cellgcm_inited();
+    let (rt, _) = runtime_with_cellgcm_inited();
     let driver_info_addr = rt.lv2_host().sys_rsx_context().driver_info_addr;
     let handler_queue = read_guest_u32_be(&rt, driver_info_addr + 0x12D0);
     assert_ne!(handler_queue, 0);
@@ -2861,7 +2861,7 @@ fn phase21_rsx_event_port_registered() {
 }
 
 #[test]
-fn phase21_sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
+fn sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
     // Schedule-stability: sys_rsx dispatch writes a fixed set of
     // guest addresses, so with disjoint concurrent PPU writes,
     // final memory is independent of when sys_rsx fires.
@@ -2954,7 +2954,7 @@ fn phase21_sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
 }
 
 #[test]
-fn phase21_multi_primitive_determinism_canary_with_sys_rsx_content() {
+fn multi_primitive_determinism_canary_with_sys_rsx_content() {
     // sys_rsx extension of the multi-primitive canary. If any
     // sys_rsx output path drifts between runs, the final
     // (memory, sync) hashes diverge.
@@ -3014,11 +3014,11 @@ fn phase21_multi_primitive_determinism_canary_with_sys_rsx_content() {
 }
 
 #[test]
-fn phase21_rsx_context_attribute_flip_drives_status_transitions() {
+fn rsx_context_attribute_flip_drives_status_transitions() {
     // FLIP_BUFFER via sub-command 0x102 emits RsxFlipRequest;
     // one commit boundary later it transitions to DONE, matching
     // the NV4097_FLIP_BUFFER path.
-    let (mut rt, unit_id) = phase21_runtime_with_cellgcm_inited();
+    let (mut rt, unit_id) = runtime_with_cellgcm_inited();
     let ctx_id = rt.lv2_host().sys_rsx_context().context_id;
 
     assert_eq!(

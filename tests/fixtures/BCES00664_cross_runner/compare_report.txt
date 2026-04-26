@@ -41,8 +41,11 @@ can be restored.
 
 Until that new checkpoint is chosen, WipEout is listed in the
 compatibility matrix with a `MaxSteps` outcome and no cross-runner
-verdict. The post-fix regression floor is `steps=390625` at the
-default `max_steps=100000000` cap with budget 256.
+verdict. The post-fix regression floor is `steps=3,906,250` at
+`max_steps=1,000,000,000` (1B-instruction cap, budget 256). Earlier
+report listed `steps=390625` at the 100M-instruction cap; raising
+the cap by 10x scales the step count linearly with no checkpoint
+trip, confirming the loop is truly stuck rather than slow.
 
 ## Classes of divergence the prior report documented
 
@@ -71,3 +74,11 @@ examples).
 
 Verdict: cross-runner comparison not currently available for
 WipEout; see "Post-fix status" above.
+
+Re-confirmed at the current branch tip: WipEout's MaxSteps
+trajectory is unchanged (still 390,625 at the 100M cap,
+3,906,250 at the 1B cap). The stall is structural -- the
+SWAR-strlen + label-emission loop spins waiting for a function
+pointer table at guest 0x009389a0 that requires a sysmodule
+SPRX's `module_start` to populate. That is the next-frontier
+target (PRX module loading), not a corner-case spec gap.

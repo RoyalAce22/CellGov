@@ -9,14 +9,10 @@ use cellgov_sync::MailboxId;
 use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::request::Lv2Request;
-use crate::thread_group::GroupState;
+use crate::thread_group::{GroupState, MAX_SLOTS_PER_GROUP};
 
 /// Maximum bytes `sys_spu_image_open` scans for the path NUL terminator.
 const SPU_IMAGE_PATH_MAX: usize = 256;
-
-/// Upper bound on per-group slot index; keeps the synthetic thread-id
-/// packing `group_id * MAX_SLOTS_PER_GROUP + slot` collision-free.
-const MAX_SLOTS_PER_GROUP: u32 = 256;
 
 /// `SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT`.
 const GROUP_JOIN_CAUSE_GROUP_EXIT: u32 = 0x0001;

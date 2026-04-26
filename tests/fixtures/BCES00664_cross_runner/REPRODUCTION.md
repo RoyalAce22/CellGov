@@ -47,8 +47,8 @@ build instructions. The same patch and binary works for WipEout.
 
 The patched binary supports CELLGOV_DUMP_PATH, CELLGOV_DUMP_REGIONS,
 and CELLGOV_DUMP_TTY_NTH. For WipEout we trigger on TTY write #20,
-which lands past the asterisk-banner phase and before the game's
-RSX-init phase:
+which lands past the asterisk-banner stage and before the game's
+RSX-init stage:
 
 ```bash
 cd tools/rpcs3

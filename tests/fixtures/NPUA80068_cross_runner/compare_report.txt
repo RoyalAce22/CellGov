@@ -1,29 +1,36 @@
-DIVERGE region data: first byte differs at offset 0xbf39 (guest 0x7ebf39) -- 93 vs 94
+DIVERGE region code: first byte differs at offset 0x35 (guest 0x10035) -- 00 vs 40
 
-Classification: PS3-wide, non-semantic -- HLE binding table layout.
+Status: SSHD reaches the FirstRsxWrite checkpoint at PPU step
+14,341,466 (was 14,109,359 before the syscall-number fixes in
+commit 8033644). The boot trajectory shifted +232K steps but the
+checkpoint is still reached and the observation captures cleanly.
 
-Guest address 0x7EBF39 falls inside the HLE OPD (function descriptor)
-stub area. SSHD's first HLE OPD is at 0x7EBF38 (cellResc, first
-import). The diverging byte is the second byte of the first OPD slot,
-which encodes part of the trampoline body address.
+The reported divergence is at offset 0x35 of the code region: the
+low byte of the ELF header's `e_ehsize` field. CellGov reads 0x00,
+RPCS3 reads 0x40 (= 64, the spec value). The same divergence class
+that the WipEout report tracks under "ELF header metadata" -- the
+header bytes captured by CellGov's loaded image differ from the
+in-memory SELF that RPCS3 mmaps.
 
-CellGov and RPCS3 assign HLE stub slot indices in the same module
-order but may differ by one index position within a module due to
-NID-table iteration order (sorted vs declaration-order). This
-produces a one-byte difference in the OPD pointer field.
+This bug pre-dates the syscall-number fix; the prior SSHD report
+called the code region "byte-identical (0x7c4f68 bytes match)" but
+that was generated against a different cellgov.json (Apr 15) and
+the result no longer holds against the post-fix observation.
 
-This is the same class of divergence seen in flOw's cross-runner
-compare (data:0x7768, also an HLE binding table layout difference).
-Both are PS3-wide, non-semantic: the pointed-to code is functionally
-identical, only the slot-index assignment convention differs.
+`compare-observations` stops at the first divergence, so the data
+region's HLE OPD layout difference (previously documented at
+offset 0xbf39) was not re-confirmed by this run.
 
-Code region: byte-identical (0x7c4f68 bytes match).
-Data region: first divergence at offset 0xbf39 of 0x49c98 bytes.
+Verdict: not strictly equivalent at the byte level. The diverging
+header bytes are not read by the executing code; classification
+remains "PS3-wide, non-semantic" in line with WipEout's similar
+note. A future cleanup should re-classify by walking past the
+ELF-header divergence and confirming that the only remaining
+differences are the documented OPD layout class.
 
-Checkpoint boundary: CellGov captures at FirstRsxWrite (put-pointer
-update to 0xC0000040); RPCS3 captures at sys_tty_write call #10.
-The boundaries are close but not identical -- CellGov reaches the
-RSX control register write while RPCS3 dumps at the last TTY write
-before that point.
-
-Verdict: equivalent (1 byte non-semantic).
+Re-confirmed at the current branch tip: step count unchanged
+(still 14,341,466). SSHD's CRT0/init path does not exercise the
+PPU corner cases the recent correctness fixes addressed (XER.SO
+propagation, FP fused-multiply-add, super-pair invalidation
+widening, etc.), so the trajectory is bit-identical with the
+prior committed baseline.

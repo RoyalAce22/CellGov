@@ -334,19 +334,33 @@ test in the hot loop).
 
 **PPU (`cellgov_ppu`)**: PPC64 interpreter with 32 GPRs, 32 FPRs, PC,
 CR, LR, CTR, XER (carry tracked), TB, and 32 vector registers.
-**119 instruction variants** today, covering integer arithmetic and
-logic, D-form and indexed loads/stores with and without update,
-conditional branches with LR/CTR variants, 64-bit multiply and divide
-families, signed and unsigned multiply-high, rotate and mask families
-(`rlwinm`, `rlwnm`, `rldicl`, `rldicr`), floating-point arithmetic and
+**140 `PpuInstruction` variants** today, covering integer arithmetic
+and logic, D-form / DS-form / indexed loads/stores with and without
+update (including DS-form `lwa`), conditional branches with
+LR/CTR/AA variants, 64-bit multiply and divide families, signed and
+unsigned multiply-high, rotate and mask families (`rlwinm`, `rlwnm`,
+`rldicl`, `rldicr`, `rldimi`), floating-point arithmetic and
 conversion (`fmadd`, `fmul`, `fdiv`, `fcmp`, `fsel`, `frsp`,
 `fctiwz`, `fcfid`), VMX (25+ VX-form and VA-form vector ops), SPR/CR
-moves, and atomic load-reserve / store-conditional pairs.
+moves, atomic load-reserve / store-conditional pairs, and
+record-form variants (`addic.`, `andis.`). The variant count
+includes the shadow's quickening rewrites (`Mr`, `Li`,
+`Slwi`/`Srwi`/`Sldi`/`Srdi`, `Clrlwi`/`Clrldi`, `Nop`, `CmpwZero`)
+and super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`,
+`LiStw`, `CmpwiBc`, `CmpwBc`, `LdMtlr`, `StdStd`) plus the
+`Consumed` placeholder; the architectural-instruction subset is
+~120 of the 140.
 
 The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
-4 relocation types, PS3 PRX import-table parser, and a 145-entry NID
-database every entry of which is verified by SHA-1 round-trip in test.
+4 relocation types, PS3 PRX import-table parser, and a NID database.
+The NID database serves two distinct roles in one sorted table:
+`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (currently 21 entries) is
+the dispatch surface the runtime PRX binder consults; the larger
+`cellgov_ppu::nid_db::NID_TABLE` (~5,300 entries imported from
+upstream coverage) supplies human-readable name resolution for
+`dump-imports` and fault diagnostics. The two tables share a
+sorted-by-NID layout for stable diffing.
 
 The HLE binder offers two layouts for the OPDs that satisfy
 `sys_prx_load_module`'s import resolution:
@@ -400,18 +414,19 @@ Classified into typed `Lv2Request` variants:
 | `sys_ppu_thread_yield`            | 43               | No-op scheduling hint; round-robin picks the next runnable unit.                                       |
 | `sys_ppu_thread_join`             | 44               | Either returns exit value immediately or blocks caller on target.                                      |
 | `sys_ppu_thread_create`           | 52               | Allocates stack + TLS, seeds child `PpuState`, registers a new PPU unit mid-run via `PpuFactory`.      |
-| `sys_event_flag_*`                | 82-87            | Create / destroy / wait / trywait / set / clear. AND/OR match with CLEAR/NO-CLEAR wake policy.         |
-| `sys_semaphore_*`                 | 93-94, 114-117   | Create / destroy / wait / post / trywait / get_value. Wake-or-increment on post.                       |
+| `sys_event_flag_*`                | 82, 83, 85, 86, 87, 118 | Create / destroy / wait / trywait / set / clear. AND/OR match with CLEAR/NO-CLEAR wake policy. Slot 84 is `_sys_interrupt_thread_establish`; slot 118 is the firmware-era home of `sys_event_flag_clear`. |
+| `sys_semaphore_*`                 | 90-94, 114       | Create / destroy / wait / trywait / post / get_value. Wake-or-increment on post.                       |
 | `sys_lwmutex_*`                   | 95-99            | Create / destroy / lock / unlock / trylock. FIFO waiter list, ownership tracked, EDEADLK on re-enter.  |
 | `sys_mutex_*`                     | 100, 102-104     | Create / lock / unlock / trylock. Heavy-mutex variant of lwmutex with attribute capture.               |
 | `sys_cond_*`                      | 105-110          | Create / destroy / wait / signal / signal_all / signal_to. Two-hop drop-and-reacquire mutex protocol.  |
-| `sys_event_queue_*`               | 128-130, 133-134 | Create / destroy / receive / tryreceive / port_send. Bounded FIFO with 4-u64 payloads.                 |
+| `sys_event_queue_*`               | 128-131, 138     | Create / destroy / receive / tryreceive / port_send. Bounded FIFO with 4-u64 payloads.                 |
+| `sys_time_get_timezone`           | 144              | Writes zero through both out-pointers (UTC, no DST). CellGov has no host-time dependency.              |
 | `sys_spu_image_open`              | 156              | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                    |
 | `sys_spu_thread_group_create`     | 170              | Allocates a monotonic group id, writes it to guest pointer.                                            |
 | `sys_spu_thread_initialize`       | 172              | Records image handle and args (copied at init time) per slot.                                          |
 | `sys_spu_thread_group_start`      | 173              | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
-| `sys_spu_thread_group_join`       | 177              | Blocks caller; wakes when all SPUs in the group finish.                                                |
-| `sys_spu_thread_group_terminate`  | 178              | Stub: returns CELL_OK without teardown (logged as invariant break). Split from join so dispatch cannot conflate the two ABI shapes. |
+| `sys_spu_thread_group_terminate`  | 177              | Stub: returns CELL_OK without teardown (logged as invariant break). Split from join so dispatch cannot conflate the two ABI shapes. |
+| `sys_spu_thread_group_join`       | 178              | Blocks caller; wakes when all SPUs in the group finish.                                                |
 | `sys_spu_thread_write_spu_mb`     | 190              | Deposits a value into the target SPU's inbound mailbox.                                                |
 | `sys_memory_container_create`     | 341              | Allocates a monotonic container id, writes it to guest pointer.                                        |
 | `sys_memory_allocate`             | 348              | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF). |
@@ -625,10 +640,10 @@ sweep. The sweep fires from three paths:
    reserved line without clearing the reservation.
 
 The contract is that every write path that commits bytes to
-main memory must fire the clear sweep. Adding a new write-
-emitting code path in a later phase must include a corresponding
-`clear_covering` call, and the lost-reservation regression suite
-in `cellgov_core::tests::runtime_tests` pins the invariant per
+main memory must fire the clear sweep. A future write-emitting
+code path must include a corresponding `clear_covering` call,
+and the lost-reservation regression suite in
+`cellgov_core::tests::runtime_tests` pins the invariant per
 path.
 
 **Scope and bounds.** The reservation table and local registers
@@ -746,8 +761,8 @@ zeroed notify and report tables).
 
 | Syscall | Request                    | Behaviour                                                           |
 | ------- | -------------------------- | ------------------------------------------------------------------- |
-| 665     | `SysRsxMemoryAllocate`     | Bump a 3 MB `mem_handle` from the RSX reservation range.            |
-| 667     | `SysRsxMemoryFree`         | Noop-safe (returns CELL_OK); bump allocator does not free.          |
+| 668     | `SysRsxMemoryAllocate`     | Bump a 3 MB `mem_handle` from the RSX reservation range.            |
+| 669     | `SysRsxMemoryFree`         | Noop-safe (returns CELL_OK); bump allocator does not free.          |
 | 670     | `SysRsxContextAllocate`    | Emit reports / driver-info / DMA-control init + event queue.        |
 | 671     | `SysRsxContextFree`        | Noop-safe (returns CELL_OK); single-context model.                  |
 | 674     | `SysRsxContextAttribute`   | Sub-command dispatch: FLIP_BUFFER, FLIP_MODE, SET_DISPLAY_BUFFER, handler register. |
@@ -798,9 +813,11 @@ configuration."
 
 ## HLE dispatch
 
-NID-based, separate from the syscall surface. `cellgov_ppu::nid_db`
-holds 145 entries (every one verified by SHA-1+suffix round-trip in
-test). Module implementations are decoupled from the Runtime via the
+NID-based, separate from the syscall surface. `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`
+holds the 21 NIDs CellGov dispatches directly; `cellgov_ppu::nid_db::NID_TABLE`
+is the larger ~5,300-entry diagnostic table used for name resolution in
+`dump-imports` and fault output, not for dispatch. Module implementations
+are decoupled from the Runtime via the
 `HleContext` trait (`cellgov_core::hle_context`). Each module file
 (`hle_sys.rs`, `hle_gcm.rs`) contains free functions that operate
 through `&mut dyn HleContext` -- 7 methods covering guest memory
@@ -1031,11 +1048,16 @@ Common boot sequence (per-title numbers below):
 5. Run the game's CRT0 from the ELF entry point.
 
 **flOw (NPUA80001).** 140 HLE bindings; liblv2 surfaces 161
-exports. Boot terminates deterministically at `sys_process_exit` at
-PPU step **1,402,388** (prior to exit the run reaches the first RSX
-call, `_cellGcmInitBody`). That terminating step is the documented
-CPU-side boundary for the static-recomp oracle and the point at
-which CellGov records a cross-runner observation.
+exports. Boot currently terminates at `sys_process_exit` at PPU
+step **10,872** (PC `0x10381ce8`) with code `0x80010005`
+(CELL_ESRCH-class). An earlier CellGov release reached step
+1,402,388 and exited cleanly; the current early-exit floor was
+reached in stages as the syscall classifier and PPU correctness
+fixes shifted conditional-branch decisions in flOw's exit-probe
+path. The earlier exit means the cross-runner observation is
+captured before `_cellGcmInitBody`, invalidating the prior
+"equivalent" verdict; see
+[tests/fixtures/NPUA80001_cross_runner/compare_report.txt](../tests/fixtures/NPUA80001_cross_runner/compare_report.txt).
 
 **Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
 modules (15 with dedicated CellGov handling); the harness uses a
@@ -1045,15 +1067,28 @@ init, TLS setup, lwmutex construction, GCM initialization
 (\_cellGcmInitBody, cellGcmGetConfiguration, cellGcmGetControlRegister),
 keyboard/pad init, SPURS init, video configuration, and into the
 main attract loop. The first RSX write (put-pointer update to the
-GCM control register at 0xC0000040) triggers at step 14,109,359
-(~3.6B instructions, ~72s wall time).
+GCM control register at 0xC0000040) triggers at step 14,341,466
+(~3.7B instructions). SSHD's CRT0/init path is bit-identical
+across CellGov revisions for the current PPU correctness surface;
+the most recent shift was commit 8033644's syscall-classifier
+alignment, which moved the step count by +232K.
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_firmware decrypt-self`. 332 HLE
 bindings across 27 modules -- the largest HLE surface of the
-three tested titles. Same `FirstRsxWrite` checkpoint as
-SSHD; CellGov reaches it at step 20,569.
+three tested titles. Same `FirstRsxWrite` checkpoint as SSHD;
+CellGov no longer reaches it. Boot stops via `MaxSteps` at the
+1B-instruction cap (3,906,250 scheduler steps, budget 256;
+390,625 at the 100M cap). The pre-fix `step 20,569` checkpoint
+trip was a spurious consequence of a now-fixed `rldimi`
+mis-decode. The current stall is structural -- a profile-loop
+function-pointer table at guest 0x009389a0 awaiting population
+by a sysmodule's `module_start`, not a corner-case spec gap.
+PRX module loading and `module_start` execution are the next
+target for unsticking the title. See
+[tests/fixtures/BCES00664_cross_runner/compare_report.txt](../tests/fixtures/BCES00664_cross_runner/compare_report.txt)
+for history and current status.
 
 ## Microtest corpus
 
