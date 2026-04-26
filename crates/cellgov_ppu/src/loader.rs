@@ -7,7 +7,9 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 /// Why loading failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadError {
-    /// File is too small to contain an ELF header.
+    /// File is too small to contain an ELF header (or program-header
+    /// table arithmetic overflowed -- treated identically: there is
+    /// no usable ELF structure to load).
     TooSmall,
     /// ELF magic bytes (0x7F 'E' 'L' 'F') not found.
     BadMagic,
@@ -17,7 +19,9 @@ pub enum LoadError {
     NotBigEndian,
     /// A LOAD segment extends past the end of the file.
     SegmentTruncated,
-    /// A LOAD segment's virtual address + size exceeds guest memory.
+    /// A LOAD segment's virtual address + size exceeds guest memory,
+    /// overflows a 32-bit PS3 effective address, or arithmetic on the
+    /// vaddr/memsz pair overflowed.
     SegmentOutOfRange {
         /// Virtual address of the segment.
         vaddr: u64,
@@ -32,6 +36,20 @@ const ELF_HEADER_SIZE: usize = 64;
 const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 /// PT_LOAD segment type.
 const PT_LOAD: u32 = 1;
+
+/// Compute `phoff + i * phentsize` defensively. Returns `None` on overflow
+/// or if the resulting program-header slot would extend past `data.len()`,
+/// which the callers translate into `LoadError::TooSmall`. Attacker-controlled
+/// header fields can otherwise wrap and bypass the post-bounds check.
+fn ph_slot_base(data_len: usize, phoff: usize, phentsize: usize, i: usize) -> Option<usize> {
+    let prod = i.checked_mul(phentsize)?;
+    let base = phoff.checked_add(prod)?;
+    let end = base.checked_add(phentsize)?;
+    if end > data_len {
+        return None;
+    }
+    Some(base)
+}
 
 /// Entry point and the minimum guest memory size needed to hold every
 /// PT_LOAD segment.
@@ -62,27 +80,35 @@ pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
     let phentsize = read_u16(data, 54) as usize;
     let phnum = read_u16(data, 56) as usize;
 
-    let mut max_addr: usize = 0;
+    let mut max_addr: u64 = 0;
     for i in 0..phnum {
-        let base = phoff + i * phentsize;
-        if base + phentsize > data.len() {
-            return Err(LoadError::TooSmall);
-        }
+        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok_or(LoadError::TooSmall)?;
         let p_type = read_u32(data, base);
         if p_type != PT_LOAD {
             continue;
         }
         let p_vaddr = read_u64(data, base + 16);
-        let p_memsz = read_u64(data, base + 40) as usize;
+        let p_memsz = read_u64(data, base + 40);
         if p_memsz == 0 {
             continue;
         }
-        let end = p_vaddr as usize + p_memsz;
+        let end = p_vaddr
+            .checked_add(p_memsz)
+            .ok_or(LoadError::SegmentOutOfRange {
+                vaddr: p_vaddr,
+                memsz: p_memsz,
+            })?;
+        if end > u64::from(u32::MAX) + 1 {
+            return Err(LoadError::SegmentOutOfRange {
+                vaddr: p_vaddr,
+                memsz: p_memsz,
+            });
+        }
         if end > max_addr {
             max_addr = end;
         }
     }
-    Ok(max_addr)
+    Ok(max_addr as usize)
 }
 
 /// Load a PPU ELF64 into `memory` and set `state.pc` / `state.gpr[2]`
@@ -115,13 +141,10 @@ pub fn load_ppu_elf(
     let phnum = read_u16(data, 56) as usize;
 
     let mem_size = memory.as_bytes().len();
-    let mut max_addr: usize = 0;
+    let mut max_addr: u64 = 0;
 
     for i in 0..phnum {
-        let base = phoff + i * phentsize;
-        if base + phentsize > data.len() {
-            return Err(LoadError::TooSmall);
-        }
+        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok_or(LoadError::TooSmall)?;
 
         let p_type = read_u32(data, base);
         if p_type != PT_LOAD {
@@ -130,40 +153,51 @@ pub fn load_ppu_elf(
 
         let p_offset = read_u64(data, base + 8) as usize;
         let p_vaddr = read_u64(data, base + 16);
-        let p_filesz = read_u64(data, base + 32) as usize;
-        let p_memsz = read_u64(data, base + 40) as usize;
+        let p_filesz = read_u64(data, base + 32);
+        let p_memsz = read_u64(data, base + 40);
 
         if p_memsz == 0 {
             continue;
         }
 
-        let end = p_vaddr as usize + p_memsz;
-        if end > mem_size {
+        // PS3 effective addresses are 32-bit; reject anything that would
+        // wrap on add or land above the 4 GiB EA ceiling before we cast
+        // to usize for the apply_commit call below.
+        let end = p_vaddr
+            .checked_add(p_memsz)
+            .ok_or(LoadError::SegmentOutOfRange {
+                vaddr: p_vaddr,
+                memsz: p_memsz,
+            })?;
+        if end > u64::from(u32::MAX) + 1 || end > mem_size as u64 {
             return Err(LoadError::SegmentOutOfRange {
                 vaddr: p_vaddr,
-                memsz: p_memsz as u64,
+                memsz: p_memsz,
             });
         }
 
-        if p_filesz > 0 && p_offset + p_filesz > data.len() {
+        if p_filesz > 0
+            && p_offset
+                .checked_add(p_filesz as usize)
+                .is_none_or(|e| e > data.len())
+        {
             return Err(LoadError::SegmentTruncated);
         }
 
+        let p_filesz_usz = p_filesz as usize;
         if p_filesz > 0 {
-            let range =
-                ByteRange::new(GuestAddr::new(p_vaddr), p_filesz as u64).expect("valid range");
+            let range = ByteRange::new(GuestAddr::new(p_vaddr), p_filesz).expect("valid range");
             memory
-                .apply_commit(range, &data[p_offset..p_offset + p_filesz])
+                .apply_commit(range, &data[p_offset..p_offset + p_filesz_usz])
                 .expect("segment fits in memory");
         }
 
         if p_memsz > p_filesz {
-            let bss_start = p_vaddr + p_filesz as u64;
+            let bss_start = p_vaddr + p_filesz;
             let bss_size = p_memsz - p_filesz;
-            let range =
-                ByteRange::new(GuestAddr::new(bss_start), bss_size as u64).expect("valid range");
+            let range = ByteRange::new(GuestAddr::new(bss_start), bss_size).expect("valid range");
             memory
-                .apply_commit(range, &vec![0u8; bss_size])
+                .apply_commit(range, &vec![0u8; bss_size as usize])
                 .expect("BSS fits in memory");
         }
 
@@ -198,7 +232,7 @@ pub fn load_ppu_elf(
 
     Ok(LoadResult {
         entry,
-        min_memory_size: max_addr,
+        min_memory_size: max_addr as usize,
     })
 }
 
@@ -267,10 +301,7 @@ pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
     let phnum = read_u16(data, 56) as usize;
     let mut out = Vec::new();
     for i in 0..phnum {
-        let base = phoff + i * phentsize;
-        if base + phentsize > data.len() {
-            return Err(LoadError::TooSmall);
-        }
+        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok_or(LoadError::TooSmall)?;
         if read_u32(data, base) != PT_LOAD {
             continue;
         }
@@ -323,7 +354,7 @@ pub struct TlsProgramHeader {
 
 /// PT_TLS segment info, or `None` if the ELF has no TLS segment.
 pub fn find_tls_segment(data: &[u8]) -> Option<TlsInfo> {
-    if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC {
+    if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC || data[4] != 2 || data[5] != 2 {
         return None;
     }
     let phoff = read_u64(data, 32) as usize;
@@ -331,10 +362,7 @@ pub fn find_tls_segment(data: &[u8]) -> Option<TlsInfo> {
     let phnum = read_u16(data, 56) as usize;
 
     for i in 0..phnum {
-        let base = phoff + i * phentsize;
-        if base + phentsize > data.len() {
-            break;
-        }
+        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
         if read_u32(data, base) == PT_TLS {
             return Some(TlsInfo {
                 vaddr: read_u64(data, base + 16),
@@ -349,7 +377,7 @@ pub fn find_tls_segment(data: &[u8]) -> Option<TlsInfo> {
 /// PT_TLS program header (including `p_offset` and `p_align`), or
 /// `None` if absent.
 pub fn find_tls_program_header(data: &[u8]) -> Option<TlsProgramHeader> {
-    if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC {
+    if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC || data[4] != 2 || data[5] != 2 {
         return None;
     }
     let phoff = read_u64(data, 32) as usize;
@@ -357,10 +385,7 @@ pub fn find_tls_program_header(data: &[u8]) -> Option<TlsProgramHeader> {
     let phnum = read_u16(data, 56) as usize;
 
     for i in 0..phnum {
-        let base = phoff + i * phentsize;
-        if base + phentsize > data.len() {
-            break;
-        }
+        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
         if read_u32(data, base) == PT_TLS {
             return Some(TlsProgramHeader {
                 file_offset: read_u64(data, base + 8),
@@ -406,45 +431,84 @@ pub struct SysProcessParam {
     pub ppc_seg: u32,
 }
 
+/// Whether file offset `file_off` falls within any PT_LOAD's
+/// `[p_offset, p_offset + p_filesz)` file range. Used to filter
+/// magic-scan false positives in string tables, debug sections, or
+/// embedded asset data.
+fn file_offset_in_pt_load(data: &[u8], file_off: usize) -> bool {
+    if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC || data[4] != 2 || data[5] != 2 {
+        return false;
+    }
+    let phoff = read_u64(data, 32) as usize;
+    let phentsize = read_u16(data, 54) as usize;
+    let phnum = read_u16(data, 56) as usize;
+    for i in 0..phnum {
+        let Some(base) = ph_slot_base(data.len(), phoff, phentsize, i) else {
+            return false;
+        };
+        if read_u32(data, base) != PT_LOAD {
+            continue;
+        }
+        let p_offset = read_u64(data, base + 8) as usize;
+        let p_filesz = read_u64(data, base + 32) as usize;
+        let Some(p_end) = p_offset.checked_add(p_filesz) else {
+            continue;
+        };
+        if file_off >= p_offset && file_off < p_end {
+            return true;
+        }
+    }
+    false
+}
+
 /// Locate `.sys_proc_param` by scanning for its magic (avoids parsing
-/// section headers). `None` if the magic is absent.
+/// section headers). `None` if the magic is absent. Matches outside any
+/// PT_LOAD file range are rejected so a stray byte sequence in a string
+/// table, debug section, or embedded asset cannot masquerade as a real
+/// `sys_process_param_t`.
 pub fn find_sys_process_param(data: &[u8]) -> Option<SysProcessParam> {
     let magic_bytes = SYS_PROCESS_PARAM_MAGIC.to_be_bytes();
     // Struct: { u32 size, magic, version, sdk_version, i32 primary_prio,
     //           u32 primary_stacksize, malloc_pagesize, ppc_seg }. Magic
     // is at offset 4 of the struct.
     let mut idx = 0;
-    while idx + 32 <= data.len() {
-        if let Some(found) = data[idx..].windows(4).position(|w| w == magic_bytes) {
-            let s = idx + found;
-            if s < 4 || s + 28 > data.len() {
-                return None;
-            }
-            let start = s - 4;
-            let size = read_u32(data, start);
-            if size < 0x20 {
-                idx = s + 4;
-                continue;
-            }
-            return Some(SysProcessParam {
-                sdk_version: read_u32(data, start + 12),
-                primary_prio: read_u32(data, start + 16) as i32,
-                primary_stacksize: read_u32(data, start + 20),
-                malloc_pagesize: read_u32(data, start + 24),
-                ppc_seg: read_u32(data, start + 28),
-            });
-        } else {
-            return None;
+    while idx + 4 <= data.len() {
+        let rel = data[idx..].windows(4).position(|w| w == magic_bytes)?;
+        let s = idx + rel;
+        if s < 4 || s + 28 > data.len() {
+            idx = s + 4;
+            continue;
         }
+        let start = s - 4;
+        let size = read_u32(data, start);
+        if size < 0x20 {
+            idx = s + 4;
+            continue;
+        }
+        if !file_offset_in_pt_load(data, start) {
+            idx = s + 4;
+            continue;
+        }
+        return Some(SysProcessParam {
+            sdk_version: read_u32(data, start + 12),
+            primary_prio: read_u32(data, start + 16) as i32,
+            primary_stacksize: read_u32(data, start + 20),
+            malloc_pagesize: read_u32(data, start + 24),
+            ppc_seg: read_u32(data, start + 28),
+        });
     }
     None
 }
 
 /// ELF section type: symbol table.
 const SHT_SYMTAB: u32 = 2;
+/// ELF section type: dynamic-link symbol table. PRX-linked PS3 binaries
+/// keep their exported symbols in `.dynsym`, not `.symtab`.
+const SHT_DYNSYM: u32 = 11;
 
 /// Symbol address by name, or `None` if not found or the ELF has no
-/// symbol table.
+/// symbol table. Searches every `SHT_SYMTAB` and `SHT_DYNSYM` section
+/// in order.
 pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
     if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC {
         return None;
@@ -454,12 +518,12 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
     let shnum = read_u16(data, 60) as usize;
 
     for i in 0..shnum {
-        let sh = shoff + i * shentsize;
-        if sh + shentsize > data.len() {
+        let sh = shoff.checked_add(i.checked_mul(shentsize)?)?;
+        if sh.checked_add(shentsize)? > data.len() {
             return None;
         }
         let sh_type = read_u32(data, sh + 4);
-        if sh_type != SHT_SYMTAB {
+        if sh_type != SHT_SYMTAB && sh_type != SHT_DYNSYM {
             continue;
         }
         let sym_off = read_u64(data, sh + 24) as usize;
@@ -467,19 +531,24 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
         let sym_entsize = read_u64(data, sh + 56) as usize;
         let strtab_idx = read_u32(data, sh + 40) as usize;
 
-        let str_sh = shoff + strtab_idx * shentsize;
-        if str_sh + shentsize > data.len() {
-            return None;
+        let Some(str_sh) = shoff.checked_add(strtab_idx.checked_mul(shentsize)?) else {
+            continue;
+        };
+        if str_sh.checked_add(shentsize)? > data.len() {
+            continue;
         }
         let str_off = read_u64(data, str_sh + 24) as usize;
         let str_size = read_u64(data, str_sh + 32) as usize;
-        if str_off + str_size > data.len() {
-            return None;
+        let Some(str_end) = str_off.checked_add(str_size) else {
+            continue;
+        };
+        if str_end > data.len() {
+            continue;
         }
-        let strtab = &data[str_off..str_off + str_size];
+        let strtab = &data[str_off..str_end];
 
         if sym_entsize == 0 {
-            return None;
+            continue;
         }
         let count = sym_size / sym_entsize;
         for j in 0..count {
@@ -500,7 +569,6 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
                 return Some(read_u64(data, entry + 8));
             }
         }
-        return None;
     }
     None
 }
@@ -841,6 +909,143 @@ mod tests {
         let segs = pt_load_segments(&data).expect("parses");
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].vaddr, 0x2000);
+    }
+
+    #[test]
+    fn rejects_segment_with_vaddr_memsz_overflow() {
+        // Crafted PT_LOAD: p_vaddr near u64::MAX so p_vaddr + p_memsz wraps.
+        // Pre-fix arithmetic would wrap, pass the post-bounds check, and
+        // route an OOB write through apply_commit.
+        let mut data = mk_elf_header(1);
+        let p_vaddr = u64::MAX - 0xFF;
+        let p_memsz = 0x200u64;
+        let base = 64;
+        data[base..base + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+        data[base + 16..base + 24].copy_from_slice(&p_vaddr.to_be_bytes());
+        data[base + 40..base + 48].copy_from_slice(&p_memsz.to_be_bytes());
+        let mut s = PpuState::new();
+        let mut mem = GuestMemory::new(0x10000);
+        assert_eq!(
+            load_ppu_elf(&data, &mut mem, &mut s),
+            Err(LoadError::SegmentOutOfRange {
+                vaddr: p_vaddr,
+                memsz: p_memsz,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_segment_above_ps3_ea_ceiling() {
+        // PS3 effective addresses are 32-bit. A segment ending above 4 GiB
+        // must be rejected even on 64-bit hosts where the arithmetic does
+        // not overflow, so guest memory is never sized for an EA the
+        // architecture cannot represent.
+        let mut data = mk_elf_header(1);
+        let p_vaddr = 0x1_0000_0000u64;
+        let p_memsz = 0x10u64;
+        let base = 64;
+        data[base..base + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+        data[base + 16..base + 24].copy_from_slice(&p_vaddr.to_be_bytes());
+        data[base + 40..base + 48].copy_from_slice(&p_memsz.to_be_bytes());
+        let mut s = PpuState::new();
+        let mut mem = GuestMemory::new(0x10000);
+        assert_eq!(
+            load_ppu_elf(&data, &mut mem, &mut s),
+            Err(LoadError::SegmentOutOfRange {
+                vaddr: p_vaddr,
+                memsz: p_memsz,
+            })
+        );
+    }
+
+    #[test]
+    fn find_tls_rejects_non_64bit_elf() {
+        // A 32-bit ELF has different program-header field offsets. Without
+        // the arch check, find_tls_segment would parse u64 fields against
+        // the wrong layout and return garbage.
+        let mut data = vec![0u8; 256];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 1; // 32-bit
+        data[5] = 2; // big-endian
+        assert!(find_tls_segment(&data).is_none());
+        assert!(find_tls_program_header(&data).is_none());
+    }
+
+    #[test]
+    fn find_tls_rejects_little_endian_elf() {
+        let mut data = vec![0u8; 256];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 2; // 64-bit
+        data[5] = 1; // little-endian
+        assert!(find_tls_segment(&data).is_none());
+        assert!(find_tls_program_header(&data).is_none());
+    }
+
+    #[test]
+    fn find_sys_process_param_rejects_magic_outside_pt_load() {
+        // Build an ELF whose PT_LOAD covers a small file range that does
+        // NOT contain the magic, and place the magic + plausible struct
+        // bytes outside that range. Pre-fix scan would match the magic and
+        // return false-positive struct fields.
+        let payload_offset = 0x200usize;
+        let pt_load_offset = 0x100usize;
+        let pt_load_size = 0x40usize; // does not cover payload_offset
+        let mut data = vec![0u8; payload_offset + 32 + 32];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 2;
+        data[5] = 2;
+        data[32..40].copy_from_slice(&64u64.to_be_bytes());
+        data[54..56].copy_from_slice(&56u16.to_be_bytes());
+        data[56..58].copy_from_slice(&1u16.to_be_bytes());
+        let ph = 64;
+        data[ph..ph + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+        data[ph + 8..ph + 16].copy_from_slice(&(pt_load_offset as u64).to_be_bytes());
+        data[ph + 32..ph + 40].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
+        data[ph + 40..ph + 48].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
+        // Plant a plausible sys_proc_param: { size=0x30, magic, ... } at payload_offset.
+        let start = payload_offset;
+        data[start..start + 4].copy_from_slice(&0x30u32.to_be_bytes());
+        data[start + 4..start + 8].copy_from_slice(&SYS_PROCESS_PARAM_MAGIC.to_be_bytes());
+        assert!(
+            find_sys_process_param(&data).is_none(),
+            "magic outside PT_LOAD must be rejected as a false positive"
+        );
+    }
+
+    #[test]
+    fn find_sys_process_param_accepts_magic_inside_pt_load() {
+        // Symmetric counterpart: a magic match inside the PT_LOAD file
+        // range still parses as a real struct. Locks the positive path
+        // so the PT_LOAD filter does not over-reject valid binaries.
+        let payload_offset = 0x140usize;
+        let pt_load_offset = 0x100usize;
+        let pt_load_size = 0x80usize; // covers payload_offset
+        let mut data = vec![0u8; pt_load_offset + pt_load_size + 32];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 2;
+        data[5] = 2;
+        data[32..40].copy_from_slice(&64u64.to_be_bytes());
+        data[54..56].copy_from_slice(&56u16.to_be_bytes());
+        data[56..58].copy_from_slice(&1u16.to_be_bytes());
+        let ph = 64;
+        data[ph..ph + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+        data[ph + 8..ph + 16].copy_from_slice(&(pt_load_offset as u64).to_be_bytes());
+        data[ph + 32..ph + 40].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
+        data[ph + 40..ph + 48].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
+        let start = payload_offset;
+        data[start..start + 4].copy_from_slice(&0x30u32.to_be_bytes());
+        data[start + 4..start + 8].copy_from_slice(&SYS_PROCESS_PARAM_MAGIC.to_be_bytes());
+        // sdk_version at start+12, primary_prio at +16, primary_stacksize at +20,
+        // malloc_pagesize at +24, ppc_seg at +28
+        data[start + 12..start + 16].copy_from_slice(&0x0015_0004u32.to_be_bytes());
+        data[start + 16..start + 20].copy_from_slice(&1000i32.to_be_bytes());
+        data[start + 20..start + 24].copy_from_slice(&0x10000u32.to_be_bytes());
+        data[start + 24..start + 28].copy_from_slice(&0x10000u32.to_be_bytes());
+        let p = find_sys_process_param(&data).expect("magic inside PT_LOAD must parse");
+        assert_eq!(p.sdk_version, 0x0015_0004);
+        assert_eq!(p.primary_prio, 1000);
+        assert_eq!(p.primary_stacksize, 0x10000);
+        assert_eq!(p.malloc_pagesize, 0x10000);
     }
 
     #[test]

@@ -61,6 +61,10 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let (rt, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Addic { rt, ra, imm })
         }
+        13 => {
+            let (rt, ra, imm) = d_form(raw);
+            Ok(PpuInstruction::AddicDot { rt, ra, imm })
+        }
 
         32 => {
             let (rt, ra, imm) = d_form(raw);
@@ -95,9 +99,11 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let sub = raw & 0x3;
             let (rt, ra, _) = d_form(raw);
             let imm = (raw & 0xFFFC) as i16;
+            debug_assert_eq!(imm & 3, 0, "DS-form imm must have low 2 bits zero");
             match sub {
                 0 => Ok(PpuInstruction::Ld { rt, ra, imm }),
                 1 => Ok(PpuInstruction::Ldu { rt, ra, imm }),
+                2 => Ok(PpuInstruction::Lwa { rt, ra, imm }),
                 _ => Err(PpuDecodeError::Unsupported(raw)),
             }
         }
@@ -131,6 +137,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let sub = raw & 0x3;
             let (rs, ra, _) = d_form(raw);
             let imm = (raw & 0xFFFC) as i16;
+            debug_assert_eq!(imm & 3, 0, "DS-form imm must have low 2 bits zero");
             match sub {
                 0 => Ok(PpuInstruction::Std { rs, ra, imm }),
                 1 => Ok(PpuInstruction::Stdu { rs, ra, imm }),
@@ -165,6 +172,10 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         28 => {
             let (rs, ra, imm) = d_form_u(raw);
             Ok(PpuInstruction::AndiDot { ra, rs, imm })
+        }
+        29 => {
+            let (rs, ra, imm) = d_form_u(raw);
+            Ok(PpuInstruction::AndisDot { ra, rs, imm })
         }
 
         11 => {
@@ -206,11 +217,13 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let bo = ((raw >> 21) & 0x1F) as u8;
             let bi = ((raw >> 16) & 0x1F) as u8;
             let bd = (raw & 0xFFFC) as i16;
+            let aa = raw & 2 != 0;
             let link = raw & 1 != 0;
             Ok(PpuInstruction::Bc {
                 bo,
                 bi,
                 offset: bd,
+                aa,
                 link,
             })
         }
@@ -836,6 +849,52 @@ mod tests {
     }
 
     #[test]
+    fn lwa_decodes_at_primary_58_sub_2() {
+        // lwa r3, 8(r4): primary=58, RT=3, RA=4, DS=2 (byte offset 8),
+        // sub=2. Word: (58<<26) | (3<<21) | (4<<16) | 0x0008 | 2.
+        let raw = (58u32 << 26) | (3u32 << 21) | (4u32 << 16) | 0x000A;
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Lwa {
+                rt: 3,
+                ra: 4,
+                imm: 8,
+            }
+        );
+    }
+
+    #[test]
+    fn addic_dot_decodes_at_primary_13() {
+        // addic. r3, r4, -1: primary=13, RT=3, RA=4, SIMM=0xFFFF.
+        let raw = (13u32 << 26) | (3u32 << 21) | (4u32 << 16) | 0xFFFF;
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::AddicDot {
+                rt: 3,
+                ra: 4,
+                imm: -1,
+            }
+        );
+    }
+
+    #[test]
+    fn andis_dot_decodes_at_primary_29() {
+        // andis. r3, r4, 0x00FF: primary=29, RA=3, RS=4, UI=0xFF.
+        let raw = (29u32 << 26) | (4u32 << 21) | (3u32 << 16) | 0x00FF;
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::AndisDot {
+                ra: 3,
+                rs: 4,
+                imm: 0x00FF,
+            }
+        );
+    }
+
+    #[test]
     fn rlwnm_decodes() {
         // rlwnm r0, r0, r8, 0, 31 -> 0x5C00_403E.
         let insn = decode(0x5C00_403E).unwrap();
@@ -1274,7 +1333,7 @@ mod tests {
 
     // -- Round-trip tripwire --
     //
-    // Mini-encoder covering the variants touched by the Rc/OE slice.
+    // Mini-encoder covering the variants that take Rc and OE bits.
     // Catches the rldimi-as-rldicl class of mis-route structurally:
     // if decode produced the wrong variant, re-encoding picks the
     // wrong sub-opcode and the round-trip diverges.

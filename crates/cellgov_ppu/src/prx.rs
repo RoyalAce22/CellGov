@@ -32,6 +32,9 @@ pub enum ImportParseError {
     NoPrxParam,
     /// The ppu_proc_prx_param_t magic does not match 0x1b434cec.
     BadMagic(u32),
+    /// The ppu_proc_prx_param_t `size` field declares a header smaller
+    /// than the libstub_start/libstub_end fields the parser reads.
+    ParamHeaderTooSmall(u32),
     /// A read went out of bounds.
     OutOfBounds,
 }
@@ -77,6 +80,14 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
     if magic != PRX_PARAM_MAGIC {
         return Err(ImportParseError::BadMagic(magic));
     }
+    // The header's declared size must cover the libstub fields at
+    // +24/+28. Real PS3 binaries set size to 0x40 or larger; rejecting
+    // smaller values catches truncated or corrupt param headers before
+    // the libstub fields are read against unrelated bytes.
+    let declared_size = loader::read_u32(data, param_off);
+    if declared_size < 32 {
+        return Err(ImportParseError::ParamHeaderTooSmall(declared_size));
+    }
 
     let libstub_start = loader::read_u32(data, param_off + 24) as usize;
     let libstub_end = loader::read_u32(data, param_off + 28) as usize;
@@ -110,15 +121,27 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
         let name = read_cstring(data, &segments, name_ptr);
 
         let mut functions = Vec::with_capacity(num_func);
-        let nid_foff = vaddr_to_file(&segments, nid_ptr).unwrap_or(0);
-        for i in 0..num_func {
-            let nid_off = nid_foff + i * 4;
-            if nid_off + 4 > data.len() {
-                break;
+        // Resolve the NID table only when this module has functions.
+        // Modules with `num_func == 0` (variable-only or empty imports)
+        // legitimately may not point at a NID table; we skip the lookup
+        // rather than letting an unmapped pointer silently fall back to
+        // file offset 0 (the ELF header) and produce garbage NIDs.
+        if num_func > 0 {
+            let nid_foff =
+                vaddr_to_file(&segments, nid_ptr).ok_or(ImportParseError::OutOfBounds)?;
+            for i in 0..num_func {
+                let nid_off = nid_foff + i * 4;
+                if nid_off + 4 > data.len() {
+                    break;
+                }
+                let nid = loader::read_u32(data, nid_off);
+                // stub_ptr addresses the function-stub pointer table:
+                // each entry is a 4-byte vaddr the binder later
+                // overwrites with the OPD address (see RPCS3
+                // ppu_load_imports for the same stride).
+                let stub_addr = (stub_ptr + i * 4) as u32;
+                functions.push(ImportedFunction { nid, stub_addr });
             }
-            let nid = loader::read_u32(data, nid_off);
-            let stub_addr = (stub_ptr + i * 4) as u32;
-            functions.push(ImportedFunction { nid, stub_addr });
         }
 
         modules.push(ImportedModule { name, functions });
@@ -147,7 +170,9 @@ pub const HLE_SYSCALL_BASE: u32 = 0x10000;
 /// Read by the PRX binder (to keep an HLE trampoline over a firmware
 /// body whose init prerequisites may not have run) and by
 /// `dump-imports` (to tag each import `impl` vs `stub`). Ordering is
-/// by NID value for stable diffing.
+/// grouped by module (GCM, sysPrxForUser memory, lwmutex, time/thread)
+/// for readability, not by NID value -- callers use `contains` rather
+/// than binary search.
 pub const HLE_IMPLEMENTED_NIDS: &[u32] = &[
     0x055bd74d, // cellGcmGetTiledPitchSize
     0x15bae46b, // _cellGcmInitBody
@@ -219,6 +244,19 @@ pub fn bind_hle_stubs(
 
 /// Write HLE OPDs and body trampolines into guest memory per `layout`
 /// and patch each imported GOT entry to point at its OPD.
+///
+/// Every imported function is bound regardless of whether its NID is in
+/// `HLE_IMPLEMENTED_NIDS` -- the runtime dispatcher decides what to do
+/// when an unimplemented syscall fires (defaults to returning CELL_OK
+/// with no effects). `HLE_IMPLEMENTED_NIDS` is informational from the
+/// binder's perspective; it does not gate trampoline emission.
+///
+/// # Panics
+/// Panics if `apply_commit` fails for any of the OPD, body, or GOT
+/// writes. Failure means the caller-supplied trampoline placement
+/// landed outside a writable region; producing a binding vec for
+/// trampolines that were never actually written would silently corrupt
+/// the dispatch surface (the guest would jump to zeroed memory).
 pub fn bind_hle_stubs_with_layout(
     modules: &[ImportedModule],
     memory: &mut cellgov_mem::GuestMemory,
@@ -226,15 +264,22 @@ pub fn bind_hle_stubs_with_layout(
     legacy_base: u32,
 ) -> Vec<HleBinding> {
     let mut bindings = Vec::new();
-    let mut offset = 0u32;
+    let mut legacy_offset = 0u32;
 
     for module in modules {
         for func in &module.functions {
             let hle_index = bindings.len() as u32;
-            let syscall_nr = HLE_SYSCALL_BASE + hle_index;
+            // The lis/ori encoding splits syscall_nr into two 16-bit
+            // immediates; an overflow in HLE_SYSCALL_BASE + hle_index
+            // would silently truncate and dispatch to the wrong index.
+            // checked_add catches the overflow before the encoding.
+            let syscall_nr = HLE_SYSCALL_BASE
+                .checked_add(hle_index)
+                .expect("HLE syscall index overflowed u32; too many imports");
             let (opd_addr, body_addr) = match layout {
                 HleLayout::Legacy24 => {
-                    let tramp = legacy_base + offset;
+                    let tramp = legacy_base + legacy_offset;
+                    legacy_offset += TRAMPOLINE_SIZE;
                     (tramp, tramp + 8)
                 }
                 HleLayout::Ps3Spec {
@@ -253,29 +298,33 @@ pub fn bind_hle_stubs_with_layout(
 
             // OPD: { body_addr, toc=0 }.
             let opd_range =
-                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(opd_addr as u64), 8);
-            if let Some(range) = opd_range {
-                let mut bytes = [0u8; 8];
-                bytes[0..4].copy_from_slice(&body_addr.to_be_bytes());
-                bytes[4..8].copy_from_slice(&0u32.to_be_bytes());
-                let _ = memory.apply_commit(range, &bytes);
-            }
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(opd_addr as u64), 8)
+                    .expect("OPD range fits in u64");
+            let mut opd_bytes = [0u8; 8];
+            opd_bytes[0..4].copy_from_slice(&body_addr.to_be_bytes());
+            opd_bytes[4..8].copy_from_slice(&0u32.to_be_bytes());
+            memory
+                .apply_commit(opd_range, &opd_bytes)
+                .expect("HLE OPD write failed; trampoline_base must point at a writable region");
+
             let body_range =
-                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(body_addr as u64), 16);
-            if let Some(range) = body_range {
-                let mut bytes = [0u8; 16];
-                bytes[0..4].copy_from_slice(&lis_r11.to_be_bytes());
-                bytes[4..8].copy_from_slice(&ori_r11.to_be_bytes());
-                bytes[8..12].copy_from_slice(&sc.to_be_bytes());
-                bytes[12..16].copy_from_slice(&blr.to_be_bytes());
-                let _ = memory.apply_commit(range, &bytes);
-            }
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(body_addr as u64), 16)
+                    .expect("body range fits in u64");
+            let mut body_bytes = [0u8; 16];
+            body_bytes[0..4].copy_from_slice(&lis_r11.to_be_bytes());
+            body_bytes[4..8].copy_from_slice(&ori_r11.to_be_bytes());
+            body_bytes[8..12].copy_from_slice(&sc.to_be_bytes());
+            body_bytes[12..16].copy_from_slice(&blr.to_be_bytes());
+            memory
+                .apply_commit(body_range, &body_bytes)
+                .expect("HLE body write failed; trampoline_base must point at a writable region");
 
             let got_range =
-                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(func.stub_addr as u64), 4);
-            if let Some(range) = got_range {
-                let _ = memory.apply_commit(range, &opd_addr.to_be_bytes());
-            }
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(func.stub_addr as u64), 4)
+                    .expect("GOT slot range fits in u64");
+            memory
+                .apply_commit(got_range, &opd_addr.to_be_bytes())
+                .expect("GOT patch failed; the import's stub_addr must lie in a writable region");
 
             bindings.push(HleBinding {
                 index: hle_index,
@@ -283,8 +332,6 @@ pub fn bind_hle_stubs_with_layout(
                 nid: func.nid,
                 stub_addr: func.stub_addr,
             });
-
-            offset += TRAMPOLINE_SIZE;
         }
     }
 
@@ -392,6 +439,116 @@ mod tests {
         assert!(names.contains(&"cellSysutil"));
         assert!(names.contains(&"sysPrxForUser"));
         assert!(names.contains(&"cellGcmSys"));
+    }
+
+    /// Build a minimal ELF whose PT_LOAD maps the file 1:1 (vaddr ==
+    /// file offset) and contains a single import module with one
+    /// function. The function's GOT slot lives at `STUB_TABLE_OFF`;
+    /// the parser reports that as `stub_addr`. The contents at the
+    /// slot are placeholder bytes the binder would overwrite.
+    fn build_synthetic_prx_elf(nid: u32) -> Vec<u8> {
+        const TOTAL_SIZE: usize = 320;
+        const PARAM_OFF: usize = 176;
+        const MOD_INFO_OFF: usize = 208;
+        const MOD_INFO_SIZE: u8 = 0x2C;
+        const NAME_OFF: usize = 252;
+        const NID_TABLE_OFF: usize = 256;
+        const STUB_TABLE_OFF: usize = 260;
+
+        let mut data = vec![0u8; TOTAL_SIZE];
+        // ELF header: magic, 64-bit, big-endian, phoff=64, phentsize=56, phnum=2.
+        data[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
+        data[4] = 2;
+        data[5] = 2;
+        data[32..40].copy_from_slice(&64u64.to_be_bytes());
+        data[54..56].copy_from_slice(&56u16.to_be_bytes());
+        data[56..58].copy_from_slice(&2u16.to_be_bytes());
+
+        // Program header 0: PT_LOAD covering the entire file with
+        // vaddr == file offset for trivial vaddr_to_file resolution.
+        let ph0 = 64usize;
+        data[ph0..ph0 + 4].copy_from_slice(&1u32.to_be_bytes());
+        data[ph0 + 8..ph0 + 16].copy_from_slice(&0u64.to_be_bytes());
+        data[ph0 + 16..ph0 + 24].copy_from_slice(&0u64.to_be_bytes());
+        data[ph0 + 32..ph0 + 40].copy_from_slice(&(TOTAL_SIZE as u64).to_be_bytes());
+
+        // Program header 1: PT_PRX_PARAM pointing at the param struct.
+        let ph1 = 64 + 56;
+        data[ph1..ph1 + 4].copy_from_slice(&PT_PRX_PARAM.to_be_bytes());
+        data[ph1 + 8..ph1 + 16].copy_from_slice(&(PARAM_OFF as u64).to_be_bytes());
+
+        // ppu_proc_prx_param_t: size=0x40, magic, libstub_start/end.
+        data[PARAM_OFF..PARAM_OFF + 4].copy_from_slice(&0x40u32.to_be_bytes());
+        data[PARAM_OFF + 4..PARAM_OFF + 8].copy_from_slice(&PRX_PARAM_MAGIC.to_be_bytes());
+        data[PARAM_OFF + 24..PARAM_OFF + 28].copy_from_slice(&(MOD_INFO_OFF as u32).to_be_bytes());
+        data[PARAM_OFF + 28..PARAM_OFF + 32]
+            .copy_from_slice(&(MOD_INFO_OFF as u32 + MOD_INFO_SIZE as u32).to_be_bytes());
+
+        // ppu_prx_module_info: size=0x2C, num_func=1, name/nids/addrs ptrs.
+        data[MOD_INFO_OFF] = MOD_INFO_SIZE;
+        data[MOD_INFO_OFF + 6..MOD_INFO_OFF + 8].copy_from_slice(&1u16.to_be_bytes());
+        data[MOD_INFO_OFF + 16..MOD_INFO_OFF + 20]
+            .copy_from_slice(&(NAME_OFF as u32).to_be_bytes());
+        data[MOD_INFO_OFF + 20..MOD_INFO_OFF + 24]
+            .copy_from_slice(&(NID_TABLE_OFF as u32).to_be_bytes());
+        data[MOD_INFO_OFF + 24..MOD_INFO_OFF + 28]
+            .copy_from_slice(&(STUB_TABLE_OFF as u32).to_be_bytes());
+
+        // Module name "tst\0".
+        data[NAME_OFF..NAME_OFF + 4].copy_from_slice(b"tst\0");
+        // NID table.
+        data[NID_TABLE_OFF..NID_TABLE_OFF + 4].copy_from_slice(&nid.to_be_bytes());
+        // Stub address table holds the placeholder body that the
+        // binder would later replace with the OPD address.
+        data[STUB_TABLE_OFF..STUB_TABLE_OFF + 4].copy_from_slice(&0u32.to_be_bytes());
+
+        data
+    }
+
+    #[test]
+    fn parse_synthetic_elf_round_trips_one_module_one_function() {
+        // Every CI run exercises the field-offset arithmetic without
+        // relying on a retail EBOOT being present.
+        let nid = 0xDEAD_BEEFu32;
+        let data = build_synthetic_prx_elf(nid);
+        let modules = parse_imports(&data).expect("synthetic ELF must parse");
+        assert_eq!(modules.len(), 1);
+        assert_eq!(modules[0].name, "tst");
+        assert_eq!(modules[0].functions.len(), 1);
+        assert_eq!(modules[0].functions[0].nid, nid);
+        // stub_addr is the *address* of the GOT slot (i.e., the stub
+        // table base + i*4), not its contents -- the binder writes the
+        // OPD address into that slot at link time.
+        assert_eq!(modules[0].functions[0].stub_addr, 260);
+    }
+
+    #[test]
+    fn parse_rejects_param_header_too_small() {
+        // size = 16 declares a header that ends before libstub_start at
+        // +24. The parser must reject rather than read past the
+        // declared boundary.
+        let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+        let param_off = 176;
+        data[param_off..param_off + 4].copy_from_slice(&16u32.to_be_bytes());
+        assert!(matches!(
+            parse_imports(&data),
+            Err(ImportParseError::ParamHeaderTooSmall(16))
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_unmapped_nid_table_when_num_func_nonzero() {
+        // Point nid_ptr at a vaddr no PT_LOAD covers; pre-fix code
+        // silently fell back to file offset 0 (the ELF header) and
+        // produced garbage NIDs.
+        let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+        let mod_info_off = 208;
+        let unmapped_vaddr: u32 = 0xFFFF_0000;
+        data[mod_info_off + 20..mod_info_off + 24].copy_from_slice(&unmapped_vaddr.to_be_bytes());
+        assert!(matches!(
+            parse_imports(&data),
+            Err(ImportParseError::OutOfBounds)
+        ));
     }
 
     #[test]

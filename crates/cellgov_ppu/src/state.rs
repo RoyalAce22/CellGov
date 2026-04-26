@@ -61,12 +61,14 @@ impl PpuState {
 
     /// Read CR field `field` (0..=7) as a 4-bit LT/GT/EQ/SO nibble.
     pub fn cr_field(&self, field: u8) -> u8 {
+        debug_assert!(field <= 7, "CR field index out of range: {field}");
         let shift = (7 - field) * 4;
         ((self.cr >> shift) & 0xF) as u8
     }
 
     /// Write CR field `field` (0..=7) with a 4-bit nibble.
     pub fn set_cr_field(&mut self, field: u8, val: u8) {
+        debug_assert!(field <= 7, "CR field index out of range: {field}");
         let shift = (7 - field) * 4;
         let mask = !(0xFu32 << shift);
         self.cr = (self.cr & mask) | (((val & 0xF) as u32) << shift);
@@ -74,6 +76,7 @@ impl PpuState {
 
     /// Read a single CR bit in PPC numbering (bit 0 = MSB of CR).
     pub fn cr_bit(&self, bit: u8) -> bool {
+        debug_assert!(bit <= 31, "CR bit index out of range: {bit}");
         let shift = 31 - bit;
         (self.cr >> shift) & 1 != 0
     }
@@ -81,6 +84,13 @@ impl PpuState {
     /// XER carry bit (PPC bit 34 from the MSB = bit 29 from the LSB).
     pub fn xer_ca(&self) -> bool {
         (self.xer >> 29) & 1 != 0
+    }
+
+    /// XER sticky-overflow bit (PPC bit 32 = Rust bit 31). Compare
+    /// instructions and dot-form CR0 updates concatenate this into
+    /// the LSB of the CR field.
+    pub fn xer_so(&self) -> bool {
+        (self.xer >> 31) & 1 != 0
     }
 
     /// Set the XER carry bit without touching adjacent OV/SO bits.
@@ -140,7 +150,17 @@ impl PpuState {
     }
 
     /// FNV-1a fingerprint over GPR[0..32], LR, CTR, XER, CR, and the
-    /// reservation register; PC, FPR, VR are excluded.
+    /// reservation register.
+    ///
+    /// Excluded: PC, FPR, VR, and TB. PC is excluded because the
+    /// per-step trace records (pc, hash) pairs separately. FPR and VR
+    /// are excluded as a current-scope decision (FPSCR plumbing is
+    /// pending and a hash that does not yet reflect FP-side divergence
+    /// is more honest than one that pretends to). TB is excluded
+    /// because guest code that branches on TB produces downstream
+    /// GPR/CR divergence the hash does catch; bare-TB divergence with
+    /// no observable downstream effect does not change program
+    /// behavior, so omitting it does not lose meaningful coverage.
     ///
     /// Encoding: fields appended in little-endian byte order, in the
     /// fixed sequence above, then a one-byte reservation tag (0
@@ -212,6 +232,38 @@ mod tests {
         let mut s = PpuState::new();
         s.gpr[0] = 0xDEAD;
         assert_eq!(s.ea_d_form(0, 100), 100);
+    }
+
+    #[test]
+    fn ea_x_form_ra_zero_uses_literal_zero() {
+        // Same `(ra|0)` rule as ea_d_form: ra=0 selects a literal zero
+        // base, not GPR[0]. Locks the parallel implementation against
+        // a refactor that drops the special case.
+        let mut s = PpuState::new();
+        s.gpr[0] = 0xDEAD;
+        s.gpr[5] = 200;
+        assert_eq!(s.ea_x_form(0, 5), 200);
+    }
+
+    #[test]
+    fn set_cr_field_preserves_other_fields() {
+        // cr_field_roundtrip starts from a zeroed CR, so a masking bug
+        // that overwrites adjacent fields with zero would be invisible.
+        // Pre-populate field 3 and field 5, then verify writing one
+        // does not disturb the other.
+        let mut s = PpuState::new();
+        s.set_cr_field(3, 0b1111);
+        s.set_cr_field(5, 0b0101);
+        assert_eq!(s.cr_field(3), 0b1111);
+        assert_eq!(s.cr_field(5), 0b0101);
+        // Overwrite field 3 with a different value; field 5 must
+        // survive untouched.
+        s.set_cr_field(3, 0b1010);
+        assert_eq!(s.cr_field(3), 0b1010);
+        assert_eq!(s.cr_field(5), 0b0101);
+        // Other fields stay zero.
+        assert_eq!(s.cr_field(0), 0);
+        assert_eq!(s.cr_field(7), 0);
     }
 
     #[test]

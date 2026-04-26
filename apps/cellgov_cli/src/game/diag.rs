@@ -172,7 +172,7 @@ pub(super) fn format_fault(
         .unwrap_or_else(|| "?".to_string());
     use cellgov_ppu::{
         FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR, FAULT_INVALID_ADDRESS, FAULT_PC_OUT_OF_RANGE,
-        FAULT_UNSUPPORTED_SYSCALL,
+        FAULT_UNIMPLEMENTED_INSN, FAULT_UNSUPPORTED_SYSCALL,
     };
     let detail = match fault {
         cellgov_effects::FaultKind::Guest(code) => {
@@ -206,6 +206,10 @@ pub(super) fn format_fault(
                 FAULT_UNSUPPORTED_SYSCALL => {
                     let nr = code & 0x0000_FFFF;
                     format!("UNSUPPORTED_SYSCALL (nr={nr}) at PC={pc_str}")
+                }
+                FAULT_UNIMPLEMENTED_INSN => {
+                    let xo = code & 0x0000_FFFF;
+                    format!("UNIMPLEMENTED_INSN (xo=0x{xo:x}) at PC={pc_str}")
                 }
                 FAULT_DEBUG_BREAK => {
                     let mut s = format!("DEBUG_BREAK at PC={pc_str}");
@@ -430,13 +434,14 @@ pub(super) fn print_hle_summary(
     let uncalled_count = total_count - called_count.min(total_count);
     println!("hle_imports: {total_count} bound, {called_count} called, {uncalled_count} uncalled");
 
+    use cellgov_ppu::nid_db::StubClass;
     if !hle_calls.is_empty() {
         println!("  called:");
         for (idx, count) in hle_calls {
             let (name, class) = match hle_bindings.get(*idx as usize) {
                 Some(b) => (
                     format_hle_idx(*idx, hle_bindings),
-                    cellgov_ppu::nid_db::stub_classification(b.nid),
+                    cellgov_ppu::nid_db::stub_classification(b.nid).as_str(),
                 ),
                 None => (format!("<hle-idx-oob {idx}>"), "<oob>"),
             };
@@ -451,7 +456,7 @@ pub(super) fn print_hle_summary(
     if !uncalled.is_empty() {
         let stateful: Vec<_> = uncalled
             .iter()
-            .filter(|b| cellgov_ppu::nid_db::stub_classification(b.nid) != "noop-safe")
+            .filter(|b| cellgov_ppu::nid_db::stub_classification(b.nid) != StubClass::NoopSafe)
             .collect();
         if !stateful.is_empty() {
             println!("  uncalled (non-noop):");
@@ -460,7 +465,7 @@ pub(super) fn print_hle_summary(
                     Some((_, f)) => f.to_string(),
                     None => format!("<unresolved-nid-0x{:08x}>", b.nid),
                 };
-                let class = cellgov_ppu::nid_db::stub_classification(b.nid);
+                let class = cellgov_ppu::nid_db::stub_classification(b.nid).as_str();
                 println!("    {}::{func} [{class}]", b.module);
             }
         }
