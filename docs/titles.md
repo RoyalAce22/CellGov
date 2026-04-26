@@ -42,8 +42,8 @@ Column definitions:
 
 | Serial | Title | Year | Engine | Format | Checkpoint | Steps | Insns | Cross-runner |
 |--------|-------|------|--------|--------|------------|------:|------:|--------------|
-| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | ProcessExit (0x80010005) | 10,872 | ~2.78M | regressed (cellgov captures pre-`_cellGcmInitBody`) |
-| NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,341,466 | ~3.7B | code:0x35 ELF-header byte (non-semantic) |
+| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | MaxSteps (4B) | 15,625,000 | 4B | not available (see note below) |
+| NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,341,441 | ~3.7B | code:0x35 ELF-header byte (non-semantic) |
 | BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | MaxSteps (1B) | 3,906,250 | 1B | not available (see note below) |
 
 ## WipEout HD Fury cross-runner note
@@ -64,17 +64,22 @@ WipEout's cross-runner entry can be restored. See
 `tests/fixtures/BCES00664_cross_runner/compare_report.txt` for
 details.
 
-## flOw ProcessExit
+## flOw cross-runner note
 
-flOw's `ProcessExit` checkpoint is a clean self-shutdown. The
-title completes its init sequence (GCM context, video-out
-query, input init, sysmodule init), then runs its process-wide
-destructor chain and calls `sys_process_exit`. It is voluntary
-termination, not a CellGov fault or hang.
+An earlier CellGov release tripped `ProcessExit` on flOw at step
+10,872 with code `0x80010005` (CELL_ESRCH-class). That exit was
+the title's PSSG renderer init bailing because
+`sys_ppu_thread_create_ex` returned `CELL_EFAULT` (a sysPrxForUser
+HLE wrapper read r4 as a struct pointer instead of as the entry
+OPD address per the SDK ABI, and the LV2 host read PS3 OPDs as
+16-byte u64-pair structs instead of 8-byte u32-pair structs).
 
-The trigger is that several video and GCM query functions
-(`cellVideoOutGetState`, `cellVideoOutGetResolution`,
-`cellGcmAddressToOffset`) return `CELL_OK` but do not yet
-populate their out-parameters. The title reads zeros from
-those structs, treats the configuration as invalid, and takes
-its graceful-exit branch instead of entering its render loop.
+With both bugs fixed, flOw's PSSG init completes and the title
+advances into its main loop. Its boot now runs past the previous
+exit point and is not observed to reach a natural stopping event
+within a 4B-instruction window (15,625,000 scheduler steps with
+budget 256). The current steady-state is a polling loop on
+`cellGcmGetControlRegister` + `cellGcmAddressToOffset` waiting
+for the RSX FIFO get-pointer to advance -- a separate
+RSX/vblank gap that needs its own coverage before flOw can
+reach a mutually-reachable checkpoint with RPCS3 again.
