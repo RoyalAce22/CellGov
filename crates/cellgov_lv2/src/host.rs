@@ -51,7 +51,7 @@ mod lwmutex;
 mod memory;
 mod mutex;
 mod ppu_thread;
-mod rsx;
+pub mod rsx;
 mod semaphore;
 mod spu;
 
@@ -542,24 +542,6 @@ impl Lv2Host {
                     effects: vec![],
                 }
             }
-            Lv2Request::MemoryGetUserMemorySize { mem_info_ptr } => {
-                let total: u32 = 0x0D50_0000;
-                let avail: u32 = 0x0D50_0000;
-                let mut buf = [0u8; 8];
-                buf[0..4].copy_from_slice(&total.to_be_bytes());
-                buf[4..8].copy_from_slice(&avail.to_be_bytes());
-                let write = Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(mem_info_ptr as u64), 8).unwrap(),
-                    bytes: WritePayload::from_slice(&buf),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: self.current_tick,
-                };
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: vec![write],
-                }
-            }
             Lv2Request::MemoryContainerCreate { cid_ptr, .. } => {
                 let id = self.alloc_id();
                 self.immediate_write_u32(id, cid_ptr, requester)
@@ -596,6 +578,24 @@ impl Lv2Host {
                 Lv2Dispatch::Immediate {
                     code: 0,
                     effects: vec![tz_write, dst_write],
+                }
+            }
+            Lv2Request::MemoryGetUserMemorySize { mem_info_ptr } => {
+                let total = crate::CELL_PS3_USER_MEMORY_TOTAL;
+                let available = total;
+                let mut bytes = [0u8; 8];
+                bytes[0..4].copy_from_slice(&total.to_be_bytes());
+                bytes[4..8].copy_from_slice(&available.to_be_bytes());
+                let write = Effect::SharedWriteIntent {
+                    range: ByteRange::new(GuestAddr::new(mem_info_ptr as u64), 8).unwrap(),
+                    bytes: WritePayload::from_slice(&bytes),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: self.current_tick,
+                };
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![write],
                 }
             }
             Lv2Request::TimeGetCurrentTime { sec_ptr, nsec_ptr } => {
@@ -870,6 +870,14 @@ mod tests {
             }
         );
         assert_eq!(cellgov_time::CELL_PPU_TIMEBASE_HZ, 79_800_000);
+    }
+
+    #[test]
+    fn cell_ps3_user_memory_total_is_213_mib() {
+        // 213 MiB = 0x0D500000 = 223,346,688 bytes. The PS3 game-mode
+        // user-memory cap.
+        assert_eq!(crate::CELL_PS3_USER_MEMORY_TOTAL, 0x0D50_0000);
+        assert_eq!(crate::CELL_PS3_USER_MEMORY_TOTAL, 223_346_688);
     }
 
     #[test]

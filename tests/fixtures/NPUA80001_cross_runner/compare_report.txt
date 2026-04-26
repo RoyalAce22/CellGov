@@ -1,12 +1,27 @@
-DIVERGE region data: first byte differs at offset 0x7768 (guest 0x827768) -- 10 vs 00
+DIVERGE region code: first byte differs at offset 0x85 (guest 0x10085) -- 01 vs 81
 
-Classification: PS3-wide, non-semantic -- HLE binding table layout.
+Status: regressed (captured-window mismatch with the RPCS3 baseline).
 
-Guest address 0x00827768 falls inside the HLE OPD (function
-descriptor) stub area. CellGov and RPCS3 populate OPD slots with
-functionally-correct pointers but iterate within a module
-differently (sorted vs declaration-order NID iteration), producing
-a one-byte difference in the OPD pointer field. The guest calls
-through the OPD identically on both sides.
+Boot trajectory: CellGov now terminates at sys_process_exit with
+code 0x80010005 (CELL_ESRCH-class) at PPU step 10,872 (PC
+0x10381ce8). Before commit 8033644 (syscall-number alignment),
+flOw reached step 1,402,388 and exited cleanly. PPU spec-fix
+work (XER.SO propagation in compares, normalized unsigned CR0,
+FP fused-multiply-add, sign-extension through store-buffer
+forwarding, super-pair invalidation widening) subsequently shifted
+flOw's exit-probe path by +904 steps (9,968 -> 10,872); SSHD and
+WipEout were unaffected by the same fixes because their critical
+paths do not exercise those corner cases.
 
-Verdict: equivalent (1 byte non-semantic).
+The earlier exit means CellGov captures its observation at a much
+earlier boot point than the RPCS3 baseline, so the cross-runner
+code-region match no longer holds. The byte difference at offset
+0x85 of the code region is a consequence of the captured-window
+mismatch, not an independent bug. The RPCS3 baseline (rpcs3.dump)
+was captured at the first sys_tty_write under headless mode and
+is unchanged across CellGov revisions.
+
+Verdict: pending investigation -- the early sys_process_exit needs
+to be tracked back to the syscall whose corrected dispatch caused
+the divergent control-flow. The current step-count floor is 10,872
+(not 9,968).

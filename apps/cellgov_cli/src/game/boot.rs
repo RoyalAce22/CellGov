@@ -33,7 +33,7 @@ pub(super) struct PreparedBoot {
     pub timings: StartupTimings,
 }
 
-/// Wall-time spans for each startup phase.
+/// Wall-time spans for each startup stage.
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct StartupTimings {
     pub mem_alloc: Duration,

@@ -36,7 +36,7 @@ natural "done" for an interpreter. Observations stop at a
 useful capture point.
 
 Different titles need different checkpoints. A title that calls
-`sys_process_exit` during its startup-probe phase has a natural
+`sys_process_exit` during its startup-probe stage has a natural
 stopping point at the exit call. A title that proceeds into
 rendering has no exit; it stops at its first write to the RSX
 command register, which is the earliest point that is both

@@ -1,7 +1,7 @@
 //! Human-readable and machine-readable comparison report rendering.
 
 use crate::compare::{Classification, CompareMode, CompareResult, MultiCompareResult};
-use crate::observation::Observation;
+use crate::observation::{Observation, ObservedEventKind, ObservedOutcome};
 use serde::Serialize;
 use std::fmt::Write;
 
@@ -12,52 +12,48 @@ pub fn format_human(result: &CompareResult) -> String {
     let class = classification_label(result.classification);
     let mode = mode_str(result.mode);
 
-    writeln!(out, "classification: {class}").ok();
-    writeln!(out, "mode: {mode}").ok();
+    let _ = writeln!(out, "classification: {class}");
+    let _ = writeln!(out, "mode: {mode}");
 
     if let Some((expected, actual)) = &result.outcome_mismatch {
-        writeln!(out, "outcome: expected {expected:?}, actual {actual:?}").ok();
+        let _ = writeln!(out, "outcome: expected {expected:?}, actual {actual:?}");
     }
 
     if let Some(d) = &result.memory_divergence {
-        writeln!(
+        let _ = writeln!(
             out,
             "memory: region=\"{}\" offset={} expected=0x{:02x} actual=0x{:02x}",
             d.region, d.offset, d.expected, d.actual
-        )
-        .ok();
+        );
     }
 
     if let Some(d) = &result.event_divergence {
-        write!(out, "events: index={}", d.index).ok();
+        let _ = write!(out, "events: index={}", d.index);
         match (&d.expected, &d.actual) {
             (Some(e), Some(a)) => {
-                writeln!(
+                let _ = writeln!(
                     out,
                     " expected={:?}/unit={} actual={:?}/unit={}",
                     e.kind, e.unit, a.kind, a.unit
-                )
-                .ok();
+                );
             }
             (Some(e), None) => {
-                writeln!(
+                let _ = writeln!(
                     out,
                     " expected={:?}/unit={} actual=<missing>",
                     e.kind, e.unit
-                )
-                .ok();
+                );
             }
             (None, Some(a)) => {
-                writeln!(
+                let _ = writeln!(
                     out,
                     " expected=<missing> actual={:?}/unit={}",
                     a.kind, a.unit
-                )
-                .ok();
+                );
             }
-            (None, None) => {
-                writeln!(out).ok();
-            }
+            // compare::compare never constructs an EventDivergence with
+            // both sides None: every divergence has at least one event.
+            (None, None) => unreachable!("EventDivergence with both sides None"),
         }
     }
 
@@ -75,29 +71,7 @@ pub fn format_json(
     actual: &Observation,
 ) -> Result<String, serde_json::Error> {
     let report = JsonReport {
-        classification: classification_slug(result.classification),
-        mode: mode_str(result.mode),
-        outcome_mismatch: result.outcome_mismatch.map(|(e, a)| OutcomePair {
-            expected: format!("{e:?}"),
-            actual: format!("{a:?}"),
-        }),
-        memory_divergence: result.memory_divergence.as_ref().map(|d| MemoryDiv {
-            region: &d.region,
-            offset: d.offset,
-            expected: d.expected,
-            actual: d.actual,
-        }),
-        event_divergence: result.event_divergence.as_ref().map(|d| EventDiv {
-            index: d.index,
-            expected: d.expected.map(|e| EventRef {
-                kind: format!("{:?}", e.kind),
-                unit: e.unit,
-            }),
-            actual: d.actual.map(|a| EventRef {
-                kind: format!("{:?}", a.kind),
-                unit: a.unit,
-            }),
-        }),
+        body: build_body(result),
         expected,
         actual,
     };
@@ -110,17 +84,17 @@ pub fn format_multi_human(result: &MultiCompareResult, baseline_count: usize) ->
 
     let class = classification_label(result.classification);
 
-    writeln!(out, "classification: {class}").ok();
-    writeln!(out, "mode: {}", mode_str(result.mode)).ok();
-    writeln!(out, "baselines: {baseline_count}").ok();
+    let _ = writeln!(out, "classification: {class}");
+    let _ = writeln!(out, "mode: {}", mode_str(result.mode));
+    let _ = writeln!(out, "baselines: {baseline_count}");
 
     if let Some(ref div) = result.oracle_divergence {
-        writeln!(out, "oracle: DISAGREE").ok();
-        write!(out, "{}", format_human(div)).ok();
+        let _ = writeln!(out, "oracle: DISAGREE");
+        let _ = write!(out, "{}", format_human(div));
     } else {
-        writeln!(out, "oracle: AGREE").ok();
+        let _ = writeln!(out, "oracle: AGREE");
         if let Some(ref cg) = result.cellgov_result {
-            write!(out, "{}", format_human(cg)).ok();
+            let _ = write!(out, "{}", format_human(cg));
         }
     }
 
@@ -128,6 +102,11 @@ pub fn format_multi_human(result: &MultiCompareResult, baseline_count: usize) ->
 }
 
 /// Serialize a multi-baseline comparison result as pretty JSON.
+///
+/// Top-level shape: `classification`, `mode`, `baseline_count`,
+/// `oracle_settled`, optional `oracle_divergence` (sub-report fields when
+/// baselines disagree), optional `cellgov_result` (sub-report fields when
+/// the oracle settled), `cellgov` observation.
 pub fn format_multi_json(
     result: &MultiCompareResult,
     baselines: &[Observation],
@@ -138,9 +117,38 @@ pub fn format_multi_json(
         mode: mode_str(result.mode),
         baseline_count: baselines.len(),
         oracle_settled: result.oracle_divergence.is_none(),
+        oracle_divergence: result.oracle_divergence.as_ref().map(build_body),
+        cellgov_result: result.cellgov_result.as_ref().map(build_body),
         cellgov,
     };
     serde_json::to_string_pretty(&report)
+}
+
+fn build_body(result: &CompareResult) -> CompareReportBody<'_> {
+    CompareReportBody {
+        classification: classification_slug(result.classification),
+        mode: mode_str(result.mode),
+        outcome_mismatch: result
+            .outcome_mismatch
+            .map(|(expected, actual)| OutcomePair { expected, actual }),
+        memory_divergence: result.memory_divergence.as_ref().map(|d| MemoryDiv {
+            region: &d.region,
+            offset: d.offset,
+            expected: d.expected,
+            actual: d.actual,
+        }),
+        event_divergence: result.event_divergence.as_ref().map(|d| EventDiv {
+            index: d.index,
+            expected: d.expected.map(|e| EventRef {
+                kind: e.kind,
+                unit: e.unit,
+            }),
+            actual: d.actual.map(|a| EventRef {
+                kind: a.kind,
+                unit: a.unit,
+            }),
+        }),
+    }
 }
 
 fn mode_str(mode: CompareMode) -> &'static str {
@@ -170,8 +178,12 @@ fn classification_slug(c: Classification) -> &'static str {
     }
 }
 
+/// Divergence-detail fields shared between single and multi-baseline JSON
+/// reports. `ObservedOutcome` and `ObservedEventKind` serialize through
+/// their `Serialize` derives so the wire format matches the embedded
+/// `Observation`'s `outcome` / event `kind` values.
 #[derive(Serialize)]
-struct JsonReport<'a> {
+struct CompareReportBody<'a> {
     classification: &'static str,
     mode: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -180,14 +192,20 @@ struct JsonReport<'a> {
     memory_divergence: Option<MemoryDiv<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     event_divergence: Option<EventDiv>,
+}
+
+#[derive(Serialize)]
+struct JsonReport<'a> {
+    #[serde(flatten)]
+    body: CompareReportBody<'a>,
     expected: &'a Observation,
     actual: &'a Observation,
 }
 
 #[derive(Serialize)]
 struct OutcomePair {
-    expected: String,
-    actual: String,
+    expected: ObservedOutcome,
+    actual: ObservedOutcome,
 }
 
 #[derive(Serialize)]
@@ -209,7 +227,7 @@ struct EventDiv {
 
 #[derive(Serialize)]
 struct EventRef {
-    kind: String,
+    kind: ObservedEventKind,
     unit: u64,
 }
 
@@ -219,6 +237,10 @@ struct MultiJsonReport<'a> {
     mode: &'static str,
     baseline_count: usize,
     oracle_settled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    oracle_divergence: Option<CompareReportBody<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cellgov_result: Option<CompareReportBody<'a>>,
     cellgov: &'a Observation,
 }
 
@@ -525,5 +547,91 @@ mod tests {
         assert!(json.contains("\"unsettled_oracle\""));
         assert!(json.contains("\"oracle_settled\": false"));
         assert!(json.contains("\"baseline_count\": 2"));
+    }
+
+    #[test]
+    fn multi_json_settled_includes_cellgov_result_details() {
+        let result = MultiCompareResult {
+            classification: Classification::Divergence,
+            mode: CompareMode::Strict,
+            oracle_divergence: None,
+            cellgov_result: Some(CompareResult {
+                classification: Classification::Divergence,
+                mode: CompareMode::Strict,
+                outcome_mismatch: Some((ObservedOutcome::Completed, ObservedOutcome::Fault)),
+                memory_divergence: Some(MemoryDivergence {
+                    region: "result".into(),
+                    offset: 7,
+                    expected: 0xAA,
+                    actual: 0xBB,
+                }),
+                event_divergence: None,
+            }),
+        };
+        let a = obs(ObservedOutcome::Completed);
+        let json = format_multi_json(&result, std::slice::from_ref(&a), &a).expect("json");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        let cg = &parsed["cellgov_result"];
+        assert_eq!(cg["classification"], "divergence");
+        assert_eq!(cg["outcome_mismatch"]["expected"], "Completed");
+        assert_eq!(cg["outcome_mismatch"]["actual"], "Fault");
+        assert_eq!(cg["memory_divergence"]["region"], "result");
+        assert_eq!(cg["memory_divergence"]["offset"], 7);
+        assert!(parsed.get("oracle_divergence").is_none());
+    }
+
+    #[test]
+    fn multi_json_unsettled_includes_oracle_divergence_details() {
+        let result = MultiCompareResult {
+            classification: Classification::UnsettledOracle,
+            mode: CompareMode::Events,
+            oracle_divergence: Some(CompareResult {
+                classification: Classification::Divergence,
+                mode: CompareMode::Events,
+                outcome_mismatch: None,
+                memory_divergence: None,
+                event_divergence: Some(EventDivergence {
+                    index: 3,
+                    expected: Some(ObservedEvent {
+                        kind: ObservedEventKind::DmaComplete,
+                        unit: 1,
+                        sequence: 3,
+                    }),
+                    actual: None,
+                }),
+            }),
+            cellgov_result: None,
+        };
+        let a = obs(ObservedOutcome::Completed);
+        let b = obs(ObservedOutcome::Fault);
+        let json =
+            format_multi_json(&result, &[a, b], &obs(ObservedOutcome::Completed)).expect("json");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        let od = &parsed["oracle_divergence"];
+        assert_eq!(od["classification"], "divergence");
+        assert_eq!(od["event_divergence"]["index"], 3);
+        assert_eq!(od["event_divergence"]["expected"]["kind"], "DmaComplete");
+        assert_eq!(od["event_divergence"]["expected"]["unit"], 1);
+        assert!(od["event_divergence"].get("actual").is_none());
+        assert!(parsed.get("cellgov_result").is_none());
+    }
+
+    #[test]
+    fn json_outcome_serialization_matches_observation_schema() {
+        let result = CompareResult {
+            classification: Classification::Divergence,
+            mode: CompareMode::Strict,
+            outcome_mismatch: Some((ObservedOutcome::Completed, ObservedOutcome::Fault)),
+            memory_divergence: None,
+            event_divergence: None,
+        };
+        let a = obs(ObservedOutcome::Completed);
+        let b = obs(ObservedOutcome::Fault);
+        let json = format_json(&result, &a, &b).expect("json");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(parsed["outcome_mismatch"]["expected"], "Completed");
+        assert_eq!(parsed["expected"]["outcome"], "Completed");
+        assert_eq!(parsed["outcome_mismatch"]["actual"], "Fault");
+        assert_eq!(parsed["actual"]["outcome"], "Fault");
     }
 }

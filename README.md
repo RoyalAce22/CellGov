@@ -49,10 +49,12 @@ Pre-Alpha. What works today:
 
 - **Titles**: 3 boot to cross-runner checkpoints -- flOw, Super
   Stardust HD, WipEout HD Fury. See [docs/titles.md](docs/titles.md).
-- **PPU**: 119 instruction variants. **SPU**: full interpreter.
-- **LV2**: 54 syscalls, 21 HLE exports, including the `sys_rsx`
-  kernel-side RSX surface.
-- 1,965 tests, zero `unsafe` (`unsafe_code = forbid`).
+- **PPU**: 140 `PpuInstruction` variants (architectural ops plus
+  shadow quickenings and super-pair fusions). **SPU**: full
+  interpreter.
+- **LV2**: 57 classified syscalls, 21 HLE exports, including the
+  `sys_rsx` kernel-side RSX surface.
+- 2,144 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 ### Next reads
 

@@ -561,8 +561,8 @@ impl Runtime {
     }
 
     /// Consume the runtime and return its guest memory. Used to chain
-    /// execution phases: run one runtime, extract the initialized memory,
-    /// and seed a fresh runtime for the next phase.
+    /// execution stages: run one runtime, extract the initialized memory,
+    /// and seed a fresh runtime for the next stage.
     pub fn into_memory(self) -> GuestMemory {
         self.memory
     }

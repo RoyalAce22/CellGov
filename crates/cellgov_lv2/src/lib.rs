@@ -37,3 +37,6 @@ pub use sync_primitives::{
     SemaphoreWait, WaiterList,
 };
 pub use thread_group::{GroupState, ThreadGroup, ThreadGroupTable};
+
+/// Total user-memory cap (213 MiB) reported via `sys_memory_get_user_memory_size`.
+pub const CELL_PS3_USER_MEMORY_TOTAL: u32 = 0x0D50_0000;

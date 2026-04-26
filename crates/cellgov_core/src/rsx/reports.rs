@@ -12,18 +12,10 @@ use core::mem::size_of;
 /// [`RsxContext::state_hash`] changes.
 pub const STATE_HASH_FORMAT_VERSION: u8 = 2;
 
-/// Fixed `context_id` returned from `sys_rsx_context_allocate`.
-pub const RSX_CONTEXT_ID: u32 = 0x5555_5555;
-
-/// DMA-control offset within the reservation.
-pub const DMA_CONTROL_OFFSET: u32 = 0x0000_0000;
-/// Driver-info offset within the reservation.
-pub const DRIVER_INFO_OFFSET: u32 = 0x0010_0000;
-/// Reports offset within the reservation.
-pub const REPORTS_OFFSET: u32 = 0x0020_0000;
-
-/// Bytes reserved per sys_rsx context.
-pub const RSX_CONTEXT_RESERVATION: u32 = 0x0030_0000;
+pub use cellgov_lv2::host::rsx::{
+    driver_info_init, DMA_CONTROL_OFFSET, DRIVER_INFO_OFFSET, REPORTS_OFFSET, RSX_CONTEXT_ID,
+    RSX_CONTEXT_RESERVATION, SEMAPHORE_INIT_PATTERN,
+};
 
 /// BE u32 semaphore slot.
 pub type RsxSemaphore = u32;
@@ -188,107 +180,6 @@ pub struct RsxDriverInfo {
     pub unk17: [u32; 2],
     /// Last-error word read by `cellGcmSetGraphicsHandler`.
     pub last_error: u32,
-}
-
-/// RPCS3 values populated at `sys_rsx_context_allocate`.
-/// Hand-maintained; no compile-time tether to RPCS3.
-pub mod driver_info_init {
-    /// Driver version word.
-    pub const VERSION_DRIVER: u32 = 0x211;
-    /// GPU version word.
-    pub const VERSION_GPU: u32 = 0x5c;
-    /// nvcore frequency in Hz.
-    pub const NVCORE_FREQUENCY: u32 = 500_000_000;
-    /// Memory frequency in Hz.
-    pub const MEMORY_FREQUENCY: u32 = 650_000_000;
-    /// Offset from reports_base to the notify array.
-    pub const REPORTS_NOTIFY_OFFSET: u32 = 0x1000;
-    /// Offset from reports_base to the semaphore block.
-    pub const REPORTS_OFFSET: u32 = 0;
-    /// Offset from reports_base to the report entries.
-    pub const REPORTS_REPORT_OFFSET: u32 = 0x1400;
-    /// Hardware channel (games = 1, VSH = 0).
-    pub const HARDWARE_CHANNEL: u32 = 1;
-}
-
-/// Semaphore init sentinel pattern, repeated across the 1024 slots.
-/// Values are native-endian; use [`semaphore_init_word_be`] for BE
-/// guest-memory bytes.
-pub const SEMAPHORE_INIT_PATTERN: [u32; 4] = [0x1337_C0D3, 0x1337_BABE, 0x1337_BEEF, 0x1337_F001];
-
-/// Initial notify timestamp. All-ones palindrome hides a missing BE
-/// swap; use [`notify_init_timestamp_be`] as the single choke point.
-pub const NOTIFY_INIT_TIMESTAMP: u64 = u64::MAX;
-
-/// Initial report timestamp. Same BE-conversion hazard as
-/// [`NOTIFY_INIT_TIMESTAMP`].
-pub const REPORT_INIT_TIMESTAMP: u64 = u64::MAX;
-
-/// Initial report pad.
-pub const REPORT_INIT_PAD: u32 = u32::MAX;
-
-/// BE bytes for the `i % 4`-th slot of the semaphore init pattern.
-#[inline]
-pub const fn semaphore_init_word_be(i: usize) -> [u8; 4] {
-    SEMAPHORE_INIT_PATTERN[i % 4].to_be_bytes()
-}
-
-/// BE bytes for the notify init timestamp.
-#[inline]
-pub const fn notify_init_timestamp_be() -> [u8; 8] {
-    NOTIFY_INIT_TIMESTAMP.to_be_bytes()
-}
-
-/// BE bytes for the report init timestamp.
-#[inline]
-pub const fn report_init_timestamp_be() -> [u8; 8] {
-    REPORT_INIT_TIMESTAMP.to_be_bytes()
-}
-
-/// BE bytes for the report init pad.
-#[inline]
-pub const fn report_init_pad_be() -> [u8; 4] {
-    REPORT_INIT_PAD.to_be_bytes()
-}
-
-/// Fill `buf` with the guest-memory bytes `sys_rsx_context_allocate`
-/// writes into the reports region: zero, then the semaphore-pattern,
-/// notify-timestamp, and report-field init loops.
-///
-/// # Panics
-///
-/// Panics if `buf.len() != RSX_REPORTS_SIZE`.
-pub fn write_rsx_reports_init(buf: &mut [u8]) {
-    assert_eq!(
-        buf.len(),
-        RSX_REPORTS_SIZE,
-        "write_rsx_reports_init expects an RSX_REPORTS_SIZE-byte buffer"
-    );
-    buf.fill(0);
-
-    let semaphore_base = 0usize;
-    for i in 0..1024 {
-        let offset = semaphore_base + i * 4;
-        buf[offset..offset + 4].copy_from_slice(&semaphore_init_word_be(i));
-    }
-
-    // Notify stride 16; `zero` stays zero from the initial fill.
-    let notify_base = 0x1000usize;
-    let ts_be = notify_init_timestamp_be();
-    for i in 0..64 {
-        let offset = notify_base + i * 16;
-        buf[offset..offset + 8].copy_from_slice(&ts_be);
-    }
-
-    // Report stride 16; `val` stays zero from the initial fill.
-    let report_base = 0x1400usize;
-    let ts_be = report_init_timestamp_be();
-    let pad_be = report_init_pad_be();
-    for i in 0..2048 {
-        let offset = report_base + i * 16;
-        buf[offset..offset + 8].copy_from_slice(&ts_be);
-        buf[offset + 12..offset + 16].copy_from_slice(&pad_be);
-    }
 }
 
 /// Guest address of label `index`.
@@ -472,14 +363,19 @@ impl Default for RsxContext {
     }
 }
 
-/// Bytes a [`RsxReports`] occupies in guest memory.
-pub const RSX_REPORTS_SIZE: usize = size_of::<RsxReports>();
+pub use cellgov_lv2::host::rsx::{RSX_DRIVER_INFO_SIZE, RSX_REPORTS_SIZE};
 
 /// Bytes a [`RsxDmaControl`] occupies in guest memory.
 pub const RSX_DMA_CONTROL_SIZE: usize = size_of::<RsxDmaControl>();
 
-/// Bytes a [`RsxDriverInfo`] occupies in guest memory.
-pub const RSX_DRIVER_INFO_SIZE: usize = size_of::<RsxDriverInfo>();
+const _: () = assert!(
+    size_of::<RsxReports>() == RSX_REPORTS_SIZE,
+    "RsxReports layout drift vs cellgov_lv2::host::rsx::RSX_REPORTS_SIZE"
+);
+const _: () = assert!(
+    size_of::<RsxDriverInfo>() == RSX_DRIVER_INFO_SIZE,
+    "RsxDriverInfo layout drift vs cellgov_lv2::host::rsx::RSX_DRIVER_INFO_SIZE"
+);
 
 #[cfg(test)]
 mod tests {
@@ -754,95 +650,6 @@ mod tests {
     #[should_panic(expected = "out of range")]
     fn label_address_helper_rejects_index_256() {
         let _ = label_address(0x3020_0000, 256);
-    }
-
-    #[test]
-    fn write_rsx_reports_init_matches_rpcs3_fills() {
-        // Independent reference: build expected bytes from the RPCS3
-        // loops without going through module helpers, then compare.
-        let mut expected = vec![0u8; RSX_REPORTS_SIZE];
-
-        let pattern: [u32; 4] = [0x1337_C0D3, 0x1337_BABE, 0x1337_BEEF, 0x1337_F001];
-        for i in 0..1024 {
-            let offset = i * 4;
-            expected[offset..offset + 4].copy_from_slice(&pattern[i % 4].to_be_bytes());
-        }
-        for i in 0..64 {
-            let offset = 0x1000 + i * 16;
-            expected[offset..offset + 8].copy_from_slice(&u64::MAX.to_be_bytes());
-        }
-        for i in 0..2048 {
-            let offset = 0x1400 + i * 16;
-            expected[offset..offset + 8].copy_from_slice(&u64::MAX.to_be_bytes());
-            expected[offset + 12..offset + 16].copy_from_slice(&u32::MAX.to_be_bytes());
-        }
-
-        let mut actual = vec![0u8; RSX_REPORTS_SIZE];
-        write_rsx_reports_init(&mut actual);
-        assert_eq!(
-            actual, expected,
-            "write_rsx_reports_init diverges from RPCS3 reference"
-        );
-    }
-
-    #[test]
-    fn write_rsx_reports_init_label_255_is_1337c0d3() {
-        let mut buf = vec![0u8; RSX_REPORTS_SIZE];
-        write_rsx_reports_init(&mut buf);
-        let sentinel = u32::from_be_bytes([buf[0xFF0], buf[0xFF1], buf[0xFF2], buf[0xFF3]]);
-        assert_eq!(sentinel, 0x1337_C0D3);
-    }
-
-    #[test]
-    fn write_rsx_reports_init_notify_timestamps_are_all_ones() {
-        let mut buf = vec![0u8; RSX_REPORTS_SIZE];
-        write_rsx_reports_init(&mut buf);
-        for i in 0..64 {
-            let offset = 0x1000 + i * 16;
-            let ts = &buf[offset..offset + 8];
-            assert_eq!(ts, &[0xFF; 8], "notify[{i}].timestamp");
-            let zero = &buf[offset + 8..offset + 16];
-            assert_eq!(zero, &[0x00; 8], "notify[{i}].zero");
-        }
-    }
-
-    #[test]
-    fn write_rsx_reports_init_report_fields() {
-        let mut buf = vec![0u8; RSX_REPORTS_SIZE];
-        write_rsx_reports_init(&mut buf);
-        for i in 0..2048 {
-            let offset = 0x1400 + i * 16;
-            assert_eq!(
-                &buf[offset..offset + 8],
-                &[0xFF; 8],
-                "report[{i}].timestamp"
-            );
-            assert_eq!(&buf[offset + 8..offset + 12], &[0x00; 4], "report[{i}].val");
-            assert_eq!(
-                &buf[offset + 12..offset + 16],
-                &[0xFF; 4],
-                "report[{i}].pad"
-            );
-        }
-    }
-
-    #[test]
-    #[should_panic(expected = "RSX_REPORTS_SIZE-byte buffer")]
-    fn write_rsx_reports_init_rejects_wrong_sized_buffer() {
-        let mut buf = vec![0u8; 100];
-        write_rsx_reports_init(&mut buf);
-    }
-
-    #[test]
-    fn be_byte_helpers_produce_be_order() {
-        // Non-palindromic input catches a missing BE swap; the
-        // all-ones values alone would pass under either byte order.
-        assert_eq!(semaphore_init_word_be(0), [0x13, 0x37, 0xC0, 0xD3]);
-        assert_eq!(semaphore_init_word_be(4), [0x13, 0x37, 0xC0, 0xD3]);
-        assert_eq!(semaphore_init_word_be(1), [0x13, 0x37, 0xBA, 0xBE]);
-        assert_eq!(notify_init_timestamp_be(), [0xFF; 8]);
-        assert_eq!(report_init_timestamp_be(), [0xFF; 8]);
-        assert_eq!(report_init_pad_be(), [0xFF; 4]);
     }
 
     #[test]

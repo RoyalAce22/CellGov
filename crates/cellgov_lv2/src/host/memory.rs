@@ -173,8 +173,8 @@ mod tests {
                         let b = bytes.bytes();
                         let total = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
                         let avail = u32::from_be_bytes([b[4], b[5], b[6], b[7]]);
-                        assert_eq!(total, 0x0D50_0000);
-                        assert_eq!(avail, 0x0D50_0000);
+                        assert_eq!(total, crate::CELL_PS3_USER_MEMORY_TOTAL);
+                        assert_eq!(avail, crate::CELL_PS3_USER_MEMORY_TOTAL);
                     }
                     other => panic!("expected SharedWriteIntent, got {other:?}"),
                 }
