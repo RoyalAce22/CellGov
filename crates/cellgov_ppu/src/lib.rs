@@ -22,7 +22,7 @@ use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, LocalDiagnostics,
     UnitStatus, YieldReason,
 };
-use cellgov_time::Budget;
+use cellgov_time::{Budget, InstructionCost};
 
 /// PPU tried to fetch at an address beyond guest memory.
 pub const FAULT_PC_OUT_OF_RANGE: u32 = 0x0102_0000;
@@ -296,7 +296,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                 self.break_pc = None;
                 return ExecutionStepResult {
                     yield_reason: YieldReason::Fault,
-                    consumed_budget: Budget::new(0),
+                    consumed_cost: InstructionCost::ZERO,
                     local_diagnostics: self.fault_diag(self.state.pc),
                     fault: Some(FaultKind::Guest(FAULT_DEBUG_BREAK)),
                     syscall_args: None,
@@ -341,7 +341,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.status = UnitStatus::Faulted;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_budget: Budget::new(budget.raw() - remaining),
+                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: self.fault_diag(step_pc),
                         fault: Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
                         syscall_args: None,
@@ -359,7 +359,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         self.status = UnitStatus::Faulted;
                         return ExecutionStepResult {
                             yield_reason: YieldReason::Fault,
-                            consumed_budget: Budget::new(budget.raw() - remaining),
+                            consumed_cost: InstructionCost::new(budget.raw() - remaining),
                             local_diagnostics: self.fault_diag(step_pc),
                             fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
                             syscall_args: None,
@@ -371,7 +371,7 @@ impl ExecutionUnit for PpuExecutionUnit {
             // Placeholder left by superinstruction pairing: advance PC, burn a tick.
             // The slot represents the second architectural instruction of a fused
             // super-pair, so it retires for trace and counter purposes too -- otherwise
-            // retirement_counter and consumed_budget drift apart on every super-pair.
+            // retirement_counter and consumed_cost drift apart on every super-pair.
             if matches!(insn, instruction::PpuInstruction::Consumed) {
                 self.state.pc += 4;
                 if self.per_step_trace {
@@ -391,7 +391,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.store_buf.flush(effects, self.id);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::BudgetExhausted,
-                        consumed_budget: budget,
+                        consumed_cost: InstructionCost::new(budget.raw()),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
@@ -442,7 +442,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     ];
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Syscall,
-                        consumed_budget: Budget::new(budget.raw() - remaining),
+                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: Some(args),
@@ -484,7 +484,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     };
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_budget: Budget::new(0),
+                        consumed_cost: InstructionCost::ZERO,
                         local_diagnostics: diag,
                         fault: Some(FaultKind::Guest(code)),
                         syscall_args: None,
@@ -505,7 +505,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.status = UnitStatus::Faulted;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_budget: Budget::new(0),
+                        consumed_cost: InstructionCost::ZERO,
                         local_diagnostics: diag,
                         fault: Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)),
                         syscall_args: None,
@@ -516,7 +516,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     self.store_buf.flush(effects, self.id);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::BudgetExhausted,
-                        consumed_budget: Budget::new(budget.raw() - remaining),
+                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
@@ -556,7 +556,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                 self.store_buf.flush(effects, self.id);
                 return ExecutionStepResult {
                     yield_reason: YieldReason::BudgetExhausted,
-                    consumed_budget: budget,
+                    consumed_cost: InstructionCost::new(budget.raw()),
                     local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: None,
                     syscall_args: None,

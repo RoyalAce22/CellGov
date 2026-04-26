@@ -3,6 +3,7 @@ use cellgov_effects::Effect;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
+use cellgov_time::InstructionCost;
 use std::cell::Cell;
 
 // Local test doubles -- cellgov_testkit depends on cellgov_core,
@@ -60,7 +61,7 @@ impl ExecutionUnit for CountingUnit {
         });
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -139,14 +140,14 @@ fn step_runs_a_registered_unit() {
         .register_with(|id| CountingUnit::new(id, 10));
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(0));
-    assert_eq!(s.result.consumed_budget, Budget::new(5));
+    assert_eq!(s.result.consumed_cost, InstructionCost::new(5));
     assert_eq!(s.time_after, GuestTicks::new(5));
     assert_eq!(rt.time(), GuestTicks::new(5));
     assert_eq!(rt.steps_taken(), 1);
 }
 
 #[test]
-fn time_advances_by_consumed_budget() {
+fn time_advances_by_consumed_cost() {
     let mut rt = build(16, 7, 100);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 10));
@@ -294,7 +295,7 @@ impl ExecutionUnit for WritingUnit {
         });
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -349,12 +350,12 @@ fn step_emits_unit_scheduled_then_step_completed_in_order() {
         TraceRecord::StepCompleted {
             unit,
             yield_reason,
-            consumed_budget,
+            consumed_cost,
             time_after,
         } => {
             assert_eq!(unit, UnitId::new(0));
             assert_eq!(yield_reason, TracedYieldReason::BudgetExhausted);
-            assert_eq!(consumed_budget, Budget::new(5));
+            assert_eq!(consumed_cost, InstructionCost::new(5));
             assert_eq!(time_after, GuestTicks::new(5));
         }
         ref other => panic!("expected StepCompleted, got {other:?}"),
@@ -530,7 +531,7 @@ fn step_emits_one_effect_record_per_effect_in_emission_order() {
             });
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
-                consumed_budget: budget,
+                consumed_cost: InstructionCost::new(budget.raw()),
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -891,7 +892,7 @@ fn commit_validation_failure_traces_as_fault_discarded() {
             });
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
-                consumed_budget: budget,
+                consumed_cost: InstructionCost::new(budget.raw()),
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -1079,7 +1080,7 @@ impl ExecutionUnit for StateHashEmittingUnit {
         self.step_idx.set(self.step_idx.get() + 1);
         ExecutionStepResult {
             yield_reason: YieldReason::BudgetExhausted,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -1253,7 +1254,7 @@ impl ExecutionUnit for SilentUnit {
         };
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -1470,7 +1471,7 @@ impl ExecutionUnit for ReservationDriverUnit {
         };
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -1540,7 +1541,7 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
         });
         ExecutionStepResult {
             yield_reason: YieldReason::Finished,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -1636,7 +1637,7 @@ impl ExecutionUnit for RsxFlipRequestEmitterUnit {
         });
         ExecutionStepResult {
             yield_reason: YieldReason::Finished,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -1785,7 +1786,7 @@ impl ExecutionUnit for RsxControlWriterUnit {
         });
         ExecutionStepResult {
             yield_reason: YieldReason::Finished,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -1971,7 +1972,7 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
         }
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -2499,7 +2500,7 @@ impl ExecutionUnit for RsxFlipSpinnerUnit {
         });
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,

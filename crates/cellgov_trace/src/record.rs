@@ -28,7 +28,7 @@
 use crate::hash::StateHash;
 use crate::level::TraceLevel;
 use cellgov_event::UnitId;
-use cellgov_time::{Budget, Epoch, GuestTicks};
+use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 
 /// Yield reasons as the trace records them.
 ///
@@ -244,8 +244,9 @@ pub enum TraceRecord {
         unit: UnitId,
         /// Why the unit yielded.
         yield_reason: TracedYieldReason,
-        /// Budget consumed.
-        consumed_budget: Budget,
+        /// Work retired in this step. Wire format is u64; the type
+        /// wrapping is structural.
+        consumed_cost: InstructionCost,
         /// Guest time after the step.
         time_after: GuestTicks,
     },
@@ -382,13 +383,13 @@ impl TraceRecord {
             TraceRecord::StepCompleted {
                 unit,
                 yield_reason,
-                consumed_budget,
+                consumed_cost,
                 time_after,
             } => {
                 buf.push(TAG_STEP_COMPLETED);
                 write_u64(buf, unit.raw());
                 buf.push(*yield_reason as u8);
-                write_u64(buf, consumed_budget.raw());
+                write_u64(buf, consumed_cost.raw());
                 write_u64(buf, time_after.raw());
             }
             TraceRecord::CommitApplied {
@@ -481,12 +482,12 @@ impl TraceRecord {
                 let yr_byte = read_u8(bytes, &mut pos)?;
                 let yield_reason = TracedYieldReason::from_u8(yr_byte)
                     .ok_or(DecodeError::UnknownYieldReason(yr_byte))?;
-                let consumed_budget = Budget::new(read_u64(bytes, &mut pos)?);
+                let consumed_cost = InstructionCost::new(read_u64(bytes, &mut pos)?);
                 let time_after = GuestTicks::new(read_u64(bytes, &mut pos)?);
                 TraceRecord::StepCompleted {
                     unit,
                     yield_reason,
-                    consumed_budget,
+                    consumed_cost,
                     time_after,
                 }
             }

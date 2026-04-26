@@ -127,6 +127,7 @@ mod tests {
     use crate::yield_reason::YieldReason;
     use crate::LocalDiagnostics;
     use cellgov_mem::GuestMemory;
+    use cellgov_time::InstructionCost;
 
     struct CountingUnit {
         id: UnitId,
@@ -167,7 +168,7 @@ mod tests {
             });
             ExecutionStepResult {
                 yield_reason,
-                consumed_budget: budget,
+                consumed_cost: InstructionCost::new(budget.raw()),
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -202,7 +203,7 @@ mod tests {
         let mut effects = Vec::new();
         let r1 = unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
         assert_eq!(r1.yield_reason, YieldReason::BudgetExhausted);
-        assert_eq!(r1.consumed_budget, Budget::new(10));
+        assert_eq!(r1.consumed_cost, InstructionCost::new(10));
         assert_eq!(effects.len(), 1);
         assert_eq!(unit.snapshot(), 1);
         assert_eq!(unit.status(), UnitStatus::Runnable);

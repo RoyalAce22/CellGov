@@ -81,7 +81,7 @@ mod tests {
     use crate::hash::StateHash;
     use crate::record::{HashCheckpointKind, TracedYieldReason};
     use cellgov_event::UnitId;
-    use cellgov_time::{Budget, Epoch, GuestTicks};
+    use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 
     fn scheduled() -> TraceRecord {
         TraceRecord::UnitScheduled {
@@ -113,7 +113,7 @@ mod tests {
         TraceRecord::StepCompleted {
             unit: UnitId::new(0),
             yield_reason: TracedYieldReason::BudgetExhausted,
-            consumed_budget: Budget::new(1),
+            consumed_cost: InstructionCost::ONE,
             time_after: GuestTicks::new(1),
         }
     }

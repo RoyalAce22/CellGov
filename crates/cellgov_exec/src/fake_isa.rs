@@ -12,7 +12,7 @@ use crate::LocalDiagnostics;
 use cellgov_effects::{Effect, MailboxMessage, WaitTarget, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_time::{Budget, GuestTicks};
+use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
 /// A single fake-ISA opcode.
 ///
@@ -144,7 +144,7 @@ impl ExecutionUnit for FakeIsaUnit {
             self.finished = true;
             return ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
-                consumed_budget: budget,
+                consumed_cost: InstructionCost::new(budget.raw()),
                 local_diagnostics: LocalDiagnostics::empty(),
                 fault: None,
                 syscall_args: None,
@@ -247,7 +247,7 @@ impl ExecutionUnit for FakeIsaUnit {
 
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,

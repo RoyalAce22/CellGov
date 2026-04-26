@@ -9,7 +9,7 @@ pub mod budget;
 pub mod epoch;
 pub mod ticks;
 
-pub use budget::Budget;
+pub use budget::{Budget, Consume, InstructionCost};
 pub use epoch::Epoch;
 pub use ticks::GuestTicks;
 

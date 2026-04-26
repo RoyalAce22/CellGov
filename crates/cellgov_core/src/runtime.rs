@@ -711,8 +711,7 @@ impl Runtime {
             });
         }
 
-        // Identity time-advancement: budget units map 1:1 to guest ticks.
-        let advance = GuestTicks::new(result.consumed_budget.raw());
+        let advance: GuestTicks = result.consumed_cost.into();
         let time_after = self
             .time
             .checked_add(advance)
@@ -725,7 +724,7 @@ impl Runtime {
             self.trace.record(&TraceRecord::StepCompleted {
                 unit: unit_id,
                 yield_reason: traced_yield_reason(result.yield_reason),
-                consumed_budget: result.consumed_budget,
+                consumed_cost: result.consumed_cost,
                 time_after,
             });
 

@@ -219,7 +219,7 @@ fn budget_exhaustion_yields() {
     let ctx = ExecutionContext::new(&mem);
     let result = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
-    assert_eq!(result.consumed_budget, Budget::new(5));
+    assert_eq!(result.consumed_cost, InstructionCost::new(5));
     assert_eq!(unit.state().pc, 20);
 }
 
@@ -267,7 +267,7 @@ fn plant_exit_stub(mem: &mut GuestMemory) {
 }
 
 /// Run a microtest PPU ELF to halt. Returns (yield_reason, r11,
-/// consumed_budget, pc), or None when the binary has not been built.
+/// consumed_cost, pc), or None when the binary has not been built.
 fn run_microtest_ppu(rel_path: &str) -> Option<(YieldReason, u64, u64, u64)> {
     let path = std::path::Path::new(rel_path);
     if skip_if_missing(path) {
@@ -289,7 +289,7 @@ fn run_microtest_ppu(rel_path: &str) -> Option<(YieldReason, u64, u64, u64)> {
     Some((
         result.yield_reason,
         unit.state().gpr[11],
-        result.consumed_budget.raw(),
+        result.consumed_cost.raw(),
         unit.state().pc,
     ))
 }
@@ -551,7 +551,7 @@ fn consumed_slot_records_per_step_hash_and_full_state() {
     // After a super-pair retires, the Consumed placeholder represents the
     // second architectural instruction's retirement. Per-step trace and
     // full-state-window must record it so retirement_counter and
-    // consumed_budget stay aligned.
+    // consumed_cost stay aligned.
     let mut mem = GuestMemory::new(256);
     let lwz: u32 = (32 << 26) | (3 << 21) | 128;
     let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
@@ -992,7 +992,7 @@ fn retail_boot_progress() {
     loop {
         match rt.step() {
             Ok(step) => {
-                total_consumed += step.result.consumed_budget.raw();
+                total_consumed += step.result.consumed_cost.raw();
                 let _ = rt.commit_step(&step.result, &step.effects);
                 steps += 1;
                 if step.result.fault.is_some() {

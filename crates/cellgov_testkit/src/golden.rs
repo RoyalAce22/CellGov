@@ -68,7 +68,7 @@ mod tests {
     use crate::fixtures::fake_isa_scenario;
     use crate::runner::run;
     use cellgov_event::UnitId;
-    use cellgov_time::{Budget, Epoch, GuestTicks};
+    use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
     use cellgov_trace::{HashCheckpointKind, StateHash, TracedEffectKind, TracedYieldReason};
 
     /// Expected golden record sequence for `fake_isa_scenario`.
@@ -80,6 +80,7 @@ mod tests {
         // 4 steps, budget=1, time advances 1 per step.
         let u0 = UnitId::new(0);
         let b1 = Budget::new(1);
+        let c1 = InstructionCost::ONE;
         vec![
             // Step 1: LoadImm(0xAB)
             TraceRecord::UnitScheduled {
@@ -91,7 +92,7 @@ mod tests {
             TraceRecord::StepCompleted {
                 unit: u0,
                 yield_reason: TracedYieldReason::BudgetExhausted,
-                consumed_budget: b1,
+                consumed_cost: c1,
                 time_after: GuestTicks::new(1),
             },
             TraceRecord::CommitApplied {
@@ -127,7 +128,7 @@ mod tests {
             TraceRecord::StepCompleted {
                 unit: u0,
                 yield_reason: TracedYieldReason::BudgetExhausted,
-                consumed_budget: b1,
+                consumed_cost: c1,
                 time_after: GuestTicks::new(2),
             },
             TraceRecord::EffectEmitted {
@@ -168,7 +169,7 @@ mod tests {
             TraceRecord::StepCompleted {
                 unit: u0,
                 yield_reason: TracedYieldReason::MailboxAccess,
-                consumed_budget: b1,
+                consumed_cost: c1,
                 time_after: GuestTicks::new(3),
             },
             TraceRecord::EffectEmitted {
@@ -209,7 +210,7 @@ mod tests {
             TraceRecord::StepCompleted {
                 unit: u0,
                 yield_reason: TracedYieldReason::Finished,
-                consumed_budget: b1,
+                consumed_cost: c1,
                 time_after: GuestTicks::new(4),
             },
             TraceRecord::CommitApplied {

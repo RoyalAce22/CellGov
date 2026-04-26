@@ -12,7 +12,7 @@ use cellgov_exec::{
 };
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::{MailboxId, SignalId};
-use cellgov_time::{Budget, GuestTicks};
+use cellgov_time::{Budget, GuestTicks, InstructionCost};
 use std::cell::Cell;
 
 /// Consumes its full budget each step, emits one `TraceMarker`, finishes
@@ -70,7 +70,7 @@ impl ExecutionUnit for CountingUnit {
         });
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -143,7 +143,7 @@ impl ExecutionUnit for WritingUnit {
         });
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -207,7 +207,7 @@ impl ExecutionUnit for MailboxProducer {
         });
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -281,7 +281,7 @@ impl ExecutionUnit for SignalEmitter {
         });
         ExecutionStepResult {
             yield_reason,
-            consumed_budget: budget,
+            consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -367,7 +367,7 @@ impl ExecutionUnit for DmaSubmitter {
                 });
                 ExecutionStepResult {
                     yield_reason: YieldReason::DmaSubmitted,
-                    consumed_budget: budget,
+                    consumed_cost: InstructionCost::new(budget.raw()),
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -380,7 +380,7 @@ impl ExecutionUnit for DmaSubmitter {
                 });
                 ExecutionStepResult {
                     yield_reason: YieldReason::Finished,
-                    consumed_budget: budget,
+                    consumed_cost: InstructionCost::new(budget.raw()),
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -464,7 +464,7 @@ impl ExecutionUnit for MailboxSender {
                 });
                 ExecutionStepResult {
                     yield_reason: YieldReason::MailboxAccess,
-                    consumed_budget: budget,
+                    consumed_cost: InstructionCost::new(budget.raw()),
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -477,7 +477,7 @@ impl ExecutionUnit for MailboxSender {
                 });
                 ExecutionStepResult {
                     yield_reason: YieldReason::MailboxAccess,
-                    consumed_budget: budget,
+                    consumed_cost: InstructionCost::new(budget.raw()),
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -491,7 +491,7 @@ impl ExecutionUnit for MailboxSender {
                 });
                 ExecutionStepResult {
                     yield_reason: YieldReason::Finished,
-                    consumed_budget: budget,
+                    consumed_cost: InstructionCost::new(budget.raw()),
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -560,7 +560,7 @@ impl ExecutionUnit for MailboxResponder {
                 });
                 ExecutionStepResult {
                     yield_reason: YieldReason::MailboxAccess,
-                    consumed_budget: budget,
+                    consumed_cost: InstructionCost::new(budget.raw()),
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
@@ -580,7 +580,7 @@ impl ExecutionUnit for MailboxResponder {
                 });
                 ExecutionStepResult {
                     yield_reason: YieldReason::Finished,
-                    consumed_budget: budget,
+                    consumed_cost: InstructionCost::new(budget.raw()),
                     local_diagnostics: LocalDiagnostics::empty(),
                     fault: None,
                     syscall_args: None,
