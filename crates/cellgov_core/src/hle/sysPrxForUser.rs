@@ -123,37 +123,34 @@ pub(crate) fn dispatch(
             adapter(runtime, source, nid).set_return(1_000_000);
         }
         NID_SYS_THREAD_CREATE_EX => {
-            // r4 (args[1]) is a POINTER to a param struct, not the
-            // entry OPD: the struct carries the 8-byte BE entry-OPD
-            // at offset 0 and the TLS address at offset 8. Reading
-            // args[1] as an OPD directly would spawn a thread whose
-            // PC is whatever 8 bytes live at the top of the struct.
+            // sysPrxForUser SDK wrapper, NID 0x24a1ea07. Signature
+            // (per RPCS3's sysPrxForUser.cpp):
+            //   sys_ppu_thread_create(
+            //       thread_id*,    // r3 = args[1]: out-pointer
+            //       u32 entry,     // r4 = args[2]: entry OPD address
+            //                      //   (DIRECT, not a struct pointer)
+            //       u64 arg,       // r5 = args[3]
+            //       s32 prio,      // r6 = args[4]
+            //       u32 stacksize, // r7 = args[5]
+            //       u64 flags,     // r8 = args[6]
+            //       char* name,    // r9 = args[7]
+            //   )
             //
-            // Register layout: r3 thread_id out, r4 param ptr, r5
-            // arg, r6 reserved (0), r7 prio, r8 stacksize, r9
-            // flags, r10 threadname. The reserved slot at r6 shifts
-            // prio / stacksize / flags one register up.
-            let param_ptr = args[1] as u32;
-            let param_start = param_ptr as usize;
-            let entry_opd_read: Option<u32> = {
-                let ctx = adapter(runtime, source, nid);
-                let mem = ctx.guest_memory();
-                mem.get(param_start..param_start + 8)
-                    .map(|slice| u64::from_be_bytes(slice.try_into().unwrap()) as u32)
-            };
-            let entry_opd = match entry_opd_read {
-                Some(opd) if opd != 0 => opd,
-                _ => {
-                    adapter(runtime, source, nid)
-                        .set_return(cellgov_lv2::errno::CELL_EFAULT.into());
-                    return Some(());
-                }
-            };
+            // The SDK wrapper allocates the LV2-side param struct
+            // internally and calls into _sys_ppu_thread_create (LV2
+            // syscall 52) where r4 is the struct pointer. The HLE
+            // entry takes the entry OPD raw -- no param-struct
+            // dereference is needed here.
+            let entry_opd = args[2] as u32;
+            if entry_opd == 0 {
+                adapter(runtime, source, nid).set_return(cellgov_lv2::errno::CELL_EFAULT.into());
+                return Some(());
+            }
             runtime.dispatch_lv2_request(
                 cellgov_lv2::Lv2Request::PpuThreadCreate {
-                    id_ptr: args[0] as u32,
+                    id_ptr: args[1] as u32,
                     entry_opd,
-                    arg: args[2],
+                    arg: args[3],
                     priority: args[4] as u32,
                     stacksize: args[5],
                     flags: args[6],

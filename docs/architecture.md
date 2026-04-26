@@ -1067,15 +1067,21 @@ Common boot sequence (per-title numbers below):
 5. Run the game's CRT0 from the ELF entry point.
 
 **flOw (NPUA80001).** 140 HLE bindings; liblv2 surfaces 161
-exports. Boot currently terminates at `sys_process_exit` at PPU
-step **10,872** (PC `0x10381ce8`) with code `0x80010005`
-(CELL_ESRCH-class). An earlier CellGov release reached step
-1,402,388 and exited cleanly; the current early-exit floor was
-reached in stages as the syscall classifier and PPU correctness
-fixes shifted conditional-branch decisions in flOw's exit-probe
-path. The earlier exit means the cross-runner observation is
-captured before `_cellGcmInitBody`, invalidating the prior
-"equivalent" verdict; see
+exports. Boot completes its CRT0, video-out probe, GCM init, and
+PSSG (renderer init) successfully, then enters a steady-state
+polling loop on `cellGcmGetControlRegister` +
+`cellGcmAddressToOffset` waiting for the RSX FIFO get-pointer to
+advance. Currently ends via `MaxSteps` at the 4B-instruction cap
+(15,625,000 scheduler steps, budget 256), deterministic across
+runs. The earlier `ProcessExit` floor at step 10,872 was the
+title's PSSG renderer init bailing because of two coupled
+oracle-side bugs: a sysPrxForUser HLE wrapper read r4 as a
+struct pointer instead of as the entry OPD address per the SDK
+ABI, and the LV2 host read PS3 OPDs as 16-byte u64-pair structs
+instead of 8-byte u32-pair structs. Both are fixed; the cross-
+runner observation is unavailable until the RSX FIFO advance /
+vblank gap is closed and a mutually-reachable checkpoint with
+RPCS3 is restored. See
 [tests/fixtures/NPUA80001_cross_runner/compare_report.txt](../tests/fixtures/NPUA80001_cross_runner/compare_report.txt).
 
 **Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
@@ -1086,11 +1092,13 @@ init, TLS setup, lwmutex construction, GCM initialization
 (\_cellGcmInitBody, cellGcmGetConfiguration, cellGcmGetControlRegister),
 keyboard/pad init, SPURS init, video configuration, and into the
 main attract loop. The first RSX write (put-pointer update to the
-GCM control register at 0xC0000040) triggers at step 14,341,466
+GCM control register at 0xC0000040) triggers at step 14,341,441
 (~3.7B instructions). SSHD's CRT0/init path is bit-identical
-across CellGov revisions for the current PPU correctness surface;
-the most recent shift was commit 8033644's syscall-classifier
-alignment, which moved the step count by +232K.
+across CellGov revisions for the current PPU correctness surface
+modulo a -25 step shift from the recent sysPrxForUser
+sys_ppu_thread_create_ex args-layout fix and the 8-byte OPD
+format correction in the LV2 host (same fixes that unblocked
+flOw's PSSG init).
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after

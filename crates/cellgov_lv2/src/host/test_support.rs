@@ -92,10 +92,11 @@ pub(super) fn primary_attrs() -> PpuThreadAttrs {
 
 pub(super) fn opd_runtime(opd_addr: u32, entry_code: u64, entry_toc: u64) -> FakeRuntime {
     let mut mem = GuestMemory::new(0x1_0000);
-    let range = ByteRange::new(GuestAddr::new(opd_addr as u64), 16).unwrap();
-    let mut bytes = [0u8; 16];
-    bytes[0..8].copy_from_slice(&entry_code.to_be_bytes());
-    bytes[8..16].copy_from_slice(&entry_toc.to_be_bytes());
+    let range = ByteRange::new(GuestAddr::new(opd_addr as u64), 8).unwrap();
+    let mut bytes = [0u8; 8];
+    // PS3 OPDs are 8 bytes: u32 BE code | u32 BE toc.
+    bytes[0..4].copy_from_slice(&(entry_code as u32).to_be_bytes());
+    bytes[4..8].copy_from_slice(&(entry_toc as u32).to_be_bytes());
     mem.apply_commit(range, &bytes).unwrap();
     FakeRuntime::with_memory(mem)
 }

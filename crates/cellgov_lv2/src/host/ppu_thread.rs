@@ -95,28 +95,30 @@ impl Lv2Host {
         stacksize: u64,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // Resolve the 16-byte OPD (entry_code || entry_toc, BE) up
-        // front so a bad address fails the syscall before any stack
-        // or TLS allocation becomes observable.
-        let opd_bytes = match rt.read_committed(entry_opd as u64, 16) {
+        // Resolve the 8-byte PS3 OPD (u32 BE code_addr || u32 BE toc)
+        // up front so a bad address fails the syscall before any
+        // stack or TLS allocation becomes observable.
+        //
+        // PS3 OPDs are 8 bytes with 4-byte fields, NOT the
+        // PowerOpen-spec 24-byte layout: empirically verified
+        // across foundation titles. Reading them as two u64s
+        // produces garbage entry/TOC values.
+        let opd_bytes = match rt.read_committed(entry_opd as u64, 8) {
             Some(bytes) => {
-                // SAFETY-style note: the trait contract promises
-                // `Some(_)` carries exactly the requested length;
-                // a short read is routed to EFAULT defensively.
                 debug_assert_eq!(
                     bytes.len(),
-                    16,
+                    8,
                     "Lv2Runtime::read_committed contract: Some(_) must carry exactly the \
                      requested length",
                 );
-                if bytes.len() < 16 {
+                if bytes.len() < 8 {
                     return Lv2Dispatch::Immediate {
                         code: crate::errno::CELL_EFAULT.into(),
                         effects: vec![],
                     };
                 }
-                let mut arr = [0u8; 16];
-                arr.copy_from_slice(&bytes[..16]);
+                let mut arr = [0u8; 8];
+                arr.copy_from_slice(&bytes[..8]);
                 arr
             }
             None => {
@@ -126,8 +128,8 @@ impl Lv2Host {
                 };
             }
         };
-        let entry_code = u64::from_be_bytes(opd_bytes[0..8].try_into().unwrap());
-        let entry_toc = u64::from_be_bytes(opd_bytes[8..16].try_into().unwrap());
+        let entry_code = u32::from_be_bytes(opd_bytes[0..4].try_into().unwrap()) as u64;
+        let entry_toc = u32::from_be_bytes(opd_bytes[4..8].try_into().unwrap()) as u64;
 
         // ABI-required back-chain + register save area floor.
         let size = stacksize.max(0x4000);
