@@ -41,15 +41,52 @@ impl fmt::Display for HleWriteError {
 
 impl std::error::Error for HleWriteError {}
 
+/// Why a call to [`HleContext::read_guest`] did not return bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HleReadError {
+    /// `addr..(addr + len)` could not form a valid `ByteRange`
+    /// (overflow or empty).
+    InvalidRange,
+    /// The underlying [`cellgov_mem::GuestMemory::read_checked`]
+    /// rejected the read (unmapped, out-of-range, or strict-reserved).
+    ReadFailed(cellgov_mem::MemError),
+}
+
+impl fmt::Display for HleReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRange => {
+                f.write_str("HLE read: ill-formed byte range (address/length overflow or empty)")
+            }
+            Self::ReadFailed(err) => write!(f, "HLE read: read rejected ({err:?})"),
+        }
+    }
+}
+
+impl std::error::Error for HleReadError {}
+
 /// The interface HLE module implementations operate through.
 pub trait HleContext {
-    /// Read-only view of committed guest memory.
+    /// Read-only view of the base-0 region's committed bytes.
+    ///
+    /// This is the legacy flat accessor: it ignores region boundaries
+    /// and treats addresses past the slice end as out-of-range. Only
+    /// safe for fields the handler has previously written through
+    /// [`Self::write_guest`] (the post-zero-init witness pattern).
+    /// For guest-supplied pointers, use [`Self::read_guest`] so an
+    /// unmapped or out-of-base-region read fails loud.
     fn guest_memory(&self) -> &[u8];
 
-    /// Guest memory size in bytes.
+    /// Guest memory size in bytes (base-0 region).
     fn guest_memory_len(&self) -> usize {
         self.guest_memory().len()
     }
+
+    /// Read `len` bytes from guest memory at `addr`, honoring region
+    /// boundaries and access modes. Symmetric counterpart to
+    /// [`Self::write_guest`]: bad pointers surface as `Err` rather
+    /// than silently substituting zeros.
+    fn read_guest(&self, addr: u64, len: usize) -> Result<&[u8], HleReadError>;
 
     /// Write bytes to guest memory at the given guest address.
     fn write_guest(&mut self, addr: u64, bytes: &[u8]) -> Result<(), HleWriteError>;
@@ -144,6 +181,14 @@ const HEAP_WATERMARK_BANDS: &[(u32, u8, &str)] = &[
 impl HleContext for RuntimeHleAdapter<'_> {
     fn guest_memory(&self) -> &[u8] {
         self.memory.as_bytes()
+    }
+
+    fn read_guest(&self, addr: u64, len: usize) -> Result<&[u8], HleReadError> {
+        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), len as u64)
+            .ok_or(HleReadError::InvalidRange)?;
+        self.memory
+            .read_checked(range)
+            .map_err(HleReadError::ReadFailed)
     }
 
     fn write_guest(&mut self, addr: u64, bytes: &[u8]) -> Result<(), HleWriteError> {

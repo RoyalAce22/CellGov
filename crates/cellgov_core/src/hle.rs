@@ -20,6 +20,8 @@ use crate::runtime::Runtime;
 
 #[path = "hle/cellGcmSys.rs"]
 pub(crate) mod cell_gcm_sys;
+#[path = "hle/cellSpurs.rs"]
+pub(crate) mod cell_spurs;
 #[path = "hle/cellSysutil.rs"]
 pub(crate) mod cell_sysutil;
 pub mod context;
@@ -82,7 +84,8 @@ impl Runtime {
     pub(crate) fn dispatch_hle(&mut self, source: UnitId, nid: u32, args: &[u64; 9]) {
         let handled = sys_prx_for_user::dispatch(self, source, nid, args)
             .or_else(|| cell_gcm_sys::dispatch(self, source, nid, args))
-            .or_else(|| cell_sysutil::dispatch(self, source, nid, args));
+            .or_else(|| cell_sysutil::dispatch(self, source, nid, args))
+            .or_else(|| cell_spurs::dispatch(self, source, nid, args));
         if handled.is_none() {
             let entry = self.hle.unclaimed_nids.entry(nid).or_insert(0);
             if *entry == 0 {
@@ -158,30 +161,26 @@ mod tests {
     #[test]
     fn hle_module_nid_sets_are_disjoint() {
         use std::collections::BTreeSet;
-        let sys: BTreeSet<u32> = crate::hle::sys_prx_for_user::OWNED_NIDS
-            .iter()
-            .copied()
-            .collect();
-        let gcm: BTreeSet<u32> = crate::hle::cell_gcm_sys::OWNED_NIDS
-            .iter()
-            .copied()
-            .collect();
-        let overlap: Vec<u32> = sys.intersection(&gcm).copied().collect();
-        assert!(
-            overlap.is_empty(),
-            "HLE module NID collision: {:#010x?} owned by both sys and gcm",
-            overlap
-        );
-        assert_eq!(
-            sys.len(),
-            crate::hle::sys_prx_for_user::OWNED_NIDS.len(),
-            "hle::sys_prx_for_user::OWNED_NIDS contains duplicates"
-        );
-        assert_eq!(
-            gcm.len(),
-            crate::hle::cell_gcm_sys::OWNED_NIDS.len(),
-            "hle::cell_gcm_sys::OWNED_NIDS contains duplicates"
-        );
+        let modules: &[(&str, &[u32])] = &[
+            ("sys_prx_for_user", crate::hle::sys_prx_for_user::OWNED_NIDS),
+            ("cell_gcm_sys", crate::hle::cell_gcm_sys::OWNED_NIDS),
+            ("cell_spurs", crate::hle::cell_spurs::OWNED_NIDS),
+        ];
+        let mut all = BTreeSet::new();
+        for (name, nids) in modules {
+            let set: BTreeSet<u32> = nids.iter().copied().collect();
+            assert_eq!(
+                set.len(),
+                nids.len(),
+                "hle::{name}::OWNED_NIDS contains duplicates"
+            );
+            for nid in &set {
+                assert!(
+                    all.insert(*nid),
+                    "HLE module NID collision: {nid:#010x} appears in {name} and another module"
+                );
+            }
+        }
     }
 
     /// Pins the order: counter `+=` must precede the `debug_assert!`

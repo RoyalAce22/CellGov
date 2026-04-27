@@ -84,6 +84,36 @@ pub fn stub_classification(nid: u32) -> StubClass {
         // cellSysutil video-out queries.
         0x887572d5 => StubClass::Stateful, // cellVideoOutGetState
         0xe558748d => StubClass::Stateful, // cellVideoOutGetResolution
+        // cellSpurs initialize family.
+        0x95180230 => StubClass::Stateful, // _cellSpursAttributeInitialize
+        0xacfc8dbc => StubClass::Stateful, // cellSpursInitialize
+        0xaa6269a8 => StubClass::Stateful, // cellSpursInitializeWithAttribute
+        0x30aa96c4 => StubClass::Stateful, // cellSpursInitializeWithAttribute2
+        0xca4c4600 => StubClass::Stateful, // cellSpursFinalize
+        // cellSpurs workload registry.
+        0xefeb2679 => StubClass::Stateful, // _cellSpursWorkloadAttributeInitialize
+        0x69726aa2 => StubClass::Stateful, // cellSpursAddWorkload
+        0xc0158d8b => StubClass::Stateful, // cellSpursAddWorkloadWithAttribute
+        0x98d5b343 => StubClass::Stateful, // cellSpursShutdownWorkload
+        0x5fd43fe4 => StubClass::Stateful, // cellSpursWaitForWorkloadShutdown
+        // cellSpurs ready-count, contention, idle-spu, priority controls.
+        0xf843818d => StubClass::Stateful, // cellSpursReadyCountStore
+        0x75211196 => StubClass::Stateful, // cellSpursReadyCountAdd
+        0x49a3426d => StubClass::Stateful, // cellSpursReadyCountSwap
+        0xf1d3552d => StubClass::Stateful, // cellSpursReadyCountCompareAndSwap
+        0x182d9890 => StubClass::Stateful, // cellSpursRequestIdleSpu
+        0x84d2f6d5 => StubClass::Stateful, // cellSpursSetMaxContention
+        0x80a29e27 => StubClass::Stateful, // cellSpursSetPriorities
+        0xb52e1bda => StubClass::Stateful, // cellSpursSetPriority
+        // cellSpurs info getter + exception handler registration.
+        0x1f402f8f => StubClass::Stateful, // cellSpursGetInfo
+        0xb9bc6207 => StubClass::Stateful, // cellSpursAttachLv2EventQueue
+        0x4e66d483 => StubClass::Stateful, // cellSpursDetachLv2EventQueue
+        0xd2e23fa9 => StubClass::Stateful, // cellSpursSetExceptionEventHandler
+        0x4c75deb8 => StubClass::Stateful, // cellSpursUnsetExceptionEventHandler
+        0x7517724a => StubClass::Stateful, // cellSpursSetGlobalExceptionEventHandler
+        0x861237f8 => StubClass::Stateful, // cellSpursUnsetGlobalExceptionEventHandler
+        0x32b94add => StubClass::Stateful, // cellSpursEnableExceptionEventHandler
         _ => StubClass::NoopSafe,
     }
 }

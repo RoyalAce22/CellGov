@@ -355,7 +355,7 @@ The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
 4 relocation types, PS3 PRX import-table parser, and a NID database.
 The NID database serves two distinct roles in one sorted table:
-`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (currently 24 entries) is
+`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (currently 50 entries) is
 the dispatch surface the runtime PRX binder consults; the larger
 `cellgov_ppu::nid_db::NID_TABLE` (~5,300 entries imported from
 upstream coverage) supplies human-readable name resolution for
@@ -814,14 +814,15 @@ configuration."
 ## HLE dispatch
 
 NID-based, separate from the syscall surface. `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`
-holds the 24 NIDs CellGov dispatches directly; `cellgov_ppu::nid_db::NID_TABLE`
+holds the 50 NIDs CellGov dispatches directly; `cellgov_ppu::nid_db::NID_TABLE`
 is the larger ~5,300-entry diagnostic table used for name resolution in
 `dump-imports` and fault output, not for dispatch. Module implementations
 are decoupled from the Runtime via the
 `HleContext` trait (`cellgov_core::hle_context`). Each module file
-(`sysPrxForUser.rs`, `cellGcmSys.rs`, `cellSysutil.rs`) contains
-free functions that operate through `&mut dyn HleContext` -- 7
-methods covering guest memory read/write, return value, register
+(`sysPrxForUser.rs`, `cellGcmSys.rs`, `cellSysutil.rs`, `cellSpurs.rs`)
+contains free functions that operate through `&mut dyn HleContext` --
+8 methods covering guest memory read (region-aware, returns
+`Result<&[u8], HleReadError>`) and write, return value, register
 write, unit status, heap allocation, and kernel-object ID
 allocation.
 
@@ -893,6 +894,42 @@ the CLI translates to the `FirstRsxWrite` checkpoint. Manifests
 that opt into `[rsx] mirror = true` map the region ReadWrite so
 the put-pointer write lands normally and the method-advance
 pass drives completion.
+
+### cellSpurs HLE (PPU-side SPU runtime surface)
+
+PPU-side surface for the PS3 SPURS (SPU Runtime System) library.
+The CellSpurs control block (alignas 128, 4096 bytes SPURS1 /
+8192 bytes SPURS2) lives in guest memory; `cellSpurs.rs` owns
+the field-offset constants and per-NID handlers that read and
+write that block. SPU-side workload dispatch, policy-module DMA,
+and taskset execution are out of scope -- the runtime ships only
+the deterministic PPU half.
+
+| Family                     | NIDs landed | Surface                                                              |
+| -------------------------- | ----------- | -------------------------------------------------------------------- |
+| Initialize / Finalize      | 5           | `_cellSpursAttributeInitialize`, `cellSpursInitialize`,              |
+|                            |             | `cellSpursInitializeWithAttribute[2]`, `cellSpursFinalize`           |
+| Workload registry          | 5           | `cellSpursAddWorkload`, `*WithAttribute`,                            |
+|                            |             | `_cellSpursWorkloadAttributeInitialize`,                             |
+|                            |             | `cellSpursShutdownWorkload`, `cellSpursWaitForWorkloadShutdown`      |
+| Ready-count / contention   | 8           | `cellSpursReadyCount{Store,Add,Swap,CompareAndSwap}`,                |
+|                            |             | `cellSpursRequestIdleSpu`, `cellSpursSetMaxContention`,              |
+|                            |             | `cellSpursSetPriorities`, `cellSpursSetPriority`                     |
+| Info + exception handlers  | 8           | `cellSpursGetInfo`, `cellSpursAttachLv2EventQueue`,                  |
+|                            |             | `cellSpursDetachLv2EventQueue`,                                      |
+|                            |             | `cellSpursSet/UnsetExceptionEventHandler`,                           |
+|                            |             | `cellSpursSet/UnsetGlobalExceptionEventHandler`,                     |
+|                            |             | `cellSpursEnableExceptionEventHandler`                               |
+
+Reads from guest-supplied pointers go through
+`HleContext::read_guest`, which honors region boundaries and
+surfaces unmapped or strict-reserved addresses as `HleReadError`
+rather than silently substituting zero bytes; the handlers map
+read failures to the spec-appropriate error code per namespace
+(`POLICY_MODULE_FAULT` in the workload family, `INVAL` in CORE).
+Writes use the established invariant-class / guest-pointer-class
+split: post-zero-init field writes use `.expect`, guest-supplied
+out-pointers use `try_write_*`.
 
 ## Schedule exploration
 
@@ -1067,27 +1104,28 @@ Common boot sequence (per-title numbers below):
 5. Run the game's CRT0 from the ELF entry point.
 
 **flOw (NPUA80001).** 140 HLE bindings; liblv2 surfaces 161
-exports. Boot completes CRT0, video-out probe, GCM init, and
-PSSG (renderer init); the title's manifest enables `[rsx]
-mirror = true` so its put-pointer store at `0xC0000040` lands in
-the FIFO cursor instead of faulting, and the commit-boundary
-FIFO advance pass drains the queued NV4097 / NV406E commands so
-the GPU semaphore writebacks satisfy PSSG's polled completion
-flag. Boot then progresses to PPU step 78,199 where a secondary
-helper PPU thread branches through CTR=0 (PC=0x00000000,
-raw=0x00000000) mid-way through SPURS workload registration --
-the title's HLE call trace at fault shows
-`cellSpursAddWorkload` fired five times,
-`cellSpursInitialize` twice, plus `cellSpursAttachLv2EventQueue`,
-`cellSpursRequestIdleSpu`, `cellSpursReadyCountStore`,
-`cellSpursGetInfo`, and `cellSpursSetExceptionEventHandler`,
-all currently noop-stubbed. Twenty-eight execution units are
-alive at the fault (one main PPU, one helper PPU, twenty-six
-SPU threads spawned by the SPURS init).
+exports. Boot completes CRT0, video-out probe, GCM init, PSSG
+(renderer init), and the SPURS surface initialization; the
+title's manifest enables `[rsx] mirror = true` so its
+put-pointer store at `0xC0000040` lands in the FIFO cursor
+instead of faulting, and the commit-boundary FIFO advance pass
+drains the queued NV4097 / NV406E commands so the GPU semaphore
+writebacks satisfy PSSG's polled completion flag. The SPURS
+PPU surface is faithfully implemented: CellSpurs control block
+populated, workload registry honors AddWorkload calls,
+ready-count and contention controls track per-wid state, info
+snapshots reflect live fields. Boot still terminates at PPU
+step 78,199 with a helper PPU thread branching through CTR=0,
+but the fault is no longer SPURS-shaped: the driver is the LV2
+sync-primitive dispatch routing gap (HLE `sys_lwmutex_lock` /
+`unlock` / `trylock` / `destroy` are silently CELL_OK'd at the
+runtime dispatcher; threads contend on a lock that does not
+serialize, leaving a C++ object's vtable pointer un-initialised
+when a downstream helper performs a virtual call).
 
 Cross-runner observation against RPCS3 is unavailable until
-flOw reaches a mutually-deterministic checkpoint past SPURS
-task-runtime modeling. See
+flOw reaches a mutually-deterministic checkpoint past the
+sync-primitive routing gap. See
 [tests/fixtures/NPUA80001_cross_runner/compare_report.txt](../tests/fixtures/NPUA80001_cross_runner/compare_report.txt).
 
 **Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
