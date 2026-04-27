@@ -42,7 +42,7 @@ Column definitions:
 
 | Serial | Title | Year | Engine | Format | Checkpoint | Steps | Insns | Cross-runner |
 |--------|-------|------|--------|--------|------------|------:|------:|--------------|
-| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | MaxSteps (4B) | 15,625,000 | 4B | not available (see note below) |
+| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | Fault (SPURS surface) | 78,199 | ~20M | not available (see note below) |
 | NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,341,441 | ~3.7B | code:0x35 ELF-header byte (non-semantic) |
 | BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | MaxSteps (1B) | 3,906,250 | 1B | not available (see note below) |
 
@@ -66,20 +66,29 @@ details.
 
 ## flOw cross-runner note
 
-An earlier CellGov release tripped `ProcessExit` on flOw at step
-10,872 with code `0x80010005` (CELL_ESRCH-class). That exit was
-the title's PSSG renderer init bailing because
-`sys_ppu_thread_create_ex` returned `CELL_EFAULT` (a sysPrxForUser
-HLE wrapper read r4 as a struct pointer instead of as the entry
-OPD address per the SDK ABI, and the LV2 host read PS3 OPDs as
-16-byte u64-pair structs instead of 8-byte u32-pair structs).
+flOw boots through CRT0, video-out probe, GCM init, and PSSG
+renderer init. Its manifest enables `[rsx] mirror = true`, so
+the title's put-pointer store at `0xC0000040` lands in the FIFO
+cursor instead of faulting and the commit-boundary FIFO advance
+pass dispatches the queued NV4097 / NV406E commands. The GPU
+semaphore writebacks emitted by the advance pass satisfy PSSG's
+init-completion poll, and the title progresses past renderer
+init into SPURS workload registration.
 
-With both bugs fixed, flOw's PSSG init completes and the title
-advances into its main loop. Its boot now runs past the previous
-exit point and is not observed to reach a natural stopping event
-within a 4B-instruction window (15,625,000 scheduler steps with
-budget 256). The current steady-state is a polling loop on
-`cellGcmGetControlRegister` + `cellGcmAddressToOffset` waiting
-for the RSX FIFO get-pointer to advance -- a separate
-RSX/vblank gap that needs its own coverage before flOw can
-reach a mutually-reachable checkpoint with RPCS3 again.
+The current stopping point is a fault at PPU step 78,199: a
+secondary helper PPU thread branches through CTR=0
+(PC=0x00000000, raw=0x00000000) mid-way through SPURS init. At
+the fault the HLE call trace shows `cellSpursAddWorkload` fired
+five times, `cellSpursInitialize` twice, plus
+`cellSpursAttachLv2EventQueue`, `cellSpursRequestIdleSpu`,
+`cellSpursReadyCountStore`, `cellSpursGetInfo`, and
+`cellSpursSetExceptionEventHandler`, all currently noop-stubbed.
+Twenty-eight execution units are alive at the fault: one main
+PPU, one helper PPU, twenty-six SPU threads spawned by the
+SPURS init.
+
+The next stable checkpoint requires a SPURS task-runtime model:
+PPU-side workload registry plus SPU-side task dispatcher with
+deterministic semantics. Cross-runner observation against RPCS3
+is unavailable until flOw reaches a mutually-deterministic
+stopping point past SPURS init.

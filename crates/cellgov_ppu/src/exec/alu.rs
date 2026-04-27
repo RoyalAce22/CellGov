@@ -1713,8 +1713,8 @@ mod tests {
 
     #[test]
     fn or_dot_sets_cr0_without_touching_result() {
-        // Catches the regression where `or. rA, rS, rS` was quickened to
-        // `Mr`, which does not update CR0.
+        // `or. rA, rS, rS` must update CR0; quickening it to plain
+        // `Mr` (move register) is incorrect because Mr has no Rc form.
         let mut s = PpuState::new();
         s.gpr[4] = (-5i64) as u64;
         exec_no_mem(
@@ -2176,7 +2176,8 @@ mod tests {
     #[test]
     fn andi_dot_propagates_xer_so_into_cr0() {
         // andi. routes through set_cr0_from_result, which OR-in's SO.
-        // Earlier hand-rolled CR0 construction silently dropped it.
+        // Hand-rolled CR0 construction that ignores XER[SO] would
+        // produce a CR0 with the SO bit always zero.
         let mut s = PpuState::new();
         s.gpr[3] = 0xFF;
         s.set_xer_ov(true);

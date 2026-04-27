@@ -820,8 +820,9 @@ mod tests {
 
     #[test]
     fn notify_on_created_group_is_rejected() {
-        // Regression: finish-before-start used to decrement the
-        // counter and strand the group in Created.
+        // notify_spu_finished must reject groups still in Created;
+        // accepting it would decrement the counter and strand the
+        // group there with no path to Running.
         let mut t = ThreadGroupTable::new();
         let gid = t.create(1).unwrap();
         t.record_spu(UnitId::new(10), gid, 0).unwrap();

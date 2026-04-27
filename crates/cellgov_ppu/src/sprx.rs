@@ -1271,9 +1271,9 @@ mod tests {
     #[test]
     fn read_cstring_unmapped_pointer_produces_diagnostic_string() {
         // Point the user library's name pointer at a vaddr no PT_LOAD
-        // covers. Pre-fix, read_cstring returned "" silently and the
-        // export library showed up with a blank name; now it carries
-        // the failing vaddr so corruption is visible in parsed output.
+        // covers. read_cstring must surface the failing vaddr in the
+        // returned name; returning "" silently hides the corruption
+        // and produces export libraries with blank names downstream.
         let mut data = make_test_prx();
         let exp1 = 0x220 + 28; // user export entry
         let unmapped: u32 = 0xDEAD_0000;
@@ -1292,11 +1292,11 @@ mod tests {
     fn load_module_start_not_double_added_when_text_vaddr_nonzero() {
         // Synthesize a fixture where text.vaddr != 0 by patching the
         // PT_LOAD[0] vaddr field and shifting all the data-segment
-        // pointers. Pre-fix code computed
-        //   ms.code = base + text.vaddr + opd.code
-        // and double-counted text.vaddr; the fix expects ms.code to be
-        // base + opd.code (which is already absolute within the PRX
-        // address space).
+        // pointers. opd.code is already an absolute vaddr in the PRX
+        // address space, so ms.code must be `base + opd.code`. A
+        // computation of `base + text.vaddr + opd.code` would
+        // double-count text.vaddr whenever the segment is non-zero
+        // based.
         let mut data = make_test_prx();
         // Set PT_LOAD[0].p_vaddr to 0x1000 (was 0).
         let ph0 = 64;
@@ -1329,10 +1329,11 @@ mod tests {
     #[test]
     fn load_uses_per_opd_toc_not_module_info_toc() {
         // Patch the module_start OPD's toc field to a value distinct
-        // from module_info.toc. Pre-fix, load_prx unconditionally used
-        // base + prx.toc for both module_start and module_stop and
-        // would silently mask any divergence between the two TOC
-        // sources; the fix honors the per-OPD toc value.
+        // from module_info.toc. load_prx must honor the per-OPD toc
+        // for module_start and module_stop entries; using
+        // `base + prx.toc` unconditionally for both would silently
+        // mask any divergence between the OPD's toc and the
+        // module_info-level toc.
         let mut data = make_test_prx();
         let opd_base = 0x2E0;
         let alt_toc: u32 = 0x300;

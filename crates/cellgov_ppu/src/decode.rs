@@ -439,22 +439,38 @@ fn decode_md(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     }
 }
 
-/// Decode primary opcode 19 (XL-form: bclr, bcctr, isync, ...).
+/// Decode primary opcode 19 (XL-form: bclr, bcctr, isync, CR-logical).
 fn decode_xl(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let xo = (raw >> 1) & 0x3FF;
+    // Branch fields: bo at bits 6-10, bi at bits 11-15, lk at bit 31.
+    // CR-logical's BT/BA share those positions; bb at bits 16-20.
     let bo = ((raw >> 21) & 0x1F) as u8;
     let bi = ((raw >> 16) & 0x1F) as u8;
     let link = raw & 1 != 0;
+    let (bt, ba) = (bo, bi);
+    let bb = ((raw >> 11) & 0x1F) as u8;
+    // mcrf uses 3-bit CR-field selectors at bits 6-8 (BF) and 11-13 (BFA).
+    let crfd = ((raw >> 23) & 0x7) as u8;
+    let crfs = ((raw >> 18) & 0x7) as u8;
 
     match xo {
+        0 => Ok(PpuInstruction::Mcrf { crfd, crfs }),
         16 => Ok(PpuInstruction::Bclr { bo, bi, link }),
-        528 => Ok(PpuInstruction::Bcctr { bo, bi, link }),
+        33 => Ok(PpuInstruction::Crnor { bt, ba, bb }),
+        129 => Ok(PpuInstruction::Crandc { bt, ba, bb }),
         // isync decodes as `ori 0,0,0` (a nop under the deterministic model).
         150 => Ok(PpuInstruction::Ori {
             ra: 0,
             rs: 0,
             imm: 0,
         }),
+        193 => Ok(PpuInstruction::Crxor { bt, ba, bb }),
+        225 => Ok(PpuInstruction::Crnand { bt, ba, bb }),
+        257 => Ok(PpuInstruction::Crand { bt, ba, bb }),
+        289 => Ok(PpuInstruction::Creqv { bt, ba, bb }),
+        417 => Ok(PpuInstruction::Crorc { bt, ba, bb }),
+        449 => Ok(PpuInstruction::Cror { bt, ba, bb }),
+        528 => Ok(PpuInstruction::Bcctr { bo, bi, link }),
         _ => Err(PpuDecodeError::Unsupported(raw)),
     }
 }
@@ -550,6 +566,16 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 
         // stfiwx reuses the RT slot for FRS.
         983 => return Ok(PpuInstruction::Stfiwx { frs: rt, ra, rb }),
+
+        // X-form FP loads/stores. RT slot doubles as FRT/FRS.
+        535 => return Ok(PpuInstruction::Lfsx { frt: rt, ra, rb }),
+        567 => return Ok(PpuInstruction::Lfsux { frt: rt, ra, rb }),
+        599 => return Ok(PpuInstruction::Lfdx { frt: rt, ra, rb }),
+        631 => return Ok(PpuInstruction::Lfdux { frt: rt, ra, rb }),
+        663 => return Ok(PpuInstruction::Stfsx { frs: rt, ra, rb }),
+        695 => return Ok(PpuInstruction::Stfsux { frs: rt, ra, rb }),
+        727 => return Ok(PpuInstruction::Stfdx { frs: rt, ra, rb }),
+        759 => return Ok(PpuInstruction::Stfdux { frs: rt, ra, rb }),
 
         103 => {
             return Ok(PpuInstruction::Vx {
@@ -701,6 +727,110 @@ mod tests {
                 link: false
             }
         );
+    }
+
+    #[test]
+    fn crnor_decodes_self_alias_form() {
+        // PowerPC `crnot Bx, By` mnemonic decomposes into
+        // `crnor Bx, By, By`; this tests the self-alias case
+        // (BA == BB), with the encoding for crnor cr30, cr29, cr29.
+        // Encoding: OP=19 | BT=30 | BA=29 | BB=29 | XO=33 | 0
+        let raw = 0x4FDD_E842;
+        let insn = decode(raw).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Crnor {
+                bt: 30,
+                ba: 29,
+                bb: 29
+            }
+        );
+    }
+
+    #[test]
+    fn cr_logical_family_decodes() {
+        // BT=8, BA=9, BB=10 across each XO. The 5-bit fields lie at
+        // raw bits (21..26), (16..21), (11..16) respectively.
+        let mk = |xo: u32| (19u32 << 26) | (8u32 << 21) | (9u32 << 16) | (10u32 << 11) | (xo << 1);
+
+        let cases: &[(u32, PpuInstruction)] = &[
+            (
+                33,
+                PpuInstruction::Crnor {
+                    bt: 8,
+                    ba: 9,
+                    bb: 10,
+                },
+            ),
+            (
+                129,
+                PpuInstruction::Crandc {
+                    bt: 8,
+                    ba: 9,
+                    bb: 10,
+                },
+            ),
+            (
+                193,
+                PpuInstruction::Crxor {
+                    bt: 8,
+                    ba: 9,
+                    bb: 10,
+                },
+            ),
+            (
+                225,
+                PpuInstruction::Crnand {
+                    bt: 8,
+                    ba: 9,
+                    bb: 10,
+                },
+            ),
+            (
+                257,
+                PpuInstruction::Crand {
+                    bt: 8,
+                    ba: 9,
+                    bb: 10,
+                },
+            ),
+            (
+                289,
+                PpuInstruction::Creqv {
+                    bt: 8,
+                    ba: 9,
+                    bb: 10,
+                },
+            ),
+            (
+                417,
+                PpuInstruction::Crorc {
+                    bt: 8,
+                    ba: 9,
+                    bb: 10,
+                },
+            ),
+            (
+                449,
+                PpuInstruction::Cror {
+                    bt: 8,
+                    ba: 9,
+                    bb: 10,
+                },
+            ),
+        ];
+        for (xo, expected) in cases {
+            let raw = mk(*xo);
+            assert_eq!(decode(raw).unwrap(), *expected, "xo={xo}");
+        }
+    }
+
+    #[test]
+    fn mcrf_decodes() {
+        // mcrf 5, 2: BF=5 at bits 6..9, BFA=2 at bits 11..14, XO=0.
+        let raw = (19u32 << 26) | (5u32 << 23) | (2u32 << 18);
+        let insn = decode(raw).unwrap();
+        assert_eq!(insn, PpuInstruction::Mcrf { crfd: 5, crfs: 2 });
     }
 
     #[test]
@@ -1070,6 +1200,100 @@ mod tests {
                 rb: 9,
             }
         );
+    }
+
+    #[test]
+    fn lfsx_decodes() {
+        // lfsx fr13, r3, r0.
+        // Encoding: OP=31 | FRT=13 | RA=3 | RB=0 | XO(10)=535 | 0
+        let insn = decode(0x7DA3_042E).unwrap();
+        assert_eq!(
+            insn,
+            PpuInstruction::Lfsx {
+                frt: 13,
+                ra: 3,
+                rb: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn x_form_fp_load_store_family_decodes() {
+        // FRT/FRS=11, RA=4, RB=5 across each XO. The 5-bit fields lie
+        // at raw bits (21..26), (16..21), (11..16) respectively;
+        // X-form XO at bits 21..30 puts XO << 1 in the low half.
+        let mk = |xo: u32| (31u32 << 26) | (11u32 << 21) | (4u32 << 16) | (5u32 << 11) | (xo << 1);
+
+        let cases: &[(u32, PpuInstruction)] = &[
+            (
+                535,
+                PpuInstruction::Lfsx {
+                    frt: 11,
+                    ra: 4,
+                    rb: 5,
+                },
+            ),
+            (
+                567,
+                PpuInstruction::Lfsux {
+                    frt: 11,
+                    ra: 4,
+                    rb: 5,
+                },
+            ),
+            (
+                599,
+                PpuInstruction::Lfdx {
+                    frt: 11,
+                    ra: 4,
+                    rb: 5,
+                },
+            ),
+            (
+                631,
+                PpuInstruction::Lfdux {
+                    frt: 11,
+                    ra: 4,
+                    rb: 5,
+                },
+            ),
+            (
+                663,
+                PpuInstruction::Stfsx {
+                    frs: 11,
+                    ra: 4,
+                    rb: 5,
+                },
+            ),
+            (
+                695,
+                PpuInstruction::Stfsux {
+                    frs: 11,
+                    ra: 4,
+                    rb: 5,
+                },
+            ),
+            (
+                727,
+                PpuInstruction::Stfdx {
+                    frs: 11,
+                    ra: 4,
+                    rb: 5,
+                },
+            ),
+            (
+                759,
+                PpuInstruction::Stfdux {
+                    frs: 11,
+                    ra: 4,
+                    rb: 5,
+                },
+            ),
+        ];
+        for (xo, expected) in cases {
+            let raw = mk(*xo);
+            assert_eq!(decode(raw).unwrap(), *expected, "xo={xo}");
+        }
     }
 
     #[test]

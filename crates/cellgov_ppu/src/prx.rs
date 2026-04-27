@@ -541,9 +541,10 @@ mod tests {
 
     #[test]
     fn parse_rejects_unmapped_nid_table_when_num_func_nonzero() {
-        // Point nid_ptr at a vaddr no PT_LOAD covers; pre-fix code
-        // silently fell back to file offset 0 (the ELF header) and
-        // produced garbage NIDs.
+        // Point nid_ptr at a vaddr no PT_LOAD covers. A vaddr->offset
+        // walker that falls back to file offset 0 on lookup miss
+        // would read the ELF header bytes and produce garbage NIDs;
+        // the parser must reject the unmapped pointer instead.
         let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
         let mod_info_off = 208;
         let unmapped_vaddr: u32 = 0xFFFF_0000;
