@@ -81,6 +81,14 @@ impl PpuState {
         (self.cr >> shift) & 1 != 0
     }
 
+    /// Write a single CR bit in PPC numbering (bit 0 = MSB of CR).
+    pub fn set_cr_bit(&mut self, bit: u8, value: bool) {
+        debug_assert!(bit <= 31, "CR bit index out of range: {bit}");
+        let shift = 31 - bit;
+        let mask = !(1u32 << shift);
+        self.cr = (self.cr & mask) | ((value as u32) << shift);
+    }
+
     /// XER carry bit (PPC bit 34 from the MSB = bit 29 from the LSB).
     pub fn xer_ca(&self) -> bool {
         (self.xer >> 29) & 1 != 0

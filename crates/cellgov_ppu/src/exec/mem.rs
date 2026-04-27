@@ -445,7 +445,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(bits) => {
-                    state.fpr[frt as usize] = (f32::from_bits(bits as u32) as f64).to_bits();
+                    state.fpr[frt as usize] = double_word(bits as u32);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -463,8 +463,8 @@ pub(crate) fn execute(
         }
         PpuInstruction::Stfs { frs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            let f = f64::from_bits(state.fpr[frs as usize]) as f32;
-            buffer_store(store_buf, state, ea, 4, f.to_bits() as u64)
+            let bits = single_frs(state.fpr[frs as usize]);
+            buffer_store(store_buf, state, ea, 4, bits as u64)
         }
         PpuInstruction::Stfd { frs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
@@ -473,8 +473,8 @@ pub(crate) fn execute(
         PpuInstruction::Stfsu { frs, ra, imm } => {
             debug_assert_store_with_update("stfsu", ra);
             let ea = state.ea_d_form(ra, imm);
-            let f = f64::from_bits(state.fpr[frs as usize]) as f32;
-            let v = buffer_store(store_buf, state, ea, 4, f.to_bits() as u64);
+            let bits = single_frs(state.fpr[frs as usize]);
+            let v = buffer_store(store_buf, state, ea, 4, bits as u64);
             if v == ExecuteVerdict::Continue {
                 state.gpr[ra as usize] = ea;
             }
@@ -500,6 +500,82 @@ pub(crate) fn execute(
                 4,
                 state.fpr[frs as usize] & 0xFFFF_FFFF,
             )
+        }
+
+        // X-form FP indexed loads / stores. EA = (RA == 0 ? 0 : GPR[RA]) + GPR[RB].
+        // The `u` (update) variants write EA back into GPR[RA] iff the
+        // memory access succeeded, matching the D-form Stfsu/Stfdu policy.
+        PpuInstruction::Lfsx { frt, ra, rb } => {
+            let ea = state.ea_x_form(ra, rb);
+            match load_ze(region_views, store_buf, ea, 4) {
+                Ok(bits) => {
+                    state.fpr[frt as usize] = double_word(bits as u32);
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
+        PpuInstruction::Lfsux { frt, ra, rb } => {
+            debug_assert_load_with_update("lfsux", ra, frt);
+            let ea = state.ea_x_form(ra, rb);
+            match load_ze(region_views, store_buf, ea, 4) {
+                Ok(bits) => {
+                    state.fpr[frt as usize] = double_word(bits as u32);
+                    state.gpr[ra as usize] = ea;
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
+        PpuInstruction::Lfdx { frt, ra, rb } => {
+            let ea = state.ea_x_form(ra, rb);
+            match load_ze(region_views, store_buf, ea, 8) {
+                Ok(bits) => {
+                    state.fpr[frt as usize] = bits;
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
+        PpuInstruction::Lfdux { frt, ra, rb } => {
+            debug_assert_load_with_update("lfdux", ra, frt);
+            let ea = state.ea_x_form(ra, rb);
+            match load_ze(region_views, store_buf, ea, 8) {
+                Ok(bits) => {
+                    state.fpr[frt as usize] = bits;
+                    state.gpr[ra as usize] = ea;
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
+        PpuInstruction::Stfsx { frs, ra, rb } => {
+            let ea = state.ea_x_form(ra, rb);
+            let bits = single_frs(state.fpr[frs as usize]);
+            buffer_store(store_buf, state, ea, 4, bits as u64)
+        }
+        PpuInstruction::Stfsux { frs, ra, rb } => {
+            debug_assert_store_with_update("stfsux", ra);
+            let ea = state.ea_x_form(ra, rb);
+            let bits = single_frs(state.fpr[frs as usize]);
+            let v = buffer_store(store_buf, state, ea, 4, bits as u64);
+            if v == ExecuteVerdict::Continue {
+                state.gpr[ra as usize] = ea;
+            }
+            v
+        }
+        PpuInstruction::Stfdx { frs, ra, rb } => {
+            let ea = state.ea_x_form(ra, rb);
+            buffer_store(store_buf, state, ea, 8, state.fpr[frs as usize])
+        }
+        PpuInstruction::Stfdux { frs, ra, rb } => {
+            debug_assert_store_with_update("stfdux", ra);
+            let ea = state.ea_x_form(ra, rb);
+            let v = buffer_store(store_buf, state, ea, 8, state.fpr[frs as usize]);
+            if v == ExecuteVerdict::Continue {
+                state.gpr[ra as usize] = ea;
+            }
+            v
         }
 
         // Cache control
@@ -590,6 +666,47 @@ fn read_aligned_16(
 
 #[inline]
 #[track_caller]
+/// PPC `DOUBLE(WORD)` per Book I sec 4.6.2: convert a 32-bit
+/// single-precision encoding to its 64-bit double encoding.
+///
+/// Matches Rust's `f32 as f64` for finite values, but preserves
+/// NaN payloads bit-exactly (including the SNaN/QNaN distinction)
+/// per Book I sec 4.6.2's bit-fill pseudocode for the
+/// NaN/Inf/Zero branch. A naive `as f64` cast is allowed by Rust
+/// to canonicalise NaNs and would silently quiet SNaNs
+/// round-tripped through stfsx -> lfsx.
+fn double_word(w: u32) -> u64 {
+    let exp = (w >> 23) & 0xFF;
+    let frac23 = w & 0x007F_FFFF;
+    if exp == 0xFF && frac23 != 0 {
+        // NaN: WORD2:31 || 0^29 fills FRT5:63; FRT1:4 inherit WORD1.
+        let sign = ((w >> 31) & 1) as u64;
+        let frac52 = (frac23 as u64) << 29;
+        return (sign << 63) | (0x7FFu64 << 52) | frac52;
+    }
+    (f32::from_bits(w) as f64).to_bits()
+}
+
+/// PPC `SINGLE(FRS)` per Book I sec 4.6.3: convert a 64-bit
+/// double-precision encoding to its 32-bit single encoding.
+///
+/// Matches Rust's `f64 as f32` for finite values; preserves NaN
+/// payloads bit-exactly (sign + high 23 fraction bits, exponent
+/// reset to all-ones) per Book I sec 4.6.3's "No Denormalization
+/// Required" branch on NaN inputs.
+fn single_frs(d: u64) -> u32 {
+    let exp = ((d >> 52) & 0x7FF) as u32;
+    let frac52 = d & 0x000F_FFFF_FFFF_FFFF;
+    if exp == 0x7FF && frac52 != 0 {
+        // NaN: WORD0:1 <- FRS0:1 (sign + first exp bit = 1);
+        // WORD2:31 <- FRS5:34 (rest of exp = 1s + top 23 fraction bits).
+        let sign = ((d >> 63) & 1) as u32;
+        let frac23 = ((d >> 29) & 0x007F_FFFF) as u32;
+        return (sign << 31) | (0xFFu32 << 23) | frac23;
+    }
+    (f64::from_bits(d) as f32).to_bits()
+}
+
 fn debug_assert_load_with_update(insn: &str, ra: u8, rt: u8) {
     // PPC Book I 3.3.2: invalid form when RA=0 (no base) or RA=RT
     // (the EA-write would clobber the loaded value). Real games
@@ -727,10 +844,12 @@ mod tests {
     fn lwa_sign_extends_through_store_buffer_forward() {
         // stw 0xFFFF_FFFE then lwa from the same EA: the load goes
         // through StoreBuffer::forward, which packs the stored bytes
-        // right-aligned into a u128. The earlier `val as i64 as u64`
-        // sign-extended from u64 bit 63 (always 0 for sub-8-byte
-        // forwards) and produced 0x0000_0000_FFFF_FFFE -- positive,
-        // not -2. Locks the size-aware sign extension.
+        // right-aligned into a u128. lwa must sign-extend from the
+        // top of the 32-bit access (bit 31), not from u64 bit 63 --
+        // sub-8-byte store-buffer forwards leave high u64 bits zero,
+        // so a `val as i64 as u64` sign-extend from bit 63 always
+        // produces a positive value regardless of the stored sign.
+        // Pins the size-aware sign extension.
         let mut s = PpuState::new();
         s.gpr[1] = 0x1000;
         s.gpr[5] = 0xFFFF_FFFE;
@@ -1477,6 +1596,452 @@ mod tests {
             }
             other => panic!("expected SharedWriteIntent, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lfsx_loads_single_and_round_converts_to_double() {
+        // 1.5f as float bits is 0x3FC00000; verify the FPR holds the
+        // double bit pattern of 1.5 (0x3FF8000000000000).
+        let mut mem = vec![0u8; 0x100];
+        mem[0x40..0x44].copy_from_slice(&0x3FC0_0000u32.to_be_bytes());
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x40;
+        s.gpr[5] = 0;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Lfsx {
+                frt: 7,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        assert_eq!(s.fpr[7], 0x3FF8_0000_0000_0000);
+    }
+
+    #[test]
+    fn lfsux_writes_back_ea_to_ra() {
+        let mut mem = vec![0u8; 0x100];
+        mem[0x44..0x48].copy_from_slice(&0x4040_0000u32.to_be_bytes()); // 3.0f
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x40;
+        s.gpr[5] = 4;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Lfsux {
+                frt: 8,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        assert_eq!(s.gpr[4], 0x44);
+        // 3.0 as double: 0x4008000000000000
+        assert_eq!(s.fpr[8], 0x4008_0000_0000_0000);
+    }
+
+    #[test]
+    fn lfdx_loads_64_bit_double() {
+        let mut mem = vec![0u8; 0x100];
+        let bits = 0x4080_1122_3344_5566u64;
+        mem[0x10..0x18].copy_from_slice(&bits.to_be_bytes());
+        let mut s = PpuState::new();
+        s.gpr[2] = 0x10;
+        s.gpr[3] = 0;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Lfdx {
+                frt: 9,
+                ra: 2,
+                rb: 3,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        assert_eq!(s.fpr[9], bits);
+    }
+
+    #[test]
+    fn lfdux_writes_back_ea_to_ra() {
+        let mut mem = vec![0u8; 0x100];
+        let bits = 0x4090_AAAA_BBBB_CCCCu64;
+        mem[0x20..0x28].copy_from_slice(&bits.to_be_bytes());
+        let mut s = PpuState::new();
+        s.gpr[2] = 0x10;
+        s.gpr[3] = 0x10;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Lfdux {
+                frt: 10,
+                ra: 2,
+                rb: 3,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        assert_eq!(s.gpr[2], 0x20);
+        assert_eq!(s.fpr[10], bits);
+    }
+
+    #[test]
+    fn stfsx_stores_round_converted_single() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x100;
+        s.gpr[5] = 0x4;
+        // 1.5 as double; round-convert to single bit pattern is 0x3FC00000.
+        s.fpr[6] = 0x3FF8_0000_0000_0000;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Stfsx {
+                frs: 6,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &[0u8; 0x200],
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        match &effects[0] {
+            Effect::SharedWriteIntent { range, bytes, .. } => {
+                assert_eq!(range.start().raw(), 0x104);
+                assert_eq!(bytes.bytes(), &0x3FC0_0000u32.to_be_bytes());
+            }
+            other => panic!("expected SharedWriteIntent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stfsux_writes_back_ea_only_on_success() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x40;
+        s.gpr[5] = 0x4;
+        s.fpr[3] = 0x4040_0000_0000_0000; // 32.0 as double
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Stfsux {
+                frs: 3,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &[0u8; 0x200],
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        assert_eq!(s.gpr[4], 0x44);
+        assert_eq!(effects.len(), 1);
+    }
+
+    #[test]
+    fn stfdx_stores_64_bit_double_verbatim() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x80;
+        s.gpr[5] = 0x10;
+        let bits = 0xC020_FFFF_0000_1111u64;
+        s.fpr[2] = bits;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Stfdx {
+                frs: 2,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &[0u8; 0x200],
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        match &effects[0] {
+            Effect::SharedWriteIntent { range, bytes, .. } => {
+                assert_eq!(range.start().raw(), 0x90);
+                assert_eq!(bytes.bytes(), &bits.to_be_bytes());
+            }
+            other => panic!("expected SharedWriteIntent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lfsx_preserves_nan_payload_bit_for_bit() {
+        // SNaN single (high frac bit clear, payload non-zero):
+        // 0x7F801234. Spec says lfsx delivers WORD0:1 + WORD2:31||0^29
+        // into FRT, leaving the SNaN/QNaN distinction untouched.
+        let mut mem = vec![0u8; 0x100];
+        mem[0x10..0x14].copy_from_slice(&0x7F80_1234u32.to_be_bytes());
+        let mut s = PpuState::new();
+        s.gpr[3] = 0x10;
+        s.gpr[4] = 0;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Lfsx {
+                frt: 5,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        // Expected: sign=0, exp=0x7FF, frac52 = 0x001234 << 29.
+        let expected = (0x7FFu64 << 52) | (0x001234u64 << 29);
+        assert_eq!(s.fpr[5], expected);
+    }
+
+    #[test]
+    fn stfsx_preserves_nan_payload_bit_for_bit() {
+        // FRS = double-encoded NaN with sign=1, exp=0x7FF,
+        // frac52 = 0xABCDE_DEADBEEF (low 29 bits will be discarded
+        // by the spec's WORD2:31 <- FRS5:34 selection). Expect WORD
+        // = sign=1, exp=0xFF, frac23 = top 23 bits of frac52.
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x80;
+        s.gpr[5] = 0;
+        let frac52: u64 = 0x000A_BCDE_DEAD_BEEF;
+        let nan_d = (1u64 << 63) | (0x7FFu64 << 52) | frac52;
+        s.fpr[6] = nan_d;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Stfsx {
+                frs: 6,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &[0u8; 0x200],
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        let frac23 = ((frac52 >> 29) & 0x007F_FFFF) as u32;
+        let expected = (1u32 << 31) | (0xFFu32 << 23) | frac23;
+        match &effects[0] {
+            Effect::SharedWriteIntent { range, bytes, .. } => {
+                assert_eq!(range.start().raw(), 0x80);
+                assert_eq!(bytes.bytes(), &expected.to_be_bytes());
+            }
+            other => panic!("expected SharedWriteIntent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stfsx_then_lfsx_round_trips_nan_payload() {
+        // Round-trip pin: a NaN whose 23 high fraction bits are
+        // distinct survives stfsx -> lfsx with the same single bit
+        // pattern, after re-expansion in lfsx into double form.
+        let frac23: u32 = 0x004A_5A5A;
+        let single_nan = (1u32 << 31) | (0xFFu32 << 23) | frac23;
+        // Set up FPR with the canonical lfsx-of-this-single result.
+        let canonical_fpr = (1u64 << 63) | (0x7FFu64 << 52) | ((frac23 as u64) << 29);
+
+        // stfsx round.
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x80;
+        s.gpr[5] = 0;
+        s.fpr[7] = canonical_fpr;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Stfsx {
+                frs: 7,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &[0u8; 0x200],
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        let stored = match &effects[0] {
+            Effect::SharedWriteIntent { bytes, .. } => {
+                u32::from_be_bytes(bytes.bytes().try_into().unwrap())
+            }
+            other => panic!("expected SharedWriteIntent, got {other:?}"),
+        };
+        assert_eq!(stored, single_nan, "stfsx must preserve NaN bit pattern");
+
+        // lfsx round.
+        let mut mem = vec![0u8; 0x100];
+        mem[0x40..0x44].copy_from_slice(&single_nan.to_be_bytes());
+        let mut s2 = PpuState::new();
+        s2.gpr[3] = 0x40;
+        s2.gpr[4] = 0;
+        let mut effects2 = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Lfsx {
+                frt: 8,
+                ra: 3,
+                rb: 4,
+            },
+            &mut s2,
+            0,
+            &mem,
+            &mut effects2,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        assert_eq!(
+            s2.fpr[8], canonical_fpr,
+            "lfsx-of-NaN must rebuild the spec FPR pattern bit-for-bit"
+        );
+    }
+
+    #[test]
+    fn lfsux_load_fault_does_not_write_ra() {
+        // EA out of mapped region: load_ze returns Err(ea), the
+        // handler emits MemFault, and RA must stay at its prior
+        // value. A naive implementation that writes RA before
+        // checking the load result would break the on-success-only
+        // discipline.
+        let mem = vec![0u8; 0x100];
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x1000_0000; // far outside the 0x100-byte region
+        s.gpr[5] = 0;
+        let original_ra = s.gpr[4];
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Lfsux {
+                frt: 9,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert!(matches!(out, ExecuteVerdict::MemFault(_)));
+        assert_eq!(s.gpr[4], original_ra);
+    }
+
+    #[test]
+    fn stfsux_buffer_full_does_not_write_ra() {
+        // Pre-fill the store buffer to capacity, then dispatch an
+        // stfsux. buffer_store should return BufferFull; RA must
+        // remain at its prior value so the retry-after-flush sees
+        // the same architectural state.
+        use crate::store_buffer::StoreBuffer;
+        let mut store_buf = StoreBuffer::new();
+        for i in 0..64 {
+            assert!(store_buf.insert(0x1000 + i * 4, 4, i as u128));
+        }
+        assert!(store_buf.is_full());
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x80;
+        s.gpr[5] = 0x10;
+        s.fpr[3] = 0x4040_0000_0000_0000;
+        let original_ra = s.gpr[4];
+        let mem = [0u8; 0x200];
+        let views: [(u64, &[u8]); 1] = [(0, &mem)];
+        let mut effects = Vec::new();
+        let out = crate::exec::execute(
+            &PpuInstruction::Stfsux {
+                frs: 3,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            uid(),
+            &views,
+            &mut effects,
+            &mut store_buf,
+        );
+        assert_eq!(out, ExecuteVerdict::BufferFull);
+        assert_eq!(s.gpr[4], original_ra);
+    }
+
+    #[test]
+    fn stfdux_buffer_full_does_not_write_ra() {
+        use crate::store_buffer::StoreBuffer;
+        let mut store_buf = StoreBuffer::new();
+        for i in 0..64 {
+            assert!(store_buf.insert(0x2000 + i * 4, 4, i as u128));
+        }
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x60;
+        s.gpr[5] = 0x8;
+        s.fpr[2] = 0xDEAD_BEEF_CAFE_BABE;
+        let original_ra = s.gpr[4];
+        let mem = [0u8; 0x200];
+        let views: [(u64, &[u8]); 1] = [(0, &mem)];
+        let mut effects = Vec::new();
+        let out = crate::exec::execute(
+            &PpuInstruction::Stfdux {
+                frs: 2,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            uid(),
+            &views,
+            &mut effects,
+            &mut store_buf,
+        );
+        assert_eq!(out, ExecuteVerdict::BufferFull);
+        assert_eq!(s.gpr[4], original_ra);
+    }
+
+    #[test]
+    fn lfdux_load_fault_does_not_write_ra() {
+        let mem = vec![0u8; 0x100];
+        let mut s = PpuState::new();
+        s.gpr[2] = 0x2000_0000;
+        s.gpr[3] = 0;
+        let original_ra = s.gpr[2];
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Lfdux {
+                frt: 10,
+                ra: 2,
+                rb: 3,
+            },
+            &mut s,
+            0,
+            &mem,
+            &mut effects,
+        );
+        assert!(matches!(out, ExecuteVerdict::MemFault(_)));
+        assert_eq!(s.gpr[2], original_ra);
+    }
+
+    #[test]
+    fn stfdux_writes_back_ea_to_ra() {
+        let mut s = PpuState::new();
+        s.gpr[4] = 0x60;
+        s.gpr[5] = 0x8;
+        s.fpr[2] = 0xDEAD_BEEF_CAFE_BABE;
+        let mut effects = Vec::new();
+        let out = exec_with_mem(
+            &PpuInstruction::Stfdux {
+                frs: 2,
+                ra: 4,
+                rb: 5,
+            },
+            &mut s,
+            0,
+            &[0u8; 0x200],
+            &mut effects,
+        );
+        assert_eq!(out, ExecuteVerdict::Continue);
+        assert_eq!(s.gpr[4], 0x68);
+        assert_eq!(effects.len(), 1);
     }
 
     #[test]

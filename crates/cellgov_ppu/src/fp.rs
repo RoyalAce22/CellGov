@@ -257,9 +257,10 @@ mod tests {
 
     #[test]
     fn fctiw_xo14_dispatches() {
-        // Earlier code silently dropped through for xo=14, leaving
-        // the destination FPR untouched. Confirm the arm fires by
-        // observing a new value.
+        // Pins the xo=14 arm. A dispatcher that drops through for
+        // xo=14 would leave the destination FPR at its prior value;
+        // observe a write by seeding a sentinel and checking it
+        // gets overwritten.
         let mut s = PpuState::new();
         s.fpr[0] = 0xDEAD_BEEFu64;
         s.fpr[2] = f64::to_bits(42.0);

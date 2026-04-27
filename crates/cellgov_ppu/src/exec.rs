@@ -25,6 +25,7 @@
 
 mod alu;
 mod branch;
+mod cr;
 mod mem;
 mod super_insn;
 #[cfg(test)]
@@ -236,6 +237,14 @@ pub fn execute(
         | PpuInstruction::Stfsu { .. }
         | PpuInstruction::Stfdu { .. }
         | PpuInstruction::Stfiwx { .. }
+        | PpuInstruction::Lfsx { .. }
+        | PpuInstruction::Lfsux { .. }
+        | PpuInstruction::Lfdx { .. }
+        | PpuInstruction::Lfdux { .. }
+        | PpuInstruction::Stfsx { .. }
+        | PpuInstruction::Stfsux { .. }
+        | PpuInstruction::Stfdx { .. }
+        | PpuInstruction::Stfdux { .. }
         | PpuInstruction::Dcbz { .. } => {
             mem::execute(insn, state, unit_id, region_views, effects, store_buf)
         }
@@ -245,6 +254,17 @@ pub fn execute(
         | PpuInstruction::Bc { .. }
         | PpuInstruction::Bclr { .. }
         | PpuInstruction::Bcctr { .. } => branch::execute(insn, state),
+
+        // CR-logical (XL-form opcode 19).
+        PpuInstruction::Mcrf { .. }
+        | PpuInstruction::Crand { .. }
+        | PpuInstruction::Crandc { .. }
+        | PpuInstruction::Cror { .. }
+        | PpuInstruction::Crorc { .. }
+        | PpuInstruction::Crxor { .. }
+        | PpuInstruction::Crnand { .. }
+        | PpuInstruction::Crnor { .. }
+        | PpuInstruction::Creqv { .. } => cr::execute(insn, state),
 
         // Integer arithmetic / logical / shift / rotate / compare / CR-SPR moves.
         PpuInstruction::Addi { .. }

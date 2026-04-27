@@ -533,9 +533,9 @@ mod tests {
     #[test]
     fn super_pair_std_std_offset_overflow_no_fuse() {
         // off1 = 32760 (max DS-aligned positive offset that overflows
-        // on +8). Pre-fix wrapping_add(8) wrapped to -32768 and matched
-        // a distant store at offset -32768; checked_add returns None
-        // and the pair stays unfused.
+        // on +8). The adjacency test must use checked_add: a
+        // wrapping_add(8) would wrap to -32768 and match a distant
+        // store at offset -32768 as if it were adjacent.
         let shadow = build_from_words(0, &[std_raw(3, 1, 32760), std_raw(4, 1, -32768)]);
         assert!(
             matches!(shadow.get(0), Some(PpuInstruction::Std { .. })),

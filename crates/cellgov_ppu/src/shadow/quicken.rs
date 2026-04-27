@@ -310,9 +310,10 @@ mod tests {
 
     #[test]
     fn quicken_rlwinm_sh_zero_routes_to_clrlwi_not_slwi() {
-        // rlwinm rA, rS, 0, 0, 31 is a 32-bit zero-extend. Pre-fix it
-        // matched the Slwi arm and produced Slwi { n: 0 }; the guarded form
-        // routes to Clrlwi { n: 0 } which is the canonical idiom.
+        // rlwinm rA, rS, 0, 0, 31 is a 32-bit zero-extend. Without a
+        // sh==0 guard on the Slwi quickening arm it can match this
+        // form and produce Slwi { n: 0 }; the guarded routing emits
+        // Clrlwi { n: 0 }, which is the canonical idiom.
         let shadow = build_from_words(0, &[rlwinm_raw(4, 3, 0, 0, 31)]);
         assert_eq!(
             shadow.get(0),

@@ -169,9 +169,9 @@ pub(crate) fn run(args: &[String]) {
     let mut counts = InventoryCounts::default();
     // Surface NID/module mismatches: the binding's module disagrees
     // with nid_db's module for the same NID. PS3 NIDs are hashes
-    // and cross-module collisions have occurred historically.
-    // Exact-string comparison may false-positive on module-name
-    // variants (versioned stubs, internal-init entrypoints).
+    // and cross-module collisions are possible. Exact-string
+    // comparison may false-positive on module-name variants
+    // (versioned stubs, internal-init entrypoints).
     let mut module_collisions: Vec<(String, u32, String, String)> = Vec::new();
     let mut empty_modules: Vec<String> = Vec::new();
 

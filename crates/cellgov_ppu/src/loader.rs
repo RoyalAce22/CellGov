@@ -914,8 +914,10 @@ mod tests {
     #[test]
     fn rejects_segment_with_vaddr_memsz_overflow() {
         // Crafted PT_LOAD: p_vaddr near u64::MAX so p_vaddr + p_memsz wraps.
-        // Pre-fix arithmetic would wrap, pass the post-bounds check, and
-        // route an OOB write through apply_commit.
+        // Wrapping `p_vaddr + p_memsz` instead of using checked_add
+        // can pass a post-bounds check on the wrapped value and
+        // route an OOB write through apply_commit. Pins checked
+        // arithmetic on segment-end computation.
         let mut data = mk_elf_header(1);
         let p_vaddr = u64::MAX - 0xFF;
         let p_memsz = 0x200u64;
@@ -985,8 +987,9 @@ mod tests {
     fn find_sys_process_param_rejects_magic_outside_pt_load() {
         // Build an ELF whose PT_LOAD covers a small file range that does
         // NOT contain the magic, and place the magic + plausible struct
-        // bytes outside that range. Pre-fix scan would match the magic and
-        // return false-positive struct fields.
+        // bytes outside that range. A magic-scanner that walks raw
+        // file bytes without filtering by PT_LOAD coverage would
+        // match the magic and return false-positive struct fields.
         let payload_offset = 0x200usize;
         let pt_load_offset = 0x100usize;
         let pt_load_size = 0x40usize; // does not cover payload_offset

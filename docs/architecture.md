@@ -1067,21 +1067,27 @@ Common boot sequence (per-title numbers below):
 5. Run the game's CRT0 from the ELF entry point.
 
 **flOw (NPUA80001).** 140 HLE bindings; liblv2 surfaces 161
-exports. Boot completes its CRT0, video-out probe, GCM init, and
-PSSG (renderer init) successfully, then enters a steady-state
-polling loop on `cellGcmGetControlRegister` +
-`cellGcmAddressToOffset` waiting for the RSX FIFO get-pointer to
-advance. Currently ends via `MaxSteps` at the 4B-instruction cap
-(15,625,000 scheduler steps, budget 256), deterministic across
-runs. The earlier `ProcessExit` floor at step 10,872 was the
-title's PSSG renderer init bailing because of two coupled
-oracle-side bugs: a sysPrxForUser HLE wrapper read r4 as a
-struct pointer instead of as the entry OPD address per the SDK
-ABI, and the LV2 host read PS3 OPDs as 16-byte u64-pair structs
-instead of 8-byte u32-pair structs. Both are fixed; the cross-
-runner observation is unavailable until the RSX FIFO advance /
-vblank gap is closed and a mutually-reachable checkpoint with
-RPCS3 is restored. See
+exports. Boot completes CRT0, video-out probe, GCM init, and
+PSSG (renderer init); the title's manifest enables `[rsx]
+mirror = true` so its put-pointer store at `0xC0000040` lands in
+the FIFO cursor instead of faulting, and the commit-boundary
+FIFO advance pass drains the queued NV4097 / NV406E commands so
+the GPU semaphore writebacks satisfy PSSG's polled completion
+flag. Boot then progresses to PPU step 78,199 where a secondary
+helper PPU thread branches through CTR=0 (PC=0x00000000,
+raw=0x00000000) mid-way through SPURS workload registration --
+the title's HLE call trace at fault shows
+`cellSpursAddWorkload` fired five times,
+`cellSpursInitialize` twice, plus `cellSpursAttachLv2EventQueue`,
+`cellSpursRequestIdleSpu`, `cellSpursReadyCountStore`,
+`cellSpursGetInfo`, and `cellSpursSetExceptionEventHandler`,
+all currently noop-stubbed. Twenty-eight execution units are
+alive at the fault (one main PPU, one helper PPU, twenty-six
+SPU threads spawned by the SPURS init).
+
+Cross-runner observation against RPCS3 is unavailable until
+flOw reaches a mutually-deterministic checkpoint past SPURS
+task-runtime modeling. See
 [tests/fixtures/NPUA80001_cross_runner/compare_report.txt](../tests/fixtures/NPUA80001_cross_runner/compare_report.txt).
 
 **Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
@@ -1094,11 +1100,7 @@ keyboard/pad init, SPURS init, video configuration, and into the
 main attract loop. The first RSX write (put-pointer update to the
 GCM control register at 0xC0000040) triggers at step 14,341,441
 (~3.7B instructions). SSHD's CRT0/init path is bit-identical
-across CellGov revisions for the current PPU correctness surface
-modulo a -25 step shift from the recent sysPrxForUser
-sys_ppu_thread_create_ex args-layout fix and the 8-byte OPD
-format correction in the LV2 host (same fixes that unblocked
-flOw's PSSG init).
+across CellGov revisions for the current PPU correctness surface.
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after

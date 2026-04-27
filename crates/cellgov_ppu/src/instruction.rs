@@ -524,6 +524,61 @@ pub enum PpuInstruction {
         link: bool,
     },
 
+    // -- CR-logical (XL-form, opcode 19) --
+    /// `mcrf BF, BFA`: copy 4-bit CR field `crfs` into field `crfd`.
+    Mcrf {
+        crfd: u8,
+        crfs: u8,
+    },
+    /// `crand BT, BA, BB`: CR[bt] = CR[ba] AND CR[bb].
+    Crand {
+        bt: u8,
+        ba: u8,
+        bb: u8,
+    },
+    /// `crandc BT, BA, BB`: CR[bt] = CR[ba] AND NOT CR[bb].
+    Crandc {
+        bt: u8,
+        ba: u8,
+        bb: u8,
+    },
+    /// `cror BT, BA, BB`: CR[bt] = CR[ba] OR CR[bb].
+    Cror {
+        bt: u8,
+        ba: u8,
+        bb: u8,
+    },
+    /// `crorc BT, BA, BB`: CR[bt] = CR[ba] OR NOT CR[bb].
+    Crorc {
+        bt: u8,
+        ba: u8,
+        bb: u8,
+    },
+    /// `crxor BT, BA, BB`: CR[bt] = CR[ba] XOR CR[bb].
+    Crxor {
+        bt: u8,
+        ba: u8,
+        bb: u8,
+    },
+    /// `crnand BT, BA, BB`: CR[bt] = NOT (CR[ba] AND CR[bb]).
+    Crnand {
+        bt: u8,
+        ba: u8,
+        bb: u8,
+    },
+    /// `crnor BT, BA, BB`: CR[bt] = NOT (CR[ba] OR CR[bb]).
+    Crnor {
+        bt: u8,
+        ba: u8,
+        bb: u8,
+    },
+    /// `creqv BT, BA, BB`: CR[bt] = NOT (CR[ba] XOR CR[bb]).
+    Creqv {
+        bt: u8,
+        ba: u8,
+        bb: u8,
+    },
+
     // -- Indexed loads/stores --
     Lwzx {
         rt: u8,
@@ -738,6 +793,56 @@ pub enum PpuInstruction {
     /// Store-float-as-integer-word. The low 32 bits of `fpr[frs]` are
     /// written verbatim -- there is no float-to-int conversion.
     Stfiwx {
+        frs: u8,
+        ra: u8,
+        rb: u8,
+    },
+
+    // -- X-form floating-point loads/stores (opcode 31) --
+    /// `lfsx FRT, RA, RB`: load single, round to double in FRT.
+    Lfsx {
+        frt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// `lfsux FRT, RA, RB`: lfsx with EA written back to RA (RA != 0).
+    Lfsux {
+        frt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// `lfdx FRT, RA, RB`: load 64-bit double into FRT.
+    Lfdx {
+        frt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// `lfdux FRT, RA, RB`: lfdx with EA written back to RA (RA != 0).
+    Lfdux {
+        frt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// `stfsx FRS, RA, RB`: round FRS to single, store 32 bits.
+    Stfsx {
+        frs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// `stfsux FRS, RA, RB`: stfsx with EA written back to RA (RA != 0).
+    Stfsux {
+        frs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// `stfdx FRS, RA, RB`: store 64-bit double from FRS.
+    Stfdx {
+        frs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// `stfdux FRS, RA, RB`: stfdx with EA written back to RA (RA != 0).
+    Stfdux {
         frs: u8,
         ra: u8,
         rb: u8,

@@ -5,6 +5,16 @@ display_name = "flOw (thatgamecompany, 2007)"
 eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
 
 [checkpoint]
-# flOw's boot reaches sys_process_exit deterministically under
-# CellGov, so its default checkpoint is that syscall.
+# Title checkpoint kind. `process-exit` stops the harness on
+# `sys_process_exit`; mutex with `first-rsx-write` because the
+# rsx-mirror toggle below makes RSX-region stores succeed
+# instead of fault.
 kind = "process-exit"
+
+[rsx]
+# Map the RSX region read-write so PPU stores at the GCM control
+# register window (0xC0000040+) land in the FIFO cursor; the
+# commit-boundary advance pass then drains the queued NV4097 /
+# NV406E commands and emits the GPU semaphore writebacks the
+# title polls for during renderer init.
+mirror = true

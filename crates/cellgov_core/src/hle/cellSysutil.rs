@@ -3,8 +3,7 @@
 //! Covers the video-out query surface a title's display-init code
 //! consults during boot. CellGov reports a primary 720p RGB display
 //! deterministically; titles that read these structs and treat zero
-//! as "no display attached" (flOw's `sys_process_exit` exit-probe
-//! path) advance into normal init instead.
+//! as "no display attached" advance into normal init instead.
 //!
 //! ## Failure policy
 //!
