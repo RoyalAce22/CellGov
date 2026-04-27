@@ -42,7 +42,7 @@ Column definitions:
 
 | Serial | Title | Year | Engine | Format | Checkpoint | Steps | Insns | Cross-runner |
 |--------|-------|------|--------|--------|------------|------:|------:|--------------|
-| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | Fault (SPURS surface) | 78,199 | ~20M | not available (see note below) |
+| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | Fault (lwmutex routing gap) | 78,199 | ~20M | not available (see note below) |
 | NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,341,441 | ~3.7B | code:0x35 ELF-header byte (non-semantic) |
 | BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | MaxSteps (1B) | 3,906,250 | 1B | not available (see note below) |
 
@@ -66,29 +66,37 @@ details.
 
 ## flOw cross-runner note
 
-flOw boots through CRT0, video-out probe, GCM init, and PSSG
-renderer init. Its manifest enables `[rsx] mirror = true`, so
-the title's put-pointer store at `0xC0000040` lands in the FIFO
-cursor instead of faulting and the commit-boundary FIFO advance
-pass dispatches the queued NV4097 / NV406E commands. The GPU
+flOw boots through CRT0, video-out probe, GCM init, PSSG
+renderer init, and the SPURS PPU-side surface init. Its
+manifest enables `[rsx] mirror = true`, so the title's
+put-pointer store at `0xC0000040` lands in the FIFO cursor
+instead of faulting and the commit-boundary FIFO advance pass
+dispatches the queued NV4097 / NV406E commands. The GPU
 semaphore writebacks emitted by the advance pass satisfy PSSG's
-init-completion poll, and the title progresses past renderer
-init into SPURS workload registration.
+init-completion poll, and the title runs through the full
+SPURS PPU surface (CellSpurs control block populated, workload
+registry honoring AddWorkload calls, ready-count and contention
+controls live, info snapshot accurate).
 
-The current stopping point is a fault at PPU step 78,199: a
-secondary helper PPU thread branches through CTR=0
-(PC=0x00000000, raw=0x00000000) mid-way through SPURS init. At
-the fault the HLE call trace shows `cellSpursAddWorkload` fired
-five times, `cellSpursInitialize` twice, plus
-`cellSpursAttachLv2EventQueue`, `cellSpursRequestIdleSpu`,
-`cellSpursReadyCountStore`, `cellSpursGetInfo`, and
-`cellSpursSetExceptionEventHandler`, all currently noop-stubbed.
-Twenty-eight execution units are alive at the fault: one main
-PPU, one helper PPU, twenty-six SPU threads spawned by the
-SPURS init.
+The current stopping point is a fault at PPU step 78,199. A
+helper PPU thread executes a C++ virtual-call dispatcher
+(`lwz r9, 0(r3); lwz r11, 0(r9); lwz r0, 0(r11); mtctr r0;
+bctrl`) where `*r3` is zero, so `bctrl` jumps to PC=0. The
+fault is downstream of an LV2 sync-primitive routing gap: the
+HLE wrappers for `sys_lwmutex_lock` / `unlock` / `trylock` /
+`destroy` (NIDs 0x1573dc3f, 0x1bc200f4, 0xaeb78725, 0xc3476d0c)
+are listed as `Stateful` and `impl` in the NID database but
+have no match arms in the runtime dispatcher; calls silently
+return CELL_OK without serializing access. Threads contend on
+a lock that does not actually lock, leaving a C++ object's
+vtable un-initialised when the helper performs its virtual
+call. The mini-trace at fault confirms the loop: alternating
+`Sc` instructions at the lwmutex_lock / unlock / ppu_thread_get_id
+HLE thunks plus a `SyscallResponseTable::insert` displacement
+on a `CondWakeReacquire` for mutex `0x4000001A`.
 
-The next stable checkpoint requires a SPURS task-runtime model:
-PPU-side workload registry plus SPU-side task dispatcher with
-deterministic semantics. Cross-runner observation against RPCS3
-is unavailable until flOw reaches a mutually-deterministic
-stopping point past SPURS init.
+Cross-runner observation against RPCS3 is unavailable until
+flOw reaches a mutually-deterministic stopping point past the
+sync-primitive routing gap. See
+`docs/dev/phases/baselines/phase_26_baselines.md` for the
+detailed disassembly and routing-gap source-level evidence.

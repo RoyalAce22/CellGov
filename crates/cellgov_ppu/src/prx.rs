@@ -198,6 +198,36 @@ pub const HLE_IMPLEMENTED_NIDS: &[u32] = &[
     0xa2c7ba64, // sys_prx_exitspawn_with_level
     0x887572d5, // cellVideoOutGetState
     0xe558748d, // cellVideoOutGetResolution
+    // cellSpurs initialize family.
+    0x95180230, // _cellSpursAttributeInitialize
+    0xacfc8dbc, // cellSpursInitialize
+    0xaa6269a8, // cellSpursInitializeWithAttribute
+    0x30aa96c4, // cellSpursInitializeWithAttribute2
+    0xca4c4600, // cellSpursFinalize
+    // cellSpurs workload registry.
+    0xefeb2679, // _cellSpursWorkloadAttributeInitialize
+    0x69726aa2, // cellSpursAddWorkload
+    0xc0158d8b, // cellSpursAddWorkloadWithAttribute
+    0x98d5b343, // cellSpursShutdownWorkload
+    0x5fd43fe4, // cellSpursWaitForWorkloadShutdown
+    // cellSpurs ready-count, contention, idle-spu, priority controls.
+    0xf843818d, // cellSpursReadyCountStore
+    0x75211196, // cellSpursReadyCountAdd
+    0x49a3426d, // cellSpursReadyCountSwap
+    0xf1d3552d, // cellSpursReadyCountCompareAndSwap
+    0x182d9890, // cellSpursRequestIdleSpu
+    0x84d2f6d5, // cellSpursSetMaxContention
+    0x80a29e27, // cellSpursSetPriorities
+    0xb52e1bda, // cellSpursSetPriority
+    // cellSpurs info getter + exception handler registration.
+    0x1f402f8f, // cellSpursGetInfo
+    0xb9bc6207, // cellSpursAttachLv2EventQueue
+    0x4e66d483, // cellSpursDetachLv2EventQueue
+    0xd2e23fa9, // cellSpursSetExceptionEventHandler
+    0x4c75deb8, // cellSpursUnsetExceptionEventHandler
+    0x7517724a, // cellSpursSetGlobalExceptionEventHandler
+    0x861237f8, // cellSpursUnsetGlobalExceptionEventHandler
+    0x32b94add, // cellSpursEnableExceptionEventHandler
 ];
 
 /// Bind result: maps each HLE index to its module and NID.

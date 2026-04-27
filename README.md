@@ -53,10 +53,12 @@ Pre-Alpha. What works today:
   shadow quickenings and super-pair fusions; covers the
   CR-logical XL-form family and the X-form FP indexed load/store
   family). **SPU**: full interpreter.
-- **LV2**: 57 classified syscalls, 24 HLE exports, including the
-  `sys_rsx` kernel-side RSX surface and the cellSysutil video-out
-  query family.
-- 2,223 tests, zero `unsafe` (`unsafe_code = forbid`).
+- **LV2**: 57 classified syscalls, 50 HLE exports, including the
+  `sys_rsx` kernel-side RSX surface, the cellSysutil video-out
+  query family, and the cellSpurs PPU-side runtime (initialize,
+  workload registry, ready-count and contention controls, info
+  snapshot, exception-handler registration).
+- 2,289 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 ### Next reads
 
