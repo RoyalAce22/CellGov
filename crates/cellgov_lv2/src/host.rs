@@ -7,8 +7,7 @@
 
 pub use self::rsx::{
     SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,
-    PACKAGE_CELLGOV_SET_VBLANK_HANDLER, PACKAGE_FLIP_BUFFER, PACKAGE_FLIP_MODE,
-    PACKAGE_SET_DISPLAY_BUFFER,
+    PACKAGE_CELLGOV_SET_VBLANK_HANDLER,
 };
 use crate::dispatch::Lv2Dispatch;
 use crate::image::ContentStore;
@@ -24,6 +23,7 @@ use crate::thread_group::ThreadGroupTable;
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_ps3_abi::cell_errors as errno;
 use cellgov_time::GuestTicks;
 
 /// Readonly view of runtime state exposed to the host during dispatch.
@@ -581,7 +581,7 @@ impl Lv2Host {
                 }
             }
             Lv2Request::MemoryGetUserMemorySize { mem_info_ptr } => {
-                let total = crate::CELL_PS3_USER_MEMORY_TOTAL;
+                let total = cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL;
                 let available = total;
                 let mut bytes = [0u8; 8];
                 bytes[0..4].copy_from_slice(&total.to_be_bytes());
@@ -673,13 +673,13 @@ impl Lv2Host {
             // CELL_OK response leaves it reading uninitialized
             // stack. Real LV2 returns EINVAL for id=0/null pOpt.
             Lv2Request::Unsupported { number: 481, .. } => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             },
             // sys_tty_read: CELL_OK spins CRT input loops forever;
             // real LV2 returns EIO outside debug console mode.
             Lv2Request::Unsupported { number: 402, .. } => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EIO.into(),
+                code: errno::CELL_EIO.into(),
                 effects: vec![],
             },
             Lv2Request::ProcessExit { .. } => Lv2Dispatch::Immediate {
@@ -715,7 +715,7 @@ impl Lv2Host {
                     ),
                 );
                 Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EINVAL.into(),
+                    code: errno::CELL_EINVAL.into(),
                     effects: vec![],
                 }
             }
@@ -876,8 +876,8 @@ mod tests {
     fn cell_ps3_user_memory_total_is_213_mib() {
         // 213 MiB = 0x0D500000 = 223,346,688 bytes. The PS3 game-mode
         // user-memory cap.
-        assert_eq!(crate::CELL_PS3_USER_MEMORY_TOTAL, 0x0D50_0000);
-        assert_eq!(crate::CELL_PS3_USER_MEMORY_TOTAL, 223_346_688);
+        assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 0x0D50_0000);
+        assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 223_346_688);
     }
 
     #[test]
@@ -964,7 +964,7 @@ mod tests {
         assert_eq!(
             result,
             Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EIO.into(),
+                code: errno::CELL_EIO.into(),
                 effects: vec![],
             }
         );
@@ -985,7 +985,7 @@ mod tests {
         assert_eq!(
             result,
             Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             }
         );

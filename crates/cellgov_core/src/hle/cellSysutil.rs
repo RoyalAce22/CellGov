@@ -7,60 +7,28 @@
 //!
 //! ## Failure policy
 //!
-//! - Null guest out-pointers return `CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER`
+//! - Null guest out-pointers return `error::ILLEGAL_PARAMETER`
 //!   without writing anything (matches RPCS3's `vm::ptr` null guard).
-//! - Out-of-range `videoOut` returns `CELL_VIDEO_OUT_ERROR_UNSUPPORTED_VIDEO_OUT`.
+//! - Out-of-range `videoOut` returns `error::UNSUPPORTED_VIDEO_OUT`.
 //! - `deviceIndex` out of range for the chosen `videoOut` returns
-//!   `CELL_VIDEO_OUT_ERROR_DEVICE_NOT_FOUND` (CellGov models exactly
-//!   one device on `CELL_VIDEO_OUT_PRIMARY`, zero on
-//!   `CELL_VIDEO_OUT_SECONDARY`).
+//!   `error::DEVICE_NOT_FOUND` (CellGov models exactly
+//!   one device on `display::PRIMARY`, zero on
+//!   `display::SECONDARY`).
 
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::cell_video_out::{
+    aspect, color_space, display, display_conversion, display_mode_resolution, error, output_state,
+    refresh_rate, resolution_id, scan_mode,
+};
+use cellgov_ps3_abi::nid::cell_sysutil as sysutil_nid;
 
 use crate::hle::context::{HleContext, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
-pub(crate) const NID_CELL_VIDEO_OUT_GET_STATE: u32 = 0x887572d5;
-pub(crate) const NID_CELL_VIDEO_OUT_GET_RESOLUTION: u32 = 0xe558748d;
-
-/// Every NID this module claims. Consumed by the disjointness and
-/// dispatch-coverage canaries in `crate::hle::tests`.
+/// Every NID this module claims; sourced from
+/// [`cellgov_ps3_abi::nid::cell_sysutil::OWNED`].
 #[cfg(test)]
-pub(crate) const OWNED_NIDS: &[u32] = &[
-    NID_CELL_VIDEO_OUT_GET_STATE,
-    NID_CELL_VIDEO_OUT_GET_RESOLUTION,
-];
-
-// PS3 cellVideoOut ABI constants. Mirror the values in
-// `tools/rpcs3-src/rpcs3/Emu/Cell/Modules/cellVideoOut.h`.
-
-const CELL_VIDEO_OUT_PRIMARY: u32 = 0;
-const CELL_VIDEO_OUT_SECONDARY: u32 = 1;
-
-const CELL_VIDEO_OUT_OUTPUT_STATE_ENABLED: u8 = 0;
-
-const CELL_VIDEO_OUT_COLOR_SPACE_RGB: u8 = 0x01;
-
-// Resolution IDs (the u8 in CellVideoOutDisplayMode and the u32 the
-// caller hands cellVideoOutGetResolution).
-const CELL_VIDEO_OUT_RESOLUTION_1080: u32 = 1;
-const CELL_VIDEO_OUT_RESOLUTION_720_U32: u32 = 2;
-const CELL_VIDEO_OUT_RESOLUTION_480: u32 = 4;
-const CELL_VIDEO_OUT_RESOLUTION_576: u32 = 5;
-const CELL_VIDEO_OUT_RESOLUTION_1600X1080: u32 = 6;
-const CELL_VIDEO_OUT_RESOLUTION_1440X1080: u32 = 7;
-const CELL_VIDEO_OUT_RESOLUTION_1280X1080: u32 = 8;
-const CELL_VIDEO_OUT_RESOLUTION_960X1080: u32 = 10;
-
-const CELL_VIDEO_OUT_RESOLUTION_720: u8 = 2;
-const CELL_VIDEO_OUT_SCAN_MODE_PROGRESSIVE: u8 = 1;
-const CELL_VIDEO_OUT_DISPLAY_CONVERSION_NONE: u8 = 0;
-const CELL_VIDEO_OUT_ASPECT_16_9: u8 = 2;
-const CELL_VIDEO_OUT_REFRESH_RATE_59_94HZ: u16 = 0x0001;
-
-const CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER: u32 = 0x8002_b222;
-const CELL_VIDEO_OUT_ERROR_DEVICE_NOT_FOUND: u32 = 0x8002_b224;
-const CELL_VIDEO_OUT_ERROR_UNSUPPORTED_VIDEO_OUT: u32 = 0x8002_b225;
+pub(crate) const OWNED_NIDS: &[u32] = sysutil_nid::OWNED;
 
 /// Dispatch entry point; returns `None` if the NID is not owned here.
 pub(crate) fn dispatch(
@@ -70,10 +38,10 @@ pub(crate) fn dispatch(
     args: &[u64; 9],
 ) -> Option<()> {
     match nid {
-        NID_CELL_VIDEO_OUT_GET_STATE => {
+        sysutil_nid::VIDEO_OUT_GET_STATE => {
             video_out_get_state(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_VIDEO_OUT_GET_RESOLUTION => {
+        sysutil_nid::VIDEO_OUT_GET_RESOLUTION => {
             video_out_get_resolution(&mut adapter(runtime, source, nid), args);
         }
         _ => return None,
@@ -100,8 +68,8 @@ fn adapter(runtime: &mut Runtime, source: UnitId, nid: u32) -> RuntimeHleAdapter
 /// `cellVideoOutGetState(videoOut, deviceIndex, state)`.
 ///
 /// Reports a primary 720p / RGB / 16:9 / 59.94Hz display when the
-/// caller queries `CELL_VIDEO_OUT_PRIMARY` with `deviceIndex == 0`.
-/// `CELL_VIDEO_OUT_SECONDARY` is modelled as having no devices
+/// caller queries `display::PRIMARY` with `deviceIndex == 0`.
+/// `display::SECONDARY` is modelled as having no devices
 /// attached. Any other `videoOut` value is unsupported.
 pub(crate) fn video_out_get_state(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let video_out = args[1] as u32;
@@ -109,23 +77,19 @@ pub(crate) fn video_out_get_state(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let state_ptr = args[3] as u32;
 
     if state_ptr == 0 {
-        ctx.set_return(CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER as u64);
+        ctx.set_return(error::ILLEGAL_PARAMETER as u64);
         return;
     }
 
-    if video_out != CELL_VIDEO_OUT_PRIMARY && video_out != CELL_VIDEO_OUT_SECONDARY {
-        ctx.set_return(CELL_VIDEO_OUT_ERROR_UNSUPPORTED_VIDEO_OUT as u64);
+    if video_out != display::PRIMARY && video_out != display::SECONDARY {
+        ctx.set_return(error::UNSUPPORTED_VIDEO_OUT as u64);
         return;
     }
 
     // PRIMARY has exactly one device (index 0); SECONDARY has none.
-    let device_count = if video_out == CELL_VIDEO_OUT_PRIMARY {
-        1
-    } else {
-        0
-    };
+    let device_count = if video_out == display::PRIMARY { 1 } else { 0 };
     if device_index >= device_count {
-        ctx.set_return(CELL_VIDEO_OUT_ERROR_DEVICE_NOT_FOUND as u64);
+        ctx.set_return(error::DEVICE_NOT_FOUND as u64);
         return;
     }
 
@@ -137,15 +101,15 @@ pub(crate) fn video_out_get_state(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     //   u8 resolutionId, u8 scanMode, u8 conversion, u8 aspect,
     //   u8 reserved[2], be_t<u16> refreshRates.
     let mut buf = [0u8; 16];
-    buf[0] = CELL_VIDEO_OUT_OUTPUT_STATE_ENABLED;
-    buf[1] = CELL_VIDEO_OUT_COLOR_SPACE_RGB;
+    buf[0] = output_state::ENABLED;
+    buf[1] = color_space::RGB;
     // buf[2..8] reserved zeros.
-    buf[8] = CELL_VIDEO_OUT_RESOLUTION_720;
-    buf[9] = CELL_VIDEO_OUT_SCAN_MODE_PROGRESSIVE;
-    buf[10] = CELL_VIDEO_OUT_DISPLAY_CONVERSION_NONE;
-    buf[11] = CELL_VIDEO_OUT_ASPECT_16_9;
+    buf[8] = display_mode_resolution::ID_720;
+    buf[9] = scan_mode::PROGRESSIVE;
+    buf[10] = display_conversion::NONE;
+    buf[11] = aspect::WIDE_16_9;
     // buf[12..14] reserved zeros.
-    buf[14..16].copy_from_slice(&CELL_VIDEO_OUT_REFRESH_RATE_59_94HZ.to_be_bytes());
+    buf[14..16].copy_from_slice(&refresh_rate::HZ_59_94.to_be_bytes());
 
     ctx.write_guest(state_ptr as u64, &buf)
         .expect("cellVideoOutGetState: write to caller out-ptr failed");
@@ -156,19 +120,19 @@ pub(crate) fn video_out_get_state(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 ///
 /// Looks the resolution ID up in the PS3 spec table and writes the
 /// (width, height) pair as two big-endian `u16`s. Unknown IDs return
-/// `CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER` without writing the
+/// `error::ILLEGAL_PARAMETER` without writing the
 /// out-pointer.
 pub(crate) fn video_out_get_resolution(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let resolution_id = args[1] as u32;
     let resolution_ptr = args[2] as u32;
 
     if resolution_ptr == 0 {
-        ctx.set_return(CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER as u64);
+        ctx.set_return(error::ILLEGAL_PARAMETER as u64);
         return;
     }
 
     let Some((width, height)) = resolution_lookup(resolution_id) else {
-        ctx.set_return(CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER as u64);
+        ctx.set_return(error::ILLEGAL_PARAMETER as u64);
         return;
     };
 
@@ -185,18 +149,18 @@ pub(crate) fn video_out_get_resolution(ctx: &mut dyn HleContext, args: &[u64; 9]
 /// Values mirror `_IntGetResolutionInfo` in
 /// `tools/rpcs3-src/rpcs3/Emu/Cell/Modules/cellVideoOut.cpp`. Only
 /// the standard 2D resolutions are supported; 3D / dualview / unusual
-/// IDs return `None` and become `CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER`
+/// IDs return `None` and become `error::ILLEGAL_PARAMETER`
 /// at the caller (deferred until a foundation title surfaces one).
 fn resolution_lookup(id: u32) -> Option<(u16, u16)> {
     match id {
-        CELL_VIDEO_OUT_RESOLUTION_1080 => Some((1920, 1080)),
-        CELL_VIDEO_OUT_RESOLUTION_720_U32 => Some((1280, 720)),
-        CELL_VIDEO_OUT_RESOLUTION_480 => Some((720, 480)),
-        CELL_VIDEO_OUT_RESOLUTION_576 => Some((720, 576)),
-        CELL_VIDEO_OUT_RESOLUTION_1600X1080 => Some((1600, 1080)),
-        CELL_VIDEO_OUT_RESOLUTION_1440X1080 => Some((1440, 1080)),
-        CELL_VIDEO_OUT_RESOLUTION_1280X1080 => Some((1280, 1080)),
-        CELL_VIDEO_OUT_RESOLUTION_960X1080 => Some((960, 1080)),
+        resolution_id::ID_1080 => Some((1920, 1080)),
+        resolution_id::ID_720 => Some((1280, 720)),
+        resolution_id::ID_480 => Some((720, 480)),
+        resolution_id::ID_576 => Some((720, 576)),
+        resolution_id::ID_1600X1080 => Some((1600, 1080)),
+        resolution_id::ID_1440X1080 => Some((1440, 1080)),
+        resolution_id::ID_1280X1080 => Some((1280, 1080)),
+        resolution_id::ID_960X1080 => Some((960, 1080)),
         _ => None,
     }
 }
@@ -241,7 +205,7 @@ mod tests {
         let state_ptr: u32 = 0x10_1000;
         let args: [u64; 9] = [
             0x10000,
-            CELL_VIDEO_OUT_PRIMARY as u64,
+            display::PRIMARY as u64,
             0,
             state_ptr as u64,
             0,
@@ -250,57 +214,42 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_VIDEO_OUT_GET_STATE, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
             0,
             "CELL_OK on success"
         );
-        assert_eq!(
-            read_guest_u8(&rt, state_ptr),
-            CELL_VIDEO_OUT_OUTPUT_STATE_ENABLED
-        );
-        assert_eq!(
-            read_guest_u8(&rt, state_ptr + 1),
-            CELL_VIDEO_OUT_COLOR_SPACE_RGB
-        );
+        assert_eq!(read_guest_u8(&rt, state_ptr), output_state::ENABLED);
+        assert_eq!(read_guest_u8(&rt, state_ptr + 1), color_space::RGB);
         for off in 2..8 {
             assert_eq!(read_guest_u8(&rt, state_ptr + off), 0, "reserved[{off}]");
         }
         assert_eq!(
             read_guest_u8(&rt, state_ptr + 8),
-            CELL_VIDEO_OUT_RESOLUTION_720
+            display_mode_resolution::ID_720
         );
-        assert_eq!(
-            read_guest_u8(&rt, state_ptr + 9),
-            CELL_VIDEO_OUT_SCAN_MODE_PROGRESSIVE
-        );
-        assert_eq!(
-            read_guest_u8(&rt, state_ptr + 10),
-            CELL_VIDEO_OUT_DISPLAY_CONVERSION_NONE
-        );
-        assert_eq!(
-            read_guest_u8(&rt, state_ptr + 11),
-            CELL_VIDEO_OUT_ASPECT_16_9
-        );
+        assert_eq!(read_guest_u8(&rt, state_ptr + 9), scan_mode::PROGRESSIVE);
+        assert_eq!(read_guest_u8(&rt, state_ptr + 10), display_conversion::NONE);
+        assert_eq!(read_guest_u8(&rt, state_ptr + 11), aspect::WIDE_16_9);
         assert_eq!(read_guest_u8(&rt, state_ptr + 12), 0);
         assert_eq!(read_guest_u8(&rt, state_ptr + 13), 0);
         assert_eq!(
             read_guest_u16_be(&rt, state_ptr + 14),
-            CELL_VIDEO_OUT_REFRESH_RATE_59_94HZ
+            refresh_rate::HZ_59_94
         );
     }
 
     #[test]
     fn video_out_get_state_null_state_pointer_returns_illegal_parameter() {
         let (mut rt, unit_id) = fixture();
-        let args: [u64; 9] = [0x10000, CELL_VIDEO_OUT_PRIMARY as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_VIDEO_OUT_GET_STATE, &args);
+        let args: [u64; 9] = [0x10000, display::PRIMARY as u64, 0, 0, 0, 0, 0, 0, 0];
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
-            CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER as u64
+            error::ILLEGAL_PARAMETER as u64
         );
     }
 
@@ -309,11 +258,11 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         let state_ptr: u32 = 0x10_1000;
         let args: [u64; 9] = [0x10000, 2, 0, state_ptr as u64, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_VIDEO_OUT_GET_STATE, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
-            CELL_VIDEO_OUT_ERROR_UNSUPPORTED_VIDEO_OUT as u64,
+            error::UNSUPPORTED_VIDEO_OUT as u64,
             "videoOut=2 is neither PRIMARY nor SECONDARY"
         );
         // The error path must not write to the out-pointer.
@@ -326,7 +275,7 @@ mod tests {
         let state_ptr: u32 = 0x10_1000;
         let args: [u64; 9] = [
             0x10000,
-            CELL_VIDEO_OUT_SECONDARY as u64,
+            display::SECONDARY as u64,
             0,
             state_ptr as u64,
             0,
@@ -335,11 +284,11 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_VIDEO_OUT_GET_STATE, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
-            CELL_VIDEO_OUT_ERROR_DEVICE_NOT_FOUND as u64,
+            error::DEVICE_NOT_FOUND as u64,
             "SECONDARY has no devices attached"
         );
     }
@@ -347,20 +296,20 @@ mod tests {
     #[test]
     fn video_out_get_resolution_table_round_trip() {
         let cases: &[(u32, u16, u16)] = &[
-            (CELL_VIDEO_OUT_RESOLUTION_1080, 1920, 1080),
-            (CELL_VIDEO_OUT_RESOLUTION_720_U32, 1280, 720),
-            (CELL_VIDEO_OUT_RESOLUTION_480, 720, 480),
-            (CELL_VIDEO_OUT_RESOLUTION_576, 720, 576),
-            (CELL_VIDEO_OUT_RESOLUTION_1600X1080, 1600, 1080),
-            (CELL_VIDEO_OUT_RESOLUTION_1440X1080, 1440, 1080),
-            (CELL_VIDEO_OUT_RESOLUTION_1280X1080, 1280, 1080),
-            (CELL_VIDEO_OUT_RESOLUTION_960X1080, 960, 1080),
+            (resolution_id::ID_1080, 1920, 1080),
+            (resolution_id::ID_720, 1280, 720),
+            (resolution_id::ID_480, 720, 480),
+            (resolution_id::ID_576, 720, 576),
+            (resolution_id::ID_1600X1080, 1600, 1080),
+            (resolution_id::ID_1440X1080, 1440, 1080),
+            (resolution_id::ID_1280X1080, 1280, 1080),
+            (resolution_id::ID_960X1080, 960, 1080),
         ];
         for &(id, expected_w, expected_h) in cases {
             let (mut rt, unit_id) = fixture();
             let res_ptr: u32 = 0x10_2000;
             let args: [u64; 9] = [0x10000, id as u64, res_ptr as u64, 0, 0, 0, 0, 0, 0];
-            rt.dispatch_hle(unit_id, NID_CELL_VIDEO_OUT_GET_RESOLUTION, &args);
+            rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args);
 
             assert_eq!(
                 read_syscall_return(&mut rt, unit_id),
@@ -379,11 +328,11 @@ mod tests {
         let res_ptr: u32 = 0x10_2000;
         // Resolution id 0xff is not in the spec table.
         let args: [u64; 9] = [0x10000, 0xff, res_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_VIDEO_OUT_GET_RESOLUTION, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
-            CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER as u64
+            error::ILLEGAL_PARAMETER as u64
         );
         assert_eq!(read_guest_u16_be(&rt, res_ptr), 0, "no write on error");
         assert_eq!(read_guest_u16_be(&rt, res_ptr + 2), 0, "no write on error");
@@ -392,22 +341,12 @@ mod tests {
     #[test]
     fn video_out_get_resolution_null_pointer_rejected() {
         let (mut rt, unit_id) = fixture();
-        let args: [u64; 9] = [
-            0x10000,
-            CELL_VIDEO_OUT_RESOLUTION_720_U32 as u64,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        ];
-        rt.dispatch_hle(unit_id, NID_CELL_VIDEO_OUT_GET_RESOLUTION, &args);
+        let args: [u64; 9] = [0x10000, resolution_id::ID_720 as u64, 0, 0, 0, 0, 0, 0, 0];
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
-            CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER as u64
+            error::ILLEGAL_PARAMETER as u64
         );
     }
 
@@ -417,7 +356,7 @@ mod tests {
         let state_ptr: u32 = 0x10_1000;
         let args: [u64; 9] = [
             0x10000,
-            CELL_VIDEO_OUT_PRIMARY as u64,
+            display::PRIMARY as u64,
             1,
             state_ptr as u64,
             0,
@@ -426,11 +365,11 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_VIDEO_OUT_GET_STATE, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
-            CELL_VIDEO_OUT_ERROR_DEVICE_NOT_FOUND as u64,
+            error::DEVICE_NOT_FOUND as u64,
             "PRIMARY has exactly one device (index 0)"
         );
     }
@@ -477,8 +416,8 @@ mod canary_tests {
     #[test]
     fn unowned_nids_are_rejected_by_dispatch() {
         let probes: &[u32] = &[
-            crate::hle::sys_prx_for_user::NID_SYS_MALLOC,
-            crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
+            cellgov_ps3_abi::nid::sys_prx_for_user::MALLOC,
+            cellgov_ps3_abi::nid::cell_gcm_sys::INIT_BODY,
             0xDEAD_BEEF,
         ];
         for &nid in probes {

@@ -2,39 +2,16 @@
 //! 0xFFA4). Handles the firmware side of PRX loading; game-side
 //! import parsing lives in [`crate::prx`].
 
+use cellgov_ps3_abi::elf::{
+    ELF_HEADER_SIZE, ELF_MAGIC, ET_PRX, NID_MODULE_START, NID_MODULE_STOP, PT_LOAD, PT_PRX_RELOC,
+};
+
 use crate::loader;
 use std::collections::BTreeMap;
 
-// -- ELF constants --
-
-/// PS3 PRX ELF type.
-const ET_PRX: u16 = 0xFFA4;
-/// PT_LOAD segment type.
-const PT_LOAD: u32 = 1;
-/// PS3 relocation segment type.
-const PT_PRX_RELOC: u32 = 0x700000A4;
-/// ELF64 header size.
-const ELF_HEADER_SIZE: usize = 64;
-/// ELF magic.
-const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
-
-// -- Relocation type constants --
-
-/// 32-bit absolute address.
-pub const R_PPC64_ADDR32: u32 = 1;
-/// Low 16 bits of address (ori immediate).
-pub const R_PPC64_ADDR16_LO: u32 = 4;
-/// High 16 bits of address (oris immediate, no adjust).
-pub const R_PPC64_ADDR16_HI: u32 = 5;
-/// High 16 bits adjusted (add 1 if bit 15 of full address is set).
-pub const R_PPC64_ADDR16_HA: u32 = 6;
-
-// -- Well-known system export NIDs --
-
-/// NID for module_start in the system export entry.
-const NID_MODULE_START: u32 = 0xbc9a0086;
-/// NID for module_stop in the system export entry.
-const NID_MODULE_STOP: u32 = 0xab779874;
+pub use cellgov_ps3_abi::elf::{
+    R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO, R_PPC64_ADDR32,
+};
 
 // -- Public data types --
 
@@ -332,11 +309,7 @@ struct VaddrRange {
     end: u32,
 }
 
-/// Export entry size field.
-const EXPORT_ENTRY_MIN_SIZE: u8 = 0x1C; // 28 bytes
-
-/// System export attribute flag.
-const EXPORT_ATTR_SYSTEM: u16 = 0x8000;
+use cellgov_ps3_abi::elf::{EXPORT_ATTR_SYSTEM, EXPORT_ENTRY_MIN_SIZE};
 
 /// Parse the export table into a list of non-system export libraries.
 fn parse_export_table(

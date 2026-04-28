@@ -30,12 +30,7 @@ pub enum LoadError {
     },
 }
 
-/// ELF64 header size.
-const ELF_HEADER_SIZE: usize = 64;
-/// ELF magic.
-const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
-/// PT_LOAD segment type.
-const PT_LOAD: u32 = 1;
+use cellgov_ps3_abi::elf::{ELF_HEADER_SIZE, ELF_MAGIC, PT_LOAD};
 
 /// Compute `phoff + i * phentsize` defensively. Returns `None` on overflow
 /// or if the resulting program-header slot would extend past `data.len()`,
@@ -323,8 +318,7 @@ pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
     Ok(out)
 }
 
-/// PT_TLS segment type.
-const PT_TLS: u32 = 7;
+use cellgov_ps3_abi::elf::PT_TLS;
 
 /// TLS segment info extracted from an ELF's PT_TLS program header.
 #[derive(Debug, Clone, Copy)]
@@ -412,8 +406,7 @@ pub fn extract_tls_template_bytes(data: &[u8]) -> Option<(Vec<u8>, u64, u64, u64
     Some((data[start..end].to_vec(), hdr.memsz, hdr.align, hdr.vaddr))
 }
 
-/// Magic marking the `.sys_proc_param` section.
-const SYS_PROCESS_PARAM_MAGIC: u32 = 0x13bcc5f6;
+use cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_MAGIC;
 
 /// Parsed `sys_process_param_t`. The caller passes `malloc_pagesize`
 /// into the game entry via `r12` so the CRT0 sizes its allocator.
@@ -500,11 +493,7 @@ pub fn find_sys_process_param(data: &[u8]) -> Option<SysProcessParam> {
     None
 }
 
-/// ELF section type: symbol table.
-const SHT_SYMTAB: u32 = 2;
-/// ELF section type: dynamic-link symbol table. PRX-linked PS3 binaries
-/// keep their exported symbols in `.dynsym`, not `.symtab`.
-const SHT_DYNSYM: u32 = 11;
+use cellgov_ps3_abi::elf::{SHT_DYNSYM, SHT_SYMTAB};
 
 /// Symbol address by name, or `None` if not found or the ELF has no
 /// symbol table. Searches every `SHT_SYMTAB` and `SHT_DYNSYM` section

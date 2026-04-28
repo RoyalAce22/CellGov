@@ -7,7 +7,6 @@ pub mod exec;
 mod fp;
 pub mod instruction;
 pub mod loader;
-pub mod nid_db;
 pub mod prx;
 pub mod shadow;
 pub mod sprx;

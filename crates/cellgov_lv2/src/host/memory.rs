@@ -4,6 +4,7 @@
 //! match because each is a single arithmetic expression.
 
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -29,7 +30,7 @@ impl Lv2Host {
         const ALIGN: u32 = 0x1_0000;
         let Ok(size) = u32::try_from(size) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         };
@@ -39,19 +40,19 @@ impl Lv2Host {
             .map(|p| p & !(ALIGN - 1))
         else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         };
         let Some(next) = aligned_ptr.checked_add(size) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         };
         if next > MEM_ALLOC_REGION_END {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         }
@@ -173,8 +174,8 @@ mod tests {
                         let b = bytes.bytes();
                         let total = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
                         let avail = u32::from_be_bytes([b[4], b[5], b[6], b[7]]);
-                        assert_eq!(total, crate::CELL_PS3_USER_MEMORY_TOTAL);
-                        assert_eq!(avail, crate::CELL_PS3_USER_MEMORY_TOTAL);
+                        assert_eq!(total, cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL);
+                        assert_eq!(avail, cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL);
                     }
                     other => panic!("expected SharedWriteIntent, got {other:?}"),
                 }

@@ -1,6 +1,8 @@
 //! Integration tests for the PS3 LV2 errno database.
 
-use cellgov_lv2::errno::{self, Lv2Error, CELL_EFAULT, CELL_EINVAL, CELL_EPERM, ENTRIES};
+use cellgov_ps3_abi::cell_errors::{
+    self as errno, Lv2Error, CELL_EFAULT, CELL_EINVAL, CELL_EPERM, ENTRIES,
+};
 
 #[test]
 fn every_code_is_unique() {

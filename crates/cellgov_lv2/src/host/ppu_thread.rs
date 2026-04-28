@@ -3,6 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -18,7 +19,7 @@ impl Lv2Host {
         let target_id = PpuThreadId::new(target);
         let Some(target_thread) = self.ppu_threads.get(target_id) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
@@ -44,7 +45,7 @@ impl Lv2Host {
         // would fire the exit-wake on the wrong unit.
         let Some(caller_thread_id) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
@@ -61,11 +62,11 @@ impl Lv2Host {
                 effects: vec![],
             },
             AddJoinWaiter::SelfJoin => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EDEADLK.into(),
+                code: errno::CELL_EDEADLK.into(),
                 effects: vec![],
             },
             AddJoinWaiter::TargetDetached => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             // Both variants are ruled out by the pre-checks above;
@@ -79,7 +80,7 @@ impl Lv2Host {
                     ),
                 );
                 Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ESRCH.into(),
+                    code: errno::CELL_ESRCH.into(),
                     effects: vec![],
                 }
             }
@@ -113,7 +114,7 @@ impl Lv2Host {
                 );
                 if bytes.len() < 8 {
                     return Lv2Dispatch::Immediate {
-                        code: crate::errno::CELL_EFAULT.into(),
+                        code: errno::CELL_EFAULT.into(),
                         effects: vec![],
                     };
                 }
@@ -123,7 +124,7 @@ impl Lv2Host {
             }
             None => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EFAULT.into(),
+                    code: errno::CELL_EFAULT.into(),
                     effects: vec![],
                 };
             }
@@ -137,7 +138,7 @@ impl Lv2Host {
             Some(s) => s,
             None => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ENOMEM.into(),
+                    code: errno::CELL_ENOMEM.into(),
                     effects: vec![],
                 };
             }
@@ -157,7 +158,7 @@ impl Lv2Host {
         // defense-in-depth assert would fire afterwards.
         if !tls_bytes.is_empty() && tls_base == 0 {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             };
         }
@@ -400,7 +401,7 @@ mod tests {
         );
         match result {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, crate::errno::CELL_ESRCH.into());
+                assert_eq!(code, errno::CELL_ESRCH.into());
                 assert!(effects.is_empty());
             }
             other => panic!("expected Immediate with ESRCH, got {other:?}"),
@@ -527,7 +528,7 @@ mod tests {
         assert_eq!(
             result,
             Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EFAULT.into(),
+                code: errno::CELL_EFAULT.into(),
                 effects: vec![],
             }
         );

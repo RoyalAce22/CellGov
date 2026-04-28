@@ -58,7 +58,7 @@ Pre-Alpha. What works today:
   query family, and the cellSpurs PPU-side runtime (initialize,
   workload registry, ready-count and contention controls, info
   snapshot, exception-handler registration).
-- 2,289 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 2,313 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 ### Next reads
 
@@ -71,7 +71,7 @@ Pre-Alpha. What works today:
 
 ## Workspace
 
-Cargo workspace, 15 library crates and 3 binaries (+1 firmware tool). See
+Cargo workspace, 16 library crates and 3 binaries (+1 firmware tool). See
 [`docs/architecture.md`](docs/architecture.md) for the layering
 diagram and per-crate responsibilities.
 

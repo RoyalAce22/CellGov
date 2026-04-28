@@ -410,7 +410,7 @@ pub(super) fn run_module_start(
         for (idx, count) in sorted.iter().take(10) {
             let name = hle_bindings
                 .get(**idx as usize)
-                .and_then(|b| cellgov_ppu::nid_db::lookup(b.nid).map(|(m, f)| format!("{m}::{f}")))
+                .and_then(|b| cellgov_ps3_abi::nid::lookup(b.nid).map(|(m, f)| format!("{m}::{f}")))
                 .unwrap_or_else(|| format!("hle_{idx}"));
             println!("    {count:>8}x  {name}");
         }

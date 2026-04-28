@@ -2763,7 +2763,7 @@ fn runtime_with_cellgcm_inited() -> (Runtime, cellgov_event::UnitId) {
     let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
     rt.dispatch_hle(
         unit_id,
-        crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
+        cellgov_ps3_abi::nid::cell_gcm_sys::INIT_BODY,
         &args,
     );
     (rt, unit_id)
@@ -2913,7 +2913,7 @@ fn sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
             let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
             rt.dispatch_hle(
                 sys_rsx_source,
-                crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
+                cellgov_ps3_abi::nid::cell_gcm_sys::INIT_BODY,
                 &args,
             );
         };
@@ -2974,7 +2974,7 @@ fn multi_primitive_determinism_canary_with_sys_rsx_content() {
         let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
         rt.dispatch_hle(
             unit_id,
-            crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
+            cellgov_ps3_abi::nid::cell_gcm_sys::INIT_BODY,
             &args,
         );
         // Sub-command flip path drives rsx_flip fold-in.
@@ -2982,7 +2982,7 @@ fn multi_primitive_determinism_canary_with_sys_rsx_content() {
         rt.dispatch_lv2_request(
             cellgov_lv2::Lv2Request::SysRsxContextAttribute {
                 context_id: ctx_id,
-                package_id: cellgov_lv2::host::PACKAGE_FLIP_BUFFER,
+                package_id: cellgov_ps3_abi::sys_rsx::package::FLIP_BUFFER,
                 a3: 0,
                 a4: 0x8000_0000,
                 a5: 0,
@@ -3031,7 +3031,7 @@ fn rsx_context_attribute_flip_drives_status_transitions() {
     rt.dispatch_lv2_request(
         cellgov_lv2::Lv2Request::SysRsxContextAttribute {
             context_id: ctx_id,
-            package_id: cellgov_lv2::host::PACKAGE_FLIP_BUFFER,
+            package_id: cellgov_ps3_abi::sys_rsx::package::FLIP_BUFFER,
             a3: 0,
             a4: 0x8000_0001,
             a5: 0,

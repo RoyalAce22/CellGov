@@ -250,7 +250,7 @@ impl HleContext for RuntimeHleAdapter<'_> {
                     eprintln!(
                         "HLE heap_alloc: watermark crossed {label} above heap_base \
                          ({used} bytes cumulative, bump-on-free allocator); \
-                         consider a real allocator -- see NID_SYS_FREE TODO in hle::sys_prx_for_user"
+                         consider a real allocator -- see _sys_free TODO in hle::sys_prx_for_user"
                     );
                 }
             }

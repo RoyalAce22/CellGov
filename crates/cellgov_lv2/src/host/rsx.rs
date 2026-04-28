@@ -3,63 +3,29 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::sys_rsx::{
+    display_buffer, driver_info, driver_info_init, event_queue, package, region, reports,
+};
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
 
-/// Fixed `context_id` returned from `sys_rsx_context_allocate`.
+/// Fixed `context_id` returned from `sys_rsx_context_allocate`. CellGov
+/// sentinel value (the PS3 spec does not pin this).
 pub const RSX_CONTEXT_ID: u32 = 0x5555_5555;
 
-/// Offset from the sys_rsx memory base to the DMA control region.
-pub const DMA_CONTROL_OFFSET: u32 = 0x0000_0000;
-/// Offset from the sys_rsx memory base to the driver-info region.
-pub const DRIVER_INFO_OFFSET: u32 = 0x0010_0000;
-/// Offset from the sys_rsx memory base to the reports region.
-pub const REPORTS_OFFSET: u32 = 0x0020_0000;
-
-/// Bytes reserved per sys_rsx context.
-pub const RSX_CONTEXT_RESERVATION: u32 = 0x0030_0000;
-
-/// Size of the reports region (semaphore + notify + report).
-pub const RSX_REPORTS_SIZE: usize = 0x9400;
-
-/// Size of the driver info region.
-pub const RSX_DRIVER_INFO_SIZE: usize = 0x12F8;
-
-/// Values `sys_rsx_context_allocate` stamps into the driver-info region.
-pub mod driver_info_init {
-    /// Driver version word.
-    pub const VERSION_DRIVER: u32 = 0x211;
-    /// GPU version word.
-    pub const VERSION_GPU: u32 = 0x5c;
-    /// nvcore frequency in Hz.
-    pub const NVCORE_FREQUENCY: u32 = 500_000_000;
-    /// Memory frequency in Hz.
-    pub const MEMORY_FREQUENCY: u32 = 650_000_000;
-    /// Offset from reports_base to the notify array.
-    pub const REPORTS_NOTIFY_OFFSET: u32 = 0x1000;
-    /// Offset from reports_base to the semaphore block.
-    pub const REPORTS_OFFSET_FIELD: u32 = 0;
-    /// Offset from reports_base to the report entries.
-    pub const REPORTS_REPORT_OFFSET: u32 = 0x1400;
-    /// Hardware channel (games = 1, VSH = 0).
-    pub const HARDWARE_CHANNEL: u32 = 1;
-    /// Default local RSX memory exposed to games.
-    pub const MEMORY_SIZE: u32 = 0x0F90_0000;
-}
-
 /// Semaphore init sentinel pattern, repeated across all 1024 slots.
+/// CellGov-picked debug-friendly bytes -- the actual PS3 init pattern
+/// is not specified.
 pub const SEMAPHORE_INIT_PATTERN: [u32; 4] = [0x1337_C0D3, 0x1337_BABE, 0x1337_BEEF, 0x1337_F001];
-
-/// Offset of the `handler_queue` field within `RsxDriverInfo`.
-pub const DRIVER_INFO_HANDLER_QUEUE_OFFSET: usize = 0x12D0;
 
 /// Fill `buf` with the bytes `sys_rsx_context_allocate` writes into
 /// the driver-info region.
 ///
 /// # Panics
 ///
-/// Panics if `buf.len() != RSX_DRIVER_INFO_SIZE`.
+/// Panics if `buf.len() != driver_info::SIZE`.
 pub fn write_rsx_driver_info_init(
     buf: &mut [u8],
     memory_size: u32,
@@ -68,8 +34,8 @@ pub fn write_rsx_driver_info_init(
 ) {
     assert_eq!(
         buf.len(),
-        RSX_DRIVER_INFO_SIZE,
-        "write_rsx_driver_info_init expects an RSX_DRIVER_INFO_SIZE-byte buffer"
+        driver_info::SIZE,
+        "write_rsx_driver_info_init expects an driver_info::SIZE-byte buffer"
     );
     buf.fill(0);
     let mut put = |offset: usize, value: u32| {
@@ -85,23 +51,8 @@ pub fn write_rsx_driver_info_init(
     put(0x30, driver_info_init::REPORTS_OFFSET_FIELD);
     put(0x34, driver_info_init::REPORTS_REPORT_OFFSET);
     put(0x50, system_mode);
-    put(DRIVER_INFO_HANDLER_QUEUE_OFFSET, handler_queue);
+    put(driver_info::HANDLER_QUEUE_OFFSET, handler_queue);
 }
-
-/// Default event-queue size for the RSX handler queue.
-pub const RSX_EVENT_QUEUE_SIZE: u32 = 0x20;
-
-/// sys_rsx_context_attribute package id: set flip mode (vsync / hsync).
-pub const PACKAGE_FLIP_MODE: u32 = 0x101;
-
-/// sys_rsx_context_attribute package id: trigger a flip buffer.
-pub const PACKAGE_FLIP_BUFFER: u32 = 0x102;
-
-/// sys_rsx_context_attribute package id: record display-buffer metadata.
-pub const PACKAGE_SET_DISPLAY_BUFFER: u32 = 0x104;
-
-/// Maximum number of display buffer slots.
-pub const DISPLAY_BUFFER_COUNT: usize = 8;
 
 /// Per-slot display buffer metadata decoded from a `SET_DISPLAY_BUFFER` payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -130,12 +81,12 @@ pub const PACKAGE_CELLGOV_SET_USER_HANDLER: u32 = 0x8000_010D;
 ///
 /// # Panics
 ///
-/// Panics if `buf.len() != RSX_REPORTS_SIZE`.
+/// Panics if `buf.len() != reports::SIZE`.
 pub fn write_rsx_reports_init(buf: &mut [u8]) {
     assert_eq!(
         buf.len(),
-        RSX_REPORTS_SIZE,
-        "write_rsx_reports_init expects an RSX_REPORTS_SIZE-byte buffer"
+        reports::SIZE,
+        "write_rsx_reports_init expects an reports::SIZE-byte buffer"
     );
     buf.fill(0);
 
@@ -192,7 +143,7 @@ pub struct SysRsxContext {
     /// User-handler callback OPD address (0 = unregistered).
     pub user_handler_addr: u32,
     /// Display-buffer metadata. Slots `0..display_buffers_count` are populated.
-    pub display_buffers: [RsxDisplayBuffer; DISPLAY_BUFFER_COUNT],
+    pub display_buffers: [RsxDisplayBuffer; display_buffer::COUNT_MAX],
     /// Count of populated display-buffer slots (monotonic).
     pub display_buffers_count: u32,
     /// Flip mode flag (1 = hsync, 2 = vsync). 0 until FLIP_MODE fires.
@@ -222,7 +173,7 @@ impl SysRsxContext {
                 pitch: 0,
                 width: 0,
                 height: 0,
-            }; DISPLAY_BUFFER_COUNT],
+            }; display_buffer::COUNT_MAX],
             display_buffers_count: 0,
             flip_mode: 0,
         }
@@ -298,19 +249,19 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         if size == 0 {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         }
         let Some(end) = self.rsx_mem_alloc_ptr.checked_add(size) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         };
         if end > Self::SYS_RSX_MEM_END {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         }
@@ -374,22 +325,25 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         if self.rsx_context.allocated {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             };
         }
         let base = if self.rsx_context.pending_mem_addr != 0 {
             self.rsx_context.pending_mem_addr
         } else {
-            let Some(end) = self.rsx_mem_alloc_ptr.checked_add(RSX_CONTEXT_RESERVATION) else {
+            let Some(end) = self
+                .rsx_mem_alloc_ptr
+                .checked_add(region::CONTEXT_RESERVATION)
+            else {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ENOMEM.into(),
+                    code: errno::CELL_ENOMEM.into(),
                     effects: vec![],
                 };
             };
             if end > Self::SYS_RSX_MEM_END {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ENOMEM.into(),
+                    code: errno::CELL_ENOMEM.into(),
                     effects: vec![],
                 };
             }
@@ -397,16 +351,16 @@ impl Lv2Host {
             self.rsx_mem_alloc_ptr = end;
             start
         };
-        let dma_control_addr = base + DMA_CONTROL_OFFSET;
-        let driver_info_addr = base + DRIVER_INFO_OFFSET;
-        let reports_addr = base + REPORTS_OFFSET;
+        let dma_control_addr = base + region::DMA_CONTROL_OFFSET;
+        let driver_info_addr = base + region::DRIVER_INFO_OFFSET;
+        let reports_addr = base + region::REPORTS_OFFSET;
 
         // port_id == queue_id: the event model uses a single kernel id
         // for the 1:1 port/queue binding driver_info.handler_queue exposes.
         let queue_id = self.alloc_id();
         let queue_created = self
             .event_queues
-            .create_with_id(queue_id, RSX_EVENT_QUEUE_SIZE);
+            .create_with_id(queue_id, event_queue::SIZE);
         debug_assert!(
             queue_created,
             "sys_rsx event queue id {queue_id:#x} collided with existing queue"
@@ -441,10 +395,10 @@ impl Lv2Host {
             source_time: self.current_tick,
         };
 
-        let mut reports_bytes = vec![0u8; RSX_REPORTS_SIZE];
+        let mut reports_bytes = vec![0u8; reports::SIZE];
         write_rsx_reports_init(&mut reports_bytes);
         let reports_init = Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(reports_addr as u64), RSX_REPORTS_SIZE as u64)
+            range: ByteRange::new(GuestAddr::new(reports_addr as u64), reports::SIZE as u64)
                 .unwrap(),
             bytes: WritePayload::from_slice(&reports_bytes),
             ordering: PriorityClass::Normal,
@@ -452,7 +406,7 @@ impl Lv2Host {
             source_time: self.current_tick,
         };
 
-        let mut driver_info_bytes = vec![0u8; RSX_DRIVER_INFO_SIZE];
+        let mut driver_info_bytes = vec![0u8; driver_info::SIZE];
         write_rsx_driver_info_init(
             &mut driver_info_bytes,
             driver_info_init::MEMORY_SIZE,
@@ -462,7 +416,7 @@ impl Lv2Host {
         let driver_info_init_effect = Effect::SharedWriteIntent {
             range: ByteRange::new(
                 GuestAddr::new(driver_info_addr as u64),
-                RSX_DRIVER_INFO_SIZE as u64,
+                driver_info::SIZE as u64,
             )
             .unwrap(),
             bytes: WritePayload::from_slice(&driver_info_bytes),
@@ -507,20 +461,20 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         if !self.rsx_context.allocated || context_id != self.rsx_context.context_id {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             };
         }
         match package_id {
-            PACKAGE_FLIP_MODE => {
+            package::FLIP_MODE => {
                 self.rsx_context.flip_mode = _a4 as u32;
                 Lv2Dispatch::Immediate {
                     code: 0,
                     effects: vec![],
                 }
             }
-            PACKAGE_FLIP_BUFFER => self.sys_rsx_attribute_flip(_a3, _a4),
-            PACKAGE_SET_DISPLAY_BUFFER => self.sys_rsx_attribute_set_display_buffer(_a3, _a4, _a5),
+            package::FLIP_BUFFER => self.sys_rsx_attribute_flip(_a3, _a4),
+            package::SET_DISPLAY_BUFFER => self.sys_rsx_attribute_set_display_buffer(_a3, _a4, _a5),
             PACKAGE_CELLGOV_SET_FLIP_HANDLER => {
                 self.rsx_context.flip_handler_addr = _a3 as u32;
                 Lv2Dispatch::Immediate {
@@ -550,9 +504,9 @@ impl Lv2Host {
     /// `display_buffers_count` monotonically to `id + 1`.
     fn sys_rsx_attribute_set_display_buffer(&mut self, a3: u64, a4: u64, a5: u64) -> Lv2Dispatch {
         let id = (a3 & 0xFF) as usize;
-        if id >= DISPLAY_BUFFER_COUNT {
+        if id >= display_buffer::COUNT_MAX {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             };
         }
@@ -680,7 +634,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(crate::errno::CELL_ENOMEM)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_ENOMEM)
         ));
     }
 
@@ -723,11 +677,11 @@ mod tests {
         );
         assert_eq!(
             extract_write_u64(&effects[2]),
-            (Lv2Host::SYS_RSX_MEM_BASE + DRIVER_INFO_OFFSET) as u64
+            (Lv2Host::SYS_RSX_MEM_BASE + region::DRIVER_INFO_OFFSET) as u64
         );
         assert_eq!(
             extract_write_u64(&effects[3]),
-            (Lv2Host::SYS_RSX_MEM_BASE + REPORTS_OFFSET) as u64
+            (Lv2Host::SYS_RSX_MEM_BASE + region::REPORTS_OFFSET) as u64
         );
 
         let Effect::SharedWriteIntent { range, bytes, .. } = &effects[4] else {
@@ -735,10 +689,10 @@ mod tests {
         };
         assert_eq!(
             range.start().raw(),
-            (Lv2Host::SYS_RSX_MEM_BASE + REPORTS_OFFSET) as u64
+            (Lv2Host::SYS_RSX_MEM_BASE + region::REPORTS_OFFSET) as u64
         );
         let b = bytes.bytes();
-        assert_eq!(b.len(), RSX_REPORTS_SIZE);
+        assert_eq!(b.len(), reports::SIZE);
         let sentinel = u32::from_be_bytes([b[0xFF0], b[0xFF1], b[0xFF2], b[0xFF3]]);
         assert_eq!(sentinel, 0x1337_C0D3);
         assert_eq!(&b[0x1000..0x1008], &[0xFF; 8]);
@@ -749,10 +703,10 @@ mod tests {
         };
         assert_eq!(
             range.start().raw(),
-            (Lv2Host::SYS_RSX_MEM_BASE + DRIVER_INFO_OFFSET) as u64
+            (Lv2Host::SYS_RSX_MEM_BASE + region::DRIVER_INFO_OFFSET) as u64
         );
         let b = bytes.bytes();
-        assert_eq!(b.len(), RSX_DRIVER_INFO_SIZE);
+        assert_eq!(b.len(), driver_info::SIZE);
         assert_eq!(
             u32::from_be_bytes([b[0x00], b[0x01], b[0x02], b[0x03]]),
             driver_info_init::VERSION_DRIVER
@@ -784,15 +738,18 @@ mod tests {
         assert_eq!(ctx.dma_control_addr, Lv2Host::SYS_RSX_MEM_BASE);
         assert_eq!(
             ctx.driver_info_addr,
-            Lv2Host::SYS_RSX_MEM_BASE + DRIVER_INFO_OFFSET
+            Lv2Host::SYS_RSX_MEM_BASE + region::DRIVER_INFO_OFFSET
         );
-        assert_eq!(ctx.reports_addr, Lv2Host::SYS_RSX_MEM_BASE + REPORTS_OFFSET);
+        assert_eq!(
+            ctx.reports_addr,
+            Lv2Host::SYS_RSX_MEM_BASE + region::REPORTS_OFFSET
+        );
         assert_eq!(ctx.mem_ctx, 0xA001);
     }
 
     #[test]
     fn write_rsx_reports_init_matches_rpcs3_pattern() {
-        let mut expected = vec![0u8; RSX_REPORTS_SIZE];
+        let mut expected = vec![0u8; reports::SIZE];
         for i in 0..1024 {
             let offset = i * 4;
             expected[offset..offset + 4]
@@ -807,13 +764,13 @@ mod tests {
             expected[offset..offset + 8].copy_from_slice(&u64::MAX.to_be_bytes());
             expected[offset + 12..offset + 16].copy_from_slice(&u32::MAX.to_be_bytes());
         }
-        let mut actual = vec![0u8; RSX_REPORTS_SIZE];
+        let mut actual = vec![0u8; reports::SIZE];
         write_rsx_reports_init(&mut actual);
         assert_eq!(actual, expected);
     }
 
     #[test]
-    #[should_panic(expected = "RSX_REPORTS_SIZE-byte buffer")]
+    #[should_panic(expected = "reports::SIZE-byte buffer")]
     fn write_rsx_reports_init_rejects_wrong_size() {
         let mut buf = vec![0u8; 128];
         write_rsx_reports_init(&mut buf);
@@ -821,7 +778,7 @@ mod tests {
 
     #[test]
     fn write_rsx_driver_info_init_stamps_all_fields() {
-        let mut buf = vec![0u8; RSX_DRIVER_INFO_SIZE];
+        let mut buf = vec![0u8; driver_info::SIZE];
         write_rsx_driver_info_init(&mut buf, 0x0F90_0000, 0xABCD, 0xE001);
         let read = |o: usize| u32::from_be_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]);
         assert_eq!(read(0x00), driver_info_init::VERSION_DRIVER);
@@ -834,11 +791,11 @@ mod tests {
         assert_eq!(read(0x30), driver_info_init::REPORTS_OFFSET_FIELD);
         assert_eq!(read(0x34), driver_info_init::REPORTS_REPORT_OFFSET);
         assert_eq!(read(0x50), 0xABCD);
-        assert_eq!(read(DRIVER_INFO_HANDLER_QUEUE_OFFSET), 0xE001);
+        assert_eq!(read(driver_info::HANDLER_QUEUE_OFFSET), 0xE001);
     }
 
     #[test]
-    #[should_panic(expected = "RSX_DRIVER_INFO_SIZE-byte buffer")]
+    #[should_panic(expected = "driver_info::SIZE-byte buffer")]
     fn write_rsx_driver_info_init_rejects_wrong_size() {
         let mut buf = vec![0u8; 128];
         write_rsx_driver_info_init(&mut buf, 0, 0, 0);
@@ -865,7 +822,7 @@ mod tests {
         let d = host.dispatch(
             Lv2Request::SysRsxContextAttribute {
                 context_id: RSX_CONTEXT_ID,
-                package_id: PACKAGE_FLIP_BUFFER,
+                package_id: package::FLIP_BUFFER,
                 a3: 0,
                 a4: 0x8000_0003,
                 a5: 0,
@@ -894,7 +851,7 @@ mod tests {
         let d = host.dispatch(
             Lv2Request::SysRsxContextAttribute {
                 context_id: RSX_CONTEXT_ID,
-                package_id: PACKAGE_FLIP_BUFFER,
+                package_id: package::FLIP_BUFFER,
                 a3: 0,
                 a4: 0x0000_1234,
                 a5: 0,
@@ -1024,7 +981,7 @@ mod tests {
         host.dispatch(
             Lv2Request::SysRsxContextAttribute {
                 context_id: RSX_CONTEXT_ID,
-                package_id: PACKAGE_FLIP_MODE,
+                package_id: package::FLIP_MODE,
                 a3: 0,
                 a4: 2, // vsync
                 a5: 0,
@@ -1046,7 +1003,7 @@ mod tests {
         host.dispatch(
             Lv2Request::SysRsxContextAttribute {
                 context_id: RSX_CONTEXT_ID,
-                package_id: PACKAGE_SET_DISPLAY_BUFFER,
+                package_id: package::SET_DISPLAY_BUFFER,
                 a3: 1,
                 a4: (1920u64 << 32) | 1080,
                 a5: (0x2000u64 << 32) | 0x10_0000,
@@ -1074,7 +1031,7 @@ mod tests {
         let d = host.dispatch(
             Lv2Request::SysRsxContextAttribute {
                 context_id: RSX_CONTEXT_ID,
-                package_id: PACKAGE_SET_DISPLAY_BUFFER,
+                package_id: package::SET_DISPLAY_BUFFER,
                 a3: 8, // invalid
                 a4: 0,
                 a5: 0,
@@ -1085,7 +1042,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(crate::errno::CELL_EINVAL)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
         ));
     }
 
@@ -1132,7 +1089,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(crate::errno::CELL_EINVAL)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
         ));
     }
 
@@ -1157,7 +1114,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(crate::errno::CELL_EINVAL)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
         ));
     }
 
@@ -1212,10 +1169,10 @@ mod tests {
         };
         let b = bytes.bytes();
         let queue_id = u32::from_be_bytes([
-            b[DRIVER_INFO_HANDLER_QUEUE_OFFSET],
-            b[DRIVER_INFO_HANDLER_QUEUE_OFFSET + 1],
-            b[DRIVER_INFO_HANDLER_QUEUE_OFFSET + 2],
-            b[DRIVER_INFO_HANDLER_QUEUE_OFFSET + 3],
+            b[driver_info::HANDLER_QUEUE_OFFSET],
+            b[driver_info::HANDLER_QUEUE_OFFSET + 1],
+            b[driver_info::HANDLER_QUEUE_OFFSET + 2],
+            b[driver_info::HANDLER_QUEUE_OFFSET + 3],
         ]);
         assert_ne!(queue_id, 0);
         let ctx = host.sys_rsx_context();
@@ -1241,7 +1198,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, effects } if code == u64::from(crate::errno::CELL_EINVAL) && effects.is_empty()
+            Lv2Dispatch::Immediate { code, effects } if code == u64::from(errno::CELL_EINVAL) && effects.is_empty()
         ));
     }
 
@@ -1264,7 +1221,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(crate::errno::CELL_ENOMEM)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_ENOMEM)
         ));
     }
 }

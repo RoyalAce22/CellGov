@@ -6,6 +6,7 @@
 //! so the count can never exceed `max`.
 
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
@@ -22,7 +23,7 @@ impl Lv2Host {
         // does not burn a kernel id.
         if initial > max || initial < 0 || max < 0 {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             };
         }
@@ -34,13 +35,13 @@ impl Lv2Host {
                 // errno since no Cell OS code maps to "allocator
                 // handed me a live id".
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ENOMEM.into(),
+                    code: errno::CELL_ENOMEM.into(),
                     effects: vec![],
                 };
             }
             Err(crate::sync_primitives::SemaphoreCreateError::InvalidBounds) => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EINVAL.into(),
+                    code: errno::CELL_EINVAL.into(),
                     effects: vec![],
                 };
             }
@@ -51,13 +52,13 @@ impl Lv2Host {
     pub(super) fn dispatch_semaphore_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.semaphores.lookup(id) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         if !entry.waiters().is_empty() {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             };
         }
@@ -71,13 +72,13 @@ impl Lv2Host {
     pub(super) fn dispatch_semaphore_wait(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         match self.semaphores.try_wait(id) {
             None => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::Immediate {
@@ -97,7 +98,7 @@ impl Lv2Host {
                         | crate::sync_primitives::SemaphoreEnqueueError::DuplicateWaiter,
                     ) => {
                         return Lv2Dispatch::Immediate {
-                            code: crate::errno::CELL_ESRCH.into(),
+                            code: errno::CELL_ESRCH.into(),
                             effects: vec![],
                         };
                     }
@@ -114,7 +115,7 @@ impl Lv2Host {
     pub(super) fn dispatch_semaphore_trywait(&mut self, id: u32) -> Lv2Dispatch {
         match self.semaphores.try_wait(id) {
             None => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::Immediate {
@@ -122,7 +123,7 @@ impl Lv2Host {
                 effects: vec![],
             },
             Some(crate::sync_primitives::SemaphoreWait::Empty) => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             },
         }
@@ -136,7 +137,7 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let Some(entry) = self.semaphores.lookup(id) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
@@ -149,17 +150,17 @@ impl Lv2Host {
         // WakeAndReturn; not wired.
         if val != 1 {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             };
         }
         match self.semaphores.post_and_wake(id) {
             crate::sync_primitives::SemaphorePost::Unknown => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             crate::sync_primitives::SemaphorePost::OverMax => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             },
             crate::sync_primitives::SemaphorePost::Incremented => Lv2Dispatch::Immediate {
@@ -240,7 +241,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EINVAL.into());
+        assert_eq!(code, errno::CELL_EINVAL.into());
     }
 
     #[test]
@@ -251,7 +252,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -284,7 +285,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = d else {
             panic!("expected Immediate, got {d:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EBUSY.into());
+        assert_eq!(code, errno::CELL_EBUSY.into());
     }
 
     #[test]
@@ -426,7 +427,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = w else {
             panic!("expected Immediate, got {w:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EBUSY.into());
+        assert_eq!(code, errno::CELL_EBUSY.into());
         assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
         assert!(host.semaphores().lookup(id).unwrap().waiters().is_empty());
     }
@@ -439,7 +440,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -496,7 +497,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -511,7 +512,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -526,7 +527,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EINVAL.into());
+        assert_eq!(code, errno::CELL_EINVAL.into());
     }
 
     #[test]
@@ -645,7 +646,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = post else {
             panic!("expected Immediate, got {post:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EINVAL.into());
+        assert_eq!(code, errno::CELL_EINVAL.into());
         assert_eq!(host.semaphores().lookup(id).unwrap().count(), 3);
     }
 
@@ -659,6 +660,6 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 }

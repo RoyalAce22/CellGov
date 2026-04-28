@@ -12,3 +12,4 @@ workspace = true
 cellgov_time = { path = "../cellgov_time" }
 cellgov_event = { path = "../cellgov_event" }
 cellgov_mem = { path = "../cellgov_mem" }
+cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
