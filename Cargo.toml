@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/cellgov_ps3_abi",
     "crates/cellgov_time",
     "crates/cellgov_event",
     "crates/cellgov_mem",
@@ -26,6 +27,7 @@ members = [
 # `cargo build -p rpcs3_to_observation` when running the
 # cross-runner comparison pipeline.
 default-members = [
+    "crates/cellgov_ps3_abi",
     "crates/cellgov_time",
     "crates/cellgov_event",
     "crates/cellgov_mem",

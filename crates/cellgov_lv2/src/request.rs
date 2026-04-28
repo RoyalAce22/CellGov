@@ -5,6 +5,8 @@
 //! [`Lv2Request::Unsupported`] / [`Lv2Request::Malformed`] instead
 //! of panicking.
 
+use cellgov_ps3_abi::syscall;
+
 /// Typed LV2 syscall request; host handlers exhaustively match.
 ///
 /// Pointer fields are guest effective addresses (u32 on PS3 despite
@@ -541,17 +543,17 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
     }
 
     match syscall_num {
-        156 => Lv2Request::SpuImageOpen {
+        syscall::SPU_IMAGE_OPEN => Lv2Request::SpuImageOpen {
             img_ptr: p!(0),
             path_ptr: p!(1),
         },
-        170 => Lv2Request::SpuThreadGroupCreate {
+        syscall::SPU_THREAD_GROUP_CREATE => Lv2Request::SpuThreadGroupCreate {
             id_ptr: p!(0),
             num_threads: p!(1),
             priority: p!(2),
             attr_ptr: p!(3),
         },
-        172 => Lv2Request::SpuThreadInitialize {
+        syscall::SPU_THREAD_INITIALIZE => Lv2Request::SpuThreadInitialize {
             thread_ptr: p!(0),
             group_id: p!(1),
             thread_num: p!(2),
@@ -559,41 +561,41 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             attr_ptr: p!(4),
             arg_ptr: p!(5),
         },
-        173 => Lv2Request::SpuThreadGroupStart { group_id: p!(0) },
-        178 => Lv2Request::SpuThreadGroupJoin {
+        syscall::SPU_THREAD_GROUP_START => Lv2Request::SpuThreadGroupStart { group_id: p!(0) },
+        syscall::SPU_THREAD_GROUP_JOIN => Lv2Request::SpuThreadGroupJoin {
             group_id: p!(0),
             cause_ptr: p!(1),
             status_ptr: p!(2),
         },
-        177 => Lv2Request::SpuThreadGroupTerminate {
+        syscall::SPU_THREAD_GROUP_TERMINATE => Lv2Request::SpuThreadGroupTerminate {
             group_id: p!(0),
             value: s!(1),
         },
-        190 => Lv2Request::SpuThreadWriteMb {
+        syscall::SPU_THREAD_WRITE_MB => Lv2Request::SpuThreadWriteMb {
             thread_id: p!(0),
             value: p!(1),
         },
-        144 => Lv2Request::TimeGetTimezone {
+        syscall::TIME_GET_TIMEZONE => Lv2Request::TimeGetTimezone {
             timezone_ptr: p!(0),
             summer_time_ptr: p!(1),
         },
-        145 => Lv2Request::TimeGetCurrentTime {
+        syscall::TIME_GET_CURRENT_TIME => Lv2Request::TimeGetCurrentTime {
             sec_ptr: p!(0),
             nsec_ptr: p!(1),
         },
-        147 => Lv2Request::TimeGetTimebaseFrequency,
-        403 => Lv2Request::TtyWrite {
+        syscall::TIME_GET_TIMEBASE_FREQUENCY => Lv2Request::TimeGetTimebaseFrequency,
+        syscall::TTY_WRITE => Lv2Request::TtyWrite {
             fd: p!(0),
             buf_ptr: p!(1),
             len: p!(2),
             nwritten_ptr: p!(3),
         },
-        22 => Lv2Request::ProcessExit { code: p!(0) },
-        43 => Lv2Request::PpuThreadYield,
-        41 => Lv2Request::PpuThreadExit {
+        syscall::PROCESS_EXIT => Lv2Request::ProcessExit { code: p!(0) },
+        syscall::PPU_THREAD_YIELD => Lv2Request::PpuThreadYield,
+        syscall::PPU_THREAD_EXIT => Lv2Request::PpuThreadExit {
             exit_value: args[0],
         },
-        52 => Lv2Request::PpuThreadCreate {
+        syscall::PPU_THREAD_CREATE => Lv2Request::PpuThreadCreate {
             id_ptr: p!(0),
             entry_opd: p!(1),
             arg: args[2],
@@ -601,7 +603,7 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             stacksize: args[4],
             flags: args[5],
         },
-        668 => Lv2Request::SysRsxMemoryAllocate {
+        syscall::SYS_RSX_MEMORY_ALLOCATE => Lv2Request::SysRsxMemoryAllocate {
             mem_handle_ptr: p!(0),
             mem_addr_ptr: p!(1),
             size: p!(2),
@@ -610,8 +612,8 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             a6: args[5],
             a7: args[6],
         },
-        669 => Lv2Request::SysRsxMemoryFree { mem_handle: p!(0) },
-        670 => Lv2Request::SysRsxContextAllocate {
+        syscall::SYS_RSX_MEMORY_FREE => Lv2Request::SysRsxMemoryFree { mem_handle: p!(0) },
+        syscall::SYS_RSX_CONTEXT_ALLOCATE => Lv2Request::SysRsxContextAllocate {
             context_id_ptr: p!(0),
             lpar_dma_control_ptr: p!(1),
             lpar_driver_info_ptr: p!(2),
@@ -619,8 +621,8 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             mem_ctx: args[4],
             system_mode: args[5],
         },
-        671 => Lv2Request::SysRsxContextFree { context_id: p!(0) },
-        674 => Lv2Request::SysRsxContextAttribute {
+        syscall::SYS_RSX_CONTEXT_FREE => Lv2Request::SysRsxContextFree { context_id: p!(0) },
+        syscall::SYS_RSX_CONTEXT_ATTRIBUTE => Lv2Request::SysRsxContextAttribute {
             context_id: p!(0),
             package_id: p!(1),
             a3: args[2],
@@ -628,128 +630,128 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             a5: args[4],
             a6: args[5],
         },
-        44 => Lv2Request::PpuThreadJoin {
+        syscall::PPU_THREAD_JOIN => Lv2Request::PpuThreadJoin {
             target: args[0],
             status_out_ptr: p!(1),
         },
-        95 => Lv2Request::LwMutexCreate {
+        syscall::LWMUTEX_CREATE => Lv2Request::LwMutexCreate {
             id_ptr: p!(0),
             attr_ptr: p!(1),
         },
-        96 => Lv2Request::LwMutexDestroy { id: p!(0) },
-        97 => Lv2Request::LwMutexLock {
+        syscall::LWMUTEX_DESTROY => Lv2Request::LwMutexDestroy { id: p!(0) },
+        syscall::LWMUTEX_LOCK => Lv2Request::LwMutexLock {
             id: p!(0),
             timeout: args[1],
         },
-        98 => Lv2Request::LwMutexUnlock { id: p!(0) },
-        99 => Lv2Request::LwMutexTryLock { id: p!(0) },
-        100 => Lv2Request::MutexCreate {
+        syscall::LWMUTEX_UNLOCK => Lv2Request::LwMutexUnlock { id: p!(0) },
+        syscall::LWMUTEX_TRYLOCK => Lv2Request::LwMutexTryLock { id: p!(0) },
+        syscall::MUTEX_CREATE => Lv2Request::MutexCreate {
             id_ptr: p!(0),
             attr_ptr: p!(1),
         },
-        102 => Lv2Request::MutexLock {
+        syscall::MUTEX_LOCK => Lv2Request::MutexLock {
             mutex_id: p!(0),
             timeout: args[1],
         },
-        104 => Lv2Request::MutexUnlock { mutex_id: p!(0) },
-        103 => Lv2Request::MutexTryLock { mutex_id: p!(0) },
-        90 => Lv2Request::SemaphoreCreate {
+        syscall::MUTEX_UNLOCK => Lv2Request::MutexUnlock { mutex_id: p!(0) },
+        syscall::MUTEX_TRYLOCK => Lv2Request::MutexTryLock { mutex_id: p!(0) },
+        syscall::SEMAPHORE_CREATE => Lv2Request::SemaphoreCreate {
             id_ptr: p!(0),
             attr_ptr: p!(1),
             initial: s!(2),
             max: s!(3),
         },
-        91 => Lv2Request::SemaphoreDestroy { id: p!(0) },
-        92 => Lv2Request::SemaphoreWait {
+        syscall::SEMAPHORE_DESTROY => Lv2Request::SemaphoreDestroy { id: p!(0) },
+        syscall::SEMAPHORE_WAIT => Lv2Request::SemaphoreWait {
             id: p!(0),
             timeout: args[1],
         },
-        94 => Lv2Request::SemaphorePost {
+        syscall::SEMAPHORE_POST => Lv2Request::SemaphorePost {
             id: p!(0),
             val: s!(1),
         },
-        93 => Lv2Request::SemaphoreTryWait { id: p!(0) },
-        114 => Lv2Request::SemaphoreGetValue {
+        syscall::SEMAPHORE_TRY_WAIT => Lv2Request::SemaphoreTryWait { id: p!(0) },
+        syscall::SEMAPHORE_GET_VALUE => Lv2Request::SemaphoreGetValue {
             id: p!(0),
             out_ptr: p!(1),
         },
-        128 => Lv2Request::EventQueueCreate {
+        syscall::EVENT_QUEUE_CREATE => Lv2Request::EventQueueCreate {
             id_ptr: p!(0),
             attr_ptr: p!(1),
             key: args[2],
             size: p!(3),
         },
-        129 => Lv2Request::EventQueueDestroy { queue_id: p!(0) },
-        130 => Lv2Request::EventQueueReceive {
+        syscall::EVENT_QUEUE_DESTROY => Lv2Request::EventQueueDestroy { queue_id: p!(0) },
+        syscall::EVENT_QUEUE_RECEIVE => Lv2Request::EventQueueReceive {
             queue_id: p!(0),
             out_ptr: p!(1),
             timeout: args[2],
         },
-        82 => Lv2Request::EventFlagCreate {
+        syscall::EVENT_FLAG_CREATE => Lv2Request::EventFlagCreate {
             id_ptr: p!(0),
             attr_ptr: p!(1),
             init: args[2],
         },
-        83 => Lv2Request::EventFlagDestroy { id: p!(0) },
-        85 => Lv2Request::EventFlagWait {
+        syscall::EVENT_FLAG_DESTROY => Lv2Request::EventFlagDestroy { id: p!(0) },
+        syscall::EVENT_FLAG_WAIT => Lv2Request::EventFlagWait {
             id: p!(0),
             bits: args[1],
             mode: p!(2),
             result_ptr: p!(3),
             timeout: args[4],
         },
-        86 => Lv2Request::EventFlagTryWait {
+        syscall::EVENT_FLAG_TRY_WAIT => Lv2Request::EventFlagTryWait {
             id: p!(0),
             bits: args[1],
             mode: p!(2),
             result_ptr: p!(3),
         },
-        87 => Lv2Request::EventFlagSet {
+        syscall::EVENT_FLAG_SET => Lv2Request::EventFlagSet {
             id: p!(0),
             bits: args[1],
         },
-        118 => Lv2Request::EventFlagClear {
+        syscall::EVENT_FLAG_CLEAR => Lv2Request::EventFlagClear {
             id: p!(0),
             bits: args[1],
         },
-        131 => Lv2Request::EventQueueTryReceive {
+        syscall::EVENT_QUEUE_TRY_RECEIVE => Lv2Request::EventQueueTryReceive {
             queue_id: p!(0),
             event_array: p!(1),
             size: p!(2),
             count_out: p!(3),
         },
-        138 => Lv2Request::EventPortSend {
+        syscall::EVENT_PORT_SEND => Lv2Request::EventPortSend {
             port_id: p!(0),
             data1: args[1],
             data2: args[2],
             data3: args[3],
         },
-        105 => Lv2Request::CondCreate {
+        syscall::COND_CREATE => Lv2Request::CondCreate {
             id_ptr: p!(0),
             mutex_id: p!(1),
             attr_ptr: p!(2),
         },
-        106 => Lv2Request::CondDestroy { id: p!(0) },
-        107 => Lv2Request::CondWait {
+        syscall::COND_DESTROY => Lv2Request::CondDestroy { id: p!(0) },
+        syscall::COND_WAIT => Lv2Request::CondWait {
             id: p!(0),
             timeout: args[1],
         },
-        108 => Lv2Request::CondSignal { id: p!(0) },
-        109 => Lv2Request::CondSignalAll { id: p!(0) },
-        110 => Lv2Request::CondSignalTo {
+        syscall::COND_SIGNAL => Lv2Request::CondSignal { id: p!(0) },
+        syscall::COND_SIGNAL_ALL => Lv2Request::CondSignalAll { id: p!(0) },
+        syscall::COND_SIGNAL_TO => Lv2Request::CondSignalTo {
             id: p!(0),
             target_thread: p!(1),
         },
-        348 => Lv2Request::MemoryAllocate {
+        syscall::MEMORY_ALLOCATE => Lv2Request::MemoryAllocate {
             size: args[0],
             flags: args[1],
             alloc_addr_ptr: p!(2),
         },
-        349 => Lv2Request::MemoryFree { addr: p!(0) },
-        352 => Lv2Request::MemoryGetUserMemorySize {
+        syscall::MEMORY_FREE => Lv2Request::MemoryFree { addr: p!(0) },
+        syscall::MEMORY_GET_USER_MEMORY_SIZE => Lv2Request::MemoryGetUserMemorySize {
             mem_info_ptr: p!(0),
         },
-        341 => Lv2Request::MemoryContainerCreate {
+        syscall::MEMORY_CONTAINER_CREATE => Lv2Request::MemoryContainerCreate {
             cid_ptr: p!(0),
             size: args[1],
         },

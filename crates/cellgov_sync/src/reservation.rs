@@ -13,8 +13,7 @@
 use cellgov_event::UnitId;
 use std::collections::BTreeMap;
 
-/// Cache-line granule in bytes (Cell BE, PPU and SPU).
-pub const RESERVATION_LINE_BYTES: u64 = 128;
+pub use cellgov_ps3_abi::hardware::RESERVATION_LINE_BYTES;
 
 /// 128-byte-aligned guest address. Low 7 bits are always zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

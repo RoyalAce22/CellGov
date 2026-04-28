@@ -13,227 +13,26 @@
 //! misaligned address.
 
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::nid::cell_spurs as spurs_nid;
 
 use crate::hle::context::{HleContext, HleReadError, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
-pub(crate) const NID_CELL_SPURS_ATTRIBUTE_INITIALIZE: u32 = 0x95180230;
-pub(crate) const NID_CELL_SPURS_INITIALIZE: u32 = 0xacfc8dbc;
-pub(crate) const NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE: u32 = 0xaa6269a8;
-pub(crate) const NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE2: u32 = 0x30aa96c4;
-pub(crate) const NID_CELL_SPURS_FINALIZE: u32 = 0xca4c4600;
-
-pub(crate) const NID_CELL_SPURS_ADD_WORKLOAD: u32 = 0x69726aa2;
-pub(crate) const NID_CELL_SPURS_ADD_WORKLOAD_WITH_ATTRIBUTE: u32 = 0xc0158d8b;
-pub(crate) const NID_CELL_SPURS_WORKLOAD_ATTRIBUTE_INITIALIZE: u32 = 0xefeb2679;
-pub(crate) const NID_CELL_SPURS_SHUTDOWN_WORKLOAD: u32 = 0x98d5b343;
-pub(crate) const NID_CELL_SPURS_WAIT_FOR_WORKLOAD_SHUTDOWN: u32 = 0x5fd43fe4;
-
-pub(crate) const NID_CELL_SPURS_READY_COUNT_STORE: u32 = 0xf843818d;
-pub(crate) const NID_CELL_SPURS_READY_COUNT_ADD: u32 = 0x75211196;
-pub(crate) const NID_CELL_SPURS_READY_COUNT_SWAP: u32 = 0x49a3426d;
-pub(crate) const NID_CELL_SPURS_READY_COUNT_COMPARE_AND_SWAP: u32 = 0xf1d3552d;
-pub(crate) const NID_CELL_SPURS_REQUEST_IDLE_SPU: u32 = 0x182d9890;
-pub(crate) const NID_CELL_SPURS_SET_MAX_CONTENTION: u32 = 0x84d2f6d5;
-pub(crate) const NID_CELL_SPURS_SET_PRIORITIES: u32 = 0x80a29e27;
-pub(crate) const NID_CELL_SPURS_SET_PRIORITY: u32 = 0xb52e1bda;
-
-pub(crate) const NID_CELL_SPURS_GET_INFO: u32 = 0x1f402f8f;
-pub(crate) const NID_CELL_SPURS_ATTACH_LV2_EVENT_QUEUE: u32 = 0xb9bc6207;
-pub(crate) const NID_CELL_SPURS_DETACH_LV2_EVENT_QUEUE: u32 = 0x4e66d483;
-pub(crate) const NID_CELL_SPURS_SET_EXCEPTION_EVENT_HANDLER: u32 = 0xd2e23fa9;
-pub(crate) const NID_CELL_SPURS_UNSET_EXCEPTION_EVENT_HANDLER: u32 = 0x4c75deb8;
-pub(crate) const NID_CELL_SPURS_SET_GLOBAL_EXCEPTION_EVENT_HANDLER: u32 = 0x7517724a;
-pub(crate) const NID_CELL_SPURS_UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER: u32 = 0x861237f8;
-pub(crate) const NID_CELL_SPURS_ENABLE_EXCEPTION_EVENT_HANDLER: u32 = 0x32b94add;
-
-/// Every NID this module claims; the dispatcher's match arms must stay
-/// in sync with this list (enforced by the canary tests below).
+/// Every NID this module claims; sourced from
+/// [`cellgov_ps3_abi::nid::cell_spurs::OWNED`]. The dispatcher's
+/// match arms must stay in sync with the leaf list (enforced by the
+/// canary tests below).
 #[cfg(test)]
-pub(crate) const OWNED_NIDS: &[u32] = &[
-    NID_CELL_SPURS_ATTRIBUTE_INITIALIZE,
-    NID_CELL_SPURS_INITIALIZE,
-    NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE,
-    NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE2,
-    NID_CELL_SPURS_FINALIZE,
-    NID_CELL_SPURS_ADD_WORKLOAD,
-    NID_CELL_SPURS_ADD_WORKLOAD_WITH_ATTRIBUTE,
-    NID_CELL_SPURS_WORKLOAD_ATTRIBUTE_INITIALIZE,
-    NID_CELL_SPURS_SHUTDOWN_WORKLOAD,
-    NID_CELL_SPURS_WAIT_FOR_WORKLOAD_SHUTDOWN,
-    NID_CELL_SPURS_READY_COUNT_STORE,
-    NID_CELL_SPURS_READY_COUNT_ADD,
-    NID_CELL_SPURS_READY_COUNT_SWAP,
-    NID_CELL_SPURS_READY_COUNT_COMPARE_AND_SWAP,
-    NID_CELL_SPURS_REQUEST_IDLE_SPU,
-    NID_CELL_SPURS_SET_MAX_CONTENTION,
-    NID_CELL_SPURS_SET_PRIORITIES,
-    NID_CELL_SPURS_SET_PRIORITY,
-    NID_CELL_SPURS_GET_INFO,
-    NID_CELL_SPURS_ATTACH_LV2_EVENT_QUEUE,
-    NID_CELL_SPURS_DETACH_LV2_EVENT_QUEUE,
-    NID_CELL_SPURS_SET_EXCEPTION_EVENT_HANDLER,
-    NID_CELL_SPURS_UNSET_EXCEPTION_EVENT_HANDLER,
-    NID_CELL_SPURS_SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
-    NID_CELL_SPURS_UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER,
-    NID_CELL_SPURS_ENABLE_EXCEPTION_EVENT_HANDLER,
-];
+pub(crate) const OWNED_NIDS: &[u32] = spurs_nid::OWNED;
 
-// CELL_SPURS_CORE_ERROR_* (0x8041070x band).
+use cellgov_ps3_abi::cell_spurs::{
+    attribute_layout, core_error, event_port_mux_layout, info_layout, layout, policy_module_error,
+    saf, sys_srv, wkl_state, workload_attribute_layout, workload_info_layout,
+};
 
-const CELL_SPURS_CORE_ERROR_INVAL: u32 = 0x8041_0702;
-const CELL_SPURS_CORE_ERROR_BUSY: u32 = 0x8041_070A;
-const CELL_SPURS_CORE_ERROR_SRCH: u32 = 0x8041_0705;
-const CELL_SPURS_CORE_ERROR_STAT: u32 = 0x8041_070F;
-const CELL_SPURS_CORE_ERROR_ALIGN: u32 = 0x8041_0710;
-const CELL_SPURS_CORE_ERROR_NULL_POINTER: u32 = 0x8041_0711;
-
-// CELL_SPURS_POLICY_MODULE_ERROR_* (0x8041080x band).
-
-const CELL_SPURS_POLICY_MODULE_ERROR_AGAIN: u32 = 0x8041_0801;
-const CELL_SPURS_POLICY_MODULE_ERROR_INVAL: u32 = 0x8041_0802;
-const CELL_SPURS_POLICY_MODULE_ERROR_SRCH: u32 = 0x8041_0805;
-const CELL_SPURS_POLICY_MODULE_ERROR_FAULT: u32 = 0x8041_080D;
-const CELL_SPURS_POLICY_MODULE_ERROR_STAT: u32 = 0x8041_080F;
-const CELL_SPURS_POLICY_MODULE_ERROR_ALIGN: u32 = 0x8041_0810;
-const CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER: u32 = 0x8041_0811;
-
-// CellSpursAttribute layout (size 512, alignas 8).
-
-const CELL_SPURS_ATTRIBUTE_SIZE: u32 = 512;
-const CELL_SPURS_ATTRIBUTE_ALIGN: u32 = 8;
-
-const ATTR_OFF_REVISION: u32 = 0x00;
-const ATTR_OFF_SDK_VERSION: u32 = 0x04;
-const ATTR_OFF_NSPUS: u32 = 0x08;
-const ATTR_OFF_SPU_PRIORITY: u32 = 0x0C;
-const ATTR_OFF_PPU_PRIORITY: u32 = 0x10;
-const ATTR_OFF_EXIT_IF_NO_WORK: u32 = 0x14;
-const ATTR_OFF_PREFIX: u32 = 0x15;
-const ATTR_OFF_PREFIX_SIZE: u32 = 0x24;
-const ATTR_OFF_FLAGS: u32 = 0x28;
-const ATTR_OFF_CONTAINER: u32 = 0x2C;
-const ATTR_OFF_SWL_PRIORITY: u32 = 0x38;
-const ATTR_OFF_SWL_MAX_SPU: u32 = 0x40;
-const ATTR_OFF_SWL_IS_PREEM: u32 = 0x44;
-
-// CellSpursWorkloadAttribute layout (size 512, alignas 8).
-
-const CELL_SPURS_WORKLOAD_ATTRIBUTE_ALIGN: u32 = 8;
-
-const WAATTR_OFF_REVISION: u32 = 0x00;
-const WAATTR_OFF_PM: u32 = 0x08;
-const WAATTR_OFF_SIZE: u32 = 0x0C;
-const WAATTR_OFF_DATA: u32 = 0x10;
-const WAATTR_OFF_PRIORITY: u32 = 0x18;
-const WAATTR_OFF_MIN_CONTENTION: u32 = 0x20;
-const WAATTR_OFF_MAX_CONTENTION: u32 = 0x24;
-
-// CellSpurs layout (size 0x1000 SPURS1 / 0x2000 SPURS2, alignas 128).
-// Only the named offsets are written; init zeroes the whole block
-// first, so unnamed bytes stay at the post-zero default.
-
-const CELL_SPURS_ALIGN: u32 = 128;
-const CELL_SPURS_SIZE1: u32 = 4096;
-const CELL_SPURS_SIZE2: u32 = 8192;
-const CELL_SPURS_NAME_MAX_LENGTH: u32 = 15;
-const CELL_SPURS_MAX_WORKLOAD: u32 = 16;
-const CELL_SPURS_MAX_WORKLOAD2: u32 = 32;
-const CELL_SPURS_MAX_SPU: u32 = 8;
-const CELL_SPURS_MAX_PRIORITY: u32 = 16;
-
-const SPURS_OFF_WKL_READY_COUNT_1: u32 = 0x00; // wklReadyCount1[16] (atomic u8)
-const SPURS_OFF_WKL_IDLE_SPU_COUNT_OR_RC2: u32 = 0x10; // wklIdleSpuCountOrReadyCount2[16] (atomic u8)
-const SPURS_OFF_WKL_MIN_CONTENTION: u32 = 0x40; // wklMinContention[16]
-const SPURS_OFF_WKL_MAX_CONTENTION: u32 = 0x50; // wklMaxContention[16] (atomic u8)
-const SPURS_OFF_FLAGS1: u32 = 0x74;
-const SPURS_OFF_NSPUS: u32 = 0x76;
-const SPURS_OFF_WKL_STATE_1: u32 = 0x80; // wklState1[16] (atomic u8)
-const SPURS_OFF_WKL_STATUS_1: u32 = 0x90; // wklStatus1[16]
-const SPURS_OFF_WKL_EVENT_1: u32 = 0xA0; // wklEvent1[16] (atomic u8)
-const SPURS_OFF_WKL_ENABLED: u32 = 0xB0;
-const SPURS_OFF_WKL_MSK_B: u32 = 0xB4; // atomic_be u32, system service available-module mask
-const SPURS_OFF_SYS_SRV_MSG: u32 = 0xBC; // sysSrvExitBarrier..
-const SPURS_OFF_SYS_SRV_MSG_UPDATE_WORKLOAD: u32 = 0xBD;
-const SPURS_OFF_SYS_SRV_PREEMPT_WKL_ID: u32 = 0xC0;
-const SPURS_OFF_WKL_STATE_2: u32 = 0xD0; // wklState2[16]
-const SPURS_OFF_WKL_STATUS_2: u32 = 0xE0; // wklStatus2[16]
-const SPURS_OFF_WKL_EVENT_2: u32 = 0xF0; // wklEvent2[16]
-const SPURS_OFF_WKL_INFO_1: u32 = 0xB00; // wklInfo1[16] (32 bytes each)
-const SPURS_OFF_WKL_INFO_SYS_SRV: u32 = 0xD00;
-const SPURS_OFF_WKL_INFO_2: u32 = 0x1000; // wklInfo2[16]
-
-// WorkloadInfo (32 bytes per entry): addr u64 +0x00, arg u64 +0x08,
-// size u32 +0x10, uniqueId u8 +0x14, priority[8] +0x18.
-const WI_SIZE: u32 = 32;
-const WI_OFF_ADDR: u32 = 0x00;
-const WI_OFF_ARG: u32 = 0x08;
-const WI_OFF_SIZE: u32 = 0x10;
-const WI_OFF_UNIQUE_ID: u32 = 0x14;
-const WI_OFF_PRIORITY: u32 = 0x18;
-
-// SPURS workload state (wklState1[]/wklState2[]). State 0
-// (NON_EXISTENT) is the post-zero default and never explicitly named.
-const SPURS_WKL_STATE_PREPARING: u8 = 1;
-const SPURS_WKL_STATE_RUNNABLE: u8 = 2;
-const SPURS_WKL_STATE_SHUTTING_DOWN: u8 = 3;
-const SPURS_WKL_STATE_REMOVABLE: u8 = 4;
-const SPURS_OFF_TRACE_BUFFER: u32 = 0x900; // vm::bptr<CellSpursTraceInfo, u64> -- 8-byte BE pointer
-const SPURS_OFF_TRACE_DATA_SIZE: u32 = 0x948;
-const SPURS_OFF_TRACE_MODE: u32 = 0x950;
-const SPURS_OFF_PPU0: u32 = 0xD20;
-const SPURS_OFF_PPU1: u32 = 0xD28;
-const SPURS_OFF_SPU_TG: u32 = 0xD30;
-const SPURS_OFF_SPUS: u32 = 0xD34; // 8 * be_t<u32>
-                                   // CellSpurs::eventQueue (0xD5C) and ::eventPort (0xD60) are populated
-                                   // by the event-helper-thread spawn path; the bound queue from
-                                   // AttachLv2EventQueue lands in the EventPortMux substruct at 0xF00.
-const SPURS_OFF_ENABLE_EH: u32 = 0xD68; // atomic_be_t<u32>
-const SPURS_OFF_EXCEPTION: u32 = 0xD6C; // be_t<u32>, set on SPURS exception
-const SPURS_OFF_FLAGS: u32 = 0xD80;
-const SPURS_OFF_SPU_PRIORITY: u32 = 0xD84;
-const SPURS_OFF_PPU_PRIORITY: u32 = 0xD88;
-const SPURS_OFF_PREFIX: u32 = 0xD8C;
-const SPURS_OFF_PREFIX_SIZE: u32 = 0xD9B;
-const SPURS_OFF_REVISION: u32 = 0xDA0;
-const SPURS_OFF_SDK_VERSION: u32 = 0xDA4;
-const SPURS_OFF_SPU_PORT_BITS: u32 = 0xDA8; // atomic_be_t<u64>
-const SPURS_OFF_EVENT_PORT_MUX: u32 = 0xF00; // EventPortMux substruct (128 bytes)
-const SPURS_OFF_GLOBAL_EXCEPTION_HANDLER: u32 = 0xF80; // atomic_be_t<u64>
-const SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS: u32 = 0xF88; // be_t<u64>
-
-// EventPortMux sub-block offsets (relative to SPURS_OFF_EVENT_PORT_MUX).
-const EPM_OFF_SPU_PORT: u32 = 0x04; // be_t<u32>
-const EPM_OFF_EVENT_PORT: u32 = 0x10; // be_t<u64>
-
-// CellSpursInfo layout (size 280 bytes per `CHECK_SIZE(CellSpursInfo, 280)`).
-const CELL_SPURS_INFO_SIZE: u32 = 280;
-const INFO_OFF_NSPUS: u32 = 0x00;
-const INFO_OFF_SPU_THREAD_GROUP_PRIORITY: u32 = 0x04;
-const INFO_OFF_PPU_THREAD_PRIORITY: u32 = 0x08;
-const INFO_OFF_EXIT_IF_NO_WORK: u32 = 0x0C;
-const INFO_OFF_SPURS2: u32 = 0x0D;
-const INFO_OFF_TRACE_BUFFER: u32 = 0x10; // vm::bptr<void> 4-byte BE pointer
-const INFO_OFF_TRACE_BUFFER_SIZE: u32 = 0x18;
-const INFO_OFF_TRACE_MODE: u32 = 0x20;
-const INFO_OFF_SPU_THREAD_GROUP: u32 = 0x24;
-const INFO_OFF_SPU_THREADS: u32 = 0x28; // 8 * be_t<u32>
-const INFO_OFF_SPURS_HANDLER_THREAD_0: u32 = 0x48;
-const INFO_OFF_SPURS_HANDLER_THREAD_1: u32 = 0x50;
-const INFO_OFF_NAME_PREFIX: u32 = 0x58; // 16 bytes
-const INFO_OFF_NAME_PREFIX_LENGTH: u32 = 0x68;
-const INFO_OFF_DEADLINE_MISS_COUNTER: u32 = 0x6C;
-const INFO_OFF_DEADLINE_MEET_COUNTER: u32 = 0x70;
-
-// SAF_* attribute flag bits.
-
-const SAF_NONE: u32 = 0x0;
-const SAF_EXIT_IF_NO_WORK: u32 = 0x1;
-const SAF_SECOND_VERSION: u32 = 0x4;
-
-// `wklInfoSysSrv.addr` sentinel value set by initialize.
-const SPURS_IMG_ADDR_SYS_SRV_WORKLOAD: u32 = 0x100;
-const SYS_SRV_WORKLOAD_SIZE: u32 = 0x2200;
+// CellSpurs::eventQueue (0xD5C) and ::eventPort (0xD60) are populated by
+// the event-helper-thread spawn path; the bound queue from
+// AttachLv2EventQueue lands in the EventPortMux substruct at 0xF00.
 
 /// Dispatch entry point; returns `None` if the NID is not owned here.
 pub(crate) fn dispatch(
@@ -243,82 +42,82 @@ pub(crate) fn dispatch(
     args: &[u64; 9],
 ) -> Option<()> {
     match nid {
-        NID_CELL_SPURS_ATTRIBUTE_INITIALIZE => {
+        spurs_nid::ATTRIBUTE_INITIALIZE => {
             attribute_initialize(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_INITIALIZE => {
+        spurs_nid::INITIALIZE => {
             initialize_bare(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE => {
+        spurs_nid::INITIALIZE_WITH_ATTRIBUTE => {
             initialize_with_attribute(&mut adapter(runtime, source, nid), args, false);
         }
-        NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE2 => {
+        spurs_nid::INITIALIZE_WITH_ATTRIBUTE2 => {
             initialize_with_attribute(&mut adapter(runtime, source, nid), args, true);
         }
-        NID_CELL_SPURS_FINALIZE => {
+        spurs_nid::FINALIZE => {
             finalize(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_WORKLOAD_ATTRIBUTE_INITIALIZE => {
+        spurs_nid::WORKLOAD_ATTRIBUTE_INITIALIZE => {
             workload_attribute_initialize(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_ADD_WORKLOAD => {
+        spurs_nid::ADD_WORKLOAD => {
             add_workload(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_ADD_WORKLOAD_WITH_ATTRIBUTE => {
+        spurs_nid::ADD_WORKLOAD_WITH_ATTRIBUTE => {
             add_workload_with_attribute(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_SHUTDOWN_WORKLOAD => {
+        spurs_nid::SHUTDOWN_WORKLOAD => {
             shutdown_workload(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_WAIT_FOR_WORKLOAD_SHUTDOWN => {
+        spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN => {
             wait_for_workload_shutdown(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_READY_COUNT_STORE => {
+        spurs_nid::READY_COUNT_STORE => {
             ready_count_store(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_READY_COUNT_ADD => {
+        spurs_nid::READY_COUNT_ADD => {
             ready_count_add(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_READY_COUNT_SWAP => {
+        spurs_nid::READY_COUNT_SWAP => {
             ready_count_swap(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_READY_COUNT_COMPARE_AND_SWAP => {
+        spurs_nid::READY_COUNT_COMPARE_AND_SWAP => {
             ready_count_compare_and_swap(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_REQUEST_IDLE_SPU => {
+        spurs_nid::REQUEST_IDLE_SPU => {
             request_idle_spu(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_SET_MAX_CONTENTION => {
+        spurs_nid::SET_MAX_CONTENTION => {
             set_max_contention(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_SET_PRIORITIES => {
+        spurs_nid::SET_PRIORITIES => {
             set_priorities(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_SET_PRIORITY => {
+        spurs_nid::SET_PRIORITY => {
             set_priority(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_GET_INFO => {
+        spurs_nid::GET_INFO => {
             get_info(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_ATTACH_LV2_EVENT_QUEUE => {
+        spurs_nid::ATTACH_LV2_EVENT_QUEUE => {
             attach_lv2_event_queue(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_DETACH_LV2_EVENT_QUEUE => {
+        spurs_nid::DETACH_LV2_EVENT_QUEUE => {
             detach_lv2_event_queue(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_SET_EXCEPTION_EVENT_HANDLER => {
+        spurs_nid::SET_EXCEPTION_EVENT_HANDLER => {
             set_exception_event_handler(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_UNSET_EXCEPTION_EVENT_HANDLER => {
+        spurs_nid::UNSET_EXCEPTION_EVENT_HANDLER => {
             unset_exception_event_handler(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_SET_GLOBAL_EXCEPTION_EVENT_HANDLER => {
+        spurs_nid::SET_GLOBAL_EXCEPTION_EVENT_HANDLER => {
             set_global_exception_event_handler(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER => {
+        spurs_nid::UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER => {
             unset_global_exception_event_handler(&mut adapter(runtime, source, nid), args);
         }
-        NID_CELL_SPURS_ENABLE_EXCEPTION_EVENT_HANDLER => {
+        spurs_nid::ENABLE_EXCEPTION_EVENT_HANDLER => {
             enable_exception_event_handler(&mut adapter(runtime, source, nid), args);
         }
         _ => return None,
@@ -351,7 +150,7 @@ fn try_read_prefix(
     len: usize,
 ) -> Result<[u8; 15], HleReadError> {
     let mut buf = [0u8; 15];
-    let len = len.min(CELL_SPURS_NAME_MAX_LENGTH as usize);
+    let len = len.min(layout::NAME_MAX_LENGTH as usize);
     if len == 0 {
         return Ok(buf);
     }
@@ -376,26 +175,42 @@ fn attribute_initialize(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let exit_if_no_work = args[7] as u8;
 
     if attr_ptr == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !attr_ptr.is_multiple_of(CELL_SPURS_ATTRIBUTE_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !attr_ptr.is_multiple_of(attribute_layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
 
-    let zero = vec![0u8; CELL_SPURS_ATTRIBUTE_SIZE as usize];
+    let zero = vec![0u8; attribute_layout::SIZE as usize];
     if ctx.write_guest(attr_ptr as u64, &zero).is_err() {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64);
+        ctx.set_return(core_error::INVAL as u64);
         return;
     }
 
-    write_be_u32(ctx, attr_ptr + ATTR_OFF_REVISION, revision);
-    write_be_u32(ctx, attr_ptr + ATTR_OFF_SDK_VERSION, sdk_version);
-    write_be_u32(ctx, attr_ptr + ATTR_OFF_NSPUS, n_spus);
-    write_be_i32(ctx, attr_ptr + ATTR_OFF_SPU_PRIORITY, spu_priority);
-    write_be_i32(ctx, attr_ptr + ATTR_OFF_PPU_PRIORITY, ppu_priority);
-    write_byte(ctx, attr_ptr + ATTR_OFF_EXIT_IF_NO_WORK, exit_if_no_work);
+    write_be_u32(ctx, attr_ptr + attribute_layout::OFF_REVISION, revision);
+    write_be_u32(
+        ctx,
+        attr_ptr + attribute_layout::OFF_SDK_VERSION,
+        sdk_version,
+    );
+    write_be_u32(ctx, attr_ptr + attribute_layout::OFF_NSPUS, n_spus);
+    write_be_i32(
+        ctx,
+        attr_ptr + attribute_layout::OFF_SPU_PRIORITY,
+        spu_priority,
+    );
+    write_be_i32(
+        ctx,
+        attr_ptr + attribute_layout::OFF_PPU_PRIORITY,
+        ppu_priority,
+    );
+    write_byte(
+        ctx,
+        attr_ptr + attribute_layout::OFF_EXIT_IF_NO_WORK,
+        exit_if_no_work,
+    );
 
     ctx.set_return(0);
 }
@@ -412,9 +227,9 @@ fn initialize_bare(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let exit_if_no_work = args[5] as u8;
 
     let flags = if exit_if_no_work != 0 {
-        SAF_EXIT_IF_NO_WORK
+        saf::EXIT_IF_NO_WORK
     } else {
-        SAF_NONE
+        saf::NONE
     };
 
     let result = spurs_initialize_internal(
@@ -433,61 +248,61 @@ fn initialize_bare(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 }
 
 /// `cellSpursInitializeWithAttribute[2](spurs, attr)` -- `is_v2` ORs
-/// `SAF_SECOND_VERSION` into the resolved flags.
+/// `saf::SECOND_VERSION` into the resolved flags.
 fn initialize_with_attribute(ctx: &mut dyn HleContext, args: &[u64; 9], is_v2: bool) {
     let spurs = args[1] as u32;
     let attr = args[2] as u32;
 
     if attr == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !attr.is_multiple_of(CELL_SPURS_ATTRIBUTE_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !attr.is_multiple_of(attribute_layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
 
     // Attribute block reads are guest-pointer-class: an unmapped or
     // out-of-region attr surfaces as INVAL rather than silently
     // substituting a zero-init attribute the caller never wrote.
-    let revision = match try_read_be_u32(ctx, attr + ATTR_OFF_REVISION) {
+    let revision = match try_read_be_u32(ctx, attr + attribute_layout::OFF_REVISION) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if revision > 2 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64);
+        ctx.set_return(core_error::INVAL as u64);
         return;
     }
     let attr_fields = (|| -> Result<_, HleReadError> {
         Ok((
-            try_read_be_u32(ctx, attr + ATTR_OFF_SDK_VERSION)?,
-            try_read_be_u32(ctx, attr + ATTR_OFF_NSPUS)? as i32,
-            try_read_be_i32(ctx, attr + ATTR_OFF_SPU_PRIORITY)?,
-            try_read_be_i32(ctx, attr + ATTR_OFF_PPU_PRIORITY)?,
-            try_read_byte(ctx, attr + ATTR_OFF_EXIT_IF_NO_WORK)?,
-            try_read_be_u32(ctx, attr + ATTR_OFF_FLAGS)?,
-            try_read_be_u32(ctx, attr + ATTR_OFF_PREFIX_SIZE)?,
+            try_read_be_u32(ctx, attr + attribute_layout::OFF_SDK_VERSION)?,
+            try_read_be_u32(ctx, attr + attribute_layout::OFF_NSPUS)? as i32,
+            try_read_be_i32(ctx, attr + attribute_layout::OFF_SPU_PRIORITY)?,
+            try_read_be_i32(ctx, attr + attribute_layout::OFF_PPU_PRIORITY)?,
+            try_read_byte(ctx, attr + attribute_layout::OFF_EXIT_IF_NO_WORK)?,
+            try_read_be_u32(ctx, attr + attribute_layout::OFF_FLAGS)?,
+            try_read_be_u32(ctx, attr + attribute_layout::OFF_PREFIX_SIZE)?,
         ))
     })();
     let (sdk_version, n_spus, spu_priority, ppu_priority, exit_if_no_work, flags_attr, prefix_size) =
         match attr_fields {
             Ok(t) => t,
-            Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+            Err(_) => return ctx.set_return(core_error::INVAL as u64),
         };
 
     let mut flags = flags_attr;
     if exit_if_no_work != 0 {
-        flags |= SAF_EXIT_IF_NO_WORK;
+        flags |= saf::EXIT_IF_NO_WORK;
     }
     if is_v2 {
-        flags |= SAF_SECOND_VERSION;
+        flags |= saf::SECOND_VERSION;
     }
 
     let mut prefix = [0u8; 15];
-    let copy_len = (prefix_size as usize).min(CELL_SPURS_NAME_MAX_LENGTH as usize);
-    let captured = match try_read_prefix(ctx, attr + ATTR_OFF_PREFIX, copy_len) {
+    let copy_len = (prefix_size as usize).min(layout::NAME_MAX_LENGTH as usize);
+    let captured = match try_read_prefix(ctx, attr + attribute_layout::OFF_PREFIX, copy_len) {
         Ok(buf) => buf,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     prefix[..copy_len].copy_from_slice(&captured[..copy_len]);
 
@@ -507,7 +322,7 @@ fn initialize_with_attribute(ctx: &mut dyn HleContext, args: &[u64; 9], is_v2: b
 }
 
 /// Validate the spurs pointer, zero the 4096 / 8192-byte CellSpurs
-/// region (selected by `SAF_SECOND_VERSION`), then patch the named
+/// region (selected by `saf::SECOND_VERSION`), then patch the named
 /// fields. SPU thread group, sync primitives, and helper PPU thread
 /// spawn are not part of this path.
 #[allow(clippy::too_many_arguments)]
@@ -524,24 +339,24 @@ fn spurs_initialize_internal(
     prefix_size: u32,
 ) -> u32 {
     if spurs == 0 {
-        return CELL_SPURS_CORE_ERROR_NULL_POINTER;
+        return core_error::NULL_POINTER;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        return CELL_SPURS_CORE_ERROR_ALIGN;
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        return core_error::ALIGN;
     }
-    if prefix_size > CELL_SPURS_NAME_MAX_LENGTH {
-        return CELL_SPURS_CORE_ERROR_INVAL;
+    if prefix_size > layout::NAME_MAX_LENGTH {
+        return core_error::INVAL;
     }
     // 6 user SPUs available; 1 disabled and 1 os-reserved
     if !(1..=6).contains(&n_spus) {
-        return CELL_SPURS_CORE_ERROR_INVAL;
+        return core_error::INVAL;
     }
 
-    let is_second = (flags & SAF_SECOND_VERSION) != 0;
+    let is_second = (flags & saf::SECOND_VERSION) != 0;
     let size = if is_second {
-        CELL_SPURS_SIZE2
+        layout::SIZE_V2
     } else {
-        CELL_SPURS_SIZE1
+        layout::SIZE_V1
     };
 
     let zero = vec![0u8; size as usize];
@@ -550,51 +365,55 @@ fn spurs_initialize_internal(
         // pointer (e.g. spurs lands in a reserved region). Subsequent
         // field writes are invariant-class because this `Ok` proves
         // [spurs, spurs + size) is writable.
-        return CELL_SPURS_CORE_ERROR_INVAL;
+        return core_error::INVAL;
     }
 
-    write_be_u32(ctx, spurs + SPURS_OFF_REVISION, revision);
-    write_be_u32(ctx, spurs + SPURS_OFF_SDK_VERSION, sdk_version);
+    write_be_u32(ctx, spurs + layout::OFF_REVISION, revision);
+    write_be_u32(ctx, spurs + layout::OFF_SDK_VERSION, sdk_version);
     // ppu0 / ppu1 = !0u64 sentinel: "handler/event-helper not spawned".
-    write_be_u64(ctx, spurs + SPURS_OFF_PPU0, u64::MAX);
-    write_be_u64(ctx, spurs + SPURS_OFF_PPU1, u64::MAX);
-    write_be_u32(ctx, spurs + SPURS_OFF_FLAGS, flags);
+    write_be_u64(ctx, spurs + layout::OFF_PPU0, u64::MAX);
+    write_be_u64(ctx, spurs + layout::OFF_PPU1, u64::MAX);
+    write_be_u32(ctx, spurs + layout::OFF_FLAGS, flags);
 
     // flags1 (u8 at 0x74) is distinct from the u32 flags at 0xD80;
     // max_workloads(), add_workload, and wait_for_workload_shutdown
     // all consult this byte. SF1_32_WORKLOADS=0x40, SF1_EXIT=0x80.
     let flags1: u8 = (if is_second { 0x40u8 } else { 0 })
-        | (if (flags & SAF_EXIT_IF_NO_WORK) != 0 {
+        | (if (flags & saf::EXIT_IF_NO_WORK) != 0 {
             0x80u8
         } else {
             0
         });
-    write_byte(ctx, spurs + SPURS_OFF_FLAGS1, flags1);
+    write_byte(ctx, spurs + layout::OFF_FLAGS1, flags1);
 
     // prefixSize is a u8 at 0xD9B; the be_t<u32> unk5 at 0xD9C must
-    // stay zero. The upstream `prefix_size > CELL_SPURS_NAME_MAX_LENGTH`
+    // stay zero. The upstream `prefix_size > layout::NAME_MAX_LENGTH`
     // check guarantees the cast lossless.
-    debug_assert!(prefix_size <= CELL_SPURS_NAME_MAX_LENGTH);
-    let prefix_size_byte = u8::try_from(prefix_size).unwrap_or(CELL_SPURS_NAME_MAX_LENGTH as u8);
-    write_byte(ctx, spurs + SPURS_OFF_PREFIX_SIZE, prefix_size_byte);
-    write_bytes(ctx, spurs + SPURS_OFF_PREFIX, &prefix);
+    debug_assert!(prefix_size <= layout::NAME_MAX_LENGTH);
+    let prefix_size_byte = u8::try_from(prefix_size).unwrap_or(layout::NAME_MAX_LENGTH as u8);
+    write_byte(ctx, spurs + layout::OFF_PREFIX_SIZE, prefix_size_byte);
+    write_bytes(ctx, spurs + layout::OFF_PREFIX, &prefix);
 
     if !is_second {
-        write_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED, 0xffff);
+        write_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED, 0xffff);
     }
 
     // sysSrvPreemptWklId[8] = -1 (no SPU is preempting a workload).
     let preempt_init = [0xffu8; 8];
-    write_bytes(ctx, spurs + SPURS_OFF_SYS_SRV_PREEMPT_WKL_ID, &preempt_init);
+    write_bytes(
+        ctx,
+        spurs + layout::OFF_SYS_SRV_PREEMPT_WKL_ID,
+        &preempt_init,
+    );
 
-    write_byte(ctx, spurs + SPURS_OFF_NSPUS, n_spus as u8);
-    write_be_i32(ctx, spurs + SPURS_OFF_SPU_PRIORITY, spu_priority);
-    write_be_u32(ctx, spurs + SPURS_OFF_PPU_PRIORITY, ppu_priority as u32);
+    write_byte(ctx, spurs + layout::OFF_NSPUS, n_spus as u8);
+    write_be_i32(ctx, spurs + layout::OFF_SPU_PRIORITY, spu_priority);
+    write_be_u32(ctx, spurs + layout::OFF_PPU_PRIORITY, ppu_priority as u32);
 
-    let sys_srv = spurs + SPURS_OFF_WKL_INFO_SYS_SRV;
-    write_be_u64(ctx, sys_srv, SPURS_IMG_ADDR_SYS_SRV_WORKLOAD as u64);
+    let sys_srv = spurs + layout::OFF_WKL_INFO_SYS_SRV;
+    write_be_u64(ctx, sys_srv, sys_srv::IMG_ADDR as u64);
     write_be_u64(ctx, sys_srv + 0x08, 0);
-    write_be_u32(ctx, sys_srv + 0x10, SYS_SRV_WORKLOAD_SIZE);
+    write_be_u32(ctx, sys_srv + 0x10, sys_srv::WORKLOAD_SIZE);
     write_byte(ctx, sys_srv + 0x14, 0xff);
 
     0
@@ -606,17 +425,17 @@ fn spurs_initialize_internal(
 fn finalize(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
 
-    write_be_u64(ctx, spurs + SPURS_OFF_PPU0, u64::MAX);
-    write_be_u64(ctx, spurs + SPURS_OFF_PPU1, u64::MAX);
-    write_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED, 0);
+    write_be_u64(ctx, spurs + layout::OFF_PPU0, u64::MAX);
+    write_be_u64(ctx, spurs + layout::OFF_PPU1, u64::MAX);
+    write_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED, 0);
 
     ctx.set_return(0);
 }
@@ -634,7 +453,7 @@ fn workload_attribute_initialize(ctx: &mut dyn HleContext, _args: &[u64; 9]) {
         "_cellSpursWorkloadAttributeInitialize: maxCnt (9th arg) \
          spills to r1+48; HleContext does not expose the spill yet"
     );
-    ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64);
+    ctx.set_return(policy_module_error::INVAL as u64);
 }
 
 /// `cellSpursAddWorkload(spurs, wid_out, pm, size, data, priority,
@@ -674,36 +493,36 @@ fn add_workload_with_attribute(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let attr = args[3] as u32;
 
     if attr == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(policy_module_error::NULL_POINTER as u64);
         return;
     }
-    if !attr.is_multiple_of(CELL_SPURS_WORKLOAD_ATTRIBUTE_ALIGN) {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_ALIGN as u64);
+    if !attr.is_multiple_of(workload_attribute_layout::ALIGN) {
+        ctx.set_return(policy_module_error::ALIGN as u64);
         return;
     }
-    let revision = match try_read_be_u32(ctx, attr + WAATTR_OFF_REVISION) {
+    let revision = match try_read_be_u32(ctx, attr + workload_attribute_layout::OFF_REVISION) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     if revision != 1 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64);
+        ctx.set_return(policy_module_error::INVAL as u64);
         return;
     }
 
     let attr_fields = (|| -> Result<_, HleReadError> {
         Ok((
-            try_read_be_u32(ctx, attr + WAATTR_OFF_PM)?,
-            try_read_be_u32(ctx, attr + WAATTR_OFF_SIZE)?,
-            try_read_be_u64(ctx, attr + WAATTR_OFF_DATA)?,
-            try_read_be_u32(ctx, attr + WAATTR_OFF_MIN_CONTENTION)?,
-            try_read_be_u32(ctx, attr + WAATTR_OFF_MAX_CONTENTION)?,
+            try_read_be_u32(ctx, attr + workload_attribute_layout::OFF_PM)?,
+            try_read_be_u32(ctx, attr + workload_attribute_layout::OFF_SIZE)?,
+            try_read_be_u64(ctx, attr + workload_attribute_layout::OFF_DATA)?,
+            try_read_be_u32(ctx, attr + workload_attribute_layout::OFF_MIN_CONTENTION)?,
+            try_read_be_u32(ctx, attr + workload_attribute_layout::OFF_MAX_CONTENTION)?,
         ))
     })();
     let (pm, size, data, min_cnt, max_cnt) = match attr_fields {
         Ok(t) => t,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
-    let priority_addr = attr + WAATTR_OFF_PRIORITY;
+    let priority_addr = attr + workload_attribute_layout::OFF_PRIORITY;
 
     let result = add_workload_internal(
         ctx,
@@ -733,60 +552,60 @@ fn add_workload_internal(
     max_cnt: u32,
 ) -> u32 {
     if spurs == 0 || wid_ptr == 0 || pm == 0 || priority_ptr == 0 {
-        return CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER;
+        return policy_module_error::NULL_POINTER;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        return CELL_SPURS_POLICY_MODULE_ERROR_ALIGN;
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        return policy_module_error::ALIGN;
     }
     if !pm.is_multiple_of(16) {
-        return CELL_SPURS_POLICY_MODULE_ERROR_ALIGN;
+        return policy_module_error::ALIGN;
     }
     if min_cnt == 0 {
-        return CELL_SPURS_POLICY_MODULE_ERROR_INVAL;
+        return policy_module_error::INVAL;
     }
     let priority = match try_read_priority_table(ctx, priority_ptr) {
         Ok(t) if t.iter().all(|&b| b <= 15) => t,
-        Ok(_) => return CELL_SPURS_POLICY_MODULE_ERROR_INVAL,
-        Err(_) => return CELL_SPURS_POLICY_MODULE_ERROR_FAULT,
+        Ok(_) => return policy_module_error::INVAL,
+        Err(_) => return policy_module_error::FAULT,
     };
 
     // Spurs-block reads from a guest-controlled pointer. An unmapped
     // spurs surfaces as FAULT; a faulted-but-mapped block returns STAT.
-    let exception = match try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION) {
+    let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
         Ok(v) => v,
-        Err(_) => return CELL_SPURS_POLICY_MODULE_ERROR_FAULT,
+        Err(_) => return policy_module_error::FAULT,
     };
     if exception != 0 {
-        return CELL_SPURS_POLICY_MODULE_ERROR_STAT;
+        return policy_module_error::STAT;
     }
 
     // Bit 31 of wklEnabled = wid 0; scan high-bit-first.
     let (enabled, flags1) = match (
-        try_read_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED),
-        try_read_byte(ctx, spurs + SPURS_OFF_FLAGS1),
+        try_read_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED),
+        try_read_byte(ctx, spurs + layout::OFF_FLAGS1),
     ) {
         (Ok(e), Ok(f)) => (e, f),
-        _ => return CELL_SPURS_POLICY_MODULE_ERROR_FAULT,
+        _ => return policy_module_error::FAULT,
     };
     let is_second = (flags1 & 0x40) != 0; // SF1_32_WORKLOADS
     let wmax = if is_second {
-        CELL_SPURS_MAX_WORKLOAD2
+        layout::MAX_WORKLOAD_V2
     } else {
-        CELL_SPURS_MAX_WORKLOAD
+        layout::MAX_WORKLOAD_V1
     };
 
     let wid = (!enabled).leading_zeros();
     if wid >= wmax {
         // *wid stays unmodified on AGAIN -- writing wid=16/32 then
         // returning would describe a slot that does not exist.
-        return CELL_SPURS_POLICY_MODULE_ERROR_AGAIN;
+        return policy_module_error::AGAIN;
     }
 
     // Guest-controlled out-pointer: bad pointer becomes _FAULT,
     // never a silent drop. wklEnabled is unchanged on the failure
     // branch.
     if try_write_be_u32(ctx, wid_ptr, wid).is_err() {
-        return CELL_SPURS_POLICY_MODULE_ERROR_FAULT;
+        return policy_module_error::FAULT;
     }
 
     // uniqueId dedupe: reuse an existing workload's uniqueId when its
@@ -795,7 +614,7 @@ fn add_workload_internal(
     // does the same scan over wklInfo1[i].addr.
     let unique_id = match find_existing_unique_id(ctx, spurs, enabled, pm, is_second) {
         Ok(uid) => uid,
-        Err(_) => return CELL_SPURS_POLICY_MODULE_ERROR_FAULT,
+        Err(_) => return policy_module_error::FAULT,
     }
     .unwrap_or(wid as u8);
 
@@ -803,47 +622,55 @@ fn add_workload_internal(
     // contention) before flipping wklEnabled / wklMskB. A panic in
     // staging leaves the slot reading as unallocated.
     debug_assert!(
-        wid < CELL_SPURS_MAX_WORKLOAD || is_second,
+        wid < layout::MAX_WORKLOAD_V1 || is_second,
         "wid={wid} >= 16 in SPURS1; wkl_info_addr would index past the 4 KiB block"
     );
     let index = wid & 0xf;
     let info_addr = wkl_info_addr(spurs, wid);
-    write_be_u64(ctx, info_addr + WI_OFF_ADDR, pm as u64);
-    write_be_u64(ctx, info_addr + WI_OFF_ARG, data);
-    write_be_u32(ctx, info_addr + WI_OFF_SIZE, size);
-    write_bytes(ctx, info_addr + WI_OFF_PRIORITY, &priority);
+    write_be_u64(ctx, info_addr + workload_info_layout::OFF_ADDR, pm as u64);
+    write_be_u64(ctx, info_addr + workload_info_layout::OFF_ARG, data);
+    write_be_u32(ctx, info_addr + workload_info_layout::OFF_SIZE, size);
+    write_bytes(
+        ctx,
+        info_addr + workload_info_layout::OFF_PRIORITY,
+        &priority,
+    );
 
     let state_arr_off = if wid < 16 {
-        SPURS_OFF_WKL_STATE_1
+        layout::OFF_WKL_STATE_1
     } else {
-        SPURS_OFF_WKL_STATE_2
+        layout::OFF_WKL_STATE_2
     };
-    write_byte(ctx, spurs + state_arr_off + index, SPURS_WKL_STATE_RUNNABLE);
+    write_byte(ctx, spurs + state_arr_off + index, wkl_state::RUNNABLE);
 
     let status_arr_off = if wid < 16 {
-        SPURS_OFF_WKL_STATUS_1
+        layout::OFF_WKL_STATUS_1
     } else {
-        SPURS_OFF_WKL_STATUS_2
+        layout::OFF_WKL_STATUS_2
     };
     write_byte(ctx, spurs + status_arr_off + index, 0);
     let event_arr_off = if wid < 16 {
-        SPURS_OFF_WKL_EVENT_1
+        layout::OFF_WKL_EVENT_1
     } else {
-        SPURS_OFF_WKL_EVENT_2
+        layout::OFF_WKL_EVENT_2
     };
     write_byte(ctx, spurs + event_arr_off + index, 0);
 
     // wklIdleSpuCountOrReadyCount2[wid & 0xf]: SPURS1 idle-SPU count;
     // SPURS2 ready count for wids 16..31. Zero on add either way.
-    write_byte(ctx, spurs + SPURS_OFF_WKL_IDLE_SPU_COUNT_OR_RC2 + index, 0);
+    write_byte(
+        ctx,
+        spurs + layout::OFF_WKL_IDLE_SPU_COUNT_OR_RC2 + index,
+        0,
+    );
 
     if wid < 16 {
-        write_byte(ctx, spurs + SPURS_OFF_WKL_READY_COUNT_1 + index, 0);
+        write_byte(ctx, spurs + layout::OFF_WKL_READY_COUNT_1 + index, 0);
         // wklMinContention is per-wid for SPURS1 only.
         let min_clamped = if min_cnt > 8 { 8 } else { min_cnt as u8 };
         write_byte(
             ctx,
-            spurs + SPURS_OFF_WKL_MIN_CONTENTION + index,
+            spurs + layout::OFF_WKL_MIN_CONTENTION + index,
             min_clamped,
         );
     }
@@ -851,10 +678,10 @@ fn add_workload_internal(
     // wklMaxContention[index]: low nibble for wid<16, high nibble
     // for wid>=16; capped at MAX_SPU=8.
     let max_clamped: u8 = if max_cnt > 8 { 8 } else { max_cnt as u8 };
-    let mc_addr = spurs + SPURS_OFF_WKL_MAX_CONTENTION + index;
+    let mc_addr = spurs + layout::OFF_WKL_MAX_CONTENTION + index;
     let prev_mc = match try_read_byte(ctx, mc_addr) {
         Ok(v) => v,
-        Err(_) => return CELL_SPURS_POLICY_MODULE_ERROR_FAULT,
+        Err(_) => return policy_module_error::FAULT,
     };
     let new_mc = if wid < 16 {
         (prev_mc & 0xf0) | (max_clamped & 0x0f)
@@ -864,26 +691,30 @@ fn add_workload_internal(
     write_byte(ctx, mc_addr, new_mc);
 
     debug_assert_ne!(wid, 0xFF, "0xFF is the system-service-workload sentinel");
-    write_byte(ctx, info_addr + WI_OFF_UNIQUE_ID, unique_id);
+    write_byte(
+        ctx,
+        info_addr + workload_info_layout::OFF_UNIQUE_ID,
+        unique_id,
+    );
 
     // Commit: flip wklEnabled, then wklMskB, then wake the system
     // service. RPCS3 `_spurs::add_workload` sets the matching bit in
     // wklMskB on alloc (cellSpurs.cpp ~line 2511).
     let new_enabled = enabled | (0x8000_0000u32 >> wid);
-    write_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED, new_enabled);
+    write_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED, new_enabled);
 
-    let mask_b = match try_read_be_u32(ctx, spurs + SPURS_OFF_WKL_MSK_B) {
+    let mask_b = match try_read_be_u32(ctx, spurs + layout::OFF_WKL_MSK_B) {
         Ok(v) => v,
-        Err(_) => return CELL_SPURS_POLICY_MODULE_ERROR_FAULT,
+        Err(_) => return policy_module_error::FAULT,
     };
     write_be_u32(
         ctx,
-        spurs + SPURS_OFF_WKL_MSK_B,
+        spurs + layout::OFF_WKL_MSK_B,
         mask_b | (0x8000_0000u32 >> wid),
     );
 
-    write_byte(ctx, spurs + SPURS_OFF_SYS_SRV_MSG_UPDATE_WORKLOAD, 0xff);
-    write_byte(ctx, spurs + SPURS_OFF_SYS_SRV_MSG, 0xff);
+    write_byte(ctx, spurs + layout::OFF_SYS_SRV_MSG_UPDATE_WORKLOAD, 0xff);
+    write_byte(ctx, spurs + layout::OFF_SYS_SRV_MSG, 0xff);
 
     0
 }
@@ -900,9 +731,9 @@ fn find_existing_unique_id(
     is_second: bool,
 ) -> Result<Option<u8>, HleReadError> {
     let wmax = if is_second {
-        CELL_SPURS_MAX_WORKLOAD2
+        layout::MAX_WORKLOAD_V2
     } else {
-        CELL_SPURS_MAX_WORKLOAD
+        layout::MAX_WORKLOAD_V1
     };
     for i in 0..wmax {
         if (enabled & (0x8000_0000u32 >> i)) == 0 {
@@ -911,9 +742,12 @@ fn find_existing_unique_id(
         let info = wkl_info_addr(spurs, i);
         // wklInfo[i].addr is the low 32 bits of a be_t<u64> at +0x00;
         // pm pointers fit in 32 bits, so compare on the low word.
-        let addr_lo = try_read_be_u32(ctx, info + WI_OFF_ADDR + 4)?;
+        let addr_lo = try_read_be_u32(ctx, info + workload_info_layout::OFF_ADDR + 4)?;
         if addr_lo == pm {
-            return Ok(Some(try_read_byte(ctx, info + WI_OFF_UNIQUE_ID)?));
+            return Ok(Some(try_read_byte(
+                ctx,
+                info + workload_info_layout::OFF_UNIQUE_ID,
+            )?));
         }
     }
     Ok(None)
@@ -927,58 +761,58 @@ fn shutdown_workload(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let wid = args[2] as u32;
 
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(policy_module_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(policy_module_error::ALIGN as u64);
         return;
     }
 
     let wmax = match try_read_wmax(ctx, spurs) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     if wid >= wmax {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64);
+        ctx.set_return(policy_module_error::INVAL as u64);
         return;
     }
 
     let state_arr_off = if wid < 16 {
-        SPURS_OFF_WKL_STATE_1
+        layout::OFF_WKL_STATE_1
     } else {
-        SPURS_OFF_WKL_STATE_2
+        layout::OFF_WKL_STATE_2
     };
     let index = wid & 0xf;
     let state_addr = spurs + state_arr_off + index;
     let prev_state = match try_read_byte(ctx, state_addr) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
-    if prev_state <= SPURS_WKL_STATE_PREPARING {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_STAT as u64);
+    if prev_state <= wkl_state::PREPARING {
+        ctx.set_return(policy_module_error::STAT as u64);
         return;
     }
-    if prev_state == SPURS_WKL_STATE_SHUTTING_DOWN || prev_state == SPURS_WKL_STATE_REMOVABLE {
+    if prev_state == wkl_state::SHUTTING_DOWN || prev_state == wkl_state::REMOVABLE {
         // Already shutting down: idempotent CELL_OK.
         ctx.set_return(0);
         return;
     }
-    write_byte(ctx, state_addr, SPURS_WKL_STATE_SHUTTING_DOWN);
+    write_byte(ctx, state_addr, wkl_state::SHUTTING_DOWN);
 
     let event_arr_off = if wid < 16 {
-        SPURS_OFF_WKL_EVENT_1
+        layout::OFF_WKL_EVENT_1
     } else {
-        SPURS_OFF_WKL_EVENT_2
+        layout::OFF_WKL_EVENT_2
     };
     let event_addr = spurs + event_arr_off + index;
     let prev_event = match try_read_byte(ctx, event_addr) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     write_byte(ctx, event_addr, prev_event | 1);
 
-    write_byte(ctx, spurs + SPURS_OFF_SYS_SRV_MSG, 0xff);
+    write_byte(ctx, spurs + layout::OFF_SYS_SRV_MSG, 0xff);
     ctx.set_return(0);
 }
 
@@ -991,29 +825,29 @@ fn wait_for_workload_shutdown(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let wid = args[2] as u32;
 
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(policy_module_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(policy_module_error::ALIGN as u64);
         return;
     }
 
     let wmax = match try_read_wmax(ctx, spurs) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     if wid >= wmax {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64);
+        ctx.set_return(policy_module_error::INVAL as u64);
         return;
     }
 
-    let enabled = match try_read_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED) {
+    let enabled = match try_read_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     if (enabled & (0x8000_0000u32 >> wid)) == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_SRCH as u64);
+        ctx.set_return(policy_module_error::SRCH as u64);
         return;
     }
 
@@ -1035,31 +869,31 @@ struct WorkloadOpErrors {
 }
 
 const POLICY_MODULE_ERRS: WorkloadOpErrors = WorkloadOpErrors {
-    null_ptr: CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER,
-    align: CELL_SPURS_POLICY_MODULE_ERROR_ALIGN,
-    inval: CELL_SPURS_POLICY_MODULE_ERROR_INVAL,
-    srch: CELL_SPURS_POLICY_MODULE_ERROR_SRCH,
-    stat: CELL_SPURS_POLICY_MODULE_ERROR_STAT,
-    fault: CELL_SPURS_POLICY_MODULE_ERROR_FAULT,
+    null_ptr: policy_module_error::NULL_POINTER,
+    align: policy_module_error::ALIGN,
+    inval: policy_module_error::INVAL,
+    srch: policy_module_error::SRCH,
+    stat: policy_module_error::STAT,
+    fault: policy_module_error::FAULT,
 };
 
 const CORE_ERRS: WorkloadOpErrors = WorkloadOpErrors {
-    null_ptr: CELL_SPURS_CORE_ERROR_NULL_POINTER,
-    align: CELL_SPURS_CORE_ERROR_ALIGN,
-    inval: CELL_SPURS_CORE_ERROR_INVAL,
-    srch: CELL_SPURS_CORE_ERROR_SRCH,
-    stat: CELL_SPURS_CORE_ERROR_STAT,
-    fault: CELL_SPURS_CORE_ERROR_INVAL,
+    null_ptr: core_error::NULL_POINTER,
+    align: core_error::ALIGN,
+    inval: core_error::INVAL,
+    srch: core_error::SRCH,
+    stat: core_error::STAT,
+    fault: core_error::INVAL,
 };
 
 /// `max_workloads()` per the SF1_32_WORKLOADS bit in `flags1`. Returns
 /// `Err` if `flags1` is unmapped / out-of-region.
 fn try_read_wmax(ctx: &dyn HleContext, spurs: u32) -> Result<u32, HleReadError> {
-    let flags1 = try_read_byte(ctx, spurs + SPURS_OFF_FLAGS1)?;
+    let flags1 = try_read_byte(ctx, spurs + layout::OFF_FLAGS1)?;
     Ok(if (flags1 & 0x40) != 0 {
-        CELL_SPURS_MAX_WORKLOAD2
+        layout::MAX_WORKLOAD_V2
     } else {
-        CELL_SPURS_MAX_WORKLOAD
+        layout::MAX_WORKLOAD_V1
     })
 }
 
@@ -1067,10 +901,10 @@ fn try_read_wmax(ctx: &dyn HleContext, spurs: u32) -> Result<u32, HleReadError> 
 /// wklReadyCount1[wid]; SPURS2 wid >= 16 overlaps
 /// wklIdleSpuCountOrReadyCount2[wid & 0xf].
 fn ready_count_addr(spurs: u32, wid: u32) -> u32 {
-    if wid < CELL_SPURS_MAX_WORKLOAD {
-        spurs + SPURS_OFF_WKL_READY_COUNT_1 + wid
+    if wid < layout::MAX_WORKLOAD_V1 {
+        spurs + layout::OFF_WKL_READY_COUNT_1 + wid
     } else {
-        spurs + SPURS_OFF_WKL_IDLE_SPU_COUNT_OR_RC2 + (wid & 0xf)
+        spurs + layout::OFF_WKL_IDLE_SPU_COUNT_OR_RC2 + (wid & 0xf)
     }
 }
 
@@ -1087,29 +921,29 @@ fn validate_workload_op(
     if spurs == 0 {
         return Err(errs.null_ptr);
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
+    if !spurs.is_multiple_of(layout::ALIGN) {
         return Err(errs.align);
     }
     let wmax = try_read_wmax(ctx, spurs).map_err(|_| errs.fault)?;
     if wid >= wmax {
         return Err(errs.inval);
     }
-    let enabled = try_read_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED).map_err(|_| errs.fault)?;
+    let enabled = try_read_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED).map_err(|_| errs.fault)?;
     if (enabled & (0x8000_0000u32 >> wid)) == 0 {
         return Err(errs.srch);
     }
-    let exception = try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION).map_err(|_| errs.fault)?;
+    let exception = try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION).map_err(|_| errs.fault)?;
     if exception != 0 {
         return Err(errs.stat);
     }
     if require_runnable {
-        let arr = if wid < CELL_SPURS_MAX_WORKLOAD {
-            SPURS_OFF_WKL_STATE_1
+        let arr = if wid < layout::MAX_WORKLOAD_V1 {
+            layout::OFF_WKL_STATE_1
         } else {
-            SPURS_OFF_WKL_STATE_2
+            layout::OFF_WKL_STATE_2
         };
         let state = try_read_byte(ctx, spurs + arr + (wid & 0xf)).map_err(|_| errs.fault)?;
-        if state != SPURS_WKL_STATE_RUNNABLE {
+        if state != wkl_state::RUNNABLE {
             return Err(errs.stat);
         }
     }
@@ -1130,7 +964,7 @@ fn ready_count_store(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     }
     if value > 0xff {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64);
+        ctx.set_return(policy_module_error::INVAL as u64);
         return;
     }
 
@@ -1147,7 +981,7 @@ fn ready_count_add(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let value = args[4] as i32;
 
     if old_ptr == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(policy_module_error::NULL_POINTER as u64);
         return;
     }
     if let Err(code) = validate_workload_op(ctx, spurs, wid, true, &POLICY_MODULE_ERRS) {
@@ -1158,13 +992,13 @@ fn ready_count_add(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let addr = ready_count_addr(spurs, wid);
     let prev = match try_read_byte(ctx, addr) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     let next = (prev as i32 + value).clamp(0, 255) as u8;
     write_byte(ctx, addr, next);
 
     if try_write_be_u32(ctx, old_ptr, prev as u32).is_err() {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64);
+        ctx.set_return(policy_module_error::FAULT as u64);
         return;
     }
     ctx.set_return(0);
@@ -1179,7 +1013,7 @@ fn ready_count_swap(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let swap = args[4] as u32;
 
     if old_ptr == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(policy_module_error::NULL_POINTER as u64);
         return;
     }
     if let Err(code) = validate_workload_op(ctx, spurs, wid, true, &POLICY_MODULE_ERRS) {
@@ -1187,18 +1021,18 @@ fn ready_count_swap(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     }
     if swap > 0xff {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64);
+        ctx.set_return(policy_module_error::INVAL as u64);
         return;
     }
 
     let addr = ready_count_addr(spurs, wid);
     let prev = match try_read_byte(ctx, addr) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     write_byte(ctx, addr, (swap & 0xff) as u8);
     if try_write_be_u32(ctx, old_ptr, prev as u32).is_err() {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64);
+        ctx.set_return(policy_module_error::FAULT as u64);
         return;
     }
     ctx.set_return(0);
@@ -1214,7 +1048,7 @@ fn ready_count_compare_and_swap(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let swap = args[5] as u32;
 
     if old_ptr == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(policy_module_error::NULL_POINTER as u64);
         return;
     }
     if let Err(code) = validate_workload_op(ctx, spurs, wid, true, &POLICY_MODULE_ERRS) {
@@ -1222,20 +1056,20 @@ fn ready_count_compare_and_swap(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     }
     if (compare | swap) > 0xff {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64);
+        ctx.set_return(policy_module_error::INVAL as u64);
         return;
     }
 
     let addr = ready_count_addr(spurs, wid);
     let prev = match try_read_byte(ctx, addr) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     if prev as u32 == compare {
         write_byte(ctx, addr, (swap & 0xff) as u8);
     }
     if try_write_be_u32(ctx, old_ptr, prev as u32).is_err() {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64);
+        ctx.set_return(policy_module_error::FAULT as u64);
         return;
     }
     ctx.set_return(0);
@@ -1250,46 +1084,46 @@ fn request_idle_spu(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let count = args[3] as u32;
 
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
     // SPURS2 has its own broadcast NIDs; this entrypoint is SPURS1-only.
-    let flags1 = match try_read_byte(ctx, spurs + SPURS_OFF_FLAGS1) {
+    let flags1 = match try_read_byte(ctx, spurs + layout::OFF_FLAGS1) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if (flags1 & 0x40) != 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_STAT as u64);
+        ctx.set_return(core_error::STAT as u64);
         return;
     }
-    if wid >= CELL_SPURS_MAX_WORKLOAD || count >= CELL_SPURS_MAX_SPU {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64);
+    if wid >= layout::MAX_WORKLOAD_V1 || count >= layout::MAX_SPU {
+        ctx.set_return(core_error::INVAL as u64);
         return;
     }
-    let enabled = match try_read_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED) {
+    let enabled = match try_read_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if (enabled & (0x8000_0000u32 >> wid)) == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_SRCH as u64);
+        ctx.set_return(core_error::SRCH as u64);
         return;
     }
-    let exception = match try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION) {
+    let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if exception != 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_STAT as u64);
+        ctx.set_return(core_error::STAT as u64);
         return;
     }
 
     write_byte(
         ctx,
-        spurs + SPURS_OFF_WKL_IDLE_SPU_COUNT_OR_RC2 + wid,
+        spurs + layout::OFF_WKL_IDLE_SPU_COUNT_OR_RC2 + wid,
         count as u8,
     );
     ctx.set_return(0);
@@ -1307,18 +1141,18 @@ fn set_max_contention(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         ctx.set_return(code as u64);
         return;
     }
-    let clamped = if max_contention > CELL_SPURS_MAX_SPU {
-        CELL_SPURS_MAX_SPU as u8
+    let clamped = if max_contention > layout::MAX_SPU {
+        layout::MAX_SPU as u8
     } else {
         max_contention as u8
     };
     let index = wid & 0xf;
-    let mc_addr = spurs + SPURS_OFF_WKL_MAX_CONTENTION + index;
+    let mc_addr = spurs + layout::OFF_WKL_MAX_CONTENTION + index;
     let prev = match try_read_byte(ctx, mc_addr) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
-    let new_mc = if wid < CELL_SPURS_MAX_WORKLOAD {
+    let new_mc = if wid < layout::MAX_WORKLOAD_V1 {
         (prev & 0xf0) | (clamped & 0x0f)
     } else {
         (prev & 0x0f) | ((clamped & 0x0f) << 4)
@@ -1336,7 +1170,7 @@ fn set_priorities(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let priorities_ptr = args[3] as u32;
 
     if priorities_ptr == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
     if let Err(code) = validate_workload_op(ctx, spurs, wid, false, &CORE_ERRS) {
@@ -1345,14 +1179,14 @@ fn set_priorities(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     }
     let table = match try_read_priority_table(ctx, priorities_ptr) {
         Ok(t) if t.iter().all(|&b| b <= 15) => t,
-        Ok(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Ok(_) => return ctx.set_return(core_error::INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     let info_addr = wkl_info_addr(spurs, wid);
-    write_bytes(ctx, info_addr + WI_OFF_PRIORITY, &table);
+    write_bytes(ctx, info_addr + workload_info_layout::OFF_PRIORITY, &table);
 
-    write_byte(ctx, spurs + SPURS_OFF_SYS_SRV_MSG_UPDATE_WORKLOAD, 0xff);
-    write_byte(ctx, spurs + SPURS_OFF_SYS_SRV_MSG, 0xff);
+    write_byte(ctx, spurs + layout::OFF_SYS_SRV_MSG_UPDATE_WORKLOAD, 0xff);
+    write_byte(ctx, spurs + layout::OFF_SYS_SRV_MSG, 0xff);
     ctx.set_return(0);
 }
 
@@ -1366,51 +1200,55 @@ fn set_priority(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let priority = args[4] as u32;
 
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
     let wmax = match try_read_wmax(ctx, spurs) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if wid >= wmax {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64);
+        ctx.set_return(core_error::INVAL as u64);
         return;
     }
-    let n_spus = match try_read_byte(ctx, spurs + SPURS_OFF_NSPUS) {
+    let n_spus = match try_read_byte(ctx, spurs + layout::OFF_NSPUS) {
         Ok(v) => v as u32,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
-    if priority >= CELL_SPURS_MAX_PRIORITY || spu_id >= n_spus {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64);
+    if priority >= layout::MAX_PRIORITY || spu_id >= n_spus {
+        ctx.set_return(core_error::INVAL as u64);
         return;
     }
-    let enabled = match try_read_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED) {
+    let enabled = match try_read_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if (enabled & (0x8000_0000u32 >> wid)) == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_SRCH as u64);
+        ctx.set_return(core_error::SRCH as u64);
         return;
     }
-    let exception = match try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION) {
+    let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if exception != 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_STAT as u64);
+        ctx.set_return(core_error::STAT as u64);
         return;
     }
 
     let info_addr = wkl_info_addr(spurs, wid);
-    write_byte(ctx, info_addr + WI_OFF_PRIORITY + spu_id, priority as u8);
+    write_byte(
+        ctx,
+        info_addr + workload_info_layout::OFF_PRIORITY + spu_id,
+        priority as u8,
+    );
 
-    write_byte(ctx, spurs + SPURS_OFF_SYS_SRV_MSG_UPDATE_WORKLOAD, 0xff);
-    write_byte(ctx, spurs + SPURS_OFF_SYS_SRV_MSG, 0xff);
+    write_byte(ctx, spurs + layout::OFF_SYS_SRV_MSG_UPDATE_WORKLOAD, 0xff);
+    write_byte(ctx, spurs + layout::OFF_SYS_SRV_MSG, 0xff);
     ctx.set_return(0);
 }
 
@@ -1423,17 +1261,17 @@ fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let info = args[2] as u32;
 
     if spurs == 0 || info == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
 
-    let zero = vec![0u8; CELL_SPURS_INFO_SIZE as usize];
+    let zero = vec![0u8; info_layout::SIZE as usize];
     if ctx.write_guest(info as u64, &zero).is_err() {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64);
+        ctx.set_return(core_error::INVAL as u64);
         return;
     }
 
@@ -1442,16 +1280,16 @@ fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     // code; CORE has no FAULT) rather than silently returning zeros.
     let spurs_fields = (|| -> Result<_, HleReadError> {
         Ok((
-            try_read_be_u32(ctx, spurs + SPURS_OFF_FLAGS)?,
-            try_read_byte(ctx, spurs + SPURS_OFF_NSPUS)? as i32,
-            try_read_be_i32(ctx, spurs + SPURS_OFF_SPU_PRIORITY)?,
-            try_read_be_i32(ctx, spurs + SPURS_OFF_PPU_PRIORITY)?,
-            try_read_be_u32(ctx, spurs + SPURS_OFF_SPU_TG)?,
-            try_read_be_u64(ctx, spurs + SPURS_OFF_PPU0)?,
-            try_read_be_u64(ctx, spurs + SPURS_OFF_PPU1)?,
-            try_read_be_u64(ctx, spurs + SPURS_OFF_TRACE_BUFFER)?,
-            try_read_be_u64(ctx, spurs + SPURS_OFF_TRACE_DATA_SIZE)?,
-            try_read_byte(ctx, spurs + SPURS_OFF_PREFIX_SIZE)?,
+            try_read_be_u32(ctx, spurs + layout::OFF_FLAGS)?,
+            try_read_byte(ctx, spurs + layout::OFF_NSPUS)? as i32,
+            try_read_be_i32(ctx, spurs + layout::OFF_SPU_PRIORITY)?,
+            try_read_be_i32(ctx, spurs + layout::OFF_PPU_PRIORITY)?,
+            try_read_be_u32(ctx, spurs + layout::OFF_SPU_TG)?,
+            try_read_be_u64(ctx, spurs + layout::OFF_PPU0)?,
+            try_read_be_u64(ctx, spurs + layout::OFF_PPU1)?,
+            try_read_be_u64(ctx, spurs + layout::OFF_TRACE_BUFFER)?,
+            try_read_be_u64(ctx, spurs + layout::OFF_TRACE_DATA_SIZE)?,
+            try_read_byte(ctx, spurs + layout::OFF_PREFIX_SIZE)?,
         ))
     })();
     let (
@@ -1467,16 +1305,24 @@ fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         prefix_size,
     ) = match spurs_fields {
         Ok(t) => t,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
 
-    write_be_i32(ctx, info + INFO_OFF_NSPUS, n_spus);
-    write_be_i32(ctx, info + INFO_OFF_SPU_THREAD_GROUP_PRIORITY, spu_priority);
-    write_be_i32(ctx, info + INFO_OFF_PPU_THREAD_PRIORITY, ppu_priority);
+    write_be_i32(ctx, info + info_layout::OFF_NSPUS, n_spus);
+    write_be_i32(
+        ctx,
+        info + info_layout::OFF_SPU_THREAD_GROUP_PRIORITY,
+        spu_priority,
+    );
+    write_be_i32(
+        ctx,
+        info + info_layout::OFF_PPU_THREAD_PRIORITY,
+        ppu_priority,
+    );
     write_byte(
         ctx,
-        info + INFO_OFF_EXIT_IF_NO_WORK,
-        if (flags & SAF_EXIT_IF_NO_WORK) != 0 {
+        info + info_layout::OFF_EXIT_IF_NO_WORK,
+        if (flags & saf::EXIT_IF_NO_WORK) != 0 {
             1
         } else {
             0
@@ -1484,8 +1330,8 @@ fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     );
     write_byte(
         ctx,
-        info + INFO_OFF_SPURS2,
-        if (flags & SAF_SECOND_VERSION) != 0 {
+        info + info_layout::OFF_SPURS2,
+        if (flags & saf::SECOND_VERSION) != 0 {
             1
         } else {
             0
@@ -1498,39 +1344,51 @@ fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     // spurs->traceMode.
     let trace_buffer_addr = (trace_buffer_raw as u32) & !3u32;
     let trace_mode_tag = (trace_buffer_raw as u32) & 3u32;
-    let trace_mode_field = match try_read_be_u32(ctx, spurs + SPURS_OFF_TRACE_MODE) {
+    let trace_mode_field = match try_read_be_u32(ctx, spurs + layout::OFF_TRACE_MODE) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
-    write_be_u32(ctx, info + INFO_OFF_TRACE_BUFFER, trace_buffer_addr);
-    write_be_u64(ctx, info + INFO_OFF_TRACE_BUFFER_SIZE, trace_data_size);
+    write_be_u32(ctx, info + info_layout::OFF_TRACE_BUFFER, trace_buffer_addr);
+    write_be_u64(
+        ctx,
+        info + info_layout::OFF_TRACE_BUFFER_SIZE,
+        trace_data_size,
+    );
     write_be_u32(
         ctx,
-        info + INFO_OFF_TRACE_MODE,
+        info + info_layout::OFF_TRACE_MODE,
         trace_mode_tag | trace_mode_field,
     );
-    write_be_u32(ctx, info + INFO_OFF_SPU_THREAD_GROUP, spu_tg);
+    write_be_u32(ctx, info + info_layout::OFF_SPU_THREAD_GROUP, spu_tg);
 
     for i in 0..8u32 {
-        let spu = match try_read_be_u32(ctx, spurs + SPURS_OFF_SPUS + i * 4) {
+        let spu = match try_read_be_u32(ctx, spurs + layout::OFF_SPUS + i * 4) {
             Ok(v) => v,
-            Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+            Err(_) => return ctx.set_return(core_error::INVAL as u64),
         };
-        write_be_u32(ctx, info + INFO_OFF_SPU_THREADS + i * 4, spu);
+        write_be_u32(ctx, info + info_layout::OFF_SPU_THREADS + i * 4, spu);
     }
 
-    write_be_u64(ctx, info + INFO_OFF_SPURS_HANDLER_THREAD_0, ppu0);
-    write_be_u64(ctx, info + INFO_OFF_SPURS_HANDLER_THREAD_1, ppu1);
+    write_be_u64(ctx, info + info_layout::OFF_SPURS_HANDLER_THREAD_0, ppu0);
+    write_be_u64(ctx, info + info_layout::OFF_SPURS_HANDLER_THREAD_1, ppu1);
 
-    let copy_len = (prefix_size as usize).min(CELL_SPURS_NAME_MAX_LENGTH as usize);
-    let prefix = match try_read_prefix(ctx, spurs + SPURS_OFF_PREFIX, copy_len) {
+    let copy_len = (prefix_size as usize).min(layout::NAME_MAX_LENGTH as usize);
+    let prefix = match try_read_prefix(ctx, spurs + layout::OFF_PREFIX, copy_len) {
         Ok(buf) => buf,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     // The 16-byte info->namePrefix slot is zero-initialised above, so
     // anything past prefix_size already reads NUL.
-    write_bytes(ctx, info + INFO_OFF_NAME_PREFIX, &prefix[..copy_len]);
-    write_be_u32(ctx, info + INFO_OFF_NAME_PREFIX_LENGTH, prefix_size as u32);
+    write_bytes(
+        ctx,
+        info + info_layout::OFF_NAME_PREFIX,
+        &prefix[..copy_len],
+    );
+    write_be_u32(
+        ctx,
+        info + info_layout::OFF_NAME_PREFIX_LENGTH,
+        prefix_size as u32,
+    );
 
     ctx.set_return(0);
 }
@@ -1546,19 +1404,19 @@ fn attach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let is_dynamic = args[4] as i32;
 
     if spurs == 0 || port_ptr == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
-    let exception = match try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION) {
+    let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if exception != 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_STAT as u64);
+        ctx.set_return(core_error::STAT as u64);
         return;
     }
 
@@ -1569,17 +1427,17 @@ fn attach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let port = if is_dynamic == 0 {
         let p = match try_read_byte(ctx, port_ptr) {
             Ok(v) => v,
-            Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+            Err(_) => return ctx.set_return(core_error::INVAL as u64),
         };
         if p > 0x3F {
-            ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64);
+            ctx.set_return(core_error::INVAL as u64);
             return;
         }
         p
     } else {
-        let bits = match try_read_be_u64(ctx, spurs + SPURS_OFF_SPU_PORT_BITS) {
+        let bits = match try_read_be_u64(ctx, spurs + layout::OFF_SPU_PORT_BITS) {
             Ok(v) => v,
-            Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+            Err(_) => return ctx.set_return(core_error::INVAL as u64),
         };
         let mut chosen: Option<u8> = None;
         for p in 0x10u8..0x40 {
@@ -1589,12 +1447,12 @@ fn attach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
             }
         }
         let Some(p) = chosen else {
-            ctx.set_return(CELL_SPURS_CORE_ERROR_BUSY as u64);
+            ctx.set_return(core_error::BUSY as u64);
             return;
         };
         // Guest-supplied out-pointer: bad address becomes _INVAL.
         if try_write_byte(ctx, port_ptr, p).is_err() {
-            ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64);
+            ctx.set_return(core_error::INVAL as u64);
             return;
         }
         p
@@ -1602,21 +1460,21 @@ fn attach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 
     write_be_u32(
         ctx,
-        spurs + SPURS_OFF_EVENT_PORT_MUX + EPM_OFF_SPU_PORT,
+        spurs + layout::OFF_EVENT_PORT_MUX + event_port_mux_layout::OFF_SPU_PORT,
         port as u32,
     );
     write_be_u64(
         ctx,
-        spurs + SPURS_OFF_EVENT_PORT_MUX + EPM_OFF_EVENT_PORT,
+        spurs + layout::OFF_EVENT_PORT_MUX + event_port_mux_layout::OFF_EVENT_PORT,
         queue as u64,
     );
-    let prev_bits = match try_read_be_u64(ctx, spurs + SPURS_OFF_SPU_PORT_BITS) {
+    let prev_bits = match try_read_be_u64(ctx, spurs + layout::OFF_SPU_PORT_BITS) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     write_be_u64(
         ctx,
-        spurs + SPURS_OFF_SPU_PORT_BITS,
+        spurs + layout::OFF_SPU_PORT_BITS,
         prev_bits | (1u64 << port),
     );
 
@@ -1631,49 +1489,55 @@ fn detach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let port = args[2] as u8;
 
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
-    let exception = match try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION) {
+    let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if exception != 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_STAT as u64);
+        ctx.set_return(core_error::STAT as u64);
         return;
     }
     if port > 0x3F {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64);
+        ctx.set_return(core_error::INVAL as u64);
         return;
     }
 
-    let prev_bits = match try_read_be_u64(ctx, spurs + SPURS_OFF_SPU_PORT_BITS) {
+    let prev_bits = match try_read_be_u64(ctx, spurs + layout::OFF_SPU_PORT_BITS) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     let mask = 1u64 << port;
     if (prev_bits & mask) == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_SRCH as u64);
+        ctx.set_return(core_error::SRCH as u64);
         return;
     }
-    write_be_u64(ctx, spurs + SPURS_OFF_SPU_PORT_BITS, prev_bits & !mask);
+    write_be_u64(ctx, spurs + layout::OFF_SPU_PORT_BITS, prev_bits & !mask);
 
     // The mux substruct only tracks the last-bound port pair.
     // Detaching a different port clears only its `spuPortBits` bit.
-    let bound_port = match try_read_be_u32(ctx, spurs + SPURS_OFF_EVENT_PORT_MUX + EPM_OFF_SPU_PORT)
-    {
+    let bound_port = match try_read_be_u32(
+        ctx,
+        spurs + layout::OFF_EVENT_PORT_MUX + event_port_mux_layout::OFF_SPU_PORT,
+    ) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if bound_port == port as u32 {
-        write_be_u32(ctx, spurs + SPURS_OFF_EVENT_PORT_MUX + EPM_OFF_SPU_PORT, 0);
+        write_be_u32(
+            ctx,
+            spurs + layout::OFF_EVENT_PORT_MUX + event_port_mux_layout::OFF_SPU_PORT,
+            0,
+        );
         write_be_u64(
             ctx,
-            spurs + SPURS_OFF_EVENT_PORT_MUX + EPM_OFF_EVENT_PORT,
+            spurs + layout::OFF_EVENT_PORT_MUX + event_port_mux_layout::OFF_EVENT_PORT,
             0,
         );
     }
@@ -1694,61 +1558,65 @@ fn set_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let taskset = args[4] as u32;
 
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(policy_module_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(policy_module_error::ALIGN as u64);
         return;
     }
 
     if wid == u32::MAX {
         if hook == 0 {
-            ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+            ctx.set_return(core_error::NULL_POINTER as u64);
             return;
         }
-        let exception = match try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION) {
+        let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
             Ok(v) => v,
-            Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+            Err(_) => return ctx.set_return(core_error::INVAL as u64),
         };
         if exception != 0 {
-            ctx.set_return(CELL_SPURS_CORE_ERROR_STAT as u64);
+            ctx.set_return(core_error::STAT as u64);
             return;
         }
-        let prev = match try_read_be_u64(ctx, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER) {
+        let prev = match try_read_be_u64(ctx, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER) {
             Ok(v) => v,
-            Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+            Err(_) => return ctx.set_return(core_error::INVAL as u64),
         };
         if prev != 0 {
-            ctx.set_return(CELL_SPURS_CORE_ERROR_BUSY as u64);
+            ctx.set_return(core_error::BUSY as u64);
             return;
         }
         // On the sentinel path, `taskset` is the handler-args pointer
         // (the third arg of SetGlobalExceptionEventHandler).
         write_be_u64(
             ctx,
-            spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS,
+            spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER_ARGS,
             taskset as u64,
         );
-        write_be_u64(ctx, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER, hook as u64);
+        write_be_u64(
+            ctx,
+            spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER,
+            hook as u64,
+        );
         ctx.set_return(0);
         return;
     }
 
     let wmax = match try_read_wmax(ctx, spurs) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     if wid >= wmax {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64);
+        ctx.set_return(policy_module_error::INVAL as u64);
         return;
     }
-    let enabled = match try_read_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED) {
+    let enabled = match try_read_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     if (enabled & (0x8000_0000u32 >> wid)) == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_SRCH as u64);
+        ctx.set_return(policy_module_error::SRCH as u64);
         return;
     }
     // No spec-defined per-workload handler slot; CELL_OK without a
@@ -1764,43 +1632,43 @@ fn unset_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let wid = args[2] as u32;
 
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(policy_module_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(policy_module_error::ALIGN as u64);
         return;
     }
 
     if wid == u32::MAX {
-        let exception = match try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION) {
+        let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
             Ok(v) => v,
-            Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+            Err(_) => return ctx.set_return(core_error::INVAL as u64),
         };
         if exception != 0 {
-            ctx.set_return(CELL_SPURS_CORE_ERROR_STAT as u64);
+            ctx.set_return(core_error::STAT as u64);
             return;
         }
-        write_be_u64(ctx, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS, 0);
-        write_be_u64(ctx, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER, 0);
+        write_be_u64(ctx, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER_ARGS, 0);
+        write_be_u64(ctx, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER, 0);
         ctx.set_return(0);
         return;
     }
 
     let wmax = match try_read_wmax(ctx, spurs) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     if wid >= wmax {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64);
+        ctx.set_return(policy_module_error::INVAL as u64);
         return;
     }
-    let enabled = match try_read_be_u32(ctx, spurs + SPURS_OFF_WKL_ENABLED) {
+    let enabled = match try_read_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64),
+        Err(_) => return ctx.set_return(policy_module_error::FAULT as u64),
     };
     if (enabled & (0x8000_0000u32 >> wid)) == 0 {
-        ctx.set_return(CELL_SPURS_POLICY_MODULE_ERROR_SRCH as u64);
+        ctx.set_return(policy_module_error::SRCH as u64);
         return;
     }
     ctx.set_return(0);
@@ -1816,38 +1684,38 @@ fn set_global_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9])
     let arg = args[3] as u32;
 
     if spurs == 0 || ea_handler == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
-    let exception = match try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION) {
+    let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if exception != 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_STAT as u64);
+        ctx.set_return(core_error::STAT as u64);
         return;
     }
-    let prev = match try_read_be_u64(ctx, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER) {
+    let prev = match try_read_be_u64(ctx, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if prev != 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_BUSY as u64);
+        ctx.set_return(core_error::BUSY as u64);
         return;
     }
 
     write_be_u64(
         ctx,
-        spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS,
+        spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER_ARGS,
         arg as u64,
     );
     write_be_u64(
         ctx,
-        spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER,
+        spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER,
         ea_handler as u64,
     );
     ctx.set_return(0);
@@ -1859,24 +1727,24 @@ fn unset_global_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9
     let spurs = args[1] as u32;
 
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
-    let exception = match try_read_be_u32(ctx, spurs + SPURS_OFF_EXCEPTION) {
+    let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
         Ok(v) => v,
-        Err(_) => return ctx.set_return(CELL_SPURS_CORE_ERROR_INVAL as u64),
+        Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
     if exception != 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_STAT as u64);
+        ctx.set_return(core_error::STAT as u64);
         return;
     }
 
-    write_be_u64(ctx, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS, 0);
-    write_be_u64(ctx, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER, 0);
+    write_be_u64(ctx, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER_ARGS, 0);
+    write_be_u64(ctx, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER, 0);
     ctx.set_return(0);
 }
 
@@ -1889,28 +1757,28 @@ fn enable_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let flag = args[2] as u8;
 
     if spurs == 0 {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_NULL_POINTER as u64);
+        ctx.set_return(core_error::NULL_POINTER as u64);
         return;
     }
-    if !spurs.is_multiple_of(CELL_SPURS_ALIGN) {
-        ctx.set_return(CELL_SPURS_CORE_ERROR_ALIGN as u64);
+    if !spurs.is_multiple_of(layout::ALIGN) {
+        ctx.set_return(core_error::ALIGN as u64);
         return;
     }
 
     let new = if flag != 0 { 1u32 } else { 0u32 };
-    write_be_u32(ctx, spurs + SPURS_OFF_ENABLE_EH, new);
+    write_be_u32(ctx, spurs + layout::OFF_ENABLE_EH, new);
     ctx.set_return(0);
 }
 
 /// Address of the 32-byte `wklInfo[wid]` block. SPURS1 wids live in
 /// `wklInfo1[wid]`; SPURS2 wid >= 16 lives in `wklInfo2[wid & 0xf]`.
 fn wkl_info_addr(spurs: u32, wid: u32) -> u32 {
-    let base = if wid < CELL_SPURS_MAX_WORKLOAD {
-        SPURS_OFF_WKL_INFO_1
+    let base = if wid < layout::MAX_WORKLOAD_V1 {
+        layout::OFF_WKL_INFO_1
     } else {
-        SPURS_OFF_WKL_INFO_2
+        layout::OFF_WKL_INFO_2
     };
-    spurs + base + (wid & 0xf) * WI_SIZE
+    spurs + base + (wid & 0xf) * workload_info_layout::SIZE
 }
 
 fn try_read_priority_table(ctx: &dyn HleContext, addr: u32) -> Result<[u8; 8], HleReadError> {
@@ -1993,60 +1861,6 @@ fn try_read_byte(ctx: &dyn HleContext, addr: u32) -> Result<u8, HleReadError> {
     Ok(bytes[0])
 }
 
-// Compile-time tripwires for cross-field offset relationships. A
-// rename or renumber that breaks one of these would produce silent
-// data corruption (writing the wrong field, indexing past a region
-// limit). Asserting at compile time fails the build first.
-#[allow(dead_code)]
-const _COMPILE_TIME_OFFSETS: () = {
-    // CellSpurs region bounds.
-    assert!(SPURS_OFF_PPU0 < CELL_SPURS_SIZE1);
-    assert!(SPURS_OFF_PPU0 < CELL_SPURS_SIZE2);
-    assert!(SPURS_OFF_REVISION < CELL_SPURS_SIZE1);
-    assert!(SPURS_OFF_EXCEPTION < CELL_SPURS_SIZE1);
-    // exception (be_t<u32>) is immediately followed by sys_spu_image
-    // spuImg at 0xD70. Tightening SPURS_OFF_EXCEPTION to enableEH
-    // (0xD68) by mistake would still pass the size check; this pins
-    // the gap so the misread fails compile.
-    const SPU_IMG_START: u32 = 0xD70;
-    assert!(SPURS_OFF_EXCEPTION + 4 == SPU_IMG_START);
-    assert!(SPU_IMG_START < CELL_SPURS_SIZE1);
-    assert!(SPURS_OFF_WKL_MSK_B + 4 == 0xB8);
-    assert!(SPURS_OFF_PREFIX + 15 == SPURS_OFF_PREFIX_SIZE);
-    // prefixSize is a u8; unk5 (u32) follows at 0xD9C. Renumbering
-    // prefixSize into a 4-byte field would clobber unk5.
-    assert!(SPURS_OFF_PREFIX_SIZE + 1 == 0xD9C);
-    assert!(SPURS_OFF_REVISION + 4 == SPURS_OFF_SDK_VERSION);
-    assert!(SPURS_OFF_FLAGS + 4 == SPURS_OFF_SPU_PRIORITY);
-    assert!(SPURS_OFF_SPU_PRIORITY + 4 == SPURS_OFF_PPU_PRIORITY);
-    // wklInfo2[16] must fit inside the SPURS2 8 KiB region but live
-    // past the SPURS1 4 KiB limit (the SPURS2-only bank).
-    assert!(SPURS_OFF_WKL_INFO_2 + 16 * WI_SIZE <= CELL_SPURS_SIZE2);
-    assert!(SPURS_OFF_WKL_INFO_2 >= CELL_SPURS_SIZE1);
-    assert!(ATTR_OFF_PREFIX + 15 == ATTR_OFF_PREFIX_SIZE);
-    assert!(ATTR_OFF_REVISION + 4 == ATTR_OFF_SDK_VERSION);
-    assert!(ATTR_OFF_NSPUS + 4 == ATTR_OFF_SPU_PRIORITY);
-    assert!(ATTR_OFF_SPU_PRIORITY + 4 == ATTR_OFF_PPU_PRIORITY);
-    assert!(ATTR_OFF_PPU_PRIORITY + 4 == ATTR_OFF_EXIT_IF_NO_WORK);
-    assert!(ATTR_OFF_FLAGS + 4 == ATTR_OFF_CONTAINER);
-    assert!(ATTR_OFF_SWL_PRIORITY + 8 == ATTR_OFF_SWL_MAX_SPU);
-    assert!(ATTR_OFF_SWL_MAX_SPU + 4 == ATTR_OFF_SWL_IS_PREEM);
-    // EventPortMux substruct (128 bytes) and the deepest written
-    // field inside it (eventPort at +0x10) must stay in SPURS1 range.
-    assert!(SPURS_OFF_EVENT_PORT_MUX + 128 <= CELL_SPURS_SIZE1);
-    assert!(SPURS_OFF_EVENT_PORT_MUX + EPM_OFF_EVENT_PORT + 8 <= CELL_SPURS_SIZE1);
-    // globalSpuExceptionHandler / args at 0xF80 / 0xF88.
-    assert!(SPURS_OFF_GLOBAL_EXCEPTION_HANDLER + 8 == SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS);
-    assert!(SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS + 8 <= CELL_SPURS_SIZE1);
-    // CellSpursInfo: padding[164] starts at 0x74, so total = 280.
-    assert!(INFO_OFF_NAME_PREFIX + 16 == INFO_OFF_NAME_PREFIX_LENGTH);
-    assert!(INFO_OFF_NAME_PREFIX_LENGTH + 4 == INFO_OFF_DEADLINE_MISS_COUNTER);
-    assert!(INFO_OFF_DEADLINE_MISS_COUNTER + 4 == INFO_OFF_DEADLINE_MEET_COUNTER);
-    assert!(INFO_OFF_SPU_THREADS + 32 == INFO_OFF_SPURS_HANDLER_THREAD_0);
-    assert!(INFO_OFF_SPURS_HANDLER_THREAD_0 + 8 == INFO_OFF_SPURS_HANDLER_THREAD_1);
-    assert!(INFO_OFF_DEADLINE_MEET_COUNTER + 4 + 164 == CELL_SPURS_INFO_SIZE);
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2110,28 +1924,40 @@ mod tests {
             /* exitIfNoWork = */ 1,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTRIBUTE_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &args);
 
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
-        assert_eq!(read_u32_be(&rt, attr_ptr + ATTR_OFF_REVISION), 1);
         assert_eq!(
-            read_u32_be(&rt, attr_ptr + ATTR_OFF_SDK_VERSION),
+            read_u32_be(&rt, attr_ptr + attribute_layout::OFF_REVISION),
+            1
+        );
+        assert_eq!(
+            read_u32_be(&rt, attr_ptr + attribute_layout::OFF_SDK_VERSION),
             0x12345678
         );
-        assert_eq!(read_u32_be(&rt, attr_ptr + ATTR_OFF_NSPUS), 5);
-        assert_eq!(read_u32_be(&rt, attr_ptr + ATTR_OFF_SPU_PRIORITY), 100);
-        assert_eq!(read_u32_be(&rt, attr_ptr + ATTR_OFF_PPU_PRIORITY), 200);
-        assert_eq!(read_byte_at(&rt, attr_ptr + ATTR_OFF_EXIT_IF_NO_WORK), 1);
+        assert_eq!(read_u32_be(&rt, attr_ptr + attribute_layout::OFF_NSPUS), 5);
+        assert_eq!(
+            read_u32_be(&rt, attr_ptr + attribute_layout::OFF_SPU_PRIORITY),
+            100
+        );
+        assert_eq!(
+            read_u32_be(&rt, attr_ptr + attribute_layout::OFF_PPU_PRIORITY),
+            200
+        );
+        assert_eq!(
+            read_byte_at(&rt, attr_ptr + attribute_layout::OFF_EXIT_IF_NO_WORK),
+            1
+        );
     }
 
     #[test]
     fn attribute_initialize_null_pointer_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0, 1, 0, 1, 100, 200, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTRIBUTE_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_NULL_POINTER as u64
+            core_error::NULL_POINTER as u64
         );
     }
 
@@ -2139,11 +1965,8 @@ mod tests {
     fn attribute_initialize_misaligned_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0001, 1, 0, 1, 100, 200, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTRIBUTE_INITIALIZE, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_ALIGN as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::ALIGN as u64);
     }
 
     #[test]
@@ -2161,40 +1984,40 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
 
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_REVISION), 0);
-        assert_eq!(read_u64_be(&rt, spurs + SPURS_OFF_PPU0), u64::MAX);
-        assert_eq!(read_u64_be(&rt, spurs + SPURS_OFF_PPU1), u64::MAX);
+        assert_eq!(read_u32_be(&rt, spurs + layout::OFF_REVISION), 0);
+        assert_eq!(read_u64_be(&rt, spurs + layout::OFF_PPU0), u64::MAX);
+        assert_eq!(read_u64_be(&rt, spurs + layout::OFF_PPU1), u64::MAX);
         assert_eq!(
-            read_u32_be(&rt, spurs + SPURS_OFF_FLAGS),
-            SAF_EXIT_IF_NO_WORK
+            read_u32_be(&rt, spurs + layout::OFF_FLAGS),
+            saf::EXIT_IF_NO_WORK
         );
-        assert_eq!(read_byte_at(&rt, spurs + SPURS_OFF_NSPUS), 2);
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_SPU_PRIORITY), 250);
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_PPU_PRIORITY), 1000);
+        assert_eq!(read_byte_at(&rt, spurs + layout::OFF_NSPUS), 2);
+        assert_eq!(read_u32_be(&rt, spurs + layout::OFF_SPU_PRIORITY), 250);
+        assert_eq!(read_u32_be(&rt, spurs + layout::OFF_PPU_PRIORITY), 1000);
         assert_eq!(
-            read_u32_be(&rt, spurs + SPURS_OFF_WKL_ENABLED),
+            read_u32_be(&rt, spurs + layout::OFF_WKL_ENABLED),
             0xffff,
             "SPURS1 wklEnabled"
         );
         for i in 0..8 {
             assert_eq!(
-                read_byte_at(&rt, spurs + SPURS_OFF_SYS_SRV_PREEMPT_WKL_ID + i),
+                read_byte_at(&rt, spurs + layout::OFF_SYS_SRV_PREEMPT_WKL_ID + i),
                 0xff
             );
         }
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_WKL_INFO_SYS_SRV),
-            SPURS_IMG_ADDR_SYS_SRV_WORKLOAD as u64
+            read_u64_be(&rt, spurs + layout::OFF_WKL_INFO_SYS_SRV),
+            sys_srv::IMG_ADDR as u64
         );
         assert_eq!(
-            read_u32_be(&rt, spurs + SPURS_OFF_WKL_INFO_SYS_SRV + 0x10),
-            SYS_SRV_WORKLOAD_SIZE
+            read_u32_be(&rt, spurs + layout::OFF_WKL_INFO_SYS_SRV + 0x10),
+            sys_srv::WORKLOAD_SIZE
         );
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_INFO_SYS_SRV + 0x14),
+            read_byte_at(&rt, spurs + layout::OFF_WKL_INFO_SYS_SRV + 0x14),
             0xff
         );
     }
@@ -2204,21 +2027,18 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         let spurs: u32 = 0x4_0040; // 64-byte aligned, NOT 128-byte aligned
         let args: [u64; 9] = [0x10000, spurs as u64, 2, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_ALIGN as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::ALIGN as u64);
     }
 
     #[test]
     fn initialize_bare_null_spurs_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0, 2, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_NULL_POINTER as u64
+            core_error::NULL_POINTER as u64
         );
     }
 
@@ -2240,26 +2060,22 @@ mod tests {
             /* exitIfNoWork = */ 0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTRIBUTE_INITIALIZE, &attr_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args);
         let _ = drain_return(&mut rt, unit_id);
 
         let init_args: [u64; 9] = [0x10000, spurs as u64, attr_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(
-            unit_id,
-            NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE2,
-            &init_args,
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE2, &init_args);
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
 
-        let flags = read_u32_be(&rt, spurs + SPURS_OFF_FLAGS);
+        let flags = read_u32_be(&rt, spurs + layout::OFF_FLAGS);
         assert_eq!(
-            flags & SAF_SECOND_VERSION,
-            SAF_SECOND_VERSION,
-            "WithAttribute2 sets SAF_SECOND_VERSION"
+            flags & saf::SECOND_VERSION,
+            saf::SECOND_VERSION,
+            "WithAttribute2 sets saf::SECOND_VERSION"
         );
         // For SPURS2 the wklEnabled SPURS1 default is NOT written.
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_WKL_ENABLED), 0);
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_REVISION), 2);
+        assert_eq!(read_u32_be(&rt, spurs + layout::OFF_WKL_ENABLED), 0);
+        assert_eq!(read_u32_be(&rt, spurs + layout::OFF_REVISION), 2);
     }
 
     #[test]
@@ -2275,15 +2091,8 @@ mod tests {
         );
 
         let init_args: [u64; 9] = [0x10000, spurs as u64, attr_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(
-            unit_id,
-            NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE,
-            &init_args,
-        );
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE, &init_args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
     #[test]
@@ -2291,44 +2100,41 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         let spurs: u32 = 0x4_0000;
         let init_args: [u64; 9] = [0x10000, spurs as u64, 2, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &init_args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &init_args);
         let _ = drain_return(&mut rt, unit_id);
 
         let fin_args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_FINALIZE, &fin_args);
+        rt.dispatch_hle(unit_id, spurs_nid::FINALIZE, &fin_args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
-        assert_eq!(read_u64_be(&rt, spurs + SPURS_OFF_PPU0), u64::MAX);
-        assert_eq!(read_u64_be(&rt, spurs + SPURS_OFF_PPU1), u64::MAX);
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_WKL_ENABLED), 0);
+        assert_eq!(read_u64_be(&rt, spurs + layout::OFF_PPU0), u64::MAX);
+        assert_eq!(read_u64_be(&rt, spurs + layout::OFF_PPU1), u64::MAX);
+        assert_eq!(read_u32_be(&rt, spurs + layout::OFF_WKL_ENABLED), 0);
     }
 
     #[test]
     fn finalize_misaligned_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0040, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_FINALIZE, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_ALIGN as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::FINALIZE, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::ALIGN as u64);
     }
 
     #[test]
     fn finalize_null_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_FINALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::FINALIZE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_NULL_POINTER as u64
+            core_error::NULL_POINTER as u64
         );
     }
 
     /// Drive `cellSpursInitialize` against a SPURS1 block at `spurs`.
     fn init_spurs(rt: &mut Runtime, unit_id: UnitId, spurs: u32) {
         let args: [u64; 9] = [0x10000, spurs as u64, 1, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
         let _ = drain_return(rt, unit_id);
     }
 
@@ -2336,14 +2142,10 @@ mod tests {
     /// `cellSpursInitializeWithAttribute2` against `spurs`.
     fn init_spurs_v2(rt: &mut Runtime, unit_id: UnitId, spurs: u32, attr_ptr: u32) {
         let attr_args: [u64; 9] = [0x10000, attr_ptr as u64, 2, 0, 1, 128, 1000, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTRIBUTE_INITIALIZE, &attr_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args);
         let _ = drain_return(rt, unit_id);
         let init_args: [u64; 9] = [0x10000, spurs as u64, attr_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(
-            unit_id,
-            NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE2,
-            &init_args,
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE2, &init_args);
         let _ = drain_return(rt, unit_id);
     }
 
@@ -2377,14 +2179,17 @@ mod tests {
             /* minCnt = */ 1,
             /* maxCnt = */ 2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
 
         // wklEnabled init = 0x0000_ffff (low 16 bits reserved); the
         // first MSB-first free slot is wid 0, so AddWorkload assigns
         // 0 and sets bit 0x80000000.
         assert_eq!(read_u32_be(&rt, wid_ptr), 0);
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_WKL_ENABLED), 0x8000_ffff);
+        assert_eq!(
+            read_u32_be(&rt, spurs + layout::OFF_WKL_ENABLED),
+            0x8000_ffff
+        );
     }
 
     #[test]
@@ -2397,7 +2202,7 @@ mod tests {
         // countl_one = 32 >= wmax=16 -> AGAIN).
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -2420,10 +2225,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_AGAIN as u64,
+            policy_module_error::AGAIN as u64,
             "all 32 bits set -> no free slot"
         );
     }
@@ -2437,7 +2242,7 @@ mod tests {
         // Clear wklEnabled to 0 so wid 0 is the next slot.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -2460,26 +2265,41 @@ mod tests {
             3,
             4,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
 
         assert_eq!(read_u32_be(&rt, wid_ptr), 0);
-        let info_addr = spurs + SPURS_OFF_WKL_INFO_1; // wid 0
-        assert_eq!(read_u64_be(&rt, info_addr + WI_OFF_ADDR), pm as u64);
-        assert_eq!(read_u64_be(&rt, info_addr + WI_OFF_ARG), 0xdead_beef);
-        assert_eq!(read_u32_be(&rt, info_addr + WI_OFF_SIZE), 0x1000);
-        assert_eq!(read_byte_at(&rt, info_addr + WI_OFF_UNIQUE_ID), 0);
+        let info_addr = spurs + layout::OFF_WKL_INFO_1; // wid 0
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_STATE_1),
-            SPURS_WKL_STATE_RUNNABLE
+            read_u64_be(&rt, info_addr + workload_info_layout::OFF_ADDR),
+            pm as u64
         );
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_MIN_CONTENTION),
+            read_u64_be(&rt, info_addr + workload_info_layout::OFF_ARG),
+            0xdead_beef
+        );
+        assert_eq!(
+            read_u32_be(&rt, info_addr + workload_info_layout::OFF_SIZE),
+            0x1000
+        );
+        assert_eq!(
+            read_byte_at(&rt, info_addr + workload_info_layout::OFF_UNIQUE_ID),
+            0
+        );
+        assert_eq!(
+            read_byte_at(&rt, spurs + layout::OFF_WKL_STATE_1),
+            wkl_state::RUNNABLE
+        );
+        assert_eq!(
+            read_byte_at(&rt, spurs + layout::OFF_WKL_MIN_CONTENTION),
             3,
             "minCnt clamped to caller value"
         );
         // wklEnabled bit 0x80000000 set after enabling wid 0.
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_WKL_ENABLED), 0x8000_0000);
+        assert_eq!(
+            read_u32_be(&rt, spurs + layout::OFF_WKL_ENABLED),
+            0x8000_0000
+        );
     }
 
     #[test]
@@ -2502,10 +2322,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_ALIGN as u64
+            policy_module_error::ALIGN as u64
         );
     }
 
@@ -2529,10 +2349,10 @@ mod tests {
             /* minCnt = */ 0,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64
+            policy_module_error::INVAL as u64
         );
     }
 
@@ -2561,10 +2381,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64
+            policy_module_error::INVAL as u64
         );
     }
 
@@ -2576,7 +2396,7 @@ mod tests {
         // Clear wklEnabled, then add a workload at wid=0.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -2595,19 +2415,19 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &add_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &add_args);
         let _ = drain_return(&mut rt, unit_id);
 
         // Shutdown wid=0.
         let sd_args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SHUTDOWN_WORKLOAD, &sd_args);
+        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &sd_args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_STATE_1),
-            SPURS_WKL_STATE_SHUTTING_DOWN
+            read_byte_at(&rt, spurs + layout::OFF_WKL_STATE_1),
+            wkl_state::SHUTTING_DOWN
         );
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_EVENT_1) & 1,
+            read_byte_at(&rt, spurs + layout::OFF_WKL_EVENT_1) & 1,
             1,
             "shutdown sets event bit 0"
         );
@@ -2619,10 +2439,10 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 99, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SHUTDOWN_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64
+            policy_module_error::INVAL as u64
         );
     }
 
@@ -2633,10 +2453,10 @@ mod tests {
         init_spurs(&mut rt, unit_id, spurs);
         // wid 99 exceeds wmax=16 for SPURS1 -> INVAL.
         let args: [u64; 9] = [0x10000, spurs as u64, 99, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_WAIT_FOR_WORKLOAD_SHUTDOWN, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64
+            policy_module_error::INVAL as u64
         );
 
         // wid 5: post-init wklEnabled is 0x0000_ffff (the SPURS1
@@ -2644,15 +2464,15 @@ mod tests {
         // (0x80000000 >> 5), which is in the high band and thus
         // unset, so the call returns SRCH.
         assert_eq!(
-            read_u32_be(&rt, spurs + SPURS_OFF_WKL_ENABLED),
+            read_u32_be(&rt, spurs + layout::OFF_WKL_ENABLED),
             0x0000_FFFF,
             "post-init wklEnabled is 0x0000_FFFF for SPURS1"
         );
         let args2: [u64; 9] = [0x10000, spurs as u64, 5, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_WAIT_FOR_WORKLOAD_SHUTDOWN, &args2);
+        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &args2);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_SRCH as u64
+            policy_module_error::SRCH as u64
         );
 
         // After AddWorkload at wid=0, bit 0x80000000 is set -> CELL_OK.
@@ -2669,11 +2489,11 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &add_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &add_args);
         let _ = drain_return(&mut rt, unit_id);
 
         let args3: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_WAIT_FOR_WORKLOAD_SHUTDOWN, &args3);
+        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &args3);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
     }
 
@@ -2692,11 +2512,11 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         // SF1_EXIT_IF_NO_WORK = 0x80, SF1_32_WORKLOADS = 0x40.
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_FLAGS1),
+            read_byte_at(&rt, spurs + layout::OFF_FLAGS1),
             0x80,
             "SPURS1 with exitIfNoWork should set flags1 = SF1_EXIT_IF_NO_WORK"
         );
@@ -2709,18 +2529,14 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         // Plant attribute via _cellSpursAttributeInitialize.
         let attr_args: [u64; 9] = [0x10000, attr_ptr as u64, 2, 0, 1, 128, 1000, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTRIBUTE_INITIALIZE, &attr_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args);
         let _ = drain_return(&mut rt, unit_id);
 
         let init_args: [u64; 9] = [0x10000, spurs as u64, attr_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(
-            unit_id,
-            NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE2,
-            &init_args,
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE2, &init_args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_FLAGS1) & 0x40,
+            read_byte_at(&rt, spurs + layout::OFF_FLAGS1) & 0x40,
             0x40,
             "WithAttribute2 should set flags1 SF1_32_WORKLOADS"
         );
@@ -2732,18 +2548,12 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         // n_spus = 0 (< 1).
         let args0: [u64; 9] = [0x10000, spurs as u64, 0, 200, 1000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &args0);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args0);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
         // n_spus = 7 (> 6).
         let args7: [u64; 9] = [0x10000, spurs as u64, 7, 200, 1000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &args7);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args7);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
     #[test]
@@ -2754,7 +2564,7 @@ mod tests {
         // Plant a non-zero exception so the next AddWorkload bails.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_EXCEPTION) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_EXCEPTION) as u64),
                 4,
             )
             .unwrap(),
@@ -2773,10 +2583,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_STAT as u64
+            policy_module_error::STAT as u64
         );
     }
 
@@ -2788,7 +2598,7 @@ mod tests {
         // Saturate wklEnabled so AGAIN fires.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -2816,10 +2626,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_AGAIN as u64
+            policy_module_error::AGAIN as u64
         );
         assert_eq!(
             read_u32_be(&rt, wid_ptr),
@@ -2837,7 +2647,7 @@ mod tests {
         // in wid 0..15 in order.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -2860,7 +2670,7 @@ mod tests {
                 1,
                 2,
             ];
-            rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+            rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
             assert_eq!(
                 drain_return(&mut rt, unit_id),
                 0,
@@ -2872,7 +2682,7 @@ mod tests {
         // AddWorkloads set bits 31..16 in MSB-first order, leaving
         // 0xFFFF_0000.
         assert_eq!(
-            read_u32_be(&rt, spurs + SPURS_OFF_WKL_ENABLED),
+            read_u32_be(&rt, spurs + layout::OFF_WKL_ENABLED),
             0xFFFF_0000,
             "16 successful AddWorkloads set the top 16 bits"
         );
@@ -2888,10 +2698,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_AGAIN as u64
+            policy_module_error::AGAIN as u64
         );
     }
 
@@ -2903,7 +2713,7 @@ mod tests {
         // Clear wklEnabled so wid 0 is allocated.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -2939,13 +2749,22 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD_WITH_ATTRIBUTE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD_WITH_ATTRIBUTE, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, wid_ptr), 0);
-        let info_addr = spurs + SPURS_OFF_WKL_INFO_1;
-        assert_eq!(read_u64_be(&rt, info_addr + WI_OFF_ADDR), 0x6_1000);
-        assert_eq!(read_u64_be(&rt, info_addr + WI_OFF_ARG), 0x1234);
-        assert_eq!(read_u32_be(&rt, info_addr + WI_OFF_SIZE), 0x1000);
+        let info_addr = spurs + layout::OFF_WKL_INFO_1;
+        assert_eq!(
+            read_u64_be(&rt, info_addr + workload_info_layout::OFF_ADDR),
+            0x6_1000
+        );
+        assert_eq!(
+            read_u64_be(&rt, info_addr + workload_info_layout::OFF_ARG),
+            0x1234
+        );
+        assert_eq!(
+            read_u32_be(&rt, info_addr + workload_info_layout::OFF_SIZE),
+            0x1000
+        );
     }
 
     #[test]
@@ -2971,10 +2790,10 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD_WITH_ATTRIBUTE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD_WITH_ATTRIBUTE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64
+            policy_module_error::INVAL as u64
         );
     }
 
@@ -2989,7 +2808,7 @@ mod tests {
         init_spurs_v2(&mut rt, unit_id, spurs, attr_ptr);
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_EXCEPTION) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_EXCEPTION) as u64),
                 4,
             )
             .unwrap(),
@@ -3008,10 +2827,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_STAT as u64
+            policy_module_error::STAT as u64
         );
     }
 
@@ -3029,7 +2848,7 @@ mod tests {
         // is defensive.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -3052,7 +2871,7 @@ mod tests {
                 1,
                 2,
             ];
-            rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+            rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
             assert_eq!(
                 drain_return(&mut rt, unit_id),
                 0,
@@ -3062,22 +2881,22 @@ mod tests {
         }
         // 32 successful AddWorkloads set every bit.
         assert_eq!(
-            read_u32_be(&rt, spurs + SPURS_OFF_WKL_ENABLED),
+            read_u32_be(&rt, spurs + layout::OFF_WKL_ENABLED),
             0xFFFF_FFFF,
             "32 successful AddWorkloads exhaust SPURS2's wid space"
         );
         // wid 0 went to wklInfo1 at offset 0xB00.
-        let info_addr_0 = spurs + SPURS_OFF_WKL_INFO_1;
+        let info_addr_0 = spurs + layout::OFF_WKL_INFO_1;
         assert_eq!(
-            read_u64_be(&rt, info_addr_0 + WI_OFF_ADDR),
+            read_u64_be(&rt, info_addr_0 + workload_info_layout::OFF_ADDR),
             0x6_1000,
             "wid 0's pm landed in wklInfo1[0]"
         );
         // wid 16 went to wklInfo2 at offset 0x1000 (start of bank
         // 2, inside the 8 KiB SPURS2 region).
-        let info_addr_16 = spurs + SPURS_OFF_WKL_INFO_2;
+        let info_addr_16 = spurs + layout::OFF_WKL_INFO_2;
         assert_eq!(
-            read_u64_be(&rt, info_addr_16 + WI_OFF_ADDR),
+            read_u64_be(&rt, info_addr_16 + workload_info_layout::OFF_ADDR),
             0x6_1000,
             "wid 16's pm landed in wklInfo2[0]"
         );
@@ -3093,10 +2912,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_AGAIN as u64
+            policy_module_error::AGAIN as u64
         );
     }
 
@@ -3106,7 +2925,7 @@ mod tests {
         init_spurs(&mut rt, unit_id, spurs);
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -3125,7 +2944,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         let _ = drain_return(&mut rt, unit_id);
         (rt, unit_id)
     }
@@ -3135,9 +2954,12 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0x42, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        assert_eq!(read_byte_at(&rt, spurs + SPURS_OFF_WKL_READY_COUNT_1), 0x42);
+        assert_eq!(
+            read_byte_at(&rt, spurs + layout::OFF_WKL_READY_COUNT_1),
+            0x42
+        );
     }
 
     #[test]
@@ -3145,10 +2967,10 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0x100, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64
+            policy_module_error::INVAL as u64
         );
     }
 
@@ -3158,10 +2980,10 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // wid = 0xffffffff is past wmax -> INVAL.
         let args: [u64; 9] = [0x10000, spurs as u64, 0xffff_ffff, 1, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64
+            policy_module_error::INVAL as u64
         );
     }
 
@@ -3171,10 +2993,10 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // wid 5 is in band but not enabled (only wid 0 was added).
         let args: [u64; 9] = [0x10000, spurs as u64, 5, 1, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_SRCH as u64
+            policy_module_error::SRCH as u64
         );
     }
 
@@ -3185,17 +3007,17 @@ mod tests {
         // Demote wid 0 from RUNNABLE to PREPARING via direct write.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_STATE_1) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_STATE_1) as u64),
                 1,
             )
             .unwrap(),
-            &[SPURS_WKL_STATE_PREPARING],
+            &[wkl_state::PREPARING],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 1, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_STAT as u64
+            policy_module_error::STAT as u64
         );
     }
 
@@ -3206,7 +3028,7 @@ mod tests {
         // Plant readyCount = 0x33.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_READY_COUNT_1) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_READY_COUNT_1) as u64),
                 1,
             )
             .unwrap(),
@@ -3214,10 +3036,13 @@ mod tests {
         );
         let old_ptr: u32 = 0x7_0000;
         let args: [u64; 9] = [0x10000, spurs as u64, 0, old_ptr as u64, 0x77, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_READY_COUNT_SWAP, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_SWAP, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, old_ptr), 0x33);
-        assert_eq!(read_byte_at(&rt, spurs + SPURS_OFF_WKL_READY_COUNT_1), 0x77);
+        assert_eq!(
+            read_byte_at(&rt, spurs + layout::OFF_WKL_READY_COUNT_1),
+            0x77
+        );
     }
 
     #[test]
@@ -3226,7 +3051,7 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_READY_COUNT_1) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_READY_COUNT_1) as u64),
                 1,
             )
             .unwrap(),
@@ -3247,13 +3072,13 @@ mod tests {
         ];
         rt.dispatch_hle(
             unit_id,
-            NID_CELL_SPURS_READY_COUNT_COMPARE_AND_SWAP,
+            spurs_nid::READY_COUNT_COMPARE_AND_SWAP,
             &args_no_swap,
         );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, old_ptr), 0x10);
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_READY_COUNT_1),
+            read_byte_at(&rt, spurs + layout::OFF_WKL_READY_COUNT_1),
             0x10,
             "no swap on compare mismatch"
         );
@@ -3270,14 +3095,13 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(
-            unit_id,
-            NID_CELL_SPURS_READY_COUNT_COMPARE_AND_SWAP,
-            &args_swap,
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_COMPARE_AND_SWAP, &args_swap);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, old_ptr), 0x10);
-        assert_eq!(read_byte_at(&rt, spurs + SPURS_OFF_WKL_READY_COUNT_1), 0x55);
+        assert_eq!(
+            read_byte_at(&rt, spurs + layout::OFF_WKL_READY_COUNT_1),
+            0x55
+        );
     }
 
     #[test]
@@ -3286,7 +3110,7 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_READY_COUNT_1) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_READY_COUNT_1) as u64),
                 1,
             )
             .unwrap(),
@@ -3295,10 +3119,13 @@ mod tests {
         let old_ptr: u32 = 0x7_0000;
         // 0xF0 + 0x20 = 0x110 -> clamped to 0xFF.
         let args: [u64; 9] = [0x10000, spurs as u64, 0, old_ptr as u64, 0x20, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_READY_COUNT_ADD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_ADD, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, old_ptr), 0xF0);
-        assert_eq!(read_byte_at(&rt, spurs + SPURS_OFF_WKL_READY_COUNT_1), 0xFF);
+        assert_eq!(
+            read_byte_at(&rt, spurs + layout::OFF_WKL_READY_COUNT_1),
+            0xFF
+        );
     }
 
     #[test]
@@ -3306,10 +3133,10 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0x55, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_READY_COUNT_SWAP, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_SWAP, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64
+            policy_module_error::NULL_POINTER as u64
         );
     }
 
@@ -3318,10 +3145,10 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 4, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_REQUEST_IDLE_SPU, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_IDLE_SPU_COUNT_OR_RC2),
+            read_byte_at(&rt, spurs + layout::OFF_WKL_IDLE_SPU_COUNT_OR_RC2),
             4
         );
     }
@@ -3334,10 +3161,10 @@ mod tests {
         let unit_id = UnitId::new(0);
         init_spurs_v2(&mut rt, unit_id, spurs, attr_ptr);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 4, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_REQUEST_IDLE_SPU, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_STAT as u64,
+            core_error::STAT as u64,
             "RequestIdleSpu does not support 32-workloads (SF1_32_WORKLOADS) -> STAT"
         );
     }
@@ -3348,11 +3175,8 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0xffff_ffff, 7, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_REQUEST_IDLE_SPU, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
     #[test]
@@ -3360,11 +3184,8 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 8, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_REQUEST_IDLE_SPU, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
     #[test]
@@ -3373,9 +3194,9 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // AddWorkload seeded the low nibble to 2; overwrite to 5.
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 5, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_MAX_CONTENTION, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_MAX_CONTENTION, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        let mc = read_byte_at(&rt, spurs + SPURS_OFF_WKL_MAX_CONTENTION);
+        let mc = read_byte_at(&rt, spurs + layout::OFF_WKL_MAX_CONTENTION);
         assert_eq!(mc & 0x0f, 5, "low nibble holds the SPURS1 wid 0..15 value");
     }
 
@@ -3384,13 +3205,13 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 99, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_MAX_CONTENTION, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_MAX_CONTENTION, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        let mc = read_byte_at(&rt, spurs + SPURS_OFF_WKL_MAX_CONTENTION);
+        let mc = read_byte_at(&rt, spurs + layout::OFF_WKL_MAX_CONTENTION);
         assert_eq!(
             mc & 0x0f,
-            CELL_SPURS_MAX_SPU as u8,
-            "values above CELL_SPURS_MAX_SPU clamp to 8"
+            layout::MAX_SPU as u8,
+            "values above layout::MAX_SPU clamp to 8"
         );
     }
 
@@ -3404,12 +3225,12 @@ mod tests {
             &[1, 2, 3, 4, 5, 6, 7, 8],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, prio_ptr as u64, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_PRIORITIES, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITIES, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        let info_addr = spurs + SPURS_OFF_WKL_INFO_1;
+        let info_addr = spurs + layout::OFF_WKL_INFO_1;
         let mem = rt.memory().as_bytes();
-        let written = &mem
-            [(info_addr + WI_OFF_PRIORITY) as usize..(info_addr + WI_OFF_PRIORITY + 8) as usize];
+        let written = &mem[(info_addr + workload_info_layout::OFF_PRIORITY) as usize
+            ..(info_addr + workload_info_layout::OFF_PRIORITY + 8) as usize];
         assert_eq!(written, &[1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
@@ -3423,11 +3244,8 @@ mod tests {
             &[0, 0, 0x10, 0, 0, 0, 0, 0],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, prio_ptr as u64, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_PRIORITIES, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITIES, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
     #[test]
@@ -3436,10 +3254,13 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // init_spurs picks nSpus=1.
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 7, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_PRIORITY, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        let info_addr = spurs + SPURS_OFF_WKL_INFO_1;
-        assert_eq!(read_byte_at(&rt, info_addr + WI_OFF_PRIORITY), 7);
+        let info_addr = spurs + layout::OFF_WKL_INFO_1;
+        assert_eq!(
+            read_byte_at(&rt, info_addr + workload_info_layout::OFF_PRIORITY),
+            7
+        );
     }
 
     #[test]
@@ -3447,11 +3268,8 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 16, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_PRIORITY, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
     #[test]
@@ -3460,11 +3278,8 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // nSpus = 1 (set by init_spurs), so spu_id = 1 is OOB.
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 1, 5, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_PRIORITY, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
     /// Debug-build half of the fail-loud contract on
@@ -3475,7 +3290,7 @@ mod tests {
     fn workload_attribute_initialize_panics_until_spill_surface_lands() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0000, 1, 0, 0x6_1000, 0x1000, 0, 0x6_2000, 2];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_WORKLOAD_ATTRIBUTE_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::WORKLOAD_ATTRIBUTE_INITIALIZE, &args);
     }
 
     #[cfg(not(debug_assertions))]
@@ -3483,10 +3298,10 @@ mod tests {
     fn workload_attribute_initialize_returns_inval_in_release() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0000, 1, 0, 0x6_1000, 0x1000, 0, 0x6_2000, 2];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_WORKLOAD_ATTRIBUTE_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::WORKLOAD_ATTRIBUTE_INITIALIZE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64
+            policy_module_error::INVAL as u64
         );
     }
 
@@ -3497,23 +3312,33 @@ mod tests {
         let info: u32 = 0x6_0000;
         // SPURS1 init: nSpus=2, spuPrio=250, ppuPrio=1000, exitIfNoWork=1.
         let init: [u64; 9] = [0x10000, spurs as u64, 2, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &init);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &init);
         let _ = drain_return(&mut rt, unit_id);
 
         let args: [u64; 9] = [0x10000, spurs as u64, info as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_GET_INFO, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
-        assert_eq!(read_u32_be(&rt, info + INFO_OFF_NSPUS), 2);
+        assert_eq!(read_u32_be(&rt, info + info_layout::OFF_NSPUS), 2);
         assert_eq!(
-            read_u32_be(&rt, info + INFO_OFF_SPU_THREAD_GROUP_PRIORITY),
+            read_u32_be(&rt, info + info_layout::OFF_SPU_THREAD_GROUP_PRIORITY),
             250
         );
-        assert_eq!(read_u32_be(&rt, info + INFO_OFF_PPU_THREAD_PRIORITY), 1000);
-        assert_eq!(read_byte_at(&rt, info + INFO_OFF_EXIT_IF_NO_WORK), 1);
-        assert_eq!(read_byte_at(&rt, info + INFO_OFF_SPURS2), 0, "SPURS1");
         assert_eq!(
-            read_u64_be(&rt, info + INFO_OFF_SPURS_HANDLER_THREAD_0),
+            read_u32_be(&rt, info + info_layout::OFF_PPU_THREAD_PRIORITY),
+            1000
+        );
+        assert_eq!(
+            read_byte_at(&rt, info + info_layout::OFF_EXIT_IF_NO_WORK),
+            1
+        );
+        assert_eq!(
+            read_byte_at(&rt, info + info_layout::OFF_SPURS2),
+            0,
+            "SPURS1"
+        );
+        assert_eq!(
+            read_u64_be(&rt, info + info_layout::OFF_SPURS_HANDLER_THREAD_0),
             u64::MAX,
             "ppu0 init sentinel"
         );
@@ -3528,9 +3353,9 @@ mod tests {
         init_spurs_v2(&mut rt, unit_id, spurs, attr_ptr);
 
         let args: [u64; 9] = [0x10000, spurs as u64, info as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_GET_INFO, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        assert_eq!(read_byte_at(&rt, info + INFO_OFF_SPURS2), 1);
+        assert_eq!(read_byte_at(&rt, info + info_layout::OFF_SPURS2), 1);
     }
 
     #[test]
@@ -3538,14 +3363,14 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         let spurs: u32 = 0x4_0000;
         let init: [u64; 9] = [0x10000, spurs as u64, 1, 250, 1000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &init);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &init);
         let _ = drain_return(&mut rt, unit_id);
 
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_GET_INFO, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_NULL_POINTER as u64
+            core_error::NULL_POINTER as u64
         );
     }
 
@@ -3553,11 +3378,8 @@ mod tests {
     fn get_info_misaligned_spurs_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0040, 0x6_0000, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_GET_INFO, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_ALIGN as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::ALIGN as u64);
     }
 
     #[test]
@@ -3583,20 +3405,26 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTACH_LV2_EVENT_QUEUE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
         assert_eq!(
-            read_u32_be(&rt, spurs + SPURS_OFF_EVENT_PORT_MUX + EPM_OFF_SPU_PORT),
+            read_u32_be(
+                &rt,
+                spurs + layout::OFF_EVENT_PORT_MUX + event_port_mux_layout::OFF_SPU_PORT
+            ),
             0x0c
         );
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_EVENT_PORT_MUX + EPM_OFF_EVENT_PORT),
+            read_u64_be(
+                &rt,
+                spurs + layout::OFF_EVENT_PORT_MUX + event_port_mux_layout::OFF_EVENT_PORT
+            ),
             0x4000_0019
         );
         // spuPortBits gains bit 0x0c.
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_SPU_PORT_BITS),
+            read_u64_be(&rt, spurs + layout::OFF_SPU_PORT_BITS),
             1u64 << 0x0c
         );
     }
@@ -3619,13 +3447,13 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTACH_LV2_EVENT_QUEUE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         // Dynamic allocator picks the lowest free bit in [0x10, 0x40);
         // post-init spuPortBits is zero, so port 0x10 is chosen.
         assert_eq!(read_byte_at(&rt, port_ptr), 0x10);
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_SPU_PORT_BITS),
+            read_u64_be(&rt, spurs + layout::OFF_SPU_PORT_BITS),
             1u64 << 0x10
         );
     }
@@ -3641,11 +3469,8 @@ mod tests {
             &[0x40],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, port_ptr as u64, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTACH_LV2_EVENT_QUEUE, &args);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
     #[test]
@@ -3654,10 +3479,10 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTACH_LV2_EVENT_QUEUE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_NULL_POINTER as u64
+            core_error::NULL_POINTER as u64
         );
     }
 
@@ -3682,17 +3507,20 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ATTACH_LV2_EVENT_QUEUE, &attach_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &attach_args);
         let _ = drain_return(&mut rt, unit_id);
 
         let detach: [u64; 9] = [0x10000, spurs as u64, 0x0c, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_DETACH_LV2_EVENT_QUEUE, &detach);
+        rt.dispatch_hle(unit_id, spurs_nid::DETACH_LV2_EVENT_QUEUE, &detach);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        assert_eq!(read_u64_be(&rt, spurs + SPURS_OFF_SPU_PORT_BITS), 0);
+        assert_eq!(read_u64_be(&rt, spurs + layout::OFF_SPU_PORT_BITS), 0);
         // EventPortMux::eventPort cleared because the detached port
         // matches the bound spuPort.
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_EVENT_PORT_MUX + EPM_OFF_EVENT_PORT),
+            read_u64_be(
+                &rt,
+                spurs + layout::OFF_EVENT_PORT_MUX + event_port_mux_layout::OFF_EVENT_PORT
+            ),
             0
         );
     }
@@ -3703,11 +3531,8 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let detach: [u64; 9] = [0x10000, spurs as u64, 0x05, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_DETACH_LV2_EVENT_QUEUE, &detach);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_SRCH as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::DETACH_LV2_EVENT_QUEUE, &detach);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::SRCH as u64);
     }
 
     #[test]
@@ -3716,11 +3541,8 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let detach: [u64; 9] = [0x10000, spurs as u64, 0x40, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_DETACH_LV2_EVENT_QUEUE, &detach);
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::DETACH_LV2_EVENT_QUEUE, &detach);
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
     #[test]
@@ -3741,16 +3563,16 @@ mod tests {
         ];
         rt.dispatch_hle(
             unit_id,
-            NID_CELL_SPURS_SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
+            spurs_nid::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &args,
         );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER),
             0x6_1000
         );
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER_ARGS),
             0x6_2000
         );
     }
@@ -3763,20 +3585,17 @@ mod tests {
         let args: [u64; 9] = [0x10000, spurs as u64, 0x6_1000, 0x6_2000, 0, 0, 0, 0, 0];
         rt.dispatch_hle(
             unit_id,
-            NID_CELL_SPURS_SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
+            spurs_nid::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &args,
         );
         let _ = drain_return(&mut rt, unit_id);
         // Second registration without unset returns BUSY.
         rt.dispatch_hle(
             unit_id,
-            NID_CELL_SPURS_SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
+            spurs_nid::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &args,
         );
-        assert_eq!(
-            drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_BUSY as u64
-        );
+        assert_eq!(drain_return(&mut rt, unit_id), core_error::BUSY as u64);
     }
 
     #[test]
@@ -3787,7 +3606,7 @@ mod tests {
         let set_args: [u64; 9] = [0x10000, spurs as u64, 0x6_1000, 0x6_2000, 0, 0, 0, 0, 0];
         rt.dispatch_hle(
             unit_id,
-            NID_CELL_SPURS_SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
+            spurs_nid::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &set_args,
         );
         let _ = drain_return(&mut rt, unit_id);
@@ -3795,16 +3614,16 @@ mod tests {
         let unset_args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
         rt.dispatch_hle(
             unit_id,
-            NID_CELL_SPURS_UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER,
+            spurs_nid::UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &unset_args,
         );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER),
             0
         );
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER_ARGS),
             0
         );
     }
@@ -3826,14 +3645,14 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER),
             0x6_3000
         );
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER_ARGS),
             0x6_4000
         );
     }
@@ -3843,11 +3662,11 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0x6_3000, 0x6_4000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         // Global slot must stay zero: per-workload path is a noop.
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER),
             0
         );
     }
@@ -3858,10 +3677,10 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // wid=20 is out of band (wmax=16) and not the sentinel.
         let args: [u64; 9] = [0x10000, spurs as u64, 20, 0x6_3000, 0x6_4000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_INVAL as u64
+            policy_module_error::INVAL as u64
         );
     }
 
@@ -3881,25 +3700,21 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(
-            unit_id,
-            NID_CELL_SPURS_SET_EXCEPTION_EVENT_HANDLER,
-            &set_args,
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &set_args);
         let _ = drain_return(&mut rt, unit_id);
         let unset_args: [u64; 9] = [0x10000, spurs as u64, 0xffff_ffff, 0, 0, 0, 0, 0, 0];
         rt.dispatch_hle(
             unit_id,
-            NID_CELL_SPURS_UNSET_EXCEPTION_EVENT_HANDLER,
+            spurs_nid::UNSET_EXCEPTION_EVENT_HANDLER,
             &unset_args,
         );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER),
             0
         );
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER_ARGS),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER_ARGS),
             0
         );
     }
@@ -3910,13 +3725,9 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 1, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(
-            unit_id,
-            NID_CELL_SPURS_ENABLE_EXCEPTION_EVENT_HANDLER,
-            &args,
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::ENABLE_EXCEPTION_EVENT_HANDLER, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_ENABLE_EH), 1);
+        assert_eq!(read_u32_be(&rt, spurs + layout::OFF_ENABLE_EH), 1);
     }
 
     #[test]
@@ -3927,20 +3738,16 @@ mod tests {
         // Pre-seed enableEH = 1 then disable.
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_ENABLE_EH) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_ENABLE_EH) as u64),
                 4,
             )
             .unwrap(),
             &1u32.to_be_bytes(),
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(
-            unit_id,
-            NID_CELL_SPURS_ENABLE_EXCEPTION_EVENT_HANDLER,
-            &args,
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::ENABLE_EXCEPTION_EVENT_HANDLER, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        assert_eq!(read_u32_be(&rt, spurs + SPURS_OFF_ENABLE_EH), 0);
+        assert_eq!(read_u32_be(&rt, spurs + layout::OFF_ENABLE_EH), 0);
     }
 
     /// 8 MiB main region; an attr above that must surface as a real
@@ -3963,10 +3770,10 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE_WITH_ATTRIBUTE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_CORE_ERROR_INVAL as u64,
+            core_error::INVAL as u64,
             "an unmapped attr must surface as INVAL, not silent CELL_OK with a zero attribute"
         );
     }
@@ -3990,10 +3797,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_FAULT as u64,
+            policy_module_error::FAULT as u64,
         );
     }
 
@@ -4014,10 +3821,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(
             drain_return(&mut rt, unit_id),
-            CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER as u64,
+            policy_module_error::NULL_POINTER as u64,
         );
     }
 
@@ -4029,7 +3836,7 @@ mod tests {
         init_spurs(&mut rt, unit_id, spurs);
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -4051,16 +3858,16 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
         // wid 1: same pm -> uniqueId reused = 0.
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
-        let info_addr_1 = spurs + SPURS_OFF_WKL_INFO_1 + 32; // wid 1
+        let info_addr_1 = spurs + layout::OFF_WKL_INFO_1 + 32; // wid 1
         assert_eq!(
-            read_byte_at(&rt, info_addr_1 + WI_OFF_UNIQUE_ID),
+            read_byte_at(&rt, info_addr_1 + workload_info_layout::OFF_UNIQUE_ID),
             0,
             "duplicate-pm AddWorkload reuses wid 0's uniqueId"
         );
@@ -4076,7 +3883,7 @@ mod tests {
         init_spurs(&mut rt, unit_id, spurs);
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -4095,10 +3902,10 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
         let _ = drain_return(&mut rt, unit_id);
         assert_eq!(
-            read_u32_be(&rt, spurs + SPURS_OFF_WKL_MSK_B),
+            read_u32_be(&rt, spurs + layout::OFF_WKL_MSK_B),
             0x8000_0000,
             "wid 0 alloc sets bit 0x80000000 in wklMskB",
         );
@@ -4110,13 +3917,13 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         for &n in &[1i32, 6] {
             let args: [u64; 9] = [0x10000, spurs as u64, n as u64, 200, 1000, 0, 0, 0, 0];
-            rt.dispatch_hle(unit_id, NID_CELL_SPURS_INITIALIZE, &args);
+            rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
             assert_eq!(
                 drain_return(&mut rt, unit_id),
                 0,
                 "n_spus = {n} (boundary) should pass init",
             );
-            assert_eq!(read_byte_at(&rt, spurs + SPURS_OFF_NSPUS), n as u8);
+            assert_eq!(read_byte_at(&rt, spurs + layout::OFF_NSPUS), n as u8);
         }
     }
 
@@ -4125,10 +3932,10 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 7, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_REQUEST_IDLE_SPU, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_IDLE_SPU_COUNT_OR_RC2),
+            read_byte_at(&rt, spurs + layout::OFF_WKL_IDLE_SPU_COUNT_OR_RC2),
             7,
         );
     }
@@ -4138,10 +3945,13 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 15, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_PRIORITY, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
-        let info_addr = spurs + SPURS_OFF_WKL_INFO_1;
-        assert_eq!(read_byte_at(&rt, info_addr + WI_OFF_PRIORITY), 15);
+        let info_addr = spurs + layout::OFF_WKL_INFO_1;
+        assert_eq!(
+            read_byte_at(&rt, info_addr + workload_info_layout::OFF_PRIORITY),
+            15
+        );
     }
 
     /// Wait-for-shutdown after Shutdown must remain a no-block CELL_OK
@@ -4151,14 +3961,10 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let sd_args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SHUTDOWN_WORKLOAD, &sd_args);
+        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &sd_args);
         let _ = drain_return(&mut rt, unit_id);
         let wait_args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(
-            unit_id,
-            NID_CELL_SPURS_WAIT_FOR_WORKLOAD_SHUTDOWN,
-            &wait_args,
-        );
+        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &wait_args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
     }
 
@@ -4169,20 +3975,23 @@ mod tests {
     fn set_exception_event_handler_per_workload_leaves_state_untouched() {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
-        let pre_status = read_byte_at(&rt, spurs + SPURS_OFF_WKL_STATUS_1);
-        let pre_state = read_byte_at(&rt, spurs + SPURS_OFF_WKL_STATE_1);
+        let pre_status = read_byte_at(&rt, spurs + layout::OFF_WKL_STATUS_1);
+        let pre_state = read_byte_at(&rt, spurs + layout::OFF_WKL_STATE_1);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0x6_3000, 0x6_4000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SET_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_u64_be(&rt, spurs + SPURS_OFF_GLOBAL_EXCEPTION_HANDLER),
+            read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER),
             0
         );
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_STATUS_1),
+            read_byte_at(&rt, spurs + layout::OFF_WKL_STATUS_1),
             pre_status
         );
-        assert_eq!(read_byte_at(&rt, spurs + SPURS_OFF_WKL_STATE_1), pre_state);
+        assert_eq!(
+            read_byte_at(&rt, spurs + layout::OFF_WKL_STATE_1),
+            pre_state
+        );
     }
 
     /// SPURS2 path through `shutdown_workload`: `wid = 25` is in band
@@ -4199,7 +4008,7 @@ mod tests {
         // Plant a workload at wid 25 (top bit pattern (0x80000000 >> 25)).
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_ENABLED) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_ENABLED) as u64),
                 4,
             )
             .unwrap(),
@@ -4208,18 +4017,18 @@ mod tests {
         // Plant state RUNNABLE for wid 25 -> wklState2[25 & 0xf] = wklState2[9].
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new((spurs + SPURS_OFF_WKL_STATE_2 + 9) as u64),
+                cellgov_mem::GuestAddr::new((spurs + layout::OFF_WKL_STATE_2 + 9) as u64),
                 1,
             )
             .unwrap(),
-            &[SPURS_WKL_STATE_RUNNABLE],
+            &[wkl_state::RUNNABLE],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 25, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELL_SPURS_SHUTDOWN_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &args);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
-            read_byte_at(&rt, spurs + SPURS_OFF_WKL_STATE_2 + 9),
-            SPURS_WKL_STATE_SHUTTING_DOWN,
+            read_byte_at(&rt, spurs + layout::OFF_WKL_STATE_2 + 9),
+            wkl_state::SHUTTING_DOWN,
         );
     }
 }
@@ -4274,8 +4083,8 @@ mod canary_tests {
     #[test]
     fn unowned_nids_are_rejected_by_dispatch() {
         let probes: &[u32] = &[
-            crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
-            crate::hle::sys_prx_for_user::NID_SYS_PPU_THREAD_GET_ID,
+            cellgov_ps3_abi::nid::cell_gcm_sys::INIT_BODY,
+            cellgov_ps3_abi::nid::sys_prx_for_user::PPU_THREAD_GET_ID,
             0xDEAD_BEEF,
         ];
         for &nid in probes {

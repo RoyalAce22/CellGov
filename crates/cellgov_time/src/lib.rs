@@ -13,13 +13,7 @@ pub use budget::{Budget, Consume, InstructionCost};
 pub use epoch::Epoch;
 pub use ticks::GuestTicks;
 
-/// Cell Broadband Engine PPU timebase register frequency, in Hz.
-///
-/// 1/40th of the 3.192 GHz core clock per CBE Programming Handbook
-/// Sec. 7.2 (Timebase Facility). The value `sys_time_get_timebase_frequency`
-/// returns, and the denominator any guest uses to convert a `mftb` delta
-/// into wall time.
-pub const CELL_PPU_TIMEBASE_HZ: u64 = 79_800_000;
+pub use cellgov_ps3_abi::hardware::CELL_PPU_TIMEBASE_HZ;
 
 /// Simulated rate at which the interpreted PPU "runs", in instructions
 /// per simulated wall-clock second.

@@ -1,9 +1,11 @@
 //! PS3 LV2 `CellError` code database.
 //!
-//! Symbols, hex codes, and descriptions mirror
-//! `tools/rpcs3-src/rpcs3/Emu/Cell/ErrorCodes.h:104-166`
-//! byte-for-byte. `CELL_OK` lives in the header's
-//! `CellNotAnError : s32` enum and is excluded from [`ENTRIES`].
+//! Symbols, hex codes, and descriptions mirror RPCS3's
+//! `Emu/Cell/ErrorCodes.h:104-166` byte-for-byte. `CELL_OK` lives in
+//! the header's `CellNotAnError : s32` enum and is excluded from
+//! [`ENTRIES`]. These are cross-cutting LV2 errnos consumed by every
+//! syscall surface, hence their home in the leaf rather than any
+//! per-module file.
 
 /// A PS3 LV2 error code with its symbol and header description.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

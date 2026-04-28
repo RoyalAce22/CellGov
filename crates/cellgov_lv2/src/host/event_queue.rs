@@ -9,6 +9,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
@@ -27,7 +28,7 @@ impl Lv2Host {
         let id = self.alloc_id();
         if !self.event_queues.create_with_id(id, effective_size) {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         }
@@ -37,13 +38,13 @@ impl Lv2Host {
     pub(super) fn dispatch_event_queue_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.event_queues.lookup(id) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         if !entry.waiters().is_empty() {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             };
         }
@@ -62,13 +63,13 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         match self.event_queues.try_receive(id) {
             None => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             Some(crate::sync_primitives::EventQueueReceive::Delivered(payload)) => {
@@ -95,13 +96,13 @@ impl Lv2Host {
                     Ok(()) => {}
                     Err(crate::sync_primitives::EventQueueEnqueueError::UnknownId) => {
                         return Lv2Dispatch::Immediate {
-                            code: crate::errno::CELL_ESRCH.into(),
+                            code: errno::CELL_ESRCH.into(),
                             effects: vec![],
                         };
                     }
                     Err(crate::sync_primitives::EventQueueEnqueueError::DuplicateWaiter) => {
                         return Lv2Dispatch::Immediate {
-                            code: crate::errno::CELL_EFAULT.into(),
+                            code: errno::CELL_EFAULT.into(),
                             effects: vec![],
                         };
                     }
@@ -132,7 +133,7 @@ impl Lv2Host {
         // still claims them.
         if ByteRange::new(GuestAddr::new(count_out as u64), 4).is_none() {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EFAULT.into(),
+                code: errno::CELL_EFAULT.into(),
                 effects: vec![],
             };
         }
@@ -140,14 +141,14 @@ impl Lv2Host {
             let addr = event_array as u64 + i * 32;
             if ByteRange::new(GuestAddr::new(addr), 32).is_none() {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EFAULT.into(),
+                    code: errno::CELL_EFAULT.into(),
                     effects: vec![],
                 };
             }
         }
         let Some(batch) = self.event_queues.try_receive_batch(id, size as usize) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
@@ -200,11 +201,11 @@ impl Lv2Host {
         };
         match self.event_queues.send_and_wake_or_enqueue(port_id, payload) {
             crate::sync_primitives::EventQueueSend::Unknown => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             crate::sync_primitives::EventQueueSend::Full => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             },
             crate::sync_primitives::EventQueueSend::Enqueued => Lv2Dispatch::Immediate {
@@ -328,7 +329,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = d else {
             panic!("expected Immediate, got {d:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EBUSY.into());
+        assert_eq!(code, errno::CELL_EBUSY.into());
     }
 
     #[test]
@@ -657,7 +658,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]

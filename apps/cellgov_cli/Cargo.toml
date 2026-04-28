@@ -18,6 +18,7 @@ cellgov_explore = { path = "../../crates/cellgov_explore" }
 cellgov_lv2 = { path = "../../crates/cellgov_lv2" }
 cellgov_mem = { path = "../../crates/cellgov_mem" }
 cellgov_ppu = { path = "../../crates/cellgov_ppu" }
+cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }
 cellgov_spu = { path = "../../crates/cellgov_spu" }
 cellgov_testkit = { path = "../../crates/cellgov_testkit" }
 cellgov_time = { path = "../../crates/cellgov_time" }

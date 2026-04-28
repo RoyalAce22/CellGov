@@ -169,66 +169,78 @@ pub const HLE_SYSCALL_BASE: u32 = 0x10000;
 ///
 /// Read by the PRX binder (to keep an HLE trampoline over a firmware
 /// body whose init prerequisites may not have run) and by
-/// `dump-imports` (to tag each import `impl` vs `stub`). Ordering is
-/// grouped by module (GCM, sysPrxForUser memory, lwmutex, time/thread)
-/// for readability, not by NID value -- callers use `contains` rather
-/// than binary search.
-pub const HLE_IMPLEMENTED_NIDS: &[u32] = &[
-    0x055bd74d, // cellGcmGetTiledPitchSize
-    0x15bae46b, // _cellGcmInitBody
-    0xa547adde, // cellGcmGetControlRegister
-    0xe315a0b2, // cellGcmGetConfiguration
-    0xf80196c1, // cellGcmGetLabelAddress
-    0x21ac3697, // cellGcmAddressToOffset
-    0x744680a2, // sys_initialize_tls
-    0xbdb18f83, // _sys_malloc
-    0xf7f7fb20, // _sys_free
-    0x68b9b011, // _sys_memset
-    0xe6f2c1e7, // sys_process_exit
-    0xb2fcf2c8, // _sys_heap_create_heap
-    0x2f85c0ef, // sys_lwmutex_create
-    0x1573dc3f, // sys_lwmutex_lock
-    0xc3476d0c, // sys_lwmutex_destroy
-    0x1bc200f4, // sys_lwmutex_unlock
-    0xaeb78725, // sys_lwmutex_trylock
-    0x8461e528, // sys_time_get_system_time
-    0x350d454e, // sys_ppu_thread_get_id
-    0x24a1ea07, // sys_ppu_thread_create
-    0x4f7172c9, // sys_process_is_stack
-    0xa2c7ba64, // sys_prx_exitspawn_with_level
-    0x887572d5, // cellVideoOutGetState
-    0xe558748d, // cellVideoOutGetResolution
-    // cellSpurs initialize family.
-    0x95180230, // _cellSpursAttributeInitialize
-    0xacfc8dbc, // cellSpursInitialize
-    0xaa6269a8, // cellSpursInitializeWithAttribute
-    0x30aa96c4, // cellSpursInitializeWithAttribute2
-    0xca4c4600, // cellSpursFinalize
-    // cellSpurs workload registry.
-    0xefeb2679, // _cellSpursWorkloadAttributeInitialize
-    0x69726aa2, // cellSpursAddWorkload
-    0xc0158d8b, // cellSpursAddWorkloadWithAttribute
-    0x98d5b343, // cellSpursShutdownWorkload
-    0x5fd43fe4, // cellSpursWaitForWorkloadShutdown
-    // cellSpurs ready-count, contention, idle-spu, priority controls.
-    0xf843818d, // cellSpursReadyCountStore
-    0x75211196, // cellSpursReadyCountAdd
-    0x49a3426d, // cellSpursReadyCountSwap
-    0xf1d3552d, // cellSpursReadyCountCompareAndSwap
-    0x182d9890, // cellSpursRequestIdleSpu
-    0x84d2f6d5, // cellSpursSetMaxContention
-    0x80a29e27, // cellSpursSetPriorities
-    0xb52e1bda, // cellSpursSetPriority
-    // cellSpurs info getter + exception handler registration.
-    0x1f402f8f, // cellSpursGetInfo
-    0xb9bc6207, // cellSpursAttachLv2EventQueue
-    0x4e66d483, // cellSpursDetachLv2EventQueue
-    0xd2e23fa9, // cellSpursSetExceptionEventHandler
-    0x4c75deb8, // cellSpursUnsetExceptionEventHandler
-    0x7517724a, // cellSpursSetGlobalExceptionEventHandler
-    0x861237f8, // cellSpursUnsetGlobalExceptionEventHandler
-    0x32b94add, // cellSpursEnableExceptionEventHandler
-];
+/// `dump-imports` (to tag each import `impl` vs `stub`). Every entry
+/// resolves through `cellgov_ps3_abi::nid::*`; the hex literal lives
+/// only in the leaf, verified at compile time against
+/// `nid_sha1(name)`. Ordering is grouped by module for readability,
+/// not by NID value -- callers use `contains` rather than binary
+/// search.
+pub const HLE_IMPLEMENTED_NIDS: &[u32] = {
+    use cellgov_ps3_abi::nid::{
+        cell_gcm_sys as gcm, cell_spurs as spurs, cell_sysutil as sysutil, sys_prx_for_user as sys,
+    };
+    &[
+        // cellGcmSys.
+        gcm::GET_TILED_PITCH_SIZE,
+        gcm::INIT_BODY,
+        gcm::GET_CONTROL_REGISTER,
+        gcm::GET_CONFIGURATION,
+        gcm::GET_LABEL_ADDRESS,
+        gcm::ADDRESS_TO_OFFSET,
+        // sysPrxForUser memory + process.
+        sys::INITIALIZE_TLS,
+        sys::MALLOC,
+        sys::FREE,
+        sys::MEMSET,
+        sys::PROCESS_EXIT,
+        sys::HEAP_CREATE_HEAP,
+        // sysPrxForUser lwmutex (create + 4 stubs).
+        sys::LWMUTEX_CREATE,
+        sys::LWMUTEX_LOCK,
+        sys::LWMUTEX_DESTROY,
+        sys::LWMUTEX_UNLOCK,
+        sys::LWMUTEX_TRYLOCK,
+        // sysPrxForUser time / thread / process / prx.
+        sys::TIME_GET_SYSTEM_TIME,
+        sys::PPU_THREAD_GET_ID,
+        sys::PPU_THREAD_CREATE,
+        sys::PROCESS_IS_STACK,
+        sys::PRX_EXITSPAWN_WITH_LEVEL,
+        // cellSysutil video-out queries.
+        sysutil::VIDEO_OUT_GET_STATE,
+        sysutil::VIDEO_OUT_GET_RESOLUTION,
+        // cellSpurs initialize family.
+        spurs::ATTRIBUTE_INITIALIZE,
+        spurs::INITIALIZE,
+        spurs::INITIALIZE_WITH_ATTRIBUTE,
+        spurs::INITIALIZE_WITH_ATTRIBUTE2,
+        spurs::FINALIZE,
+        // cellSpurs workload registry.
+        spurs::WORKLOAD_ATTRIBUTE_INITIALIZE,
+        spurs::ADD_WORKLOAD,
+        spurs::ADD_WORKLOAD_WITH_ATTRIBUTE,
+        spurs::SHUTDOWN_WORKLOAD,
+        spurs::WAIT_FOR_WORKLOAD_SHUTDOWN,
+        // cellSpurs ready-count, contention, idle-spu, priority controls.
+        spurs::READY_COUNT_STORE,
+        spurs::READY_COUNT_ADD,
+        spurs::READY_COUNT_SWAP,
+        spurs::READY_COUNT_COMPARE_AND_SWAP,
+        spurs::REQUEST_IDLE_SPU,
+        spurs::SET_MAX_CONTENTION,
+        spurs::SET_PRIORITIES,
+        spurs::SET_PRIORITY,
+        // cellSpurs info getter + exception handler registration.
+        spurs::GET_INFO,
+        spurs::ATTACH_LV2_EVENT_QUEUE,
+        spurs::DETACH_LV2_EVENT_QUEUE,
+        spurs::SET_EXCEPTION_EVENT_HANDLER,
+        spurs::UNSET_EXCEPTION_EVENT_HANDLER,
+        spurs::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
+        spurs::UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER,
+        spurs::ENABLE_EXCEPTION_EVENT_HANDLER,
+    ]
+};
 
 /// Bind result: maps each HLE index to its module and NID.
 #[derive(Debug, Clone)]

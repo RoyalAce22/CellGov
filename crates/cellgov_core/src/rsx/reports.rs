@@ -12,10 +12,8 @@ use core::mem::size_of;
 /// [`RsxContext::state_hash`] changes.
 pub const STATE_HASH_FORMAT_VERSION: u8 = 2;
 
-pub use cellgov_lv2::host::rsx::{
-    driver_info_init, DMA_CONTROL_OFFSET, DRIVER_INFO_OFFSET, REPORTS_OFFSET, RSX_CONTEXT_ID,
-    RSX_CONTEXT_RESERVATION, SEMAPHORE_INIT_PATTERN,
-};
+pub use cellgov_lv2::host::rsx::{RSX_CONTEXT_ID, SEMAPHORE_INIT_PATTERN};
+pub use cellgov_ps3_abi::sys_rsx::{driver_info_init, region};
 
 /// BE u32 semaphore slot.
 pub type RsxSemaphore = u32;
@@ -59,11 +57,7 @@ pub struct RsxReports {
     pub report: [RsxReport; 2048],
 }
 
-/// Bytes between consecutive labels in the semaphore region.
-pub const LABEL_STRIDE: u32 = 0x10;
-
-/// Count of addressable labels.
-pub const LABEL_COUNT: u32 = 256;
+pub use cellgov_ps3_abi::cell_gcm::{LABEL_COUNT, LABEL_STRIDE};
 
 /// DMA-control region. Put / get / ref live at +0x40 / +0x44 / +0x48;
 /// total 0x58 bytes.
@@ -297,14 +291,16 @@ impl RsxContext {
             "set_context_allocated called before set_memory_allocated"
         );
         debug_assert!(
-            self.mem_addr.checked_add(RSX_CONTEXT_RESERVATION).is_some(),
+            self.mem_addr
+                .checked_add(region::CONTEXT_RESERVATION)
+                .is_some(),
             "mem_addr {:#x} + reservation {:#x} wraps u32",
             self.mem_addr,
-            RSX_CONTEXT_RESERVATION
+            region::CONTEXT_RESERVATION
         );
-        let dma_control_addr = self.mem_addr + DMA_CONTROL_OFFSET;
-        let driver_info_addr = self.mem_addr + DRIVER_INFO_OFFSET;
-        let reports_addr = self.mem_addr + REPORTS_OFFSET;
+        let dma_control_addr = self.mem_addr + region::DMA_CONTROL_OFFSET;
+        let driver_info_addr = self.mem_addr + region::DRIVER_INFO_OFFSET;
+        let reports_addr = self.mem_addr + region::REPORTS_OFFSET;
         debug_assert!(
             reports_addr.is_multiple_of(16),
             "reports_addr {reports_addr:#x} must be 16-byte aligned for RsxReports"
@@ -363,18 +359,18 @@ impl Default for RsxContext {
     }
 }
 
-pub use cellgov_lv2::host::rsx::{RSX_DRIVER_INFO_SIZE, RSX_REPORTS_SIZE};
+pub use cellgov_ps3_abi::sys_rsx::{driver_info, reports};
 
 /// Bytes a [`RsxDmaControl`] occupies in guest memory.
 pub const RSX_DMA_CONTROL_SIZE: usize = size_of::<RsxDmaControl>();
 
 const _: () = assert!(
-    size_of::<RsxReports>() == RSX_REPORTS_SIZE,
-    "RsxReports layout drift vs cellgov_lv2::host::rsx::RSX_REPORTS_SIZE"
+    size_of::<RsxReports>() == reports::SIZE,
+    "RsxReports layout drift vs cellgov_ps3_abi::sys_rsx::reports::SIZE"
 );
 const _: () = assert!(
-    size_of::<RsxDriverInfo>() == RSX_DRIVER_INFO_SIZE,
-    "RsxDriverInfo layout drift vs cellgov_lv2::host::rsx::RSX_DRIVER_INFO_SIZE"
+    size_of::<RsxDriverInfo>() == driver_info::SIZE,
+    "RsxDriverInfo layout drift vs cellgov_ps3_abi::sys_rsx::driver_info::SIZE"
 );
 
 #[cfg(test)]
@@ -384,7 +380,7 @@ mod tests {
 
     #[test]
     fn rsx_reports_size_matches_rpcs3() {
-        assert_eq!(RSX_REPORTS_SIZE, 0x9400);
+        assert_eq!(reports::SIZE, 0x9400);
     }
 
     #[test]
@@ -429,7 +425,7 @@ mod tests {
 
     #[test]
     fn rsx_driver_info_size_matches_rpcs3() {
-        assert_eq!(RSX_DRIVER_INFO_SIZE, 0x12F8);
+        assert_eq!(driver_info::SIZE, 0x12F8);
     }
 
     #[test]
@@ -493,17 +489,19 @@ mod tests {
 
     #[test]
     fn reservation_offsets_match_rpcs3_layout() {
-        assert_eq!(DMA_CONTROL_OFFSET, 0x0000_0000);
-        assert_eq!(DRIVER_INFO_OFFSET, 0x0010_0000);
-        assert_eq!(REPORTS_OFFSET, 0x0020_0000);
-        assert_eq!(RSX_CONTEXT_RESERVATION, 0x0030_0000);
+        assert_eq!(region::DMA_CONTROL_OFFSET, 0x0000_0000);
+        assert_eq!(region::DRIVER_INFO_OFFSET, 0x0010_0000);
+        assert_eq!(region::REPORTS_OFFSET, 0x0020_0000);
+        assert_eq!(region::CONTEXT_RESERVATION, 0x0030_0000);
         // u64 guards against future sizes truncating via `as u32`.
         let dma = RSX_DMA_CONTROL_SIZE as u64;
-        let dri = RSX_DRIVER_INFO_SIZE as u64;
-        let rep = RSX_REPORTS_SIZE as u64;
-        assert!(u64::from(DRIVER_INFO_OFFSET) >= u64::from(DMA_CONTROL_OFFSET) + dma);
-        assert!(u64::from(REPORTS_OFFSET) >= u64::from(DRIVER_INFO_OFFSET) + dri);
-        assert!(u64::from(REPORTS_OFFSET) + rep <= u64::from(RSX_CONTEXT_RESERVATION));
+        let dri = driver_info::SIZE as u64;
+        let rep = reports::SIZE as u64;
+        assert!(
+            u64::from(region::DRIVER_INFO_OFFSET) >= u64::from(region::DMA_CONTROL_OFFSET) + dma
+        );
+        assert!(u64::from(region::REPORTS_OFFSET) >= u64::from(region::DRIVER_INFO_OFFSET) + dri);
+        assert!(u64::from(region::REPORTS_OFFSET) + rep <= u64::from(region::CONTEXT_RESERVATION));
     }
 
     #[test]
@@ -592,9 +590,15 @@ mod tests {
 
         assert!(ctx.allocated);
         assert_eq!(ctx.context_id, RSX_CONTEXT_ID);
-        assert_eq!(ctx.dma_control_addr, 0x3000_0000 + DMA_CONTROL_OFFSET);
-        assert_eq!(ctx.driver_info_addr, 0x3000_0000 + DRIVER_INFO_OFFSET);
-        assert_eq!(ctx.reports_addr, 0x3000_0000 + REPORTS_OFFSET);
+        assert_eq!(
+            ctx.dma_control_addr,
+            0x3000_0000 + region::DMA_CONTROL_OFFSET
+        );
+        assert_eq!(
+            ctx.driver_info_addr,
+            0x3000_0000 + region::DRIVER_INFO_OFFSET
+        );
+        assert_eq!(ctx.reports_addr, 0x3000_0000 + region::REPORTS_OFFSET);
         assert_eq!(ctx.event_queue_id, 0xE001);
         assert_eq!(ctx.event_port_id, 0xE002);
         assert_eq!(ctx.mem_handle, 0xA001);

@@ -10,11 +10,9 @@
 //! `handler` records the `cellGcmSetFlipHandler` address but PPU
 //! dispatch into it is not modelled.
 
-/// Flip status byte value: no flip pending or prior flip completed.
-pub const CELL_GCM_DISPLAY_FLIP_STATUS_DONE: u8 = 0;
-
-/// Flip status byte value: flip issued, not yet complete.
-pub const CELL_GCM_DISPLAY_FLIP_STATUS_WAITING: u8 = 1;
+pub use cellgov_ps3_abi::cell_gcm::{
+    CELL_GCM_DISPLAY_FLIP_STATUS_DONE, CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
+};
 
 /// Hash-input shape version. Bump when [`RsxFlipState::state_hash`]
 /// changes field order, endianness, or hasher family.

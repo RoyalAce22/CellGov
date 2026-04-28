@@ -13,48 +13,16 @@
 //!   exhaustion, ID counter exhaustion).
 
 use cellgov_event::UnitId;
-use cellgov_lv2::errno::CELL_EFAULT;
+use cellgov_ps3_abi::cell_errors::CELL_EFAULT;
+use cellgov_ps3_abi::nid::sys_prx_for_user as sys_nid;
 
 use crate::hle::context::{HleContext, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
-pub(crate) const NID_SYS_INITIALIZE_TLS: u32 = 0x744680a2;
-pub(crate) const NID_SYS_PROCESS_EXIT: u32 = 0xe6f2c1e7;
-pub(crate) const NID_SYS_MALLOC: u32 = 0xbdb18f83;
-pub(crate) const NID_SYS_FREE: u32 = 0xf7f7fb20;
-pub(crate) const NID_SYS_MEMSET: u32 = 0x68b9b011;
-pub(crate) const NID_SYS_LWMUTEX_CREATE: u32 = 0x2f85c0ef;
-pub(crate) const NID_SYS_HEAP_CREATE_HEAP: u32 = 0xb2fcf2c8;
-pub(crate) const NID_SYS_HEAP_DELETE_HEAP: u32 = 0xaede4b03;
-pub(crate) const NID_SYS_HEAP_MALLOC: u32 = 0x35168520;
-pub(crate) const NID_SYS_HEAP_MEMALIGN: u32 = 0x44265c08;
-pub(crate) const NID_SYS_HEAP_FREE: u32 = 0x8a561d92;
-pub(crate) const NID_SYS_PPU_THREAD_GET_ID: u32 = 0x350d454e;
-pub(crate) const NID_SYS_THREAD_CREATE_EX: u32 = 0x24a1ea07;
-pub(crate) const NID_SYS_THREAD_EXIT: u32 = 0xaff080a4;
-pub(crate) const NID_SYS_TIME_GET_SYSTEM_TIME: u32 = 0x8461e528;
-
-/// Every NID this module claims. Consumed by the disjointness and
-/// dispatch-coverage canaries in `crate::hle::tests` and
-/// `canary_tests`.
+/// Every NID this module claims; sourced from
+/// [`cellgov_ps3_abi::nid::sys_prx_for_user::OWNED`].
 #[cfg(test)]
-pub(crate) const OWNED_NIDS: &[u32] = &[
-    NID_SYS_INITIALIZE_TLS,
-    NID_SYS_PROCESS_EXIT,
-    NID_SYS_MALLOC,
-    NID_SYS_FREE,
-    NID_SYS_MEMSET,
-    NID_SYS_LWMUTEX_CREATE,
-    NID_SYS_HEAP_CREATE_HEAP,
-    NID_SYS_HEAP_DELETE_HEAP,
-    NID_SYS_HEAP_MALLOC,
-    NID_SYS_HEAP_MEMALIGN,
-    NID_SYS_HEAP_FREE,
-    NID_SYS_PPU_THREAD_GET_ID,
-    NID_SYS_THREAD_CREATE_EX,
-    NID_SYS_THREAD_EXIT,
-    NID_SYS_TIME_GET_SYSTEM_TIME,
-];
+pub(crate) const OWNED_NIDS: &[u32] = sys_nid::OWNED;
 
 /// Dispatch entry point; returns `None` if the NID is not owned here.
 pub(crate) fn dispatch(
@@ -64,16 +32,16 @@ pub(crate) fn dispatch(
     args: &[u64; 9],
 ) -> Option<()> {
     match nid {
-        NID_SYS_INITIALIZE_TLS => {
+        sys_nid::INITIALIZE_TLS => {
             initialize_tls(&mut adapter(runtime, source, nid), args);
         }
-        NID_SYS_PROCESS_EXIT => {
+        sys_nid::PROCESS_EXIT => {
             process_exit(&mut adapter(runtime, source, nid), args);
         }
-        NID_SYS_MALLOC => {
+        sys_nid::MALLOC => {
             malloc(&mut adapter(runtime, source, nid), args);
         }
-        NID_SYS_FREE | NID_SYS_HEAP_DELETE_HEAP | NID_SYS_HEAP_FREE => {
+        sys_nid::FREE | sys_nid::HEAP_DELETE_HEAP | sys_nid::HEAP_FREE => {
             // No-op: the HLE bump allocator in `hle::context` cannot
             // release individual allocations, so free / delete-heap
             // / heap-free collapse to CELL_OK with the allocation
@@ -83,22 +51,22 @@ pub(crate) fn dispatch(
             // `hle_heap_watermark` shows non-trivial usage.
             adapter(runtime, source, nid).set_return(0);
         }
-        NID_SYS_MEMSET => {
+        sys_nid::MEMSET => {
             memset(&mut adapter(runtime, source, nid), args);
         }
-        NID_SYS_LWMUTEX_CREATE => {
+        sys_nid::LWMUTEX_CREATE => {
             lwmutex_create(&mut adapter(runtime, source, nid), args);
         }
-        NID_SYS_HEAP_CREATE_HEAP => {
+        sys_nid::HEAP_CREATE_HEAP => {
             heap_create_heap(&mut adapter(runtime, source, nid));
         }
-        NID_SYS_HEAP_MALLOC => {
+        sys_nid::HEAP_MALLOC => {
             heap_malloc(&mut adapter(runtime, source, nid), args);
         }
-        NID_SYS_HEAP_MEMALIGN => {
+        sys_nid::HEAP_MEMALIGN => {
             heap_memalign(&mut adapter(runtime, source, nid), args);
         }
-        NID_SYS_PPU_THREAD_GET_ID => {
+        sys_nid::PPU_THREAD_GET_ID => {
             // Look up the guest-facing thread id via the LV2 table.
             // An unseeded table collapses every unit to the fallback
             // 0x01000000, which breaks thread-id-keyed state.
@@ -115,14 +83,14 @@ pub(crate) fn dispatch(
                 .expect("sys_ppu_thread_get_id: write to caller out-ptr failed");
             ctx.set_return(0);
         }
-        NID_SYS_TIME_GET_SYSTEM_TIME => {
+        sys_nid::TIME_GET_SYSTEM_TIME => {
             // Fixed 1 second in microseconds. Determinism beats
             // wall-clock accuracy; a monotonic source would have to
             // come from `runtime.time()` (GuestTicks), never a host
             // clock.
             adapter(runtime, source, nid).set_return(1_000_000);
         }
-        NID_SYS_THREAD_CREATE_EX => {
+        sys_nid::PPU_THREAD_CREATE => {
             // sysPrxForUser SDK wrapper, NID 0x24a1ea07. Signature
             // (per RPCS3's sysPrxForUser.cpp):
             //   sys_ppu_thread_create(
@@ -143,7 +111,7 @@ pub(crate) fn dispatch(
             // dereference is needed here.
             let entry_opd = args[2] as u32;
             if entry_opd == 0 {
-                adapter(runtime, source, nid).set_return(cellgov_lv2::errno::CELL_EFAULT.into());
+                adapter(runtime, source, nid).set_return(CELL_EFAULT.into());
                 return Some(());
             }
             runtime.dispatch_lv2_request(
@@ -158,7 +126,7 @@ pub(crate) fn dispatch(
                 source,
             );
         }
-        NID_SYS_THREAD_EXIT => {
+        sys_nid::PPU_THREAD_EXIT => {
             runtime.dispatch_lv2_request(
                 cellgov_lv2::Lv2Request::PpuThreadExit {
                     exit_value: args[0],
@@ -411,8 +379,8 @@ mod canary_tests {
     #[test]
     fn unowned_nids_are_rejected_by_dispatch() {
         let probes: &[u32] = &[
-            crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
-            crate::hle::cell_gcm_sys::NID_CELLGCM_GET_CONFIGURATION,
+            cellgov_ps3_abi::nid::cell_gcm_sys::INIT_BODY,
+            cellgov_ps3_abi::nid::cell_gcm_sys::GET_CONFIGURATION,
             0xDEAD_BEEF,
         ];
         for &nid in probes {

@@ -6,16 +6,13 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::MailboxId;
 
+use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::sys_spu;
+
 use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::request::Lv2Request;
 use crate::thread_group::{GroupState, MAX_SLOTS_PER_GROUP};
-
-/// Maximum bytes `sys_spu_image_open` scans for the path NUL terminator.
-const SPU_IMAGE_PATH_MAX: usize = 256;
-
-/// `SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT`.
-const GROUP_JOIN_CAUSE_GROUP_EXIT: u32 = 0x0001;
 
 impl Lv2Host {
     pub(super) fn dispatch_image_open(
@@ -25,11 +22,11 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        let path_bytes = match rt.read_committed(path_ptr as u64, SPU_IMAGE_PATH_MAX) {
+        let path_bytes = match rt.read_committed(path_ptr as u64, sys_spu::IMAGE_PATH_MAX) {
             Some(bytes) => bytes,
             None => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EFAULT.into(),
+                    code: errno::CELL_EFAULT.into(),
                     effects: vec![],
                 };
             }
@@ -39,7 +36,7 @@ impl Lv2Host {
             Some(n) => n,
             None => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EINVAL.into(),
+                    code: errno::CELL_EINVAL.into(),
                     effects: vec![],
                 };
             }
@@ -50,7 +47,7 @@ impl Lv2Host {
             Some(r) => r,
             None => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ENOENT.into(),
+                    code: errno::CELL_ENOENT.into(),
                     effects: vec![],
                 };
             }
@@ -90,7 +87,7 @@ impl Lv2Host {
         // Enforce the thread-id packing limit up front.
         if num_threads > MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             };
         }
@@ -99,7 +96,7 @@ impl Lv2Host {
             None => {
                 // u32 id space exhausted; EAGAIN so retries terminate.
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EAGAIN.into(),
+                    code: errno::CELL_EAGAIN.into(),
                     effects: vec![],
                 };
             }
@@ -126,7 +123,7 @@ impl Lv2Host {
             Some(g) => g,
             None => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ESRCH.into(),
+                    code: errno::CELL_ESRCH.into(),
                     effects: vec![],
                 };
             }
@@ -139,7 +136,7 @@ impl Lv2Host {
         for (_slot_idx, slot) in &slot_entries {
             if self.content.lookup_by_handle(slot.image_handle).is_none() {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ESRCH.into(),
+                    code: errno::CELL_ESRCH.into(),
                     effects: vec![],
                 };
             }
@@ -196,7 +193,7 @@ impl Lv2Host {
                     "dispatch_thread_initialize got wrong request variant: {other:?}"
                 );
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EINVAL.into(),
+                    code: errno::CELL_EINVAL.into(),
                     effects: vec![],
                 };
             }
@@ -210,7 +207,7 @@ impl Lv2Host {
             }
             _ => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EFAULT.into(),
+                    code: errno::CELL_EFAULT.into(),
                     effects: vec![],
                 };
             }
@@ -235,7 +232,7 @@ impl Lv2Host {
                 }
                 _ => {
                     return Lv2Dispatch::Immediate {
-                        code: crate::errno::CELL_EFAULT.into(),
+                        code: errno::CELL_EFAULT.into(),
                         effects: vec![],
                     };
                 }
@@ -244,7 +241,7 @@ impl Lv2Host {
 
         if thread_num >= MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             };
         }
@@ -256,7 +253,7 @@ impl Lv2Host {
             Some(id) => id,
             None => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EINVAL.into(),
+                    code: errno::CELL_EINVAL.into(),
                     effects: vec![],
                 };
             }
@@ -266,7 +263,7 @@ impl Lv2Host {
         // an invalid reference, surfaced as ESRCH.
         let Some(handle) = crate::dispatch::SpuImageHandle::new(image_handle) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
@@ -277,19 +274,19 @@ impl Lv2Host {
             Ok(()) => {}
             Err(crate::thread_group::InitializeThreadError::UnknownGroup) => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ESRCH.into(),
+                    code: errno::CELL_ESRCH.into(),
                     effects: vec![],
                 };
             }
             Err(crate::thread_group::InitializeThreadError::SlotAlreadyInitialized) => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EBUSY.into(),
+                    code: errno::CELL_EBUSY.into(),
                     effects: vec![],
                 };
             }
             Err(_) => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EINVAL.into(),
+                    code: errno::CELL_EINVAL.into(),
                     effects: vec![],
                 };
             }
@@ -321,7 +318,7 @@ impl Lv2Host {
             Some(g) => g,
             None => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ESRCH.into(),
+                    code: errno::CELL_ESRCH.into(),
                     effects: vec![],
                 };
             }
@@ -332,7 +329,7 @@ impl Lv2Host {
         // of hard-coding GROUP_EXIT / status 0 for both branches below.
         match group.state {
             GroupState::Created => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             },
             GroupState::Running => Lv2Dispatch::Block {
@@ -342,7 +339,7 @@ impl Lv2Host {
                     code: 0,
                     cause_ptr,
                     status_ptr,
-                    cause: GROUP_JOIN_CAUSE_GROUP_EXIT,
+                    cause: sys_spu::group_join_cause::GROUP_EXIT,
                     status: 0,
                 },
                 effects: vec![],
@@ -355,7 +352,7 @@ impl Lv2Host {
                     effects.push(Effect::SharedWriteIntent {
                         range,
                         bytes: WritePayload::new(
-                            GROUP_JOIN_CAUSE_GROUP_EXIT.to_be_bytes().to_vec(),
+                            sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes().to_vec(),
                         ),
                         ordering: PriorityClass::Normal,
                         source: requester,
@@ -390,7 +387,7 @@ impl Lv2Host {
             Some(uid) => uid,
             None => {
                 return Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_ESRCH.into(),
+                    code: errno::CELL_ESRCH.into(),
                     effects: vec![],
                 };
             }
@@ -525,7 +522,7 @@ mod tests {
         let result = host.dispatch(req, UnitId::new(0), &rt);
         match result {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, crate::errno::CELL_EINVAL.into());
+                assert_eq!(code, errno::CELL_EINVAL.into());
                 assert!(effects.is_empty());
             }
             other => panic!("expected Immediate, got {other:?}"),

@@ -13,11 +13,15 @@ that.
 
 ## Workspace shape
 
-15 library crates, 3 application binaries under `apps/`, and 1 bridge
+16 library crates, 3 application binaries under `apps/`, and 1 bridge
 binary under `bridges/`, organized as a strict layered DAG.
 Foundational primitives sit at the bottom; consumers at the top. No
-backward edges. `cellgov_firmware` is fully standalone (no workspace
-library dependencies); `cellgov_mkelf` likewise.
+backward edges. `cellgov_ps3_abi` is the data-only leaf for PS3
+ABI source-of-truth values (NIDs, errnos, struct layouts, syscall
+numbers, ELF/PRX layout, hardware constants); it depends on nothing
+in the workspace and is depended on by every layer that consumes
+PS3 ABI literals. `cellgov_firmware` is fully standalone (no
+workspace library dependencies); `cellgov_mkelf` likewise.
 
 ```mermaid
 graph BT
@@ -31,6 +35,7 @@ graph BT
     rpcs3obs["rpcs3_to_observation"]
   end
 
+  ps3_abi[cellgov_ps3_abi]
   time[cellgov_time]
   event[cellgov_event]
   mem[cellgov_mem]
@@ -46,6 +51,13 @@ graph BT
   testkit[cellgov_testkit]
   explore[cellgov_explore]
   compare[cellgov_compare]
+
+  ps3_abi --> time
+  ps3_abi --> sync
+  ps3_abi --> lv2
+  ps3_abi --> ppu
+  ps3_abi --> core
+  ps3_abi --> cli
 
   time --> event
   time --> mem
@@ -114,6 +126,7 @@ Everything else is workspace-internal. The workspace compiles under
 
 | Crate                          | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cellgov_ps3_abi`              | PS3 ABI source-of-truth leaf: NIDs (with `nid_const!` SHA-1 verification), the global NID lookup table and `stub_classification`, LV2 errno database, LV2 syscall numbers, ELF / PRX / SPRX layout, CBE PPU hardware constants, and per-PS3-PRX-module ABI data (cellSpurs, cellGcmSys, cellVideoOut, cellGcm) under `sprx_modules/`. Data only; no behaviour. Zero workspace dependencies.                                                                |
 | `cellgov_time`                 | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time.                                                                                                                                                                                                                                                                                                                                            |
 | `cellgov_event`                | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary.                                                                                                                                                                                                                                                                                                                                                              |
 | `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`.                                                                                                                                                                                                                                                                            |

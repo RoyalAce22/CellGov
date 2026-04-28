@@ -116,10 +116,8 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use crate::hle::cell_gcm_sys::tiled_pitch_lookup;
-    use crate::hle::cell_gcm_sys::{
-        NID_CELLGCM_GET_CONFIGURATION, NID_CELLGCM_GET_LABEL_ADDRESS, NID_CELLGCM_INIT_BODY,
-    };
-    use crate::hle::sys_prx_for_user::{NID_SYS_PPU_THREAD_GET_ID, NID_SYS_TIME_GET_SYSTEM_TIME};
+    use cellgov_ps3_abi::nid::cell_gcm_sys as gcm_nid;
+    use cellgov_ps3_abi::nid::sys_prx_for_user as sys_nid;
 
     #[test]
     fn tiled_pitch_exact_boundary() {
@@ -244,7 +242,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELLGCM_INIT_BODY, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args);
 
         let mem = rt.memory().as_bytes();
         let ctx_ptr = u32::from_be_bytes([mem[0x10000], mem[0x10001], mem[0x10002], mem[0x10003]]);
@@ -277,7 +275,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELLGCM_INIT_BODY, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args);
 
         let base = cellgov_lv2::host::Lv2Host::SYS_RSX_MEM_BASE;
         assert_eq!(rt.hle.gcm.control_addr, base + 0x40);
@@ -331,7 +329,7 @@ mod tests {
                 heap_warning_mask: &mut heap_warning_mask,
                 next_id: &mut next_id,
                 source: cellgov_event::UnitId::new(0),
-                nid: crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
+                nid: gcm_nid::INIT_BODY,
                 mutated: false,
                 handlers_without_mutation: &mut handlers_without_mutation,
             };
@@ -361,7 +359,6 @@ mod tests {
 
     #[test]
     fn gcm_set_flip_handler_records_callback_address() {
-        use crate::hle::cell_gcm_sys::NID_CELLGCM_SET_FLIP_HANDLER;
         use crate::runtime::Runtime;
         use cellgov_mem::GuestMemory;
         use cellgov_time::Budget;
@@ -376,7 +373,7 @@ mod tests {
 
         assert_eq!(rt.rsx_flip().handler(), 0, "starts cleared");
         let args: [u64; 9] = [0, 0x1234_5678, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELLGCM_SET_FLIP_HANDLER, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args);
 
         assert_eq!(rt.rsx_flip().handler(), 0x1234_5678);
         assert_eq!(
@@ -388,7 +385,6 @@ mod tests {
 
     #[test]
     fn gcm_set_flip_handler_forwards_to_sys_rsx_when_allocated() {
-        use crate::hle::cell_gcm_sys::NID_CELLGCM_SET_FLIP_HANDLER;
         use crate::runtime::Runtime;
         use cellgov_mem::GuestMemory;
         use cellgov_time::Budget;
@@ -402,16 +398,12 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
-        rt.dispatch_hle(
-            unit_id,
-            crate::hle::cell_gcm_sys::NID_CELLGCM_INIT_BODY,
-            &args,
-        );
+        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args);
         assert!(rt.lv2_host().sys_rsx_context().allocated);
 
         let handler: u32 = 0x1234_5678;
         let args: [u64; 9] = [0, handler as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELLGCM_SET_FLIP_HANDLER, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args);
         assert_eq!(rt.rsx_flip().handler(), handler);
         assert_eq!(
             rt.lv2_host().sys_rsx_context().flip_handler_addr,
@@ -422,7 +414,6 @@ mod tests {
 
     #[test]
     fn gcm_set_flip_handler_accepts_null_to_clear() {
-        use crate::hle::cell_gcm_sys::NID_CELLGCM_SET_FLIP_HANDLER;
         use crate::runtime::Runtime;
         use cellgov_mem::GuestMemory;
         use cellgov_time::Budget;
@@ -437,7 +428,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0; 9];
-        rt.dispatch_hle(unit_id, NID_CELLGCM_SET_FLIP_HANDLER, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args);
 
         assert_eq!(rt.rsx_flip().handler(), 0, "NULL cleared the handler");
     }
@@ -458,7 +449,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELLGCM_INIT_BODY, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args);
 
         let label_addr = rt.hle.gcm.label_addr;
         assert_ne!(label_addr, 0, "init must have allocated a label region");
@@ -493,7 +484,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELLGCM_GET_CONFIGURATION, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::GET_CONFIGURATION, &args);
 
         let mem = rt.memory().as_bytes();
         let a = 0x10000usize;
@@ -524,12 +515,12 @@ mod tests {
         });
 
         let args0: [u64; 9] = [0x10000, 0, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELLGCM_GET_LABEL_ADDRESS, &args0);
+        rt.dispatch_hle(unit_id, gcm_nid::GET_LABEL_ADDRESS, &args0);
         let ret0 = rt.registry_mut().drain_syscall_return(unit_id);
         assert_eq!(ret0, Some(0x50000));
 
         let args5: [u64; 9] = [0x10000, 5, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_CELLGCM_GET_LABEL_ADDRESS, &args5);
+        rt.dispatch_hle(unit_id, gcm_nid::GET_LABEL_ADDRESS, &args5);
         let ret5 = rt.registry_mut().drain_syscall_return(unit_id);
         assert_eq!(ret5, Some(0x50000 + 5 * 0x10));
     }
@@ -561,7 +552,7 @@ mod tests {
         rt.lv2_host_mut().seed_primary_ppu_thread(unit_id, attrs);
 
         let args: [u64; 9] = [0x2000, 0, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, NID_SYS_PPU_THREAD_GET_ID, &args);
+        rt.dispatch_hle(unit_id, sys_nid::PPU_THREAD_GET_ID, &args);
 
         let mem = rt.memory().as_bytes();
         let tid = u64::from_be_bytes([
@@ -814,7 +805,7 @@ mod tests {
         assert_ne!(child_id.raw(), 0x0100_0000);
 
         let args: [u64; 9] = [0x3000, 0, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(child, NID_SYS_PPU_THREAD_GET_ID, &args);
+        rt.dispatch_hle(child, sys_nid::PPU_THREAD_GET_ID, &args);
 
         let mem = rt.memory().as_bytes();
         let tid = u64::from_be_bytes([
@@ -843,7 +834,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0; 9];
-        rt.dispatch_hle(unit_id, NID_SYS_TIME_GET_SYSTEM_TIME, &args);
+        rt.dispatch_hle(unit_id, sys_nid::TIME_GET_SYSTEM_TIME, &args);
 
         let ret = rt.registry_mut().drain_syscall_return(unit_id);
         assert_eq!(ret, Some(1_000_000));

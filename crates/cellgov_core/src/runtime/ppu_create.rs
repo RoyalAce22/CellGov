@@ -4,8 +4,8 @@
 //! pointer. The host has already resolved the OPD.
 
 use cellgov_event::UnitId;
-use cellgov_lv2::errno::{CELL_E2BIG, CELL_ENOMEM};
 use cellgov_lv2::{Lv2Dispatch, PpuThreadAttrs, PpuThreadInitState};
+use cellgov_ps3_abi::cell_errors::{CELL_E2BIG, CELL_ENOMEM};
 
 use super::Runtime;
 

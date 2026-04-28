@@ -94,8 +94,8 @@ fn classify_import(
         );
         return (Bucket::UnknownNid, "<unknown-nid>", false);
     }
-    use cellgov_ppu::nid_db::StubClass;
-    let class = cellgov_ppu::nid_db::stub_classification(nid);
+    use cellgov_ps3_abi::nid::StubClass;
+    let class = cellgov_ps3_abi::nid::stub_classification(nid);
     let is_impl = CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&nid);
     let bucket = match (is_impl, class) {
         (true, _) => Bucket::Impl,
@@ -153,7 +153,7 @@ pub(crate) fn run(args: &[String]) {
     println!("Classification columns:");
     println!();
     println!("- **Name**: NID-DB lookup result. Renders `<unknown>` when the");
-    println!("  NID is not in `cellgov_ppu::nid_db` at all (no symbol");
+    println!("  NID is not in `cellgov_ps3_abi::nid` at all (no symbol");
     println!("  available).");
     println!("- **Class**: `stub_classification(nid)` from the NID DB.");
     println!("  `stateful` / `unsafe-to-stub` need real impls; `noop-safe`");
@@ -186,7 +186,7 @@ pub(crate) fn run(args: &[String]) {
         println!("| NID        | Name                                              | Class           | CellGov |");
         println!("|------------|---------------------------------------------------|-----------------|---------|");
         for f in &module.functions {
-            let lookup = cellgov_ppu::nid_db::lookup(f.nid);
+            let lookup = cellgov_ps3_abi::nid::lookup(f.nid);
             let name: &str = lookup.map(|(_m, n)| n).unwrap_or("<unknown>");
             let (bucket, class_cell, is_impl) = classify_import(f.nid, lookup);
             counts.bump(bucket);
@@ -296,7 +296,7 @@ mod tests {
     fn every_implemented_nid_is_in_nid_db() {
         for &nid in CELLGOV_HLE_IMPLEMENTED_NIDS {
             assert!(
-                cellgov_ppu::nid_db::lookup(nid).is_some(),
+                cellgov_ps3_abi::nid::lookup(nid).is_some(),
                 "NID 0x{nid:08x} is in HLE_IMPLEMENTED_NIDS but absent from nid_db"
             );
         }
@@ -311,10 +311,10 @@ mod tests {
         // safe to leave unstubbed. _sys_free is the lone genuine
         // NoopSafe in the impl list (memory leak is acceptable for
         // triage runs).
-        use cellgov_ppu::nid_db::StubClass;
+        use cellgov_ps3_abi::nid::StubClass;
         const SYS_FREE_NID: u32 = 0xf7f7fb20;
         for &nid in CELLGOV_HLE_IMPLEMENTED_NIDS {
-            let c = cellgov_ppu::nid_db::stub_classification(nid);
+            let c = cellgov_ps3_abi::nid::stub_classification(nid);
             if nid == SYS_FREE_NID {
                 assert_eq!(c, StubClass::NoopSafe);
             } else {
@@ -389,7 +389,7 @@ mod tests {
     fn classify_import_routes_implemented_nid_to_impl_bucket() {
         // sys_initialize_tls: stateful and in the implemented list.
         let nid = 0x744680a2;
-        let lookup = cellgov_ppu::nid_db::lookup(nid);
+        let lookup = cellgov_ps3_abi::nid::lookup(nid);
         assert!(lookup.is_some(), "test precondition: nid_db knows this NID");
         let (bucket, cell, is_impl) = classify_import(nid, lookup);
         assert_eq!(bucket, Bucket::Impl);
@@ -406,7 +406,7 @@ mod tests {
             !CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&nid),
             "precondition drifted: 0x{nid:08x} is now implemented; swap to another noop-safe NID"
         );
-        let lookup = cellgov_ppu::nid_db::lookup(nid);
+        let lookup = cellgov_ps3_abi::nid::lookup(nid);
         assert!(
             lookup.is_some(),
             "precondition drifted: 0x{nid:08x} no longer in nid_db; swap to another noop-safe NID"

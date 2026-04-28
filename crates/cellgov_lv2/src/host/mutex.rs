@@ -6,6 +6,7 @@
 //! would race with a concurrent unlock.
 
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -40,7 +41,7 @@ impl Lv2Host {
             // IdCollision is a host-invariant break; surface
             // ENOMEM so the guest cannot use the bad id.
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         }
@@ -50,13 +51,13 @@ impl Lv2Host {
     pub(super) fn dispatch_mutex_lock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         match self.mutexes.acquire_or_enqueue(id, caller) {
             crate::sync_primitives::MutexAcquireOrEnqueue::Unknown => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             crate::sync_primitives::MutexAcquireOrEnqueue::Acquired => Lv2Dispatch::Immediate {
@@ -65,7 +66,7 @@ impl Lv2Host {
             },
             crate::sync_primitives::MutexAcquireOrEnqueue::WouldDeadlock => {
                 Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EDEADLK.into(),
+                    code: errno::CELL_EDEADLK.into(),
                     effects: vec![],
                 }
             }
@@ -80,13 +81,13 @@ impl Lv2Host {
     pub(super) fn dispatch_mutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         match self.mutexes.try_acquire(id, caller) {
             None => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             Some(crate::sync_primitives::MutexAcquire::Acquired) => Lv2Dispatch::Immediate {
@@ -94,7 +95,7 @@ impl Lv2Host {
                 effects: vec![],
             },
             Some(crate::sync_primitives::MutexAcquire::Contended) => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             },
         }
@@ -103,17 +104,17 @@ impl Lv2Host {
     pub(super) fn dispatch_mutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         match self.mutexes.release_and_wake_next(id, caller) {
             crate::sync_primitives::MutexRelease::Unknown => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             crate::sync_primitives::MutexRelease::NotOwner => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EPERM.into(),
+                code: errno::CELL_EPERM.into(),
                 effects: vec![],
             },
             crate::sync_primitives::MutexRelease::Freed => Lv2Dispatch::Immediate {
@@ -205,7 +206,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -480,7 +481,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EBUSY.into());
+        assert_eq!(code, errno::CELL_EBUSY.into());
         assert_eq!(
             host.mutexes().lookup(id).unwrap().owner(),
             Some(PpuThreadId::PRIMARY),
@@ -498,7 +499,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -548,6 +549,6 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EPERM.into());
+        assert_eq!(code, errno::CELL_EPERM.into());
     }
 }

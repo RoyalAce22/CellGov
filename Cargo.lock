@@ -92,6 +92,7 @@ dependencies = [
  "cellgov_lv2",
  "cellgov_mem",
  "cellgov_ppu",
+ "cellgov_ps3_abi",
  "cellgov_spu",
  "cellgov_testkit",
  "cellgov_time",
@@ -124,6 +125,7 @@ dependencies = [
  "cellgov_exec",
  "cellgov_lv2",
  "cellgov_mem",
+ "cellgov_ps3_abi",
  "cellgov_sync",
  "cellgov_time",
  "cellgov_trace",
@@ -205,6 +207,7 @@ dependencies = [
  "cellgov_effects",
  "cellgov_event",
  "cellgov_mem",
+ "cellgov_ps3_abi",
  "cellgov_sync",
  "cellgov_time",
 ]
@@ -231,6 +234,7 @@ dependencies = [
  "cellgov_event",
  "cellgov_exec",
  "cellgov_mem",
+ "cellgov_ps3_abi",
  "cellgov_spu",
  "cellgov_sync",
  "cellgov_testkit",
@@ -238,6 +242,10 @@ dependencies = [
  "criterion",
  "sha1",
 ]
+
+[[package]]
+name = "cellgov_ps3_abi"
+version = "0.0.0"
 
 [[package]]
 name = "cellgov_spu"
@@ -261,6 +269,7 @@ version = "0.0.0"
 dependencies = [
  "cellgov_event",
  "cellgov_mem",
+ "cellgov_ps3_abi",
  "cellgov_time",
 ]
 
@@ -282,6 +291,9 @@ dependencies = [
 [[package]]
 name = "cellgov_time"
 version = "0.0.0"
+dependencies = [
+ "cellgov_ps3_abi",
+]
 
 [[package]]
 name = "cellgov_trace"

@@ -8,6 +8,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
@@ -36,7 +37,7 @@ impl Lv2Host {
         let id = self.alloc_id();
         if self.event_flags.create_with_id(id, init).is_err() {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         }
@@ -46,13 +47,13 @@ impl Lv2Host {
     pub(super) fn dispatch_event_flag_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.event_flags.lookup(id) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         if !entry.waiters().is_empty() {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             };
         }
@@ -73,14 +74,14 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         let mode = Self::decode_event_flag_mode(mode_raw);
         match self.event_flags.try_wait(id, bits, mode) {
             None => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
@@ -104,13 +105,13 @@ impl Lv2Host {
                     Ok(()) => {}
                     Err(crate::sync_primitives::EventFlagEnqueueError::UnknownId) => {
                         return Lv2Dispatch::Immediate {
-                            code: crate::errno::CELL_ESRCH.into(),
+                            code: errno::CELL_ESRCH.into(),
                             effects: vec![],
                         };
                     }
                     Err(crate::sync_primitives::EventFlagEnqueueError::DuplicateWaiter) => {
                         return Lv2Dispatch::Immediate {
-                            code: crate::errno::CELL_EFAULT.into(),
+                            code: errno::CELL_EFAULT.into(),
                             effects: vec![],
                         };
                     }
@@ -142,7 +143,7 @@ impl Lv2Host {
         let mode = Self::decode_event_flag_mode(mode_raw);
         match self.event_flags.try_wait(id, bits, mode) {
             None => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
@@ -159,7 +160,7 @@ impl Lv2Host {
                 }
             }
             Some(crate::sync_primitives::EventFlagWait::NoMatch) => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             },
         }
@@ -168,7 +169,7 @@ impl Lv2Host {
     pub(super) fn dispatch_event_flag_set(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
         let Some(woken) = self.event_flags.set_and_wake(id, bits) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
@@ -203,7 +204,7 @@ impl Lv2Host {
     pub(super) fn dispatch_event_flag_clear(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
         if !self.event_flags.clear_bits(id, bits) {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         }
@@ -530,6 +531,6 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = w else {
             panic!("expected Immediate, got {w:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EBUSY.into());
+        assert_eq!(code, errno::CELL_EBUSY.into());
     }
 }

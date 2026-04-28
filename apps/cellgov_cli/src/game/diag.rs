@@ -82,7 +82,7 @@ pub(super) fn longest_readable_prefix(
 /// index-OOB, NID-not-in-database, and resolved cases in the output.
 pub(super) fn format_hle_idx(idx: u32, hle_bindings: &[cellgov_ppu::prx::HleBinding]) -> String {
     match hle_bindings.get(idx as usize) {
-        Some(b) => match cellgov_ppu::nid_db::lookup(b.nid) {
+        Some(b) => match cellgov_ps3_abi::nid::lookup(b.nid) {
             Some((_, func)) => format!("{}::{func}", b.module),
             None => format!("{}::<unresolved-nid-0x{:08x}>", b.module, b.nid),
         },
@@ -434,14 +434,14 @@ pub(super) fn print_hle_summary(
     let uncalled_count = total_count - called_count.min(total_count);
     println!("hle_imports: {total_count} bound, {called_count} called, {uncalled_count} uncalled");
 
-    use cellgov_ppu::nid_db::StubClass;
+    use cellgov_ps3_abi::nid::StubClass;
     if !hle_calls.is_empty() {
         println!("  called:");
         for (idx, count) in hle_calls {
             let (name, class) = match hle_bindings.get(*idx as usize) {
                 Some(b) => (
                     format_hle_idx(*idx, hle_bindings),
-                    cellgov_ppu::nid_db::stub_classification(b.nid).as_str(),
+                    cellgov_ps3_abi::nid::stub_classification(b.nid).as_str(),
                 ),
                 None => (format!("<hle-idx-oob {idx}>"), "<oob>"),
             };
@@ -456,16 +456,16 @@ pub(super) fn print_hle_summary(
     if !uncalled.is_empty() {
         let stateful: Vec<_> = uncalled
             .iter()
-            .filter(|b| cellgov_ppu::nid_db::stub_classification(b.nid) != StubClass::NoopSafe)
+            .filter(|b| cellgov_ps3_abi::nid::stub_classification(b.nid) != StubClass::NoopSafe)
             .collect();
         if !stateful.is_empty() {
             println!("  uncalled (non-noop):");
             for b in &stateful {
-                let func = match cellgov_ppu::nid_db::lookup(b.nid) {
+                let func = match cellgov_ps3_abi::nid::lookup(b.nid) {
                     Some((_, f)) => f.to_string(),
                     None => format!("<unresolved-nid-0x{:08x}>", b.nid),
                 };
-                let class = cellgov_ppu::nid_db::stub_classification(b.nid).as_str();
+                let class = cellgov_ps3_abi::nid::stub_classification(b.nid).as_str();
                 println!("    {}::{func} [{class}]", b.module);
             }
         }

@@ -6,6 +6,7 @@
 //! would race a concurrent unlock.
 
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
@@ -20,7 +21,7 @@ impl Lv2Host {
         // id_ptr is not written on overflow.
         let Some(id) = self.lwmutexes.create() else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ENOMEM.into(),
+                code: errno::CELL_ENOMEM.into(),
                 effects: vec![],
             };
         };
@@ -30,13 +31,13 @@ impl Lv2Host {
     pub(super) fn dispatch_lwmutex_lock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         match self.lwmutexes.acquire_or_enqueue(id, caller) {
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Unknown => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Acquired => Lv2Dispatch::Immediate {
@@ -45,7 +46,7 @@ impl Lv2Host {
             },
             crate::sync_primitives::LwMutexAcquireOrEnqueue::WouldDeadlock => {
                 Lv2Dispatch::Immediate {
-                    code: crate::errno::CELL_EDEADLK.into(),
+                    code: errno::CELL_EDEADLK.into(),
                     effects: vec![],
                 }
             }
@@ -60,13 +61,13 @@ impl Lv2Host {
     pub(super) fn dispatch_lwmutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         match self.lwmutexes.try_acquire(id, caller) {
             None => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             Some(crate::sync_primitives::LwMutexAcquire::Acquired) => Lv2Dispatch::Immediate {
@@ -74,7 +75,7 @@ impl Lv2Host {
                 effects: vec![],
             },
             Some(crate::sync_primitives::LwMutexAcquire::Contended) => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             },
         }
@@ -83,17 +84,17 @@ impl Lv2Host {
     pub(super) fn dispatch_lwmutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         match self.lwmutexes.release_and_wake_next(id, caller) {
             crate::sync_primitives::LwMutexRelease::Unknown => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
             crate::sync_primitives::LwMutexRelease::NotOwner => Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EPERM.into(),
+                code: errno::CELL_EPERM.into(),
                 effects: vec![],
             },
             crate::sync_primitives::LwMutexRelease::Freed => Lv2Dispatch::Immediate {
@@ -123,13 +124,13 @@ impl Lv2Host {
     pub(super) fn dispatch_lwmutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.lwmutexes.lookup(id) else {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             };
         };
         if !entry.waiters().is_empty() || entry.owner().is_some() {
             return Lv2Dispatch::Immediate {
-                code: crate::errno::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             };
         }
@@ -196,7 +197,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -256,7 +257,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EBUSY.into());
+        assert_eq!(code, errno::CELL_EBUSY.into());
         assert!(host.lwmutexes().lookup(id).is_some());
     }
 
@@ -270,7 +271,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -438,7 +439,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EBUSY.into());
+        assert_eq!(code, errno::CELL_EBUSY.into());
         let entry = host.lwmutexes().lookup(id).unwrap();
         assert_eq!(entry.owner(), Some(PpuThreadId::PRIMARY));
         assert!(entry.waiters().is_empty());
@@ -454,7 +455,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -586,7 +587,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EPERM.into());
+        assert_eq!(code, errno::CELL_EPERM.into());
         assert_eq!(
             host.lwmutexes().lookup(id).unwrap().owner(),
             Some(PpuThreadId::PRIMARY),
@@ -603,7 +604,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_ESRCH.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
@@ -750,6 +751,6 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, crate::errno::CELL_EDEADLK.into());
+        assert_eq!(code, errno::CELL_EDEADLK.into());
     }
 }
