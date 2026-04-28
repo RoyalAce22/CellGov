@@ -137,7 +137,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                                                                                                                                                                               |
 | `cellgov_lv2`                  | LV2 model: image registry, thread-group table, syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                                                                                                                                                                       |
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                         |
-| `cellgov_ppu`                  | PPU interpreter, ELF64/SPRX/PRX loaders, NID database, HLE binder.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, HLE binder, and `HLE_IMPLEMENTED_NIDS` dispatch surface. The NID lookup database itself lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                         |
 | `cellgov_spu`                  | SPU interpreter, channel file, SPU ELF loader.                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace.                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                                                                                                                                                                             |
@@ -366,14 +366,13 @@ and super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`,
 
 The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
-4 relocation types, PS3 PRX import-table parser, and a NID database.
-The NID database serves two distinct roles in one sorted table:
-`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (currently 50 entries) is
-the dispatch surface the runtime PRX binder consults; the larger
-`cellgov_ppu::nid_db::NID_TABLE` (~5,300 entries imported from
-upstream coverage) supplies human-readable name resolution for
-`dump-imports` and fault diagnostics. The two tables share a
-sorted-by-NID layout for stable diffing.
+4 relocation types, and the PS3 PRX import-table parser.
+`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (50 entries) is the
+dispatch surface the runtime PRX binder consults; the larger
+NID lookup database (~5,300 entries) lives in
+`cellgov_ps3_abi::nid` and is accessed via `lookup(nid)` for
+human-readable name resolution in `dump-imports` and fault
+diagnostics.
 
 The HLE binder offers two layouts for the OPDs that satisfy
 `sys_prx_load_module`'s import resolution:
@@ -446,6 +445,7 @@ Classified into typed `Lv2Request` variants:
 | `sys_memory_free`                 | 349              | Stub: no-op (CellGov does not track deallocation).                                                     |
 | `sys_memory_get_user_memory_size` | 352              | Writes `sys_memory_info_t` (total / available, 0x0D500000 each) to guest pointer.                      |
 | `sys_tty_write`                   | 403              | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing.                                   |
+| `sys_fs_open`                     | 801              | Minimal handler: validates fd out-pointer (alignment + writable region; CELL_EFAULT otherwise), reads the path until NUL within `CELL_FS_MAX_PATH_LENGTH` (CELL_EINVAL on no-NUL, CELL_EFAULT on unmapped path pointer), then returns CELL_ENOENT with 0 written to the fd out-pointer. Path is byte-transparent. O_CREAT triggers an invariant-break log. |
 
 ### PPU thread lifecycle
 
@@ -827,9 +827,10 @@ configuration."
 ## HLE dispatch
 
 NID-based, separate from the syscall surface. `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`
-holds the 50 NIDs CellGov dispatches directly; `cellgov_ppu::nid_db::NID_TABLE`
-is the larger ~5,300-entry diagnostic table used for name resolution in
-`dump-imports` and fault output, not for dispatch. Module implementations
+holds the 50 NIDs CellGov dispatches directly; the larger ~5,300-entry
+diagnostic database lives in `cellgov_ps3_abi::nid` (accessed via
+`lookup(nid)` for name resolution in `dump-imports` and fault output,
+not for dispatch). Module implementations
 are decoupled from the Runtime via the
 `HleContext` trait (`cellgov_core::hle_context`). Each module file
 (`sysPrxForUser.rs`, `cellGcmSys.rs`, `cellSysutil.rs`, `cellSpurs.rs`)
@@ -847,10 +848,14 @@ allocation.
 | `_sys_malloc`           | 0xbdb18f83 | unsafe-to-stub | Bump allocator, 16-byte aligned, never freed.                 |
 | `_sys_free`             | 0xf7f7fb20 | noop-safe      | No-op.                                                        |
 | `_sys_memset`           | 0x68b9b011 | stateful       | Writes val \* size bytes to guest memory, returns ptr.        |
-| `_sys_heap_create_heap` | 0xb2fcf2c8 | stateful       | Allocates a fresh heap id (RPCS3-equivalent).                 |
+| `_sys_heap_create_heap` | 0xb2fcf2c8 | stateful       | Allocates a fresh heap id.                                    |
 | `_sys_heap_malloc`      | 0x35168520 | unsafe-to-stub | Bumps the shared HLE arena.                                   |
 | `_sys_heap_memalign`    | 0x44265c08 | unsafe-to-stub | Bumps with `max(align, 16)` rounding.                         |
-| `sys_lwmutex_create`    | 0x2f85c0ef | stateful       | Initializes the 24-byte sys_lwmutex_t (owner = lwmutex_free). |
+| `sys_lwmutex_create`    | 0x2f85c0ef | stateful       | Initializes the 24-byte sys_lwmutex_t with sleep_queue id from the LV2 lwmutex table. |
+| `sys_lwmutex_lock`      | 0x1573dc3f | stateful       | Reads embedded id from offset 0x10, routes to `Lv2Request::LwMutexLock` (Acquire / Block). |
+| `sys_lwmutex_unlock`    | 0x1bc200f4 | stateful       | Routes to `Lv2Request::LwMutexUnlock` (Free / Transfer-and-wake-next).                    |
+| `sys_lwmutex_trylock`   | 0xaeb78725 | stateful       | Routes to `Lv2Request::LwMutexTryLock` (Acquire / CELL_EBUSY-on-held).                    |
+| `sys_lwmutex_destroy`   | 0xc3476d0c | stateful       | Routes to `Lv2Request::LwMutexDestroy` (CELL_EBUSY if still owned or waiters present).    |
 | `sys_process_exit`      | 0xe6f2c1e7 | stateful       | Marks unit Finished.                                          |
 | All others              | --         | noop-safe      | Return 0.                                                     |
 
@@ -971,9 +976,9 @@ divergence.
 For long-running boot snapshots, `observe_from_boot` builds
 observations from `run-game` outputs and the CLI's
 `compare-observations` subcommand reads two JSON files and reports
-MATCH or the first differing field. Determinism check on flOw's full
-1.4M-step boot passes byte-identical between two CellGov runs of the
-same ELF.
+MATCH or the first differing field. Determinism check on a full
+multi-million-step boot passes byte-identical between two CellGov
+runs of the same ELF.
 
 ### Per-step divergence localization
 
@@ -988,8 +993,8 @@ reports:
   in `{Pc, Hash}`. The check order is step count -> PC -> hash so
   the report names the highest-level divergence first. Surfaced via
   `cellgov_cli diverge <a.state> <b.state>`. Throughput is
-  ~17 ns per record, so a 1.4M-record flOw boot scan completes in
-  ~80 ms.
+  ~17 ns per record, so a 16M-record flOw boot scan completes in
+  under 300 ms.
 - `cellgov_compare::zoom_lookup(a_zoom, b_zoom, step)` consumes
   separate zoom-trace files (`PpuStateFull` records emitted only
   inside the unit's window) and returns either `Found { diffs }`
@@ -1042,18 +1047,20 @@ by short name (`--title sshd`), content id (`--content-id
 NPUA80068`), or explicit manifest path (`--title-manifest
 <file>`). The harness is currently wired for three titles:
 
-- **flOw** (NPUA80001): PSN HDD, checkpoint is `process-exit` --
-  flOw's boot calls `sys_process_exit` on its own and CellGov
-  records the observation at that point.
+- **flOw** (NPUA80001): PSN HDD. Manifest declares the
+  `process-exit` checkpoint kind, but the title boots past the
+  point where it would have called `sys_process_exit` and
+  currently exits on `MaxSteps` at the budget cap.
 - **Super Stardust HD** (NPUA80068): PSN HDD, checkpoint is
   `first-rsx-write` -- SSHD's attract-mode loop never exits, so
   the harness treats the first PPU write into the `rsx` reserved
   region as a checkpoint hit.
 - **WipEout HD Fury** (BCES00664): disc ISO, same `first-rsx-write`
-  checkpoint as SSHD. Disc titles add an optional `[source] kind =
-"disc"` to the manifest; `resolve_eboot` then looks under
-  `dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead of the PSN
-  layout. The encrypted `EBOOT.BIN` is decrypted once via
+  checkpoint kind as SSHD; currently exits on `MaxSteps` at the
+  budget cap without reaching it. Disc titles add an optional
+  `[source] kind = "disc"` to the manifest; `resolve_eboot` then
+  looks under `dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead of
+  the PSN layout. The encrypted `EBOOT.BIN` is decrypted once via
   `cellgov_firmware decrypt-self`.
 
 Per-title status (boot checkpoint reached, cross-runner observation
@@ -1127,19 +1134,26 @@ writebacks satisfy PSSG's polled completion flag. The SPURS
 PPU surface is faithfully implemented: CellSpurs control block
 populated, workload registry honors AddWorkload calls,
 ready-count and contention controls track per-wid state, info
-snapshots reflect live fields. Boot still terminates at PPU
-step 78,199 with a helper PPU thread branching through CTR=0,
-but the fault is no longer SPURS-shaped: the driver is the LV2
-sync-primitive dispatch routing gap (HLE `sys_lwmutex_lock` /
-`unlock` / `trylock` / `destroy` are silently CELL_OK'd at the
-runtime dispatcher; threads contend on a lock that does not
-serialize, leaving a C++ object's vtable pointer un-initialised
-when a downstream helper performs a virtual call).
+snapshots reflect live fields. The four `sys_lwmutex_*` HLE
+arms route through the LV2 lwmutex surface so contended locks
+produce real Blocked / Runnable transitions; the embedded
+`sleep_queue_id` is allocated from the LV2 lwmutex table at
+create time so subsequent lock / unlock / trylock / destroy
+resolve through the same id space. The minimal `sys_fs_open`
+handler returns `CELL_ENOENT` with `0` written to the fd
+out-pointer; flOw attempts ~11 paths during boot (runtime log,
+SDK scratch files, localization XML, class registry, resource
+manifest, credits-screen texture pack at three resolutions,
+plus a developer-machine drive-letter-prefixed copy of those
+texture paths) and fails-soft on each ENOENT.
 
-Cross-runner observation against RPCS3 is unavailable until
-flOw reaches a mutually-deterministic checkpoint past the
-sync-primitive routing gap. See
-[tests/fixtures/NPUA80001_cross_runner/compare_report.txt](../tests/fixtures/NPUA80001_cross_runner/compare_report.txt).
+Boot reaches `MaxSteps` at the 4B-instruction cap (15,625,000
+scheduler steps, budget 256). The stopping point is a polling
+loop where ~50% of the budget retires a single syscall
+instruction at PC=0x007a7d08 (Sc, raw=0x44000002).
+Cross-runner observation against RPCS3 is queued pending
+advancement past the polling loop to a deterministic checkpoint
+RPCS3 also reaches.
 
 **Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
 modules (15 with dedicated CellGov handling); the harness uses a
@@ -1149,7 +1163,7 @@ init, TLS setup, lwmutex construction, GCM initialization
 (\_cellGcmInitBody, cellGcmGetConfiguration, cellGcmGetControlRegister),
 keyboard/pad init, SPURS init, video configuration, and into the
 main attract loop. The first RSX write (put-pointer update to the
-GCM control register at 0xC0000040) triggers at step 14,341,441
+GCM control register at 0xC0000040) triggers at step 14,341,436
 (~3.7B instructions). SSHD's CRT0/init path is bit-identical
 across CellGov revisions for the current PPU correctness surface.
 
@@ -1157,18 +1171,12 @@ across CellGov revisions for the current PPU correctness surface.
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_firmware decrypt-self`. 332 HLE
 bindings across 27 modules -- the largest HLE surface of the
-three tested titles. Same `FirstRsxWrite` checkpoint as SSHD;
-CellGov no longer reaches it. Boot stops via `MaxSteps` at the
+three tested titles. Same `FirstRsxWrite` checkpoint kind as
+SSHD, not currently reached. Boot stops via `MaxSteps` at the
 1B-instruction cap (3,906,250 scheduler steps, budget 256;
-390,625 at the 100M cap). The pre-fix `step 20,569` checkpoint
-trip was a spurious consequence of a now-fixed `rldimi`
-mis-decode. The current stall is structural -- a profile-loop
-function-pointer table at guest 0x009389a0 awaiting population
-by a sysmodule's `module_start`, not a corner-case spec gap.
-PRX module loading and `module_start` execution are the next
-target for unsticking the title. See
+390,625 at the 100M cap). See
 [tests/fixtures/BCES00664_cross_runner/compare_report.txt](../tests/fixtures/BCES00664_cross_runner/compare_report.txt)
-for history and current status.
+for history.
 
 ## Microtest corpus
 

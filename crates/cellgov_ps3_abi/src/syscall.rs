@@ -122,6 +122,10 @@ pub const MEMORY_GET_USER_MEMORY_SIZE: u64 = 352;
 /// `sys_tty_write` (`fd=1` is the TTY guest debug log).
 pub const TTY_WRITE: u64 = 403;
 
+/// `sys_fs_open` (path-validating file-open; minimal handler returns
+/// CELL_ENOENT for unknown paths).
+pub const FS_OPEN: u64 = 801;
+
 /// `sys_rsx_memory_allocate`.
 pub const SYS_RSX_MEMORY_ALLOCATE: u64 = 668;
 /// `sys_rsx_memory_free`.

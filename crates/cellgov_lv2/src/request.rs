@@ -89,9 +89,9 @@ pub enum Lv2Request {
     /// is a deterministic oracle with no host-time dependency, so
     /// both slots receive zero (UTC, no DST).
     TimeGetTimezone {
-        /// Out-pointer for the timezone offset in minutes (be_t<s32>).
+        /// Out-pointer for the timezone offset in minutes (`be_t<s32>`).
         timezone_ptr: u32,
-        /// Out-pointer for the summer-time offset in minutes (be_t<s32>).
+        /// Out-pointer for the summer-time offset in minutes (`be_t<s32>`).
         summer_time_ptr: u32,
     },
     /// sys_tty_write (403).
@@ -353,6 +353,19 @@ pub enum Lv2Request {
     LwMutexTryLock {
         /// Lwmutex id.
         id: u32,
+    },
+    /// sys_fs_open (801). Minimal handler -- whitelist is empty, so
+    /// every call returns `CELL_ENOENT` and writes 0 to `fd_out_ptr`.
+    FsOpen {
+        /// Guest pointer to the path string.
+        path_ptr: u32,
+        /// Open flags (`O_RDONLY|O_NONBLOCK|O_LARGEFILE` etc).
+        flags: u32,
+        /// Out-pointer for the file descriptor.
+        fd_out_ptr: u32,
+        /// Mode bits (only consulted when the path matches the
+        /// whitelist; ignored under the minimal handler).
+        mode: u32,
     },
     /// sys_cond_create (105).
     CondCreate {
@@ -645,6 +658,12 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
         },
         syscall::LWMUTEX_UNLOCK => Lv2Request::LwMutexUnlock { id: p!(0) },
         syscall::LWMUTEX_TRYLOCK => Lv2Request::LwMutexTryLock { id: p!(0) },
+        syscall::FS_OPEN => Lv2Request::FsOpen {
+            path_ptr: p!(0),
+            flags: p!(1),
+            fd_out_ptr: p!(2),
+            mode: p!(3),
+        },
         syscall::MUTEX_CREATE => Lv2Request::MutexCreate {
             id_ptr: p!(0),
             attr_ptr: p!(1),

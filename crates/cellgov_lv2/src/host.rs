@@ -28,7 +28,7 @@ use cellgov_time::GuestTicks;
 
 /// Readonly view of runtime state exposed to the host during dispatch.
 ///
-/// `read_committed` is the only channel by which the host observes
+/// `read_committed` is the primary channel by which the host observes
 /// guest memory; `current_tick` stamps LV2-sourced effects so they
 /// participate in commit-pipeline ordering at the triggering
 /// syscall's tick rather than tick 0.
@@ -42,11 +42,35 @@ pub trait Lv2Runtime {
 
     /// Global guest tick of the in-flight dispatch.
     fn current_tick(&self) -> GuestTicks;
+
+    /// Read up to `max_len` bytes from `addr`, stopping at and
+    /// including the first occurrence of `terminator`. Returns the
+    /// prefix BEFORE the terminator (the terminator byte itself is
+    /// not in the returned slice).
+    ///
+    /// # Returns
+    /// - `Some(bytes)` with `bytes.len() < max_len` when a terminator
+    ///   is found within the first `max_len` mapped bytes.
+    /// - `None` when `addr` is unmapped, OR when no terminator
+    ///   appears within `max_len` mapped bytes, OR when the address
+    ///   is in a `ReservedStrict` region.
+    ///
+    /// The default impl walks one byte at a time via
+    /// [`Self::read_committed`]; concrete impls may override with a
+    /// region-aware bulk scan.
+    fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]>;
+
+    /// True iff a `len`-byte write starting at `addr` would land
+    /// entirely inside a single `ReadWrite` region. False when the
+    /// range straddles a region boundary, lands in a reserved region,
+    /// or is unmapped.
+    fn writable(&self, addr: u64, len: usize) -> bool;
 }
 
 mod cond;
 mod event_flag;
 mod event_queue;
+mod fs;
 mod lwmutex;
 mod memory;
 mod mutex;
@@ -451,6 +475,12 @@ impl Lv2Host {
             Lv2Request::LwMutexLock { id, .. } => self.dispatch_lwmutex_lock(id, requester),
             Lv2Request::LwMutexUnlock { id } => self.dispatch_lwmutex_unlock(id, requester),
             Lv2Request::LwMutexTryLock { id } => self.dispatch_lwmutex_trylock(id, requester),
+            Lv2Request::FsOpen {
+                path_ptr,
+                flags,
+                fd_out_ptr,
+                mode,
+            } => self.dispatch_fs_open(path_ptr, flags, fd_out_ptr, mode, requester, rt),
             Lv2Request::MutexCreate { id_ptr, attr_ptr } => {
                 self.dispatch_mutex_create(id_ptr, attr_ptr, requester, rt)
             }

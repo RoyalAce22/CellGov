@@ -7,7 +7,7 @@
 Classification columns:
 
 - **Name**: NID-DB lookup; `<unknown>` means the NID is not in
-  `cellgov_ppu::nid_db`.
+  `cellgov_ps3_abi::nid`.
 - **Class**: `stub_classification(nid)` from the NID DB.
   `stateful` / `unsafe-to-stub` need real impls; `noop-safe`
   is fine returning 0.

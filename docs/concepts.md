@@ -46,13 +46,11 @@ The two checkpoints CellGov currently recognises:
 
 - **`ProcessExit`** -- the guest called `sys_process_exit`. Used
   for titles that reach a natural shutdown during the captured
-  window. flOw is the only current tested title that exits
-  this way during boot.
+  window.
 - **`FirstRsxWrite`** -- the first PPU write to guest address
   `0xC0000040` (the RSX control register put-pointer, typically
   inside `_cellGcmInitBody`). Used for titles that proceed past
-  init into an RSX command stream. SSHD and WipEout HD Fury stop
-  here by default.
+  init into an RSX command stream. SSHD currently stops here.
 
 A third checkpoint kind, `PcReached`, stops at a specific PC
 address and exists for manifest-driven frontier exploration, not
@@ -60,6 +58,11 @@ for the default compatibility matrix. The `[rsx] mirror = true`
 manifest flag changes what "past FirstRsxWrite" means for a title
 by mapping the RSX region read/write so the put-pointer write
 lands instead of tripping the checkpoint.
+
+A title that exits its budget cap without hitting any of the above
+has no checkpoint observation; cross-runner comparison for it is
+queued pending boot advancement to a deterministic stopping point.
+flOw and WipEout HD Fury are in that state today.
 
 The point of a checkpoint is: at this specific deterministic event,
 capture the observable state, stop the run, emit the observation.
@@ -132,117 +135,43 @@ is a behaviour-level judgement backed by the classification
 narrative in the same file. They are statements at different
 layers.
 
-### Worked example 1: flOw (the small case)
+### Worked example: Super Stardust HD
 
-flOw's cross-runner report against RPCS3 contains exactly one
+SSHD's cross-runner report against RPCS3 contains exactly one
 line:
 
 ```
-DIVERGE region data: first byte differs at offset 0x7768 (guest 0x827768) -- 10 vs 00
+DIVERGE region code: first byte differs at offset 0x35 (guest 0x10035) -- 00 vs 40
 ```
 
-One byte. At guest address `0x00827768`, CellGov has `0x10` and
-RPCS3 has `0x00`. Byte-equality check: DIVERGE.
+One byte. At guest address `0x00010035`, CellGov has `0x00` and
+RPCS3 has `0x40`. Byte-equality check: DIVERGE.
 
-What lives at `0x00827768`? It is inside flOw's data segment, in
-the region the PS3 loader populates with **HLE OPD stubs** (OPD =
-Official Procedure Descriptor, the 16-byte function-pointer
-structure PPC64 ELF ABI requires for indirect calls). When the
-loader imports a function from a PRX or HLE library, it allocates
-an OPD slot, fills in the entry-point address and TOC pointer,
-and the guest makes indirect calls through that slot.
+What lives at `0x00010035`? It is the low byte of the ELF
+header's `e_ehsize` field, written when the loader maps PT_LOAD
+#0 starting at `p_offset = 0`. The spec value is `0x40` (= 64,
+the standard ELF64 header size). RPCS3 keeps the bytes from the
+SELF in place; CellGov's `cellgov_firmware decrypt-self` clears
+this slot during reconstruction.
 
-The guest never reads the OPD struct's raw bytes. It dereferences
-them as function pointers. CellGov and RPCS3 both populate the
-OPD slots with functionally-correct pointers into functionally-
-correct HLE trampolines. The differing byte is the second byte of
-the first OPD pointer field -- a one-position shift in where
-CellGov's allocator landed the trampoline vs where RPCS3's
-landed.
-
-Same program. Same call. Same result. Different byte at
-`0x00827768`.
+The guest never reads its own ELF header during execution. The
+loader uses the field to know how big the header is, but that
+read happens on the host side before the program counter ever
+points into the header range. Same program. Same execution.
+Different byte at `0x00010035`.
 
 **Verdict: equivalent (1 byte non-semantic).**
 
 The verdict sits on top of the byte-level DIVERGE. Both are true
 statements at different layers.
 
-### Worked example 2: WipEout HD Fury (the large case)
-
-WipEout's cross-runner report is larger. Two clusters and 974
-total bytes across code and data regions. The raw tool output:
-
-```
-DIVERGE region code: first byte differs at offset 0x17 (guest 0x10017) -- 00 vs 01
-DIVERGE region data: first byte differs at offset 0xffee (guest 0x86ffee) -- 00 vs 1c
-
-Total: 14 byte diffs in code (out of 0x848e48), 960 byte diffs in data (out of 0xd6f80).
-```
-
-Three families of divergence, none of them semantic:
-
-**Cluster 1 -- ELF header metadata (code region, 2 bytes).** The
-first 0x40 bytes of the loaded code segment are the ELF header
-itself, because PT_LOAD #0 has `p_offset=0`. The differing bytes
-fall inside `e_version` (byte 0x14..=0x17) and the high 32 bits
-of `e_entry` (byte 0x18..=0x1F):
-
-```
-CellGov: e_version=0, e_entry=0x0001000000870530
-RPCS3:   e_version=1, e_entry=0x0000000000870530
-```
-
-The actual entry point (low 32 bits = `0x00870530`) is identical
-on both sides. Only the unread high metadata bytes differ. This is
-a SELF-decoder reconstruction difference between
-`cellgov_firmware decrypt-self` and RPCS3's in-memory SELF
-decryption; neither is used during execution.
-
-**Cluster 2 -- SYS_PROC_PARAM block (code region, 12 bytes).**
-Offsets 0x848e00..=0x848e19 hold the PT_PROC supplemental header
-content:
-
-```
-CellGov: zero-initialized (not written back to guest memory)
-RPCS3:   sdk_version, primary_prio, primary_stacksize, malloc_pagesize
-         populated from the SELF metadata
-```
-
-CellGov reads SYS_PROC_PARAM via the loader and surfaces the
-values internally, but does not write the parsed struct back into
-guest memory. RPCS3 keeps the bytes from the SELF in place. Both
-runners use the values via internal state; the guest's process
-startup does not re-read this memory range during execution.
-
-**Cluster 3 -- HLE OPD slots (data region, 960 bytes).** Same
-class as flOw, scaled up. WipEout has 332 imports across 27
-modules. Each import gets an OPD slot; CellGov and RPCS3 assign
-slot indices in the same module order but iterate within a module
-differently (sorted vs. declaration order). The resulting
-per-slot pointer differences sum to 960 bytes, visible as:
-
-```
-CellGov: 0144 0000  0144 1c30  0144 1c20  ...
-RPCS3:   0144 05b8  0144 1938  0144 05b8  ...
-```
-
-Every OPD pair functionally-resolves to a CellGov HLE trampoline
-on one side and an RPCS3 HLE trampoline on the other. The guest
-calls through them identically.
-
-**Verdict: equivalent (974 bytes non-semantic).**
-
-974 bytes of raw divergence, zero semantic divergence. The
-compatibility matrix shows `equivalent (974 bytes non-semantic)`.
-The raw report shows two `DIVERGE` lines. Both are correct.
-
 ### Why the verdict term matters
 
-If the compatibility matrix said `MATCH` for WipEout, that would
-be wrong: 974 bytes actually differ. If it said `DIVERGE`, that
-would read as failure at a glance even though the divergence is
-entirely non-semantic. `equivalent` threads the needle: it
+If the compatibility matrix said `MATCH` for a title with any
+non-zero divergence, that would be wrong: bytes actually differ.
+If it said `DIVERGE` for one classified-non-semantic byte, that
+would read as failure at a glance even though the program
+behaves identically. `equivalent` threads the needle: it
 concedes the bytes differ, and asserts the behaviour does not.
 
 The same term appears in three places:
