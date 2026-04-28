@@ -66,11 +66,15 @@ impl SyscallResponseTable {
         let displaced = self.pending.insert(unit, response);
         if let Some(prev) = displaced.as_ref() {
             if self.displacement_count == 0 {
+                let new_response = self
+                    .pending
+                    .get(&unit)
+                    .expect("just-inserted response must be present");
                 eprintln!(
                     "SyscallResponseTable::insert: displaced pending response for {unit:?}: \
-                     {prev:?} -- original r3 and any owed out-pointer writes are lost. \
-                     Further displacements in this table will be counted but not logged; \
-                     inspect displacement_count() for the total."
+                     {prev:?} (overwritten by {new_response:?}) -- original r3 and any owed \
+                     out-pointer writes are lost. Further displacements in this table will be \
+                     counted but not logged; inspect displacement_count() for the total."
                 );
             }
             self.displacement_count = self.displacement_count.saturating_add(1);

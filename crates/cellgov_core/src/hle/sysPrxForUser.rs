@@ -55,7 +55,27 @@ pub(crate) fn dispatch(
             memset(&mut adapter(runtime, source, nid), args);
         }
         sys_nid::LWMUTEX_CREATE => {
-            lwmutex_create(&mut adapter(runtime, source, nid), args);
+            lwmutex_create(runtime, source, nid, args);
+        }
+        sys_nid::LWMUTEX_LOCK => {
+            lwmutex_route(runtime, source, nid, args, |id, timeout| {
+                cellgov_lv2::Lv2Request::LwMutexLock { id, timeout }
+            });
+        }
+        sys_nid::LWMUTEX_UNLOCK => {
+            lwmutex_route(runtime, source, nid, args, |id, _timeout| {
+                cellgov_lv2::Lv2Request::LwMutexUnlock { id }
+            });
+        }
+        sys_nid::LWMUTEX_TRYLOCK => {
+            lwmutex_route(runtime, source, nid, args, |id, _timeout| {
+                cellgov_lv2::Lv2Request::LwMutexTryLock { id }
+            });
+        }
+        sys_nid::LWMUTEX_DESTROY => {
+            lwmutex_route(runtime, source, nid, args, |id, _timeout| {
+                cellgov_lv2::Lv2Request::LwMutexDestroy { id }
+            });
         }
         sys_nid::HEAP_CREATE_HEAP => {
             heap_create_heap(&mut adapter(runtime, source, nid));
@@ -234,50 +254,95 @@ pub(crate) fn memset(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     }
 }
 
-pub(crate) fn lwmutex_create(ctx: &mut dyn HleContext, args: &[u64; 9]) {
+/// `sys_lwmutex_create` HLE shim.
+///
+/// Allocates the lwmutex's `sleep_queue` id from the LV2 lwmutex
+/// table so subsequent `sys_lwmutex_{lock,unlock,trylock,destroy}`
+/// routed through [`lwmutex_route`] resolve through the same
+/// blocking surface.
+pub(crate) fn lwmutex_create(runtime: &mut Runtime, source: UnitId, nid: u32, args: &[u64; 9]) {
     let mutex_ptr = args[1] as u32;
     let attr_ptr = args[2] as u32;
 
     // Sony's sys_lwmutex_create traps on a bad attr_ptr; match that
     // with an explicit CELL_EFAULT rather than substituting
     // (PRIORITY, NOT_RECURSIVE) defaults.
-    let mem = ctx.guest_memory();
-    let attr_offset = attr_ptr as usize;
-    let Some(attr_end) = attr_offset.checked_add(8) else {
-        ctx.set_return(CELL_EFAULT.into());
+    let (protocol, recursive) = {
+        let mem = runtime.memory.as_bytes();
+        let attr_offset = attr_ptr as usize;
+        let Some(attr_end) = attr_offset.checked_add(8) else {
+            adapter(runtime, source, nid).set_return(CELL_EFAULT.into());
+            return;
+        };
+        if attr_end > mem.len() {
+            adapter(runtime, source, nid).set_return(CELL_EFAULT.into());
+            return;
+        }
+        let protocol = u32::from_be_bytes([
+            mem[attr_offset],
+            mem[attr_offset + 1],
+            mem[attr_offset + 2],
+            mem[attr_offset + 3],
+        ]);
+        let recursive = u32::from_be_bytes([
+            mem[attr_offset + 4],
+            mem[attr_offset + 5],
+            mem[attr_offset + 6],
+            mem[attr_offset + 7],
+        ]);
+        (protocol, recursive)
+    };
+
+    let Some(sleep_queue) = runtime.lv2_host_mut().lwmutexes_mut().create() else {
+        adapter(runtime, source, nid).set_return(cellgov_ps3_abi::cell_errors::CELL_ENOMEM.into());
         return;
     };
-    if attr_end > mem.len() {
-        ctx.set_return(CELL_EFAULT.into());
-        return;
-    }
-    let protocol = u32::from_be_bytes([
-        mem[attr_offset],
-        mem[attr_offset + 1],
-        mem[attr_offset + 2],
-        mem[attr_offset + 3],
-    ]);
-    let recursive = u32::from_be_bytes([
-        mem[attr_offset + 4],
-        mem[attr_offset + 5],
-        mem[attr_offset + 6],
-        mem[attr_offset + 7],
-    ]);
-
-    let sleep_queue = ctx
-        .alloc_id()
-        .expect("sys_lwmutex_create: HLE id counter exhausted");
 
     let mut buf = [0u8; 24];
     buf[0..4].copy_from_slice(&0xFFFF_FFFFu32.to_be_bytes());
     buf[8..12].copy_from_slice(&(recursive | protocol).to_be_bytes());
     buf[16..20].copy_from_slice(&sleep_queue.to_be_bytes());
 
-    // Bad mutex_ptr -> CELL_EFAULT, matching on-device trap-on-write.
+    let mut ctx = adapter(runtime, source, nid);
     match ctx.write_guest(mutex_ptr as u64, &buf) {
         Ok(()) => ctx.set_return(0),
         Err(_) => ctx.set_return(CELL_EFAULT.into()),
     }
+}
+
+/// Read the embedded `sleep_queue` id at offset 0x10 of an
+/// `sys_lwmutex_t` and dispatch the supplied `Lv2Request` through
+/// the LV2 lwmutex surface.
+fn lwmutex_route<F>(
+    runtime: &mut Runtime,
+    source: UnitId,
+    nid: u32,
+    args: &[u64; 9],
+    make_request: F,
+) where
+    F: FnOnce(u32, u64) -> cellgov_lv2::Lv2Request,
+{
+    let mutex_ptr = args[1] as u32;
+    let timeout = args[2];
+
+    let mem = runtime.memory.as_bytes();
+    let id_offset = (mutex_ptr as usize).saturating_add(0x10);
+    let Some(id_end) = id_offset.checked_add(4) else {
+        adapter(runtime, source, nid).set_return(CELL_EFAULT.into());
+        return;
+    };
+    if id_end > mem.len() {
+        adapter(runtime, source, nid).set_return(CELL_EFAULT.into());
+        return;
+    }
+    let id = u32::from_be_bytes([
+        mem[id_offset],
+        mem[id_offset + 1],
+        mem[id_offset + 2],
+        mem[id_offset + 3],
+    ]);
+
+    runtime.dispatch_lv2_request(make_request(id, timeout), source);
 }
 
 pub(crate) fn heap_create_heap(ctx: &mut dyn HleContext) {
@@ -392,5 +457,177 @@ mod canary_tests {
                 "sys::dispatch claimed NID {nid:#010x} that is not in its OWNED_NIDS"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod lwmutex_routing_tests {
+    use super::*;
+    use cellgov_event::UnitId;
+    use cellgov_exec::{FakeIsaUnit, FakeOp};
+    use cellgov_lv2::PpuThreadAttrs;
+    use cellgov_mem::GuestMemory;
+    use cellgov_ps3_abi::nid::sys_prx_for_user as sys_nid;
+    use cellgov_time::Budget;
+
+    /// 1 MiB guest memory + seeded primary PPU thread is enough for
+    /// lwmutex traffic from a single unit.
+    fn lwmutex_runtime() -> (Runtime, UnitId, u32) {
+        let mut rt = Runtime::new(GuestMemory::new(0x10_0000), Budget::new(1), 100);
+        let unit_id = UnitId::new(0);
+        rt.registry_mut()
+            .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+        rt.set_hle_heap_base(0x10000);
+        rt.lv2_host_mut().seed_primary_ppu_thread(
+            unit_id,
+            PpuThreadAttrs {
+                entry: 0x1000,
+                arg: 0,
+                stack_base: 0xD000_0000,
+                stack_size: 0x10000,
+                priority: 1000,
+                tls_base: 0,
+            },
+        );
+        // mutex_ptr at 0x40000, attr_ptr at 0x40100. 24-byte mutex,
+        // 8-byte attribute (zero protocol + non-recursive).
+        let mutex_ptr: u32 = 0x40000;
+        (rt, unit_id, mutex_ptr)
+    }
+
+    fn create_args(mutex_ptr: u32) -> [u64; 9] {
+        let attr_ptr: u32 = 0x40100;
+        [0, mutex_ptr as u64, attr_ptr as u64, 0, 0, 0, 0, 0, 0]
+    }
+
+    fn ptr_args(mutex_ptr: u32) -> [u64; 9] {
+        [0, mutex_ptr as u64, 0, 0, 0, 0, 0, 0, 0]
+    }
+
+    fn dispatch_and_drain(rt: &mut Runtime, unit: UnitId, nid: u32, args: &[u64; 9]) -> u64 {
+        let routed = dispatch(rt, unit, nid, args);
+        assert_eq!(routed, Some(()), "NID {nid:#010x} dispatch returned None");
+        rt.registry_mut()
+            .drain_syscall_return(unit)
+            .expect("dispatch should have set a syscall return")
+    }
+
+    #[test]
+    fn create_lock_unlock_destroy_single_thread() {
+        let (mut rt, unit, mutex_ptr) = lwmutex_runtime();
+        let args = create_args(mutex_ptr);
+        assert_eq!(
+            dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_CREATE, &args),
+            0
+        );
+        assert_eq!(rt.lv2_host().lwmutexes().len(), 1);
+
+        let args = ptr_args(mutex_ptr);
+        assert_eq!(
+            dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_LOCK, &args),
+            0
+        );
+        let id_bytes =
+            &rt.memory().as_bytes()[(mutex_ptr as usize + 0x10)..(mutex_ptr as usize + 0x14)];
+        let id = u32::from_be_bytes([id_bytes[0], id_bytes[1], id_bytes[2], id_bytes[3]]);
+        assert!(rt
+            .lv2_host()
+            .lwmutexes()
+            .lookup(id)
+            .unwrap()
+            .owner()
+            .is_some());
+
+        assert_eq!(
+            dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_UNLOCK, &args),
+            0
+        );
+        assert!(rt
+            .lv2_host()
+            .lwmutexes()
+            .lookup(id)
+            .unwrap()
+            .owner()
+            .is_none());
+
+        assert_eq!(
+            dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_DESTROY, &args),
+            0
+        );
+        assert_eq!(rt.lv2_host().lwmutexes().len(), 0);
+    }
+
+    #[test]
+    fn trylock_after_lock_returns_ebusy() {
+        let (mut rt, unit, mutex_ptr) = lwmutex_runtime();
+        dispatch_and_drain(
+            &mut rt,
+            unit,
+            sys_nid::LWMUTEX_CREATE,
+            &create_args(mutex_ptr),
+        );
+        let args = ptr_args(mutex_ptr);
+
+        assert_eq!(
+            dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_LOCK, &args),
+            0
+        );
+        // try_acquire returns Contended on any held mutex regardless
+        // of caller identity, mapped to CELL_EBUSY by the LV2 host.
+        let trylock_ret = dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_TRYLOCK, &args);
+        assert_eq!(
+            trylock_ret as u32,
+            cellgov_ps3_abi::cell_errors::CELL_EBUSY.code,
+        );
+    }
+
+    #[test]
+    fn destroy_while_held_returns_ebusy() {
+        let (mut rt, unit, mutex_ptr) = lwmutex_runtime();
+        dispatch_and_drain(
+            &mut rt,
+            unit,
+            sys_nid::LWMUTEX_CREATE,
+            &create_args(mutex_ptr),
+        );
+        let args = ptr_args(mutex_ptr);
+
+        dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_LOCK, &args);
+        let destroy_ret = dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_DESTROY, &args);
+        assert_eq!(
+            destroy_ret as u32,
+            cellgov_ps3_abi::cell_errors::CELL_EBUSY.code,
+        );
+    }
+
+    #[test]
+    fn lock_on_unknown_id_returns_esrch() {
+        let (mut rt, unit, mutex_ptr) = lwmutex_runtime();
+        // Hand-write a fake lwmutex struct at mutex_ptr with a
+        // never-allocated id at offset 0x10.
+        let mut buf = [0u8; 24];
+        buf[16..20].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
+        rt.memory_mut()
+            .apply_commit(
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(mutex_ptr as u64), 24)
+                    .unwrap(),
+                &buf,
+            )
+            .unwrap();
+
+        let lock_ret =
+            dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_LOCK, &ptr_args(mutex_ptr));
+        assert_eq!(
+            lock_ret as u32,
+            cellgov_ps3_abi::cell_errors::CELL_ESRCH.code,
+        );
+    }
+
+    #[test]
+    fn create_with_oob_attr_ptr_returns_efault() {
+        let (mut rt, unit, mutex_ptr) = lwmutex_runtime();
+        let args: [u64; 9] = [0, mutex_ptr as u64, 0xFFFF_FFFF, 0, 0, 0, 0, 0, 0];
+        let ret = dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_CREATE, &args);
+        assert_eq!(ret as u32, CELL_EFAULT.code);
     }
 }
