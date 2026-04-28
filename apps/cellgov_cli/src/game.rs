@@ -167,6 +167,12 @@ pub fn run_game(opts: RunGameOptions<'_>) {
     if prov > 0 {
         println!("provisional_reads: {prov} (reserved RSX/SPU regions returned zero)");
     }
+    let displacements = rt.syscall_responses().displacement_count();
+    if displacements > 0 {
+        println!(
+            "syscall_response_displacements: {displacements} (pending wake responses overwritten before drain; lost r3 + out-pointer writes)"
+        );
+    }
     if tty_oob_count > 0 {
         println!(
             "tty_oob_captures_dropped: {tty_oob_count} (sys_tty_write calls whose buffer overflowed guest memory)"
