@@ -96,11 +96,11 @@ pub mod layout {
     pub const OFF_PPU1: u32 = 0xD28;
     /// `spuTG` (SPU thread group id).
     pub const OFF_SPU_TG: u32 = 0xD30;
-    /// `spus` (8 * be_t<u32>).
+    /// `spus` (8 * `be_t<u32>`).
     pub const OFF_SPUS: u32 = 0xD34;
-    /// `enableEH` (atomic_be_t<u32>).
+    /// `enableEH` (`atomic_be_t<u32>`).
     pub const OFF_ENABLE_EH: u32 = 0xD68;
-    /// `exception` (be_t<u32>) -- set on SPURS exception.
+    /// `exception` (`be_t<u32>`) -- set on SPURS exception.
     pub const OFF_EXCEPTION: u32 = 0xD6C;
     /// `flags` (u32).
     pub const OFF_FLAGS: u32 = 0xD80;
@@ -116,13 +116,13 @@ pub mod layout {
     pub const OFF_REVISION: u32 = 0xDA0;
     /// `sdkVersion` (u32).
     pub const OFF_SDK_VERSION: u32 = 0xDA4;
-    /// `spuPortBits` (atomic_be_t<u64>).
+    /// `spuPortBits` (`atomic_be_t<u64>`).
     pub const OFF_SPU_PORT_BITS: u32 = 0xDA8;
     /// `eventPortMux` substruct (128 bytes).
     pub const OFF_EVENT_PORT_MUX: u32 = 0xF00;
-    /// `globalSpuExceptionHandler` (atomic_be_t<u64>).
+    /// `globalSpuExceptionHandler` (`atomic_be_t<u64>`).
     pub const OFF_GLOBAL_EXCEPTION_HANDLER: u32 = 0xF80;
-    /// `globalSpuExceptionHandlerArgs` (be_t<u64>).
+    /// `globalSpuExceptionHandlerArgs` (`be_t<u64>`).
     pub const OFF_GLOBAL_EXCEPTION_HANDLER_ARGS: u32 = 0xF88;
 }
 
@@ -212,7 +212,7 @@ pub mod info_layout {
     pub const OFF_EXIT_IF_NO_WORK: u32 = 0x0C;
     /// `spurs2` (u8 boolean).
     pub const OFF_SPURS2: u32 = 0x0D;
-    /// `traceBuffer` (vm::bptr<void>) -- 4-byte BE pointer.
+    /// `traceBuffer` (`vm::bptr<void>`) -- 4-byte BE pointer.
     pub const OFF_TRACE_BUFFER: u32 = 0x10;
     /// `traceBufferSize` (u32).
     pub const OFF_TRACE_BUFFER_SIZE: u32 = 0x18;
@@ -220,7 +220,7 @@ pub mod info_layout {
     pub const OFF_TRACE_MODE: u32 = 0x20;
     /// `spuThreadGroup` (u32).
     pub const OFF_SPU_THREAD_GROUP: u32 = 0x24;
-    /// `spuThreads[8]` (8 * be_t<u32>).
+    /// `spuThreads[8]` (8 * `be_t<u32>`).
     pub const OFF_SPU_THREADS: u32 = 0x28;
     /// `spursHandlerThread0` (u64).
     pub const OFF_SPURS_HANDLER_THREAD_0: u32 = 0x48;
@@ -238,9 +238,9 @@ pub mod info_layout {
 
 /// `EventPortMux` sub-block offsets (relative to `layout::OFF_EVENT_PORT_MUX`).
 pub mod event_port_mux_layout {
-    /// `spuPort` (be_t<u32>).
+    /// `spuPort` (`be_t<u32>`).
     pub const OFF_SPU_PORT: u32 = 0x04;
-    /// `eventPort` (be_t<u64>).
+    /// `eventPort` (`be_t<u64>`).
     pub const OFF_EVENT_PORT: u32 = 0x10;
 }
 

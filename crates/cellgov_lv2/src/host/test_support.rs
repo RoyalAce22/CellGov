@@ -50,6 +50,26 @@ impl Lv2Runtime for FakeRuntime {
     fn current_tick(&self) -> GuestTicks {
         self.tick
     }
+
+    fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]> {
+        let bytes = self.memory.as_bytes();
+        let start = addr as usize;
+        let end = start.checked_add(max_len)?.min(bytes.len());
+        if start >= bytes.len() {
+            return None;
+        }
+        let window = &bytes[start..end];
+        let nul_pos = window.iter().position(|&b| b == terminator)?;
+        Some(&window[..nul_pos])
+    }
+
+    fn writable(&self, addr: u64, len: usize) -> bool {
+        let Some(end) = (addr).checked_add(len as u64) else {
+            return false;
+        };
+        let bytes = self.memory.as_bytes();
+        end <= bytes.len() as u64
+    }
 }
 
 /// Extract the big-endian u32 payload from a `SharedWriteIntent`.
