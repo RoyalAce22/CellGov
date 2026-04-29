@@ -167,6 +167,9 @@ fn build_observation(
             runner: "rpcs3".into(),
             steps,
         },
+        // The bridge consumes RPCS3's magic-tagged region payload, not
+        // the surrounding TTY stream; left empty.
+        tty_log: Vec::new(),
     })
 }
 

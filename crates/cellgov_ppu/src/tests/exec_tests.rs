@@ -5,7 +5,7 @@
 //! `exec/<module>.rs::tests`.
 
 use super::*;
-use crate::exec::test_support::{exec_no_mem, exec_with_mem};
+use crate::exec::test_support::{exec_no_mem, exec_with_mem, uid};
 
 #[test]
 fn sc_returns_syscall() {
@@ -474,4 +474,100 @@ fn cmpw_bc_taken_matches_separate() {
     assert_eq!(v2, ExecuteVerdict::Branch);
     assert_eq!(s1.pc, s2.pc);
     assert_eq!(s2.pc, 0x1014);
+}
+
+#[test]
+fn ld_stitches_eight_byte_stbs_in_store_buffer() {
+    // Regression for PSL1GHT printf bug: _Litob writes the 8 ASCII
+    // hex digits to a stack buffer with 8 individual `stb`s, then
+    // `bl memcpy` reads them back with `ld`. A `forward()` that
+    // requires single-entry full coverage misses the load and falls
+    // through to pre-block memory (zeros) -- corrupting every printf
+    // that produces an 8-digit integer.
+    use crate::store_buffer::StoreBuffer;
+    let mut s = PpuState::new();
+    s.gpr[1] = 0x1000;
+    let mem = vec![0u8; 0x100];
+    let views: [(u64, &[u8]); 1] = [(0x1000, &mem)];
+    let mut effects = Vec::new();
+    let mut store_buf = StoreBuffer::new();
+
+    let bytes = [b'1', b'0', b'0', b'0', b'0', b'0', b'0', b'0'];
+    for (i, b) in bytes.iter().enumerate() {
+        s.gpr[3] = *b as u64;
+        let v = execute(
+            &PpuInstruction::Stb {
+                rs: 3,
+                ra: 1,
+                imm: i as i16,
+            },
+            &mut s,
+            uid(),
+            &views,
+            &mut effects,
+            &mut store_buf,
+        );
+        assert_eq!(v, ExecuteVerdict::Continue, "stb #{i}");
+    }
+    assert_eq!(store_buf.len(), 8);
+
+    let v = execute(
+        &PpuInstruction::Ld {
+            rt: 4,
+            ra: 1,
+            imm: 0,
+        },
+        &mut s,
+        uid(),
+        &views,
+        &mut effects,
+        &mut store_buf,
+    );
+    assert_eq!(v, ExecuteVerdict::Continue);
+    assert_eq!(s.gpr[4], 0x3130303030303030);
+}
+
+#[test]
+fn ld_overlays_partial_store_onto_pre_block_memory() {
+    // A buffered store covers bytes [4, 8) of an 8-byte load; the
+    // other 4 bytes come from committed memory. Stitching must mix
+    // the two sources, not pick one.
+    use crate::store_buffer::StoreBuffer;
+    let mut s = PpuState::new();
+    s.gpr[1] = 0x1000;
+    let mut mem = vec![0u8; 0x100];
+    mem[0..8].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44]);
+    let views: [(u64, &[u8]); 1] = [(0x1000, &mem)];
+    let mut effects = Vec::new();
+    let mut store_buf = StoreBuffer::new();
+
+    s.gpr[3] = 0xDEAD_BEEF;
+    let v = execute(
+        &PpuInstruction::Stw {
+            rs: 3,
+            ra: 1,
+            imm: 4,
+        },
+        &mut s,
+        uid(),
+        &views,
+        &mut effects,
+        &mut store_buf,
+    );
+    assert_eq!(v, ExecuteVerdict::Continue);
+
+    let v = execute(
+        &PpuInstruction::Ld {
+            rt: 4,
+            ra: 1,
+            imm: 0,
+        },
+        &mut s,
+        uid(),
+        &views,
+        &mut effects,
+        &mut store_buf,
+    );
+    assert_eq!(v, ExecuteVerdict::Continue);
+    assert_eq!(s.gpr[4], 0xAABB_CCDD_DEAD_BEEF);
 }

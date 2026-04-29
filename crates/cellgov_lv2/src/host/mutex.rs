@@ -48,6 +48,26 @@ impl Lv2Host {
         self.immediate_write_u32(id, id_ptr, requester)
     }
 
+    pub(super) fn dispatch_mutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
+        let Some(entry) = self.mutexes.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_ESRCH.into(),
+                effects: vec![],
+            };
+        };
+        if entry.owner().is_some() || !entry.waiters().is_empty() {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EBUSY.into(),
+                effects: vec![],
+            };
+        }
+        self.mutexes.destroy(id);
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![],
+        }
+    }
+
     pub(super) fn dispatch_mutex_lock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {

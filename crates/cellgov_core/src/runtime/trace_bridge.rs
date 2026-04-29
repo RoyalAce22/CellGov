@@ -56,14 +56,14 @@ pub(super) struct MemoryView<'a> {
 
 impl Lv2Runtime for MemoryView<'_> {
     fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
-        let bytes = self.memory.as_bytes();
-        let start = addr as usize;
-        let end = start.checked_add(len)?;
-        if end <= bytes.len() {
-            Some(&bytes[start..end])
-        } else {
-            None
-        }
+        // Region-aware: addresses outside the main region (stacks,
+        // child stacks, RSX, SPU-reserved) are still valid for the
+        // host to inspect. Linear `.as_bytes()` only covers main, so
+        // route through `GuestMemory::read` which handles the
+        // multi-region layout.
+        use cellgov_mem::ByteRange;
+        let range = ByteRange::new(cellgov_mem::GuestAddr::new(addr), len as u64)?;
+        self.memory.read(range)
     }
 
     fn current_tick(&self) -> GuestTicks {

@@ -15,9 +15,21 @@ const MAX_PATH_LEN: usize = 1024;
 /// `O_CREAT` bit in PS3 LV2 oflag.
 const O_CREAT: u32 = 0x4;
 
+/// Paths whose `sys_fs_open` succeeds with a synthetic descriptor.
+/// Real CellGov has no virtual filesystem; the whitelist exists so
+/// PSL1GHT-test ELFs that probe the host's fs surface (presence of
+/// `PARAM.SFO`, fopen / fclose plumbing, write-to-output.txt
+/// fixtures) progress past their checks. The fd value is non-zero
+/// but otherwise unspecified; `sys_fs_read` is not modeled and
+/// `sys_fs_write` redirects bytes to the host's `tty_log` so the
+/// harness can compare the captured stream against the test's
+/// `.expected` file regardless of whether the test wrote via TTY or
+/// via fopen.
+const FS_OPEN_WHITELIST: &[&[u8]] = &[b"/app_home/PARAM.SFO", b"/app_home/output.txt"];
+
 impl Lv2Host {
     pub(super) fn dispatch_fs_open(
-        &self,
+        &mut self,
         path_ptr: u32,
         flags: u32,
         fd_out_ptr: u32,
@@ -54,6 +66,26 @@ impl Lv2Host {
         // embed UTF-8 / Shift-JIS, so lossy decode is the only
         // correct shape for the log.
         let path_str = String::from_utf8_lossy(&path_bytes_owned);
+
+        if FS_OPEN_WHITELIST.contains(&path_bytes_owned.as_slice()) {
+            // Whitelist hit: allocate a synthetic fd, increment the
+            // open-fd counter, write the fd back to the guest.
+            let fd = self.alloc_id();
+            self.fs_fd_count_inc();
+            let write = Effect::SharedWriteIntent {
+                range: ByteRange::new(GuestAddr::new(fd_out_ptr as u64), 4)
+                    .expect("fd_out_ptr range u32 fits in u64"),
+                bytes: WritePayload::from_slice(&fd.to_be_bytes()),
+                ordering: PriorityClass::Normal,
+                source: requester,
+                source_time: rt.current_tick(),
+            };
+            return Lv2Dispatch::Immediate {
+                code: 0,
+                effects: vec![write],
+            };
+        }
+
         if flags & O_CREAT != 0 {
             eprintln!(
                 "sys_fs_open: INVARIANT-BREAK O_CREAT requested for {path_str:?} \

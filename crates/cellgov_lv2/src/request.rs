@@ -119,6 +119,11 @@ pub enum Lv2Request {
         /// Attribute struct (opaque).
         attr_ptr: u32,
     },
+    /// sys_mutex_destroy (101).
+    MutexDestroy {
+        /// Mutex id.
+        mutex_id: u32,
+    },
     /// sys_mutex_lock (102).
     MutexLock {
         /// Mutex id.
@@ -269,6 +274,20 @@ pub enum Lv2Request {
         /// Out-pointer for the observed bit pattern.
         result_ptr: u32,
     },
+    /// sys_event_flag_cancel (132).
+    EventFlagCancel {
+        /// Event flag id.
+        id: u32,
+        /// Out-pointer for the count of woken waiters; may be 0 (NULL).
+        num_ptr: u32,
+    },
+    /// sys_event_flag_get (139).
+    EventFlagGet {
+        /// Event flag id.
+        id: u32,
+        /// Out-pointer for the current bit pattern.
+        flags_ptr: u32,
+    },
     /// sys_event_queue_tryreceive (133).
     EventQueueTryReceive {
         /// Queue id.
@@ -311,6 +330,79 @@ pub enum Lv2Request {
         /// Exit code.
         code: u32,
     },
+    /// sys_process_getpid (1).
+    ProcessGetPid,
+    /// sys_process_get_number_of_object (12).
+    ProcessGetNumberOfObject {
+        /// Object class id from `sys_process.h`'s `SYS_*_OBJECT` enum.
+        class_id: u32,
+        /// Out-pointer for the count (size_t, written as 64-bit BE).
+        count_out_ptr: u32,
+    },
+    /// sys_process_getppid (18).
+    ProcessGetPpid,
+    /// sys_process_get_sdk_version (25).
+    ProcessGetSdkVersion {
+        /// Target PID (we model a single-process world; ignored).
+        pid: u32,
+        /// Out-pointer for the SDK version (s32, written as 32-bit BE).
+        version_out_ptr: u32,
+    },
+    /// `_sys_process_get_paramsfo` (30). Writes a 64-byte SFO header
+    /// blob to the caller's buffer.
+    ProcessGetParamsfo {
+        /// Out-pointer for the 64-byte SFO blob.
+        buf_ptr: u32,
+    },
+    /// sys_process_get_ppu_guid (31).
+    ProcessGetPpuGuid,
+    /// sys_timer_create (70). CellGov tracks the live count for
+    /// `sys_process_get_number_of_object` but does not model timer
+    /// expiry semantics; the id is allocated and write-back-fired.
+    TimerCreate {
+        /// Out-pointer for the timer id.
+        id_ptr: u32,
+    },
+    /// sys_timer_destroy (71).
+    TimerDestroy {
+        /// Timer id (currently unused; just decrements the count).
+        id: u32,
+    },
+    /// sys_rwlock_create (120). Stub: id allocator with live-count
+    /// tracking; no read/write contention modeling.
+    RwlockCreate {
+        /// Out-pointer for the rwlock id.
+        id_ptr: u32,
+        /// Attribute struct (opaque).
+        attr_ptr: u32,
+    },
+    /// sys_rwlock_destroy (121).
+    RwlockDestroy {
+        /// Rwlock id.
+        id: u32,
+    },
+    /// sys_event_port_create (134). Stub: id allocator with
+    /// live-count tracking.
+    EventPortCreate {
+        /// Out-pointer for the event-port id.
+        id_ptr: u32,
+        /// Port type (`SYS_EVENT_PORT_LOCAL` etc; opaque to the stub).
+        port_type: u32,
+        /// Port name (opaque).
+        name: u64,
+    },
+    /// sys_event_port_destroy (135).
+    EventPortDestroy {
+        /// Event-port id.
+        id: u32,
+    },
+    /// sys_process_is_stack (NID 0x4f7172c9, sysPrxForUser dispatch).
+    /// Listed here for completeness; the NID handler does the
+    /// region check rather than going through this variant.
+    ProcessIsStack {
+        /// Guest pointer to test for membership in any stack region.
+        addr: u32,
+    },
     /// sys_ppu_thread_yield (43).
     PpuThreadYield,
     /// sys_ppu_thread_exit (41).
@@ -339,8 +431,12 @@ pub enum Lv2Request {
     },
     /// sys_lwmutex_lock (97).
     LwMutexLock {
-        /// Lwmutex id.
+        /// Lwmutex id (the kernel-side `sleep_queue`).
         id: u32,
+        /// User-space `sys_lwmutex_t` address. Captured by the
+        /// host so the post-wake handler can update the owner /
+        /// recursive_count / waiter fields.
+        mutex_ptr: u32,
         /// Timeout in microseconds; 0 means infinite. Ignored.
         timeout: u64,
     },
@@ -366,6 +462,27 @@ pub enum Lv2Request {
         /// Mode bits (only consulted when the path matches the
         /// whitelist; ignored under the minimal handler).
         mode: u32,
+    },
+    /// sys_fs_close (804). Stub: decrements the live-fd counter for
+    /// `sys_process_get_number_of_object` and returns CELL_OK.
+    FsClose {
+        /// File descriptor.
+        fd: u32,
+    },
+    /// sys_fs_write (803). Reads `size` bytes from `buf_ptr` and
+    /// appends them to the host's `tty_log` so the ps3autotests
+    /// harness can compare against `<test>.expected` whether the
+    /// test wrote via printf (TTY) or fprintf (output.txt).
+    FsWrite {
+        /// File descriptor (unused; treated as the unified
+        /// write-stream).
+        fd: u32,
+        /// Source buffer.
+        buf_ptr: u32,
+        /// Byte count.
+        size: u32,
+        /// Out-pointer for `nwrite` (bytes actually written).
+        nwrite_ptr: u32,
     },
     /// sys_cond_create (105).
     CondCreate {
@@ -604,6 +721,31 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             nwritten_ptr: p!(3),
         },
         syscall::PROCESS_EXIT => Lv2Request::ProcessExit { code: p!(0) },
+        syscall::PROCESS_GETPID => Lv2Request::ProcessGetPid,
+        syscall::PROCESS_GET_NUMBER_OF_OBJECT => Lv2Request::ProcessGetNumberOfObject {
+            class_id: p!(0),
+            count_out_ptr: p!(1),
+        },
+        syscall::PROCESS_GETPPID => Lv2Request::ProcessGetPpid,
+        syscall::PROCESS_GET_SDK_VERSION => Lv2Request::ProcessGetSdkVersion {
+            pid: p!(0),
+            version_out_ptr: p!(1),
+        },
+        syscall::PROCESS_GET_PARAMSFO => Lv2Request::ProcessGetParamsfo { buf_ptr: p!(0) },
+        syscall::PROCESS_GET_PPU_GUID => Lv2Request::ProcessGetPpuGuid,
+        syscall::TIMER_CREATE => Lv2Request::TimerCreate { id_ptr: p!(0) },
+        syscall::TIMER_DESTROY => Lv2Request::TimerDestroy { id: p!(0) },
+        syscall::RWLOCK_CREATE => Lv2Request::RwlockCreate {
+            id_ptr: p!(0),
+            attr_ptr: p!(1),
+        },
+        syscall::RWLOCK_DESTROY => Lv2Request::RwlockDestroy { id: p!(0) },
+        syscall::EVENT_PORT_CREATE => Lv2Request::EventPortCreate {
+            id_ptr: p!(0),
+            port_type: p!(1),
+            name: args[2],
+        },
+        syscall::EVENT_PORT_DESTROY => Lv2Request::EventPortDestroy { id: p!(0) },
         syscall::PPU_THREAD_YIELD => Lv2Request::PpuThreadYield,
         syscall::PPU_THREAD_EXIT => Lv2Request::PpuThreadExit {
             exit_value: args[0],
@@ -654,10 +796,20 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
         syscall::LWMUTEX_DESTROY => Lv2Request::LwMutexDestroy { id: p!(0) },
         syscall::LWMUTEX_LOCK => Lv2Request::LwMutexLock {
             id: p!(0),
+            // The raw `sys_lwmutex_lock` LV2 syscall does not carry a
+            // user-space struct pointer; only the HLE wrapper does.
+            mutex_ptr: 0,
             timeout: args[1],
         },
         syscall::LWMUTEX_UNLOCK => Lv2Request::LwMutexUnlock { id: p!(0) },
         syscall::LWMUTEX_TRYLOCK => Lv2Request::LwMutexTryLock { id: p!(0) },
+        syscall::FS_CLOSE => Lv2Request::FsClose { fd: p!(0) },
+        syscall::FS_WRITE => Lv2Request::FsWrite {
+            fd: p!(0),
+            buf_ptr: p!(1),
+            size: p!(2),
+            nwrite_ptr: p!(3),
+        },
         syscall::FS_OPEN => Lv2Request::FsOpen {
             path_ptr: p!(0),
             flags: p!(1),
@@ -668,6 +820,7 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
             id_ptr: p!(0),
             attr_ptr: p!(1),
         },
+        syscall::MUTEX_DESTROY => Lv2Request::MutexDestroy { mutex_id: p!(0) },
         syscall::MUTEX_LOCK => Lv2Request::MutexLock {
             mutex_id: p!(0),
             timeout: args[1],
@@ -732,6 +885,14 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
         syscall::EVENT_FLAG_CLEAR => Lv2Request::EventFlagClear {
             id: p!(0),
             bits: args[1],
+        },
+        syscall::EVENT_FLAG_CANCEL => Lv2Request::EventFlagCancel {
+            id: p!(0),
+            num_ptr: p!(1),
+        },
+        syscall::EVENT_FLAG_GET => Lv2Request::EventFlagGet {
+            id: p!(0),
+            flags_ptr: p!(1),
         },
         syscall::EVENT_QUEUE_TRY_RECEIVE => Lv2Request::EventQueueTryReceive {
             queue_id: p!(0),
@@ -1053,6 +1214,7 @@ mod tests {
             classify(97, &args),
             Lv2Request::LwMutexLock {
                 id: 7,
+                mutex_ptr: 0,
                 timeout: 100
             }
         );

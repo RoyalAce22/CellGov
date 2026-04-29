@@ -49,6 +49,10 @@ pub enum BootOutcome {
 /// State hashes are `None`: the boot path does not retain the per-step
 /// hashes the scenario runner accumulates.
 ///
+/// `tty_log` is the captured `sys_tty_write` byte stream from the
+/// boot's `Lv2Host`; pass an empty slice when the caller has no TTY
+/// data to record.
+///
 /// Outcome mapping:
 /// - `ProcessExit`, `RsxWriteCheckpoint`, `PcReached` -> `Completed`
 /// - `MaxSteps`, `TimeOverflow` -> `Timeout`
@@ -58,6 +62,7 @@ pub fn observe_from_boot(
     outcome: BootOutcome,
     steps_taken: usize,
     regions: &[RegionDescriptor],
+    tty_log: &[u8],
 ) -> Observation {
     let observed_outcome = match outcome {
         BootOutcome::ProcessExit => ObservedOutcome::Completed,
@@ -95,6 +100,7 @@ pub fn observe_from_boot(
             runner: "cellgov-boot".into(),
             steps: Some(steps_taken),
         },
+        tty_log: tty_log.to_vec(),
     }
 }
 
@@ -146,6 +152,9 @@ pub fn observe(result: &ScenarioResult, regions: &[RegionDescriptor]) -> Observa
             runner: "cellgov".into(),
             steps: Some(result.steps_taken),
         },
+        // Scenario runner has no LV2 host with a TTY surface; left
+        // empty until we add structural-test TTY capture.
+        tty_log: Vec::new(),
     }
 }
 
@@ -379,26 +388,27 @@ mod tests {
     #[test]
     fn observe_from_boot_maps_process_exit_to_completed() {
         let mem = vec![0u8; 16];
-        let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1000, &[]);
+        let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1000, &[], &[]);
         assert_eq!(obs.outcome, ObservedOutcome::Completed);
         assert_eq!(obs.metadata.runner, "cellgov-boot");
         assert_eq!(obs.metadata.steps, Some(1000));
         assert!(obs.state_hashes.is_none());
+        assert!(obs.tty_log.is_empty());
     }
 
     #[test]
     fn observe_from_boot_maps_fault_and_max_steps() {
         let mem = vec![0u8; 16];
-        let fault = observe_from_boot(&mem, BootOutcome::Fault, 50, &[]);
+        let fault = observe_from_boot(&mem, BootOutcome::Fault, 50, &[], &[]);
         assert_eq!(fault.outcome, ObservedOutcome::Fault);
-        let timeout = observe_from_boot(&mem, BootOutcome::MaxSteps, 100_000, &[]);
+        let timeout = observe_from_boot(&mem, BootOutcome::MaxSteps, 100_000, &[], &[]);
         assert_eq!(timeout.outcome, ObservedOutcome::Timeout);
     }
 
     #[test]
     fn observe_from_boot_maps_pc_reached_to_completed() {
         let mem = vec![0u8; 16];
-        let obs = observe_from_boot(&mem, BootOutcome::PcReached(0x10381ce8), 1402388, &[]);
+        let obs = observe_from_boot(&mem, BootOutcome::PcReached(0x10381ce8), 1402388, &[], &[]);
         assert_eq!(obs.outcome, ObservedOutcome::Completed);
         assert_eq!(obs.metadata.steps, Some(1402388));
     }
@@ -406,7 +416,7 @@ mod tests {
     #[test]
     fn observe_from_boot_maps_rsx_write_checkpoint_to_completed() {
         let mem = vec![0u8; 16];
-        let obs = observe_from_boot(&mem, BootOutcome::RsxWriteCheckpoint, 12_345, &[]);
+        let obs = observe_from_boot(&mem, BootOutcome::RsxWriteCheckpoint, 12_345, &[], &[]);
         assert_eq!(obs.outcome, ObservedOutcome::Completed);
         assert_eq!(obs.metadata.steps, Some(12_345));
     }
@@ -427,9 +437,17 @@ mod tests {
                 size: 16,
             },
         ];
-        let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1, &regions);
+        let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1, &regions, &[]);
         assert_eq!(obs.memory_regions.len(), 2);
         assert_eq!(obs.memory_regions[0].data, vec![1, 2, 3, 4, 5, 6, 7, 8]);
         assert_eq!(obs.memory_regions[1].data, vec![0u8; 16]);
+    }
+
+    #[test]
+    fn observe_from_boot_passes_tty_log_through() {
+        let mem = vec![0u8; 16];
+        let tty = b"hello world\n";
+        let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1, &[], tty);
+        assert_eq!(obs.tty_log, tty);
     }
 }

@@ -57,11 +57,25 @@ pub enum Lv2Dispatch {
     /// Joiners hold a [`PendingResponse::PpuThreadJoin`]; the wake
     /// writes `exit_value` (u64 BE) to the joiner's `status_out_ptr`
     /// and sets r3 = 0. The source's r3 is not written.
+    ///
+    /// `lwmutex_inheritors` carries any peers that were parked on
+    /// kernel-side lwmutex sleep queues whose held lwmutexes were
+    /// implicitly transferred by the exit (one transfer per lwmutex
+    /// with a non-empty waiter list, in id order). Each entry's
+    /// pending [`PendingResponse::LwMutexWake`] is resolved via the
+    /// usual sync-wake path. Real PS3 strands these waiters; the
+    /// transfer is a deterministic-oracle simplification so a guest
+    /// printf that returns to `sys_ppu_thread_exit` without
+    /// flushing its stdio lock still allows other threads to make
+    /// progress.
     PpuThreadExit {
         /// Delivered to joiners via their `status_out_ptr`.
         exit_value: u64,
         /// Joiners to transition Blocked -> Runnable.
         woken_unit_ids: Vec<UnitId>,
+        /// Sync-primitive waiters that inherited a held lwmutex on
+        /// thread exit; resolved via `resolve_sync_wakes`.
+        lwmutex_inheritors: Vec<UnitId>,
         /// Effects to commit.
         effects: Vec<Effect>,
     },
@@ -324,6 +338,20 @@ pub enum PendingResponse {
         /// Which mutex table `mutex_id` names (distinct id spaces).
         mutex_kind: CondMutexKind,
     },
+    /// On wake, claim ownership of the user-space `sys_lwmutex_t`:
+    /// write `owner = caller`, `recursive_count = 1`, decrement the
+    /// `waiter` field, and set r3 = 0.
+    ///
+    /// `mutex_ptr == 0` means the raw LV2 syscall path was used (no
+    /// user-space struct), and the wake just sets r3 = 0.
+    LwMutexWake {
+        /// User-space `sys_lwmutex_t` address (offset 0 = owner,
+        /// offset 4 = waiter, offset 12 = recursive_count).
+        mutex_ptr: u32,
+        /// Caller's PSL1GHT thread id (low 32 bits of `PpuThreadId`),
+        /// written into the user-space owner slot.
+        caller: u32,
+    },
 }
 
 impl PendingResponse {
@@ -338,6 +366,7 @@ impl PendingResponse {
             PendingResponse::EventQueueReceive { .. } => 3,
             PendingResponse::EventFlagWake { .. } => 4,
             PendingResponse::CondWakeReacquire { .. } => 5,
+            PendingResponse::LwMutexWake { .. } => 6,
         }
     }
 }
@@ -402,6 +431,11 @@ mod tests {
             PendingResponse::CondWakeReacquire {
                 mutex_id: 0,
                 mutex_kind: CondMutexKind::LwMutex,
+            }
+            .variant_tag(),
+            PendingResponse::LwMutexWake {
+                mutex_ptr: 0,
+                caller: 0,
             }
             .variant_tag(),
         ];

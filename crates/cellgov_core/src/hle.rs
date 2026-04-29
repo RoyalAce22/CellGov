@@ -822,7 +822,10 @@ mod tests {
     }
 
     #[test]
-    fn sys_time_get_system_time_returns_nonzero_monotonic() {
+    fn sys_time_get_system_time_returns_microseconds_from_guest_clock() {
+        // Microseconds since boot, derived from `runtime.time()`
+        // (1 tick = 1 ns -> us = ticks / 1000). At t=0 the call
+        // returns 0; advancing the guest clock advances the result.
         use crate::runtime::Runtime;
         use cellgov_mem::GuestMemory;
         use cellgov_time::Budget;
@@ -835,8 +838,6 @@ mod tests {
 
         let args: [u64; 9] = [0; 9];
         rt.dispatch_hle(unit_id, sys_nid::TIME_GET_SYSTEM_TIME, &args);
-
-        let ret = rt.registry_mut().drain_syscall_return(unit_id);
-        assert_eq!(ret, Some(1_000_000));
+        assert_eq!(rt.registry_mut().drain_syscall_return(unit_id), Some(0));
     }
 }

@@ -19,6 +19,8 @@ pub mod sys_prx_for_user {
     crate::nid_const!(LWMUTEX_UNLOCK = 0x1bc2_00f4, "sys_lwmutex_unlock");
     crate::nid_const!(LWMUTEX_DESTROY = 0xc347_6d0c, "sys_lwmutex_destroy");
     crate::nid_const!(LWMUTEX_TRYLOCK = 0xaeb7_8725, "sys_lwmutex_trylock");
+    crate::nid_const!(LWCOND_CREATE = 0xda0e_b71a, "sys_lwcond_create");
+    crate::nid_const!(LWCOND_DESTROY = 0x1c9a_942c, "sys_lwcond_destroy");
     crate::nid_const!(PROCESS_IS_STACK = 0x4f71_72c9, "sys_process_is_stack");
     crate::nid_const!(
         PRX_EXITSPAWN_WITH_LEVEL = 0xa2c7_ba64,
@@ -51,6 +53,8 @@ pub mod sys_prx_for_user {
         LWMUTEX_LOCK,
         LWMUTEX_UNLOCK,
         LWMUTEX_TRYLOCK,
+        LWCOND_CREATE,
+        LWCOND_DESTROY,
         HEAP_CREATE_HEAP,
         HEAP_DELETE_HEAP,
         HEAP_MALLOC,
@@ -292,6 +296,9 @@ pub fn stub_classification(nid: u32) -> StubClass {
         | sys::LWMUTEX_DESTROY
         | sys::LWMUTEX_UNLOCK
         | sys::LWMUTEX_TRYLOCK => StubClass::Stateful,
+        // Lightweight cond family: count-only stubs today, but the
+        // count itself is observable state.
+        sys::LWCOND_CREATE | sys::LWCOND_DESTROY => StubClass::Stateful,
         // Time / thread / process queries.
         sys::TIME_GET_SYSTEM_TIME
         | sys::PPU_THREAD_GET_ID

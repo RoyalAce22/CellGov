@@ -1,4 +1,16 @@
-//! Lightweight mutex table.
+//! Lightweight mutex sleep queue.
+//!
+//! Models the kernel-side primitive only: a `signaled` flag plus a
+//! FIFO waiter list. PSL1GHT (and the PS3 SDK static-libc) tracks
+//! owner / recursion / waiter count in the user-space `sys_lwmutex_t`
+//! struct and only invokes the kernel for actual contention; the
+//! kernel-side object therefore mirrors RPCS3's `lv2_lwmutex`
+//! (`signaled` + sleep queue), not a full mutex with ownership.
+//!
+//! Initial state of a fresh entry is `signaled = true`: the first
+//! lock-call to land in the kernel consumes the signal and returns
+//! without blocking, matching real PS3 behaviour where a freshly
+//! created lwmutex is takeable.
 //!
 //! Ids are minted monotonically by [`LwMutexIdAllocator`]. The
 //! id space is distinct from the heavy mutex table.
@@ -10,21 +22,20 @@ use std::collections::BTreeMap;
 /// Outcome of a `try_acquire` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LwMutexAcquire {
-    /// Caller is now the owner.
+    /// The signal was consumed; caller proceeds without blocking.
     Acquired,
-    /// Mutex is owned.
+    /// No signal pending.
     Contended,
 }
 
 /// Outcome of an `acquire_or_enqueue` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LwMutexAcquireOrEnqueue {
-    /// Caller is now the owner.
+    /// Signal consumed; caller proceeds without blocking.
     Acquired,
-    /// Caller was appended to the waiter list.
+    /// Caller was appended to the waiter list and must block.
     Enqueued,
-    /// Caller already holds the mutex or is already parked
-    /// (non-recursive).
+    /// Caller is already parked on this mutex; dispatch-layer bug.
     WouldDeadlock,
     /// Unknown id.
     Unknown,
@@ -33,15 +44,14 @@ pub enum LwMutexAcquireOrEnqueue {
 /// Outcome of a `release_and_wake_next` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LwMutexRelease {
-    /// Mutex is now unowned; no waiter was woken.
-    Freed,
+    /// Sleep queue was empty; the signal was set so the next lock
+    /// will pass without blocking.
+    Signaled,
     /// Ownership transferred to `new_owner`; caller must wake it.
     Transferred {
-        /// Thread that just became the owner.
+        /// Thread that was at the head of the sleep queue.
         new_owner: PpuThreadId,
     },
-    /// Caller did not own the mutex.
-    NotOwner,
     /// Unknown id.
     Unknown,
 }
@@ -56,30 +66,39 @@ pub enum LwMutexEnqueueError {
     UnknownId,
     /// Thread is already on the waiter list.
     DuplicateWaiter,
-    /// Thread currently owns this mutex; parking would strand
-    /// it. Dispatch must surface recursive locks through
-    /// [`LwMutexAcquireOrEnqueue::WouldDeadlock`].
-    WaiterIsOwner,
 }
 
 /// A single lightweight mutex.
+///
+/// `signaled` is the binary "wake pending" flag set by an unlock
+/// against an empty sleep queue and consumed by the next lock.
+/// PSL1GHT-side ownership and recursion tracking live in the
+/// guest's `sys_lwmutex_t` struct, not here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LwMutexEntry {
-    owner: Option<PpuThreadId>,
+    signaled: bool,
     waiters: WaiterList,
 }
 
 impl LwMutexEntry {
     fn new() -> Self {
+        // A freshly created lwmutex starts un-signaled. The HLE
+        // wrapper for `sys_lwmutex_lock` only invokes the kernel
+        // on actual contention (its user-space CAS already covers
+        // the uncontended case), so a kernel-side `acquire` always
+        // means "block until the holder posts a wake". Starting
+        // `signaled = true` would silently break that invariant by
+        // letting the very first contender skip the queue while
+        // the holder still owns the user-space struct.
         Self {
-            owner: None,
+            signaled: false,
             waiters: WaiterList::new(),
         }
     }
 
-    /// Current owner, or `None` if free.
-    pub fn owner(&self) -> Option<PpuThreadId> {
-        self.owner
+    /// Whether a wake is pending for the next lock-call.
+    pub fn signaled(&self) -> bool {
+        self.signaled
     }
 
     /// Read-only view of the waiter list.
@@ -179,12 +198,21 @@ impl LwMutexTable {
         self.entries.is_empty()
     }
 
-    /// Check-and-set without enqueueing. Non-recursive: the
-    /// owner re-acquiring sees `Contended`, not `WouldDeadlock`.
-    pub fn try_acquire(&mut self, id: u32, caller: PpuThreadId) -> Option<LwMutexAcquire> {
+    /// Iterate ids in `BTreeMap` order.
+    pub fn iter_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.entries.keys().copied()
+    }
+
+    /// Try to consume a pending signal without enqueueing.
+    ///
+    /// Returns `Acquired` (signal consumed, caller proceeds) or
+    /// `Contended` (no signal, no state change). PSL1GHT-style
+    /// owner / recursion checks happen in the user-space wrapper
+    /// before this entry point fires.
+    pub fn try_acquire(&mut self, id: u32, _caller: PpuThreadId) -> Option<LwMutexAcquire> {
         let entry = self.entries.get_mut(&id)?;
-        if entry.owner.is_none() {
-            entry.owner = Some(caller);
+        if entry.signaled {
+            entry.signaled = false;
             Some(LwMutexAcquire::Acquired)
         } else {
             Some(LwMutexAcquire::Contended)
@@ -193,32 +221,31 @@ impl LwMutexTable {
 
     /// Atomic acquire-or-park.
     ///
-    /// O(n) scan over the waiter list on the already-parked
-    /// check.
+    /// If the entry is signaled, the caller consumes the signal and
+    /// proceeds (`Acquired`). Otherwise the caller is appended to
+    /// the FIFO sleep queue and must block (`Enqueued`). A caller
+    /// already on the sleep queue indicates a dispatch-layer bug
+    /// and returns `WouldDeadlock`.
+    ///
+    /// O(n) scan over the waiter list on the already-parked check.
     pub fn acquire_or_enqueue(&mut self, id: u32, caller: PpuThreadId) -> LwMutexAcquireOrEnqueue {
         let Some(entry) = self.entries.get_mut(&id) else {
             return LwMutexAcquireOrEnqueue::Unknown;
         };
-        match entry.owner {
-            None => {
-                entry.owner = Some(caller);
-                LwMutexAcquireOrEnqueue::Acquired
-            }
-            Some(owner) if owner == caller => LwMutexAcquireOrEnqueue::WouldDeadlock,
-            Some(_) => {
-                if entry.waiters.contains(caller) {
-                    return LwMutexAcquireOrEnqueue::WouldDeadlock;
-                }
-                // Contains check above rules out duplicate.
-                if entry.waiters.enqueue(caller).is_err() {
-                    debug_assert!(
-                        false,
-                        "contains guard broken for lwmutex {id:#x} caller {caller:?}"
-                    );
-                }
-                LwMutexAcquireOrEnqueue::Enqueued
-            }
+        if entry.signaled {
+            entry.signaled = false;
+            return LwMutexAcquireOrEnqueue::Acquired;
         }
+        if entry.waiters.contains(caller) {
+            return LwMutexAcquireOrEnqueue::WouldDeadlock;
+        }
+        if entry.waiters.enqueue(caller).is_err() {
+            debug_assert!(
+                false,
+                "contains guard broken for lwmutex {id:#x} caller {caller:?}"
+            );
+        }
+        LwMutexAcquireOrEnqueue::Enqueued
     }
 
     /// Low-level enqueue. Prefer [`Self::acquire_or_enqueue`]
@@ -232,10 +259,6 @@ impl LwMutexTable {
             .entries
             .get_mut(&id)
             .ok_or(LwMutexEnqueueError::UnknownId)?;
-        if entry.owner == Some(waiter) {
-            debug_assert!(false, "thread {:?} already owns lwmutex {:#x}", waiter, id,);
-            return Err(LwMutexEnqueueError::WaiterIsOwner);
-        }
         if entry.waiters.enqueue(waiter).is_err() {
             debug_assert!(
                 false,
@@ -247,22 +270,21 @@ impl LwMutexTable {
         Ok(())
     }
 
-    /// Release on behalf of `caller`.
-    pub fn release_and_wake_next(&mut self, id: u32, caller: PpuThreadId) -> LwMutexRelease {
+    /// Release on behalf of `caller`. Recursive: a release that
+    /// Release. Wakes the head of the sleep queue if any waiter is
+    /// parked (`Transferred`), otherwise sets the signal so the next
+    /// lock-call passes without blocking (`Signaled`). The kernel
+    /// does not validate `_caller`; PSL1GHT verifies the owner in
+    /// user space before invoking unlock.
+    pub fn release_and_wake_next(&mut self, id: u32, _caller: PpuThreadId) -> LwMutexRelease {
         let Some(entry) = self.entries.get_mut(&id) else {
             return LwMutexRelease::Unknown;
         };
-        if entry.owner != Some(caller) {
-            return LwMutexRelease::NotOwner;
-        }
         match entry.waiters.dequeue_one() {
-            Some(new_owner) => {
-                entry.owner = Some(new_owner);
-                LwMutexRelease::Transferred { new_owner }
-            }
+            Some(new_owner) => LwMutexRelease::Transferred { new_owner },
             None => {
-                entry.owner = None;
-                LwMutexRelease::Freed
+                entry.signaled = true;
+                LwMutexRelease::Signaled
             }
         }
     }
@@ -275,13 +297,7 @@ impl LwMutexTable {
         hasher.write(&(self.entries.len() as u64).to_le_bytes());
         for (id, entry) in &self.entries {
             hasher.write(&id.to_le_bytes());
-            match entry.owner {
-                Some(owner) => {
-                    hasher.write(&[1u8]);
-                    hasher.write(&owner.raw().to_le_bytes());
-                }
-                None => hasher.write(&[0u8]),
-            }
+            hasher.write(&[entry.signaled as u8]);
             hasher.write(&(entry.waiters.len() as u64).to_le_bytes());
             for waiter in entry.waiters.iter() {
                 hasher.write(&waiter.raw().to_le_bytes());
@@ -350,32 +366,35 @@ mod tests {
     }
 
     #[test]
-    fn try_acquire_unowned_sets_owner() {
+    fn fresh_entry_is_unsignaled() {
+        // A freshly created entry starts un-signaled. Locks reaching
+        // the kernel always park; only an unlock against an empty
+        // queue sets the signal so the next contender can pass.
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        assert!(!t.lookup(id).unwrap().signaled());
+    }
+
+    #[test]
+    fn try_acquire_unsignaled_is_contended() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
         let caller = tid(0x0100_0001);
-        assert_eq!(t.try_acquire(id, caller), Some(LwMutexAcquire::Acquired));
-        assert_eq!(t.lookup(id).unwrap().owner(), Some(caller));
+        assert_eq!(t.try_acquire(id, caller), Some(LwMutexAcquire::Contended));
+        assert!(!t.lookup(id).unwrap().signaled());
     }
 
     #[test]
-    fn try_acquire_contended_does_not_change_owner() {
+    fn try_acquire_consumes_signal_set_by_unlock() {
+        // After an unlock-with-no-waiters sets the signal, the next
+        // try_acquire consumes it.
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
         let a = tid(0x0100_0001);
-        let b = tid(0x0100_0002);
-        t.try_acquire(id, a);
-        assert_eq!(t.try_acquire(id, b), Some(LwMutexAcquire::Contended));
-        assert_eq!(t.lookup(id).unwrap().owner(), Some(a));
-    }
-
-    #[test]
-    fn try_acquire_same_thread_twice_is_contended() {
-        let mut t = LwMutexTable::new();
-        let id = t.create().unwrap();
-        let a = tid(0x0100_0001);
-        t.try_acquire(id, a);
-        assert_eq!(t.try_acquire(id, a), Some(LwMutexAcquire::Contended));
+        t.release_and_wake_next(id, a);
+        assert!(t.lookup(id).unwrap().signaled());
+        assert_eq!(t.try_acquire(id, a), Some(LwMutexAcquire::Acquired));
+        assert!(!t.lookup(id).unwrap().signaled());
     }
 
     #[test]
@@ -385,57 +404,36 @@ mod tests {
     }
 
     #[test]
-    fn acquire_or_enqueue_unowned_sets_owner() {
+    fn acquire_or_enqueue_unsignaled_parks() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
         let a = tid(0x0100_0001);
         assert_eq!(
             t.acquire_or_enqueue(id, a),
-            LwMutexAcquireOrEnqueue::Acquired,
-        );
-        assert_eq!(t.lookup(id).unwrap().owner(), Some(a));
-    }
-
-    #[test]
-    fn acquire_or_enqueue_enqueues_contender() {
-        let mut t = LwMutexTable::new();
-        let id = t.create().unwrap();
-        let owner = tid(0x0100_0001);
-        let contender = tid(0x0100_0002);
-        t.acquire_or_enqueue(id, owner);
-        assert_eq!(
-            t.acquire_or_enqueue(id, contender),
             LwMutexAcquireOrEnqueue::Enqueued,
         );
-        let parked: Vec<_> = t.lookup(id).unwrap().waiters().iter().collect();
-        assert_eq!(parked, vec![contender]);
+        assert_eq!(t.lookup(id).unwrap().waiters().len(), 1);
     }
 
     #[test]
-    fn acquire_or_enqueue_owner_retrying_is_would_deadlock() {
+    fn acquire_or_enqueue_consumes_signal_when_pending() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
-        let a = tid(0x0100_0001);
-        t.acquire_or_enqueue(id, a);
+        // Set the signal via an unlock against an empty queue.
+        t.release_and_wake_next(id, tid(0x0100_0001));
         assert_eq!(
-            t.acquire_or_enqueue(id, a),
-            LwMutexAcquireOrEnqueue::WouldDeadlock,
+            t.acquire_or_enqueue(id, tid(0x0100_0002)),
+            LwMutexAcquireOrEnqueue::Acquired,
         );
-        assert_eq!(t.lookup(id).unwrap().owner(), Some(a));
-        assert!(t.lookup(id).unwrap().waiters().is_empty());
+        assert!(!t.lookup(id).unwrap().signaled());
     }
 
     #[test]
     fn acquire_or_enqueue_already_parked_is_would_deadlock() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
-        let owner = tid(0x0100_0001);
         let waiter = tid(0x0100_0002);
-        t.acquire_or_enqueue(id, owner);
-        assert_eq!(
-            t.acquire_or_enqueue(id, waiter),
-            LwMutexAcquireOrEnqueue::Enqueued,
-        );
+        t.acquire_or_enqueue(id, waiter);
         assert_eq!(
             t.acquire_or_enqueue(id, waiter),
             LwMutexAcquireOrEnqueue::WouldDeadlock,
@@ -456,8 +454,8 @@ mod tests {
     fn enqueue_waiter_preserves_fifo_order() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
-        let owner = tid(0x0100_0001);
-        t.try_acquire(id, owner);
+        // Consume the initial signal first.
+        t.try_acquire(id, tid(0x0100_0001));
         t.enqueue_waiter(id, tid(0x0100_0002)).unwrap();
         t.enqueue_waiter(id, tid(0x0100_0003)).unwrap();
         t.enqueue_waiter(id, tid(0x0100_0004)).unwrap();
@@ -478,13 +476,13 @@ mod tests {
     }
 
     #[test]
-    fn release_without_waiters_frees() {
+    fn release_without_waiters_signals() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
         let a = tid(0x0100_0001);
         t.try_acquire(id, a);
-        assert_eq!(t.release_and_wake_next(id, a), LwMutexRelease::Freed);
-        assert_eq!(t.lookup(id).unwrap().owner(), None);
+        assert_eq!(t.release_and_wake_next(id, a), LwMutexRelease::Signaled);
+        assert!(t.lookup(id).unwrap().signaled());
     }
 
     #[test]
@@ -501,20 +499,10 @@ mod tests {
             t.release_and_wake_next(id, owner),
             LwMutexRelease::Transferred { new_owner: w1 },
         );
-        assert_eq!(t.lookup(id).unwrap().owner(), Some(w1));
+        // Transfer does not signal; the wake hands off directly.
+        assert!(!t.lookup(id).unwrap().signaled());
         let remaining: Vec<_> = t.lookup(id).unwrap().waiters().iter().collect();
         assert_eq!(remaining, vec![w2]);
-    }
-
-    #[test]
-    fn release_by_non_owner_is_rejected() {
-        let mut t = LwMutexTable::new();
-        let id = t.create().unwrap();
-        let a = tid(0x0100_0001);
-        let b = tid(0x0100_0002);
-        t.try_acquire(id, a);
-        assert_eq!(t.release_and_wake_next(id, b), LwMutexRelease::NotOwner);
-        assert_eq!(t.lookup(id).unwrap().owner(), Some(a));
     }
 
     #[test]
@@ -527,6 +515,22 @@ mod tests {
     }
 
     #[test]
+    fn unlock_then_acquire_via_signal() {
+        // Unlock against an empty queue sets the signal; the next
+        // acquire consumes it without parking.
+        let mut t = LwMutexTable::new();
+        let id = t.create().unwrap();
+        let a = tid(0x0100_0001);
+        assert_eq!(t.release_and_wake_next(id, a), LwMutexRelease::Signaled);
+        let b = tid(0x0100_0002);
+        assert_eq!(
+            t.acquire_or_enqueue(id, b),
+            LwMutexAcquireOrEnqueue::Acquired,
+        );
+        assert!(!t.lookup(id).unwrap().signaled());
+    }
+
+    #[test]
     fn state_hash_empty_is_stable() {
         let a = LwMutexTable::new();
         let b = LwMutexTable::new();
@@ -534,16 +538,15 @@ mod tests {
     }
 
     #[test]
-    fn state_hash_distinguishes_owner_change() {
+    fn state_hash_distinguishes_signaled_state() {
         let mut a = LwMutexTable::new();
         let mut b = LwMutexTable::new();
         let id_a = a.create().unwrap();
-        let id_b = b.create().unwrap();
+        b.create().unwrap();
         assert_eq!(a.state_hash(), b.state_hash());
-        a.try_acquire(id_a, tid(0x0100_0001));
+        // Unlock-with-no-waiters sets the signal on `a` only.
+        a.release_and_wake_next(id_a, tid(0x0100_0001));
         assert_ne!(a.state_hash(), b.state_hash());
-        b.try_acquire(id_b, tid(0x0100_0001));
-        assert_eq!(a.state_hash(), b.state_hash());
     }
 
     #[test]
@@ -552,9 +555,8 @@ mod tests {
         let mut b = LwMutexTable::new();
         let id_a = a.create().unwrap();
         let id_b = b.create().unwrap();
-        let owner = tid(0x0100_0001);
-        a.try_acquire(id_a, owner);
-        b.try_acquire(id_b, owner);
+        a.try_acquire(id_a, tid(0x0100_0001));
+        b.try_acquire(id_b, tid(0x0100_0001));
         a.enqueue_waiter(id_a, tid(0x0100_0002)).unwrap();
         a.enqueue_waiter(id_a, tid(0x0100_0003)).unwrap();
         b.enqueue_waiter(id_b, tid(0x0100_0003)).unwrap();
@@ -580,22 +582,10 @@ mod tests {
     fn duplicate_enqueue_panics_in_debug() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
-        let owner = tid(0x0100_0001);
         let waiter = tid(0x0100_0002);
-        t.try_acquire(id, owner);
+        t.try_acquire(id, tid(0x0100_0001));
         t.enqueue_waiter(id, waiter).unwrap();
         let _ = t.enqueue_waiter(id, waiter);
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "already owns")]
-    fn enqueue_waiter_on_owner_panics_in_debug() {
-        let mut t = LwMutexTable::new();
-        let id = t.create().unwrap();
-        let owner = tid(0x0100_0001);
-        t.try_acquire(id, owner);
-        let _ = t.enqueue_waiter(id, owner);
     }
 
     #[test]
@@ -614,9 +604,8 @@ mod tests {
     fn duplicate_enqueue_returns_err_in_release() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
-        let owner = tid(0x0100_0001);
         let waiter = tid(0x0100_0002);
-        t.try_acquire(id, owner);
+        t.try_acquire(id, tid(0x0100_0001));
         t.enqueue_waiter(id, waiter).unwrap();
         assert_eq!(
             t.enqueue_waiter(id, waiter),
@@ -630,31 +619,14 @@ mod tests {
     fn destroy_with_parked_waiters_returns_entry_unchanged_in_release() {
         let mut t = LwMutexTable::new();
         let id = t.create().unwrap();
-        let owner = tid(0x0100_0001);
         let waiter1 = tid(0x0100_0002);
         let waiter2 = tid(0x0100_0003);
-        t.try_acquire(id, owner);
+        t.try_acquire(id, tid(0x0100_0001));
         t.enqueue_waiter(id, waiter1).unwrap();
         t.enqueue_waiter(id, waiter2).unwrap();
         let removed = t.destroy(id).unwrap();
-        assert_eq!(removed.owner(), Some(owner));
         let parked: Vec<_> = removed.waiters().iter().collect();
         assert_eq!(parked, vec![waiter1, waiter2]);
         assert!(t.lookup(id).is_none());
-    }
-
-    #[test]
-    #[cfg(not(debug_assertions))]
-    fn enqueue_waiter_on_owner_returns_err_in_release() {
-        let mut t = LwMutexTable::new();
-        let id = t.create().unwrap();
-        let owner = tid(0x0100_0001);
-        t.try_acquire(id, owner);
-        assert_eq!(
-            t.enqueue_waiter(id, owner),
-            Err(LwMutexEnqueueError::WaiterIsOwner),
-        );
-        assert_eq!(t.lookup(id).unwrap().owner(), Some(owner));
-        assert!(t.lookup(id).unwrap().waiters().is_empty());
     }
 }

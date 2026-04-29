@@ -99,6 +99,29 @@ pub(super) fn seed_primary_ppu(host: &mut Lv2Host, unit_id: UnitId) {
     );
 }
 
+/// Address where [`fake_runtime_with_valid_sync_attr`] seeds a
+/// fully-initialized 8-byte sync-attribute header so creation
+/// dispatches accept the pointer.
+pub(super) const VALID_SYNC_ATTR_PTR: u32 = 0x800;
+
+/// Build a `FakeRuntime` whose guest memory has a valid 24-byte
+/// `sys_*_attribute_t` header (protocol = SYS_SYNC_FIFO at +0, type =
+/// SYS_SYNC_WAITER_SINGLE at +20) at [`VALID_SYNC_ATTR_PTR`]. Use when
+/// the test exercises a happy-path create that needs the LV2 host to
+/// validate the attribute fields rather than reject NULL/zero attrs.
+pub(super) fn fake_runtime_with_valid_sync_attr(size: usize) -> FakeRuntime {
+    let mut mem = GuestMemory::new(size);
+    let mut attr = [0u8; 24];
+    attr[0..4].copy_from_slice(&0x1u32.to_be_bytes()); // protocol = SYS_SYNC_FIFO
+    attr[20..24].copy_from_slice(&0x10000u32.to_be_bytes()); // type = SYS_SYNC_WAITER_SINGLE
+    mem.apply_commit(
+        ByteRange::new(GuestAddr::new(VALID_SYNC_ATTR_PTR as u64), 24).unwrap(),
+        &attr,
+    )
+    .unwrap();
+    FakeRuntime::with_memory(mem)
+}
+
 pub(super) fn primary_attrs() -> PpuThreadAttrs {
     PpuThreadAttrs {
         entry: 0x10_0000,

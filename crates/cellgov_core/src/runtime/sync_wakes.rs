@@ -53,6 +53,36 @@ impl Runtime {
                     self.commit_bytes_at(result_ptr as u64, &observed.to_be_bytes());
                     self.registry.set_syscall_return(waiter, 0);
                 }
+                Some(PendingResponse::LwMutexWake { mutex_ptr, caller }) => {
+                    // Claim ownership in the user-space lwmutex
+                    // struct: write owner (offset 0), reset
+                    // recursive_count to 1 (offset 12), decrement
+                    // waiter (offset 4). `mutex_ptr == 0` is the
+                    // raw LV2-syscall path with no user-space
+                    // struct; in that case we just set r3 = 0.
+                    if mutex_ptr != 0 {
+                        let base = mutex_ptr as u64;
+                        self.commit_bytes_at(base, &caller.to_be_bytes());
+                        self.commit_bytes_at(base + 12, &1u32.to_be_bytes());
+                        // Read the current waiter count so the
+                        // decrement is non-clobbering: only this
+                        // unit's contribution is removed.
+                        let waiter_addr = base + 4;
+                        let bytes = self.memory.read(
+                            cellgov_mem::ByteRange::new(
+                                cellgov_mem::GuestAddr::new(waiter_addr),
+                                4,
+                            )
+                            .expect("lwmutex_wake: bad waiter ByteRange"),
+                        );
+                        let current = bytes
+                            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+                            .unwrap_or(0);
+                        let next = current.saturating_sub(1);
+                        self.commit_bytes_at(waiter_addr, &next.to_be_bytes());
+                    }
+                    self.registry.set_syscall_return(waiter, 0);
+                }
                 Some(PendingResponse::CondWakeReacquire { .. }) => {
                     // Full re-acquire belongs with the cond primitive;
                     // for now wake with CELL_OK and do not re-park.
@@ -129,7 +159,8 @@ impl Runtime {
                     PendingResponse::PpuThreadJoin { .. }
                     | PendingResponse::EventQueueReceive { .. }
                     | PendingResponse::CondWakeReacquire { .. }
-                    | PendingResponse::EventFlagWake { .. } => {
+                    | PendingResponse::EventFlagWake { .. }
+                    | PendingResponse::LwMutexWake { .. } => {
                         // The SPU thread-group wake path should not
                         // reach these variants; each has its own wake
                         // path. Defensive recovery without writing to

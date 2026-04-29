@@ -112,6 +112,23 @@ pub struct Lv2Host {
     /// Zero in a clean run; non-zero means at least one wake or
     /// table update fell back to a degraded response. Not hashed.
     invariant_break_count: usize,
+    /// Captured `sys_tty_write` byte stream in dispatch order.
+    ///
+    /// Each successful TtyWrite appends `buf_ptr..buf_ptr+len` of
+    /// guest memory; unmapped buffers append nothing. Observation
+    /// channel only -- not folded into [`Self::state_hash`].
+    tty_log: Vec<u8>,
+    /// Live-object counters for primitives CellGov stubs as ID
+    /// allocators only. These feed `sys_process_get_number_of_object`
+    /// without modeling the primitives' semantic surfaces.
+    timer_count: u32,
+    rwlock_count: u32,
+    event_port_count: u32,
+    lwcond_count: u32,
+    /// Live count of file descriptors opened via `sys_fs_open`.
+    /// `sys_fs_close` decrements; feeds the SYS_FS_FD_OBJECT (0x73)
+    /// query in `sys_process_get_number_of_object`.
+    fs_fd_count: u32,
 }
 
 impl Default for Lv2Host {
@@ -150,7 +167,41 @@ impl Lv2Host {
             conds: CondTable::new(),
             current_tick: GuestTicks::ZERO,
             invariant_break_count: 0,
+            tty_log: Vec::new(),
+            timer_count: 0,
+            rwlock_count: 0,
+            event_port_count: 0,
+            lwcond_count: 0,
+            fs_fd_count: 0,
         }
+    }
+
+    /// Increment the open-fd counter; the `sys_fs_open` whitelist
+    /// path uses this to surface a live fd in
+    /// `sys_process_get_number_of_object`. There is no decrement
+    /// counterpart on purpose -- real PS3's `sys_fs_close` does not
+    /// drop the kernel-side fs-object count synchronously, and the
+    /// ps3autotests sys_process matrix shows `fs_fd` staying at 1
+    /// after `fclose`.
+    pub(super) fn fs_fd_count_inc(&mut self) {
+        self.fs_fd_count = self.fs_fd_count.saturating_add(1);
+    }
+
+    /// Increment the lwcond live-object counter; called by the HLE
+    /// `sys_lwcond_create` shim.
+    pub fn lwcond_count_inc(&mut self) {
+        self.lwcond_count = self.lwcond_count.saturating_add(1);
+    }
+
+    /// Decrement the lwcond live-object counter.
+    pub fn lwcond_count_dec(&mut self) {
+        self.lwcond_count = self.lwcond_count.saturating_sub(1);
+    }
+
+    /// Captured `sys_tty_write` byte stream in dispatch order.
+    #[inline]
+    pub fn tty_log(&self) -> &[u8] {
+        &self.tty_log
     }
 
     /// Running total of invariant breaks caught defensively.
@@ -466,13 +517,18 @@ impl Lv2Host {
                 self.dispatch_write_mb(thread_id, value, requester)
             }
             Lv2Request::TtyWrite {
-                len, nwritten_ptr, ..
-            } => self.immediate_write_u32(len, nwritten_ptr, requester),
+                buf_ptr,
+                len,
+                nwritten_ptr,
+                ..
+            } => self.dispatch_tty_write(buf_ptr, len, nwritten_ptr, requester, rt),
             Lv2Request::LwMutexCreate { id_ptr, .. } => {
                 self.dispatch_lwmutex_create(id_ptr, requester)
             }
             Lv2Request::LwMutexDestroy { id } => self.dispatch_lwmutex_destroy(id),
-            Lv2Request::LwMutexLock { id, .. } => self.dispatch_lwmutex_lock(id, requester),
+            Lv2Request::LwMutexLock { id, mutex_ptr, .. } => {
+                self.dispatch_lwmutex_lock(id, mutex_ptr, requester)
+            }
             Lv2Request::LwMutexUnlock { id } => self.dispatch_lwmutex_unlock(id, requester),
             Lv2Request::LwMutexTryLock { id } => self.dispatch_lwmutex_trylock(id, requester),
             Lv2Request::FsOpen {
@@ -481,9 +537,30 @@ impl Lv2Host {
                 fd_out_ptr,
                 mode,
             } => self.dispatch_fs_open(path_ptr, flags, fd_out_ptr, mode, requester, rt),
+            Lv2Request::FsClose { .. } => {
+                // Real PS3 keeps the fd live in the kernel's
+                // fs-object count even after `sys_fs_close`; the
+                // sys_process test's matrix shows fs_fd=1 at lines
+                // 17 / 18 despite an intervening `fclose(file)`. We
+                // mirror that by leaving `fs_fd_count` unchanged
+                // here. A future slice that wires real fd lifecycle
+                // (with deferred reclamation or proper LV2-side
+                // tracking) can revisit this.
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![],
+                }
+            }
+            Lv2Request::FsWrite {
+                buf_ptr,
+                size,
+                nwrite_ptr,
+                ..
+            } => self.dispatch_tty_write(buf_ptr, size, nwrite_ptr, requester, rt),
             Lv2Request::MutexCreate { id_ptr, attr_ptr } => {
                 self.dispatch_mutex_create(id_ptr, attr_ptr, requester, rt)
             }
+            Lv2Request::MutexDestroy { mutex_id } => self.dispatch_mutex_destroy(mutex_id),
             Lv2Request::MutexLock { mutex_id, .. } => self.dispatch_mutex_lock(mutex_id, requester),
             Lv2Request::MutexUnlock { mutex_id } => self.dispatch_mutex_unlock(mutex_id, requester),
             Lv2Request::MutexTryLock { mutex_id } => {
@@ -491,12 +568,14 @@ impl Lv2Host {
             }
             Lv2Request::SemaphoreCreate {
                 id_ptr,
+                attr_ptr,
                 initial,
                 max,
-                ..
-            } => self.dispatch_semaphore_create(id_ptr, initial, max, requester),
+            } => self.dispatch_semaphore_create(id_ptr, attr_ptr, initial, max, requester, rt),
             Lv2Request::SemaphoreDestroy { id } => self.dispatch_semaphore_destroy(id),
-            Lv2Request::SemaphoreWait { id, .. } => self.dispatch_semaphore_wait(id, requester),
+            Lv2Request::SemaphoreWait { id, timeout } => {
+                self.dispatch_semaphore_wait(id, timeout, requester)
+            }
             Lv2Request::SemaphorePost { id, val } => self.dispatch_semaphore_post(id, val),
             Lv2Request::SemaphoreTryWait { id } => self.dispatch_semaphore_trywait(id),
             Lv2Request::SemaphoreGetValue { id, out_ptr } => {
@@ -529,17 +608,19 @@ impl Lv2Host {
                 count_out,
                 requester,
             ),
-            Lv2Request::EventFlagCreate { id_ptr, init, .. } => {
-                self.dispatch_event_flag_create(id_ptr, init, requester)
-            }
+            Lv2Request::EventFlagCreate {
+                id_ptr,
+                attr_ptr,
+                init,
+            } => self.dispatch_event_flag_create(id_ptr, attr_ptr, init, requester, rt),
             Lv2Request::EventFlagDestroy { id } => self.dispatch_event_flag_destroy(id),
             Lv2Request::EventFlagWait {
                 id,
                 bits,
                 mode,
                 result_ptr,
-                ..
-            } => self.dispatch_event_flag_wait(id, bits, mode, result_ptr, requester),
+                timeout,
+            } => self.dispatch_event_flag_wait(id, bits, mode, result_ptr, timeout, requester),
             Lv2Request::EventFlagTryWait {
                 id,
                 bits,
@@ -548,6 +629,12 @@ impl Lv2Host {
             } => self.dispatch_event_flag_trywait(id, bits, mode, result_ptr, requester),
             Lv2Request::EventFlagSet { id, bits } => self.dispatch_event_flag_set(id, bits),
             Lv2Request::EventFlagClear { id, bits } => self.dispatch_event_flag_clear(id, bits),
+            Lv2Request::EventFlagCancel { id, num_ptr } => {
+                self.dispatch_event_flag_cancel(id, num_ptr, requester)
+            }
+            Lv2Request::EventFlagGet { id, flags_ptr } => {
+                self.dispatch_event_flag_get(id, flags_ptr, requester)
+            }
             Lv2Request::CondCreate {
                 id_ptr, mutex_id, ..
             } => self.dispatch_cond_create(id_ptr, mutex_id, requester),
@@ -716,6 +803,74 @@ impl Lv2Host {
                 code: 0u64,
                 effects: vec![],
             },
+            // Process-identity stubs: PSL1GHT tests probe these and
+            // rely on the spec PID/PPID/GUID values. Real LV2 derives
+            // these from the loaded process; CellGov hosts a single
+            // synthetic process so the values are constants.
+            Lv2Request::ProcessGetPid => Lv2Dispatch::Immediate {
+                code: 0x0100_0500,
+                effects: vec![],
+            },
+            Lv2Request::ProcessGetPpid => Lv2Dispatch::Immediate {
+                code: 0x0100_0300,
+                effects: vec![],
+            },
+            Lv2Request::ProcessGetPpuGuid => Lv2Dispatch::Immediate {
+                code: 0x0100_0300,
+                effects: vec![],
+            },
+            Lv2Request::ProcessIsStack { .. } => Lv2Dispatch::Immediate {
+                code: 0u64,
+                effects: vec![],
+            },
+            Lv2Request::ProcessGetNumberOfObject {
+                class_id,
+                count_out_ptr,
+            } => self.dispatch_process_get_number_of_object(class_id, count_out_ptr, requester),
+            Lv2Request::ProcessGetSdkVersion {
+                version_out_ptr, ..
+            } => self.dispatch_process_get_sdk_version(version_out_ptr, requester),
+            Lv2Request::ProcessGetParamsfo { buf_ptr } => {
+                self.dispatch_process_get_paramsfo(buf_ptr, requester)
+            }
+            // ID-allocator stubs for primitives whose only test-level
+            // exercise is create/destroy plus the live-count probe.
+            Lv2Request::TimerCreate { id_ptr } => {
+                self.timer_count = self.timer_count.saturating_add(1);
+                let id = self.alloc_id();
+                self.immediate_write_u32(id, id_ptr, requester)
+            }
+            Lv2Request::TimerDestroy { .. } => {
+                self.timer_count = self.timer_count.saturating_sub(1);
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![],
+                }
+            }
+            Lv2Request::RwlockCreate { id_ptr, .. } => {
+                self.rwlock_count = self.rwlock_count.saturating_add(1);
+                let id = self.alloc_id();
+                self.immediate_write_u32(id, id_ptr, requester)
+            }
+            Lv2Request::RwlockDestroy { .. } => {
+                self.rwlock_count = self.rwlock_count.saturating_sub(1);
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![],
+                }
+            }
+            Lv2Request::EventPortCreate { id_ptr, .. } => {
+                self.event_port_count = self.event_port_count.saturating_add(1);
+                let id = self.alloc_id();
+                self.immediate_write_u32(id, id_ptr, requester)
+            }
+            Lv2Request::EventPortDestroy { .. } => {
+                self.event_port_count = self.event_port_count.saturating_sub(1);
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: vec![],
+                }
+            }
             Lv2Request::Unsupported { number, args } => {
                 self.log_invariant_break(
                     "dispatch.unsupported_stub",
@@ -749,6 +904,104 @@ impl Lv2Host {
                     effects: vec![],
                 }
             }
+        }
+    }
+
+    /// Append the TTY buffer into [`Self::tty_log`] and write
+    /// nwritten back. An unmapped buffer skips the append and still
+    /// reports `len` written; matching the existing CELL_OK shape.
+    pub(super) fn dispatch_tty_write(
+        &mut self,
+        buf_ptr: u32,
+        len: u32,
+        nwritten_ptr: u32,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        if len > 0 {
+            if let Some(bytes) = rt.read_committed(buf_ptr as u64, len as usize) {
+                self.tty_log.extend_from_slice(bytes);
+            }
+        }
+        self.immediate_write_u32(len, nwritten_ptr, requester)
+    }
+
+    /// Per-class active-object count for `sys_process_get_number_of_object`.
+    /// Maps class ids from `sys_process.h`'s `SYS_*_OBJECT` enum onto
+    /// CellGov's internal LV2 tables; classes we do not model
+    /// (mem-container, intr-tag, timer, fs_fd, ...) report zero.
+    /// The kernel writes a 32-bit count to `count_out_ptr` (PSL1GHT's
+    /// `size_t` is 4 bytes in the PPU64 ILP32 environment).
+    pub(super) fn dispatch_process_get_number_of_object(
+        &self,
+        class_id: u32,
+        count_out_ptr: u32,
+        source: UnitId,
+    ) -> Lv2Dispatch {
+        let count: u32 = match class_id {
+            0x85 => self.mutexes.len() as u32,      // SYS_MUTEX_OBJECT
+            0x86 => self.conds.len() as u32, // SYS_COND_OBJECT (heavy cond, syscall 105 path)
+            0x88 => self.rwlock_count,       // SYS_RWLOCK_OBJECT
+            0x0E => self.event_port_count,   // SYS_EVENT_PORT_OBJECT
+            0x11 => self.timer_count,        // SYS_TIMER_OBJECT
+            0x8D => self.event_queues.len() as u32, // SYS_EVENT_QUEUE_OBJECT
+            0x95 => self.lwmutexes.len() as u32, // SYS_LWMUTEX_OBJECT
+            0x96 => self.semaphores.len() as u32, // SYS_SEMAPHORE_OBJECT
+            0x97 => self.lwcond_count,       // SYS_LWCOND_OBJECT
+            0x73 => self.fs_fd_count,        // SYS_FS_FD_OBJECT
+            0x98 => self.event_flags.len() as u32, // SYS_EVENT_FLAG_OBJECT
+            _ => 0,
+        };
+        self.immediate_write_u32(count, count_out_ptr, source)
+    }
+
+    /// `sys_process_get_sdk_version` writes the SDK version of the
+    /// target PID. CellGov hosts a single synthetic process; the
+    /// constant matches the value real PS3 reports for PSL1GHT-built
+    /// homebrew (no SDK version recorded -> `0xFFFFFFFF`).
+    pub(super) fn dispatch_process_get_sdk_version(
+        &self,
+        version_out_ptr: u32,
+        source: UnitId,
+    ) -> Lv2Dispatch {
+        let version: u32 = 0xFFFF_FFFF;
+        let write = Effect::SharedWriteIntent {
+            range: ByteRange::new(GuestAddr::new(version_out_ptr as u64), 4).unwrap(),
+            bytes: WritePayload::from_slice(&version.to_be_bytes()),
+            ordering: PriorityClass::Normal,
+            source,
+            source_time: self.current_tick,
+        };
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![write],
+        }
+    }
+
+    /// `_sys_process_get_paramsfo` writes a 64-byte SFO blob to the
+    /// caller's buffer. CellGov produces the same fixed blob real PS3
+    /// returns for PSL1GHT-built homebrew with no PARAM.SFO loaded:
+    /// version=1 at byte 0, parental_level=4 at byte 23, attribute=1
+    /// at byte 31, all other bytes zero.
+    pub(super) fn dispatch_process_get_paramsfo(
+        &self,
+        buf_ptr: u32,
+        source: UnitId,
+    ) -> Lv2Dispatch {
+        let mut blob = [0u8; 64];
+        blob[0] = 0x01;
+        blob[23] = 0x04;
+        blob[31] = 0x01;
+        let write = Effect::SharedWriteIntent {
+            range: ByteRange::new(GuestAddr::new(buf_ptr as u64), 64).unwrap(),
+            bytes: WritePayload::from_slice(&blob),
+            ordering: PriorityClass::Normal,
+            source,
+            source_time: self.current_tick,
+        };
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![write],
         }
     }
 
@@ -804,6 +1057,100 @@ mod tests {
             }
             other => panic!("expected Immediate, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tty_write_appends_buffer_bytes_to_tty_log() {
+        let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+        mem.apply_commit(
+            ByteRange::new(GuestAddr::new(0x8000), 12).unwrap(),
+            b"hello world\n",
+        )
+        .unwrap();
+        let rt = FakeRuntime::with_memory(mem);
+        let mut host = Lv2Host::new();
+        host.dispatch(
+            Lv2Request::TtyWrite {
+                fd: 1,
+                buf_ptr: 0x8000,
+                len: 12,
+                nwritten_ptr: 0x9000,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(host.tty_log(), b"hello world\n");
+    }
+
+    #[test]
+    fn tty_write_concatenates_across_calls_in_dispatch_order() {
+        let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+        mem.apply_commit(ByteRange::new(GuestAddr::new(0x8000), 4).unwrap(), b"abcd")
+            .unwrap();
+        mem.apply_commit(ByteRange::new(GuestAddr::new(0x8100), 3).unwrap(), b"xyz")
+            .unwrap();
+        let rt = FakeRuntime::with_memory(mem);
+        let mut host = Lv2Host::new();
+        host.dispatch(
+            Lv2Request::TtyWrite {
+                fd: 1,
+                buf_ptr: 0x8000,
+                len: 4,
+                nwritten_ptr: 0x9000,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        host.dispatch(
+            Lv2Request::TtyWrite {
+                fd: 1,
+                buf_ptr: 0x8100,
+                len: 3,
+                nwritten_ptr: 0x9000,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(host.tty_log(), b"abcdxyz");
+    }
+
+    #[test]
+    fn tty_write_zero_len_is_a_noop_for_tty_log() {
+        let rt = FakeRuntime::new(0x10000);
+        let mut host = Lv2Host::new();
+        host.dispatch(
+            Lv2Request::TtyWrite {
+                fd: 1,
+                buf_ptr: 0x8000,
+                len: 0,
+                nwritten_ptr: 0x9000,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert!(host.tty_log().is_empty());
+    }
+
+    #[test]
+    fn tty_write_unmapped_buf_does_not_corrupt_tty_log_and_still_returns_ok() {
+        // FakeRuntime sized 0x1000; buf_ptr at 0x8000 is unmapped.
+        let rt = FakeRuntime::new(0x1000);
+        let mut host = Lv2Host::new();
+        let result = host.dispatch(
+            Lv2Request::TtyWrite {
+                fd: 1,
+                buf_ptr: 0x8000,
+                len: 4,
+                nwritten_ptr: 0x100,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        match result {
+            Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, 0),
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+        assert!(host.tty_log().is_empty());
     }
 
     #[test]

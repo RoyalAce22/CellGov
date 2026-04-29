@@ -269,13 +269,27 @@ impl EventFlagTable {
         Some(woken)
     }
 
-    /// AND-NOT `bits_to_clear` on the flag without waking
-    /// anyone. Returns `false` if `id` is unknown.
+    /// Drain every parked waiter without mutating `bits`. Each
+    /// returned [`EventFlagWaiter`] is the full record so the
+    /// caller can wake the thread with whatever return code they
+    /// choose (typically `CELL_ECANCELED`). Returns `None` if `id`
+    /// is unknown.
+    pub fn cancel_waiters(&mut self, id: u32) -> Option<Vec<EventFlagWaiter>> {
+        let entry = self.entries.get_mut(&id)?;
+        Some(std::mem::take(&mut entry.waiters))
+    }
+
+    /// `entry.bits &= mask` -- the LV2 `sys_event_flag_clear` keeps
+    /// bits **inside** `mask` and drops the rest, matching RPCS3's
+    /// `pattern.atomic_op(|p| p &= bitptn)`. The argument name
+    /// `bits_to_clear` is a misnomer kept for backwards
+    /// compatibility with callers, but the semantics are mask-and,
+    /// not bit-clear. Returns `false` if `id` is unknown.
     pub fn clear_bits(&mut self, id: u32, bits_to_clear: u64) -> bool {
         let Some(entry) = self.entries.get_mut(&id) else {
             return false;
         };
-        entry.bits &= !bits_to_clear;
+        entry.bits &= bits_to_clear;
         true
     }
 
@@ -483,7 +497,11 @@ mod tests {
     }
 
     #[test]
-    fn clear_bits_removes_without_waking() {
+    fn clear_bits_masks_without_waking() {
+        // sys_event_flag_clear is mask-and: bits in `mask` survive,
+        // bits outside `mask` are dropped. Matches RPCS3
+        // (`pattern &= bitptn`). Old value `0b0111` masked by
+        // `0b0101` -> `0b0101`.
         let mut t = EventFlagTable::new();
         t.create_with_id(1, 0b0111).unwrap();
         t.enqueue_waiter(
@@ -495,7 +513,7 @@ mod tests {
         )
         .unwrap();
         assert!(t.clear_bits(1, 0b0101));
-        assert_eq!(t.lookup(1).unwrap().bits(), 0b0010);
+        assert_eq!(t.lookup(1).unwrap().bits(), 0b0101);
         assert_eq!(t.lookup(1).unwrap().waiters().len(), 1);
     }
 
