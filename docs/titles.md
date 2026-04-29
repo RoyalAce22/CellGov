@@ -36,10 +36,14 @@ Column definitions:
 | Serial | Title | Year | Engine | Format | Checkpoint | Steps | Insns | Cross-runner |
 |--------|-------|------|--------|--------|------------|------:|------:|--------------|
 | NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | MaxSteps (4B) | 15,625,000 | 4B | refresh queued |
-| NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,341,436 | ~3.7B | equivalent (1 byte non-semantic) |
-| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | MaxSteps (1B) | 3,906,250 | 1B | refresh queued |
+| NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,352,589 | ~3.7B | refresh queued |
+| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | FirstRsxWrite | 45,697 | ~12M | refresh queued |
 
 Cross-runner refresh is gated on each title reaching a stopping
-point RPCS3 also reaches; flOw and WipEout currently exit on the
-budget cap with no natural checkpoint. Per-title compare reports
-live at `tests/fixtures/<serial>_cross_runner/compare_report.txt`.
+point RPCS3 also reaches. flOw exits on the budget cap; SSHD and
+WipEout HD now both reach the FirstRsxWrite checkpoint (the WipEout
+shift from the earlier MaxSteps anchor is driven by the
+sync-primitive correctness work that lets its boot proceed past
+the lwmutex / event_flag contention loops it previously spun in).
+Per-title compare reports live at
+`tests/fixtures/<serial>_cross_runner/compare_report.txt`.

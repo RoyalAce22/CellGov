@@ -9,6 +9,8 @@ pub use self::rsx::{
     SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,
     PACKAGE_CELLGOV_SET_VBLANK_HANDLER,
 };
+use std::collections::BTreeMap;
+
 use crate::dispatch::Lv2Dispatch;
 use crate::image::ContentStore;
 use crate::ppu_thread::{
@@ -129,6 +131,13 @@ pub struct Lv2Host {
     /// `sys_fs_close` decrements; feeds the SYS_FS_FD_OBJECT (0x73)
     /// query in `sys_process_get_number_of_object`.
     fs_fd_count: u32,
+    /// Per-thread count of distinct lwmutexes the thread currently
+    /// holds. Recursive re-acquires of the same lwmutex do not bump
+    /// the count; only first-acquire (FREE -> me) and kernel-side
+    /// transfer (LwMutexWake) do. Read by the runtime to drive
+    /// critical-section-aware scheduler stickiness so a unit holding
+    /// stdio's lwmutex is not preempted mid-printf by a budget tick.
+    lwmutex_holds: BTreeMap<PpuThreadId, u32>,
 }
 
 impl Default for Lv2Host {
@@ -173,16 +182,59 @@ impl Lv2Host {
             event_port_count: 0,
             lwcond_count: 0,
             fs_fd_count: 0,
+            lwmutex_holds: BTreeMap::new(),
+        }
+    }
+
+    /// Number of distinct lwmutexes `tid` currently holds. `0` for
+    /// untracked threads.
+    pub fn lwmutex_holds_for(&self, tid: PpuThreadId) -> u32 {
+        self.lwmutex_holds.get(&tid).copied().unwrap_or(0)
+    }
+
+    /// Record that `tid` just acquired one more distinct lwmutex.
+    /// Recursive re-acquires (where `tid` was already the owner)
+    /// MUST NOT call this; only first-acquire and kernel-side
+    /// transfer do.
+    pub fn lwmutex_holds_inc(&mut self, tid: PpuThreadId) {
+        let slot = self.lwmutex_holds.entry(tid).or_insert(0);
+        *slot = slot.saturating_add(1);
+    }
+
+    /// Record that `tid` just fully released one lwmutex (recursive
+    /// count went 1 -> 0). Saturates at 0; an underflow would
+    /// indicate a leak in the increment path.
+    pub fn lwmutex_holds_dec(&mut self, tid: PpuThreadId) {
+        if let Some(slot) = self.lwmutex_holds.get_mut(&tid) {
+            *slot = slot.saturating_sub(1);
+            if *slot == 0 {
+                self.lwmutex_holds.remove(&tid);
+            }
+        }
+    }
+
+    /// Drop any tracked count for `tid`. Used at thread-exit and on
+    /// stale-owner recovery (so a never-decremented count from a
+    /// dead thread does not leak forever).
+    pub fn lwmutex_holds_clear(&mut self, tid: PpuThreadId) {
+        self.lwmutex_holds.remove(&tid);
+    }
+
+    /// Whether the unit's current PPU thread holds at least one
+    /// lwmutex. `false` if the unit has no PPU thread mapping.
+    pub fn unit_holds_lwmutex(&self, unit: UnitId) -> bool {
+        match self.ppu_threads.thread_id_for_unit(unit) {
+            Some(tid) => self.lwmutex_holds_for(tid) > 0,
+            None => false,
         }
     }
 
     /// Increment the open-fd counter; the `sys_fs_open` whitelist
     /// path uses this to surface a live fd in
-    /// `sys_process_get_number_of_object`. There is no decrement
-    /// counterpart on purpose -- real PS3's `sys_fs_close` does not
-    /// drop the kernel-side fs-object count synchronously, and the
-    /// ps3autotests sys_process matrix shows `fs_fd` staying at 1
-    /// after `fclose`.
+    /// `sys_process_get_number_of_object`. No decrement counterpart:
+    /// real PS3's `sys_fs_close` does not drop the kernel-side
+    /// fs-object count synchronously, and the ps3autotests
+    /// sys_process matrix shows `fs_fd` staying at 1 after `fclose`.
     pub(super) fn fs_fd_count_inc(&mut self) {
         self.fs_fd_count = self.fs_fd_count.saturating_add(1);
     }
@@ -466,6 +518,13 @@ impl Lv2Host {
         }
         if !self.conds.is_empty() {
             hasher.write(&self.conds.state_hash().to_le_bytes());
+        }
+        if !self.lwmutex_holds.is_empty() {
+            hasher.write(&(self.lwmutex_holds.len() as u64).to_le_bytes());
+            for (tid, count) in &self.lwmutex_holds {
+                hasher.write(&tid.raw().to_le_bytes());
+                hasher.write(&count.to_le_bytes());
+            }
         }
         hasher.finish()
     }
@@ -1435,6 +1494,77 @@ mod tests {
         // Regression guard for the TlsTemplate gating.
         let fresh = Lv2Host::new();
         assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
+    }
+
+    #[test]
+    fn lwmutex_holds_inc_increments_per_thread() {
+        let mut host = Lv2Host::new();
+        let a = PpuThreadId::new(0x0100_0001);
+        let b = PpuThreadId::new(0x0100_0002);
+        assert_eq!(host.lwmutex_holds_for(a), 0);
+        host.lwmutex_holds_inc(a);
+        host.lwmutex_holds_inc(a);
+        host.lwmutex_holds_inc(b);
+        assert_eq!(host.lwmutex_holds_for(a), 2);
+        assert_eq!(host.lwmutex_holds_for(b), 1);
+    }
+
+    #[test]
+    fn lwmutex_holds_dec_zeroes_and_drops_entry() {
+        let mut host = Lv2Host::new();
+        let a = PpuThreadId::new(0x0100_0001);
+        host.lwmutex_holds_inc(a);
+        host.lwmutex_holds_inc(a);
+        host.lwmutex_holds_dec(a);
+        assert_eq!(host.lwmutex_holds_for(a), 1);
+        host.lwmutex_holds_dec(a);
+        assert_eq!(host.lwmutex_holds_for(a), 0);
+        // Final dec drops the entry from the map so the state hash
+        // returns to baseline.
+        host.lwmutex_holds_dec(a); // no-op on absent entry
+        assert_eq!(host.lwmutex_holds_for(a), 0);
+    }
+
+    #[test]
+    fn lwmutex_holds_clear_removes_entry() {
+        let mut host = Lv2Host::new();
+        let a = PpuThreadId::new(0x0100_0001);
+        host.lwmutex_holds_inc(a);
+        host.lwmutex_holds_inc(a);
+        host.lwmutex_holds_clear(a);
+        assert_eq!(host.lwmutex_holds_for(a), 0);
+    }
+
+    #[test]
+    fn unit_holds_lwmutex_via_thread_table() {
+        let mut host = Lv2Host::new();
+        let unit = UnitId::new(0);
+        host.seed_primary_ppu_thread(unit, primary_attrs());
+        assert!(!host.unit_holds_lwmutex(unit));
+        let tid = host.ppu_thread_id_for_unit(unit).unwrap();
+        host.lwmutex_holds_inc(tid);
+        assert!(host.unit_holds_lwmutex(unit));
+        host.lwmutex_holds_dec(tid);
+        assert!(!host.unit_holds_lwmutex(unit));
+    }
+
+    #[test]
+    fn unit_holds_lwmutex_unmapped_unit_is_false() {
+        let host = Lv2Host::new();
+        // No PPU thread seeded for this unit; query is well-defined.
+        assert!(!host.unit_holds_lwmutex(UnitId::new(99)));
+    }
+
+    #[test]
+    fn state_hash_changes_when_holds_inserted_then_returns_to_baseline() {
+        let mut host = Lv2Host::new();
+        host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+        let baseline = host.state_hash();
+        let tid = host.ppu_thread_id_for_unit(UnitId::new(0)).unwrap();
+        host.lwmutex_holds_inc(tid);
+        assert_ne!(baseline, host.state_hash());
+        host.lwmutex_holds_dec(tid);
+        assert_eq!(baseline, host.state_hash());
     }
 
     #[test]

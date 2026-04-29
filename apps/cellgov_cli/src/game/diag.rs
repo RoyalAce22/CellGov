@@ -105,6 +105,7 @@ pub(super) struct ProcessExitInfo {
 
 pub(super) fn print_trace_line(
     rt: &Runtime,
+    unit: cellgov_event::UnitId,
     result: &cellgov_exec::ExecutionStepResult,
     steps: usize,
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
@@ -116,7 +117,8 @@ pub(super) fn print_trace_line(
             .map(|w| format!("0x{w:08x}"))
             .unwrap_or_else(|| "<unmapped>".to_string());
         println!(
-            "[{steps:>4}] PC=0x{pc:08x}  raw={raw}  yr={:?}",
+            "[{steps:>4}] u{} PC=0x{pc:08x}  raw={raw}  yr={:?}",
+            unit.raw(),
             result.yield_reason
         );
     }

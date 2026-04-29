@@ -58,9 +58,22 @@ Pre-Alpha. What works today:
   query family, the cellSpurs PPU-side runtime (initialize,
   workload registry, ready-count and contention controls, info
   snapshot, exception-handler registration), and HLE
-  sys_lwmutex_* routing through the LV2 lwmutex surface for
-  spec-correct Acquired / Freed / Contended / EDEADLK semantics.
-- 2,322 tests, zero `unsafe` (`unsafe_code = forbid`).
+  sys_lwmutex_* routing through the LV2 lwmutex surface with a
+  kernel sleep-queue, recursive-acquire depth tracking, and
+  per-thread hold counts that drive critical-section-aware
+  scheduling so concurrent printf paths complete atomically.
+- **Sync primitives**: lwmutex / event_flag / semaphore / mutex
+  / cond now match real-PS3 wake ordering, including event_flag
+  cancel waking parked waiters with `CELL_ECANCELED`,
+  semaphore post-N multi-wake, finite-timeout waits trip
+  `ETIMEDOUT` only when no peer can satisfy them, and timer
+  syscalls advance the deterministic guest clock.
+- **PS3 conformance**: ps3autotests cross-runner harness boots
+  whitelisted .ppu.elf files and compares captured TTY against
+  real-PS3 .expected. cpu/basic, cpu/ppu_branch,
+  lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag all
+  match byte-for-byte.
+- 2,362 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 ### Next reads
 

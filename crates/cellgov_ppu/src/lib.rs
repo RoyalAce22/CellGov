@@ -89,8 +89,9 @@ pub struct PpuExecutionUnit {
     /// Fires a synthetic `FAULT_DEBUG_BREAK` after `break_skip` prior hits.
     break_pc: Option<u64>,
     break_skip: u32,
-    per_step_trace: bool,
     /// Drained by the runtime via `drain_retired_state_hashes`.
+    /// Populated only when the per-step `ExecutionContext::trace_per_step()`
+    /// flag is set on the active call.
     per_step_hashes: Vec<(u64, u64)>,
     /// Inclusive `[lo, hi]` retirement-index window for full-state capture.
     full_state_window: Option<(u64, u64)>,
@@ -122,7 +123,6 @@ impl PpuExecutionUnit {
             status: UnitStatus::Runnable,
             break_pc: None,
             break_skip: 0,
-            per_step_trace: false,
             per_step_hashes: Vec::new(),
             full_state_window: None,
             retirement_counter: 0,
@@ -137,16 +137,6 @@ impl PpuExecutionUnit {
             profile_pairs: std::collections::BTreeMap::new(),
             profile_prev: None,
         }
-    }
-
-    /// Enable per-step `(pc, state_hash)` tracing.
-    pub fn set_per_step_trace(&mut self, on: bool) {
-        self.per_step_trace = on;
-    }
-
-    /// Returns whether per-step state-hash tracing is enabled.
-    pub fn per_step_trace(&self) -> bool {
-        self.per_step_trace
     }
 
     /// Configure the inclusive retirement-index window for full-register snapshots.
@@ -373,7 +363,7 @@ impl ExecutionUnit for PpuExecutionUnit {
             // retirement_counter and consumed_cost drift apart on every super-pair.
             if matches!(insn, instruction::PpuInstruction::Consumed) {
                 self.state.pc += 4;
-                if self.per_step_trace {
+                if ctx.trace_per_step() {
                     self.per_step_hashes
                         .push((step_pc, self.state.state_hash()));
                 }
@@ -536,7 +526,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                 self.profile_prev = Some(name);
             }
 
-            if self.per_step_trace {
+            if ctx.trace_per_step() {
                 self.per_step_hashes
                     .push((step_pc, self.state.state_hash()));
             }

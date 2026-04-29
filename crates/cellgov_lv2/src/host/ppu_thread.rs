@@ -189,6 +189,13 @@ impl Lv2Host {
         exit_value: u64,
         requester: UnitId,
     ) -> Lv2Dispatch {
+        // Clear the exiting thread's lwmutex hold count regardless of
+        // whether the thread actually called unlock; abnormal exit
+        // (or a printf path that bypasses our HLE unlock wrapper)
+        // would otherwise leak the count forever.
+        if let Some(tid) = self.ppu_threads.thread_id_for_unit(requester) {
+            self.lwmutex_holds_clear(tid);
+        }
         let waiters_unit_ids = match self.ppu_threads.thread_id_for_unit(requester) {
             Some(tid) => {
                 // A waiter whose table entry disappears between

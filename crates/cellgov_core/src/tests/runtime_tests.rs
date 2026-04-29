@@ -1026,7 +1026,10 @@ fn full_trace_mode_emits_trace_records() {
 
     let reader = TraceReader::new(rt.trace().bytes());
     let records: Vec<_> = reader.collect();
-    // UnitScheduled + StepCompleted + CommitApplied + 4 hash checkpoints = 7 min.
+    // Per-yield records: UnitScheduled + StepCompleted + commit-
+    // boundary CommitApplied + four sync/state hash checkpoints.
+    // CountingUnit does not retire any instructions, so no
+    // PpuStateHash records emit (those are per-instruction).
     assert!(
         records.len() >= 7,
         "FullTrace mode should emit >= 7 trace records, got {}",

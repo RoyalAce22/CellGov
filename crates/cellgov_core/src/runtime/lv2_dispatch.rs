@@ -121,6 +121,11 @@ impl Runtime {
         );
         match dispatch {
             Lv2Dispatch::Immediate { code, effects } => {
+                if is_process_exit {
+                    // Every other unit transitions to Finished, which
+                    // is a state change others can observe.
+                    self.step_woke_others = true;
+                }
                 self.handle_immediate(source, code, effects, is_process_exit);
             }
             Lv2Dispatch::RegisterSpu {
@@ -128,6 +133,9 @@ impl Runtime {
                 effects,
                 code,
             } => {
+                if !inits.is_empty() {
+                    self.step_woke_others = true;
+                }
                 self.handle_register_spu(source, inits, effects, code);
             }
             Lv2Dispatch::Block {
@@ -141,6 +149,9 @@ impl Runtime {
                 lwmutex_inheritors,
                 effects,
             } => {
+                if !woken_unit_ids.is_empty() || !lwmutex_inheritors.is_empty() {
+                    self.step_woke_others = true;
+                }
                 self.handle_ppu_thread_exit(
                     source,
                     exit_value,
@@ -150,6 +161,10 @@ impl Runtime {
                 );
             }
             Lv2Dispatch::PpuThreadCreate { .. } => {
+                // A fresh thread enters Runnable; treat as a wake so
+                // the scheduler rotates rather than sticking to the
+                // creator.
+                self.step_woke_others = true;
                 self.handle_ppu_thread_create(source, dispatch);
             }
             Lv2Dispatch::WakeAndReturn {
@@ -158,6 +173,9 @@ impl Runtime {
                 response_updates,
                 effects,
             } => {
+                if !woken_unit_ids.is_empty() {
+                    self.step_woke_others = true;
+                }
                 self.handle_wake_and_return(
                     source,
                     code,
@@ -173,6 +191,9 @@ impl Runtime {
                 effects,
                 ..
             } => {
+                if !woken_unit_ids.is_empty() {
+                    self.step_woke_others = true;
+                }
                 self.handle_block_and_wake(
                     source,
                     pending,
@@ -330,10 +351,10 @@ impl Runtime {
             &response_updates,
         );
         for (waiter, response) in response_updates {
-            // Partial-fill updates (e.g. EventQueueReceive None -> Some,
-            // EventFlagWake observed=0 -> observed=bits_at_wake)
-            // intentionally replace the parked entry; drain first so
-            // the insert contract is satisfied. The variant-tag check
+            // Partial-fill update path (e.g. EventQueueReceive None
+            // -> Some, EventFlagWake observed=0 -> observed=bits_at_wake):
+            // drain the parked entry before inserting the replacement
+            // so the insert contract holds. The variant-tag check
             // above confirmed shape compatibility.
             let _ = self.syscall_responses.try_take(waiter);
             let _ = self.syscall_responses.insert(waiter, response);

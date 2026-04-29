@@ -477,6 +477,8 @@ pub(crate) fn lwmutex_lock_hle(runtime: &mut Runtime, source: UnitId, nid: u32, 
         // Uncontended acquire (or stale owner from a thread that
         // already exited without unlocking -- treated as free so the
         // mutex is not orphaned forever).
+        let was_stale = fields.owner != LWMUTEX_FREE_OWNER && !owner_alive;
+        let me_tid = runtime.lv2_host().ppu_thread_id_for_unit(source);
         let mut ctx = adapter(runtime, source, nid);
         if !write_lwmutex_u32(&mut ctx, mutex_ptr, LWMUTEX_OFF_OWNER, me)
             || !write_lwmutex_u32(&mut ctx, mutex_ptr, LWMUTEX_OFF_RECURSIVE_COUNT, 1)
@@ -485,6 +487,15 @@ pub(crate) fn lwmutex_lock_hle(runtime: &mut Runtime, source: UnitId, nid: u32, 
             return;
         }
         ctx.set_return(0);
+        drop(ctx);
+        if was_stale {
+            runtime
+                .lv2_host_mut()
+                .lwmutex_holds_clear(cellgov_lv2::PpuThreadId::new(fields.owner as u64));
+        }
+        if let Some(tid) = me_tid {
+            runtime.lv2_host_mut().lwmutex_holds_inc(tid);
+        }
         return;
     }
     if fields.owner == me {
@@ -558,6 +569,7 @@ pub(crate) fn lwmutex_unlock_hle(runtime: &mut Runtime, source: UnitId, nid: u32
     // Final release: clear user-space ownership, then wake one
     // kernel-side waiter if the user-space waiter counter says any
     // are parked.
+    let me_tid = runtime.lv2_host().ppu_thread_id_for_unit(source);
     {
         let mut ctx = adapter(runtime, source, nid);
         if !write_lwmutex_u32(&mut ctx, mutex_ptr, LWMUTEX_OFF_OWNER, LWMUTEX_FREE_OWNER)
@@ -566,6 +578,12 @@ pub(crate) fn lwmutex_unlock_hle(runtime: &mut Runtime, source: UnitId, nid: u32
             ctx.set_return(CELL_EFAULT.into());
             return;
         }
+    }
+    // Decrement the per-thread hold count: this is a final unlock
+    // (recursive_count went 1 -> 0), so the lwmutex is no longer in
+    // the holder's critical-section set.
+    if let Some(tid) = me_tid {
+        runtime.lv2_host_mut().lwmutex_holds_dec(tid);
     }
     if fields.waiter > 0 {
         runtime.dispatch_lv2_request(
@@ -625,6 +643,8 @@ pub(crate) fn lwmutex_trylock_hle(
         .ppu_threads()
         .is_owner_alive(fields.owner);
     if fields.owner == LWMUTEX_FREE_OWNER || !owner_alive {
+        let was_stale = fields.owner != LWMUTEX_FREE_OWNER && !owner_alive;
+        let me_tid = runtime.lv2_host().ppu_thread_id_for_unit(source);
         let mut ctx = adapter(runtime, source, nid);
         if !write_lwmutex_u32(&mut ctx, mutex_ptr, LWMUTEX_OFF_OWNER, me)
             || !write_lwmutex_u32(&mut ctx, mutex_ptr, LWMUTEX_OFF_RECURSIVE_COUNT, 1)
@@ -633,6 +653,15 @@ pub(crate) fn lwmutex_trylock_hle(
             return;
         }
         ctx.set_return(0);
+        drop(ctx);
+        if was_stale {
+            runtime
+                .lv2_host_mut()
+                .lwmutex_holds_clear(cellgov_lv2::PpuThreadId::new(fields.owner as u64));
+        }
+        if let Some(tid) = me_tid {
+            runtime.lv2_host_mut().lwmutex_holds_inc(tid);
+        }
         return;
     }
     if fields.owner == me && (fields.attribute & SYS_SYNC_RECURSIVE) != 0 {

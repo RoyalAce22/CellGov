@@ -27,8 +27,7 @@ fn linear_addi_program(n: usize) -> GuestMemory {
 /// the runtime emits.
 fn ppu_trace_bytes(mem: &GuestMemory, n: usize) -> Vec<u8> {
     let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
-    ppu.set_per_step_trace(true);
-    let ctx = ExecutionContext::new(mem);
+    let ctx = ExecutionContext::new(mem).with_trace_per_step(true);
     let _ = ppu.run_until_yield(Budget::new(n as u64), &ctx, &mut Vec::new());
     let pairs = ppu.drain_retired_state_hashes();
     let mut writer = TraceWriter::new();

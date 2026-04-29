@@ -84,6 +84,13 @@ pub struct Runtime {
     /// Unit selected by the most recent `step()` call; one commit batch
     /// per unit yield, so this attributes the batch unambiguously.
     last_scheduled_unit: Option<UnitId>,
+    /// Set during `commit_step` if the dispatch for the just-completed
+    /// step transitioned at least one other unit into `Runnable`.
+    /// Surfaced to the scheduler via `notify_yielded` so a sticky-on-
+    /// non-waking-syscall policy can distinguish wake-causing syscalls
+    /// (`sema_post`, `event_flag_set`, etc.) from non-waking ones
+    /// (`tty_write`, `ppu_thread_get_id`).
+    step_woke_others: bool,
     pub(crate) hle: crate::hle::HleState,
     /// Reused across steps to avoid per-step allocation in the common
     /// zero-effects case.
@@ -109,6 +116,7 @@ impl Runtime {
         result: &ExecutionStepResult,
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
+        self.step_woke_others = false;
         // Trivial-step fast path under FaultDriven: no effects, no fault,
         // no syscall/finished yield, empty DMA and RSX queues. Epoch still
         // advances so the atomic-batch boundary is preserved; trace is
@@ -126,6 +134,11 @@ impl Runtime {
             && !self.rsx_flip.pending()
         {
             self.epoch.advance();
+            if let Some(unit) = self.last_scheduled_unit {
+                let holds_cs = self.lv2_host.unit_holds_lwmutex(unit);
+                self.scheduler
+                    .notify_yielded(unit, result.yield_reason, false, holds_cs);
+            }
             return Ok(CommitOutcome::default());
         }
 
@@ -236,6 +249,10 @@ impl Runtime {
         }
 
         self.emit_commit_trace(source, &outcome, &due);
+
+        let holds_cs = self.lv2_host.unit_holds_lwmutex(source);
+        self.scheduler
+            .notify_yielded(source, result.yield_reason, self.step_woke_others, holds_cs);
 
         outcome
     }
@@ -663,7 +680,8 @@ impl Runtime {
             };
             let ctx = ctx
                 .with_reservations(&self.reservations)
-                .with_current_tick(self.time);
+                .with_current_tick(self.time)
+                .with_trace_per_step(self.mode != RuntimeMode::FaultDriven);
             let unit = self
                 .registry
                 .get_mut(unit_id)
