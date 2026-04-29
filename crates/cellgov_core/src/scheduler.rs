@@ -8,7 +8,7 @@
 
 use crate::registry::UnitRegistry;
 use cellgov_event::UnitId;
-use cellgov_exec::UnitStatus;
+use cellgov_exec::{UnitStatus, YieldReason};
 
 /// Pluggable scheduling policy.
 pub trait Scheduler {
@@ -18,11 +18,42 @@ pub trait Scheduler {
     /// Must be a deterministic function of scheduler state plus the
     /// sequence of registry-status snapshots observed.
     fn select_next(&mut self, registry: &UnitRegistry) -> Option<UnitId>;
+
+    /// Notify the scheduler that the just-completed step ended with
+    /// `yield_reason` on `unit`. `woke_others` is `true` iff the
+    /// step's dispatch transitioned at least one other unit into
+    /// `Runnable`. `holds_critical_section` is `true` iff `unit`
+    /// owns at least one lwmutex (or analogous primitive) at the
+    /// end of the step. Default: ignored. Implementations that want
+    /// time-slice-style stickiness use this hook.
+    fn notify_yielded(
+        &mut self,
+        _unit: UnitId,
+        _yield_reason: YieldReason,
+        _woke_others: bool,
+        _holds_critical_section: bool,
+    ) {
+    }
 }
 
-/// Round-robin scheduler: walks the registry in id order from the
-/// position after `last_scheduled`, returns the first `Runnable` unit,
-/// wraps around. Skips `Blocked`, `Faulted`, `Finished`.
+/// Round-robin scheduler with wake-aware and critical-section-aware
+/// stickiness: walks the registry in id order from the position
+/// after `last_scheduled`, returns the first `Runnable` unit, wraps
+/// around. Skips `Blocked`, `Faulted`, `Finished`.
+///
+/// Stickiness exceptions, in priority order:
+///
+/// 1. The previous step's unit holds at least one lwmutex (i.e. is
+///    in a critical section). The scheduler reselects the same unit
+///    regardless of yield reason, the only exception being a
+///    blocking yield (which moves the unit out of the runnable set
+///    anyway). Modeled on real PS3, where time-slice preemption
+///    inside a held synchronization primitive would risk priority-
+///    inversion-style stalls and is generally avoided.
+/// 2. The previous step ended with [`YieldReason::Syscall`] and did
+///    not wake any other unit. Real PS3 does not preempt on a non-
+///    blocking, non-waking syscall return.
+/// 3. Otherwise: normal round-robin advance.
 ///
 /// Relies on two [`UnitRegistry`] contracts:
 ///
@@ -35,6 +66,9 @@ pub trait Scheduler {
 pub struct RoundRobinScheduler {
     /// Cursor: id of the most recently selected unit; `None` at start.
     last_scheduled: Option<UnitId>,
+    /// Set when the previous step yielded on `Syscall` without waking
+    /// any other unit; cleared otherwise.
+    sticky: bool,
 }
 
 impl RoundRobinScheduler {
@@ -91,6 +125,10 @@ impl Scheduler for RoundRobinScheduler {
             0 => None,
             1 => Some(runnables[0]),
             _ => match self.last_scheduled {
+                // Sticky after a non-waking syscall: real PS3 does
+                // not preempt on syscall return when no other unit
+                // became runnable, so reselect the same unit.
+                Some(c) if self.sticky && runnables.contains(&c) => Some(c),
                 Some(c) => runnables
                     .iter()
                     .copied()
@@ -104,6 +142,25 @@ impl Scheduler for RoundRobinScheduler {
             self.last_scheduled = Some(id);
         }
         chosen
+    }
+
+    fn notify_yielded(
+        &mut self,
+        _unit: UnitId,
+        yield_reason: YieldReason,
+        woke_others: bool,
+        holds_critical_section: bool,
+    ) {
+        let in_critical = holds_critical_section
+            && !matches!(
+                yield_reason,
+                YieldReason::WaitingSync
+                    | YieldReason::DmaWait
+                    | YieldReason::Finished
+                    | YieldReason::Fault
+            );
+        let non_waking_syscall = matches!(yield_reason, YieldReason::Syscall) && !woke_others;
+        self.sticky = in_critical || non_waking_syscall;
     }
 }
 
@@ -231,6 +288,57 @@ mod tests {
         assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
         assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
         assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+    }
+
+    #[test]
+    fn syscall_yield_with_no_wake_sticks_to_same_unit() {
+        let r = registry_with(&[UnitStatus::Runnable, UnitStatus::Runnable]);
+        let mut s = RoundRobinScheduler::new();
+        assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+        // Non-blocking syscall, no wake -> stay sticky.
+        s.notify_yielded(UnitId::new(0), YieldReason::Syscall, false, false);
+        assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+    }
+
+    #[test]
+    fn syscall_yield_that_wakes_others_rotates() {
+        let r = registry_with(&[UnitStatus::Runnable, UnitStatus::Runnable]);
+        let mut s = RoundRobinScheduler::new();
+        assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+        s.notify_yielded(UnitId::new(0), YieldReason::Syscall, true, false);
+        assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
+    }
+
+    #[test]
+    fn budget_exhausted_with_held_lwmutex_sticks_to_same_unit() {
+        let r = registry_with(&[UnitStatus::Runnable, UnitStatus::Runnable]);
+        let mut s = RoundRobinScheduler::new();
+        assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+        // Budget tick fires while unit holds a lwmutex -> stick.
+        s.notify_yielded(UnitId::new(0), YieldReason::BudgetExhausted, false, true);
+        assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+    }
+
+    #[test]
+    fn budget_exhausted_without_lwmutex_rotates() {
+        let r = registry_with(&[UnitStatus::Runnable, UnitStatus::Runnable]);
+        let mut s = RoundRobinScheduler::new();
+        assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+        s.notify_yielded(UnitId::new(0), YieldReason::BudgetExhausted, false, false);
+        assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
+    }
+
+    #[test]
+    fn waiting_sync_releases_critical_section_stickiness() {
+        // A unit that blocks on a sync primitive may have been
+        // holding a lwmutex up to the block instant; the block
+        // takes it out of the runnable set, so the sticky bit must
+        // not survive into the next round.
+        let r = registry_with(&[UnitStatus::Runnable, UnitStatus::Runnable]);
+        let mut s = RoundRobinScheduler::new();
+        assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+        s.notify_yielded(UnitId::new(0), YieldReason::WaitingSync, false, true);
+        assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
     }
 
     #[test]

@@ -47,24 +47,45 @@ pub type SpuFactory = Box<dyn Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit
 /// Constructs a child PPU unit when `Lv2Dispatch::PpuThreadCreate` fires.
 pub type PpuFactory = Box<dyn Fn(UnitId, PpuThreadInitState) -> Box<dyn RegisteredUnit>>;
 
-/// Controls which trace records emit and whether state-hash
-/// checkpoints compute at commit boundaries.
+/// Controls which trace records emit and whether per-instruction
+/// state-hash fingerprints are captured.
+///
+/// Two orthogonal axes drive the modes:
+///
+/// 1. *Per-yield* records (`UnitScheduled`, `StepCompleted`,
+///    `EffectEmitted`, commit-boundary state-hash checkpoints):
+///    fire once per `run_until_yield` call. `FullTrace` enables
+///    them all; `DeterminismCheck` enables the commit-boundary
+///    subset; `FaultDriven` disables them.
+/// 2. *Per-instruction* `PpuStateHash` fingerprints: fire once per
+///    retired instruction. The runtime sets the
+///    `ExecutionContext::trace_per_step` flag based on mode
+///    (`FullTrace` and `DeterminismCheck` set it, `FaultDriven`
+///    does not). The unit's per-step hash buffer accumulates
+///    `(pc, hash)` per retirement at any budget size, so trace
+///    fidelity is independent of slice granularity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeMode {
-    /// Trace off, hash checkpoints off.
+    /// No trace records, no per-instruction hashes.
     FaultDriven,
-    /// Commit + block/wake trace records, hash checkpoints on.
+    /// Commit + block/wake records + per-instruction hashes.
     DeterminismCheck,
-    /// All trace records, all hash checkpoints.
+    /// All trace records + per-instruction hashes.
     FullTrace,
 }
 
-/// `FullTrace` returns Budget=1 because `PpuStateHash` records require
-/// single-instruction yields to attribute hashes to specific PCs; other
-/// modes return the throughput batch size (256).
+/// All non-trivial modes return the throughput batch size (256).
+/// `PpuStateHash` records carry their own retired-instruction PC and
+/// the unit's per-step hash buffer accumulates one entry per retired
+/// instruction independent of yield size, so the trace fidelity is
+/// orthogonal to budget choice. The yield-boundary records
+/// (`UnitScheduled`, `StepCompleted`, `EffectEmitted`) describe a
+/// scheduler decision and a budget consumption; under FullTrace they
+/// fire once per yield, not once per instruction.
 pub fn default_budget_for_mode(mode: RuntimeMode) -> Budget {
     match mode {
-        RuntimeMode::FullTrace => Budget::new(1),
-        RuntimeMode::FaultDriven | RuntimeMode::DeterminismCheck => Budget::new(256),
+        RuntimeMode::FullTrace | RuntimeMode::FaultDriven | RuntimeMode::DeterminismCheck => {
+            Budget::new(256)
+        }
     }
 }

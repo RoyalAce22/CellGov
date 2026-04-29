@@ -1,23 +1,9 @@
-//! ps3autotests integration: boot whitelisted .ppu.elf files via the
-//! `cellgov_cli run-game` binary and compare captured TTY output
-//! against the real-PS3 .expected file shipped in ps3autotests.
-//!
-//! ps3autotests lives at `tools/ps3autotests/` (gitignored). When the
-//! directory is absent each test prints a short note and returns
-//! cleanly; this lets CI runs without the third-party fixture skip
-//! quietly while developers who clone it get the validation
-//! automatically.
-//!
-//! The harness invokes the cellgov_cli binary built by the same Cargo
-//! workspace via `CARGO_BIN_EXE_cellgov_cli`. The boot path that runs
-//! is the same one `run-game` uses interactively, so any HLE or LV2
-//! gap surfaces here exactly as it would for a developer running the
-//! command by hand.
-//!
-//! Cross-runner verdict vocabulary (per docs/concepts.md):
-//! - `MATCH`: captured TTY equals .expected byte-for-byte.
-//! - `DIVERGE`: bytes differ; the test panics with a side-by-side
-//!   preview.
+//! Boot whitelisted `.ppu.elf` files from `tools/ps3autotests/` via
+//! the `cellgov_cli run-game` binary and compare captured TTY
+//! against the real-PS3 `.expected` file. When the (gitignored)
+//! `tools/ps3autotests/` directory is absent, each test logs a
+//! skip note and returns clean so CI without the fixture stays
+//! green.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,8 +16,6 @@ use cellgov_compare::Observation;
 struct Case {
     rel_dir: &'static str,
     stem: &'static str,
-    /// Step cap. Generous default: ELFs that need more than this
-    /// almost certainly need investigation, not a higher cap.
     max_steps: usize,
 }
 
@@ -198,9 +182,6 @@ fn first_diff_offset(a: &[u8], b: &[u8]) -> String {
 
 #[test]
 fn cpu_basic() {
-    // Hello World. Smallest possible test: confirms the boot pipeline
-    // plus TTY capture surfaces work end-to-end against a real-PS3
-    // baseline. Currently MATCH.
     run_case(&Case {
         rel_dir: "cpu/basic",
         stem: "basic",
@@ -208,12 +189,6 @@ fn cpu_basic() {
     });
 }
 
-/// PPU branch-instruction coverage. Writes ~hundreds of `branch`
-/// outcomes to `/app_home/output.txt`; CellGov pipes those writes
-/// into `tty_log` so the harness compares the captured stream to
-/// `.expected`. Currently MATCH (41490 bytes) after the store-buffer
-/// stitching fix that lets `ld` see eight prior `stb`s across a
-/// `bl memcpy` boundary.
 #[test]
 fn cpu_ppu_branch() {
     run_case(&Case {
@@ -223,25 +198,7 @@ fn cpu_ppu_branch() {
     });
 }
 
-// The two LV2 tests below currently DIVERGE against the real-PS3
-// .expected and are gated behind `#[ignore]` so default
-// `cargo test` stays green. Run them with
-// `cargo test -p cellgov_cli --test ps3autotests -- --ignored` to
-// reproduce. Each comment names the specific gap the test exposes.
-
-/// DIVERGE today at offset 2570. Test completes end-to-end (all
-/// four phases hit the right syscalls; cancel wakes both wait
-/// threads with `CELL_ECANCELED` and returns the correct count to
-/// `num_ptr`). The remaining 41-byte gap and the byte-level shift
-/// near the second trywait line are guest-side printf interleaving:
-/// PSL1GHT's stdio releases the stdio lwmutex between body and
-/// newline writes, and CellGov's instruction-granular scheduler
-/// preempts more aggressively than real-PS3 timing, so two
-/// concurrent printfs fragment differently than on the reference.
-/// Closing this requires either a coarser scheduling slice or a
-/// printf-aware override.
 #[test]
-#[ignore = "diverges: guest printf interleaving in trywait+cancel phase"]
 fn lv2_sys_event_flag() {
     run_case(&Case {
         rel_dir: "lv2/sys_event_flag",
@@ -250,9 +207,6 @@ fn lv2_sys_event_flag() {
     });
 }
 
-/// MATCH today (909 bytes). The previously-divergent
-/// `sys_process_get_sdk_version` line is fixed by the store-buffer
-/// stitching change in `cellgov_ppu::exec`.
 #[test]
 fn lv2_sys_process() {
     run_case(&Case {
@@ -262,11 +216,6 @@ fn lv2_sys_process() {
     });
 }
 
-/// MATCH today (2072 bytes). All four phases (error tests, get/wait,
-/// post/wait with multi-worker contention, post-N) line up with the
-/// real PS3 stream after the lwmutex sleep-queue redesign, the
-/// timer syscalls advancing guest time, and `sys_semaphore_post`
-/// supporting `val > 1`.
 #[test]
 fn lv2_sys_semaphore() {
     run_case(&Case {

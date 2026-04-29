@@ -70,6 +70,7 @@ impl Runtime {
             max_steps,
             trace,
             last_scheduled_unit: None,
+            step_woke_others: false,
             effects_buf: Vec::new(),
             hle: crate::hle::HleState::new(),
             mode: RuntimeMode::FullTrace,

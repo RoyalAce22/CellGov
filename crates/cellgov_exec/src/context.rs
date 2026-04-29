@@ -28,6 +28,13 @@ pub struct ExecutionContext<'a> {
     register_writes: &'a [(u8, u64)],
     reservations: Option<&'a ReservationTable>,
     current_tick: GuestTicks,
+    /// When `true`, units that support per-instruction state
+    /// fingerprinting MUST capture `(pc, state_hash)` on every
+    /// retired instruction so the runtime can drain them via
+    /// `drain_retired_state_hashes`. The runtime sets this from its
+    /// own `mode`; default is `false` so the FaultDriven hot path
+    /// pays no hashing cost.
+    trace_per_step: bool,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -41,6 +48,7 @@ impl<'a> ExecutionContext<'a> {
             register_writes: &[],
             reservations: None,
             current_tick: GuestTicks::ZERO,
+            trace_per_step: false,
         }
     }
 
@@ -55,6 +63,7 @@ impl<'a> ExecutionContext<'a> {
             register_writes: &[],
             reservations: None,
             current_tick: GuestTicks::ZERO,
+            trace_per_step: false,
         }
     }
 
@@ -71,6 +80,7 @@ impl<'a> ExecutionContext<'a> {
             register_writes: &[],
             reservations: None,
             current_tick: GuestTicks::ZERO,
+            trace_per_step: false,
         }
     }
 
@@ -91,6 +101,7 @@ impl<'a> ExecutionContext<'a> {
             register_writes,
             reservations: None,
             current_tick: GuestTicks::ZERO,
+            trace_per_step: false,
         }
     }
 
@@ -112,12 +123,21 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn with_reservations(self, table: &'a ReservationTable) -> Self {
         Self {
-            memory: self.memory,
-            received: self.received,
-            syscall_return: self.syscall_return,
-            register_writes: self.register_writes,
             reservations: Some(table),
-            current_tick: self.current_tick,
+            ..self
+        }
+    }
+
+    /// Set the per-instruction trace flag. Units that fingerprint
+    /// state read this from the context every step, so the runtime's
+    /// mode (`FullTrace` / `DeterminismCheck`) is the single source
+    /// of truth and unit registration / mode flips do not need to
+    /// resync any per-unit flag.
+    #[inline]
+    pub const fn with_trace_per_step(self, on: bool) -> Self {
+        Self {
+            trace_per_step: on,
+            ..self
         }
     }
 
@@ -168,6 +188,15 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn current_tick(&self) -> GuestTicks {
         self.current_tick
+    }
+
+    /// Whether the runtime wants per-instruction `(pc, state_hash)`
+    /// fingerprints captured this step. Units that support tracing
+    /// read this and gate their `per_step_hashes` push on it; units
+    /// that do not just ignore it.
+    #[inline]
+    pub const fn trace_per_step(&self) -> bool {
+        self.trace_per_step
     }
 }
 

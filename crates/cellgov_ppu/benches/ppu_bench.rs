@@ -383,8 +383,7 @@ fn bench_run_until_yield_per_step_on(c: &mut Criterion) {
     c.bench_function("run_until_yield/per_step_on_addi100", |b| {
         b.iter(|| {
             let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
-            ppu.set_per_step_trace(true);
-            let ctx = ExecutionContext::new(&mem);
+            let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
             let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
             // Drain per iteration; buffer would otherwise grow unbounded.
             let _ = ppu.drain_retired_state_hashes();

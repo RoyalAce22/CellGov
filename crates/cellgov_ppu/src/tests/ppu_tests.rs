@@ -561,10 +561,9 @@ fn consumed_slot_records_per_step_hash_and_full_state() {
     mem.apply_commit(load_target, &7u32.to_be_bytes()).unwrap();
 
     let mut unit = unit_with_shadow_for_pair(&mem, lwz, cmpwi);
-    unit.set_per_step_trace(true);
     unit.set_full_state_window(Some((0, 1)));
 
-    let ctx = ExecutionContext::new(&mem);
+    let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
     let result = unit.run_until_yield(Budget::new(2), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
 
@@ -1179,9 +1178,7 @@ fn per_step_trace_on_records_one_hash_per_retired_instruction() {
     place_insn(&mut mem, 8, (14 << 26) | (5 << 21) | 3);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.set_per_step_trace(true);
-    assert!(unit.per_step_trace());
-    let ctx = ExecutionContext::new(&mem);
+    let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
     let _ = unit.run_until_yield(Budget::new(3), &ctx, &mut Vec::new());
 
     let drained = unit.drain_retired_state_hashes();
@@ -1196,14 +1193,51 @@ fn per_step_trace_on_records_one_hash_per_retired_instruction() {
 }
 
 #[test]
+fn per_step_trace_pc_attribution_is_budget_independent() {
+    // Regression: PpuStateHash records carry their own PC per
+    // retirement, so running 3 instructions in three Budget=1 calls
+    // and running them in one Budget=3 call must emit the same
+    // (pc, hash) sequence. Drives the runtime mode design where
+    // FullTrace can use the same throughput batch as other modes.
+    use cellgov_exec::ExecutionUnit;
+    let mut mem = GuestMemory::new(64);
+    place_insn(&mut mem, 0, (14 << 26) | (3 << 21) | 1);
+    place_insn(&mut mem, 4, (14 << 26) | (4 << 21) | 2);
+    place_insn(&mut mem, 8, (14 << 26) | (5 << 21) | 3);
+
+    let pairs_at = |budget: u64| -> Vec<(u64, u64)> {
+        let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+        let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
+        let mut collected = Vec::new();
+        let mut remaining = 3u64;
+        while remaining > 0 {
+            let take = budget.min(remaining);
+            let _ = unit.run_until_yield(Budget::new(take), &ctx, &mut Vec::new());
+            collected.extend(unit.drain_retired_state_hashes());
+            remaining = remaining.saturating_sub(take);
+        }
+        collected
+    };
+
+    let one_at_a_time = pairs_at(1);
+    let two_at_a_time = pairs_at(2);
+    let all_in_one = pairs_at(3);
+    assert_eq!(one_at_a_time, two_at_a_time);
+    assert_eq!(one_at_a_time, all_in_one);
+    assert_eq!(one_at_a_time.len(), 3);
+    assert_eq!(one_at_a_time[0].0, 0);
+    assert_eq!(one_at_a_time[1].0, 4);
+    assert_eq!(one_at_a_time[2].0, 8);
+}
+
+#[test]
 fn drain_retired_state_hashes_clears_buffer() {
     use cellgov_exec::ExecutionUnit;
     let mut mem = GuestMemory::new(64);
     place_insn(&mut mem, 0, (14 << 26) | (3 << 21) | 1);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.set_per_step_trace(true);
-    let ctx = ExecutionContext::new(&mem);
+    let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
     let _ = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     assert_eq!(unit.drain_retired_state_hashes().len(), 1);
@@ -1221,8 +1255,7 @@ fn per_step_trace_does_not_record_on_fault() {
     place_insn(&mut mem, 0, 0x0000_0000);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.set_per_step_trace(true);
-    let ctx = ExecutionContext::new(&mem);
+    let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
     let result = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
 
     assert_eq!(result.yield_reason, YieldReason::Fault);
@@ -1280,9 +1313,8 @@ fn full_state_window_and_per_step_hash_are_independent() {
     }
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.set_per_step_trace(true);
     unit.set_full_state_window(Some((0, 0)));
-    let ctx = ExecutionContext::new(&mem);
+    let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
     let _ = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
 
     assert_eq!(unit.drain_retired_state_hashes().len(), 5);

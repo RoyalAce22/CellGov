@@ -81,6 +81,13 @@ impl Runtime {
                         let next = current.saturating_sub(1);
                         self.commit_bytes_at(waiter_addr, &next.to_be_bytes());
                     }
+                    // The waker just acquired the lwmutex, so its
+                    // critical-section count goes up by one. Mirrors
+                    // the increment HLE lwmutex_lock does on the
+                    // uncontended fast path.
+                    if let Some(tid) = self.lv2_host.ppu_thread_id_for_unit(waiter) {
+                        self.lv2_host.lwmutex_holds_inc(tid);
+                    }
                     self.registry.set_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::CondWakeReacquire { .. }) => {

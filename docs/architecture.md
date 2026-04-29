@@ -228,13 +228,18 @@ ten-step deterministic loop:
    default `RoundRobinScheduler` walks the registry in id
    order from the position after the last selection, skipping
    units whose effective status is `Blocked` / `Faulted` /
-   `Finished`. A single-runnable fast path (one iter pass that
-   exits on the second runnable) keeps single-PPU titles off
-   the two-pass rotation. When the registry is non-empty but
-   every unit is `Blocked`, `Runtime::step` returns
-   `StepError::AllBlocked` rather than `NoRunnableUnit` --
-   callers that care about liveness vs terminal stall can
-   distinguish the two.
+   `Finished`. Two stickiness exceptions match real-PS3 time-
+   slice behavior: the previous unit is reselected if (a) it
+   holds at least one lwmutex (critical section in flight), or
+   (b) the previous yield was a non-blocking syscall that did
+   not wake any other unit. Wake-causing syscalls (`sema_post`,
+   `event_flag_set`, etc.) follow normal rotation so the woken
+   unit gets to run. A single-runnable fast path keeps
+   single-PPU titles off the two-pass rotation. When the
+   registry is non-empty but every unit is `Blocked`,
+   `Runtime::step` returns `StepError::AllBlocked` rather than
+   `NoRunnableUnit` -- callers that care about liveness vs
+   terminal stall can distinguish the two.
 2. Grant the unit the per-step `Budget` (default 256 instructions).
 3. Run the unit until it yields (one `ExecutionUnit::run_until_yield`).
    The PPU executes up to Budget instructions per call, batching
@@ -328,14 +333,18 @@ Trace emission is gated by `RuntimeMode` (`FaultDriven` /
 overhead; determinism check pays state-hash overhead at commit
 boundaries; full trace pays both.
 
-The two per-step variants are gated separately on the unit, not on
-`RuntimeMode`. `PpuExecutionUnit::set_per_step_trace(true)` enables
-one `PpuStateHash` (25 bytes: step + pc + 64-bit FNV-1a fingerprint
-of GPR + LR + CTR + XER + CR) per retired instruction. The runtime
+The two per-step variants are gated by the runtime's mode through
+the per-call `ExecutionContext::trace_per_step` flag.
+`RuntimeMode::FullTrace` and `RuntimeMode::DeterminismCheck` set
+the flag; `FaultDriven` does not. When set, the unit emits one
+`PpuStateHash` (25 bytes: step + pc + 64-bit FNV-1a fingerprint of
+GPR + LR + CTR + XER + CR) per retired instruction. The runtime
 drains them via `ExecutionUnit::drain_retired_state_hashes` after
 each `run_until_yield` and writes them to the main trace stream
-with monotonic per-instruction step indices that are independent of
-`steps_taken`. `set_full_state_window(Some((lo, hi)))` enables a
+with monotonic per-instruction step indices that are independent
+of `steps_taken`. Per-instruction PC attribution is preserved at
+any `Budget` size: a single yield retiring N instructions emits N
+records, one per PC. `set_full_state_window(Some((lo, hi)))` enables a
 bounded-window second stream of `PpuStateFull` records (301 bytes
 each, full register snapshot) routed to a separate `zoom_trace`
 sink so the main per-step stream stays homogeneous. Cost: 876 ns per

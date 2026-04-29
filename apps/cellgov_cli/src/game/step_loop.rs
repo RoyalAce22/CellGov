@@ -212,7 +212,7 @@ pub(super) fn step_loop(
                 let t_cov_end = Instant::now();
 
                 if ctx.trace {
-                    print_trace_line(rt, &step.result, *ctx.steps, ctx.hle_bindings);
+                    print_trace_line(rt, step.unit, &step.result, *ctx.steps, ctx.hle_bindings);
                 }
                 // Capture HLE/LV2 calls, TTY, and sys_process_exit
                 // before commit so the final report has them even
