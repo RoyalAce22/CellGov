@@ -27,8 +27,8 @@ pub use mutex::{
     MutexEntry, MutexRelease, MutexTable,
 };
 pub use semaphore::{
-    SemaphoreCreateError, SemaphoreEnqueueError, SemaphoreEntry, SemaphorePost, SemaphoreTable,
-    SemaphoreWait,
+    SemaphoreCreateError, SemaphoreEnqueueError, SemaphoreEntry, SemaphorePost, SemaphorePostN,
+    SemaphoreTable, SemaphoreWait,
 };
 
 use crate::ppu_thread::PpuThreadId;

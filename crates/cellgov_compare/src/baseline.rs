@@ -152,6 +152,7 @@ mod tests {
                 runner: "rpcs3-interpreter".into(),
                 steps: None,
             },
+            tty_log: Vec::new(),
         };
 
         let dir = TempDir::new("rpcs3_baseline_test");

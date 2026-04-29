@@ -116,6 +116,7 @@ pub(super) fn save_boot_observation(
     outcome: cellgov_compare::BootOutcome,
     steps: usize,
     manifest_path: Option<&str>,
+    tty_log: &[u8],
 ) -> Result<(), String> {
     let regions: Vec<cellgov_compare::RegionDescriptor> = match manifest_path {
         Some(mp) => {
@@ -150,7 +151,8 @@ pub(super) fn save_boot_observation(
                 .collect()
         }
     };
-    let observation = cellgov_compare::observe_from_boot(final_memory, outcome, steps, &regions);
+    let observation =
+        cellgov_compare::observe_from_boot(final_memory, outcome, steps, &regions, tty_log);
     let json =
         serde_json::to_string_pretty(&observation).map_err(|e| format!("serialize failed: {e}"))?;
     std::fs::write(path, json).map_err(|e| format!("write to {path} failed: {e}"))?;

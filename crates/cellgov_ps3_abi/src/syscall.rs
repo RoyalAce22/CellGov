@@ -4,8 +4,41 @@
 //! (the dispatch match in `cellgov_lv2::request::classify`) lives in
 //! `cellgov_lv2`; this module is data only.
 
+/// `sys_process_getpid`.
+pub const PROCESS_GETPID: u64 = 1;
+
+/// `sys_process_get_number_of_object`.
+pub const PROCESS_GET_NUMBER_OF_OBJECT: u64 = 12;
+
+/// `sys_process_getppid`.
+pub const PROCESS_GETPPID: u64 = 18;
+
 /// `sys_process_exit`.
 pub const PROCESS_EXIT: u64 = 22;
+
+/// `sys_process_get_sdk_version`.
+pub const PROCESS_GET_SDK_VERSION: u64 = 25;
+
+/// `_sys_process_get_paramsfo`.
+pub const PROCESS_GET_PARAMSFO: u64 = 30;
+
+/// `sys_process_get_ppu_guid`.
+pub const PROCESS_GET_PPU_GUID: u64 = 31;
+
+/// `sys_timer_create`.
+pub const TIMER_CREATE: u64 = 70;
+/// `sys_timer_destroy`.
+pub const TIMER_DESTROY: u64 = 71;
+
+/// `sys_rwlock_create`.
+pub const RWLOCK_CREATE: u64 = 120;
+/// `sys_rwlock_destroy`.
+pub const RWLOCK_DESTROY: u64 = 121;
+
+/// `sys_event_port_create`.
+pub const EVENT_PORT_CREATE: u64 = 134;
+/// `sys_event_port_destroy`.
+pub const EVENT_PORT_DESTROY: u64 = 135;
 
 /// `sys_ppu_thread_exit`.
 pub const PPU_THREAD_EXIT: u64 = 41;
@@ -42,6 +75,9 @@ pub const SEMAPHORE_POST: u64 = 94;
 pub const LWMUTEX_CREATE: u64 = 95;
 /// `sys_lwmutex_destroy`.
 pub const LWMUTEX_DESTROY: u64 = 96;
+
+/// `sys_mutex_destroy`.
+pub const MUTEX_DESTROY: u64 = 101;
 /// `sys_lwmutex_lock`.
 pub const LWMUTEX_LOCK: u64 = 97;
 /// `sys_lwmutex_unlock`.
@@ -73,6 +109,11 @@ pub const COND_SIGNAL_TO: u64 = 110;
 
 /// `sys_semaphore_get_value`.
 pub const SEMAPHORE_GET_VALUE: u64 = 114;
+
+/// `sys_event_flag_cancel`.
+pub const EVENT_FLAG_CANCEL: u64 = 132;
+/// `sys_event_flag_get`.
+pub const EVENT_FLAG_GET: u64 = 139;
 
 /// `sys_event_flag_clear`.
 pub const EVENT_FLAG_CLEAR: u64 = 118;
@@ -125,6 +166,12 @@ pub const TTY_WRITE: u64 = 403;
 /// `sys_fs_open` (path-validating file-open; minimal handler returns
 /// CELL_ENOENT for unknown paths).
 pub const FS_OPEN: u64 = 801;
+
+/// `sys_fs_write`.
+pub const FS_WRITE: u64 = 803;
+
+/// `sys_fs_close`.
+pub const FS_CLOSE: u64 = 804;
 
 /// `sys_rsx_memory_allocate`.
 pub const SYS_RSX_MEMORY_ALLOCATE: u64 = 668;

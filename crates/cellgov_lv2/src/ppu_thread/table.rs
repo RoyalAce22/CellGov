@@ -203,6 +203,44 @@ impl PpuThreadTable {
         self.threads.keys().copied()
     }
 
+    /// Whether any thread other than `caller` is alive (not yet
+    /// `Finished` / `Detached`).
+    ///
+    /// Used by finite-timeout wait dispatchers to decide between
+    /// blocking and tripping `CELL_ETIMEDOUT`: if no peer thread can
+    /// possibly post / set the awaited condition, blocking would
+    /// deadlock the schedule, so the wait must time-trip immediately.
+    pub fn has_other_alive_thread(&self, caller: PpuThreadId) -> bool {
+        self.threads.iter().any(|(id, t)| {
+            *id != caller && !matches!(t.state, PpuThreadState::Finished | PpuThreadState::Detached)
+        })
+    }
+
+    /// Whether any thread whose low-32-bit id matches `raw_low32` is
+    /// still alive. The user-space owner field of `sys_lwmutex_t` only
+    /// stores the low 32 bits of the kernel `PpuThreadId`, so the HLE
+    /// lwmutex fast-path cannot distinguish between two threads whose
+    /// ids share a low-32-bit prefix; in practice every allocated
+    /// thread id we hand out has a unique low-32 chunk, so this match
+    /// is exact.
+    ///
+    /// Returns `true` if there is no thread with that id (the owner
+    /// field carries a stale id from a thread that was never seeded
+    /// here, which we treat as alive to keep the contention path).
+    pub fn is_owner_alive(&self, raw_low32: u32) -> bool {
+        let Some((_, thread)) = self
+            .threads
+            .iter()
+            .find(|(id, _)| (id.raw() as u32) == raw_low32)
+        else {
+            return true;
+        };
+        !matches!(
+            thread.state,
+            PpuThreadState::Finished | PpuThreadState::Detached
+        )
+    }
+
     /// FNV-1a fold for determinism checking.
     ///
     /// Walks entries in BTreeMap order and folds id, unit_id,

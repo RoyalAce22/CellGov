@@ -49,6 +49,7 @@ pub fn obs(
         events,
         state_hashes: None,
         metadata: meta("test"),
+        tty_log: Vec::new(),
     }
 }
 
@@ -87,6 +88,7 @@ pub fn sample_observation() -> Observation {
             runner: "cellgov".into(),
             steps: Some(42),
         },
+        tty_log: b"sample tty\n".to_vec(),
     }
 }
 

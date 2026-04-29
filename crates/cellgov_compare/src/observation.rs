@@ -125,6 +125,12 @@ pub struct Observation {
     pub state_hashes: Option<ObservedHashes>,
     /// Runner identity and run metadata.
     pub metadata: ObservationMetadata,
+    /// `sys_tty_write` byte stream captured in dispatch order. Empty
+    /// when the runner did not capture TTY output, or when the guest
+    /// emitted none. `#[serde(default)]` lets pre-Step-1 baselines
+    /// load with an empty default.
+    #[serde(default)]
+    pub tty_log: Vec<u8>,
 }
 
 #[cfg(test)]
@@ -186,6 +192,7 @@ mod tests {
                 runner: "rpcs3".into(),
                 steps: None,
             },
+            tty_log: Vec::new(),
         };
         assert!(obs.state_hashes.is_none());
         assert!(obs.metadata.steps.is_none());
@@ -241,10 +248,34 @@ mod tests {
                 runner: "rpcs3".into(),
                 steps: None,
             },
+            tty_log: Vec::new(),
         };
         let json = serde_json::to_string(&obs).expect("serialize");
         let loaded: Observation = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(obs, loaded);
+    }
+
+    #[test]
+    fn pre_step1_baseline_without_tty_log_field_loads_with_empty_default() {
+        // Baselines saved before TTY capture existed serialize without
+        // a tty_log field. `#[serde(default)]` must let them load.
+        let json = r#"{
+            "outcome": "Completed",
+            "memory_regions": [],
+            "events": [],
+            "state_hashes": null,
+            "metadata": { "runner": "rpcs3-interpreter", "steps": null }
+        }"#;
+        let obs: Observation = serde_json::from_str(json).expect("legacy baseline must load");
+        assert!(obs.tty_log.is_empty());
+    }
+
+    #[test]
+    fn tty_log_difference_breaks_observation_equality() {
+        let a = sample_observation();
+        let mut b = sample_observation();
+        b.tty_log.push(b'!');
+        assert_ne!(a, b);
     }
 
     // Guards against `#[serde(default)]` creeping onto required slice

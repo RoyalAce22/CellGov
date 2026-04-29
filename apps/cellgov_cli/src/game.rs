@@ -280,6 +280,7 @@ pub fn run_game(opts: RunGameOptions<'_>) {
             boot_outcome,
             steps,
             observation_manifest,
+            rt.lv2_host().tty_log(),
         ) {
             eprintln!("save-observation: {msg}");
             std::process::exit(1);

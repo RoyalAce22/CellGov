@@ -109,6 +109,7 @@ size = "0x8"
             runner: "cellgov".into(),
             steps: Some(1234),
         },
+        tty_log: Vec::new(),
     };
     let cellgov_obs_path = work.join("cellgov.json");
     fs::write(
@@ -187,6 +188,7 @@ size = "0x4"
             runner: "cellgov".into(),
             steps: Some(1),
         },
+        tty_log: Vec::new(),
     };
     let cellgov_obs_path = work.join("cellgov.json");
     fs::write(

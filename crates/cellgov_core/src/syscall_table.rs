@@ -213,6 +213,11 @@ impl SyscallResponseTable {
                     hasher.write(&result_ptr.to_le_bytes());
                     hasher.write(&observed.to_le_bytes());
                 }
+                PendingResponse::LwMutexWake { mutex_ptr, caller } => {
+                    hasher.write(&[6u8]);
+                    hasher.write(&mutex_ptr.to_le_bytes());
+                    hasher.write(&caller.to_le_bytes());
+                }
             }
         }
         hasher.finish()

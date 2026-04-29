@@ -142,6 +142,10 @@ pub fn observe(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<Observati
             runner: format!("rpcs3-{:?}", config.decoder).to_lowercase(),
             steps: None,
         },
+        // Region-extraction adapter does not surface raw TTY bytes
+        // beyond the magic-tagged payload it parses. Step-2 ps3autotests
+        // path will read TTY directly via its own helper.
+        tty_log: Vec::new(),
     })
 }
 
@@ -162,6 +166,7 @@ pub fn observe_from_tty(
             runner: format!("rpcs3-{:?}", decoder).to_lowercase(),
             steps: None,
         },
+        tty_log: Vec::new(),
     })
 }
 

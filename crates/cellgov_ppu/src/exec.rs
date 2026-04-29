@@ -92,6 +92,14 @@ pub(crate) fn load_slice<'a>(
 }
 
 /// Zero-extending load; store buffer is checked first for forwarding.
+///
+/// Fast path: a single buffered store fully covers the load, so
+/// `forward` returns `Some` and the region is not touched.
+///
+/// Slow path: read from the region view and overlay any buffered
+/// stores that overlap the range. Stitches multiple narrow stores
+/// (e.g. eight `stb`s) into a wider load (e.g. one `ld`), and merges
+/// partial overlaps with pre-block memory.
 #[inline]
 pub(crate) fn load_ze(
     region_views: &[(u64, &[u8])],
@@ -103,13 +111,15 @@ pub(crate) fn load_ze(
         return Ok(val as u64);
     }
     let slice = load_slice(region_views, ea, size as usize).ok_or(ea)?;
+    let mut bytes = [0u8; 8];
+    let n = size as usize;
+    bytes[..n].copy_from_slice(&slice[..n]);
+    store_buf.overlay_range(ea, &mut bytes[..n]);
     Ok(match size {
-        1 => slice[0] as u64,
-        2 => u16::from_be_bytes([slice[0], slice[1]]) as u64,
-        4 => u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as u64,
-        8 => u64::from_be_bytes([
-            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
-        ]),
+        1 => bytes[0] as u64,
+        2 => u16::from_be_bytes([bytes[0], bytes[1]]) as u64,
+        4 => u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64,
+        8 => u64::from_be_bytes(bytes),
         _ => {
             debug_assert!(false, "load_ze: unexpected size {size}");
             return Err(ea);
@@ -118,6 +128,10 @@ pub(crate) fn load_ze(
 }
 
 /// Sign-extending load; store buffer is checked first for forwarding.
+///
+/// Same fast / slow path split as [`load_ze`]; the slow path overlays
+/// buffered stores onto pre-block memory so multi-store stitching and
+/// partial overlap both work.
 #[inline]
 pub(crate) fn load_se(
     region_views: &[(u64, &[u8])],
@@ -142,16 +156,18 @@ pub(crate) fn load_se(
         });
     }
     let slice = load_slice(region_views, ea, size as usize).ok_or(ea)?;
+    let mut bytes = [0u8; 8];
+    let n = size as usize;
+    bytes[..n].copy_from_slice(&slice[..n]);
+    store_buf.overlay_range(ea, &mut bytes[..n]);
     Ok(match size {
-        1 => (slice[0] as i8) as i64 as u64,
-        2 => i16::from_be_bytes([slice[0], slice[1]]) as i64 as u64,
-        4 => i32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as i64 as u64,
+        1 => (bytes[0] as i8) as i64 as u64,
+        2 => i16::from_be_bytes([bytes[0], bytes[1]]) as i64 as u64,
+        4 => i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as i64 as u64,
         // Identity for 64-bit; sign-extending a doubleword is a no-op
         // but the arm must exist so a future caller cannot fall to
         // the silent-zero default.
-        8 => u64::from_be_bytes([
-            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
-        ]),
+        8 => u64::from_be_bytes(bytes),
         _ => {
             debug_assert!(false, "load_se: unexpected size {size}");
             return Err(ea);

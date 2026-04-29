@@ -140,12 +140,12 @@ impl StoreBuffer {
         true
     }
 
-    /// Forward a load from the buffer, or `None` to fall through to
-    /// committed memory.
-    ///
-    /// Only full-coverage matches forward. Partial overlaps return
-    /// `None`: committed memory still holds the pre-block state, so
-    /// the fallback read is correct.
+    /// Fast-path forward: a single buffered store fully covers the
+    /// load. Returns `None` for partial overlap or when multiple
+    /// narrower stores tile the range -- the caller must read
+    /// pre-block memory and call [`Self::overlay_range`] to stitch
+    /// in the buffered bytes (see `load_ze` / `load_se` in
+    /// `exec.rs` and `read_aligned_16` in `exec/mem.rs`).
     ///
     /// # Performance
     /// O(n) reverse scan over up to 64 entries per load.

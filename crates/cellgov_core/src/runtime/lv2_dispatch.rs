@@ -58,6 +58,31 @@ impl Runtime {
             return;
         }
 
+        // Timer syscalls advance the deterministic guest clock. CellGov
+        // is not real-time; instead, every `sys_timer_sleep` /
+        // `sys_timer_usleep` call adds the requested duration to
+        // `self.time` so subsequent `sys_time_get_system_time` calls
+        // reflect the simulated wall time. No yield, no waiter list:
+        // other PPU threads see the new time on their next read.
+        const SYS_TIMER_USLEEP: u64 = 141;
+        const SYS_TIMER_SLEEP: u64 = 142;
+        match args[0] {
+            SYS_TIMER_USLEEP => {
+                let usec = args[1];
+                self.advance_guest_time_by_us(usec);
+                self.registry.set_syscall_return(source, 0);
+                return;
+            }
+            SYS_TIMER_SLEEP => {
+                let seconds = args[1];
+                let usec = seconds.saturating_mul(1_000_000);
+                self.advance_guest_time_by_us(usec);
+                self.registry.set_syscall_return(source, 0);
+                return;
+            }
+            _ => {}
+        }
+
         let request = cellgov_lv2::request::classify(
             args[0],
             &[
@@ -65,6 +90,17 @@ impl Runtime {
             ],
         );
         self.dispatch_lv2_request(request, source);
+    }
+
+    /// Advance `self.time` by `usec` microseconds. Used by the timer
+    /// syscalls. Saturates at `u64::MAX` ticks; the simulated clock
+    /// never wraps because the test scenarios that push it past
+    /// `u64::MAX` do not exist.
+    fn advance_guest_time_by_us(&mut self, usec: u64) {
+        // 1 tick = 1 nanosecond (cellgov_time::SIMULATED_INSTRUCTIONS_PER_SECOND).
+        let delta_ticks = usec.saturating_mul(1_000);
+        let new_raw = self.time.raw().saturating_add(delta_ticks);
+        self.time = cellgov_time::GuestTicks::new(new_raw);
     }
 
     /// Route a typed LV2 request through the host and hand each
@@ -102,9 +138,16 @@ impl Runtime {
             Lv2Dispatch::PpuThreadExit {
                 exit_value,
                 woken_unit_ids,
+                lwmutex_inheritors,
                 effects,
             } => {
-                self.handle_ppu_thread_exit(source, exit_value, woken_unit_ids, effects);
+                self.handle_ppu_thread_exit(
+                    source,
+                    exit_value,
+                    woken_unit_ids,
+                    lwmutex_inheritors,
+                    effects,
+                );
             }
             Lv2Dispatch::PpuThreadCreate { .. } => {
                 self.handle_ppu_thread_create(source, dispatch);
@@ -235,6 +278,7 @@ impl Runtime {
         source: UnitId,
         exit_value: u64,
         woken_unit_ids: Vec<UnitId>,
+        lwmutex_inheritors: Vec<UnitId>,
         effects: Vec<Effect>,
     ) {
         self.apply_lv2_effects(&effects);
@@ -253,6 +297,14 @@ impl Runtime {
             }
             self.registry
                 .set_status_override(waiter, UnitStatus::Runnable);
+        }
+        // Sync waiters whose held lwmutexes were transferred by the
+        // exit go through the normal sync-wake path so their
+        // `LwMutexWake` pending response repairs the user-space
+        // struct (decrement waiter, set owner = inheritor,
+        // recursive_count = 1).
+        if !lwmutex_inheritors.is_empty() {
+            self.resolve_sync_wakes(&lwmutex_inheritors);
         }
     }
 
@@ -278,9 +330,12 @@ impl Runtime {
             &response_updates,
         );
         for (waiter, response) in response_updates {
-            // Displacement is expected for partial-fill updates (e.g.
-            // EventQueueReceive None -> Some); the variant-tag check
+            // Partial-fill updates (e.g. EventQueueReceive None -> Some,
+            // EventFlagWake observed=0 -> observed=bits_at_wake)
+            // intentionally replace the parked entry; drain first so
+            // the insert contract is satisfied. The variant-tag check
             // above confirmed shape compatibility.
+            let _ = self.syscall_responses.try_take(waiter);
             let _ = self.syscall_responses.insert(waiter, response);
         }
         self.resolve_sync_wakes(&woken_unit_ids);
@@ -304,6 +359,7 @@ impl Runtime {
             &response_updates,
         );
         for (waiter, response) in response_updates {
+            let _ = self.syscall_responses.try_take(waiter);
             let _ = self.syscall_responses.insert(waiter, response);
         }
         self.resolve_sync_wakes(&woken_unit_ids);
@@ -350,6 +406,13 @@ pub(crate) fn check_response_updates(
             woken_unit_ids.contains(waiter),
             "{site}: response_updates entry for {waiter:?} is not in woken_unit_ids",
         );
+        // ReturnCode is the universal "wake with this r3, no payload"
+        // override (cancel paths, timeout paths). It is allowed to
+        // replace any prior variant; the variant-tag invariant only
+        // applies to payload-carrying refinements.
+        if matches!(update, PendingResponse::ReturnCode { .. }) {
+            continue;
+        }
         if let Some(existing) = table.peek(*waiter) {
             assert_eq!(
                 existing.variant_tag(),
@@ -381,6 +444,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "variant mismatch")]
     fn check_response_updates_rejects_variant_mismatch() {
+        // Two payload-carrying variants must not swap: a partial
+        // refinement that switches shape would feed wrong data into
+        // the wake side.
         let mut table = SyscallResponseTable::new();
         let waiter = UnitId::new(7);
         let _ = table.insert(
@@ -390,7 +456,31 @@ mod tests {
                 payload: None,
             },
         );
-        let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0 })];
+        let updates = vec![(
+            waiter,
+            PendingResponse::EventFlagWake {
+                result_ptr: 0x1000,
+                observed: 0,
+            },
+        )];
+        check_response_updates("test", &table, &[waiter], &updates);
+    }
+
+    #[test]
+    fn check_response_updates_allows_return_code_to_replace_any_variant() {
+        // ReturnCode is the universal cancel/timeout override: it
+        // carries no payload and is allowed to replace whatever the
+        // waiter parked on.
+        let mut table = SyscallResponseTable::new();
+        let waiter = UnitId::new(7);
+        let _ = table.insert(
+            waiter,
+            PendingResponse::EventFlagWake {
+                result_ptr: 0x1000,
+                observed: 0,
+            },
+        );
+        let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0x80010013 })];
         check_response_updates("test", &table, &[waiter], &updates);
     }
 

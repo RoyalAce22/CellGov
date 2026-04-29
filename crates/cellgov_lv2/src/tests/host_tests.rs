@@ -47,14 +47,12 @@ fn lwmutex_and_mutex_id_spaces_are_independent() {
     // shared `next_kernel_id` allocator (0x4000_0001+).
     assert_eq!(lw_id, 1);
     assert!(hv_id >= 0x4000_0001);
-    host.dispatch(
-        Lv2Request::LwMutexLock {
-            id: lw_id,
-            timeout: 0,
-        },
-        src,
-        &rt,
-    );
+    // Drive the heavy mutex's lock/unlock cycle and verify the
+    // lwmutex table is untouched (no cross-contamination via the
+    // shared allocator). The kernel-side lwmutex lock semantics
+    // intentionally always park, so we exercise lwmutex via the
+    // kernel signal-only path: an unlock against an empty queue
+    // sets the signal.
     host.dispatch(
         Lv2Request::MutexLock {
             mutex_id: hv_id,
@@ -64,22 +62,19 @@ fn lwmutex_and_mutex_id_spaces_are_independent() {
         &rt,
     );
     assert_eq!(
-        host.lwmutexes().lookup(lw_id).unwrap().owner(),
-        Some(PpuThreadId::PRIMARY),
-    );
-    assert_eq!(
         host.mutexes().lookup(hv_id).unwrap().owner(),
         Some(PpuThreadId::PRIMARY),
     );
+    assert!(!host.lwmutexes().lookup(lw_id).unwrap().signaled());
     host.dispatch(Lv2Request::LwMutexUnlock { id: lw_id }, src, &rt);
-    assert_eq!(host.lwmutexes().lookup(lw_id).unwrap().owner(), None);
+    assert!(host.lwmutexes().lookup(lw_id).unwrap().signaled());
     assert_eq!(
         host.mutexes().lookup(hv_id).unwrap().owner(),
         Some(PpuThreadId::PRIMARY),
     );
     host.dispatch(Lv2Request::MutexUnlock { mutex_id: hv_id }, src, &rt);
     assert_eq!(host.mutexes().lookup(hv_id).unwrap().owner(), None);
-    assert_eq!(host.lwmutexes().lookup(lw_id).unwrap().owner(), None);
+    assert!(host.lwmutexes().lookup(lw_id).unwrap().signaled());
 }
 
 #[test]
@@ -131,28 +126,20 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
             other => panic!("expected Immediate, got {other:?}"),
         }
     };
-    host.dispatch(
-        Lv2Request::LwMutexLock {
-            id: lw_id,
-            timeout: 0,
-        },
-        owner_unit,
-        &rt,
-    );
+    // Park `waiter_tid` directly on the lwmutex sleep queue so the
+    // unlock has a transfer target. The kernel-side dispatch
+    // doesn't care about ownership; the HLE-side fast path already
+    // covered that, so a direct enqueue is the legitimate way to
+    // exercise the cross-table independence here.
+    host.lwmutexes_mut()
+        .enqueue_waiter(lw_id, waiter_tid)
+        .unwrap();
     host.dispatch(
         Lv2Request::MutexLock {
             mutex_id: hv_id,
             timeout: 0,
         },
         owner_unit,
-        &rt,
-    );
-    host.dispatch(
-        Lv2Request::LwMutexLock {
-            id: lw_id,
-            timeout: 0,
-        },
-        waiter_unit,
         &rt,
     );
     assert_eq!(
@@ -173,6 +160,7 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
             effects: _,
         }
     ));
+    // The heavy-mutex unlock did not touch the lwmutex sleep queue.
     assert_eq!(
         host.lwmutexes()
             .lookup(lw_id)
@@ -195,7 +183,7 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
 fn multi_primitive_determinism_canary() {
     fn canonical_run() -> Vec<(String, u64)> {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x10000);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let u0 = UnitId::new(0);
         let u1 = UnitId::new(1);
         let u2 = UnitId::new(2);
@@ -222,7 +210,7 @@ fn multi_primitive_determinism_canary() {
         let sem_id = match host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x200,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 0,
                 max: 4,
             },
@@ -292,6 +280,7 @@ fn multi_primitive_determinism_canary() {
                 u0,
                 Lv2Request::LwMutexLock {
                     id: lwmutex_id,
+                    mutex_ptr: 0,
                     timeout: 0,
                 },
             ),
@@ -300,6 +289,7 @@ fn multi_primitive_determinism_canary() {
                 u1,
                 Lv2Request::LwMutexLock {
                     id: lwmutex_id,
+                    mutex_ptr: 0,
                     timeout: 0,
                 },
             ),
@@ -308,6 +298,7 @@ fn multi_primitive_determinism_canary() {
                 u2,
                 Lv2Request::LwMutexLock {
                     id: lwmutex_id,
+                    mutex_ptr: 0,
                     timeout: 0,
                 },
             ),
@@ -414,7 +405,9 @@ fn lost_wake_lwmutex_unlock_before_lock_does_not_park_waiter() {
         Lv2Dispatch::Immediate { effects: e, .. } => extract_write_u32(&e[0]),
         other => panic!("expected Immediate, got {other:?}"),
     };
-    host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, owner_unit, &rt);
+    // An unlock against an empty kernel sleep queue sets the signal
+    // so the next contended lock can pass. This guards the
+    // lost-wake case where a release races ahead of an acquire.
     let unlock = host.dispatch(Lv2Request::LwMutexUnlock { id }, owner_unit, &rt);
     assert!(matches!(
         unlock,
@@ -423,7 +416,15 @@ fn lost_wake_lwmutex_unlock_before_lock_does_not_park_waiter() {
             effects: _,
         }
     ));
-    let lock = host.dispatch(Lv2Request::LwMutexLock { id, timeout: 0 }, later_unit, &rt);
+    let lock = host.dispatch(
+        Lv2Request::LwMutexLock {
+            id,
+            mutex_ptr: 0,
+            timeout: 0,
+        },
+        later_unit,
+        &rt,
+    );
     match lock {
         Lv2Dispatch::Immediate { code: 0, .. } => {}
         other => panic!("expected Immediate(0), got {other:?}"),
@@ -474,13 +475,13 @@ fn lost_wake_mutex_unlock_before_lock_does_not_park_waiter() {
 #[test]
 fn lost_wake_semaphore_post_before_wait_consumes_buffered_slot() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
     let created = host.dispatch(
         Lv2Request::SemaphoreCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
             initial: 0,
             max: 4,
         },
@@ -572,13 +573,13 @@ fn lost_wake_event_queue_send_before_receive_delivers_buffered_payload() {
 #[test]
 fn lost_wake_event_flag_set_before_wait_is_immediately_matched() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
     let created = host.dispatch(
         Lv2Request::EventFlagCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
             init: 0,
         },
         src,

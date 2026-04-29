@@ -9,19 +9,48 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
-use crate::host::Lv2Host;
+use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
     pub(super) fn dispatch_semaphore_create(
         &mut self,
         id_ptr: u32,
+        attr_ptr: u32,
         initial: i32,
         max: i32,
         requester: UnitId,
+        rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // Reject bad bounds before alloc_id so an invalid request
-        // does not burn a kernel id.
-        if initial > max || initial < 0 || max < 0 {
+        // NULL-pointer checks come before bounds checks: real LV2
+        // returns EFAULT for NULL id/attr regardless of initial/max.
+        if id_ptr == 0 || attr_ptr == 0 {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EFAULT.into(),
+                effects: vec![],
+            };
+        }
+        // sys_semaphore_attribute_t shares the layout used by
+        // event_flag/mutex/cond: protocol u32 at +0, type s32 at +20.
+        // A memset-zero attr fails protocol validation with EINVAL.
+        let Some(attr_bytes) = rt.read_committed(attr_ptr as u64, 24) else {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EFAULT.into(),
+                effects: vec![],
+            };
+        };
+        let protocol =
+            u32::from_be_bytes([attr_bytes[0], attr_bytes[1], attr_bytes[2], attr_bytes[3]]);
+        const SYS_SYNC_FIFO: u32 = 0x1;
+        const SYS_SYNC_PRIORITY: u32 = 0x2;
+        if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EINVAL.into(),
+                effects: vec![],
+            };
+        }
+        // Bounds checks. `max == 0` is invalid: a semaphore that can
+        // never be acquired is not useful and real LV2 rejects it.
+        if max <= 0 || initial < 0 || initial > max {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EINVAL.into(),
                 effects: vec![],
@@ -69,7 +98,12 @@ impl Lv2Host {
         }
     }
 
-    pub(super) fn dispatch_semaphore_wait(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+    pub(super) fn dispatch_semaphore_wait(
+        &mut self,
+        id: u32,
+        timeout: u64,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_ESRCH.into(),
@@ -86,6 +120,18 @@ impl Lv2Host {
                 effects: vec![],
             },
             Some(crate::sync_primitives::SemaphoreWait::Empty) => {
+                // Finite timeout, no peer that could post: trip
+                // ETIMEDOUT immediately. CellGov has no guest
+                // clock, so blocking the only live thread would
+                // stall the schedule with no path forward. If
+                // peers exist, block normally and let a future
+                // post wake the waiter.
+                if timeout != 0 && !self.ppu_threads.has_other_alive_thread(caller) {
+                    return Lv2Dispatch::Immediate {
+                        code: errno::CELL_ETIMEDOUT.into(),
+                        effects: vec![],
+                    };
+                }
                 match self.semaphores.enqueue_waiter(id, caller) {
                     Ok(()) => {}
                     // Both errors are host-invariant breaks here
@@ -135,6 +181,14 @@ impl Lv2Host {
         out_ptr: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
+        // Real LV2 returns EFAULT for a NULL out pointer before
+        // looking up the semaphore id.
+        if out_ptr == 0 {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EFAULT.into(),
+                effects: vec![],
+            };
+        }
         let Some(entry) = self.semaphores.lookup(id) else {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_ESRCH.into(),
@@ -146,43 +200,65 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_semaphore_post(&mut self, id: u32, val: i32) -> Lv2Dispatch {
-        // val != 1 would require waking multiple waiters in one
-        // WakeAndReturn; not wired.
-        if val != 1 {
+        // Real LV2 (matching RPCS3 sys_semaphore_post) orders error
+        // checks: id lookup -> count<=0 -> overflow-vs-max. The
+        // overflow check folds in waiters: post(N) wakes up to N
+        // waiters (each consuming one slot) and only the leftover
+        // counts toward the max.
+        let Some(entry) = self.semaphores.lookup(id) else {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_ESRCH.into(),
+                effects: vec![],
+            };
+        };
+        if val <= 0 {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EINVAL.into(),
                 effects: vec![],
             };
         }
-        match self.semaphores.post_and_wake(id) {
-            crate::sync_primitives::SemaphorePost::Unknown => Lv2Dispatch::Immediate {
+        let waiters_len = entry.waiters().len() as i32;
+        let leftover = (val - waiters_len).max(0);
+        if leftover > entry.max() - entry.count() {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EBUSY.into(),
+                effects: vec![],
+            };
+        }
+        match self.semaphores.post_and_wake_n(id, val as u32) {
+            crate::sync_primitives::SemaphorePostN::Unknown => Lv2Dispatch::Immediate {
                 code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
-            crate::sync_primitives::SemaphorePost::OverMax => Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
+            crate::sync_primitives::SemaphorePostN::OverMax => Lv2Dispatch::Immediate {
+                code: errno::CELL_EBUSY.into(),
                 effects: vec![],
             },
-            crate::sync_primitives::SemaphorePost::Incremented => Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![],
-            },
-            crate::sync_primitives::SemaphorePost::Woke { new_owner } => {
-                // Waiter is already off the list; releaser
-                // returns CELL_OK even if resolve_wake_thread
-                // fires the host-invariant break, since the
-                // waiter is already stranded at that point.
-                match self.resolve_wake_thread(new_owner, "semaphore_post.Woke") {
-                    Some(unit) => Lv2Dispatch::WakeAndReturn {
+            crate::sync_primitives::SemaphorePostN::Posted { woken, .. } => {
+                if woken.is_empty() {
+                    return Lv2Dispatch::Immediate {
                         code: 0,
-                        woken_unit_ids: vec![unit],
+                        effects: vec![],
+                    };
+                }
+                let mut units = Vec::with_capacity(woken.len());
+                for tid in woken {
+                    if let Some(unit) = self.resolve_wake_thread(tid, "semaphore_post.Woke") {
+                        units.push(unit);
+                    }
+                }
+                if units.is_empty() {
+                    Lv2Dispatch::Immediate {
+                        code: 0,
+                        effects: vec![],
+                    }
+                } else {
+                    Lv2Dispatch::WakeAndReturn {
+                        code: 0,
+                        woken_unit_ids: units,
                         response_updates: vec![],
                         effects: vec![],
-                    },
-                    None => Lv2Dispatch::Immediate {
-                        code: 0,
-                        effects: vec![],
-                    },
+                    }
                 }
             }
         }
@@ -192,20 +268,22 @@ impl Lv2Host {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::test_support::{extract_write_u32, seed_primary_ppu, FakeRuntime};
+    use crate::host::test_support::{
+        extract_write_u32, fake_runtime_with_valid_sync_attr, seed_primary_ppu, VALID_SYNC_ATTR_PTR,
+    };
     use crate::ppu_thread::{PpuThreadAttrs, PpuThreadId};
     use crate::request::Lv2Request;
 
     #[test]
     fn semaphore_create_writes_id_and_stores_entry() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 2,
                 max: 10,
             },
@@ -227,11 +305,11 @@ mod tests {
     #[test]
     fn semaphore_create_rejects_initial_above_max() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 11,
                 max: 10,
             },
@@ -247,7 +325,7 @@ mod tests {
     #[test]
     fn semaphore_destroy_unknown_returns_esrch() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let r = host.dispatch(Lv2Request::SemaphoreDestroy { id: 77 }, UnitId::new(0), &rt);
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
@@ -258,13 +336,13 @@ mod tests {
     #[test]
     fn semaphore_destroy_with_waiter_returns_ebusy() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 0,
                 max: 10,
             },
@@ -291,13 +369,13 @@ mod tests {
     #[test]
     fn semaphore_wait_with_positive_count_decrements_and_returns_ok() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 1,
                 max: 10,
             },
@@ -325,13 +403,13 @@ mod tests {
     #[test]
     fn semaphore_wait_with_zero_count_parks_caller() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 0,
                 max: 10,
             },
@@ -369,13 +447,13 @@ mod tests {
     #[test]
     fn semaphore_trywait_with_positive_count_acquires() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 1,
                 max: 10,
             },
@@ -403,13 +481,13 @@ mod tests {
     #[test]
     fn semaphore_trywait_with_zero_count_returns_ebusy() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 0,
                 max: 10,
             },
@@ -435,7 +513,7 @@ mod tests {
     #[test]
     fn semaphore_trywait_unknown_returns_esrch() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let r = host.dispatch(Lv2Request::SemaphoreTryWait { id: 99 }, UnitId::new(0), &rt);
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
@@ -446,13 +524,13 @@ mod tests {
     #[test]
     fn semaphore_get_value_writes_current_count() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 5,
                 max: 10,
             },
@@ -483,9 +561,24 @@ mod tests {
     }
 
     #[test]
+    fn semaphore_get_value_null_out_ptr_returns_efault() {
+        let mut host = Lv2Host::new();
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
+        let r = host.dispatch(
+            Lv2Request::SemaphoreGetValue { id: 1, out_ptr: 0 },
+            UnitId::new(0),
+            &rt,
+        );
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, errno::CELL_EFAULT.into());
+    }
+
+    #[test]
     fn semaphore_get_value_unknown_returns_esrch() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let r = host.dispatch(
             Lv2Request::SemaphoreGetValue {
                 id: 99,
@@ -503,7 +596,7 @@ mod tests {
     #[test]
     fn semaphore_post_unknown_returns_esrch() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let r = host.dispatch(
             Lv2Request::SemaphorePost { id: 99, val: 1 },
             UnitId::new(0),
@@ -516,30 +609,66 @@ mod tests {
     }
 
     #[test]
-    fn semaphore_post_val_not_one_returns_einval() {
+    fn semaphore_post_multi_increments_count_when_room() {
+        // Multi-post with available headroom should land all `val`
+        // slots into the count without EINVAL or EBUSY.
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
+        let src = UnitId::new(0);
+        seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
-            Lv2Request::SemaphorePost { id: 1, val: 2 },
+            Lv2Request::SemaphoreCreate {
+                id_ptr: 0x100,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
+                initial: 0,
+                max: 10,
+            },
+            src,
+            &rt,
+        );
+        let id = match &r {
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: e,
+            } => extract_write_u32(&e[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+        let r = host.dispatch(Lv2Request::SemaphorePost { id, val: 3 }, src, &rt);
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate, got {r:?}");
+        };
+        assert_eq!(code, 0);
+        assert_eq!(host.semaphores().lookup(id).unwrap().count(), 3);
+    }
+
+    #[test]
+    fn semaphore_post_unknown_id_returns_esrch_even_for_invalid_val() {
+        // Real LV2 looks up id before validating val, so a post
+        // against a destroyed id with any val returns ESRCH, not
+        // EINVAL.
+        let mut host = Lv2Host::new();
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
+        let r = host.dispatch(
+            Lv2Request::SemaphorePost { id: 999, val: 0 },
             UnitId::new(0),
             &rt,
         );
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_EINVAL.into());
+        assert_eq!(code, errno::CELL_ESRCH.into());
     }
 
     #[test]
     fn semaphore_post_with_no_waiters_increments() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 0,
                 max: 10,
             },
@@ -567,7 +696,7 @@ mod tests {
     #[test]
     fn semaphore_post_wakes_parked_waiter_without_incrementing() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let poster_unit = UnitId::new(0);
         let waiter_unit = UnitId::new(1);
         seed_primary_ppu(&mut host, poster_unit);
@@ -587,7 +716,7 @@ mod tests {
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 0,
                 max: 10,
             },
@@ -620,15 +749,15 @@ mod tests {
     }
 
     #[test]
-    fn semaphore_post_past_max_with_no_waiters_returns_einval() {
+    fn semaphore_post_past_max_with_no_waiters_returns_ebusy() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(
             Lv2Request::SemaphoreCreate {
                 id_ptr: 0x100,
-                attr_ptr: 0,
+                attr_ptr: VALID_SYNC_ATTR_PTR,
                 initial: 3,
                 max: 3,
             },
@@ -646,14 +775,14 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = post else {
             panic!("expected Immediate, got {post:?}");
         };
-        assert_eq!(code, errno::CELL_EINVAL.into());
+        assert_eq!(code, errno::CELL_EBUSY.into());
         assert_eq!(host.semaphores().lookup(id).unwrap().count(), 3);
     }
 
     #[test]
     fn semaphore_wait_unknown_id_returns_esrch() {
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(256);
+        let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);
         let r = host.dispatch(Lv2Request::SemaphoreWait { id: 99, timeout: 0 }, src, &rt);

@@ -217,11 +217,46 @@ impl Lv2Host {
                 Vec::new()
             }
         };
+        let lwmutex_inheritors = self.release_held_lwmutexes_on_exit();
         Lv2Dispatch::PpuThreadExit {
             exit_value,
             woken_unit_ids: waiters_unit_ids,
+            lwmutex_inheritors,
             effects: vec![],
         }
+    }
+
+    /// Drain one waiter from every kernel lwmutex sleep queue.
+    /// Called when a thread exits without unlocking the lwmutexes
+    /// it held in user space. The kernel side has no owner record,
+    /// so we instead transfer one waiter per non-empty entry; the
+    /// woken waiter's `LwMutexWake` pending response handles the
+    /// user-space owner / waiter / recursive_count fix-up.
+    fn release_held_lwmutexes_on_exit(&mut self) -> Vec<UnitId> {
+        let ids: Vec<u32> = self
+            .lwmutexes
+            .iter_ids()
+            .filter(|id| {
+                self.lwmutexes
+                    .lookup(*id)
+                    .map(|e| !e.waiters().is_empty())
+                    .unwrap_or(false)
+            })
+            .collect();
+        let mut inheritors = Vec::new();
+        for id in ids {
+            if let crate::sync_primitives::LwMutexRelease::Transferred { new_owner } = self
+                .lwmutexes
+                .release_and_wake_next(id, PpuThreadId::PRIMARY)
+            {
+                if let Some(unit) =
+                    self.resolve_wake_thread(new_owner, "ppu_thread_exit.lwmutex_transfer")
+                {
+                    inheritors.push(unit);
+                }
+            }
+        }
+        inheritors
     }
 }
 
@@ -248,6 +283,7 @@ mod tests {
                 exit_value,
                 woken_unit_ids,
                 effects,
+                ..
             } => {
                 assert_eq!(exit_value, 0xDEAD_BEEF);
                 assert!(woken_unit_ids.is_empty());

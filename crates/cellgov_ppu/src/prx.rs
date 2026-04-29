@@ -203,6 +203,10 @@ pub const HLE_IMPLEMENTED_NIDS: &[u32] = {
         sys::LWMUTEX_DESTROY,
         sys::LWMUTEX_UNLOCK,
         sys::LWMUTEX_TRYLOCK,
+        // sysPrxForUser lwcond (create / destroy stubs only; wait /
+        // signal still hit the unclaimed handler).
+        sys::LWCOND_CREATE,
+        sys::LWCOND_DESTROY,
         // sysPrxForUser time / thread / process / prx.
         sys::TIME_GET_SYSTEM_TIME,
         sys::PPU_THREAD_GET_ID,

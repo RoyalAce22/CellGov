@@ -34,6 +34,27 @@ pub enum SemaphorePost {
     Unknown,
 }
 
+/// Outcome of a `post_and_wake_n` call. Distinct from `SemaphorePost`
+/// because a single bulk post can both wake several waiters AND
+/// increment the leftover.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SemaphorePostN {
+    /// Up to `count` waiters were dequeued and the leftover was
+    /// added to `entry.count`.
+    Posted {
+        /// FIFO-order ids of the threads that consumed slots and
+        /// must now be woken by the dispatcher.
+        woken: Vec<PpuThreadId>,
+        /// Number of slots that incremented the count.
+        incremented: u32,
+    },
+    /// Post would push count past `max` (after consuming waiters);
+    /// table unchanged.
+    OverMax,
+    /// Unknown id.
+    Unknown,
+}
+
 /// Failure modes of [`SemaphoreTable::create_with_id`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemaphoreCreateError {
@@ -191,6 +212,44 @@ impl SemaphoreTable {
             return Err(SemaphoreEnqueueError::DuplicateWaiter);
         }
         Ok(())
+    }
+
+    /// Post `count` slots. Wakes up to `count` FIFO waiters
+    /// (without incrementing) and adds any leftover slots to
+    /// `entry.count`. Returns `OverMax` if the leftover would push
+    /// `count` past `max`.
+    ///
+    /// Real LV2 (and RPCS3) atomically consult the post-increment
+    /// view: if `count + slots_after_wake > max` the whole call
+    /// fails. We mirror that by computing `would_be_count = max -
+    /// (count - waiters_consumed)` up front.
+    pub fn post_and_wake_n(&mut self, id: u32, count: u32) -> SemaphorePostN {
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return SemaphorePostN::Unknown;
+        };
+        let waiters_to_wake = (entry.waiters.len() as u32).min(count);
+        let leftover = count - waiters_to_wake;
+        let new_count = (entry.count as u32).saturating_add(leftover);
+        if new_count > entry.max as u32 {
+            return SemaphorePostN::OverMax;
+        }
+        let mut woken = Vec::with_capacity(waiters_to_wake as usize);
+        for _ in 0..waiters_to_wake {
+            if let Some(t) = entry.waiters.dequeue_one() {
+                woken.push(t);
+            }
+        }
+        entry.count = new_count as i32;
+        debug_assert!(
+            entry.count <= entry.max,
+            "semaphore {id:#x} count past max after post_and_wake_n: count={} max={}",
+            entry.count,
+            entry.max,
+        );
+        SemaphorePostN::Posted {
+            woken,
+            incremented: leftover,
+        }
     }
 
     /// Post one slot. Wakes the FIFO head (without incrementing)
