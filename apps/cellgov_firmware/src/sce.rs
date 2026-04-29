@@ -11,52 +11,52 @@ use crate::crypto::{SCEPKG_ERK, SCEPKG_RIV};
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct SceHeader {
-    pub se_magic: u32,
-    pub se_hver: u32,
-    pub se_flags: u16,
-    pub se_type: u16,
-    pub se_meta: u32,
-    pub se_hsize: u64,
-    pub se_esize: u64,
+pub struct SceContainerHeader {
+    pub magic: u32,
+    pub header_version: u32,
+    pub revision_flags: u16,
+    pub category: u16,
+    pub metadata_offset: u32,
+    pub header_size: u64,
+    pub encrypted_payload_size: u64,
 }
 
 #[derive(Debug)]
 #[repr(C)]
 #[cfg_attr(not(test), allow(dead_code))]
-pub struct MetadataInfo {
-    pub key: [u8; 16],
-    pub key_pad: [u8; 16],
-    pub iv: [u8; 16],
-    pub iv_pad: [u8; 16],
+pub struct MetadataKeyEnvelope {
+    pub aes_key: [u8; 16],
+    pub aes_key_padding: [u8; 16],
+    pub aes_iv: [u8; 16],
+    pub aes_iv_padding: [u8; 16],
 }
 
 #[derive(Debug)]
 #[repr(C)]
 #[cfg_attr(not(test), allow(dead_code))]
-pub struct MetadataHeader {
-    pub signature_input_length: u64,
-    pub unknown1: u32,
+pub struct EncryptedMetadataDirectory {
+    pub signed_region_length: u64,
+    pub reserved_a: u32,
     pub section_count: u32,
     pub key_count: u32,
-    pub opt_header_size: u32,
-    pub unknown2: u32,
-    pub unknown3: u32,
+    pub auxiliary_header_size: u32,
+    pub reserved_b: u32,
+    pub reserved_c: u32,
 }
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct MetadataSectionHeader {
-    pub data_offset: u64,
-    pub data_size: u64,
-    pub section_type: u32,
-    pub program_idx: u32,
-    pub hashed: u32,
-    pub sha1_idx: u32,
-    pub encrypted: u32,
-    pub key_idx: u32,
-    pub iv_idx: u32,
-    pub compressed: u32,
+pub struct EncryptedSectionDescriptor {
+    pub payload_offset: u64,
+    pub payload_size: u64,
+    pub section_kind: u32,
+    pub program_segment_index: u32,
+    pub sha1_hashed: u32,
+    pub sha1_slot: u32,
+    pub encryption_kind: u32,
+    pub key_slot: u32,
+    pub iv_slot: u32,
+    pub compression_kind: u32,
 }
 
 fn read_be_u64(data: &[u8], offset: usize) -> u64 {
@@ -71,7 +71,7 @@ fn read_be_u16(data: &[u8], offset: usize) -> u16 {
     u16::from_be_bytes(data[offset..offset + 2].try_into().unwrap())
 }
 
-fn parse_sce_header(data: &[u8]) -> Result<SceHeader, String> {
+fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, String> {
     if data.len() < 0x20 {
         return Err("data too small for SCE header".into());
     }
@@ -79,14 +79,14 @@ fn parse_sce_header(data: &[u8]) -> Result<SceHeader, String> {
     if magic != 0x53434500 {
         return Err(format!("bad SCE magic: 0x{magic:08x}"));
     }
-    Ok(SceHeader {
-        se_magic: magic,
-        se_hver: read_be_u32(data, 4),
-        se_flags: read_be_u16(data, 8),
-        se_type: read_be_u16(data, 10),
-        se_meta: read_be_u32(data, 12),
-        se_hsize: read_be_u64(data, 16),
-        se_esize: read_be_u64(data, 24),
+    Ok(SceContainerHeader {
+        magic,
+        header_version: read_be_u32(data, 4),
+        revision_flags: read_be_u16(data, 8),
+        category: read_be_u16(data, 10),
+        metadata_offset: read_be_u32(data, 12),
+        header_size: read_be_u64(data, 16),
+        encrypted_payload_size: read_be_u64(data, 24),
     })
 }
 
@@ -99,7 +99,7 @@ pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, String> {
 
 pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, String> {
     let hdr = parse_sce_header(data)?;
-    let revision = hdr.se_flags & 0x7FFF;
+    let revision = hdr.revision_flags & 0x7FFF;
     let key = crate::crypto::app_key_for_revision(revision)
         .ok_or_else(|| format!("no APP key for SELF revision 0x{revision:04x}"))?;
 
@@ -196,100 +196,100 @@ fn decrypt_sce_sections(
 ) -> Result<Vec<Vec<u8>>, String> {
     let hdr = parse_sce_header(data)?;
 
-    let meta_offset = hdr.se_meta as usize + 0x20;
-    if meta_offset + 0x40 > data.len() {
+    let key_envelope_offset = hdr.metadata_offset as usize + 0x20;
+    if key_envelope_offset + 0x40 > data.len() {
         return Err("SCE file truncated at metadata info".into());
     }
 
-    let mut meta_info_buf = [0u8; 0x40];
-    meta_info_buf.copy_from_slice(&data[meta_offset..meta_offset + 0x40]);
+    let mut key_envelope_buf = [0u8; 0x40];
+    key_envelope_buf.copy_from_slice(&data[key_envelope_offset..key_envelope_offset + 0x40]);
 
-    // Debug SELFs ship MetadataInfo in cleartext; retail encrypts with AES-256-CBC.
-    let is_debug = (hdr.se_flags & 0x8000) != 0;
+    // Debug SELFs ship the key envelope in cleartext; retail encrypts with AES-256-CBC.
+    let is_debug = (hdr.revision_flags & 0x8000) != 0;
     if !is_debug {
         let decryptor = Aes256CbcDec::new(
             aes::cipher::generic_array::GenericArray::from_slice(erk),
             aes::cipher::generic_array::GenericArray::from_slice(riv),
         );
         decryptor
-            .decrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut meta_info_buf)
+            .decrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut key_envelope_buf)
             .map_err(|e| format!("AES-256-CBC decrypt failed: {e}"))?;
     }
 
-    let meta_key: [u8; 16] = meta_info_buf[0..16].try_into().unwrap();
-    let meta_iv: [u8; 16] = meta_info_buf[0x20..0x30].try_into().unwrap();
+    let aes_key: [u8; 16] = key_envelope_buf[0..16].try_into().unwrap();
+    let aes_iv: [u8; 16] = key_envelope_buf[0x20..0x30].try_into().unwrap();
 
-    // The two 16-byte pad regions must decrypt to zero; non-zero means the ERK/RIV
+    // The two 16-byte padding regions must decrypt to zero; non-zero means the ERK/RIV
     // does not match this SELF revision.
     if !is_debug
-        && (meta_info_buf[0x10..0x20].iter().any(|&b| b != 0)
-            || meta_info_buf[0x30..0x40].iter().any(|&b| b != 0))
+        && (key_envelope_buf[0x10..0x20].iter().any(|&b| b != 0)
+            || key_envelope_buf[0x30..0x40].iter().any(|&b| b != 0))
     {
-        return Err("MetadataInfo padding validation failed (wrong key?)".into());
+        return Err("MetadataKeyEnvelope padding validation failed (wrong key?)".into());
     }
 
-    let headers_offset = meta_offset + 0x40;
-    let headers_end = hdr.se_hsize as usize;
-    if headers_end > data.len() || headers_offset >= headers_end {
+    let directory_offset = key_envelope_offset + 0x40;
+    let directory_end = hdr.header_size as usize;
+    if directory_end > data.len() || directory_offset >= directory_end {
         return Err("SCE file truncated at metadata headers".into());
     }
-    let mut headers_buf = data[headers_offset..headers_end].to_vec();
+    let mut directory_buf = data[directory_offset..directory_end].to_vec();
 
     let mut ctr_cipher = Aes128Ctr::new(
-        aes::cipher::generic_array::GenericArray::from_slice(&meta_key),
-        aes::cipher::generic_array::GenericArray::from_slice(&meta_iv),
+        aes::cipher::generic_array::GenericArray::from_slice(&aes_key),
+        aes::cipher::generic_array::GenericArray::from_slice(&aes_iv),
     );
     ctr_cipher.seek(0u64);
-    ctr_cipher.apply_keystream(&mut headers_buf);
+    ctr_cipher.apply_keystream(&mut directory_buf);
 
-    if headers_buf.len() < 0x20 {
+    if directory_buf.len() < 0x20 {
         return Err("decrypted metadata too small for header".into());
     }
-    let section_count = read_be_u32(&headers_buf, 0x0C) as usize;
-    let key_count = read_be_u32(&headers_buf, 0x10) as usize;
+    let section_count = read_be_u32(&directory_buf, 0x0C) as usize;
+    let key_count = read_be_u32(&directory_buf, 0x10) as usize;
 
     let sections_start = 0x20usize;
     let keys_start = sections_start + section_count * 0x30;
     let keys_end = keys_start + key_count * 0x10;
 
-    if keys_end > headers_buf.len() {
+    if keys_end > directory_buf.len() {
         return Err(format!(
             "metadata headers truncated: need {} bytes, have {}",
             keys_end,
-            headers_buf.len()
+            directory_buf.len()
         ));
     }
 
-    let data_keys = &headers_buf[keys_start..keys_end];
+    let data_keys = &directory_buf[keys_start..keys_end];
 
     let mut sections: Vec<Vec<u8>> = Vec::new();
 
     for i in 0..section_count {
         let off = sections_start + i * 0x30;
-        let sec = MetadataSectionHeader {
-            data_offset: read_be_u64(&headers_buf, off),
-            data_size: read_be_u64(&headers_buf, off + 8),
-            section_type: read_be_u32(&headers_buf, off + 0x10),
-            program_idx: read_be_u32(&headers_buf, off + 0x14),
-            hashed: read_be_u32(&headers_buf, off + 0x18),
-            sha1_idx: read_be_u32(&headers_buf, off + 0x1C),
-            encrypted: read_be_u32(&headers_buf, off + 0x20),
-            key_idx: read_be_u32(&headers_buf, off + 0x24),
-            iv_idx: read_be_u32(&headers_buf, off + 0x28),
-            compressed: read_be_u32(&headers_buf, off + 0x2C),
+        let sec = EncryptedSectionDescriptor {
+            payload_offset: read_be_u64(&directory_buf, off),
+            payload_size: read_be_u64(&directory_buf, off + 8),
+            section_kind: read_be_u32(&directory_buf, off + 0x10),
+            program_segment_index: read_be_u32(&directory_buf, off + 0x14),
+            sha1_hashed: read_be_u32(&directory_buf, off + 0x18),
+            sha1_slot: read_be_u32(&directory_buf, off + 0x1C),
+            encryption_kind: read_be_u32(&directory_buf, off + 0x20),
+            key_slot: read_be_u32(&directory_buf, off + 0x24),
+            iv_slot: read_be_u32(&directory_buf, off + 0x28),
+            compression_kind: read_be_u32(&directory_buf, off + 0x2C),
         };
 
-        let sec_start = sec.data_offset as usize;
-        let sec_end = sec_start + sec.data_size as usize;
+        let sec_start = sec.payload_offset as usize;
+        let sec_end = sec_start + sec.payload_size as usize;
         if sec_end > data.len() {
             return Err(format!("section {i} extends past file end"));
         }
 
         let mut sec_data = data[sec_start..sec_end].to_vec();
 
-        if sec.encrypted == 3 {
-            let k_off = sec.key_idx as usize * 0x10;
-            let iv_off = sec.iv_idx as usize * 0x10;
+        if sec.encryption_kind == 3 {
+            let k_off = sec.key_slot as usize * 0x10;
+            let iv_off = sec.iv_slot as usize * 0x10;
             if k_off + 0x10 > data_keys.len() || iv_off + 0x10 > data_keys.len() {
                 return Err(format!("section {i} key/iv index out of range"));
             }
@@ -304,7 +304,7 @@ fn decrypt_sce_sections(
             sec_cipher.apply_keystream(&mut sec_data);
         }
 
-        if sec.compressed == 2 {
+        if sec.compression_kind == 2 {
             use flate2::read::ZlibDecoder;
             use std::io::Read;
             let mut decoder = ZlibDecoder::new(sec_data.as_slice());
@@ -345,8 +345,8 @@ mod tests {
         data[0..4].copy_from_slice(&0x53434500u32.to_be_bytes());
         data[16..24].copy_from_slice(&256u64.to_be_bytes());
         let hdr = parse_sce_header(&data).unwrap();
-        assert_eq!(hdr.se_magic, 0x53434500);
-        assert_eq!(hdr.se_hsize, 256);
+        assert_eq!(hdr.magic, 0x53434500);
+        assert_eq!(hdr.header_size, 256);
     }
 
     #[test]
