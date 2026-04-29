@@ -1031,6 +1031,30 @@ mod tests {
     }
 
     #[test]
+    fn divd_small_dividend_returns_zero() {
+        // Hex-format conversion routines do `value / base` until
+        // value reaches 0; the last iteration always has dividend
+        // < divisor (e.g. 0xF / 16, 1 / 16). Verify those produce
+        // zero quotient.
+        for (a, b) in [(0u64, 16u64), (1, 16), (0xFu64, 16), (15, 16)] {
+            let mut s = PpuState::new();
+            s.gpr[3] = a;
+            s.gpr[4] = b;
+            exec_no_mem(
+                &PpuInstruction::Divd {
+                    rt: 5,
+                    ra: 3,
+                    rb: 4,
+                    oe: false,
+                    rc: false,
+                },
+                &mut s,
+            );
+            assert_eq!(s.gpr[5], 0, "divd({a:#x}, {b}) expected 0");
+        }
+    }
+
+    #[test]
     fn divd_divide_by_zero() {
         let mut s = PpuState::new();
         s.gpr[3] = 100;
