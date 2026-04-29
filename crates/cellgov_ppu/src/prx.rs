@@ -1,8 +1,8 @@
 //! PS3 PRX import table parser and HLE trampoline binder.
 //!
-//! Walks the `ppu_proc_prx_param_t` in PT_0x60000002 to enumerate
-//! imported modules / NIDs / OPD slots, then writes HLE trampolines
-//! into guest memory and patches the GOT to point at them.
+//! Walks the `PrxParamHeader` in PT_0x60000002 to enumerate imported
+//! modules / NIDs / OPD slots, then writes HLE trampolines into guest
+//! memory and patches the GOT to point at them.
 
 use crate::loader;
 
@@ -30,10 +30,11 @@ pub struct ImportedFunction {
 pub enum ImportParseError {
     /// No PT_0x60000002 program header found.
     NoPrxParam,
-    /// The ppu_proc_prx_param_t magic does not match 0x1b434cec.
+    /// The PrxParamHeader magic does not match 0x1b434cec.
     BadMagic(u32),
-    /// The ppu_proc_prx_param_t `size` field declares a header smaller
-    /// than the libstub_start/libstub_end fields the parser reads.
+    /// The PrxParamHeader `header_size` field declares a header smaller
+    /// than the imports_table_start/imports_table_end fields the parser
+    /// reads.
     ParamHeaderTooSmall(u32),
     /// A read went out of bounds.
     OutOfBounds,
@@ -42,11 +43,11 @@ pub enum ImportParseError {
 /// PT_0x60000002 program header type.
 const PT_PRX_PARAM: u32 = 0x6000_0002;
 
-/// Expected magic value in ppu_proc_prx_param_t.
+/// Expected magic value in PrxParamHeader.
 const PRX_PARAM_MAGIC: u32 = 0x1b43_4cec;
 
 /// Enumerate every imported module and its (NID, GOT slot) entries
-/// by walking the libstub array in PT_0x60000002.
+/// by walking the imports table in PT_0x60000002.
 pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseError> {
     if data.len() < 64 {
         return Err(ImportParseError::OutOfBounds);
@@ -74,37 +75,39 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
         return Err(ImportParseError::OutOfBounds);
     }
 
-    // ppu_proc_prx_param_t: { u32 size, magic, version, unk0,
-    //   libent_start, libent_end, libstub_start, libstub_end }.
+    // PrxParamHeader: { u32 header_size, magic, version, reserved0,
+    //   exports_table_start, exports_table_end,
+    //   imports_table_start, imports_table_end }.
     let magic = loader::read_u32(data, param_off + 4);
     if magic != PRX_PARAM_MAGIC {
         return Err(ImportParseError::BadMagic(magic));
     }
-    // The header's declared size must cover the libstub fields at
-    // +24/+28. Real PS3 binaries set size to 0x40 or larger; rejecting
+    // The header's declared size must cover the imports-table fields at
+    // +24/+28. Real PS3 binaries set this to 0x40 or larger; rejecting
     // smaller values catches truncated or corrupt param headers before
-    // the libstub fields are read against unrelated bytes.
+    // the imports-table fields are read against unrelated bytes.
     let declared_size = loader::read_u32(data, param_off);
     if declared_size < 32 {
         return Err(ImportParseError::ParamHeaderTooSmall(declared_size));
     }
 
-    let libstub_start = loader::read_u32(data, param_off + 24) as usize;
-    let libstub_end = loader::read_u32(data, param_off + 28) as usize;
+    let imports_table_start = loader::read_u32(data, param_off + 24) as usize;
+    let imports_table_end = loader::read_u32(data, param_off + 28) as usize;
 
     let segments = build_segment_map(data, phoff, phentsize, phnum);
 
     let mut modules = Vec::new();
-    let mut addr = libstub_start;
-    while addr < libstub_end {
+    let mut addr = imports_table_start;
+    while addr < imports_table_end {
         let foff = vaddr_to_file(&segments, addr).ok_or(ImportParseError::OutOfBounds)?;
         if foff >= data.len() {
             return Err(ImportParseError::OutOfBounds);
         }
 
-        // ppu_prx_module_info: { u8 size, unk0, u16 version, attributes,
-        //   num_func, num_var, num_tlsvar, u8 info_hash, info_tlshash,
-        //   u8[2] unk1, u32 name_ptr, nid_ptr, stub_ptr }.
+        // PrxImportEntry: { u8 entry_size, reserved0, u16 module_version,
+        //   attributes, function_count, variable_count, tls_var_count,
+        //   u8 name_hash_byte, tls_hash_byte, u8[2] reserved1,
+        //   u32 name_ptr, nid_ptr, stub_ptr }.
         let entry_size = data[foff] as usize;
         if entry_size == 0 {
             break;
@@ -113,23 +116,24 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
             return Err(ImportParseError::OutOfBounds);
         }
 
-        let num_func = loader::read_u16(data, foff + 6) as usize;
+        let function_count = loader::read_u16(data, foff + 6) as usize;
         let name_ptr = loader::read_u32(data, foff + 16) as usize;
         let nid_ptr = loader::read_u32(data, foff + 20) as usize;
         let stub_ptr = loader::read_u32(data, foff + 24) as usize;
 
         let name = read_cstring(data, &segments, name_ptr);
 
-        let mut functions = Vec::with_capacity(num_func);
+        let mut functions = Vec::with_capacity(function_count);
         // Resolve the NID table only when this module has functions.
-        // Modules with `num_func == 0` (variable-only or empty imports)
-        // legitimately may not point at a NID table; we skip the lookup
-        // rather than letting an unmapped pointer silently fall back to
-        // file offset 0 (the ELF header) and produce garbage NIDs.
-        if num_func > 0 {
+        // Modules with `function_count == 0` (variable-only or empty
+        // imports) legitimately may not point at a NID table; we skip
+        // the lookup rather than letting an unmapped pointer silently
+        // fall back to file offset 0 (the ELF header) and produce
+        // garbage NIDs.
+        if function_count > 0 {
             let nid_foff =
                 vaddr_to_file(&segments, nid_ptr).ok_or(ImportParseError::OutOfBounds)?;
-            for i in 0..num_func {
+            for i in 0..function_count {
                 let nid_off = nid_foff + i * 4;
                 if nid_off + 4 > data.len() {
                     break;
@@ -137,8 +141,7 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
                 let nid = loader::read_u32(data, nid_off);
                 // stub_ptr addresses the function-stub pointer table:
                 // each entry is a 4-byte vaddr the binder later
-                // overwrites with the OPD address (see RPCS3
-                // ppu_load_imports for the same stride).
+                // overwrites with the OPD address.
                 let stub_addr = (stub_ptr + i * 4) as u32;
                 functions.push(ImportedFunction { nid, stub_addr });
             }
@@ -522,14 +525,14 @@ mod tests {
         data[ph1..ph1 + 4].copy_from_slice(&PT_PRX_PARAM.to_be_bytes());
         data[ph1 + 8..ph1 + 16].copy_from_slice(&(PARAM_OFF as u64).to_be_bytes());
 
-        // ppu_proc_prx_param_t: size=0x40, magic, libstub_start/end.
+        // PrxParamHeader: header_size=0x40, magic, imports_table_start/end.
         data[PARAM_OFF..PARAM_OFF + 4].copy_from_slice(&0x40u32.to_be_bytes());
         data[PARAM_OFF + 4..PARAM_OFF + 8].copy_from_slice(&PRX_PARAM_MAGIC.to_be_bytes());
         data[PARAM_OFF + 24..PARAM_OFF + 28].copy_from_slice(&(MOD_INFO_OFF as u32).to_be_bytes());
         data[PARAM_OFF + 28..PARAM_OFF + 32]
             .copy_from_slice(&(MOD_INFO_OFF as u32 + MOD_INFO_SIZE as u32).to_be_bytes());
 
-        // ppu_prx_module_info: size=0x2C, num_func=1, name/nids/addrs ptrs.
+        // PrxImportEntry: entry_size=0x2C, function_count=1, name/nids/stubs ptrs.
         data[MOD_INFO_OFF] = MOD_INFO_SIZE;
         data[MOD_INFO_OFF + 6..MOD_INFO_OFF + 8].copy_from_slice(&1u16.to_be_bytes());
         data[MOD_INFO_OFF + 16..MOD_INFO_OFF + 20]
@@ -569,9 +572,9 @@ mod tests {
 
     #[test]
     fn parse_rejects_param_header_too_small() {
-        // size = 16 declares a header that ends before libstub_start at
-        // +24. The parser must reject rather than read past the
-        // declared boundary.
+        // header_size = 16 declares a header that ends before
+        // imports_table_start at +24. The parser must reject rather
+        // than read past the declared boundary.
         let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
         let param_off = 176;
         data[param_off..param_off + 4].copy_from_slice(&16u32.to_be_bytes());
@@ -582,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_unmapped_nid_table_when_num_func_nonzero() {
+    fn parse_rejects_unmapped_nid_table_when_function_count_nonzero() {
         // Point nid_ptr at a vaddr no PT_LOAD covers. A vaddr->offset
         // walker that falls back to file offset 0 on lookup miss
         // would read the ELF header bytes and produce garbage NIDs;
