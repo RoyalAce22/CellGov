@@ -1,6 +1,7 @@
 //! cellgov_cli -- run scenarios, dump traces, compare observations, explore schedules.
 
 mod cli;
+mod disasm;
 mod dump_imports;
 mod game;
 
@@ -57,6 +58,7 @@ fn main() {
         "bench-boot" => cli::boot_cmd::bench_boot(&args),
         "dump" => cli::dump::run(&args, SCENARIOS),
         "dump-imports" => dump_imports::run(&args),
+        "disasm" => disasm::run(&args),
         other => match run_scenario(other) {
             Some((label, result)) => println!("{}", report(label, &result)),
             None => die(&format!(
