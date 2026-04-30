@@ -167,11 +167,25 @@ pub const TTY_WRITE: u64 = 403;
 /// CELL_ENOENT for unknown paths).
 pub const FS_OPEN: u64 = 801;
 
+/// `sys_fs_read` (read up to `nbytes` from an open fd into a guest
+/// buffer; routed through the in-memory FS layer).
+pub const FS_READ: u64 = 802;
+
 /// `sys_fs_write`.
 pub const FS_WRITE: u64 = 803;
 
 /// `sys_fs_close`.
 pub const FS_CLOSE: u64 = 804;
+
+/// `sys_fs_fstat` (populate a `CellFsStat` for an open fd).
+pub const FS_FSTAT: u64 = 805;
+
+/// `sys_fs_stat` (populate a `CellFsStat` from a path).
+pub const FS_STAT: u64 = 815;
+
+/// `sys_fs_lseek` (move an fd's offset to a new absolute position;
+/// SEEK_SET / SEEK_CUR / SEEK_END semantics).
+pub const FS_LSEEK: u64 = 818;
 
 /// `sys_rsx_memory_allocate`.
 pub const SYS_RSX_MEMORY_ALLOCATE: u64 = 668;

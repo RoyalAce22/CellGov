@@ -43,6 +43,39 @@ pub struct TitleManifest {
     /// (a writable region cannot fault on the put-pointer store);
     /// the loader rejects both together.
     pub rsx_mirror: bool,
+    /// Optional in-memory content provider. Read-only blobs the
+    /// title expects to load from `/app_home/...` paths get
+    /// registered in `Lv2Host::fs_store` at boot. Absent for
+    /// titles that boot without title-specific content.
+    pub content: Option<ContentManifest>,
+}
+
+/// Per-title content provider entries, each mapping a guest path
+/// the title opens via `sys_fs_open` to a host file whose bytes
+/// get registered in `Lv2Host::fs_store` at boot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentManifest {
+    /// Base directory for relative `host_path`s. Resolved against
+    /// the workspace root when relative; used as-is when absolute.
+    pub base: String,
+    /// Optional environment variable name. When set in the
+    /// process environment to a non-empty value, that value is
+    /// used as the base directory instead of [`Self::base`]. The
+    /// override exists for the gitignored-developer-local content
+    /// path: a developer who has the real title content drops it
+    /// into a local directory and exports the env var, without
+    /// needing to edit the committed manifest.
+    pub override_base_env: Option<String>,
+    pub files: Vec<ContentEntry>,
+}
+
+/// One blob to register: `guest_path` is what the title sees from
+/// `sys_fs_open`; `host_path` is the on-disk source (resolved
+/// against the [`ContentManifest::base`] when relative).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentEntry {
+    pub guest_path: String,
+    pub host_path: String,
 }
 
 /// Stop condition for a boot. Default comes from the manifest;
@@ -136,6 +169,23 @@ struct ManifestFile {
     checkpoint: ManifestCheckpoint,
     source: Option<ManifestSource>,
     rsx: Option<ManifestRsx>,
+    content: Option<ManifestContent>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestContent {
+    base: String,
+    #[serde(default)]
+    override_base_env: Option<String>,
+    files: Vec<ManifestContentFile>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestContentFile {
+    guest_path: String,
+    host_path: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -359,7 +409,7 @@ impl TitleManifest {
                 });
             }
             if let Some(table) = raw.as_table() {
-                let conflicting: Vec<&str> = ["title", "checkpoint", "source", "rsx"]
+                let conflicting: Vec<&str> = ["title", "checkpoint", "source", "rsx", "content"]
                     .iter()
                     .copied()
                     .filter(|k| table.contains_key(*k))
@@ -435,6 +485,18 @@ impl TitleManifest {
                     .to_string(),
             });
         }
+        let content = file.content.map(|c| ContentManifest {
+            base: c.base,
+            override_base_env: c.override_base_env,
+            files: c
+                .files
+                .into_iter()
+                .map(|f| ContentEntry {
+                    guest_path: f.guest_path,
+                    host_path: f.host_path,
+                })
+                .collect(),
+        });
         Ok(TitleManifest {
             content_id: file.title.content_id,
             short_name: file.title.short_name,
@@ -443,6 +505,7 @@ impl TitleManifest {
             checkpoint,
             source,
             rsx_mirror,
+            content,
         })
     }
 
@@ -734,6 +797,165 @@ kind = "process-exit"
     fn rsx_mirror_defaults_to_false_when_table_absent() {
         let m = parse(PROCESS_EXIT_TOML);
         assert!(!m.rsx_mirror());
+    }
+
+    #[test]
+    fn content_block_absent_means_no_content_provider() {
+        let m = parse(PROCESS_EXIT_TOML);
+        assert!(m.content.is_none());
+    }
+
+    #[test]
+    fn parses_content_block_with_files() {
+        let text = r#"
+[title]
+content_id = "NPAA77777"
+short_name = "content-fixture"
+display_name = "Content fixture"
+eboot_candidates = ["EBOOT.elf"]
+
+[checkpoint]
+kind = "process-exit"
+
+[content]
+base = "tests/fixtures/CONTENT_DIR"
+files = [
+    { guest_path = "/app_home/Data/Resources/first.xml", host_path = "first.xml" },
+    { guest_path = "/app_home/Data/Local/Localization.xml", host_path = "Localization.xml" },
+]
+"#;
+        let m = parse(text);
+        let content = m.content.as_ref().expect("content present");
+        assert_eq!(content.base, "tests/fixtures/CONTENT_DIR");
+        assert!(
+            content.override_base_env.is_none(),
+            "override_base_env defaults to None when omitted",
+        );
+        assert_eq!(content.files.len(), 2);
+        assert_eq!(
+            content.files[0].guest_path,
+            "/app_home/Data/Resources/first.xml",
+        );
+        assert_eq!(content.files[0].host_path, "first.xml");
+    }
+
+    #[test]
+    fn parses_content_block_with_override_base_env() {
+        let text = r#"
+[title]
+content_id = "NPAA77779"
+short_name = "override-fixture"
+display_name = "Override fixture"
+eboot_candidates = ["EBOOT.elf"]
+
+[checkpoint]
+kind = "process-exit"
+
+[content]
+base = "tests/fixtures/synthetic"
+override_base_env = "CELLGOV_NPAA77779_CONTENT_DIR"
+files = [
+    { guest_path = "/p", host_path = "h.bin" },
+]
+"#;
+        let m = parse(text);
+        let content = m.content.as_ref().expect("content present");
+        assert_eq!(
+            content.override_base_env.as_deref(),
+            Some("CELLGOV_NPAA77779_CONTENT_DIR"),
+        );
+    }
+
+    #[test]
+    fn parses_content_block_with_empty_files_array() {
+        // An empty `files` array is a valid (if pointless) shape;
+        // it lets a manifest scaffold the [content] block before
+        // any blobs are wired.
+        let text = r#"
+[title]
+content_id = "NPAA77778"
+short_name = "empty-content"
+display_name = "Empty content"
+eboot_candidates = ["EBOOT.elf"]
+
+[checkpoint]
+kind = "process-exit"
+
+[content]
+base = "."
+files = []
+"#;
+        let m = parse(text);
+        let content = m.content.as_ref().expect("content present");
+        assert!(content.files.is_empty());
+    }
+
+    #[test]
+    fn content_block_missing_base_is_rejected() {
+        let text = r#"
+[title]
+content_id = "x"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["x"]
+
+[checkpoint]
+kind = "process-exit"
+
+[content]
+files = []
+"#;
+        let err =
+            TitleManifest::load_from_text(text, Path::new("missing_base.toml")).expect_err("bad");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+    }
+
+    #[test]
+    fn content_entry_with_unknown_field_is_rejected() {
+        // serde(deny_unknown_fields) catches typos like
+        // `host-path` (dash instead of underscore).
+        let text = r#"
+[title]
+content_id = "x"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["x"]
+
+[checkpoint]
+kind = "process-exit"
+
+[content]
+base = "."
+files = [
+    { guest_path = "/foo", "host-path" = "bar" },
+]
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("typo.toml")).expect_err("bad");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+    }
+
+    #[test]
+    fn parses_content_block_from_nested_cellgov_section() {
+        let text = r#"
+[cellgov.title]
+content_id = "CG_CONT"
+short_name = "cgcontent"
+display_name = "CG content"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[cellgov.content]
+base = "fx"
+files = [
+    { guest_path = "/p", host_path = "h" },
+]
+"#;
+        let m = parse(text);
+        let content = m.content.as_ref().expect("nested content present");
+        assert_eq!(content.base, "fx");
+        assert_eq!(content.files.len(), 1);
     }
 
     #[test]
@@ -1046,6 +1268,7 @@ kind = "process-exit"
             checkpoint: CheckpointTrigger::ProcessExit,
             source: GameSource::Hdd,
             rsx_mirror: false,
+            content: None,
         }
     }
 

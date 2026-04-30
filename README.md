@@ -53,27 +53,43 @@ Pre-Alpha. What works today:
   shadow quickenings and super-pair fusions; covers the
   CR-logical XL-form family and the X-form FP indexed load/store
   family). **SPU**: full interpreter.
-- **LV2**: 58 classified syscalls, 50 HLE exports, including the
+- **LV2**: 62 classified syscalls, 56 HLE exports, including the
   `sys_rsx` kernel-side RSX surface, the cellSysutil video-out
   query family, the cellSpurs PPU-side runtime (initialize,
   workload registry, ready-count and contention controls, info
-  snapshot, exception-handler registration), and HLE
-  sys_lwmutex_* routing through the LV2 lwmutex surface with a
-  kernel sleep-queue, recursive-acquire depth tracking, and
+  snapshot, exception-handler registration), HLE sys_lwmutex_*
+  routing through the LV2 lwmutex surface with a kernel
+  sleep-queue, recursive-acquire depth tracking, and
   per-thread hold counts that drive critical-section-aware
-  scheduling so concurrent printf paths complete atomically.
+  scheduling so concurrent printf paths complete atomically,
+  and the read-side `sys_fs_*` family
+  (open / read / close / lseek / fstat / stat) backed by an
+  in-memory blob store that titles populate via per-title
+  content manifests.
 - **Sync primitives**: lwmutex / event_flag / semaphore / mutex
   / cond now match real-PS3 wake ordering, including event_flag
   cancel waking parked waiters with `CELL_ECANCELED`,
   semaphore post-N multi-wake, finite-timeout waits trip
   `ETIMEDOUT` only when no peer can satisfy them, and timer
-  syscalls advance the deterministic guest clock.
+  syscalls advance the deterministic guest clock. Critical-
+  section sticky scheduling is bounded by a sticky-streak
+  ceiling so a single thread holding an lwmutex cannot starve
+  peers indefinitely.
+- **In-memory FS**: the LV2 `sys_fs_*` surface is backed by a
+  path-keyed blob store with a never-recycle fd allocator and
+  deterministic 56-byte `CellFsStat` (zero atime / mtime /
+  ctime, S_IFREG read-only mode, 4096 blksize). Titles populate
+  it from a per-title content manifest with three-tier
+  resolution (env override -> EBOOT-adjacent USRDIR
+  auto-discovery -> manifest's checked-in synthetic stubs).
+  Both raw `sys_fs_*` syscalls and the `cellFs*` HLE wrappers
+  route through the same store.
 - **PS3 conformance**: ps3autotests cross-runner harness boots
   whitelisted .ppu.elf files and compares captured TTY against
   real-PS3 .expected. cpu/basic, cpu/ppu_branch,
   lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag all
   match byte-for-byte.
-- 2,362 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 2,470 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 ### Next reads
 

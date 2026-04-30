@@ -234,12 +234,19 @@ ten-step deterministic loop:
    (b) the previous yield was a non-blocking syscall that did
    not wake any other unit. Wake-causing syscalls (`sema_post`,
    `event_flag_set`, etc.) follow normal rotation so the woken
-   unit gets to run. A single-runnable fast path keeps
-   single-PPU titles off the two-pass rotation. When the
-   registry is non-empty but every unit is `Blocked`,
-   `Runtime::step` returns `StepError::AllBlocked` rather than
-   `NoRunnableUnit` -- callers that care about liveness vs
-   terminal stall can distinguish the two.
+   unit gets to run. A sticky-streak counter bounds how long a
+   single unit can hold the seat: after 64 consecutive sticky
+   yields the scheduler rotates regardless of the held-lwmutex /
+   non-waking-syscall triggers, so a single thread that holds an
+   lwmutex while doing only non-waking syscalls cannot starve
+   peers indefinitely. The 64-step ceiling is 8x the empirical
+   minimum (the longest ps3autotests printf critical section).
+   A single-runnable fast path keeps single-PPU titles off the
+   two-pass rotation. When the registry is non-empty but every
+   unit is `Blocked`, `Runtime::step` returns
+   `StepError::AllBlocked` rather than `NoRunnableUnit` --
+   callers that care about liveness vs terminal stall can
+   distinguish the two.
 2. Grant the unit the per-step `Budget` (default 256 instructions).
 3. Run the unit until it yields (one `ExecutionUnit::run_until_yield`).
    The PPU executes up to Budget instructions per call, batching
@@ -454,7 +461,12 @@ Classified into typed `Lv2Request` variants:
 | `sys_memory_free`                 | 349              | Stub: no-op (CellGov does not track deallocation).                                                     |
 | `sys_memory_get_user_memory_size` | 352              | Writes `sys_memory_info_t` (total / available, 0x0D500000 each) to guest pointer.                      |
 | `sys_tty_write`                   | 403              | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing.                                   |
-| `sys_fs_open`                     | 801              | Minimal handler: validates fd out-pointer (alignment + writable region; CELL_EFAULT otherwise), reads the path until NUL within `CELL_FS_MAX_PATH_LENGTH` (CELL_EINVAL on no-NUL, CELL_EFAULT on unmapped path pointer), then returns CELL_ENOENT with 0 written to the fd out-pointer. Path is byte-transparent. O_CREAT triggers an invariant-break log. |
+| `sys_fs_open`                     | 801              | Routes through the in-memory FS layer (see "In-memory filesystem" below). Manifest-registered paths get a fresh fd from `FsStore`; legacy whitelist paths (`PARAM.SFO`, `output.txt`) get an `alloc_id` synthetic fd; everything else returns `CELL_FS_ENOENT`. CELL_EFAULT on unmapped path / fd out-pointer; CELL_EINVAL on no-NUL within `CELL_FS_MAX_PATH_LENGTH`; CELL_EMFILE when the FsStore allocator is exhausted. |
+| `sys_fs_read`                     | 802              | Reads up to `nbytes` from `fd`'s offset into the guest buffer; advances the offset by the actual count returned and writes that count (u64 BE) to `nread_out_ptr`. Error precedence: bad nread out-pointer (8-byte aligned + writable) -> CELL_EFAULT; unknown fd -> CELL_EBADF; bad buffer (when nbytes > 0) -> CELL_EFAULT BEFORE the offset advances (POSIX semantics). |
+| `sys_fs_close`                    | 804              | FsStore-tracked fds are removed from the open-fd table so subsequent reads / fstats return EBADF. Unknown fds return CELL_OK to preserve legacy whitelist `fclose` behaviour; this is a deliberate divergence pending whitelist retirement. `fs_fd_count` is left unchanged across close (real-PS3 invariant pinned by ps3autotests `sys_process`). |
+| `sys_fs_lseek`                    | 818              | SEEK_SET / CUR / END semantics via `FsStore::seek`. Errors: CELL_EFAULT (bad pos out-pointer), CELL_EINVAL (whence out of `{0,1,2}` or seek out of `[0, u64::MAX]`), CELL_EBADF (unknown fd). Failed seek leaves the offset unchanged. |
+| `sys_fs_fstat`                    | 805              | Writes a 56-byte `CellFsStat` to `stat_out_ptr` (8-byte aligned). `mode = S_IFREG \| 0o444`, `size` from the backing blob, `blksize = 4096`, all timestamp fields zero (oracle has no host time). CELL_EBADF on unknown fd. |
+| `sys_fs_stat`                     | 815              | Path-keyed variant of `sys_fs_fstat`; CELL_FS_ENOENT for unregistered paths. Same struct shape. |
 
 ### PPU thread lifecycle
 
@@ -505,6 +517,56 @@ error codes instead of CELL_OK (matching RPCS3 retail behavior):
 
 All other syscalls fall through the host dispatcher returning CELL_OK
 with no effects.
+
+### In-memory filesystem
+
+The read-side `sys_fs_*` surface routes through an in-memory
+blob store at `Lv2Host::fs_store` (`cellgov_lv2::fs::FsStore`).
+Two `BTreeMap`s back it: a path-keyed blob table
+(`String -> Vec<u8>` plus a pre-computed FNV-1a content hash)
+and a per-fd open-file table (`u32 -> { path, offset }`). Fds
+come from a monotonic `next_fd` counter starting at
+`0x4000_0001`; fds are never recycled within a boot, so a stale
+fd can never alias a fresh one. State-hash inclusion folds the
+content hashes, fd offsets, and the next-fd counter so a content
+swap, an unintended re-allocation, or a bogus extra read shows
+up as a state-hash divergence in post-step assertions. Single-
+write blob registration: a second `register_blob` at the same
+path is rejected with `FsError::PathAlreadyRegistered`, so
+content cannot mutate under an open fd.
+
+Per-title content lands in the store at boot via the manifest
+schema in `docs/titles/<content-id>.toml`:
+
+```toml
+[content]
+base = "tests/fixtures/<id>_content"
+override_base_env = "CELLGOV_<ID>_CONTENT_DIR"
+files = [
+    { guest_path = "/app_home/Data/Resources/first.xml", host_path = "Data/Resources/first.xml" },
+    ...
+]
+```
+
+The boot-time content provider in
+`apps/cellgov_cli/src/game/content.rs` resolves each entry
+against three tiers in priority order:
+
+1. `override_base_env`'s value, if the env var is set to a
+   non-empty path. Hard-fail on any missing file with a
+   diagnostic that names the env var (so a developer who set
+   the override knows which knob to fix).
+2. EBOOT-adjacent USRDIR (`<eboot>.parent()`), auto-discovered.
+   Soft probe: every entry must resolve under it for the tier
+   to win; a partial USRDIR falls through to (3).
+3. The manifest's checked-in `base` (the synthetic stubs
+   committed to the public repo). Hard-fail on missing files.
+
+The HLE wrappers `cellFs{Open,Read,Close,Lseek,Fstat,Stat}` in
+`cellgov_core::hle::sys_fs` translate each PSL1GHT C-level
+signature into the matching `Lv2Request::Fs*` and route through
+`runtime.dispatch_lv2_request` so the title's HLE path observes
+the same FsStore-backed behaviour as the raw-syscall path.
 
 ### Synchronization primitives
 
@@ -1148,21 +1210,22 @@ arms route through the LV2 lwmutex surface so contended locks
 produce real Blocked / Runnable transitions; the embedded
 `sleep_queue_id` is allocated from the LV2 lwmutex table at
 create time so subsequent lock / unlock / trylock / destroy
-resolve through the same id space. The minimal `sys_fs_open`
-handler returns `CELL_ENOENT` with `0` written to the fd
-out-pointer; flOw attempts ~11 paths during boot (runtime log,
-SDK scratch files, localization XML, class registry, resource
-manifest, credits-screen texture pack at three resolutions,
-plus a developer-machine drive-letter-prefixed copy of those
-texture paths) and fails-soft on each ENOENT.
+resolve through the same id space. The read-side `sys_fs_*`
+surface is wired through the in-memory FS layer; flOw's manifest
+registers `Data/{Resources/first.xml,Local/Localization.xml,Classes/Classes.xml}`
+which the EBOOT-adjacent USRDIR auto-discovery serves with the
+real bytes already on disk next to `EBOOT.elf`.
 
-Boot reaches `MaxSteps` at the 4B-instruction cap (15,625,000
-scheduler steps, budget 256). The stopping point is a polling
-loop where ~50% of the budget retires a single syscall
-instruction at PC=0x007a7d08 (Sc, raw=0x44000002).
-Cross-runner observation against RPCS3 is queued pending
-advancement past the polling loop to a deterministic checkpoint
-RPCS3 also reaches.
+Boot reaches a deterministic FAULT at step 85,291 (DECODE_ERROR
+at `PC=0x00000004`, raw=`0x00000000`). The driver is a NULL
+bcctr from flOw's `MODE_AUTO_LOAD` fallback: even with real XML
+content opened and read, the title's resource loader still trips
+the AUTO_LOAD path because the unclaimed `cellSaveDataAutoLoad`
+HLE NID returns CELL_OK with no result data, leaving an
+uninitialized table that the next dispatch reads as a NULL
+function pointer. Cross-runner refresh against this checkpoint
+is queued; the named successor driver is the save-data autoload
+subsystem.
 
 **Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
 modules (15 with dedicated CellGov handling); the harness uses a
@@ -1172,7 +1235,7 @@ init, TLS setup, lwmutex construction, GCM initialization
 (\_cellGcmInitBody, cellGcmGetConfiguration, cellGcmGetControlRegister),
 keyboard/pad init, SPURS init, video configuration, and into the
 main attract loop. The first RSX write (put-pointer update to the
-GCM control register at 0xC0000040) triggers at step 14,341,436
+GCM control register at 0xC0000040) triggers at step 14,352,589
 (~3.7B instructions). SSHD's CRT0/init path is bit-identical
 across CellGov revisions for the current PPU correctness surface.
 
@@ -1181,9 +1244,9 @@ from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_firmware decrypt-self`. 332 HLE
 bindings across 27 modules -- the largest HLE surface of the
 three tested titles. Same `FirstRsxWrite` checkpoint kind as
-SSHD, not currently reached. Boot stops via `MaxSteps` at the
-1B-instruction cap (3,906,250 scheduler steps, budget 256;
-390,625 at the 100M cap). See
+SSHD; reaches the put-pointer write at step 45,697 (the
+`0xC0000040` MMIO sentinel write triggers the checkpoint after
+the title's renderer init runs to the GCM control register). See
 [tests/fixtures/BCES00664_cross_runner/compare_report.txt](../tests/fixtures/BCES00664_cross_runner/compare_report.txt)
 for history.
 

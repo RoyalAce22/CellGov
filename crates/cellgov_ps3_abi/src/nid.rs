@@ -67,6 +67,23 @@ pub mod sys_prx_for_user {
     ];
 }
 
+/// `sys_fs` NIDs. PSL1GHT-built titles call these HLE wrappers
+/// instead of issuing the raw `sys_fs_*` syscalls; the HLE
+/// dispatcher in `cellgov_core::hle::sys_fs` forwards each call
+/// to the matching `Lv2Request::Fs*` so titles see the same
+/// FsStore / manifest content via either path.
+pub mod sys_fs {
+    crate::nid_const!(OPEN = 0x718b_f5f8, "cellFsOpen");
+    crate::nid_const!(READ = 0x4d5f_f8e2, "cellFsRead");
+    crate::nid_const!(CLOSE = 0x2cb5_1f0d, "cellFsClose");
+    crate::nid_const!(LSEEK = 0xa397_d042, "cellFsLseek");
+    crate::nid_const!(FSTAT = 0xef3e_fa34, "cellFsFstat");
+    crate::nid_const!(STAT = 0x7de6_dced, "cellFsStat");
+
+    /// Every NID this module owns.
+    pub const OWNED: &[u32] = &[OPEN, READ, CLOSE, LSEEK, FSTAT, STAT];
+}
+
 /// `cellSysutil` NIDs (video-out query surface today; will grow as
 /// title boots exercise more of this module's exports).
 pub mod cell_sysutil {
@@ -273,6 +290,7 @@ pub fn stub_classification(nid: u32) -> StubClass {
     use cell_gcm_sys as gcm;
     use cell_spurs as spurs;
     use cell_sysutil as sysutil;
+    use sys_fs as fs;
     use sys_prx_for_user as sys;
     match nid {
         // RSX / GCM library: every implemented surface mutates or reads
@@ -337,6 +355,12 @@ pub fn stub_classification(nid: u32) -> StubClass {
         | spurs::SET_GLOBAL_EXCEPTION_EVENT_HANDLER
         | spurs::UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER
         | spurs::ENABLE_EXCEPTION_EVENT_HANDLER => StubClass::Stateful,
+        // sys_fs HLE wrappers: every entry forwards to the LV2
+        // sys_fs_* surface and mutates fd-table / blob state. A
+        // 0-returning stub would let the title proceed with an
+        // uninitialized fd or skipped read, corrupting downstream
+        // state.
+        fs::OPEN | fs::READ | fs::CLOSE | fs::LSEEK | fs::FSTAT | fs::STAT => StubClass::Stateful,
         _ => StubClass::NoopSafe,
     }
 }

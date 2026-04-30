@@ -6,6 +6,7 @@
 //! packets and never calls back into the runtime.
 
 pub mod dispatch;
+pub mod fs;
 pub mod host;
 pub mod image;
 pub mod ppu_thread;
@@ -17,6 +18,7 @@ pub use dispatch::{
     CondMutexKind, Lv2BlockReason, Lv2Dispatch, PendingResponse, PpuThreadInitState,
     SpuImageHandle, SpuInitState,
 };
+pub use fs::{FileStat, FsError, FsStore, SeekWhence};
 pub use host::{Lv2Host, Lv2Runtime};
 pub use image::{ContentStore, SpuImageRecord};
 pub use ppu_thread::{

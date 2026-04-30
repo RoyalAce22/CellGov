@@ -180,7 +180,8 @@ pub const HLE_SYSCALL_BASE: u32 = 0x10000;
 /// search.
 pub const HLE_IMPLEMENTED_NIDS: &[u32] = {
     use cellgov_ps3_abi::nid::{
-        cell_gcm_sys as gcm, cell_spurs as spurs, cell_sysutil as sysutil, sys_prx_for_user as sys,
+        cell_gcm_sys as gcm, cell_spurs as spurs, cell_sysutil as sysutil, sys_fs as fs,
+        sys_prx_for_user as sys,
     };
     &[
         // cellGcmSys.
@@ -246,6 +247,15 @@ pub const HLE_IMPLEMENTED_NIDS: &[u32] = {
         spurs::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
         spurs::UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER,
         spurs::ENABLE_EXCEPTION_EVENT_HANDLER,
+        // sys_fs HLE wrappers; each forwards to the matching LV2
+        // sys_fs_* syscall handler so HLE-using titles see the
+        // same FsStore-backed behaviour as raw-syscall titles.
+        fs::OPEN,
+        fs::READ,
+        fs::CLOSE,
+        fs::LSEEK,
+        fs::FSTAT,
+        fs::STAT,
     ]
 };
 

@@ -3,6 +3,7 @@
 
 mod bench;
 mod boot;
+mod content;
 mod diag;
 pub mod manifest;
 mod observation;

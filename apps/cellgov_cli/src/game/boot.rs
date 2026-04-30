@@ -474,6 +474,66 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
+    // Per-title content provider: register read-only blobs the
+    // title expects to load via `sys_fs_open`. The provider runs
+    // before any title-side step, so the first sys_fs_open already
+    // sees the manifest-driven blobs. Missing host files are a
+    // startup error; a misconfigured manifest must not look like a
+    // runtime FS bug.
+    //
+    // Resolution priority (high to low):
+    //   1. override env var (gitignored developer-local content)
+    //   2. EBOOT-relative USRDIR auto-discovery (real title bytes
+    //      already on disk next to the EBOOT being loaded)
+    //   3. manifest's checked-in base (synthetic stubs in the
+    //      public test suite)
+    if let Some(content) = opts.title.content.as_ref() {
+        let workspace_root = std::env::current_dir()
+            .unwrap_or_else(|e| die(&format!("cannot read CWD for content base resolution: {e}")));
+        let override_base =
+            super::content::override_base_from_env(content, |name| std::env::var(name).ok());
+        // The EBOOT path resolves under USRDIR/<title>/EBOOT.elf;
+        // its parent directory is the title's USRDIR. host paths
+        // in the manifest are USRDIR-relative (e.g.
+        // `Data/Resources/first.xml`).
+        let usrdir_base = std::path::Path::new(opts.elf_path).parent();
+        let registration_result = super::content::register_content_blobs(
+            content,
+            &workspace_root,
+            override_base.as_deref(),
+            usrdir_base,
+            rt.lv2_host_mut(),
+        );
+        match registration_result {
+            Ok(source) => {
+                if opts.print_banner {
+                    let label = match source {
+                        super::content::ContentBaseSource::Manifest => {
+                            format!("manifest base ({})", content.base)
+                        }
+                        super::content::ContentBaseSource::Usrdir { path } => {
+                            format!("EBOOT-adjacent USRDIR ({})", path.display())
+                        }
+                        super::content::ContentBaseSource::Override { env } => {
+                            format!(
+                                "override env {env}={}",
+                                override_base
+                                    .as_ref()
+                                    .map(|p| p.display().to_string())
+                                    .unwrap_or_default(),
+                            )
+                        }
+                    };
+                    println!(
+                        "content: registered {} blob(s) from {label}",
+                        content.files.len(),
+                    );
+                }
+            }
+            Err(e) => die(&format!("content provider failed: {e}")),
+        }
+    }
+
     PreparedBoot {
         rt,
         hle_bindings,

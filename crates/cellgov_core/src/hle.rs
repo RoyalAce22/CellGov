@@ -25,6 +25,7 @@ pub(crate) mod cell_spurs;
 #[path = "hle/cellSysutil.rs"]
 pub(crate) mod cell_sysutil;
 pub mod context;
+pub(crate) mod sys_fs;
 #[path = "hle/sysPrxForUser.rs"]
 pub(crate) mod sys_prx_for_user;
 
@@ -85,7 +86,8 @@ impl Runtime {
         let handled = sys_prx_for_user::dispatch(self, source, nid, args)
             .or_else(|| cell_gcm_sys::dispatch(self, source, nid, args))
             .or_else(|| cell_sysutil::dispatch(self, source, nid, args))
-            .or_else(|| cell_spurs::dispatch(self, source, nid, args));
+            .or_else(|| cell_spurs::dispatch(self, source, nid, args))
+            .or_else(|| sys_fs::dispatch(self, source, nid, args));
         if handled.is_none() {
             let entry = self.hle.unclaimed_nids.entry(nid).or_insert(0);
             if *entry == 0 {

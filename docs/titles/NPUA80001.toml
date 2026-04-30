@@ -18,3 +18,28 @@ kind = "process-exit"
 # NV406E commands and emits the GPU semaphore writebacks the
 # title polls for during renderer init.
 mirror = true
+
+[content]
+# Read-only blobs the title's resource loader expects to find via
+# sys_fs_open. The boot-time content provider in
+# apps/cellgov_cli/src/game/content.rs reads each host file off
+# disk and registers it in Lv2Host::fs_store at the named
+# guest_path before the step loop runs.
+#
+# `base` is resolved against the workspace root when relative.
+# `host_path` is resolved against `base` when relative; absolute
+# paths pass through.
+#
+# `override_base_env` names an env var that, when set, replaces
+# `base` for this run. Use it to point at a gitignored local copy
+# of the real title content; the synthetic stubs under
+# `tests/fixtures/NPUA80001_content/` stay checked in as the
+# default for the public test suite. See SOURCES.md in that dir
+# for the synthetic-vs-real choice rationale.
+base = "tests/fixtures/NPUA80001_content"
+override_base_env = "CELLGOV_NPUA80001_CONTENT_DIR"
+files = [
+    { guest_path = "/app_home/Data/Resources/first.xml", host_path = "Data/Resources/first.xml" },
+    { guest_path = "/app_home/Data/Local/Localization.xml", host_path = "Data/Local/Localization.xml" },
+    { guest_path = "/app_home/Data/Classes/Classes.xml", host_path = "Data/Classes/Classes.xml" },
+]
