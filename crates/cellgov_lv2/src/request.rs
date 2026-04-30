@@ -469,6 +469,53 @@ pub enum Lv2Request {
         /// File descriptor.
         fd: u32,
     },
+    /// sys_fs_read (802). Reads up to `nbytes` from `fd`'s current
+    /// offset into a guest-supplied buffer; advances the offset by
+    /// the byte count actually returned. Routed through the
+    /// in-memory FS layer.
+    FsRead {
+        /// File descriptor.
+        fd: u32,
+        /// Destination buffer in guest memory.
+        buf_ptr: u32,
+        /// Maximum bytes to read (PSL1GHT signature: `u64`).
+        nbytes: u64,
+        /// Out-pointer for `nread` (u64, 8-byte aligned).
+        nread_out_ptr: u32,
+    },
+    /// sys_fs_lseek (818). Update `fd`'s offset under SEEK_SET /
+    /// SEEK_CUR / SEEK_END semantics; write the new absolute
+    /// position to `pos_out_ptr`.
+    FsLseek {
+        /// File descriptor.
+        fd: u32,
+        /// Signed offset; PSL1GHT signature is `s64`.
+        offset: i64,
+        /// 0 = SEEK_SET, 1 = SEEK_CUR, 2 = SEEK_END; anything else
+        /// surfaces as CELL_EINVAL.
+        whence: u32,
+        /// Out-pointer for the new absolute position (u64, 8-byte
+        /// aligned).
+        pos_out_ptr: u32,
+    },
+    /// sys_fs_fstat (805). Populate a `CellFsStat` (56 bytes) for
+    /// an open fd's backing blob.
+    FsFstat {
+        /// File descriptor.
+        fd: u32,
+        /// Out-pointer for the `CellFsStat` struct (56 bytes,
+        /// 8-byte aligned).
+        stat_out_ptr: u32,
+    },
+    /// sys_fs_stat (815). Path-keyed variant of `sys_fs_fstat`;
+    /// populates a `CellFsStat` from a path lookup.
+    FsStat {
+        /// Guest pointer to the path string.
+        path_ptr: u32,
+        /// Out-pointer for the `CellFsStat` struct (56 bytes,
+        /// 8-byte aligned).
+        stat_out_ptr: u32,
+    },
     /// sys_fs_write (803). Reads `size` bytes from `buf_ptr` and
     /// appends them to the host's `tty_log` so the ps3autotests
     /// harness can compare against `<test>.expected` whether the
@@ -804,6 +851,26 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
         syscall::LWMUTEX_UNLOCK => Lv2Request::LwMutexUnlock { id: p!(0) },
         syscall::LWMUTEX_TRYLOCK => Lv2Request::LwMutexTryLock { id: p!(0) },
         syscall::FS_CLOSE => Lv2Request::FsClose { fd: p!(0) },
+        syscall::FS_READ => Lv2Request::FsRead {
+            fd: p!(0),
+            buf_ptr: p!(1),
+            nbytes: args[2],
+            nread_out_ptr: p!(3),
+        },
+        syscall::FS_LSEEK => Lv2Request::FsLseek {
+            fd: p!(0),
+            offset: args[1] as i64,
+            whence: p!(2),
+            pos_out_ptr: p!(3),
+        },
+        syscall::FS_FSTAT => Lv2Request::FsFstat {
+            fd: p!(0),
+            stat_out_ptr: p!(1),
+        },
+        syscall::FS_STAT => Lv2Request::FsStat {
+            path_ptr: p!(0),
+            stat_out_ptr: p!(1),
+        },
         syscall::FS_WRITE => Lv2Request::FsWrite {
             fd: p!(0),
             buf_ptr: p!(1),

@@ -12,6 +12,7 @@ pub use self::rsx::{
 use std::collections::BTreeMap;
 
 use crate::dispatch::Lv2Dispatch;
+use crate::fs::FsStore;
 use crate::image::ContentStore;
 use crate::ppu_thread::{
     PpuThread, PpuThreadAttrs, PpuThreadId, PpuThreadTable, ThreadStack, ThreadStackAllocator,
@@ -131,6 +132,10 @@ pub struct Lv2Host {
     /// `sys_fs_close` decrements; feeds the SYS_FS_FD_OBJECT (0x73)
     /// query in `sys_process_get_number_of_object`.
     fs_fd_count: u32,
+    /// In-memory filesystem layer. Populated at boot from the
+    /// per-title content manifest; consumed by the `sys_fs_*`
+    /// dispatch handlers in `host/fs.rs`.
+    fs_store: FsStore,
     /// Per-thread count of distinct lwmutexes the thread currently
     /// holds. Recursive re-acquires of the same lwmutex do not bump
     /// the count; only first-acquire (FREE -> me) and kernel-side
@@ -182,8 +187,23 @@ impl Lv2Host {
             event_port_count: 0,
             lwcond_count: 0,
             fs_fd_count: 0,
+            fs_store: FsStore::new(),
             lwmutex_holds: BTreeMap::new(),
         }
+    }
+
+    /// Read-only view of the in-memory FS layer. Used by `sys_fs_*`
+    /// handlers and for diagnostic readouts; mutation goes through
+    /// [`Self::fs_store_mut`].
+    pub fn fs_store(&self) -> &FsStore {
+        &self.fs_store
+    }
+
+    /// Mutable view of the in-memory FS layer. Used by the manifest
+    /// loader at boot to register blobs, and by the `sys_fs_*`
+    /// handlers to allocate / advance / release fds.
+    pub fn fs_store_mut(&mut self) -> &mut FsStore {
+        &mut self.fs_store
     }
 
     /// Number of distinct lwmutexes `tid` currently holds. `0` for
@@ -526,6 +546,9 @@ impl Lv2Host {
                 hasher.write(&count.to_le_bytes());
             }
         }
+        if !self.fs_store.is_empty() {
+            hasher.write(&self.fs_store.state_hash().to_le_bytes());
+        }
         hasher.finish()
     }
 
@@ -596,20 +619,26 @@ impl Lv2Host {
                 fd_out_ptr,
                 mode,
             } => self.dispatch_fs_open(path_ptr, flags, fd_out_ptr, mode, requester, rt),
-            Lv2Request::FsClose { .. } => {
-                // Real PS3 keeps the fd live in the kernel's
-                // fs-object count even after `sys_fs_close`; the
-                // sys_process test's matrix shows fs_fd=1 at lines
-                // 17 / 18 despite an intervening `fclose(file)`. We
-                // mirror that by leaving `fs_fd_count` unchanged
-                // here. A future slice that wires real fd lifecycle
-                // (with deferred reclamation or proper LV2-side
-                // tracking) can revisit this.
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: vec![],
-                }
+            Lv2Request::FsClose { fd } => self.dispatch_fs_close(fd),
+            Lv2Request::FsRead {
+                fd,
+                buf_ptr,
+                nbytes,
+                nread_out_ptr,
+            } => self.dispatch_fs_read(fd, buf_ptr, nbytes, nread_out_ptr, requester, rt),
+            Lv2Request::FsLseek {
+                fd,
+                offset,
+                whence,
+                pos_out_ptr,
+            } => self.dispatch_fs_lseek(fd, offset, whence, pos_out_ptr, requester, rt),
+            Lv2Request::FsFstat { fd, stat_out_ptr } => {
+                self.dispatch_fs_fstat(fd, stat_out_ptr, requester, rt)
             }
+            Lv2Request::FsStat {
+                path_ptr,
+                stat_out_ptr,
+            } => self.dispatch_fs_stat(path_ptr, stat_out_ptr, requester, rt),
             Lv2Request::FsWrite {
                 buf_ptr,
                 size,

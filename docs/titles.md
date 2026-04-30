@@ -35,15 +35,26 @@ Column definitions:
 
 | Serial | Title | Year | Engine | Format | Checkpoint | Steps | Insns | Cross-runner |
 |--------|-------|------|--------|--------|------------|------:|------:|--------------|
-| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | MaxSteps (4B) | 15,625,000 | 4B | refresh queued |
+| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | FAULT (NULL bcctr from MODE_AUTO_LOAD) | 85,291 | ~22M | refresh queued |
 | NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,352,589 | ~3.7B | refresh queued |
 | BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | FirstRsxWrite | 45,697 | ~12M | refresh queued |
 
+flOw advanced from an earlier frontier (MaxSteps at 15,625,000,
+which had been a scheduler-starvation symptom rather than progress)
+through two structural fixes: the critical-section sticky-streak
+bound and the in-memory FS layer with EBOOT-adjacent USRDIR
+auto-discovery. The residual fault at step 85,291 is a NULL
+function-pointer dispatch from `MODE_AUTO_LOAD`, driven by the
+unclaimed `cellSaveDataAutoLoad` HLE NID returning CELL_OK with no
+result data; the named successor driver is the save-data autoload
+subsystem.
+
+SSHD's anchor at 14,352,589 and WipEout HD's at 45,697 are bit-
+identical across the current correctness surface. WipEout's earlier
+MaxSteps anchor is gone -- sync-primitive correctness lets its boot
+proceed past the lwmutex / event_flag contention loops it
+previously spun in.
+
 Cross-runner refresh is gated on each title reaching a stopping
-point RPCS3 also reaches. flOw exits on the budget cap; SSHD and
-WipEout HD now both reach the FirstRsxWrite checkpoint (the WipEout
-shift from the earlier MaxSteps anchor is driven by the
-sync-primitive correctness work that lets its boot proceed past
-the lwmutex / event_flag contention loops it previously spun in).
-Per-title compare reports live at
+point RPCS3 also reaches. Per-title compare reports live at
 `tests/fixtures/<serial>_cross_runner/compare_report.txt`.
