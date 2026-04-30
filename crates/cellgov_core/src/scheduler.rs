@@ -69,9 +69,21 @@ pub struct RoundRobinScheduler {
     /// Set when the previous step yielded on `Syscall` without waking
     /// any other unit; cleared otherwise.
     sticky: bool,
+    /// Consecutive sticky yields. Forces a rotation when it crosses
+    /// the starvation guard threshold.
+    sticky_streak: u32,
 }
 
 impl RoundRobinScheduler {
+    /// Sticky-streak ceiling. Forces a rotation after this many
+    /// consecutive sticky-eligible yields so a single unit holding
+    /// a lwmutex while looping on non-waking syscalls cannot starve
+    /// peers indefinitely. The minimum value that keeps the
+    /// ps3autotests printf-interleave protection intact is 8; the
+    /// value here gives an 8x margin for longer printf-pattern
+    /// critical sections.
+    const STICKY_STREAK_LIMIT: u32 = 64;
+
     /// Construct a fresh scheduler.
     #[inline]
     pub fn new() -> Self {
@@ -160,7 +172,14 @@ impl Scheduler for RoundRobinScheduler {
                     | YieldReason::Fault
             );
         let non_waking_syscall = matches!(yield_reason, YieldReason::Syscall) && !woke_others;
-        self.sticky = in_critical || non_waking_syscall;
+        let want_sticky = in_critical || non_waking_syscall;
+        if want_sticky {
+            self.sticky_streak = self.sticky_streak.saturating_add(1);
+            self.sticky = self.sticky_streak < Self::STICKY_STREAK_LIMIT;
+        } else {
+            self.sticky_streak = 0;
+            self.sticky = false;
+        }
     }
 }
 
@@ -325,6 +344,38 @@ mod tests {
         let mut s = RoundRobinScheduler::new();
         assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
         s.notify_yielded(UnitId::new(0), YieldReason::BudgetExhausted, false, false);
+        assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
+    }
+
+    #[test]
+    fn sticky_streak_rotates_after_limit() {
+        let r = registry_with(&[UnitStatus::Runnable, UnitStatus::Runnable]);
+        let mut s = RoundRobinScheduler::new();
+        assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+        // Yield-and-pick `LIMIT - 1` times: still sticky.
+        for _ in 0..(RoundRobinScheduler::STICKY_STREAK_LIMIT - 1) {
+            s.notify_yielded(UnitId::new(0), YieldReason::Syscall, false, true);
+            assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+        }
+        // Streak hits the limit on this yield -> next pick rotates.
+        s.notify_yielded(UnitId::new(0), YieldReason::Syscall, false, true);
+        assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
+    }
+
+    #[test]
+    fn sticky_streak_resets_on_non_sticky_yield() {
+        let r = registry_with(&[UnitStatus::Runnable, UnitStatus::Runnable]);
+        let mut s = RoundRobinScheduler::new();
+        assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+        // Build a partial sticky streak.
+        for _ in 0..(RoundRobinScheduler::STICKY_STREAK_LIMIT - 1) {
+            s.notify_yielded(UnitId::new(0), YieldReason::Syscall, false, true);
+        }
+        // A wake-causing yield resets the streak: full sticky budget
+        // returns afterwards.
+        s.notify_yielded(UnitId::new(0), YieldReason::Syscall, true, false);
+        assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
+        s.notify_yielded(UnitId::new(1), YieldReason::Syscall, false, true);
         assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
     }
 
