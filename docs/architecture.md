@@ -192,10 +192,12 @@ them:
   SPU-reserved -- it keeps the address space honest without
   requiring real semantics, and surfaces any silent zero-reads in
   `run-game`'s end-of-boot summary.
-- **`ReservedStrict`**: reads return `None`, writes fault with
-  `MemError::ReservedWrite`. Opted into via `--strict-reserved` on
-  the CLI, used by tests asserting no code paths touch the region
-  yet.
+- **`ReservedStrict`**: reads via the legacy `GuestMemory::read`
+  return `None`; reads via `GuestMemory::read_checked` (the path the
+  HLE layer uses) fault with `MemError::ReservedStrictRead { addr,
+  region }`. Writes fault with `MemError::ReservedWrite`. Opted
+  into via `--strict-reserved` on the CLI, used by tests asserting
+  no code paths touch the region yet.
 
 Out-of-region accesses (addresses that fall in no region) surface as
 `MemError::Unmapped(FaultContext)`, where `FaultContext` names the

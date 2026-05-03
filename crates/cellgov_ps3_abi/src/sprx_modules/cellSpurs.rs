@@ -298,9 +298,11 @@ pub mod policy_module_error {
 // Compile-time tripwires for cross-field offset relationships. A
 // rename or renumber that breaks one of these fails the build before
 // any silent data corruption (writing the wrong field, indexing past
-// a region limit) can ship.
-#[allow(dead_code)]
-const _COMPILE_TIME_OFFSETS: () = {
+// a region limit) can ship. The literal-underscore name makes the
+// const anonymous and exempt from the `dead_code` lint without an
+// attribute -- rustc still evaluates every assert below at compile
+// time.
+const _: () = {
     // CellSpurs region bounds.
     assert!(layout::OFF_PPU0 < layout::SIZE_V1);
     assert!(layout::OFF_PPU0 < layout::SIZE_V2);

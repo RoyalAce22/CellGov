@@ -231,163 +231,184 @@ impl CommitPipeline {
 
         // Pre-validation pass: reject the whole batch on the first
         // failure. Subsystem state mutates only in the apply pass below.
-        for (idx, effect) in effects.iter().enumerate() {
-            match effect {
-                Effect::SharedWriteIntent { range, bytes, .. } => {
-                    if bytes.len() as u64 != range.length() {
-                        return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
-                    }
-                    let start = range.start().raw();
-                    let length = range.length();
-                    let _end = start
-                        .checked_add(length)
-                        .ok_or(CommitError::OutOfRange { effect_index: idx })?;
-                    if ctx.memory.containing_region(start, length).is_none() {
-                        return Err(CommitError::OutOfRange { effect_index: idx });
-                    }
-                    staging.stage(StagedWrite {
-                        range: *range,
-                        bytes: bytes.bytes().to_vec(),
-                    });
-                    writes += 1;
-                }
-                Effect::MailboxSend { mailbox, .. } => {
-                    if ctx.mailboxes.get(*mailbox).is_none() {
-                        return Err(CommitError::UnknownMailbox {
-                            effect_index: idx,
-                            mailbox: *mailbox,
+        // The IIFE wrapping lets a validation failure return from the
+        // closure rather than the outer function so we can `staging.clear()`
+        // before propagating -- StagingMemory's Drop debug-asserts that the
+        // buffer is empty at release time, and an early-return path that
+        // skipped the clear would trip it.
+        let pre_validate: Result<(), CommitError> = (|| {
+            for (idx, effect) in effects.iter().enumerate() {
+                match effect {
+                    Effect::SharedWriteIntent { range, bytes, .. } => {
+                        if bytes.len() as u64 != range.length() {
+                            return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
+                        }
+                        let start = range.start().raw();
+                        let length = range.length();
+                        let _end = start
+                            .checked_add(length)
+                            .ok_or(CommitError::OutOfRange { effect_index: idx })?;
+                        if ctx.memory.containing_region(start, length).is_none() {
+                            return Err(CommitError::OutOfRange { effect_index: idx });
+                        }
+                        staging.stage(StagedWrite {
+                            range: *range,
+                            bytes: bytes.bytes().to_vec(),
                         });
+                        writes += 1;
                     }
-                    sends += 1;
-                }
-                Effect::MailboxReceiveAttempt {
-                    mailbox, source, ..
-                } => {
-                    if ctx.mailboxes.get(*mailbox).is_none() {
-                        return Err(CommitError::UnknownMailbox {
-                            effect_index: idx,
-                            mailbox: *mailbox,
-                        });
+                    Effect::MailboxSend { mailbox, .. } => {
+                        if ctx.mailboxes.get(*mailbox).is_none() {
+                            return Err(CommitError::UnknownMailbox {
+                                effect_index: idx,
+                                mailbox: *mailbox,
+                            });
+                        }
+                        sends += 1;
                     }
-                    if ctx.units.get(*source).is_none() {
-                        return Err(CommitError::UnknownSourceUnit {
-                            effect_index: idx,
-                            source: *source,
-                        });
+                    Effect::MailboxReceiveAttempt {
+                        mailbox, source, ..
+                    } => {
+                        if ctx.mailboxes.get(*mailbox).is_none() {
+                            return Err(CommitError::UnknownMailbox {
+                                effect_index: idx,
+                                mailbox: *mailbox,
+                            });
+                        }
+                        if ctx.units.get(*source).is_none() {
+                            return Err(CommitError::UnknownSourceUnit {
+                                effect_index: idx,
+                                source: *source,
+                            });
+                        }
                     }
-                }
-                Effect::SignalUpdate { signal, .. } => {
-                    if ctx.signals.get(*signal).is_none() {
-                        return Err(CommitError::UnknownSignal {
-                            effect_index: idx,
-                            signal: *signal,
-                        });
+                    Effect::SignalUpdate { signal, .. } => {
+                        if ctx.signals.get(*signal).is_none() {
+                            return Err(CommitError::UnknownSignal {
+                                effect_index: idx,
+                                signal: *signal,
+                            });
+                        }
+                        signal_updates += 1;
                     }
-                    signal_updates += 1;
-                }
-                Effect::DmaEnqueue { request, .. } => {
-                    // Pre-validate only the destination; source ranges
-                    // may legitimately reference SPU local stores or
-                    // staging buffers outside the region map.
-                    let dst = request.destination();
-                    let start = dst.start().raw();
-                    let length = dst.length();
-                    if start.checked_add(length).is_none()
-                        || ctx.memory.containing_region(start, length).is_none()
-                    {
-                        return Err(CommitError::DmaDestinationOutOfRange { effect_index: idx });
+                    Effect::DmaEnqueue { request, .. } => {
+                        // Pre-validate only the destination; source ranges
+                        // may legitimately reference SPU local stores or
+                        // staging buffers outside the region map.
+                        let dst = request.destination();
+                        let start = dst.start().raw();
+                        let length = dst.length();
+                        if start.checked_add(length).is_none()
+                            || ctx.memory.containing_region(start, length).is_none()
+                        {
+                            return Err(CommitError::DmaDestinationOutOfRange {
+                                effect_index: idx,
+                            });
+                        }
+                        dma_count += 1;
                     }
-                    dma_count += 1;
-                }
-                Effect::WakeUnit { target, .. } => {
-                    if ctx.units.get(*target).is_none() {
-                        return Err(CommitError::UnknownWakeTarget {
-                            effect_index: idx,
-                            target: *target,
-                        });
+                    Effect::WakeUnit { target, .. } => {
+                        if ctx.units.get(*target).is_none() {
+                            return Err(CommitError::UnknownWakeTarget {
+                                effect_index: idx,
+                                target: *target,
+                            });
+                        }
+                        wakes += 1;
                     }
-                    wakes += 1;
-                }
-                Effect::WaitOnEvent { source, .. } => {
-                    if ctx.units.get(*source).is_none() {
-                        return Err(CommitError::UnknownSourceUnit {
-                            effect_index: idx,
-                            source: *source,
-                        });
+                    Effect::WaitOnEvent { source, .. } => {
+                        if ctx.units.get(*source).is_none() {
+                            return Err(CommitError::UnknownSourceUnit {
+                                effect_index: idx,
+                                source: *source,
+                            });
+                        }
+                        waits += 1;
                     }
-                    waits += 1;
-                }
-                Effect::ConditionalStore {
-                    range,
-                    bytes,
-                    source,
-                    ..
-                } => {
-                    if bytes.len() as u64 != range.length() {
-                        return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
-                    }
-                    let start = range.start().raw();
-                    let length = range.length();
-                    let _end = start
-                        .checked_add(length)
-                        .ok_or(CommitError::OutOfRange { effect_index: idx })?;
-                    if ctx.memory.containing_region(start, length).is_none() {
-                        return Err(CommitError::OutOfRange { effect_index: idx });
-                    }
-                    if ctx.units.get(*source).is_none() {
-                        return Err(CommitError::UnknownSourceUnit {
-                            effect_index: idx,
-                            source: *source,
-                        });
-                    }
-                    staging.stage(StagedWrite {
-                        range: *range,
-                        bytes: bytes.bytes().to_vec(),
-                    });
-                    conditional_stores += 1;
-                }
-                Effect::ReservationAcquire { source, .. } => {
-                    if ctx.units.get(*source).is_none() {
-                        return Err(CommitError::UnknownSourceUnit {
-                            effect_index: idx,
-                            source: *source,
-                        });
-                    }
-                }
-                Effect::RsxLabelWrite { offset, value } => {
-                    // Offsets 0..0x1000 are the semaphore region; 0x1000+
-                    // is notify/report space under sys_rsx and is a guest
-                    // bug. Surface at the commit boundary rather than as
-                    // silent notify corruption.
-                    debug_assert!(
-                        *offset < 0x1000,
-                        "RsxLabelWrite offset {:#x} past semaphore region (guest bug? \
-                         0..0x1000 is semaphore, 0x1000+ is notify/report)",
-                        *offset
-                    );
-                    let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
-                    let Some(_end) = start.checked_add(4) else {
-                        return Err(CommitError::OutOfRange { effect_index: idx });
-                    };
-                    if ctx.memory.containing_region(start, 4).is_none() {
-                        return Err(CommitError::OutOfRange { effect_index: idx });
-                    }
-                    let Ok(range) =
-                        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(start), 4)
-                            .ok_or(CommitError::OutOfRange { effect_index: idx })
-                    else {
-                        return Err(CommitError::OutOfRange { effect_index: idx });
-                    };
-                    staging.stage(StagedWrite {
+                    Effect::ConditionalStore {
                         range,
-                        bytes: value.to_be_bytes().to_vec(),
-                    });
-                    writes += 1;
-                }
-                _ => {
-                    deferred += 1;
+                        bytes,
+                        source,
+                        ..
+                    } => {
+                        if bytes.len() as u64 != range.length() {
+                            return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
+                        }
+                        let start = range.start().raw();
+                        let length = range.length();
+                        let _end = start
+                            .checked_add(length)
+                            .ok_or(CommitError::OutOfRange { effect_index: idx })?;
+                        if ctx.memory.containing_region(start, length).is_none() {
+                            return Err(CommitError::OutOfRange { effect_index: idx });
+                        }
+                        if ctx.units.get(*source).is_none() {
+                            return Err(CommitError::UnknownSourceUnit {
+                                effect_index: idx,
+                                source: *source,
+                            });
+                        }
+                        staging.stage(StagedWrite {
+                            range: *range,
+                            bytes: bytes.bytes().to_vec(),
+                        });
+                        conditional_stores += 1;
+                    }
+                    Effect::ReservationAcquire { source, .. } => {
+                        if ctx.units.get(*source).is_none() {
+                            return Err(CommitError::UnknownSourceUnit {
+                                effect_index: idx,
+                                source: *source,
+                            });
+                        }
+                    }
+                    Effect::RsxLabelWrite { offset, value } => {
+                        // Offsets 0..0x1000 are the semaphore region; 0x1000+
+                        // is notify/report space under sys_rsx and is a guest
+                        // bug. Surface at the commit boundary rather than as
+                        // silent notify corruption.
+                        debug_assert!(
+                            *offset < 0x1000,
+                            "RsxLabelWrite offset {:#x} past semaphore region (guest bug? \
+                         0..0x1000 is semaphore, 0x1000+ is notify/report)",
+                            *offset
+                        );
+                        // rsx_label_base: u32 and offset: u32 widened to u64
+                        // before adding, so `start <= 2 * u32::MAX < u64::MAX`
+                        // and the wrap is structurally unreachable for any
+                        // valid input. `wrapping_add` documents the
+                        // arithmetic; `checked_add` on the +4 below remains
+                        // because `start + 4` could in principle reach
+                        // `u64::MAX` if the inputs were ever extended to u64.
+                        let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
+                        let Some(_end) = start.checked_add(4) else {
+                            return Err(CommitError::OutOfRange { effect_index: idx });
+                        };
+                        if ctx.memory.containing_region(start, 4).is_none() {
+                            return Err(CommitError::OutOfRange { effect_index: idx });
+                        }
+                        let Ok(range) =
+                            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(start), 4)
+                                .ok_or(CommitError::OutOfRange { effect_index: idx })
+                        else {
+                            return Err(CommitError::OutOfRange { effect_index: idx });
+                        };
+                        staging.stage(StagedWrite {
+                            range,
+                            bytes: value.to_be_bytes().to_vec(),
+                        });
+                        writes += 1;
+                    }
+                    _ => {
+                        deferred += 1;
+                    }
                 }
             }
+            Ok(())
+        })();
+        if let Err(e) = pre_validate {
+            staging.clear();
+            return Err(e);
         }
 
         // Apply pass. `drain_into` is the only operation below that

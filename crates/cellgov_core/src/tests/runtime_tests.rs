@@ -2870,11 +2870,30 @@ fn sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
     // guest addresses, so with disjoint concurrent PPU writes,
     // final memory is independent of when sys_rsx fires.
     fn run_with_dispatch_at(position: usize) -> u64 {
-        let mut rt = Runtime::new(
-            cellgov_mem::GuestMemory::new(0x4000_0000),
-            Budget::new(1),
-            100,
-        );
+        // Three disjoint regions covering only addresses this test
+        // touches: low memory for the heap and PPU writers, plus the
+        // two sys_rsx sub-regions that receive init effects. content_hash
+        // walks every region's bytes, so cutting the unused 0x3000_0000
+        // dma_control window and the gaps between rsx sub-regions drops
+        // the per-run zero-init from 771 MB to ~2 MB.
+        //
+        // Writes per region:
+        //   low_main         : context_pp at 0x10000 (4B); PPU writers
+        //                      at 0x20000 / 0x20100 (4B each); heap
+        //                      allocations from 0x10_0000 through
+        //                      0x10_1067 (init_body + sys_rsx scratch).
+        //   rsx_driver_info  : driver_info_init effect, driver_info::SIZE
+        //                      = 0x12F8 bytes at 0x3010_0000.
+        //   rsx_reports      : reports_init effect, reports::SIZE
+        //                      = 0x9400 bytes at 0x3020_0000.
+        use cellgov_mem::{GuestMemory, PageSize, Region};
+        let mem = GuestMemory::from_regions(vec![
+            Region::new(0, 0x20_0000, "low_main", PageSize::Page64K),
+            Region::new(0x3010_0000, 0x2000, "rsx_driver_info", PageSize::Page64K),
+            Region::new(0x3020_0000, 0x1_0000, "rsx_reports", PageSize::Page64K),
+        ])
+        .expect("regions are disjoint by construction");
+        let mut rt = Runtime::new(mem, Budget::new(1), 100);
         rt.set_hle_heap_base(0x10_0000);
         rt.set_gcm_rsx_checkpoint(false);
 
