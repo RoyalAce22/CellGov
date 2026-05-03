@@ -359,6 +359,19 @@ pub(crate) fn init_body(ctx: &mut dyn HleContext, args: &[u64; 9], state: &mut G
     // is the sole source of non-zero label values; a pre-fill would
     // mask divergences.
 
+    // Sanity bound on the per-call heap span. Today's allocations
+    // total 16 + 16 + 16 (12 padded) + 4096 = ~4144 bytes; 8 KiB
+    // gives 2x headroom. A breach means a new allocation crept in
+    // without anyone updating the test's region sizing (the
+    // sys_rsx_dispatch_commutes test sizes its low_main region to
+    // fit init_body's heap span).
+    let heap_high_water = label_addr.wrapping_add(4096);
+    debug_assert!(
+        heap_high_water.wrapping_sub(cb_base) <= 0x2000,
+        "cellGcmInitBody heap span {} bytes exceeds 8 KiB sanity bound",
+        heap_high_water.wrapping_sub(cb_base)
+    );
+
     ctx.set_return(0);
 }
 

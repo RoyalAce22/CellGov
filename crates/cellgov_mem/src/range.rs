@@ -35,10 +35,20 @@ impl ByteRange {
         self.length
     }
 
+    /// Exclusive end as `u64`. The `new` precondition guarantees the
+    /// addition does not overflow; `wrapping_add` keeps a future bug
+    /// here a wrong number rather than UB in `const` contexts, and the
+    /// `debug_assert` keeps tests honest.
+    #[inline]
+    const fn end_raw(self) -> u64 {
+        debug_assert!(self.start.raw().checked_add(self.length).is_some());
+        self.start.raw().wrapping_add(self.length)
+    }
+
     /// Exclusive upper bound. Infallible because `new` validated non-overflow.
     #[inline]
     pub const fn end(self) -> GuestAddr {
-        GuestAddr::new(self.start.raw() + self.length)
+        GuestAddr::new(self.end_raw())
     }
 
     /// Whether the range is zero bytes long.
@@ -54,7 +64,7 @@ impl ByteRange {
             return false;
         }
         let raw = addr.raw();
-        raw >= self.start.raw() && raw < self.start.raw() + self.length
+        raw >= self.start.raw() && raw < self.end_raw()
     }
 
     /// Whether this range and `other` share at least one byte.
@@ -66,9 +76,7 @@ impl ByteRange {
         if self.length == 0 || other.length == 0 {
             return false;
         }
-        let self_end = self.start.raw() + self.length;
-        let other_end = other.start.raw() + other.length;
-        self.start.raw() < other_end && other.start.raw() < self_end
+        self.start.raw() < other.end_raw() && other.start.raw() < self.end_raw()
     }
 }
 
@@ -106,6 +114,24 @@ mod tests {
     fn construction_at_max_zero_length_is_ok() {
         let res = ByteRange::new(GuestAddr::new(u64::MAX), 0);
         assert!(res.is_some());
+    }
+
+    #[test]
+    fn end_at_u64_max_zero_length() {
+        let br = r(u64::MAX, 0);
+        assert_eq!(br.end(), GuestAddr::new(u64::MAX));
+    }
+
+    #[test]
+    fn overlap_near_u64_max() {
+        // a = [MAX-0x100, MAX-0x80), b = [MAX-0x80, MAX): adjacent.
+        let a = ByteRange::new(GuestAddr::new(u64::MAX - 0x100), 0x80).unwrap();
+        let b = ByteRange::new(GuestAddr::new(u64::MAX - 0x80), 0x80).unwrap();
+        assert!(!a.overlaps(b));
+        // a = [MAX-0x100, MAX-0x80), c = [MAX-0xC0, MAX-0x40): c starts
+        // inside a, so they share the bytes [MAX-0xC0, MAX-0x80).
+        let c = ByteRange::new(GuestAddr::new(u64::MAX - 0xC0), 0x80).unwrap();
+        assert!(a.overlaps(c));
     }
 
     #[test]
