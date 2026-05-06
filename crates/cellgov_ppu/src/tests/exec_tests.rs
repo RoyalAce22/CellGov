@@ -1,8 +1,4 @@
-//! Cross-module exec tests: equivalence between predecoded shadow
-//! variants (quickenings and super-pairs) and the ISA-native sequences
-//! they replace, plus the lone Sc dispatch that lives in exec.rs
-//! itself. Per-module unit tests live next to their implementation in
-//! `exec/<module>.rs::tests`.
+//! Equivalence between predecoded shadow variants and their ISA-native sequences.
 
 use super::*;
 use crate::exec::test_support::{exec_no_mem, exec_with_mem, uid};
@@ -219,7 +215,6 @@ fn lwz_cmpwi_matches_separate_execution() {
         &mut s1,
     );
 
-    // Execute fused LwzCmpwi
     let mut s2 = PpuState::new();
     s2.gpr[1] = 0x1000;
     let mut effects2 = Vec::new();
@@ -379,7 +374,6 @@ fn lwz_mtlr_matches_separate_execution() {
 
 #[test]
 fn cmpwi_bc_taken_matches_separate() {
-    // Equivalent sequence: cmpwi cr0, r3, 10 ; beq cr0, +16.
     let mut s1 = PpuState::new();
     s1.pc = 0x1000;
     s1.gpr[3] = 10;
@@ -403,7 +397,7 @@ fn cmpwi_bc_taken_matches_separate() {
         &mut s1,
     );
 
-    // Super sits at the cmpwi slot; bc offset is relative to super_pc + 4.
+    // Bc offset is relative to super_pc + 4, not super_pc.
     let mut s2 = PpuState::new();
     s2.pc = 0x1000;
     s2.gpr[3] = 10;
@@ -428,7 +422,6 @@ fn cmpwi_bc_taken_matches_separate() {
 
 #[test]
 fn cmpw_bc_taken_matches_separate() {
-    // Equivalent sequence: cmpw cr0, r3, r4 ; beq cr0, +16.
     let mut s1 = PpuState::new();
     s1.pc = 0x1000;
     s1.gpr[3] = 42;
@@ -478,12 +471,8 @@ fn cmpw_bc_taken_matches_separate() {
 
 #[test]
 fn ld_stitches_eight_byte_stbs_in_store_buffer() {
-    // Regression for PSL1GHT printf bug: _Litob writes the 8 ASCII
-    // hex digits to a stack buffer with 8 individual `stb`s, then
-    // `bl memcpy` reads them back with `ld`. A `forward()` that
-    // requires single-entry full coverage misses the load and falls
-    // through to pre-block memory (zeros) -- corrupting every printf
-    // that produces an 8-digit integer.
+    // Forward across multiple buffered entries -- single-entry-coverage
+    // forwarding misses the load and falls through to pre-block memory.
     use crate::store_buffer::StoreBuffer;
     let mut s = PpuState::new();
     s.gpr[1] = 0x1000;
@@ -529,9 +518,8 @@ fn ld_stitches_eight_byte_stbs_in_store_buffer() {
 
 #[test]
 fn ld_overlays_partial_store_onto_pre_block_memory() {
-    // A buffered store covers bytes [4, 8) of an 8-byte load; the
-    // other 4 bytes come from committed memory. Stitching must mix
-    // the two sources, not pick one.
+    // Partial-coverage forward must mix buffered bytes with committed
+    // memory, not pick one source.
     use crate::store_buffer::StoreBuffer;
     let mut s = PpuState::new();
     s.gpr[1] = 0x1000;

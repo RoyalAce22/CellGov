@@ -1,9 +1,8 @@
 //! Return shape of `ExecutionUnit::run_until_yield`.
 //!
-//! Effects are collected separately via the `&mut Vec<Effect>`
-//! parameter and are not carried on this struct. A step yielding
-//! [`crate::YieldReason::Fault`] has all of its effects discarded by
-//! the commit pipeline; this type only carries the data.
+//! Effects flow through the `&mut Vec<Effect>` parameter; a
+//! [`crate::YieldReason::Fault`] step has its effects discarded by the
+//! commit pipeline.
 
 use crate::yield_reason::YieldReason;
 use cellgov_effects::FaultKind;
@@ -11,73 +10,49 @@ use cellgov_time::InstructionCost;
 
 /// Per-step local diagnostics surfaced by an execution unit.
 ///
-/// All fields are optional: synthetic and test-only step results may
-/// omit them, and arch units populate what they can. Consumers must
-/// tolerate `None` on every field -- a synthetic fault step that
-/// omits `fault_regs`, or a syscall step from a fake unit that omits
-/// `lr`, is legal and renders as `<unknown>` in CLI diagnostics.
+/// Every field is optional; consumers must tolerate `None` and render
+/// `<unknown>` rather than fabricating a value.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct LocalDiagnostics {
-    /// PC at the start of the step. `None` only from synthetic/test
-    /// step results.
+    /// Program counter at yield.
     pub pc: Option<u64>,
-    /// Caller return address at yield time. Populated by arch units
-    /// on `YieldReason::Syscall` yields so HLE / LV2 dispatch can
-    /// attribute the call to a specific guest call site without a
-    /// post-hoc downcast through the registry. `None` on all other
-    /// yield reasons and from synthetic / test step results.
+    /// Caller return address at yield. Populated on
+    /// `YieldReason::Syscall` so HLE / LV2 dispatch can attribute the
+    /// call site without a downcast through the registry.
     pub lr: Option<u64>,
-    /// LEV field of the `sc` instruction (PPC64 Book III §2.3.1).
-    /// LEV=0 is the standard kernel-syscall form; LEV=1 is the
-    /// hypervisor hcall form (CBE Handbook §11.1); LEV>1 is reserved.
-    /// Populated by arch units on `YieldReason::Syscall`. The
-    /// runtime classifier uses this to reject hypercalls before
-    /// they reach the LV2 dispatch path. `None` on non-syscall
-    /// yields and from synthetic / test step results.
+    /// LEV field of the `sc` instruction (PPC64 Book III 2.3.1).
+    /// LEV=0 is a kernel syscall, LEV=1 a hypercall (CBE Handbook
+    /// 11.1), LEV>1 reserved. Populated on `YieldReason::Syscall`;
+    /// the runtime classifier rejects LEV>=1 before LV2 dispatch.
     pub syscall_lev: Option<u8>,
-    /// Effective address that caused a memory fault, if applicable.
+    /// Effective address of the faulting access.
     pub faulting_ea: Option<u64>,
-    /// Register snapshot captured at fault time. Optional even on
-    /// fault steps: synthetic units that fault before populating a
-    /// register file emit `None` here, and CLI fault formatters
-    /// fall through to the no-registers path. Real arch units that
-    /// support the dump (PPU, SPU) always populate it on fault.
+    /// Register snapshot at fault time. PPU and SPU units populate it
+    /// on every fault; synthetic units may leave it `None`.
     pub fault_regs: Option<FaultRegisterDump>,
 }
 
-/// Arch-neutral register snapshot captured at fault time for the CLI
-/// to format without knowing PPU vs SPU specifics.
+/// Arch-neutral register snapshot at fault time.
 ///
-/// Field set matches the registers folded into `PpuStateHash`'s
-/// FNV-1a fingerprint (GPR + LR + CTR + XER + CR), so a CLI fault
-/// formatter and a divergence trace agree on the same set of state
-/// at the same step. SPU dumps populate `xer = 0` -- the SPU has no
-/// XER analogue, and an arch-neutral struct that drops XER on PPU
-/// dumps would lose state the divergence trace already hashes.
+/// The field set matches `PpuStateHash`'s FNV-1a fingerprint
+/// (GPR + LR + CTR + XER + CR) so CLI fault formatting and divergence
+/// traces hash the same state. SPU dumps populate `xer = 0`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FaultRegisterDump {
-    /// GPR[0..31].
+    /// General-purpose registers r0..r31.
     pub gprs: [u64; 32],
-    /// Link register (LR on PPC64).
+    /// Link register.
     pub lr: u64,
-    /// Count register (CTR on PPC64).
+    /// Count register.
     pub ctr: u64,
-    /// Fixed-Point Exception Register. PowerPC carries XER's
-    /// SO/OV/CA bits across instruction boundaries; including it
-    /// matches the field set hashed in `PpuStateHash` and lets the
-    /// CLI format the same fingerprint a divergence trace would
-    /// produce. SPU dumps populate this with zero.
+    /// PowerPC XER (SO/OV/CA carry across instructions). Zero on SPU.
     pub xer: u64,
-    /// Condition register (CR on PPC64, packed 32-bit).
+    /// Condition register (8 4-bit fields).
     pub cr: u32,
 }
 
 impl FaultRegisterDump {
-    /// All-zero dump. For test fixtures only -- a real fault step's
-    /// dump should be populated by the unit from its committed
-    /// register file. `#[cfg(test)]` keeps this out of the public
-    /// API so production code cannot accidentally construct a dump
-    /// indistinguishable from a unit that forgot to populate one.
+    /// All-zero register dump for tests.
     #[cfg(test)]
     pub const fn zeroed() -> Self {
         Self {
@@ -91,7 +66,7 @@ impl FaultRegisterDump {
 }
 
 impl LocalDiagnostics {
-    /// Empty diagnostics; equivalent to [`LocalDiagnostics::default`].
+    /// Diagnostics with every field unset.
     #[inline]
     pub const fn empty() -> Self {
         Self {
@@ -103,7 +78,7 @@ impl LocalDiagnostics {
         }
     }
 
-    /// Diagnostics with only `pc` set.
+    /// Diagnostics carrying only the program counter.
     #[inline]
     pub const fn with_pc(pc: u64) -> Self {
         Self {
@@ -115,7 +90,7 @@ impl LocalDiagnostics {
         }
     }
 
-    /// Diagnostics with `pc` and `faulting_ea` set.
+    /// Diagnostics carrying program counter and faulting effective address.
     #[inline]
     pub const fn with_pc_ea(pc: u64, ea: u64) -> Self {
         Self {
@@ -127,9 +102,7 @@ impl LocalDiagnostics {
         }
     }
 
-    /// Diagnostics with `pc` and `lr` set; for arch units returning a
-    /// syscall yield where the calling convention has the return
-    /// address staged in LR.
+    /// Diagnostics carrying program counter and link register.
     #[inline]
     pub const fn with_pc_lr(pc: u64, lr: u64) -> Self {
         Self {
@@ -141,11 +114,7 @@ impl LocalDiagnostics {
         }
     }
 
-    /// Diagnostics for a syscall step: `pc`, `lr`, and the LEV field
-    /// of the `sc` instruction. PPU and SPU units populate this on
-    /// every syscall yield so the runtime classifier can reject
-    /// hypercalls (LEV >= 1) before they reach the LV2 dispatch
-    /// path.
+    /// Diagnostics carrying program counter, link register, and syscall LEV field.
     #[inline]
     pub const fn with_pc_lr_syscall_lev(pc: u64, lr: u64, syscall_lev: u8) -> Self {
         Self {
@@ -157,10 +126,7 @@ impl LocalDiagnostics {
         }
     }
 
-    /// Diagnostics for a fault step: `pc`, `faulting_ea`, and the
-    /// register dump in one constructor. Centralising the shape
-    /// keeps fault sites from accidentally calling `with_pc_ea` and
-    /// emitting a fault-shaped diagnostic with no register dump.
+    /// Diagnostics carrying program counter, faulting EA, and register dump.
     #[inline]
     pub const fn with_fault(pc: u64, ea: u64, regs: FaultRegisterDump) -> Self {
         Self {
@@ -173,65 +139,42 @@ impl LocalDiagnostics {
     }
 }
 
-/// The value returned by a single `run_until_yield` call.
+/// Value returned by a single `run_until_yield` call.
 ///
-/// Fields are `pub` because the set is fixed and any future addition
-/// is a contract change, not a drive-by edit.
+/// # Invariants
 ///
-/// **Invariant on `fault`:** `fault` is `Some` if and only if
-/// `yield_reason == YieldReason::Fault`.
+/// - `fault.is_some()` iff `yield_reason == YieldReason::Fault`.
+/// - `syscall_args.is_some()` iff `yield_reason == YieldReason::Syscall`.
 ///
-/// **Invariant on `syscall_args`:** `syscall_args` is `Some` if and
-/// only if `yield_reason == YieldReason::Syscall`.
-///
-/// The runtime relies on both to route fault attribution and HLE /
-/// LV2 dispatch. Violations are programming errors and are checked
-/// by [`ExecutionStepResult::is_well_formed`]; the check is exposed
-/// rather than enforced at construction so callers can run it
-/// explicitly without paying for redundant checks at every emission
-/// site.
+/// Checked by [`ExecutionStepResult::is_well_formed`]; the runtime
+/// routes fault attribution and HLE / LV2 dispatch on these.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionStepResult {
-    /// Why the unit yielded.
+    /// Why the unit yielded control.
     pub yield_reason: YieldReason,
-    /// Work the unit actually retired; may be less than granted when
-    /// the unit yielded early. Bridges to [`cellgov_time::GuestTicks`]
-    /// via `From<InstructionCost>` at step 8 of the commit pipeline.
+    /// Work retired this step; bridges to [`cellgov_time::GuestTicks`]
+    /// via `From<InstructionCost>` in the commit pipeline, which
+    /// advances guest time by `consumed_cost`.
     ///
-    /// `InstructionCost::ZERO` is legal only on `YieldReason::Fault`
-    /// (the unit faulted before retiring its first instruction).
-    /// Other yield reasons with zero cost are forward-progress bugs:
-    /// the scheduler advances guest time by `consumed_cost` at step
-    /// 8, so a non-fault zero-cost yield emitted in a loop deadlocks
-    /// the schedule. The runtime can `debug_assert!` this at the
-    /// step-loop boundary; this struct does not enforce it because
-    /// the legal-cases set is small and emitter-defined.
+    /// `InstructionCost::ZERO` is legal only on `YieldReason::Fault`.
+    /// A non-fault zero-cost yield in a loop deadlocks the schedule.
     pub consumed_cost: InstructionCost,
-    /// Per-step diagnostics for trace and assertion consumers.
+    /// Per-step local diagnostics from the execution unit.
     pub local_diagnostics: LocalDiagnostics,
-    /// Fault data, present iff `yield_reason == YieldReason::Fault`.
+    /// Fault payload, present iff `yield_reason == YieldReason::Fault`.
     pub fault: Option<FaultKind>,
-    /// Raw syscall arguments, present iff
-    /// `yield_reason == YieldReason::Syscall`. Index 0 carries the
-    /// syscall number from the arch's syscall-number register
-    /// (GPR 11 on PPC64 LV2; channel value on SPU), and indices
-    /// 1..=8 carry the argument registers in arch-defined order
-    /// (GPR 3..=10 on PPC64 LV2; index 1 overlaps the conventional
-    /// PPC return register r3 -- the response goes back through the
-    /// runtime's syscall-response table, not by mutating this
-    /// array). The mapping is the responsibility of the emitting
-    /// `ExecutionUnit`; this struct is a transport only and does
-    /// not enforce a particular convention.
+    /// Raw syscall arguments. Index 0 is the syscall number from the
+    /// arch's syscall-number register (GPR 11 on PPC64 LV2; channel
+    /// value on SPU); indices 1..=8 are argument registers in
+    /// arch-defined order (GPR 3..=10 on PPC64 LV2). Responses go
+    /// through the runtime's syscall-response table, not by mutating
+    /// this array. Mapping is the emitting `ExecutionUnit`'s
+    /// responsibility.
     pub syscall_args: Option<[u64; 9]>,
 }
 
 impl ExecutionStepResult {
-    /// Whether both struct-level invariants hold:
-    /// - `fault` is `Some` iff `yield_reason == Fault`.
-    /// - `syscall_args` is `Some` iff `yield_reason == Syscall`.
-    ///
-    /// Callers should run this on every step result before processing
-    /// it; a `false` return indicates a unit bug.
+    /// Whether both struct-level invariants hold.
     #[inline]
     pub fn is_well_formed(&self) -> bool {
         let fault_ok = match (self.yield_reason, &self.fault) {
@@ -270,9 +213,6 @@ mod tests {
 
     #[test]
     fn with_pc_does_not_set_lr() {
-        // Arch units that cannot supply LR (synthetic / test) leave
-        // it None on with_pc; downstream HLE dispatch reports
-        // "<unknown>" rather than fabricating an address.
         let d = LocalDiagnostics::with_pc(0x1234);
         assert_eq!(d.pc, Some(0x1234));
         assert!(d.lr.is_none());
@@ -401,10 +341,6 @@ mod tests {
 
     #[test]
     fn clone_preserves_heavy_fields() {
-        // Pin clone-soundness on the heavy fields specifically: the
-        // 32-element GPR array and the syscall-args array. A future
-        // representation change to either would break here rather
-        // than in some end-to-end test.
         let mut args = [0u64; 9];
         args[0] = 41; // sys_ppu_thread_exit
         args[1] = 0xDEAD_BEEF;

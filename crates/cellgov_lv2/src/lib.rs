@@ -1,9 +1,4 @@
-//! LV2 host model: image registry, thread group table, sync primitives,
-//! and the dispatch function that answers PPU syscall requests.
-//!
-//! The runtime drives the host and reads guest memory on its behalf
-//! through [`Lv2Runtime`]; the host returns pure-data [`Lv2Dispatch`]
-//! packets and never calls back into the runtime.
+//! LV2 host model: image registry, thread group table, sync primitives, and syscall dispatch.
 
 pub mod dispatch;
 pub mod fs;

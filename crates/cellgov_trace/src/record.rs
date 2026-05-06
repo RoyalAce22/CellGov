@@ -1,69 +1,61 @@
 //! Structured trace record types and their binary encoding.
 //!
-//! ## Wire format
+//! # Wire format
 //!
-//! Each record is a 1-byte tag followed by a fixed-length variant payload. All
-//! multi-byte integers are little-endian. Tags, per-variant field layouts, and
-//! helper-enum discriminants (`TracedYieldReason`, `HashCheckpointKind`,
-//! `TracedEffectKind`, `TracedBlockReason`, `TracedWakeReason`) are part of the
-//! binary trace contract: do not reorder, do not change tags, do not change
-//! discriminants. New record variants append with strictly greater tags.
+//! Each record is a 1-byte tag followed by a fixed-length variant payload, all
+//! multi-byte integers little-endian. Tags, per-variant field layouts, and the
+//! discriminants of `TracedYieldReason`, `HashCheckpointKind`,
+//! `TracedEffectKind`, `TracedBlockReason`, and `TracedWakeReason` are part of
+//! the binary trace contract; new record variants append with strictly greater
+//! tags. The current set is fixed-size, so there is no length field after the
+//! tag.
 //!
-//! There is no length field after the tag because the current record set is
-//! fixed-size. The first variable-size variant will grow a length field at
-//! that variant only; fixed-size variants stay binary-compatible.
-//!
-//! ## Variants and tags
-//!
-//! - `0x00 UnitScheduled`     -- 1 + 8 + 8 + 8 + 8 = 33 bytes
-//! - `0x01 StepCompleted`     -- 1 + 8 + 1 + 8 + 8 = 26 bytes
-//! - `0x02 CommitApplied`     -- 1 + 8 + 4 + 4 + 1 + 8 = 26 bytes
-//! - `0x03 StateHashCheckpoint` -- 1 + 1 + 8 = 10 bytes
-//! - `0x04 EffectEmitted`     -- 1 + 8 + 4 + 1 = 14 bytes
-//! - `0x05 UnitBlocked`       -- 1 + 8 + 1 = 10 bytes
-//! - `0x06 UnitWoken`         -- 1 + 8 + 1 = 10 bytes
-//! - `0x07 PpuStateHash`      -- 1 + 8 + 8 + 8 = 25 bytes
-//! - `0x08 PpuStateFull`      -- 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 = 301 bytes
+//! | Tag    | Variant               | Bytes                          |
+//! |--------|-----------------------|--------------------------------|
+//! | `0x00` | `UnitScheduled`       | 1 + 8 + 8 + 8 + 8 = 33         |
+//! | `0x01` | `StepCompleted`       | 1 + 8 + 1 + 8 + 8 = 26         |
+//! | `0x02` | `CommitApplied`       | 1 + 8 + 4 + 4 + 1 + 8 = 26     |
+//! | `0x03` | `StateHashCheckpoint` | 1 + 1 + 8 = 10                 |
+//! | `0x04` | `EffectEmitted`       | 1 + 8 + 4 + 1 = 14             |
+//! | `0x05` | `UnitBlocked`         | 1 + 8 + 1 = 10                 |
+//! | `0x06` | `UnitWoken`           | 1 + 8 + 1 = 10                 |
+//! | `0x07` | `PpuStateHash`        | 1 + 8 + 8 + 8 = 25             |
+//! | `0x08` | `PpuStateFull`        | 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 = 301 |
 
 use crate::hash::StateHash;
 use crate::level::TraceLevel;
 use cellgov_event::UnitId;
 use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 
-/// Yield reasons as the trace records them.
+/// Mirror of `cellgov_exec::YieldReason` for the trace stream.
 ///
-/// Parallel enum to `cellgov_exec::YieldReason`; discriminants mirror the
-/// source so a bridge layer can map without a translation table. The trace
-/// crate cannot depend on `cellgov_exec` (DAG: effects -> exec, effects ->
-/// trace).
+/// Discriminants must match the source enum: the trace crate cannot depend on
+/// `cellgov_exec` (DAG: effects -> exec, effects -> trace), so the bridge maps
+/// by raw value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedYieldReason {
-    /// Budget consumed.
+    /// Unit consumed its full granted budget.
     BudgetExhausted = 0,
-    /// Mailbox send or receive.
+    /// Unit yielded for mailbox access.
     MailboxAccess = 1,
-    /// DMA request submitted.
+    /// Unit submitted a DMA and yielded.
     DmaSubmitted = 2,
-    /// Waiting for DMA completion.
+    /// Unit yielded waiting for DMA completion.
     DmaWait = 3,
-    /// Waiting on a sync primitive.
+    /// Unit yielded waiting on a sync primitive.
     WaitingSync = 4,
-    /// Hit a syscall boundary.
+    /// Unit yielded on a syscall.
     Syscall = 5,
-    /// Yielded at an interrupt boundary.
+    /// Unit yielded at an interrupt boundary.
     InterruptBoundary = 6,
-    /// Faulted.
+    /// Unit yielded due to a fault.
     Fault = 7,
-    /// Completed normally.
+    /// Unit reached its terminal state.
     Finished = 8,
-    /// `sc` instruction with LEV >= 1 (hypercall, CBE Handbook
-    /// §11.1). PS3 usermode never issues these; the runtime
-    /// rejects with `CELL_EINVAL` and logs an invariant break.
-    /// Distinguished from [`Self::Syscall`] in the trace stream so
-    /// a hypercall rejection cannot byte-collide with an unrelated
-    /// LV2 handler returning `CELL_EINVAL` -- the host's invariant
-    /// break log carries the full LEV / r11 / args context.
+    /// `sc` with LEV >= 1 (CBE Handbook 11.1). PS3 usermode never issues these;
+    /// distinguished from `Syscall` so a rejection cannot byte-collide with an
+    /// unrelated LV2 handler returning `CELL_EINVAL`.
     Hypercall = 9,
 }
 
@@ -89,13 +81,13 @@ impl TracedYieldReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum HashCheckpointKind {
-    /// Committed guest memory.
+    /// Hash covers committed shared memory.
     CommittedMemory = 0,
-    /// Runnable queue.
+    /// Hash covers the runnable-unit queue.
     RunnableQueue = 1,
-    /// All sync object states.
+    /// Hash covers sync-primitive state.
     SyncState = 2,
-    /// Unit statuses.
+    /// Hash covers per-unit status flags.
     UnitStatus = 3,
 }
 
@@ -115,9 +107,9 @@ impl HashCheckpointKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedBlockReason {
-    /// `WaitOnEvent` effect.
+    /// Unit blocked waiting on a sync event.
     WaitOnEvent = 0,
-    /// `MailboxReceiveAttempt` on an empty mailbox.
+    /// Unit blocked because its mailbox was empty.
     MailboxEmpty = 1,
 }
 
@@ -135,9 +127,9 @@ impl TracedBlockReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedWakeReason {
-    /// `WakeUnit` effect from another unit.
+    /// Unit woken by a wake effect.
     WakeEffect = 0,
-    /// DMA completion firing.
+    /// Unit woken by DMA completion.
     DmaCompletion = 1,
 }
 
@@ -151,39 +143,39 @@ impl TracedWakeReason {
     }
 }
 
-/// Effect kinds as the trace records them.
+/// Mirror of `cellgov_effects::Effect` for the trace stream.
 ///
-/// Parallel enum to `cellgov_effects::Effect`; discriminants mirror the source
-/// variant order so a bridge layer can map without a translation table. The
-/// trace crate cannot depend on `cellgov_effects` (DAG: effects -> trace).
+/// Discriminants must match the source variant order: the trace crate cannot
+/// depend on `cellgov_effects` (DAG: effects -> trace), so the bridge maps by
+/// raw value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TracedEffectKind {
-    /// Shared memory write intent.
+    /// Shared-memory write intent.
     SharedWriteIntent = 0,
     /// Mailbox send.
     MailboxSend = 1,
     /// Mailbox receive attempt.
     MailboxReceiveAttempt = 2,
-    /// DMA transfer enqueued.
+    /// DMA descriptor enqueued.
     DmaEnqueue = 3,
-    /// Wait on a sync primitive.
+    /// Wait on a sync event.
     WaitOnEvent = 4,
     /// Wake another unit.
     WakeUnit = 5,
-    /// Signal register update.
+    /// Sync signal update.
     SignalUpdate = 6,
-    /// Fault raised.
+    /// Fault raised by the unit.
     FaultRaised = 7,
-    /// Diagnostic trace marker.
+    /// User-emitted trace marker.
     TraceMarker = 8,
-    /// Atomic reservation acquired (lwarx / ldarx / getllar).
+    /// `lwarx` / `ldarx` / `getllar`.
     ReservationAcquire = 9,
-    /// Conditional atomic store succeeded (stwcx / stdcx / putllc).
+    /// `stwcx` / `stdcx` / `putllc` success.
     ConditionalStore = 10,
-    /// RSX FIFO label write (NV406E semaphore release or report writeback).
+    /// NV406E semaphore release or report writeback.
     RsxLabelWrite = 11,
-    /// RSX FIFO flip-buffer request (NV4097 flip).
+    /// NV4097 flip.
     RsxFlipRequest = 12,
 }
 
@@ -213,129 +205,120 @@ impl TracedEffectKind {
 pub enum DecodeError {
     /// Byte stream ended mid-record.
     Truncated,
-    /// Tag byte does not name a known record variant.
+    /// Record tag byte is not a known variant.
     UnknownTag(u8),
-    /// `YieldReason` discriminant out of range.
+    /// Yield-reason byte is not a known variant.
     UnknownYieldReason(u8),
-    /// `HashCheckpointKind` discriminant out of range.
+    /// Hash-checkpoint-kind byte is not a known variant.
     UnknownHashKind(u8),
     /// `fault_discarded` flag was neither 0 nor 1.
     InvalidBool(u8),
-    /// `TracedEffectKind` discriminant out of range.
+    /// Effect-kind byte is not a known variant.
     UnknownEffectKind(u8),
-    /// `TracedBlockReason` discriminant out of range.
+    /// Block-reason byte is not a known variant.
     UnknownBlockReason(u8),
-    /// `TracedWakeReason` discriminant out of range.
+    /// Wake-reason byte is not a known variant.
     UnknownWakeReason(u8),
 }
 
 /// A single structured trace record.
-// PpuStateFull carries 32 GPRs by value (~300 bytes vs ~30 for every other
-// variant). Records are encoded to bytes immediately and not stored long-term,
-// so the layout difference does not justify a heap allocation per record.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TraceRecord {
     /// Scheduler selected a unit and granted it a budget.
     UnitScheduled {
-        /// Unit scheduled.
+        /// Unit that was scheduled.
         unit: UnitId,
-        /// Budget granted for this step.
+        /// Budget granted to the unit for this step.
         granted_budget: Budget,
-        /// Guest time at scheduling.
+        /// Guest-time clock at scheduling.
         time: GuestTicks,
-        /// Epoch at scheduling.
+        /// Commit epoch at scheduling.
         epoch: Epoch,
     },
     /// A unit's `run_until_yield` returned.
     StepCompleted {
-        /// Unit that completed a step.
+        /// Unit that completed the step.
         unit: UnitId,
-        /// Why the unit yielded.
+        /// Reason the unit yielded.
         yield_reason: TracedYieldReason,
-        /// Work retired in this step. Wire format is u64; the type
-        /// wrapping is structural.
+        /// Instruction cost consumed during the step.
         consumed_cost: InstructionCost,
-        /// Guest time after the step.
+        /// Guest-time clock after the step.
         time_after: GuestTicks,
     },
     /// Commit pipeline finished processing a step's effects.
     CommitApplied {
-        /// Unit whose effects were committed.
+        /// Unit whose step was committed.
         unit: UnitId,
-        /// Shared writes applied.
+        /// Number of writes that landed in shared memory.
         writes_committed: u32,
-        /// Effects deferred for later processing.
+        /// Number of effects deferred past this commit.
         effects_deferred: u32,
-        /// Whether a fault discarded all effects.
+        /// Whether the step's effects were discarded due to a fault.
         fault_discarded: bool,
-        /// Epoch after commit.
+        /// Commit epoch after this commit.
         epoch_after: Epoch,
     },
     /// State hash captured at a controlled checkpoint.
     StateHashCheckpoint {
-        /// Hash category this checkpoint covers.
+        /// Which subsystem the hash covers.
         kind: HashCheckpointKind,
         /// Hash value.
         hash: StateHash,
     },
-    /// A unit emitted an effect during its step.
-    ///
     /// One record per effect, in emission order, with `sequence` running 0..N
     /// within the step. Effect payloads (write bytes, mailbox messages, DMA
     /// descriptors) are not included.
     EffectEmitted {
         /// Unit that emitted the effect.
         unit: UnitId,
-        /// Index within this step's effect list.
+        /// Per-step emission sequence number.
         sequence: u32,
-        /// Effect kind.
+        /// Effect variant.
         kind: TracedEffectKind,
     },
-    /// A unit's status was overridden to `Blocked` by the commit pipeline.
-    ///
-    /// Emitted once per block transition, after `CommitApplied`.
+    /// Status overridden to `Blocked`. Emitted once per transition, after
+    /// `CommitApplied`.
     UnitBlocked {
-        /// Unit blocked.
+        /// Unit that transitioned to blocked.
         unit: UnitId,
-        /// Why it blocked.
+        /// Why the unit blocked.
         reason: TracedBlockReason,
     },
-    /// A unit's status was overridden to `Runnable` by the commit pipeline or a
-    /// DMA completion.
-    ///
-    /// Emitted once per wake transition, after `CommitApplied`.
+    /// Status overridden to `Runnable` by the commit pipeline or a DMA
+    /// completion. Emitted once per transition, after `CommitApplied`.
     UnitWoken {
-        /// Unit woken.
+        /// Unit that transitioned to runnable.
         unit: UnitId,
-        /// Why it was woken.
+        /// Why the unit was woken.
         reason: TracedWakeReason,
     },
-    /// Per-step PPU state fingerprint captured at instruction retire.
+    /// Per-step PPU state fingerprint at instruction retire.
     ///
     /// `hash` covers GPR + LR + CTR + XER + CR under a canonical tooling-local
     /// byte layout. Emitted once per retired instruction when per-step tracing
     /// is active.
     PpuStateHash {
-        /// Monotonic step index within the run.
+        /// Per-thread retired-instruction counter.
         step: u64,
         /// PC of the instruction that just retired.
         pc: u64,
-        /// Fingerprint of the live register file.
+        /// Hash of the PPU architectural state.
         hash: StateHash,
     },
-    /// Full PPU register snapshot captured at instruction retire.
+    /// Full PPU register snapshot at instruction retire.
     ///
     /// Opt-in `[lo, hi]` window only, never on the hot path. Covers the same
-    /// architectural surface as `PpuStateHash` but uncompressed, so a
-    /// divergence diff can name the exact disagreeing register.
+    /// architectural surface as `PpuStateHash` uncompressed, so a divergence
+    /// diff can name the exact disagreeing register. `step` matches
+    /// `PpuStateHash::step` for the same instruction.
     PpuStateFull {
-        /// Monotonic step index. Matches `PpuStateHash::step` for the same
-        /// instruction.
+        /// Per-thread retired-instruction counter.
         step: u64,
         /// PC of the instruction that just retired.
         pc: u64,
-        /// GPR[0..32].
+        /// General-purpose registers r0..r31.
         gpr: [u64; 32],
         /// Link register.
         lr: u64,
@@ -343,7 +326,7 @@ pub enum TraceRecord {
         ctr: u64,
         /// Fixed-point exception register.
         xer: u64,
-        /// Condition register (packed 32-bit).
+        /// Condition register.
         cr: u32,
     },
 }
@@ -359,7 +342,7 @@ const TAG_PPU_STATE_HASH: u8 = 0x07;
 const TAG_PPU_STATE_FULL: u8 = 0x08;
 
 impl TraceRecord {
-    /// Category this record belongs to.
+    /// Trace level this record belongs to.
     pub fn level(&self) -> TraceLevel {
         match self {
             TraceRecord::UnitScheduled { .. }
@@ -374,7 +357,7 @@ impl TraceRecord {
         }
     }
 
-    /// Append this record's binary encoding to `buf`.
+    /// Append the binary encoding to `buf`.
     pub fn encode(&self, buf: &mut Vec<u8>) {
         match self {
             TraceRecord::UnitScheduled {

@@ -1,16 +1,28 @@
 //! HLE router chaining per-library dispatch modules.
 //!
-//! Filenames match the canonical Sony library names so a visual grep
-//! against RPCS3's source tree lines up one-to-one; Rust module
-//! identifiers stay snake_case via `#[path]`.
+//! Filenames mirror Sony library names for visual grep against RPCS3;
+//! `#[path]` keeps Rust identifiers snake_case.
 //!
-//! ## Unclaimed-NID policy
+//! ## Cross-module contracts
 //!
-//! When no module claims a NID, the router sets r3 = CELL_OK (0) with
-//! no side effects and records the NID in
-//! [`HleState::unclaimed_nids`] (one-shot stderr on first occurrence).
-//! Downstream observability can walk the counter to attribute
-//! corrupted state to a specific unimplemented library entry.
+//! - **OWNED_NIDS authority.** Each per-library module exports
+//!   `OWNED_NIDS` and a `dispatch` fn. Sets must be disjoint across
+//!   modules (enforced by `hle_module_nid_sets_are_disjoint`); the
+//!   router probes them in fixed order and stops at the first claim.
+//! - **Unclaimed-NID fallback.** A NID no module claims sets r3 =
+//!   CELL_OK (0) with no other state mutation and bumps
+//!   [`HleState::unclaimed_nids`]. First occurrence emits one stderr
+//!   line so a downstream divergence can be attributed to a specific
+//!   unimplemented entry.
+//! - **Caller LR plumbing.** `caller_lr` flows from
+//!   [`cellgov_exec::LocalDiagnostics::lr`] through `dispatch_hle`
+//!   into the unclaimed-NID stderr line. `None` is permitted for
+//!   synthetic callers without an LR.
+//! - **Park-for-callback.** Handlers record a spawn intent into
+//!   [`HleState::pending_callback_spawn`] via
+//!   [`HleContext::park_for_callback`]; the router drains it after
+//!   every dispatch (handled or unclaimed) so the slot is always
+//!   `None` between calls.
 
 use cellgov_event::UnitId;
 
@@ -34,37 +46,29 @@ pub(crate) mod sys_prx_for_user;
 /// HLE-specific bookkeeping bundled off the `Runtime` struct.
 pub(crate) struct HleState {
     pub nids: std::collections::BTreeMap<u32, u32>,
-    /// Bump-allocator base (most recent `Runtime::set_hle_heap_base`).
-    /// The watermark threshold check subtracts this from `heap_ptr`
-    /// to report bytes handed out rather than the raw cursor.
+    /// Bump-allocator base. Watermark accounting subtracts this from
+    /// `heap_ptr` to report bytes handed out rather than raw cursor.
     pub heap_base: u32,
     pub heap_ptr: u32,
-    /// Peak `heap_ptr`. `heap_alloc` emits a one-shot stderr warning
-    /// when `heap_watermark - heap_base` crosses 1 MiB / 10 MiB /
-    /// 100 MiB.
+    /// Peak `heap_ptr`; `heap_alloc` emits a one-shot stderr warning
+    /// at the 1 MiB / 10 MiB / 100 MiB thresholds (mask below).
     pub heap_watermark: u32,
     /// Bits: 0x1 = 1 MiB, 0x2 = 10 MiB, 0x4 = 100 MiB.
     pub heap_warning_mask: u8,
-    /// Monotonic kernel-object ID counter. Starts above zero so a
-    /// zero-initialized guest field is distinguishable from an
-    /// allocated ID.
+    /// Monotonic kernel-object ID counter; starts above zero so a
+    /// zero-initialised guest field is distinguishable from a real id.
     pub next_id: u32,
     pub gcm: GcmState,
-    /// NIDs that no module claimed, keyed by NID with a call count.
-    /// First occurrence of each NID emits a stderr line in
-    /// `dispatch_hle`.
+    /// Per-NID call count for unclaimed dispatches; first occurrence
+    /// of each NID emits a stderr line in `dispatch_hle`.
     pub unclaimed_nids: std::collections::BTreeMap<u32, usize>,
-    /// NIDs that were claimed and routed to a handler but produced
-    /// no observable mutation before the adapter dropped. Populated
-    /// from [`context::RuntimeHleAdapter`]'s `Drop` in both debug
-    /// and release. A non-zero entry here is a handler whose
-    /// register state leaked straight through to the guest without
-    /// a fresh r3.
+    /// Per-NID count of claimed handlers that returned without
+    /// mutating state. A non-zero entry means handler register state
+    /// reached the guest without a fresh r3; populated from
+    /// [`context::RuntimeHleAdapter`]'s `Drop` in debug and release.
     pub handlers_without_mutation: std::collections::BTreeMap<u32, usize>,
-    /// Park-intent slot. Set by an HLE handler via
-    /// [`HleContext::park_for_callback`]; consumed by
-    /// [`Runtime::dispatch_hle`] (or any per-module dispatch site)
-    /// to materialize the worker spawn after the handler returns.
+    /// Park-intent slot: set via [`HleContext::park_for_callback`],
+    /// drained by [`Runtime::dispatch_hle`] after the handler returns.
     /// Always `None` between dispatches.
     pub pending_callback_spawn: Option<HleParkRequest>,
 }
@@ -87,18 +91,9 @@ impl HleState {
 }
 
 impl Runtime {
-    /// Dispatch an HLE import call by NID.
-    ///
-    /// `caller_lr` is the calling guest's LR at the syscall boundary,
-    /// surfaced through [`cellgov_exec::LocalDiagnostics::lr`] when the
-    /// arch unit can populate it. Used in the unclaimed-NID first-
-    /// occurrence stderr line to attribute the call to a specific
-    /// guest call site without a post-hoc downcast through the
-    /// registry. Pass `None` from synthetic / test callers that do
-    /// not have an LR.
-    ///
-    /// See the module-level "Unclaimed-NID policy" for the fallback
-    /// contract.
+    /// Dispatch an HLE import call by NID. `caller_lr` is the guest
+    /// LR at the syscall boundary; see module-level cross-module
+    /// contracts for the fallback and park-spawn behaviour.
     pub(crate) fn dispatch_hle(
         &mut self,
         source: UnitId,
@@ -141,10 +136,6 @@ impl Runtime {
             }
             .set_return(0);
         }
-        // Drain any park-for-callback intent the handler recorded.
-        // Runs on every dispatch, whether handled or unclaimed; the
-        // unclaimed fallback never parks but the cost of an empty
-        // take() is negligible.
         self.consume_pending_callback_spawn(source);
     }
 }
@@ -218,8 +209,6 @@ mod tests {
         }
     }
 
-    /// Pins the order: counter `+=` must precede the `debug_assert!`
-    /// so debug and release populate the same map.
     #[test]
     fn adapter_drop_bumps_handlers_without_mutation_counter() {
         use crate::hle::context::RuntimeHleAdapter;
@@ -285,15 +274,15 @@ mod tests {
 
         let mem = rt.memory().as_bytes();
         let ctx_ptr = u32::from_be_bytes([mem[0x10000], mem[0x10001], mem[0x10002], mem[0x10003]]);
-        assert_ne!(ctx_ptr, 0, "context pointer should be non-zero");
+        assert_ne!(ctx_ptr, 0);
 
         let a = ctx_ptr as usize;
         let begin = u32::from_be_bytes([mem[a], mem[a + 1], mem[a + 2], mem[a + 3]]);
         let end = u32::from_be_bytes([mem[a + 4], mem[a + 5], mem[a + 6], mem[a + 7]]);
         let callback = u32::from_be_bytes([mem[a + 12], mem[a + 13], mem[a + 14], mem[a + 15]]);
-        assert_eq!(begin, 0x20000 + 0x1000, "begin = ioAddress + 0x1000");
-        assert!(end > begin, "end > begin");
-        assert_ne!(callback, 0, "callback OPD should be non-zero");
+        assert_eq!(begin, 0x20000 + 0x1000);
+        assert!(end > begin);
+        assert_ne!(callback, 0);
 
         assert_eq!(rt.hle.gcm.control_addr, 0xC000_0040);
     }
@@ -320,8 +309,6 @@ mod tests {
         assert_eq!(rt.hle.gcm.control_addr, base + 0x40);
         assert_eq!(rt.hle.gcm.label_addr, base + 0x20_0000);
 
-        // Label 255 reads the LV2 sentinel written into the reports
-        // region at sys_rsx context allocation.
         let label_addr = rt.hle.gcm.label_addr as usize;
         let sentinel_offset = label_addr + 255 * 0x10;
         let mem = rt.memory().as_bytes();
@@ -334,9 +321,6 @@ mod tests {
         assert_eq!(sentinel, 0x1337_C0D3);
     }
 
-    /// Pins that both `init_body` branches produce a non-zero
-    /// `control_addr`, which the GET_CONTROL_REGISTER dispatch
-    /// `debug_assert_ne!` relies on as its "init ran" witness.
     #[test]
     fn gcm_init_body_control_addr_is_nonzero_in_both_modes() {
         use crate::hle::cell_gcm_sys::{init_body, GcmState};
@@ -380,22 +364,11 @@ mod tests {
         }
 
         let ctrl_with_checkpoint = run_init(true);
-        assert_eq!(
-            ctrl_with_checkpoint, 0xC000_0040,
-            "rsx_checkpoint mode must pin control_addr to the MMIO sentinel; \
-             if you changed this value update the dispatch witness too"
-        );
-        assert_ne!(
-            ctrl_with_checkpoint, 0,
-            "control_addr sentinel cannot be 0 (dispatch witness would silently pass pre-init)"
-        );
+        assert_eq!(ctrl_with_checkpoint, 0xC000_0040);
+        assert_ne!(ctrl_with_checkpoint, 0);
 
         let ctrl_no_checkpoint = run_init(false);
-        assert_ne!(
-            ctrl_no_checkpoint, 0,
-            "non-checkpoint mode must heap-allocate a non-zero control_addr \
-             (dispatch witness relies on both init branches producing non-zero)"
-        );
+        assert_ne!(ctrl_no_checkpoint, 0);
     }
 
     #[test]
@@ -412,7 +385,7 @@ mod tests {
             cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
         });
 
-        assert_eq!(rt.rsx_flip().handler(), 0, "starts cleared");
+        assert_eq!(rt.rsx_flip().handler(), 0);
         let args: [u64; 9] = [0, 0x1234_5678, 0, 0, 0, 0, 0, 0, 0];
         rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args, None);
 
@@ -446,11 +419,7 @@ mod tests {
         let args: [u64; 9] = [0, handler as u64, 0, 0, 0, 0, 0, 0, 0];
         rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args, None);
         assert_eq!(rt.rsx_flip().handler(), handler);
-        assert_eq!(
-            rt.lv2_host().sys_rsx_context().flip_handler_addr,
-            handler,
-            "sys_rsx authoritative state should mirror the handler address"
-        );
+        assert_eq!(rt.lv2_host().sys_rsx_context().flip_handler_addr, handler);
     }
 
     #[test]
@@ -471,7 +440,7 @@ mod tests {
         let args: [u64; 9] = [0; 9];
         rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args, None);
 
-        assert_eq!(rt.rsx_flip().handler(), 0, "NULL cleared the handler");
+        assert_eq!(rt.rsx_flip().handler(), 0);
     }
 
     #[test]
@@ -493,14 +462,11 @@ mod tests {
         rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args, None);
 
         let label_addr = rt.hle.gcm.label_addr;
-        assert_ne!(label_addr, 0, "init must have allocated a label region");
+        assert_ne!(label_addr, 0);
         let mem = rt.memory().as_bytes();
         let base = label_addr as usize;
-        for (i, byte) in mem[base..base + 4096].iter().enumerate() {
-            assert_eq!(
-                *byte, 0,
-                "label byte at offset {i:#x} must be zero post-init; got {byte:#x}"
-            );
+        for byte in mem[base..base + 4096].iter() {
+            assert_eq!(*byte, 0);
         }
     }
 
@@ -516,7 +482,6 @@ mod tests {
         rt.hle.gcm.io_address = 0x20000;
         rt.hle.gcm.io_size = 0x80000;
         rt.hle.gcm.local_size = 0x0f90_0000;
-        // Satisfy the `context_addr != 0` "init ran" witness.
         rt.hle.gcm.context_addr = 0x101000;
 
         let unit_id = cellgov_event::UnitId::new(0);
@@ -547,7 +512,6 @@ mod tests {
 
         let mut rt = Runtime::new(GuestMemory::new(0x200000), Budget::new(1), 100);
         rt.set_gcm_rsx_checkpoint(true);
-        // Satisfy the `label_addr != 0` "init ran" witness.
         rt.hle.gcm.label_addr = 0x50000;
 
         let unit_id = cellgov_event::UnitId::new(0);
@@ -568,10 +532,6 @@ mod tests {
 
     #[test]
     fn sys_ppu_thread_get_id_returns_primary_when_unit_seeded_in_table() {
-        // Route through the PpuThreadTable lookup, not the
-        // 0x0100_0000 fallback. The two produce the same value for
-        // the primary thread; this test pins the routing so child
-        // threads pick up their minted ids through the same path.
         use crate::runtime::Runtime;
         use cellgov_lv2::PpuThreadAttrs;
         use cellgov_mem::GuestMemory;
@@ -864,9 +824,6 @@ mod tests {
 
     #[test]
     fn sys_time_get_system_time_returns_microseconds_from_guest_clock() {
-        // Microseconds since boot, derived from `runtime.time()`
-        // (1 tick = 1 ns -> us = ticks / 1000). At t=0 the call
-        // returns 0; advancing the guest clock advances the result.
         use crate::runtime::Runtime;
         use cellgov_mem::GuestMemory;
         use cellgov_time::Budget;
@@ -882,9 +839,6 @@ mod tests {
         assert_eq!(rt.registry_mut().drain_syscall_return(unit_id), Some(0));
     }
 
-    /// `park_for_callback` writes the request into the slot the
-    /// adapter borrows from `HleState` and counts as a mutation
-    /// (Drop guard does not bump `handlers_without_mutation`).
     #[test]
     fn adapter_park_for_callback_records_request_and_satisfies_drop_guard() {
         use crate::hle::context::{HleContext, HleParkRequest, RuntimeHleAdapter};
@@ -928,10 +882,6 @@ mod tests {
             adapter.park_for_callback(request);
         }
         assert_eq!(pending, Some(request));
-        assert!(
-            !counter.contains_key(&probe_nid),
-            "park_for_callback must count as a mutation; Drop guard should NOT \
-             bump handlers_without_mutation",
-        );
+        assert!(!counter.contains_key(&probe_nid));
     }
 }

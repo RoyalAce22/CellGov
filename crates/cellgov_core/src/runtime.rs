@@ -1,7 +1,4 @@
-//! Top-level runtime: [`Runtime::step`] selects a unit, grants budget, and
-//! runs until yield; [`Runtime::commit_step`] validates, stages, and applies
-//! the emitted effects, dispatches syscalls, fires due DMA completions,
-//! and emits the commit-boundary trace records.
+//! Step driver and commit pipeline over registered units and guest memory.
 //!
 //! Determinism contract: every observable output is a pure function of
 //! runtime state + registry contents + scheduler decisions. No host time,
@@ -9,8 +6,7 @@
 //! [`StepError::MaxStepsExceeded`] rather than looping on a stalled system.
 //!
 //! The main trace stream is fixed-size-per-record; full PPU register
-//! snapshots go to a separate `zoom_trace` writer so the main stream
-//! stays homogeneous.
+//! snapshots route to `zoom_trace` to keep the main stream homogeneous.
 
 use crate::commit::{CommitContext, CommitError, CommitOutcome, CommitPipeline};
 use crate::registry::{RegisteredUnit, UnitRegistry};
@@ -47,24 +43,19 @@ pub struct Runtime {
     mailbox_registry: MailboxRegistry,
     signal_registry: SignalRegistry,
     reservations: cellgov_sync::ReservationTable,
-    /// Folded into [`Runtime::sync_state_hash`] at every commit boundary.
     rsx_cursor: crate::rsx::RsxFifoCursor,
     /// Persists across commit boundaries: an OFFSET / RELEASE pair may
     /// straddle drains and the later RELEASE must read the earlier OFFSET.
-    /// Folded into [`Runtime::sync_state_hash`].
     rsx_sem_offset: u32,
-    /// When true, committed writes to `0xC000_0040..0xC000_004C` mirror
-    /// into [`Self::rsx_cursor`] at the same commit boundary. Host must
-    /// make the RSX region writable before enabling; otherwise every
-    /// put-pointer store reserved-writes and the mirror never runs.
+    /// Host must make the RSX region writable before enabling; otherwise
+    /// every put-pointer store reserved-writes and the mirror never runs.
     rsx_mirror_writes: bool,
-    /// Folded into [`Self::sync_state_hash`].
     rsx_flip: crate::rsx::flip::RsxFlipState,
     rsx_methods: crate::rsx::method::NvMethodTable,
     /// Advance-pass effects produced at the end of commit batch N, queued
-    /// for the start of batch N+1. Preserves the atomic-batch contract:
-    /// FIFO method parses mutate cursor + sem_offset in batch N, but the
-    /// downstream memory / state effects commit alongside batch N+1.
+    /// for the start of batch N+1. FIFO method parses mutate cursor +
+    /// sem_offset in batch N; downstream memory / state effects commit
+    /// alongside batch N+1 to preserve the atomic-batch contract.
     pending_rsx_effects: Vec<Effect>,
     dma_queue: DmaQueue,
     dma_latency: Box<dyn DmaLatencyModel>,
@@ -81,35 +72,29 @@ pub struct Runtime {
     steps_taken: usize,
     max_steps: usize,
     trace: TraceWriter,
-    /// Unit selected by the most recent `step()` call; one commit batch
-    /// per unit yield, so this attributes the batch unambiguously.
+    /// One commit batch per unit yield; attributes the batch to its source.
     last_scheduled_unit: Option<UnitId>,
-    /// Set during `commit_step` if the dispatch for the just-completed
-    /// step transitioned at least one other unit into `Runnable`.
-    /// Surfaced to the scheduler via `notify_yielded` so a sticky-on-
-    /// non-waking-syscall policy can distinguish wake-causing syscalls
-    /// (`sema_post`, `event_flag_set`, etc.) from non-waking ones
-    /// (`tty_write`, `ppu_thread_get_id`).
+    /// True when the just-completed step's dispatch transitioned at least
+    /// one other unit into `Runnable`. Surfaced via `notify_yielded` so
+    /// scheduler policy can distinguish wake-causing syscalls (`sema_post`,
+    /// `event_flag_set`) from non-waking ones (`tty_write`,
+    /// `ppu_thread_get_id`).
     step_woke_others: bool,
     pub(crate) hle: crate::hle::HleState,
-    /// Reused across steps to avoid per-step allocation in the common
-    /// zero-effects case.
     effects_buf: Vec<Effect>,
     mode: RuntimeMode,
-    /// Monotonic counter over per-instruction state hashes. Orthogonal to
+    /// Monotonic over per-instruction state hashes; orthogonal to
     /// `steps_taken`, which counts `run_until_yield` invocations.
     per_step_index: u64,
-    /// Separate sink for `PpuStateFull` records so the main `trace` stream
-    /// stays fixed-size-per-record.
     zoom_trace: TraceWriter,
 }
 
 impl Runtime {
     /// Drive the commit pipeline for a previously-returned step result.
     ///
-    /// The epoch advances on every commit boundary, including validation
-    /// failures -- the step's set of effects is closed either way, so an
-    /// `Err` return still mutates `self.epoch`. Fault rule and atomic-batch
+    /// Epoch advances on every commit boundary including validation
+    /// failures: the step's effect set is closed either way, so an `Err`
+    /// return still mutates `self.epoch`. Fault rule and atomic-batch
     /// semantics are inherited from [`CommitPipeline::process`].
     pub fn commit_step(
         &mut self,
@@ -117,10 +102,8 @@ impl Runtime {
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
         self.step_woke_others = false;
-        // Trivial-step fast path under FaultDriven: no effects, no fault,
-        // no syscall/finished yield, empty DMA and RSX queues. Epoch still
-        // advances so the atomic-batch boundary is preserved; trace is
-        // already off in this mode.
+        // Trivial-step fast path under FaultDriven. Epoch still advances
+        // to preserve the atomic-batch boundary; trace is off in this mode.
         if self.mode == RuntimeMode::FaultDriven
             && effects.is_empty()
             && result.fault.is_none()
@@ -142,8 +125,8 @@ impl Runtime {
             return Ok(CommitOutcome::default());
         }
 
-        // Prepend any RSX effects the previous commit's advance pass
-        // emitted. Allocates only when pending_rsx_effects is non-empty.
+        // Prepend RSX effects from the previous commit's advance pass.
+        // Allocates only when pending_rsx_effects is non-empty.
         let combined_storage: Vec<Effect>;
         let effects: &[Effect] = if self.pending_rsx_effects.is_empty() {
             effects
@@ -156,10 +139,9 @@ impl Runtime {
             &combined_storage
         };
 
-        // Snapshot at entry so the post-apply DONE transition fires only
-        // for flips that started pending in a PRIOR batch; guarantees an
-        // intermediate WAITING observation for any PPU step between the
-        // two commit boundaries.
+        // Snapshot so the post-apply DONE transition fires only for flips
+        // pending at entry; a flip queued in this batch must be observable
+        // as WAITING for at least one PPU step before completing.
         let flip_pending_at_entry = self.rsx_flip.pending();
         let flip_status_at_entry = self.rsx_flip.status();
 
@@ -177,9 +159,8 @@ impl Runtime {
         };
         let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
 
-        // Invalidate predecoded code cached by any unit that overlaps a
-        // committed write. Required for correctness under self-modifying
-        // code or runtime relocations.
+        // Invalidate predecoded caches overlapping committed writes;
+        // required for self-modifying code and runtime relocations.
         if outcome.is_ok() {
             for effect in effects {
                 if let cellgov_effects::Effect::SharedWriteIntent { range, .. } = effect {
@@ -198,12 +179,11 @@ impl Runtime {
         if result.yield_reason == YieldReason::Syscall {
             self.dispatch_syscall(result, source);
         }
-        // Callback worker faulted mid-body: absorb the fault by
-        // waking the parent with CELL_EFAULT and finishing the
-        // worker. The fault is still recorded in the step result
-        // (so the trace stream and diagnostics see it) but the
-        // step-loop classifier treats it as `Continue` because
-        // `outcome.callback_worker_fault_absorbed` is set.
+        // Callback worker faulted mid-body: wake the parent with
+        // CELL_EFAULT and finish the worker. Fault stays recorded in the
+        // step result (visible to trace / diagnostics); the step-loop
+        // classifier treats it as `Continue` via
+        // `outcome.callback_worker_fault_absorbed`.
         let absorbed = if result.yield_reason == YieldReason::Fault {
             self.try_absorb_callback_worker_fault(source)
         } else {
@@ -225,11 +205,11 @@ impl Runtime {
             self.resolve_join_wakes(source);
         }
 
-        // RSX FIFO advance pass: runs after unit effects commit and DMA
-        // completions fire, before state-hash checkpoints emit. Emitted
-        // effects land in `pending_rsx_effects` and commit alongside the
-        // next batch's unit effects (atomic-batch contract). Cursor
-        // mutations land in THIS batch's state-hash checkpoint.
+        // RSX FIFO advance: after unit effects commit and DMA completions
+        // fire, before state-hash checkpoints emit. Emitted effects land
+        // in `pending_rsx_effects` and commit with the next batch
+        // (atomic-batch contract); cursor mutations land in THIS batch's
+        // state-hash checkpoint.
         if self.rsx_cursor.get() != self.rsx_cursor.put() {
             crate::rsx::advance::rsx_advance(
                 &self.memory,
@@ -241,16 +221,13 @@ impl Runtime {
             );
         }
 
-        // WAITING -> DONE transition: only for flips pending at entry,
-        // so a flip queued in THIS batch has at least one PPU step window
-        // in which a poll returns WAITING before the next boundary.
         if flip_pending_at_entry {
             self.rsx_flip.complete_pending_flip();
         }
 
-        // Flip-status memory mirror. Gated on rsx_mirror_writes because
-        // the default reserved-region RSX layout would reserved-fault.
-        // Skip on no-change to keep the memory hash stable.
+        // Flip-status memory mirror; gated on rsx_mirror_writes because
+        // the default reserved RSX layout would reserved-fault. No-change
+        // skip keeps the memory hash stable across idle batches.
         if self.rsx_mirror_writes {
             let flip_status_now = self.rsx_flip.status();
             if flip_status_now != flip_status_at_entry {
@@ -273,7 +250,7 @@ impl Runtime {
         outcome
     }
 
-    /// Binary trace buffer accumulated so far.
+    /// Main binary trace stream emitted by the runtime.
     #[inline]
     pub fn trace(&self) -> &TraceWriter {
         &self.trace
@@ -285,49 +262,49 @@ impl Runtime {
         &self.zoom_trace
     }
 
-    /// Unit registry.
+    /// Immutable view of the unit registry.
     #[inline]
     pub fn registry(&self) -> &UnitRegistry {
         &self.registry
     }
 
-    /// Mutable unit registry.
+    /// Mutable view of the unit registry.
     #[inline]
     pub fn registry_mut(&mut self) -> &mut UnitRegistry {
         &mut self.registry
     }
 
-    /// Mailbox registry.
+    /// Immutable view of the mailbox registry.
     #[inline]
     pub fn mailbox_registry(&self) -> &MailboxRegistry {
         &self.mailbox_registry
     }
 
-    /// Mutable mailbox registry.
+    /// Mutable view of the mailbox registry.
     #[inline]
     pub fn mailbox_registry_mut(&mut self) -> &mut MailboxRegistry {
         &mut self.mailbox_registry
     }
 
-    /// Signal-notification register registry.
+    /// Immutable view of the signal registry.
     #[inline]
     pub fn signal_registry(&self) -> &SignalRegistry {
         &self.signal_registry
     }
 
-    /// Mutable signal-notification register registry.
+    /// Mutable view of the signal registry.
     #[inline]
     pub fn signal_registry_mut(&mut self) -> &mut SignalRegistry {
         &mut self.signal_registry
     }
 
-    /// LV2 host model.
+    /// Immutable view of the LV2 host state.
     #[inline]
     pub fn lv2_host(&self) -> &Lv2Host {
         &self.lv2_host
     }
 
-    /// Mutable LV2 host model.
+    /// Mutable view of the LV2 host state.
     #[inline]
     pub fn lv2_host_mut(&mut self) -> &mut Lv2Host {
         &mut self.lv2_host
@@ -349,25 +326,25 @@ impl Runtime {
         self.ppu_factory = Some(Box::new(factory));
     }
 
-    /// Syscall response table.
+    /// Immutable view of the syscall response table.
     #[inline]
     pub fn syscall_responses(&self) -> &SyscallResponseTable {
         &self.syscall_responses
     }
 
-    /// Mutable syscall response table.
+    /// Mutable view of the syscall response table.
     #[inline]
     pub fn syscall_responses_mut(&mut self) -> &mut SyscallResponseTable {
         &mut self.syscall_responses
     }
 
-    /// DMA completion queue.
+    /// Immutable view of the in-flight DMA queue.
     #[inline]
     pub fn dma_queue(&self) -> &DmaQueue {
         &self.dma_queue
     }
 
-    /// Replace the scheduler.
+    /// Replace the runtime scheduler.
     pub fn set_scheduler<S: Scheduler + 'static>(&mut self, scheduler: S) {
         self.scheduler = Box::new(scheduler);
     }
@@ -377,7 +354,7 @@ impl Runtime {
         self.hle.nids = nids;
     }
 
-    /// Reset the HLE bump allocator and its watermark-band warning mask.
+    /// Set the base address of the HLE bump-allocator heap.
     pub fn set_hle_heap_base(&mut self, base: u32) {
         assert_ne!(
             base, 0,
@@ -390,16 +367,16 @@ impl Runtime {
         self.hle.heap_warning_mask = 0;
     }
 
-    /// Peak address the HLE bump allocator has ever reached. Subtract the
-    /// heap base to get cumulative bytes allocated across the scenario.
+    /// Peak address the HLE bump allocator has reached. Subtract the heap
+    /// base for cumulative bytes allocated across the scenario.
     #[inline]
     pub fn hle_heap_watermark(&self) -> u32 {
         self.hle.heap_watermark
     }
 
     /// NIDs the HLE dispatcher saw that no module claimed, with per-NID
-    /// call counts. Non-empty after a run is a punch list of
-    /// unimplemented library entries the scenario touched.
+    /// call counts. Non-empty after a run lists unimplemented library
+    /// entries the scenario touched.
     #[inline]
     pub fn hle_unclaimed_nids(&self) -> &std::collections::BTreeMap<u32, usize> {
         &self.hle.unclaimed_nids
@@ -407,41 +384,41 @@ impl Runtime {
 
     /// NIDs whose handlers ran but produced no observable mutation
     /// (no set_return, set_register, write_guest, set_unit_finished,
-    /// heap_alloc, or alloc_id). A non-empty map is a silent-divergence
-    /// punch list: stale register state leaks through to the guest.
+    /// heap_alloc, or alloc_id). A non-empty map flags silent divergence:
+    /// stale register state leaks through to the guest.
     #[inline]
     pub fn hle_handlers_without_mutation(&self) -> &std::collections::BTreeMap<u32, usize> {
         &self.hle.handlers_without_mutation
     }
 
-    /// Set the runtime mode.
+    /// Set the runtime trace / fault mode.
     pub fn set_mode(&mut self, mode: RuntimeMode) {
         self.mode = mode;
     }
 
-    /// Current runtime mode.
+    /// Current runtime trace / fault mode.
     pub fn mode(&self) -> RuntimeMode {
         self.mode
     }
 
-    /// Split-borrow the unit and mailbox registries together.
+    /// Mutable access to unit and mailbox registries together.
     #[inline]
     pub fn registries_mut(&mut self) -> (&mut UnitRegistry, &mut MailboxRegistry) {
         (&mut self.registry, &mut self.mailbox_registry)
     }
 
-    /// Takes effect on the next `step()` call. Use
-    /// [`default_budget_for_mode`] for the natural budget for a mode.
+    /// Takes effect on the next `step()` call. See
+    /// [`default_budget_for_mode`] for per-mode defaults.
     pub fn set_budget(&mut self, budget: Budget) {
         self.budget_per_step = budget;
     }
 
-    /// Per-step budget grant.
+    /// Current per-step execution budget.
     pub fn budget(&self) -> Budget {
         self.budget_per_step
     }
 
-    /// FNV-1a merge of every sync / committed-state source the runtime
+    /// FNV-1a merge over every sync / committed-state source the runtime
     /// owns (mailboxes, signal registers, LV2 host, syscall responses,
     /// reservations, RSX cursor / semaphore offset / flip state) in a
     /// fixed order. Replay tooling compares pairs via the `SyncState`
@@ -463,7 +440,7 @@ impl Runtime {
         hasher.finish()
     }
 
-    /// Committed guest memory.
+    /// Immutable view of guest memory.
     #[inline]
     pub fn memory(&self) -> &GuestMemory {
         &self.memory
@@ -476,79 +453,79 @@ impl Runtime {
         self.hle.gcm.rsx_checkpoint = enabled;
     }
 
-    /// Mutable committed guest memory.
+    /// Mutable view of guest memory.
     #[inline]
     pub fn memory_mut(&mut self) -> &mut GuestMemory {
         &mut self.memory
     }
 
-    /// Atomic-reservation table.
+    /// Immutable view of the load-reservation table.
     #[inline]
     pub fn reservations(&self) -> &cellgov_sync::ReservationTable {
         &self.reservations
     }
 
-    /// Mutable atomic-reservation table.
+    /// Mutable view of the load-reservation table.
     #[inline]
     pub fn reservations_mut(&mut self) -> &mut cellgov_sync::ReservationTable {
         &mut self.reservations
     }
 
-    /// RSX FIFO cursor.
+    /// Immutable view of the RSX FIFO cursor.
     #[inline]
     pub fn rsx_cursor(&self) -> &crate::rsx::RsxFifoCursor {
         &self.rsx_cursor
     }
 
-    /// Mutable RSX FIFO cursor.
+    /// Mutable view of the RSX FIFO cursor.
     #[inline]
     pub fn rsx_cursor_mut(&mut self) -> &mut crate::rsx::RsxFifoCursor {
         &mut self.rsx_cursor
     }
 
-    /// Current RSX semaphore-offset register.
+    /// Last parsed RSX semaphore-write offset.
     #[inline]
     pub fn rsx_sem_offset(&self) -> u32 {
         self.rsx_sem_offset
     }
 
-    /// Mutable RSX semaphore-offset register.
+    /// Mutable reference to the RSX semaphore-write offset.
     #[inline]
     pub fn rsx_sem_offset_mut(&mut self) -> &mut u32 {
         &mut self.rsx_sem_offset
     }
 
-    /// Enabling this requires the host to have made the RSX region
-    /// writable; otherwise every put-pointer store reserved-writes and
-    /// the mirror never runs.
+    /// Host must have made the RSX region writable before enabling;
+    /// otherwise every put-pointer store reserved-writes and the mirror
+    /// never runs.
     pub fn set_rsx_mirror_writes(&mut self, enabled: bool) {
         self.rsx_mirror_writes = enabled;
     }
 
-    /// Current value of the RSX mirror flag.
+    /// True when RSX control-register writes mirror into the cursor.
     #[inline]
     pub fn rsx_mirror_writes_enabled(&self) -> bool {
         self.rsx_mirror_writes
     }
 
-    /// RSX flip-status state.
+    /// Immutable view of the RSX flip state.
     #[inline]
     pub fn rsx_flip(&self) -> &crate::rsx::flip::RsxFlipState {
         &self.rsx_flip
     }
 
-    /// Mutable RSX flip-status state.
+    /// Mutable view of the RSX flip state.
     #[inline]
     pub fn rsx_flip_mut(&mut self) -> &mut crate::rsx::flip::RsxFlipState {
         &mut self.rsx_flip
     }
 
     /// Mirror committed writes to `0xC000_0040..0xC000_004C` into
-    /// [`Self::rsx_cursor`]. Reads bytes from committed memory rather
-    /// than the effect payload: a partial-overlap write may cross slots
-    /// and the authoritative value is what the pipeline applied. Only
-    /// full 4-byte slot coverage mirrors -- a sub-word store still
-    /// applies to memory but leaves the cursor alone.
+    /// [`Self::rsx_cursor`]. Reads from committed memory rather than the
+    /// effect payload: partial-overlap writes may cross slots and the
+    /// authoritative value is what the pipeline applied. Only full 4-byte
+    /// slot coverage mirrors; sub-word stores still apply to memory but
+    /// leave the cursor alone.
     ///
     /// Called from `commit_step` after the batch applies and before the
     /// FIFO advance pass, so the drain sees the new put / ref in the
@@ -593,9 +570,9 @@ impl Runtime {
         }
     }
 
-    /// Consume the runtime and return its guest memory. Used to chain
-    /// execution stages: run one runtime, extract the initialized memory,
-    /// and seed a fresh runtime for the next stage.
+    /// Consume the runtime and return its guest memory. Chains execution
+    /// stages: run one runtime, extract the initialized memory, seed a
+    /// fresh runtime for the next stage.
     pub fn into_memory(self) -> GuestMemory {
         self.memory
     }
@@ -612,13 +589,13 @@ impl Runtime {
         self.epoch
     }
 
-    /// Total number of successful `step()` calls so far.
+    /// Number of `step()` calls completed so far.
     #[inline]
     pub fn steps_taken(&self) -> usize {
         self.steps_taken
     }
 
-    /// Configured deadlock-detector cap.
+    /// Step-count cap before `step()` returns `MaxStepsExceeded`.
     #[inline]
     pub fn max_steps(&self) -> usize {
         self.max_steps
@@ -644,8 +621,8 @@ impl Runtime {
         let unit_id = match self.scheduler.select_next(&self.registry) {
             Some(id) => id,
             None => {
-                // Distinguish terminal stall from soft-stall (parked
-                // units that could be woken by a future signal).
+                // Distinguish terminal stall from soft-stall: parked units
+                // could still wake from a future signal.
                 let any_blocked = self.registry.ids().any(|id| {
                     self.registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Blocked)
                 });
@@ -657,11 +634,10 @@ impl Runtime {
             }
         };
 
-        // Clear any runtime-side status override so the unit's own status
-        // logic resumes after this step.
+        // Clear runtime-side status override so the unit's own status
+        // logic resumes for this step.
         self.registry.clear_status_override(unit_id);
 
-        // Per-step trace records only emit in FullTrace.
         if self.mode == RuntimeMode::FullTrace {
             self.trace.record(&TraceRecord::UnitScheduled {
                 unit: unit_id,
@@ -671,9 +647,9 @@ impl Runtime {
             });
         }
 
-        // The memory borrow is alive only for `run_until_yield`,
-        // enforcing the freeze-during-step rule. Drain any messages /
-        // syscall returns the commit pipeline delivered to this unit.
+        // Memory borrow scoped to `run_until_yield` to enforce the
+        // freeze-during-step rule. Drains messages / syscall returns the
+        // commit pipeline delivered to this unit.
         let received = self.registry.drain_receives(unit_id);
         let syscall_ret = self.registry.drain_syscall_return(unit_id);
         let reg_writes = self.registry.drain_register_writes(unit_id);
@@ -703,8 +679,8 @@ impl Runtime {
                 .get_mut(unit_id)
                 .expect("scheduler returned an id that is not in the registry");
             let res = unit.run_until_yield(self.budget_per_step, &ctx, &mut effects_buf);
-            // FaultDriven has no downstream consumer for the drained
-            // fingerprints / snapshots, so skip both vtable dispatches.
+            // FaultDriven has no consumer for fingerprints / snapshots;
+            // skip both vtable dispatches.
             let (retired_hashes, retired_full) = if self.mode == RuntimeMode::FaultDriven {
                 (Vec::new(), Vec::new())
             } else {
@@ -717,9 +693,8 @@ impl Runtime {
         };
 
         // PpuStateHash and PpuStateFull pair by step index so the diff
-        // printer can match a hash divergence with its full-state
-        // snapshot when both are present. Step indices are monotonic
-        // and independent of `steps_taken`.
+        // printer matches a hash divergence with its full-state snapshot.
+        // Step indices are monotonic and independent of `steps_taken`.
         let hash_base = self.per_step_index;
         for (pc, hash) in retired_hashes {
             self.trace.record(&TraceRecord::PpuStateHash {
@@ -729,10 +704,10 @@ impl Runtime {
             });
             self.per_step_index += 1;
         }
-        // Stamp with `hash_base + i`: a window starting at the unit's
-        // first retired instruction aligns `step` fields with the hash
-        // stream; mid-run windows carry correct PCs but not step parity
-        // -- the diff printer matches by PC in that case.
+        // `hash_base + i` aligns `step` with the hash stream when the
+        // window starts at the unit's first retired instruction. Mid-run
+        // windows carry correct PCs but not step parity -- the diff
+        // printer matches by PC in that case.
         for (i, (pc, gpr, lr, ctr, xer, cr)) in retired_full.into_iter().enumerate() {
             self.zoom_trace.record(&TraceRecord::PpuStateFull {
                 step: hash_base + i as u64,
@@ -774,8 +749,8 @@ impl Runtime {
             }
         }
 
-        // Hand `effects_buf` off to `RuntimeStep`; the fresh Vec avoids
-        // allocating in the common zero-effects FaultDriven case.
+        // Hand `effects_buf` off to `RuntimeStep`; the fresh empty Vec
+        // avoids allocating in the common zero-effects FaultDriven case.
         self.effects_buf = Vec::new();
         Ok(RuntimeStep {
             unit: unit_id,

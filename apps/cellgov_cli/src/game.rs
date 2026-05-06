@@ -1,5 +1,6 @@
-//! `run-game` subcommand: load a decrypted PS3 ELF and run the PPU
-//! until fault, stall, or step limit.
+//! `run-game` subcommand: boot a PS3 ELF and drive the PPU step loop
+//! to fault, stall, or step limit, emitting diagnostics and optional
+//! observation artifacts.
 
 mod bench;
 mod boot;
@@ -24,8 +25,7 @@ use step_loop::{
     SYSCALL_RING_SIZE,
 };
 
-/// Tunables for one `run-game` invocation; fields map 1:1 onto
-/// the equivalent CLI flags.
+/// One `run-game` invocation; fields map 1:1 onto the CLI flags.
 pub struct RunGameOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
@@ -94,9 +94,8 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         rt.set_gcm_rsx_checkpoint(true);
     }
     if title.rsx_mirror() {
-        // Mirror mode requires GCM's control_addr at the MMIO
-        // sentinel 0xC000_0040; routing it to the HLE heap would
-        // bypass the mirror and leave cursor.put unobserved.
+        // Mirror requires control_addr at MMIO sentinel 0xC000_0040;
+        // the HLE-heap path leaves cursor.put unobserved.
         rt.set_gcm_rsx_checkpoint(true);
         rt.set_rsx_mirror_writes(true);
     }
@@ -151,8 +150,8 @@ pub fn run_game(opts: RunGameOptions<'_>) {
 
     println!("outcome: {outcome}");
     println!("steps: {steps}");
-    // Peak bump-allocator address minus the HLE heap base set in
-    // boot::prepare. Cumulative bytes leaked under leak-on-free.
+    // Must match the base set in boot::prepare; bytes-used reports
+    // cumulative leak under leak-on-free.
     const HLE_HEAP_BASE: u32 = 0x10410000;
     let watermark = rt.hle_heap_watermark();
     let used = watermark.saturating_sub(HLE_HEAP_BASE);
@@ -188,9 +187,8 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         println!();
         println!("profile:");
         if t_loop.is_zero() {
-            // pct() clamps to 0.0 on zero total, which is visually
-            // indistinguishable from "nothing happened"; tag the
-            // clock-resolution artifact explicitly.
+            // pct() returns 0.0 on zero total; distinguish that from
+            // a real all-zero profile.
             println!(
                 "  WARN: t_loop is zero (clock resolution artifact or instantaneous loop); percentages below are meaningless"
             );
@@ -211,8 +209,6 @@ pub fn run_game(opts: RunGameOptions<'_>) {
             t.coverage_time,
             pct(t.coverage_time, t_loop)
         );
-        // Untracked = t_loop - (step + commit + coverage); overflow
-        // prints WARN instead of saturating to zero.
         match compute_untracked(t_loop, t.step_time, t.commit_time, t.coverage_time) {
             Ok(overhead) => {
                 println!(
@@ -267,8 +263,8 @@ pub fn run_game(opts: RunGameOptions<'_>) {
     }
 
     if let Some(path) = save_observation {
-        // Non-zero exit on save failure: callers feed the JSON into a
-        // cross-runner diff that would accept a missing file as empty.
+        // Exit non-zero so the cross-runner diff does not silently
+        // treat a missing file as an empty observation.
         if let Err(msg) = save_boot_observation(
             path,
             &elf_data,

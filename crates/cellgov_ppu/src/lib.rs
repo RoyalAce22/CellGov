@@ -1,6 +1,7 @@
-//! PPU `ExecutionUnit`: fetch-decode-execute loop, emitting `Effect`s
-//! for all guest-visible writes. Instruction semantics live in
-//! `exec`; decoding in `decode`.
+//! PPU `ExecutionUnit`: fetch-decode-execute loop. All guest-visible
+//! writes leave via `Effect`s flushed at yield/fault/budget-exhaustion;
+//! mid-batch faults discard the batch and roll architectural state
+//! back to the step's entry snapshot.
 
 pub mod decode;
 pub mod exec;
@@ -36,10 +37,8 @@ pub const FAULT_DEBUG_BREAK: u32 = 0x0108_0000;
 /// Decoded instruction (typically a VMX sub-opcode) had no exec arm.
 pub const FAULT_UNIMPLEMENTED_INSN: u32 = 0x0109_0000;
 
-/// Whether `insn` is a 2-instruction super-pair fusion. The shadow
-/// build emits a `Consumed` placeholder at the +4 slot for these
-/// variants; quickenings (1-instruction rewrites like `Mr`, `Slwi`)
-/// don't.
+/// True for fused 2-instruction variants that require a `Consumed`
+/// placeholder at PC+4; false for 1-instruction quickenings.
 fn is_super_pair(insn: &instruction::PpuInstruction) -> bool {
     matches!(
         insn,
@@ -58,15 +57,15 @@ fn is_super_pair(insn: &instruction::PpuInstruction) -> bool {
 /// PPU architectural state snapshot for replay.
 #[derive(Debug, Clone)]
 pub struct PpuSnapshot {
-    /// General-purpose registers.
+    /// General-purpose registers r0..r31.
     pub gpr: [u64; 32],
-    /// Floating-point registers (raw f64 bit patterns, matching `PpuState`).
+    /// Raw f64 bit patterns, matching `PpuState`.
     pub fpr: [u64; 32],
-    /// Vector registers, big-endian (byte 0 in MSB).
+    /// Big-endian (byte 0 in MSB).
     pub vr: [u128; 32],
     /// Program counter.
     pub pc: u64,
-    /// Condition register.
+    /// Condition register (8 nibble fields).
     pub cr: u32,
     /// Link register.
     pub lr: u64,
@@ -74,7 +73,7 @@ pub struct PpuSnapshot {
     pub ctr: u64,
     /// Fixed-point exception register.
     pub xer: u64,
-    /// Time base counter.
+    /// Time-base register.
     pub tb: u64,
     /// Canonical reservation-line address, or `None` when no reservation is held.
     pub reservation_line: Option<u64>,
@@ -86,25 +85,22 @@ pub struct PpuExecutionUnit {
     id: UnitId,
     state: state::PpuState,
     status: UnitStatus,
-    /// Fires a synthetic `FAULT_DEBUG_BREAK` after `break_skip` prior hits.
+    /// Fires `FAULT_DEBUG_BREAK` after `break_skip` prior hits at this PC.
     break_pc: Option<u64>,
     break_skip: u32,
-    /// Drained by the runtime via `drain_retired_state_hashes`.
-    /// Populated only when the per-step `ExecutionContext::trace_per_step()`
-    /// flag is set on the active call.
+    /// Populated only when `ExecutionContext::trace_per_step()` is set;
+    /// drained by the runtime via `drain_retired_state_hashes`.
     per_step_hashes: Vec<(u64, u64)>,
     /// Inclusive `[lo, hi]` retirement-index window for full-state capture.
     full_state_window: Option<(u64, u64)>,
     /// Increments on successful retirement only; matches the per-step-hash gate.
     retirement_counter: u64,
-    /// Drained by the runtime via `drain_retired_state_full`.
     per_step_full_states: Vec<(u64, [u64; 32], u64, u64, u64, u32)>,
-    /// Predecoded shadow of the main text region; stale slots re-decode on miss.
+    /// Stale slots re-decode on miss.
     instruction_shadow: Option<shadow::PredecodedShadow>,
     /// Sustained miss growth at stable PCs signals code outside the shadowed region.
     shadow_hits: u64,
     shadow_misses: u64,
-    /// Flushed to `effects` at every yield/fault/budget-exhaustion point.
     store_buf: StoreBuffer,
     /// Forces `Budget=1` on the next `run_until_yield` for post-fault single-step replay.
     budget_override: Option<u64>,
@@ -115,7 +111,7 @@ pub struct PpuExecutionUnit {
 }
 
 impl PpuExecutionUnit {
-    /// Create a unit with zeroed architectural state.
+    /// Builds a fresh PPU unit with the given id and zeroed architectural state.
     pub fn new(id: UnitId) -> Self {
         Self {
             id,
@@ -139,57 +135,56 @@ impl PpuExecutionUnit {
         }
     }
 
-    /// Configure the inclusive retirement-index window for full-register snapshots.
+    /// Sets the inclusive `[lo, hi]` retirement-index window for full-state capture.
     pub fn set_full_state_window(&mut self, window: Option<(u64, u64)>) {
         self.full_state_window = window;
     }
 
-    /// Returns the current full-state capture window, if any.
+    /// Returns the configured full-state capture window, if any.
     pub fn full_state_window(&self) -> Option<(u64, u64)> {
         self.full_state_window
     }
 
-    /// Set a counted debug breakpoint: skip `skip` hits at `pc`, then fault.
+    /// Skip `skip` hits at `pc`, then fault on the next.
     pub fn set_break_pc(&mut self, pc: u64, skip: u32) {
         self.break_pc = Some(pc);
         self.break_skip = skip;
     }
 
-    /// Enable instruction-frequency profiling.
+    /// Enables or disables per-instruction profiling.
     pub fn set_profile_mode(&mut self, on: bool) {
         self.profile_mode = on;
     }
 
-    /// Accumulated instruction-variant frequencies.
+    /// Returns the per-variant retirement counts collected while profiling.
     pub fn profile_insns(&self) -> &std::collections::BTreeMap<&'static str, u64> {
         &self.profile_insns
     }
 
-    /// Accumulated adjacent-pair frequencies.
+    /// Returns the per-(prev, curr) variant pair counts collected while profiling.
     pub fn profile_pairs(&self) -> &std::collections::BTreeMap<(&'static str, &'static str), u64> {
         &self.profile_pairs
     }
 
-    /// Mutable access to the PPU's architectural state.
+    /// Returns a mutable reference to the underlying architectural state.
     pub fn state_mut(&mut self) -> &mut state::PpuState {
         &mut self.state
     }
 
-    /// Read access to the PPU's architectural state.
+    /// Returns a shared reference to the underlying architectural state.
     pub fn state(&self) -> &state::PpuState {
         &self.state
     }
 
-    /// Attach a predecoded shadow built from the same memory the PPU will fetch.
-    ///
-    /// The shadow must be built after all boot-time code writes (ELF/PRX load,
-    /// HLE stub planting) and before the step loop begins.
+    /// Caller must build the shadow after all boot-time code writes
+    /// (ELF/PRX load, HLE stub planting) and before the step loop begins;
+    /// otherwise stale slots will re-decode on every fetch.
     pub fn set_instruction_shadow(&mut self, shadow: shadow::PredecodedShadow) {
         self.instruction_shadow = Some(shadow);
     }
 
-    /// Returns `(hits, misses)` counters; high miss ratios signal code
-    /// executing outside the shadowed region (correctness preserved, fast path lost).
+    /// Returns `(hits, misses)`. High miss ratios mean correctness is
+    /// preserved but the O(1) fast path is lost.
     pub fn shadow_stats(&self) -> (u64, u64) {
         (self.shadow_hits, self.shadow_misses)
     }
@@ -252,16 +247,14 @@ impl ExecutionUnit for PpuExecutionUnit {
         effects.clear();
         self.store_buf.clear();
 
-        // Mirror cross-unit reservation clears from the committed table.
-        // The ctx view is frozen for this step, so one read suffices.
+        // Cross-unit reservation clears: the committed table is the source
+        // of truth, our local copy is a cache. ctx view is frozen for the step.
         if self.state.reservation.is_some() && !ctx.reservation_held(self.id) {
             self.state.reservation = None;
         }
 
-        // Resync the TB register to the global tick counter's
-        // current-step value. `max` preserves strict monotonicity
-        // across steps in the case where a prior step retired more
-        // mftb reads than the inter-step tick-derived delta.
+        // `max` preserves strict TB monotonicity when a prior step retired
+        // more mftb reads than the inter-step tick-derived delta covers.
         let tb_from_tick = cellgov_time::ticks_to_tb(ctx.current_tick().raw());
         if tb_from_tick > self.state.tb {
             self.state.tb = tb_from_tick;
@@ -300,9 +293,9 @@ impl ExecutionUnit for PpuExecutionUnit {
 
         let mem = ctx.memory().as_bytes();
         // Stack-allocated region table avoids per-call heap alloc on the
-        // Budget=1 hot path (one call per retired instruction). Code
-        // always lives in the base-0 region (`mem`); this table serves
-        // loads/stores against auxiliary regions (stack, rsx, ...).
+        // Budget=1 hot path (one call per retired instruction). Code lives
+        // in the base-0 region (`mem`); this table serves loads/stores
+        // against auxiliary regions (stack, rsx, ...).
         const MAX_REGIONS: usize = 8;
         let mut region_views_storage: [(u64, &[u8]); MAX_REGIONS] =
             [(0, &[] as &[u8]); MAX_REGIONS];
@@ -320,7 +313,7 @@ impl ExecutionUnit for PpuExecutionUnit {
         loop {
             let step_pc = self.state.pc;
 
-            // Shadow is O(1); fallback decodes from raw memory.
+            // Shadow lookup is O(1); the miss path decodes from raw memory.
             let insn = if let Some(cached) = self
                 .instruction_shadow
                 .as_ref()
@@ -362,10 +355,10 @@ impl ExecutionUnit for PpuExecutionUnit {
                 }
             };
 
-            // Placeholder left by superinstruction pairing: advance PC, burn a tick.
-            // The slot represents the second architectural instruction of a fused
-            // super-pair, so it retires for trace and counter purposes too -- otherwise
-            // retirement_counter and consumed_cost drift apart on every super-pair.
+            // The `Consumed` slot is the second architectural instruction of
+            // a fused super-pair. It must retire for trace and counter purposes;
+            // otherwise retirement_counter and consumed_cost drift apart by one
+            // per super-pair.
             if matches!(insn, instruction::PpuInstruction::Consumed) {
                 self.state.pc += 4;
                 if ctx.trace_per_step() {
@@ -404,13 +397,9 @@ impl ExecutionUnit for PpuExecutionUnit {
             ) {
                 ExecuteVerdict::Continue => {
                     self.state.pc += 4;
-                    // Super-pair variants must be followed by a
-                    // `Consumed` placeholder; otherwise the second
-                    // half of the original pair would re-execute.
-                    // Contract is locked from the outside by the
-                    // `fetch_loop_advances_past_consumed_after_super_pair`
-                    // and `fetch_loop_super_pair_taken_branch_uses_target_not_consumed_skip`
-                    // tests in tests/ppu_tests.rs.
+                    // A super-pair without a `Consumed` at PC+4 would re-execute
+                    // its second half. Cannot fire if the shadow builder and
+                    // fusion tables agree.
                     debug_assert!(
                         !is_super_pair(&insn)
                             || self
@@ -445,7 +434,8 @@ impl ExecutionUnit for PpuExecutionUnit {
                 ExecuteVerdict::Fault(f) => {
                     // Capture diag before rollback so registers reflect the fault site.
                     // Address-bearing variants route the address through diag.faulting_ea
-                    // so the 16-bit low slot of the fault code stays clean of upper bits.
+                    // to keep the low 16 bits of the fault code free for the category-prefix
+                    // contract with cellgov_core.
                     let diag = match f {
                         PpuFault::InvalidAddress(a) => self.fault_diag_ea(step_pc, a),
                         PpuFault::PcOutOfRange(a) => self.fault_diag_ea(step_pc, a),
@@ -464,8 +454,8 @@ impl ExecutionUnit for PpuExecutionUnit {
                     effects.clear();
                     self.status = UnitStatus::Faulted;
                     // Syscall numbers (<= ~1024) and VMX sub-opcodes (<= 11 bits) fit
-                    // in the low 16 bits; mask defensively so a stray high bit cannot
-                    // corrupt the upper-16 fault category prefix.
+                    // in the low 16 bits; mask guards against an upper-bit collision
+                    // with the category prefix.
                     let code = match f {
                         PpuFault::PcOutOfRange(_) => FAULT_PC_OUT_OF_RANGE,
                         PpuFault::InvalidAddress(_) => FAULT_INVALID_ADDRESS,
@@ -506,7 +496,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     };
                 }
                 ExecuteVerdict::BufferFull => {
-                    // Yield without advancing PC so the store retries next step.
+                    // PC stays at the failing store so it retries next step.
                     self.store_buf.flush(effects, self.id);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::BudgetExhausted,
@@ -519,10 +509,9 @@ impl ExecutionUnit for PpuExecutionUnit {
             }
 
             if self.profile_mode {
-                // Profile the variant the unit actually dispatched, including
-                // quickenings (Mr, Slwi, ...) and super-pairs (LwzCmpwi, ...);
-                // re-decoding the raw word would attribute fused/quickened work
-                // back to its pre-rewrite encoding.
+                // Attribute work to the dispatched variant (quickenings,
+                // super-pairs) rather than the raw encoding, so fusion shows
+                // up in the profile instead of being hidden behind its origin.
                 let name = insn.variant_name();
                 *self.profile_insns.entry(name).or_insert(0) += 1;
                 if let Some(prev) = self.profile_prev {

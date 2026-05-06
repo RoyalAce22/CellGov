@@ -1,27 +1,10 @@
-//! PPU instruction execution: mutates `PpuState` and stages memory
-//! effects in response to a decoded `PpuInstruction`. Syscall
-//! dispatch is delegated to the runtime via `ExecuteVerdict::Syscall`.
+//! PPU instruction dispatch: decodes [`PpuInstruction`] variants to
+//! per-unit submodules, mutating [`PpuState`] and staging memory
+//! [`Effect`]s. Syscalls escape via [`ExecuteVerdict::Syscall`].
 //!
-//! The match dispatch in [`execute`] groups ISA variants by functional
-//! unit and delegates each group to a peer module:
-//!
-//! - [`mem`]: integer / atomic / vector / floating-point loads and
-//!   stores, plus `dcbz`.
-//! - [`branch`]: `b`/`bc`/`bclr`/`bcctr` and the BO/BI condition
-//!   evaluator they share.
-//! - [`alu`]: arithmetic, logical, shift, rotate, compare, and
-//!   CR/SPR moves.
-//! - [`vec`]: VMX / AltiVec register-to-register arithmetic. The
-//!   memory-touching vector ops (`lvx`, `lvlx`, `lvrx`, `stvx`)
-//!   live in [`mem`] so all loads / stores share one
-//!   store-buffer-forward / region-view path.
-//! - [`super_insn`]: predecoded shadow output -- quickened single
-//!   rewrites and super-paired 2-instruction fusions.
-//! - [`fp`](crate::fp): double-precision floating-point arithmetic.
-//!
-//! The shared load / store vocabulary ([`load_ze`], [`load_se`],
-//! [`buffer_store`], [`load_slice`]) lives here so cross-module
-//! re-imports don't form dependency chains.
+//! Memory-touching vector ops (`lvx`, `lvlx`, `lvrx`, `stvx`) route
+//! through [`mem`] rather than [`vec`] so every load / store shares
+//! one store-buffer-forward / region-view path.
 
 mod alu;
 mod branch;
@@ -46,13 +29,10 @@ pub enum ExecuteVerdict {
     Continue,
     /// PC was written explicitly; caller must not advance.
     Branch,
-    /// Yield to runtime syscall dispatch. The runtime classifier
-    /// rejects non-zero LEV before LV2 dispatch.
+    /// Yield to runtime syscall dispatch.
     Syscall {
-        /// LEV field of the `sc` instruction (Book III §2.3.1):
-        /// 0 = kernel syscall, 1 = hypercall (CBE Handbook §11.1),
-        /// LEV greater than 1 is reserved per Book I §2.4.2. PS3
-        /// usermode always issues LEV=0.
+        /// LEV field of `sc` (Book III 2.3.1): 0 = kernel syscall,
+        /// 1 = hypercall, greater than 1 reserved (Book I 2.4.2).
         lev: u8,
     },
     /// Architectural fault.
@@ -73,14 +53,14 @@ pub enum PpuFault {
     InvalidAddress(u64),
     /// Unsupported syscall number.
     UnsupportedSyscall(u64),
-    /// Decoded instruction had no execution arm (typically a VMX
-    /// sub-opcode the dispatcher does not yet handle). The payload
-    /// is the offending sub-opcode for diagnostics.
+    /// Decoded instruction had no execution arm; payload is the
+    /// offending sub-opcode.
     UnimplementedInstruction(u64),
 }
 
-/// Linear search for a `[ea, ea+len)` slice covered entirely by one
-/// region view.
+/// Linear search for `[ea, ea+len)` covered by one region view.
+///
+/// O(n) over `region_views`; n is small (single-digit) per dispatch.
 #[inline]
 pub(crate) fn load_slice<'a>(
     region_views: &[(u64, &'a [u8])],
@@ -98,15 +78,11 @@ pub(crate) fn load_slice<'a>(
     None
 }
 
-/// Zero-extending load; store buffer is checked first for forwarding.
+/// Zero-extending load with store-buffer forwarding.
 ///
-/// Fast path: a single buffered store fully covers the load, so
-/// `forward` returns `Some` and the region is not touched.
-///
-/// Slow path: read from the region view and overlay any buffered
-/// stores that overlap the range. Stitches multiple narrow stores
-/// (e.g. eight `stb`s) into a wider load (e.g. one `ld`), and merges
-/// partial overlaps with pre-block memory.
+/// Slow path overlays buffered stores onto the region view, so
+/// multi-store stitching (eight `stb`s read as one `ld`) and partial
+/// overlaps with pre-block memory both resolve correctly.
 #[inline]
 pub(crate) fn load_ze(
     region_views: &[(u64, &[u8])],
@@ -134,11 +110,7 @@ pub(crate) fn load_ze(
     })
 }
 
-/// Sign-extending load; store buffer is checked first for forwarding.
-///
-/// Same fast / slow path split as [`load_ze`]; the slow path overlays
-/// buffered stores onto pre-block memory so multi-store stitching and
-/// partial overlap both work.
+/// Sign-extending load with store-buffer forwarding. See [`load_ze`].
 #[inline]
 pub(crate) fn load_se(
     region_views: &[(u64, &[u8])],
@@ -147,10 +119,8 @@ pub(crate) fn load_se(
     size: u8,
 ) -> Result<u64, u64> {
     if let Some(val) = store_buf.forward(ea, size) {
-        // Forward packs `size` bytes right-aligned into a u128.
-        // Sign-extend from the size's MSB, not from u64 bit 63 --
-        // the latter is always 0 for sub-8-byte forwarding and would
-        // produce a positive result for a negative stored value.
+        // `forward` right-aligns `size` bytes; sign must come from
+        // the size's MSB, not u64 bit 63 (always 0 for sub-doubleword).
         return Ok(match size {
             1 => (val as u8 as i8) as i64 as u64,
             2 => (val as u16 as i16) as i64 as u64,
@@ -171,9 +141,6 @@ pub(crate) fn load_se(
         1 => (bytes[0] as i8) as i64 as u64,
         2 => i16::from_be_bytes([bytes[0], bytes[1]]) as i64 as u64,
         4 => i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as i64 as u64,
-        // Identity for 64-bit; sign-extending a doubleword is a no-op
-        // but the arm must exist so a future caller cannot fall to
-        // the silent-zero default.
         8 => u64::from_be_bytes(bytes),
         _ => {
             debug_assert!(false, "load_se: unexpected size {size}");
@@ -182,10 +149,11 @@ pub(crate) fn load_se(
     })
 }
 
-/// Stage a store and drop any same-unit reservation that overlaps
-/// the written byte range. Clearing must happen intra-step so a
-/// subsequent `stwcx` on the same line observes the invalidation
-/// without waiting for commit.
+/// Stage a store and drop any same-unit reservation overlapping
+/// the written range.
+///
+/// Reservation clearing is intra-step so a later `stwcx` in the
+/// same block observes the invalidation pre-commit.
 #[inline]
 pub(crate) fn buffer_store(
     store_buf: &mut StoreBuffer,
@@ -208,8 +176,9 @@ pub(crate) fn buffer_store(
 
 /// Execute one decoded PPU instruction.
 ///
-/// Loads check the store buffer before falling back to `region_views`.
-/// Stores stage into the buffer; the caller flushes at block boundaries.
+/// Caller flushes `store_buf` at block boundaries; on
+/// [`ExecuteVerdict::BufferFull`] the same instruction must be
+/// retried after a flush.
 pub fn execute(
     insn: &PpuInstruction,
     state: &mut PpuState,
@@ -219,7 +188,6 @@ pub fn execute(
     store_buf: &mut StoreBuffer,
 ) -> ExecuteVerdict {
     match *insn {
-        // Memory: integer / atomic / vector / FP loads and stores, plus dcbz.
         PpuInstruction::Lwz { .. }
         | PpuInstruction::Lbz { .. }
         | PpuInstruction::Lhz { .. }
@@ -272,7 +240,6 @@ pub fn execute(
             mem::execute(insn, state, unit_id, region_views, effects, store_buf)
         }
 
-        // Branches.
         PpuInstruction::B { .. }
         | PpuInstruction::Bc { .. }
         | PpuInstruction::Bclr { .. }
@@ -289,7 +256,6 @@ pub fn execute(
         | PpuInstruction::Crnor { .. }
         | PpuInstruction::Creqv { .. } => cr::execute(insn, state),
 
-        // Integer arithmetic / logical / shift / rotate / compare / CR-SPR moves.
         PpuInstruction::Addi { .. }
         | PpuInstruction::Addis { .. }
         | PpuInstruction::Subfic { .. }
@@ -362,16 +328,14 @@ pub fn execute(
         | PpuInstruction::Rldic { .. }
         | PpuInstruction::Rldimi { .. } => alu::execute(insn, state),
 
-        // Vector arithmetic.
         PpuInstruction::Vxor { vt, va, vb } => {
             let va = state.vr[va as usize];
             let vb = state.vr[vb as usize];
             state.vr[vt as usize] = va ^ vb;
             ExecuteVerdict::Continue
         }
-        // `lvx` rides the Vx encoding but is a memory load; route it
-        // to the mem dispatcher so all vector loads share one
-        // forwarding / region-view path.
+        // `lvx` (Vx xo=103) is a memory load encoded under the Vx
+        // form; route to mem so vector loads share the forwarding path.
         PpuInstruction::Vx {
             xo: 103,
             vt,
@@ -382,9 +346,8 @@ pub fn execute(
         PpuInstruction::Va { xo, vt, va, vb, vc } => vec::execute_va(state, xo, vt, va, vb, vc),
         PpuInstruction::Vsldoi { vt, va, vb, shb } => vec::execute_vsldoi(state, vt, va, vb, shb),
 
-        // Floating-point arithmetic. TODO(fp-rc): `_rc` is preserved
-        // at decode but record-form CR1 update is pending FPSCR
-        // plumbing.
+        // TODO(fp-rc): record-form CR1 update pending FPSCR plumbing;
+        // `_rc` is preserved at decode.
         PpuInstruction::Fp63 {
             xo,
             frt,
@@ -402,7 +365,6 @@ pub fn execute(
             rc: _rc,
         } => fp::execute_fp59(state, xo, frt, fra, frb, frc),
 
-        // Predecoded shadow output: quickenings + super-pairs.
         PpuInstruction::Li { .. }
         | PpuInstruction::Mr { .. }
         | PpuInstruction::Slwi { .. }
@@ -424,11 +386,6 @@ pub fn execute(
         | PpuInstruction::CmpwBc { .. }
         | PpuInstruction::Consumed => super_insn::execute(insn, state, region_views, store_buf),
 
-        // LEV is preserved at decode (Book III §2.3.1) and routed
-        // to the runtime so the classifier can reject hypercalls
-        // before LV2 dispatch. PS3 usermode always issues LEV=0;
-        // LEV=1 lands as `Lv2Request::Hypercall` (programming
-        // error in user code per Book I §2.4.2).
         PpuInstruction::Sc { lev } => ExecuteVerdict::Syscall { lev },
     }
 }

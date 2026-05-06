@@ -1,18 +1,9 @@
-//! `sys_fs` HLE implementations.
+//! `cellFs*` HLE forwarders onto the LV2 [`Lv2Request::Fs*`] dispatch arm.
 //!
-//! PSL1GHT-built titles call `cellFsOpen` / `cellFsRead` / etc.
-//! instead of issuing the raw `sys_fs_*` syscalls. Each handler
-//! here translates the HLE C-level signature into the matching
-//! [`Lv2Request::Fs*`] and routes through
-//! [`Runtime::dispatch_lv2_request`], so the title's HLE path
-//! sees the same FsStore-backed behaviour as the LV2 syscall path
-//! (manifest-registered blobs, EBOOT-adjacent USRDIR
-//! auto-discovery, fd allocator, error precedence).
-//!
-//! The wrappers do not call back into the [`HleContext`] adapter:
-//! `dispatch_lv2_request` already sets the syscall return value
-//! and applies effects via the runtime commit pipeline, which is
-//! the same path the raw-syscall arm uses.
+//! Both the HLE and raw-syscall paths bottom out in the same FsStore,
+//! whose contents are populated from the per-title manifest
+//! (registered blobs plus EBOOT-adjacent USRDIR auto-discovery). Fd
+//! allocation and errno precedence live in the LV2 arm, not here.
 
 use cellgov_event::UnitId;
 use cellgov_lv2::Lv2Request;
@@ -20,12 +11,10 @@ use cellgov_ps3_abi::nid::sys_fs as sys_fs_nid;
 
 use crate::runtime::Runtime;
 
-/// Every NID this module claims; sourced from
-/// [`cellgov_ps3_abi::nid::sys_fs::OWNED`].
 #[cfg(test)]
 pub(crate) const OWNED_NIDS: &[u32] = sys_fs_nid::OWNED;
 
-/// Dispatch entry point; returns `None` if the NID is not owned here.
+/// Returns `None` when the NID is not owned by this module.
 pub(crate) fn dispatch(
     runtime: &mut Runtime,
     source: UnitId,
@@ -46,11 +35,9 @@ pub(crate) fn dispatch(
 
 /// `cellFsOpen(const char *path, s32 oflag, s32 *fd, const void *arg, u64 size)`.
 ///
-/// `arg` and `size` carry per-flag extension data (e.g. mode bits
-/// when `O_CREAT` is set). The current LV2 dispatch arm rejects
-/// `O_CREAT` with ENOENT regardless, so passing `mode = 0` is
-/// faithful for the only path that succeeds today (read-only opens
-/// of manifest-registered blobs).
+/// `mode = 0` matches the only currently-supported path (read-only
+/// opens of manifest-registered blobs); the LV2 arm rejects `O_CREAT`
+/// with ENOENT regardless of the `arg`/`size` extension bytes.
 fn fs_open(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]) {
     let path_ptr = args[1] as u32;
     let flags = args[2] as u32;
@@ -191,8 +178,6 @@ mod tests {
             .register_blob("/foo".into(), b"hello".to_vec())
             .unwrap();
         write_path(&mut rt, 0x10000, b"/foo");
-        // args[0] = HLE syscall slot (unused by the handler).
-        // args[1] = path_ptr, args[2] = oflag, args[3] = fd_out_ptr.
         let args: [u64; 9] = [0x10000, 0x10000, 0, 0x20000, 0, 0, 0, 0, 0];
         rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0, "CELL_OK");
@@ -211,7 +196,6 @@ mod tests {
             read_syscall_return(&mut rt, unit_id) as u32,
             errno::CELL_ENOENT.code,
         );
-        // The LV2 dispatcher writes 0 to fd_out_ptr on ENOENT.
         assert_eq!(read_u32_be(&rt, 0x20000), 0);
     }
 
@@ -223,12 +207,10 @@ mod tests {
             .register_blob("/foo".into(), b"abcdef".to_vec())
             .unwrap();
         write_path(&mut rt, 0x10000, b"/foo");
-        // Open via the HLE path so the fd is FsStore-allocated.
         let open_args: [u64; 9] = [0x10000, 0x10000, 0, 0x20000, 0, 0, 0, 0, 0];
         rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
         let fd = read_u32_be(&rt, 0x20000);
-        // Read 4 bytes into 0x30000; nread out at 0x30100.
         let read_args: [u64; 9] = [0x10000, fd as u64, 0x30000, 4, 0x30100, 0, 0, 0, 0];
         rt.dispatch_hle(unit_id, sys_fs_nid::READ, &read_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
@@ -271,8 +253,10 @@ mod tests {
         rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args, None);
         let _ = read_syscall_return(&mut rt, unit_id);
         let fd = read_u32_be(&rt, 0x20000);
-        // SEEK_SET to offset 4 -> pos = 4.
-        let lseek_args: [u64; 9] = [0x10000, fd as u64, 4, 0 /* SET */, 0x30000, 0, 0, 0, 0];
+        let lseek_args: [u64; 9] = [
+            0x10000, fd as u64, 4, 0, /* SEEK_SET */
+            0x30000, 0, 0, 0, 0,
+        ];
         rt.dispatch_hle(unit_id, sys_fs_nid::LSEEK, &lseek_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
         assert_eq!(read_u64_be(&rt, 0x30000), 4);
@@ -290,11 +274,10 @@ mod tests {
         rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args, None);
         let _ = read_syscall_return(&mut rt, unit_id);
         let fd = read_u32_be(&rt, 0x20000);
-        // fstat into a 56-byte struct at 0x40000 (8-byte aligned).
         let fstat_args: [u64; 9] = [0x10000, fd as u64, 0x40000, 0, 0, 0, 0, 0, 0];
         rt.dispatch_hle(unit_id, sys_fs_nid::FSTAT, &fstat_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
-        // size lives at offset 40 of the CellFsStat struct.
+        // CellFsStat::st_size sits at offset 40.
         assert_eq!(read_u64_be(&rt, 0x40000 + 40), 11);
     }
 
@@ -347,9 +330,8 @@ mod canary_tests {
     fn owned_nids_all_claimed_by_dispatch() {
         for &nid in OWNED_NIDS {
             let (mut rt, unit_id) = canary_runtime();
-            // Provide aligned, in-bounds arg values so the LV2
-            // dispatch reaches a known errno (ENOENT / EBADF /
-            // EFAULT) without panicking on bad pointers.
+            // In-bounds, aligned pointers so LV2 reaches a known
+            // errno rather than faulting on the probe arguments.
             let args: [u64; 9] = [0x10000, 0x10100, 0x10200, 0x10300, 0x10400, 0, 0, 0, 0];
             let result = dispatch(&mut rt, unit_id, nid, &args);
             assert_eq!(

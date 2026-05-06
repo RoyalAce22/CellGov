@@ -1,28 +1,22 @@
-//! PPU architectural state.
-//!
-//! Pure data owned and mutated by `exec.rs`: GPR/FPR/VR register
-//! banks, PC, CR, LR, CTR, XER, the time base, and the per-unit
-//! reservation register.
+//! PPU architectural state: register banks and SPRs mutated by `exec.rs`.
 
 use cellgov_sync::ReservedLine;
 
-/// PPU general-purpose register count.
+/// Number of general-purpose registers (r0..r31).
 pub const GPR_COUNT: usize = 32;
-
-/// PPU floating-point register count.
+/// Number of floating-point registers (f0..f31).
 pub const FPR_COUNT: usize = 32;
-
-/// PPU vector register count (AltiVec / VMX).
+/// Number of vector registers (v0..v31).
 pub const VR_COUNT: usize = 32;
 
-/// Full PPU architectural state.
+/// PPU architectural register file and SPRs.
 #[derive(Clone)]
 pub struct PpuState {
-    /// General-purpose registers.
+    /// General-purpose registers r0..r31.
     pub gpr: [u64; GPR_COUNT],
-    /// Floating-point registers (raw f64 bit pattern).
+    /// Floating-point registers f0..f31 as raw f64 bit patterns.
     pub fpr: [u64; FPR_COUNT],
-    /// Vector registers, stored big-endian (byte 0 is the MSB).
+    /// Vector registers v0..v31; big-endian (byte 0 is MSB).
     pub vr: [u128; VR_COUNT],
     /// Program counter.
     pub pc: u64,
@@ -34,16 +28,15 @@ pub struct PpuState {
     pub ctr: u64,
     /// Fixed-point exception register.
     pub xer: u64,
-    /// Time base counter.
+    /// Time base register.
     pub tb: u64,
-    /// Per-unit reservation; the committed-side verdict lives in
-    /// [`cellgov_sync::ReservationTable`]. A `stwcx` / `stdcx`
-    /// succeeds only when both signals agree.
+    /// Per-unit half of the reservation; `stwcx`/`stdcx` succeeds only
+    /// when this and [`cellgov_sync::ReservationTable`] agree.
     pub reservation: Option<ReservedLine>,
 }
 
 impl PpuState {
-    /// Zeroed state: all registers, PC, and reservation cleared.
+    /// Construct a zeroed PPU state with no active reservation.
     pub fn new() -> Self {
         Self {
             gpr: [0u64; GPR_COUNT],
@@ -89,19 +82,18 @@ impl PpuState {
         self.cr = (self.cr & mask) | ((value as u32) << shift);
     }
 
-    /// XER carry bit (PPC bit 34 from the MSB = bit 29 from the LSB).
+    /// XER carry bit (PPC bit 34 from MSB = Rust bit 29 from LSB).
     pub fn xer_ca(&self) -> bool {
         (self.xer >> 29) & 1 != 0
     }
 
-    /// XER sticky-overflow bit (PPC bit 32 = Rust bit 31). Compare
-    /// instructions and dot-form CR0 updates concatenate this into
-    /// the LSB of the CR field.
+    /// XER sticky-overflow bit (PPC bit 32 = Rust bit 31). Dot-form
+    /// CR0 updates copy this into the LSB of the CR field.
     pub fn xer_so(&self) -> bool {
         (self.xer >> 31) & 1 != 0
     }
 
-    /// Set the XER carry bit without touching adjacent OV/SO bits.
+    /// Write XER carry bit (PPC bit 34 = Rust bit 29).
     pub fn set_xer_ca(&mut self, value: bool) {
         if value {
             self.xer |= 1 << 29;
@@ -110,9 +102,8 @@ impl PpuState {
         }
     }
 
-    /// Write OV and update the sticky SO bit. PPC bit 32 (SO) = Rust
-    /// bit 31; PPC bit 33 (OV) = Rust bit 30. SO is sticky: OR-in on
-    /// overflow, never cleared here (only `mtxer` clears it).
+    /// Write OV (Rust bit 30) and OR into sticky SO (Rust bit 31).
+    /// SO is never cleared here; only `mtxer` clears it.
     pub fn set_xer_ov(&mut self, overflow: bool) {
         if overflow {
             self.xer |= (1u64 << 31) | (1u64 << 30);
@@ -121,13 +112,8 @@ impl PpuState {
         }
     }
 
-    /// Set CR0 from a signed 64-bit result: LT/GT/EQ based on the
-    /// value as `i64`, plus the sticky SO bit copied from XER.
-    ///
-    /// Assumes 64-bit mode. In 32-bit mode, dot-form integer
-    /// arithmetic compares the sign-extended low 32 bits, not the
-    /// full 64-bit result. PS3 PPU always runs in 64-bit mode; this
-    /// function is unsafe to call from a 32-bit-mode code path.
+    /// Set CR0 LT/GT/EQ from `result as i64`, then OR in XER's SO bit.
+    /// 64-bit mode only; 32-bit mode would compare sign-extended low 32 bits.
     pub fn set_cr0_from_result(&mut self, result: u64) {
         let signed = result as i64;
         let mut nib = if signed < 0 {
@@ -157,24 +143,11 @@ impl PpuState {
         base.wrapping_add(self.gpr[rb as usize])
     }
 
-    /// FNV-1a fingerprint over GPR[0..32], LR, CTR, XER, CR, and the
-    /// reservation register.
-    ///
-    /// Excluded: PC, FPR, VR, and TB. PC is excluded because the
-    /// per-step trace records (pc, hash) pairs separately. FPR and VR
-    /// are excluded as a current-scope decision (FPSCR plumbing is
-    /// pending and a hash that does not yet reflect FP-side divergence
-    /// is more honest than one that pretends to). TB is excluded
-    /// because guest code that branches on TB produces downstream
-    /// GPR/CR divergence the hash does catch; bare-TB divergence with
-    /// no observable downstream effect does not change program
-    /// behavior, so omitting it does not lose meaningful coverage.
-    ///
-    /// Encoding: fields appended in little-endian byte order, in the
-    /// fixed sequence above, then a one-byte reservation tag (0
-    /// absent, 1 present) followed by the line address when present.
-    /// This is a tooling-local serialization, not a PPC endianness
-    /// statement.
+    /// FNV-1a over GPR[0..32], LR, CTR, XER, CR, and the reservation
+    /// register. PC, FPR, VR, and TB are excluded: PC is paired with
+    /// the hash at the trace level, and FP/VR/TB divergences surface
+    /// downstream through GPR/CR. Encoding is little-endian in the
+    /// listed order, then a 1-byte reservation tag and line address.
     pub fn state_hash(&self) -> u64 {
         let mut h = cellgov_mem::Fnv1aHasher::new();
         for r in &self.gpr {
@@ -201,22 +174,11 @@ impl Default for PpuState {
     }
 }
 
-/// Build the `[u64; 9]` syscall-args array from a PPU state at
-/// syscall-yield time, in the order
-/// [`cellgov_exec::ExecutionStepResult::syscall_args`] expects:
-/// index 0 carries the syscall number, indices 1..=8 carry the
-/// argument registers.
-///
-/// PS3 LV2 ABI mapping:
-/// - `args[0]` <- `r11` (syscall number)
-/// - `args[1..=8]` <- `r3..=r10` (call arguments; `r3` overlaps the
-///   PPC return register, but the response is written back through
-///   the runtime's syscall-response table, not by mutating the
-///   array)
-///
-/// Named so a future SPU implementation can grep for the convention
-/// and a divergent caller (e.g. one that put the syscall number in
-/// the wrong GPR) trips the test pinning the layout.
+/// PS3 LV2 syscall-args layout for
+/// [`cellgov_exec::ExecutionStepResult::syscall_args`]:
+/// `args[0] = r11` (syscall number), `args[1..=8] = r3..=r10`.
+/// Syscall responses flow through the runtime's response table, not
+/// by mutating this array.
 #[inline]
 pub fn ppu_syscall_args(state: &PpuState) -> [u64; 9] {
     [
@@ -275,9 +237,6 @@ mod tests {
 
     #[test]
     fn ea_x_form_ra_zero_uses_literal_zero() {
-        // Same `(ra|0)` rule as ea_d_form: ra=0 selects a literal zero
-        // base, not GPR[0]. Locks the parallel implementation against
-        // a refactor that drops the special case.
         let mut s = PpuState::new();
         s.gpr[0] = 0xDEAD;
         s.gpr[5] = 200;
@@ -286,21 +245,14 @@ mod tests {
 
     #[test]
     fn set_cr_field_preserves_other_fields() {
-        // cr_field_roundtrip starts from a zeroed CR, so a masking bug
-        // that overwrites adjacent fields with zero would be invisible.
-        // Pre-populate field 3 and field 5, then verify writing one
-        // does not disturb the other.
         let mut s = PpuState::new();
         s.set_cr_field(3, 0b1111);
         s.set_cr_field(5, 0b0101);
         assert_eq!(s.cr_field(3), 0b1111);
         assert_eq!(s.cr_field(5), 0b0101);
-        // Overwrite field 3 with a different value; field 5 must
-        // survive untouched.
         s.set_cr_field(3, 0b1010);
         assert_eq!(s.cr_field(3), 0b1010);
         assert_eq!(s.cr_field(5), 0b0101);
-        // Other fields stay zero.
         assert_eq!(s.cr_field(0), 0);
         assert_eq!(s.cr_field(7), 0);
     }
@@ -471,8 +423,6 @@ mod tests {
     #[test]
     fn ppu_syscall_args_maps_r11_to_index_0_and_r3_through_r10_to_1_through_8() {
         let mut s = PpuState::new();
-        // Distinguishable per-register sentinels so a wrong index
-        // surfaces by value rather than by absence.
         s.gpr[3] = 0xA300_0000_0000_0003;
         s.gpr[4] = 0xA400_0000_0000_0004;
         s.gpr[5] = 0xA500_0000_0000_0005;
@@ -482,7 +432,6 @@ mod tests {
         s.gpr[9] = 0xA900_0000_0000_0009;
         s.gpr[10] = 0xAA00_0000_0000_000A;
         s.gpr[11] = 0xAB00_0000_0000_000B;
-        // Other registers must NOT bleed into the args array.
         s.gpr[0] = 0xDEAD_BEEF_DEAD_BEEF;
         s.gpr[2] = 0xDEAD_BEEF_DEAD_BEEF;
         s.gpr[12] = 0xDEAD_BEEF_DEAD_BEEF;

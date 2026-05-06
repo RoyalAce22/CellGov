@@ -23,7 +23,6 @@ impl Lv2Host {
                 effects: vec![],
             };
         };
-        // Already exited: write exit value, no block.
         if matches!(
             target_thread.state,
             crate::ppu_thread::PpuThreadState::Finished
@@ -41,8 +40,8 @@ impl Lv2Host {
                 effects: vec![write],
             };
         }
-        // Falling back to the primary id on an untracked caller
-        // would fire the exit-wake on the wrong unit.
+        // No fallback to PRIMARY: that would route the exit-wake to
+        // the wrong unit when the caller is not in the table.
         let Some(caller_thread_id) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_ESRCH.into(),
@@ -69,8 +68,8 @@ impl Lv2Host {
                 code: errno::CELL_ESRCH.into(),
                 effects: vec![],
             },
-            // Both variants are ruled out by the pre-checks above;
-            // surface as an invariant break rather than panic.
+            // Pre-checks above eliminate both variants; reaching here
+            // means the table mutated mid-call.
             AddJoinWaiter::UnknownTarget | AddJoinWaiter::TargetAlreadyFinished => {
                 self.record_invariant_break(
                     "ppu_thread_join.add_join_waiter_unreachable",
@@ -96,14 +95,9 @@ impl Lv2Host {
         stacksize: u64,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // Resolve the 8-byte PS3 OPD (u32 BE code_addr || u32 BE toc)
-        // up front so a bad address fails the syscall before any
-        // stack or TLS allocation becomes observable.
-        //
-        // PS3 OPDs are 8 bytes with 4-byte fields, NOT the
-        // PowerOpen-spec 24-byte layout: empirically verified
-        // across foundation titles. Reading them as two u64s
-        // produces garbage entry/TOC values.
+        // PS3 OPD is 8 bytes (u32 BE code_addr || u32 BE toc), not
+        // the 24-byte PowerOpen layout. Resolve before allocating so
+        // a bad pointer fails without observable side effects.
         let opd_bytes = match rt.read_committed(entry_opd as u64, 8) {
             Some(bytes) => {
                 debug_assert_eq!(
@@ -132,7 +126,7 @@ impl Lv2Host {
         let entry_code = u32::from_be_bytes(opd_bytes[0..4].try_into().unwrap()) as u64;
         let entry_toc = u32::from_be_bytes(opd_bytes[4..8].try_into().unwrap()) as u64;
 
-        // ABI-required back-chain + register save area floor.
+        // 0x4000 floor covers the ABI back-chain + register save area.
         let size = stacksize.max(0x4000);
         let stack = match self.allocate_child_stack(size, 0x10) {
             Some(s) => s,
@@ -144,8 +138,8 @@ impl Lv2Host {
             }
         };
 
-        // Empty template => empty Vec (runtime treats as "no TLS,
-        // r13 = 0"). Non-empty: 16-aligned slot above the stack.
+        // Empty template encodes "no TLS, r13 = 0"; non-empty places
+        // the slot 16-aligned above the stack.
         let tls_bytes = self.tls_template.instantiate();
         let tls_base = if tls_bytes.is_empty() {
             0
@@ -153,9 +147,7 @@ impl Lv2Host {
             (stack.end() + 0xF) & !0xF
         };
 
-        // Guard against a future placement change that could land
-        // non-empty TLS at guest address 0; the runtime's own
-        // defense-in-depth assert would fire afterwards.
+        // Non-empty TLS at guest 0 would alias the empty-template sentinel.
         if !tls_bytes.is_empty() && tls_base == 0 {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EINVAL.into(),
@@ -172,9 +164,8 @@ impl Lv2Host {
                 extra_args: [0; 7],
                 stack_top: stack.initial_sp(),
                 tls_base,
-                // Well-behaved guests call sys_ppu_thread_exit
-                // explicitly, so an unreachable 0 fallthrough is
-                // safe.
+                // Guests exit via sys_ppu_thread_exit; LR=0 traps a
+                // fallthrough return.
                 lr_sentinel: 0,
             },
             stack_base: stack.base,
@@ -190,18 +181,15 @@ impl Lv2Host {
         exit_value: u64,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Clear the exiting thread's lwmutex hold count regardless of
-        // whether the thread actually called unlock; abnormal exit
-        // (or a printf path that bypasses our HLE unlock wrapper)
-        // would otherwise leak the count forever.
+        // Abnormal exit (or any path that skips the HLE unlock wrapper)
+        // would otherwise leak the hold count forever.
         if let Some(tid) = self.ppu_threads.thread_id_for_unit(requester) {
             self.lwmutex_holds_clear(tid);
         }
         let waiters_unit_ids = match self.ppu_threads.thread_id_for_unit(requester) {
             Some(tid) => {
-                // A waiter whose table entry disappears between
-                // join-time and wake is logged by
-                // resolve_wake_thread; surviving waiters still wake.
+                // resolve_wake_thread filters waiters whose table
+                // entry vanished between join and wake.
                 let waiter_thread_ids = self.ppu_threads.mark_finished(tid, exit_value);
                 waiter_thread_ids
                     .into_iter()
@@ -209,9 +197,8 @@ impl Lv2Host {
                     .collect()
             }
             None => {
-                // Empty table = legitimate pre-seed (testkit).
-                // Non-empty + absent caller = mid-run divergence
-                // that would strand joiners.
+                // Empty table is a legitimate pre-seed (testkit);
+                // non-empty + absent caller would strand joiners.
                 if !self.ppu_threads.is_empty() {
                     self.record_invariant_break(
                         "ppu_thread_exit.unknown_caller",
@@ -234,12 +221,12 @@ impl Lv2Host {
         }
     }
 
-    /// Drain one waiter from every kernel lwmutex sleep queue.
-    /// Called when a thread exits without unlocking the lwmutexes
-    /// it held in user space. The kernel side has no owner record,
-    /// so we instead transfer one waiter per non-empty entry; the
-    /// woken waiter's `LwMutexWake` pending response handles the
-    /// user-space owner / waiter / recursive_count fix-up.
+    /// Transfer one waiter from each non-empty kernel lwmutex queue.
+    ///
+    /// Kernel lwmutex entries carry no owner record, so on thread
+    /// exit we cannot identify the held set; we wake one waiter per
+    /// non-empty queue and rely on each `LwMutexWake` pending
+    /// response to fix up user-space owner / waiter / recursive_count.
     fn release_held_lwmutexes_on_exit(&mut self) -> Vec<UnitId> {
         let ids: Vec<u32> = self
             .lwmutexes

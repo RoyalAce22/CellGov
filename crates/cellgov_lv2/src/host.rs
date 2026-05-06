@@ -1,9 +1,14 @@
-//! `Lv2Host` -- the LV2 model the runtime calls into.
+//! LV2 model the runtime calls into.
 //!
-//! The runtime calls `dispatch` once per PPU syscall yield,
-//! synchronously during the same `step()` that observed the yield.
-//! The host reads guest memory through the `Lv2Runtime` trait and
-//! returns an `Lv2Dispatch` telling the runtime what to do.
+//! # Cross-module contract
+//!
+//! The runtime calls [`Lv2Host::dispatch`] once per PPU syscall yield,
+//! synchronously inside the same `step()` that observed the yield.
+//! During the call the host reads guest memory through the
+//! [`Lv2Runtime`] trait and returns an [`Lv2Dispatch`] telling the
+//! runtime what guest-visible work to perform. The host never writes
+//! guest memory directly; every write travels back to the runtime as
+//! an `Effect` so the commit pipeline orders it.
 
 pub use self::rsx::{
     SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,
@@ -31,42 +36,31 @@ use cellgov_time::GuestTicks;
 
 /// Readonly view of runtime state exposed to the host during dispatch.
 ///
-/// `read_committed` is the primary channel by which the host observes
-/// guest memory; `current_tick` stamps LV2-sourced effects so they
-/// participate in commit-pipeline ordering at the triggering
-/// syscall's tick rather than tick 0.
+/// `current_tick` stamps LV2-sourced effects so they participate in
+/// commit-pipeline ordering at the triggering syscall's tick rather
+/// than tick 0.
 pub trait Lv2Runtime {
-    /// Read `len` bytes of committed guest memory starting at `addr`.
-    ///
     /// # Contract
     /// `Some(bytes)` must carry exactly `len` bytes; short reads are
     /// a trait violation. `None` means the range is out of bounds.
     fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]>;
 
-    /// Global guest tick of the in-flight dispatch.
+    /// Current guest tick.
     fn current_tick(&self) -> GuestTicks;
 
-    /// Read up to `max_len` bytes from `addr`, stopping at and
-    /// including the first occurrence of `terminator`. Returns the
-    /// prefix BEFORE the terminator (the terminator byte itself is
-    /// not in the returned slice).
+    /// Read up to `max_len` bytes from `addr`, returning the prefix
+    /// before the first `terminator` byte (terminator excluded).
     ///
     /// # Returns
     /// - `Some(bytes)` with `bytes.len() < max_len` when a terminator
     ///   is found within the first `max_len` mapped bytes.
-    /// - `None` when `addr` is unmapped, OR when no terminator
-    ///   appears within `max_len` mapped bytes, OR when the address
-    ///   is in a `ReservedStrict` region.
-    ///
-    /// The default impl walks one byte at a time via
-    /// [`Self::read_committed`]; concrete impls may override with a
-    /// region-aware bulk scan.
+    /// - `None` when `addr` is unmapped, no terminator appears within
+    ///   `max_len` mapped bytes, or the address is in a
+    ///   `ReservedStrict` region.
     fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]>;
 
-    /// True iff a `len`-byte write starting at `addr` would land
-    /// entirely inside a single `ReadWrite` region. False when the
-    /// range straddles a region boundary, lands in a reserved region,
-    /// or is unmapped.
+    /// True iff a `len`-byte write at `addr` lands entirely inside a
+    /// single `ReadWrite` region.
     fn writable(&self, addr: u64, len: usize) -> bool;
 }
 
@@ -96,9 +90,8 @@ pub struct Lv2Host {
     ppu_threads: PpuThreadTable,
     tls_template: TlsTemplate,
     stack_allocator: ThreadStackAllocator,
-    /// Shared kernel-object id counter for mutexes, semaphores,
-    /// event queues, event flags, and conds. `lwmutexes` has its
-    /// own allocator starting at 1.
+    /// Shared id allocator for mutex / semaphore / event-queue /
+    /// event-flag / cond. `lwmutexes` has its own allocator from 1.
     next_kernel_id: u32,
     mem_alloc_ptr: u32,
     /// Separate bump cursor so the RSX-visible region cannot collide
@@ -114,49 +107,41 @@ pub struct Lv2Host {
     conds: CondTable,
     /// Dispatch-local scratch; not folded into [`Self::state_hash`].
     current_tick: GuestTicks,
-    /// Running count of host-invariant breaks caught defensively.
-    /// Zero in a clean run; non-zero means at least one wake or
-    /// table update fell back to a degraded response. Not hashed.
+    /// Running count of host-invariant breaks. Non-zero means at
+    /// least one wake or table update fell back to a degraded
+    /// response. Not hashed.
     invariant_break_count: usize,
     /// Captured `sys_tty_write` byte stream in dispatch order.
-    ///
-    /// Each successful TtyWrite appends `buf_ptr..buf_ptr+len` of
-    /// guest memory; unmapped buffers append nothing. Observation
-    /// channel only -- not folded into [`Self::state_hash`].
+    /// Observation channel; not folded into [`Self::state_hash`].
     tty_log: Vec<u8>,
-    /// Live-object counters for primitives CellGov stubs as ID
-    /// allocators only. These feed `sys_process_get_number_of_object`
-    /// without modeling the primitives' semantic surfaces.
+    /// Live-object counters for primitives stubbed as ID allocators
+    /// only; feed `sys_process_get_number_of_object`.
     timer_count: u32,
     rwlock_count: u32,
     event_port_count: u32,
     lwcond_count: u32,
-    /// Live count of file descriptors opened via `sys_fs_open`.
-    /// `sys_fs_close` decrements; feeds the SYS_FS_FD_OBJECT (0x73)
-    /// query in `sys_process_get_number_of_object`.
+    /// Live count of file descriptors opened via `sys_fs_open`;
+    /// feeds the `SYS_FS_FD_OBJECT` (0x73) query.
     fs_fd_count: u32,
-    /// In-memory filesystem layer. Populated at boot from the
-    /// per-title content manifest; consumed by the `sys_fs_*`
-    /// dispatch handlers in `host/fs.rs`.
     fs_store: FsStore,
-    /// Per-thread count of distinct lwmutexes the thread currently
-    /// holds. Recursive re-acquires of the same lwmutex do not bump
-    /// the count; only first-acquire (FREE -> me) and kernel-side
-    /// transfer (LwMutexWake) do. Read by the runtime to drive
-    /// critical-section-aware scheduler stickiness so a unit holding
-    /// stdio's lwmutex is not preempted mid-printf by a budget tick.
+    /// Per-thread count of distinct lwmutexes held. Recursive
+    /// re-acquires of the same lwmutex do not bump the count; only
+    /// first-acquire (FREE -> me) and kernel-side transfer
+    /// (LwMutexWake) do. Read by the runtime to drive
+    /// critical-section-aware scheduler stickiness.
     lwmutex_holds: BTreeMap<PpuThreadId, u32>,
     /// Worker -> (parent unit, stage) linkage for callback-dispatch
-    /// workers spawned via [`Self::call_guest_callback_sync`]. The
-    /// parent stays parked until its worker hits the trampoline; at
-    /// that point the dispatch arm consumes this entry to build the
-    /// wake response. `BTreeMap` for deterministic iteration.
+    /// workers spawned via [`Self::call_guest_callback_sync`].
+    ///
+    /// # Cross-module contract
+    /// The parent unit stays parked while its entry is present.
+    /// `dispatch_callback_return` consumes the entry to build the
+    /// wake response; if the worker terminates without producing a
+    /// return event, the entry leaks and the parent never wakes.
+    /// `BTreeMap` for deterministic iteration.
     callback_parents: BTreeMap<PpuThreadId, (UnitId, crate::dispatch::CallbackReturnStage)>,
-    /// Per-parent recursion depth. A callback running on a worker
-    /// may itself call `call_guest_callback_sync`, spawning a fresh
-    /// worker; the depth tracker caps this at
-    /// `cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP` to
-    /// catch runaway recursion.
+    /// Per-parent recursion depth, capped at
+    /// `cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP`.
     callback_depth: BTreeMap<UnitId, u8>,
 }
 
@@ -175,7 +160,7 @@ impl Lv2Host {
     /// Upper bound (exclusive) of the sys_rsx memory region.
     pub const SYS_RSX_MEM_END: u32 = Self::SYS_RSX_MEM_BASE + 0x1000_0000;
 
-    /// Construct an empty host.
+    /// Construct an empty host with default tables and id allocators.
     pub fn new() -> Self {
         Self {
             content: ContentStore::new(),
@@ -183,7 +168,7 @@ impl Lv2Host {
             ppu_threads: PpuThreadTable::new(),
             tls_template: TlsTemplate::empty(),
             stack_allocator: ThreadStackAllocator::new(),
-            next_kernel_id: 0x4000_0001, // start above zero to catch uninitialized use
+            next_kernel_id: 0x4000_0001, // non-zero to catch uninitialized use
             mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
             rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
             rsx_mem_handle_counter: 1,
@@ -209,38 +194,32 @@ impl Lv2Host {
         }
     }
 
-    /// Read-only view of the in-memory FS layer. Used by `sys_fs_*`
-    /// handlers and for diagnostic readouts; mutation goes through
-    /// [`Self::fs_store_mut`].
+    /// Read-only view of the in-memory filesystem store.
     pub fn fs_store(&self) -> &FsStore {
         &self.fs_store
     }
 
-    /// Mutable view of the in-memory FS layer. Used by the manifest
-    /// loader at boot to register blobs, and by the `sys_fs_*`
-    /// handlers to allocate / advance / release fds.
+    /// Mutable view of the in-memory filesystem store.
     pub fn fs_store_mut(&mut self) -> &mut FsStore {
         &mut self.fs_store
     }
 
-    /// Number of distinct lwmutexes `tid` currently holds. `0` for
-    /// untracked threads.
+    /// Distinct lwmutexes currently held by `tid`.
     pub fn lwmutex_holds_for(&self, tid: PpuThreadId) -> u32 {
         self.lwmutex_holds.get(&tid).copied().unwrap_or(0)
     }
 
-    /// Record that `tid` just acquired one more distinct lwmutex.
+    /// # Contract
     /// Recursive re-acquires (where `tid` was already the owner)
-    /// MUST NOT call this; only first-acquire and kernel-side
-    /// transfer do.
+    /// must not call this; only first-acquire (FREE -> me) and
+    /// kernel-side transfer paths bump the count.
     pub fn lwmutex_holds_inc(&mut self, tid: PpuThreadId) {
         let slot = self.lwmutex_holds.entry(tid).or_insert(0);
         *slot = slot.saturating_add(1);
     }
 
-    /// Record that `tid` just fully released one lwmutex (recursive
-    /// count went 1 -> 0). Saturates at 0; an underflow would
-    /// indicate a leak in the increment path.
+    /// Saturates at 0; underflow signals a leak in the increment
+    /// path.
     pub fn lwmutex_holds_dec(&mut self, tid: PpuThreadId) {
         if let Some(slot) = self.lwmutex_holds.get_mut(&tid) {
             *slot = slot.saturating_sub(1);
@@ -250,15 +229,13 @@ impl Lv2Host {
         }
     }
 
-    /// Drop any tracked count for `tid`. Used at thread-exit and on
-    /// stale-owner recovery (so a never-decremented count from a
-    /// dead thread does not leak forever).
+    /// Drop any tracked count for `tid`; used at thread-exit and
+    /// stale-owner recovery so a dead thread's count does not leak.
     pub fn lwmutex_holds_clear(&mut self, tid: PpuThreadId) {
         self.lwmutex_holds.remove(&tid);
     }
 
-    /// Whether the unit's current PPU thread holds at least one
-    /// lwmutex. `false` if the unit has no PPU thread mapping.
+    /// `false` when `unit` has no PPU thread mapping.
     pub fn unit_holds_lwmutex(&self, unit: UnitId) -> bool {
         match self.ppu_threads.thread_id_for_unit(unit) {
             Some(tid) => self.lwmutex_holds_for(tid) > 0,
@@ -266,23 +243,20 @@ impl Lv2Host {
         }
     }
 
-    /// Increment the open-fd counter; the `sys_fs_open` whitelist
-    /// path uses this to surface a live fd in
-    /// `sys_process_get_number_of_object`. No decrement counterpart:
-    /// real PS3's `sys_fs_close` does not drop the kernel-side
-    /// fs-object count synchronously, and the ps3autotests
-    /// sys_process matrix shows `fs_fd` staying at 1 after `fclose`.
+    /// No decrement counterpart: real PS3's `sys_fs_close` does not
+    /// drop the kernel-side fs-object count synchronously, and the
+    /// ps3autotests `sys_process` matrix shows `fs_fd` staying at 1
+    /// after `fclose`.
     pub(super) fn fs_fd_count_inc(&mut self) {
         self.fs_fd_count = self.fs_fd_count.saturating_add(1);
     }
 
-    /// Increment the lwcond live-object counter; called by the HLE
-    /// `sys_lwcond_create` shim.
+    /// Increment the live `sys_lwcond` object count.
     pub fn lwcond_count_inc(&mut self) {
         self.lwcond_count = self.lwcond_count.saturating_add(1);
     }
 
-    /// Decrement the lwcond live-object counter.
+    /// Decrement the live `sys_lwcond` object count, saturating at 0.
     pub fn lwcond_count_dec(&mut self) {
         self.lwcond_count = self.lwcond_count.saturating_sub(1);
     }
@@ -293,7 +267,7 @@ impl Lv2Host {
         &self.tty_log
     }
 
-    /// Running total of invariant breaks caught defensively.
+    /// Running count of host-invariant breaks observed during dispatch.
     #[inline]
     pub fn invariant_break_count(&self) -> usize {
         self.invariant_break_count
@@ -310,8 +284,8 @@ impl Lv2Host {
     }
 
     /// Log-once without `debug_assert!`, for paths reachable by
-    /// guest input during normal operation (`Unsupported` syscalls
-    /// hit during real boots).
+    /// guest input during normal operation (e.g. `Unsupported`
+    /// syscalls during real boots).
     fn log_invariant_break(&mut self, site: &'static str, details: std::fmt::Arguments<'_>) {
         if self.invariant_break_count == 0 {
             eprintln!("lv2 host invariant break at {site}: {details}");
@@ -319,11 +293,9 @@ impl Lv2Host {
         self.invariant_break_count = self.invariant_break_count.saturating_add(1);
     }
 
-    /// Resolve a waiter `PpuThreadId` to its `UnitId`.
-    ///
     /// `None` means the thread table and the primitive diverged;
-    /// this is logged as an invariant break so the caller can skip
-    /// the wake and leave surviving waiters intact.
+    /// the divergence is logged as an invariant break so the caller
+    /// can skip the wake and leave surviving waiters intact.
     pub(super) fn resolve_wake_thread(
         &mut self,
         thread: PpuThreadId,
@@ -344,8 +316,6 @@ impl Lv2Host {
         }
     }
 
-    /// Override the bump-allocator cursor.
-    ///
     /// Callers that load a real ELF must set this to the
     /// 64KB-aligned address above the ELF's highest PT_LOAD end;
     /// the default (`0x0001_0000`) assumes no ELF is loaded and
@@ -354,7 +324,7 @@ impl Lv2Host {
         self.mem_alloc_ptr = base;
     }
 
-    /// Current sys_rsx context bookkeeping.
+    /// Read-only view of the sys_rsx host context.
     #[inline]
     pub fn sys_rsx_context(&self) -> &SysRsxContext {
         &self.rsx_context
@@ -366,58 +336,57 @@ impl Lv2Host {
         id
     }
 
-    /// SPU image registry.
+    /// Read-only view of the per-title content manifest store.
     pub fn content_store(&self) -> &ContentStore {
         &self.content
     }
 
-    /// Mutable image registry; tests pre-register images.
+    /// Mutable view of the per-title content manifest store.
     pub fn content_store_mut(&mut self) -> &mut ContentStore {
         &mut self.content
     }
 
-    /// SPU thread group table.
+    /// Read-only view of the SPU thread-group table.
     pub fn thread_groups(&self) -> &ThreadGroupTable {
         &self.groups
     }
 
-    /// Mutable thread group table.
+    /// Mutable view of the SPU thread-group table.
     pub fn thread_groups_mut(&mut self) -> &mut ThreadGroupTable {
         &mut self.groups
     }
 
-    /// PPU thread table.
+    /// Read-only view of the PPU thread table.
     pub fn ppu_threads(&self) -> &PpuThreadTable {
         &self.ppu_threads
     }
 
-    /// Mutable PPU thread table.
+    /// Mutable view of the PPU thread table.
     pub fn ppu_threads_mut(&mut self) -> &mut PpuThreadTable {
         &mut self.ppu_threads
     }
 
-    /// Seed the primary PPU thread; call exactly once after the
-    /// primary PPU unit is registered.
+    /// Call exactly once after the primary PPU unit is registered.
     pub fn seed_primary_ppu_thread(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) {
         self.ppu_threads.insert_primary(unit_id, attrs);
     }
 
-    /// Look up a PPU thread by runtime `UnitId`.
+    /// Look up the PPU thread record bound to `unit_id`, if any.
     pub fn ppu_thread_for_unit(&self, unit_id: UnitId) -> Option<&PpuThread> {
         self.ppu_threads.get_by_unit(unit_id)
     }
 
-    /// Resolve a runtime `UnitId` to its guest-facing `PpuThreadId`.
+    /// Look up the PPU thread id bound to `unit_id`, if any.
     pub fn ppu_thread_id_for_unit(&self, unit_id: UnitId) -> Option<PpuThreadId> {
         self.ppu_threads.thread_id_for_unit(unit_id)
     }
 
-    /// True when the unit's backing `PpuThread` is in `Finished`
-    /// state. Used by the runtime to mirror a host-driven thread
-    /// finish (e.g. callback worker terminal trampoline) into the
-    /// unit's lifecycle so the PPU execution loop stops fetching.
-    /// Returns false when the unit is not a PPU thread or its thread
-    /// is still Running / Detached.
+    /// True when the unit's backing `PpuThread` is `Finished`. The
+    /// runtime mirrors a host-driven thread finish (callback-worker
+    /// terminal trampoline) into the unit's lifecycle so the PPU
+    /// execution loop stops fetching past the trampoline `sc 0`.
+    /// `false` when the unit is not a PPU thread or the thread is
+    /// still `Running` / `Detached`.
     pub fn is_ppu_thread_finished_for_unit(&self, unit_id: UnitId) -> bool {
         match self.ppu_threads.get_by_unit(unit_id) {
             Some(thread) => matches!(thread.state, crate::ppu_thread::PpuThreadState::Finished),
@@ -425,82 +394,82 @@ impl Lv2Host {
         }
     }
 
-    /// Capture the game ELF's PT_TLS template.
+    /// Install the TLS template used for new PPU threads.
     pub fn set_tls_template(&mut self, template: TlsTemplate) {
         self.tls_template = template;
     }
 
-    /// Captured PT_TLS template.
+    /// Read-only view of the installed TLS template.
     pub fn tls_template(&self) -> &TlsTemplate {
         &self.tls_template
     }
 
-    /// Lightweight mutex table.
+    /// Read-only view of the lwmutex table.
     pub fn lwmutexes(&self) -> &LwMutexTable {
         &self.lwmutexes
     }
 
-    /// Mutable lwmutex table.
+    /// Mutable view of the lwmutex table.
     pub fn lwmutexes_mut(&mut self) -> &mut LwMutexTable {
         &mut self.lwmutexes
     }
 
-    /// Heavy mutex table.
+    /// Read-only view of the mutex table.
     pub fn mutexes(&self) -> &MutexTable {
         &self.mutexes
     }
 
-    /// Mutable mutex table.
+    /// Mutable view of the mutex table.
     pub fn mutexes_mut(&mut self) -> &mut MutexTable {
         &mut self.mutexes
     }
 
-    /// Counting semaphore table.
+    /// Read-only view of the semaphore table.
     pub fn semaphores(&self) -> &SemaphoreTable {
         &self.semaphores
     }
 
-    /// Mutable semaphore table.
+    /// Mutable view of the semaphore table.
     pub fn semaphores_mut(&mut self) -> &mut SemaphoreTable {
         &mut self.semaphores
     }
 
-    /// Event queue table.
+    /// Read-only view of the event-queue table.
     pub fn event_queues(&self) -> &EventQueueTable {
         &self.event_queues
     }
 
-    /// Mutable event queue table.
+    /// Mutable view of the event-queue table.
     pub fn event_queues_mut(&mut self) -> &mut EventQueueTable {
         &mut self.event_queues
     }
 
-    /// Event flag table.
+    /// Read-only view of the event-flag table.
     pub fn event_flags(&self) -> &EventFlagTable {
         &self.event_flags
     }
 
-    /// Cond table.
+    /// Read-only view of the condition-variable table.
     pub fn conds(&self) -> &CondTable {
         &self.conds
     }
 
-    /// Mutable cond table.
+    /// Mutable view of the condition-variable table.
     pub fn conds_mut(&mut self) -> &mut CondTable {
         &mut self.conds
     }
 
-    /// Mutable event flag table.
+    /// Mutable view of the event-flag table.
     pub fn event_flags_mut(&mut self) -> &mut EventFlagTable {
         &mut self.event_flags
     }
 
-    /// Reserve a child-thread stack block.
+    /// Allocate a new child-thread stack of `size` bytes at `align`.
     pub fn allocate_child_stack(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
         self.stack_allocator.allocate(size, align)
     }
 
-    /// Register `unit_id` as an SPU in `group_id` at `slot`.
+    /// Bind an SPU `unit_id` to `(group_id, slot)` in the group table.
     pub fn record_spu(
         &mut self,
         unit_id: cellgov_event::UnitId,
@@ -510,8 +479,6 @@ impl Lv2Host {
         self.groups.record_spu(unit_id, group_id, slot)
     }
 
-    /// Notify that the SPU `unit_id` has finished.
-    ///
     /// Returns `Ok(Some(group_id))` when this notify drove the
     /// group to `Finished`.
     pub fn notify_spu_finished(
@@ -530,6 +497,11 @@ impl Lv2Host {
     /// and `mem_alloc_ptr` always contribute, so a
     /// created-then-destroyed primitive still advances the hash via
     /// allocator state once the table empties again.
+    ///
+    /// # Cost
+    /// Linear in the number of live primitives plus per-thread
+    /// lwmutex-hold and callback-parent map sizes; runs once per
+    /// commit boundary.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for source in [self.content.state_hash(), self.groups.state_hash()] {
@@ -597,15 +569,22 @@ impl Lv2Host {
         hasher.finish()
     }
 
-    /// Dispatch a syscall request; called once per PPU syscall yield.
+    /// Dispatch one syscall request.
+    ///
+    /// # Cross-module contract
+    /// Called once per PPU syscall yield, synchronously inside the
+    /// runtime's `step()`. The returned [`Lv2Dispatch`] is the
+    /// host's complete response: any guest-memory writes ride as
+    /// `Effect`s the runtime feeds into the commit pipeline. The
+    /// host snapshots `rt.current_tick()` on entry so every effect
+    /// it builds is stamped at the triggering syscall's tick rather
+    /// than tick 0.
     pub fn dispatch(
         &mut self,
         request: Lv2Request,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // Snapshot the tick so every helper below stamps LV2-sourced
-        // effects at the triggering syscall's tick.
         self.current_tick = rt.current_tick();
         match request {
             Lv2Request::SpuImageOpen { img_ptr, path_ptr } => {
@@ -626,8 +605,6 @@ impl Lv2Host {
                 status_ptr,
             } => self.dispatch_group_join(group_id, cause_ptr, status_ptr, requester),
             Lv2Request::SpuThreadGroupTerminate { group_id, value } => {
-                // Routed separately from Join so the ABI shape is
-                // preserved; SPU teardown is not yet modelled.
                 self.log_invariant_break(
                     "dispatch.spu_thread_group_terminate_stub",
                     format_args!(
@@ -784,9 +761,8 @@ impl Lv2Host {
                 ..
             } => self.dispatch_memory_allocate(size, alloc_addr_ptr, requester),
             Lv2Request::MemoryFree { .. } => {
-                // No deallocation tracking; every call returns
-                // CELL_OK. Titles that key on free's errno will
-                // misbehave.
+                // No dealloc tracking; titles keying on free's
+                // errno will misbehave.
                 Lv2Dispatch::Immediate {
                     code: 0u64,
                     effects: vec![],
@@ -796,9 +772,9 @@ impl Lv2Host {
                 let id = self.alloc_id();
                 self.immediate_write_u32(id, cid_ptr, requester)
             }
+            // The round-robin walk advances on the syscall yield
+            // itself, so the host has nothing further to do.
             Lv2Request::PpuThreadYield => Lv2Dispatch::Immediate {
-                // Pure scheduler hint; the round-robin walk advances
-                // on the syscall yield itself.
                 code: 0,
                 effects: vec![],
             },
@@ -919,9 +895,9 @@ impl Lv2Host {
                 a6,
             } => self.dispatch_sys_rsx_context_attribute(context_id, package_id, a3, a4, a5, a6),
             // _sys_prx_start_module: liblv2 calls this with id=0
-            // (our _sys_prx_load_module stub returns 0), and a
-            // CELL_OK response leaves it reading uninitialized
-            // stack. Real LV2 returns EINVAL for id=0/null pOpt.
+            // (our _sys_prx_load_module stub returns 0); CELL_OK
+            // leaves it reading uninitialized stack. Real LV2
+            // returns EINVAL for id=0/null pOpt.
             Lv2Request::Unsupported { number: 481, .. } => Lv2Dispatch::Immediate {
                 code: errno::CELL_EINVAL.into(),
                 effects: vec![],
@@ -936,10 +912,8 @@ impl Lv2Host {
                 code: 0u64,
                 effects: vec![],
             },
-            // Process-identity stubs: PSL1GHT tests probe these and
-            // rely on the spec PID/PPID/GUID values. Real LV2 derives
-            // these from the loaded process; CellGov hosts a single
-            // synthetic process so the values are constants.
+            // CellGov hosts a single synthetic process; PSL1GHT
+            // tests rely on these spec PID/PPID/GUID constants.
             Lv2Request::ProcessGetPid => Lv2Dispatch::Immediate {
                 code: 0x0100_0500,
                 effects: vec![],
@@ -1005,10 +979,9 @@ impl Lv2Host {
                 }
             }
             Lv2Request::CallbackDispatchSpawn { .. } => {
-                // CallbackDispatchSpawn is fabricated internally by
-                // HLE handlers via `call_guest_callback_sync`; the
-                // classifier never decodes it, so reaching this arm
-                // through `dispatch` is a layering bug.
+                // Fabricated internally via `call_guest_callback_sync`;
+                // reaching dispatch through `Lv2Request` is a layering
+                // bug -- the classifier never decodes this variant.
                 self.record_invariant_break(
                     "dispatch.callback_dispatch_spawn_via_request",
                     format_args!(
@@ -1027,9 +1000,8 @@ impl Lv2Host {
             }
             Lv2Request::Hypercall { lev, r11, args } => {
                 // PS3 usermode never issues `sc` with LEV != 0
-                // (Book I §2.4.2). Surface as an invariant break
-                // and reject with CELL_EINVAL rather than letting
-                // the call fall through to the LV2 table.
+                // (Book I 2.4.2); reject with CELL_EINVAL rather
+                // than letting the call fall through to LV2.
                 self.log_invariant_break(
                     "dispatch.hypercall_rejected",
                     format_args!(
@@ -1081,8 +1053,8 @@ impl Lv2Host {
     }
 
     /// Append the TTY buffer into [`Self::tty_log`] and write
-    /// nwritten back. An unmapped buffer skips the append and still
-    /// reports `len` written; matching the existing CELL_OK shape.
+    /// `nwritten` back. An unmapped buffer skips the append and
+    /// still reports `len` written.
     pub(super) fn dispatch_tty_write(
         &mut self,
         buf_ptr: u32,
@@ -1099,12 +1071,11 @@ impl Lv2Host {
         self.immediate_write_u32(len, nwritten_ptr, requester)
     }
 
-    /// Per-class active-object count for `sys_process_get_number_of_object`.
-    /// Maps class ids from `sys_process.h`'s `SYS_*_OBJECT` enum onto
-    /// CellGov's internal LV2 tables; classes we do not model
-    /// (mem-container, intr-tag, timer, fs_fd, ...) report zero.
-    /// The kernel writes a 32-bit count to `count_out_ptr` (PSL1GHT's
-    /// `size_t` is 4 bytes in the PPU64 ILP32 environment).
+    /// Per-class active-object count for
+    /// `sys_process_get_number_of_object`. Maps `sys_process.h`
+    /// `SYS_*_OBJECT` ids onto CellGov's tables; unmodeled classes
+    /// report zero. Writes a 32-bit count (PSL1GHT `size_t` is 4
+    /// bytes in PPU64 ILP32).
     pub(super) fn dispatch_process_get_number_of_object(
         &self,
         class_id: u32,
@@ -1128,10 +1099,8 @@ impl Lv2Host {
         self.immediate_write_u32(count, count_out_ptr, source)
     }
 
-    /// `sys_process_get_sdk_version` writes the SDK version of the
-    /// target PID. CellGov hosts a single synthetic process; the
-    /// constant matches the value real PS3 reports for PSL1GHT-built
-    /// homebrew (no SDK version recorded -> `0xFFFFFFFF`).
+    /// Writes `0xFFFFFFFF` -- the value real PS3 reports for
+    /// PSL1GHT-built homebrew with no SDK version recorded.
     pub(super) fn dispatch_process_get_sdk_version(
         &self,
         version_out_ptr: u32,
@@ -1151,11 +1120,10 @@ impl Lv2Host {
         }
     }
 
-    /// `_sys_process_get_paramsfo` writes a 64-byte SFO blob to the
-    /// caller's buffer. CellGov produces the same fixed blob real PS3
-    /// returns for PSL1GHT-built homebrew with no PARAM.SFO loaded:
-    /// version=1 at byte 0, parental_level=4 at byte 23, attribute=1
-    /// at byte 31, all other bytes zero.
+    /// Writes the 64-byte SFO blob real PS3 returns for
+    /// PSL1GHT-built homebrew with no PARAM.SFO loaded: version=1
+    /// at byte 0, parental_level=4 at byte 23, attribute=1 at byte
+    /// 31, rest zero.
     pub(super) fn dispatch_process_get_paramsfo(
         &self,
         buf_ptr: u32,
@@ -1178,9 +1146,9 @@ impl Lv2Host {
         }
     }
 
-    /// Immediate dispatch that writes a u32 to `ptr` and returns
-    /// CELL_OK; shared by create-style syscalls that return a
-    /// freshly allocated object id through an out-pointer.
+    /// Build an immediate dispatch that writes `value` (BE u32) to
+    /// `ptr` and returns CELL_OK; shared by create-style syscalls
+    /// that emit a freshly allocated id through an out-pointer.
     pub(super) fn immediate_write_u32(&self, value: u32, ptr: u32, source: UnitId) -> Lv2Dispatch {
         let write = Effect::SharedWriteIntent {
             range: ByteRange::new(GuestAddr::new(ptr as u64), 4).unwrap(),
@@ -1306,7 +1274,6 @@ mod tests {
 
     #[test]
     fn tty_write_unmapped_buf_does_not_corrupt_tty_log_and_still_returns_ok() {
-        // FakeRuntime sized 0x1000; buf_ptr at 0x8000 is unmapped.
         let rt = FakeRuntime::new(0x1000);
         let mut host = Lv2Host::new();
         let result = host.dispatch(
@@ -1357,7 +1324,6 @@ mod tests {
 
     #[test]
     fn time_get_current_time_splits_at_billion_tick() {
-        // tick = 1_500_000_001 -> sec = 1, nsec = 500_000_001.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000).with_tick(cellgov_time::GuestTicks::new(1_500_000_001));
         let result = host.dispatch(
@@ -1372,7 +1338,6 @@ mod tests {
             Lv2Dispatch::Immediate { effects, .. } => effects,
             other => panic!("expected Immediate, got {other:?}"),
         };
-        // First effect is sec at 0x1000, second is nsec at 0x1008.
         if let Effect::SharedWriteIntent { bytes, .. } = &effects[0] {
             let v = u64::from_be_bytes(bytes.bytes().try_into().unwrap());
             assert_eq!(v, 1);
@@ -1389,17 +1354,13 @@ mod tests {
 
     #[test]
     fn time_get_current_time_and_timebase_frequency_are_coherent() {
-        // A title that reads both and cross-checks gets the same
-        // elapsed interval. Elapsed ticks converted to seconds via
-        // SIM_IPS must equal the TB delta divided by TB_HZ.
         let tick_later = 3 * cellgov_time::SIMULATED_INSTRUCTIONS_PER_SECOND + 500_000_000;
         let (sec, nsec) = cellgov_time::ticks_to_sec_nsec(tick_later);
         let tb = cellgov_time::ticks_to_tb(tick_later);
         let as_nsec_from_time_syscall = sec * 1_000_000_000 + nsec;
-        // TB reading converted via freq: ticks_us = tb * 1e6 / freq.
         let us_from_tb = tb * 1_000_000 / cellgov_time::CELL_PPU_TIMEBASE_HZ;
         let nsec_from_tb = us_from_tb * 1_000;
-        // Within 1us of each other (TB granularity is ~12.5 ns).
+        // TB granularity is ~12.5 ns; require agreement under 1 us.
         let diff = as_nsec_from_time_syscall.abs_diff(nsec_from_tb);
         assert!(
             diff < 1_000,
@@ -1424,8 +1385,8 @@ mod tests {
 
     #[test]
     fn cell_ps3_user_memory_total_is_213_mib() {
-        // 213 MiB = 0x0D500000 = 223,346,688 bytes. The PS3 game-mode
-        // user-memory cap.
+        // 213 MiB == 0x0D50_0000 == 223,346,688 bytes (PS3 game-mode
+        // user-memory cap).
         assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 0x0D50_0000);
         assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 223_346_688);
     }
@@ -1574,7 +1535,6 @@ mod tests {
 
     #[test]
     fn state_hash_unchanged_when_ppu_table_empty() {
-        // Regression guard for the empty-table gating in state_hash.
         let fresh = Lv2Host::new();
         assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
     }
@@ -1605,7 +1565,6 @@ mod tests {
 
     #[test]
     fn state_hash_unchanged_when_tls_template_empty() {
-        // Regression guard for the TlsTemplate gating.
         let fresh = Lv2Host::new();
         assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
     }
@@ -1633,9 +1592,7 @@ mod tests {
         assert_eq!(host.lwmutex_holds_for(a), 1);
         host.lwmutex_holds_dec(a);
         assert_eq!(host.lwmutex_holds_for(a), 0);
-        // Final dec drops the entry from the map so the state hash
-        // returns to baseline.
-        host.lwmutex_holds_dec(a); // no-op on absent entry
+        host.lwmutex_holds_dec(a);
         assert_eq!(host.lwmutex_holds_for(a), 0);
     }
 
@@ -1665,7 +1622,6 @@ mod tests {
     #[test]
     fn unit_holds_lwmutex_unmapped_unit_is_false() {
         let host = Lv2Host::new();
-        // No PPU thread seeded for this unit; query is well-defined.
         assert!(!host.unit_holds_lwmutex(UnitId::new(99)));
     }
 
@@ -1707,7 +1663,6 @@ mod tests {
 
     #[test]
     fn state_hash_unchanged_when_no_child_stack_allocated() {
-        // Regression guard for the stack-allocator sentinel gating.
         let fresh = Lv2Host::new();
         assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
     }
@@ -1720,18 +1675,11 @@ mod tests {
         assert_ne!(pre, host.state_hash());
     }
 
-    /// `is_ppu_thread_finished_for_unit` returns false for unmapped
-    /// units, false for live primary threads, and true after the host
-    /// marks the backing `PpuThread` `Finished`. Pinned because the
-    /// callback-dispatch wake path in `cellgov_core` keys on this
-    /// signal to transition the worker unit to `Finished` so the PPU
-    /// execution loop stops fetching past the trampoline `sc 0`.
     #[test]
     fn is_ppu_thread_finished_for_unit_tracks_thread_state() {
         use crate::ppu_thread::{PpuThreadAttrs, PpuThreadState};
         let mut host = Lv2Host::new();
         let parent = UnitId::new(0);
-        // Unmapped unit returns false (no PpuThread bound to it).
         assert!(!host.is_ppu_thread_finished_for_unit(parent));
 
         host.seed_primary_ppu_thread(
@@ -1745,11 +1693,8 @@ mod tests {
                 tls_base: 0,
             },
         );
-        // Newly seeded thread is alive (state defaults to Running).
         assert!(!host.is_ppu_thread_finished_for_unit(parent));
 
-        // Manually transition the backing PpuThread to Finished and
-        // re-check; the accessor reflects the host-side lifecycle.
         let tid = host
             .ppu_threads()
             .thread_id_for_unit(parent)
