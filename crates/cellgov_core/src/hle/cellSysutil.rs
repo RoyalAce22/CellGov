@@ -62,6 +62,7 @@ fn adapter(runtime: &mut Runtime, source: UnitId, nid: u32) -> RuntimeHleAdapter
         nid,
         mutated: false,
         handlers_without_mutation: &mut runtime.hle.handlers_without_mutation,
+        pending_callback_spawn: &mut runtime.hle.pending_callback_spawn,
     }
 }
 
@@ -214,7 +215,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args, None);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
@@ -245,7 +246,7 @@ mod tests {
     fn video_out_get_state_null_state_pointer_returns_illegal_parameter() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, display::PRIMARY as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args, None);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
@@ -258,7 +259,7 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         let state_ptr: u32 = 0x10_1000;
         let args: [u64; 9] = [0x10000, 2, 0, state_ptr as u64, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args, None);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
@@ -284,7 +285,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args, None);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
@@ -309,7 +310,7 @@ mod tests {
             let (mut rt, unit_id) = fixture();
             let res_ptr: u32 = 0x10_2000;
             let args: [u64; 9] = [0x10000, id as u64, res_ptr as u64, 0, 0, 0, 0, 0, 0];
-            rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args);
+            rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args, None);
 
             assert_eq!(
                 read_syscall_return(&mut rt, unit_id),
@@ -328,7 +329,7 @@ mod tests {
         let res_ptr: u32 = 0x10_2000;
         // Resolution id 0xff is not in the spec table.
         let args: [u64; 9] = [0x10000, 0xff, res_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args, None);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
@@ -342,7 +343,7 @@ mod tests {
     fn video_out_get_resolution_null_pointer_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, resolution_id::ID_720 as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args, None);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
@@ -365,7 +366,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args);
+        rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args, None);
 
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),

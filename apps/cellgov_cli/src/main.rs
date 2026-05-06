@@ -80,15 +80,27 @@ fn print_usage() {
     println!(
         "       cellgov_cli compare <manifest.toml> --baselines-dir <dir> [--mode ...] [--format ...]"
     );
+    println!("       cellgov_cli compare-observations <a.json> <b.json>");
+    println!("       cellgov_cli diverge <a.state> <b.state>");
+    println!("       cellgov_cli zoom <a.zoom.state> <b.zoom.state> <step>");
     println!("       cellgov_cli explore <scenario> [--format human|json]");
     println!("       cellgov_cli explore micro <name> [--format human|json]");
     println!(
-        "       cellgov_cli run-game <elf-path> [--max-steps N] [--budget N] [--trace] [--profile]"
+        "       cellgov_cli run-game <elf-path|--title NAME> [--max-steps N] [--budget N] [--trace] [--profile]"
     );
     println!(
         "       cellgov_cli bench-boot --title <name> [--max-steps N] [--budget N] [--firmware-dir DIR]\n\
          \t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR]"
     );
+    println!(
+        "       cellgov_cli bench-boot-once <--title NAME|--content-id ID|--title-manifest PATH>\n\
+         \t\t[--max-steps N] [--budget N] [--firmware-dir DIR]\n\
+         \t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR]"
+    );
+    println!(
+        "       cellgov_cli dump-imports <--title NAME|--content-id ID|--title-manifest PATH>"
+    );
+    println!("       cellgov_cli disasm <elf-path> --vaddr <hex> [--count N]");
     println!();
     println!("available scenarios:");
     for name in SCENARIOS {

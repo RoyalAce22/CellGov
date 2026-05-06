@@ -1,59 +1,58 @@
-WipEout HD Fury cross-runner comparison invalidated by PPU decoder
-correctness fix.
+DIVERGE region code: first byte differs at offset 0x17 (guest 0x10017) -- 00 vs 01
 
-## History
+Status: WipEout reaches the FirstRsxWrite checkpoint at PPU step
+45,697 (deterministic across two bench-boot runs,
+`agreement: 0.59%`). The earlier "stuck at MaxSteps" frontier
+documented in the prior fixture is gone -- the SWAR-strlen +
+label-emission loop the title spun in is no longer the gating
+issue; the title now reaches the same FirstRsxWrite checkpoint it
+hit before the rldic / rldimi decoder fix invalidated the prior
+spurious 20,569-step trip.
 
-An earlier CellGov release tripped the `FirstRsxWrite` checkpoint on
-WipEout at step 20,569 and produced a 974-byte byte-level divergence
-against RPCS3 at that point, classified non-semantic (ELF header
-reconstruction + SYS_PROC_PARAM + HLE OPD layout).
+The reported divergence is at offset 0x17 of the code region:
+the low byte of the ELF header's `e_version` field. CellGov reads
+0x00, RPCS3 reads 0x01. Same class as SSHD's 0x35 byte (e_ehsize)
+and the historical flOw-side divergences: the header bytes
+captured by CellGov's loaded image differ from the in-memory
+SELF bytes RPCS3 mmaps. Neither side reads these bytes during
+execution; the divergence is non-semantic.
 
-That checkpoint was spurious. The PPU decoder was lumping `rldic`
-(primary 30, XO=2) and `rldimi` (XO=3) under the `rldicl` execution
-path. The `rldicl` path uses mask `mb..=63` and overwrites RA
-entirely, which is correct for `rldicl` but wrong for both
-neighbours: `rldic` needs mask `mb..=63-sh` (clear-both-sides), and
-`rldimi` needs to MERGE the rotated bits into RA while preserving
-bits outside the mask.
+`compare-observations` stops at the first divergence, so the
+data region's HLE OPD layout differences (previously documented
+across the OPD slot table) are not re-confirmed by this run. The
+OPD layout class is shared with SSHD and flOw; classification
+remains "PS3-wide, non-semantic".
 
-PS3 code commonly uses `rldimi rt, rs, 32, 0` (or similar) to splice
-a 32-bit value into the upper half of a 64-bit register when
-constructing pointers. Under the mis-decode the upper half was
-cleared instead of inserted, producing a pointer whose upper 32 bits
-were zero. A subsequent store through that truncated pointer landed
-on the RSX MMIO window at `0xC0000040` by accident, tripping the
-`FirstRsxWrite` checkpoint inside CellGov's `run-game` harness.
+## History (kept for context)
 
-With the decoder fixed (`rldic` and `rldimi` now decode to their own
-variants with correct mask semantics), WipEout's boot no longer
-trips `0xC0000040` at step 20,569. Its init sequence instead runs
-past that point and was not observed to reach a natural stopping
-event within a 100M-instruction `bench-boot` window.
+An earlier CellGov release tripped the `FirstRsxWrite` checkpoint
+on WipEout at step 20,569. That trip was spurious -- the PPU
+decoder was lumping `rldic` (XO=2) and `rldimi` (XO=3) under the
+`rldicl` execution path, and a `rldimi rt, rs, 32, 0` mis-decoded
+to clear-rather-than-merge. PS3 code uses this idiom to splice a
+32-bit value into the upper half of a 64-bit pointer; under the
+mis-decode the upper half was zeroed, producing a pointer whose
+later store landed on RSX MMIO at 0xC0000040 by accident,
+tripping FirstRsxWrite prematurely.
 
-## Post-fix status
-
-WipEout cannot currently be compared cross-runner at the
-`FirstRsxWrite` checkpoint because CellGov no longer reaches that
-checkpoint during the captured boot window. A new mutually-reachable
-checkpoint (fault, syscall exit, or `PcReached` at a specific address
-RPCS3 can also hit) is needed before WipEout's cross-runner entry
-can be restored.
-
-Until that new checkpoint is chosen, WipEout is listed in the
-compatibility matrix with a `MaxSteps` outcome and no cross-runner
-verdict. The post-fix regression floor is `steps=3,906,250` at
-`max_steps=1,000,000,000` (1B-instruction cap, budget 256). Earlier
-report listed `steps=390625` at the 100M-instruction cap; raising
-the cap by 10x scales the step count linearly with no checkpoint
-trip, confirming the loop is truly stuck rather than slow.
+With the decoder fixed (`rldic` and `rldimi` decoded with correct
+mask semantics), WipEout's boot ran past 20,569 and (per the
+prior fixture) was observed to stall in a SWAR-strlen +
+label-emission loop, never reaching FirstRsxWrite within a 100M-
+or 1B-instruction window. That stall is also gone in the current
+build: the title reaches the legitimate FirstRsxWrite at 45,697
+steps without further decoder or scheduler work, so the prior
+"PRX module loading" frontier is no longer the gating issue for
+this checkpoint.
 
 ## Classes of divergence the prior report documented
 
 Kept here as historical context. These were all classified
-non-semantic; the fix above does not change their classification:
+non-semantic; the current 0x17 e_version divergence is the same
+class as the first item:
 
-- ELF header metadata (code region, 2 bytes): `e_version` and the
-  high half of `e_entry` differ because
+- ELF header metadata (code region, 2 bytes): `e_version` and
+  the high half of `e_entry` differ because
   `cellgov_firmware decrypt-self` and RPCS3's in-memory SELF
   decryption reconstruct these header bytes differently. Neither
   side reads them during execution.
@@ -62,23 +61,18 @@ non-semantic; the fix above does not change their classification:
   write the parsed struct back into guest memory; RPCS3 keeps the
   SELF bytes in place. Both runners use the values via internal
   state.
-- HLE OPD slots (data region, 960 bytes): CellGov and RPCS3 assign
-  HLE trampoline stub slot indices in the same module order but
-  iterate within a module differently (sorted vs declaration
-  order), producing per-slot pointer differences. The guest calls
-  through either side's OPDs identically.
+- HLE OPD slots (data region, 960 bytes): CellGov and RPCS3
+  assign HLE trampoline stub slot indices in the same module
+  order but iterate within a module differently (sorted vs
+  declaration order), producing per-slot pointer differences. The
+  guest calls through either side's OPDs identically.
 
-These classes are shared with flOw and SSHD (see their
-compare_report.txt files and `docs/concepts.md` for the worked
-examples).
+Verdict: not strictly equivalent at the byte level. The diverging
+header byte at 0x17 is not read by the executing code;
+classification remains "PS3-wide, non-semantic". A future cleanup
+should re-classify by walking past the ELF-header divergence and
+confirming that the only remaining differences are the documented
+OPD layout class.
 
-Verdict: cross-runner comparison not currently available for
-WipEout; see "Post-fix status" above.
-
-Re-confirmed at the current branch tip: WipEout's MaxSteps
-trajectory is unchanged (still 390,625 at the 100M cap,
-3,906,250 at the 1B cap). The stall is structural -- the
-SWAR-strlen + label-emission loop spins waiting for a function
-pointer table at guest 0x009389a0 that requires a sysmodule
-SPRX's `module_start` to populate. That is the next-frontier
-target (PRX module loading), not a corner-case spec gap.
+Re-confirmed at the current branch tip: step count is 45,697
+(deterministic across runs).

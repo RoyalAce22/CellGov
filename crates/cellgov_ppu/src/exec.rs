@@ -46,8 +46,15 @@ pub enum ExecuteVerdict {
     Continue,
     /// PC was written explicitly; caller must not advance.
     Branch,
-    /// Yield to runtime syscall dispatch.
-    Syscall,
+    /// Yield to runtime syscall dispatch. The runtime classifier
+    /// rejects non-zero LEV before LV2 dispatch.
+    Syscall {
+        /// LEV field of the `sc` instruction (Book III §2.3.1):
+        /// 0 = kernel syscall, 1 = hypercall (CBE Handbook §11.1),
+        /// LEV greater than 1 is reserved per Book I §2.4.2. PS3
+        /// usermode always issues LEV=0.
+        lev: u8,
+    },
     /// Architectural fault.
     Fault(PpuFault),
     /// Memory access at invalid effective address.
@@ -417,10 +424,12 @@ pub fn execute(
         | PpuInstruction::CmpwBc { .. }
         | PpuInstruction::Consumed => super_insn::execute(insn, state, region_views, store_buf),
 
-        // TODO(sc-lev): `lev` is preserved at decode but not routed;
-        // LV1 hypercall (LEV=1) dispatch lands here when it exists.
-        // PS3 usermode always issues LEV=0.
-        PpuInstruction::Sc { lev: _lev } => ExecuteVerdict::Syscall,
+        // LEV is preserved at decode (Book III §2.3.1) and routed
+        // to the runtime so the classifier can reject hypercalls
+        // before LV2 dispatch. PS3 usermode always issues LEV=0;
+        // LEV=1 lands as `Lv2Request::Hypercall` (programming
+        // error in user code per Book I §2.4.2).
+        PpuInstruction::Sc { lev } => ExecuteVerdict::Syscall { lev },
     }
 }
 

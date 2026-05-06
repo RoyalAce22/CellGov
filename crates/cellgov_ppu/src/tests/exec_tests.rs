@@ -11,7 +11,7 @@ use crate::exec::test_support::{exec_no_mem, exec_with_mem, uid};
 fn sc_returns_syscall() {
     let mut s = PpuState::new();
     let result = exec_no_mem(&PpuInstruction::Sc { lev: 0 }, &mut s);
-    assert!(matches!(result, ExecuteVerdict::Syscall));
+    assert!(matches!(result, ExecuteVerdict::Syscall { lev: 0 }));
 }
 
 #[test]

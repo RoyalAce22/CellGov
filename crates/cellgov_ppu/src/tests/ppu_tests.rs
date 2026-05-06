@@ -1897,3 +1897,53 @@ fn fetch_loop_super_pair_taken_branch_uses_target_not_consumed_skip() {
          Continue verdict only)"
     );
 }
+
+/// Integration boundary: decode the canonical `sc 0` instruction
+/// word, run it through the full PPU yield path, and assert the
+/// LEV value lands in `LocalDiagnostics::syscall_lev`. Closes the
+/// loop end-to-end so a decoder-side regression (e.g. shifting
+/// the LEV mask) cannot pass while the namespace tests stay green.
+#[test]
+fn sc_zero_yields_with_syscall_lev_zero() {
+    let mut mem = GuestMemory::new(256);
+    place_insn(&mut mem, 0, 0x4400_0002);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    let ctx = ExecutionContext::new(&mem);
+    let mut effects = Vec::new();
+    let result = unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
+
+    assert_eq!(result.yield_reason, YieldReason::Syscall);
+    assert_eq!(
+        result.local_diagnostics.syscall_lev,
+        Some(0),
+        "canonical `sc 0` (0x44000002) must surface LEV=0",
+    );
+}
+
+/// Integration boundary for the hypercall path: `sc 1` decodes to
+/// `PpuInstruction::Sc { lev: 1 }`, executes to
+/// `ExecuteVerdict::Syscall { lev: 1 }`, surfaces as
+/// `LocalDiagnostics::syscall_lev = Some(1)`. The runtime classifier
+/// then routes this to `Lv2Request::Hypercall` and the trace stream
+/// distinguishes it via `TracedYieldReason::Hypercall`. This test
+/// pins the first link in that chain; without it, a decoder-mask
+/// regression would produce LEV=0 from `sc 1`'s instruction word
+/// and the LEV-aware classifier would never fire in run-game.
+#[test]
+fn sc_one_yields_with_syscall_lev_one() {
+    let mut mem = GuestMemory::new(256);
+    place_insn(&mut mem, 0, 0x4400_0022);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    let ctx = ExecutionContext::new(&mem);
+    let mut effects = Vec::new();
+    let result = unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
+
+    assert_eq!(result.yield_reason, YieldReason::Syscall);
+    assert_eq!(
+        result.local_diagnostics.syscall_lev,
+        Some(1),
+        "canonical `sc 1` (0x44000022) must surface LEV=1",
+    );
+}

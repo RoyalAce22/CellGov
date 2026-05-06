@@ -43,19 +43,115 @@ impl Runtime {
         }
     }
 
+    /// If `source` is a registered callback worker, absorb the
+    /// fault by waking the parent with `CELL_EFAULT` in r3 and
+    /// finishing the worker. Returns `true` when the fault was
+    /// absorbed; `false` when `source` is a regular thread (caller
+    /// should fall through to the normal run-terminating path).
+    ///
+    /// The wake is dispatched via `handle_wake_and_return`, which
+    /// already mirrors the worker's `PpuThread::Finished` state into
+    /// the unit's `UnitStatus::Finished` so the PPU execution loop
+    /// stops fetching past the fault PC. The parent's r3 carries the
+    /// kernel-error code via `args[0]` for the `Synthetic` resume
+    /// stage; consumer stages (e.g., `AutoLoadAfterStat`) read the
+    /// underlying cb_result struct and see whatever pre-fault state
+    /// the worker left, mapping the failure case to their stage-
+    /// specific error code.
+    pub(super) fn try_absorb_callback_worker_fault(&mut self, source: UnitId) -> bool {
+        use cellgov_ps3_abi::cell_errors::CELL_EFAULT;
+        let fault_code = u64::from(CELL_EFAULT);
+        let dispatch = match self
+            .lv2_host
+            .dispatch_callback_worker_fault(source, fault_code)
+        {
+            Some(d) => d,
+            None => return false,
+        };
+        match dispatch {
+            Lv2Dispatch::WakeAndReturn {
+                code,
+                woken_unit_ids,
+                response_updates,
+                effects,
+            } => {
+                if !woken_unit_ids.is_empty() {
+                    self.step_woke_others = true;
+                }
+                self.handle_wake_and_return(
+                    source,
+                    code,
+                    woken_unit_ids,
+                    response_updates,
+                    effects,
+                );
+                true
+            }
+            other => {
+                unreachable!("dispatch_callback_worker_fault returns WakeAndReturn, got {other:?}",)
+            }
+        }
+    }
+
     /// Classify a syscall yield, dispatch through the LV2 host, and
     /// fold the result back into runtime state.
     pub(super) fn dispatch_syscall(&mut self, result: &ExecutionStepResult, source: UnitId) {
         let Some(args) = &result.syscall_args else {
             return;
         };
+        // LEV defaults to 0 for synthetic / fake-ISA callers that
+        // don't populate it. Real PPU yields always set it (see
+        // `cellgov_ppu::lib::run_until_yield`).
+        let lev = result.local_diagnostics.syscall_lev.unwrap_or(0);
 
-        // HLE import stubs use syscall numbers >= 0x10000.
-        if args[0] >= 0x10000 {
-            let hle_index = (args[0] - 0x10000) as u32;
-            let nid = self.hle.nids.get(&hle_index).copied().unwrap_or(0);
-            self.dispatch_hle(source, nid, args);
+        // Hypercall (LEV >= 1) routes straight to the request
+        // classifier, which produces `Lv2Request::Hypercall` and
+        // the host rejects with CELL_EINVAL. PS3 usermode never
+        // issues these (Book I §2.4.2 programming-error note).
+        if lev != 0 {
+            let request = cellgov_lv2::request::classify_with_lev(
+                lev,
+                args[0],
+                &[
+                    args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
+                ],
+            );
+            self.dispatch_lv2_request(request, source);
             return;
+        }
+
+        // LEV=0: route by namespace. The HleImport range goes to
+        // the NID dispatcher; CellGovPrivate goes to the LV2
+        // classifier (which understands the private syscalls); Lv2
+        // falls through to the timer fast-paths and the LV2
+        // classifier; None is also routed through classify, which
+        // returns Unsupported with the raw number preserved.
+        use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
+        match SyscallNamespace::of(args[0]) {
+            Some(SyscallNamespace::HleImport) => {
+                let hle_index = (args[0] - SyscallNamespace::HleImport.range().0) as u32;
+                let nid = self.hle.nids.get(&hle_index).copied().unwrap_or(0);
+                let caller_lr = result.local_diagnostics.lr;
+                self.dispatch_hle(source, nid, args, caller_lr);
+                return;
+            }
+            Some(SyscallNamespace::CellGovPrivate) => {
+                let request = cellgov_lv2::request::classify_with_lev(
+                    lev,
+                    args[0],
+                    &[
+                        args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
+                    ],
+                );
+                self.dispatch_lv2_request(request, source);
+                return;
+            }
+            Some(SyscallNamespace::Lv2) | None => {
+                // Fall through to the timer fast-paths and the LV2
+                // classifier. None is treated as Lv2 to preserve
+                // the existing Unsupported-via-classify path for
+                // numbers above every declared namespace.
+            }
         }
 
         // Timer syscalls advance the deterministic guest clock. CellGov
@@ -83,7 +179,8 @@ impl Runtime {
             _ => {}
         }
 
-        let request = cellgov_lv2::request::classify(
+        let request = cellgov_lv2::request::classify_with_lev(
+            lev,
             args[0],
             &[
                 args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
@@ -201,6 +298,12 @@ impl Runtime {
                     response_updates,
                     effects,
                 );
+            }
+            Lv2Dispatch::CallbackSpawn { .. } => {
+                // The worker enters Runnable; treat as a wake so the
+                // scheduler rotates to it on the next budget tick.
+                self.step_woke_others = true;
+                self.handle_callback_spawn(dispatch);
             }
         }
     }
@@ -360,6 +463,19 @@ impl Runtime {
             let _ = self.syscall_responses.insert(waiter, response);
         }
         self.resolve_sync_wakes(&woken_unit_ids);
+        // Callback workers reach this path with their PpuThread
+        // already transitioned to Finished by
+        // `Lv2Host::dispatch_callback_return` (the trampoline syscall
+        // is the worker's terminal action; the host knows it as
+        // such). Transition the unit's status in lockstep so the PPU
+        // execution loop does not fetch the next instruction past the
+        // trampoline `sc 0` (which lands on the OPD slot's bytes and
+        // decode-faults). Other WakeAndReturn callers leave the
+        // source's PpuThread Running, so this is a no-op for them.
+        if self.lv2_host.is_ppu_thread_finished_for_unit(source) {
+            self.registry
+                .set_status_override(source, UnitStatus::Finished);
+        }
     }
 
     /// Park-and-release (e.g. cond_wait): wake held waiters first, then

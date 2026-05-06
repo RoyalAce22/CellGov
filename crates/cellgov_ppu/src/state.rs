@@ -201,6 +201,37 @@ impl Default for PpuState {
     }
 }
 
+/// Build the `[u64; 9]` syscall-args array from a PPU state at
+/// syscall-yield time, in the order
+/// [`cellgov_exec::ExecutionStepResult::syscall_args`] expects:
+/// index 0 carries the syscall number, indices 1..=8 carry the
+/// argument registers.
+///
+/// PS3 LV2 ABI mapping:
+/// - `args[0]` <- `r11` (syscall number)
+/// - `args[1..=8]` <- `r3..=r10` (call arguments; `r3` overlaps the
+///   PPC return register, but the response is written back through
+///   the runtime's syscall-response table, not by mutating the
+///   array)
+///
+/// Named so a future SPU implementation can grep for the convention
+/// and a divergent caller (e.g. one that put the syscall number in
+/// the wrong GPR) trips the test pinning the layout.
+#[inline]
+pub fn ppu_syscall_args(state: &PpuState) -> [u64; 9] {
+    [
+        state.gpr[11],
+        state.gpr[3],
+        state.gpr[4],
+        state.gpr[5],
+        state.gpr[6],
+        state.gpr[7],
+        state.gpr[8],
+        state.gpr[9],
+        state.gpr[10],
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,5 +466,41 @@ mod tests {
         assert!(!s.xer_ca());
         s.xer = 1u64 << 29;
         assert!(s.xer_ca());
+    }
+
+    #[test]
+    fn ppu_syscall_args_maps_r11_to_index_0_and_r3_through_r10_to_1_through_8() {
+        let mut s = PpuState::new();
+        // Distinguishable per-register sentinels so a wrong index
+        // surfaces by value rather than by absence.
+        s.gpr[3] = 0xA300_0000_0000_0003;
+        s.gpr[4] = 0xA400_0000_0000_0004;
+        s.gpr[5] = 0xA500_0000_0000_0005;
+        s.gpr[6] = 0xA600_0000_0000_0006;
+        s.gpr[7] = 0xA700_0000_0000_0007;
+        s.gpr[8] = 0xA800_0000_0000_0008;
+        s.gpr[9] = 0xA900_0000_0000_0009;
+        s.gpr[10] = 0xAA00_0000_0000_000A;
+        s.gpr[11] = 0xAB00_0000_0000_000B;
+        // Other registers must NOT bleed into the args array.
+        s.gpr[0] = 0xDEAD_BEEF_DEAD_BEEF;
+        s.gpr[2] = 0xDEAD_BEEF_DEAD_BEEF;
+        s.gpr[12] = 0xDEAD_BEEF_DEAD_BEEF;
+        s.gpr[31] = 0xDEAD_BEEF_DEAD_BEEF;
+
+        let args = ppu_syscall_args(&s);
+        assert_eq!(args[0], 0xAB00_0000_0000_000B, "args[0] must be r11");
+        assert_eq!(args[1], 0xA300_0000_0000_0003, "args[1] must be r3");
+        assert_eq!(args[2], 0xA400_0000_0000_0004);
+        assert_eq!(args[3], 0xA500_0000_0000_0005);
+        assert_eq!(args[4], 0xA600_0000_0000_0006);
+        assert_eq!(args[5], 0xA700_0000_0000_0007);
+        assert_eq!(args[6], 0xA800_0000_0000_0008);
+        assert_eq!(args[7], 0xA900_0000_0000_0009);
+        assert_eq!(args[8], 0xAA00_0000_0000_000A, "args[8] must be r10");
+        assert!(
+            !args.contains(&0xDEAD_BEEF_DEAD_BEEF),
+            "no register outside r3..=r11 may leak into the args array",
+        );
     }
 }

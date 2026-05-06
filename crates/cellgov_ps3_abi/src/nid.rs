@@ -97,6 +97,27 @@ pub mod cell_sysutil {
     pub const OWNED: &[u32] = &[VIDEO_OUT_GET_STATE, VIDEO_OUT_GET_RESOLUTION];
 }
 
+/// `cellSaveData` NIDs. PRX-registered under `cellSysutil` per
+/// RPCS3's `REG_FUNC(cellSysutil, ...)` declarations, but grouped
+/// here by C source file to mirror PSL1GHT / SCE SDK convention.
+/// Layouts and constants live in `crate::cell_save_data`.
+///
+/// `OWNED` lists only the NIDs the HLE dispatcher currently claims
+/// (the AutoLoad NODATA fast path). `AUTO_SAVE` / `AUTO_SAVE_2` /
+/// `LIST_AUTO_LOAD` are defined here for the typed callsites and
+/// stay outside `OWNED` so the unclaimed-NID path keeps logging
+/// them until a real worker-thread dispatch lands.
+pub mod cell_save_data {
+    crate::nid_const!(AUTO_LOAD = 0xc22c_79b5, "cellSaveDataAutoLoad");
+    crate::nid_const!(AUTO_SAVE = 0xf8a1_75ec, "cellSaveDataAutoSave");
+    crate::nid_const!(AUTO_LOAD_2 = 0xfbd5_c856, "cellSaveDataAutoLoad2");
+    crate::nid_const!(AUTO_SAVE_2 = 0x8b7e_d64b, "cellSaveDataAutoSave2");
+    crate::nid_const!(LIST_AUTO_LOAD = 0x2142_5307, "cellSaveDataListAutoLoad");
+
+    /// Every NID this module owns at the HLE dispatcher.
+    pub const OWNED: &[u32] = &[AUTO_LOAD, AUTO_LOAD_2];
+}
+
 /// `cellGcmSys` NIDs.
 pub mod cell_gcm_sys {
     crate::nid_const!(
@@ -241,6 +262,7 @@ pub const ALL_HLE_OWNED: &[&[u32]] = &[
     cell_gcm_sys::OWNED,
     cell_sysutil::OWNED,
     cell_spurs::OWNED,
+    cell_save_data::OWNED,
 ];
 
 /// Returns `Some((module, function))` if the NID is known. `module` may
@@ -288,6 +310,7 @@ impl StubClass {
 /// `HLE_IMPLEMENTED_NIDS` should grow an explicit arm here.
 pub fn stub_classification(nid: u32) -> StubClass {
     use cell_gcm_sys as gcm;
+    use cell_save_data as savedata;
     use cell_spurs as spurs;
     use cell_sysutil as sysutil;
     use sys_fs as fs;
@@ -361,6 +384,13 @@ pub fn stub_classification(nid: u32) -> StubClass {
         // uninitialized fd or skipped read, corrupting downstream
         // state.
         fs::OPEN | fs::READ | fs::CLOSE | fs::LSEEK | fs::FSTAT | fs::STAT => StubClass::Stateful,
+        // cellSaveData autoload: the stub returns the no-save
+        // sentinel (sign-extended NODATA) before any title callback
+        // fires. A blanket 0-return would hand back CELL_OK and let
+        // the title proceed as if save data were loaded; explicit
+        // Stateful classification flags this as "non-noop, must
+        // implement" rather than "leak-safe stub".
+        savedata::AUTO_LOAD | savedata::AUTO_LOAD_2 => StubClass::Stateful,
         _ => StubClass::NoopSafe,
     }
 }

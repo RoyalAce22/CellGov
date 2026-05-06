@@ -164,9 +164,12 @@ pub fn import_summary(modules: &[ImportedModule]) -> String {
     out
 }
 
-/// Base syscall number for HLE import stubs. Real LV2 syscalls stay
-/// below 1024; HLE stubs start at 0x10000 to avoid collision.
-pub const HLE_SYSCALL_BASE: u32 = 0x10000;
+/// Base syscall number for HLE import stubs. Equal to the lower
+/// bound of [`cellgov_ps3_abi::syscall_namespace::SyscallNamespace::HleImport`];
+/// retained as a named constant for legacy call sites.
+pub const HLE_SYSCALL_BASE: u32 = cellgov_ps3_abi::syscall_namespace::SyscallNamespace::HleImport
+    .range()
+    .0 as u32;
 
 /// NIDs for which CellGov ships a dedicated HLE implementation.
 ///
@@ -180,8 +183,8 @@ pub const HLE_SYSCALL_BASE: u32 = 0x10000;
 /// search.
 pub const HLE_IMPLEMENTED_NIDS: &[u32] = {
     use cellgov_ps3_abi::nid::{
-        cell_gcm_sys as gcm, cell_spurs as spurs, cell_sysutil as sysutil, sys_fs as fs,
-        sys_prx_for_user as sys,
+        cell_gcm_sys as gcm, cell_save_data as savedata, cell_spurs as spurs,
+        cell_sysutil as sysutil, sys_fs as fs, sys_prx_for_user as sys,
     };
     &[
         // cellGcmSys.
@@ -256,6 +259,15 @@ pub const HLE_IMPLEMENTED_NIDS: &[u32] = {
         fs::LSEEK,
         fs::FSTAT,
         fs::STAT,
+        // cellSaveData autoload with real callback dispatch via the
+        // worker-thread primitive: AutoLoad / AutoLoad2 allocate
+        // cbResult / statGet / statSet on the HLE heap, populate
+        // statGet with the no-save shape, and park the calling unit
+        // on the title's funcStat callback. The resume arm reads
+        // cbResult.result and finalizes (CELL_OK or a cellSaveData
+        // error code). AutoSave / ListAutoLoad stay unclaimed.
+        savedata::AUTO_LOAD,
+        savedata::AUTO_LOAD_2,
     ]
 };
 
@@ -325,19 +337,36 @@ pub fn bind_hle_stubs_with_layout(
     layout: HleLayout,
     legacy_base: u32,
 ) -> Vec<HleBinding> {
+    use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
+    use cellgov_ps3_abi::trampoline_codegen::{
+        encode_blr, encode_lis_ori_sc, encode_ps3_packed_opd,
+    };
+
     let mut bindings = Vec::new();
     let mut legacy_offset = 0u32;
 
     for module in modules {
         for func in &module.functions {
             let hle_index = bindings.len() as u32;
-            // The lis/ori encoding splits syscall_nr into two 16-bit
-            // immediates; an overflow in HLE_SYSCALL_BASE + hle_index
-            // would silently truncate and dispatch to the wrong index.
-            // checked_add catches the overflow before the encoding.
-            let syscall_nr = HLE_SYSCALL_BASE
-                .checked_add(hle_index)
-                .expect("HLE syscall index overflowed u32; too many imports");
+            // try_encode rather than encode: the binder grows
+            // hle_index at runtime (one per import), so an over-
+            // capacity title (0x70000+ imports) should produce a
+            // descriptive abort rather than a generic "syscall
+            // index out of range" debug panic. The namespace's
+            // upper bound (0x80000) fits in u32, so the
+            // narrowing for the encoder cannot lose data.
+            let syscall_nr_u64 = SyscallNamespace::HleImport
+                .try_encode(hle_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "HLE binding count exceeded the HleImport namespace capacity \
+                         (hle_index={hle_index}, namespace upper bound=0x{:x}); \
+                         widen SyscallNamespace::HleImport before retrying",
+                        SyscallNamespace::HleImport.range().1,
+                    )
+                });
+            let syscall_nr =
+                u32::try_from(syscall_nr_u64).expect("HleImport namespace fits in u32");
             let (opd_addr, body_addr) = match layout {
                 HleLayout::Legacy24 => {
                     let tramp = legacy_base + legacy_offset;
@@ -350,33 +379,26 @@ pub fn bind_hle_stubs_with_layout(
                 } => (opd_base + hle_index * 8, body_base + hle_index * 16),
             };
 
-            let hi = (syscall_nr >> 16) & 0xFFFF;
-            let lo = syscall_nr & 0xFFFF;
-            // Body: lis r11, hi; ori r11, r11, lo; sc; blr.
-            let lis_r11: u32 = (15 << 26) | (11 << 21) | hi;
-            let ori_r11: u32 = (24 << 26) | (11 << 21) | (11 << 16) | lo;
-            let sc: u32 = 0x4400_0002;
-            let blr: u32 = 0x4E80_0020;
-
-            // OPD: { body_addr, toc=0 }.
+            // OPD: { body_addr, toc=0 }. RPCS3-packed shape, not
+            // 24-byte ELFv1; CellGov's binder dereferences via
+            // packed convention.
             let opd_range =
                 cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(opd_addr as u64), 8)
                     .expect("OPD range fits in u64");
-            let mut opd_bytes = [0u8; 8];
-            opd_bytes[0..4].copy_from_slice(&body_addr.to_be_bytes());
-            opd_bytes[4..8].copy_from_slice(&0u32.to_be_bytes());
+            let opd_bytes = encode_ps3_packed_opd(body_addr, 0);
             memory
                 .apply_commit(opd_range, &opd_bytes)
                 .expect("HLE OPD write failed; trampoline_base must point at a writable region");
 
+            // Body: lis r11, hi; ori r11, r11, lo; sc 0; blr.
             let body_range =
                 cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(body_addr as u64), 16)
                     .expect("body range fits in u64");
+            let lis_ori_sc = encode_lis_ori_sc(syscall_nr);
+            let blr = encode_blr();
             let mut body_bytes = [0u8; 16];
-            body_bytes[0..4].copy_from_slice(&lis_r11.to_be_bytes());
-            body_bytes[4..8].copy_from_slice(&ori_r11.to_be_bytes());
-            body_bytes[8..12].copy_from_slice(&sc.to_be_bytes());
-            body_bytes[12..16].copy_from_slice(&blr.to_be_bytes());
+            body_bytes[0..12].copy_from_slice(&lis_ori_sc);
+            body_bytes[12..16].copy_from_slice(&blr);
             memory
                 .apply_commit(body_range, &body_bytes)
                 .expect("HLE body write failed; trampoline_base must point at a writable region");
@@ -478,7 +500,9 @@ mod tests {
     #[test]
     fn hle_implemented_nids_contains_tls_init() {
         // sys_initialize_tls is required by every PS3 ELF boot.
-        assert!(HLE_IMPLEMENTED_NIDS.contains(&0x744680a2));
+        assert!(
+            HLE_IMPLEMENTED_NIDS.contains(&cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS)
+        );
     }
 
     #[test]

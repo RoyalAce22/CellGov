@@ -1,9 +1,14 @@
 DIVERGE region code: first byte differs at offset 0x35 (guest 0x10035) -- 00 vs 40
 
 Status: SSHD reaches the FirstRsxWrite checkpoint at PPU step
-14,341,466 (was 14,109,359 before the syscall-number fixes in
-commit 8033644). The boot trajectory shifted +232K steps but the
-checkpoint is still reached and the observation captures cleanly.
+14,352,589 (was 14,341,466 in the prior fixture, was 14,109,359
+before the syscall-number fixes in commit 8033644). The +11,123
+delta from the prior fixture is the post-Phase-29 trajectory;
+SSHD does not call cellSaveDataAutoLoad, so the shift comes from
+the central resume dispatcher refactor and small ordering nudges
+in the wake path rather than any direct AutoLoad code. The
+checkpoint is still reached deterministically (bit-identical
+across two bench-boot runs, `agreement: 0.82%`).
 
 The reported divergence is at offset 0x35 of the code region: the
 low byte of the ELF header's `e_ehsize` field. CellGov reads 0x00,
@@ -28,9 +33,10 @@ note. A future cleanup should re-classify by walking past the
 ELF-header divergence and confirming that the only remaining
 differences are the documented OPD layout class.
 
-Re-confirmed at the current branch tip: step count unchanged
-(still 14,341,466). SSHD's CRT0/init path does not exercise the
-PPU corner cases the recent correctness fixes addressed (XER.SO
-propagation, FP fused-multiply-add, super-pair invalidation
-widening, etc.), so the trajectory is bit-identical with the
-prior committed baseline.
+Re-confirmed at the current branch tip: step count is 14,352,589
+(deterministic across runs). SSHD's CRT0/init path does not
+exercise the PPU corner cases earlier correctness fixes addressed
+(XER.SO propagation, FP fused-multiply-add, super-pair invalidation
+widening, etc.), nor does it call cellSaveDataAutoLoad, so the
++11,123 step shift relative to the prior fixture is small but
+real. The trajectory is bit-identical run-to-run.

@@ -15,11 +15,13 @@
 use cellgov_event::UnitId;
 
 use crate::hle::cell_gcm_sys::GcmState;
-use crate::hle::context::{HleContext, RuntimeHleAdapter};
+use crate::hle::context::{HleContext, HleParkRequest, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
 #[path = "hle/cellGcmSys.rs"]
 pub(crate) mod cell_gcm_sys;
+#[path = "hle/cellSaveData.rs"]
+pub(crate) mod cell_save_data;
 #[path = "hle/cellSpurs.rs"]
 pub(crate) mod cell_spurs;
 #[path = "hle/cellSysutil.rs"]
@@ -59,6 +61,12 @@ pub(crate) struct HleState {
     /// register state leaked straight through to the guest without
     /// a fresh r3.
     pub handlers_without_mutation: std::collections::BTreeMap<u32, usize>,
+    /// Park-intent slot. Set by an HLE handler via
+    /// [`HleContext::park_for_callback`]; consumed by
+    /// [`Runtime::dispatch_hle`] (or any per-module dispatch site)
+    /// to materialize the worker spawn after the handler returns.
+    /// Always `None` between dispatches.
+    pub pending_callback_spawn: Option<HleParkRequest>,
 }
 
 impl HleState {
@@ -73,6 +81,7 @@ impl HleState {
             gcm: GcmState::default(),
             unclaimed_nids: std::collections::BTreeMap::new(),
             handlers_without_mutation: std::collections::BTreeMap::new(),
+            pending_callback_spawn: None,
         }
     }
 }
@@ -80,20 +89,39 @@ impl HleState {
 impl Runtime {
     /// Dispatch an HLE import call by NID.
     ///
+    /// `caller_lr` is the calling guest's LR at the syscall boundary,
+    /// surfaced through [`cellgov_exec::LocalDiagnostics::lr`] when the
+    /// arch unit can populate it. Used in the unclaimed-NID first-
+    /// occurrence stderr line to attribute the call to a specific
+    /// guest call site without a post-hoc downcast through the
+    /// registry. Pass `None` from synthetic / test callers that do
+    /// not have an LR.
+    ///
     /// See the module-level "Unclaimed-NID policy" for the fallback
     /// contract.
-    pub(crate) fn dispatch_hle(&mut self, source: UnitId, nid: u32, args: &[u64; 9]) {
+    pub(crate) fn dispatch_hle(
+        &mut self,
+        source: UnitId,
+        nid: u32,
+        args: &[u64; 9],
+        caller_lr: Option<u64>,
+    ) {
         let handled = sys_prx_for_user::dispatch(self, source, nid, args)
             .or_else(|| cell_gcm_sys::dispatch(self, source, nid, args))
             .or_else(|| cell_sysutil::dispatch(self, source, nid, args))
             .or_else(|| cell_spurs::dispatch(self, source, nid, args))
+            .or_else(|| cell_save_data::dispatch(self, source, nid, args))
             .or_else(|| sys_fs::dispatch(self, source, nid, args));
         if handled.is_none() {
             let entry = self.hle.unclaimed_nids.entry(nid).or_insert(0);
             if *entry == 0 {
+                let lr_str = caller_lr
+                    .map(|lr| format!("0x{lr:08x}"))
+                    .unwrap_or_else(|| "<unknown>".to_string());
                 eprintln!(
-                    "HLE dispatch: unclaimed NID {nid:#010x} called from {source:?}; \
-                     returning CELL_OK with no side effects (silent divergence risk)"
+                    "HLE dispatch: unclaimed NID {nid:#010x} called from {source:?} \
+                     (LR={lr_str}); returning CELL_OK with no side effects (silent \
+                     divergence risk)"
                 );
             }
             *entry += 1;
@@ -109,9 +137,15 @@ impl Runtime {
                 nid,
                 mutated: false,
                 handlers_without_mutation: &mut self.hle.handlers_without_mutation,
+                pending_callback_spawn: &mut self.hle.pending_callback_spawn,
             }
             .set_return(0);
         }
+        // Drain any park-for-callback intent the handler recorded.
+        // Runs on every dispatch, whether handled or unclaimed; the
+        // unclaimed fallback never parks but the cost of an empty
+        // take() is negligible.
+        self.consume_pending_callback_spawn(source);
     }
 }
 
@@ -165,6 +199,7 @@ mod tests {
             ("sys_prx_for_user", crate::hle::sys_prx_for_user::OWNED_NIDS),
             ("cell_gcm_sys", crate::hle::cell_gcm_sys::OWNED_NIDS),
             ("cell_spurs", crate::hle::cell_spurs::OWNED_NIDS),
+            ("cell_save_data", crate::hle::cell_save_data::OWNED_NIDS),
         ];
         let mut all = BTreeSet::new();
         for (name, nids) in modules {
@@ -203,6 +238,7 @@ mod tests {
         let mut counter: BTreeMap<u32, usize> = BTreeMap::new();
 
         let probe_nid: u32 = 0xBADF_00D0;
+        let mut pending_callback_spawn = None;
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _adapter = RuntimeHleAdapter {
                 memory: &mut memory,
@@ -216,6 +252,7 @@ mod tests {
                 nid: probe_nid,
                 mutated: false,
                 handlers_without_mutation: &mut counter,
+                pending_callback_spawn: &mut pending_callback_spawn,
             };
         }));
 
@@ -244,7 +281,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args, None);
 
         let mem = rt.memory().as_bytes();
         let ctx_ptr = u32::from_be_bytes([mem[0x10000], mem[0x10001], mem[0x10002], mem[0x10003]]);
@@ -277,7 +314,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args, None);
 
         let base = cellgov_lv2::host::Lv2Host::SYS_RSX_MEM_BASE;
         assert_eq!(rt.hle.gcm.control_addr, base + 0x40);
@@ -318,6 +355,7 @@ mod tests {
             let mut next_id: u32 = 0x8000_0001;
             let mut handlers_without_mutation: std::collections::BTreeMap<u32, usize> =
                 std::collections::BTreeMap::new();
+            let mut pending_callback_spawn = None;
             let mut gcm = GcmState {
                 rsx_checkpoint,
                 ..Default::default()
@@ -334,6 +372,7 @@ mod tests {
                 nid: gcm_nid::INIT_BODY,
                 mutated: false,
                 handlers_without_mutation: &mut handlers_without_mutation,
+                pending_callback_spawn: &mut pending_callback_spawn,
             };
             let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
             init_body(&mut ctx, &args, &mut gcm);
@@ -375,7 +414,7 @@ mod tests {
 
         assert_eq!(rt.rsx_flip().handler(), 0, "starts cleared");
         let args: [u64; 9] = [0, 0x1234_5678, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args, None);
 
         assert_eq!(rt.rsx_flip().handler(), 0x1234_5678);
         assert_eq!(
@@ -400,12 +439,12 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args, None);
         assert!(rt.lv2_host().sys_rsx_context().allocated);
 
         let handler: u32 = 0x1234_5678;
         let args: [u64; 9] = [0, handler as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args, None);
         assert_eq!(rt.rsx_flip().handler(), handler);
         assert_eq!(
             rt.lv2_host().sys_rsx_context().flip_handler_addr,
@@ -430,7 +469,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0; 9];
-        rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::SET_FLIP_HANDLER, &args, None);
 
         assert_eq!(rt.rsx_flip().handler(), 0, "NULL cleared the handler");
     }
@@ -451,7 +490,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0x8000, 0x80000, 0x20000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::INIT_BODY, &args, None);
 
         let label_addr = rt.hle.gcm.label_addr;
         assert_ne!(label_addr, 0, "init must have allocated a label region");
@@ -486,7 +525,7 @@ mod tests {
         });
 
         let args: [u64; 9] = [0x10000, 0x10000, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::GET_CONFIGURATION, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::GET_CONFIGURATION, &args, None);
 
         let mem = rt.memory().as_bytes();
         let a = 0x10000usize;
@@ -517,12 +556,12 @@ mod tests {
         });
 
         let args0: [u64; 9] = [0x10000, 0, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::GET_LABEL_ADDRESS, &args0);
+        rt.dispatch_hle(unit_id, gcm_nid::GET_LABEL_ADDRESS, &args0, None);
         let ret0 = rt.registry_mut().drain_syscall_return(unit_id);
         assert_eq!(ret0, Some(0x50000));
 
         let args5: [u64; 9] = [0x10000, 5, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::GET_LABEL_ADDRESS, &args5);
+        rt.dispatch_hle(unit_id, gcm_nid::GET_LABEL_ADDRESS, &args5, None);
         let ret5 = rt.registry_mut().drain_syscall_return(unit_id);
         assert_eq!(ret5, Some(0x50000 + 5 * 0x10));
     }
@@ -554,7 +593,7 @@ mod tests {
         rt.lv2_host_mut().seed_primary_ppu_thread(unit_id, attrs);
 
         let args: [u64; 9] = [0x2000, 0, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_nid::PPU_THREAD_GET_ID, &args);
+        rt.dispatch_hle(unit_id, sys_nid::PPU_THREAD_GET_ID, &args, None);
 
         let mem = rt.memory().as_bytes();
         let tid = u64::from_be_bytes([
@@ -807,7 +846,7 @@ mod tests {
         assert_ne!(child_id.raw(), 0x0100_0000);
 
         let args: [u64; 9] = [0x3000, 0, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(child, sys_nid::PPU_THREAD_GET_ID, &args);
+        rt.dispatch_hle(child, sys_nid::PPU_THREAD_GET_ID, &args, None);
 
         let mem = rt.memory().as_bytes();
         let tid = u64::from_be_bytes([
@@ -839,7 +878,60 @@ mod tests {
         });
 
         let args: [u64; 9] = [0; 9];
-        rt.dispatch_hle(unit_id, sys_nid::TIME_GET_SYSTEM_TIME, &args);
+        rt.dispatch_hle(unit_id, sys_nid::TIME_GET_SYSTEM_TIME, &args, None);
         assert_eq!(rt.registry_mut().drain_syscall_return(unit_id), Some(0));
+    }
+
+    /// `park_for_callback` writes the request into the slot the
+    /// adapter borrows from `HleState` and counts as a mutation
+    /// (Drop guard does not bump `handlers_without_mutation`).
+    #[test]
+    fn adapter_park_for_callback_records_request_and_satisfies_drop_guard() {
+        use crate::hle::context::{HleContext, HleParkRequest, RuntimeHleAdapter};
+        use cellgov_lv2::CallbackReturnStage;
+        use cellgov_mem::GuestMemory;
+        use std::collections::BTreeMap;
+
+        let mut memory = GuestMemory::new(0x10000);
+        let mut registry = crate::registry::UnitRegistry::new();
+        registry.register_with(|id| {
+            cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::End])
+        });
+        let mut heap_ptr: u32 = 0x1000;
+        let mut heap_watermark: u32 = 0x1000;
+        let mut heap_warning_mask: u8 = 0;
+        let mut next_id: u32 = 0x8000_0001;
+        let mut counter: BTreeMap<u32, usize> = BTreeMap::new();
+        let mut pending: Option<HleParkRequest> = None;
+
+        let probe_nid: u32 = 0xCAFE_F00D;
+        let request = HleParkRequest {
+            opd_addr: 0x0040_0000,
+            args: [0x1111_1111, 0x2222_2222, 0x3333_3333, 0, 0, 0, 0, 0],
+            stage: CallbackReturnStage::Synthetic,
+        };
+        {
+            let mut adapter = RuntimeHleAdapter {
+                memory: &mut memory,
+                registry: &mut registry,
+                heap_base: 0x1000,
+                heap_ptr: &mut heap_ptr,
+                heap_watermark: &mut heap_watermark,
+                heap_warning_mask: &mut heap_warning_mask,
+                next_id: &mut next_id,
+                source: cellgov_event::UnitId::new(0),
+                nid: probe_nid,
+                mutated: false,
+                handlers_without_mutation: &mut counter,
+                pending_callback_spawn: &mut pending,
+            };
+            adapter.park_for_callback(request);
+        }
+        assert_eq!(pending, Some(request));
+        assert!(
+            !counter.contains_key(&probe_nid),
+            "park_for_callback must count as a mutation; Drop guard should NOT \
+             bump handlers_without_mutation",
+        );
     }
 }

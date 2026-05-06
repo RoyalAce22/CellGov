@@ -15,6 +15,7 @@ use std::fmt;
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
+use cellgov_lv2::CallbackReturnStage;
 
 /// Why a call to [`HleContext::write_guest`] did not commit any
 /// bytes.
@@ -64,6 +65,30 @@ impl fmt::Display for HleReadError {
 }
 
 impl std::error::Error for HleReadError {}
+
+/// Deferred request to spawn a callback worker recorded by an HLE
+/// handler via [`HleContext::park_for_callback`].
+///
+/// The handler does not perform the spawn itself; it records its
+/// intent and returns. The dispatch path consumes the recorded
+/// request after the handler drops, materializes the worker via
+/// [`cellgov_lv2::Lv2Host::call_guest_callback_sync`] +
+/// [`crate::Runtime::apply_callback_spawn`], and parks the calling
+/// unit on the worker's trampoline return.
+///
+/// At most one outstanding request per [`crate::hle::HleState`]
+/// (handlers are dispatched serially per unit; recursive callback
+/// dispatch is bounded by
+/// [`cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HleParkRequest {
+    /// Title-supplied OPD pointer that the worker enters.
+    pub opd_addr: u32,
+    /// Worker `r3..=r10` at entry.
+    pub args: [u64; 8],
+    /// Resume-stage discriminant for the parent's pending response.
+    pub stage: CallbackReturnStage,
+}
 
 /// The interface HLE module implementations operate through.
 pub trait HleContext {
@@ -115,6 +140,22 @@ pub trait HleContext {
     /// Returns `None` past `u32::MAX` rather than recycling IDs,
     /// which would produce kernel-object aliasing.
     fn alloc_id(&mut self) -> Option<u32>;
+
+    /// Record an intent to park the calling unit and run a guest
+    /// callback OPD on a fresh worker PPU thread.
+    ///
+    /// The dispatch path consumes the recorded
+    /// [`HleParkRequest`] after the handler returns and performs
+    /// the actual spawn via
+    /// [`cellgov_lv2::Lv2Host::call_guest_callback_sync`]. The
+    /// handler MUST NOT also call [`Self::set_return`]: the
+    /// parent's r3 is set by the resume arm in
+    /// [`crate::runtime`] when the worker returns.
+    ///
+    /// At most one park per dispatch; calling this twice in a
+    /// single handler displaces the prior request and is treated
+    /// as a programming error in debug builds.
+    fn park_for_callback(&mut self, request: HleParkRequest);
 }
 
 /// Adapter implementing [`HleContext`] by borrowing from a
@@ -145,6 +186,11 @@ pub(crate) struct RuntimeHleAdapter<'a> {
     /// Set on every mutating method. The Drop guard reads this.
     pub(crate) mutated: bool,
     pub(crate) handlers_without_mutation: &'a mut std::collections::BTreeMap<u32, usize>,
+    /// Park-intent slot. Handlers that wish to dispatch a guest
+    /// callback worker via [`HleContext::park_for_callback`] write
+    /// here; the post-dispatch consumer in
+    /// [`crate::Runtime`] reads + clears it.
+    pub(crate) pending_callback_spawn: &'a mut Option<HleParkRequest>,
 }
 
 impl Drop for RuntimeHleAdapter<'_> {
@@ -276,5 +322,18 @@ impl HleContext for RuntimeHleAdapter<'_> {
         }
         *self.next_id = id.checked_add(1).unwrap_or(0);
         Some(id)
+    }
+
+    fn park_for_callback(&mut self, request: HleParkRequest) {
+        self.mutated = true;
+        let prior = self.pending_callback_spawn.replace(request);
+        debug_assert!(
+            prior.is_none(),
+            "park_for_callback called twice in one dispatch (NID {:#010x}, source {:?}); \
+             prior request {:?} was displaced",
+            self.nid,
+            self.source,
+            prior,
+        );
     }
 }

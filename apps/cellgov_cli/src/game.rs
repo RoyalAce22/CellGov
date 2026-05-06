@@ -8,17 +8,11 @@ mod diag;
 pub mod manifest;
 mod observation;
 mod prx;
-mod ps3_layout;
 mod step_loop;
 
 pub use bench::{bench_boot_one_run, bench_boot_pair};
 
 pub(crate) use bench::agreement_percent;
-pub(crate) use ps3_layout::{
-    PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
-    PS3_PRIMARY_STACK_TOP, PS3_RSX_BASE, PS3_RSX_SIZE, PS3_SPU_RESERVED_BASE,
-    PS3_SPU_RESERVED_SIZE,
-};
 
 use std::time::Instant;
 
@@ -26,7 +20,8 @@ use diag::{print_hle_summary, print_insn_coverage, print_shadow_stats, print_top
 use manifest::TitleManifest;
 use observation::save_boot_observation;
 use step_loop::{
-    compute_untracked, pct, step_loop, StepLoopCtx, StepTiming, PC_RING_SIZE, SYSCALL_RING_SIZE,
+    compute_untracked, pct, step_loop, RingCursor, StepLoopCtx, StepTiming, PC_RING_SIZE,
+    SYSCALL_RING_SIZE,
 };
 
 /// Tunables for one `run-game` invocation; fields map 1:1 onto
@@ -139,11 +134,11 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         timing: &mut timing,
         loop_start: t_loop_start,
         pc_ring: [0; PC_RING_SIZE],
-        pc_ring_pos: 0,
+        pc_ring_cursor: RingCursor::new(PC_RING_SIZE),
         last_tty: None,
         last_exit: None,
         syscall_ring: [(0, 0); SYSCALL_RING_SIZE],
-        syscall_ring_pos: 0,
+        syscall_ring_cursor: RingCursor::new(SYSCALL_RING_SIZE),
         pc_hits: &mut pc_hits,
         checkpoint: title.checkpoint_trigger(),
         tty_oob_count: 0,

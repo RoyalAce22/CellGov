@@ -70,6 +70,7 @@ pub trait Lv2Runtime {
     fn writable(&self, addr: u64, len: usize) -> bool;
 }
 
+mod callback_dispatch;
 mod cond;
 mod event_flag;
 mod event_queue;
@@ -81,6 +82,8 @@ mod ppu_thread;
 pub mod rsx;
 mod semaphore;
 mod spu;
+
+pub use callback_dispatch::CallbackError;
 
 #[cfg(test)]
 mod test_support;
@@ -143,6 +146,18 @@ pub struct Lv2Host {
     /// critical-section-aware scheduler stickiness so a unit holding
     /// stdio's lwmutex is not preempted mid-printf by a budget tick.
     lwmutex_holds: BTreeMap<PpuThreadId, u32>,
+    /// Worker -> (parent unit, stage) linkage for callback-dispatch
+    /// workers spawned via [`Self::call_guest_callback_sync`]. The
+    /// parent stays parked until its worker hits the trampoline; at
+    /// that point the dispatch arm consumes this entry to build the
+    /// wake response. `BTreeMap` for deterministic iteration.
+    callback_parents: BTreeMap<PpuThreadId, (UnitId, crate::dispatch::CallbackReturnStage)>,
+    /// Per-parent recursion depth. A callback running on a worker
+    /// may itself call `call_guest_callback_sync`, spawning a fresh
+    /// worker; the depth tracker caps this at
+    /// `cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP` to
+    /// catch runaway recursion.
+    callback_depth: BTreeMap<UnitId, u8>,
 }
 
 impl Default for Lv2Host {
@@ -189,6 +204,8 @@ impl Lv2Host {
             fs_fd_count: 0,
             fs_store: FsStore::new(),
             lwmutex_holds: BTreeMap::new(),
+            callback_parents: BTreeMap::new(),
+            callback_depth: BTreeMap::new(),
         }
     }
 
@@ -395,6 +412,19 @@ impl Lv2Host {
         self.ppu_threads.thread_id_for_unit(unit_id)
     }
 
+    /// True when the unit's backing `PpuThread` is in `Finished`
+    /// state. Used by the runtime to mirror a host-driven thread
+    /// finish (e.g. callback worker terminal trampoline) into the
+    /// unit's lifecycle so the PPU execution loop stops fetching.
+    /// Returns false when the unit is not a PPU thread or its thread
+    /// is still Running / Detached.
+    pub fn is_ppu_thread_finished_for_unit(&self, unit_id: UnitId) -> bool {
+        match self.ppu_threads.get_by_unit(unit_id) {
+            Some(thread) => matches!(thread.state, crate::ppu_thread::PpuThreadState::Finished),
+            None => false,
+        }
+    }
+
     /// Capture the game ELF's PT_TLS template.
     pub fn set_tls_template(&mut self, template: TlsTemplate) {
         self.tls_template = template;
@@ -548,6 +578,21 @@ impl Lv2Host {
         }
         if !self.fs_store.is_empty() {
             hasher.write(&self.fs_store.state_hash().to_le_bytes());
+        }
+        if !self.callback_parents.is_empty() {
+            hasher.write(&(self.callback_parents.len() as u64).to_le_bytes());
+            for (worker, (parent, stage)) in &self.callback_parents {
+                hasher.write(&worker.raw().to_le_bytes());
+                hasher.write(&parent.raw().to_le_bytes());
+                hasher.write(&[stage.stable_tag()]);
+            }
+        }
+        if !self.callback_depth.is_empty() {
+            hasher.write(&(self.callback_depth.len() as u64).to_le_bytes());
+            for (parent, depth) in &self.callback_depth {
+                hasher.write(&parent.raw().to_le_bytes());
+                hasher.write(&[*depth]);
+            }
         }
         hasher.finish()
     }
@@ -956,6 +1001,46 @@ impl Lv2Host {
                 self.event_port_count = self.event_port_count.saturating_sub(1);
                 Lv2Dispatch::Immediate {
                     code: 0,
+                    effects: vec![],
+                }
+            }
+            Lv2Request::CallbackDispatchSpawn { .. } => {
+                // CallbackDispatchSpawn is fabricated internally by
+                // HLE handlers via `call_guest_callback_sync`; the
+                // classifier never decodes it, so reaching this arm
+                // through `dispatch` is a layering bug.
+                self.record_invariant_break(
+                    "dispatch.callback_dispatch_spawn_via_request",
+                    format_args!(
+                        "CallbackDispatchSpawn reached dispatch via Lv2Request; should be \
+                         constructed only as Lv2Dispatch::CallbackSpawn from \
+                         call_guest_callback_sync"
+                    ),
+                );
+                Lv2Dispatch::Immediate {
+                    code: errno::CELL_EINVAL.into(),
+                    effects: vec![],
+                }
+            }
+            Lv2Request::CallbackDispatchReturn { args } => {
+                self.dispatch_callback_return(requester, args)
+            }
+            Lv2Request::Hypercall { lev, r11, args } => {
+                // PS3 usermode never issues `sc` with LEV != 0
+                // (Book I §2.4.2). Surface as an invariant break
+                // and reject with CELL_EINVAL rather than letting
+                // the call fall through to the LV2 table.
+                self.log_invariant_break(
+                    "dispatch.hypercall_rejected",
+                    format_args!(
+                        "sc LEV={lev} r11={r11:#x} from PS3 usermode; \
+                         hypercalls are a programming error per Book I 2.4.2 \
+                         (r3={:#x} r4={:#x} r5={:#x} r6={:#x} r7={:#x} r8={:#x} r9={:#x} r10={:#x})",
+                        args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                    ),
+                );
+                Lv2Dispatch::Immediate {
+                    code: errno::CELL_EINVAL.into(),
                     effects: vec![],
                 }
             }
@@ -1633,5 +1718,46 @@ mod tests {
         let mut host = Lv2Host::new();
         let _ = host.allocate_child_stack(0x10_000, 0x10).unwrap();
         assert_ne!(pre, host.state_hash());
+    }
+
+    /// `is_ppu_thread_finished_for_unit` returns false for unmapped
+    /// units, false for live primary threads, and true after the host
+    /// marks the backing `PpuThread` `Finished`. Pinned because the
+    /// callback-dispatch wake path in `cellgov_core` keys on this
+    /// signal to transition the worker unit to `Finished` so the PPU
+    /// execution loop stops fetching past the trampoline `sc 0`.
+    #[test]
+    fn is_ppu_thread_finished_for_unit_tracks_thread_state() {
+        use crate::ppu_thread::{PpuThreadAttrs, PpuThreadState};
+        let mut host = Lv2Host::new();
+        let parent = UnitId::new(0);
+        // Unmapped unit returns false (no PpuThread bound to it).
+        assert!(!host.is_ppu_thread_finished_for_unit(parent));
+
+        host.seed_primary_ppu_thread(
+            parent,
+            PpuThreadAttrs {
+                entry: 0x10_0000,
+                arg: 0,
+                stack_base: 0xD000_0000,
+                stack_size: 0x10000,
+                priority: 1000,
+                tls_base: 0,
+            },
+        );
+        // Newly seeded thread is alive (state defaults to Running).
+        assert!(!host.is_ppu_thread_finished_for_unit(parent));
+
+        // Manually transition the backing PpuThread to Finished and
+        // re-check; the accessor reflects the host-side lifecycle.
+        let tid = host
+            .ppu_threads()
+            .thread_id_for_unit(parent)
+            .expect("seeded primary thread has a thread id");
+        host.ppu_threads_mut()
+            .get_mut(tid)
+            .expect("thread exists")
+            .state = PpuThreadState::Finished;
+        assert!(host.is_ppu_thread_finished_for_unit(parent));
     }
 }

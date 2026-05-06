@@ -9,7 +9,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
-use cellgov_lv2::PendingResponse;
+use cellgov_lv2::{CallbackReturnStage, PendingResponse};
 
 use super::Runtime;
 
@@ -95,6 +95,9 @@ impl Runtime {
                     // for now wake with CELL_OK and do not re-park.
                     self.registry.set_syscall_return(waiter, 0);
                 }
+                Some(PendingResponse::CallbackReturn { stage, args }) => {
+                    self.resume_callback_return(waiter, stage, args);
+                }
                 Some(_) | None => {
                     // Defensive: an ill-formed or absent entry still
                     // transitions the waiter back to runnable.
@@ -103,6 +106,56 @@ impl Runtime {
             }
             self.registry
                 .set_status_override(waiter, UnitStatus::Runnable);
+        }
+    }
+
+    /// Stage-dispatching resume entry for a callback worker's wake.
+    ///
+    /// Each parkable HLE handler that schedules a worker via
+    /// `Lv2Host::call_guest_callback_sync` lands a
+    /// `CallbackReturnStage` variant here in lockstep with adding
+    /// the variant to `cellgov_lv2`. Adding a variant without a
+    /// resume arm fires the wildcard `unimplemented!`; the wildcard
+    /// is required because `CallbackReturnStage` is
+    /// `#[non_exhaustive]` cross-crate.
+    ///
+    /// `args` is the worker's `r3..=r10` captured at trampoline
+    /// entry. `args[0]` is the worker's r3 by PPC64 ELFv1
+    /// convention; the rest are caller-defined out-register
+    /// payloads that consumer arms read directly.
+    fn resume_callback_return(
+        &mut self,
+        waiter: UnitId,
+        stage: CallbackReturnStage,
+        args: [u64; 8],
+    ) {
+        match stage {
+            CallbackReturnStage::Synthetic => {
+                self.registry.set_syscall_return(waiter, args[0]);
+            }
+            CallbackReturnStage::AutoLoadAfterStat {
+                cb_result_addr,
+                stat_get_addr,
+                stat_set_addr,
+                func_file_opd,
+            } => {
+                crate::hle::cell_save_data::resume_after_stat(
+                    self,
+                    waiter,
+                    cb_result_addr,
+                    stat_get_addr,
+                    stat_set_addr,
+                    func_file_opd,
+                    args,
+                );
+            }
+            _ => {
+                unimplemented!(
+                    "resume_callback_return: stage {stage:?} has no resume arm; \
+                     add the arm in this match in lockstep with adding the \
+                     CallbackReturnStage variant in cellgov_lv2"
+                );
+            }
         }
     }
 
@@ -167,7 +220,8 @@ impl Runtime {
                     | PendingResponse::EventQueueReceive { .. }
                     | PendingResponse::CondWakeReacquire { .. }
                     | PendingResponse::EventFlagWake { .. }
-                    | PendingResponse::LwMutexWake { .. } => {
+                    | PendingResponse::LwMutexWake { .. }
+                    | PendingResponse::CallbackReturn { .. } => {
                         // The SPU thread-group wake path should not
                         // reach these variants; each has its own wake
                         // path. Defensive recovery without writing to

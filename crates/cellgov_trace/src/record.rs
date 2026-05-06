@@ -57,6 +57,14 @@ pub enum TracedYieldReason {
     Fault = 7,
     /// Completed normally.
     Finished = 8,
+    /// `sc` instruction with LEV >= 1 (hypercall, CBE Handbook
+    /// §11.1). PS3 usermode never issues these; the runtime
+    /// rejects with `CELL_EINVAL` and logs an invariant break.
+    /// Distinguished from [`Self::Syscall`] in the trace stream so
+    /// a hypercall rejection cannot byte-collide with an unrelated
+    /// LV2 handler returning `CELL_EINVAL` -- the host's invariant
+    /// break log carries the full LEV / r11 / args context.
+    Hypercall = 9,
 }
 
 impl TracedYieldReason {
@@ -71,6 +79,7 @@ impl TracedYieldReason {
             6 => Self::InterruptBoundary,
             7 => Self::Fault,
             8 => Self::Finished,
+            9 => Self::Hypercall,
             _ => return None,
         })
     }

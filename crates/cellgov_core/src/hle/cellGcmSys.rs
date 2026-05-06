@@ -151,6 +151,7 @@ fn adapter(runtime: &mut Runtime, source: UnitId, nid: u32) -> RuntimeHleAdapter
         nid,
         mutated: false,
         handlers_without_mutation: &mut runtime.hle.handlers_without_mutation,
+        pending_callback_spawn: &mut runtime.hle.pending_callback_spawn,
     }
 }
 
@@ -171,6 +172,7 @@ fn init_body_with_runtime(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]
                     next_id,
                     gcm,
                     handlers_without_mutation,
+                    pending_callback_spawn,
                     ..
                 },
             ..
@@ -187,6 +189,7 @@ fn init_body_with_runtime(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]
             nid: gcm_nid::INIT_BODY,
             mutated: false,
             handlers_without_mutation,
+            pending_callback_spawn,
         };
         init_body(&mut ctx, args, gcm);
     }
@@ -268,6 +271,7 @@ fn get_configuration_with_runtime(runtime: &mut Runtime, source: UnitId, args: &
                 next_id,
                 gcm,
                 handlers_without_mutation,
+                pending_callback_spawn,
                 ..
             },
         ..
@@ -284,6 +288,7 @@ fn get_configuration_with_runtime(runtime: &mut Runtime, source: UnitId, args: &
         nid: gcm_nid::GET_CONFIGURATION,
         mutated: false,
         handlers_without_mutation,
+        pending_callback_spawn,
     };
     get_configuration(&mut ctx, args, gcm);
 }
@@ -522,7 +527,7 @@ mod address_to_offset_tests {
         let address: u32 = 0x0004_0000;
         let offset_ptr: u32 = 0x10_1000;
         let args: [u64; 9] = [0x10000, address as u64, offset_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::ADDRESS_TO_OFFSET, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::ADDRESS_TO_OFFSET, &args, None);
 
         let m = rt.memory().as_bytes();
         let written = u32::from_be_bytes([
@@ -547,7 +552,7 @@ mod address_to_offset_tests {
         let address: u32 = 0x4000_0000; // outside both ranges
         let offset_ptr: u32 = 0x10_1000;
         let args: [u64; 9] = [0x10000, address as u64, offset_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, gcm_nid::ADDRESS_TO_OFFSET, &args);
+        rt.dispatch_hle(unit_id, gcm_nid::ADDRESS_TO_OFFSET, &args, None);
 
         let m = rt.memory().as_bytes();
         let written = u32::from_be_bytes([

@@ -33,14 +33,24 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
 }
 
 /// Map a runtime [`YieldReason`] onto its [`TracedYieldReason`] twin.
-pub(super) fn traced_yield_reason(y: YieldReason) -> TracedYieldReason {
+///
+/// `syscall_lev` is the LEV field of the `sc` instruction
+/// (`LocalDiagnostics::syscall_lev`). A `Syscall` yield with
+/// `syscall_lev = Some(lev != 0)` maps to
+/// [`TracedYieldReason::Hypercall`]; the trace stream cannot
+/// byte-collide a hypercall rejection with a normal LV2 handler
+/// returning the same error code.
+pub(super) fn traced_yield_reason(y: YieldReason, syscall_lev: Option<u8>) -> TracedYieldReason {
     match y {
         YieldReason::BudgetExhausted => TracedYieldReason::BudgetExhausted,
         YieldReason::MailboxAccess => TracedYieldReason::MailboxAccess,
         YieldReason::DmaSubmitted => TracedYieldReason::DmaSubmitted,
         YieldReason::DmaWait => TracedYieldReason::DmaWait,
         YieldReason::WaitingSync => TracedYieldReason::WaitingSync,
-        YieldReason::Syscall => TracedYieldReason::Syscall,
+        YieldReason::Syscall => match syscall_lev {
+            Some(lev) if lev != 0 => TracedYieldReason::Hypercall,
+            _ => TracedYieldReason::Syscall,
+        },
         YieldReason::InterruptBoundary => TracedYieldReason::InterruptBoundary,
         YieldReason::Fault => TracedYieldReason::Fault,
         YieldReason::Finished => TracedYieldReason::Finished,
