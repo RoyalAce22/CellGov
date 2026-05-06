@@ -1,56 +1,32 @@
 //! Single source of truth for the `r11` syscall-number namespace.
 //!
-//! Every `sc 0` instruction CellGov emits or classifies sources its
-//! syscall number from r11. Three disjoint, contiguous ranges share
-//! that word:
+//! Three disjoint, contiguous ranges share the r11 word:
 //!
-//! - **`Lv2`** -- real PS3 LV2 syscalls. RPCS3's table tops out
-//!   around 1023; the namespace reserves the low 64K (`0..0x10000`).
-//! - **`HleImport`** -- CellGov-emitted HLE import trampolines (one
-//!   per PS3 PRX import). r11 = `HleImport.encode(hle_index)`. The
-//!   runtime classifies the call as a NID lookup.
-//! - **`CellGovPrivate`** -- runtime-installed trampolines that fire
-//!   CellGov-private control surfaces (callback return today;
-//!   future flip-handler return, SPURS exception return, etc.).
+//! - **`Lv2`** -- real PS3 LV2 syscalls (`0..0x10000`).
+//! - **`HleImport`** -- CellGov-emitted HLE import trampolines
+//!   (`0x10000..0x80000`), one number per PRX import.
+//! - **`CellGovPrivate`** -- runtime-installed control trampolines
+//!   (`0x80000..0x100000`).
 //!
-//! All emitters go through [`SyscallNamespace::encode`] (proof at
-//! const-eval time when the index is statically known) or
-//! [`SyscallNamespace::try_encode`] (when the index grows at
-//! runtime, e.g. the HLE import binder). Pure namespace facts
-//! ([`SyscallNamespace::of`] / [`SyscallNamespace::decode`]) live
-//! here; the LEV-aware dispatch-hint classifier lives in
-//! `cellgov_lv2::syscall_classification` because it produces a
-//! routing decision rather than an ABI fact.
-//!
-//! Adding a new private syscall becomes "register an index in
-//! [`CellGovPrivateSyscall`]" rather than picking a free number,
-//! editing two crates, and hoping the bit pattern does not collide.
+//! The LEV-aware dispatch-hint classifier lives in
+//! `cellgov_lv2::syscall_classification`; this module exposes pure
+//! ABI facts only.
 
 use crate::syscall;
 
 /// Half-open ranges in the syscall-number namespace.
-///
-/// Every encoder and the classifier route through this enum. Adding
-/// a namespace requires extending the [`Self::range`] and
-/// [`Self::of`] match arms together; the const-asserting blocks at
-/// the bottom of this module pin disjointness AND contiguity at
-/// compile time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyscallNamespace {
-    /// Real PS3 LV2 syscalls (`0..0x10000`).
+    /// Real LV2 syscalls in `0..0x10000`.
     Lv2,
-    /// CellGov-emitted HLE import trampolines (`0x10000..0x80000`).
-    /// One number per imported function; the index space gives
-    /// 0x70000 (~458K) bindings, well above any plausible title.
+    /// CellGov-emitted HLE import trampolines in `0x10000..0x80000`.
     HleImport,
-    /// CellGov-private control trampolines (`0x80000..0x100000`).
     /// Indexed by [`CellGovPrivateSyscall`].
     CellGovPrivate,
 }
 
 impl SyscallNamespace {
-    /// Half-open `[start, end)` range of syscall numbers in this
-    /// namespace.
+    /// Half-open `[start, end)` range of syscall numbers.
     #[inline]
     pub const fn range(self) -> (u64, u64) {
         match self {
@@ -65,10 +41,8 @@ impl SyscallNamespace {
     /// # Panics
     /// In debug builds, panics if `start + index` does not fit in
     /// the namespace's range. In const context this is a compile-
-    /// time error. Release builds skip the assert; the call sites
-    /// that grow `index` at runtime (the HLE import binder) use
-    /// [`Self::try_encode`] to surface overflow as `None` instead
-    /// of crashing the emulator.
+    /// time error. Runtime callers whose `index` grows from a count
+    /// should use [`Self::try_encode`].
     #[inline]
     pub const fn encode(self, index: u32) -> u64 {
         let (start, end) = self.range();
@@ -77,12 +51,9 @@ impl SyscallNamespace {
         value
     }
 
-    /// Fallible variant of [`Self::encode`] for runtime callers
-    /// whose `index` grows from a count (one per PRX import in the
-    /// HLE binder's case). Returns `None` when the produced syscall
-    /// number would land outside the namespace's `[start, end)`
-    /// range, including the wrap-past-end case if a future `range()`
-    /// edit ever leaves the upper bound below the index reach.
+    /// Fallible variant of [`Self::encode`]. Returns `None` when the
+    /// produced syscall number would land outside the namespace's
+    /// `[start, end)` range, including the wrap-past-end case.
     #[inline]
     pub const fn try_encode(self, index: u32) -> Option<u64> {
         let (start, end) = self.range();
@@ -96,10 +67,7 @@ impl SyscallNamespace {
 
     /// Classify a raw r11 value into its namespace.
     ///
-    /// `None` means the value falls outside every declared range
-    /// (above [`Self::CellGovPrivate`]). Runtime callers folding
-    /// in the LEV check use `cellgov_lv2::syscall_classification::classify`,
-    /// which composes this function with the hypercall guard.
+    /// Returns `None` for values above [`Self::CellGovPrivate`].
     #[inline]
     pub const fn of(syscall_num: u64) -> Option<SyscallNamespace> {
         let (_lv2_lo, lv2_hi) = Self::Lv2.range();
@@ -116,10 +84,8 @@ impl SyscallNamespace {
         }
     }
 
-    /// Decompose a syscall number into `(namespace, index)`.
-    ///
-    /// `index` is `syscall_num - namespace.range().0`. Returns
-    /// `None` for syscall numbers outside every declared range.
+    /// Decompose a syscall number into `(namespace, index)`, where
+    /// `index = syscall_num - namespace.range().0`.
     #[inline]
     pub const fn decode(syscall_num: u64) -> Option<(SyscallNamespace, u32)> {
         match Self::of(syscall_num) {
@@ -134,25 +100,15 @@ impl SyscallNamespace {
 
 /// Indexed catalog of CellGov-private syscalls.
 ///
-/// Each variant maps to a unique index in
-/// [`SyscallNamespace::CellGovPrivate`]. Adding a private syscall
-/// (vblank-handler return, SPURS exception return, etc.) means
-/// **appending** a variant; the encoded number is then
-/// `SyscallNamespace::CellGovPrivate.encode(<variant> as u32)`.
-///
-/// # Invariant: never renumber existing variants
-/// The discriminant of each variant is wire-visible -- it lands in
-/// guest memory as the lo half of `lis r11; ori r11` and is
-/// captured in trace fixtures. Renumbering an existing variant
-/// changes the encoded bytes and breaks any consumer keyed off the
-/// raw number. New variants only ever append.
+/// # Invariant
+/// Discriminants are wire-visible -- they land in guest memory as
+/// the lo half of `lis r11; ori r11` and are captured in trace
+/// fixtures. Only ever append new variants; never renumber.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 #[repr(u32)]
 pub enum CellGovPrivateSyscall {
-    /// Worker-callback return trampoline. Fires from a PPU worker
-    /// thread after a `blr` lands on the runtime-installed
-    /// trampoline body.
+    /// Trampoline a guest callback uses to return control to the runtime.
     CallbackReturn = 0,
 }
 
@@ -163,22 +119,15 @@ impl CellGovPrivateSyscall {
         SyscallNamespace::CellGovPrivate.encode(self as u32)
     }
 
-    /// Recover the variant from a per-namespace `index`. `None` for
-    /// indices not yet registered. Used by the LEV-aware classifier
-    /// in `cellgov_lv2::syscall_classification` to surface a typed
-    /// variant rather than a raw number.
+    /// Recover the variant from a per-namespace `index`, or `None`
+    /// for indices not yet registered.
     ///
-    /// # Producer / consumer ordering
-    /// Adding a variant requires an audit of any code emitting
-    /// `CellGovPrivate` trampolines to ensure no emitter precedes
-    /// the variant registration. The match arms here make a missing
-    /// consumer-side variant a compile error when the classifier is
-    /// rebuilt, but a producer (some future flip-handler OPD
-    /// installer in a different crate) could still emit the new
-    /// syscall number from a cross-crate call site before the
-    /// variant exists. Such an emission would route through the
-    /// classifier's `Unknown` arm silently. Land the variant + every
-    /// emitter in the same change to avoid the gap.
+    /// # Cross-crate contract
+    /// A producer in another crate can emit a `CellGovPrivate`
+    /// syscall number whose variant has not been added here; that
+    /// emission routes through the classifier's `Unknown` arm
+    /// silently. Land the variant and every emitter in the same
+    /// change.
     #[inline]
     pub const fn from_index(index: u32) -> Option<Self> {
         match index {
@@ -188,12 +137,9 @@ impl CellGovPrivateSyscall {
     }
 }
 
-// Compile-time disjointness AND contiguity check. Disjointness
-// alone would let a future edit leave a gap (`HleImport` at
-// 0x10000..0x70000, `CellGovPrivate` at 0x80000..0x100000) where
-// `of()` returns None for the 0x70000..0x80000 range -- a silent
-// classifier hole. Contiguity asserts the chosen design: every
-// r11 value below 0x100000 lands in exactly one namespace.
+// Disjointness + contiguity: every r11 below 0x100000 lands in
+// exactly one namespace. A gap would let `of()` return None inside
+// the reserved range.
 const _: () = {
     let (lv2_lo, lv2_hi) = SyscallNamespace::Lv2.range();
     let (hle_lo, hle_hi) = SyscallNamespace::HleImport.range();
@@ -209,12 +155,9 @@ const _: () = {
     );
 };
 
-// Compile-time proof that every LV2 syscall constant in
-// `crate::syscall` fits the `Lv2` namespace. A future syscall
-// constant added at, say, `0x10000+` would compile cleanly without
-// this block, then silently route as an HLE import at runtime.
-// Adding a new constant in `crate::syscall` requires extending this
-// table -- the friction is the point.
+// Every LV2 syscall constant in `crate::syscall` must fit the
+// `Lv2` namespace; a constant at `0x10000+` would otherwise route
+// as an HLE import at runtime. New constants extend this table.
 const LV2_SYSCALL_CATALOG: &[u64] = &[
     syscall::PROCESS_GETPID,
     syscall::PROCESS_GET_NUMBER_OF_OBJECT,
@@ -313,8 +256,6 @@ const _: () = {
 mod tests {
     use super::*;
 
-    /// Pin every namespace's range; loud failure if a future edit
-    /// shifts a boundary without updating call sites.
     #[test]
     fn namespace_ranges_are_pinned() {
         assert_eq!(SyscallNamespace::Lv2.range(), (0, 0x10000));
@@ -345,8 +286,6 @@ mod tests {
         }
     }
 
-    /// Boundary round-trips for each namespace at index 0, midpoint,
-    /// and max-valid. Replaces the prior 6-pair sample.
     #[test]
     fn encode_decode_round_trips_at_boundaries() {
         let cases = [
@@ -417,11 +356,6 @@ mod tests {
         );
     }
 
-    /// Variant ordering is wire-visible. Renumbering an existing
-    /// variant changes the encoded syscall number, which changes
-    /// the bytes the trampoline emits and any trace fixture that
-    /// records private syscall numbers. Only ever append new
-    /// variants.
     #[test]
     fn private_syscall_discriminants_are_pinned() {
         assert_eq!(CellGovPrivateSyscall::CallbackReturn as u32, 0);
@@ -432,8 +366,6 @@ mod tests {
         );
         assert_eq!(CellGovPrivateSyscall::from_index(1), None);
     }
-
-    // ---- encode panic boundaries ----
 
     #[test]
     #[cfg(debug_assertions)]
@@ -456,8 +388,6 @@ mod tests {
         let _ = SyscallNamespace::CellGovPrivate.encode(0x80000);
     }
 
-    // ---- try_encode ----
-
     #[test]
     fn try_encode_returns_some_within_range() {
         assert_eq!(SyscallNamespace::Lv2.try_encode(0), Some(0));
@@ -477,15 +407,6 @@ mod tests {
 
     #[test]
     fn try_encode_returns_none_when_index_overflows_u32_to_u64() {
-        // Even an index that would wrap past `end` (impossible
-        // today since end > start + u32::MAX is structurally false,
-        // but pin the wrap-defense behavior so a future range edit
-        // that flips this can't introduce a silent overflow).
         assert_eq!(SyscallNamespace::Lv2.try_encode(u32::MAX), None);
     }
-
-    // The LEV-aware dispatch-hint classifier (and its tests) live
-    // in `cellgov_lv2::syscall_classification` because they
-    // produce a routing decision rather than an ABI fact. The pure
-    // `of` / `decode` namespace functions stay tested here.
 }

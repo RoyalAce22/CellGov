@@ -1,12 +1,12 @@
 //! Commit pipeline: validate, stage, apply a unit's emitted effects.
 //!
-//! Contract (none of these are expressible in the type system):
+//! Cross-module contract:
 //!
 //! - One commit batch per unit yield; no cross-unit batching.
-//! - Atomic from guest visibility: every `SharedWriteIntent` in the
-//!   batch becomes visible at the same epoch boundary, or none do.
-//! - Fault rule: `YieldReason::Fault` discards the whole batch,
-//!   including effects emitted before the fault.
+//! - Atomic guest visibility: every `SharedWriteIntent` in the batch
+//!   becomes visible at the same epoch boundary, or none do.
+//! - `YieldReason::Fault` discards the whole batch, including effects
+//!   emitted before the fault.
 //! - Validation rejects the whole batch; a rejected batch commits
 //!   nothing and surfaces as a fault on the originating unit.
 //! - Every committed `SharedWriteIntent` runs the reservation-table
@@ -30,50 +30,50 @@ use cellgov_time::GuestTicks;
 pub enum CommitError {
     /// A `SharedWriteIntent` payload length did not match its range length.
     PayloadLengthMismatch {
-        /// Position of the offending effect in `emitted_effects`.
+        /// Index of the offending effect within the batch.
         effect_index: usize,
     },
     /// A `SharedWriteIntent` target range escapes any registered region.
     OutOfRange {
-        /// Position of the offending effect in `emitted_effects`.
+        /// Index of the offending effect within the batch.
         effect_index: usize,
     },
-    /// A `MailboxSend` targeted an unregistered mailbox.
+    /// A `MailboxSend` or `MailboxReceiveAttempt` targeted an unregistered mailbox.
     UnknownMailbox {
-        /// Position of the offending effect in `emitted_effects`.
+        /// Index of the offending effect within the batch.
         effect_index: usize,
-        /// The unregistered mailbox.
+        /// Mailbox id that was not found in the registry.
         mailbox: MailboxId,
     },
     /// A `SignalUpdate` targeted an unregistered signal.
     UnknownSignal {
-        /// Position of the offending effect in `emitted_effects`.
+        /// Index of the offending effect within the batch.
         effect_index: usize,
-        /// The unregistered signal.
+        /// Signal id that was not found in the registry.
         signal: SignalId,
     },
     /// A `WakeUnit` targeted an unregistered unit.
     UnknownWakeTarget {
-        /// Position of the offending effect in `emitted_effects`.
+        /// Index of the offending effect within the batch.
         effect_index: usize,
-        /// The unregistered unit.
+        /// Target unit id that was not found in the registry.
         target: UnitId,
     },
     /// A source-side effect named an unregistered unit; rejecting keeps
     /// the reservation table and pending-receive inbox registry-consistent.
     UnknownSourceUnit {
-        /// Position of the offending effect in `emitted_effects`.
+        /// Index of the offending effect within the batch.
         effect_index: usize,
-        /// The unregistered unit.
+        /// Source unit id that was not found in the registry.
         source: UnitId,
     },
     /// A `DmaEnqueue` destination range escapes any registered region.
     ///
-    /// Only destination is pre-validated; source ranges may legitimately
-    /// reference SPU local stores or staging buffers that the completion
-    /// handler resolves by path.
+    /// Source ranges are not pre-validated; they may legitimately reference
+    /// SPU local stores or staging buffers that the completion handler
+    /// resolves by path.
     DmaDestinationOutOfRange {
-        /// Position of the offending effect in `emitted_effects`.
+        /// Index of the offending effect within the batch.
         effect_index: usize,
     },
     /// The memory layer rejected the drain (permissions, or a
@@ -84,36 +84,36 @@ pub enum CommitError {
 /// Summary of what a commit pass accomplished.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CommitOutcome {
-    /// Committed `SharedWriteIntent` count (includes `RsxLabelWrite`).
+    /// Includes `RsxLabelWrite` (staged as a 4-byte BE store).
     pub writes_committed: usize,
-    /// Committed `MailboxSend` count.
+    /// Number of `MailboxSend` effects committed.
     pub mailbox_sends_committed: usize,
-    /// Committed `SignalUpdate` count.
+    /// Number of `SignalUpdate` effects committed.
     pub signal_updates_committed: usize,
-    /// `MailboxReceiveAttempt`s that popped a message.
+    /// Number of `MailboxReceiveAttempt` effects that delivered a message.
     pub mailbox_receives_committed: usize,
-    /// `MailboxReceiveAttempt`s that blocked on an empty mailbox.
+    /// Number of `MailboxReceiveAttempt` effects that blocked on an empty mailbox.
     pub mailbox_receives_blocked: usize,
-    /// `DmaEnqueue`s scheduled into the completion queue.
+    /// Number of `DmaEnqueue` effects committed onto the DMA queue.
     pub dma_enqueued: usize,
-    /// `WakeUnit`s applied as `Runnable` overrides.
+    /// Number of `WakeUnit` effects committed.
     pub wakes_committed: usize,
-    /// `WaitOnEvent`s applied as `Blocked` overrides.
+    /// Number of `WaitOnEvent` effects committed.
     pub waits_committed: usize,
-    /// DMA completions that fired at this boundary. Filled by the runtime,
-    /// always zero from [`CommitPipeline::process`].
+    /// DMA completions that fired at this boundary. Always zero from
+    /// [`CommitPipeline::process`]; the runtime fills it during `commit_step`.
     pub dma_completions_fired: usize,
     /// `ReservationAcquire`s that installed or replaced an entry.
     ///
     /// A second acquire on the same unit bumps this counter AND
-    /// `reservations_cleared`; the table size is unchanged. Tooling that
-    /// wants net installs must reconcile both counters.
+    /// `reservations_cleared` while leaving the table size unchanged;
+    /// tooling that wants net installs must reconcile both.
     pub reservation_acquires_committed: usize,
-    /// `ConditionalStore`s whose write was applied.
+    /// Number of `ConditionalStore` effects committed.
     pub conditional_stores_committed: usize,
     /// `ConditionalStore`s that reached apply without a prior reservation
     /// for the emitter. Zero for correct real emitters (PPU, SPU); non-zero
-    /// for synthetic test units that skip the LL/SC pre-check, or an
+    /// indicates a synthetic test unit skipping the LL/SC pre-check or an
     /// emitter-side ordering bug. Whole-scenario CI asserts zero for real
     /// emitters.
     pub conditional_stores_without_prior_reservation: usize,
@@ -127,25 +127,22 @@ pub struct CommitOutcome {
     pub effects_deferred: usize,
     /// `true` if the step faulted and the whole batch was discarded.
     pub fault_discarded: bool,
-    /// Count of effects dropped by the fault rule. Equals `effects.len()`
-    /// when `fault_discarded`, else zero. Per-kind detail lives in the
-    /// trace stream.
+    /// Equals `effects.len()` when `fault_discarded`, else zero;
+    /// per-kind detail lives in the trace stream.
     pub effects_discarded_on_fault: usize,
-    /// Units blocked during this commit.
+    /// Units transitioned to `Blocked` during this commit, with the reason.
     pub blocked_units: Vec<(UnitId, BlockReason)>,
-    /// Units woken during this commit (excludes DMA-completion wakes).
+    /// Excludes DMA-completion wakes.
     pub woken_units: Vec<UnitId>,
-    /// `true` when the step's `YieldReason::Fault` was a callback
-    /// worker faulting mid-body and the runtime absorbed it by
-    /// waking the parent with a kernel-error code in r3 + finishing
-    /// the worker. Step-loop classifiers treat such steps as
-    /// `Continue` rather than `StepFault` so the parent can run
-    /// through its error-path code instead of the entire run
-    /// terminating on a recoverable callback failure.
+    /// `true` when a callback worker faulted mid-body and the runtime
+    /// recovered by waking the parent with a kernel-error code in r3 and
+    /// finishing the worker. Step-loop classifiers then treat the step as
+    /// `Continue` rather than `StepFault`, letting the parent execute its
+    /// error path instead of terminating the run.
     ///
-    /// Always `false` from `CommitPipeline::process`; populated by
-    /// the runtime in `commit_step` when the source unit was a
-    /// registered callback worker.
+    /// Always `false` from [`CommitPipeline::process`]; the runtime sets
+    /// it during `commit_step` when the source unit is a registered
+    /// callback worker.
     pub callback_worker_fault_absorbed: bool,
 }
 
@@ -160,27 +157,26 @@ pub enum BlockReason {
 
 /// Mutable references to every subsystem the commit pipeline touches.
 pub struct CommitContext<'a> {
-    /// Committed guest memory.
+    /// Guest memory the staged writes drain into.
     pub memory: &'a mut GuestMemory,
-    /// Unit registry (status overrides, receive delivery).
+    /// Unit registry queried for source/target validation and status overrides.
     pub units: &'a mut UnitRegistry,
-    /// Mailbox registry.
+    /// Mailbox registry for send and receive-attempt effects.
     pub mailboxes: &'a mut MailboxRegistry,
-    /// Signal-notification register registry.
+    /// Signal registry for signal-update effects.
     pub signals: &'a mut SignalRegistry,
-    /// DMA completion queue.
+    /// DMA queue that enqueued completions are appended to.
     pub dma_queue: &'a mut DmaQueue,
-    /// Latency model for DMA completion times.
+    /// Latency model used to compute DMA completion times.
     pub dma_latency: &'a dyn DmaLatencyModel,
-    /// Current guest time.
+    /// Current guest time used as the base for DMA latency calculations.
     pub now: GuestTicks,
-    /// Atomic reservation table.
+    /// Reservation table mutated by LL/SC and clear-sweep paths.
     pub reservations: &'a mut ReservationTable,
-    /// RSX label area base address; zero means GCM has not been initialised.
-    /// `RsxLabelWrite` commits as a 4-byte big-endian store at
-    /// `rsx_label_base + offset`.
+    /// Zero means GCM has not been initialised; `RsxLabelWrite` commits as
+    /// a 4-byte big-endian store at `rsx_label_base + offset`.
     pub rsx_label_base: u32,
-    /// RSX flip-status state machine; write-only from this pipeline.
+    /// Write-only from this pipeline.
     pub rsx_flip: &'a mut crate::rsx::flip::RsxFlipState,
 }
 
@@ -189,7 +185,7 @@ pub struct CommitContext<'a> {
 pub struct CommitPipeline {}
 
 impl CommitPipeline {
-    /// Construct a fresh commit pipeline.
+    /// Construct an empty commit pipeline.
     #[inline]
     pub fn new() -> Self {
         Self::default()
@@ -197,10 +193,9 @@ impl CommitPipeline {
 
     /// Process the effects produced by a single unit step.
     ///
-    /// See the module docs for the full contract (atomic-batch,
-    /// fault-discards-all, validation-rejects-whole-batch). Validation
-    /// runs over every effect first; staged memory writes drain as one
-    /// atomic operation before any other subsystem is mutated.
+    /// Validation runs over every effect first; staged memory writes
+    /// drain as one atomic operation before any other subsystem is
+    /// mutated. See the module docs for the full contract.
     ///
     /// # Errors
     ///
@@ -241,13 +236,9 @@ impl CommitPipeline {
         let mut woken_units = Vec::new();
         let mut deferred = 0usize;
 
-        // Pre-validation pass: reject the whole batch on the first
-        // failure. Subsystem state mutates only in the apply pass below.
-        // The IIFE wrapping lets a validation failure return from the
-        // closure rather than the outer function so we can `staging.clear()`
-        // before propagating -- StagingMemory's Drop debug-asserts that the
-        // buffer is empty at release time, and an early-return path that
-        // skipped the clear would trip it.
+        // The IIFE channels validation failures through `staging.clear()`
+        // before propagating; `StagingMemory`'s Drop debug-asserts the
+        // buffer is empty at release.
         let pre_validate: Result<(), CommitError> = (|| {
             for (idx, effect) in effects.iter().enumerate() {
                 match effect {
@@ -304,9 +295,6 @@ impl CommitPipeline {
                         signal_updates += 1;
                     }
                     Effect::DmaEnqueue { request, .. } => {
-                        // Pre-validate only the destination; source ranges
-                        // may legitimately reference SPU local stores or
-                        // staging buffers outside the region map.
                         let dst = request.destination();
                         let start = dst.start().raw();
                         let length = dst.length();
@@ -375,9 +363,9 @@ impl CommitPipeline {
                         }
                     }
                     Effect::RsxLabelWrite { offset, value } => {
-                        // Offsets 0..0x1000 are the semaphore region; 0x1000+
-                        // is notify/report space under sys_rsx and is a guest
-                        // bug. Surface at the commit boundary rather than as
+                        // 0..0x1000 is the semaphore region; 0x1000+ is
+                        // notify/report space under sys_rsx -- a guest bug
+                        // surfaced at the commit boundary instead of as
                         // silent notify corruption.
                         debug_assert!(
                             *offset < 0x1000,
@@ -385,13 +373,7 @@ impl CommitPipeline {
                          0..0x1000 is semaphore, 0x1000+ is notify/report)",
                             *offset
                         );
-                        // rsx_label_base: u32 and offset: u32 widened to u64
-                        // before adding, so `start <= 2 * u32::MAX < u64::MAX`
-                        // and the wrap is structurally unreachable for any
-                        // valid input. `wrapping_add` documents the
-                        // arithmetic; `checked_add` on the +4 below remains
-                        // because `start + 4` could in principle reach
-                        // `u64::MAX` if the inputs were ever extended to u64.
+                        // Two u32s widened to u64: the sum cannot wrap.
                         let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
                         let Some(_end) = start.checked_add(4) else {
                             return Err(CommitError::OutOfRange { effect_index: idx });
@@ -423,11 +405,11 @@ impl CommitPipeline {
             return Err(e);
         }
 
-        // Apply pass. `drain_into` is the only operation below that
-        // can fail; every op that follows (mailbox send, signal OR,
-        // DMA enqueue, reservation mutations, payload clone) is
-        // infallible absent host OOM. Adding a new fallible op here
-        // breaks the atomicity guarantee and needs rollback machinery.
+        // Atomicity invariant: `drain_into` is the only fallible op in
+        // the apply pass. Every op below (mailbox send, signal OR, DMA
+        // enqueue, reservation mutations, payload clone) is infallible
+        // absent host OOM; a new fallible op here would need rollback
+        // machinery to preserve the atomic-batch contract.
         staging
             .drain_into(ctx.memory)
             .map_err(CommitError::Memory)?;
@@ -480,7 +462,8 @@ impl CommitPipeline {
                     blocked_units.push((*source, BlockReason::WaitOnEvent));
                 }
                 Effect::SharedWriteIntent { range, .. } => {
-                    // Cross-unit reservation invalidation in emission order.
+                    // Cross-unit reservation invalidation; emission order
+                    // determines which writer wins concurrent LL/SC races.
                     reservations_cleared += ctx
                         .reservations
                         .clear_covering(range.start().raw(), range.length());
@@ -488,7 +471,8 @@ impl CommitPipeline {
                 Effect::ReservationAcquire { line_addr, source } => {
                     // Canonicalize to 128-byte line at insert; callers may
                     // pass a raw EA. A prior entry on the same unit is
-                    // clobbered (LL/SC re-reservation) and counted as cleared.
+                    // clobbered (LL/SC re-reservation) and counted as cleared
+                    // so `reservations_cleared` stays consistent across paths.
                     let prior = ctx
                         .reservations
                         .insert_or_replace(*source, ReservedLine::containing(*line_addr));
@@ -498,15 +482,13 @@ impl CommitPipeline {
                     reservation_acquires += 1;
                 }
                 Effect::ConditionalStore { range, source, .. } => {
-                    // Drop the emitter's own entry first so it is never
-                    // double-counted by the subsequent cross-unit sweep.
-                    //
-                    // Soft contract: the pipeline does not re-check that
-                    // the emitter still holds a reservation covering the
-                    // line. Synthetic emitters reach this branch with no
-                    // prior entry and bump the unconditional counter; real
-                    // emitters hitting that path indicate an emitter-side
-                    // LL/SC bug.
+                    // Drop the emitter's own entry first so the cross-unit
+                    // sweep below cannot double-count it. The pipeline does
+                    // not re-check that the emitter still holds a covering
+                    // reservation; the emitter is responsible for the LL/SC
+                    // pre-check, and a missing prior entry here flags an
+                    // emitter-side bug via
+                    // `conditional_stores_without_prior_reservation`.
                     if ctx.reservations.remove_if_present(*source).is_some() {
                         reservations_cleared += 1;
                     } else {

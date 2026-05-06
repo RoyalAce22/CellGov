@@ -1,19 +1,7 @@
-//! cellSysutil HLE implementations.
+//! cellSysutil HLE: video-out query surface.
 //!
-//! Covers the video-out query surface a title's display-init code
-//! consults during boot. CellGov reports a primary 720p RGB display
-//! deterministically; titles that read these structs and treat zero
-//! as "no display attached" advance into normal init instead.
-//!
-//! ## Failure policy
-//!
-//! - Null guest out-pointers return `error::ILLEGAL_PARAMETER`
-//!   without writing anything (matches RPCS3's `vm::ptr` null guard).
-//! - Out-of-range `videoOut` returns `error::UNSUPPORTED_VIDEO_OUT`.
-//! - `deviceIndex` out of range for the chosen `videoOut` returns
-//!   `error::DEVICE_NOT_FOUND` (CellGov models exactly
-//!   one device on `display::PRIMARY`, zero on
-//!   `display::SECONDARY`).
+//! Models exactly one device on `display::PRIMARY` and zero on
+//! `display::SECONDARY`; PRIMARY reports 720p / RGB / 16:9 / 59.94Hz.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::cell_video_out::{
@@ -25,12 +13,10 @@ use cellgov_ps3_abi::nid::cell_sysutil as sysutil_nid;
 use crate::hle::context::{HleContext, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
-/// Every NID this module claims; sourced from
-/// [`cellgov_ps3_abi::nid::cell_sysutil::OWNED`].
 #[cfg(test)]
 pub(crate) const OWNED_NIDS: &[u32] = sysutil_nid::OWNED;
 
-/// Dispatch entry point; returns `None` if the NID is not owned here.
+/// Returns `None` if the NID is not owned here.
 pub(crate) fn dispatch(
     runtime: &mut Runtime,
     source: UnitId,
@@ -67,11 +53,6 @@ fn adapter(runtime: &mut Runtime, source: UnitId, nid: u32) -> RuntimeHleAdapter
 }
 
 /// `cellVideoOutGetState(videoOut, deviceIndex, state)`.
-///
-/// Reports a primary 720p / RGB / 16:9 / 59.94Hz display when the
-/// caller queries `display::PRIMARY` with `deviceIndex == 0`.
-/// `display::SECONDARY` is modelled as having no devices
-/// attached. Any other `videoOut` value is unsupported.
 pub(crate) fn video_out_get_state(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let video_out = args[1] as u32;
     let device_index = args[2] as u32;
@@ -87,29 +68,22 @@ pub(crate) fn video_out_get_state(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     }
 
-    // PRIMARY has exactly one device (index 0); SECONDARY has none.
     let device_count = if video_out == display::PRIMARY { 1 } else { 0 };
     if device_index >= device_count {
         ctx.set_return(error::DEVICE_NOT_FOUND as u64);
         return;
     }
 
-    // Faithful PRIMARY / 720p / RGB / 16:9 / 59.94Hz baseline.
-    // Layout follows `CellVideoOutState` in cellVideoOut.h:
-    //   u8 state, u8 colorSpace, u8 reserved[6],
-    //   CellVideoOutDisplayMode displayMode (8 bytes).
-    // CellVideoOutDisplayMode:
-    //   u8 resolutionId, u8 scanMode, u8 conversion, u8 aspect,
-    //   u8 reserved[2], be_t<u16> refreshRates.
+    // Layout: CellVideoOutState { u8 state, u8 colorSpace, u8 reserved[6],
+    // CellVideoOutDisplayMode { u8 resolutionId, u8 scanMode, u8 conversion,
+    // u8 aspect, u8 reserved[2], be_t<u16> refreshRates } }.
     let mut buf = [0u8; 16];
     buf[0] = output_state::ENABLED;
     buf[1] = color_space::RGB;
-    // buf[2..8] reserved zeros.
     buf[8] = display_mode_resolution::ID_720;
     buf[9] = scan_mode::PROGRESSIVE;
     buf[10] = display_conversion::NONE;
     buf[11] = aspect::WIDE_16_9;
-    // buf[12..14] reserved zeros.
     buf[14..16].copy_from_slice(&refresh_rate::HZ_59_94.to_be_bytes());
 
     ctx.write_guest(state_ptr as u64, &buf)
@@ -117,12 +91,7 @@ pub(crate) fn video_out_get_state(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellVideoOutGetResolution(resolutionId, resolution)`.
-///
-/// Looks the resolution ID up in the PS3 spec table and writes the
-/// (width, height) pair as two big-endian `u16`s. Unknown IDs return
-/// `error::ILLEGAL_PARAMETER` without writing the
-/// out-pointer.
+/// `cellVideoOutGetResolution(resolutionId, resolution)`; writes (width, height) as big-endian `u16`s.
 pub(crate) fn video_out_get_resolution(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let resolution_id = args[1] as u32;
     let resolution_ptr = args[2] as u32;
@@ -145,13 +114,7 @@ pub(crate) fn video_out_get_resolution(ctx: &mut dyn HleContext, args: &[u64; 9]
     ctx.set_return(0);
 }
 
-/// PS3 spec resolution table.
-///
-/// Values mirror `_IntGetResolutionInfo` in
-/// `tools/rpcs3-src/rpcs3/Emu/Cell/Modules/cellVideoOut.cpp`. Only
-/// the standard 2D resolutions are supported; 3D / dualview / unusual
-/// IDs return `None` and become `error::ILLEGAL_PARAMETER`
-/// at the caller (deferred until a foundation title surfaces one).
+/// PS3 spec resolution table; mirrors `_IntGetResolutionInfo` in RPCS3's `cellVideoOut.cpp`.
 fn resolution_lookup(id: u32) -> Option<(u16, u16)> {
     match id {
         resolution_id::ID_1080 => Some((1920, 1080)),
@@ -217,11 +180,7 @@ mod tests {
         ];
         rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_STATE, &args, None);
 
-        assert_eq!(
-            read_syscall_return(&mut rt, unit_id),
-            0,
-            "CELL_OK on success"
-        );
+        assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
         assert_eq!(read_guest_u8(&rt, state_ptr), output_state::ENABLED);
         assert_eq!(read_guest_u8(&rt, state_ptr + 1), color_space::RGB);
         for off in 2..8 {
@@ -264,9 +223,7 @@ mod tests {
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
             error::UNSUPPORTED_VIDEO_OUT as u64,
-            "videoOut=2 is neither PRIMARY nor SECONDARY"
         );
-        // The error path must not write to the out-pointer.
         assert_eq!(read_guest_u8(&rt, state_ptr), 0);
     }
 
@@ -290,7 +247,6 @@ mod tests {
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
             error::DEVICE_NOT_FOUND as u64,
-            "SECONDARY has no devices attached"
         );
     }
 
@@ -312,11 +268,7 @@ mod tests {
             let args: [u64; 9] = [0x10000, id as u64, res_ptr as u64, 0, 0, 0, 0, 0, 0];
             rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args, None);
 
-            assert_eq!(
-                read_syscall_return(&mut rt, unit_id),
-                0,
-                "id 0x{id:x}: CELL_OK"
-            );
+            assert_eq!(read_syscall_return(&mut rt, unit_id), 0, "id 0x{id:x}");
             let w = read_guest_u16_be(&rt, res_ptr);
             let h = read_guest_u16_be(&rt, res_ptr + 2);
             assert_eq!((w, h), (expected_w, expected_h), "id 0x{id:x}");
@@ -327,7 +279,6 @@ mod tests {
     fn video_out_get_resolution_unknown_id_rejected() {
         let (mut rt, unit_id) = fixture();
         let res_ptr: u32 = 0x10_2000;
-        // Resolution id 0xff is not in the spec table.
         let args: [u64; 9] = [0x10000, 0xff, res_ptr as u64, 0, 0, 0, 0, 0, 0];
         rt.dispatch_hle(unit_id, sysutil_nid::VIDEO_OUT_GET_RESOLUTION, &args, None);
 
@@ -335,8 +286,8 @@ mod tests {
             read_syscall_return(&mut rt, unit_id),
             error::ILLEGAL_PARAMETER as u64
         );
-        assert_eq!(read_guest_u16_be(&rt, res_ptr), 0, "no write on error");
-        assert_eq!(read_guest_u16_be(&rt, res_ptr + 2), 0, "no write on error");
+        assert_eq!(read_guest_u16_be(&rt, res_ptr), 0);
+        assert_eq!(read_guest_u16_be(&rt, res_ptr + 2), 0);
     }
 
     #[test]
@@ -371,7 +322,6 @@ mod tests {
         assert_eq!(
             read_syscall_return(&mut rt, unit_id),
             error::DEVICE_NOT_FOUND as u64,
-            "PRIMARY has exactly one device (index 0)"
         );
     }
 }
@@ -394,15 +344,12 @@ mod canary_tests {
         (rt, unit_id)
     }
 
-    /// Drift canary for [`OWNED_NIDS`] vs the [`dispatch`] match arms.
-    /// Mirror of the same-named tests in cell_gcm_sys / sys_prx_for_user.
     #[test]
     fn owned_nids_all_claimed_by_dispatch() {
         for &nid in OWNED_NIDS {
             let (mut rt, unit_id) = canary_runtime();
-            // Provide a valid out-pointer so handlers do not bail
-            // before set_return / write_guest fire (RuntimeHleAdapter
-            // Drop guard requires at least one mutation).
+            // Valid out-pointer so handlers reach set_return / write_guest;
+            // RuntimeHleAdapter's Drop guard requires at least one mutation.
             let state_ptr: u32 = 0x10_1000;
             let args: [u64; 9] = [0x10000, 0, 0, state_ptr as u64, 0, 0, 0, 0, 0];
             let result = dispatch(&mut rt, unit_id, nid, &args);

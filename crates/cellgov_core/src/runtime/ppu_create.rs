@@ -1,7 +1,7 @@
-//! PPU thread creation: construct the child unit via the installed PPU
-//! factory, commit its initial TLS image, register it in the LV2 PPU
-//! thread table, and write the minted thread id into the caller's out
-//! pointer. The host has already resolved the OPD.
+//! PPU thread spawning: child-thread creation and callback-worker
+//! spawning. Owns the runtime side of the host -> runtime cooperation
+//! that materializes a worker after an HLE handler parks for a guest
+//! callback.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -31,19 +31,13 @@ impl Runtime {
             }
             other => unreachable!("handle_ppu_thread_create called with {other:?}"),
         };
-        // The host rejects `tls_bytes && tls_base == 0` with CELL_EINVAL
-        // in `dispatch_ppu_thread_create`; reaching here is a host
-        // regression. Unconditional assert so release builds fail loudly
-        // rather than committing the TLS image to guest address 0.
+        // Guards against committing a TLS image to guest address 0 if
+        // the host-side CELL_EINVAL filter regresses.
         assert!(
             tls_bytes.is_empty() || init.tls_base != 0,
-            "PpuThreadCreate: non-empty tls_bytes requires non-zero tls_base \
-             (host-side guard in dispatch_ppu_thread_create bypassed -- host regression)",
+            "PpuThreadCreate: non-empty tls_bytes requires non-zero tls_base",
         );
 
-        // cellgov_core does not depend on cellgov_ppu; without a
-        // factory we cannot construct a concrete PpuExecutionUnit.
-        // CELL_E2BIG is the shipped error value.
         let Some(factory) = self.ppu_factory.as_ref() else {
             self.registry.set_syscall_return(source, CELL_E2BIG.into());
             return;
@@ -91,28 +85,21 @@ impl Runtime {
     /// Drain [`crate::hle::HleState::pending_callback_spawn`] and
     /// materialize the worker.
     ///
-    /// Called after every [`Self::dispatch_hle`] call (whether or not
-    /// any handler claimed the NID); a no-op when no handler recorded
-    /// a park-for-callback intent.
+    /// # Cross-module contract
+    /// Caller (`dispatch_hle`) MUST invoke this after every HLE
+    /// dispatch, including unclaimed NIDs; otherwise a recorded
+    /// park-for-callback intent leaks across syscalls and the parent
+    /// stays `Runnable` while the host believes it is parked.
     ///
-    /// On success the parent unit transitions to `Blocked` and a fresh
-    /// worker PPU is registered (see [`Self::handle_callback_spawn`]).
-    /// On failure the parent is left `Runnable` with a kernel error
-    /// code in r3:
-    /// - [`CallbackError::TooDeep`] -> [`CELL_EAGAIN`] (recursion cap
-    ///   would be exceeded).
-    /// - [`CallbackError::OpdReadFailed`] -> [`CELL_EFAULT`] (title
-    ///   handed us an unmapped OPD pointer).
-    /// - [`CallbackError::StackAllocFailed`] -> [`CELL_ENOMEM`] (the
-    ///   worker stack arena is exhausted).
+    /// # Errors
+    /// On host failure the parent stays `Runnable` with r3 set to:
+    /// - [`CallbackError::TooDeep`] -> [`CELL_EAGAIN`]
+    /// - [`CallbackError::OpdReadFailed`] -> [`CELL_EFAULT`]
+    /// - [`CallbackError::StackAllocFailed`] -> [`CELL_ENOMEM`]
     pub(crate) fn consume_pending_callback_spawn(&mut self, source: UnitId) {
         let Some(park) = self.hle.pending_callback_spawn.take() else {
             return;
         };
-        // Split borrow: lv2_host is mutable, memory is immutable.
-        // The view's borrow ends at the end of this statement so the
-        // subsequent `apply_callback_spawn` (which needs `&mut self`)
-        // composes without an explicit drop.
         let result = self.lv2_host.call_guest_callback_sync(
             source,
             park.opd_addr,
@@ -137,31 +124,20 @@ impl Runtime {
         }
     }
 
-    /// Public entry point for the callback-dispatch spawn handler.
-    ///
-    /// Mirrors [`Self::handle_callback_spawn`] for callers that
-    /// construct a [`Lv2Dispatch::CallbackSpawn`] outside the
-    /// runtime's LV2 dispatch path (integration tests that
-    /// synthesize spawns directly, and HLE handlers that build a
-    /// spawn via [`cellgov_lv2::Lv2Host::call_guest_callback_sync`]
-    /// and inject it via this entry).
+    /// Public entry to [`Self::handle_callback_spawn`] for callers
+    /// outside the runtime's LV2 dispatch path.
     pub fn apply_callback_spawn(&mut self, dispatch: Lv2Dispatch) {
         self.handle_callback_spawn(dispatch);
     }
 
-    /// Spawn a callback worker AND park the parent on the worker's
-    /// trampoline return. Mirrors `handle_ppu_thread_create` but
-    /// (a) does not write a thread id to a guest pointer (callbacks
-    /// are detached -- no caller-visible id), (b) extracts the
-    /// `CallbackReturnStage` from `parent_pending` to feed
-    /// `Lv2Host::attach_callback_worker`, (c) parks `parent` in
-    /// `Blocked` with `parent_pending` stored in
-    /// `syscall_responses`.
+    /// Spawn a detached callback worker and park the parent on the
+    /// worker's trampoline return.
     ///
     /// # Invariants
-    /// - `parent_pending` is a [`PendingResponse::CallbackReturn`].
-    /// - The PPU factory is installed; without it, callback dispatch
-    ///   cannot run and the parent wakes immediately with CELL_E2BIG.
+    /// - `parent_pending` is a [`PendingResponse::CallbackReturn`];
+    ///   any other variant wakes the parent with CELL_E2BIG.
+    /// - The parent must not already have an entry in
+    ///   `syscall_responses`; the parked response is inserted here.
     pub(super) fn handle_callback_spawn(&mut self, dispatch: Lv2Dispatch) {
         let (worker_init, parent, parent_pending, effects): (
             PpuThreadInitState,
@@ -180,10 +156,6 @@ impl Runtime {
         };
         self.apply_lv2_effects(&effects);
 
-        // Recover the stage from the parent's pending response. The
-        // host built `parent_pending` in `call_guest_callback_sync`,
-        // so this match is total in current callers; debug-asserted
-        // for forward-compat.
         let stage = match parent_pending {
             PendingResponse::CallbackReturn { stage, .. } => stage,
             ref other => {
@@ -205,10 +177,7 @@ impl Runtime {
             .registry
             .register_dynamic(&|id| factory(id, seed.clone()));
 
-        // No TLS image for callback workers -- they execute the
-        // title's existing code, which has whatever TLS bindings
-        // the parent already established.
-
+        // Workers inherit the parent's TLS bindings; no fresh image.
         let attrs = PpuThreadAttrs {
             entry: worker_init.entry_code,
             arg: worker_init.arg,
@@ -229,9 +198,7 @@ impl Runtime {
         self.lv2_host
             .attach_callback_worker(worker_thread_id, parent, stage);
 
-        // Park the parent. Mirrors `handle_block` shape: insert
-        // pending response, flip status to Blocked. No r3 write
-        // here -- the trampoline-return wake will set it.
+        // r3 is set by the trampoline-return wake, not here.
         let displaced = self.syscall_responses.insert(parent, parent_pending);
         debug_assert!(
             displaced.is_none(),

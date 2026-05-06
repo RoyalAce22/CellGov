@@ -1,16 +1,12 @@
 //! cellSpurs PPU-side HLE handlers.
 //!
-//! The `CellSpurs` control block lives in guest memory; this module
-//! owns the field-offset constants and the per-NID handlers that read
-//! and write that block. SPU-side workload dispatch, policy-module
-//! DMA, and taskset execution are out of scope.
-//!
-//! ## Alignment invariants
+//! Owns the `CellSpurs` field-offset constants and the per-NID
+//! handlers that read/write the guest-memory control block. SPU-side
+//! workload dispatch, policy-module DMA, and taskset execution are
+//! out of scope.
 //!
 //! `CellSpurs` is `alignas(128)`; `CellSpursAttribute` is `alignas(8)`.
-//! Every entrypoint rejects misaligned pointers with the matching
-//! `_ALIGN` error code rather than silently writing through a
-//! misaligned address.
+//! Misaligned pointers return `_ALIGN`.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::nid::cell_spurs as spurs_nid;
@@ -18,10 +14,6 @@ use cellgov_ps3_abi::nid::cell_spurs as spurs_nid;
 use crate::hle::context::{HleContext, HleReadError, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
-/// Every NID this module claims; sourced from
-/// [`cellgov_ps3_abi::nid::cell_spurs::OWNED`]. The dispatcher's
-/// match arms must stay in sync with the leaf list (enforced by the
-/// canary tests below).
 #[cfg(test)]
 pub(crate) const OWNED_NIDS: &[u32] = spurs_nid::OWNED;
 
@@ -30,11 +22,11 @@ use cellgov_ps3_abi::cell_spurs::{
     saf, sys_srv, wkl_state, workload_attribute_layout, workload_info_layout,
 };
 
-// CellSpurs::eventQueue (0xD5C) and ::eventPort (0xD60) are populated by
-// the event-helper-thread spawn path; the bound queue from
-// AttachLv2EventQueue lands in the EventPortMux substruct at 0xF00.
+// AttachLv2EventQueue's bound queue lives in the EventPortMux
+// substruct at 0xF00, not the CellSpurs::eventQueue/eventPort fields
+// (those need a spawned event-helper thread).
 
-/// Dispatch entry point; returns `None` if the NID is not owned here.
+/// Returns `None` if the NID is not owned here.
 pub(crate) fn dispatch(
     runtime: &mut Runtime,
     source: UnitId,
@@ -142,9 +134,8 @@ fn adapter(runtime: &mut Runtime, source: UnitId, nid: u32) -> RuntimeHleAdapter
     }
 }
 
-/// Copy up to `len` prefix bytes into a zero-padded 15-byte buffer.
-/// Returns Err if the source range is unmapped; `len == 0` succeeds
-/// with the all-zero buffer without touching guest memory.
+/// Copy up to `len` prefix bytes into a zero-padded 15-byte buffer;
+/// `len == 0` returns the all-zero buffer without a guest read.
 fn try_read_prefix(
     ctx: &dyn HleContext,
     prefix_addr: u32,
@@ -161,11 +152,8 @@ fn try_read_prefix(
 }
 
 /// `_cellSpursAttributeInitialize(attr, revision, sdkVersion, nSpus,
-/// spuPriority, ppuPriority, exitIfNoWork)` -- zero-init the 512-byte
-/// attribute block then write the named fields.
-///
-/// Accepts any `revision` value; the bounds check is on the
-/// `cellSpursInitializeWithAttribute*` consumer side.
+/// spuPriority, ppuPriority, exitIfNoWork)`. Revision is bounds-checked
+/// downstream by `cellSpursInitializeWithAttribute*`.
 fn attribute_initialize(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let attr_ptr = args[1] as u32;
     let revision = args[2] as u32;
@@ -217,9 +205,8 @@ fn attribute_initialize(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 }
 
 /// `cellSpursInitialize(spurs, nSpus, spuPriority, ppuPriority,
-/// exitIfNoWork)` -- bare-args initializer routing through the same
-/// internal path as the attribute form (revision = sdkVersion = 0,
-/// empty prefix).
+/// exitIfNoWork)` -- bare-args form (revision/sdkVersion = 0, empty
+/// prefix); shares the attribute-form internal path.
 fn initialize_bare(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let n_spus = args[2] as i32;
@@ -263,9 +250,7 @@ fn initialize_with_attribute(ctx: &mut dyn HleContext, args: &[u64; 9], is_v2: b
         return;
     }
 
-    // Attribute block reads are guest-pointer-class: an unmapped or
-    // out-of-region attr surfaces as INVAL rather than silently
-    // substituting a zero-init attribute the caller never wrote.
+    // Unmapped attr surfaces as INVAL, not a zero-substituted attribute.
     let revision = match try_read_be_u32(ctx, attr + attribute_layout::OFF_REVISION) {
         Ok(v) => v,
         Err(_) => return ctx.set_return(core_error::INVAL as u64),
@@ -322,10 +307,9 @@ fn initialize_with_attribute(ctx: &mut dyn HleContext, args: &[u64; 9], is_v2: b
     ctx.set_return(result as u64);
 }
 
-/// Validate the spurs pointer, zero the 4096 / 8192-byte CellSpurs
-/// region (selected by `saf::SECOND_VERSION`), then patch the named
-/// fields. SPU thread group, sync primitives, and helper PPU thread
-/// spawn are not part of this path.
+/// Zero the 4096/8192-byte CellSpurs region (size selected by
+/// `saf::SECOND_VERSION`) then patch the named fields. SPU thread
+/// group, sync primitives, and helper PPU spawn are out of scope.
 #[allow(clippy::too_many_arguments)]
 fn spurs_initialize_internal(
     ctx: &mut dyn HleContext,
@@ -360,25 +344,23 @@ fn spurs_initialize_internal(
         layout::SIZE_V1
     };
 
+    // The Ok of this zero proves [spurs, spurs+size) writable; the
+    // subsequent field writes use `.expect`-class helpers.
     let zero = vec![0u8; size as usize];
     if ctx.write_guest(spurs as u64, &zero).is_err() {
-        // Zero-block witness: a failure here is the caller's bad
-        // pointer (e.g. spurs lands in a reserved region). Subsequent
-        // field writes are invariant-class because this `Ok` proves
-        // [spurs, spurs + size) is writable.
         return core_error::INVAL;
     }
 
     write_be_u32(ctx, spurs + layout::OFF_REVISION, revision);
     write_be_u32(ctx, spurs + layout::OFF_SDK_VERSION, sdk_version);
-    // ppu0 / ppu1 = !0u64 sentinel: "handler/event-helper not spawned".
+    // ppu0/ppu1 = !0u64 sentinel: handler/event-helper not spawned.
     write_be_u64(ctx, spurs + layout::OFF_PPU0, u64::MAX);
     write_be_u64(ctx, spurs + layout::OFF_PPU1, u64::MAX);
     write_be_u32(ctx, spurs + layout::OFF_FLAGS, flags);
 
-    // flags1 (u8 at 0x74) is distinct from the u32 flags at 0xD80;
-    // max_workloads(), add_workload, and wait_for_workload_shutdown
-    // all consult this byte. SF1_32_WORKLOADS=0x40, SF1_EXIT=0x80.
+    // flags1 (u8 at 0x74) is distinct from flags (u32 at 0xD80);
+    // max_workloads(), add_workload, wait_for_workload_shutdown read it.
+    // SF1_32_WORKLOADS=0x40, SF1_EXIT=0x80.
     let flags1: u8 = (if is_second { 0x40u8 } else { 0 })
         | (if (flags & saf::EXIT_IF_NO_WORK) != 0 {
             0x80u8
@@ -387,9 +369,6 @@ fn spurs_initialize_internal(
         });
     write_byte(ctx, spurs + layout::OFF_FLAGS1, flags1);
 
-    // prefixSize is a u8 at 0xD9B; the be_t<u32> unk5 at 0xD9C must
-    // stay zero. The upstream `prefix_size > layout::NAME_MAX_LENGTH`
-    // check guarantees the cast lossless.
     debug_assert!(prefix_size <= layout::NAME_MAX_LENGTH);
     let prefix_size_byte = u8::try_from(prefix_size).unwrap_or(layout::NAME_MAX_LENGTH as u8);
     write_byte(ctx, spurs + layout::OFF_PREFIX_SIZE, prefix_size_byte);
@@ -399,7 +378,7 @@ fn spurs_initialize_internal(
         write_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED, 0xffff);
     }
 
-    // sysSrvPreemptWklId[8] = -1 (no SPU is preempting a workload).
+    // sysSrvPreemptWklId[8] = -1: no SPU is preempting a workload.
     let preempt_init = [0xffu8; 8];
     write_bytes(
         ctx,
@@ -420,9 +399,8 @@ fn spurs_initialize_internal(
     0
 }
 
-/// `cellSpursFinalize(spurs)` -- reset the `ppu0` / `ppu1` sentinels
-/// and clear `wklEnabled`. Without spawned handler / event-helper
-/// threads or a SPU thread group, the join + destroy half is a no-op.
+/// `cellSpursFinalize(spurs)` -- reset `ppu0`/`ppu1` sentinels and
+/// clear `wklEnabled`. Join+destroy half has no SPU thread group.
 fn finalize(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     if spurs == 0 {
@@ -442,12 +420,9 @@ fn finalize(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 }
 
 /// `_cellSpursWorkloadAttributeInitialize(attr, revision, sdkVersion,
-/// pm, size, data, priority, minCnt, maxCnt)` -- 9-arg SDK wrapper.
-///
-/// The 9th arg `maxCnt` spills to the caller's parameter save area at
-/// `r1 + 48` per PPE 64-bit ABI; `args: [u64; 9]` only covers the
-/// 8 register-passed slots. Fails loud (debug panic + release INVAL)
-/// rather than silently writing a wrong `maxContention`.
+/// pm, size, data, priority, minCnt, maxCnt)`. 9th arg `maxCnt`
+/// spills to `r1+48` per PPE64 ABI and `args: [u64; 9]` covers only
+/// the 8 register slots; debug panics, release returns INVAL.
 fn workload_attribute_initialize(ctx: &mut dyn HleContext, _args: &[u64; 9]) {
     debug_assert!(
         false,
@@ -458,9 +433,8 @@ fn workload_attribute_initialize(ctx: &mut dyn HleContext, _args: &[u64; 9]) {
 }
 
 /// `cellSpursAddWorkload(spurs, wid_out, pm, size, data, priority,
-/// minCnt, maxCnt)` -- allocate the first free workload id (MSB-first
-/// scan over `wklEnabled`), populate `wklInfoX[wid]`, and mark the
-/// slot enabled. Returns `_AGAIN` when full.
+/// minCnt, maxCnt)` -- MSB-first scan over `wklEnabled` for the first
+/// free wid. Returns `_AGAIN` when full.
 fn add_workload(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid_ptr = args[2] as u32;
@@ -485,9 +459,8 @@ fn add_workload(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(result as u64);
 }
 
-/// `cellSpursAddWorkloadWithAttribute(spurs, wid_out, attr)` -- reads
-/// pm / size / data / priority / contentions from the attribute block
-/// and feeds the same internal path. Only revision 1 is accepted.
+/// `cellSpursAddWorkloadWithAttribute(spurs, wid_out, attr)` -- only
+/// revision 1 is accepted; routes to the same internal path.
 fn add_workload_with_attribute(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid_ptr = args[2] as u32;
@@ -539,7 +512,6 @@ fn add_workload_with_attribute(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(result as u64);
 }
 
-/// Shared body for both AddWorkload variants.
 #[allow(clippy::too_many_arguments)]
 fn add_workload_internal(
     ctx: &mut dyn HleContext,
@@ -570,8 +542,7 @@ fn add_workload_internal(
         Err(_) => return policy_module_error::FAULT,
     };
 
-    // Spurs-block reads from a guest-controlled pointer. An unmapped
-    // spurs surfaces as FAULT; a faulted-but-mapped block returns STAT.
+    // Unmapped spurs -> FAULT; mapped-but-faulted block -> STAT.
     let exception = match try_read_be_u32(ctx, spurs + layout::OFF_EXCEPTION) {
         Ok(v) => v,
         Err(_) => return policy_module_error::FAULT,
@@ -595,33 +566,27 @@ fn add_workload_internal(
         layout::MAX_WORKLOAD_V1
     };
 
+    // *wid stays unmodified on AGAIN; an out-of-band wid would name
+    // a slot that does not exist.
     let wid = (!enabled).leading_zeros();
     if wid >= wmax {
-        // *wid stays unmodified on AGAIN -- writing wid=16/32 then
-        // returning would describe a slot that does not exist.
         return policy_module_error::AGAIN;
     }
 
-    // Guest-controlled out-pointer: bad pointer becomes _FAULT,
-    // never a silent drop. wklEnabled is unchanged on the failure
-    // branch.
     if try_write_be_u32(ctx, wid_ptr, wid).is_err() {
         return policy_module_error::FAULT;
     }
 
-    // uniqueId dedupe: reuse an existing workload's uniqueId when its
-    // policy-module address matches the new pm. Bit 31 of `enabled`
-    // is wid 0; scan in slot order. RPCS3's `_spurs::add_workload`
-    // does the same scan over wklInfo1[i].addr.
+    // uniqueId dedupe: reuse an existing wid's uniqueId when its
+    // wklInfo[i].addr matches `pm` (RPCS3 cellSpurs.cpp ~2511).
     let unique_id = match find_existing_unique_id(ctx, spurs, enabled, pm, is_second) {
         Ok(uid) => uid,
         Err(_) => return policy_module_error::FAULT,
     }
     .unwrap_or(wid as u8);
 
-    // Stage per-wid bookkeeping (info, state, status, event,
-    // contention) before flipping wklEnabled / wklMskB. A panic in
-    // staging leaves the slot reading as unallocated.
+    // Stage per-wid bookkeeping before flipping wklEnabled/wklMskB
+    // so a panic in staging leaves the slot reading as unallocated.
     debug_assert!(
         wid < layout::MAX_WORKLOAD_V1 || is_second,
         "wid={wid} >= 16 in SPURS1; wkl_info_addr would index past the 4 KiB block"
@@ -657,8 +622,7 @@ fn add_workload_internal(
     };
     write_byte(ctx, spurs + event_arr_off + index, 0);
 
-    // wklIdleSpuCountOrReadyCount2[wid & 0xf]: SPURS1 idle-SPU count;
-    // SPURS2 ready count for wids 16..31. Zero on add either way.
+    // SPURS1 idle-SPU count, SPURS2 ready count for wids 16..31.
     write_byte(
         ctx,
         spurs + layout::OFF_WKL_IDLE_SPU_COUNT_OR_RC2 + index,
@@ -667,7 +631,7 @@ fn add_workload_internal(
 
     if wid < 16 {
         write_byte(ctx, spurs + layout::OFF_WKL_READY_COUNT_1 + index, 0);
-        // wklMinContention is per-wid for SPURS1 only.
+        // wklMinContention is SPURS1-only.
         let min_clamped = if min_cnt > 8 { 8 } else { min_cnt as u8 };
         write_byte(
             ctx,
@@ -676,8 +640,8 @@ fn add_workload_internal(
         );
     }
 
-    // wklMaxContention[index]: low nibble for wid<16, high nibble
-    // for wid>=16; capped at MAX_SPU=8.
+    // wklMaxContention[index]: low nibble for wid<16, high for wid>=16;
+    // capped at MAX_SPU=8.
     let max_clamped: u8 = if max_cnt > 8 { 8 } else { max_cnt as u8 };
     let mc_addr = spurs + layout::OFF_WKL_MAX_CONTENTION + index;
     let prev_mc = match try_read_byte(ctx, mc_addr) {
@@ -698,9 +662,7 @@ fn add_workload_internal(
         unique_id,
     );
 
-    // Commit: flip wklEnabled, then wklMskB, then wake the system
-    // service. RPCS3 `_spurs::add_workload` sets the matching bit in
-    // wklMskB on alloc (cellSpurs.cpp ~line 2511).
+    // Commit order: wklEnabled, wklMskB, wake system service.
     let new_enabled = enabled | (0x8000_0000u32 >> wid);
     write_be_u32(ctx, spurs + layout::OFF_WKL_ENABLED, new_enabled);
 
@@ -720,10 +682,8 @@ fn add_workload_internal(
     0
 }
 
-/// Walk every enabled workload (other than the one being inserted)
-/// and reuse its uniqueId when its `wklInfo[i].addr` matches `pm`.
-/// Returns `Ok(None)` when no match is found and the caller should
-/// assign a fresh uniqueId.
+/// O(wmax) scan; returns `Ok(None)` when the caller should assign
+/// a fresh uniqueId.
 fn find_existing_unique_id(
     ctx: &dyn HleContext,
     spurs: u32,
@@ -741,8 +701,7 @@ fn find_existing_unique_id(
             continue;
         }
         let info = wkl_info_addr(spurs, i);
-        // wklInfo[i].addr is the low 32 bits of a be_t<u64> at +0x00;
-        // pm pointers fit in 32 bits, so compare on the low word.
+        // wklInfo[i].addr is be_t<u64>; pm fits in 32 bits, compare low word.
         let addr_lo = try_read_be_u32(ctx, info + workload_info_layout::OFF_ADDR + 4)?;
         if addr_lo == pm {
             return Ok(Some(try_read_byte(
@@ -754,9 +713,8 @@ fn find_existing_unique_id(
     Ok(None)
 }
 
-/// `cellSpursShutdownWorkload(spurs, wid)` -- transition the
-/// workload's state to SHUTTING_DOWN. The SPU-side completion event
-/// is out of scope; the state transition is the observable effect.
+/// `cellSpursShutdownWorkload(spurs, wid)` -- state -> SHUTTING_DOWN.
+/// SPU-side completion event is out of scope.
 fn shutdown_workload(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -795,7 +753,6 @@ fn shutdown_workload(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     }
     if prev_state == wkl_state::SHUTTING_DOWN || prev_state == wkl_state::REMOVABLE {
-        // Already shutting down: idempotent CELL_OK.
         ctx.set_return(0);
         return;
     }
@@ -817,10 +774,9 @@ fn shutdown_workload(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellSpursWaitForWorkloadShutdown(spurs, wid)` -- returns
-/// CELL_OK for the no-wait fast path or `_SRCH` if `wid` is not
-/// enabled. With no SPU kernel emitting completion events, the
-/// nominal wait would never resolve, so this never blocks.
+/// `cellSpursWaitForWorkloadShutdown(spurs, wid)` -- never blocks
+/// (no SPU kernel emits completion events); returns `_SRCH` if `wid`
+/// is not enabled, else CELL_OK.
 fn wait_for_workload_shutdown(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -855,11 +811,8 @@ fn wait_for_workload_shutdown(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// Error-code bundle picked per call site: `ReadyCount*` returns the
-/// POLICY_MODULE namespace; the others return CORE. Same predicates,
-/// different numeric codes. `fault` is the code for an unmapped /
-/// out-of-region read of the caller's `spurs` pointer; the CORE
-/// namespace has no FAULT, so it folds into INVAL there.
+/// Error-code bundle picked per call site. `fault` = unmapped spurs
+/// pointer; the CORE namespace folds it into INVAL.
 struct WorkloadOpErrors {
     null_ptr: u32,
     align: u32,
@@ -887,8 +840,7 @@ const CORE_ERRS: WorkloadOpErrors = WorkloadOpErrors {
     fault: core_error::INVAL,
 };
 
-/// `max_workloads()` per the SF1_32_WORKLOADS bit in `flags1`. Returns
-/// `Err` if `flags1` is unmapped / out-of-region.
+/// `max_workloads()` per the SF1_32_WORKLOADS bit in `flags1`.
 fn try_read_wmax(ctx: &dyn HleContext, spurs: u32) -> Result<u32, HleReadError> {
     let flags1 = try_read_byte(ctx, spurs + layout::OFF_FLAGS1)?;
     Ok(if (flags1 & 0x40) != 0 {
@@ -898,8 +850,7 @@ fn try_read_wmax(ctx: &dyn HleContext, spurs: u32) -> Result<u32, HleReadError> 
     })
 }
 
-/// Address of the `readyCount(wid)` byte. SPURS1 wid lives in
-/// wklReadyCount1[wid]; SPURS2 wid >= 16 overlaps
+/// SPURS1 wid -> wklReadyCount1[wid]; SPURS2 wid >= 16 ->
 /// wklIdleSpuCountOrReadyCount2[wid & 0xf].
 fn ready_count_addr(spurs: u32, wid: u32) -> u32 {
     if wid < layout::MAX_WORKLOAD_V1 {
@@ -909,9 +860,8 @@ fn ready_count_addr(spurs: u32, wid: u32) -> u32 {
     }
 }
 
-/// Shared validation prelude: spurs null/align, wid in band, enabled
-/// bit set, no pending exception, and optionally `state == RUNNABLE`.
-/// Errors come from the caller-supplied namespace bundle.
+/// Validation prelude: spurs null/align, wid in band, enabled bit
+/// set, no pending exception, optionally `state == RUNNABLE`.
 fn validate_workload_op(
     ctx: &dyn HleContext,
     spurs: u32,
@@ -951,15 +901,14 @@ fn validate_workload_op(
     Ok(())
 }
 
-/// `cellSpursReadyCountStore(spurs, wid, value)` -- store
-/// `value & 0xff` into `readyCount(wid)`; `value > 0xff` is INVAL.
+/// `cellSpursReadyCountStore(spurs, wid, value)` -- `value > 0xff` is INVAL.
 fn ready_count_store(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
     let value = args[3] as u32;
 
-    // Run wid-band validation before the value-overflow check so an
-    // OOB wid surfaces _INVAL via the band check, not the value path.
+    // wid-band check runs before the value-overflow check so OOB wid
+    // surfaces via the band path.
     if let Err(code) = validate_workload_op(ctx, spurs, wid, true, &POLICY_MODULE_ERRS) {
         ctx.set_return(code as u64);
         return;
@@ -973,8 +922,8 @@ fn ready_count_store(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellSpursReadyCountAdd(spurs, wid, old_ptr, value)` -- add `value`
-/// (s32) saturating-clamped to `[0, 255]`; write prior to `*old_ptr`.
+/// `cellSpursReadyCountAdd(spurs, wid, old_ptr, value)` -- add s32
+/// `value` saturating-clamped to `[0, 255]`; prior to `*old_ptr`.
 fn ready_count_add(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -1005,8 +954,7 @@ fn ready_count_add(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellSpursReadyCountSwap(spurs, wid, old_ptr, swap)` -- replace
-/// `readyCount(wid)` with `swap & 0xff`; write prior to `*old_ptr`.
+/// `cellSpursReadyCountSwap(spurs, wid, old_ptr, swap)`.
 fn ready_count_swap(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -1040,7 +988,7 @@ fn ready_count_swap(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 }
 
 /// `cellSpursReadyCountCompareAndSwap(spurs, wid, old_ptr, compare,
-/// swap)` -- swap on match; always writes prior to `*old_ptr`.
+/// swap)` -- always writes prior to `*old_ptr`.
 fn ready_count_compare_and_swap(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -1076,9 +1024,8 @@ fn ready_count_compare_and_swap(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellSpursRequestIdleSpu(spurs, wid, count)` -- SPURS1-only: write
-/// `count` into the SPURS1 idle-SPU slot at
-/// `wklIdleSpuCountOrReadyCount2[wid]`. SPURS2 contexts return STAT.
+/// `cellSpursRequestIdleSpu(spurs, wid, count)` -- SPURS1-only;
+/// SPURS2 returns STAT.
 fn request_idle_spu(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -1092,7 +1039,6 @@ fn request_idle_spu(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         ctx.set_return(core_error::ALIGN as u64);
         return;
     }
-    // SPURS2 has its own broadcast NIDs; this entrypoint is SPURS1-only.
     let flags1 = match try_read_byte(ctx, spurs + layout::OFF_FLAGS1) {
         Ok(v) => v,
         Err(_) => return ctx.set_return(core_error::INVAL as u64),
@@ -1130,9 +1076,8 @@ fn request_idle_spu(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellSpursSetMaxContention(spurs, wid, maxContention)` -- update
-/// the `wklMaxContention[wid % 16]` nibble (low for wid<16, high for
-/// wid>=16); value clamps to MAX_SPU=8.
+/// `cellSpursSetMaxContention(spurs, wid, maxContention)` -- writes
+/// the wid's nibble of `wklMaxContention`; clamps to MAX_SPU=8.
 fn set_max_contention(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -1162,9 +1107,8 @@ fn set_max_contention(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellSpursSetPriorities(spurs, wid, priorities)` -- copy the
-/// 8-byte table at `priorities` into `wklInfoX[wid].priority`. Every
-/// byte must be `<= 15`.
+/// `cellSpursSetPriorities(spurs, wid, priorities)` -- 8-byte table;
+/// each byte must be `<= 15`.
 fn set_priorities(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -1191,8 +1135,7 @@ fn set_priorities(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellSpursSetPriority(spurs, wid, spuId, priority)` -- write a
-/// single byte at `wklInfoX[wid].priority[spuId]`. Requires
+/// `cellSpursSetPriority(spurs, wid, spuId, priority)` -- requires
 /// `priority < 16` and `spuId < spurs->nSpus`.
 fn set_priority(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
@@ -1253,10 +1196,8 @@ fn set_priority(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellSpursGetInfo(spurs, info)` -- write a 280-byte snapshot of
-/// the CellSpurs control-block fields at `info`. SPU-dispatcher
-/// outputs (deadline counters, full traceMode tag bits) are zero
-/// without a running SPU kernel.
+/// `cellSpursGetInfo(spurs, info)` -- 280-byte snapshot of CellSpurs
+/// fields. SPU-dispatcher outputs read zero without a running SPU kernel.
 fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let info = args[2] as u32;
@@ -1276,9 +1217,7 @@ fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     }
 
-    // Spurs-side fields are guest-pointer-class: an unmapped or
-    // out-of-region spurs surfaces as INVAL (the closest CORE-namespace
-    // code; CORE has no FAULT) rather than silently returning zeros.
+    // Unmapped spurs -> INVAL (CORE namespace has no FAULT).
     let spurs_fields = (|| -> Result<_, HleReadError> {
         Ok((
             try_read_be_u32(ctx, spurs + layout::OFF_FLAGS)?,
@@ -1339,10 +1278,8 @@ fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         },
     );
 
-    // The trace-buffer pointer's low 2 bits encode the trace-mode tag.
-    // info->traceBuffer is a 4-byte vm::bptr<void> with the tag bits
-    // cleared; info->traceMode receives the tag OR-merged with
-    // spurs->traceMode.
+    // Low 2 bits of traceBuffer encode the trace-mode tag; info->traceBuffer
+    // gets the cleared address, info->traceMode merges tag with spurs->traceMode.
     let trace_buffer_addr = (trace_buffer_raw as u32) & !3u32;
     let trace_mode_tag = (trace_buffer_raw as u32) & 3u32;
     let trace_mode_field = match try_read_be_u32(ctx, spurs + layout::OFF_TRACE_MODE) {
@@ -1378,8 +1315,6 @@ fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         Ok(buf) => buf,
         Err(_) => return ctx.set_return(core_error::INVAL as u64),
     };
-    // The 16-byte info->namePrefix slot is zero-initialised above, so
-    // anything past prefix_size already reads NUL.
     write_bytes(
         ctx,
         info + info_layout::OFF_NAME_PREFIX,
@@ -1395,9 +1330,8 @@ fn get_info(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 }
 
 /// `cellSpursAttachLv2EventQueue(spurs, queue, port_ptr, isDynamic)`
-/// -- bind a (queue, port) into the `eventPortMux` substruct and
-/// flip the matching `spuPortBits` bit. The SPU thread-group
-/// connect-event call is a no-op without a running SPU thread group.
+/// -- writes (queue, port) into `eventPortMux` and sets the matching
+/// `spuPortBits` bit.
 fn attach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let queue = args[2] as u32;
@@ -1421,10 +1355,8 @@ fn attach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     }
 
-    // Static: caller's *port already names the desired SPU port.
-    // Dynamic: pick the first untaken bit in [0x10, 0x40), since the
-    // SPU thread-group allocator that would normally choose isn't
-    // running.
+    // Static: *port names the desired SPU port.
+    // Dynamic: pick the first untaken bit in [0x10, 0x40).
     let port = if is_dynamic == 0 {
         let p = match try_read_byte(ctx, port_ptr) {
             Ok(v) => v,
@@ -1451,7 +1383,6 @@ fn attach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
             ctx.set_return(core_error::BUSY as u64);
             return;
         };
-        // Guest-supplied out-pointer: bad address becomes _INVAL.
         if try_write_byte(ctx, port_ptr, p).is_err() {
             ctx.set_return(core_error::INVAL as u64);
             return;
@@ -1482,9 +1413,9 @@ fn attach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// `cellSpursDetachLv2EventQueue(spurs, port)` -- clear the port bit
-/// in `spuPortBits` and zero the bound queue slot if the detached
-/// port matches. A clear bit returns `_SRCH` (SDK >= 0x180000).
+/// `cellSpursDetachLv2EventQueue(spurs, port)` -- clears the bit in
+/// `spuPortBits`; zeros the bound queue slot if `port` was the bound
+/// one. Clear bit returns `_SRCH` (SDK >= 0x180000).
 fn detach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let port = args[2] as u8;
@@ -1521,8 +1452,8 @@ fn detach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     }
     write_be_u64(ctx, spurs + layout::OFF_SPU_PORT_BITS, prev_bits & !mask);
 
-    // The mux substruct only tracks the last-bound port pair.
-    // Detaching a different port clears only its `spuPortBits` bit.
+    // The mux substruct tracks only the last-bound port pair; detaching
+    // a different port clears just its spuPortBits bit.
     let bound_port = match try_read_be_u32(
         ctx,
         spurs + layout::OFF_EVENT_PORT_MUX + event_port_mux_layout::OFF_SPU_PORT,
@@ -1547,11 +1478,8 @@ fn detach_lv2_event_queue(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 }
 
 /// `cellSpursSetExceptionEventHandler(spurs, wid, hook, taskset)` --
-/// `wid == 0xffffffff` is the global-handler sentinel and routes to
-/// the same write as `cellSpursSetGlobalExceptionEventHandler`. The
-/// per-workload slot is not laid out in the spec; valid `wid` returns
-/// CELL_OK with no field write to match the canonical UNIMPLEMENTED
-/// stub.
+/// `wid == 0xffffffff` routes to the global-handler write; valid wid
+/// is a CELL_OK no-op (per-workload slot is unspecified).
 fn set_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -1588,8 +1516,7 @@ fn set_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
             ctx.set_return(core_error::BUSY as u64);
             return;
         }
-        // On the sentinel path, `taskset` is the handler-args pointer
-        // (the third arg of SetGlobalExceptionEventHandler).
+        // On the sentinel path, `taskset` is the handler-args pointer.
         write_be_u64(
             ctx,
             spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER_ARGS,
@@ -1620,14 +1547,11 @@ fn set_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         ctx.set_return(policy_module_error::SRCH as u64);
         return;
     }
-    // No spec-defined per-workload handler slot; CELL_OK without a
-    // field write matches the canonical UNIMPLEMENTED stub.
     ctx.set_return(0);
 }
 
-/// `cellSpursUnsetExceptionEventHandler(spurs, wid)` -- mirror of
-/// `set_exception_event_handler`: sentinel routes to the global-clear
-/// path; valid wid is a CELL_OK no-op.
+/// `cellSpursUnsetExceptionEventHandler(spurs, wid)` -- sentinel
+/// routes to the global-clear path; valid wid is a CELL_OK no-op.
 fn unset_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let wid = args[2] as u32;
@@ -1676,9 +1600,7 @@ fn unset_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 }
 
 /// `cellSpursSetGlobalExceptionEventHandler(spurs, eaHandler, arg)`
-/// -- write `globalSpuExceptionHandlerArgs` then
-/// `globalSpuExceptionHandler`. Returns BUSY when a handler is
-/// already registered (caller must Unset first).
+/// -- returns BUSY when a handler is already registered.
 fn set_global_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let ea_handler = args[2] as u32;
@@ -1722,8 +1644,8 @@ fn set_global_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9])
     ctx.set_return(0);
 }
 
-/// `cellSpursUnsetGlobalExceptionEventHandler(spurs)` -- clear both
-/// handler slots; rejects with STAT if an exception is pending.
+/// `cellSpursUnsetGlobalExceptionEventHandler(spurs)` -- STAT if an
+/// exception is pending.
 fn unset_global_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
 
@@ -1749,10 +1671,10 @@ fn unset_global_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9
     ctx.set_return(0);
 }
 
-/// `cellSpursEnableExceptionEventHandler(spurs, flag)` -- exchange
-/// `enableEH` with `flag ? 1 : 0`. The
-/// `sys_spu_thread_group_{connect,disconnect}_event` side effect is
-/// not emitted (no SPU thread group exists yet).
+/// `cellSpursEnableExceptionEventHandler(spurs, flag)` -- writes
+/// `enableEH = flag ? 1 : 0`. The
+/// `sys_spu_thread_group_{connect,disconnect}_event` side effect
+/// requires a running SPU thread group.
 fn enable_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let spurs = args[1] as u32;
     let flag = args[2] as u8;
@@ -1771,8 +1693,7 @@ fn enable_exception_event_handler(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     ctx.set_return(0);
 }
 
-/// Address of the 32-byte `wklInfo[wid]` block. SPURS1 wids live in
-/// `wklInfo1[wid]`; SPURS2 wid >= 16 lives in `wklInfo2[wid & 0xf]`.
+/// SPURS1 wid -> `wklInfo1[wid]`; SPURS2 wid >= 16 -> `wklInfo2[wid & 0xf]`.
 fn wkl_info_addr(spurs: u32, wid: u32) -> u32 {
     let base = if wid < layout::MAX_WORKLOAD_V1 {
         layout::OFF_WKL_INFO_1
@@ -1796,38 +1717,32 @@ fn try_read_be_u64(ctx: &dyn HleContext, addr: u32) -> Result<u64, HleReadError>
     Ok(u64::from_be_bytes(buf))
 }
 
-// Two write classes:
-//
-// - `write_*`: addresses inside a CellSpurs / Attribute /
-//   WorkloadAttribute block already proven writable by its zero-init.
-//   Failure means an allocator/commit-pipeline bug, so `.expect`.
-// - `try_write_*`: guest-controlled pointers (out-pointers caller
-//   supplied). Propagate Err so the handler maps it to a faithful
-//   error code instead of silently dropping the write.
+// `write_*` panic past a zero-init witness; `try_write_*` propagate
+// to the caller for guest-controlled out-pointers.
 
 fn write_be_u32(ctx: &mut dyn HleContext, addr: u32, value: u32) {
     ctx.write_guest(addr as u64, &value.to_be_bytes())
-        .expect("cellSpurs: invariant-class field write failed past a zero-init witness");
+        .expect("cellSpurs: write past zero-init witness");
 }
 
 fn write_be_i32(ctx: &mut dyn HleContext, addr: u32, value: i32) {
     ctx.write_guest(addr as u64, &value.to_be_bytes())
-        .expect("cellSpurs: invariant-class field write failed past a zero-init witness");
+        .expect("cellSpurs: write past zero-init witness");
 }
 
 fn write_be_u64(ctx: &mut dyn HleContext, addr: u32, value: u64) {
     ctx.write_guest(addr as u64, &value.to_be_bytes())
-        .expect("cellSpurs: invariant-class field write failed past a zero-init witness");
+        .expect("cellSpurs: write past zero-init witness");
 }
 
 fn write_byte(ctx: &mut dyn HleContext, addr: u32, value: u8) {
     ctx.write_guest(addr as u64, &[value])
-        .expect("cellSpurs: invariant-class field write failed past a zero-init witness");
+        .expect("cellSpurs: write past zero-init witness");
 }
 
 fn write_bytes(ctx: &mut dyn HleContext, addr: u32, bytes: &[u8]) {
     ctx.write_guest(addr as u64, bytes)
-        .expect("cellSpurs: invariant-class block write failed past a zero-init witness");
+        .expect("cellSpurs: write past zero-init witness");
 }
 
 fn try_write_be_u32(
@@ -1872,9 +1787,8 @@ mod tests {
     use cellgov_time::Budget;
 
     fn fixture() -> (Runtime, UnitId) {
-        // 8 MiB region: SPURS test addresses fit in 0x4_xxxx +
-        // 0x6_xxxx scratch; heap_base at 1 MiB. Bigger memories blow
-        // the test process when ~25 instances run in parallel.
+        // 8 MiB; bigger memories OOM the process when ~25 fixtures
+        // run in parallel.
         let mut rt = Runtime::new(GuestMemory::new(0x80_0000), Budget::new(1), 100);
         let unit_id = UnitId::new(0);
         rt.registry_mut()
@@ -2142,15 +2056,12 @@ mod tests {
         );
     }
 
-    /// Drive `cellSpursInitialize` against a SPURS1 block at `spurs`.
     fn init_spurs(rt: &mut Runtime, unit_id: UnitId, spurs: u32) {
         let args: [u64; 9] = [0x10000, spurs as u64, 1, 250, 1000, 1, 0, 0, 0];
         rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args, None);
         let _ = drain_return(rt, unit_id);
     }
 
-    /// Plant a revision=2 attribute at `attr_ptr` then drive
-    /// `cellSpursInitializeWithAttribute2` against `spurs`.
     fn init_spurs_v2(rt: &mut Runtime, unit_id: UnitId, spurs: u32, attr_ptr: u32) {
         let attr_args: [u64; 9] = [0x10000, attr_ptr as u64, 2, 0, 1, 128, 1000, 0, 0];
         rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args, None);
@@ -2165,7 +2076,6 @@ mod tests {
         let _ = drain_return(rt, unit_id);
     }
 
-    /// Plant an all-zero (valid) 8-byte priority table at `addr`.
     fn plant_priority_zero(rt: &mut Runtime, addr: u32) {
         let _ = rt.memory_mut().apply_commit(
             cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr as u64), 8).unwrap(),
@@ -2818,9 +2728,6 @@ mod tests {
         );
     }
 
-    /// SPURS2 mirror -- the exception field is at the same 0xD6C
-    /// offset; a refactor that moves it inside the SPURS2 bank by
-    /// mistake fails here while the SPURS1 sibling still passes.
     #[test]
     fn add_workload_returns_stat_when_exception_is_set_v2() {
         let (mut rt, unit_id) = fixture();
@@ -2855,8 +2762,6 @@ mod tests {
         );
     }
 
-    /// Exercises the SPURS2 wid >= 16 branch (wklInfo2 indexing,
-    /// bank-selection debug_assert) that the SPURS1 tests never reach.
     #[test]
     fn add_workload_fills_slots_in_high_bit_first_order_v2() {
         let (mut rt, unit_id) = fixture();
@@ -2940,7 +2845,6 @@ mod tests {
         );
     }
 
-    /// Init SPURS1 and add one workload at wid 0 (RUNNABLE).
     fn fixture_with_one_workload(spurs: u32) -> (Runtime, UnitId) {
         let (mut rt, unit_id) = fixture();
         init_spurs(&mut rt, unit_id, spurs);
@@ -3309,8 +3213,6 @@ mod tests {
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
-    /// Debug-build half of the fail-loud contract on
-    /// `_cellSpursWorkloadAttributeInitialize`.
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "maxCnt")]
@@ -3813,9 +3715,6 @@ mod tests {
         assert_eq!(read_u32_be(&rt, spurs + layout::OFF_ENABLE_EH), 0);
     }
 
-    /// 8 MiB main region; an attr above that must surface as a real
-    /// read failure, not zero-substitution that falsely accepts an
-    /// uninitialised revision.
     #[test]
     fn initialize_with_attribute_unmapped_attr_rejected_with_inval() {
         let (mut rt, unit_id) = fixture();
@@ -3841,8 +3740,6 @@ mod tests {
         );
     }
 
-    /// AddWorkload should report FAULT (not silent success or INVAL)
-    /// when the spurs pointer doesn't land inside any region.
     #[test]
     fn add_workload_unmapped_spurs_returns_fault() {
         let (mut rt, unit_id) = fixture();
@@ -3867,7 +3764,6 @@ mod tests {
         );
     }
 
-    /// `priority_ptr == 0` must surface as NULL_POINTER, not INVAL.
     #[test]
     fn add_workload_null_priority_pointer_returns_null_pointer() {
         let (mut rt, unit_id) = fixture();
@@ -3891,7 +3787,6 @@ mod tests {
         );
     }
 
-    /// Two AddWorkloads with the same `pm` reuse uniqueId.
     #[test]
     fn add_workload_dedupes_unique_id_on_matching_pm() {
         let (mut rt, unit_id) = fixture();
@@ -3936,9 +3831,6 @@ mod tests {
         );
     }
 
-    /// AddWorkload pins the `wklMskB` bit-on-alloc polarity. RPCS3
-    /// `_spurs::add_workload` sets `(0x80000000 >> wid)` (verified
-    /// against `cellSpurs.cpp` ~line 2511).
     #[test]
     fn add_workload_sets_wkl_msk_b_bit_on_alloc() {
         let (mut rt, unit_id) = fixture();
@@ -4017,8 +3909,6 @@ mod tests {
         );
     }
 
-    /// Wait-for-shutdown after Shutdown must remain a no-block CELL_OK
-    /// path (no SPU kernel = no completion event ever fires).
     #[test]
     fn wait_for_workload_shutdown_after_shutdown_returns_ok() {
         let spurs: u32 = 0x4_0000;
@@ -4036,9 +3926,6 @@ mod tests {
         assert_eq!(drain_return(&mut rt, unit_id), 0);
     }
 
-    /// Per-workload `set_exception_event_handler` is a CELL_OK no-op:
-    /// confirm both the global slot AND the per-workload state byte
-    /// stay untouched.
     #[test]
     fn set_exception_event_handler_per_workload_leaves_state_untouched() {
         let spurs: u32 = 0x4_0000;
@@ -4062,9 +3949,6 @@ mod tests {
         );
     }
 
-    /// SPURS2 path through `shutdown_workload`: `wid = 25` is in band
-    /// only because `flags1 & SF1_32_WORKLOADS` -- pins the wmax
-    /// derivation against any future hardcoded constant.
     #[test]
     fn shutdown_workload_v2_accepts_wid_in_spurs2_band() {
         let (mut rt, unit_id) = fixture();
@@ -4119,11 +4003,8 @@ mod canary_tests {
         (rt, unit_id)
     }
 
-    /// Drift canary: every entry in [`OWNED_NIDS`] must be claimed by
-    /// [`dispatch`]. Synthetic-zero args trip handler null-pointer
-    /// guards; the panic from `_cellSpursWorkloadAttributeInitialize`'s
-    /// fail-loud `debug_assert!` is caught here as evidence that
-    /// routing succeeded before the body fired.
+    /// Drift canary: every [`OWNED_NIDS`] entry must route through
+    /// [`dispatch`]. A panic past the dispatcher arm counts as routed.
     #[test]
     fn owned_nids_all_claimed_by_dispatch() {
         for &nid in OWNED_NIDS {
@@ -4139,15 +4020,11 @@ mod canary_tests {
                      OWNED_NIDS -- the match arm was likely removed without trimming \
                      the list"
                 ),
-                Err(_) => {
-                    // Routing reached a handler body, then panicked.
-                }
+                Err(_) => {}
             }
         }
     }
 
-    /// NIDs owned by other modules (and a synthetic 0xDEAD_BEEF) must
-    /// return `None` so the dispatcher chain can keep walking.
     #[test]
     fn unowned_nids_are_rejected_by_dispatch() {
         let probes: &[u32] = &[

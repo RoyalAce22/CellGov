@@ -1,15 +1,5 @@
-//! HLE context trait: the interface every HLE module operates through.
-//!
-//! Per-module files accept `&mut dyn HleContext` and never see the
-//! Runtime. The dispatch layer in `hle.rs` constructs an internal
-//! adapter that implements this trait by borrowing from the Runtime.
-//!
-//! ## Failure policy
-//!
-//! Fallible operations return a result type so silent drops become
-//! impossible: [`HleContext::write_guest`] is `Result`,
-//! [`HleContext::heap_alloc`] and [`HleContext::alloc_id`] are
-//! `Option`. Handlers that cannot recover `.expect(...)`.
+//! HLE handler interface: per-module handlers see only `&mut dyn HleContext`,
+//! never the Runtime.
 
 use std::fmt;
 
@@ -17,15 +7,12 @@ use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 use cellgov_lv2::CallbackReturnStage;
 
-/// Why a call to [`HleContext::write_guest`] did not commit any
-/// bytes.
+/// Failure modes for [`HleContext::write_guest`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HleWriteError {
-    /// `addr..(addr + bytes.len())` could not form a valid
-    /// [`cellgov_mem::ByteRange`] (overflow or empty).
+    /// Address plus length overflowed or the range was empty.
     InvalidRange,
-    /// The underlying [`cellgov_mem::GuestMemory::apply_commit`]
-    /// rejected the write.
+    /// Underlying memory commit was rejected.
     CommitFailed(cellgov_mem::MemError),
 }
 
@@ -42,14 +29,12 @@ impl fmt::Display for HleWriteError {
 
 impl std::error::Error for HleWriteError {}
 
-/// Why a call to [`HleContext::read_guest`] did not return bytes.
+/// Failure modes for [`HleContext::read_guest`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HleReadError {
-    /// `addr..(addr + len)` could not form a valid `ByteRange`
-    /// (overflow or empty).
+    /// Address plus length overflowed or the range was empty.
     InvalidRange,
-    /// The underlying [`cellgov_mem::GuestMemory::read_checked`]
-    /// rejected the read (unmapped, out-of-range, or strict-reserved).
+    /// Underlying memory read was rejected.
     ReadFailed(cellgov_mem::MemError),
 }
 
@@ -66,137 +51,112 @@ impl fmt::Display for HleReadError {
 
 impl std::error::Error for HleReadError {}
 
-/// Deferred request to spawn a callback worker recorded by an HLE
-/// handler via [`HleContext::park_for_callback`].
+/// Park-intent record produced by a handler calling
+/// [`HleContext::park_for_callback`].
 ///
-/// The handler does not perform the spawn itself; it records its
-/// intent and returns. The dispatch path consumes the recorded
-/// request after the handler drops, materializes the worker via
+/// Cross-module contract: the handler records intent and returns
+/// without spawning. The dispatch path then drains this request,
+/// spawns the worker via
 /// [`cellgov_lv2::Lv2Host::call_guest_callback_sync`] +
-/// [`crate::Runtime::apply_callback_spawn`], and parks the calling
-/// unit on the worker's trampoline return.
+/// [`crate::Runtime::apply_callback_spawn`], and parks the caller on
+/// the worker's trampoline return; the parent's r3 is set by the
+/// resume arm, never by the handler.
 ///
-/// At most one outstanding request per [`crate::hle::HleState`]
-/// (handlers are dispatched serially per unit; recursive callback
-/// dispatch is bounded by
-/// [`cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP`]).
+/// At most one outstanding request per dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HleParkRequest {
-    /// Title-supplied OPD pointer that the worker enters.
+    /// Guest OPD (function descriptor) address of the callback to invoke.
     pub opd_addr: u32,
     /// Worker `r3..=r10` at entry.
     pub args: [u64; 8],
-    /// Resume-stage discriminant for the parent's pending response.
+    /// Resume arm that consumes the worker's return value.
     pub stage: CallbackReturnStage,
 }
 
-/// The interface HLE module implementations operate through.
+/// Per-dispatch handler interface; the only Runtime surface HLE handlers see.
 pub trait HleContext {
-    /// Read-only view of the base-0 region's committed bytes.
+    /// Flat base-0 view; ignores region boundaries.
     ///
-    /// This is the legacy flat accessor: it ignores region boundaries
-    /// and treats addresses past the slice end as out-of-range. Only
-    /// safe for fields the handler has previously written through
-    /// [`Self::write_guest`] (the post-zero-init witness pattern).
-    /// For guest-supplied pointers, use [`Self::read_guest`] so an
-    /// unmapped or out-of-base-region read fails loud.
+    /// Safe only for fields the handler itself wrote via
+    /// [`Self::write_guest`]. Guest-supplied pointers must go through
+    /// [`Self::read_guest`] so unmapped reads fail loud.
     fn guest_memory(&self) -> &[u8];
 
-    /// Guest memory size in bytes (base-0 region).
+    /// Length of the flat guest memory view in bytes.
     fn guest_memory_len(&self) -> usize {
         self.guest_memory().len()
     }
 
-    /// Read `len` bytes from guest memory at `addr`, honoring region
-    /// boundaries and access modes. Symmetric counterpart to
-    /// [`Self::write_guest`]: bad pointers surface as `Err` rather
-    /// than silently substituting zeros.
+    /// Bounds- and region-checked read.
     fn read_guest(&self, addr: u64, len: usize) -> Result<&[u8], HleReadError>;
 
-    /// Write bytes to guest memory at the given guest address.
+    /// Bounds- and region-checked write through the commit pipeline.
     fn write_guest(&mut self, addr: u64, bytes: &[u8]) -> Result<(), HleWriteError>;
 
-    /// Set the syscall return value (lands in r3 on resume).
+    /// Set r3 on resume.
     fn set_return(&mut self, value: u64);
 
-    /// Push a register write (e.g. r13 for TLS base).
-    ///
     /// # Panics
     ///
-    /// Panics if `reg >= 32` (PowerPC has 32 GPRs).
+    /// Panics if `reg >= 32`.
     fn set_register(&mut self, reg: u8, value: u64);
 
-    /// Mark the calling unit as Finished (for sys_process_exit).
+    /// Mark the calling unit as Finished on resume.
     fn set_unit_finished(&mut self);
 
-    /// Bump-allocate from the HLE heap.
-    ///
-    /// `align` is rounded up to the next power of two; 0 or 1 means
-    /// no alignment. Returns `None` on exhaustion or u32 overflow.
+    /// Bump-allocate. `align` is rounded up to the next power of two;
+    /// 0 or 1 means none. `None` on exhaustion or u32 overflow.
     fn heap_alloc(&mut self, size: u32, align: u32) -> Option<u32>;
 
-    /// Allocate a monotonic kernel-object ID.
-    ///
-    /// Returns `None` past `u32::MAX` rather than recycling IDs,
-    /// which would produce kernel-object aliasing.
+    /// Monotonic kernel-object ID. `None` past `u32::MAX`; IDs are
+    /// never recycled (aliasing would break kernel-object identity).
     fn alloc_id(&mut self) -> Option<u32>;
 
-    /// Record an intent to park the calling unit and run a guest
-    /// callback OPD on a fresh worker PPU thread.
+    /// Record a park intent; the dispatch path drains it and spawns
+    /// the worker after the handler returns. See [`HleParkRequest`]
+    /// for the full contract.
     ///
-    /// The dispatch path consumes the recorded
-    /// [`HleParkRequest`] after the handler returns and performs
-    /// the actual spawn via
-    /// [`cellgov_lv2::Lv2Host::call_guest_callback_sync`]. The
-    /// handler MUST NOT also call [`Self::set_return`]: the
-    /// parent's r3 is set by the resume arm in
-    /// [`crate::runtime`] when the worker returns.
-    ///
-    /// At most one park per dispatch; calling this twice in a
-    /// single handler displaces the prior request and is treated
-    /// as a programming error in debug builds.
+    /// At most one park per dispatch; a second call in the same
+    /// handler displaces the first and trips a debug assert.
     fn park_for_callback(&mut self, request: HleParkRequest);
 }
 
-/// Adapter implementing [`HleContext`] by borrowing from a
-/// [`Runtime`](crate::runtime::Runtime). Constructed per-dispatch in
-/// `dispatch_hle` and dropped immediately after the handler returns.
+/// [`HleContext`] adapter borrowing Runtime state. Constructed per
+/// dispatch in `dispatch_hle` and dropped after the handler returns.
 ///
-/// ## Mutation witness
-///
-/// On drop, if no mutating method was called and no unwind is
-/// active, the NID is added to
-/// [`crate::hle::HleState::handlers_without_mutation`]; debug builds
-/// additionally `debug_assert!`. The counter is the production
-/// signal; the assert is the test-time amplifier.
+/// Mutation witness: a clean drop with no mutating method called bumps
+/// [`crate::hle::HleState::handlers_without_mutation`] and trips a
+/// debug assert.
 pub(crate) struct RuntimeHleAdapter<'a> {
+    /// Guest memory view; the source of `read_guest`/`write_guest`.
     pub(crate) memory: &'a mut cellgov_mem::GuestMemory,
+    /// Unit registry receiving register writes and status overrides.
     pub(crate) registry: &'a mut crate::registry::UnitRegistry,
-    /// Snapshot of `HleState::heap_base`. `heap_alloc`'s watermark
-    /// band check subtracts this from `heap_ptr`.
+    /// Lowest legal heap address; watermark warnings are reported above this.
     pub(crate) heap_base: u32,
+    /// Bump-allocator cursor.
     pub(crate) heap_ptr: &'a mut u32,
+    /// Highest cursor value ever reached.
     pub(crate) heap_watermark: &'a mut u32,
+    /// Bitmask of watermark bands already warned on.
     pub(crate) heap_warning_mask: &'a mut u8,
+    /// Next monotonic kernel-object ID handed out by `alloc_id`.
     pub(crate) next_id: &'a mut u32,
+    /// Unit whose dispatch produced this adapter.
     pub(crate) source: UnitId,
-    /// The NID being dispatched. The Drop impl uses it to
-    /// attribute a no-mutation miss to a specific library entry.
+    /// NID being dispatched, used in mutation-witness diagnostics.
     pub(crate) nid: u32,
-    /// Set on every mutating method. The Drop guard reads this.
+    /// Set by any mutating method; drop checks this for the witness assert.
     pub(crate) mutated: bool,
+    /// Per-NID counter of dispatches that returned without mutating state.
     pub(crate) handlers_without_mutation: &'a mut std::collections::BTreeMap<u32, usize>,
-    /// Park-intent slot. Handlers that wish to dispatch a guest
-    /// callback worker via [`HleContext::park_for_callback`] write
-    /// here; the post-dispatch consumer in
-    /// [`crate::Runtime`] reads + clears it.
+    /// Park intent recorded by `park_for_callback`, drained by dispatch.
     pub(crate) pending_callback_spawn: &'a mut Option<HleParkRequest>,
 }
 
 impl Drop for RuntimeHleAdapter<'_> {
     fn drop(&mut self) {
-        // Standard Drop-guard idiom: skip during an active unwind
-        // so a double-panic does not abort the process.
+        // Skip during unwind to avoid double-panic abort.
         if std::thread::panicking() {
             return;
         }
@@ -209,15 +169,13 @@ impl Drop for RuntimeHleAdapter<'_> {
             "RuntimeHleAdapter dropped without any mutation -- handler for NID {:#010x} \
              (source {:?}) constructed the adapter but never called \
              set_return/set_register/write_guest/set_unit_finished. The guest's r3 still \
-             holds its prior value; this is the silent-divergence footgun the Drop guard \
-             exists to catch.",
+             holds its prior value.",
             self.nid, self.source
         );
     }
 }
 
-/// Watermark bands the bump allocator reports on crossing. One-shot
-/// per band per HleState; ordered low to high.
+/// One-shot watermark bands, ordered low to high.
 const HEAP_WATERMARK_BANDS: &[(u32, u8, &str)] = &[
     (1 << 20, 0x01, "1 MiB"),
     (10 << 20, 0x02, "10 MiB"),
@@ -269,9 +227,7 @@ impl HleContext for RuntimeHleAdapter<'_> {
 
     fn heap_alloc(&mut self, size: u32, align: u32) -> Option<u32> {
         self.mutated = true;
-        // Normalize align to a power of two; fall back to 1 on
-        // pathological guest-supplied values so `sys_memalign`
-        // cannot crash the oracle.
+        // Fall back to 1 so a guest-supplied 0 cannot crash the oracle.
         let align = align.checked_next_power_of_two().unwrap_or(1);
         debug_assert!(align.is_power_of_two());
         let mask = align - 1;
@@ -282,12 +238,11 @@ impl HleContext for RuntimeHleAdapter<'_> {
             if new_ptr > *self.heap_watermark {
                 *self.heap_watermark = new_ptr;
             }
-            // Dispatch witnesses in `hle::cell_gcm_sys::GcmState`
-            // rely on the allocator never handing out address 0.
+            // Cross-module: dispatch witnesses in `hle::cell_gcm_sys::GcmState`
+            // treat address 0 as "unset", so heap_base must be nonzero.
             debug_assert_ne!(
                 aligned, 0,
-                "HLE heap_alloc: allocator returned address 0 (heap_base must be nonzero; \
-                 dispatch witnesses depend on this)"
+                "HLE heap_alloc: allocator returned address 0 (heap_base must be nonzero)"
             );
             let used = self.heap_watermark.saturating_sub(self.heap_base);
             for &(threshold, bit, label) in HEAP_WATERMARK_BANDS {
@@ -308,10 +263,8 @@ impl HleContext for RuntimeHleAdapter<'_> {
 
     fn alloc_id(&mut self) -> Option<u32> {
         self.mutated = true;
-        // 0 is the exhausted sentinel: after issuing u32::MAX,
-        // `next_id` parks at 0 and subsequent calls return None.
-        // Test fixtures that pass `next_id: &mut 0` directly trip
-        // the debug_assert rather than silently issuing no IDs.
+        // 0 is the exhausted sentinel; reaching it before exhaustion
+        // means a fixture forgot to seed next_id.
         let id = *self.next_id;
         debug_assert_ne!(
             id, 0,

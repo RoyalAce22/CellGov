@@ -1,67 +1,44 @@
 //! LEV-aware dispatch-hint classifier for `sc` yields.
 //!
-//! Composes `cellgov_ps3_abi::syscall_namespace::SyscallNamespace::of`
-//! (a pure ABI fact: which namespace bucket does an r11 value land
-//! in) with the hypercall guard (a routing decision: any non-zero
-//! LEV is rejected before LV2 dispatch). The classifier produces
-//! [`SyscallClassification`] which the runtime consumes to drive
-//! [`crate::Lv2Request`] construction.
-//!
-//! Lives in `cellgov_lv2` rather than `cellgov_ps3_abi` because
-//! the output type is a routing hint, not an ABI fact. The pure
-//! namespace functions stay in the ABI crate.
+//! Composes the pure namespace partition from
+//! `cellgov_ps3_abi::syscall_namespace` with the hypercall guard so
+//! the runtime can route an `sc` to LV2, an HLE binder, a private
+//! variant, or a fault path off a single typed value.
 
 use cellgov_ps3_abi::syscall_namespace::{CellGovPrivateSyscall, SyscallNamespace};
 
-/// Typed classification of an `sc` yield.
-///
-/// Each variant carries the per-namespace decoded form so the
-/// caller does not re-walk the range tables. `Hypercall` and
-/// `Unknown` are the two fault paths; the runtime routes them away
-/// from LV2 dispatch.
+/// Dispatch hint produced by [`classify`] for a guest `sc` instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SyscallClassification {
-    /// LEV=0, r11 in `Lv2` range. The runtime's LV2 dispatcher
-    /// receives the raw `number`.
+    /// Routes to the LV2 syscall table.
     Lv2 {
-        /// r11 verbatim.
+        /// LV2 syscall number from `r11`.
         number: u64,
     },
-    /// LEV=0, r11 in `HleImport` range. `index` is the per-namespace
-    /// 0-based index (the original `hle_index` the binder passed to
-    /// `SyscallNamespace::HleImport.encode`).
+    /// Routes to the HLE import binder.
     HleImport {
-        /// 0-based index inside the `HleImport` namespace.
+        /// 0-based offset inside the `HleImport` namespace.
         index: u32,
     },
-    /// LEV=0, r11 in `CellGovPrivate` range, recognized variant.
+    /// Routes to a CellGov-private runtime hook.
     CellGovPrivate(CellGovPrivateSyscall),
-    /// LEV >= 1. PS3 usermode should never issue this; programming
-    /// error per Book I §2.4.2. The runtime rejects rather than
-    /// silently treating it as LV2.
+    /// Routes to the hypercall fault path; LEV >= 1 cannot originate from PS3 usermode.
     Hypercall {
-        /// LEV value as decoded from the `sc` instruction.
+        /// Privilege level from the `sc` operand.
         lev: u8,
-        /// r11 verbatim, preserved for diagnostics.
+        /// Raw `r11` preserved for diagnostics.
         r11: u64,
     },
-    /// LEV=0 but r11 is above every declared namespace OR inside
-    /// `CellGovPrivate` at an index without a registered variant.
-    /// Falls through to [`crate::Lv2Request::Unsupported`].
+    /// Routes to [`crate::Lv2Request::Unsupported`].
     Unknown {
-        /// r11 verbatim.
+        /// Raw `r11` that did not match any namespace.
         r11: u64,
     },
 }
 
-/// LEV-aware classification of an `sc` yield.
-///
-/// Combines the LEV field of the `sc` instruction (Book III §2.3.1)
-/// with the r11 syscall number to produce a typed dispatch hint.
-/// Non-zero LEV is routed to [`SyscallClassification::Hypercall`]
-/// regardless of r11; the runtime rejects these before LV2 dispatch
-/// (PS3 usermode programming error per Book I §2.4.2).
+/// Non-zero LEV short-circuits to [`SyscallClassification::Hypercall`]
+/// regardless of r11 (Book III 2.3.1, Book I 2.4.2).
 #[inline]
 pub const fn classify(lev: u8, r11: u64) -> SyscallClassification {
     if lev != 0 {
@@ -114,8 +91,6 @@ mod tests {
 
     #[test]
     fn classify_unknown_private_index_falls_to_unknown() {
-        // 0x80001 is in the CellGovPrivate range but no variant
-        // is registered at index 1.
         assert_eq!(
             classify(0, 0x80001),
             SyscallClassification::Unknown { r11: 0x80001 },
@@ -138,9 +113,6 @@ mod tests {
         );
     }
 
-    /// Every non-zero LEV is a hypercall regardless of r11. PS3
-    /// usermode never issues these; the runtime rejects them
-    /// before LV2 dispatch.
     #[test]
     fn nonzero_lev_always_routes_to_hypercall() {
         for lev in 1..=63u8 {
@@ -148,8 +120,6 @@ mod tests {
                 classify(lev, 22),
                 SyscallClassification::Hypercall { .. }
             ));
-            // Non-zero LEV must not be classified as LV2 even when
-            // r11 lands inside the private namespace.
             assert!(matches!(
                 classify(lev, 0x80000),
                 SyscallClassification::Hypercall { .. }

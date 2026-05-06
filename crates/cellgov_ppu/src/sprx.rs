@@ -1,6 +1,6 @@
-//! Parser and loader for decrypted PS3 firmware PRX (ELF64 type
-//! 0xFFA4). Handles the firmware side of PRX loading; game-side
-//! import parsing lives in [`crate::prx`].
+//! Parser and loader for decrypted PS3 firmware PRX (ELF64 type 0xFFA4).
+//!
+//! Game-side import parsing lives in [`crate::prx`].
 
 use cellgov_ps3_abi::elf::{
     ELF_HEADER_SIZE, ELF_MAGIC, ET_PRX, NID_MODULE_START, NID_MODULE_STOP, PT_LOAD, PT_PRX_RELOC,
@@ -13,118 +13,122 @@ pub use cellgov_ps3_abi::elf::{
     R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO, R_PPC64_ADDR32,
 };
 
-// -- Public data types --
-
-/// A parsed decrypted PRX module, ready for loading into guest memory.
+/// Parsed decrypted PRX module ready for loading.
+///
+/// All vaddrs (`toc`, OPD fields, segment vaddrs) are unrelocated PRX-space
+/// addresses; [`load_prx`] adds the chosen base.
 #[derive(Debug, Clone)]
 pub struct ParsedPrx {
-    /// Module name from sys_prx_module_info_t (e.g., "liblv2").
+    /// Module name from `sys_prx_module_info_t`.
     pub name: String,
-    /// Table of Contents base address (unrelocated).
+    /// Module TOC vaddr (unrelocated).
     pub toc: u32,
-    /// Text (code) segment.
+    /// Text PT_LOAD segment.
     pub text: PrxSegment,
-    /// Data segment.
+    /// Data PT_LOAD segment.
     pub data: PrxSegment,
-    /// Exported libraries (non-system entries with NID tables).
+    /// Non-system exported libraries.
     pub exports: Vec<PrxExportLib>,
-    /// Relocation entries from the 0x700000A4 segment.
+    /// RELA entries from the PT_PRX_RELOC segment.
     pub relocations: Vec<PrxRelocation>,
-    /// module_start function: (code_vaddr, toc) from OPD. None if absent.
+    /// OPD for `module_start`, if exported.
     pub module_start: Option<PrxOpd>,
-    /// module_stop function: (code_vaddr, toc) from OPD. None if absent.
+    /// OPD for `module_stop`, if exported.
     pub module_stop: Option<PrxOpd>,
 }
 
-/// A PT_LOAD segment's raw data and address info.
+/// PT_LOAD segment bytes plus its vaddr and sizes.
+///
+/// `data` holds `filesz` bytes; the loader zero-extends the
+/// `memsz - filesz` BSS tail.
 #[derive(Debug, Clone)]
 pub struct PrxSegment {
-    /// Virtual address (unrelocated, typically 0 for text).
+    /// Unrelocated PRX-space vaddr of the segment.
     pub vaddr: u64,
-    /// Size of data in file.
+    /// On-disk byte size.
     pub filesz: u64,
-    /// Size in memory (may be larger than filesz for BSS).
+    /// In-memory byte size including BSS tail.
     pub memsz: u64,
-    /// Raw segment bytes (filesz bytes, caller zero-extends to memsz).
+    /// Raw `filesz` bytes from the file.
     pub data: Vec<u8>,
 }
 
-/// An exported library within a PRX module.
+/// One exported library within a PRX module.
 #[derive(Debug, Clone)]
 pub struct PrxExportLib {
-    /// Library name (e.g., "sysPrxForUser", "cellSysmodule").
+    /// Library name string.
     pub name: String,
-    /// Library attributes.
+    /// Library attribute flags.
     pub attrs: u16,
-    /// Exported functions: (NID, stub vaddr).
+    /// Exported function entries.
     pub functions: Vec<PrxExport>,
-    /// Exported variables: (NID, vaddr).
+    /// Exported variable entries.
     pub variables: Vec<PrxExport>,
 }
 
-/// A single exported symbol (function or variable).
+/// One exported symbol; `vaddr` is unrelocated PRX-space.
 #[derive(Debug, Clone, Copy)]
 pub struct PrxExport {
-    /// NID identifying the symbol.
+    /// Symbol NID.
     pub nid: u32,
-    /// Virtual address of the symbol's OPD (functions) or data (variables).
-    /// Unrelocated -- caller must add the base address.
+    /// Unrelocated PRX-space vaddr of the symbol's stub.
     pub vaddr: u32,
 }
 
-/// Official Procedure Descriptor with its location and contents.
+/// Official Procedure Descriptor: function entry point and TOC pair.
+///
+/// All three fields are unrelocated absolute PRX vaddrs, not segment-relative
+/// offsets -- adding `text.vaddr` would double-count for non-zero-based text.
 #[derive(Debug, Clone, Copy)]
 pub struct PrxOpd {
-    /// Virtual address of the OPD itself (unrelocated).
+    /// Vaddr of the OPD itself.
     pub opd_vaddr: u32,
-    /// Code entry point read from the OPD (unrelocated).
+    /// Function entry-point vaddr.
     pub code: u32,
-    /// Table of Contents base read from the OPD.
+    /// TOC vaddr paired with this entry point.
     pub toc: u32,
 }
 
-/// A single ELF64 RELA relocation entry.
+/// One ELF64 RELA relocation entry.
 ///
-/// The PS3 PRX `sym` field packs two segment indices:
-/// `sym & 0xFF` is the target segment (0 = text, 1 = data) and
-/// `(sym >> 8) & 0xFF` is the value segment the addend is relative to.
+/// `sym` packs two segment indices: `sym & 0xFF` is the target segment to
+/// patch (0 = text, 1 = data) and `(sym >> 8) & 0xFF` is the value segment
+/// whose vaddr the `addend` is relative to.
 #[derive(Debug, Clone, Copy)]
 pub struct PrxRelocation {
     /// Offset within the target segment to patch.
     pub offset: u64,
-    /// Relocation type (R_PPC64_ADDR32, etc.).
+    /// PPC64 relocation type code.
     pub rtype: u32,
-    /// Packed segment indices: (value_seg << 8) | target_seg.
+    /// Packed target/value segment indices (low byte / next byte).
     pub sym: u32,
-    /// Signed addend, relative to the value segment's vaddr.
+    /// Signed addend added to the value-segment vaddr.
     pub addend: i64,
 }
 
-/// Why PRX parsing failed.
+/// Failure mode while parsing a decrypted PRX.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrxParseError {
-    /// File too small for an ELF header.
+    /// Input is shorter than the ELF header.
     TooSmall,
-    /// Not a valid ELF file (bad magic).
+    /// First four bytes are not the ELF magic.
     BadMagic,
-    /// Not a 64-bit big-endian ELF.
+    /// ELF class/encoding is not ELF64 big-endian.
     NotElf64Be,
-    /// ELF type is not 0xFFA4 (PS3 PRX).
+    /// ELF e_type was not 0xFFA4 (PS3 PRX); carries the observed type.
     NotPrx(u16),
     /// Fewer than 2 PT_LOAD segments.
     MissingSegments,
-    /// A read went out of bounds.
+    /// A computed file offset or size escaped the input buffer.
     OutOfBounds,
-    /// Module name not found in the binary.
+    /// `sys_prx_module_info_t` was missing or unreadable.
     NoModuleInfo,
 }
 
-// -- Parsing --
-
 /// Parse a decrypted PRX (ELF64 type 0xFFA4) into its components.
 ///
-/// Input must already be decrypted (e.g. via RPCS3 `--decrypt`), not
-/// a raw SCE-encrypted SELF.
+/// Input must already be decrypted (e.g. via RPCS3 `--decrypt`), not a raw
+/// SCE-encrypted SELF.
 pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     if data.len() < ELF_HEADER_SIZE {
         return Err(PrxParseError::TooSmall);
@@ -143,9 +147,7 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     let phoff = loader::read_u64(data, 32) as usize;
     let phentsize = loader::read_u16(data, 54) as usize;
     let phnum = loader::read_u16(data, 56) as usize;
-    // ELF64 phdr is 56 bytes; we read fields up to base + 40 + 8 = 48.
-    // phentsize < 48 would either OOB-read into adjacent entries or, if
-    // 0, duplicate-read the same phdr every iteration.
+    // ELF64 phdr is 56 bytes; smaller phentsize would alias entries.
     if phentsize < 56 {
         return Err(PrxParseError::OutOfBounds);
     }
@@ -198,7 +200,7 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     let text = extract_segment(data, &loads[0])?;
     let data_seg = extract_segment(data, &loads[1])?;
 
-    // PT_LOAD[0].paddr doubles as the file offset of module_info.
+    // PT_LOAD[0].p_paddr doubles as the file offset of module_info.
     let mi_file_off = loads[0].p_paddr as usize;
     let (name, toc, exports_range, _imports_range) = parse_module_info(data, mi_file_off)?;
 
@@ -223,8 +225,6 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
         module_stop,
     })
 }
-
-// -- Internal helpers --
 
 struct RawPhdr {
     #[allow(dead_code)]
@@ -266,9 +266,9 @@ fn extract_segment(data: &[u8], phdr: &RawPhdr) -> Result<PrxSegment, PrxParseEr
 
 /// Parse `sys_prx_module_info_t` at `file_off`.
 ///
-/// Layout: `+0` u16 attributes, `+2` u8[2] version, `+4` char[28] name,
-/// `+32` u32 toc, `+36/+40` u32 exports_{start,end} (vaddr),
-/// `+44/+48` u32 imports_{start,end} (vaddr).
+/// Layout: `+0` u16 attrs, `+2` u8[2] version, `+4` char[28] name, `+32` u32
+/// toc, `+36/+40` u32 exports_{start,end} (vaddr), `+44/+48` u32
+/// imports_{start,end} (vaddr).
 fn parse_module_info(
     data: &[u8],
     file_off: usize,
@@ -311,7 +311,7 @@ struct VaddrRange {
 
 use cellgov_ps3_abi::elf::{EXPORT_ATTR_SYSTEM, EXPORT_ENTRY_MIN_SIZE};
 
-/// Parse the export table into a list of non-system export libraries.
+/// Walk the export table, returning every non-system library.
 fn parse_export_table(
     data: &[u8],
     seg_map: &[SegEntry],
@@ -326,10 +326,8 @@ fn parse_export_table(
     }
 
     let start_foff = v2f(seg_map, range.start as usize).ok_or(PrxParseError::OutOfBounds)?;
-    // Compute end_foff from the size rather than translating range.end
-    // through v2f: range.end is exclusive and may equal seg.vaddr +
-    // seg.size for a table that fills its segment to the boundary, in
-    // which case v2f's strict-less-than upper-bound check returns None.
+    // range.end is exclusive; v2f's strict-less-than would reject a table
+    // whose end touches its segment boundary, so derive end_foff from size.
     let end_foff = start_foff + size;
 
     let mut libs = Vec::new();
@@ -386,8 +384,9 @@ fn parse_export_table(
     Ok(libs)
 }
 
-/// Read the NID and stub tables into `(functions, variables)`;
-/// entries at `[0, num_func)` are functions, the remainder variables.
+/// Read the NID and stub tables into `(functions, variables)`.
+///
+/// Entries at `[0, num_func)` are functions; the remainder are variables.
 fn read_export_entries(
     data: &[u8],
     seg_map: &[SegEntry],
@@ -438,8 +437,7 @@ fn find_system_opd(
 
     let start_foff =
         v2f(seg_map, exports_range.start as usize).ok_or(PrxParseError::OutOfBounds)?;
-    // See parse_export_table: compute end_foff from the size to handle
-    // tables that fill a segment to its exclusive boundary.
+    // See [`parse_export_table`] for why end_foff comes from size, not v2f.
     let end_foff = start_foff + (exports_range.end - exports_range.start) as usize;
 
     let mut pos = start_foff;
@@ -531,9 +529,8 @@ fn parse_relocations(data: &[u8], phdr: &RawPhdr) -> Result<Vec<PrxRelocation>, 
 }
 
 fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
-    // Failed lookups embed the vaddr so a corrupt name pointer is
-    // visible in the parsed module rather than indistinguishable from
-    // a legitimately-empty string.
+    // Failed lookups embed the vaddr so corrupt name pointers stay
+    // distinguishable from legitimately-empty strings downstream.
     let foff = match v2f(seg_map, vaddr) {
         Some(o) => o,
         None => return format!("<unmapped:0x{vaddr:x}>"),
@@ -548,74 +545,75 @@ fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
     String::from_utf8_lossy(&data[foff..foff + end]).into_owned()
 }
 
-// -- Loading into guest memory --
-
-/// A PRX module loaded into guest memory with relocations applied.
+/// PRX module loaded into guest memory with relocations applied.
+///
+/// Every address is post-relocation (already includes `base`). `module_start`
+/// and `module_stop` are derived from the parsed OPD plus `base` rather than
+/// read back from guest memory: not every OPD field has a relocation entry,
+/// so a post-relocation read is unreliable.
 #[derive(Debug, Clone)]
 pub struct LoadedPrx {
-    /// Module name.
+    /// Module name from `sys_prx_module_info_t`.
     pub name: String,
-    /// Base address in guest memory.
+    /// Guest base at which the module was loaded.
     pub base: u64,
-    /// Relocated TOC value (base + unrelocated toc).
+    /// Relocated TOC guest address.
     pub toc: u64,
-    /// Text segment range in guest memory: [start, start + memsz).
+    /// Text segment range `[text_start, text_end)`.
     pub text_start: u64,
-    /// End of text segment in guest memory.
+    /// Exclusive end of the text segment range.
     pub text_end: u64,
-    /// Data segment range in guest memory.
+    /// Data segment range `[data_start, data_end)`.
     pub data_start: u64,
-    /// End of data segment in guest memory.
+    /// Exclusive end of the data segment range.
     pub data_end: u64,
     /// Exported function NIDs mapped to relocated OPD guest addresses.
     pub exports: BTreeMap<u32, u64>,
-    /// module_start entry point, computed from base + parsed OPD. Not
-    /// every OPD field has a relocation entry, so this is derived
-    /// rather than read back from guest memory.
+    /// Relocated `module_start` OPD, if exported.
     pub module_start: Option<LoadedOpd>,
-    /// module_stop entry point.
+    /// Relocated `module_stop` OPD, if exported.
     pub module_stop: Option<LoadedOpd>,
-    /// Number of relocations applied.
+    /// Number of relocation entries applied.
     pub relocs_applied: usize,
 }
 
-/// A relocated OPD entry, ready for setting up PPU state.
+/// Relocated OPD entry; both fields are absolute guest addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoadedOpd {
-    /// Code entry point (relocated guest address).
+    /// Function entry-point guest address.
     pub code: u64,
-    /// Table of Contents base (relocated guest address).
+    /// TOC guest address paired with this entry point.
     pub toc: u64,
 }
 
-/// Why loading a PRX into guest memory failed.
+/// Failure mode while loading a parsed PRX into guest memory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrxLoadError {
-    /// A segment does not fit in guest memory at the chosen base.
+    /// Segment does not fit in guest memory at the chosen base.
     SegmentOutOfRange {
-        /// Start address attempted.
+        /// Guest address where the segment would have started.
         guest_addr: u64,
-        /// Segment size.
+        /// Total in-memory size of the segment.
         size: u64,
     },
-    /// Guest memory write failed.
+    /// Guest memory write failed at the given address.
     MemoryWrite(u64),
-    /// An unsupported relocation type was encountered.
+    /// Relocation type code is not handled by the loader.
     UnsupportedReloc(u32),
-    /// A relocation referenced a segment index outside the loaded
-    /// `[text, data]` pair. PS3 PRX modules have at most 2 PT_LOAD
-    /// segments today, so any higher index indicates corruption or a
-    /// firmware shape the loader does not yet model.
+    /// Relocation referenced a segment index outside the loaded
+    /// `[text, data]` pair (>= 2). Indicates corruption or a firmware
+    /// shape the loader does not yet model.
     RelocSegmentOutOfRange {
-        /// The packed `r_sym` value of the offending relocation.
+        /// Raw `sym` field carrying the offending segment index.
         sym: u32,
-        /// The decoded segment index that exceeded the table.
+        /// Decoded segment index that was out of range.
         seg: usize,
     },
 }
 
-/// Load a parsed PRX at `base` and apply relocations. `base` must be
-/// page-aligned and above the game's own memory footprint.
+/// Load a parsed PRX at `base` and apply relocations.
+///
+/// `base` must be page-aligned and above the game's own memory footprint.
 pub fn load_prx(
     prx: &ParsedPrx,
     memory: &mut cellgov_mem::GuestMemory,
@@ -626,7 +624,7 @@ pub fn load_prx(
     write_segment(memory, base, &prx.text, mem_size)?;
     write_segment(memory, base, &prx.data, mem_size)?;
 
-    // seg_vaddrs indexed by segment number: 0 = text, 1 = data.
+    // Indexed by sym-encoded segment number: 0 = text, 1 = data.
     let seg_vaddrs = [prx.text.vaddr, prx.data.vaddr];
     let relocs_applied = apply_relocations(memory, base, &seg_vaddrs, &prx.relocations)?;
 
@@ -637,16 +635,9 @@ pub fn load_prx(
         }
     }
 
-    // Derive module_start/stop from parsed OPD + base: the code field
-    // is often not covered by the reloc table, so reading it back from
-    // guest memory after relocation is unreliable. opd.code and opd.toc
-    // are both unrelocated absolute vaddrs (within the PRX's address
-    // space), so adding text.vaddr again would double-count for any
-    // module whose text segment is not at vaddr 0. opd.toc is honored
-    // per entry point rather than collapsed onto module_info's toc:
-    // every shipping firmware module has the two equal, but the
-    // per-OPD field exists to allow divergence and we read what the
-    // OPD actually says.
+    // opd.code/toc are absolute PRX vaddrs; add base only. Per-OPD toc is
+    // honored rather than collapsed onto module_info.toc -- shipping firmware
+    // keeps them equal but the OPD field is authoritative if it diverges.
     let module_start = prx.module_start.map(|opd| LoadedOpd {
         code: base + opd.code as u64,
         toc: base + opd.toc as u64,
@@ -712,7 +703,7 @@ fn write_segment(
     Ok(())
 }
 
-/// Apply every relocation. `seg_vaddrs` is `[text_vaddr, data_vaddr]`.
+/// Apply every relocation; `seg_vaddrs` is `[text_vaddr, data_vaddr]`.
 fn apply_relocations(
     memory: &mut cellgov_mem::GuestMemory,
     base: u64,
@@ -743,10 +734,8 @@ fn apply_relocations(
 
         let target = base + target_base + r.offset;
         let value = (base + value_base).wrapping_add(r.addend as u64);
-        // PS3 PRX uses PPC32-style 16-bit halves for ADDR16_LO/HI/HA;
-        // mask to u32 so a base above 4 GiB does not silently truncate
-        // bits 32..47 into the halfword. ADDR32 already truncates by
-        // the cast.
+        // PRX ADDR16_{LO,HI,HA} are PPC32-style halves; truncate to u32 so a
+        // base above 4 GiB does not bleed bits 32..47 into the halfword.
         let value32 = value as u32;
 
         match r.rtype {
@@ -760,7 +749,7 @@ fn apply_relocations(
                 write_u16(memory, target, (value32 >> 16) as u16)?;
             }
             R_PPC64_ADDR16_HA => {
-                // +0x8000 before shift: cancels sign extension of the paired LO.
+                // +0x8000 cancels sign-extension of the paired LO.
                 let ha = (value32.wrapping_add(0x8000) >> 16) as u16;
                 write_u16(memory, target, ha)?;
             }
@@ -800,12 +789,11 @@ fn write_u16(
 mod tests {
     use super::*;
 
-    /// Build a minimal PRX ELF64 binary for testing.
+    /// Minimal PRX ELF64 fixture.
     ///
-    /// File layout: ELF header at 0, three 56-byte program headers at
-    /// 0x40, text segment at 0x0F0 (vaddr 0x0), data segment at 0x1F0
-    /// (vaddr 0x100, holds module_info, export tables, OPDs),
-    /// relocation segment at 0x3F0.
+    /// Layout: ELF header at 0, three 56-byte program headers at 0x40, text
+    /// at 0x0F0 (vaddr 0), data at 0x1F0 (vaddr 0x100, holds module_info,
+    /// export tables, OPDs), relocations at 0x3F0.
     fn make_test_prx() -> Vec<u8> {
         let mut buf = vec![0u8; 0x500];
 
@@ -819,7 +807,7 @@ mod tests {
 
         let phdr_base = 64;
 
-        // PT_LOAD[0] text. paddr points to module_info inside the data segment.
+        // PT_LOAD[0] text; p_paddr aliases module_info file offset.
         let ph0 = phdr_base;
         buf[ph0..ph0 + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
         buf[ph0 + 8..ph0 + 16].copy_from_slice(&0xF0u64.to_be_bytes());
@@ -828,7 +816,6 @@ mod tests {
         buf[ph0 + 32..ph0 + 40].copy_from_slice(&0x100u64.to_be_bytes());
         buf[ph0 + 40..ph0 + 48].copy_from_slice(&0x100u64.to_be_bytes());
 
-        // PT_LOAD[1] data.
         let ph1 = phdr_base + 56;
         buf[ph1..ph1 + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
         buf[ph1 + 8..ph1 + 16].copy_from_slice(&0x1F0u64.to_be_bytes());
@@ -837,7 +824,6 @@ mod tests {
         buf[ph1 + 32..ph1 + 40].copy_from_slice(&0x200u64.to_be_bytes());
         buf[ph1 + 40..ph1 + 48].copy_from_slice(&0x200u64.to_be_bytes());
 
-        // PT_PRX_RELOC (3 entries).
         let ph2 = phdr_base + 112;
         buf[ph2..ph2 + 4].copy_from_slice(&PT_PRX_RELOC.to_be_bytes());
         buf[ph2 + 8..ph2 + 16].copy_from_slice(&0x3F0u64.to_be_bytes());
@@ -848,7 +834,6 @@ mod tests {
             buf[i..i + 4].copy_from_slice(&0x6000_0000u32.to_be_bytes());
         }
 
-        // module_info at file offset 0x1F0 (= PT_LOAD[0].paddr).
         let mi = 0x1F0;
         buf[mi..mi + 2].copy_from_slice(&0x0006u16.to_be_bytes());
         buf[mi + 2] = 1;
@@ -860,7 +845,6 @@ mod tests {
         buf[mi + 44..mi + 48].copy_from_slice(&0x168u32.to_be_bytes()); // imports_start
         buf[mi + 48..mi + 52].copy_from_slice(&0x168u32.to_be_bytes()); // imports_end
 
-        // System export entry at vaddr 0x130 (file 0x220): 2 funcs + 1 var.
         let exp0 = 0x220;
         buf[exp0] = 0x1C;
         buf[exp0 + 4..exp0 + 6].copy_from_slice(&0x8000u16.to_be_bytes());
@@ -869,7 +853,6 @@ mod tests {
         buf[exp0 + 20..exp0 + 24].copy_from_slice(&0x1A0u32.to_be_bytes());
         buf[exp0 + 24..exp0 + 28].copy_from_slice(&0x1B0u32.to_be_bytes());
 
-        // User export entry at vaddr 0x14C (file 0x23C): 3 funcs.
         let exp1 = exp0 + 28;
         buf[exp1] = 0x1C;
         buf[exp1 + 4..exp1 + 6].copy_from_slice(&0x0001u16.to_be_bytes());
@@ -878,57 +861,50 @@ mod tests {
         buf[exp1 + 20..exp1 + 24].copy_from_slice(&0x1D0u32.to_be_bytes());
         buf[exp1 + 24..exp1 + 28].copy_from_slice(&0x1E0u32.to_be_bytes());
 
-        // System NID table (vaddr 0x1A0, file 0x290): module_start,
-        // module_stop, and a variable NID.
         let nid0 = 0x290;
         buf[nid0..nid0 + 4].copy_from_slice(&NID_MODULE_START.to_be_bytes());
         buf[nid0 + 4..nid0 + 8].copy_from_slice(&NID_MODULE_STOP.to_be_bytes());
         buf[nid0 + 8..nid0 + 12].copy_from_slice(&0xD7F43016u32.to_be_bytes());
 
-        // System stub table (vaddr 0x1B0, file 0x2A0): OPD vaddrs.
         let stub0 = 0x2A0;
         buf[stub0..stub0 + 4].copy_from_slice(&0x1F0u32.to_be_bytes());
         buf[stub0 + 4..stub0 + 8].copy_from_slice(&0x1F8u32.to_be_bytes());
 
-        // OPDs at vaddr 0x1F0 / 0x1F8 (file 0x2E0 / 0x2E8).
         let opd_base = 0x2E0;
         buf[opd_base..opd_base + 4].copy_from_slice(&0x10u32.to_be_bytes());
         buf[opd_base + 4..opd_base + 8].copy_from_slice(&0x200u32.to_be_bytes());
         buf[opd_base + 8..opd_base + 12].copy_from_slice(&0x20u32.to_be_bytes());
         buf[opd_base + 12..opd_base + 16].copy_from_slice(&0x200u32.to_be_bytes());
 
-        // Library name "testlib" (vaddr 0x1C0, file 0x2B0).
         buf[0x2B0..0x2B7].copy_from_slice(b"testlib");
 
-        // User NID table (vaddr 0x1D0, file 0x2C0).
         let nid1 = 0x2C0;
         buf[nid1..nid1 + 4].copy_from_slice(&0xAAAAAAAAu32.to_be_bytes());
         buf[nid1 + 4..nid1 + 8].copy_from_slice(&0xBBBBBBBBu32.to_be_bytes());
         buf[nid1 + 8..nid1 + 12].copy_from_slice(&0xCCCCCCCCu32.to_be_bytes());
 
-        // User stub table (vaddr 0x1E0, file 0x2D0).
         let stub1 = 0x2D0;
         buf[stub1..stub1 + 4].copy_from_slice(&0x40u32.to_be_bytes());
         buf[stub1 + 4..stub1 + 8].copy_from_slice(&0x50u32.to_be_bytes());
         buf[stub1 + 8..stub1 + 12].copy_from_slice(&0x60u32.to_be_bytes());
 
         // Three RELA entries (24 bytes each) at 0x3F0.
+        // [0] ADDR32 text->text at offset 0x50, addend 0x80.
         let rel0 = 0x3F0;
-        // ADDR32 text->text at offset 0x50, addend 0x80.
         buf[rel0..rel0 + 8].copy_from_slice(&0x50u64.to_be_bytes());
         let r_info0: u64 = R_PPC64_ADDR32 as u64;
         buf[rel0 + 8..rel0 + 16].copy_from_slice(&r_info0.to_be_bytes());
         buf[rel0 + 16..rel0 + 24].copy_from_slice(&0x80i64.to_be_bytes());
 
-        // ADDR16_HA text->text at offset 0x54, addend 0x200.
+        // [1] ADDR16_HA text->text at offset 0x54, addend 0x200.
         let rel1 = rel0 + 24;
         buf[rel1..rel1 + 8].copy_from_slice(&0x54u64.to_be_bytes());
         let r_info1: u64 = R_PPC64_ADDR16_HA as u64;
         buf[rel1 + 8..rel1 + 16].copy_from_slice(&r_info1.to_be_bytes());
         buf[rel1 + 16..rel1 + 24].copy_from_slice(&0x200i64.to_be_bytes());
 
-        // ADDR32 target=data value=text at data-relative 0xF0 (OPD
-        // code field of module_start), addend 0x10.
+        // [2] ADDR32 target=data value=text at data+0xF0 (module_start
+        // OPD code field), addend 0x10.
         let rel2 = rel1 + 24;
         buf[rel2..rel2 + 8].copy_from_slice(&0xF0u64.to_be_bytes());
         let r_info2: u64 = (0x0001u64 << 32) | R_PPC64_ADDR32 as u64;
@@ -963,7 +939,6 @@ mod tests {
         let data = make_test_prx();
         let prx = parse_prx(&data).unwrap();
 
-        // Only the user library survives; the system entry is filtered.
         assert_eq!(prx.exports.len(), 1);
         assert_eq!(prx.exports[0].name, "testlib");
         assert_eq!(prx.exports[0].functions.len(), 3);
@@ -1014,8 +989,8 @@ mod tests {
         data[0..4].copy_from_slice(&ELF_MAGIC);
         data[4] = 2;
         data[5] = 2;
-        // ET_EXEC, not PRX.
-        data[16..18].copy_from_slice(&0x0002u16.to_be_bytes());
+        data[16..18].copy_from_slice(&0x0002u16.to_be_bytes()); // ET_EXEC
+
         assert!(matches!(parse_prx(&data), Err(PrxParseError::NotPrx(2))));
     }
 
@@ -1167,7 +1142,6 @@ mod tests {
     fn load_test_prx_addr16_lo_and_hi() {
         let mut data = make_test_prx();
 
-        // Shrink the relocation segment to 2 entries.
         let ph2 = 64 + 112;
         data[ph2 + 32..ph2 + 40].copy_from_slice(&48u64.to_be_bytes());
 
@@ -1214,10 +1188,7 @@ mod tests {
 
     #[test]
     fn load_prx_rejects_reloc_with_out_of_range_segment() {
-        // sym packs target_seg in low 8 bits and value_seg in next 8.
-        // Set value_seg = 0x02 (third segment); the loader has only
-        // [text, data] (2 entries), so this must error rather than
-        // silently substitute segment 0's vaddr.
+        // value_seg = 0x02 against a 2-entry [text, data] table.
         let mut data = make_test_prx();
         let rel0 = 0x3F0;
         let r_info: u64 = (0x0200u64 << 32) | R_PPC64_ADDR32 as u64;
@@ -1234,8 +1205,6 @@ mod tests {
 
     #[test]
     fn parse_rejects_phentsize_below_minimum() {
-        // ELF64 phdr is 56 bytes; phentsize < 56 (including 0) means
-        // either OOB-read or duplicate-read of the same phdr.
         let mut data = make_test_prx();
         data[54..56].copy_from_slice(&8u16.to_be_bytes());
         assert!(matches!(parse_prx(&data), Err(PrxParseError::OutOfBounds)));
@@ -1243,12 +1212,8 @@ mod tests {
 
     #[test]
     fn read_cstring_unmapped_pointer_produces_diagnostic_string() {
-        // Point the user library's name pointer at a vaddr no PT_LOAD
-        // covers. read_cstring must surface the failing vaddr in the
-        // returned name; returning "" silently hides the corruption
-        // and produces export libraries with blank names downstream.
         let mut data = make_test_prx();
-        let exp1 = 0x220 + 28; // user export entry
+        let exp1 = 0x220 + 28;
         let unmapped: u32 = 0xDEAD_0000;
         data[exp1 + 16..exp1 + 20].copy_from_slice(&unmapped.to_be_bytes());
 
@@ -1263,28 +1228,17 @@ mod tests {
 
     #[test]
     fn load_module_start_not_double_added_when_text_vaddr_nonzero() {
-        // Synthesize a fixture where text.vaddr != 0 by patching the
-        // PT_LOAD[0] vaddr field and shifting all the data-segment
-        // pointers. opd.code is already an absolute vaddr in the PRX
-        // address space, so ms.code must be `base + opd.code`. A
-        // computation of `base + text.vaddr + opd.code` would
-        // double-count text.vaddr whenever the segment is non-zero
-        // based.
         let mut data = make_test_prx();
-        // Set PT_LOAD[0].p_vaddr to 0x1000 (was 0).
         let ph0 = 64;
         let new_text_vaddr: u64 = 0x1000;
         data[ph0 + 16..ph0 + 24].copy_from_slice(&new_text_vaddr.to_be_bytes());
 
         let prx = parse_prx(&data).unwrap();
         assert_eq!(prx.text.vaddr, 0x1000);
-        // opd.code is read as 0x10 from the OPD bytes regardless of
-        // text.vaddr -- OPD code is an absolute PRX vaddr, not an
-        // offset into the text segment.
         assert_eq!(
             prx.module_start.expect("module_start").code,
             0x10,
-            "OPD code field is unrelocated absolute, not text-relative"
+            "OPD code is absolute PRX vaddr, not text-relative",
         );
 
         let base: u64 = 0x1000_0000;
@@ -1295,18 +1249,12 @@ mod tests {
         assert_eq!(
             ms.code,
             base + 0x10,
-            "module_start.code must be base + opd.code, not base + text.vaddr + opd.code"
+            "ms.code = base + opd.code, not base + text.vaddr + opd.code",
         );
     }
 
     #[test]
     fn load_uses_per_opd_toc_not_module_info_toc() {
-        // Patch the module_start OPD's toc field to a value distinct
-        // from module_info.toc. load_prx must honor the per-OPD toc
-        // for module_start and module_stop entries; using
-        // `base + prx.toc` unconditionally for both would silently
-        // mask any divergence between the OPD's toc and the
-        // module_info-level toc.
         let mut data = make_test_prx();
         let opd_base = 0x2E0;
         let alt_toc: u32 = 0x300;
@@ -1321,13 +1269,8 @@ mod tests {
         let loaded = load_prx(&prx, &mut mem, base).unwrap();
 
         let ms = loaded.module_start.expect("module_start");
-        assert_eq!(
-            ms.toc,
-            base + alt_toc as u64,
-            "module_start.toc must come from the OPD's toc field, not module_info.toc"
-        );
-        // module_stop's OPD still carries 0x200, so it diverges from
-        // module_start in this fixture and confirms per-OPD handling.
+        assert_eq!(ms.toc, base + alt_toc as u64);
+        // module_stop's OPD still carries 0x200; divergence proves per-OPD.
         let mstop = loaded.module_stop.expect("module_stop");
         assert_eq!(mstop.toc, base + 0x200);
     }

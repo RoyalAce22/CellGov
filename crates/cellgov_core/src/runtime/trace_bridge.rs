@@ -1,10 +1,5 @@
-//! Trace enum bridges (`cellgov_effects::Effect` /
-//! `cellgov_exec::YieldReason` onto their `cellgov_trace` twins) and
-//! the read-only `MemoryView` the runtime hands to `Lv2Host::dispatch`.
-//! The bridges are exhaustive matches: `cellgov_trace` sits below both
-//! source crates in the workspace DAG and cannot name the source
-//! variants, so adding a new variant breaks compilation here and
-//! forces the trace contract to update alongside.
+//! Bridges runtime effect/yield enums onto their `cellgov_trace` twins
+//! and exposes a read-only `MemoryView` to `Lv2Host::dispatch`.
 
 use cellgov_exec::YieldReason;
 use cellgov_lv2::Lv2Runtime;
@@ -12,7 +7,6 @@ use cellgov_mem::GuestMemory;
 use cellgov_time::GuestTicks;
 use cellgov_trace::{TracedEffectKind, TracedYieldReason};
 
-/// Map an `Effect` onto its `TracedEffectKind` twin.
 pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKind {
     use cellgov_effects::Effect;
     match e {
@@ -32,14 +26,9 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
     }
 }
 
-/// Map a runtime [`YieldReason`] onto its [`TracedYieldReason`] twin.
-///
-/// `syscall_lev` is the LEV field of the `sc` instruction
-/// (`LocalDiagnostics::syscall_lev`). A `Syscall` yield with
-/// `syscall_lev = Some(lev != 0)` maps to
-/// [`TracedYieldReason::Hypercall`]; the trace stream cannot
-/// byte-collide a hypercall rejection with a normal LV2 handler
-/// returning the same error code.
+/// `syscall_lev` is the LEV field of the `sc` instruction; non-zero
+/// LEV distinguishes a hypercall from a normal LV2 syscall so the
+/// trace stream cannot byte-collide the two.
 pub(super) fn traced_yield_reason(y: YieldReason, syscall_lev: Option<u8>) -> TracedYieldReason {
     match y {
         YieldReason::BudgetExhausted => TracedYieldReason::BudgetExhausted,
@@ -57,8 +46,8 @@ pub(super) fn traced_yield_reason(y: YieldReason, syscall_lev: Option<u8>) -> Tr
     }
 }
 
-/// Read-only view of committed memory + tick snapshot, handed to
-/// `Lv2Host::dispatch`; constructed fresh per dispatch call.
+/// Read-only view of committed memory plus tick snapshot, constructed
+/// fresh per `Lv2Host::dispatch` call.
 pub(super) struct MemoryView<'a> {
     pub(super) memory: &'a GuestMemory,
     pub(super) current_tick: GuestTicks,
@@ -66,11 +55,9 @@ pub(super) struct MemoryView<'a> {
 
 impl Lv2Runtime for MemoryView<'_> {
     fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
-        // Region-aware: addresses outside the main region (stacks,
-        // child stacks, RSX, SPU-reserved) are still valid for the
-        // host to inspect. Linear `.as_bytes()` only covers main, so
-        // route through `GuestMemory::read` which handles the
-        // multi-region layout.
+        // Linear `.as_bytes()` only covers the main region; route
+        // through `GuestMemory::read` to reach stacks, RSX, and
+        // SPU-reserved regions.
         use cellgov_mem::ByteRange;
         let range = ByteRange::new(cellgov_mem::GuestAddr::new(addr), len as u64)?;
         self.memory.read(range)
@@ -81,23 +68,13 @@ impl Lv2Runtime for MemoryView<'_> {
     }
 
     fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]> {
-        // GuestMemory's region-aware read returns None when a range
-        // straddles a region boundary, so the natural strategy is:
-        // find the region containing `addr`, scan up to the region
-        // end (or max_len, whichever is smaller) for the terminator,
-        // and return the prefix.
+        // `GuestMemory::read` returns None when a range straddles a
+        // region boundary, so bisect to find the largest readable
+        // window <= max_len before scanning for the terminator.
         use cellgov_mem::ByteRange;
         let region_remaining = {
-            // GuestMemory exposes containing_region but only the
-            // base/size, not the slice; round-trip through `read`
-            // with length 1 to confirm the address is mapped, then
-            // probe upward.
             let probe = ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1)?;
             self.memory.read(probe)?;
-            // Now find the largest readable window <= max_len.
-            // Bisect: read length doubles until it fails, then we
-            // walk down. For paths typically <100 bytes this is
-            // fast; the worst case is one miss per region boundary.
             let mut hi = max_len;
             let mut lo = 1;
             while hi > lo {

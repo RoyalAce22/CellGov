@@ -26,31 +26,30 @@ pub enum Lv2Dispatch {
     /// `effects = vec![]` -- otherwise a `SharedWriteIntent` paired
     /// with an error return still commits the write.
     Immediate {
-        /// Value for r3.
+        /// Return code written to r3 (0 = `CELL_OK`).
         code: u64,
-        /// Effects to commit.
+        /// Effects committed before the return code is written.
         effects: Vec<Effect>,
     },
     /// Construct and register SPUs for a thread group; `code` -> r3.
     ///
-    /// Keyed by slot index because guests may leave slots
-    /// uninitialized. `BTreeMap` iteration gives byte-stable
-    /// ascending-slot registration order.
+    /// `BTreeMap` keying gives byte-stable ascending-slot registration
+    /// order across guests that leave slots uninitialized.
     RegisterSpu {
-        /// Per-slot init state.
+        /// Per-slot SPU init state, keyed by slot index for stable order.
         inits: BTreeMap<u32, SpuInitState>,
-        /// Effects to commit.
+        /// Effects committed alongside the registration.
         effects: Vec<Effect>,
-        /// Value for the caller's r3.
+        /// Return code written to the caller's r3.
         code: u64,
     },
     /// Park the caller; `pending` is applied at wake time.
     Block {
-        /// Why the caller is blocking.
+        /// Why the caller is being parked.
         reason: Lv2BlockReason,
-        /// Resolves the caller at wake time.
+        /// Wake-time response applied when the caller resumes.
         pending: PendingResponse,
-        /// Effects to commit before blocking.
+        /// Effects committed at park time.
         effects: Vec<Effect>,
     },
     /// `sys_ppu_thread_exit`: source becomes Finished, joiners wake.
@@ -59,25 +58,22 @@ pub enum Lv2Dispatch {
     /// writes `exit_value` (u64 BE) to the joiner's `status_out_ptr`
     /// and sets r3 = 0. The source's r3 is not written.
     ///
-    /// `lwmutex_inheritors` carries any peers that were parked on
-    /// kernel-side lwmutex sleep queues whose held lwmutexes were
-    /// implicitly transferred by the exit (one transfer per lwmutex
-    /// with a non-empty waiter list, in id order). Each entry's
-    /// pending [`PendingResponse::LwMutexWake`] is resolved via the
-    /// usual sync-wake path. Real PS3 strands these waiters; the
-    /// transfer is a deterministic-oracle simplification so a guest
-    /// printf that returns to `sys_ppu_thread_exit` without
-    /// flushing its stdio lock still allows other threads to make
-    /// progress.
+    /// `lwmutex_inheritors` carries peers parked on kernel-side lwmutex
+    /// sleep queues whose held lwmutexes were transferred by the exit
+    /// (one transfer per lwmutex with a non-empty waiter list, in id
+    /// order). Each entry's pending [`PendingResponse::LwMutexWake`]
+    /// resolves via the usual sync-wake path. Real PS3 strands these
+    /// waiters; the transfer is a deterministic-oracle simplification
+    /// so a guest printf returning to `sys_ppu_thread_exit` without
+    /// flushing its stdio lock still allows progress.
     PpuThreadExit {
-        /// Delivered to joiners via their `status_out_ptr`.
+        /// Exit value delivered to joiners (u64 BE at `status_out_ptr`).
         exit_value: u64,
-        /// Joiners to transition Blocked -> Runnable.
+        /// Joiners woken by the exit.
         woken_unit_ids: Vec<UnitId>,
-        /// Sync-primitive waiters that inherited a held lwmutex on
-        /// thread exit; resolved via `resolve_sync_wakes`.
+        /// Peers parked on lwmutexes whose ownership transferred at exit.
         lwmutex_inheritors: Vec<UnitId>,
-        /// Effects to commit.
+        /// Effects committed at exit.
         effects: Vec<Effect>,
     },
     /// Release-side completion: source returns `code`, each unit in
@@ -97,13 +93,13 @@ pub enum Lv2Dispatch {
     ///   existing entry's tag -- updates are partial fills, not
     ///   variant replacements.
     WakeAndReturn {
-        /// Value for the release caller's r3.
+        /// Return code written to the source's r3.
         code: u64,
         /// Units whose pending responses resolve.
         woken_unit_ids: Vec<UnitId>,
-        /// Per-waiter pending-response overrides.
+        /// Per-waiter overrides applied to the pending response table.
         response_updates: Vec<(UnitId, PendingResponse)>,
-        /// Effects to commit alongside the wakes.
+        /// Effects committed alongside the wake.
         effects: Vec<Effect>,
     },
     /// Source blocks and other units wake in the same dispatch.
@@ -116,22 +112,22 @@ pub enum Lv2Dispatch {
     /// Same `woken_unit_ids` / `response_updates` invariants as
     /// [`Self::WakeAndReturn`].
     BlockAndWake {
-        /// Why the source is blocking.
+        /// Why the source is being parked.
         reason: Lv2BlockReason,
-        /// Resolves the source at wake time.
+        /// Wake-time response applied to the source.
         pending: PendingResponse,
-        /// Units to wake alongside the source's block.
+        /// Units whose pending responses resolve in the same step.
         woken_unit_ids: Vec<UnitId>,
         /// Per-waiter pending-response overrides.
         response_updates: Vec<(UnitId, PendingResponse)>,
-        /// Effects to commit alongside the transitions.
+        /// Effects committed alongside the block-and-wake.
         effects: Vec<Effect>,
     },
     /// Worker-thread callback-dispatch spawn: register a fresh PPU
     /// thread for the callback AND park `parent` until the worker
-    /// returns. Fuses the [`Self::PpuThreadCreate`] and [`Self::Block`]
-    /// shapes so the runtime applies both transitions atomically per
-    /// the `call_guest_callback_sync` contract.
+    /// returns. Fuses [`Self::PpuThreadCreate`] and [`Self::Block`]
+    /// so the runtime applies both transitions atomically per the
+    /// `call_guest_callback_sync` contract.
     ///
     /// The runtime materializes the worker via the existing
     /// PpuThreadCreate path, allocates the worker's `PpuThreadId`
@@ -148,21 +144,19 @@ pub enum Lv2Dispatch {
     ///   the host learns it via `attach_callback_worker` after
     ///   `PpuThreadTable::create` runs.
     CallbackSpawn {
-        /// PPC64-ABI seed values for the callback worker.
+        /// PPC64 register seed for the worker thread.
         worker_init: PpuThreadInitState,
-        /// Lowest address of the worker's stack block.
+        /// Worker stack base address.
         worker_stack_base: u64,
-        /// Size of the worker's stack block.
+        /// Worker stack size in bytes.
         worker_stack_size: u64,
-        /// Worker priority (not consulted; carried for parity with
-        /// the existing `PpuThreadCreate` shape).
+        /// Worker scheduling priority.
         worker_priority: u32,
-        /// Calling unit; parks until the worker's trampoline syscall.
+        /// Caller parked until the worker returns.
         parent: UnitId,
-        /// Resolves the parent at wake time. Must be a
-        /// [`PendingResponse::CallbackReturn`].
+        /// Must be a [`PendingResponse::CallbackReturn`].
         parent_pending: PendingResponse,
-        /// Effects to commit alongside the spawn / park transitions.
+        /// Effects committed at spawn time.
         effects: Vec<Effect>,
     },
     /// `sys_ppu_thread_create` with the OPD already resolved.
@@ -180,17 +174,17 @@ pub enum Lv2Dispatch {
     PpuThreadCreate {
         /// Guest address to receive the minted thread id (u64 BE).
         id_ptr: u32,
-        /// PPC64-ABI seed values.
+        /// PPC64 register seed for the child thread.
         init: PpuThreadInitState,
-        /// Lowest address of the child's stack block.
+        /// Child stack base address.
         stack_base: u64,
-        /// Size of the child's stack block.
+        /// Child stack size in bytes.
         stack_size: u64,
         /// Bytes to commit at `init.tls_base` before entry.
         tls_bytes: Vec<u8>,
-        /// Thread priority captured in attrs.
+        /// Child scheduling priority.
         priority: u32,
-        /// Effects to commit alongside the create.
+        /// Effects committed at create time.
         effects: Vec<Effect>,
     },
 }
@@ -209,7 +203,7 @@ impl SpuImageHandle {
         }
     }
 
-    /// The raw handle value (always non-zero).
+    /// Underlying non-zero handle value.
     #[inline]
     pub const fn raw(self) -> u32 {
         self.0.get()
@@ -226,13 +220,12 @@ pub struct PpuThreadInitState {
     pub entry_code: u64,
     /// Second OPD word -- r2 (TOC) for the child.
     pub entry_toc: u64,
-    /// r3 argument.
+    /// r3.
     pub arg: u64,
-    /// r4..=r10 arguments. All zero on the `sys_ppu_thread_create`
-    /// path (which only carries one argument). Populated for the
-    /// callback-dispatch worker path so a title-supplied callback
-    /// receives the full 8-register argument set CellGov captured
-    /// at the parent's call site.
+    /// r4..=r10. All zero on the `sys_ppu_thread_create` path (which
+    /// only carries one argument). Populated for the callback-dispatch
+    /// worker path so a title-supplied callback receives the full
+    /// 8-register argument set captured at the parent's call site.
     pub extra_args: [u64; 7],
     /// r1: 16-byte back-chain area at the top of the stack.
     pub stack_top: u64,
@@ -263,7 +256,7 @@ pub struct SpuInitState {
 pub enum Lv2BlockReason {
     /// `sys_spu_thread_group_join`.
     ThreadGroupJoin {
-        /// Group being joined.
+        /// Target thread group id.
         group_id: u32,
     },
     /// `sys_ppu_thread_join`.
@@ -273,35 +266,35 @@ pub enum Lv2BlockReason {
     },
     /// `sys_lwmutex_lock` on a contended lwmutex.
     LwMutex {
-        /// lwmutex id.
+        /// Target lwmutex id.
         id: u32,
     },
     /// `sys_mutex_lock` on a contended heavy mutex.
     Mutex {
-        /// Mutex id.
+        /// Target mutex id.
         id: u32,
     },
     /// `sys_semaphore_wait` on an empty semaphore.
     Semaphore {
-        /// Semaphore id.
+        /// Target semaphore id.
         id: u32,
     },
     /// `sys_event_queue_receive` on an empty queue.
     EventQueue {
-        /// Queue id.
+        /// Target event queue id.
         id: u32,
     },
     /// `sys_event_flag_wait` on an unsatisfied mask.
     EventFlag {
-        /// Event-flag id.
+        /// Target event flag id.
         id: u32,
     },
     /// `sys_cond_wait`. Caller released `mutex_id` on entry and
     /// re-acquires on wake via [`PendingResponse::CondWakeReacquire`].
     Cond {
-        /// Cond id.
+        /// Target cond variable id.
         id: u32,
-        /// Mutex the caller released on the way in.
+        /// Companion mutex released at park, re-acquired at wake.
         mutex_id: u32,
         /// Which mutex table `mutex_id` names (distinct id spaces).
         mutex_kind: CondMutexKind,
@@ -311,9 +304,8 @@ pub enum Lv2BlockReason {
     /// worker thread `worker` issues the CellGov-private return
     /// trampoline syscall (`CB_RETURN_SYSCALL`).
     CallbackDispatch {
-        /// Worker thread the parent is waiting on. Used by the
-        /// trampoline-return dispatch arm to look up the parent in
-        /// `Lv2Host::callback_parents` and key the wake.
+        /// Used by the trampoline-return dispatch arm to look up the
+        /// parent in `Lv2Host::callback_parents` and key the wake.
         worker: PpuThreadId,
     },
 }
@@ -326,7 +318,7 @@ pub enum Lv2BlockReason {
 pub enum PendingResponse {
     /// On wake, set r3 = `code`. No out-pointer writes.
     ReturnCode {
-        /// Value for r3.
+        /// Return code written to r3 on wake.
         code: u64,
     },
     /// On wake, set r3 = `code` and write `cause` / `status` to the
@@ -334,11 +326,11 @@ pub enum PendingResponse {
     ThreadGroupJoin {
         /// Used for wake matching.
         group_id: u32,
-        /// Value for r3.
+        /// Return code written to r3 on wake.
         code: u64,
-        /// Out-pointer for the exit cause.
+        /// Guest out-pointer receiving `cause` (u32 BE).
         cause_ptr: u32,
-        /// Out-pointer for the exit status.
+        /// Guest out-pointer receiving `status` (u32 BE).
         status_ptr: u32,
         /// Filled in at wake time.
         cause: u32,
@@ -351,7 +343,7 @@ pub enum PendingResponse {
         /// Trace/diagnostic only; wake matching uses the pending
         /// table entry, not this field.
         target: u64,
-        /// Out-pointer for the child's exit value.
+        /// Guest out-pointer receiving the exit value (u64 BE).
         status_out_ptr: u32,
     },
     /// On wake, write the event payload (4x u64 BE matching PSL1GHT's
@@ -364,7 +356,7 @@ pub enum PendingResponse {
     /// deliver zero u64s the guest cannot distinguish from a real
     /// event.
     EventQueueReceive {
-        /// Out-pointer for the `sys_event_t` buffer.
+        /// Guest out-pointer receiving the 4x u64 BE event payload.
         out_ptr: u32,
         /// Filled in at wake time by the send side.
         payload: Option<EventPayload>,
@@ -373,7 +365,7 @@ pub enum PendingResponse {
     /// r3 = 0. `observed` is filled by the matching
     /// `sys_event_flag_set` via `response_updates`.
     EventFlagWake {
-        /// Out-pointer for the observed pattern.
+        /// Guest out-pointer receiving `observed` (u64 BE).
         result_ptr: u32,
         /// Filled in at wake time by the set side.
         observed: u64,
@@ -388,7 +380,7 @@ pub enum PendingResponse {
     /// cond waiter references it. An empty table entry at wake time
     /// is a host-level invariant break.
     CondWakeReacquire {
-        /// Mutex to re-acquire on wake.
+        /// Mutex re-acquired before returning r3 = 0.
         mutex_id: u32,
         /// Which mutex table `mutex_id` names (distinct id spaces).
         mutex_kind: CondMutexKind,
@@ -407,13 +399,13 @@ pub enum PendingResponse {
         /// written into the user-space owner slot.
         caller: u32,
     },
-    /// On wake, the parent unit resumes a parkable HLE handler that
-    /// previously called `Lv2Host::call_guest_callback_sync`. `args`
-    /// carries the worker's `r3..=r10` captured at the trampoline.
-    /// `stage` discriminates which handler to resume (and where in
-    /// that handler's flow). The wake-side delivery writes `args[0]`
-    /// (the worker's r3) into the parent's r3; `args[1..=7]` stay in
-    /// the response payload for the resuming handler to read.
+    /// Resume a parkable HLE handler that previously called
+    /// `Lv2Host::call_guest_callback_sync`. `args` carries the
+    /// worker's `r3..=r10` captured at the trampoline. `stage`
+    /// discriminates which handler to resume (and where in that
+    /// handler's flow). The wake-side delivery writes `args[0]` (the
+    /// worker's r3) into the parent's r3; `args[1..=7]` stay in the
+    /// response payload for the resuming handler to read.
     ///
     /// # Invariants
     /// - `args` is exactly the eight-register set captured from the
@@ -424,7 +416,7 @@ pub enum PendingResponse {
     /// - `stage` is constructed by the spawn-side handler and must
     ///   not be mutated between spawn and wake.
     CallbackReturn {
-        /// Which handler-resume path to take.
+        /// Continuation kind; selects which handler resumes and how.
         stage: CallbackReturnStage,
         /// Worker `r3..=r10` from the trampoline-entry capture.
         args: [u64; 8],
@@ -434,26 +426,21 @@ pub enum PendingResponse {
 /// Continuation kind for [`PendingResponse::CallbackReturn`].
 ///
 /// Each parkable HLE handler adds a variant. `Synthetic` is the
-/// test-only placeholder; consumer-specific variants
-/// (`AutoLoadAfterStat`, etc.) carry the per-handler resume state.
-/// Non-exhaustive so adding a variant does not break downstream
-/// matches.
-///
-/// A non-exhaustive match on this enum makes a missing
-/// handler-resume case a compile error inside the resume dispatcher
+/// test-only placeholder; consumer-specific variants carry the
+/// per-handler resume state. `#[non_exhaustive]` makes a missing
+/// handler-resume case a compile error in the resume dispatcher
 /// while keeping crate-external matches forward-compatible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CallbackReturnStage {
-    /// Test-only marker. The wake delivery writes the worker's
-    /// `args[0]` (r3) into the parent's r3 and otherwise routes
-    /// nothing further.
+    /// Test-only marker. Wake delivery writes the worker's `args[0]`
+    /// (r3) into the parent's r3 and routes nothing further.
     Synthetic,
-    /// `cellSaveDataAutoLoad` / `cellSaveDataAutoLoad2` resume
-    /// after the title's `funcStat` callback returns. The resume
-    /// arm reads `cb_result.result` and either finalizes the
-    /// AutoLoad call (CELL_OK / `cellSaveData` error code) or
-    /// transitions into the funcFile loop.
+    /// `cellSaveDataAutoLoad` / `cellSaveDataAutoLoad2` resume after
+    /// the title's `funcStat` callback returns. The resume arm reads
+    /// `cb_result.result` and either finalizes the AutoLoad call
+    /// (CELL_OK / `cellSaveData` error code) or transitions into the
+    /// funcFile loop.
     AutoLoadAfterStat {
         /// Guest pointer to the HLE-allocated `CellSaveDataCBResult`.
         cb_result_addr: u32,
@@ -470,11 +457,8 @@ pub enum CallbackReturnStage {
 impl CallbackReturnStage {
     /// Stable byte tag for state-hash serialization.
     ///
-    /// Each variant has a fixed tag; consumers that hash the
-    /// `PendingResponse::CallbackReturn` payload must use this rather
-    /// than ordering-sensitive `match` indices. Adding a variant
-    /// here MUST assign a fresh tag and bump the consumer's state-
-    /// hash format version.
+    /// Adding a variant MUST assign a fresh tag and bump the
+    /// consumer's state-hash format version.
     pub fn stable_tag(self) -> u8 {
         match self {
             CallbackReturnStage::Synthetic => 0,
@@ -504,9 +488,9 @@ impl PendingResponse {
 /// Which mutex table [`PendingResponse::CondWakeReacquire`] targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CondMutexKind {
-    /// A `sys_lwmutex`.
+    /// `mutex_id` names a `sys_lwmutex_t`.
     LwMutex,
-    /// A heavy `sys_mutex`.
+    /// `mutex_id` names a heavy `sys_mutex_t`.
     Mutex,
 }
 

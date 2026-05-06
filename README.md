@@ -47,63 +47,16 @@ CellGov answers that question:
 
 Pre-Alpha. What works today:
 
-- **Titles**: 3 boot to cross-runner checkpoints -- flOw, Super
-  Stardust HD, WipEout HD Fury. See [docs/titles.md](docs/titles.md).
-- **PPU**: 160 `PpuInstruction` variants (architectural ops plus
-  shadow quickenings and super-pair fusions; covers the
-  CR-logical XL-form family and the X-form FP indexed load/store
-  family). **SPU**: full interpreter.
-- **LV2**: 62 classified syscalls, 60 HLE exports, including the
-  `sys_rsx` kernel-side RSX surface, the cellSysutil video-out
-  query family, the cellSpurs PPU-side runtime (initialize,
-  workload registry, ready-count and contention controls, info
-  snapshot, exception-handler registration), HLE sys_lwmutex_*
-  routing through the LV2 lwmutex surface with a kernel
-  sleep-queue, recursive-acquire depth tracking, and
-  per-thread hold counts that drive critical-section-aware
-  scheduling so concurrent printf paths complete atomically,
-  the read-side `sys_fs_*` family
-  (open / read / close / lseek / fstat / stat) backed by an
-  in-memory blob store that titles populate via per-title
-  content manifests, and `cellSaveDataAutoLoad` / `AutoLoad2`
-  with real callback dispatch on a worker PPU thread so titles
-  whose autoload code runs `funcStat` see populated `statGet`
-  and a deterministic `cbResult.result` round-trip.
-- **Worker-thread callback dispatch**: a generic primitive
-  spawns a deterministic worker PPU thread on demand, runs a
-  title-supplied OPD with caller-supplied args on that worker,
-  blocks the parent unit until the worker returns through a
-  re-entry trampoline (a 12-byte `lis r11, hi; ori r11, r11, lo;
-  sc 0` sequence at `0x0000_FF00`), and surfaces the worker's
-  captured `r3..=r10` back to the parent via a stage-keyed
-  resume dispatcher. The primitive's first consumer is
-  `cellSaveDataAutoLoad`; flip-handler / vblank-handler / SPURS
-  exception-handler consumers wire through the same surface in
-  successor phases.
-- **Sync primitives**: lwmutex / event_flag / semaphore / mutex
-  / cond now match real-PS3 wake ordering, including event_flag
-  cancel waking parked waiters with `CELL_ECANCELED`,
-  semaphore post-N multi-wake, finite-timeout waits trip
-  `ETIMEDOUT` only when no peer can satisfy them, and timer
-  syscalls advance the deterministic guest clock. Critical-
-  section sticky scheduling is bounded by a sticky-streak
-  ceiling so a single thread holding an lwmutex cannot starve
-  peers indefinitely.
-- **In-memory FS**: the LV2 `sys_fs_*` surface is backed by a
-  path-keyed blob store with a never-recycle fd allocator and
-  deterministic 56-byte `CellFsStat` (zero atime / mtime /
-  ctime, S_IFREG read-only mode, 4096 blksize). Titles populate
-  it from a per-title content manifest with three-tier
-  resolution (env override -> EBOOT-adjacent USRDIR
-  auto-discovery -> manifest's checked-in synthetic stubs).
-  Both raw `sys_fs_*` syscalls and the `cellFs*` HLE wrappers
-  route through the same store.
-- **PS3 conformance**: ps3autotests cross-runner harness boots
-  whitelisted .ppu.elf files and compares captured TTY against
-  real-PS3 .expected. cpu/basic, cpu/ppu_branch,
-  lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag all
-  match byte-for-byte.
+- **3 titles boot to cross-runner checkpoints**: flOw, Super Stardust HD, WipEout HD Fury (see [docs/titles.md](docs/titles.md)).
+- **PPU and SPU interpreters**: 160 PPU instructions; full SPU.
+- **LV2**: 62 classified syscalls, 60 HLE exports (sys_rsx, cellSysutil, cellSpurs, sys_lwmutex, sys_fs, cellSaveDataAutoLoad).
+- **Worker-thread callback dispatch**: deterministic primitive for invoking guest callbacks; first consumer is `cellSaveDataAutoLoad`.
+- **Sync primitives**: lwmutex / event_flag / semaphore / mutex / cond match real-PS3 wake ordering (incl. ETIMEDOUT and CELL_ECANCELED paths).
+- **In-memory FS**: path-keyed blob store; both raw `sys_fs_*` and `cellFs*` HLE wrappers route through it.
+- **PS3 conformance**: ps3autotests cross-runner harness; cpu/basic, cpu/ppu_branch, lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag match real-PS3 byte-for-byte.
 - 2,626 tests, zero `unsafe` (`unsafe_code = forbid`).
+
+See [docs/architecture.md](docs/architecture.md) for the full pipeline, memory model, and per-subsystem details.
 
 ### Next reads
 

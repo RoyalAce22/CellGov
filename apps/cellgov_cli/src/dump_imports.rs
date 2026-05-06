@@ -1,40 +1,27 @@
 //! `dump-imports` subcommand: parse a title's EBOOT import table and
 //! print a markdown inventory bucketed by classification.
 //!
-//! Each imported NID falls into exactly one of five buckets:
-//! `Impl` (CellGov has dedicated handling), `Stateful` /
-//! `UnsafeToStub` / `NoopSafe` (stub-safety tier from the NID DB),
-//! or `UnknownNid` (not in the DB). The buckets drive the summary
-//! arithmetic at the end of `run`. The classifier returns a typed
-//! `StubClass` so a typo cannot create an unknown-class drift bucket.
-//!
 //! Artifacts land in `docs/titles/<content-id>_hle_inventory.md`.
 
-/// NIDs with dedicated CellGov HLE handling. Shared with the runtime
-/// PRX binder; adding an HLE impl means updating this library constant.
+/// Shared with the runtime PRX binder; adding an HLE impl updates this constant.
 const CELLGOV_HLE_IMPLEMENTED_NIDS: &[u32] = cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS;
 
-/// Column width for the Name field in the markdown table.
 const NAME_COLUMN_WIDTH: usize = 49;
 
-/// Char-aware truncation to `NAME_COLUMN_WIDTH`, appending "..." on
-/// overflow. Padding is left to the format specifier.
+/// Char-aware truncation to `NAME_COLUMN_WIDTH` with "..." on overflow.
 ///
-/// Caveat: `{:<width$}` pads by byte count, so combining sequences
-/// or wide glyphs still misalign the table. PS3 NID DB entries are
-/// overwhelmingly ASCII C identifiers, so this is theoretical.
+/// `{:<width$}` pads by byte count, so combining sequences or wide
+/// glyphs still misalign. NID DB entries are overwhelmingly ASCII.
 fn fit_name_column(name: &str) -> String {
     if name.chars().count() <= NAME_COLUMN_WIDTH {
         name.to_string()
     } else {
-        // chars().take to avoid cutting mid-codepoint.
         let head: String = name.chars().take(NAME_COLUMN_WIDTH - 3).collect();
         format!("{head}...")
     }
 }
 
-/// Per-bucket counters. Sum across all fields equals
-/// `total_functions`; `run` asserts the invariant.
+/// Sum across all fields equals `total_functions`; `run` asserts the invariant.
 #[derive(Debug, Default, Clone, Copy)]
 struct InventoryCounts {
     impl_count: usize,
@@ -64,8 +51,7 @@ impl InventoryCounts {
     }
 }
 
-/// Disjoint classification outcomes; `InventoryCounts` has one field
-/// per variant, and `classify_import` returns one per NID.
+/// `InventoryCounts` has one field per variant; `classify_import` returns one per NID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Bucket {
     Impl,
@@ -75,19 +61,16 @@ enum Bucket {
     UnknownNid,
 }
 
-/// Map a NID and its nid_db lookup to a bucket plus the Class-column
-/// string and whether the NID is on the impl list.
+/// Map a NID and its nid_db lookup to a bucket, Class-column string,
+/// and impl-list membership.
 fn classify_import(
     nid: u32,
     lookup: Option<(&'static str, &'static str)>,
 ) -> (Bucket, &'static str, bool) {
     if lookup.is_none() {
-        // Hard-assert (not debug-only): an implemented NID missing from
-        // nid_db would silently classify as UnknownNid + stub here in
-        // release builds -- the worst possible outcome for a function
-        // CellGov claims to dispatch. The every_implemented_nid_is_in_nid_db
-        // test catches this offline; this guard catches it in any
-        // dump-imports invocation regardless of test coverage.
+        // Hard-assert in release: an implemented NID missing from nid_db
+        // would otherwise silently classify as UnknownNid + stub for a
+        // function CellGov claims to dispatch.
         assert!(
             !CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&nid),
             "NID 0x{nid:08x} is in HLE_IMPLEMENTED_NIDS but nid_db has no entry"
@@ -106,7 +89,6 @@ fn classify_import(
     (bucket, class.as_str(), is_impl)
 }
 
-/// Entry point for `cellgov_cli dump-imports --title <name>`.
 pub(crate) fn run(args: &[String]) {
     let title = crate::cli::title::resolve_title_manifest(args, "dump-imports");
     let vfs_root = crate::cli::title::resolve_ps3_vfs_root(args);
@@ -167,17 +149,13 @@ pub(crate) fn run(args: &[String]) {
     println!();
 
     let mut counts = InventoryCounts::default();
-    // Surface NID/module mismatches: the binding's module disagrees
-    // with nid_db's module for the same NID. PS3 NIDs are hashes
-    // and cross-module collisions are possible. Exact-string
-    // comparison may false-positive on module-name variants
-    // (versioned stubs, internal-init entrypoints).
+    // PS3 NIDs are hashes; cross-module collisions are possible. Exact-string
+    // comparison may false-positive on versioned stubs / internal-init entrypoints.
     let mut module_collisions: Vec<(String, u32, String, String)> = Vec::new();
     let mut empty_modules: Vec<String> = Vec::new();
 
     for module in &modules {
         if module.functions.is_empty() {
-            // Omit from the doc; note on stderr.
             empty_modules.push(module.name.clone());
             continue;
         }
@@ -191,8 +169,7 @@ pub(crate) fn run(args: &[String]) {
             let (bucket, class_cell, is_impl) = classify_import(f.nid, lookup);
             counts.bump(bucket);
 
-            // Only cross-check bindings that claim impl status: a
-            // mismatch only misattributes the impl mark.
+            // A mismatch only misattributes the impl mark, so skip non-impl bindings.
             if is_impl {
                 if let Some((db_mod, _)) = lookup {
                     if !db_mod.is_empty() && db_mod != module.name {
@@ -219,8 +196,7 @@ pub(crate) fn run(args: &[String]) {
         println!();
     }
 
-    // Flush diagnostics before the counter assertion so a panic
-    // does not swallow them.
+    // Flush diagnostics before the counter assertion so a panic does not swallow them.
     if !empty_modules.is_empty() {
         eprintln!(
             "dump-imports: {} module(s) imported with zero functions; omitted from the inventory:",
@@ -278,7 +254,6 @@ mod tests {
 
     #[test]
     fn implemented_nids_is_nonempty_and_contains_tls_init() {
-        // sys_initialize_tls is called by every PS3 ELF boot.
         assert!(CELLGOV_HLE_IMPLEMENTED_NIDS
             .contains(&cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS));
         assert!(CELLGOV_HLE_IMPLEMENTED_NIDS.len() > 4);
@@ -305,13 +280,8 @@ mod tests {
 
     #[test]
     fn no_implemented_nid_falls_through_to_default_noop_safe() {
-        // Implementation list and stub classifier are kept in sync by
-        // hand. Every implemented NID must have an explicit arm in
-        // stub_classification; falling through to the catch-all NoopSafe
-        // means the classifier silently considers a stateful function
-        // safe to leave unstubbed. _sys_free is the lone genuine
-        // NoopSafe in the impl list (memory leak is acceptable for
-        // triage runs).
+        // _sys_free is the lone genuine NoopSafe in the impl list
+        // (memory leak is acceptable for triage runs).
         use cellgov_ps3_abi::nid::StubClass;
         for &nid in CELLGOV_HLE_IMPLEMENTED_NIDS {
             let c = cellgov_ps3_abi::nid::stub_classification(nid);
@@ -352,8 +322,7 @@ mod tests {
 
     #[test]
     fn fit_name_column_handles_codepoint_straddling_the_cut_boundary() {
-        // A two-byte codepoint starts exactly at the cut index so a
-        // byte-slice implementation would panic on the char-boundary.
+        // Two-byte codepoint at the cut index would crash a byte-slice impl.
         let cut = NAME_COLUMN_WIDTH - 3;
         let prefix = "a".repeat(cut);
         let straddler = "\u{00e9}";
@@ -387,7 +356,6 @@ mod tests {
 
     #[test]
     fn classify_import_routes_implemented_nid_to_impl_bucket() {
-        // sys_initialize_tls: stateful and in the implemented list.
         let nid = cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS;
         let lookup = cellgov_ps3_abi::nid::lookup(nid);
         assert!(lookup.is_some(), "test precondition: nid_db knows this NID");
@@ -399,8 +367,8 @@ mod tests {
 
     #[test]
     fn classify_import_routes_noop_safe_nid_while_sce_np_remains_unimplemented() {
-        // Witness: sceNpManagerSubSignout. If its status drifts, the
-        // precondition asserts guide swapping to another noop-safe NID.
+        // Witness NID: sceNpManagerSubSignout. Precondition asserts below
+        // guide swapping to another noop-safe NID if its status drifts.
         let nid = 0x000e53cc;
         assert!(
             !CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&nid),

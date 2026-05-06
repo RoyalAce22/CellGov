@@ -1,36 +1,9 @@
-//! cellSaveData HLE implementations.
+//! `cellSaveData` HLE: AutoLoad / AutoLoad2 dispatch with real
+//! `funcStat` callback parking.
 //!
-//! Real callback dispatch via the worker-thread primitive: AutoLoad
-//! / AutoLoad2 allocate `cbResult` / `statGet` / `statSet` on the HLE
-//! heap, populate `statGet` with the no-save shape (mirrored from
-//! RPCS3's `savedata_op` `psf.empty()` branch), then park the calling
-//! unit on the title's `funcStat` callback via
-//! [`HleContext::park_for_callback`]. On resume, [`resume_after_stat`]
-//! reads `cbResult.result` and either finalizes (CELL_OK or a
-//! `cellSaveData` error code) or transitions into the funcFile loop
-//! (the funcFile path is wired in a follow-on slice; today's
-//! resume returns FAILURE on `OK_NEXT`).
-//!
-//! ## Spec deviations (visible in fault traces)
-//!
-//! - Save data is never persisted: `isNewData` is hard-coded to
-//!   YES. A fresh-install AutoLoad branch is the only successful path.
-//! - `dir.atime` / `mtime` / `ctime` and `getParam.*` stay zero
-//!   (RPCS3 fills these from filesystem stat / PARAM.SFO; with no
-//!   save data, the dir_info struct from a failed stat is still
-//!   zero-initialized).
-//! - `version`, `errDialog`, and `container` are not validated.
-//! - The funcFile loop is not yet exercised; titles whose `funcStat`
-//!   returns `OK_NEXT` (drop into funcFile) currently see
-//!   `CELL_SAVEDATA_ERROR_FAILURE` instead of running funcFile.
-//!
-//! ## Anti-scope
-//!
-//! - No `cellSaveDataAutoSave` / `cellSaveDataAutoSave2`. AutoSave
-//!   needs the same primitive but the persistence side is a
-//!   successor phase.
-//! - No `cellSaveDataListAutoLoad`. The list variant pops a
-//!   user-facing dialog; anti-scope for the headless oracle.
+//! Save data is never persisted; `isNewData` is hard-coded to YES so
+//! AutoLoad always takes the fresh-install branch. AutoSave and the
+//! list variants are not implemented.
 
 use cellgov_event::UnitId;
 use cellgov_lv2::CallbackReturnStage;
@@ -43,27 +16,10 @@ use cellgov_ps3_abi::nid::cell_save_data as save_nid;
 use crate::hle::context::{HleContext, HleParkRequest, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
-/// Every NID this module claims at the dispatcher.
-///
-/// `cfg(test)` per the workspace pattern (every per-module HLE
-/// `OWNED_NIDS` is test-only; the production source of truth is
-/// `cellgov_ps3_abi::nid::cell_save_data::OWNED`, flattened into
-/// `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` via
-/// `cellgov_ps3_abi::nid::ALL_HLE_OWNED`). The drift case is caught
-/// by the `every_cell_save_data_namespace_nid_routes_per_owned`
-/// and `owned_nids_match_abi_namespace_owned` tests below, plus the
-/// parent `hle.rs`'s `hle_module_nid_sets_are_disjoint` canary.
 #[cfg(test)]
 pub(crate) const OWNED_NIDS: &[u32] = save_nid::OWNED;
 
-/// Dispatch entry point; returns `None` if the NID is not owned here.
-///
-/// AutoLoad and AutoLoad2 share the NODATA fast path but get
-/// separate match arms and separate handler functions so the future
-/// worker-thread variant cannot conflate their argument layouts
-/// (AutoLoad2 has an eighth `userdata` argument that AutoLoad
-/// lacks). Today the bodies happen to be identical; the seam stays
-/// per-NID by construction.
+/// Returns `None` when the NID is not owned here.
 pub(crate) fn dispatch(
     runtime: &mut Runtime,
     source: UnitId,
@@ -95,42 +51,43 @@ fn adapter(runtime: &mut Runtime, source: UnitId, nid: u32) -> RuntimeHleAdapter
     }
 }
 
-/// `cellSaveDataAutoLoad(version, dirName, errDialog, setBuf,
-/// funcStat, funcFile, container)`. Seven args.
+/// `cellSaveDataAutoLoad(version, dirName, errDialog, setBuf, funcStat,
+/// funcFile, container)`.
 ///
-/// Argument slots in the `[u64; 9]` array (index 0 carries the
-/// syscall number, indices 1..=8 carry r3..=r10):
-/// - `args[1]` = `version` (u32)
-/// - `args[2]` = `dirName` (vm::cptr<char>)
-/// - `args[3]` = `errDialog` (u32)
-/// - `args[4]` = `setBuf` (vm::ptr<CellSaveDataSetBuf>)
-/// - `args[5]` = `funcStat` (vm::ptr<CellSaveDataStatCallback>)
-/// - `args[6]` = `funcFile` (vm::ptr<CellSaveDataFileCallback>)
-/// - `args[7]` = `container` (u32)
+/// `args[1..=7]` carry r3..=r9. AutoLoad and AutoLoad2 keep separate
+/// arms so a future divergence in argument layout cannot conflate them.
 fn auto_load(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     auto_load_impl(ctx, args);
 }
 
-/// `cellSaveDataAutoLoad2(version, dirName, errDialog, setBuf,
-/// funcStat, funcFile, container, userdata)`. Eight args.
+/// `cellSaveDataAutoLoad2(version, dirName, errDialog, setBuf, funcStat,
+/// funcFile, container, userdata)`.
 ///
-/// Same as `cellSaveDataAutoLoad` plus an eighth `userdata` arg.
-/// The body shares the AutoLoad pipeline; `userdata` is wired into
-/// `cbResult.userdata` so the title's callback observes it.
+/// `args[8]` carries the eighth `userdata` argument absent from AutoLoad.
 fn auto_load_2(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     auto_load_impl(ctx, args);
 }
 
 /// Shared AutoLoad / AutoLoad2 body.
 ///
-/// Validates the four mandatory pointers, allocates the per-call
-/// callback structs on the HLE heap, populates `statGet` with the
-/// no-save shape, and parks the calling unit on the title's
-/// `funcStat` callback. The resume arm runs in
-/// [`resume_after_stat`].
+/// # Cross-module contract
 ///
-/// `args[8]` carries `userdata` for AutoLoad2 (it is zero for
-/// plain AutoLoad since the title never wrote to slot 8).
+/// `statGet` is populated to match RPCS3's `savedata_op` `psf.empty()`
+/// branch (`rpcs3/Emu/Cell/Modules/cellSaveData.cpp` lines 1502-1523):
+///
+/// - `hddFreeSizeKB` = 40 GiB - 256 KiB
+/// - `isNewData` = YES
+/// - `sysSizeKB` = 35 (constant in RPCS3 regardless of state)
+/// - `dir.dirName` echoes the title's input `dirName` so a title that
+///   debug-prints `statGet` does not fault on a zero string
+/// - `fileList` = `setBuf->buf`, giving titles a valid pointer to
+///   dereference even when `fileListNum` is zero
+///
+/// Other fields (`atime`/`mtime`/`ctime`, `getParam.*`, `sizeKB`,
+/// `bind`, `fileNum`) rely on the bump allocator's zero-initialized
+/// post-condition.
+///
+/// `args[8]` carries `userdata`; zero for plain AutoLoad.
 fn auto_load_impl(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let dir_name = args[2] as u32;
     let set_buf = args[4] as u32;
@@ -142,10 +99,6 @@ fn auto_load_impl(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     }
     let userdata = args[8] as u32;
 
-    // Allocate cbResult / statGet / statSet on the HLE bump heap.
-    // The bump allocator never reuses memory; GuestMemory is zero-
-    // initialized at construction; therefore each fresh allocation
-    // returns a zero-filled region without an explicit memset.
     let Some(cb_result_addr) = ctx.heap_alloc(cb_result_layout::SIZE, 16) else {
         ctx.set_return(error::as_r3(error::INTERNAL));
         return;
@@ -159,19 +112,6 @@ fn auto_load_impl(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     };
 
-    // Populate statGet with the no-save shape, matching RPCS3's
-    // savedata_op output for the `psf.empty()` (isNewData) branch
-    // (`rpcs3/Emu/Cell/Modules/cellSaveData.cpp` lines 1502-1523).
-    // Fields not written here stay zero (allocator post-condition
-    // above): atime/mtime/ctime, getParam.*, sizeKB.
-    //
-    // - hddFreeSizeKB: 40 GiB - 256 KiB (RPCS3's reported value).
-    // - isNewData: YES (no save data).
-    // - dir.dirName: echoed from the title's input dirName so the
-    //   title's debug-print of statGet sees a populated string.
-    // - sysSizeKB: 35 (RPCS3 reports a constant 35 regardless).
-    // - fileList: setBuf->buf so titles dereferencing fileList get
-    //   a valid (title-supplied) pointer even when fileListNum=0.
     let set_buf_buf = match read_be_u32(ctx, set_buf + set_buf_layout::OFF_BUF) {
         Ok(v) => v,
         Err(()) => {
@@ -214,8 +154,6 @@ fn auto_load_impl(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     }
 
-    // Populate cbResult.userdata for AutoLoad2 (zero for plain
-    // AutoLoad, which is the same as the allocator's post-condition).
     if userdata != 0
         && write_be_u32(
             ctx,
@@ -228,8 +166,6 @@ fn auto_load_impl(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         return;
     }
 
-    // Park on funcStat. Worker r3..=r5 carry the three struct
-    // pointers; r6..=r10 are zero.
     ctx.park_for_callback(HleParkRequest {
         opd_addr: func_stat,
         args: [
@@ -251,27 +187,22 @@ fn auto_load_impl(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     });
 }
 
-/// Helper: write a big-endian u32 at the given guest address.
 fn write_be_u32(ctx: &mut dyn HleContext, addr: u32, value: u32) -> Result<(), ()> {
     ctx.write_guest(addr as u64, &value.to_be_bytes())
         .map_err(|_| ())
 }
 
-/// Helper: read a big-endian u32 from the given guest address.
 fn read_be_u32(ctx: &dyn HleContext, addr: u32) -> Result<u32, ()> {
     let bytes = ctx.read_guest(addr as u64, 4).map_err(|_| ())?;
     Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
-/// Helper: copy a NUL-terminated string from `src` (guest) to `dst`
-/// (guest), truncated to `cap` bytes total including the trailing
-/// NUL. Matches RPCS3's `strcpy_trunc` semantics: at most `cap-1`
-/// non-NUL bytes plus a final NUL are written. Returns `Err(())`
-/// when the source range is unmapped.
+/// Copy a NUL-terminated string between guest addresses, writing at
+/// most `cap-1` non-NUL bytes plus a final NUL.
 ///
-/// Assumes `dst` is zero-initialized over its full `cap` bytes
-/// (the bump allocator's post-condition); only writes up to the
-/// effective string length, leaving the trailing zeros intact.
+/// Matches RPCS3's `strcpy_trunc` semantics. Relies on `dst` already
+/// being zero over `cap` bytes (bump allocator post-condition); only
+/// the effective string prefix is written.
 fn copy_truncated_cstr(ctx: &mut dyn HleContext, src: u32, dst: u32, cap: u32) -> Result<(), ()> {
     if cap == 0 {
         return Ok(());
@@ -286,16 +217,23 @@ fn copy_truncated_cstr(ctx: &mut dyn HleContext, src: u32, dst: u32, cap: u32) -
     ctx.write_guest(dst as u64, &owned).map_err(|_| ())
 }
 
-/// Resume entry for [`CallbackReturnStage::AutoLoadAfterStat`]:
-/// inspect the title's `cbResult.result` and either finalize the
-/// AutoLoad call (CELL_OK / `cellSaveData` error) or report
-/// `OK_NEXT` as failure (the funcFile loop lands in a follow-on
-/// slice).
+/// Resume entry for [`CallbackReturnStage::AutoLoadAfterStat`].
 ///
-/// Reads four bytes at `cb_result_addr + OFF_RESULT` as a big-endian
-/// signed 32-bit integer. An unmapped read (the title's callback
-/// somehow corrupted the cb_result region) maps to
-/// `CELL_SAVEDATA_ERROR_INTERNAL`.
+/// # Cross-module contract
+///
+/// Reads `cbResult.result` as a big-endian i32 and maps each documented
+/// `cb_result` discriminant to the parent's r3:
+///
+/// - `OK_LAST` -> `CELL_OK`
+/// - `OK_NEXT` -> `FAILURE` (funcFile loop is not implemented; an
+///   explicit error keeps titles from observing silent success)
+/// - `OK_LAST_NOCONFIRM` -> `PARAM` (illegal in `funcStat` per RPCS3
+///   `savedata_op` line 1630; only `funcFile`/`funcDone` may use it)
+/// - `ERR_NOSPACE` / `ERR_FAILURE` / `ERR_BROKEN` / `ERR_NODATA` ->
+///   the matching `cellSaveData` error
+/// - any other value (including `ERR_INVALID`) -> `PARAM`
+///
+/// An unmapped read of the cbResult region maps to `INTERNAL`.
 pub(crate) fn resume_after_stat(
     runtime: &mut Runtime,
     waiter: UnitId,
@@ -323,20 +261,13 @@ pub(crate) fn resume_after_stat(
     };
     let result = i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     let r3: u64 = match result {
-        cb_result::OK_LAST => 0, // CELL_OK
-        cb_result::OK_NEXT => {
-            // funcFile loop lands in a follow-on slice; until then
-            // titles whose funcStat returns OK_NEXT see FAILURE.
-            error::as_r3(error::FAILURE)
-        }
-        // OK_LAST_NOCONFIRM is illegal in funcStat per RPCS3's
-        // savedata_op (line 1630); maps to PARAM.
+        cb_result::OK_LAST => 0,
+        cb_result::OK_NEXT => error::as_r3(error::FAILURE),
         cb_result::OK_LAST_NOCONFIRM => error::as_r3(error::PARAM),
         cb_result::ERR_NOSPACE => error::as_r3(error::NOSPACE),
         cb_result::ERR_FAILURE => error::as_r3(error::FAILURE),
         cb_result::ERR_BROKEN => error::as_r3(error::BROKEN),
         cb_result::ERR_NODATA => error::as_r3(error::NODATA),
-        // ERR_INVALID and any unrecognized result map to PARAM.
         _ => error::as_r3(error::PARAM),
     };
     runtime.registry.set_syscall_return(waiter, r3);
@@ -350,11 +281,6 @@ mod tests {
     use cellgov_mem::GuestMemory;
     use cellgov_time::Budget;
 
-    /// Minimal runtime for dispatch routing: 1 MiB guest memory,
-    /// budget 1, one fake unit. Sufficient because the NODATA stub
-    /// never reads guest pointers; the day a slice validates arg
-    /// pointers against guest memory, this fixture must grow to
-    /// cover mapped vs unmapped ranges.
     fn fixture() -> (Runtime, UnitId) {
         let mut rt = Runtime::new(GuestMemory::new(0x10_0000), Budget::new(1), 100);
         let unit = UnitId::new(0);
@@ -364,11 +290,7 @@ mod tests {
         (rt, unit)
     }
 
-    /// All four mandatory pointers populated; no NULL-rejection
-    /// arm fires.
     fn args_with_pointers() -> [u64; 9] {
-        // Sentinel guest pointers: any non-zero u32 satisfies the
-        // NULL check; the stub never dereferences them.
         [
             0,        // syscall index (ignored)
             0,        // version
@@ -382,21 +304,17 @@ mod tests {
         ]
     }
 
-    /// Happy path: AutoLoad parks the calling unit on the title's
-    /// funcStat OPD with the three struct addresses wired into
-    /// r3..=r5 and the resume stage carrying the same addresses.
     #[test]
     fn auto_load_with_no_save_path_parks_for_func_stat() {
         let (mut rt, unit) = fixture();
         let routed = dispatch(&mut rt, unit, save_nid::AUTO_LOAD, &args_with_pointers());
         assert_eq!(routed, Some(()));
-        // r3 is set by the resume arm, not at park time.
         assert_eq!(rt.registry_mut().drain_syscall_return(unit), None);
         let park = rt
             .hle
             .pending_callback_spawn
             .expect("AutoLoad must park for funcStat");
-        assert_eq!(park.opd_addr, 0x3_0000); // funcStat from args_with_pointers
+        assert_eq!(park.opd_addr, 0x3_0000);
         let (cb_result_addr, stat_get_addr, stat_set_addr, func_file_opd) = match park.stage {
             CallbackReturnStage::AutoLoadAfterStat {
                 cb_result_addr,
@@ -409,17 +327,13 @@ mod tests {
         assert_ne!(cb_result_addr, 0);
         assert_ne!(stat_get_addr, 0);
         assert_ne!(stat_set_addr, 0);
-        assert_eq!(func_file_opd, 0x4_0000); // funcFile from args_with_pointers
+        assert_eq!(func_file_opd, 0x4_0000);
         assert_eq!(park.args[0], u64::from(cb_result_addr));
         assert_eq!(park.args[1], u64::from(stat_get_addr));
         assert_eq!(park.args[2], u64::from(stat_set_addr));
         assert_eq!(&park.args[3..], &[0u64; 5]);
     }
 
-    /// statGet's no-save shape is written before the title's
-    /// funcStat fires: hddFreeSizeKB = 1 GiB, isNewData = YES,
-    /// sysSizeKB = 35. Other fields stay zero (the bump allocator
-    /// hands out fresh memory which is zero-initialized).
     #[test]
     fn auto_load_writes_no_save_shape_into_stat_get() {
         let (mut rt, unit) = fixture();
@@ -434,8 +348,6 @@ mod tests {
             let a = (stat_get_addr + off) as usize;
             u32::from_be_bytes([mem[a], mem[a + 1], mem[a + 2], mem[a + 3]])
         };
-        // Matches RPCS3's reported value (40 GiB - 256 KiB) so a
-        // future drift here is loud rather than silent.
         assert_eq!(
             read_be32(stat_get_layout::OFF_HDD_FREE_SIZE_KB),
             40 * 1024 * 1024 - 256,
@@ -450,9 +362,6 @@ mod tests {
         assert_eq!(read_be32(stat_get_layout::OFF_FILE_NUM), 0);
     }
 
-    /// Set up a guest dirName cstring at `addr`; return the
-    /// fixture's args mutated to use it. Caller must already have a
-    /// runtime with allocated memory at `addr`.
     fn write_guest_cstr(rt: &mut Runtime, addr: u32, s: &[u8]) {
         rt.memory_mut()
             .apply_commit(
@@ -466,10 +375,6 @@ mod tests {
             .unwrap();
     }
 
-    /// `dir.dirName` is populated from the title's input dirName
-    /// (NUL-terminated, truncated to 32 bytes). Titles whose
-    /// funcStat dump-formatter reads dirName fault on the next
-    /// dependent load if this field is left zero.
     #[test]
     fn auto_load_echoes_dir_name_into_stat_get() {
         let (mut rt, unit) = fixture();
@@ -487,17 +392,13 @@ mod tests {
             (stat_get_addr + stat_get_layout::OFF_DIR + dir_stat_layout::OFF_DIR_NAME) as usize;
         let mem = rt.memory().as_bytes();
         assert_eq!(&mem[dirname_off..dirname_off + 4], b"FLOW");
-        // Trailing byte is the existing zero from the bump allocator.
         assert_eq!(mem[dirname_off + 4], 0);
     }
 
-    /// Over-long dirName is truncated to 31 chars + NUL (matches
-    /// RPCS3's `strcpy_trunc(dst[32], src)` semantics).
     #[test]
     fn auto_load_truncates_oversize_dir_name() {
         let (mut rt, unit) = fixture();
         let dir_name_addr = 0x1_0000u32;
-        // 40 'A' bytes + NUL.
         let mut s = vec![b'A'; 40];
         s.push(0);
         write_guest_cstr(&mut rt, dir_name_addr, &s);
@@ -512,19 +413,14 @@ mod tests {
         let dirname_off =
             (stat_get_addr + stat_get_layout::OFF_DIR + dir_stat_layout::OFF_DIR_NAME) as usize;
         let mem = rt.memory().as_bytes();
-        // 31 'A' bytes followed by a NUL terminator at offset 31.
         assert_eq!(&mem[dirname_off..dirname_off + 31], &[b'A'; 31][..]);
         assert_eq!(mem[dirname_off + 31], 0);
     }
 
-    /// `statGet.fileList` is populated from `setBuf.buf` so titles
-    /// dereferencing fileList land on a valid title-supplied buffer
-    /// even when fileListNum=0.
     #[test]
     fn auto_load_threads_set_buf_buf_into_file_list() {
         let (mut rt, unit) = fixture();
         let set_buf_addr = 0x2_0000u32;
-        // Write `buf = 0xCAFEC0DE` into setBuf.OFF_BUF.
         rt.memory_mut()
             .apply_commit(
                 cellgov_mem::ByteRange::new(
@@ -554,9 +450,6 @@ mod tests {
         assert_eq!(v, 0xCAFE_C0DE);
     }
 
-    /// AutoLoad2's eighth arg is `userdata`; the handler stages
-    /// it into `cbResult.userdata` so the title's callback observes
-    /// the value the title passed in.
     #[test]
     fn auto_load_2_threads_userdata_into_cb_result() {
         let (mut rt, unit) = fixture();
@@ -576,7 +469,7 @@ mod tests {
     fn auto_load_with_null_dir_name_returns_param() {
         let (mut rt, unit) = fixture();
         let mut args = args_with_pointers();
-        args[2] = 0; // dirName = NULL
+        args[2] = 0;
         dispatch(&mut rt, unit, save_nid::AUTO_LOAD, &args);
         let r3 = rt
             .registry_mut()
@@ -590,7 +483,7 @@ mod tests {
     fn auto_load_with_null_set_buf_returns_param() {
         let (mut rt, unit) = fixture();
         let mut args = args_with_pointers();
-        args[4] = 0; // setBuf = NULL
+        args[4] = 0;
         dispatch(&mut rt, unit, save_nid::AUTO_LOAD, &args);
         assert_eq!(
             rt.registry_mut().drain_syscall_return(unit),
@@ -602,7 +495,7 @@ mod tests {
     fn auto_load_with_null_func_stat_returns_param() {
         let (mut rt, unit) = fixture();
         let mut args = args_with_pointers();
-        args[5] = 0; // funcStat = NULL
+        args[5] = 0;
         dispatch(&mut rt, unit, save_nid::AUTO_LOAD, &args);
         assert_eq!(
             rt.registry_mut().drain_syscall_return(unit),
@@ -614,7 +507,7 @@ mod tests {
     fn auto_load_with_null_func_file_returns_param() {
         let (mut rt, unit) = fixture();
         let mut args = args_with_pointers();
-        args[6] = 0; // funcFile = NULL
+        args[6] = 0;
         dispatch(&mut rt, unit, save_nid::AUTO_LOAD, &args);
         assert_eq!(
             rt.registry_mut().drain_syscall_return(unit),
@@ -624,11 +517,6 @@ mod tests {
 
     #[test]
     fn auto_load_marks_handler_as_mutated() {
-        // Stubs that call `set_return` flip `mutated = true` in the
-        // adapter, so the NID must NOT land in
-        // `handlers_without_mutation`. A future no-op stub that
-        // forgets to set r3 would silently appear in that map; pin
-        // the contract here.
         let (mut rt, unit) = fixture();
         dispatch(&mut rt, unit, save_nid::AUTO_LOAD, &args_with_pointers());
         let map = rt.hle_handlers_without_mutation();
@@ -639,16 +527,11 @@ mod tests {
         );
     }
 
-    /// PARAM rejection (NULL pointer in a mandatory slot) takes the
-    /// fast set_return path: no heap allocation, no parking, no
-    /// pending request. Pinned because the heap-and-park rewrite
-    /// makes "happy path" the heavyweight branch; a regression that
-    /// always allocates would trip here.
     #[test]
     fn auto_load_param_rejection_emits_no_heap_or_park() {
         let (mut rt, unit) = fixture();
         let mut args = args_with_pointers();
-        args[2] = 0; // dirName = NULL
+        args[2] = 0;
         let heap_before = rt.hle_heap_watermark();
         dispatch(&mut rt, unit, save_nid::AUTO_LOAD, &args);
         assert_eq!(rt.hle_heap_watermark(), heap_before);
@@ -659,10 +542,6 @@ mod tests {
         assert!(rt.hle.pending_callback_spawn.is_none());
     }
 
-    /// Two units call AutoLoad. unit_a's NULL-dirName rejection
-    /// returns PARAM without parking; unit_b's happy path parks for
-    /// funcStat. Each unit's state stays isolated; a shared-slot
-    /// regression would clobber one with the other.
     #[test]
     fn dispatch_isolates_returns_per_unit() {
         let mut rt = Runtime::new(GuestMemory::new(0x10_0000), Budget::new(1), 100);
@@ -683,17 +562,13 @@ mod tests {
         );
         assert!(rt.hle.pending_callback_spawn.is_none());
 
-        // unit_b: happy path. Parks for funcStat; r3 unset until resume.
         dispatch(&mut rt, unit_b, save_nid::AUTO_LOAD, &args_with_pointers());
         assert_eq!(rt.registry_mut().drain_syscall_return(unit_b), None);
         assert!(rt.hle.pending_callback_spawn.is_some());
     }
 
-    // ----- resume_after_stat coverage -----
-
-    /// Drive a resume scenario: write `result` into the cbResult
-    /// region at the OFF_RESULT slot, run resume_after_stat, return
-    /// the parent's r3.
+    /// Drive a resume scenario by writing `result` at `OFF_RESULT` and
+    /// returning the parent's r3.
     fn drive_resume(result: i32) -> u64 {
         let mut rt = Runtime::new(GuestMemory::new(0x10_0000), Budget::new(1), 100);
         let unit = rt
@@ -723,10 +598,6 @@ mod tests {
 
     #[test]
     fn resume_after_stat_ok_next_returns_failure_until_func_file_lands() {
-        // Until the funcFile loop is wired, OK_NEXT is reported as
-        // FAILURE so titles see a real error rather than silent
-        // success. This test pins the temporary mapping so adding
-        // the loop forces an explicit update here.
         assert_eq!(
             drive_resume(cb_result::OK_NEXT),
             error::as_r3(error::FAILURE)
@@ -735,8 +606,6 @@ mod tests {
 
     #[test]
     fn resume_after_stat_ok_last_noconfirm_is_param() {
-        // RPCS3's savedata_op (line 1630) rejects OK_LAST_NOCONFIRM
-        // from funcStat; only funcFile/funcDone may use it.
         assert_eq!(
             drive_resume(cb_result::OK_LAST_NOCONFIRM),
             error::as_r3(error::PARAM),
@@ -769,26 +638,16 @@ mod tests {
 
     #[test]
     fn resume_after_stat_unknown_result_code_is_param() {
-        // Title-side bug: callback writes a value outside the
-        // documented cb_result discriminant set. We map to PARAM
-        // rather than panicking; the title gets a deterministic
-        // error code instead of UB.
         assert_eq!(drive_resume(0x7FFF_FFFF), error::as_r3(error::PARAM));
         assert_eq!(drive_resume(-100), error::as_r3(error::PARAM));
     }
 
     #[test]
     fn resume_after_stat_unmapped_cb_result_maps_to_internal() {
-        // The resume reads cbResult.result from guest memory; if
-        // the title corrupted the pointer (or the runtime handed
-        // back an unmapped address), the read fails and the parent
-        // sees CELL_SAVEDATA_ERROR_INTERNAL rather than a silent
-        // zero (which would look like CELL_OK).
         let mut rt = Runtime::new(GuestMemory::new(0x10_0000), Budget::new(1), 100);
         let unit = rt
             .registry_mut()
             .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
-        // Address well past the mapped region.
         resume_after_stat(&mut rt, unit, 0xFF00_0000, 0, 0, 0, [0; 8]);
         assert_eq!(
             rt.registry_mut().drain_syscall_return(unit),
@@ -798,11 +657,6 @@ mod tests {
 
     #[test]
     fn every_cell_save_data_namespace_nid_routes_per_owned() {
-        // For every NID in the cellSaveData typed namespace, assert
-        // dispatch returns Some iff the NID is in OWNED_NIDS, and
-        // None otherwise. Catches the drift case where a future
-        // edit adds a `match` arm without updating OWNED_NIDS, or
-        // vice versa, across the entire cellSaveData family.
         let namespace_nids = &[
             save_nid::AUTO_LOAD,
             save_nid::AUTO_SAVE,
@@ -838,15 +692,6 @@ mod tests {
 
     #[test]
     fn owned_nids_match_abi_namespace_owned() {
-        // Cross-check OWNED_NIDS against the ABI-side namespace
-        // OWNED list. The abi list flows into
-        // `cellgov_ps3_abi::nid::ALL_HLE_OWNED` and from there into
-        // `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`; pinning the
-        // dispatcher's claimed set to the abi-side source-of-truth
-        // catches the drift case where a NID is claimed by one and
-        // not the other (which would either let a real PRX export
-        // shadow the stub at load time, or make bound trampolines
-        // fall through to the unclaimed-NID path).
         let abi_owned: std::collections::BTreeSet<u32> = save_nid::OWNED.iter().copied().collect();
         let dispatcher_owned: std::collections::BTreeSet<u32> =
             OWNED_NIDS.iter().copied().collect();

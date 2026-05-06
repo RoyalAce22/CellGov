@@ -87,12 +87,14 @@ graph BT
 
   testkit --> compare
   trace --> compare
+  event --> compare
 
   ppu --> cli
   spu --> cli
   compare --> cli
   explore --> cli
   compare --> rpcs3obs
+  trace --> rpcs3obs
 
   ppu ~~~ spu
   firmware ~~~ mkelf
@@ -126,23 +128,23 @@ Everything else is workspace-internal. The workspace compiles under
 
 | Crate                          | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cellgov_ps3_abi`              | PS3 ABI source-of-truth leaf: NIDs (with `nid_const!` SHA-1 verification), the global NID lookup table and `stub_classification`, LV2 errno database, LV2 syscall numbers, ELF / PRX / SPRX layout, CBE PPU hardware constants, and per-PS3-PRX-module ABI data (cellSpurs, cellGcmSys, cellVideoOut, cellGcm) under `sprx_modules/`. Data only; no behaviour. Zero workspace dependencies.                                                                |
+| `cellgov_ps3_abi`              | PS3 ABI source-of-truth leaf: NIDs (with `nid_const!` SHA-1 verification), the global NID lookup table and `stub_classification`, LV2 errno database, LV2 syscall numbers, ELF / PRX / SPRX layout, CBE PPU hardware constants, and per-PS3-PRX-module ABI data (cellSpurs, cellGcmSys, cellVideoOut, cellGcm, cellSaveData) under `sprx_modules/`. Data only; no behaviour. Zero workspace dependencies.                                                |
 | `cellgov_time`                 | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time.                                                                                                                                                                                                                                                                                                                                            |
 | `cellgov_event`                | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary.                                                                                                                                                                                                                                                                                                                                                              |
-| `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`.                                                                                                                                                                                                                                                                            |
-| `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier and wait-set primitives.                                                                                                                                                                                                                                                                                                                                                                                 |
+| `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`, and `StagingMemory` / `StagedWrite` for batched pending writes.                                                                                                                                                                                                            |
+| `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier ids, and the atomic reservation table.                                                                                                                                                                                                                                                                                                                                                                  |
 | `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `cellgov_effects`              | The 13-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                                                                                                                                                                      |
 | `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                                                                                                                                                                              |
 | `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                                                                                                                                                                               |
-| `cellgov_lv2`                  | LV2 model: image registry, thread-group table, syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                                                                                                                                                                       |
+| `cellgov_lv2`                  | LV2 model: image / content registry, thread-group table, PPU thread table, in-memory filesystem store, LV2 sync primitives (mutex, cond, semaphore, lwmutex, event-flag, event-queue), syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                              |
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                         |
 | `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, HLE binder, and `HLE_IMPLEMENTED_NIDS` dispatch surface. The NID lookup database itself lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                         |
 | `cellgov_spu`                  | SPU interpreter, channel file, SPU ELF loader.                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace.                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                                                                                                                                                                             |
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                |
-| `cellgov_cli`                  | The user-facing binary: `run-game`, `dump`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                                                                                                                                                                             |
+| `cellgov_cli`                  | The user-facing binary: `run-game`, `bench-boot`, `bench-boot-once`, `dump`, `dump-imports`, `disasm`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                                                                                                                  |
 | `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                                                                                                                                                                     |
 | `cellgov_firmware`             | PS3 firmware and SELF decrypter. Two subcommands: `install` extracts decrypted SPRX modules from a `PS3UPDAT.PUP` downloaded from Sony's website (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). `decrypt-self` decrypts a retail game `EBOOT.BIN` (SELF) into an `EBOOT.elf` using per-revision APP keys -- same AES pipeline, different key table. No RPCS3 dependency. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                  |
@@ -157,7 +159,7 @@ binary search), which returns the region entirely containing the
 range or `None` if the access straddles a boundary or falls in an
 unmapped gap.
 
-The `run-game` driver builds four regions matching the canonical PS3
+The `run-game` driver builds five regions matching the canonical PS3
 LV2 virtual-address layout:
 
 | Guest VA              | Size   | Label          | Access                           | Purpose                                                                  |
@@ -210,10 +212,11 @@ and above it. This turns a diagnostic at `0xB0000000` into
 The PPU interpreter's fetch path uses `GuestMemory::as_bytes()`, a
 legacy accessor that returns the base-0 region's bytes -- code
 always lives in `main`, so this is safe. Load paths (`ld`, `lwz`,
-`lfs`, `lvx`, etc.) go through a cached `load_slice` closure built
-at the top of `run_until_yield`: the closure holds a
-`[(u64, &[u8]); 8]` snapshot of every region's base and bytes, and
-linear-scans it per load. Linear scan wins over `BTreeMap` lookup
+`lfs`, `lvx`, etc.) go through the `load_slice` helper, which scans
+a stack-allocated region-view table built at the top of
+`run_until_yield`: a `[(u64, &[u8]); 8]` snapshot (`MAX_REGIONS = 8`)
+of every region's base and bytes, sliced to the active region count
+per dispatch. Linear scan wins over `BTreeMap` lookup
 because the region count stays single-digit under the current PS3
 layout (main, stack, child_stacks, rsx, spu_reserved); if many more mappings are
 later added, a two-tier fast-path is the natural next
@@ -224,7 +227,7 @@ stores to any mapped region land correctly.
 ## Per-step pipeline
 
 `Runtime::step` and `Runtime::commit_step` together implement a
-ten-step deterministic loop:
+nine-step deterministic loop:
 
 1. Select a runnable unit via the configured `Scheduler`. The
    default `RoundRobinScheduler` walks the registry in id
@@ -256,29 +259,46 @@ ten-step deterministic loop:
    buffer provides write-then-read coherence within the batch.
    Effects are collected through a caller-owned `&mut Vec<Effect>`
    (not on the result struct).
-4. Validate effects against the registry and memory.
-5. Stage a commit batch.
-6. Apply the batch to shared state (memory, mailboxes, signals, etc).
-7. Inject resulting events: DMA completions, syscall dispatch through
-   `Lv2Host`, block / wake transitions.
-8. Advance guest time by the unit's consumed budget.
-9. Emit trace records for every decision in steps 1-7.
+4. Validate every effect against the registry and memory in a
+   single pass, staging `SharedWriteIntent` payloads into a
+   `StagingMemory` buffer as it goes. A validation failure clears
+   the staging buffer and rejects the whole batch.
+5. Drain the staging buffer to guest memory as one atomic operation,
+   then apply the remaining per-effect updates (mailboxes, signals,
+   DMA enqueue, reservations, wakes, block transitions, RSX flip
+   requests) in emission order.
+6. Dispatch the unit's syscall through `Lv2Host` if the yield reason
+   was `Syscall`; absorb a callback-worker mid-body fault if the
+   source is a registered worker.
+7. Advance the commit epoch, then fire any DMA completions whose
+   ready tick has arrived; resolve join wakes if the unit finished;
+   run the RSX FIFO advance pass (its emitted effects queue for the
+   next batch under the atomic-batch contract).
+8. Emit commit trace records for the batch and notify the scheduler
+   of the yield, passing whether other units were woken and whether
+   the source still holds an lwmutex.
+9. Guest time itself advances inside step 3 (`Runtime::step`) by
+   the unit's consumed budget; `commit_step` only advances the
+   epoch.
 
-Steps 4-6 are atomic. A fault discards the entire batch -- the unit
-faults, the rest of the system sees nothing the unit tried to do.
-This is what makes the determinism guarantees mechanical rather than
-aspirational. When a fault occurs mid-batch (after some instructions
-have retired), the PPU restores a state snapshot taken at step entry
-and re-executes at Budget=1 so that pre-fault instructions commit
-individually and the faulting instruction is isolated.
+Steps 4-5 are atomic. A fault (`YieldReason::Fault` checked at
+step 4 entry, or a validation rejection mid-step 4) discards the
+entire batch -- the unit faults, the rest of the system sees
+nothing the unit tried to do. This is what makes the determinism
+guarantees mechanical rather than aspirational. When a fault
+occurs mid-batch (after some instructions have retired), the PPU
+restores a state snapshot taken at step entry and re-executes at
+Budget=1 so that pre-fault instructions commit individually and
+the faulting instruction is isolated.
 
 **Trivial-step fast path (FaultDriven only).** When the effects
 vec is empty, `fault` is `None`, `yield_reason` is neither
-`Syscall` nor `Finished`, and the DMA queue is empty,
-`Runtime::commit_step` skips steps 4-7 entirely and only advances
-the epoch (step 8 still runs). Under `RuntimeMode::FaultDriven`
-the trace records of steps 1-7 are suppressed anyway, so the
-observable contract is identical -- every atomic-batch boundary
+`Syscall` nor `Finished`, the DMA queue is empty, and no RSX
+work is pending, `Runtime::commit_step` skips steps 4-8 and only
+advances the epoch (plus the scheduler `notify_yielded` call).
+Under `RuntimeMode::FaultDriven` the trace records of steps 1-8
+are suppressed anyway, so the observable contract is identical --
+every atomic-batch boundary
 still advances the epoch, and scheduler-visible state
 (`status_overrides`, pending receives / syscall returns / reg
 writes) is unchanged by an empty commit. The fast path cuts the
@@ -308,10 +328,12 @@ Three optimization passes run at shadow build time:
 2. **Super-pairing.** Frequent 2-instruction sequences are fused
    into single dispatch entries: `lwz + cmpwi` -> `LwzCmpwi`,
    `li + stw` -> `LiStw`, `mflr + stw` -> `MflrStw`,
-   `lwz + mtlr` -> `LwzMtlr`, `cmpwi + bc` -> `CmpwiBc`,
-   `cmpw + bc` -> `CmpwBc`. The second slot is marked `Consumed`;
-   the fetch loop skips it. Candidates are selected from
-   adjacent-pair profiling data (> 1% frequency threshold).
+   `lwz + mtlr` -> `LwzMtlr`, `mflr + std` -> `MflrStd`,
+   `ld + mtlr` -> `LdMtlr`, `std + std` -> `StdStd`,
+   `cmpwi + bc` -> `CmpwiBc`, `cmpw + bc` -> `CmpwBc`. The
+   second slot is marked `Consumed`; the fetch loop skips it.
+   Candidates are selected from adjacent-pair profiling data
+   (> 1% frequency threshold).
 
 3. **Block-length annotation.** A backward scan fills
    `block_len[i]` with the number of instructions to the end of
@@ -365,7 +387,7 @@ test in the hot loop).
 
 **PPU (`cellgov_ppu`)**: PPC64 interpreter with 32 GPRs, 32 FPRs, PC,
 CR, LR, CTR, XER (carry tracked), TB, and 32 vector registers.
-**140 `PpuInstruction` variants** today, covering integer arithmetic
+**160 `PpuInstruction` variants** today, covering integer arithmetic
 and logic, D-form / DS-form / indexed loads/stores with and without
 update (including DS-form `lwa`), conditional branches with
 LR/CTR/AA variants, 64-bit multiply and divide families, signed and
@@ -380,14 +402,14 @@ includes the shadow's quickening rewrites (`Mr`, `Li`,
 and super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`,
 `LiStw`, `CmpwiBc`, `CmpwBc`, `LdMtlr`, `StdStd`) plus the
 `Consumed` placeholder; the architectural-instruction subset is
-~120 of the 140.
+~141 of the 160.
 
 The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
 4 relocation types, and the PS3 PRX import-table parser.
-`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (60 entries) is the
+`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (61 entries) is the
 dispatch surface the runtime PRX binder consults; the larger
-NID lookup database (~5,300 entries) lives in
+NID lookup database (~5,327 entries) lives in
 `cellgov_ps3_abi::nid` and is accessed via `lookup(nid)` for
 human-readable name resolution in `dump-imports` and fault
 diagnostics.
@@ -870,7 +892,7 @@ the `FirstRsxWrite` checkpoint.
 ### LV2 sys_rsx syscall surface
 
 `cellgov_lv2::host::rsx` models the kernel-side surface the
-PS3 LV2 exposes under syscall numbers 665, 667, 670, 671, and
+PS3 LV2 exposes under syscall numbers 668, 669, 670, 671, and
 674. The surface is a single allocated RSX context plus a
 bump-allocated memory region and the structures the guest
 poll paths read -- `RsxReports` (37 KB: semaphore array,
@@ -942,7 +964,7 @@ diagnostic database lives in `cellgov_ps3_abi::nid` (accessed via
 `lookup(nid)` for name resolution in `dump-imports` and fault output,
 not for dispatch). Module implementations
 are decoupled from the Runtime via the
-`HleContext` trait (`cellgov_core::hle_context`). Each module file
+`HleContext` trait (`cellgov_core::hle::context`). Each module file
 (`sysPrxForUser.rs`, `cellGcmSys.rs`, `cellSysutil.rs`, `cellSpurs.rs`,
 `cellSaveData.rs`, `sys_fs.rs`) contains free functions that operate
 through `&mut dyn HleContext` -- 9 methods covering guest memory read
@@ -952,7 +974,7 @@ kernel-object ID allocation, and parkable callback dispatch
 (`park_for_callback` records an `HleParkRequest` the post-dispatch
 helper consumes; see "Worker-thread callback dispatch" above).
 
-### sysPrxForUser (`hle_sys.rs`)
+### sysPrxForUser (`sysPrxForUser.rs`)
 
 | Function                | NID        | Classification | Behavior                                                      |
 | ----------------------- | ---------- | -------------- | ------------------------------------------------------------- |
@@ -1100,11 +1122,12 @@ modifying the runtime. It records every branching point from a
 baseline run, replays each alternate through a `PrescribedScheduler`
 within configurable `max_schedules` and `max_steps_per_run` bounds,
 and classifies each outcome as `ScheduleStable`, `ScheduleSensitive`,
-or `Inconclusive`. `StepFootprint` extracted from the 9 `Effect`
-variants drives conservative dependency analysis: pairs of steps with
-non-overlapping footprints prune as provably independent. The
-`explore_with_regions` mode extracts named memory regions per
-schedule for per-schedule comparison against external baselines.
+or `Inconclusive`. `StepFootprint` extracted from the nine
+shared-resource `Effect` variants drives conservative dependency
+analysis: pairs of steps with non-overlapping footprints prune as
+provably independent. The `explore_with_regions` mode also captures
+named memory regions per schedule for comparison against external
+baselines.
 
 ## Comparison harness
 
@@ -1151,13 +1174,13 @@ reports:
 ### RPCS3 bridge
 
 `bridges/rpcs3-patch/0001-cellgov-checkpoint-dump.patch` adds an
-opt-in dump hook to RPCS3's `_sys_process_exit` and `sys_tty_write`
-syscalls. With `CELLGOV_DUMP_PATH`, `CELLGOV_DUMP_REGIONS`, and
-`CELLGOV_DUMP_TTY_NTH=N` set, RPCS3 writes the configured guest
-memory regions to a binary file on the Nth `sys_tty_write` and
-exits. `bridges/rpcs3_to_observation` then converts that dump plus a
-shared region manifest into the same `Observation` JSON
-`cellgov_cli compare-observations` reads.
+opt-in dump hook to RPCS3's `_sys_process_exit` syscall. With
+`CELLGOV_DUMP_PATH` and `CELLGOV_DUMP_REGIONS` set, RPCS3 writes
+the configured guest memory regions (parsed as `addr:size` hex
+pairs, appended contiguously in declaration order) to a binary
+file on process exit. `bridges/rpcs3_to_observation` then converts
+that dump plus a shared region manifest into the same `Observation`
+JSON `cellgov_cli compare-observations` reads.
 
 The patched RPCS3 binary is built by the developer; the CellGov
 library has no Cargo or runtime dependency on RPCS3. The bridge is
@@ -1192,25 +1215,30 @@ NPUA80068`), or explicit manifest path (`--title-manifest
 <file>`). The harness is currently wired for three titles:
 
 - **flOw** (NPUA80001): PSN HDD. Manifest declares the
-  `process-exit` checkpoint kind, but the title boots past the
-  point where it would have called `sys_process_exit` and
-  currently exits on `MaxSteps` at the budget cap.
+  `process-exit` checkpoint kind and enables `[rsx] mirror = true`
+  so the title's GCM put-pointer stores land in the FIFO cursor
+  instead of faulting; boot currently halts at a deterministic
+  FAULT (NULL bcctr in `m_InitEntityHierarchy`) before reaching
+  `sys_process_exit`. The manifest also declares a `[content]`
+  block of read-only blobs (`first.xml`, `Localization.xml`,
+  `Classes.xml`) registered into `Lv2Host::fs_store` at boot via
+  the boot-time content provider in `apps/cellgov_cli/src/game/content.rs`.
 - **Super Stardust HD** (NPUA80068): PSN HDD, checkpoint is
   `first-rsx-write` -- SSHD's attract-mode loop never exits, so
   the harness treats the first PPU write into the `rsx` reserved
   region as a checkpoint hit.
 - **WipEout HD Fury** (BCES00664): disc ISO, same `first-rsx-write`
-  checkpoint kind as SSHD; currently exits on `MaxSteps` at the
-  budget cap without reaching it. Disc titles add an optional
-  `[source] kind = "disc"` to the manifest; `resolve_eboot` then
-  looks under `dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead of
-  the PSN layout. The encrypted `EBOOT.BIN` is decrypted once via
-  `cellgov_firmware decrypt-self`.
+  checkpoint kind as SSHD; reaches the put-pointer checkpoint at
+  step 45,697. Disc titles add a `[source] kind = "disc"` block to
+  the manifest; `resolve_eboot` then looks under
+  `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead of
+  the PSN HDD layout. The encrypted `EBOOT.BIN` is decrypted once
+  via `cellgov_firmware decrypt-self`.
 
 Per-title status (boot checkpoint reached, cross-runner observation
 match) is tracked in [titles.md](titles.md).
 
-Adding a third title is a single-file TOML commit under
+Adding a new title is a single-file TOML commit under
 `docs/titles/`; no Rust change is needed as long as the title
 fits the existing checkpoint kinds (`process-exit`,
 `first-rsx-write`, `pc`) and the standard PS3 VFS layout. The

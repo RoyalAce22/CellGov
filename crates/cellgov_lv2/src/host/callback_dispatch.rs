@@ -1,24 +1,21 @@
 //! Worker-thread callback-dispatch primitive.
 //!
-//! `Lv2Host::call_guest_callback_sync` is the public entry: an HLE
-//! handler invokes a title-supplied callback OPD on a fresh worker
-//! PPU thread and parks the parent unit until the worker returns.
-//! The worker's terminal `blr` sets `PC = LR` where LR was staged
-//! to [`cellgov_ps3_abi::callback_dispatch::CALLBACK_RETURN_CODE_ADDR`],
-//! landing directly on the trampoline body which fires a CellGov-
-//! private LV2 syscall classified as
-//! [`crate::Lv2Request::CallbackDispatchReturn`]. The returning
-//! dispatch arm here resolves the worker -> parent linkage, decrements
-//! the recursion-depth tracker, and emits a
-//! [`crate::Lv2Dispatch::WakeAndReturn`] keyed to the parent.
+//! Cross-crate contract: an HLE handler calls
+//! [`Lv2Host::call_guest_callback_sync`] with a guest OPD pointer; the
+//! host emits [`Lv2Dispatch::CallbackSpawn`]; the runtime mints a worker
+//! [`PpuThreadId`] and re-enters via [`Lv2Host::attach_callback_worker`]
+//! to record the worker -> parent link. The worker's terminal `blr`
+//! sets `PC = LR` where LR was staged to
+//! [`CALLBACK_RETURN_CODE_ADDR`] -- a code address, not an OPD --
+//! landing on the trampoline body that issues a CellGov-private LV2
+//! syscall classified as [`crate::Lv2Request::CallbackDispatchReturn`].
+//! [`Lv2Host::dispatch_callback_return`] resolves the linkage,
+//! decrements the recursion-depth tracker, and emits
+//! [`Lv2Dispatch::WakeAndReturn`] keyed to the parent.
 //!
-//! This is the canonical parkable-handler pattern. Future parkable
-//! HLE handlers (cellSaveDataAutoLoad's funcStat / funcFile
-//! dispatch, vblank-handler invocation, SPURS exception handlers)
-//! all route through `call_guest_callback_sync`; the per-handler
-//! resume state lives in the
-//! [`crate::CallbackReturnStage`] enum carried by
-//! [`crate::PendingResponse::CallbackReturn`].
+//! Per-handler resume state rides in [`crate::CallbackReturnStage`]
+//! inside [`crate::PendingResponse::CallbackReturn`]; the worker's
+//! captured `r3..=r10` overwrite the placeholder `args` at wake time.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::callback_dispatch::{CALLBACK_DEPTH_CAP, CALLBACK_RETURN_CODE_ADDR};
@@ -30,51 +27,35 @@ use crate::ppu_thread::PpuThreadId;
 /// Failure modes for [`Lv2Host::call_guest_callback_sync`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallbackError {
-    /// Recursion depth would exceed
-    /// [`CALLBACK_DEPTH_CAP`]. Title-side runaway recursion or the
-    /// rare case of a callback re-entering the same handler more
-    /// than the cap allows.
+    /// Parent is already at [`CALLBACK_DEPTH_CAP`].
     TooDeep,
-    /// Title-supplied OPD pointer is unmapped or short-read by the
-    /// runtime. CellGov returns this rather than spawning a worker
-    /// against an undefined entry point.
+    /// OPD pointer unmapped or short-read; no state mutated.
     OpdReadFailed,
-    /// Worker stack allocation failed (child-stack arena exhausted).
+    /// Child-stack arena exhausted.
     StackAllocFailed,
 }
 
 impl Lv2Host {
-    /// Invoke a guest callback synchronously on a fresh worker PPU
-    /// thread, parking `parent` until the worker returns through the
-    /// CellGov-private trampoline.
+    /// Invoke a guest callback synchronously on a fresh worker PPU thread,
+    /// parking `parent` until the worker returns through the trampoline.
     ///
-    /// # Contract
-    /// - `parent` is the calling PPU unit. It is parked with a
-    ///   [`PendingResponse::CallbackReturn { stage, args: [0; 8] }`]
-    ///   that the trampoline-return dispatch arm later overwrites
-    ///   with the worker's captured `r3..=r10`.
-    /// - `opd_addr` is a guest pointer to an 8-byte PS3 OPD
-    ///   (`u32 BE code_addr || u32 BE toc`). Read failure surfaces
-    ///   as [`CallbackError::OpdReadFailed`] before any state is
-    ///   mutated.
-    /// - `args[0..=7]` becomes the worker's `r3..=r10`. Higher
-    ///   slots are not used.
-    /// - `stage` discriminates which handler-resume path the
-    ///   parent's pending response carries.
+    /// The worker inherits `parent`'s `tls_base` so `r13`-relative TLS
+    /// dereferences (locale tables, errno) resolve; sharing is sound
+    /// while `parent` is parked Blocked. `args[0..=7]` map to worker
+    /// `r3..=r10`. `LR` is staged to [`CALLBACK_RETURN_CODE_ADDR`]
+    /// -- the trampoline code address, not an OPD; `blr` branches to
+    /// `LR` directly and an OPD would decode as garbage.
     ///
-    /// On success, returns [`Lv2Dispatch::CallbackSpawn`]. The
-    /// runtime's handle path allocates the worker's [`PpuThreadId`]
-    /// (via [`crate::ppu_thread::PpuThreadTable::create`]) and
-    /// then calls back into [`Self::attach_callback_worker`] to link
-    /// the worker to `parent` in the host's bookkeeping.
+    /// On success returns [`Lv2Dispatch::CallbackSpawn`]; the runtime
+    /// mints the worker id and re-enters [`Self::attach_callback_worker`].
+    /// The parent's [`PendingResponse::CallbackReturn`] carries `stage`
+    /// and zero-filled `args`; the trampoline-return wake overwrites
+    /// `args` with the worker's captured `r3..=r10`.
     ///
     /// # Errors
-    /// - [`CallbackError::TooDeep`] when `parent` is already at the
-    ///   recursion cap.
-    /// - [`CallbackError::OpdReadFailed`] when the OPD pointer is
-    ///   unreadable.
-    /// - [`CallbackError::StackAllocFailed`] when the child-stack
-    ///   arena is exhausted.
+    /// - [`CallbackError::TooDeep`]
+    /// - [`CallbackError::OpdReadFailed`]
+    /// - [`CallbackError::StackAllocFailed`]
     pub fn call_guest_callback_sync(
         &mut self,
         parent: UnitId,
@@ -83,29 +64,18 @@ impl Lv2Host {
         stage: CallbackReturnStage,
         rt: &dyn Lv2Runtime,
     ) -> Result<Lv2Dispatch, CallbackError> {
-        // Recursion cap: parent's existing depth + 1 must not exceed
-        // CALLBACK_DEPTH_CAP. Checked before any allocation.
         let current_depth = self.callback_depth.get(&parent).copied().unwrap_or(0);
         if current_depth >= CALLBACK_DEPTH_CAP {
             return Err(CallbackError::TooDeep);
         }
 
-        // Inherit the parent PPU thread's tls_base into the worker so
-        // the worker's r13 lands on the same TLS image. Title code
-        // dereferences `r13 + offset` for locale tables, errno, and
-        // other thread-local globals; r13 = 0 produces sign-extended
-        // negative addresses that fault on the first such access.
-        // Callbacks are short-lived and synchronous from the parent's
-        // perspective; sharing TLS is safe because the parent is
-        // parked Blocked while the worker runs.
         let parent_tls_base = self
             .ppu_threads
             .get_by_unit(parent)
             .map(|t| u64::from(t.attrs.tls_base))
             .unwrap_or(0);
 
-        // Read the 8-byte OPD: u32 BE code_addr || u32 BE toc.
-        // Same shape as `dispatch_ppu_thread_create` reads.
+        // OPD layout: u32 BE code_addr || u32 BE toc.
         let opd_bytes = rt
             .read_committed(opd_addr as u64, 8)
             .ok_or(CallbackError::OpdReadFailed)?;
@@ -115,19 +85,10 @@ impl Lv2Host {
         let entry_code = u32::from_be_bytes(opd_bytes[0..4].try_into().unwrap()) as u64;
         let entry_toc = u32::from_be_bytes(opd_bytes[4..8].try_into().unwrap()) as u64;
 
-        // Allocate worker stack at the ABI minimum. Worker callbacks
-        // are typically short-lived; titles needing larger stacks
-        // would surface as a separate ENOMEM frontier.
         let stack = self
             .allocate_child_stack(0x4000, 0x10)
             .ok_or(CallbackError::StackAllocFailed)?;
 
-        // r3 = args[0]; r4..=r10 = args[1..=7]; r1 = stack top;
-        // r2 = TOC; LR = trampoline code address so the worker's
-        // terminal `blr` (which sets PC = LR) lands on the
-        // trampoline body. Note this is the code address, NOT the
-        // OPD address: blr branches to LR directly, and the OPD
-        // would decode as garbage instructions.
         let mut extra_args = [0u64; 7];
         extra_args.copy_from_slice(&args[1..]);
         let worker_init = PpuThreadInitState {
@@ -154,23 +115,13 @@ impl Lv2Host {
         })
     }
 
-    /// Link a freshly created worker `PpuThreadId` to its parent
-    /// `UnitId` and the parkable-handler `stage`; increment the
-    /// parent's recursion-depth tracker.
-    ///
-    /// Called by the runtime's `handle_callback_spawn` after
-    /// [`crate::ppu_thread::PpuThreadTable::create`] mints the
-    /// worker id. The runtime extracts `stage` from the dispatch's
-    /// `parent_pending` field (a [`PendingResponse::CallbackReturn`]
-    /// constructed by [`Self::call_guest_callback_sync`]).
+    /// Link a freshly minted worker to its parent and bump the parent's
+    /// recursion depth.
     ///
     /// # Invariants
-    /// - `worker` is freshly minted; `callback_parents` does not
-    ///   already contain it.
-    /// - `parent`'s depth is below [`CALLBACK_DEPTH_CAP`]
-    ///   (enforced by [`Self::call_guest_callback_sync`]).
-    /// - `stage` matches the stage in the parent's pending response;
-    ///   future consumer stages land here without a host refactor.
+    /// - `worker` is not yet in `callback_parents`.
+    /// - `parent`'s depth is below [`CALLBACK_DEPTH_CAP`] (enforced
+    ///   upstream by [`Self::call_guest_callback_sync`]).
     pub fn attach_callback_worker(
         &mut self,
         worker: PpuThreadId,
@@ -186,18 +137,9 @@ impl Lv2Host {
         *entry = entry.saturating_add(1);
     }
 
-    /// Resolve a callback worker's trampoline-return: look up parent,
-    /// decrement depth, mark the worker `Finished`, and emit a
-    /// `WakeAndReturn` keyed to the parent.
-    ///
-    /// `worker_unit` is the `requester` arg from the dispatch path
-    /// (the worker's `UnitId`). `args` carries the worker's
-    /// `r3..=r10` captured by the trampoline classifier.
-    /// True when `worker_unit` is registered in `callback_parents`,
-    /// i.e. a callback worker spawned by `call_guest_callback_sync`
-    /// whose parent is parked. Used by the runtime's fault-handling
-    /// path to recognize a mid-body worker fault as recoverable
-    /// rather than fatal to the run.
+    /// True when `worker_unit` is a registered callback worker whose
+    /// parent is parked. The runtime's fault path uses this to treat a
+    /// mid-body worker fault as recoverable rather than run-fatal.
     pub fn is_callback_worker(&self, worker_unit: UnitId) -> bool {
         let Some(worker_thread) = self.ppu_threads.thread_id_for_unit(worker_unit) else {
             return false;
@@ -205,18 +147,15 @@ impl Lv2Host {
         self.callback_parents.contains_key(&worker_thread)
     }
 
-    /// Wrapper around [`Self::dispatch_callback_return`] for the
-    /// fault-propagation path: the worker faulted before reaching
-    /// the trampoline `blr`, so synthesize the wake with
-    /// `args = [fault_code; 8]` (Synthetic stage writes
-    /// `args[0]` to parent r3; consumer stages that read the
-    /// underlying cb_result struct see whatever pre-fault state
-    /// the worker left, mapping the failure case to their
-    /// stage-specific error code).
+    /// Fault-path wrapper: synthesize a wake with `args = [fault_code; 8]`.
     ///
-    /// Returns `None` when `worker_unit` is not a registered
-    /// callback worker (caller should fall through to the normal
-    /// run-terminating fault path).
+    /// Synthetic stage writes `args[0]` to parent `r3`. Consumer stages
+    /// reading their own cb_result struct see whatever pre-fault state
+    /// the worker left; mapping fault to a stage-specific error code is
+    /// the consumer's job.
+    ///
+    /// Returns `None` when `worker_unit` is not a registered callback
+    /// worker; caller falls through to the run-terminating fault path.
     pub fn dispatch_callback_worker_fault(
         &mut self,
         worker_unit: UnitId,
@@ -265,20 +204,10 @@ impl Lv2Host {
                 self.callback_depth.remove(&parent);
             }
         }
-        // Mark the worker `Finished` with `args[0]` (worker r3) as
-        // the exit value. Callback workers spawn detached so no
-        // joiners ride this transition; the returned waiter list
-        // is expected empty.
+        // Callback workers spawn detached; the waiter list is empty.
         let _no_joiners = self.ppu_threads.mark_finished(worker_thread, args[0]);
-        // The runtime applies this update via `response_updates`
-        // (variant_tag must match the parked entry's tag). Stage
-        // is recovered from `callback_parents`; future consumer
-        // stages land here without a host refactor.
         let response_update = PendingResponse::CallbackReturn { stage, args };
         Lv2Dispatch::WakeAndReturn {
-            // Source is the worker; its r3 (args[0]) is its return
-            // value. The worker is about to be retired so the r3
-            // write is observation-only.
             code: args[0],
             woken_unit_ids: vec![parent],
             response_updates: vec![(parent, response_update)],
@@ -296,9 +225,6 @@ mod tests {
     use cellgov_event::UnitId;
     use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 
-    /// Build a host with a primary PPU thread and a FakeRuntime that
-    /// has an OPD pre-written at `opd_addr` pointing at
-    /// `(entry_code, entry_toc)`.
     fn host_with_opd(
         opd_addr: u32,
         entry_code: u32,
@@ -357,18 +283,15 @@ mod tests {
                 assert_eq!(p, parent);
                 assert_eq!(worker_init.entry_code, 0x1234_5678);
                 assert_eq!(worker_init.entry_toc, 0x9ABC_DEF0);
-                assert_eq!(worker_init.arg, args[0]); // r3 = args[0]
-                assert_eq!(worker_init.extra_args[0], args[1]); // r4
-                assert_eq!(worker_init.extra_args[6], args[7]); // r10
+                assert_eq!(worker_init.arg, args[0]);
+                assert_eq!(worker_init.extra_args[0], args[1]);
+                assert_eq!(worker_init.extra_args[6], args[7]);
                 assert_eq!(worker_init.lr_sentinel, CALLBACK_RETURN_CODE_ADDR as u64);
                 match parent_pending {
                     PendingResponse::CallbackReturn {
                         stage: CallbackReturnStage::Synthetic,
                         args: pending_args,
                     } => {
-                        // Args are placeholder zeros at park time;
-                        // the trampoline-return wake fills them in
-                        // via response_updates.
                         assert_eq!(pending_args, [0; 8]);
                     }
                     other => panic!("expected CallbackReturn pending, got {other:?}"),
@@ -382,7 +305,6 @@ mod tests {
     fn call_guest_callback_sync_rejects_unmapped_opd() {
         let parent = UnitId::new(0);
         let (mut host, rt) = host_with_opd(0x4000, 0, 0, parent);
-        // Address well past the FakeRuntime's 0x10_0000-byte buffer.
         let err = host
             .call_guest_callback_sync(
                 parent,
@@ -399,11 +321,6 @@ mod tests {
     fn recursion_cap_rejects_after_eight_attaches() {
         let parent = UnitId::new(0);
         let (mut host, rt) = host_with_opd(0x4000, 0x1000, 0x2000, parent);
-        // Pre-bump the parent's depth to the cap by repeatedly
-        // attaching synthetic worker ids. Worker thread ids are
-        // monotonic per the allocator but we can fabricate ids
-        // straight into callback_parents because attach is a
-        // public API.
         for i in 0..CALLBACK_DEPTH_CAP {
             let worker = PpuThreadId::new(0x0100_0001 + i as u64);
             host.attach_callback_worker(worker, parent, CallbackReturnStage::Synthetic);
@@ -422,10 +339,6 @@ mod tests {
         let worker_b = PpuThreadId::new(0x0100_0002);
         host.attach_callback_worker(worker_a, parent, CallbackReturnStage::Synthetic);
         host.attach_callback_worker(worker_b, parent, CallbackReturnStage::Synthetic);
-        // Internal state inspection via state_hash drift: two
-        // attach calls hash differently from one. Direct field
-        // access would require a pub accessor; the hash is the
-        // canonical inspection channel.
         let h_two = host.state_hash();
         let mut other = Lv2Host::new();
         other.attach_callback_worker(worker_a, parent, CallbackReturnStage::Synthetic);
@@ -437,7 +350,6 @@ mod tests {
     fn dispatch_callback_return_emits_wake_with_args_round_trip() {
         let mut host = Lv2Host::new();
         let parent = UnitId::new(0);
-        // Seed a primary so resolve_wake_thread works.
         host.seed_primary_ppu_thread(
             parent,
             PpuThreadAttrs {
@@ -449,7 +361,6 @@ mod tests {
                 tls_base: 0,
             },
         );
-        // Manually create a worker thread and link it.
         let worker_unit = UnitId::new(1);
         let worker_thread = host
             .ppu_threads_mut()
@@ -484,7 +395,7 @@ mod tests {
                 response_updates,
                 ..
             } => {
-                assert_eq!(code, captured_args[0]); // r3 = args[0]
+                assert_eq!(code, captured_args[0]);
                 assert_eq!(woken_unit_ids, vec![parent]);
                 assert_eq!(response_updates.len(), 1);
                 let (woken_parent, response) = &response_updates[0];
@@ -537,10 +448,6 @@ mod tests {
         let depth_after_attach = host.state_hash();
         host.dispatch_callback_return(worker_unit, [0; 8]);
         let depth_after_return = host.state_hash();
-        // After return, callback_parents and callback_depth should
-        // both drop their parent entry; hash differs from "one
-        // attach" snapshot but matches a fresh-host hash modulo the
-        // worker's `Finished` state.
         assert_ne!(depth_after_attach, depth_after_return);
     }
 }

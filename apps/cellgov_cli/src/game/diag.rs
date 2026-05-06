@@ -1,9 +1,7 @@
-//! Diagnostic formatting for `run-game`. Pure formatting: reads state,
-//! produces strings or stdout, never mutates guest state.
+//! Diagnostic formatting for `run-game`: reads runtime state, produces strings.
 //!
-//! The `pc_ring` parameters threaded through `format_fault`,
-//! `format_process_exit`, and `format_max_steps` assume a
-//! single-threaded stepper. A concurrent writer would tear reads.
+//! `pc_ring` readers assume a single-threaded stepper; a concurrent writer
+//! would tear reads.
 
 use crate::game::step_loop::{block_reason_label, RingCursor};
 use crate::game::{PC_RING_SIZE, SYSCALL_RING_SIZE};
@@ -12,10 +10,6 @@ use cellgov_exec::UnitStatus;
 use cellgov_lv2::PpuThreadState;
 
 /// Render `bytes` as ASCII, replacing non-printable bytes with `.`.
-///
-/// Output is always pure ASCII, safe for cp1252/cp437 consoles. The
-/// full-slice TTY path uses `from_utf8_lossy` instead to preserve
-/// multi-byte UTF-8.
 pub(super) fn ascii_safe_preview(bytes: &[u8]) -> String {
     bytes
         .iter()
@@ -29,20 +23,17 @@ pub(super) fn ascii_safe_preview(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// Fetch a 32-bit big-endian instruction word at `pc`, resolving against
-/// any region in the memory map (not just base-0).
+/// Fetch a 32-bit big-endian instruction word at `pc` from any mapped region.
 pub(super) fn fetch_raw_at(rt: &Runtime, pc: u64) -> Option<u32> {
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(pc), 4)?;
     let b = rt.memory().read(range)?;
     Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-/// Label the region containing `[addr, addr+len)`, returning
-/// `"<unmapped>"` if the range straddles or escapes every region.
+/// Label the region containing `[addr, addr+len)`, or `"<unmapped>"`.
 ///
-/// `len` must match the caller's subsequent read width: querying with
-/// `len=1` would label a PC 1-3 bytes before a region boundary as
-/// mapped even though the caller's 4-byte fetch would fail.
+/// `len` must match the caller's read width; querying with `len=1` mislabels
+/// a PC 1-3 bytes before a boundary as mapped when a 4-byte fetch would fail.
 pub(super) fn region_label_at(rt: &Runtime, addr: u64, len: u64) -> &'static str {
     rt.memory()
         .containing_region(addr, len)
@@ -50,8 +41,9 @@ pub(super) fn region_label_at(rt: &Runtime, addr: u64, len: u64) -> &'static str
         .unwrap_or("<unmapped>")
 }
 
-/// Longest readable prefix of `[buf, buf+len)`. `None` when even the
-/// first byte is unmapped. O(log len) memory probes.
+/// Longest readable prefix of `[buf, buf+len)` via O(log len) probes.
+///
+/// Returns `None` when the first byte is unmapped.
 pub(super) fn longest_readable_prefix(
     mem: &cellgov_mem::GuestMemory,
     buf: u64,
@@ -81,8 +73,7 @@ pub(super) fn longest_readable_prefix(
     Some((lo, bytes))
 }
 
-/// Resolve an HLE index into `"{module}::{func}"`. Distinguishes
-/// index-OOB, NID-not-in-database, and resolved cases in the output.
+/// Resolve an HLE index into `"{module}::{func}"`.
 pub(super) fn format_hle_idx(idx: u32, hle_bindings: &[cellgov_ppu::prx::HleBinding]) -> String {
     match hle_bindings.get(idx as usize) {
         Some(b) => match cellgov_ps3_abi::nid::lookup(b.nid) {
@@ -93,14 +84,12 @@ pub(super) fn format_hle_idx(idx: u32, hle_bindings: &[cellgov_ppu::prx::HleBind
     }
 }
 
-/// Captured TTY write for the diagnostic artifact.
 pub(super) struct TtyCapture {
     pub(super) fd: u32,
     pub(super) raw_bytes: Vec<u8>,
     pub(super) call_pc: u64,
 }
 
-/// Captured sys_process_exit info.
 pub(super) struct ProcessExitInfo {
     pub(super) code: u32,
     pub(super) call_pc: u64,
@@ -114,8 +103,8 @@ pub(super) fn print_trace_line(
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) {
     if let Some(pc) = result.local_diagnostics.pc {
-        // "<unmapped>" vs "0x00000000": the zero word decodes as a
-        // valid PPC instruction, so unwrap_or(0) would conflate them.
+        // The zero word decodes as a valid PPC instruction, so unwrap_or(0)
+        // would conflate unmapped fetches with a real zero word.
         let raw = fetch_raw_at(rt, pc)
             .map(|w| format!("0x{w:08x}"))
             .unwrap_or_else(|| "<unmapped>".to_string());
@@ -147,10 +136,6 @@ pub(super) fn print_trace_line(
                 }
                 None => match longest_readable_prefix(rt.memory(), buf, len) {
                     Some((n, bytes)) => {
-                        // ascii_safe_preview strips all control bytes,
-                        // so the partial output is always single-line;
-                        // the full-slice branch above preserves the
-                        // guest's own newline.
                         let text = ascii_safe_preview(&bytes);
                         println!("       -> tty (partial {n}/{len}): {text}");
                     }
@@ -184,13 +169,9 @@ pub(super) fn format_fault(
             let fault_type = code & 0xFFFF_0000;
             match fault_type {
                 FAULT_PC_OUT_OF_RANGE => {
-                    // Raw code kept so low-16 bits surface if the ABI
-                    // ever encodes signal there.
                     format!("PC_OUT_OF_RANGE at PC={pc_str} (code=0x{code:08x})")
                 }
                 FAULT_DECODE_ERROR => {
-                    // Three outcomes: no PC in diagnostics, PC unmapped,
-                    // PC mapped but word undecodable.
                     let raw_str = match pc {
                         None => "<no-pc>".to_string(),
                         Some(a) => match fetch_raw_at(rt, a) {
@@ -218,9 +199,7 @@ pub(super) fn format_fault(
                 }
                 FAULT_DEBUG_BREAK => {
                     let mut s = format!("DEBUG_BREAK at PC={pc_str}");
-                    // Dump memory at each GPR that looks pointer-like.
-                    // Region-aware so stack pointers (0xD0000000+) are
-                    // not dropped.
+                    // Region-aware so stack pointers (0xD0000000+) are not dropped.
                     if let Some(regs) = &result.local_diagnostics.fault_regs {
                         for (i, &val) in regs.gprs.iter().enumerate() {
                             if val < 0x1000 {
@@ -240,10 +219,8 @@ pub(super) fn format_fault(
                             };
                             let label = region_label_at(rt, val, 64);
                             s.push_str(&format!("\n  [r{i}=0x{val:08x} ({label})]: "));
-                            // If a printable-ASCII prefix leads into
-                            // non-printable bytes, count the hidden tail
-                            // so an ASCII header on a binary blob does
-                            // not erase the rest.
+                            // Count the non-printable tail so an ASCII header on a
+                            // binary blob does not erase the rest.
                             let printable = slice
                                 .iter()
                                 .take_while(|&&b| (0x20..0x7f).contains(&b))
@@ -291,15 +268,7 @@ pub(super) fn format_fault(
     out
 }
 
-/// Format a commit-pipeline rejection as a Fault diagnostic.
-///
-/// A non-checkpoint `CommitError` means the commit pipeline rejected
-/// the unit's batch (memory bounds, payload mismatch, unknown
-/// mailbox / signal / unit, etc.). The originating step's
-/// instruction-stream effects were discarded by the same atomic-
-/// batch rule that handles guest faults; the diagnostic mirrors
-/// `format_fault`'s shape so a reader can compare the two without
-/// shifting context.
+/// Format a commit-pipeline rejection mirroring `format_fault`'s shape.
 pub(super) fn format_commit_fault(
     rt: &Runtime,
     err: &CommitError,
@@ -312,19 +281,10 @@ pub(super) fn format_commit_fault(
     out
 }
 
-/// Format a deadlock diagnostic by walking the unit registry for
-/// every `Blocked` unit and naming its block reason.
+/// Format a deadlock diagnostic naming each `Blocked` unit's reason.
 ///
-/// A `StepError::AllBlocked` says at least one unit is `Blocked` and
-/// none is `Runnable`; per the architecture doc this is a liveness
-/// probe, not a semantic deadlock proof, but the per-unit reason is
-/// the diagnostic an investigator wants.
-///
-/// Walks `rt.registry()` rather than `Lv2Host::ppu_threads()` so SPU
-/// units that block on a mailbox-receive stall or DMA wait surface
-/// alongside PPU threads. The PPU-side
-/// [`cellgov_lv2::GuestBlockReason`] is looked up per-unit when
-/// available; non-PPU units render with the bare unit id.
+/// Walks `rt.registry()` rather than `Lv2Host::ppu_threads()` so SPU units
+/// blocked on mailbox-receive or DMA wait surface alongside PPU threads.
 pub(super) fn format_deadlock(
     rt: &Runtime,
     steps: usize,
@@ -356,9 +316,6 @@ pub(super) fn format_deadlock(
                 ));
             }
             None => {
-                // SPU or other non-PPU unit: scheduler-level Blocked
-                // without an LV2 thread record. Mailbox-receive
-                // stall or DMA wait is the typical cause.
                 out.push_str(&format!(
                     "\n  unit {} (no LV2 PPU thread record; SPU or pre-LV2 unit)",
                     unit_id.raw(),
@@ -367,9 +324,8 @@ pub(super) fn format_deadlock(
         }
     }
     if blocked_count == 0 {
-        // AllBlocked fires when at least one unit is Blocked, so an
-        // empty walk means the registry status and effective_status
-        // disagreed; worth flagging.
+        // AllBlocked fires only when a unit is Blocked; an empty walk means
+        // registry status and effective_status disagreed.
         out.push_str("\n  (no Blocked units in registry; AllBlocked may have raced a wake)");
     } else {
         out.push_str(&format!("\n  {blocked_count} blocked unit(s) total"));
@@ -378,11 +334,7 @@ pub(super) fn format_deadlock(
     out
 }
 
-/// Append a stale-exit note to a non-`ProcessExit` terminal
-/// diagnostic so a captured `sys_process_exit` /
-/// `sys_ppu_thread_exit` is not silently dropped on the floor.
-///
-/// No-op when `last_exit` is `None`.
+/// Append a stale-exit note to a non-`ProcessExit` terminal diagnostic.
 pub(super) fn append_orphan_exit_info(
     diagnostic: &mut String,
     last_exit: Option<&ProcessExitInfo>,
@@ -396,8 +348,7 @@ pub(super) fn append_orphan_exit_info(
     ));
 }
 
-/// Append a "last N PCs" block with decoded mnemonics. Shared between
-/// `format_fault` and `format_commit_fault`.
+/// Append a "last N PCs" block with decoded mnemonics.
 fn append_pc_ring_with_decode(
     out: &mut String,
     rt: &Runtime,
@@ -411,7 +362,6 @@ fn append_pc_ring_with_decode(
     out.push_str(&format!("\n  last {filled} PCs:"));
     for i in pc_cursor.iter_indices() {
         let pc = pc_ring[i];
-        // <unmapped> = fetch failed, <baddec> = word undecodable.
         let (raw, name) = match fetch_raw_at(rt, pc) {
             Some(w) => (
                 format!("0x{w:08x}"),
@@ -426,8 +376,7 @@ fn append_pc_ring_with_decode(
     }
 }
 
-/// Append a "last N PCs" block without decoding. Cheaper than
-/// `append_pc_ring_with_decode` when memory access is cold.
+/// Append a "last N PCs" block without decoding (no memory probes).
 fn append_pc_ring_terse(out: &mut String, pc_ring: &[u64; PC_RING_SIZE], pc_cursor: &RingCursor) {
     let filled = pc_cursor.filled();
     if filled == 0 {
@@ -440,7 +389,6 @@ fn append_pc_ring_terse(out: &mut String, pc_ring: &[u64; PC_RING_SIZE], pc_curs
     }
 }
 
-/// Append a "last N syscalls" block.
 fn append_syscall_ring(
     out: &mut String,
     syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
@@ -464,7 +412,7 @@ fn append_syscall_ring(
     }
 }
 
-/// Format the diagnostic artifact for a guest-initiated sys_process_exit.
+/// Format the diagnostic artifact for a guest-initiated `sys_process_exit`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn format_process_exit(
     exit: &ProcessExitInfo,
@@ -497,8 +445,8 @@ pub(super) fn format_process_exit(
                 out.push_str(&format!("{b:02x} "));
             }
         }
-        // All-non-printable gets an explicit tag so an all-dots line
-        // is not mistaken for a stripped ASCII message.
+        // Tag all-non-printable so a dots-only line is not mistaken for
+        // a stripped ASCII message.
         let preview = ascii_safe_preview(&tty.raw_bytes);
         let all_nonprintable =
             !tty.raw_bytes.is_empty() && tty.raw_bytes.iter().all(|&b| !(0x20..=0x7E).contains(&b));
@@ -517,7 +465,7 @@ pub(super) fn format_process_exit(
     out
 }
 
-/// Format the MAX_STEPS diagnostic with the last PCs and syscalls.
+/// Format the MAX_STEPS diagnostic.
 pub(super) fn format_max_steps(
     steps: usize,
     pc_ring: &[u64; PC_RING_SIZE],
@@ -584,8 +532,7 @@ pub(super) fn print_hle_summary(
 }
 
 pub(super) fn print_insn_coverage(insn_coverage: &std::collections::BTreeMap<&'static str, usize>) {
-    // Always emit a header so empty output is not mistaken for the
-    // feature being disabled.
+    // Empty output must distinguish "no executions" from "feature disabled".
     if insn_coverage.is_empty() {
         println!("instruction_coverage: none");
         return;
@@ -599,8 +546,9 @@ pub(super) fn print_insn_coverage(insn_coverage: &std::collections::BTreeMap<&'s
 }
 
 /// Report per-unit and summed instruction-shadow hit/miss counts.
-/// A rising miss count on a single unit means its fetches have moved
-/// outside the shadowed region (PRX bodies above 0x10000000).
+///
+/// A rising miss count on a single unit means its fetches moved outside
+/// the shadowed region (PRX bodies above 0x10000000).
 pub(super) fn print_shadow_stats(rt: &mut Runtime) {
     let mut per_unit: Vec<(u64, u64, u64)> = Vec::new();
     let mut total_hits = 0u64;
@@ -623,8 +571,6 @@ pub(super) fn print_shadow_stats(rt: &mut Runtime) {
     }
     let hit_pct = (total_hits as f64 / total as f64) * 100.0;
     let active = per_unit.len();
-    // `active` = units that retired at least one instruction;
-    // `total_units` = all registered units.
     println!(
         "shadow: {total_hits}/{total} via shadow ({hit_pct:.1}%), {total_misses} decode-on-fetch ({active} active / {total_units} registered)"
     );
@@ -642,8 +588,7 @@ pub(super) fn print_top_pcs(rt: &Runtime, pc_hits: &std::collections::HashMap<u6
         return;
     }
     let mut sorted: Vec<_> = pc_hits.iter().collect();
-    // Stable ordering: descending by count, ascending by PC on ties,
-    // so HashMap iteration order does not leak into replay diffs.
+    // Tie-break by PC so HashMap iteration order does not leak into replay diffs.
     sorted.sort_by(|&(pc_a, c_a), &(pc_b, c_b)| c_b.cmp(c_a).then(pc_a.cmp(pc_b)));
     println!("top_pcs_by_hit_count:");
     for (pc, count) in sorted.iter().take(20) {
@@ -691,7 +636,6 @@ mod tests {
     #[test]
     fn region_label_at_unmapped_addr_is_not_misattributed() {
         let rt = rt_with_layout();
-        // 0x80000000 sits between main and stack in the fixture layout.
         assert_eq!(region_label_at(&rt, 0x8000_0000, 4), "<unmapped>");
     }
 
@@ -710,8 +654,8 @@ mod tests {
     #[test]
     fn longest_readable_prefix_finds_region_boundary_exactly() {
         let rt = rt_with_layout();
-        // Pinned precondition: a future fixture that maps 0x4000_0000
-        // would let this test pass without exercising the boundary.
+        // Pinned precondition: a fixture that maps 0x4000_0000 would let
+        // this test pass without exercising the boundary.
         assert!(
             longest_readable_prefix(rt.memory(), 0x4000_0000, 1).is_none(),
             "precondition: nothing readable at main's end"
@@ -793,11 +737,6 @@ mod tests {
 
     #[test]
     fn format_deadlock_dumps_ppu_unit_with_lv2_reason_and_spu_unit_without() {
-        // Two-unit scenario: unit A is a PPU thread parked on
-        // WaitingOnLwMutex (PPU thread record present); unit B is a
-        // synthetic non-PPU unit (no LV2 thread record, modeling
-        // the SPU mailbox-receive-stall shape). The dump must
-        // surface both with the right rendering.
         use cellgov_lv2::{GuestBlockReason, PpuThreadAttrs, PpuThreadState};
         use cellgov_testkit::world::CountingUnit;
 
@@ -832,7 +771,7 @@ mod tests {
             .get_mut(ppu_id_a)
             .unwrap()
             .state = PpuThreadState::Blocked(GuestBlockReason::WaitingOnLwMutex { id: 7 });
-        // unit_b: deliberately no PpuThread record.
+        // unit_b has no PpuThread record (models SPU/non-PPU shape).
 
         let cursor = RingCursor::new(PC_RING_SIZE);
         let ring = [0u64; PC_RING_SIZE];

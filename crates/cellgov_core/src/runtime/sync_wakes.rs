@@ -1,11 +1,5 @@
-//! Pending-response wake protocol for blocked units: consume a
-//! `PendingResponse`, commit any continuation payload, and transition
-//! the waiter from `Blocked` to `Runnable`.
-//!
-//! [`Runtime::resolve_sync_wakes`] handles releases on sync primitives
-//! (mutex, lwmutex, semaphore, event queue, event flag, cond).
-//! [`Runtime::resolve_join_wakes`] handles PPUs parked on
-//! `sys_spu_thread_group_join` when the group finishes.
+//! Wake protocol for blocked units: consume `PendingResponse`, commit
+//! continuation payload, transition Blocked -> Runnable.
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
@@ -14,15 +8,10 @@ use cellgov_lv2::{CallbackReturnStage, PendingResponse};
 use super::Runtime;
 
 impl Runtime {
-    /// Resolve each waiter's `PendingResponse`, commit continuation
-    /// payloads, and flip Blocked -> Runnable.
-    ///
     /// # Panics
     ///
-    /// Panics on `EventQueueReceive { payload: None }` at wake time:
-    /// the send-side dispatch forgot to install `response_updates`.
-    /// Delivering four zero u64s would be indistinguishable from a
-    /// real event.
+    /// `EventQueueReceive { payload: None }`: four zero u64s would be
+    /// indistinguishable from a real event.
     pub(super) fn resolve_sync_wakes(&mut self, woken_unit_ids: &[UnitId]) {
         for waiter in woken_unit_ids {
             let waiter = *waiter;
@@ -54,19 +43,12 @@ impl Runtime {
                     self.registry.set_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::LwMutexWake { mutex_ptr, caller }) => {
-                    // Claim ownership in the user-space lwmutex
-                    // struct: write owner (offset 0), reset
-                    // recursive_count to 1 (offset 12), decrement
-                    // waiter (offset 4). `mutex_ptr == 0` is the
-                    // raw LV2-syscall path with no user-space
-                    // struct; in that case we just set r3 = 0.
+                    // `mutex_ptr == 0` is the raw LV2-syscall path with
+                    // no user-space struct.
                     if mutex_ptr != 0 {
                         let base = mutex_ptr as u64;
                         self.commit_bytes_at(base, &caller.to_be_bytes());
                         self.commit_bytes_at(base + 12, &1u32.to_be_bytes());
-                        // Read the current waiter count so the
-                        // decrement is non-clobbering: only this
-                        // unit's contribution is removed.
                         let waiter_addr = base + 4;
                         let bytes = self.memory.read(
                             cellgov_mem::ByteRange::new(
@@ -81,9 +63,7 @@ impl Runtime {
                         let next = current.saturating_sub(1);
                         self.commit_bytes_at(waiter_addr, &next.to_be_bytes());
                     }
-                    // The waker just acquired the lwmutex, so its
-                    // critical-section count goes up by one. Mirrors
-                    // the increment HLE lwmutex_lock does on the
+                    // Mirror the increment HLE lwmutex_lock does on the
                     // uncontended fast path.
                     if let Some(tid) = self.lv2_host.ppu_thread_id_for_unit(waiter) {
                         self.lv2_host.lwmutex_holds_inc(tid);
@@ -91,16 +71,12 @@ impl Runtime {
                     self.registry.set_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::CondWakeReacquire { .. }) => {
-                    // Full re-acquire belongs with the cond primitive;
-                    // for now wake with CELL_OK and do not re-park.
                     self.registry.set_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::CallbackReturn { stage, args }) => {
                     self.resume_callback_return(waiter, stage, args);
                 }
                 Some(_) | None => {
-                    // Defensive: an ill-formed or absent entry still
-                    // transitions the waiter back to runnable.
                     self.registry.set_syscall_return(waiter, 0);
                 }
             }
@@ -109,20 +85,16 @@ impl Runtime {
         }
     }
 
-    /// Stage-dispatching resume entry for a callback worker's wake.
+    /// Stage dispatcher for a callback worker's wake.
     ///
     /// Each parkable HLE handler that schedules a worker via
-    /// `Lv2Host::call_guest_callback_sync` lands a
-    /// `CallbackReturnStage` variant here in lockstep with adding
-    /// the variant to `cellgov_lv2`. Adding a variant without a
-    /// resume arm fires the wildcard `unimplemented!`; the wildcard
-    /// is required because `CallbackReturnStage` is
+    /// `Lv2Host::call_guest_callback_sync` must land a matching
+    /// `CallbackReturnStage` arm here; the wildcard `unimplemented!`
+    /// catches new variants because `CallbackReturnStage` is
     /// `#[non_exhaustive]` cross-crate.
     ///
-    /// `args` is the worker's `r3..=r10` captured at trampoline
-    /// entry. `args[0]` is the worker's r3 by PPC64 ELFv1
-    /// convention; the rest are caller-defined out-register
-    /// payloads that consumer arms read directly.
+    /// `args` is the worker's `r3..=r10` captured at trampoline entry
+    /// (PPC64 ELFv1: `args[0]` is r3).
     fn resume_callback_return(
         &mut self,
         waiter: UnitId,
@@ -150,11 +122,7 @@ impl Runtime {
                 );
             }
             _ => {
-                unimplemented!(
-                    "resume_callback_return: stage {stage:?} has no resume arm; \
-                     add the arm in this match in lockstep with adding the \
-                     CallbackReturnStage variant in cellgov_lv2"
-                );
+                unimplemented!("resume_callback_return: stage {stage:?} has no resume arm");
             }
         }
     }
@@ -191,9 +159,8 @@ impl Runtime {
             if !is_match {
                 continue;
             }
-            // `peek` confirmed a matching ThreadGroupJoin; use
-            // `take_expected` so an accidental intervening drain
-            // panics rather than silently dropping into `else`.
+            // `take_expected` so an intervening drain panics rather
+            // than silently falling through.
             let pending = self.syscall_responses.take_expected(waiter_id);
             {
                 match &pending {
@@ -222,10 +189,8 @@ impl Runtime {
                     | PendingResponse::EventFlagWake { .. }
                     | PendingResponse::LwMutexWake { .. }
                     | PendingResponse::CallbackReturn { .. } => {
-                        // The SPU thread-group wake path should not
-                        // reach these variants; each has its own wake
-                        // path. Defensive recovery without writing to
-                        // the out pointer.
+                        // Each variant has its own wake path; recover
+                        // without writing to the out pointer.
                         self.registry
                             .set_status_override(waiter_id, UnitStatus::Runnable);
                     }

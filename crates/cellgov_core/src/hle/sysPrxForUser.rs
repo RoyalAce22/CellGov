@@ -1,16 +1,9 @@
-//! sysPrxForUser HLE implementations.
+//! sysPrxForUser HLE implementations. Kernel-side `sc` trap
+//! handlers live in `cellgov_lv2`.
 //!
-//! Kernel-side syscalls (`sc` trap handlers) live in `cellgov_lv2`.
-//!
-//! ## Failure policy
-//!
-//! - Invariants that only our loader/runtime can violate (malformed
-//!   TLS, unseeded LV2 thread table) use `debug_assert!`; release
-//!   keeps the historical fallback.
-//! - Guest-supplied bad pointers return `CELL_EFAULT` (matching
-//!   Sony's trap-on-bad-pointer via RPCS3's `vm::ptr`).
-//! - `.expect(...)` is reserved for oracle-state corruption (heap
-//!   exhaustion, ID counter exhaustion).
+//! Bad guest pointers return `CELL_EFAULT`; loader/runtime
+//! invariants use `debug_assert!`; oracle-state corruption (heap
+//! or id-counter exhaustion) panics via `.expect`.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::cell_errors::CELL_EFAULT;
@@ -19,12 +12,10 @@ use cellgov_ps3_abi::nid::sys_prx_for_user as sys_nid;
 use crate::hle::context::{HleContext, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
-/// Every NID this module claims; sourced from
-/// [`cellgov_ps3_abi::nid::sys_prx_for_user::OWNED`].
 #[cfg(test)]
 pub(crate) const OWNED_NIDS: &[u32] = sys_nid::OWNED;
 
-/// Dispatch entry point; returns `None` if the NID is not owned here.
+/// Returns `None` if the NID is not owned here.
 pub(crate) fn dispatch(
     runtime: &mut Runtime,
     source: UnitId,
@@ -39,17 +30,9 @@ pub(crate) fn dispatch(
             process_exit(&mut adapter(runtime, source, nid), args);
         }
         sys_nid::PROCESS_IS_STACK => {
-            // Real LV2: returns 1 iff `addr` is in a PPU thread
-            // stack region. CellGov configures the primary stack at
-            // 0xD0000000+0x10000 and child stacks at 0xD0010000 +
-            // 0xF00000; the lower bound is widened to 0xCFF00000 to
-            // accommodate PSL1GHT primary-thread startup that
-            // consumes more than 64 KiB before main() runs and
-            // leaves locals just below the configured stack base.
-            //
-            // HLE call convention: args[0] is the trampoline-side
-            // syscall-id slot; args[1] holds the first guest C-level
-            // argument (the pointer to test).
+            // Lower bound widened below the configured 0xD0000000
+            // stack base because PSL1GHT startup leaves locals
+            // there before main() runs.
             let addr = args[1] as u32;
             const STACK_RANGE_LO: u32 = 0xCFF0_0000;
             const STACK_RANGE_HI: u32 = 0xD0F1_0000;
@@ -60,13 +43,7 @@ pub(crate) fn dispatch(
             malloc(&mut adapter(runtime, source, nid), args);
         }
         sys_nid::FREE | sys_nid::HEAP_DELETE_HEAP | sys_nid::HEAP_FREE => {
-            // No-op: the HLE bump allocator in `hle::context` cannot
-            // release individual allocations, so free / delete-heap
-            // / heap-free collapse to CELL_OK with the allocation
-            // leaked (RPCS3's HLE path makes the same compromise).
-            //
-            // TODO: switch to a real free-list allocator when
-            // `hle_heap_watermark` shows non-trivial usage.
+            // Bump allocator cannot release individual allocations.
             adapter(runtime, source, nid).set_return(0);
         }
         sys_nid::MEMSET => {
@@ -91,9 +68,6 @@ pub(crate) fn dispatch(
             lwcond_create(runtime, source, nid, args);
         }
         sys_nid::LWCOND_DESTROY => {
-            // Stub: decrement count via the LV2 host. The lwcond
-            // queue/signal surface is not yet modeled; fully wiring
-            // it is its own slice.
             runtime.lv2_host_mut().lwcond_count_dec();
             adapter(runtime, source, nid).set_return(0);
         }
@@ -107,14 +81,12 @@ pub(crate) fn dispatch(
             heap_memalign(&mut adapter(runtime, source, nid), args);
         }
         sys_nid::PPU_THREAD_GET_ID => {
-            // Look up the guest-facing thread id via the LV2 table.
-            // An unseeded table collapses every unit to the fallback
-            // 0x01000000, which breaks thread-id-keyed state.
             let table_id = runtime.lv2_host().ppu_thread_id_for_unit(source);
+            // Unseeded table: every unit collapses to the fallback
+            // id, colliding thread-id-keyed state across units.
             debug_assert!(
                 table_id.is_some(),
-                "sys_ppu_thread_get_id: LV2 thread table not seeded for unit {source:?}; \
-                 fallback id 0x01000000 would collide with every other unit's call"
+                "sys_ppu_thread_get_id: LV2 thread table not seeded for unit {source:?}"
             );
             let id: u64 = table_id.map(|tid| tid.raw()).unwrap_or(0x0100_0000);
             let ptr = args[0] as u32;
@@ -124,33 +96,15 @@ pub(crate) fn dispatch(
             ctx.set_return(0);
         }
         sys_nid::TIME_GET_SYSTEM_TIME => {
-            // Microseconds since boot, derived from the deterministic
-            // guest clock (1 tick = 1 ns, so us = ticks / 1000). The
-            // timer syscalls advance `runtime.time` so a thread that
-            // measures `system_time()` before and after a sleep sees
-            // the expected delta.
+            // 1 tick = 1 ns; us = ticks / 1000.
             let us = runtime.time().raw() / 1_000;
             adapter(runtime, source, nid).set_return(us);
         }
         sys_nid::PPU_THREAD_CREATE => {
-            // sysPrxForUser SDK wrapper, NID 0x24a1ea07. Signature
-            // (per RPCS3's sysPrxForUser.cpp):
-            //   sys_ppu_thread_create(
-            //       thread_id*,    // r3 = args[1]: out-pointer
-            //       u32 entry,     // r4 = args[2]: entry OPD address
-            //                      //   (DIRECT, not a struct pointer)
-            //       u64 arg,       // r5 = args[3]
-            //       s32 prio,      // r6 = args[4]
-            //       u32 stacksize, // r7 = args[5]
-            //       u64 flags,     // r8 = args[6]
-            //       char* name,    // r9 = args[7]
-            //   )
-            //
-            // The SDK wrapper allocates the LV2-side param struct
-            // internally and calls into _sys_ppu_thread_create (LV2
-            // syscall 52) where r4 is the struct pointer. The HLE
-            // entry takes the entry OPD raw -- no param-struct
-            // dereference is needed here.
+            // SDK-side wrapper signature (id_ptr, entry_opd, arg,
+            // prio, stacksize, flags, name); takes the entry OPD
+            // directly, unlike the LV2 syscall which receives a
+            // param-struct pointer.
             let entry_opd = args[2] as u32;
             if entry_opd == 0 {
                 adapter(runtime, source, nid).set_return(CELL_EFAULT.into());
@@ -203,8 +157,7 @@ pub(crate) fn initialize_tls(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     let tls_seg_size = args[3] as u32;
     let tls_mem_size = args[4] as u32;
 
-    // ELF PT_TLS invariant: p_filesz <= p_memsz. A violation means
-    // a buggy loader or malformed ELF.
+    // ELF PT_TLS invariant: p_filesz <= p_memsz.
     debug_assert!(
         tls_seg_size <= tls_mem_size,
         "sys_initialize_tls: malformed TLS (p_filesz={tls_seg_size:#x} > \
@@ -235,8 +188,8 @@ pub(crate) fn initialize_tls(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     }
 
     let bss_start = dst_end;
-    // Malformed p_filesz > p_memsz wraps here to a huge value and
-    // is rejected by the bounds check below.
+    // Malformed p_filesz > p_memsz wraps to a huge value and is
+    // rejected by the bounds check below.
     let bss_len = tls_mem_size.wrapping_sub(tls_seg_size) as usize;
     let bss_end = bss_start.saturating_add(bss_len);
     if bss_len > 0 && bss_end <= mem_len {
@@ -266,10 +219,8 @@ pub(crate) fn memset(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         ctx.set_return(args[1]);
         return;
     }
-    // Real libc memset never returns an error; it faults on a bad
-    // page, which the oracle cannot produce. Map a failed write to
-    // CELL_EFAULT instead of silently skipping it. Guests that
-    // check memset's return value see a visible diff here.
+    // libc memset faults on a bad page; the oracle has no faulting
+    // path, so a failed write surfaces as CELL_EFAULT.
     let data = vec![val; size as usize];
     match ctx.write_guest(ptr as u64, &data) {
         Ok(()) => ctx.set_return(args[1]),
@@ -277,22 +228,15 @@ pub(crate) fn memset(ctx: &mut dyn HleContext, args: &[u64; 9]) {
     }
 }
 
-/// `sys_lwmutex_create` HLE shim.
-///
-/// Allocates the lwmutex's `sleep_queue` id from the LV2 lwmutex
-/// table so subsequent `sys_lwmutex_{lock,unlock,trylock,destroy}`
-/// routed through [`lwmutex_route`] resolve through the same
-/// blocking surface.
+/// Allocates the `sleep_queue` id from the LV2 lwmutex table so the
+/// matching `lock`/`unlock`/`trylock`/`destroy` calls resolve
+/// through the same blocking surface.
 pub(crate) fn lwmutex_create(runtime: &mut Runtime, source: UnitId, nid: u32, args: &[u64; 9]) {
     let mutex_ptr = args[1] as u32;
     let attr_ptr = args[2] as u32;
 
-    // Sony's sys_lwmutex_create traps on a bad attr_ptr; match that
-    // with an explicit CELL_EFAULT rather than substituting
-    // (PRIORITY, NOT_RECURSIVE) defaults. The read is region-aware
-    // because guests pass stack-allocated attrs (PSL1GHT puts the
-    // primary thread stack at 0xD0000000+); a linear `as_bytes()`
-    // probe would always fail those addresses.
+    // Region-aware read: guests pass stack-allocated attrs above
+    // 0xD0000000, outside the linear user-memory region.
     let (protocol, recursive) = {
         use cellgov_mem::ByteRange;
         let Some(range) = ByteRange::new(cellgov_mem::GuestAddr::new(attr_ptr as u64), 8) else {
@@ -313,18 +257,12 @@ pub(crate) fn lwmutex_create(runtime: &mut Runtime, source: UnitId, nid: u32, ar
         return;
     };
 
-    // Initialise the full struct: owner = FREE, waiter = 0,
-    // attribute = recursive | protocol, recursive_count = 0,
-    // sleep_queue = kernel id, pad = 0. Leaving waiter or
-    // recursive_count uninitialised would let stack garbage drive
-    // the user-space fast path and force spurious kernel calls.
+    // Stack garbage in waiter / recursive_count would mislead the
+    // user-space fast path into spurious kernel calls.
     let mut buf = [0u8; 24];
     buf[0..4].copy_from_slice(&0xFFFF_FFFFu32.to_be_bytes());
-    // buf[4..8] = waiter = 0 (already zero).
     buf[8..12].copy_from_slice(&(recursive | protocol).to_be_bytes());
-    // buf[12..16] = recursive_count = 0 (already zero).
     buf[16..20].copy_from_slice(&sleep_queue.to_be_bytes());
-    // buf[20..24] = pad = 0 (already zero).
 
     let mut ctx = adapter(runtime, source, nid);
     match ctx.write_guest(mutex_ptr as u64, &buf) {
@@ -333,24 +271,16 @@ pub(crate) fn lwmutex_create(runtime: &mut Runtime, source: UnitId, nid: u32, ar
     }
 }
 
-/// `sys_lwcond_create` HLE shim.
-///
-/// Stub: tracks live-object count for `sys_process_get_number_of_object`
-/// and writes a placeholder kernel id back to the user lwcond
-/// struct. Wait/signal semantics are not modeled.
+/// Tracks live-object count for `sys_process_get_number_of_object`
+/// and writes a non-zero handle marker; wait/signal semantics are
+/// not modeled.
 pub(crate) fn lwcond_create(runtime: &mut Runtime, source: UnitId, nid: u32, args: &[u64; 9]) {
     let lwcond_ptr = args[1] as u32;
-    let _lwmutex_ptr = args[2] as u32; // paired lwmutex; unused for the count-only stub
+    let _lwmutex_ptr = args[2] as u32;
     let _attr_ptr = args[3] as u32;
 
     runtime.lv2_host_mut().lwcond_count_inc();
 
-    // Place a non-zero id at offset 0 of the lwcond struct so any
-    // caller probing the handle sees a non-zero value. The exact
-    // layout of `sys_lwcond_t` is opaque here; this is purely a
-    // visibility marker for the count-only stub. A full lwcond
-    // implementation would populate the queue id and lwmutex
-    // pointer fields.
     let id = 0xFFFFFFFFu32;
     let mut buf = [0u8; 4];
     buf.copy_from_slice(&id.to_be_bytes());
@@ -359,12 +289,8 @@ pub(crate) fn lwcond_create(runtime: &mut Runtime, source: UnitId, nid: u32, arg
     ctx.set_return(0);
 }
 
-/// Read the embedded `sleep_queue` id at offset 0x10 of an
-/// `sys_lwmutex_t` and dispatch the supplied `Lv2Request` through
-/// the LV2 lwmutex surface. Currently unused: the lock / unlock /
-/// trylock / destroy paths each do their own user-space CAS and
-/// dispatch directly. Kept for the day a non-recursive primitive
-/// (semaphore?) wants the same routing shape.
+/// Reads the embedded `sleep_queue` id at offset 0x10 and dispatches
+/// the supplied request through the LV2 lwmutex surface.
 #[allow(dead_code)]
 fn lwmutex_route<F>(
     runtime: &mut Runtime,
@@ -378,9 +304,7 @@ fn lwmutex_route<F>(
     let mutex_ptr = args[1] as u32;
     let timeout = args[2];
 
-    // Region-aware: lwmutex structs are typically stack-allocated by
-    // guests, and the primary stack at 0xD0000000+ is outside the
-    // linear user-memory region.
+    // Region-aware: stack-allocated structs above 0xD0000000.
     use cellgov_mem::ByteRange;
     let Some(range) = ByteRange::new(
         cellgov_mem::GuestAddr::new((mutex_ptr as u64).saturating_add(0x10)),
@@ -399,11 +323,11 @@ fn lwmutex_route<F>(
 }
 
 // PSL1GHT `sys_lwmutex_t` layout:
-//   +0  u32 owner            (lock_var.owner; 0xFFFF_FFFF == free)
-//   +4  u32 waiter            (number of threads in kernel sleep queue)
-//   +8  u32 attribute         (recursive | protocol)
+//   +0  u32 owner            (0xFFFF_FFFF == free)
+//   +4  u32 waiter           (kernel sleep-queue depth)
+//   +8  u32 attribute        (recursive | protocol)
 //   +12 u32 recursive_count
-//   +16 u32 sleep_queue       (kernel-side id)
+//   +16 u32 sleep_queue      (kernel-side id)
 //   +20 u32 pad
 const LWMUTEX_OFF_OWNER: u64 = 0;
 const LWMUTEX_OFF_WAITER: u64 = 4;
@@ -411,7 +335,6 @@ const LWMUTEX_OFF_RECURSIVE_COUNT: u64 = 12;
 const LWMUTEX_FREE_OWNER: u32 = 0xFFFF_FFFF;
 const SYS_SYNC_RECURSIVE: u32 = 0x10;
 
-/// Snapshot of a guest `sys_lwmutex_t`'s scalar fields.
 struct LwMutexFields {
     owner: u32,
     waiter: u32,
@@ -420,8 +343,7 @@ struct LwMutexFields {
     sleep_queue: u32,
 }
 
-/// Region-aware read of all scalar fields, or `None` on a bad
-/// `mutex_ptr` (matches Sony's trap-on-bad-pointer).
+/// `None` on a bad `mutex_ptr`.
 fn read_lwmutex_fields(runtime: &Runtime, mutex_ptr: u32) -> Option<LwMutexFields> {
     use cellgov_mem::ByteRange;
     let range = ByteRange::new(cellgov_mem::GuestAddr::new(mutex_ptr as u64), 24)?;
@@ -438,17 +360,13 @@ fn read_lwmutex_fields(runtime: &Runtime, mutex_ptr: u32) -> Option<LwMutexField
     })
 }
 
-/// Region-aware single-field write; on failure the wrapper reports
-/// `CELL_EFAULT` upstream.
 fn write_lwmutex_u32(ctx: &mut dyn HleContext, mutex_ptr: u32, off: u64, value: u32) -> bool {
     ctx.write_guest((mutex_ptr as u64) + off, &value.to_be_bytes())
         .is_ok()
 }
 
-/// Caller's PSL1GHT thread id encoded into the user-space owner
-/// field. The HLE keeps the LV2 thread-id as the canonical caller
-/// identity; the user-space owner field stores its raw u32 form so
-/// future kernel calls can detect "this is the same thread".
+/// Truncated LV2 thread id used as the user-space owner field so
+/// later calls recognise the same thread.
 fn caller_owner_id(runtime: &Runtime, source: UnitId) -> u32 {
     runtime
         .lv2_host()
@@ -457,11 +375,7 @@ fn caller_owner_id(runtime: &Runtime, source: UnitId) -> u32 {
         .unwrap_or(0)
 }
 
-/// `sys_lwmutex_lock` HLE wrapper.
-///
-/// Implements the user-space fast-path so the kernel only sees
-/// actual contention. RPCS3's `sys_lwmutex_lock` (PRX-side, not the
-/// `_sys_*` syscall) does the same staging.
+/// User-space fast path; only contention reaches the kernel.
 pub(crate) fn lwmutex_lock_hle(runtime: &mut Runtime, source: UnitId, nid: u32, args: &[u64; 9]) {
     let mutex_ptr = args[1] as u32;
     let timeout = args[2];
@@ -475,9 +389,8 @@ pub(crate) fn lwmutex_lock_hle(runtime: &mut Runtime, source: UnitId, nid: u32, 
         .ppu_threads()
         .is_owner_alive(fields.owner);
     if fields.owner == LWMUTEX_FREE_OWNER || !owner_alive {
-        // Uncontended acquire (or stale owner from a thread that
-        // already exited without unlocking -- treated as free so the
-        // mutex is not orphaned forever).
+        // Stale owner (thread exited without unlocking) is treated
+        // as free so the mutex is not orphaned forever.
         let was_stale = fields.owner != LWMUTEX_FREE_OWNER && !owner_alive;
         let me_tid = runtime.lv2_host().ppu_thread_id_for_unit(source);
         let mut ctx = adapter(runtime, source, nid);
@@ -500,10 +413,8 @@ pub(crate) fn lwmutex_lock_hle(runtime: &mut Runtime, source: UnitId, nid: u32, 
         return;
     }
     if fields.owner == me {
-        // Recursive: we already own the lwmutex. PSL1GHT's
-        // user-space wrapper is responsible for the
-        // recursive_count bookkeeping; the kernel-side hook just
-        // returns OK so the wrapper can proceed.
+        // PSL1GHT's wrapper owns recursive_count bookkeeping;
+        // returning OK lets it proceed.
         if (fields.attribute & SYS_SYNC_RECURSIVE) != 0 {
             adapter(runtime, source, nid).set_return(0);
             return;
@@ -511,10 +422,9 @@ pub(crate) fn lwmutex_lock_hle(runtime: &mut Runtime, source: UnitId, nid: u32, 
         adapter(runtime, source, nid).set_return(cellgov_ps3_abi::cell_errors::CELL_EDEADLK.into());
         return;
     }
-    // Contention: bump the user-space waiter so a concurrent
-    // unlocker invokes the kernel, then block in the kernel sleep
-    // queue. On wake, the runtime fills in owner / waiter /
-    // recursive_count via `PendingResponse::LwMutexWake`.
+    // Bump the user-space waiter so a concurrent unlocker invokes
+    // the kernel; post-wake fields are filled in by the runtime
+    // via `PendingResponse::LwMutexWake`.
     {
         let mut ctx = adapter(runtime, source, nid);
         if !write_lwmutex_u32(
@@ -535,13 +445,8 @@ pub(crate) fn lwmutex_lock_hle(runtime: &mut Runtime, source: UnitId, nid: u32, 
         },
         source,
     );
-    // The dispatch parked the unit if it had to block; the
-    // post-wake bookkeeping (decrement waiter, write owner = me,
-    // recursive_count = 1) is performed by the runtime when it
-    // resolves `PendingResponse::LwMutexWake`.
 }
 
-/// `sys_lwmutex_unlock` HLE wrapper.
 pub(crate) fn lwmutex_unlock_hle(runtime: &mut Runtime, source: UnitId, nid: u32, args: &[u64; 9]) {
     let mutex_ptr = args[1] as u32;
     let Some(fields) = read_lwmutex_fields(runtime, mutex_ptr) else {
@@ -567,9 +472,6 @@ pub(crate) fn lwmutex_unlock_hle(runtime: &mut Runtime, source: UnitId, nid: u32
         ctx.set_return(0);
         return;
     }
-    // Final release: clear user-space ownership, then wake one
-    // kernel-side waiter if the user-space waiter counter says any
-    // are parked.
     let me_tid = runtime.lv2_host().ppu_thread_id_for_unit(source);
     {
         let mut ctx = adapter(runtime, source, nid);
@@ -580,9 +482,8 @@ pub(crate) fn lwmutex_unlock_hle(runtime: &mut Runtime, source: UnitId, nid: u32
             return;
         }
     }
-    // Decrement the per-thread hold count: this is a final unlock
-    // (recursive_count went 1 -> 0), so the lwmutex is no longer in
-    // the holder's critical-section set.
+    // recursive_count went 1 -> 0; lwmutex leaves the holder's
+    // critical-section set.
     if let Some(tid) = me_tid {
         runtime.lv2_host_mut().lwmutex_holds_dec(tid);
     }
@@ -598,10 +499,8 @@ pub(crate) fn lwmutex_unlock_hle(runtime: &mut Runtime, source: UnitId, nid: u32
     }
 }
 
-/// `sys_lwmutex_destroy` HLE wrapper. Real LV2 rejects destroy of
-/// a held lwmutex with `CELL_EBUSY`; the held check looks at the
-/// user-space owner field, since the kernel side has no
-/// ownership tracking.
+/// Held check reads the user-space owner field; the kernel side
+/// has no ownership tracking.
 pub(crate) fn lwmutex_destroy_hle(
     runtime: &mut Runtime,
     source: UnitId,
@@ -625,8 +524,7 @@ pub(crate) fn lwmutex_destroy_hle(
     );
 }
 
-/// `sys_lwmutex_trylock` HLE wrapper. Mirrors the lock fast-path
-/// but never blocks: contention reports `CELL_EBUSY`.
+/// Never blocks; contention reports `CELL_EBUSY`.
 pub(crate) fn lwmutex_trylock_hle(
     runtime: &mut Runtime,
     source: UnitId,
@@ -707,12 +605,9 @@ pub(crate) fn heap_memalign(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 }
 
 pub(crate) fn process_exit(ctx: &mut dyn HleContext, args: &[u64; 9]) {
-    // Finished units never resume; set_return here repurposes the
-    // registry's syscall-return slot as a post-mortem exit-code
-    // carrier. A registry change that clears the return slot on
-    // Finished units would silently drop the exit code; if a
-    // second caller needs this, promote to a dedicated
-    // `HleContext::set_exit_code` method.
+    // Finished units never resume; the syscall-return slot doubles
+    // as a post-mortem exit-code carrier. A registry change that
+    // clears the slot on Finished units would drop the exit code.
     ctx.set_unit_finished();
     ctx.set_return(args[0]);
 }
@@ -727,9 +622,7 @@ mod canary_tests {
     use cellgov_mem::GuestMemory;
     use cellgov_time::Budget;
 
-    /// Runtime wired up just enough for any sys-module NID to reach
-    /// its handler (registered unit, seeded LV2 thread table, heap
-    /// base, stub PPU factory).
+    /// Minimum runtime that lets any sys-module NID reach its handler.
     fn canary_runtime() -> (Runtime, UnitId) {
         let mut rt = Runtime::new(GuestMemory::new(0x10_0000), Budget::new(1), 100);
         let unit_id = UnitId::new(0);
@@ -751,10 +644,9 @@ mod canary_tests {
         (rt, unit_id)
     }
 
-    /// Drift canary: every NID in [`OWNED_NIDS`] must reach a
-    /// handler. A handler panic on synthetic-zero args counts as
-    /// "routed" -- `catch_unwind` captures it as evidence of
-    /// dispatch reaching the body.
+    /// A handler panic on synthetic-zero args counts as "routed":
+    /// `catch_unwind` captures it as evidence of dispatch reaching
+    /// the body.
     #[test]
     fn owned_nids_all_claimed_by_dispatch() {
         for &nid in OWNED_NIDS {
@@ -769,15 +661,11 @@ mod canary_tests {
                     "sys::dispatch returned None for NID {nid:#010x} listed in OWNED_NIDS \
                      -- the match arm was likely removed without trimming the list"
                 ),
-                Err(_) => {
-                    // Handler panicked => NID reached the body.
-                }
+                Err(_) => {}
             }
         }
     }
 
-    /// Negative companion: gcm-owned and synthetic NIDs must return
-    /// `None`.
     #[test]
     fn unowned_nids_are_rejected_by_dispatch() {
         let probes: &[u32] = &[
@@ -807,8 +695,6 @@ mod lwmutex_routing_tests {
     use cellgov_ps3_abi::nid::sys_prx_for_user as sys_nid;
     use cellgov_time::Budget;
 
-    /// 1 MiB guest memory + seeded primary PPU thread is enough for
-    /// lwmutex traffic from a single unit.
     fn lwmutex_runtime() -> (Runtime, UnitId, u32) {
         let mut rt = Runtime::new(GuestMemory::new(0x10_0000), Budget::new(1), 100);
         let unit_id = UnitId::new(0);
@@ -826,8 +712,6 @@ mod lwmutex_routing_tests {
                 tls_base: 0,
             },
         );
-        // mutex_ptr at 0x40000, attr_ptr at 0x40100. 24-byte mutex,
-        // 8-byte attribute (zero protocol + non-recursive).
         let mutex_ptr: u32 = 0x40000;
         (rt, unit_id, mutex_ptr)
     }
@@ -864,9 +748,6 @@ mod lwmutex_routing_tests {
             dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_LOCK, &args),
             0
         );
-        // The HLE wrapper takes the uncontended lock entirely in
-        // user space (owner field at offset 0), so the kernel
-        // side stays untouched: still signaled, no waiters parked.
         let owner_bytes = &rt.memory().as_bytes()[(mutex_ptr as usize)..(mutex_ptr as usize + 4)];
         let owner = u32::from_be_bytes([
             owner_bytes[0],
@@ -880,7 +761,6 @@ mod lwmutex_routing_tests {
             dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_UNLOCK, &args),
             0
         );
-        // Unlock cleared the user-space owner.
         let owner_bytes = &rt.memory().as_bytes()[(mutex_ptr as usize)..(mutex_ptr as usize + 4)];
         let owner = u32::from_be_bytes([
             owner_bytes[0],
@@ -912,8 +792,6 @@ mod lwmutex_routing_tests {
             dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_LOCK, &args),
             0
         );
-        // try_acquire returns Contended on any held mutex regardless
-        // of caller identity, mapped to CELL_EBUSY by the LV2 host.
         let trylock_ret = dispatch_and_drain(&mut rt, unit, sys_nid::LWMUTEX_TRYLOCK, &args);
         assert_eq!(
             trylock_ret as u32,
@@ -943,8 +821,7 @@ mod lwmutex_routing_tests {
     #[test]
     fn lock_on_unknown_id_returns_esrch() {
         let (mut rt, unit, mutex_ptr) = lwmutex_runtime();
-        // Hand-write a fake lwmutex struct at mutex_ptr with a
-        // never-allocated id at offset 0x10.
+        // Never-allocated id at offset 0x10.
         let mut buf = [0u8; 24];
         buf[16..20].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
         rt.memory_mut()

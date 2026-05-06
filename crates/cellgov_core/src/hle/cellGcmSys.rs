@@ -1,20 +1,10 @@
-//! cellGcmSys HLE implementations.
+//! HLE for cellGcmSys: RSX command-buffer and context setup.
 //!
-//! ## Failure policy
-//!
-//! Arithmetic on guest-controlled values uses `wrapping_*` to match
-//! real PPU hardware; arithmetic on oracle-owned values (fresh heap
-//! pointers) uses plain `+` so a wrap is a loud oracle bug.
-//! `debug_assert!` marks invariants a well-behaved guest cannot
-//! violate on real hardware; `.expect(...)` is reserved for
-//! oracle-state corruption (heap exhaustion, commit failure).
-//!
-//! ## Comparison-run note
-//!
-//! The RSX-checkpoint flag is a divergence source: the same NID
-//! behaves differently based on a flag real PS3 and RPCS3 do not
-//! have. Cross-runner comparison runs must configure it
-//! consistently on both sides.
+//! Arithmetic on guest-controlled values uses `wrapping_*` to match PPU
+//! hardware; arithmetic on oracle-owned values uses plain `+` so a wrap
+//! is a loud oracle bug. The `rsx_checkpoint` flag selects an MMIO
+//! sentinel for `control_addr` instead of a heap allocation, and must
+//! be configured identically across runners during comparison.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::cell_gcm_sys::{error as gcm_error, rsx_local};
@@ -23,25 +13,16 @@ use cellgov_ps3_abi::nid::cell_gcm_sys as gcm_nid;
 use crate::hle::context::{HleContext, RuntimeHleAdapter};
 use crate::runtime::Runtime;
 
-/// Every NID this module claims; sourced from
-/// [`cellgov_ps3_abi::nid::cell_gcm_sys::OWNED`].
 #[cfg(test)]
 pub(crate) const OWNED_NIDS: &[u32] = gcm_nid::OWNED;
 
-/// Per-module state for cellGcmSys.
-///
-/// Zero-valued `context_addr`, `control_addr`, and `label_addr` mean
-/// "not yet initialized"; all three become non-zero after `init_body`
-/// runs. The witness holds because (1) the RSX-checkpoint MMIO
-/// sentinel `0xC000_0040` is non-zero and (2) the HLE bump allocator
-/// refuses to hand out address 0 (see `RuntimeHleAdapter::heap_alloc`
-/// and the `set_hle_heap_base` precondition).
+/// Zero in `context_addr`, `control_addr`, and `label_addr` means
+/// pre-`init_body`; all three become non-zero post-init because the
+/// MMIO sentinel `0xC000_0040` is non-zero and the HLE bump allocator
+/// refuses address 0. GET_* dispatch arms assert on this.
 #[derive(Debug, Default)]
 pub(crate) struct GcmState {
     pub(crate) context_addr: u32,
-    /// Non-zero post-init. `0xC000_0040` under `rsx_checkpoint`,
-    /// otherwise a heap allocation. The GET_CONTROL_REGISTER
-    /// dispatch `debug_assert_ne!(..., 0)` relies on this.
     pub(crate) control_addr: u32,
     pub(crate) io_address: u32,
     pub(crate) io_size: u32,
@@ -56,7 +37,7 @@ pub(crate) const TILED_PITCHES: &[u32] = &[
     0x6800, 0x7000, 0x8000, 0xA000, 0xC000, 0xD000, 0xE000, 0x10000,
 ];
 
-/// Dispatch entry point; returns `None` if the NID is not owned here.
+/// Returns `None` if the NID is not owned here.
 pub(crate) fn dispatch(
     runtime: &mut Runtime,
     source: UnitId,
@@ -89,8 +70,7 @@ pub(crate) fn dispatch(
                 state.label_addr, 0,
                 "cellGcmGetLabelAddress called before cellGcmInitBody (label_addr is still 0)"
             );
-            // Real cellGcm does not bounds-check the index; wrapping
-            // matches hardware and keeps debug/release in agreement.
+            // Real cellGcm does not bounds-check the index.
             let offset = 0x10u32.wrapping_mul(index);
             let addr = state.label_addr.wrapping_add(offset) as u64;
             adapter(runtime, source, nid).set_return(addr);
@@ -113,9 +93,7 @@ pub(crate) fn dispatch(
             }
         }
         gcm_nid::SET_FLIP_HANDLER => {
-            // Zero clears. Record in `RsxFlipState.handler` and
-            // mirror to `SysRsxContext.flip_handler_addr` so sys_rsx
-            // stays the single source of truth.
+            // Mirror into sys_rsx so it remains the source of truth.
             let handler_addr = args[1] as u32;
             runtime.rsx_flip_mut().set_handler(handler_addr);
             if runtime.lv2_host().sys_rsx_context().allocated {
@@ -156,8 +134,7 @@ fn adapter(runtime: &mut Runtime, source: UnitId, nid: u32) -> RuntimeHleAdapter
 }
 
 fn init_body_with_runtime(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]) {
-    // Split-borrow: gcm substate and ctx fields both sit under
-    // Runtime.hle; destructure to disjoint borrows here.
+    // Split borrow: gcm substate and adapter fields share Runtime.hle.
     let rsx_checkpoint = runtime.hle.gcm.rsx_checkpoint;
     let heap_base = runtime.hle.heap_base;
     {
@@ -198,13 +175,12 @@ fn init_body_with_runtime(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]
     }
 }
 
-/// Non-checkpoint half of `cellGcmInitBody`: fire
-/// sys_rsx_memory_allocate + sys_rsx_context_allocate, read the
-/// canonical addresses back from Lv2Host's SysRsxContext.
+/// Non-checkpoint half of `cellGcmInitBody`: invokes
+/// sys_rsx_memory_allocate + sys_rsx_context_allocate and pulls the
+/// resulting addresses back from Lv2Host's SysRsxContext.
 fn forward_init_to_sys_rsx(runtime: &mut Runtime, source: UnitId) {
     use cellgov_lv2::Lv2Request;
-    // 48 bytes of scratch for six out-pointers totaling 36 bytes,
-    // rounded for 16-byte alignment.
+    // 48 bytes covers six out-pointers (36 bytes) at 16-byte alignment.
     let scratch = runtime
         .hle
         .heap_ptr
@@ -252,8 +228,7 @@ fn forward_init_to_sys_rsx(runtime: &mut Runtime, source: UnitId) {
     );
 
     let rsx = *runtime.lv2_host().sys_rsx_context();
-    // Skip past the 0x40-byte reserved prefix inside RsxDmaControl;
-    // cellGcmGetControlRegister returns the put/get/ref window base.
+    // 0x40-byte reserved prefix sits before the put/get/ref window.
     runtime.hle.gcm.control_addr = rsx.dma_control_addr + 0x40;
     runtime.hle.gcm.label_addr = rsx.reports_addr;
 }
@@ -301,18 +276,14 @@ pub(crate) fn get_tiled_pitch_size(ctx: &mut dyn HleContext, args: &[u64; 9]) {
 
 pub(crate) fn init_body(ctx: &mut dyn HleContext, args: &[u64; 9], state: &mut GcmState) {
     let context_pp = args[1] as u32;
-    // The guest's io region IS the command queue; cmd_size is ABI
-    // padding (RPCS3 ignores it too).
+    // The io region is the command queue; cmd_size is ABI padding.
     let _cmd_size_unused_hle = args[2] as u32;
     let io_size = args[3] as u32;
     let io_address = args[4] as u32;
 
-    // Re-init is legal: Sony's `_cellGcmInitBody` resets and
-    // proceeds. Each re-init leaks the prior context / control /
-    // label / command-buffer allocations because the bump allocator
-    // cannot release them (RPCS3 has the same bounded leak).
+    // Re-init leaks prior allocations: the bump allocator cannot
+    // release them, matching RPCS3's bounded leak.
 
-    // Guest-controlled pointer math wraps on real PS3.
     let begin = io_address.wrapping_add(0x1000);
     let end = io_address.wrapping_add(io_size).wrapping_sub(4);
 
@@ -360,16 +331,10 @@ pub(crate) fn init_body(ctx: &mut dyn HleContext, args: &[u64; 9], state: &mut G
         .heap_alloc(4096, 16)
         .expect("cellGcmInitBody: HLE heap exhausted (label region)");
     state.label_addr = label_addr;
-    // Labels start at 0 (zero-init from GuestMemory). FIFO advance
-    // is the sole source of non-zero label values; a pre-fill would
-    // mask divergences.
+    // Labels stay zero-initialised: FIFO advance is the sole writer.
 
-    // Sanity bound on the per-call heap span. Today's allocations
-    // total 16 + 16 + 16 (12 padded) + 4096 = ~4144 bytes; 8 KiB
-    // gives 2x headroom. A breach means a new allocation crept in
-    // without anyone updating the test's region sizing (the
-    // sys_rsx_dispatch_commutes test sizes its low_main region to
-    // fit init_body's heap span).
+    // Per-call heap span bound; breach means a new allocation appeared
+    // without `sys_rsx_dispatch_commutes` resizing its low_main region.
     let heap_high_water = label_addr.wrapping_add(4096);
     debug_assert!(
         heap_high_water.wrapping_sub(cb_base) <= 0x2000,
@@ -391,7 +356,7 @@ pub(crate) fn get_configuration(ctx: &mut dyn HleContext, args: &[u64; 9], state
     buf[4..8].copy_from_slice(&state.io_address.to_be_bytes());
     buf[8..12].copy_from_slice(&state.local_size.to_be_bytes());
     buf[12..16].copy_from_slice(&state.io_size.to_be_bytes());
-    // Real PS3 RSX clocks.
+    // PS3 RSX core / memory clocks.
     buf[16..20].copy_from_slice(&650_000_000u32.to_be_bytes());
     buf[20..24].copy_from_slice(&500_000_000u32.to_be_bytes());
     ctx.write_guest(config_ptr as u64, &buf)
@@ -399,22 +364,12 @@ pub(crate) fn get_configuration(ctx: &mut dyn HleContext, args: &[u64; 9], state
     ctx.set_return(0);
 }
 
-/// Translate a guest virtual address into the RSX-side offset the GPU
-/// consults for that memory.
+/// Translate a guest VA into an RSX offset.
 ///
-/// Two ranges are recognised:
-///
-/// - **IO map**: `[gcm.io_address, gcm.io_address + gcm.io_size)` after
-///   `cellGcmInitBody` runs. The offset is `address - gcm.io_address`.
-/// - **RSX local**: `[0xC000_0000, 0xD000_0000)`. The offset is
-///   `address - 0xC000_0000`.
-///
-/// Returns `None` for any address outside both ranges (and for
-/// pre-init queries where `gcm.io_address` is still zero -- the IO
-/// map check requires a non-zero base). Tile / zcull / surface
-/// region translations are deferred until a foundation title
-/// surfaces them; until then they fall through to `None` and
-/// surface as `gcm_error::FAILURE`.
+/// Recognises the IO map `[io_address, io_address + io_size)` (post
+/// `init_body` only -- a zero `io_address` skips the check) and RSX
+/// local `[0xC000_0000, 0xD000_0000)`. Tile / zcull / surface regions
+/// are not yet translated and return `None`.
 pub(crate) fn address_to_offset(gcm: &GcmState, address: u32) -> Option<u32> {
     if gcm.io_address != 0 {
         let io_end = gcm.io_address.wrapping_add(gcm.io_size);
@@ -428,11 +383,9 @@ pub(crate) fn address_to_offset(gcm: &GcmState, address: u32) -> Option<u32> {
     None
 }
 
-/// Smallest tiled pitch in [`TILED_PITCHES`] >= `size`.
-///
-/// Returns `0` for `size == 0` and for `size > 0x10000`; callers
-/// treat `0` as "no valid tiled pitch" and fall back to the linear
-/// path. Windows are `(low, high]` inclusive on the upper side.
+/// Smallest tiled pitch in [`TILED_PITCHES`] >= `size`, or `0` for
+/// `size == 0` or `size > 0x10000` (callers treat `0` as "fall back to
+/// linear"). Bucketing is `(low, high]` inclusive on the upper bound.
 pub fn tiled_pitch_lookup(size: u32) -> u32 {
     TILED_PITCHES
         .windows(2)
@@ -456,9 +409,6 @@ mod address_to_offset_tests {
         rt.registry_mut()
             .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
         rt.set_hle_heap_base(0x10_0000);
-        // Mimic post-init GCM state: io_address = 0x20000, io_size =
-        // 0x80000. Address 0x40000 lands inside the IO map at offset
-        // 0x20000.
         rt.hle.gcm.io_address = 0x0002_0000;
         rt.hle.gcm.io_size = 0x0008_0000;
         (rt, unit_id)
@@ -471,13 +421,9 @@ mod address_to_offset_tests {
             io_size: 0x0008_0000,
             ..GcmState::default()
         };
-        // Within IO map.
         assert_eq!(address_to_offset(&gcm, 0x0002_0000), Some(0));
         assert_eq!(address_to_offset(&gcm, 0x0004_0000), Some(0x0002_0000));
-        // Last valid byte.
         assert_eq!(address_to_offset(&gcm, 0x0009_FFFF), Some(0x0007_FFFF));
-        // One past the IO map end falls through to the RSX-local check
-        // (which also rejects), so the call returns None.
         assert_eq!(address_to_offset(&gcm, 0x000A_0000), None);
     }
 
@@ -502,22 +448,16 @@ mod address_to_offset_tests {
             io_size: 0x0008_0000,
             ..GcmState::default()
         };
-        // Below IO map.
         assert_eq!(address_to_offset(&gcm, 0x0001_FFFF), None);
-        // Between IO map end and RSX local base.
         assert_eq!(address_to_offset(&gcm, 0x4000_0000), None);
-        // Past RSX local end.
         assert_eq!(address_to_offset(&gcm, 0xD000_0000), None);
     }
 
     #[test]
     fn address_to_offset_pre_init_rejects_io_addresses() {
-        // Without io_address seeded, the IO-map check is skipped and
-        // any non-RSX-local address returns None.
         let gcm = GcmState::default();
         assert_eq!(address_to_offset(&gcm, 0x0002_0000), None);
-        // RSX-local still works pre-init -- it is a fixed mapping, not
-        // an init-time configuration.
+        // RSX local is a fixed mapping, not init-time configuration.
         assert_eq!(address_to_offset(&gcm, rsx_local::BASE), Some(0));
     }
 
@@ -580,9 +520,8 @@ mod canary_tests {
     use cellgov_mem::GuestMemory;
     use cellgov_time::Budget;
 
-    /// Runtime with rsx_checkpoint on and gcm state pre-seeded as if
-    /// `init_body` had run. Non-zero seeds satisfy the
-    /// `debug_assert_ne!(_, 0)` witnesses in the GET_* handlers.
+    /// Pre-seeds gcm state with non-zero addresses so the GET_*
+    /// `debug_assert_ne!(_, 0)` checks pass without running init_body.
     fn canary_runtime() -> (Runtime, UnitId) {
         let mut rt = Runtime::new(GuestMemory::new(0x20_0000), Budget::new(1), 100);
         let unit_id = UnitId::new(0);
@@ -596,9 +535,6 @@ mod canary_tests {
         (rt, unit_id)
     }
 
-    /// Drift canary for [`OWNED_NIDS`] vs the [`dispatch`] match arms.
-    /// Mirror of `sys::canary_tests::owned_nids_all_claimed_by_dispatch`;
-    /// see that test's rustdoc for the full rationale.
     #[test]
     fn owned_nids_all_claimed_by_dispatch() {
         for &nid in OWNED_NIDS {
@@ -614,9 +550,6 @@ mod canary_tests {
         }
     }
 
-    /// Negative companion to the coverage canary: sys-owned NIDs
-    /// and a synthetic never-registered NID must return `None` from
-    /// gcm's dispatch.
     #[test]
     fn unowned_nids_are_rejected_by_dispatch() {
         let probes: &[u32] = &[

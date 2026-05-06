@@ -1,53 +1,49 @@
-//! PS3 PRX import table parser and HLE trampoline binder.
+//! PS3 PRX import-table parser and HLE trampoline binder.
 //!
-//! Walks the `PrxParamHeader` in PT_0x60000002 to enumerate imported
-//! modules / NIDs / OPD slots, then writes HLE trampolines into guest
-//! memory and patches the GOT to point at them.
+//! Walks `PrxParamHeader` in PT_0x60000002 to enumerate imported
+//! modules / NIDs / GOT slots, then writes HLE trampolines into guest
+//! memory and patches each GOT slot to point at its OPD.
 
 use crate::loader;
 
-/// A single imported module with its functions.
+/// A single imported PRX module with its function imports.
 #[derive(Debug, Clone)]
 pub struct ImportedModule {
-    /// Module name (e.g., "cellSysutil", "sysPrxForUser").
+    /// Module name (e.g., `cellGcmSys`).
     pub name: String,
-    /// Imported functions: (NID, OPD guest address).
+    /// Function imports declared by this module.
     pub functions: Vec<ImportedFunction>,
 }
 
-/// A single imported function.
+/// One imported function: NID and the GOT slot the binder patches.
 #[derive(Debug, Clone, Copy)]
 pub struct ImportedFunction {
-    /// Function NID (Numeric ID) -- a 32-bit hash identifying the function.
+    /// Function NID (hashed name).
     pub nid: u32,
-    /// GOT slot the binder overwrites with an OPD guest address so
-    /// callers dereference it as a normal PPC function pointer.
+    /// Guest address of the GOT slot; the binder overwrites its
+    /// contents with an OPD address so callers dereference it as a
+    /// normal PPC function pointer.
     pub stub_addr: u32,
 }
 
-/// Why import parsing failed.
+/// Failure modes for [`parse_imports`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportParseError {
-    /// No PT_0x60000002 program header found.
+    /// No `PT_PRX_PARAM` program header was found.
     NoPrxParam,
-    /// The PrxParamHeader magic does not match 0x1b434cec.
+    /// `PrxParamHeader` magic did not match `PRX_PARAM_MAGIC`.
     BadMagic(u32),
-    /// The PrxParamHeader `header_size` field declares a header smaller
-    /// than the imports_table_start/imports_table_end fields the parser
-    /// reads.
+    /// `header_size` declared smaller than the
+    /// imports_table_start/end fields at +24/+28.
     ParamHeaderTooSmall(u32),
-    /// A read went out of bounds.
+    /// A read or virtual-address resolution went past the file or segment.
     OutOfBounds,
 }
 
-/// PT_0x60000002 program header type.
 const PT_PRX_PARAM: u32 = 0x6000_0002;
-
-/// Expected magic value in PrxParamHeader.
 const PRX_PARAM_MAGIC: u32 = 0x1b43_4cec;
 
-/// Enumerate every imported module and its (NID, GOT slot) entries
-/// by walking the imports table in PT_0x60000002.
+/// Enumerate every imported module and its (NID, GOT slot) entries.
 pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseError> {
     if data.len() < 64 {
         return Err(ImportParseError::OutOfBounds);
@@ -82,10 +78,8 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
     if magic != PRX_PARAM_MAGIC {
         return Err(ImportParseError::BadMagic(magic));
     }
-    // The header's declared size must cover the imports-table fields at
-    // +24/+28. Real PS3 binaries set this to 0x40 or larger; rejecting
-    // smaller values catches truncated or corrupt param headers before
-    // the imports-table fields are read against unrelated bytes.
+    // Reject a header that ends before the imports-table fields at
+    // +24/+28 so we don't read those offsets against unrelated bytes.
     let declared_size = loader::read_u32(data, param_off);
     if declared_size < 32 {
         return Err(ImportParseError::ParamHeaderTooSmall(declared_size));
@@ -124,12 +118,9 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
         let name = read_cstring(data, &segments, name_ptr);
 
         let mut functions = Vec::with_capacity(function_count);
-        // Resolve the NID table only when this module has functions.
-        // Modules with `function_count == 0` (variable-only or empty
-        // imports) legitimately may not point at a NID table; we skip
-        // the lookup rather than letting an unmapped pointer silently
-        // fall back to file offset 0 (the ELF header) and produce
-        // garbage NIDs.
+        // Variable-only modules (function_count == 0) may carry an
+        // unmapped nid_ptr; resolving it would silently fall back to
+        // file offset 0 (the ELF header) and yield garbage NIDs.
         if function_count > 0 {
             let nid_foff =
                 vaddr_to_file(&segments, nid_ptr).ok_or(ImportParseError::OutOfBounds)?;
@@ -139,9 +130,6 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
                     break;
                 }
                 let nid = loader::read_u32(data, nid_off);
-                // stub_ptr addresses the function-stub pointer table:
-                // each entry is a 4-byte vaddr the binder later
-                // overwrites with the OPD address.
                 let stub_addr = (stub_ptr + i * 4) as u32;
                 functions.push(ImportedFunction { nid, stub_addr });
             }
@@ -154,7 +142,7 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
     Ok(modules)
 }
 
-/// Summary of parsed imports for diagnostics.
+/// Human-readable one-line-per-module summary for diagnostics.
 pub fn import_summary(modules: &[ImportedModule]) -> String {
     let total_funcs: usize = modules.iter().map(|m| m.functions.len()).sum();
     let mut out = format!("{} modules, {} functions:\n", modules.len(), total_funcs);
@@ -164,23 +152,21 @@ pub fn import_summary(modules: &[ImportedModule]) -> String {
     out
 }
 
-/// Base syscall number for HLE import stubs. Equal to the lower
-/// bound of [`cellgov_ps3_abi::syscall_namespace::SyscallNamespace::HleImport`];
-/// retained as a named constant for legacy call sites.
+/// Lower bound of [`SyscallNamespace::HleImport`][ns]; HLE syscall
+/// number for binding `i` is `HLE_SYSCALL_BASE + i`.
+///
+/// [ns]: cellgov_ps3_abi::syscall_namespace::SyscallNamespace::HleImport
 pub const HLE_SYSCALL_BASE: u32 = cellgov_ps3_abi::syscall_namespace::SyscallNamespace::HleImport
     .range()
     .0 as u32;
 
 /// NIDs for which CellGov ships a dedicated HLE implementation.
 ///
-/// Read by the PRX binder (to keep an HLE trampoline over a firmware
-/// body whose init prerequisites may not have run) and by
-/// `dump-imports` (to tag each import `impl` vs `stub`). Every entry
-/// resolves through `cellgov_ps3_abi::nid::*`; the hex literal lives
-/// only in the leaf, verified at compile time against
-/// `nid_sha1(name)`. Ordering is grouped by module for readability,
-/// not by NID value -- callers use `contains` rather than binary
-/// search.
+/// Consumed by the PRX binder and by `dump-imports` to tag each
+/// import `impl` vs `stub`. Entries resolve through
+/// `cellgov_ps3_abi::nid::*` (hex lives only in the leaf, verified
+/// against `nid_sha1(name)` at compile time). Grouped by module;
+/// callers use `contains`, not binary search.
 pub const HLE_IMPLEMENTED_NIDS: &[u32] = {
     use cellgov_ps3_abi::nid::{
         cell_gcm_sys as gcm, cell_save_data as savedata, cell_spurs as spurs,
@@ -207,8 +193,8 @@ pub const HLE_IMPLEMENTED_NIDS: &[u32] = {
         sys::LWMUTEX_DESTROY,
         sys::LWMUTEX_UNLOCK,
         sys::LWMUTEX_TRYLOCK,
-        // sysPrxForUser lwcond (create / destroy stubs only; wait /
-        // signal still hit the unclaimed handler).
+        // sysPrxForUser lwcond create/destroy only; wait/signal still
+        // route through the unclaimed-NID handler.
         sys::LWCOND_CREATE,
         sys::LWCOND_DESTROY,
         // sysPrxForUser time / thread / process / prx.
@@ -251,45 +237,38 @@ pub const HLE_IMPLEMENTED_NIDS: &[u32] = {
         spurs::UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER,
         spurs::ENABLE_EXCEPTION_EVENT_HANDLER,
         // sys_fs HLE wrappers; each forwards to the matching LV2
-        // sys_fs_* syscall handler so HLE-using titles see the
-        // same FsStore-backed behaviour as raw-syscall titles.
+        // sys_fs_* syscall handler.
         fs::OPEN,
         fs::READ,
         fs::CLOSE,
         fs::LSEEK,
         fs::FSTAT,
         fs::STAT,
-        // cellSaveData autoload with real callback dispatch via the
-        // worker-thread primitive: AutoLoad / AutoLoad2 allocate
-        // cbResult / statGet / statSet on the HLE heap, populate
-        // statGet with the no-save shape, and park the calling unit
-        // on the title's funcStat callback. The resume arm reads
-        // cbResult.result and finalizes (CELL_OK or a cellSaveData
-        // error code). AutoSave / ListAutoLoad stay unclaimed.
+        // cellSaveData AutoLoad / AutoLoad2 only. AutoSave and
+        // ListAutoLoad stay unclaimed.
         savedata::AUTO_LOAD,
         savedata::AUTO_LOAD_2,
     ]
 };
 
-/// Bind result: maps each HLE index to its module and NID.
+/// One bound HLE import: index, originating module, NID, and GOT slot.
 #[derive(Debug, Clone)]
 pub struct HleBinding {
-    /// HLE index (0-based, added to HLE_SYSCALL_BASE for the syscall number).
+    /// 0-based; the syscall number is `HLE_SYSCALL_BASE + index`.
     pub index: u32,
-    /// Module name.
+    /// Name of the module this binding originated from.
     pub module: String,
-    /// Function NID.
+    /// Function NID being bound.
     pub nid: u32,
-    /// Guest address of the GOT entry that was patched.
+    /// Guest address of the patched GOT slot.
     pub stub_addr: u32,
 }
 
-/// Per-binding trampoline size used by [`HleLayout::Legacy24`]
-/// (8-byte OPD + 16-byte body). `Ps3Spec` splits OPD and body and
-/// does not use this constant.
+/// Per-binding trampoline footprint for [`HleLayout::Legacy24`]
+/// (8-byte OPD + 16-byte body). `Ps3Spec` splits OPD and body.
 pub const TRAMPOLINE_SIZE: u32 = 24;
 
-/// Layout strategy for HLE trampolines.
+/// Memory layout for HLE OPDs and trampoline bodies.
 #[derive(Debug, Clone, Copy)]
 pub enum HleLayout {
     /// 24 bytes per binding at `trampoline_base`: 8-byte OPD followed
@@ -299,15 +278,14 @@ pub enum HleLayout {
     /// `body_base + i*16`. Matches RPCS3's `vm::alloc(N*8, vm::main)`
     /// HLE table shape so GOT entries are packed 8-byte pointers.
     Ps3Spec {
-        /// First 8-byte OPD slot.
+        /// Base guest address for packed 8-byte OPDs.
         opd_base: u32,
-        /// First 16-byte body trampoline.
+        /// Base guest address for 16-byte trampoline bodies.
         body_base: u32,
     },
 }
 
-/// [`bind_hle_stubs_with_layout`] with the [`HleLayout::Legacy24`]
-/// packing.
+/// [`bind_hle_stubs_with_layout`] with [`HleLayout::Legacy24`].
 pub fn bind_hle_stubs(
     modules: &[ImportedModule],
     memory: &mut cellgov_mem::GuestMemory,
@@ -317,20 +295,15 @@ pub fn bind_hle_stubs(
 }
 
 /// Write HLE OPDs and body trampolines into guest memory per `layout`
-/// and patch each imported GOT entry to point at its OPD.
+/// and patch each imported GOT slot to point at its OPD.
 ///
-/// Every imported function is bound regardless of whether its NID is in
-/// `HLE_IMPLEMENTED_NIDS` -- the runtime dispatcher decides what to do
-/// when an unimplemented syscall fires (defaults to returning CELL_OK
-/// with no effects). `HLE_IMPLEMENTED_NIDS` is informational from the
-/// binder's perspective; it does not gate trampoline emission.
+/// Every imported function is bound regardless of `HLE_IMPLEMENTED_NIDS`
+/// membership; the runtime dispatcher handles unimplemented syscalls.
 ///
 /// # Panics
-/// Panics if `apply_commit` fails for any of the OPD, body, or GOT
-/// writes. Failure means the caller-supplied trampoline placement
-/// landed outside a writable region; producing a binding vec for
-/// trampolines that were never actually written would silently corrupt
-/// the dispatch surface (the guest would jump to zeroed memory).
+/// Panics if any OPD, body, or GOT `apply_commit` fails -- placement
+/// landed outside a writable region, and returning a partial binding
+/// vec would silently corrupt the dispatch surface.
 pub fn bind_hle_stubs_with_layout(
     modules: &[ImportedModule],
     memory: &mut cellgov_mem::GuestMemory,
@@ -348,13 +321,9 @@ pub fn bind_hle_stubs_with_layout(
     for module in modules {
         for func in &module.functions {
             let hle_index = bindings.len() as u32;
-            // try_encode rather than encode: the binder grows
-            // hle_index at runtime (one per import), so an over-
-            // capacity title (0x70000+ imports) should produce a
-            // descriptive abort rather than a generic "syscall
-            // index out of range" debug panic. The namespace's
-            // upper bound (0x80000) fits in u32, so the
-            // narrowing for the encoder cannot lose data.
+            // try_encode produces a descriptive panic if a title
+            // exhausts the HleImport namespace (~0x80000 imports);
+            // encode would emit a generic debug-only assert.
             let syscall_nr_u64 = SyscallNamespace::HleImport
                 .try_encode(hle_index)
                 .unwrap_or_else(|| {
@@ -379,9 +348,9 @@ pub fn bind_hle_stubs_with_layout(
                 } => (opd_base + hle_index * 8, body_base + hle_index * 16),
             };
 
-            // OPD: { body_addr, toc=0 }. RPCS3-packed shape, not
-            // 24-byte ELFv1; CellGov's binder dereferences via
-            // packed convention.
+            // OPD: { body_addr, toc=0 } in RPCS3-packed 8-byte shape,
+            // not 24-byte ELFv1. The binder dereferences via packed
+            // convention.
             let opd_range =
                 cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(opd_addr as u64), 8)
                     .expect("OPD range fits in u64");
@@ -499,7 +468,6 @@ mod tests {
 
     #[test]
     fn hle_implemented_nids_contains_tls_init() {
-        // sys_initialize_tls is required by every PS3 ELF boot.
         assert!(
             HLE_IMPLEMENTED_NIDS.contains(&cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS)
         );
@@ -527,11 +495,9 @@ mod tests {
         assert!(names.contains(&"cellGcmSys"));
     }
 
-    /// Build a minimal ELF whose PT_LOAD maps the file 1:1 (vaddr ==
-    /// file offset) and contains a single import module with one
-    /// function. The function's GOT slot lives at `STUB_TABLE_OFF`;
-    /// the parser reports that as `stub_addr`. The contents at the
-    /// slot are placeholder bytes the binder would overwrite.
+    /// Minimal ELF with PT_LOAD mapped 1:1 (vaddr == file offset) and
+    /// one import module of one function. The GOT slot at
+    /// `STUB_TABLE_OFF` is the `stub_addr` the parser reports.
     fn build_synthetic_prx_elf(nid: u32) -> Vec<u8> {
         const TOTAL_SIZE: usize = 320;
         const PARAM_OFF: usize = 176;
@@ -542,7 +508,8 @@ mod tests {
         const STUB_TABLE_OFF: usize = 260;
 
         let mut data = vec![0u8; TOTAL_SIZE];
-        // ELF header: magic, 64-bit, big-endian, phoff=64, phentsize=56, phnum=2.
+        // ELF header: magic, 64-bit, big-endian, phoff=64,
+        // phentsize=56, phnum=2.
         data[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
         data[4] = 2;
         data[5] = 2;
@@ -550,27 +517,27 @@ mod tests {
         data[54..56].copy_from_slice(&56u16.to_be_bytes());
         data[56..58].copy_from_slice(&2u16.to_be_bytes());
 
-        // Program header 0: PT_LOAD covering the entire file with
-        // vaddr == file offset for trivial vaddr_to_file resolution.
+        // PT_LOAD covering the whole file with vaddr == file offset.
         let ph0 = 64usize;
         data[ph0..ph0 + 4].copy_from_slice(&1u32.to_be_bytes());
         data[ph0 + 8..ph0 + 16].copy_from_slice(&0u64.to_be_bytes());
         data[ph0 + 16..ph0 + 24].copy_from_slice(&0u64.to_be_bytes());
         data[ph0 + 32..ph0 + 40].copy_from_slice(&(TOTAL_SIZE as u64).to_be_bytes());
 
-        // Program header 1: PT_PRX_PARAM pointing at the param struct.
+        // PT_PRX_PARAM pointing at PARAM_OFF.
         let ph1 = 64 + 56;
         data[ph1..ph1 + 4].copy_from_slice(&PT_PRX_PARAM.to_be_bytes());
         data[ph1 + 8..ph1 + 16].copy_from_slice(&(PARAM_OFF as u64).to_be_bytes());
 
-        // PrxParamHeader: header_size=0x40, magic, imports_table_start/end.
+        // PrxParamHeader: header_size=0x40, magic, imports table.
         data[PARAM_OFF..PARAM_OFF + 4].copy_from_slice(&0x40u32.to_be_bytes());
         data[PARAM_OFF + 4..PARAM_OFF + 8].copy_from_slice(&PRX_PARAM_MAGIC.to_be_bytes());
         data[PARAM_OFF + 24..PARAM_OFF + 28].copy_from_slice(&(MOD_INFO_OFF as u32).to_be_bytes());
         data[PARAM_OFF + 28..PARAM_OFF + 32]
             .copy_from_slice(&(MOD_INFO_OFF as u32 + MOD_INFO_SIZE as u32).to_be_bytes());
 
-        // PrxImportEntry: entry_size=0x2C, function_count=1, name/nids/stubs ptrs.
+        // PrxImportEntry: entry_size=0x2C, function_count=1,
+        // name/nids/stubs ptrs.
         data[MOD_INFO_OFF] = MOD_INFO_SIZE;
         data[MOD_INFO_OFF + 6..MOD_INFO_OFF + 8].copy_from_slice(&1u16.to_be_bytes());
         data[MOD_INFO_OFF + 16..MOD_INFO_OFF + 20]
@@ -580,12 +547,8 @@ mod tests {
         data[MOD_INFO_OFF + 24..MOD_INFO_OFF + 28]
             .copy_from_slice(&(STUB_TABLE_OFF as u32).to_be_bytes());
 
-        // Module name "tst\0".
         data[NAME_OFF..NAME_OFF + 4].copy_from_slice(b"tst\0");
-        // NID table.
         data[NID_TABLE_OFF..NID_TABLE_OFF + 4].copy_from_slice(&nid.to_be_bytes());
-        // Stub address table holds the placeholder body that the
-        // binder would later replace with the OPD address.
         data[STUB_TABLE_OFF..STUB_TABLE_OFF + 4].copy_from_slice(&0u32.to_be_bytes());
 
         data
@@ -593,8 +556,6 @@ mod tests {
 
     #[test]
     fn parse_synthetic_elf_round_trips_one_module_one_function() {
-        // Every CI run exercises the field-offset arithmetic without
-        // relying on a retail EBOOT being present.
         let nid = 0xDEAD_BEEFu32;
         let data = build_synthetic_prx_elf(nid);
         let modules = parse_imports(&data).expect("synthetic ELF must parse");
@@ -602,17 +563,11 @@ mod tests {
         assert_eq!(modules[0].name, "tst");
         assert_eq!(modules[0].functions.len(), 1);
         assert_eq!(modules[0].functions[0].nid, nid);
-        // stub_addr is the *address* of the GOT slot (i.e., the stub
-        // table base + i*4), not its contents -- the binder writes the
-        // OPD address into that slot at link time.
         assert_eq!(modules[0].functions[0].stub_addr, 260);
     }
 
     #[test]
     fn parse_rejects_param_header_too_small() {
-        // header_size = 16 declares a header that ends before
-        // imports_table_start at +24. The parser must reject rather
-        // than read past the declared boundary.
         let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
         let param_off = 176;
         data[param_off..param_off + 4].copy_from_slice(&16u32.to_be_bytes());
@@ -624,10 +579,6 @@ mod tests {
 
     #[test]
     fn parse_rejects_unmapped_nid_table_when_function_count_nonzero() {
-        // Point nid_ptr at a vaddr no PT_LOAD covers. A vaddr->offset
-        // walker that falls back to file offset 0 on lookup miss
-        // would read the ELF header bytes and produce garbage NIDs;
-        // the parser must reject the unmapped pointer instead.
         let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
         let mod_info_off = 208;
         let unmapped_vaddr: u32 = 0xFFFF_0000;

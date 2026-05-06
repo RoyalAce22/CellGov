@@ -1,5 +1,4 @@
-//! Firmware PRX loading, module_start execution, and TLS pre-init
-//! for `run-game`.
+//! Firmware PRX loading, module_start execution, and TLS pre-init for `run-game`.
 
 use std::time::Instant;
 
@@ -11,7 +10,6 @@ use cellgov_time::Budget;
 use super::diag::fetch_raw_at;
 use crate::cli::exit::die;
 
-/// Summary of a loaded firmware PRX module.
 pub(super) struct PrxLoadInfo {
     pub(super) name: String,
     pub(super) base: u64,
@@ -19,14 +17,13 @@ pub(super) struct PrxLoadInfo {
     pub(super) relocs_applied: usize,
     pub(super) resolved: usize,
     pub(super) total_imports: usize,
-    /// module_start entry point (code, toc) if present.
     pub(super) module_start: Option<cellgov_ppu::sprx::LoadedOpd>,
 }
 
 /// Build an HLE-index to NID map for fast runtime lookup.
 ///
-/// Duplicate indices indicate an upstream bug in the binder; the
-/// debug_assert surfaces it instead of letting the later binding
+/// Duplicate indices indicate an upstream binder bug; the
+/// `debug_assert` surfaces it instead of letting the later binding
 /// silently overwrite the earlier one.
 pub(super) fn build_nid_map(
     bindings: &[cellgov_ppu::prx::HleBinding],
@@ -50,15 +47,13 @@ pub(super) fn build_nid_map(
     map
 }
 
-/// TLS base in guest memory. Matches the HLE sys_initialize_tls
-/// allocation in `cellgov_core::hle`.
+/// Must match the HLE `sys_initialize_tls` allocation in `cellgov_core::hle`.
 pub(super) const TLS_BASE: u64 = 0x10400000;
 
 /// Pre-initialize TLS from the ELF's PT_TLS segment.
 ///
-/// Copies the TLS template to `TLS_BASE + 0x30` and zeros the BSS
-/// portion. On real PS3 the kernel does this during process creation
-/// before any module_start runs.
+/// On real PS3 the kernel does this during process creation before
+/// any module_start runs.
 pub(super) fn pre_init_tls(elf_data: &[u8], mem: &mut cellgov_mem::GuestMemory) {
     let tls = match cellgov_ppu::loader::find_tls_segment(elf_data) {
         Some(t) => t,
@@ -70,8 +65,6 @@ pub(super) fn pre_init_tls(elf_data: &[u8], mem: &mut cellgov_mem::GuestMemory) 
     let p_filesz = tls.filesz as usize;
     let p_memsz = tls.memsz as usize;
 
-    // Copy the TLS template; a skipped copy here means r13-relative
-    // reads in module_start will see uninitialized TLS bytes.
     let mut copy_ok = true;
     let m = mem.as_bytes();
     // checked_add: malformed PT_TLS fields must not wrap on 32-bit
@@ -153,10 +146,8 @@ pub(super) fn pre_init_tls(elf_data: &[u8], mem: &mut cellgov_mem::GuestMemory) 
 
 /// Run a PRX module's module_start to completion or fault.
 ///
-/// Takes ownership of guest memory, runs until the function returns
-/// (PC reaches the LR=0 sentinel) or a fault/stall occurs, then
-/// returns the modified memory. A decode-error fault at PC=0 with
-/// LR=0 at fault time is treated as a clean return.
+/// A decode-error fault at PC=0 with LR=0 at fault time is treated
+/// as a clean return (the LR=0 sentinel set before entry).
 pub(super) fn run_module_start(
     mem: cellgov_mem::GuestMemory,
     prx_info: &PrxLoadInfo,
@@ -288,10 +279,9 @@ pub(super) fn run_module_start(
                         _ => None,
                     };
 
-                    // Clean-return detection: PC=0, LR=0, decode-error
-                    // fault. The LR=0 check rejects corrupted call
-                    // targets that happen to jump to PC=0 after an
-                    // intermediate bl overwrote LR.
+                    // LR=0 check rejects corrupted call targets that
+                    // happen to jump to PC=0 after an intermediate bl
+                    // overwrote LR.
                     let lr_at_fault = step
                         .result
                         .local_diagnostics
@@ -482,9 +472,9 @@ pub(super) fn load_firmware_prx(
         }
     };
 
-    // Default placement: first free 64K-aligned page past the HLE
-    // trampoline area, reproducing what the LV2 first-fit allocator
-    // returns on a fresh boot. CELLGOV_PRX_BASE overrides for pinned
+    // Default placement reproduces what the LV2 first-fit allocator
+    // returns on a fresh boot: first free 64K-aligned page past the
+    // HLE trampoline area. CELLGOV_PRX_BASE overrides for pinned
     // microtest and cross-runner layouts.
     let prx_base = match std::env::var("CELLGOV_PRX_BASE") {
         Ok(s) => {
