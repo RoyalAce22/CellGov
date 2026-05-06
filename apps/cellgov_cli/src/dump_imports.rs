@@ -279,7 +279,8 @@ mod tests {
     #[test]
     fn implemented_nids_is_nonempty_and_contains_tls_init() {
         // sys_initialize_tls is called by every PS3 ELF boot.
-        assert!(CELLGOV_HLE_IMPLEMENTED_NIDS.contains(&0x744680a2));
+        assert!(CELLGOV_HLE_IMPLEMENTED_NIDS
+            .contains(&cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS));
         assert!(CELLGOV_HLE_IMPLEMENTED_NIDS.len() > 4);
     }
 
@@ -312,10 +313,9 @@ mod tests {
         // NoopSafe in the impl list (memory leak is acceptable for
         // triage runs).
         use cellgov_ps3_abi::nid::StubClass;
-        const SYS_FREE_NID: u32 = 0xf7f7fb20;
         for &nid in CELLGOV_HLE_IMPLEMENTED_NIDS {
             let c = cellgov_ps3_abi::nid::stub_classification(nid);
-            if nid == SYS_FREE_NID {
+            if nid == cellgov_ps3_abi::nid::sys_prx_for_user::FREE {
                 assert_eq!(c, StubClass::NoopSafe);
             } else {
                 assert!(
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn classify_import_routes_implemented_nid_to_impl_bucket() {
         // sys_initialize_tls: stateful and in the implemented list.
-        let nid = 0x744680a2;
+        let nid = cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS;
         let lookup = cellgov_ps3_abi::nid::lookup(nid);
         assert!(lookup.is_some(), "test precondition: nid_db knows this NID");
         let (bucket, cell, is_impl) = classify_import(nid, lookup);

@@ -5,8 +5,11 @@
 //! `format_process_exit`, and `format_max_steps` assume a
 //! single-threaded stepper. A concurrent writer would tear reads.
 
+use crate::game::step_loop::{block_reason_label, RingCursor};
 use crate::game::{PC_RING_SIZE, SYSCALL_RING_SIZE};
-use cellgov_core::Runtime;
+use cellgov_core::{CommitError, Runtime};
+use cellgov_exec::UnitStatus;
+use cellgov_lv2::PpuThreadState;
 
 /// Render `bytes` as ASCII, replacing non-printable bytes with `.`.
 ///
@@ -166,7 +169,7 @@ pub(super) fn format_fault(
     fault: &cellgov_effects::FaultKind,
     steps: usize,
     pc_ring: &[u64; PC_RING_SIZE],
-    pc_ring_pos: usize,
+    pc_cursor: &RingCursor,
 ) -> String {
     let pc = result.local_diagnostics.pc;
     let pc_str = pc
@@ -278,36 +281,187 @@ pub(super) fn format_fault(
             out.push_str(&format!("r{i:<2}=0x{val:016x}  "));
         }
         out.push_str(&format!(
-            "\n    LR=0x{:016x}  CTR=0x{:016x}  CR=0x{:08x}",
-            regs.lr, regs.ctr, regs.cr
+            "\n    LR=0x{:016x}  CTR=0x{:016x}  XER=0x{:016x}  CR=0x{:08x}",
+            regs.lr, regs.ctr, regs.xer, regs.cr
         ));
     }
 
-    // Mini-trace: last N PCs with raw word plus decoded mnemonic.
-    // Walking backward through the mnemonics identifies the setter of
-    // a bad effective address.
-    let filled = pc_ring_pos.min(PC_RING_SIZE);
-    if filled > 0 {
-        out.push_str(&format!("\n  last {filled} PCs:"));
-        let start = pc_ring_pos.saturating_sub(PC_RING_SIZE);
-        for i in start..pc_ring_pos {
-            let pc = pc_ring[i % PC_RING_SIZE];
-            // <unmapped> = fetch failed, <baddec> = word undecodable.
-            let (raw, name) = match fetch_raw_at(rt, pc) {
-                Some(w) => (
-                    format!("0x{w:08x}"),
-                    cellgov_ppu::decode::decode(w)
-                        .ok()
-                        .map(|insn| insn.variant_name().to_string())
-                        .unwrap_or_else(|| "<baddec>".into()),
-                ),
-                None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
-            };
-            out.push_str(&format!("\n    0x{pc:08x}  raw={raw}  {name}"));
-        }
-    }
+    append_pc_ring_with_decode(&mut out, rt, pc_ring, pc_cursor);
 
     out
+}
+
+/// Format a commit-pipeline rejection as a Fault diagnostic.
+///
+/// A non-checkpoint `CommitError` means the commit pipeline rejected
+/// the unit's batch (memory bounds, payload mismatch, unknown
+/// mailbox / signal / unit, etc.). The originating step's
+/// instruction-stream effects were discarded by the same atomic-
+/// batch rule that handles guest faults; the diagnostic mirrors
+/// `format_fault`'s shape so a reader can compare the two without
+/// shifting context.
+pub(super) fn format_commit_fault(
+    rt: &Runtime,
+    err: &CommitError,
+    steps: usize,
+    pc_ring: &[u64; PC_RING_SIZE],
+    pc_cursor: &RingCursor,
+) -> String {
+    let mut out = format!("COMMIT_FAULT at step {steps}: {err:?}");
+    append_pc_ring_with_decode(&mut out, rt, pc_ring, pc_cursor);
+    out
+}
+
+/// Format a deadlock diagnostic by walking the unit registry for
+/// every `Blocked` unit and naming its block reason.
+///
+/// A `StepError::AllBlocked` says at least one unit is `Blocked` and
+/// none is `Runnable`; per the architecture doc this is a liveness
+/// probe, not a semantic deadlock proof, but the per-unit reason is
+/// the diagnostic an investigator wants.
+///
+/// Walks `rt.registry()` rather than `Lv2Host::ppu_threads()` so SPU
+/// units that block on a mailbox-receive stall or DMA wait surface
+/// alongside PPU threads. The PPU-side
+/// [`cellgov_lv2::GuestBlockReason`] is looked up per-unit when
+/// available; non-PPU units render with the bare unit id.
+pub(super) fn format_deadlock(
+    rt: &Runtime,
+    steps: usize,
+    pc_ring: &[u64; PC_RING_SIZE],
+    pc_cursor: &RingCursor,
+) -> String {
+    let mut out = format!("DEADLOCK after {steps} steps:");
+    let mut blocked_count = 0usize;
+    let blocked_ids: Vec<_> = rt
+        .registry()
+        .iter()
+        .filter_map(|(id, _)| {
+            (rt.registry().effective_status(id) == Some(UnitStatus::Blocked)).then_some(id)
+        })
+        .collect();
+    for unit_id in blocked_ids {
+        blocked_count += 1;
+        match rt.lv2_host().ppu_thread_for_unit(unit_id) {
+            Some(thread) => {
+                let label = match &thread.state {
+                    PpuThreadState::Blocked(reason) => block_reason_label(reason),
+                    other => format!("(unit Blocked but PPU thread state is {other:?})"),
+                };
+                out.push_str(&format!(
+                    "\n  unit {} (PPU thread {}): {}",
+                    unit_id.raw(),
+                    thread.id.raw(),
+                    label,
+                ));
+            }
+            None => {
+                // SPU or other non-PPU unit: scheduler-level Blocked
+                // without an LV2 thread record. Mailbox-receive
+                // stall or DMA wait is the typical cause.
+                out.push_str(&format!(
+                    "\n  unit {} (no LV2 PPU thread record; SPU or pre-LV2 unit)",
+                    unit_id.raw(),
+                ));
+            }
+        }
+    }
+    if blocked_count == 0 {
+        // AllBlocked fires when at least one unit is Blocked, so an
+        // empty walk means the registry status and effective_status
+        // disagreed; worth flagging.
+        out.push_str("\n  (no Blocked units in registry; AllBlocked may have raced a wake)");
+    } else {
+        out.push_str(&format!("\n  {blocked_count} blocked unit(s) total"));
+    }
+    append_pc_ring_terse(&mut out, pc_ring, pc_cursor);
+    out
+}
+
+/// Append a stale-exit note to a non-`ProcessExit` terminal
+/// diagnostic so a captured `sys_process_exit` /
+/// `sys_ppu_thread_exit` is not silently dropped on the floor.
+///
+/// No-op when `last_exit` is `None`.
+pub(super) fn append_orphan_exit_info(
+    diagnostic: &mut String,
+    last_exit: Option<&ProcessExitInfo>,
+) {
+    let Some(exit) = last_exit else {
+        return;
+    };
+    diagnostic.push_str(&format!(
+        "\n  note: stale exit info captured before terminal verdict (code={}, PC=0x{:08x})",
+        exit.code, exit.call_pc,
+    ));
+}
+
+/// Append a "last N PCs" block with decoded mnemonics. Shared between
+/// `format_fault` and `format_commit_fault`.
+fn append_pc_ring_with_decode(
+    out: &mut String,
+    rt: &Runtime,
+    pc_ring: &[u64; PC_RING_SIZE],
+    pc_cursor: &RingCursor,
+) {
+    let filled = pc_cursor.filled();
+    if filled == 0 {
+        return;
+    }
+    out.push_str(&format!("\n  last {filled} PCs:"));
+    for i in pc_cursor.iter_indices() {
+        let pc = pc_ring[i];
+        // <unmapped> = fetch failed, <baddec> = word undecodable.
+        let (raw, name) = match fetch_raw_at(rt, pc) {
+            Some(w) => (
+                format!("0x{w:08x}"),
+                cellgov_ppu::decode::decode(w)
+                    .ok()
+                    .map(|insn| insn.variant_name().to_string())
+                    .unwrap_or_else(|| "<baddec>".into()),
+            ),
+            None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
+        };
+        out.push_str(&format!("\n    0x{pc:08x}  raw={raw}  {name}"));
+    }
+}
+
+/// Append a "last N PCs" block without decoding. Cheaper than
+/// `append_pc_ring_with_decode` when memory access is cold.
+fn append_pc_ring_terse(out: &mut String, pc_ring: &[u64; PC_RING_SIZE], pc_cursor: &RingCursor) {
+    let filled = pc_cursor.filled();
+    if filled == 0 {
+        return;
+    }
+    out.push_str(&format!("\n  last {filled} PCs:"));
+    for i in pc_cursor.iter_indices() {
+        let pc = pc_ring[i];
+        out.push_str(&format!("\n    0x{pc:08x}"));
+    }
+}
+
+/// Append a "last N syscalls" block.
+fn append_syscall_ring(
+    out: &mut String,
+    syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
+    syscall_cursor: &RingCursor,
+    hle_bindings: &[cellgov_ppu::prx::HleBinding],
+) {
+    let filled = syscall_cursor.filled();
+    if filled == 0 {
+        return;
+    }
+    out.push_str(&format!("\n  last {filled} syscalls:"));
+    for i in syscall_cursor.iter_indices() {
+        let (nr, pc) = syscall_ring[i];
+        if nr >= 0x10000 {
+            let idx = (nr - 0x10000) as u32;
+            let name = format_hle_idx(idx, hle_bindings);
+            out.push_str(&format!("\n    HLE {name} at 0x{pc:08x}"));
+        } else {
+            out.push_str(&format!("\n    LV2 #{nr} at 0x{pc:08x}"));
+        }
+    }
 }
 
 /// Format the diagnostic artifact for a guest-initiated sys_process_exit.
@@ -317,9 +471,9 @@ pub(super) fn format_process_exit(
     last_tty: Option<&TtyCapture>,
     steps: usize,
     pc_ring: &[u64; PC_RING_SIZE],
-    pc_ring_pos: usize,
+    pc_cursor: &RingCursor,
     syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
-    syscall_ring_pos: usize,
+    syscall_cursor: &RingCursor,
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) -> String {
     let mut out = format!(
@@ -358,32 +512,8 @@ pub(super) fn format_process_exit(
         }
     }
 
-    let filled = pc_ring_pos.min(PC_RING_SIZE);
-    if filled > 0 {
-        out.push_str(&format!("\n  last {filled} PCs:"));
-        let start = pc_ring_pos.saturating_sub(PC_RING_SIZE);
-        for i in start..pc_ring_pos {
-            let pc = pc_ring[i % PC_RING_SIZE];
-            out.push_str(&format!("\n    0x{pc:08x}"));
-        }
-    }
-
-    let sc_filled = syscall_ring_pos.min(SYSCALL_RING_SIZE);
-    if sc_filled > 0 {
-        out.push_str(&format!("\n  last {sc_filled} syscalls:"));
-        let start = syscall_ring_pos.saturating_sub(SYSCALL_RING_SIZE);
-        for i in start..syscall_ring_pos {
-            let (nr, pc) = syscall_ring[i % SYSCALL_RING_SIZE];
-            if nr >= 0x10000 {
-                let idx = (nr - 0x10000) as u32;
-                let name = format_hle_idx(idx, hle_bindings);
-                out.push_str(&format!("\n    HLE {name} at 0x{pc:08x}"));
-            } else {
-                out.push_str(&format!("\n    LV2 #{nr} at 0x{pc:08x}"));
-            }
-        }
-    }
-
+    append_pc_ring_terse(&mut out, pc_ring, pc_cursor);
+    append_syscall_ring(&mut out, syscall_ring, syscall_cursor, hle_bindings);
     out
 }
 
@@ -391,39 +521,14 @@ pub(super) fn format_process_exit(
 pub(super) fn format_max_steps(
     steps: usize,
     pc_ring: &[u64; PC_RING_SIZE],
-    pc_ring_pos: usize,
+    pc_cursor: &RingCursor,
     syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
-    syscall_ring_pos: usize,
+    syscall_cursor: &RingCursor,
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) -> String {
     let mut out = format!("MAX_STEPS after {} steps", steps);
-
-    let filled = pc_ring_pos.min(PC_RING_SIZE);
-    if filled > 0 {
-        out.push_str(&format!("\n  last {filled} PCs:"));
-        let start = pc_ring_pos.saturating_sub(PC_RING_SIZE);
-        for i in start..pc_ring_pos {
-            let pc = pc_ring[i % PC_RING_SIZE];
-            out.push_str(&format!("\n    0x{pc:08x}"));
-        }
-    }
-
-    let sc_filled = syscall_ring_pos.min(SYSCALL_RING_SIZE);
-    if sc_filled > 0 {
-        out.push_str(&format!("\n  last {sc_filled} syscalls:"));
-        let start = syscall_ring_pos.saturating_sub(SYSCALL_RING_SIZE);
-        for i in start..syscall_ring_pos {
-            let (nr, pc) = syscall_ring[i % SYSCALL_RING_SIZE];
-            if nr >= 0x10000 {
-                let idx = (nr - 0x10000) as u32;
-                let name = format_hle_idx(idx, hle_bindings);
-                out.push_str(&format!("\n    HLE {name} at 0x{pc:08x}"));
-            } else {
-                out.push_str(&format!("\n    LV2 #{nr} at 0x{pc:08x}"));
-            }
-        }
-    }
-
+    append_pc_ring_terse(&mut out, pc_ring, pc_cursor);
+    append_syscall_ring(&mut out, syscall_ring, syscall_cursor, hle_bindings);
     out
 }
 
@@ -632,5 +737,116 @@ mod tests {
         let buf = 0x4000_0000 - 1;
         let (n, _bytes) = longest_readable_prefix(rt.memory(), buf, 2).expect("single-byte prefix");
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn append_orphan_exit_info_is_noop_when_none() {
+        let mut s = String::from("FAULT at step 100");
+        append_orphan_exit_info(&mut s, None);
+        assert_eq!(s, "FAULT at step 100");
+    }
+
+    #[test]
+    fn append_orphan_exit_info_appends_code_and_pc_when_some() {
+        let mut s = String::from("FAULT at step 100");
+        append_orphan_exit_info(
+            &mut s,
+            Some(&ProcessExitInfo {
+                code: 0x42,
+                call_pc: 0x10ab_cdef,
+            }),
+        );
+        assert!(s.contains("code=66"), "got {s}");
+        assert!(s.contains("PC=0x10abcdef"), "got {s}");
+        assert!(s.contains("stale exit info"), "got {s}");
+    }
+
+    #[test]
+    fn format_commit_fault_includes_error_and_step_and_pc_ring() {
+        let rt = rt_with_layout();
+        let err = CommitError::PayloadLengthMismatch { effect_index: 3 };
+        let mut cursor = RingCursor::new(PC_RING_SIZE);
+        let mut ring = [0u64; PC_RING_SIZE];
+        for pc in [0x0010_0000u64, 0x0010_0004, 0x0010_0008] {
+            let idx = cursor.record();
+            ring[idx] = pc;
+        }
+        let out = format_commit_fault(&rt, &err, 1234, &ring, &cursor);
+        assert!(out.starts_with("COMMIT_FAULT at step 1234"), "got {out}");
+        assert!(out.contains("PayloadLengthMismatch"), "got {out}");
+        assert!(out.contains("last 3 PCs:"), "got {out}");
+        assert!(out.contains("0x00100000"), "got {out}");
+    }
+
+    #[test]
+    fn format_deadlock_with_empty_registry_flags_drift() {
+        let rt = rt_with_layout();
+        let cursor = RingCursor::new(PC_RING_SIZE);
+        let ring = [0u64; PC_RING_SIZE];
+        let out = format_deadlock(&rt, 99, &ring, &cursor);
+        assert!(out.starts_with("DEADLOCK after 99 steps:"), "got {out}");
+        assert!(
+            out.contains("no Blocked units in registry") && out.contains("AllBlocked"),
+            "expected drift note in {out}",
+        );
+    }
+
+    #[test]
+    fn format_deadlock_dumps_ppu_unit_with_lv2_reason_and_spu_unit_without() {
+        // Two-unit scenario: unit A is a PPU thread parked on
+        // WaitingOnLwMutex (PPU thread record present); unit B is a
+        // synthetic non-PPU unit (no LV2 thread record, modeling
+        // the SPU mailbox-receive-stall shape). The dump must
+        // surface both with the right rendering.
+        use cellgov_lv2::{GuestBlockReason, PpuThreadAttrs, PpuThreadState};
+        use cellgov_testkit::world::CountingUnit;
+
+        let mut rt = rt_with_layout();
+        let unit_a = rt
+            .registry_mut()
+            .register_with(|id| CountingUnit::new(id, 100));
+        let unit_b = rt
+            .registry_mut()
+            .register_with(|id| CountingUnit::new(id, 100));
+
+        rt.registry_mut()
+            .set_status_override(unit_a, UnitStatus::Blocked);
+        rt.registry_mut()
+            .set_status_override(unit_b, UnitStatus::Blocked);
+
+        let attrs = PpuThreadAttrs {
+            entry: 0x10_0000,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x10000,
+            priority: 1000,
+            tls_base: 0x0020_0000,
+        };
+        let ppu_id_a = rt
+            .lv2_host_mut()
+            .ppu_threads_mut()
+            .create(unit_a, attrs)
+            .unwrap();
+        rt.lv2_host_mut()
+            .ppu_threads_mut()
+            .get_mut(ppu_id_a)
+            .unwrap()
+            .state = PpuThreadState::Blocked(GuestBlockReason::WaitingOnLwMutex { id: 7 });
+        // unit_b: deliberately no PpuThread record.
+
+        let cursor = RingCursor::new(PC_RING_SIZE);
+        let ring = [0u64; PC_RING_SIZE];
+        let out = format_deadlock(&rt, 42, &ring, &cursor);
+        assert!(out.contains("DEADLOCK after 42 steps:"), "got {out}");
+        assert!(
+            out.contains(&format!("unit {} (PPU thread", unit_a.raw())),
+            "PPU unit not labeled: {out}",
+        );
+        assert!(out.contains("WaitingOnLwMutex(id=7)"), "got {out}");
+        assert!(
+            out.contains(&format!("unit {} (no LV2 PPU thread record", unit_b.raw())),
+            "SPU-shaped unit not labeled: {out}",
+        );
+        assert!(out.contains("2 blocked unit(s) total"), "got {out}");
     }
 }

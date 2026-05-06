@@ -352,6 +352,7 @@ fn multi_primitive_determinism_canary() {
                 Lv2Dispatch::RegisterSpu { .. } => "RegSpu".into(),
                 Lv2Dispatch::PpuThreadCreate { .. } => "PpuCreate".into(),
                 Lv2Dispatch::PpuThreadExit { .. } => "PpuExit".into(),
+                Lv2Dispatch::CallbackSpawn { .. } => "CbSpawn".into(),
             };
             trace.push((format!("{label}:{tag}"), host.state_hash()));
         }

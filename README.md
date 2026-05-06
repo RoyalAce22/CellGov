@@ -53,7 +53,7 @@ Pre-Alpha. What works today:
   shadow quickenings and super-pair fusions; covers the
   CR-logical XL-form family and the X-form FP indexed load/store
   family). **SPU**: full interpreter.
-- **LV2**: 62 classified syscalls, 56 HLE exports, including the
+- **LV2**: 62 classified syscalls, 60 HLE exports, including the
   `sys_rsx` kernel-side RSX surface, the cellSysutil video-out
   query family, the cellSpurs PPU-side runtime (initialize,
   workload registry, ready-count and contention controls, info
@@ -62,10 +62,24 @@ Pre-Alpha. What works today:
   sleep-queue, recursive-acquire depth tracking, and
   per-thread hold counts that drive critical-section-aware
   scheduling so concurrent printf paths complete atomically,
-  and the read-side `sys_fs_*` family
+  the read-side `sys_fs_*` family
   (open / read / close / lseek / fstat / stat) backed by an
   in-memory blob store that titles populate via per-title
-  content manifests.
+  content manifests, and `cellSaveDataAutoLoad` / `AutoLoad2`
+  with real callback dispatch on a worker PPU thread so titles
+  whose autoload code runs `funcStat` see populated `statGet`
+  and a deterministic `cbResult.result` round-trip.
+- **Worker-thread callback dispatch**: a generic primitive
+  spawns a deterministic worker PPU thread on demand, runs a
+  title-supplied OPD with caller-supplied args on that worker,
+  blocks the parent unit until the worker returns through a
+  re-entry trampoline (a 12-byte `lis r11, hi; ori r11, r11, lo;
+  sc 0` sequence at `0x0000_FF00`), and surfaces the worker's
+  captured `r3..=r10` back to the parent via a stage-keyed
+  resume dispatcher. The primitive's first consumer is
+  `cellSaveDataAutoLoad`; flip-handler / vblank-handler / SPURS
+  exception-handler consumers wire through the same surface in
+  successor phases.
 - **Sync primitives**: lwmutex / event_flag / semaphore / mutex
   / cond now match real-PS3 wake ordering, including event_flag
   cancel waking parked waiters with `CELL_ECANCELED`,
@@ -89,7 +103,7 @@ Pre-Alpha. What works today:
   real-PS3 .expected. cpu/basic, cpu/ppu_branch,
   lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag all
   match byte-for-byte.
-- 2,470 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 2,626 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 ### Next reads
 

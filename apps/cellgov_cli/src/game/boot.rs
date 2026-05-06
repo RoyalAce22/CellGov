@@ -11,13 +11,14 @@ use cellgov_ppu::prx::HleBinding;
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_time::Budget;
 
-use super::manifest::TitleManifest;
-use super::prx::{build_nid_map, load_firmware_prx, pre_init_tls, run_module_start, PrxLoadInfo};
-use super::{
+use cellgov_ps3_abi::process_address_space::{
     PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
     PS3_PRIMARY_STACK_TOP, PS3_RSX_BASE, PS3_RSX_SIZE, PS3_SPU_RESERVED_BASE,
     PS3_SPU_RESERVED_SIZE,
 };
+
+use super::manifest::TitleManifest;
+use super::prx::{build_nid_map, load_firmware_prx, pre_init_tls, run_module_start, PrxLoadInfo};
 use crate::cli::exit::{die, load_file_or_die};
 
 /// Outputs of [`prepare`] that downstream step loops need.
@@ -139,6 +140,39 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         ),
     ])
     .unwrap_or_else(|e| die(&format!("failed to build guest memory layout: {e:?}")));
+
+    // Install the callback-return trampoline at runtime init.
+    // Worker LR slots point at `CALLBACK_RETURN_CODE_ADDR`; the
+    // worker's terminal `blr` sets `PC = LR` and lands on the
+    // trampoline body, which issues `lis r11, 8; ori r11, r11, 0;
+    // sc 0` (classified as `Lv2Request::CallbackDispatchReturn`).
+    // The trampoline lives inside the main region in the
+    // pre-user-heap scratch zone (`0..0x10000`) because the PPU's
+    // instruction-fetch path reads only from the base-0 region.
+    {
+        use cellgov_ps3_abi::callback_dispatch::{
+            CALLBACK_RETURN_CODE_ADDR, CALLBACK_RETURN_OPD_ADDR, TRAMPOLINE_CODE_BYTES,
+            TRAMPOLINE_OPD_BYTES,
+        };
+        mem.apply_commit(
+            cellgov_mem::ByteRange::new(
+                cellgov_mem::GuestAddr::new(CALLBACK_RETURN_CODE_ADDR as u64),
+                TRAMPOLINE_CODE_BYTES.len() as u64,
+            )
+            .expect("callback trampoline code range must be valid"),
+            &TRAMPOLINE_CODE_BYTES,
+        )
+        .expect("callback trampoline code commit");
+        mem.apply_commit(
+            cellgov_mem::ByteRange::new(
+                cellgov_mem::GuestAddr::new(CALLBACK_RETURN_OPD_ADDR as u64),
+                TRAMPOLINE_OPD_BYTES.len() as u64,
+            )
+            .expect("callback trampoline OPD range must be valid"),
+            &TRAMPOLINE_OPD_BYTES,
+        )
+        .expect("callback trampoline OPD commit");
+    }
     let t_mem_alloc = t_start.elapsed();
 
     let load_result = cellgov_ppu::loader::load_ppu_elf(&elf_data, &mut mem, &mut state)
@@ -431,6 +465,13 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             state.gpr[1] = init.stack_top;
             state.gpr[2] = init.entry_toc;
             state.gpr[3] = init.arg;
+            // r4..=r10 from extra_args. Zero on the
+            // sys_ppu_thread_create path; populated for
+            // callback-dispatch workers carrying the parent's
+            // r3..=r10 capture.
+            for (i, value) in init.extra_args.iter().enumerate() {
+                state.gpr[4 + i] = *value;
+            }
             state.gpr[13] = init.tls_base;
             state.lr = init.lr_sentinel;
         }

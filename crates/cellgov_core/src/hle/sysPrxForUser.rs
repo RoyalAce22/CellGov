@@ -194,6 +194,7 @@ fn adapter(runtime: &mut Runtime, source: UnitId, nid: u32) -> RuntimeHleAdapter
         nid,
         mutated: false,
         handlers_without_mutation: &mut runtime.hle.handlers_without_mutation,
+        pending_callback_spawn: &mut runtime.hle.pending_callback_spawn,
     }
 }
 

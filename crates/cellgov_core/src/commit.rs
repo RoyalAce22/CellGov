@@ -135,6 +135,18 @@ pub struct CommitOutcome {
     pub blocked_units: Vec<(UnitId, BlockReason)>,
     /// Units woken during this commit (excludes DMA-completion wakes).
     pub woken_units: Vec<UnitId>,
+    /// `true` when the step's `YieldReason::Fault` was a callback
+    /// worker faulting mid-body and the runtime absorbed it by
+    /// waking the parent with a kernel-error code in r3 + finishing
+    /// the worker. Step-loop classifiers treat such steps as
+    /// `Continue` rather than `StepFault` so the parent can run
+    /// through its error-path code instead of the entire run
+    /// terminating on a recoverable callback failure.
+    ///
+    /// Always `false` from `CommitPipeline::process`; populated by
+    /// the runtime in `commit_step` when the source unit was a
+    /// registered callback worker.
+    pub callback_worker_fault_absorbed: bool,
 }
 
 /// Why the commit pipeline blocked a unit.
@@ -530,6 +542,7 @@ impl CommitPipeline {
             effects_discarded_on_fault: 0,
             blocked_units,
             woken_units,
+            callback_worker_fault_absorbed: false,
         })
     }
 }

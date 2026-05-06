@@ -28,7 +28,7 @@ const MAX_PENDING_RESPONSES: usize = 65_536;
 /// Wire-format version prepended to [`SyscallResponseTable::state_hash`].
 /// Bumping this constant requires updating
 /// `tests::state_hash_wire_format_golden`'s `EXPECTED` in the same commit.
-const STATE_HASH_FORMAT_VERSION: u64 = 2;
+const STATE_HASH_FORMAT_VERSION: u64 = 4;
 
 impl SyscallResponseTable {
     /// Construct an empty table.
@@ -217,6 +217,18 @@ impl SyscallResponseTable {
                     hasher.write(&[6u8]);
                     hasher.write(&mutex_ptr.to_le_bytes());
                     hasher.write(&caller.to_le_bytes());
+                }
+                PendingResponse::CallbackReturn { stage, args } => {
+                    hasher.write(&[7u8]);
+                    // CallbackReturnStage is non-exhaustive; the
+                    // stable_tag method is the byte-stable mapping.
+                    // Adding a new stage requires bumping
+                    // STATE_HASH_FORMAT_VERSION and assigning the
+                    // tag in cellgov_lv2.
+                    hasher.write(&[stage.stable_tag()]);
+                    for word in args {
+                        hasher.write(&word.to_le_bytes());
+                    }
                 }
             }
         }
@@ -881,6 +893,20 @@ mod tests {
                     observed: 0,
                 },
             ),
+            (
+                "LwMutexWake",
+                PendingResponse::LwMutexWake {
+                    mutex_ptr: 0,
+                    caller: 0,
+                },
+            ),
+            (
+                "CallbackReturn",
+                PendingResponse::CallbackReturn {
+                    stage: cellgov_lv2::CallbackReturnStage::Synthetic,
+                    args: [0; 8],
+                },
+            ),
         ];
         let mut seen: std::collections::BTreeMap<u64, &str> = std::collections::BTreeMap::new();
         for (name, v) in variants {
@@ -959,7 +985,27 @@ mod tests {
                 observed: 0x0F0F_0F0F,
             },
         );
-        const EXPECTED: u64 = 0x3A00_EF41_5539_22DE;
+        ins(
+            &mut t,
+            UnitId::new(6),
+            PendingResponse::LwMutexWake {
+                mutex_ptr: 0xD000_F000,
+                caller: 0x0100_0001,
+            },
+        );
+        ins(
+            &mut t,
+            UnitId::new(7),
+            PendingResponse::CallbackReturn {
+                stage: cellgov_lv2::CallbackReturnStage::Synthetic,
+                args: [0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80],
+            },
+        );
+        // Recomputed for STATE_HASH_FORMAT_VERSION = 4
+        // (CallbackReturnStage::AutoLoadAfterStat variant added).
+        // Bumping the version regenerates this; CI catches drift
+        // via this assert.
+        const EXPECTED: u64 = 0xA87A_9CCE_8412_5A70;
         assert_eq!(
             t.state_hash(),
             EXPECTED,

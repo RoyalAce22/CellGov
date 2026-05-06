@@ -138,6 +138,7 @@ fn adapter(runtime: &mut Runtime, source: UnitId, nid: u32) -> RuntimeHleAdapter
         nid,
         mutated: false,
         handlers_without_mutation: &mut runtime.hle.handlers_without_mutation,
+        pending_callback_spawn: &mut runtime.hle.pending_callback_spawn,
     }
 }
 
@@ -1924,7 +1925,7 @@ mod tests {
             /* exitIfNoWork = */ 1,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &args, None);
 
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
         assert_eq!(
@@ -1954,7 +1955,7 @@ mod tests {
     fn attribute_initialize_null_pointer_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0, 1, 0, 1, 100, 200, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             core_error::NULL_POINTER as u64
@@ -1965,7 +1966,7 @@ mod tests {
     fn attribute_initialize_misaligned_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0001, 1, 0, 1, 100, 200, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::ALIGN as u64);
     }
 
@@ -1984,7 +1985,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args, None);
 
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
         assert_eq!(read_u32_be(&rt, spurs + layout::OFF_REVISION), 0);
@@ -2027,7 +2028,7 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         let spurs: u32 = 0x4_0040; // 64-byte aligned, NOT 128-byte aligned
         let args: [u64; 9] = [0x10000, spurs as u64, 2, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::ALIGN as u64);
     }
 
@@ -2035,7 +2036,7 @@ mod tests {
     fn initialize_bare_null_spurs_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0, 2, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             core_error::NULL_POINTER as u64
@@ -2060,11 +2061,16 @@ mod tests {
             /* exitIfNoWork = */ 0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args, None);
         let _ = drain_return(&mut rt, unit_id);
 
         let init_args: [u64; 9] = [0x10000, spurs as u64, attr_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE2, &init_args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::INITIALIZE_WITH_ATTRIBUTE2,
+            &init_args,
+            None,
+        );
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
 
         let flags = read_u32_be(&rt, spurs + layout::OFF_FLAGS);
@@ -2091,7 +2097,12 @@ mod tests {
         );
 
         let init_args: [u64; 9] = [0x10000, spurs as u64, attr_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE, &init_args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::INITIALIZE_WITH_ATTRIBUTE,
+            &init_args,
+            None,
+        );
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
@@ -2100,11 +2111,11 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         let spurs: u32 = 0x4_0000;
         let init_args: [u64; 9] = [0x10000, spurs as u64, 2, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &init_args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &init_args, None);
         let _ = drain_return(&mut rt, unit_id);
 
         let fin_args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::FINALIZE, &fin_args);
+        rt.dispatch_hle(unit_id, spurs_nid::FINALIZE, &fin_args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
         assert_eq!(read_u64_be(&rt, spurs + layout::OFF_PPU0), u64::MAX);
@@ -2116,7 +2127,7 @@ mod tests {
     fn finalize_misaligned_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0040, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::FINALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::FINALIZE, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::ALIGN as u64);
     }
 
@@ -2124,7 +2135,7 @@ mod tests {
     fn finalize_null_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::FINALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::FINALIZE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             core_error::NULL_POINTER as u64
@@ -2134,7 +2145,7 @@ mod tests {
     /// Drive `cellSpursInitialize` against a SPURS1 block at `spurs`.
     fn init_spurs(rt: &mut Runtime, unit_id: UnitId, spurs: u32) {
         let args: [u64; 9] = [0x10000, spurs as u64, 1, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args, None);
         let _ = drain_return(rt, unit_id);
     }
 
@@ -2142,10 +2153,15 @@ mod tests {
     /// `cellSpursInitializeWithAttribute2` against `spurs`.
     fn init_spurs_v2(rt: &mut Runtime, unit_id: UnitId, spurs: u32, attr_ptr: u32) {
         let attr_args: [u64; 9] = [0x10000, attr_ptr as u64, 2, 0, 1, 128, 1000, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args, None);
         let _ = drain_return(rt, unit_id);
         let init_args: [u64; 9] = [0x10000, spurs as u64, attr_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE2, &init_args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::INITIALIZE_WITH_ATTRIBUTE2,
+            &init_args,
+            None,
+        );
         let _ = drain_return(rt, unit_id);
     }
 
@@ -2179,7 +2195,7 @@ mod tests {
             /* minCnt = */ 1,
             /* maxCnt = */ 2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
 
         // wklEnabled init = 0x0000_ffff (low 16 bits reserved); the
@@ -2225,7 +2241,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::AGAIN as u64,
@@ -2265,7 +2281,7 @@ mod tests {
             3,
             4,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0, "CELL_OK");
 
         assert_eq!(read_u32_be(&rt, wid_ptr), 0);
@@ -2322,7 +2338,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::ALIGN as u64
@@ -2349,7 +2365,7 @@ mod tests {
             /* minCnt = */ 0,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::INVAL as u64
@@ -2381,7 +2397,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::INVAL as u64
@@ -2415,12 +2431,12 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &add_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &add_args, None);
         let _ = drain_return(&mut rt, unit_id);
 
         // Shutdown wid=0.
         let sd_args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &sd_args);
+        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &sd_args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
             read_byte_at(&rt, spurs + layout::OFF_WKL_STATE_1),
@@ -2439,7 +2455,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 99, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::INVAL as u64
@@ -2453,7 +2469,7 @@ mod tests {
         init_spurs(&mut rt, unit_id, spurs);
         // wid 99 exceeds wmax=16 for SPURS1 -> INVAL.
         let args: [u64; 9] = [0x10000, spurs as u64, 99, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::INVAL as u64
@@ -2469,7 +2485,7 @@ mod tests {
             "post-init wklEnabled is 0x0000_FFFF for SPURS1"
         );
         let args2: [u64; 9] = [0x10000, spurs as u64, 5, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &args2);
+        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &args2, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::SRCH as u64
@@ -2489,11 +2505,11 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &add_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &add_args, None);
         let _ = drain_return(&mut rt, unit_id);
 
         let args3: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &args3);
+        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &args3, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
     }
 
@@ -2512,7 +2528,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         // SF1_EXIT_IF_NO_WORK = 0x80, SF1_32_WORKLOADS = 0x40.
         assert_eq!(
@@ -2529,11 +2545,16 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         // Plant attribute via _cellSpursAttributeInitialize.
         let attr_args: [u64; 9] = [0x10000, attr_ptr as u64, 2, 0, 1, 128, 1000, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTRIBUTE_INITIALIZE, &attr_args, None);
         let _ = drain_return(&mut rt, unit_id);
 
         let init_args: [u64; 9] = [0x10000, spurs as u64, attr_ptr as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE2, &init_args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::INITIALIZE_WITH_ATTRIBUTE2,
+            &init_args,
+            None,
+        );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
             read_byte_at(&rt, spurs + layout::OFF_FLAGS1) & 0x40,
@@ -2548,11 +2569,11 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         // n_spus = 0 (< 1).
         let args0: [u64; 9] = [0x10000, spurs as u64, 0, 200, 1000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args0);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args0, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
         // n_spus = 7 (> 6).
         let args7: [u64; 9] = [0x10000, spurs as u64, 7, 200, 1000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args7);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args7, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
@@ -2583,7 +2604,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::STAT as u64
@@ -2626,7 +2647,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::AGAIN as u64
@@ -2670,7 +2691,7 @@ mod tests {
                 1,
                 2,
             ];
-            rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+            rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
             assert_eq!(
                 drain_return(&mut rt, unit_id),
                 0,
@@ -2698,7 +2719,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::AGAIN as u64
@@ -2749,7 +2770,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD_WITH_ATTRIBUTE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD_WITH_ATTRIBUTE, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, wid_ptr), 0);
         let info_addr = spurs + layout::OFF_WKL_INFO_1;
@@ -2790,7 +2811,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD_WITH_ATTRIBUTE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD_WITH_ATTRIBUTE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::INVAL as u64
@@ -2827,7 +2848,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::STAT as u64
@@ -2871,7 +2892,7 @@ mod tests {
                 1,
                 2,
             ];
-            rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+            rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
             assert_eq!(
                 drain_return(&mut rt, unit_id),
                 0,
@@ -2912,7 +2933,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::AGAIN as u64
@@ -2944,7 +2965,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         let _ = drain_return(&mut rt, unit_id);
         (rt, unit_id)
     }
@@ -2954,7 +2975,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0x42, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
             read_byte_at(&rt, spurs + layout::OFF_WKL_READY_COUNT_1),
@@ -2967,7 +2988,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0x100, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::INVAL as u64
@@ -2980,7 +3001,7 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // wid = 0xffffffff is past wmax -> INVAL.
         let args: [u64; 9] = [0x10000, spurs as u64, 0xffff_ffff, 1, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::INVAL as u64
@@ -2993,7 +3014,7 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // wid 5 is in band but not enabled (only wid 0 was added).
         let args: [u64; 9] = [0x10000, spurs as u64, 5, 1, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::SRCH as u64
@@ -3014,7 +3035,7 @@ mod tests {
             &[wkl_state::PREPARING],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 1, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_STORE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::STAT as u64
@@ -3036,7 +3057,7 @@ mod tests {
         );
         let old_ptr: u32 = 0x7_0000;
         let args: [u64; 9] = [0x10000, spurs as u64, 0, old_ptr as u64, 0x77, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_SWAP, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_SWAP, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, old_ptr), 0x33);
         assert_eq!(
@@ -3074,6 +3095,7 @@ mod tests {
             unit_id,
             spurs_nid::READY_COUNT_COMPARE_AND_SWAP,
             &args_no_swap,
+            None,
         );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, old_ptr), 0x10);
@@ -3095,7 +3117,12 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_COMPARE_AND_SWAP, &args_swap);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::READY_COUNT_COMPARE_AND_SWAP,
+            &args_swap,
+            None,
+        );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, old_ptr), 0x10);
         assert_eq!(
@@ -3119,7 +3146,7 @@ mod tests {
         let old_ptr: u32 = 0x7_0000;
         // 0xF0 + 0x20 = 0x110 -> clamped to 0xFF.
         let args: [u64; 9] = [0x10000, spurs as u64, 0, old_ptr as u64, 0x20, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_ADD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_ADD, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, old_ptr), 0xF0);
         assert_eq!(
@@ -3133,7 +3160,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0x55, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_SWAP, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::READY_COUNT_SWAP, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::NULL_POINTER as u64
@@ -3145,7 +3172,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 4, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
             read_byte_at(&rt, spurs + layout::OFF_WKL_IDLE_SPU_COUNT_OR_RC2),
@@ -3161,7 +3188,7 @@ mod tests {
         let unit_id = UnitId::new(0);
         init_spurs_v2(&mut rt, unit_id, spurs, attr_ptr);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 4, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             core_error::STAT as u64,
@@ -3175,7 +3202,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0xffff_ffff, 7, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
@@ -3184,7 +3211,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 8, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
@@ -3194,7 +3221,7 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // AddWorkload seeded the low nibble to 2; overwrite to 5.
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 5, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_MAX_CONTENTION, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_MAX_CONTENTION, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         let mc = read_byte_at(&rt, spurs + layout::OFF_WKL_MAX_CONTENTION);
         assert_eq!(mc & 0x0f, 5, "low nibble holds the SPURS1 wid 0..15 value");
@@ -3205,7 +3232,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 99, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_MAX_CONTENTION, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_MAX_CONTENTION, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         let mc = read_byte_at(&rt, spurs + layout::OFF_WKL_MAX_CONTENTION);
         assert_eq!(
@@ -3225,7 +3252,7 @@ mod tests {
             &[1, 2, 3, 4, 5, 6, 7, 8],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, prio_ptr as u64, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITIES, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITIES, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         let info_addr = spurs + layout::OFF_WKL_INFO_1;
         let mem = rt.memory().as_bytes();
@@ -3244,7 +3271,7 @@ mod tests {
             &[0, 0, 0x10, 0, 0, 0, 0, 0],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, prio_ptr as u64, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITIES, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITIES, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
@@ -3254,7 +3281,7 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // init_spurs picks nSpus=1.
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 7, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         let info_addr = spurs + layout::OFF_WKL_INFO_1;
         assert_eq!(
@@ -3268,7 +3295,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 16, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
@@ -3278,7 +3305,7 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // nSpus = 1 (set by init_spurs), so spu_id = 1 is OOB.
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 1, 5, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
@@ -3290,7 +3317,12 @@ mod tests {
     fn workload_attribute_initialize_panics_until_spill_surface_lands() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0000, 1, 0, 0x6_1000, 0x1000, 0, 0x6_2000, 2];
-        rt.dispatch_hle(unit_id, spurs_nid::WORKLOAD_ATTRIBUTE_INITIALIZE, &args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::WORKLOAD_ATTRIBUTE_INITIALIZE,
+            &args,
+            None,
+        );
     }
 
     #[cfg(not(debug_assertions))]
@@ -3298,7 +3330,12 @@ mod tests {
     fn workload_attribute_initialize_returns_inval_in_release() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0000, 1, 0, 0x6_1000, 0x1000, 0, 0x6_2000, 2];
-        rt.dispatch_hle(unit_id, spurs_nid::WORKLOAD_ATTRIBUTE_INITIALIZE, &args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::WORKLOAD_ATTRIBUTE_INITIALIZE,
+            &args,
+            None,
+        );
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::INVAL as u64
@@ -3312,11 +3349,11 @@ mod tests {
         let info: u32 = 0x6_0000;
         // SPURS1 init: nSpus=2, spuPrio=250, ppuPrio=1000, exitIfNoWork=1.
         let init: [u64; 9] = [0x10000, spurs as u64, 2, 250, 1000, 1, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &init);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &init, None);
         let _ = drain_return(&mut rt, unit_id);
 
         let args: [u64; 9] = [0x10000, spurs as u64, info as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
         assert_eq!(read_u32_be(&rt, info + info_layout::OFF_NSPUS), 2);
@@ -3353,7 +3390,7 @@ mod tests {
         init_spurs_v2(&mut rt, unit_id, spurs, attr_ptr);
 
         let args: [u64; 9] = [0x10000, spurs as u64, info as u64, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_byte_at(&rt, info + info_layout::OFF_SPURS2), 1);
     }
@@ -3363,11 +3400,11 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         let spurs: u32 = 0x4_0000;
         let init: [u64; 9] = [0x10000, spurs as u64, 1, 250, 1000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &init);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &init, None);
         let _ = drain_return(&mut rt, unit_id);
 
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             core_error::NULL_POINTER as u64
@@ -3378,7 +3415,7 @@ mod tests {
     fn get_info_misaligned_spurs_rejected() {
         let (mut rt, unit_id) = fixture();
         let args: [u64; 9] = [0x10000, 0x4_0040, 0x6_0000, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::GET_INFO, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::ALIGN as u64);
     }
 
@@ -3405,7 +3442,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
         assert_eq!(
@@ -3447,7 +3484,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         // Dynamic allocator picks the lowest free bit in [0x10, 0x40);
         // post-init spuPortBits is zero, so port 0x10 is chosen.
@@ -3469,7 +3506,7 @@ mod tests {
             &[0x40],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, port_ptr as u64, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
@@ -3479,7 +3516,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             core_error::NULL_POINTER as u64
@@ -3507,11 +3544,16 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ATTACH_LV2_EVENT_QUEUE, &attach_args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::ATTACH_LV2_EVENT_QUEUE,
+            &attach_args,
+            None,
+        );
         let _ = drain_return(&mut rt, unit_id);
 
         let detach: [u64; 9] = [0x10000, spurs as u64, 0x0c, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::DETACH_LV2_EVENT_QUEUE, &detach);
+        rt.dispatch_hle(unit_id, spurs_nid::DETACH_LV2_EVENT_QUEUE, &detach, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u64_be(&rt, spurs + layout::OFF_SPU_PORT_BITS), 0);
         // EventPortMux::eventPort cleared because the detached port
@@ -3531,7 +3573,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let detach: [u64; 9] = [0x10000, spurs as u64, 0x05, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::DETACH_LV2_EVENT_QUEUE, &detach);
+        rt.dispatch_hle(unit_id, spurs_nid::DETACH_LV2_EVENT_QUEUE, &detach, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::SRCH as u64);
     }
 
@@ -3541,7 +3583,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let detach: [u64; 9] = [0x10000, spurs as u64, 0x40, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::DETACH_LV2_EVENT_QUEUE, &detach);
+        rt.dispatch_hle(unit_id, spurs_nid::DETACH_LV2_EVENT_QUEUE, &detach, None);
         assert_eq!(drain_return(&mut rt, unit_id), core_error::INVAL as u64);
     }
 
@@ -3565,6 +3607,7 @@ mod tests {
             unit_id,
             spurs_nid::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &args,
+            None,
         );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
@@ -3587,6 +3630,7 @@ mod tests {
             unit_id,
             spurs_nid::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &args,
+            None,
         );
         let _ = drain_return(&mut rt, unit_id);
         // Second registration without unset returns BUSY.
@@ -3594,6 +3638,7 @@ mod tests {
             unit_id,
             spurs_nid::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &args,
+            None,
         );
         assert_eq!(drain_return(&mut rt, unit_id), core_error::BUSY as u64);
     }
@@ -3608,6 +3653,7 @@ mod tests {
             unit_id,
             spurs_nid::SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &set_args,
+            None,
         );
         let _ = drain_return(&mut rt, unit_id);
 
@@ -3616,6 +3662,7 @@ mod tests {
             unit_id,
             spurs_nid::UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER,
             &unset_args,
+            None,
         );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
@@ -3645,7 +3692,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
             read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER),
@@ -3662,7 +3709,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0x6_3000, 0x6_4000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         // Global slot must stay zero: per-workload path is a noop.
         assert_eq!(
@@ -3677,7 +3724,7 @@ mod tests {
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         // wid=20 is out of band (wmax=16) and not the sentinel.
         let args: [u64; 9] = [0x10000, spurs as u64, 20, 0x6_3000, 0x6_4000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::INVAL as u64
@@ -3700,13 +3747,19 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &set_args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::SET_EXCEPTION_EVENT_HANDLER,
+            &set_args,
+            None,
+        );
         let _ = drain_return(&mut rt, unit_id);
         let unset_args: [u64; 9] = [0x10000, spurs as u64, 0xffff_ffff, 0, 0, 0, 0, 0, 0];
         rt.dispatch_hle(
             unit_id,
             spurs_nid::UNSET_EXCEPTION_EVENT_HANDLER,
             &unset_args,
+            None,
         );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
@@ -3725,7 +3778,12 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         init_spurs(&mut rt, unit_id, spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 1, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::ENABLE_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::ENABLE_EXCEPTION_EVENT_HANDLER,
+            &args,
+            None,
+        );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, spurs + layout::OFF_ENABLE_EH), 1);
     }
@@ -3745,7 +3803,12 @@ mod tests {
             &1u32.to_be_bytes(),
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::ENABLE_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::ENABLE_EXCEPTION_EVENT_HANDLER,
+            &args,
+            None,
+        );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(read_u32_be(&rt, spurs + layout::OFF_ENABLE_EH), 0);
     }
@@ -3770,7 +3833,7 @@ mod tests {
             0,
             0,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE_WITH_ATTRIBUTE, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             core_error::INVAL as u64,
@@ -3797,7 +3860,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::FAULT as u64,
@@ -3821,7 +3884,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(
             drain_return(&mut rt, unit_id),
             policy_module_error::NULL_POINTER as u64,
@@ -3858,11 +3921,11 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
         // wid 1: same pm -> uniqueId reused = 0.
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
 
         let info_addr_1 = spurs + layout::OFF_WKL_INFO_1 + 32; // wid 1
@@ -3902,7 +3965,7 @@ mod tests {
             1,
             2,
         ];
-        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::ADD_WORKLOAD, &args, None);
         let _ = drain_return(&mut rt, unit_id);
         assert_eq!(
             read_u32_be(&rt, spurs + layout::OFF_WKL_MSK_B),
@@ -3917,7 +3980,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         for &n in &[1i32, 6] {
             let args: [u64; 9] = [0x10000, spurs as u64, n as u64, 200, 1000, 0, 0, 0, 0];
-            rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args);
+            rt.dispatch_hle(unit_id, spurs_nid::INITIALIZE, &args, None);
             assert_eq!(
                 drain_return(&mut rt, unit_id),
                 0,
@@ -3932,7 +3995,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 7, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::REQUEST_IDLE_SPU, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
             read_byte_at(&rt, spurs + layout::OFF_WKL_IDLE_SPU_COUNT_OR_RC2),
@@ -3945,7 +4008,7 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 15, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_PRIORITY, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         let info_addr = spurs + layout::OFF_WKL_INFO_1;
         assert_eq!(
@@ -3961,10 +4024,15 @@ mod tests {
         let spurs: u32 = 0x4_0000;
         let (mut rt, unit_id) = fixture_with_one_workload(spurs);
         let sd_args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &sd_args);
+        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &sd_args, None);
         let _ = drain_return(&mut rt, unit_id);
         let wait_args: [u64; 9] = [0x10000, spurs as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN, &wait_args);
+        rt.dispatch_hle(
+            unit_id,
+            spurs_nid::WAIT_FOR_WORKLOAD_SHUTDOWN,
+            &wait_args,
+            None,
+        );
         assert_eq!(drain_return(&mut rt, unit_id), 0);
     }
 
@@ -3978,7 +4046,7 @@ mod tests {
         let pre_status = read_byte_at(&rt, spurs + layout::OFF_WKL_STATUS_1);
         let pre_state = read_byte_at(&rt, spurs + layout::OFF_WKL_STATE_1);
         let args: [u64; 9] = [0x10000, spurs as u64, 0, 0x6_3000, 0x6_4000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SET_EXCEPTION_EVENT_HANDLER, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
             read_u64_be(&rt, spurs + layout::OFF_GLOBAL_EXCEPTION_HANDLER),
@@ -4024,7 +4092,7 @@ mod tests {
             &[wkl_state::RUNNABLE],
         );
         let args: [u64; 9] = [0x10000, spurs as u64, 25, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &args);
+        rt.dispatch_hle(unit_id, spurs_nid::SHUTDOWN_WORKLOAD, &args, None);
         assert_eq!(drain_return(&mut rt, unit_id), 0);
         assert_eq!(
             read_byte_at(&rt, spurs + layout::OFF_WKL_STATE_2 + 9),

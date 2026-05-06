@@ -169,6 +169,7 @@ impl Lv2Host {
                 entry_code,
                 entry_toc,
                 arg,
+                extra_args: [0; 7],
                 stack_top: stack.initial_sp(),
                 tls_base,
                 // Well-behaved guests call sys_ppu_thread_exit

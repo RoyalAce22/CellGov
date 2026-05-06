@@ -2714,6 +2714,7 @@ fn ppu_thread_create_tls_base_zero_with_non_empty_tls_panics() {
             entry_code: 0,
             entry_toc: 0,
             arg: 0,
+            extra_args: [0; 7],
             stack_top: 0,
             tls_base: 0,
             lr_sentinel: 0,
@@ -2768,6 +2769,7 @@ fn runtime_with_cellgcm_inited() -> (Runtime, cellgov_event::UnitId) {
         unit_id,
         cellgov_ps3_abi::nid::cell_gcm_sys::INIT_BODY,
         &args,
+        None,
     );
     (rt, unit_id)
 }
@@ -2937,6 +2939,7 @@ fn sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
                 sys_rsx_source,
                 cellgov_ps3_abi::nid::cell_gcm_sys::INIT_BODY,
                 &args,
+                None,
             );
         };
 
@@ -2998,6 +3001,7 @@ fn multi_primitive_determinism_canary_with_sys_rsx_content() {
             unit_id,
             cellgov_ps3_abi::nid::cell_gcm_sys::INIT_BODY,
             &args,
+            None,
         );
         // Sub-command flip path drives rsx_flip fold-in.
         let ctx_id = rt.lv2_host().sys_rsx_context().context_id;
@@ -3082,4 +3086,278 @@ fn rsx_context_attribute_flip_drives_status_transitions() {
         "post-boundary: DONE"
     );
     assert!(!rt.rsx_flip().pending());
+}
+
+// ----- callback-dispatch integration tests -----
+
+/// Drive a CallbackSpawn dispatch through `handle_callback_spawn`
+/// and assert: the parent unit transitions to Blocked, a worker
+/// PPU thread is registered, callback_parents links worker -> parent,
+/// callback_depth tracks the parent at depth 1.
+#[test]
+fn callback_spawn_dispatch_parks_parent_and_registers_worker() {
+    use cellgov_lv2::{CallbackReturnStage, Lv2Dispatch, PendingResponse, PpuThreadInitState};
+    let mut rt = build(0x1000, 1, 100);
+    rt.set_ppu_factory(|id, _init| Box::new(CountingUnit::new(id, 100)));
+    let parent = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    rt.lv2_host_mut().seed_primary_ppu_thread(
+        parent,
+        cellgov_lv2::PpuThreadAttrs {
+            entry: 0x10_0000,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x10000,
+            priority: 1000,
+            tls_base: 0,
+        },
+    );
+    let dispatch = Lv2Dispatch::CallbackSpawn {
+        worker_init: PpuThreadInitState {
+            entry_code: 0x1234,
+            entry_toc: 0x5678,
+            arg: 0xAA,
+            extra_args: [0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22],
+            stack_top: 0xD002_0000,
+            tls_base: 0,
+            lr_sentinel: 0xBFFF_FF0C,
+        },
+        worker_stack_base: 0xD001_0000,
+        worker_stack_size: 0x4000,
+        worker_priority: 0,
+        parent,
+        parent_pending: PendingResponse::CallbackReturn {
+            stage: CallbackReturnStage::Synthetic,
+            args: [0; 8],
+        },
+        effects: vec![],
+    };
+    rt.handle_callback_spawn_for_test(dispatch);
+
+    // Parent transitioned to Blocked.
+    assert_eq!(
+        rt.registry().effective_status(parent),
+        Some(UnitStatus::Blocked),
+        "parent must be parked after CallbackSpawn"
+    );
+    // A second unit was registered for the worker.
+    assert!(
+        rt.registry().ids().count() >= 2,
+        "worker unit must be registered"
+    );
+}
+
+/// After `dispatch_callback_return` emits a `WakeAndReturn` carrying
+/// the worker's captured args, the runtime's `handle_wake_and_return`
+/// applies the response_update and `resolve_sync_wakes` writes
+/// `args[0]` (worker r3) into the parent's r3.
+#[test]
+fn callback_return_wakes_parent_with_worker_r3() {
+    use cellgov_lv2::{CallbackReturnStage, Lv2Dispatch, PendingResponse, PpuThreadInitState};
+    let mut rt = build(0x1000, 1, 100);
+    rt.set_ppu_factory(|id, _init| Box::new(CountingUnit::new(id, 100)));
+    let parent = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    rt.lv2_host_mut().seed_primary_ppu_thread(
+        parent,
+        cellgov_lv2::PpuThreadAttrs {
+            entry: 0x10_0000,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x10000,
+            priority: 1000,
+            tls_base: 0,
+        },
+    );
+    // Park the parent via CallbackSpawn.
+    rt.handle_callback_spawn_for_test(Lv2Dispatch::CallbackSpawn {
+        worker_init: PpuThreadInitState {
+            entry_code: 0x1234,
+            entry_toc: 0x5678,
+            arg: 0,
+            extra_args: [0; 7],
+            stack_top: 0xD002_0000,
+            tls_base: 0,
+            lr_sentinel: 0xBFFF_FF0C,
+        },
+        worker_stack_base: 0xD001_0000,
+        worker_stack_size: 0x4000,
+        worker_priority: 0,
+        parent,
+        parent_pending: PendingResponse::CallbackReturn {
+            stage: CallbackReturnStage::Synthetic,
+            args: [0; 8],
+        },
+        effects: vec![],
+    });
+    assert_eq!(
+        rt.registry().effective_status(parent),
+        Some(UnitStatus::Blocked)
+    );
+
+    // Synthesize the worker's trampoline-syscall return: pull the
+    // worker UnitId from the registry (it's the second one), build
+    // a CallbackDispatchReturn request, dispatch it. The host's
+    // `dispatch_callback_return` returns WakeAndReturn; we drive it
+    // through the full request path so handle_wake_and_return
+    // applies the response_update.
+    let worker_unit = rt
+        .registry()
+        .ids()
+        .find(|id| *id != parent)
+        .expect("worker registered");
+    let captured = [
+        0xCAFE_BABE,
+        0xDEAD_BEEF,
+        0x1111_1111,
+        0x2222_2222,
+        0x3333_3333,
+        0x4444_4444,
+        0x5555_5555,
+        0x6666_6666,
+    ];
+    rt.dispatch_lv2_request(
+        cellgov_lv2::Lv2Request::CallbackDispatchReturn { args: captured },
+        worker_unit,
+    );
+
+    // Parent unparked with worker r3 (= captured[0]) in r3.
+    assert_eq!(
+        rt.registry().effective_status(parent),
+        Some(UnitStatus::Runnable),
+        "parent must be unparked"
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(parent),
+        Some(captured[0]),
+        "parent's r3 must be worker's r3 (args[0])"
+    );
+}
+
+// ----- consume_pending_callback_spawn helper tests -----
+
+/// Helper: write a guest-memory OPD `(code_addr, toc)` at `addr`.
+fn write_opd(rt: &mut Runtime, addr: u32, code: u32, toc: u32) {
+    let mut bytes = [0u8; 8];
+    bytes[0..4].copy_from_slice(&code.to_be_bytes());
+    bytes[4..8].copy_from_slice(&toc.to_be_bytes());
+    rt.memory_mut()
+        .apply_commit(
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr as u64), 8).unwrap(),
+            &bytes,
+        )
+        .unwrap();
+}
+
+/// Happy path: a pending park-for-callback drains into a real worker
+/// spawn. Parent ends up Blocked on `PendingResponse::CallbackReturn`,
+/// a fresh worker unit is registered, and the pending slot is cleared.
+#[test]
+fn consume_pending_callback_spawn_drains_into_worker_spawn() {
+    use crate::hle::context::HleParkRequest;
+    use cellgov_lv2::CallbackReturnStage;
+
+    let mut rt = build(0x10_0000, 1, 100);
+    rt.set_ppu_factory(|id, _init| Box::new(CountingUnit::new(id, 100)));
+    let parent = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    rt.lv2_host_mut().seed_primary_ppu_thread(
+        parent,
+        cellgov_lv2::PpuThreadAttrs {
+            entry: 0x10_0000,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x10000,
+            priority: 1000,
+            tls_base: 0,
+        },
+    );
+    write_opd(&mut rt, 0x4000, 0x1234_5678, 0x9ABC_DEF0);
+
+    let units_before = rt.registry().ids().count();
+    rt.hle.pending_callback_spawn = Some(HleParkRequest {
+        opd_addr: 0x4000,
+        args: [0xAA, 0xBB, 0xCC, 0, 0, 0, 0, 0],
+        stage: CallbackReturnStage::Synthetic,
+    });
+    rt.consume_pending_callback_spawn(parent);
+
+    assert!(
+        rt.hle.pending_callback_spawn.is_none(),
+        "pending slot must be cleared after consume"
+    );
+    assert_eq!(
+        rt.registry().effective_status(parent),
+        Some(UnitStatus::Blocked),
+        "parent must park after consumption applies the spawn",
+    );
+    assert!(
+        rt.registry().ids().count() > units_before,
+        "consume_pending_callback_spawn must register a worker unit",
+    );
+}
+
+/// Empty pending slot: consume is a noop. No registry mutation, no
+/// status change, no r3 write.
+#[test]
+fn consume_pending_callback_spawn_with_empty_slot_is_noop() {
+    let mut rt = build(0x10_0000, 1, 100);
+    let parent = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    let units_before = rt.registry().ids().count();
+    let status_before = rt.registry().effective_status(parent);
+
+    rt.consume_pending_callback_spawn(parent);
+
+    assert_eq!(rt.registry().ids().count(), units_before);
+    assert_eq!(rt.registry().effective_status(parent), status_before);
+    assert_eq!(rt.registry_mut().drain_syscall_return(parent), None);
+}
+
+/// Unreadable OPD pointer surfaces as CELL_EFAULT in parent's r3
+/// without parking (the parent stays Runnable so its caller observes
+/// the error and continues).
+#[test]
+fn consume_pending_callback_spawn_unmapped_opd_writes_cell_efault() {
+    use crate::hle::context::HleParkRequest;
+    use cellgov_lv2::CallbackReturnStage;
+    use cellgov_ps3_abi::cell_errors::CELL_EFAULT;
+
+    let mut rt = build(0x10_0000, 1, 100);
+    rt.set_ppu_factory(|id, _init| Box::new(CountingUnit::new(id, 100)));
+    let parent = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    rt.lv2_host_mut().seed_primary_ppu_thread(
+        parent,
+        cellgov_lv2::PpuThreadAttrs {
+            entry: 0x10_0000,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x10000,
+            priority: 1000,
+            tls_base: 0,
+        },
+    );
+
+    rt.hle.pending_callback_spawn = Some(HleParkRequest {
+        opd_addr: 0xFF00_0000, // far past any mapped region
+        args: [0; 8],
+        stage: CallbackReturnStage::Synthetic,
+    });
+    rt.consume_pending_callback_spawn(parent);
+
+    assert_eq!(
+        rt.registry().effective_status(parent),
+        Some(UnitStatus::Runnable),
+        "OpdReadFailed must NOT park parent",
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(parent),
+        Some(u64::from(CELL_EFAULT)),
+    );
 }

@@ -194,7 +194,7 @@ mod tests {
         // args[0] = HLE syscall slot (unused by the handler).
         // args[1] = path_ptr, args[2] = oflag, args[3] = fd_out_ptr.
         let args: [u64; 9] = [0x10000, 0x10000, 0, 0x20000, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0, "CELL_OK");
         let fd = read_u32_be(&rt, 0x20000);
         assert_ne!(fd, 0, "fs-layer fd must be non-zero");
@@ -206,7 +206,7 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         write_path(&mut rt, 0x10000, b"/missing");
         let args: [u64; 9] = [0x10000, 0x10000, 0, 0x20000, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &args, None);
         assert_eq!(
             read_syscall_return(&mut rt, unit_id) as u32,
             errno::CELL_ENOENT.code,
@@ -225,12 +225,12 @@ mod tests {
         write_path(&mut rt, 0x10000, b"/foo");
         // Open via the HLE path so the fd is FsStore-allocated.
         let open_args: [u64; 9] = [0x10000, 0x10000, 0, 0x20000, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
         let fd = read_u32_be(&rt, 0x20000);
         // Read 4 bytes into 0x30000; nread out at 0x30100.
         let read_args: [u64; 9] = [0x10000, fd as u64, 0x30000, 4, 0x30100, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::READ, &read_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::READ, &read_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
         assert_eq!(read_u64_be(&rt, 0x30100), 4);
         assert_eq!(&rt.memory().as_bytes()[0x30000..0x30004], b"abcd");
@@ -245,12 +245,12 @@ mod tests {
             .unwrap();
         write_path(&mut rt, 0x10000, b"/foo");
         let open_args: [u64; 9] = [0x10000, 0x10000, 0, 0x20000, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args, None);
         let _ = read_syscall_return(&mut rt, unit_id);
         let fd = read_u32_be(&rt, 0x20000);
         assert_eq!(rt.lv2_host().fs_store().open_fd_count(), 1);
         let close_args: [u64; 9] = [0x10000, fd as u64, 0, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::CLOSE, &close_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::CLOSE, &close_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
         assert_eq!(
             rt.lv2_host().fs_store().open_fd_count(),
@@ -268,12 +268,12 @@ mod tests {
             .unwrap();
         write_path(&mut rt, 0x10000, b"/foo");
         let open_args: [u64; 9] = [0x10000, 0x10000, 0, 0x20000, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args, None);
         let _ = read_syscall_return(&mut rt, unit_id);
         let fd = read_u32_be(&rt, 0x20000);
         // SEEK_SET to offset 4 -> pos = 4.
         let lseek_args: [u64; 9] = [0x10000, fd as u64, 4, 0 /* SET */, 0x30000, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::LSEEK, &lseek_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::LSEEK, &lseek_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
         assert_eq!(read_u64_be(&rt, 0x30000), 4);
     }
@@ -287,12 +287,12 @@ mod tests {
             .unwrap();
         write_path(&mut rt, 0x10000, b"/foo");
         let open_args: [u64; 9] = [0x10000, 0x10000, 0, 0x20000, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::OPEN, &open_args, None);
         let _ = read_syscall_return(&mut rt, unit_id);
         let fd = read_u32_be(&rt, 0x20000);
         // fstat into a 56-byte struct at 0x40000 (8-byte aligned).
         let fstat_args: [u64; 9] = [0x10000, fd as u64, 0x40000, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::FSTAT, &fstat_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::FSTAT, &fstat_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
         // size lives at offset 40 of the CellFsStat struct.
         assert_eq!(read_u64_be(&rt, 0x40000 + 40), 11);
@@ -307,7 +307,7 @@ mod tests {
             .unwrap();
         write_path(&mut rt, 0x10000, b"/foo");
         let stat_args: [u64; 9] = [0x10000, 0x10000, 0x40000, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::STAT, &stat_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::STAT, &stat_args, None);
         assert_eq!(read_syscall_return(&mut rt, unit_id), 0);
         assert_eq!(read_u64_be(&rt, 0x40000 + 40), 3);
     }
@@ -317,7 +317,7 @@ mod tests {
         let (mut rt, unit_id) = fixture();
         write_path(&mut rt, 0x10000, b"/missing");
         let stat_args: [u64; 9] = [0x10000, 0x10000, 0x40000, 0, 0, 0, 0, 0, 0];
-        rt.dispatch_hle(unit_id, sys_fs_nid::STAT, &stat_args);
+        rt.dispatch_hle(unit_id, sys_fs_nid::STAT, &stat_args, None);
         assert_eq!(
             read_syscall_return(&mut rt, unit_id) as u32,
             errno::CELL_ENOENT.code,

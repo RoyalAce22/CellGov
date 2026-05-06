@@ -1385,11 +1385,15 @@ mod tests {
         );
 
         assert!(
-            loaded.exports.contains_key(&0x744680a2),
+            loaded
+                .exports
+                .contains_key(&cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS),
             "should export sys_initialize_tls"
         );
         assert!(
-            loaded.exports.contains_key(&0xbdb18f83),
+            loaded
+                .exports
+                .contains_key(&cellgov_ps3_abi::nid::sys_prx_for_user::MALLOC),
             "should export _sys_malloc"
         );
     }

@@ -5,7 +5,9 @@
 //! [`Lv2Request::Unsupported`] / [`Lv2Request::Malformed`] instead
 //! of panicking.
 
+use cellgov_ps3_abi::callback_dispatch::CB_RETURN_SYSCALL;
 use cellgov_ps3_abi::syscall;
+use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
 
 /// Typed LV2 syscall request; host handlers exhaustively match.
 ///
@@ -642,6 +644,43 @@ pub enum Lv2Request {
         /// Sub-command argument.
         a6: u64,
     },
+    /// Worker-thread callback-dispatch spawn. NOT a guest-issued
+    /// syscall -- fabricated internally by HLE handlers via
+    /// `Lv2Host::call_guest_callback_sync`, never decoded by
+    /// [`classify`]. The host materializes a fresh worker PPU thread
+    /// with the title-supplied OPD and parks `parent` until the
+    /// worker returns.
+    CallbackDispatchSpawn {
+        /// Title-supplied OPD address (16 bytes BE: code || toc).
+        opd: u32,
+        /// `r3..=r10` for the worker.
+        args: [u64; 8],
+        /// Calling unit; parks on the worker's return.
+        parent: cellgov_event::UnitId,
+    },
+    /// Worker-thread callback-dispatch return. Issued by the
+    /// CellGov-private trampoline in
+    /// `cellgov_ps3_abi::callback_dispatch` when the worker's
+    /// terminal `blr` lands on the trampoline. [`classify`] decodes
+    /// this from `r11 = CB_RETURN_SYSCALL` (bit 19 set).
+    CallbackDispatchReturn {
+        /// Worker `r3..=r10` captured at trampoline entry. Forwarded
+        /// to the parent via [`crate::dispatch::PendingResponse::CallbackReturn`].
+        args: [u64; 8],
+    },
+    /// `sc` instruction with a non-zero LEV field. PS3 usermode
+    /// must never issue this (Book I §2.4.2 programming-error
+    /// note); the runtime rejects rather than letting the call
+    /// reach the LV2 dispatcher with no flag that this was a
+    /// privileged-mode call.
+    Hypercall {
+        /// LEV value as decoded from the `sc` instruction.
+        lev: u8,
+        /// r11 verbatim, preserved for diagnostics.
+        r11: u64,
+        /// Raw GPR values from r3..=r10.
+        args: [u64; 8],
+    },
     /// Unknown syscall number; raw args preserved for trace.
     Unsupported {
         /// Raw syscall number from GPR 11.
@@ -683,9 +722,29 @@ const I32_RANGE_REASONS: [&str; 8] = [
     "arg 7: not representable as i32",
 ];
 
-/// Build an [`Lv2Request`] from the raw syscall number (r11) and
-/// argument GPRs (r3..=r10).
+/// Build an [`Lv2Request`] for an `sc 0` (LEV=0) yield. Convenience
+/// wrapper around [`classify_with_lev`] for callers that already
+/// know LEV is zero (synthetic / fake-ISA test paths). Real PPU
+/// yields go through `classify_with_lev` from the runtime.
+#[inline]
 pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
+    classify_with_lev(0, syscall_num, args)
+}
+
+/// Build an [`Lv2Request`] from the LEV field, syscall number
+/// (r11), and argument GPRs (r3..=r10).
+///
+/// `lev` is the LEV field of the `sc` instruction (Book III
+/// §2.3.1). Non-zero LEV is a hypercall and routes to
+/// [`Lv2Request::Hypercall`]; the LV2 dispatcher must not see it.
+pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
+    if lev != 0 {
+        return Lv2Request::Hypercall {
+            lev,
+            r11: syscall_num,
+            args: *args,
+        };
+    }
     // `s!` uses `as i64` to reverse PPC64 sign extension: a guest
     // `int x = -1` arrives as 0xFFFF_FFFF_FFFF_FFFF, decodes to
     // -1i64, and `i32::try_from` rejects anything that isn't a
@@ -719,6 +778,37 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
         };
     }
 
+    // The classifier dispatches on SyscallNamespace::of: each
+    // namespace has a dedicated arm so a future namespace addition
+    // forces a match update rather than falling through silently.
+    // Real LV2 syscalls (`Lv2`) drop into the table below;
+    // `CellGovPrivate` routes the trampoline-installed numbers; the
+    // `HleImport` range is consumed upstream by `dispatch_syscall`
+    // before classify runs (NID lookup), but we surface it here as
+    // Unsupported for completeness of the total-classification
+    // contract.
+    match SyscallNamespace::of(syscall_num) {
+        Some(SyscallNamespace::CellGovPrivate) => {
+            return match syscall_num {
+                CB_RETURN_SYSCALL => Lv2Request::CallbackDispatchReturn { args: *args },
+                n => Lv2Request::Unsupported {
+                    number: n,
+                    args: *args,
+                },
+            };
+        }
+        Some(SyscallNamespace::HleImport) => {
+            return Lv2Request::Unsupported {
+                number: syscall_num,
+                args: *args,
+            };
+        }
+        Some(SyscallNamespace::Lv2) | None => {
+            // Lv2: fall through to the LV2 table match below.
+            // None: fall through to the table; the catch-all arm
+            // emits Unsupported with the raw number preserved.
+        }
+    }
     match syscall_num {
         syscall::SPU_IMAGE_OPEN => Lv2Request::SpuImageOpen {
             img_ptr: p!(0),
@@ -1703,6 +1793,47 @@ mod tests {
                 context_id: 0x5555_5555,
             }
         );
+    }
+
+    #[test]
+    fn classify_callback_return_syscall_routes_via_bit19() {
+        let args = [
+            0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888,
+        ];
+        let req = classify(CB_RETURN_SYSCALL, &args);
+        assert_eq!(req, Lv2Request::CallbackDispatchReturn { args });
+    }
+
+    #[test]
+    fn classify_unknown_private_syscall_falls_through_to_unsupported() {
+        // Bit 19 set but not CB_RETURN_SYSCALL: classifier rejects
+        // before reaching the LV2 table.
+        let args = [0; 8];
+        let bogus = CB_RETURN_SYSCALL | 0x1000;
+        let req = classify(bogus, &args);
+        match req {
+            Lv2Request::Unsupported { number, .. } => assert_eq!(number, bogus),
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn real_lv2_syscalls_classify_into_lv2_namespace() {
+        // Sanity: every real LV2 syscall constant lives in the
+        // SyscallNamespace::Lv2 range, never colliding with the
+        // private or HleImport namespaces.
+        for n in [
+            syscall::PROCESS_EXIT,
+            syscall::PPU_THREAD_CREATE,
+            syscall::FS_OPEN,
+            syscall::TTY_WRITE,
+        ] {
+            assert_eq!(
+                SyscallNamespace::of(n),
+                Some(SyscallNamespace::Lv2),
+                "syscall {n:#x} must classify into Lv2",
+            );
+        }
     }
 
     #[test]

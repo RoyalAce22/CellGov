@@ -12,11 +12,12 @@ pub mod image;
 pub mod ppu_thread;
 pub mod request;
 pub mod sync_primitives;
+pub mod syscall_classification;
 pub mod thread_group;
 
 pub use dispatch::{
-    CondMutexKind, Lv2BlockReason, Lv2Dispatch, PendingResponse, PpuThreadInitState,
-    SpuImageHandle, SpuInitState,
+    CallbackReturnStage, CondMutexKind, Lv2BlockReason, Lv2Dispatch, PendingResponse,
+    PpuThreadInitState, SpuImageHandle, SpuInitState,
 };
 pub use fs::{FileStat, FsError, FsStore, SeekWhence};
 pub use host::{Lv2Host, Lv2Runtime};
@@ -37,4 +38,5 @@ pub use sync_primitives::{
     SemaphoreCreateError, SemaphoreEnqueueError, SemaphoreEntry, SemaphorePost, SemaphoreTable,
     SemaphoreWait, WaiterList,
 };
+pub use syscall_classification::{classify as classify_syscall, SyscallClassification};
 pub use thread_group::{GroupState, ThreadGroup, ThreadGroupTable};

@@ -198,6 +198,22 @@ impl Runtime {
         if result.yield_reason == YieldReason::Syscall {
             self.dispatch_syscall(result, source);
         }
+        // Callback worker faulted mid-body: absorb the fault by
+        // waking the parent with CELL_EFAULT and finishing the
+        // worker. The fault is still recorded in the step result
+        // (so the trace stream and diagnostics see it) but the
+        // step-loop classifier treats it as `Continue` because
+        // `outcome.callback_worker_fault_absorbed` is set.
+        let absorbed = if result.yield_reason == YieldReason::Fault {
+            self.try_absorb_callback_worker_fault(source)
+        } else {
+            false
+        };
+        if absorbed {
+            if let Ok(ref mut o) = outcome {
+                o.callback_worker_fault_absorbed = true;
+            }
+        }
 
         self.epoch.advance();
         let due = self.fire_dma_completions();
@@ -741,7 +757,10 @@ impl Runtime {
         if self.mode == RuntimeMode::FullTrace {
             self.trace.record(&TraceRecord::StepCompleted {
                 unit: unit_id,
-                yield_reason: traced_yield_reason(result.yield_reason),
+                yield_reason: traced_yield_reason(
+                    result.yield_reason,
+                    result.local_diagnostics.syscall_lev,
+                ),
                 consumed_cost: result.consumed_cost,
                 time_after,
             });

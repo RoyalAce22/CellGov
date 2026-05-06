@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use cellgov_core::{Runtime, RuntimeMode, StepError};
 use cellgov_ppu::PpuExecutionUnit;
+use cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_BASE;
 use cellgov_time::Budget;
 
 use super::diag::fetch_raw_at;
@@ -184,7 +185,7 @@ pub(super) fn run_module_start(
     // Stack offset below the game's stack_top so the two do not
     // clobber each other if they ever coexist (LV2 runs module_start
     // to completion first, so in practice they do not).
-    ms_state.gpr[1] = super::PS3_PRIMARY_STACK_BASE + 0x8000;
+    ms_state.gpr[1] = PS3_PRIMARY_STACK_BASE + 0x8000;
     // PPC64 convention: r13 = TLS_area + 0x7030.
     ms_state.gpr[13] = TLS_BASE + 0x30 + 0x7000;
     // LR=0 sentinel: blr from module_start jumps to PC=0, where the

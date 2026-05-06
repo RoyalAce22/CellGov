@@ -201,6 +201,7 @@ impl PpuExecutionUnit {
             gprs: self.state.gpr,
             lr: self.state.lr,
             ctr: self.state.ctr,
+            xer: self.state.xer,
             cr: self.state.cr,
         }
     }
@@ -208,6 +209,8 @@ impl PpuExecutionUnit {
     fn fault_diag(&self, pc: u64) -> LocalDiagnostics {
         LocalDiagnostics {
             pc: Some(pc),
+            lr: Some(self.state.lr),
+            syscall_lev: None,
             faulting_ea: None,
             fault_regs: Some(self.capture_regs()),
         }
@@ -216,6 +219,8 @@ impl PpuExecutionUnit {
     fn fault_diag_ea(&self, pc: u64, ea: u64) -> LocalDiagnostics {
         LocalDiagnostics {
             pc: Some(pc),
+            lr: Some(self.state.lr),
+            syscall_lev: None,
             faulting_ea: Some(ea),
             fault_regs: Some(self.capture_regs()),
         }
@@ -422,17 +427,17 @@ impl ExecutionUnit for PpuExecutionUnit {
                     );
                 }
                 ExecuteVerdict::Branch => {}
-                ExecuteVerdict::Syscall => {
+                ExecuteVerdict::Syscall { lev } => {
                     self.store_buf.flush(effects, self.id);
-                    let s = &self.state;
-                    let args = [
-                        s.gpr[11], s.gpr[3], s.gpr[4], s.gpr[5], s.gpr[6], s.gpr[7], s.gpr[8],
-                        s.gpr[9], s.gpr[10],
-                    ];
+                    let args = state::ppu_syscall_args(&self.state);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Syscall,
                         consumed_cost: InstructionCost::new(budget.raw() - remaining),
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        local_diagnostics: LocalDiagnostics::with_pc_lr_syscall_lev(
+                            step_pc,
+                            self.state.lr,
+                            lev,
+                        ),
                         fault: None,
                         syscall_args: Some(args),
                     };

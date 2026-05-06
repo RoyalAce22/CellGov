@@ -385,7 +385,7 @@ and super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`,
 The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
 4 relocation types, and the PS3 PRX import-table parser.
-`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (50 entries) is the
+`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (60 entries) is the
 dispatch surface the runtime PRX binder consults; the larger
 NID lookup database (~5,300 entries) lives in
 `cellgov_ps3_abi::nid` and is accessed via `lookup(nid)` for
@@ -519,6 +519,43 @@ error codes instead of CELL_OK (matching RPCS3 retail behavior):
 
 All other syscalls fall through the host dispatcher returning CELL_OK
 with no effects.
+
+### Worker-thread callback dispatch
+
+A generic primitive on `Lv2Host::call_guest_callback_sync` lets HLE
+handlers invoke a title-supplied function pointer on a worker PPU
+thread and park the calling unit until the worker returns. The
+contract: input `(opd_addr, args[0..=7], parent_unit, stage)`; the
+opd is read as a packed PS3 OPD (`u32 BE code_addr || u32 BE toc`),
+worker `r3..=r10` are populated from `args`, the worker's LR is
+staged to a re-entry trampoline at `0x0000_FF00`, and the parent
+parks with a [`PendingResponse::CallbackReturn { stage, args:
+[0; 8] }`]. The worker's terminal `blr` lands on the trampoline
+(`lis r11, 8; ori r11, r11, 0; sc 0`) which fires a CellGov-private
+LV2 syscall in the namespace
+`cellgov_ps3_abi::syscall_namespace::SyscallNamespace::CellGovPrivate`;
+the runtime classifies it as `CallbackDispatchReturn`, captures
+the worker's `r3..=r10`, marks the worker `Finished`, and emits a
+`Lv2Dispatch::WakeAndReturn` keyed to the parent. The runtime's
+`resume_callback_return` dispatches by stage to the consumer's
+resume function (currently
+`cellgov_core::hle::cell_save_data::resume_after_stat`).
+
+The trampoline lives inside the main user-memory region in the
+pre-user-heap scratch zone (`0x0000_FF00..0x0000_FF20`) because
+the PPU instruction-fetch path reads only from the base-0 region;
+the original sketch placed it just below `PS3_RSX_BASE` but that
+address was unreachable to fetch. Workers inherit the parent's
+`tls_base` so r13-relative TLS loads inside the callback
+resolve through the parent's TLS image. Recursion depth is
+capped by `cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP`
+(8) -- exceeding it surfaces as `CallbackError::TooDeep` to the
+caller, mapped to `CELL_EAGAIN`.
+
+The first consumer is `cellSaveDataAutoLoad` / `AutoLoad2`. The
+primitive also unblocks deferred Phase 21 (flip-handler) and
+Phase 26 (SPURS exception-handler / event-helper) consumers; both
+remain stubbed pending a title that surfaces them.
 
 ### In-memory filesystem
 
@@ -900,18 +937,20 @@ configuration."
 ## HLE dispatch
 
 NID-based, separate from the syscall surface. `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`
-holds the 50 NIDs CellGov dispatches directly; the larger ~5,300-entry
+holds the 60 NIDs CellGov dispatches directly; the larger ~5,300-entry
 diagnostic database lives in `cellgov_ps3_abi::nid` (accessed via
 `lookup(nid)` for name resolution in `dump-imports` and fault output,
 not for dispatch). Module implementations
 are decoupled from the Runtime via the
 `HleContext` trait (`cellgov_core::hle_context`). Each module file
-(`sysPrxForUser.rs`, `cellGcmSys.rs`, `cellSysutil.rs`, `cellSpurs.rs`)
-contains free functions that operate through `&mut dyn HleContext` --
-8 methods covering guest memory read (region-aware, returns
-`Result<&[u8], HleReadError>`) and write, return value, register
-write, unit status, heap allocation, and kernel-object ID
-allocation.
+(`sysPrxForUser.rs`, `cellGcmSys.rs`, `cellSysutil.rs`, `cellSpurs.rs`,
+`cellSaveData.rs`, `sys_fs.rs`) contains free functions that operate
+through `&mut dyn HleContext` -- 9 methods covering guest memory read
+(region-aware, returns `Result<&[u8], HleReadError>`) and write,
+return value, register write, unit status, heap allocation,
+kernel-object ID allocation, and parkable callback dispatch
+(`park_for_callback` records an `HleParkRequest` the post-dispatch
+helper consumes; see "Worker-thread callback dispatch" above).
 
 ### sysPrxForUser (`hle_sys.rs`)
 
@@ -1021,6 +1060,38 @@ read failures to the spec-appropriate error code per namespace
 Writes use the established invariant-class / guest-pointer-class
 split: post-zero-init field writes use `.expect`, guest-supplied
 out-pointers use `try_write_*`.
+
+### cellSaveData HLE (autoload with real callback dispatch)
+
+The first consumer of the worker-thread callback-dispatch primitive
+(see "Worker-thread callback dispatch" under "LV2 host"). The
+handler allocates `CellSaveDataCBResult` (20 bytes), `StatGet`
+(`stat_get_layout::SIZE = 0x6A8`), and `StatSet` (`SIZE = 0x0C`)
+on the HLE bump heap, populates `statGet` with the no-save shape
+(`hddFreeSizeKB = 41,942,784` -- 40 GiB minus 256 KiB to match
+RPCS3, `isNewData = YES`, `sysSizeKB = 35`, echoed `dir.dirName`,
+`fileList = setBuf->buf`), and parks the calling unit on the
+title's funcStat OPD with `args = [cb_result_addr, stat_get_addr,
+stat_set_addr, 0, 0, 0, 0, 0]` and the
+`CallbackReturnStage::AutoLoadAfterStat` resume stage. On wake,
+`resume_after_stat` reads `cbResult.result` and finalizes (CELL_OK
+on `OK_LAST`, the matching `CELL_SAVEDATA_ERROR_*` for negative
+results, `PARAM` for `OK_LAST_NOCONFIRM` per RPCS3
+`savedata_op:1630`). The funcFile loop transition (on `OK_NEXT`)
+is wired but currently maps to `FAILURE` until the AutoLoadAfterFile
+variant lands.
+
+| Function                  | NID        | Behavior                                                                 |
+| ------------------------- | ---------- | ------------------------------------------------------------------------ |
+| `cellSaveDataAutoLoad`    | 0xc22c79b5 | NULL-pointer rejection (PARAM); heap-alloc and statGet populate; park    |
+|                           |            | for funcStat via `call_guest_callback_sync`. Resume reads cbResult.result|
+|                           |            | and returns CELL_OK or `CELL_SAVEDATA_ERROR_*` per the cb_result table.  |
+| `cellSaveDataAutoLoad2`   | 0xfbd5c856 | Same shape as AutoLoad plus `cbResult.userdata = args[8]` so the title's |
+|                           |            | callback observes the userdata pointer the title passed in r10.          |
+
+`AutoSave` and `ListAutoLoad` stay unclaimed (the autosave
+persistence side and the system-dialog wrapper are anti-scope
+until a title surfaces them).
 
 ## Schedule exploration
 
@@ -1218,16 +1289,25 @@ registers `Data/{Resources/first.xml,Local/Localization.xml,Classes/Classes.xml}
 which the EBOOT-adjacent USRDIR auto-discovery serves with the
 real bytes already on disk next to `EBOOT.elf`.
 
-Boot reaches a deterministic FAULT at step 85,291 (DECODE_ERROR
-at `PC=0x00000004`, raw=`0x00000000`). The driver is a NULL
-bcctr from flOw's `MODE_AUTO_LOAD` fallback: even with real XML
-content opened and read, the title's resource loader still trips
-the AUTO_LOAD path because the unclaimed `cellSaveDataAutoLoad`
-HLE NID returns CELL_OK with no result data, leaving an
-uninitialized table that the next dispatch reads as a NULL
-function pointer. Cross-runner refresh against this checkpoint
-is queued; the named successor driver is the save-data autoload
-subsystem.
+Boot reaches a deterministic FAULT at step 100,047 (DECODE_ERROR
+at `PC=0x00000004`, raw=`0x00000000`). The driver is a NULL bcctr
+from flOw's `CFlOwApplication::m_InitEntityHierarchy` running in
+a child PPU thread (r1 in the child-stack region, r2 = 0). The
+prior frontier at step 85,291 / 86,527 was the same NULL-bcctr
+shape but in the post-AutoLoad return path because callbacks
+never fired; the worker-thread callback-dispatch primitive +
+`cellSaveDataAutoLoad`'s real funcStat dispatch unblocked that
+surface (TTY trace shows `cb_data_status_load`'s populated
+StatGet dump and the title taking the no-save branch with
+`CELL_SAVEDATA_ERROR_NODATA = 0x8002b40b`). The new fault opens
+a Stage C investigation against an uninitialized vtable slot the
+entity-init code dereferences -- most likely a sysmodule whose
+`module_start` was supposed to install the slot via
+`cellSysmoduleLoadModule`. Cross-runner refresh at the new
+frontier produced an outcome-class mismatch (CellGov FAULT vs
+RPCS3 Completed-at-first-sys_tty_write); a CellGov-side
+"stop-at-Nth-sys_tty_write" checkpoint flag is the prerequisite
+for byte-level comparable cross-runner output.
 
 **Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
 modules (15 with dedicated CellGov handling); the harness uses a

@@ -17,15 +17,19 @@
 //! `docs/dev/optimizations/centralized_ps3_abi_crate.md` for the full
 //! scope and migration plan.
 
+pub mod callback_dispatch;
 pub mod cell_errors;
 pub mod elf;
 pub mod hardware;
 pub mod nid;
+pub mod process_address_space;
 pub mod sha1;
 pub mod sys_memory;
 pub mod sys_rsx;
 pub mod sys_spu;
 pub mod syscall;
+pub mod syscall_namespace;
+pub mod trampoline_codegen;
 
 // Per-PS3-PRX-module ABI data. Filenames mirror the Sony library
 // names; module identifiers stay snake_case to match the rest of the
@@ -34,6 +38,8 @@ pub mod syscall;
 pub mod cell_gcm;
 #[path = "sprx_modules/cellGcmSys.rs"]
 pub mod cell_gcm_sys;
+#[path = "sprx_modules/cellSaveData.rs"]
+pub mod cell_save_data;
 #[path = "sprx_modules/cellSpurs.rs"]
 pub mod cell_spurs;
 #[path = "sprx_modules/cellVideoOut.rs"]
