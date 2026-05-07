@@ -1,11 +1,12 @@
 //! Branch dispatch: `b`/`bc`/`bclr`/`bcctr` and the BO/BI condition
 //! evaluator they share.
 //!
-//! Per Book I 2.4: every branch form's pseudocode is (1) optional CTR
-//! decrement, (2) condition evaluation, (3) target write, (4) LR
-//! write if LK. The dispatch arms below preserve that ordering so
-//! adding a side effect to `branch_condition` cannot accidentally
-//! observe a half-updated LR.
+//! Every branch form's pseudocode is (1) optional CTR decrement,
+//! (2) condition evaluation, (3) target write, (4) LR write if LK.
+//! The dispatch arms below preserve that ordering so adding a side
+//! effect to `branch_condition` cannot accidentally observe a
+//! half-updated LR.
+// [PPC-Book1 p:20 s:2.4] Branch Processor Instructions overview.
 
 use crate::exec::ExecuteVerdict;
 use crate::instruction::PpuInstruction;
@@ -19,6 +20,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             // negative absolute target lands at 0xFFFF_FFFF_FFFF_xxxx.
             // Do not change the cast to `as u32 as u64`; that path
             // would zero-extend.
+            // [PPC-Book1 p:24 s:2.4] Branch I-form: NIA <- EXTS(LI||0b00) when AA, else CIA+EXTS(LI||0b00); LR<-CIA+4 when LK.
             let target = if aa {
                 (offset as u64) & 0xFFFF_FFFF_FFFF_FFFC
             } else {
@@ -37,6 +39,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             aa,
             link,
         } => {
+            // [PPC-Book1 p:24 s:2.4] Branch Conditional B-form: target is EXTS(BD||0b00); LR is written under LK regardless of taken.
             let cond = branch_condition(state, bo, bi);
             if link {
                 state.lr = state.pc + 4;
@@ -55,7 +58,11 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         PpuInstruction::Bclr { bo, bi, link } => {
             // Capture target before LR is overwritten so `blrl`
             // returns to the *old* LR while the new LR points at the
-            // following instruction.
+            // following instruction. The architectural BH operand is
+            // dropped at decode -- it is a predictor hint only and
+            // does not affect results.
+            // [PPC-Book1 p:25 s:2.4] bclr XL-form: NIA <- LR[0:61]||0b00; CTR decremented when BO_2=0.
+            // [PPC-Book1 p:21 s:2.4.1 Figure 23] BH field encodings; BH is independent of BO "at" hints and does not affect execution.
             let target = state.lr & !3;
             let cond = branch_condition(state, bo, bi);
             if link {
@@ -69,11 +76,12 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
         }
         PpuInstruction::Bcctr { bo, bi, link } => {
-            // Book I 2.4.1: bcctr's pseudocode has no CTR decrement
-            // step. BO_2=0 is an invalid form (assemblers reject
-            // bdnzctr); we treat BO_2 as don't-care here so the
-            // invalid form runs deterministically without corrupting
-            // CTR. Only the CR-test path matters for the condition.
+            // bcctr's pseudocode has no CTR decrement step. BO_2=0
+            // is an invalid form (assemblers reject bdnzctr); we
+            // treat BO_2 as don't-care here so the invalid form runs
+            // deterministically without corrupting CTR. Only the
+            // CR-test path matters for the condition.
+            // [PPC-Book1 p:25 s:2.4] bcctr XL-form: NIA <- CTR[0:61]||0b00; specifying BO_2=0 yields an invalid form.
             let cond_ok = (bo & 0x10) != 0 || (state.cr_bit(bi) == ((bo & 0x08) != 0));
             if link {
                 state.lr = state.pc + 4;
@@ -98,6 +106,8 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
 /// `bcctr` is the only branch whose spec pseudocode lacks a CTR
 /// decrement -- it does not call this helper.
 pub(crate) fn branch_condition(state: &mut PpuState, bo: u8, bi: u8) -> bool {
+    // [PPC-Book1 p:24 s:2.4] BO encoding: ctr_ok = BO_2 | ((CTR!=0) XOR BO_3); cond_ok = BO_0 | (CR_BI == BO_1).
+    // [PPC-Book1 p:20 s:2.4.1 Figure 21] BO field encodings table; the "a"/"t" hint bits in BO_4 (0x01) are software hints only and do not affect results.
     let decr_ctr = (bo & 0x04) == 0;
     if decr_ctr {
         state.ctr = state.ctr.wrapping_sub(1);
@@ -148,9 +158,9 @@ mod tests {
 
     #[test]
     fn ba_with_negative_offset_sign_extends_to_high_address() {
-        // Per Book I 2.4: `NIA <- EXTS(LI || 0b00)` for `ba`. A cast
-        // path that zero-extended (e.g. `offset as u32 as u64`)
-        // would land at 0x0000_0000_FFFF_FF00 instead of the
+        // [PPC-Book1 p:24 s:2.4] `NIA <- EXTS(LI || 0b00)` for `ba`.
+        // A cast path that zero-extended (e.g. `offset as u32 as
+        // u64`) would land at 0x0000_0000_FFFF_FF00 instead of the
         // architectural 0xFFFF_FFFF_FFFF_FF00 -- which is how the
         // hypervisor reaches its high-address exception vectors.
         let mut s = PpuState::new();
@@ -303,9 +313,9 @@ mod tests {
 
     #[test]
     fn bcl_sets_lr_even_when_branch_not_taken() {
-        // Book I 2.4: LK=1 writes LR regardless of whether the branch
-        // is taken. A regression that gated the LR write on cond_ok
-        // would leave LR unchanged here.
+        // [PPC-Book1 p:24 s:2.4] LK=1 writes LR regardless of whether
+        // the branch is taken. A regression that gated the LR write
+        // on cond_ok would leave LR unchanged here.
         let mut s = PpuState::new();
         s.pc = 0x1000;
         s.lr = 0xDEAD;

@@ -4,6 +4,10 @@
 //! giving a total order that preserves enqueue order among equal times.
 //! `Effect::DmaEnqueue` flows through the commit pipeline into this
 //! queue; completions emit wake events as they drain.
+//
+// [CBE-Handbook p:509 s:19] MFC command queues; out-of-order execution; tag-group ordering via fence/barrier.
+// [CBE-Handbook p:504 s:18.10.4] 16-entry MFC SPU command queue depth.
+// [CBE-Handbook p:522 s:19.3.3.2] 8-entry MFC proxy command queue for PPE-issued commands.
 
 use crate::completion::DmaCompletion;
 use cellgov_time::GuestTicks;

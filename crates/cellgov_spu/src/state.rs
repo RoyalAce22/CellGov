@@ -3,15 +3,18 @@
 use cellgov_sync::ReservedLine;
 
 /// SPU local store size: 256 KB.
+// [CBE-Handbook p:126 s:5.3.1] LS area for each SPE is 256 KB in size.
 pub const LS_SIZE: usize = 256 * 1024;
 
 /// Number of 128-bit general-purpose SPU registers.
+// [SPU-ISA p:25 s:2] 128 GPRs, each 128 bits wide.
 pub const REG_COUNT: usize = 128;
 
 /// Full SPU architectural state.
 #[derive(Clone)]
 pub struct SpuState {
     /// 128 x 128-bit GPRs; each register is 16 bytes, byte 0 is MSB.
+    // [SPU-ISA p:28 s:2.2] All GPRs are 128 bits wide; leftmost word (bytes 0-3) is preferred slot.
     pub regs: [[u8; 16]; REG_COUNT],
     /// 256 KB local store.
     pub ls: Vec<u8>,
@@ -23,6 +26,7 @@ pub struct SpuState {
     /// when this is `Some(line)` *and* the committed
     /// [`cellgov_sync::ReservationTable`] entry (queried via
     /// `ExecutionContext::reservation_held`) still holds the line.
+    // [CBEA p:91 s:8.4.3] Reservation granule is the 128-byte lock line.
     pub reservation: Option<ReservedLine>,
 }
 
@@ -100,23 +104,32 @@ impl Default for SpuState {
 #[derive(Clone, Default)]
 pub struct ChannelState {
     /// MFC_LSA: local store address for next DMA command.
+    // [CBEA p:110 s:9] MFC_LSA channel x'10': local storage address command parameter.
     pub mfc_lsa: u32,
     /// MFC_EAH: effective address high word.
+    // [CBEA p:110 s:9] MFC_EAH channel x'11': high-order EA command parameter.
     pub mfc_eah: u32,
     /// MFC_EAL: effective address low word.
+    // [CBEA p:111 s:9] MFC_EAL channel x'12': low-order EA / list address command parameter.
     pub mfc_eal: u32,
     /// MFC_Size: transfer size for next DMA command.
+    // [CBEA p:111 s:9] MFC_Size channel x'13': transfer size / list size command parameter.
     pub mfc_size: u32,
     /// MFC_TagID: tag for next DMA command.
+    // [CBEA p:111 s:9] MFC_TagID channel x'14': tag identifier command parameter.
     pub mfc_tag_id: u32,
     /// Tag mask written by mfc_write_tag_mask.
+    // [CBEA p:113 s:9] MFC_WrTagMask channel x'1E': tag-group query mask.
     pub tag_mask: u32,
     /// Tag completion status bits, set on DMA completion.
+    // [CBEA p:114 s:9] MFC_RdTagStat channel x'18': tag-group status bits.
     pub tag_status: u32,
     /// Atomic operation status set after getllar/putllc.
+    // [CBEA p:115 s:9] MFC_RdAtomicStat channel x'1B': atomic-command completion status.
     pub atomic_status: u32,
     /// Target register for a pending rdch SPU_RdInMbox yield; consumed
     /// by `run_until_yield` on message delivery.
+    // [CBEA p:117 s:9] SPU_RdInMbox channel x'1D': PPE-to-SPU mailbox read.
     pub pending_mbox_rt: Option<u8>,
     /// Pending DMA Get (ea, lsa, size); serviced at the start of the
     /// next `run_until_yield` from the committed memory snapshot.

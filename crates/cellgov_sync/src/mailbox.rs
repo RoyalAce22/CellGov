@@ -4,6 +4,8 @@
 //!
 //! Messages are raw `u32` words rather than `cellgov_effects::MailboxMessage`
 //! because the crate DAG runs `effects -> sync`, not the reverse.
+// [CBEA p:132 s:9.5 SPU Mailbox Channels] models the three Cell BE SPU mailbox channels (Outbound, Outbound Interrupt, Inbound) as a u32 FIFO.
+// [CBE-Handbook p:536 s:19.6 Mailboxes] full-send / empty-receive stall semantics that the integration layer translates into block/wake events.
 
 /// Stable identifier for a mailbox instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

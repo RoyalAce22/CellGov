@@ -13,9 +13,10 @@ use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::ReservedLine;
 use cellgov_time::GuestTicks;
 
-/// Data cache block size on the Cell PPU. Book II Sec. 3.2.2 defines
-/// the `dcbz` block as the implementation's data cache line; Cell
-/// PPU is 128 bytes.
+/// Data cache block size on the Cell PPU. The `dcbz` block is the
+/// implementation's data cache line; Cell PPU is 128 bytes.
+// [PPC-Book2 p:20 s:3.2 Cache Management Instructions] dcbz block is implementation-defined.
+// [CBE-Handbook p:135 s:6.1] PPE L1 DCache cache-line size is 128 bytes; coherence block matches.
 const DCBZ_BLOCK_BYTES: usize = 128;
 
 pub(crate) fn execute(
@@ -28,6 +29,11 @@ pub(crate) fn execute(
 ) -> ExecuteVerdict {
     match *insn {
         // Integer loads
+        // [PPC-Book1 p:34 s:3.3] Load Byte and Zero (lbz, D-form): byte at EA -> RT[56:63], RT[0:55]=0.
+        // [PPC-Book1 p:35 s:3.3] Load Halfword and Zero (lhz, D-form): zero-extend halfword to RT.
+        // [PPC-Book1 p:36 s:3.3] Load Halfword Algebraic (lha, D-form): sign-extend halfword to RT.
+        // [PPC-Book1 p:38 s:3.3] Load Word Algebraic (lwa, DS-form): sign-extend word to RT.
+        // [PPC-Book1 p:39 s:3.3] Load Doubleword (ld, DS-form): MEM(EA,8) -> RT.
         PpuInstruction::Lwz { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 4) {
@@ -138,6 +144,7 @@ pub(crate) fn execute(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:34 s:3.3] X-form indexed load variants (lbzx/lhzx/lwzx/ldx): EA = (RA|0)+(RB).
         PpuInstruction::Lwzx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 4) {
@@ -180,6 +187,10 @@ pub(crate) fn execute(
         }
 
         // Integer stores
+        // [PPC-Book1 p:40 s:3.3.3] Store Byte (stb, D-form): RS[56:63] -> MEM(EA,1).
+        // [PPC-Book1 p:41 s:3.3.3] Store Halfword (sth, D-form): RS[48:63] -> MEM(EA,2).
+        // [PPC-Book1 p:42 s:3.3.3] Store Word (stw/stwx/stwu, D/X-form): RS[32:63] -> MEM(EA,4).
+        // [PPC-Book1 p:43 s:3.3.3] Store Doubleword (std/stdx, DS/X-form): RS -> MEM(EA,8).
         PpuInstruction::Stw { rs, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
             buffer_store(store_buf, state, ea, 4, state.gpr[rs as usize])
@@ -255,6 +266,7 @@ pub(crate) fn execute(
         }
 
         // Atomic load-reserve / store-conditional
+        // [PPC-Book2 p:24 s:3.3] lwarx/ldarx: load + set RESERVE, RESERVE_ADDR = real_addr(EA); EA must be naturally aligned.
         PpuInstruction::Ldarx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             debug_assert!(
@@ -275,6 +287,7 @@ pub(crate) fn execute(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book2 p:25 s:3.3] stwcx./stdcx.: if RESERVE && RESERVE_ADDR == real_addr(EA) then store + CR0 = 0b00||1||XER[SO], else CR0 = 0b00||0||XER[SO]; reservation cleared.
         PpuInstruction::Stdcx { rs, ra, rb } => {
             // Local reservation alone is authoritative here:
             // cross-unit invalidation is applied at step start by
@@ -289,9 +302,9 @@ pub(crate) fn execute(
                 Some(line) => line.addr() == ReservedLine::containing(ea).addr(),
                 None => false,
             };
-            // Book II 3.3.2: CR0 = 0b00 || n || XER[SO]. The SO bit
-            // is sticky and must be reflected in every dot-form
-            // result.
+            // [PPC-Book2 p:25 s:3.3.2 Atomic Update Primitives] CR0 = 0b00 || n || XER[SO].
+            // The SO bit is sticky and must be reflected in every
+            // dot-form result.
             let so = u8::from(state.xer_so());
             if success {
                 state.set_cr_field(0, 0b0010 | so);
@@ -380,6 +393,7 @@ pub(crate) fn execute(
         }
 
         // Vector loads / stores
+        // [CBE-Handbook p:744 s:A.3] PPE-only VMX additions lvlx/lvrx/stvlx/stvrx: unaligned vector load/store helpers.
         PpuInstruction::Lvlx { vt, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let addr = base.wrapping_add(state.gpr[rb as usize]);
@@ -408,6 +422,7 @@ pub(crate) fn execute(
             };
             ExecuteVerdict::Continue
         }
+        // [AltiVec-PEM p:6-28 s:6.2] Store Vector Indexed (stvx, X-form): EA = ((RA|0)+(RB)) & ~0xF; vS -> MEM(EA,16).
         PpuInstruction::Stvx { vs, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]) & !15u64;
@@ -441,6 +456,10 @@ pub(crate) fn execute(
         }
 
         // Floating-point loads / stores
+        // [PPC-Book1 p:104 s:4.6] Load Floating-Point Single (lfs, D-form): single -> double via DOUBLE() into FRT.
+        // [PPC-Book1 p:105 s:4.6] Load Floating-Point Double (lfd, D-form): MEM(EA,8) -> FRT.
+        // [PPC-Book1 p:107 s:4.6] Store Floating-Point Single (stfs, D-form): SINGLE(FRS) -> MEM(EA,4).
+        // [PPC-Book1 p:108 s:4.6] Store Floating-Point Double (stfd, D-form): FRS -> MEM(EA,8).
         PpuInstruction::Lfs { frt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 4) {
@@ -491,6 +510,7 @@ pub(crate) fn execute(
         }
         // Unlike stfs, stfiwx stores the low 32 FPR bits verbatim
         // (no round-convert to single precision).
+        // [PPC-Book1 p:109 s:4.6] Store Floating-Point as Integer Word Indexed (stfiwx): FRS[32:63] -> MEM(EA,4) without conversion.
         PpuInstruction::Stfiwx { frs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             buffer_store(
@@ -505,6 +525,10 @@ pub(crate) fn execute(
         // X-form FP indexed loads / stores. EA = (RA == 0 ? 0 : GPR[RA]) + GPR[RB].
         // The `u` (update) variants write EA back into GPR[RA] iff the
         // memory access succeeded, matching the D-form Stfsu/Stfdu policy.
+        // [PPC-Book1 p:104 s:4.6] lfsx / lfsux: X-form single-precision load with DOUBLE() conversion.
+        // [PPC-Book1 p:105 s:4.6] lfdx / lfdux: X-form double-precision load.
+        // [PPC-Book1 p:107 s:4.6] stfsx / stfsux: X-form single-precision store via SINGLE() conversion.
+        // [PPC-Book1 p:108 s:4.6] stfdx / stfdux: X-form double-precision store.
         PpuInstruction::Lfsx { frt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 4) {
@@ -579,6 +603,7 @@ pub(crate) fn execute(
         }
 
         // Cache control
+        // [PPC-Book2 p:20 s:3.2] Data Cache Block set to Zero (dcbz, X-form): zero the block of size n containing EA; treated as a Store.
         PpuInstruction::Dcbz { ra, rb } => {
             let ea = state.ea_x_form(ra, rb) & !(DCBZ_BLOCK_BYTES as u64 - 1);
             debug_assert!(
@@ -617,6 +642,7 @@ pub(crate) fn execute(
 /// Lives here rather than in `vec` because the load path is the
 /// same store-buffer-forward / region-view fallback shared with
 /// `lvlx`/`lvrx`.
+// [AltiVec-PEM p:6-21 s:6.2] Load Vector Indexed (lvx, X-form): EA = ((RA|0)+(RB)) & ~0xF; MEM(EA,16) -> vD.
 pub(crate) fn execute_lvx(
     state: &mut PpuState,
     vt: u8,
@@ -666,15 +692,15 @@ fn read_aligned_16(
 
 #[inline]
 #[track_caller]
-/// PPC `DOUBLE(WORD)` per Book I sec 4.6.2: convert a 32-bit
-/// single-precision encoding to its 64-bit double encoding.
+// [PPC-Book1 p:103 s:4.6.2] DOUBLE(WORD): single-precision to double-precision conversion pseudocode (normalized / denormalized / Zero / Infinity / NaN branches).
+/// PPC `DOUBLE(WORD)`: convert a 32-bit single-precision encoding to
+/// its 64-bit double encoding.
 ///
-/// Matches Rust's `f32 as f64` for finite values, but preserves
-/// NaN payloads bit-exactly (including the SNaN/QNaN distinction)
-/// per Book I sec 4.6.2's bit-fill pseudocode for the
-/// NaN/Inf/Zero branch. A naive `as f64` cast is allowed by Rust
-/// to canonicalise NaNs and would silently quiet SNaNs
-/// round-tripped through stfsx -> lfsx.
+/// Matches Rust's `f32 as f64` for finite values, but preserves NaN
+/// payloads bit-exactly (including the SNaN/QNaN distinction) per
+/// the bit-fill pseudocode for the NaN/Inf/Zero branch. A naive
+/// `as f64` cast is allowed by Rust to canonicalise NaNs and would
+/// silently quiet SNaNs round-tripped through stfsx -> lfsx.
 fn double_word(w: u32) -> u64 {
     let exp = (w >> 23) & 0xFF;
     let frac23 = w & 0x007F_FFFF;
@@ -687,13 +713,14 @@ fn double_word(w: u32) -> u64 {
     (f32::from_bits(w) as f64).to_bits()
 }
 
-/// PPC `SINGLE(FRS)` per Book I sec 4.6.3: convert a 64-bit
-/// double-precision encoding to its 32-bit single encoding.
+// [PPC-Book1 p:106 s:4.6.3] SINGLE(FRS): double-precision to single-precision conversion pseudocode (No Denormalization Required vs Denormalization Required branches).
+/// PPC `SINGLE(FRS)`: convert a 64-bit double-precision encoding to
+/// its 32-bit single encoding.
 ///
 /// Matches Rust's `f64 as f32` for finite values; preserves NaN
 /// payloads bit-exactly (sign + high 23 fraction bits, exponent
-/// reset to all-ones) per Book I sec 4.6.3's "No Denormalization
-/// Required" branch on NaN inputs.
+/// reset to all-ones) per the "No Denormalization Required" branch
+/// on NaN inputs.
 fn single_frs(d: u64) -> u32 {
     let exp = ((d >> 52) & 0x7FF) as u32;
     let frac52 = d & 0x000F_FFFF_FFFF_FFFF;
@@ -708,9 +735,8 @@ fn single_frs(d: u64) -> u32 {
 }
 
 fn debug_assert_load_with_update(insn: &str, ra: u8, rt: u8) {
-    // PPC Book I 3.3.2: invalid form when RA=0 (no base) or RA=RT
-    // (the EA-write would clobber the loaded value). Real games
-    // never encode this; assemblers reject it. Surfaces in tests if
+    // [PPC-Book1 p:33 s:3.3.2] Load with update: invalid form when RA=0 or RA=RT.
+    // Real games never encode this; assemblers reject it. Surfaces in tests if
     // a decoder bug or self-modifying code produces it.
     debug_assert!(ra != 0 && ra != rt, "{insn} invalid form: RA={ra}, RT={rt}");
 }
@@ -718,8 +744,8 @@ fn debug_assert_load_with_update(insn: &str, ra: u8, rt: u8) {
 #[inline]
 #[track_caller]
 fn debug_assert_store_with_update(insn: &str, ra: u8) {
-    // PPC Book I 3.3.3: store-with-update with RA=0 has no base
-    // register to update; assemblers reject the encoding.
+    // [PPC-Book1 p:40 s:3.3.3] Store with update: invalid form when RA=0.
+    // No base register to update; assemblers reject the encoding.
     debug_assert!(ra != 0, "{insn} invalid form: RA=0");
 }
 
@@ -2199,8 +2225,9 @@ mod tests {
 
     #[test]
     fn stwcx_success_propagates_xer_so_into_cr0() {
-        // Book II 3.3.2: stwcx CR0 = 0b00 || n || XER[SO]. Earlier
-        // code zeroed the SO bit unconditionally.
+        // [PPC-Book2 p:25 s:3.3.2 Atomic Update Primitives] stwcx
+        // CR0 = 0b00 || n || XER[SO]. Earlier code zeroed the SO bit
+        // unconditionally.
         let mut s = PpuState::new();
         s.reservation = Some(ReservedLine::containing(0x1000));
         s.gpr[3] = 0x1000;

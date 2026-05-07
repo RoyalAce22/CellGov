@@ -4,6 +4,8 @@
 //! store in the same block observes that store's bytes; committed
 //! memory still holds the pre-block state until [`StoreBuffer::flush`]
 //! emits `Effect::SharedWriteIntent` packets at the block boundary.
+//
+// [PPC-Book2 p:8 s:1.7 Shared Storage] weakly consistent storage model: stores need not be globally visible in program order, only as observed by the executing processor.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -118,6 +120,7 @@ impl StoreBuffer {
     ///
     /// Flush skips this entry (see [`StoreEntry`]). Returns `false`
     /// when the buffer is full.
+    // [PPC-Book2 p:9 s:1.7.3 Atomic Update] stwcx./stdcx. commit through the ConditionalStore effect path; this entry exists only so intra-block loads forward the reserved bytes.
     #[inline]
     pub fn insert_conditional(&mut self, addr: u64, len: u8, value: u128) -> bool {
         debug_assert!(
@@ -170,6 +173,7 @@ impl StoreBuffer {
 
     /// Emit pending stores as `SharedWriteIntent` effects in program
     /// order and clear the buffer. Conditional entries are skipped.
+    // [PPC-Book2 p:28 s:3.3 eieio] block-boundary flush models the memory-barrier ordering of Load/Store accesses with respect to other processors.
     pub fn flush(&mut self, effects: &mut Vec<Effect>, source: UnitId) {
         for i in 0..self.entries.len() {
             let e = &self.entries[i];

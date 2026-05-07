@@ -9,6 +9,9 @@
 //! - RI10 (8-bit opcode):  bits `[0:7]`
 //! - RI16 (9-bit opcode):  bits `[0:8]`
 //! - RI18 (7-bit opcode):  bits `[0:6]`
+//
+// [SPU-ISA p:28 s:2.3 Instruction Formats] RR/RRR/RI7 opcode-field bit ranges.
+// [SPU-ISA p:29 s:2.3 Instruction Formats] RI10/RI16/RI18 opcode-field bit ranges.
 
 use crate::instruction::{SpuDecodeError, SpuInstruction};
 
@@ -30,6 +33,7 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
     let rb7 = ((raw >> 14) & 0x7F) as u8;
 
     // RRR: OP[0:3] RT[4:10] RB[11:17] RA[18:24] RC[25:31].
+    // [SPU-ISA p:220 s:9 Shufb] RRR opcode 0xB; RC at bits [25:31].
     if op4 == 0xB {
         return Ok(SpuInstruction::Shufb {
             rt: ((raw >> 21) & 0x7F) as u8,
@@ -54,9 +58,10 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
             })
         }
         0x000 => {
+            // [SPU-ISA p:238 s:10 Stop and Signal] opcode 0x000; signal in bits [18:31].
             return Ok(SpuInstruction::Stop {
                 signal: (raw & 0x3FFF) as u16,
-            })
+            });
         }
         0x1A8 => return Ok(SpuInstruction::Bi { ra: ra7 }),
         0x201 => return Ok(SpuInstruction::Nop),
@@ -272,6 +277,7 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
     Err(SpuDecodeError::Unsupported(raw))
 }
 
+// [SPU-ISA p:171 s:6 Lqd] RI10 imm10 is sign-extended to i16 before address compute.
 fn sign_extend_10(val: u16) -> i16 {
     if val & 0x200 != 0 {
         (val | 0xFC00) as i16

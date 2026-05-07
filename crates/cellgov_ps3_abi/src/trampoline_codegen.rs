@@ -3,29 +3,35 @@
 //! Encodings follow PowerPC Operating Environment Architecture
 //! (PPC64 ELFv1):
 //!
-//! - `lis rD, SIMM` -- Book I §3.3.9. SIMM is sign-extended into
-//!   the GPR's upper 32 bits.
-//! - `ori rA, rS, UIMM` -- opcode 24. Zero-extends UIMM.
-//! - `sc LEV` -- Book III §2.3.1. Bit 30 is a mandatory `1`; without
-//!   it the instruction decodes to POWER's invalid "fast SVC" form
-//!   (Book I Appendix E.11). LEV=0 is the user-mode syscall path.
-//! - `blr` -- extended mnemonic for `bclr 20, 0, 0`. BO bit 2 must
-//!   be set per Book I §2.4.3.
+//! - `lis rD, SIMM`: SIMM is sign-extended into the GPR's upper 32 bits.
+//!   See [PPC-Book1 p:51 s:3.3 Add Immediate Shifted].
+//! - `ori rA, rS, UIMM`: opcode 24, zero-extends UIMM.
+//! - `sc LEV`: bit 30 is a mandatory `1`; without it the instruction
+//!   decodes to POWER's invalid "fast SVC" form. LEV=0 is the
+//!   user-mode syscall path. See
+//!   [PPC-Book1 p:26 s:2.4.2 System Call Instruction] and
+//!   [PPC-Book3 p:12 s:2.3.1].
+//! - `blr`: extended mnemonic for `bclr 20, 0, 0`; BO bit 2 must be set.
+//!   See [PPC-Book1 p:25 s:2.4 Branch Conditional to Link Register].
 
 /// Opcode field of `sc` (bits 0..6 from MSB).
+// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] sc primary opcode = 17, SC-form.
 const SC_OPCODE: u32 = 17 << 26;
 
-/// LEV=0 (user-mode syscall). Per Book III §2.3.1 the LEV field
-/// occupies instruction bits 20:26 (7 bits, MSB-numbered); Book I
-/// §2.4.2 reserves bits 20:25, leaving bit 26 as the only active
-/// LEV bit. Bit 26 from MSB is bit 5 from LSB in the 32-bit word.
+/// LEV=0 (user-mode syscall). The LEV field occupies instruction
+/// bits 20:26 (7 bits, MSB-numbered); bits 20:25 are reserved,
+/// leaving bit 26 as the only active LEV bit. Bit 26 from MSB is
+/// bit 5 from LSB in the 32-bit word.
+// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] bits 20:25 reserved; LEV occupies bit 26 (in app programs LEV=0).
 const SC_LEV_USER: u32 = 0 << 5;
 
 /// Mandatory `1` at bit 30 from MSB (bit 1 from LSB).
+// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] SC-form layout pins a 1 at bit 30.
 const SC_BIT_30_MANDATORY: u32 = 1 << 1;
 
 /// Highest `lis` SIMM input before sign-extension contaminates the
 /// upper 32 bits of the destination GPR.
+// [PPC-Book1 p:51 s:3.3 Add Immediate Shifted] addis result is EXTS(SI||0x0000); SI bit 0 set sign-extends through the upper 32 bits in 64-bit mode.
 const LIS_SIGN_SAFE_LIMIT: u32 = 0x8000_0000;
 
 /// PPC64 instruction bytes for `lis r11, hi; ori r11, r11, lo; sc 0`
@@ -47,7 +53,9 @@ pub const fn encode_lis_ori_sc(syscall_num: u32) -> [u8; 12] {
     );
     let hi = (syscall_num >> 16) & 0xFFFF;
     let lo = syscall_num & 0xFFFF;
+    // [PPC-Book1 p:51 s:3.3 Add Immediate Shifted] addis primary opcode = 15, D-form, EXTS(SI||0x0000); lis is `addis Rx,0,value`.
     let lis: u32 = (15 << 26) | (11 << 21) | hi;
+    // [PPC-Book1 p:66 s:3.3 OR Immediate] ori primary opcode = 24, D-form, zero-extends UI (no sign-extend).
     let ori: u32 = (24 << 26) | (11 << 21) | (11 << 16) | lo;
     let sc: u32 = SC_OPCODE | SC_LEV_USER | SC_BIT_30_MANDATORY;
     let lis_b = lis.to_be_bytes();
@@ -62,6 +70,8 @@ pub const fn encode_lis_ori_sc(syscall_num: u32) -> [u8; 12] {
 /// PPC `blr` (branch to LR) as 4 bytes big-endian.
 #[inline]
 pub const fn encode_blr() -> [u8; 4] {
+    // [PPC-Book1 p:25 s:2.4 Branch Conditional to Link Register] bclr XL-form: primary opcode 19, extended opcode 16, BO=20 (branch always: BO[0]=BO[2]=1 skips CTR-decrement and CR test).
+    // [PPC-Book1 p:24 s:2.4 Branch Instructions] LK bit (instruction bit 31) = 0 selects blr (no LR update); LK=1 would be blrl.
     let raw: u32 = (19 << 26) | (20 << 21) | (16 << 1);
     raw.to_be_bytes()
 }

@@ -20,52 +20,52 @@ pub(crate) fn execute_vx(state: &mut PpuState, xo: u16, vt: u8, va: u8, vb: u8) 
 
     let result = match xo {
         // -- Integer add/sub --
-        0x000 => vadd_bytes(a, b), // vaddubm
-        0x040 => vadd_halfs(a, b), // vadduhm
-        0x080 => vadd_words(a, b), // vadduwm
+        0x000 => vadd_bytes(a, b), // vaddubm  // [AltiVec-PEM p:6-35 s:6.2] Vector Add Unsigned Byte Modulo
+        0x040 => vadd_halfs(a, b), // vadduhm  // [AltiVec-PEM p:6-37 s:6.2] Vector Add Unsigned Halfword Modulo
+        0x080 => vadd_words(a, b), // vadduwm  // [AltiVec-PEM p:6-39 s:6.2] Vector Add Unsigned Word Modulo
 
         // -- Integer compare --
-        0x086 => vcmpequw(a, b), // vcmpequw
+        0x086 => vcmpequw(a, b), // vcmpequw   // [AltiVec-PEM p:6-56 s:6.2] Vector Compare Equal-to Unsigned Word
 
         // -- Logical --
-        0xac4 => a & b,    // vand
-        0x6c4 => a | b,    // vor
-        0x4c4 => a ^ b,    // vxor (fallback)
-        0x8c4 => a & !b,   // vandc
-        0x7c4 => !(a | b), // vnor
+        0xac4 => a & b, // vand             // [AltiVec-PEM p:6-41 s:6.2] Vector Logical AND
+        0x6c4 => a | b, // vor              // [AltiVec-PEM p:6-111 s:6.2] Vector Logical OR
+        0x4c4 => a ^ b, // vxor (fallback)  // [AltiVec-PEM p:6-177 s:6.2] Vector Logical XOR
+        0x8c4 => a & !b, // vandc            // [AltiVec-PEM p:6-42 s:6.2] Vector Logical AND with Complement
+        0x7c4 => !(a | b), // vnor             // [AltiVec-PEM p:6-110 s:6.2] Vector Logical NOR
 
         // -- Shift --
-        0x284 => vslw(a, b),  // vslw
-        0x384 => vsrw(a, b),  // vsrw
-        0x484 => vsraw(a, b), // vsraw
-        0x444 => vsrah(a, b), // vsrah
-        0x304 => vsrab(a, b), // vsrab
+        0x284 => vslw(a, b), // vslw          // [AltiVec-PEM p:6-139 s:6.2] Vector Shift Left Integer Word
+        0x384 => vsrw(a, b), // vsrw          // [AltiVec-PEM p:6-154 s:6.2] Vector Shift Right Word
+        0x484 => vsraw(a, b), // vsraw         // [AltiVec-PEM p:6-150 s:6.2] Vector Shift Right Algebraic Word
+        0x444 => vsrah(a, b), // vsrah         // [AltiVec-PEM p:6-149 s:6.2] Vector Shift Right Algebraic Half Word
+        0x304 => vsrab(a, b), // vsrab         // [AltiVec-PEM p:6-148 s:6.2] Vector Shift Right Algebraic Byte
 
         // -- Splat (PPC AltiVec ISA XO values) --
-        0x20c => vspltb(b, va), // vspltb (va is byte index)
-        0x24c => vsplth(b, va), // vsplth (va is halfword index)
-        0x28c => vspltw(b, va), // vspltw (va is word index)
-        0x30c => vspltisb(va),  // vspltisb (sign-extended 5-bit imm)
-        0x34c => vspltish(va),  // vspltish
-        0x38c => vspltisw(va),  // vspltisw
+        0x20c => vspltb(b, va), // vspltb (va is byte index)     // [AltiVec-PEM p:6-140 s:6.2] Vector Splat Byte
+        0x24c => vsplth(b, va), // vsplth (va is halfword index) // [AltiVec-PEM p:6-141 s:6.2] Vector Splat Half Word
+        0x28c => vspltw(b, va), // vspltw (va is word index)     // [AltiVec-PEM p:6-145 s:6.2] Vector Splat Word
+        0x30c => vspltisb(va), // vspltisb (sign-extended 5-bit imm) // [AltiVec-PEM p:6-142 s:6.2] Vector Splat Immediate Signed Byte
+        0x34c => vspltish(va), // vspltish    // [AltiVec-PEM p:6-143 s:6.2] Vector Splat Immediate Signed Half Word
+        0x38c => vspltisw(va), // vspltisw    // [AltiVec-PEM p:6-144 s:6.2] Vector Splat Immediate Signed Word
 
         // -- Merge --
-        0x00c => vmrghb(a, b), // vmrghb
-        0x04c => vmrghh(a, b), // vmrghh
-        0x08c => vmrghw(a, b), // vmrghw
-        0x40a => vmrglb(a, b), // vmrglb
-        0x44a => vmrglh(a, b), // vmrglh
-        0x48a => vmrglw(a, b), // vmrglw
+        0x00c => vmrghb(a, b), // vmrghb       // [AltiVec-PEM p:6-89 s:6.2] Vector Merge High Byte
+        0x04c => vmrghh(a, b), // vmrghh       // [AltiVec-PEM p:6-90 s:6.2] Vector Merge High Half Word
+        0x08c => vmrghw(a, b), // vmrghw       // [AltiVec-PEM p:6-91 s:6.2] Vector Merge High Word
+        0x40a => vmrglb(a, b), // vmrglb       // [AltiVec-PEM p:6-92 s:6.2] Vector Merge Low Byte
+        0x44a => vmrglh(a, b), // vmrglh       // [AltiVec-PEM p:6-93 s:6.2] Vector Merge Low Half Word
+        0x48a => vmrglw(a, b), // vmrglw       // [AltiVec-PEM p:6-94 s:6.2] Vector Merge Low Word
 
         // -- Multiply --
-        0x048 => vmulouh(a, b), // vmulouh
+        0x048 => vmulouh(a, b), // vmulouh     // [AltiVec-PEM p:6-108 s:6.2] Vector Multiply Odd Unsigned Half Word
 
         // -- Subtract --
-        0x600 => vsub_ubytes_sat(a, b), // vsububs (saturating)
+        0x600 => vsub_ubytes_sat(a, b), // vsububs (saturating)  // [AltiVec-PEM p:6-161 s:6.2] Vector Subtract Unsigned Byte Saturate
 
         // -- Int <-> Float conversions (VX-form, va field is uimm scale) --
-        0x34a => vcfsx(b, va), // vcfsx
-        0x38a => vcfux(b, va), // vcfux
+        0x34a => vcfsx(b, va), // vcfsx        // [AltiVec-PEM p:6-49 s:6.2] Vector Convert from Signed Fixed-Point Word
+        0x38a => vcfux(b, va), // vcfux        // [AltiVec-PEM p:6-50 s:6.2] Vector Convert from Unsigned Fixed-Point Word
 
         _ => {
             return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(xo as u64));
@@ -90,8 +90,8 @@ pub(crate) fn execute_va(
     let c = state.vr[vc as usize];
 
     let result = match xo {
-        0x2a => vsel(a, b, c),  // vsel
-        0x2b => vperm(a, b, c), // vperm
+        0x2a => vsel(a, b, c), // vsel        // [AltiVec-PEM p:6-133 s:6.2] Vector Select
+        0x2b => vperm(a, b, c), // vperm       // [AltiVec-PEM p:6-112 s:6.2] Vector Permute
         _ => {
             return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(xo as u64));
         }
@@ -103,6 +103,7 @@ pub(crate) fn execute_va(
 
 /// Execute `vsldoi`. `shb` is the 4-bit byte-shift immediate carved out
 /// of the VA-form vc slot by the decoder.
+// [AltiVec-PEM p:6-136 s:6.2] Vector Shift Left Double by Octet Immediate
 pub(crate) fn execute_vsldoi(
     state: &mut PpuState,
     vt: u8,
@@ -386,6 +387,9 @@ fn vmulouh(a: u128, b: u128) -> u128 {
 }
 
 fn vsub_ubytes_sat(a: u128, b: u128) -> u128 {
+    // [AltiVec-PEM p:6-161 s:6.2] vsububs: clamp vA[i]-vB[i] to 0 on
+    // underflow. PEM requires VSCR[SAT] be set when any lane saturates
+    // ([AltiVec-PEM p:4-4 s:4.2]); VSCR is not modelled here.
     let ab = a.to_be_bytes();
     let bb = b.to_be_bytes();
     let mut r = [0u8; 16];
@@ -397,11 +401,13 @@ fn vsub_ubytes_sat(a: u128, b: u128) -> u128 {
 
 fn vsel(a: u128, b: u128, c: u128) -> u128 {
     // Per-bit mux: c_bit ? b_bit : a_bit.
+    // [AltiVec-PEM p:6-133 s:6.2] "if (vC)i=0 then vDi <- (vA)i else vDi <- (vB)i"
     (a & !c) | (b & c)
 }
 
 fn vperm(a: u128, b: u128, c: u128) -> u128 {
     // Low 5 bits of each c byte index the a:b concatenation (32 bytes).
+    // [AltiVec-PEM p:6-112 s:6.2] "temp0:255 <- (vA) || (vB); b <- (vC)i+3:i+7 || 0b000"
     let ab = a.to_be_bytes();
     let bb = b.to_be_bytes();
     let cb = c.to_be_bytes();
@@ -420,6 +426,7 @@ fn vsldoi(a: u128, b: u128, sh: u8) -> u128 {
     // Left-shift the a:b concatenation by `sh` bytes, return the
     // high 16. PEM constrains SH to 0..=15, so the [shift, shift+15]
     // window always falls inside the 32-byte concat.
+    // [AltiVec-PEM p:6-136 s:6.2] SH is a 4-bit field; "vD <- ((vA) || (vB)) <<ui (SH || 0b000)"
     let ab = a.to_be_bytes();
     let bb = b.to_be_bytes();
     let mut concat = [0u8; 32];

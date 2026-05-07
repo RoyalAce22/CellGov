@@ -9,10 +9,10 @@ use std::fmt;
 
 /// A location in the guest's flat address space, in bytes from zero.
 ///
-/// No `Add<u64>`: overflow on address arithmetic must surface as a fault
-/// rather than wrap. Use [`GuestAddr::checked_offset`] for the fallible
-/// signed form (PPC ISA v2.02 Book I sec. 1.12.2: D-form / DS-form / indexed
-/// EA arithmetic is 64-bit two's-complement with a signed displacement).
+/// No `Add<u64>`: overflow on address arithmetic must surface as a
+/// fault rather than wrap. Use [`GuestAddr::checked_offset`] for the
+/// fallible signed form.
+// [PPC-Book1 p:15 s:1.12 Storage Addressing] D/DS-form and indexed EAs use 64-bit two's-complement signed-displacement arithmetic.
 ///
 /// `repr(transparent)` so the type is ABI-identical to the underlying
 /// `u64`. `Option<GuestAddr>` is still 16 bytes -- `u64` has no niche.

@@ -4,10 +4,12 @@
 //! occupies bits 0-5; extended opcodes live at bits 21-30 (XO-form)
 //! or other positions depending on form. Unknown encodings produce
 //! `PpuDecodeError::Unsupported(raw)` -- the decoder never panics.
+// [PPC-Book1 p:7 s:1.7 Instruction formats] OPCD at bits 0:5; XO is form-dependent.
 
 use crate::instruction::{PpuDecodeError, PpuInstruction};
 
 /// Extract D-form fields as `(rt/rs, ra, signed imm16)`.
+// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD(0:5) RT/RS(6:10) RA(11:15) D/SI(16:31).
 #[inline]
 fn d_form(raw: u32) -> (u8, u8, i16) {
     (
@@ -18,6 +20,7 @@ fn d_form(raw: u32) -> (u8, u8, i16) {
 }
 
 /// Extract D-form fields as `(rt/rs, ra, unsigned imm16)`.
+// [PPC-Book1 p:8 s:1.7.4 D-Form] UI variant; immediate at bits 16:31, zero-extended.
 #[inline]
 fn d_form_u(raw: u32) -> (u8, u8, u16) {
     (
@@ -28,6 +31,7 @@ fn d_form_u(raw: u32) -> (u8, u8, u16) {
 }
 
 /// Extract X-form fields as `(rt/rs, ra, rb)`.
+// [PPC-Book1 p:9 s:1.7.6 X-Form] OPCD(0:5) RT/RS(6:10) RA(11:15) RB(16:20) XO(21:30) Rc(31).
 #[inline]
 fn x_form(raw: u32) -> (u8, u8, u8) {
     (
@@ -44,6 +48,7 @@ fn x_form(raw: u32) -> (u8, u8, u8) {
 /// Returns `PpuDecodeError::Unsupported(raw)` for any encoding the
 /// decoder does not recognise.
 pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
+    // [PPC-Book1 p:7 s:1.7 Instruction formats] Bits 0:5 always specify OPCD; shift 26 isolates them.
     let primary = (raw >> 26) & 0x3F;
 
     match primary {
@@ -95,6 +100,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             Ok(PpuInstruction::Lha { rt, ra, imm })
         }
         58 => {
+            // [PPC-Book1 p:8 s:1.7.5 DS-Form] DS(16:29) || 0b00, sign-extended; XO(30:31) selects op.
             // DS-form: low 2 bits select between ld/ldu/lwa.
             let sub = raw & 0x3;
             let (rt, ra, _) = d_form(raw);
@@ -133,6 +139,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             Ok(PpuInstruction::Sthu { rs, ra, imm })
         }
         62 => {
+            // [PPC-Book1 p:8 s:1.7.5 DS-Form] XO(30:31) selects std/stdu under primary 62.
             // DS-form: low 2 bits select between std/stdu.
             let sub = raw & 0x3;
             let (rs, ra, _) = d_form(raw);
@@ -200,6 +207,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         }
 
         18 => {
+            // [PPC-Book1 p:8 s:1.7.1 I-Form] OPCD(0:5) LI(6:29) AA(30) LK(31); LI||0b00 sign-extended.
             // I-form LI field is bits 6..29 shifted left 2; sign-extend
             // from bit 25 (the MSB of LI after the shift).
             let li = raw & 0x03FF_FFFC;
@@ -214,6 +222,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         }
 
         16 => {
+            // [PPC-Book1 p:8 s:1.7.2 B-Form] OPCD(0:5) BO(6:10) BI(11:15) BD(16:29) AA(30) LK(31).
             let bo = ((raw >> 21) & 0x1F) as u8;
             let bi = ((raw >> 16) & 0x1F) as u8;
             let bd = (raw & 0xFFFC) as i16;
@@ -230,6 +239,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 
         19 => decode_xl(raw),
 
+        // [PPC-Book1 p:10 s:1.7.13 M-Form] OPCD RS RA RB/SH MB(21:25) ME(26:30) Rc.
         // M-form (primaries 20, 21, 23): 5-bit MB at bits 21..=25 and
         // 5-bit ME at bits 26..=30. Not to be confused with MD-form's
         // 6-bit mask bound (primary 30, split across bits 21..=25 and
@@ -312,6 +322,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         }
 
         63 | 59 => {
+            // [PPC-Book1 p:10 s:1.7.12 A-Form] OPCD FRT FRA FRB FRC(21:25) XO(26:30) Rc(31).
             let (frt, fra, frb) = x_form(raw);
             let frc = ((raw >> 6) & 0x1F) as u8;
             let xo = ((raw >> 1) & 0x3FF) as u16;
@@ -338,8 +349,8 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         }
 
         17 => {
-            // SC-form (Book I Sec. 3.3.1, p. 35): LEV occupies PPC
-            // bits 20..=26 (7 bits). In Rust LSB-0 that is bits 5..=11.
+            // [PPC-Book1 p:8 s:1.7.3 SC-Form] OPCD ///(6:10) ///(11:15) //(16:19) LEV(20:26) //(27:29) 1(30) /(31).
+            // [PPC-Book1 p:26 s:2.4.2 System Call Instruction] LEV occupies PPC bits 20..=26 (7 bits); LSB-0 that is bits 5..=11.
             let lev = ((raw >> 5) & 0x7F) as u8;
             Ok(PpuInstruction::Sc { lev })
         }
@@ -359,6 +370,7 @@ fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let xo_6 = (raw & 0x3F) as u8;
 
     if let 0x20..=0x2f = xo_6 {
+        // [AltiVec-PEM p:A-21 s:A.5 Table A-5 VA-Form] OPCD vD vA vB vC(21:25) XO(26:31).
         // vsldoi puts a 4-bit byte shift (SHB) in the vc slot, with bit
         // 21 reserved. Other VA-form ops treat the slot as a register.
         if xo_6 == 0x2c {
@@ -378,6 +390,7 @@ fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         });
     }
 
+    // [AltiVec-PEM p:A-21 s:A.5 Table A-6 VX-Form] OPCD vD vA vB XO(21:31).
     match xo_11 {
         0x4c4 => Ok(PpuInstruction::Vxor { vt, va, vb }),
         _ => Ok(PpuInstruction::Vx {
@@ -394,6 +407,7 @@ fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 /// MD-form splits the 6-bit SH across bits 16..20 (low) and bit 30
 /// (high); the 6-bit mask bound splits across bits 21..25 (low) and
 /// bit 26 (high). Sub-opcode lives in bits 27..29.
+// [PPC-Book1 p:10 s:1.7.14 MD-Form] OPCD RS RA sh(16:20) mb(21:25,26) XO(27:29) sh(30) Rc.
 fn decode_md(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let rs = ((raw >> 21) & 0x1F) as u8;
     let ra = ((raw >> 16) & 0x1F) as u8;
@@ -440,6 +454,7 @@ fn decode_md(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 }
 
 /// Decode primary opcode 19 (XL-form: bclr, bcctr, isync, CR-logical).
+// [PPC-Book1 p:9 s:1.7.7 XL-Form] OPCD BT/BO BA/BI BB(16:20) XO(21:30) LK(31).
 fn decode_xl(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let xo = (raw >> 1) & 0x3FF;
     // Branch fields: bo at bits 6-10, bi at bits 11-15, lk at bit 31.
@@ -480,6 +495,8 @@ fn decode_xl(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 /// XO-form uses a 9-bit extended opcode at bits 22..30; X-form uses
 /// a 10-bit extended opcode at bits 21..30. The 9-bit match runs
 /// first; on miss the 10-bit match takes over.
+// [PPC-Book1 p:9 s:1.7.11 XO-Form] OPCD RT RA RB OE(21) XO(22:30) Rc(31).
+// [PPC-Book1 p:208 s:Appendix I Opcode Maps] Primary 31 extended opcodes at bits 21:30.
 fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let xo_10 = (raw >> 1) & 0x3FF;
     let xo_9 = (raw >> 1) & 0x1FF;
@@ -528,6 +545,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let sh = rb;
             return Ok(PpuInstruction::Srawi { ra, rs: rt, sh, rc });
         }
+        // [PPC-Book1 p:9 s:1.7.10 XS-Form] sh(16:20) XO(21:29) sh(30) Rc(31).
         // sradi is XS-form: XO(9)=413 occupies bits 21..29, raw bit 30
         // holds the SH high bit, raw bit 31 is Rc. Extracting as a
         // 10-bit XO captures (XO(9) << 1) | SH_hi, so both 826 (SH_hi=0)
@@ -608,12 +626,13 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 
         19 => return Ok(PpuInstruction::Mfcr { rt }),
         144 => {
-            // mtcrf CRM (FXM field) lives at bits 12..19.
+            // [PPC-Book1 p:3 s:1.5.2 Reserved Fields and Reserved Values] reserved bits ignored on read.
+            // mtcrf CRM (FXM field) lives at bits 12..19; bits 11 and 20 are reserved.
             let crm = ((raw >> 12) & 0xFF) as u8;
             return Ok(PpuInstruction::Mtcrf { rs: rt, crm });
         }
-        // SPR / TBR half-swap (Book I Sec. 3.3.15, p. 84; Book II
-        // Sec. 4.1, p. 30). The encoded register number is split
+        // [PPC-Book1 p:9 s:1.7.8 XFX-Form] OPCD RT/RS spr(11:20) XO(21:30) /(31).
+        // SPR / TBR half-swap. The encoded register number is split
         // across the RA and RB slots, and the halves are reversed:
         //   rb (bits 11..=15) = SPR/TBR low 5 bits
         //   ra (bits 16..=20) = SPR/TBR high 5 bits
@@ -644,9 +663,9 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             };
         }
 
-        // dcbz: Book II Sec. 3.2.2. 128-byte zero store to the block
-        // containing the EA. Unlike the cache hints below, dcbz has
-        // architecturally visible effects and needs a real variant.
+        // [PPC-Book2 p:20 s:3.2 Cache Management Instructions] dcbz: 128-byte zero store to the block containing EA.
+        // Unlike the cache hints below, dcbz has architecturally
+        // visible effects and needs a real variant.
         1014 => return Ok(PpuInstruction::Dcbz { ra, rb }),
 
         // Cache and memory-barrier hints: dcbst(54), dcbf(86), dcbt(278),

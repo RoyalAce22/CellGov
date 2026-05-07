@@ -20,10 +20,11 @@ pub struct LocalDiagnostics {
     /// `YieldReason::Syscall` so HLE / LV2 dispatch can attribute the
     /// call site without a downcast through the registry.
     pub lr: Option<u64>,
-    /// LEV field of the `sc` instruction (PPC64 Book III 2.3.1).
-    /// LEV=0 is a kernel syscall, LEV=1 a hypercall (CBE Handbook
-    /// 11.1), LEV>1 reserved. Populated on `YieldReason::Syscall`;
-    /// the runtime classifier rejects LEV>=1 before LV2 dispatch.
+    /// LEV field of the `sc` instruction.
+    // [PPC-Book1 p:26 s:2.4.2 System Call Instruction] LEV=0 user-mode kernel syscall path.
+    // [PPC-Book3 p:12 s:2.3.1] LEV=1 invokes the hypervisor; LEV>1 reserved.
+    /// Populated on `YieldReason::Syscall`; the runtime classifier
+    /// rejects LEV >= 1 before LV2 dispatch.
     pub syscall_lev: Option<u8>,
     /// Effective address of the faulting access.
     pub faulting_ea: Option<u64>,

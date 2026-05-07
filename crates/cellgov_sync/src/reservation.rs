@@ -6,6 +6,8 @@
 //! a conditional store succeeds only if the unit's entry is still
 //! present at commit time. The table holds the global half of the
 //! verdict, ANDed with the unit's local reservation register.
+// [PPC-Book2 p:10 s:1.7.3.1] PPU lwarx/stwcx reservation + granule semantics.
+// [CBE-Handbook p:590 s:20.3] SPU getllar/putllc 128-byte lock-line atomics.
 //!
 //! Keys are canonical line addresses (low 7 bits zero). Callers pass
 //! byte-granular addresses; the table canonicalizes on insert.
@@ -13,6 +15,7 @@
 use cellgov_event::UnitId;
 use std::collections::BTreeMap;
 
+// [CBE-Handbook p:577 s:20.2] CBE reservation granule is 128 bytes = PPE cache line.
 pub use cellgov_ps3_abi::hardware::RESERVATION_LINE_BYTES;
 
 /// 128-byte-aligned guest address. Low 7 bits are always zero.
@@ -59,6 +62,7 @@ impl ReservedLine {
 /// Committed atomic-reservation state, at most one entry per unit. A
 /// second `insert_or_replace` for the same unit drops the prior entry
 /// (matches PPC/SPU ABI: a second reserve invalidates the first).
+// [PPC-Book2 p:10 s:1.7.3.1] "another lwarx/ldarx clears the first reservation".
 #[derive(Debug, Clone, Default)]
 pub struct ReservationTable {
     entries: BTreeMap<UnitId, ReservedLine>,
@@ -116,6 +120,7 @@ impl ReservationTable {
     /// Drop every entry whose line overlaps `[addr, addr + len)`.
     /// Returns the count dropped. O(n) over entries; short-circuits on
     /// empty table or zero-length writes.
+    // [CBE-Handbook p:589 s:20.3] MFC atomic unit clears reservation on snoop of granule.
     pub fn clear_covering(&mut self, addr: u64, len: u64) -> usize {
         if self.entries.is_empty() || len == 0 {
             return 0;

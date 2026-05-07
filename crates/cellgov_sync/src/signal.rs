@@ -1,6 +1,9 @@
 //! Signal notification register and its leaf identifier. Updates
 //! OR-merge into the 32-bit value; clear is explicit, no
 //! clear-on-read. Block/wake translation happens upstream.
+// [CBEA p:101 s:8.7] Two SPU signal-notification facilities (Sig_Notify_1, Sig_Notify_2), each one 32-bit register + channel.
+// [CBE-Handbook p:546 s:19.7] OR mode accumulates producer signals into a single 32-bit register; overwrite mode is the alternative.
+// [CBE-Handbook p:547 s:19.7] Channel count for signal-notification registers saturates at 1, so SPE software cannot count writes.
 
 /// Stable identifier for a signal notification register.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

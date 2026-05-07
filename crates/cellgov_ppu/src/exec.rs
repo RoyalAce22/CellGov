@@ -23,6 +23,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 
 /// Outcome of a single `execute` call.
+// [PPC-Book1 p:5 s:1.5] non-branching insns set NIA=CIA+4; branches assign NIA explicitly.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ExecuteVerdict {
     /// Advance PC by 4.
@@ -30,9 +31,11 @@ pub enum ExecuteVerdict {
     /// PC was written explicitly; caller must not advance.
     Branch,
     /// Yield to runtime syscall dispatch.
+    // [PPC-Book3 p:12 s:2.3.1] sc with LEV=1 invokes the hypervisor; LEV>1 reserved.
+    // [PPC-Book1 p:26 s:2.4.2] sc LEV-field encoding (instruction bits 20:25 reserved).
     Syscall {
-        /// LEV field of `sc` (Book III 2.3.1): 0 = kernel syscall,
-        /// 1 = hypercall, greater than 1 reserved (Book I 2.4.2).
+        /// LEV field of `sc`: 0 = kernel syscall, 1 = hypercall,
+        /// greater than 1 reserved.
         lev: u8,
     },
     /// Architectural fault.
@@ -154,6 +157,7 @@ pub(crate) fn load_se(
 ///
 /// Reservation clearing is intra-step so a later `stwcx` in the
 /// same block observes the invalidation pre-commit.
+// [PPC-Book2 p:10 s:1.7.3.1] reservation lost when any store hits the reservation granule.
 #[inline]
 pub(crate) fn buffer_store(
     store_buf: &mut StoreBuffer,
@@ -336,6 +340,7 @@ pub fn execute(
         }
         // `lvx` (Vx xo=103) is a memory load encoded under the Vx
         // form; route to mem so vector loads share the forwarding path.
+        // [AltiVec-PEM p:6-21] lvx EA = (rA|0)+rB masked with ~0xF; loads 16 bytes.
         PpuInstruction::Vx {
             xo: 103,
             vt,
@@ -386,6 +391,7 @@ pub fn execute(
         | PpuInstruction::CmpwBc { .. }
         | PpuInstruction::Consumed => super_insn::execute(insn, state, region_views, store_buf),
 
+        // [PPC-Book1 p:26 s:2.4.2] sc surfaces LEV to the system; service dispatch is runtime-defined.
         PpuInstruction::Sc { lev } => ExecuteVerdict::Syscall { lev },
     }
 }

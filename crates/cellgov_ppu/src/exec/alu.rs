@@ -9,16 +9,19 @@ use crate::state::PpuState;
 pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVerdict {
     match *insn {
         // Integer arithmetic / logical
+        // [PPC-Book1 p:51 s:3.3.8] addi: RT <- (RA|0) + EXTS(SI); RA=0 selects literal zero, else GPR(RA).
         PpuInstruction::Addi { rt, ra, imm } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             state.gpr[rt as usize] = base.wrapping_add(imm as i64 as u64);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:51 s:3.3.8] addis: RT <- (RA|0) + (SI << 16); D-form add immediate shifted.
         PpuInstruction::Addis { rt, ra, imm } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             state.gpr[rt as usize] = base.wrapping_add((imm as i64 as u64) << 16);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:53 s:3.3.8] subfic: RT <- ~(RA) + EXTS(SI) + 1; sets CA from carry.
         PpuInstruction::Subfic { rt, ra, imm } => {
             let a = state.gpr[ra as usize];
             let b = imm as i64 as u64;
@@ -27,12 +30,14 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             state.set_xer_ca(!borrow);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:56 s:3.3.8] mulli: signed (RA) * EXTS(SI), low 64 bits placed in RT.
         PpuInstruction::Mulli { rt, ra, imm } => {
             let a = state.gpr[ra as usize] as i64;
             let b = imm as i64;
             state.gpr[rt as usize] = a.wrapping_mul(b) as u64;
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:51 s:3.3.8] addic: RT <- (RA) + EXTS(SI); always sets CA from carry-out.
         PpuInstruction::Addic { rt, ra, imm } => {
             let a = state.gpr[ra as usize];
             let b = imm as i64 as u64;
@@ -41,6 +46,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             state.set_xer_ca(carry);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:51 s:3.3.8] addic.: addic with implicit Rc=1 updating CR0 from result.
         PpuInstruction::AddicDot { rt, ra, imm } => {
             // Same arithmetic as Addic; ISA exposes the dot form as
             // primary 13 with implicit Rc=1 (CR0 always updated).
@@ -52,6 +58,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             state.set_cr0_from_result(result);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:52 s:3.3.8] add: RT <- (RA) + (RB); OE sets SO/OV, Rc updates CR0.
         PpuInstruction::Add { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
@@ -66,6 +73,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:52 s:3.3.8] subf: RT <- ~(RA) + (RB) + 1, i.e. (RB) - (RA).
         PpuInstruction::Subf { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
@@ -80,6 +88,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:53 s:3.3.8] subfc: subtract from carrying; sets CA from borrow-out.
         PpuInstruction::Subfc { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
@@ -95,6 +104,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:54 s:3.3.8] subfe: ~(RA) + (RB) + CA; carry-in from XER[CA].
         PpuInstruction::Subfe { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
@@ -112,6 +122,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:55 s:3.3.8] neg: RT <- ~(RA) + 1; OV set if RA is the most-negative value.
         PpuInstruction::Neg { rt, ra, oe, rc } => {
             let a = state.gpr[ra as usize];
             let result = (a as i64).wrapping_neg() as u64;
@@ -124,6 +135,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:56 s:3.3.8] mullw: signed 32x32 product, low 32 bits sign-extended into RT.
         PpuInstruction::Mullw { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i32 as i64;
             let b = state.gpr[rb as usize] as i32 as i64;
@@ -138,6 +150,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:57 s:3.3.8] mulhwu: high 32 bits of unsigned 32x32 product, zero-extended.
         PpuInstruction::Mulhwu { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as u32 as u64;
             let b = state.gpr[rb as usize] as u32 as u64;
@@ -151,6 +164,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:57 s:3.3.8] mulhw: high 32 bits of signed 32x32 product, sign-extended.
         PpuInstruction::Mulhw { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as i32 as i64;
             let b = state.gpr[rb as usize] as i32 as i64;
@@ -161,6 +175,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:57 s:3.3.8] mulhdu: high 64 bits of unsigned 64x64 product.
         PpuInstruction::Mulhdu { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as u128;
             let b = state.gpr[rb as usize] as u128;
@@ -171,6 +186,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:57 s:3.3.8] mulhd: high 64 bits of signed 64x64 product.
         PpuInstruction::Mulhd { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as i64 as i128;
             let b = state.gpr[rb as usize] as i64 as i128;
@@ -181,6 +197,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:54 s:3.3.8] adde: (RA) + (RB) + CA; carry-in from XER[CA], CA written.
         PpuInstruction::Adde { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
@@ -198,6 +215,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:55 s:3.3.8] addze: (RA) + CA + 0; CA propagated from XER and updated.
         PpuInstruction::Addze { rt, ra, oe, rc } => {
             let a = state.gpr[ra as usize];
             let ca_in: u64 = state.xer_ca() as u64;
@@ -213,6 +231,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:58 s:3.3.8] divw: signed 32-bit divide; RT undefined on overflow (we yield 0).
         PpuInstruction::Divw { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i32;
             let b = state.gpr[rb as usize] as i32;
@@ -227,6 +246,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:59 s:3.3.8] divwu: unsigned 32-bit divide; sets OV on divide-by-zero.
         PpuInstruction::Divwu { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as u32;
             let b = state.gpr[rb as usize] as u32;
@@ -243,6 +263,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:58 s:3.3.8] divd: signed 64-bit divide; OV on b=0 or i64::MIN/-1.
         PpuInstruction::Divd { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i64;
             let b = state.gpr[rb as usize] as i64;
@@ -257,6 +278,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:59 s:3.3.8] divdu: unsigned 64-bit divide; OV when divisor is zero.
         PpuInstruction::Divdu { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
@@ -271,6 +293,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:56 s:3.3.8] mulld: signed 64x64 product, low 64 bits placed into RT.
         PpuInstruction::Mulld { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i64;
             let b = state.gpr[rb as usize] as i64;
@@ -286,6 +309,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         }
 
         // Logical
+        // [PPC-Book1 p:67 s:3.3.11] or: RA <- (RS) | (RB); X-form bit-parallel OR.
         PpuInstruction::Or { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] | state.gpr[rb as usize];
             state.gpr[ra as usize] = result;
@@ -294,6 +318,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:68 s:3.3.11] orc: RA <- (RS) | ~(RB); OR with complement.
         PpuInstruction::Orc { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] | !state.gpr[rb as usize];
             state.gpr[ra as usize] = result;
@@ -302,6 +327,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:67 s:3.3.11] and: RA <- (RS) & (RB); X-form bit-parallel AND.
         PpuInstruction::And { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] & state.gpr[rb as usize];
             state.gpr[ra as usize] = result;
@@ -310,6 +336,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:68 s:3.3.11] nor: RA <- ~((RS) | (RB)); NOR.
         PpuInstruction::Nor { ra, rs, rb, rc } => {
             let result = !(state.gpr[rs as usize] | state.gpr[rb as usize]);
             state.gpr[ra as usize] = result;
@@ -318,6 +345,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:68 s:3.3.11] andc: RA <- (RS) & ~(RB); AND with complement.
         PpuInstruction::Andc { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] & !state.gpr[rb as usize];
             state.gpr[ra as usize] = result;
@@ -326,6 +354,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:67 s:3.3.11] xor: RA <- (RS) XOR (RB); X-form bit-parallel XOR.
         PpuInstruction::Xor { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] ^ state.gpr[rb as usize];
             state.gpr[ra as usize] = result;
@@ -334,12 +363,14 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:65 s:3.3.11] andi.: RA <- (RS) & (zero-ext UI); always updates CR0.
         PpuInstruction::AndiDot { ra, rs, imm } => {
             let result = state.gpr[rs as usize] & imm as u64;
             state.gpr[ra as usize] = result;
             state.set_cr0_from_result(result);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:65 s:3.3.11] andis.: RA <- (RS) & (UI << 16); always updates CR0.
         PpuInstruction::AndisDot { ra, rs, imm } => {
             // andis. masks RS with (UI << 16); UI is zero-extended,
             // so high bits of the result above bit 31 stay clear.
@@ -350,6 +381,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         }
 
         // Shifts
+        // [PPC-Book1 p:77 s:3.3.12.2] slw: shift left word; RB[58] selects 32+ shift -> zero result.
         PpuInstruction::Slw { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x3F;
             let val = state.gpr[rs as usize] as u32;
@@ -370,10 +402,13 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
                 //
                 // Same choice applies to Srw / Rlwinm / Rlwimi /
                 // Rlwnm below.
+                // [PPC-Book1 p:71 s:3.3.12] Rotate/Shift Rc=1: first three CR0 bits set per 3.3.7 result test.
+                // [PPC-Book1 p:50 s:3.3.7] CR0 LT/GT/EQ read the (sign-extended) result as a signed value.
                 state.set_cr0_from_result(result as i32 as i64 as u64);
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:78 s:3.3.12.2] srw: shift right word logical; shift count from RB[58:63].
         PpuInstruction::Srw { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x3F;
             let val = state.gpr[rs as usize] as u32;
@@ -385,6 +420,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:79 s:3.3.12.2] srawi: arithmetic right shift word immediate; CA from shifted-out 1s.
         PpuInstruction::Srawi { ra, rs, sh, rc } => {
             let val = state.gpr[rs as usize] as i32;
             let result = val >> sh;
@@ -397,6 +433,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:79 s:3.3.12.2] sraw: arithmetic right shift word; sign replicated, CA from lost 1s.
         PpuInstruction::Sraw { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x3F;
             let val = state.gpr[rs as usize] as i32;
@@ -415,6 +452,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:80 s:3.3.12.2] srad: arithmetic right shift doubleword; CA from lost 1-bits.
         PpuInstruction::Srad { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x7F;
             let val = state.gpr[rs as usize] as i64;
@@ -432,6 +470,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:79 s:3.3.12.2] sradi: arithmetic right shift doubleword immediate.
         PpuInstruction::Sradi { ra, rs, sh, rc } => {
             let shift = sh as u64;
             let val = state.gpr[rs as usize] as i64;
@@ -444,6 +483,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:77 s:3.3.12.2] sld: shift left doubleword; RB[57] selects 64+ -> zero.
         PpuInstruction::Sld { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x7F;
             let result = if shift < 64 {
@@ -457,6 +497,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:78 s:3.3.12.2] srd: shift right doubleword logical; RB[57] selects 64+ -> zero.
         PpuInstruction::Srd { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x7F;
             let result = if shift < 64 {
@@ -470,6 +511,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:70 s:3.3.11] cntlzw: count leading zeros of low 32 bits of RS, range 0..=32.
         PpuInstruction::Cntlzw { ra, rs, rc } => {
             let val = state.gpr[rs as usize] as u32;
             let result = val.leading_zeros() as u64;
@@ -479,6 +521,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:70 s:3.3.11] cntlzd: count leading zeros of 64-bit RS, range 0..=64.
         PpuInstruction::Cntlzd { ra, rs, rc } => {
             let result = state.gpr[rs as usize].leading_zeros() as u64;
             state.gpr[ra as usize] = result;
@@ -487,6 +530,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:69 s:3.3.11] extsh: sign-extend halfword RS[48:63] into RA.
         PpuInstruction::Extsh { ra, rs, rc } => {
             let result = state.gpr[rs as usize] as i16 as i64 as u64;
             state.gpr[ra as usize] = result;
@@ -495,6 +539,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:69 s:3.3.11] extsb: sign-extend byte RS[56:63] into RA.
         PpuInstruction::Extsb { ra, rs, rc } => {
             let result = state.gpr[rs as usize] as i8 as i64 as u64;
             state.gpr[ra as usize] = result;
@@ -503,6 +548,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:69 s:3.3.11] extsw: sign-extend word RS[32:63] into RA.
         PpuInstruction::Extsw { ra, rs, rc } => {
             let result = state.gpr[rs as usize] as i32 as i64 as u64;
             state.gpr[ra as usize] = result;
@@ -511,69 +557,81 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:66 s:3.3.11] ori: RA <- (RS) | zero-ext UI; ori 0,0,0 is the preferred no-op.
         PpuInstruction::Ori { ra, rs, imm } => {
             state.gpr[ra as usize] = state.gpr[rs as usize] | imm as u64;
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:66 s:3.3.11] oris: RA <- (RS) | (UI << 16).
         PpuInstruction::Oris { ra, rs, imm } => {
             state.gpr[ra as usize] = state.gpr[rs as usize] | ((imm as u64) << 16);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:66 s:3.3.11] xori: RA <- (RS) XOR zero-ext UI.
         PpuInstruction::Xori { ra, rs, imm } => {
             state.gpr[ra as usize] = state.gpr[rs as usize] ^ imm as u64;
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:66 s:3.3.11] xoris: RA <- (RS) XOR (UI << 16).
         PpuInstruction::Xoris { ra, rs, imm } => {
             state.gpr[ra as usize] = state.gpr[rs as usize] ^ ((imm as u64) << 16);
             ExecuteVerdict::Continue
         }
 
-        // Compare. Book I 3.3.9: CR[4*BF .. 4*BF+3] <- c || XER_SO,
+        // Compare CR-field write: CR[4*BF .. 4*BF+3] <- c || XER_SO,
         // i.e. the SO bit is concatenated as the LSB of every compare
-        // result. Without it, code that branches on SO after a compare
-        // sees stale data.
+        // result. Without it, code that branches on SO after a
+        // compare sees stale data.
+        // [PPC-Book1 p:60 s:3.3.9] cmpi/cmpwi (L=0): signed compare 32-bit RA vs SI into CR field BF.
         PpuInstruction::Cmpwi { bf, ra, imm } => {
             let a = state.gpr[ra as usize] as i32;
             let b = imm as i32;
             state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:61 s:3.3.9] cmpli/cmplwi (L=0): unsigned compare 32-bit RA vs zero-ext UI.
         PpuInstruction::Cmplwi { bf, ra, imm } => {
             let a = state.gpr[ra as usize] as u32;
             let b = imm as u32;
             state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:60 s:3.3.9] cmpi/cmpdi (L=1): signed compare 64-bit RA vs SI.
         PpuInstruction::Cmpdi { bf, ra, imm } => {
             let a = state.gpr[ra as usize] as i64;
             let b = imm as i64;
             state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:61 s:3.3.9] cmpli/cmpldi (L=1): unsigned compare 64-bit RA vs zero-ext UI.
         PpuInstruction::Cmpldi { bf, ra, imm } => {
             let a = state.gpr[ra as usize];
             let b = imm as u64;
             state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:60 s:3.3.9] cmp/cmpw (L=0): signed compare of 32-bit RA vs RB.
         PpuInstruction::Cmpw { bf, ra, rb } => {
             let a = state.gpr[ra as usize] as i32;
             let b = state.gpr[rb as usize] as i32;
             state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:61 s:3.3.9] cmpl/cmplw (L=0): unsigned compare of 32-bit RA vs RB.
         PpuInstruction::Cmplw { bf, ra, rb } => {
             let a = state.gpr[ra as usize] as u32;
             let b = state.gpr[rb as usize] as u32;
             state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:60 s:3.3.9] cmp/cmpd (L=1): signed compare of 64-bit RA vs RB.
         PpuInstruction::Cmpd { bf, ra, rb } => {
             let a = state.gpr[ra as usize] as i64;
             let b = state.gpr[rb as usize] as i64;
             state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:61 s:3.3.9] cmpl/cmpld (L=1): unsigned compare of 64-bit RA vs RB.
         PpuInstruction::Cmpld { bf, ra, rb } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
@@ -582,6 +640,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         }
 
         // CR / SPR moves
+        // [PPC-Book2 p:30 s:4.1] mftb: read 64-bit Time Base register into RT (TBR=268).
         PpuInstruction::Mftb { rt } => {
             // Coarse-granularity advance: the per-step resync in
             // `PpuExecutionUnit::run_until_yield` aligns TB with the
@@ -593,19 +652,22 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             state.gpr[rt as usize] = state.tb;
             ExecuteVerdict::Continue
         }
+        // [PPC-Book2 p:30 s:4.1] mftbu: read TBU (high 32 bits of Time Base) into RT[32:63] (TBR=269).
         PpuInstruction::Mftbu { rt } => {
             state.tb = state.tb.saturating_add(1);
             state.gpr[rt as usize] = (state.tb >> 32) & 0xFFFF_FFFF;
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:83 s:3.3.13] mfcr: RT[32:63] <- CR; high 32 bits of RT cleared.
         PpuInstruction::Mfcr { rt } => {
             state.gpr[rt as usize] = state.cr as u64;
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:83 s:3.3.13] mtcrf: write CR fields selected by FXM mask from RS[32:63].
         PpuInstruction::Mtcrf { rs, crm } => {
-            // PPC Book I 3.3.13: bits 32:63 of RS (the low 32 bits in
-            // little-endian Rust terms) are placed into selected CR
-            // fields. Each bit in CRM selects a 4-bit CR field.
+            // Bits 32:63 of RS (the low 32 bits in little-endian
+            // Rust terms) are placed into selected CR fields. Each
+            // bit in CRM selects a 4-bit CR field.
             let val = state.gpr[rs as usize] as u32;
             for i in 0..8u8 {
                 if crm & (1 << (7 - i)) != 0 {
@@ -617,24 +679,29 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:82 s:3.3.13] mflr: extended mnemonic for mfspr RT,LR (SPR 8).
         PpuInstruction::Mflr { rt } => {
             state.gpr[rt as usize] = state.lr;
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:82 s:3.3.13] mtlr: extended mnemonic for mtspr LR,RS (SPR 8).
         PpuInstruction::Mtlr { rs } => {
             state.lr = state.gpr[rs as usize];
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:82 s:3.3.13] mfctr: extended mnemonic for mfspr RT,CTR (SPR 9).
         PpuInstruction::Mfctr { rt } => {
             state.gpr[rt as usize] = state.ctr;
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:82 s:3.3.13] mtctr: extended mnemonic for mtspr CTR,RS (SPR 9).
         PpuInstruction::Mtctr { rs } => {
             state.ctr = state.gpr[rs as usize];
             ExecuteVerdict::Continue
         }
 
         // Rotate / mask
+        // [PPC-Book1 p:73 s:3.3.12] rlwinm: rotate left 32 bits by SH, AND with mask MB..ME.
         PpuInstruction::Rlwinm {
             ra,
             rs,
@@ -654,6 +721,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:76 s:3.3.12] rlwimi: rotate left word, insert under mask MB..ME into RA.
         PpuInstruction::Rlwimi {
             ra,
             rs,
@@ -674,6 +742,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:75 s:3.3.12] rlwnm: rotate left word by RB[59:63], AND with mask MB..ME.
         PpuInstruction::Rlwnm {
             ra,
             rs,
@@ -694,6 +763,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:72 s:3.3.12] rldicl: rotate left doubleword immediate, mask MB..63 (clear left).
         PpuInstruction::Rldicl { ra, rs, sh, mb, rc } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
             let result = rotated & mask64(mb, 63);
@@ -703,6 +773,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:72 s:3.3.12] rldicr: rotate left doubleword immediate, mask 0..ME (clear right).
         PpuInstruction::Rldicr { ra, rs, sh, me, rc } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
             let result = rotated & mask64(0, me);
@@ -712,6 +783,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:73 s:3.3.12] rldic: rotate left doubleword imm, mask MB..63-SH (clear).
         PpuInstruction::Rldic { ra, rs, sh, mb, rc } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
             let me = 63u8.saturating_sub(sh);
@@ -722,6 +794,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:76 s:3.3.12] rldimi: rotate left doubleword imm, insert under mask MB..63-SH.
         PpuInstruction::Rldimi { ra, rs, sh, mb, rc } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
             let me = 63u8.saturating_sub(sh);
@@ -741,7 +814,8 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
 
 /// Build a 4-bit CR field for compare instructions: `LT|GT|EQ|SO`.
 /// Exactly one of `lt`/`gt`/`eq` is set; `so` is the sticky overflow
-/// bit copied unchanged from XER (Book I 3.3.9).
+/// bit copied unchanged from XER.
+// [PPC-Book1 p:60 s:3.3.9] CR field encoding c||XER[SO] -> {LT,GT,EQ,SO} nibble.
 fn cmp_cr_field(lt: bool, gt: bool, so: bool) -> u8 {
     let mut nib = if lt {
         0b1000
@@ -757,6 +831,7 @@ fn cmp_cr_field(lt: bool, gt: bool, so: bool) -> u8 {
 }
 
 /// 32-bit rlwinm mask. `mb > me` wraps to bits `[0..me]` and `[mb..31]`.
+// [PPC-Book1 p:11 s:1.7] M-form MB/ME mask: 1s from MB to ME inclusive, wraps when MB>ME.
 pub(super) fn rlwinm_mask(mb: u8, me: u8) -> u32 {
     if mb <= me {
         let top = 0xFFFF_FFFFu32 >> mb;
@@ -771,6 +846,7 @@ pub(super) fn rlwinm_mask(mb: u8, me: u8) -> u32 {
 
 /// 64-bit PPC mask from MSB-numbered bits `mb..=me`; `mb > me` wraps
 /// to `[0..me]` and `[mb..63]`.
+// [PPC-Book1 p:71 s:3.3.12] MD/MDS-form 64-bit MASK function: bits[mb:me] = 1, wrapping.
 fn mask64(mb: u8, me: u8) -> u64 {
     let all = 0xFFFF_FFFF_FFFF_FFFFu64;
     if mb <= me {
@@ -2018,9 +2094,10 @@ mod tests {
 
     #[test]
     fn srawi_sh_zero_clears_ca() {
-        // Book I p. 80: "A shift amount of zero causes RA to receive
-        // EXTS(RS[32:63]), and CA to be set to 0." CA is explicitly
-        // cleared, not computed from the (nonexistent) shifted-out bits.
+        // [PPC-Book1 p:80 s:3.3.12.2] "A shift amount of zero causes
+        // RA to receive EXTS(RS[32:63]), and CA to be set to 0." CA
+        // is explicitly cleared, not computed from the (nonexistent)
+        // shifted-out bits.
         let mut s = PpuState::new();
         s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
         s.set_xer_ca(true);
