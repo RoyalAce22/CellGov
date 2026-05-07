@@ -374,6 +374,8 @@ pub(super) fn step_loop(
                             if binding.nid == cellgov_ps3_abi::nid::sys_prx_for_user::PROCESS_EXIT
                                 || binding.nid
                                     == cellgov_ps3_abi::nid::sys_prx_for_user::PPU_THREAD_EXIT
+                                || binding.nid
+                                    == cellgov_ps3_abi::nid::sys_prx_for_user::PRX_EXITSPAWN_WITH_LEVEL
                             {
                                 ctx.last_exit = Some(ProcessExitInfo {
                                     code: args[1] as u32,

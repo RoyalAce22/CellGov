@@ -63,6 +63,7 @@ pub mod sys_prx_for_user {
         PPU_THREAD_GET_ID,
         PPU_THREAD_CREATE,
         PPU_THREAD_EXIT,
+        PRX_EXITSPAWN_WITH_LEVEL,
         TIME_GET_SYSTEM_TIME,
     ];
 }
