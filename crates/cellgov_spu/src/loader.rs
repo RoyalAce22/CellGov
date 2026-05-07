@@ -46,12 +46,12 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
         return Err(LoadError::BadMagic);
     }
 
-    // EI_CLASS must be 1 (32-bit).
+    // [CBE-Handbook p:393 s:14.2.2.1] SPE-ELF requires EI_CLASS=ELFCLASS32.
     if data[4] != 1 {
         return Err(LoadError::Not32Bit);
     }
 
-    // EI_DATA must be 2 (big-endian).
+    // [CBE-Handbook p:393 s:14.2.2.1] SPE-ELF requires EI_DATA=ELFDATA2MSB.
     if data[5] != 2 {
         return Err(LoadError::NotBigEndian);
     }
@@ -77,6 +77,7 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
         let p_filesz = read_u32(data, base + 16) as usize;
         let p_memsz = read_u32(data, base + 20) as usize;
 
+        // [CBE-Handbook p:64 s:3.1.1] Local Store is 256 KB; segments must fit.
         let end = p_vaddr as usize + p_memsz;
         if end > state.ls.len() {
             return Err(LoadError::SegmentOutOfRange {
@@ -100,6 +101,7 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
         }
     }
 
+    // [CBE-Handbook p:421 s:14.6.3.3] SPE loader transfers control to entry parameter (e_entry).
     state.pc = entry;
     Ok(())
 }

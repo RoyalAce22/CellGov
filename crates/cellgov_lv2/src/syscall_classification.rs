@@ -38,7 +38,7 @@ pub enum SyscallClassification {
 }
 
 /// Non-zero LEV short-circuits to [`SyscallClassification::Hypercall`]
-/// regardless of r11 (Book III 2.3.1, Book I 2.4.2).
+/// regardless of r11.
 #[inline]
 pub const fn classify(lev: u8, r11: u64) -> SyscallClassification {
     if lev != 0 {

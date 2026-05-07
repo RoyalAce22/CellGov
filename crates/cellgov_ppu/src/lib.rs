@@ -55,6 +55,7 @@ fn is_super_pair(insn: &instruction::PpuInstruction) -> bool {
 }
 
 /// PPU architectural state snapshot for replay.
+// [PPC-Book1 p:18 s:2.3 Branch Processor Registers] CR is 32 bits in eight 4-bit fields; LR and CTR are 64-bit branch registers.
 #[derive(Debug, Clone)]
 pub struct PpuSnapshot {
     /// General-purpose registers r0..r31.
@@ -74,6 +75,7 @@ pub struct PpuSnapshot {
     /// Fixed-point exception register.
     pub xer: u64,
     /// Time-base register.
+    // [PPC-Book2 p:29 s:Chapter 4. Time Base] TB is a 64-bit unsigned counter incremented monotonically.
     pub tb: u64,
     /// Canonical reservation-line address, or `None` when no reservation is held.
     pub reservation_line: Option<u64>,

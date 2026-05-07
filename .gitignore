@@ -37,3 +37,9 @@ ps3_libs/
 # AI tooling
 .claude/
 CLAUDE.local.md
+
+# Python venv, ChromaDB, and local-only ingest scripts (doc
+# ingestion via scripts/ingest_official_docs.py).
+.venv/
+.chroma_db/
+scripts/

@@ -652,9 +652,9 @@ pub enum Lv2Request {
         /// In: worker return registers.
         args: [u64; 8],
     },
-    /// `sc` with non-zero LEV. PS3 usermode must never issue this
-    /// (Book I 2.4.2); the runtime rejects rather than letting the
-    /// call reach LV2 dispatch unflagged.
+    /// `sc` with non-zero LEV. PS3 usermode must never issue this;
+    /// the runtime rejects rather than letting the call reach LV2
+    /// dispatch unflagged.
     Hypercall {
         /// In: privilege level.
         lev: u8,
@@ -714,8 +714,8 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
 
 /// Build an [`Lv2Request`] from the `sc` LEV field, r11, and r3..=r10.
 ///
-/// Non-zero `lev` (Book III 2.3.1) routes to [`Lv2Request::Hypercall`];
-/// the LV2 dispatcher must not see it.
+/// Non-zero `lev` routes to [`Lv2Request::Hypercall`]; the LV2
+/// dispatcher must not see it.
 pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
     if lev != 0 {
         return Lv2Request::Hypercall {

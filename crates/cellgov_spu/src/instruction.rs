@@ -3,6 +3,8 @@
 /// A decoded SPU instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpuInstruction {
+    // [SPU-ISA p:32 s:3 Load/Store Quadword and Generate-Controls family]
+    // Lqd/Lqx/Lqa/Stqd/Stqx/Stqa pp.32-39; Cbd/Cwd pp.40-45.
     /// Load quadword, d-form: rt = LS[(ra + imm*16) & ~0xF].
     Lqd {
         /// Destination register.
@@ -54,6 +56,7 @@ pub enum SpuInstruction {
         imm: i16,
     },
 
+    // [SPU-ISA p:50 s:4 Constant-Formation: Il/Ila/Ilh/Ilhu/Iohl/Fsmbi pp.50-56]
     /// Immediate load word: all 4 word slots = sign_extend(imm16).
     Il {
         /// Destination register.
@@ -97,6 +100,7 @@ pub enum SpuInstruction {
         imm: u16,
     },
 
+    // [SPU-ISA p:60 s:5 Integer arithmetic: A p.60, Ai p.61, Sf p.64]
     /// Add word: all 4 word slots, `rt[i] = ra[i] + rb[i]`.
     A {
         /// Destination register.
@@ -125,6 +129,7 @@ pub enum SpuInstruction {
         rb: u8,
     },
 
+    // [SPU-ISA p:101 s:5 Logical: Ori (Or Word Immediate) p.106, Nor p.113, Andi p.101]
     /// OR immediate: all 4 word slots, `rt[i] = ra[i] | sign_extend(imm)`.
     Ori {
         /// Destination register.
@@ -153,6 +158,8 @@ pub enum SpuInstruction {
         imm: i16,
     },
 
+    // [SPU-ISA p:116 s:5 Shuffle Bytes (Shufb)]
+    // [SPU-ISA p:124 s:6 Shift/Rotate Quadword by Bytes: Shlqbyi p.125, Rotqby p.131]
     /// Shuffle bytes: rt = shufb(ra, rb, rc).
     Shufb {
         /// Destination register.
@@ -183,6 +190,7 @@ pub enum SpuInstruction {
         rb: u8,
     },
 
+    // [SPU-ISA p:40 s:3 Generate Controls for Byte/Word Insertion d-form: Cbd p.40, Cwd p.44]
     /// Generate controls for byte insertion d-form (shufb mask).
     Cbd {
         /// Destination register.
@@ -202,6 +210,7 @@ pub enum SpuInstruction {
         imm: u8,
     },
 
+    // [SPU-ISA p:160 s:7 Compare Equal Word (Ceq) p.160, Compare Equal Word Immediate (Ceqi) p.161]
     /// Compare equal word: `rt[i] = (ra[i] == rb[i]) ? 0xFFFFFFFF : 0`.
     Ceq {
         /// Destination register.
@@ -221,6 +230,7 @@ pub enum SpuInstruction {
         imm: i16,
     },
 
+    // [SPU-ISA p:174 s:7 Branch family: Br p.174, Brsl p.176, Brz p.183, Brnz p.182, Bi p.178]
     /// Branch relative: PC = PC + offset * 4.
     Br {
         /// Signed word offset.
@@ -253,6 +263,7 @@ pub enum SpuInstruction {
         ra: u8,
     },
 
+    // [SPU-ISA p:248 s:11 Channel Instructions: Rdch p.248, Wrch p.250]
     /// Read channel: `rt = channel[channel]`.
     Rdch {
         /// Destination register.
@@ -268,6 +279,8 @@ pub enum SpuInstruction {
         rt: u8,
     },
 
+    // [SPU-ISA p:240 s:10 Control: Nop p.241, Lnop p.240, Sync p.242, Stop p.238, Heq p.150]
+    // [SPU-ISA p:192 s:8 Hint-for-Branch: Hbr p.192, Hbra p.193, Hbrr p.194]
     /// No operation (even pipeline).
     Nop,
     /// No operation (odd pipeline).

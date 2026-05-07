@@ -999,14 +999,14 @@ impl Lv2Host {
                 self.dispatch_callback_return(requester, args)
             }
             Lv2Request::Hypercall { lev, r11, args } => {
-                // PS3 usermode never issues `sc` with LEV != 0
-                // (Book I 2.4.2); reject with CELL_EINVAL rather
-                // than letting the call fall through to LV2.
+                // PS3 usermode never issues `sc` with LEV != 0;
+                // reject with CELL_EINVAL rather than letting the
+                // call fall through to LV2.
                 self.log_invariant_break(
                     "dispatch.hypercall_rejected",
                     format_args!(
                         "sc LEV={lev} r11={r11:#x} from PS3 usermode; \
-                         hypercalls are a programming error per Book I 2.4.2 \
+                         hypercalls are a programming error \
                          (r3={:#x} r4={:#x} r5={:#x} r6={:#x} r7={:#x} r8={:#x} r9={:#x} r10={:#x})",
                         args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
                     ),

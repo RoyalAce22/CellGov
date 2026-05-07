@@ -11,6 +11,22 @@
 //! The LEV-aware dispatch-hint classifier lives in
 //! `cellgov_lv2::syscall_classification`; this module exposes pure
 //! ABI facts only.
+//
+// [PPC-Book1 p:36 s:2.4.2 System Call Instruction] sc SC-form: bits
+// 0:5 opcode 17, LEV at instruction bits 20:26; bits 0:5 of LEV
+// (instr 20:25) reserved; LEV>1 reserved for application use.
+// [PPC-Book1 p:2 s:1.5.1 Definitions and Notation] bits are numbered
+// left to right starting with bit 0 (big-endian: bit 0 is MSB); range
+// p:q denotes bits p through q.
+// [PPC-Book1 p:3 s:1.5.2 Reserved Fields and Reserved Values]
+// reserved fields in instructions are ignored by the processor;
+// software must write zero to maximize forward compatibility.
+// [PPC-Book3 p:81 s:5.5.13 System Call Interrupt] sc raises a System
+// Call interrupt; SRR0=EA of next instruction; SRR1 loaded from MSR
+// (with bits 33:36 and 42:47 cleared); vector at EA 0x0000_0000_0000_0C00.
+// [PPC-Book3 p:73 s:5.5.13 System Call Interrupt] sc with LEV=1 in
+// problem state should be treated as a programming error (hypervisor
+// call from unprivileged context is not permitted).
 
 use crate::syscall;
 

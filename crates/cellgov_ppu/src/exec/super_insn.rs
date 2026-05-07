@@ -53,9 +53,9 @@ pub(crate) fn execute(
             } else {
                 0b0010
             };
-            // Book I 3.3.9: CR[4*BF .. 4*BF+3] <- c || XER[SO]. The
-            // SO bit is sticky and must be reflected in every
-            // compare result.
+            // [PPC-Book1 p:60 s:3.3.9] CR[4*BF .. 4*BF+3] <- c ||
+            // XER[SO]. The SO bit is sticky and must be reflected in
+            // every compare result.
             state.set_cr_field(bf, cr_val | u8::from(state.xer_so()));
             ExecuteVerdict::Continue
         }
@@ -74,6 +74,8 @@ pub(crate) fn execute(
         }
 
         // Superinstructions (compound 2-instruction pairs)
+        // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz: RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D).
+        // [PPC-Book1 p:60 s:3.3.9 Compare Immediate] cmpi (cmpwi when L=0): signed 32-bit compare against EXTS(SI), CR field <- c || XER[SO].
         PpuInstruction::LwzCmpwi {
             rt,
             ra_load,
@@ -100,6 +102,8 @@ pub(crate) fn execute(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:51 s:3.3.8 Add Immediate] addi (li when RA=0): RT <- EXTS(SI); the li mnemonic forces RA=0.
+        // [PPC-Book1 p:42 s:3.3.3 Store Word] stw: MEM(EA,4) <- (RS)32:63; EA = (RA|0)+EXTS(D).
         PpuInstruction::LiStw {
             rt,
             imm,
@@ -111,6 +115,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra_store, store_offset);
             buffer_store(store_buf, state, ea, 4, val)
         }
+        // [PPC-Book1 p:81 s:3.3.13 Move From Special Purpose Register] mfspr (mflr when SPR=8): RS <- LR.
+        // [PPC-Book1 p:42 s:3.3.3 Store Word] stw: MEM(EA,4) <- (RS)32:63; low 32 bits stored.
         PpuInstruction::MflrStw {
             rt,
             ra_store,
@@ -120,6 +126,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra_store, store_offset);
             buffer_store(store_buf, state, ea, 4, state.gpr[rt as usize])
         }
+        // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz: RT <- 32 zeros || MEM(EA,4).
+        // [PPC-Book1 p:81 s:3.3.13 Move To Special Purpose Register] mtspr (mtlr when SPR=8): LR <- (RS).
         PpuInstruction::LwzMtlr {
             rt,
             ra_load,
@@ -135,6 +143,8 @@ pub(crate) fn execute(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:81 s:3.3.13 Move From Special Purpose Register] mfspr (mflr when SPR=8): RS <- LR (full 64 bits).
+        // [PPC-Book1 p:43 s:3.3.3 Store Doubleword] std: MEM(EA,8) <- (RS); EA = (RA|0)+EXTS(DS||0b00).
         PpuInstruction::MflrStd {
             rt,
             ra_store,
@@ -144,6 +154,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra_store, store_offset);
             buffer_store(store_buf, state, ea, 8, state.gpr[rt as usize])
         }
+        // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld: RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
+        // [PPC-Book1 p:81 s:3.3.13 Move To Special Purpose Register] mtspr (mtlr when SPR=8): LR <- (RS).
         PpuInstruction::LdMtlr {
             rt,
             ra_load,
@@ -159,6 +171,7 @@ pub(crate) fn execute(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:43 s:3.3.3 Store Doubleword] std (x2): MEM(EA,8) <- (RS) for each store; the second EA is constrained to EA1+8 by the fuser.
         PpuInstruction::StdStd {
             rs1,
             rs2,
@@ -178,6 +191,11 @@ pub(crate) fn execute(
             let ea2 = ea1.wrapping_add(8);
             buffer_store(store_buf, state, ea2, 8, state.gpr[rs2 as usize])
         }
+        // [PPC-Book1 p:60 s:3.3.9 Compare Immediate] cmpi (cmpwi when L=0): signed 32-bit compare against EXTS(SI), CR field <- c || XER[SO].
+        // [PPC-Book1 p:18 s:2.3.1 Condition Register] CR field bits LT/GT/EQ/SO occupy positions 0/1/2/3 within the 4-bit field.
+        // [PPC-Book1 p:24 s:2.4 Branch Conditional] bc: BO/BI gate the branch; target = CIA + EXTS(BD||0b00). Here CIA is the bc slot (super + 4).
+        // [PPC-Book1 p:20 s:2.4.1 Branch Instructions Figure 21] BO field encodings: 0b001at = "branch if CR_BI = 0", 0b011at = "branch if CR_BI = 1", 0b1z1zz = "branch always".
+        // [PPC-Book1 p:24 s:2.4 Branch Conditional B-form] BD displacement is sign-extended with 0b00 appended; the fused form pre-resolves AA=0 so target_offset is already EXTS(BD||0b00) bytes.
         PpuInstruction::CmpwiBc {
             bf,
             ra,
@@ -205,6 +223,10 @@ pub(crate) fn execute(
                 ExecuteVerdict::Continue
             }
         }
+        // [PPC-Book1 p:60 s:3.3.9 Compare] cmp (cmpw when L=0): signed 32-bit register compare, CR field <- c || XER[SO].
+        // [PPC-Book1 p:18 s:2.3.1 Condition Register] CR field bits LT/GT/EQ/SO occupy positions 0/1/2/3 within the 4-bit field.
+        // [PPC-Book1 p:24 s:2.4 Branch Conditional] bc: BO/BI gate the branch; target = CIA + EXTS(BD||0b00).
+        // [PPC-Book1 p:20 s:2.4.1 Branch Instructions Figure 21] BO field encodings: 0b001at = "branch if CR_BI = 0", 0b011at = "branch if CR_BI = 1"; non-CTR-decrementing forms ignore the CTR clause.
         PpuInstruction::CmpwBc {
             bf,
             ra,
