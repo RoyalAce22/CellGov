@@ -31,6 +31,7 @@ use quicken::quicken_insn;
 use superpair::make_super_pair;
 
 /// Predecoded instruction shadow covering one contiguous guest range.
+#[derive(Clone)]
 pub struct PredecodedShadow {
     base: u64,
     /// `None` means decode failed; callers treat it like a stale slot

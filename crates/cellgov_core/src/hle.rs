@@ -44,6 +44,7 @@ pub(crate) mod sys_fs;
 pub(crate) mod sys_prx_for_user;
 
 /// HLE-specific bookkeeping bundled off the `Runtime` struct.
+#[derive(Clone)]
 pub(crate) struct HleState {
     pub nids: std::collections::BTreeMap<u32, u32>,
     /// Bump-allocator base. Watermark accounting subtracts this from

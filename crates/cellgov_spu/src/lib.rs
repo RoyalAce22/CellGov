@@ -41,6 +41,7 @@ pub struct SpuSnapshot {
 }
 
 /// A Synergistic Processing Unit execution unit.
+#[derive(Clone)]
 pub struct SpuExecutionUnit {
     id: UnitId,
     state: state::SpuState,

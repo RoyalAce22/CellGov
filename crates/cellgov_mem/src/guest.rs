@@ -9,6 +9,7 @@
 //! is faster than a `BTreeMap` walk.
 
 use std::cell::Cell;
+use std::sync::Arc;
 
 use crate::range::ByteRange;
 
@@ -39,10 +40,15 @@ pub enum RegionAccess {
 }
 
 /// A single contiguous guest memory region.
+///
+/// `bytes` is `Arc<Vec<u8>>`: clone is a refcount bump,
+/// [`GuestMemory::apply_commit`] forks via [`Arc::make_mut`].
+/// Without COW, `Runtime::snapshot` would clone the full memory
+/// per branching point.
 #[derive(Debug, Clone)]
 pub struct Region {
     base: u64,
-    bytes: Vec<u8>,
+    bytes: Arc<Vec<u8>>,
     label: &'static str,
     page_size: PageSize,
     access: RegionAccess,
@@ -66,7 +72,7 @@ impl Region {
     ) -> Self {
         Self {
             base,
-            bytes: vec![0u8; size],
+            bytes: Arc::new(vec![0u8; size]),
             label,
             page_size,
             access,
@@ -106,7 +112,7 @@ impl Region {
     /// Byte slice covering the region's full backing store.
     #[inline]
     pub fn bytes(&self) -> &[u8] {
-        &self.bytes
+        self.bytes.as_slice()
     }
 
     /// Exclusive end address, saturating at `u64::MAX`.
@@ -236,7 +242,7 @@ impl GuestMemory {
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         match self.regions.first() {
-            Some(r) if r.base() == 0 => &r.bytes,
+            Some(r) if r.base() == 0 => r.bytes.as_slice(),
             _ => &[],
         }
     }
@@ -327,7 +333,9 @@ impl GuestMemory {
         }
         let offset = (start - region.base()) as usize;
         let end = offset + length as usize;
-        region.bytes[offset..end].copy_from_slice(bytes);
+        // make_mut forks the Vec only when the Arc is shared with a
+        // live snapshot; unique-ref writes pay no copy.
+        Arc::make_mut(&mut region.bytes)[offset..end].copy_from_slice(bytes);
         self.cached_hash.set(None);
         Ok(())
     }
@@ -343,7 +351,7 @@ impl GuestMemory {
         }
         let mut hasher = crate::hash::Fnv1aHasher::new();
         for region in &self.regions {
-            hasher.write(&region.bytes);
+            hasher.write(region.bytes.as_slice());
         }
         let h = hasher.finish();
         self.cached_hash.set(Some(h));
@@ -416,6 +424,111 @@ mod tests {
         assert_eq!(mem.size(), 16);
         let bytes = mem.read(range(0, 16)).unwrap();
         assert_eq!(bytes, &[0u8; 16]);
+    }
+
+    // These canaries pin behaviour, not mechanism: a future
+    // deep-clone implementation would still pass. Cache-invalidation
+    // efficiency ("cheap snapshots") is a doc contract, not tested
+    // here -- a bug that re-invalidates the unaffected cache and
+    // recomputes to the same value slips through.
+
+    const COW_OFFSET: u64 = 0;
+    const COW_LEN: u64 = 4;
+    const ORIGINAL_BYTES: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
+    const FORKED_BYTES: [u8; 4] = [0xAA, 0xBB, 0xCC, 0xDD];
+
+    fn make_seeded_cow_pair() -> (GuestMemory, GuestMemory) {
+        let mut original = GuestMemory::new(16);
+        original
+            .apply_commit(range(COW_OFFSET, COW_LEN), &ORIGINAL_BYTES)
+            .unwrap();
+        let clone = original.clone();
+        debug_assert_eq!(
+            original.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+            clone.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+        );
+        (original, clone)
+    }
+
+    #[test]
+    fn write_to_original_does_not_leak_into_clone() {
+        let (mut original, clone) = make_seeded_cow_pair();
+        original
+            .apply_commit(range(COW_OFFSET, COW_LEN), &FORKED_BYTES)
+            .unwrap();
+
+        assert_eq!(
+            original.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+            &FORKED_BYTES
+        );
+        assert_eq!(
+            clone.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+            &ORIGINAL_BYTES,
+            "COW fork failed: write to original leaked into clone",
+        );
+    }
+
+    /// Mirror of [`write_to_original_does_not_leak_into_clone`];
+    /// catches a one-direction-only COW.
+    #[test]
+    fn write_to_clone_does_not_leak_into_original() {
+        let (original, mut clone) = make_seeded_cow_pair();
+        clone
+            .apply_commit(range(COW_OFFSET, COW_LEN), &FORKED_BYTES)
+            .unwrap();
+
+        assert_eq!(
+            original.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+            &ORIGINAL_BYTES,
+            "COW fork failed: write to clone leaked into original",
+        );
+        assert_eq!(
+            clone.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+            &FORKED_BYTES
+        );
+    }
+
+    #[test]
+    fn clone_hash_remains_valid_after_original_writes() {
+        let (mut original, clone) = make_seeded_cow_pair();
+        let clone_hash_before = clone.content_hash();
+        original
+            .apply_commit(range(COW_OFFSET, COW_LEN), &FORKED_BYTES)
+            .unwrap();
+
+        assert_ne!(
+            original.content_hash(),
+            clone_hash_before,
+            "original's content_hash failed to reflect post-write bytes",
+        );
+        assert_eq!(
+            clone.content_hash(),
+            clone_hash_before,
+            "clone's content_hash drifted after original's write",
+        );
+    }
+
+    /// Mirror of [`clone_hash_remains_valid_after_original_writes`];
+    /// catches cache-state aliasing from the clone back into the
+    /// original.
+    #[test]
+    fn original_hash_remains_valid_after_clone_writes() {
+        let (original, mut clone) = make_seeded_cow_pair();
+        let original_hash_before = original.content_hash();
+        clone
+            .apply_commit(range(COW_OFFSET, COW_LEN), &FORKED_BYTES)
+            .unwrap();
+
+        assert_ne!(
+            clone.content_hash(),
+            original_hash_before,
+            "clone's content_hash failed to reflect post-write bytes",
+        );
+        assert_eq!(
+            original.content_hash(),
+            original_hash_before,
+            "original's content_hash drifted after clone's write",
+        );
     }
 
     #[test]

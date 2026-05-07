@@ -129,6 +129,8 @@ mod tests {
     use cellgov_mem::GuestMemory;
     use cellgov_time::InstructionCost;
 
+    #[derive(Clone)]
+
     struct CountingUnit {
         id: UnitId,
         steps: u64,

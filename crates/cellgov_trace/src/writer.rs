@@ -73,6 +73,14 @@ impl TraceWriter {
         self.record_count = 0;
         std::mem::take(&mut self.buf)
     }
+
+    /// Drop accumulated records, preserving allocator capacity and
+    /// level-filter mask (unlike [`Self::take_bytes`]).
+    #[inline]
+    pub fn clear(&mut self) {
+        self.buf.clear();
+        self.record_count = 0;
+    }
 }
 
 #[cfg(test)]

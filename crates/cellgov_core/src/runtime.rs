@@ -28,9 +28,11 @@ mod dma;
 mod lv2_dispatch;
 mod mem_helpers;
 mod ppu_create;
+mod snapshot;
 mod sync_wakes;
 mod trace_bridge;
 mod types;
+pub use snapshot::RuntimeSnapshot;
 pub use types::{
     default_budget_for_mode, PpuFactory, RuntimeMode, RuntimeStep, SpuFactory, StepError,
 };
@@ -87,6 +89,12 @@ pub struct Runtime {
     /// `steps_taken`, which counts `run_until_yield` invocations.
     per_step_index: u64,
     zoom_trace: TraceWriter,
+    /// Set by [`Runtime::restore_into`], cleared by
+    /// [`Runtime::set_scheduler`]; [`Runtime::step`] debug-panics
+    /// if it sees this set. Catches stepping with a scheduler whose
+    /// internal sticky-streak / last-position state was carried over
+    /// from before the restore.
+    scheduler_dirty_after_restore: bool,
 }
 
 impl Runtime {
@@ -347,6 +355,22 @@ impl Runtime {
     /// Replace the runtime scheduler.
     pub fn set_scheduler<S: Scheduler + 'static>(&mut self, scheduler: S) {
         self.scheduler = Box::new(scheduler);
+        self.scheduler_dirty_after_restore = false;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn effects_buf_mut_for_tests(&mut self) -> &mut Vec<Effect> {
+        &mut self.effects_buf
+    }
+
+    #[cfg(test)]
+    pub(crate) fn effects_buf_capacity_for_tests(&self) -> usize {
+        self.effects_buf.capacity()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn per_step_index_for_tests(&self) -> u64 {
+        self.per_step_index
     }
 
     /// Map HLE index -> NID for dispatch.
@@ -614,6 +638,12 @@ impl Runtime {
     /// Emitted effects are returned verbatim in [`RuntimeStep::result`];
     /// [`Runtime::commit_step`] drives the commit pipeline over them.
     pub fn step(&mut self) -> Result<RuntimeStep, StepError> {
+        debug_assert!(
+            !self.scheduler_dirty_after_restore,
+            "Runtime::step called between restore_into and set_scheduler; the snapshotted \
+             last_scheduled_unit / step_woke_others would diverge from the scheduler's stale \
+             internal sticky-streak counter. Install a fresh scheduler after every restore_into."
+        );
         if self.steps_taken >= self.max_steps {
             return Err(StepError::MaxStepsExceeded);
         }

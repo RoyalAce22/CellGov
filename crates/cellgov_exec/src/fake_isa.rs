@@ -84,6 +84,7 @@ pub enum FakeOp {
 
 /// Execution unit that interprets a `Vec<FakeOp>` program one opcode
 /// per `run_until_yield`.
+#[derive(Clone)]
 pub struct FakeIsaUnit {
     id: UnitId,
     program: Vec<FakeOp>,

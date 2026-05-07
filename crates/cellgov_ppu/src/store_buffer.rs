@@ -39,6 +39,7 @@ struct StoreEntry {
 /// Stores are appended in program order; [`Self::forward`] scans in
 /// reverse so the most recent covering store wins. Full buffer
 /// returns `false` from `insert`; the caller must yield the block.
+#[derive(Clone)]
 pub struct StoreBuffer {
     entries: Vec<StoreEntry>,
 }

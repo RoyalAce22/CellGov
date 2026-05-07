@@ -76,6 +76,7 @@ impl Runtime {
             mode: RuntimeMode::FullTrace,
             per_step_index: 0,
             zoom_trace: TraceWriter::new(),
+            scheduler_dirty_after_restore: false,
         }
     }
 }

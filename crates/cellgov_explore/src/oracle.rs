@@ -3,9 +3,9 @@
 
 use crate::classify::ExplorationResult;
 use crate::config::ExplorationConfig;
-use crate::observer::observe_decisions;
+use crate::observer::observe_decisions_with_snapshots;
 use crate::prescribed::PrescribedScheduler;
-use crate::util::{build_overrides, classify_iteration, for_each_alternate, run_to_stall};
+use crate::util::{classify_iteration, for_each_alternate, run_to_stall};
 use cellgov_core::Runtime;
 use cellgov_mem::{ByteRange, GuestAddr};
 
@@ -64,7 +64,7 @@ where
     F: FnMut() -> Runtime,
 {
     let mut rt_baseline = make_runtime();
-    let log = observe_decisions(&mut rt_baseline);
+    let (log, snapshots) = observe_decisions_with_snapshots(&mut rt_baseline, true);
     let baseline_hash = rt_baseline.memory().content_hash();
     let baseline_regions = extract_regions(rt_baseline.memory(), regions);
 
@@ -75,12 +75,14 @@ where
 
     let mut alternates = Vec::new();
     let iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
-        let overrides = build_overrides(step, alt);
-        let mut rt = make_runtime();
-        rt.set_scheduler(PrescribedScheduler::new(overrides));
-        run_to_stall(&mut rt, config.max_steps_per_run);
-        let hash = rt.memory().content_hash();
-        let captured = extract_regions(rt.memory(), regions);
+        let snap = snapshots
+            .get(&step)
+            .expect("observer must snapshot every branching point");
+        rt_baseline.restore_into(snap);
+        rt_baseline.set_scheduler(PrescribedScheduler::single_choice(alt));
+        run_to_stall(&mut rt_baseline, config.max_steps_per_run);
+        let hash = rt_baseline.memory().content_hash();
+        let captured = extract_regions(rt_baseline.memory(), regions);
         alternates.push(ScheduleSnapshot {
             memory_hash: hash,
             regions: captured,

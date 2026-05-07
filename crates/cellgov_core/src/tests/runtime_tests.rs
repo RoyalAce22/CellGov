@@ -8,6 +8,8 @@ use std::cell::Cell;
 
 // cellgov_testkit depends on cellgov_core; doubles live here to avoid the cycle.
 
+#[derive(Clone)]
+
 struct CountingUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -226,6 +228,8 @@ fn step_returns_emitted_effects_in_order() {
         }
     );
 }
+
+#[derive(Clone)]
 
 struct WritingUnit {
     id: UnitId,
@@ -465,6 +469,8 @@ fn step_emits_one_effect_record_per_effect_in_emission_order() {
     use cellgov_event::PriorityClass;
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_trace::{TraceReader, TraceRecord, TracedEffectKind};
+
+    #[derive(Clone)]
 
     struct MultiEffectUnit {
         id: UnitId,
@@ -832,6 +838,8 @@ fn commit_validation_failure_traces_as_fault_discarded() {
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_trace::{TraceReader, TraceRecord};
 
+    #[derive(Clone)]
+
     struct OobUnit {
         id: UnitId,
         done: Cell<bool>,
@@ -1013,6 +1021,8 @@ fn max_steps_zero_rejects_first_step() {
 
 type FullStateTuple = (u64, [u64; 32], u64, u64, u64, u32);
 
+#[derive(Clone)]
+
 struct StateHashEmittingUnit {
     id: UnitId,
     pairs_per_step: Vec<Vec<(u64, u64)>>,
@@ -1172,6 +1182,8 @@ fn into_memory_returns_committed_state() {
     assert_eq!(&recovered.as_bytes()[0..4], &[0xDE, 0xAD, 0xBE, 0xEF]);
     assert_eq!(recovered.size(), 64);
 }
+
+#[derive(Clone)]
 
 struct SilentUnit {
     id: UnitId,
@@ -1357,6 +1369,8 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
     );
 }
 
+#[derive(Clone)]
+
 struct ReservationDriverUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -1426,6 +1440,8 @@ impl ExecutionUnit for ReservationDriverUnit {
         self.steps.get()
     }
 }
+
+#[derive(Clone)]
 
 struct RsxFlipCommandEmitterUnit {
     id: UnitId,
@@ -1536,6 +1552,8 @@ fn rsx_flip_waiting_observable_between_two_commits_then_done() {
     );
     assert!(!rt.rsx_flip().pending());
 }
+
+#[derive(Clone)]
 
 struct RsxFlipRequestEmitterUnit {
     id: UnitId,
@@ -1666,6 +1684,8 @@ fn rsx_flip_second_request_while_pending_resolves_one_transition() {
         "second request's buffer_index remains recorded"
     );
 }
+
+#[derive(Clone)]
 
 struct RsxControlWriterUnit {
     id: UnitId,
@@ -1805,6 +1825,8 @@ fn rsx_mirror_writes_on_routes_reference_to_cursor() {
     rt.commit_step(&s.result, &s.effects).unwrap();
     assert_eq!(rt.rsx_cursor().current_reference(), 0xCAFE_BABE);
 }
+
+#[derive(Clone)]
 
 struct RsxOffsetReleaseDriverUnit {
     id: UnitId,
@@ -2349,6 +2371,8 @@ fn conditional_store_through_runtime_clears_own_and_overlapping() {
     assert!(!rt.reservations().is_held_by(UnitId::new(0)));
     assert!(!rt.reservations().is_held_by(UnitId::new(1)));
 }
+
+#[derive(Clone)]
 
 struct RsxFlipSpinnerUnit {
     id: UnitId,

@@ -15,12 +15,17 @@ use std::collections::BTreeMap;
 
 /// Object-safe view of an execution unit.
 ///
-/// Blanket-impl'd for every `U: ExecutionUnit + 'static`. Method
-/// contracts mirror [`ExecutionUnit`]; see that trait for the
-/// authoritative docs.
+/// Blanket-impl'd for every `U: ExecutionUnit + Clone + 'static`.
+/// Method contracts mirror [`ExecutionUnit`]; see that trait for
+/// the authoritative docs.
 pub trait RegisteredUnit: 'static {
     /// Stable id assigned at registration.
     fn unit_id(&self) -> UnitId;
+
+    /// Deep-clone behind a fresh box. Used by [`UnitRegistry::clone`]
+    /// (and thus [`crate::Runtime::snapshot`]) to fork per-unit
+    /// state without aliasing.
+    fn clone_box(&self) -> Box<dyn RegisteredUnit>;
 
     /// Coarse runnability state queried by the scheduler.
     fn status(&self) -> UnitStatus;
@@ -70,10 +75,15 @@ pub trait RegisteredUnit: 'static {
     }
 }
 
-impl<U: ExecutionUnit + 'static> RegisteredUnit for U {
+impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn unit_id(&self) -> UnitId {
         ExecutionUnit::unit_id(self)
+    }
+
+    #[inline]
+    fn clone_box(&self) -> Box<dyn RegisteredUnit> {
+        Box::new(self.clone())
     }
 
     #[inline]
@@ -146,6 +156,24 @@ pub struct UnitRegistry {
     pending_register_writes: BTreeMap<UnitId, Vec<(u8, u64)>>,
 }
 
+impl Clone for UnitRegistry {
+    fn clone(&self) -> Self {
+        let units = self
+            .units
+            .iter()
+            .map(|(id, unit)| (*id, unit.clone_box()))
+            .collect();
+        Self {
+            next_id: self.next_id,
+            units,
+            status_overrides: self.status_overrides.clone(),
+            pending_receives: self.pending_receives.clone(),
+            pending_syscall_returns: self.pending_syscall_returns.clone(),
+            pending_register_writes: self.pending_register_writes.clone(),
+        }
+    }
+}
+
 impl UnitRegistry {
     /// Construct an empty registry.
     #[inline]
@@ -179,7 +207,7 @@ impl UnitRegistry {
     /// sequence would silently change replay hashes.
     pub fn register_with<U, F>(&mut self, factory: F) -> UnitId
     where
-        U: ExecutionUnit + 'static,
+        U: ExecutionUnit + Clone + 'static,
         F: FnOnce(UnitId) -> U,
     {
         let id = UnitId::new(self.next_id);
@@ -449,6 +477,8 @@ mod tests {
     use cellgov_mem::GuestMemory;
     use cellgov_time::InstructionCost;
 
+    #[derive(Clone)]
+
     struct CountingUnit {
         id: UnitId,
         steps: u64,
@@ -489,6 +519,8 @@ mod tests {
             self.steps
         }
     }
+
+    #[derive(Clone)]
 
     struct LyingUnit;
 
@@ -609,6 +641,8 @@ mod tests {
         }
         assert_eq!(total, 3);
     }
+
+    #[derive(Clone)]
 
     struct StatusUnit {
         id: UnitId,

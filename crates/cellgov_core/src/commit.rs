@@ -181,7 +181,7 @@ pub struct CommitContext<'a> {
 }
 
 /// The commit pipeline.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CommitPipeline {}
 
 impl CommitPipeline {

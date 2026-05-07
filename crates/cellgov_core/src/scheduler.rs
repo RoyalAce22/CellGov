@@ -193,6 +193,8 @@ mod tests {
     use cellgov_time::{Budget, InstructionCost};
     use std::cell::Cell;
 
+    #[derive(Clone)]
+
     struct TestUnit {
         id: UnitId,
         status: Cell<UnitStatus>,

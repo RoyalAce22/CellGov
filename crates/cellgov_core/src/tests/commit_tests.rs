@@ -58,6 +58,8 @@ impl CommitTestBed {
     }
 }
 
+#[derive(Clone)]
+
 struct DummyUnit {
     id: UnitId,
     status: UnitStatus,
