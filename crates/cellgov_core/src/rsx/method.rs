@@ -554,7 +554,7 @@ pub fn register_nv4097_back_end_semaphore_handlers(
 /// [`decode_header`]. Populated at runtime construction by the
 /// `register_nv*` helpers in this module; unregistered method
 /// addresses take the unknown-method fallback in the advance pass.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct NvMethodTable {
     handlers: BTreeMap<u16, NvMethodHandler>,
 }

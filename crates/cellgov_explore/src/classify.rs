@@ -14,7 +14,7 @@ pub enum OutcomeClass {
 }
 
 /// One explored alternate schedule and its committed-memory hash.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleRecord {
     /// Step index of the branching point this alternate diverges at.
     pub branch_step: usize,
@@ -25,7 +25,7 @@ pub struct ScheduleRecord {
 }
 
 /// Aggregate result of a bounded exploration run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExplorationResult {
     /// Committed-memory hash from the default-schedule baseline run.
     pub baseline_hash: u64,

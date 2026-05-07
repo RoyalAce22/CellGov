@@ -83,6 +83,7 @@ pub struct PpuSnapshot {
 
 /// PPU `ExecutionUnit`: owns architectural state, fetches and executes
 /// instructions, emits `Effect`s for stores and syscalls.
+#[derive(Clone)]
 pub struct PpuExecutionUnit {
     id: UnitId,
     state: state::PpuState,

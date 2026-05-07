@@ -20,7 +20,7 @@ pub(crate) const OWNED_NIDS: &[u32] = gcm_nid::OWNED;
 /// pre-`init_body`; all three become non-zero post-init because the
 /// MMIO sentinel `0xC000_0040` is non-zero and the HLE bump allocator
 /// refuses address 0. GET_* dispatch arms assert on this.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct GcmState {
     pub(crate) context_addr: u32,
     pub(crate) control_addr: u32,

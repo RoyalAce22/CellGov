@@ -17,6 +17,7 @@ use std::cell::Cell;
 
 /// Consumes its full budget each step, emits one `TraceMarker`, finishes
 /// after `max` steps.
+#[derive(Clone)]
 pub struct CountingUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -83,6 +84,7 @@ impl ExecutionUnit for CountingUnit {
 
 /// Emits one `SharedWriteIntent` per step against `range`, payload is
 /// the step number byte-replicated; finishes after `max` steps.
+#[derive(Clone)]
 pub struct WritingUnit {
     id: UnitId,
     steps: Cell<u64>,
@@ -156,6 +158,7 @@ impl ExecutionUnit for WritingUnit {
 
 /// Emits one [`Effect::MailboxSend`] per step into `target` with message
 /// words `1..=max`; finishes after `max` steps.
+#[derive(Clone)]
 pub struct MailboxProducer {
     id: UnitId,
     target: MailboxId,
@@ -221,6 +224,7 @@ impl ExecutionUnit for MailboxProducer {
 /// Emits one [`Effect::SignalUpdate`] per step into `target`, OR-ing in
 /// `1 << (step - 1)`; finishes after `bit_count` steps leaving
 /// `(1 << bit_count) - 1` in the register.
+#[derive(Clone)]
 pub struct SignalEmitter {
     id: UnitId,
     target: SignalId,
@@ -294,6 +298,7 @@ impl ExecutionUnit for SignalEmitter {
 
 /// Two-stage DMA block/unblock probe: seed source, submit Put, block;
 /// then on wake emit a `TraceMarker` and finish.
+#[derive(Clone)]
 pub struct DmaSubmitter {
     id: UnitId,
     source: ByteRange,
@@ -398,6 +403,7 @@ impl ExecutionUnit for DmaSubmitter {
 ///
 /// Explicit `WakeUnit` is required: the commit pipeline does not auto-wake
 /// on message delivery.
+#[derive(Clone)]
 pub struct MailboxSender {
     id: UnitId,
     responder: UnitId,
@@ -506,6 +512,7 @@ impl ExecutionUnit for MailboxSender {
 
 /// Two-stage SPU-like responder paired with [`MailboxSender`]: receive
 /// attempt; then read command, send `command + 1` response, wake sender.
+#[derive(Clone)]
 pub struct MailboxResponder {
     id: UnitId,
     sender: UnitId,

@@ -31,6 +31,14 @@ impl PrescribedScheduler {
             fallback: RoundRobinScheduler::new(),
         }
     }
+
+    /// Force `choice` on the first scheduling decision, then fall
+    /// back to round-robin. Suits the snapshot/restore path where
+    /// the host runtime's step counter is already at the branch
+    /// point and only one override is needed.
+    pub fn single_choice(choice: UnitId) -> Self {
+        Self::new(vec![Some(choice)])
+    }
 }
 
 impl Scheduler for PrescribedScheduler {
@@ -68,6 +76,7 @@ mod tests {
     use cellgov_time::{Budget, InstructionCost};
     use std::cell::Cell;
 
+    #[derive(Clone)]
     struct StubUnit {
         id: UnitId,
         status: Cell<UnitStatus>,

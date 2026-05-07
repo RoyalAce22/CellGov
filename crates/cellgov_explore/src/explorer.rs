@@ -1,29 +1,30 @@
 //! Main bounded enumerator: baseline run then one replay per
 //! non-pruned alternate branching-point choice.
+//!
+//! Alternates restore from a [`cellgov_core::RuntimeSnapshot`]
+//! captured during the baseline rather than re-running from step 0.
+//! See `docs/dev/optimizations/exploration_snapshot_restore.md`.
 
 use crate::classify::ExplorationResult;
 use crate::config::ExplorationConfig;
-use crate::observer::observe_decisions;
+use crate::observer::observe_decisions_with_snapshots;
 use crate::prescribed::PrescribedScheduler;
-use crate::util::{build_overrides, classify_iteration, for_each_alternate, run_to_stall};
+use crate::util::{classify_iteration, for_each_alternate, run_to_stall};
 use cellgov_core::Runtime;
 
 /// Run bounded schedule exploration on a workload.
 ///
 /// Returns `None` if the baseline run has no branching points.
-///
-/// `make_runtime` is called once for the baseline and once per
-/// non-pruned alternate; each call must produce an independent runtime
-/// from identical initial state. Exploration stops after
-/// `config.max_schedules` alternates or when every alternate has been
-/// replayed, and each replay stops after `config.max_steps_per_run`
-/// steps.
+/// `make_runtime` is invoked exactly once -- alternates replay from
+/// snapshots, not by reconstructing the runtime. Exploration stops
+/// at `config.max_schedules` alternates and each replay at
+/// `config.max_steps_per_run` steps.
 pub fn explore<F>(mut make_runtime: F, config: &ExplorationConfig) -> Option<ExplorationResult>
 where
     F: FnMut() -> Runtime,
 {
     let mut rt_baseline = make_runtime();
-    let log = observe_decisions(&mut rt_baseline);
+    let (log, snapshots) = observe_decisions_with_snapshots(&mut rt_baseline, true);
     let baseline_hash = rt_baseline.memory().content_hash();
 
     let total_branching_points = log.branching_count();
@@ -32,11 +33,13 @@ where
     }
 
     let iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
-        let overrides = build_overrides(step, alt);
-        let mut rt = make_runtime();
-        rt.set_scheduler(PrescribedScheduler::new(overrides));
-        run_to_stall(&mut rt, config.max_steps_per_run);
-        rt.memory().content_hash()
+        let snap = snapshots
+            .get(&step)
+            .expect("observer must snapshot every branching point");
+        rt_baseline.restore_into(snap);
+        rt_baseline.set_scheduler(PrescribedScheduler::single_choice(alt));
+        run_to_stall(&mut rt_baseline, config.max_steps_per_run);
+        rt_baseline.memory().content_hash()
     });
 
     Some(classify_iteration(
