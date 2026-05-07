@@ -6,14 +6,14 @@ use cellgov_time::GuestTicks;
 
 /// Total order over guest-visible events.
 ///
-/// Field declaration order IS the tie-break order: the derived `Ord`
-/// compares lexicographically top-to-bottom. Reordering fields changes
-/// every replay's event order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+/// Field declaration order IS the tie-break order; reordering
+/// fields changes every replay. Lower keys sort first: a min-heap
+/// or `BTreeMap` consumer pops the next event to service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OrderingKey {
     /// Guest-time stamp at which the event becomes visible.
     pub timestamp: GuestTicks,
-    /// Lower discriminant orders earlier.
+    /// Higher priority sorts first; see [`PriorityClass`].
     pub priority: PriorityClass,
     /// Source unit id.
     pub source: UnitId,
@@ -22,7 +22,7 @@ pub struct OrderingKey {
 }
 
 impl OrderingKey {
-    /// Construct an ordering key from its four tiers.
+    /// Construct from the four tiers in declaration order.
     #[inline]
     pub const fn new(
         timestamp: GuestTicks,
@@ -42,6 +42,8 @@ impl OrderingKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
     fn key(t: u64, p: PriorityClass, u: u64, s: u64) -> OrderingKey {
         OrderingKey::new(
@@ -50,6 +52,12 @@ mod tests {
             UnitId::new(u),
             SequenceNumber::new(s),
         )
+    }
+
+    fn hash_of(k: &OrderingKey) -> u64 {
+        let mut h = DefaultHasher::new();
+        k.hash(&mut h);
+        h.finish()
     }
 
     #[test]
@@ -61,13 +69,13 @@ mod tests {
 
     #[test]
     fn tier_two_priority_breaks_timestamp_tie() {
-        let bg = key(50, PriorityClass::Background, 999, 999);
-        let normal = key(50, PriorityClass::Normal, 0, 0);
-        let high = key(50, PriorityClass::High, 0, 0);
         let crit = key(50, PriorityClass::Critical, 0, 0);
-        assert!(bg < normal);
-        assert!(normal < high);
-        assert!(high < crit);
+        let high = key(50, PriorityClass::High, 0, 0);
+        let normal = key(50, PriorityClass::Normal, 0, 0);
+        let bg = key(50, PriorityClass::Background, 999, 999);
+        assert!(crit < high);
+        assert!(high < normal);
+        assert!(normal < bg);
     }
 
     #[test]
@@ -92,13 +100,43 @@ mod tests {
         assert_eq!(a.cmp(&b), std::cmp::Ordering::Equal);
     }
 
+    /// `PartialEq`/`Hash` agreement; pins against a future manual
+    /// impl drifting from the derive.
     #[test]
-    fn default_is_lowest_possible_key() {
-        let d = OrderingKey::default();
-        assert_eq!(d.timestamp, GuestTicks::ZERO);
-        assert_eq!(d.priority, PriorityClass::default());
-        assert_eq!(d.source, UnitId::new(0));
-        assert_eq!(d.sequence, SequenceNumber::ZERO);
+    fn equal_keys_produce_equal_hashes() {
+        let a = key(50, PriorityClass::High, 3, 9);
+        let b = key(50, PriorityClass::High, 3, 9);
+        assert_eq!(hash_of(&a), hash_of(&b));
+    }
+
+    /// Catches a future manual `Clone` that silently drops a field.
+    #[test]
+    fn copy_preserves_ordering_identity() {
+        let a = key(50, PriorityClass::High, 3, 9);
+        let b = a;
+        assert_eq!(a.cmp(&b), std::cmp::Ordering::Equal);
+        assert_eq!(hash_of(&a), hash_of(&b));
+    }
+
+    /// A future move to wrapping arithmetic on `GuestTicks` would
+    /// silently invert this and break replay determinism.
+    #[test]
+    fn max_timestamp_compares_above_zero() {
+        let lo = key(0, PriorityClass::default(), 0, 0);
+        let hi = key(u64::MAX, PriorityClass::default(), 0, 0);
+        assert!(lo < hi);
+    }
+
+    #[test]
+    fn explicit_origin_key_compares_lowest() {
+        let origin = OrderingKey::new(
+            GuestTicks::ZERO,
+            PriorityClass::default(),
+            UnitId::new(0),
+            SequenceNumber::ZERO,
+        );
+        let later = key(1, PriorityClass::default(), 0, 0);
+        assert!(origin < later);
     }
 
     #[test]
@@ -113,11 +151,11 @@ mod tests {
         ];
         keys.sort();
         let expected = [
+            key(1, PriorityClass::Critical, 99, 99),
+            key(1, PriorityClass::Normal, 0, 0),
             key(1, PriorityClass::Background, 4, 7),
             key(1, PriorityClass::Background, 5, 0),
             key(1, PriorityClass::Background, 5, 1),
-            key(1, PriorityClass::Normal, 0, 0),
-            key(1, PriorityClass::Critical, 99, 99),
             key(2, PriorityClass::Normal, 0, 0),
         ];
         assert_eq!(keys, expected);

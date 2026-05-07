@@ -1,6 +1,8 @@
 //! SPU channel numbers and MFC command opcodes.
 //!
-//! Architectural constants used by `rdch`/`wrch`/`rchcnt`.
+//! Architectural constants for `rdch`/`wrch`/`rchcnt` and the MFC
+//! command opcodes written to `MFC_CMD`. Channel-access semantics
+//! live in `cellgov_spu`; this module is data only.
 // [CBEA p:112 s:9.1 MFC SPU Command Parameter Channels] SPU channel architecture overview.
 
 // MFC command channels

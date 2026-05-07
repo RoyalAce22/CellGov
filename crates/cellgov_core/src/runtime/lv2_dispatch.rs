@@ -26,7 +26,11 @@ impl Runtime {
                     mailbox, message, ..
                 } => {
                     if let Some(mbox) = self.mailbox_registry.get_mut(*mailbox) {
-                        mbox.send(message.raw());
+                        // force_send mirrors commit-pipeline
+                        // [CBE-Handbook p:541 s:19.6.6.2]; the
+                        // outbound write-blocking path is not
+                        // wired here yet.
+                        mbox.force_send(message.raw());
                     }
                     let target = UnitId::new(mailbox.raw());
                     if self.registry.effective_status(target) == Some(UnitStatus::Blocked) {
@@ -331,8 +335,22 @@ impl Runtime {
                     "record_spu rejected a freshly allocated unit: dispatch-layer \
                      corruption in the RegisterSpu path",
                 );
-                self.mailbox_registry
-                    .register_at(cellgov_sync::MailboxId::new(uid.raw()));
+                // SPU Read Inbound Mailbox depth is 4 per
+                // [CBE-Handbook p:533 s:19.6 Table 19-15]; we use it
+                // as the default capacity for dispatch-allocated
+                // mailboxes until the SPU exec layer differentiates
+                // outbound (depth 1) from inbound (depth 4).
+                const SPU_INBOUND_MBOX_DEPTH: usize = 4;
+                let inserted = self.mailbox_registry.register_at(
+                    cellgov_sync::MailboxId::new(uid.raw()),
+                    SPU_INBOUND_MBOX_DEPTH,
+                );
+                debug_assert!(
+                    inserted,
+                    "RegisterSpu for UnitId({:?}) found an existing mailbox; \
+                     the dispatch layer must allocate a fresh unit id per SPU",
+                    uid.raw()
+                );
             }
         }
         self.registry.set_syscall_return(source, code);

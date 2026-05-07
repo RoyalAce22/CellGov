@@ -418,10 +418,16 @@ impl CommitPipeline {
                 Effect::MailboxSend {
                     mailbox, message, ..
                 } => {
+                    // force_send: PPE-overrun semantics
+                    // [CBE-Handbook p:541 s:19.6.6.2]. The SPU
+                    // outbound write-blocking path is not modelled
+                    // here yet; until SPU exec issues MailboxSend
+                    // and yields on full, every commit-pipeline
+                    // send must succeed.
                     ctx.mailboxes
                         .get_mut(*mailbox)
                         .expect("pre-validated mailbox id")
-                        .send(message.raw());
+                        .force_send(message.raw());
                 }
                 Effect::SignalUpdate { signal, value, .. } => {
                     ctx.signals
@@ -461,12 +467,17 @@ impl CommitPipeline {
                     ctx.units.set_status_override(*source, UnitStatus::Blocked);
                     blocked_units.push((*source, BlockReason::WaitOnEvent));
                 }
-                Effect::SharedWriteIntent { range, .. } => {
+                Effect::SharedWriteIntent { range, source, .. } => {
                     // Cross-unit reservation invalidation; emission order
                     // determines which writer wins concurrent LL/SC races.
-                    reservations_cleared += ctx
-                        .reservations
-                        .clear_covering(range.start().raw(), range.length());
+                    // The emitter's own reservation is preserved: the PPC
+                    // spec only invalidates on stores from another
+                    // processor [PPC-Book2 p:10 s:1.7.3.1].
+                    reservations_cleared += ctx.reservations.clear_covering(
+                        range.start().raw(),
+                        range.length(),
+                        Some(*source),
+                    );
                 }
                 Effect::ReservationAcquire { line_addr, source } => {
                     // Canonicalize to 128-byte line at insert; callers may
@@ -494,9 +505,11 @@ impl CommitPipeline {
                     } else {
                         conditional_stores_without_prior_reservation += 1;
                     }
-                    reservations_cleared += ctx
-                        .reservations
-                        .clear_covering(range.start().raw(), range.length());
+                    // Emitter's entry was already removed above, so
+                    // the writer-exclusion arg is unused on this path.
+                    reservations_cleared +=
+                        ctx.reservations
+                            .clear_covering(range.start().raw(), range.length(), None);
                 }
                 Effect::RsxFlipRequest { buffer_index } => {
                     ctx.rsx_flip.request_flip(*buffer_index);

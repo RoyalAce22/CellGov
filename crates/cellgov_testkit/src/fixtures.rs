@@ -233,7 +233,7 @@ pub fn mailbox_send_scenario(message_count: u64) -> ScenarioFixture {
         .budget(Budget::new(1))
         .max_steps(cap)
         .register(move |rt: &mut Runtime| {
-            let target = rt.mailbox_registry_mut().register();
+            let target = rt.mailbox_registry_mut().register(4);
             rt.registry_mut()
                 .register_with(|id| MailboxProducer::new(id, target, message_count));
         })
@@ -248,8 +248,8 @@ pub fn mailbox_roundtrip_scenario(command: u32) -> ScenarioFixture {
         .budget(Budget::new(1))
         .max_steps(20)
         .register(move |rt: &mut Runtime| {
-            let cmd_mb = rt.mailbox_registry_mut().register();
-            let resp_mb = rt.mailbox_registry_mut().register();
+            let cmd_mb = rt.mailbox_registry_mut().register(4);
+            let resp_mb = rt.mailbox_registry_mut().register(4);
             // Registration order pins sender to id 0, responder to id 1.
             let sender_id = cellgov_event::UnitId::new(0);
             let responder_id = cellgov_event::UnitId::new(1);
@@ -296,7 +296,7 @@ pub fn fake_isa_scenario() -> ScenarioFixture {
         .budget(Budget::new(1))
         .max_steps(20)
         .register(move |rt: &mut Runtime| {
-            rt.mailbox_registry_mut().register(); // mailbox 0
+            rt.mailbox_registry_mut().register(4); // mailbox 0
             rt.registry_mut().register_with(|id| {
                 FakeIsaUnit::new(
                     id,
@@ -482,9 +482,13 @@ mod tests {
         let result = run(mailbox_send_scenario(5));
 
         let mut expected = Runtime::new(GuestMemory::new(16), Budget::new(1), 100);
-        let mb = expected.mailbox_registry_mut().register();
+        let mb = expected.mailbox_registry_mut().register(4);
         for n in 1..=5u32 {
-            expected.mailbox_registry_mut().get_mut(mb).unwrap().send(n);
+            expected
+                .mailbox_registry_mut()
+                .get_mut(mb)
+                .unwrap()
+                .force_send(n);
         }
         assert_eq!(
             result.final_sync_hash,
@@ -718,8 +722,8 @@ mod tests {
         use cellgov_trace::StateHash;
         let result = run(mailbox_roundtrip_scenario(0x42));
         let mut expected = Runtime::new(GuestMemory::new(16), Budget::new(1), 100);
-        expected.mailbox_registry_mut().register(); // cmd
-        expected.mailbox_registry_mut().register(); // resp
+        expected.mailbox_registry_mut().register(4); // cmd
+        expected.mailbox_registry_mut().register(4); // resp
         assert_eq!(
             result.final_sync_hash,
             StateHash::new(expected.sync_state_hash())
@@ -764,12 +768,12 @@ mod tests {
         use cellgov_trace::StateHash;
         let result = run(fake_isa_scenario());
         let mut expected = Runtime::new(GuestMemory::new(256), Budget::new(1), 100);
-        let mb = expected.mailbox_registry_mut().register();
+        let mb = expected.mailbox_registry_mut().register(4);
         expected
             .mailbox_registry_mut()
             .get_mut(mb)
             .unwrap()
-            .send(0xab);
+            .force_send(0xab);
         assert_eq!(
             result.final_sync_hash,
             StateHash::new(expected.sync_state_hash())

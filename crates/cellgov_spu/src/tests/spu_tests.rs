@@ -435,11 +435,13 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
                 // Mailbox must be registered before the unit so both
                 // receive ID 0: the SPU rdch handler looks up
                 // MailboxId(unit_id) and they must match.
-                let mbox_id = rt.mailbox_registry_mut().register();
+                // SPU Read Inbound Mailbox depth = 4
+                // [CBE-Handbook p:533 s:19.6 Table 19-15].
+                let mbox_id = rt.mailbox_registry_mut().register(4);
                 rt.mailbox_registry_mut()
                     .get_mut(mbox_id)
                     .unwrap()
-                    .send(mailbox_value);
+                    .force_send(mailbox_value);
 
                 let data = elf;
                 rt.registry_mut().register_with(|id| {

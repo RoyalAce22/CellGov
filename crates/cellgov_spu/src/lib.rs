@@ -6,7 +6,6 @@
 //! from the frozen committed snapshot exposed by
 //! [`cellgov_exec::ExecutionContext::memory`].
 
-pub mod channels;
 pub mod decode;
 pub mod exec;
 pub mod instruction;

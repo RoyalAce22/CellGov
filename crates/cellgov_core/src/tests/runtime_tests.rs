@@ -620,7 +620,7 @@ fn sync_state_checkpoint_changes_when_a_mailbox_is_registered() {
         rt.registry_mut()
             .register_with(|id| CountingUnit::new(id, 1));
         if register_mailbox {
-            let _ = rt.mailbox_registry_mut().register();
+            let _ = rt.mailbox_registry_mut().register(4);
         }
         let s = rt.step().unwrap();
         rt.commit_step(&s.result, &s.effects).unwrap();
@@ -764,9 +764,12 @@ fn sync_state_checkpoint_changes_when_a_message_lands_in_a_mailbox() {
         let mut rt = build(16, 1, 100);
         rt.registry_mut()
             .register_with(|id| CountingUnit::new(id, 1));
-        let mb_id = rt.mailbox_registry_mut().register();
+        let mb_id = rt.mailbox_registry_mut().register(4);
         if let Some(word) = seed_message {
-            rt.mailbox_registry_mut().get_mut(mb_id).unwrap().send(word);
+            rt.mailbox_registry_mut()
+                .get_mut(mb_id)
+                .unwrap()
+                .force_send(word);
         }
         let s = rt.step().unwrap();
         rt.commit_step(&s.result, &s.effects).unwrap();
@@ -2057,7 +2060,12 @@ fn sync_state_hash_changes_after_reservation_acquire() {
 }
 
 #[test]
-fn sync_state_hash_returns_to_empty_after_reservation_cleared() {
+fn sync_state_hash_persists_after_same_unit_store_to_reserved_line() {
+    // Spec pin: a unit's own store does not clear its own
+    // reservation [PPC-Book2 p:10 s:1.7.3.1]. ReservationDriverUnit
+    // emits an acquire then an own-line write; the table must still
+    // hold the entry afterward, so the post-write hash matches the
+    // post-acquire hash, not the empty hash.
     let mut rt = build(4096, 1, 100);
     rt.registry_mut().register_with(|id| ReservationDriverUnit {
         id,
@@ -2067,13 +2075,14 @@ fn sync_state_hash_returns_to_empty_after_reservation_cleared() {
     let h_empty = rt.sync_state_hash();
     let s1 = rt.step().unwrap();
     rt.commit_step(&s1.result, &s1.effects).unwrap();
-    assert_ne!(h_empty, rt.sync_state_hash());
+    let h_after_acquire = rt.sync_state_hash();
+    assert_ne!(h_empty, h_after_acquire);
     let s2 = rt.step().unwrap();
     rt.commit_step(&s2.result, &s2.effects).unwrap();
     assert_eq!(
-        h_empty,
+        h_after_acquire,
         rt.sync_state_hash(),
-        "cleared reservation table must restore the pre-acquire sync hash"
+        "same-unit store must not clear the emitter's own reservation"
     );
 }
 
