@@ -39,8 +39,11 @@ impl Runtime {
                 continue;
             }
             let dst = c.destination();
+            // DMA completion: the issuer's own reservation is
+            // preserved; only other processors' reservations are
+            // invalidated. [PPC-Book2 p:10 s:1.7.3.1]
             self.reservations
-                .clear_covering(dst.start().raw(), dst.length());
+                .clear_covering(dst.start().raw(), dst.length(), Some(c.issuer()));
             self.registry
                 .set_status_override(c.issuer(), UnitStatus::Runnable);
         }

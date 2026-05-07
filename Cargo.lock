@@ -258,6 +258,7 @@ dependencies = [
  "cellgov_event",
  "cellgov_exec",
  "cellgov_mem",
+ "cellgov_ps3_abi",
  "cellgov_sync",
  "cellgov_testkit",
  "cellgov_time",

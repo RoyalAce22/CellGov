@@ -3,7 +3,6 @@
 //! Translates decoded instructions into `SpuState` mutations and
 //! `Effect` packets. The only layer that couples state to Effects.
 
-use crate::channels;
 use crate::instruction::SpuInstruction;
 use crate::state::SpuState;
 use cellgov_dma::{DmaDirection, DmaRequest};
@@ -11,6 +10,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_ps3_abi::spu_channels as channels;
 use cellgov_time::GuestTicks;
 
 /// Outcome of executing a single SPU instruction.

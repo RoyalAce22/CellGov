@@ -2,11 +2,12 @@
 //!
 //! Models PPU `lwarx`/`ldarx` + `stwcx`/`stdcx` and SPU `MFC_GETLLAR` +
 //! `MFC_PUTLLC` over a 128-byte cache-line granule. The commit
-//! pipeline clears every entry whose line overlaps a committed write;
-//! a conditional store succeeds only if the unit's entry is still
-//! present at commit time. The table holds the global half of the
-//! verdict, ANDed with the unit's local reservation register.
-// [PPC-Book2 p:10 s:1.7.3.1] PPU lwarx/stwcx reservation + granule semantics.
+//! pipeline clears every entry whose line overlaps a committed write
+//! from a *different* unit; a conditional store succeeds only if the
+//! unit's entry is still present at commit time. The table holds the
+//! global half of the verdict, ANDed with the unit's local
+//! reservation register.
+// [PPC-Book2 p:10 s:1.7.3.1] PPU lwarx/stwcx reservation + granule semantics; "another processor" stores clear the reservation.
 // [CBE-Handbook p:590 s:20.3] SPU getllar/putllc 128-byte lock-line atomics.
 //!
 //! Keys are canonical line addresses (low 7 bits zero). Callers pass
@@ -18,6 +19,19 @@ use std::collections::BTreeMap;
 // [CBE-Handbook p:577 s:20.2] CBE reservation granule is 128 bytes = PPE cache line.
 pub use cellgov_ps3_abi::hardware::RESERVATION_LINE_BYTES;
 
+// `containing()`'s line-mask arithmetic only aligns correctly when
+// the granule is a power of two; catch a future non-power-of-two
+// value at compile time.
+const _: () = assert!(
+    RESERVATION_LINE_BYTES.is_power_of_two(),
+    "line mask arithmetic requires power-of-two granule"
+);
+
+/// Cell BE effective-address space is 42 bits
+/// [CBE-Handbook p:75 s:4.5.1]. Beyond this, the saturating
+/// arithmetic in `end_inclusive` lets near-`u64::MAX` lines collide.
+const CELL_EA_LIMIT: u64 = 0x0000_03FF_FFFF_FFFF;
+
 /// 128-byte-aligned guest address. Low 7 bits are always zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ReservedLine {
@@ -26,8 +40,18 @@ pub struct ReservedLine {
 
 impl ReservedLine {
     /// Canonical line containing `byte_addr`.
+    ///
+    /// # Panics
+    ///
+    /// Debug-asserts `byte_addr` is within the 42-bit Cell BE EA
+    /// space; beyond that, the saturating arithmetic regime makes
+    /// overlap checks unreliable.
     #[inline]
     pub const fn containing(byte_addr: u64) -> Self {
+        debug_assert!(
+            byte_addr <= CELL_EA_LIMIT,
+            "byte_addr exceeds Cell BE 42-bit EA space"
+        );
         Self {
             addr: byte_addr & !(RESERVATION_LINE_BYTES - 1),
         }
@@ -39,7 +63,9 @@ impl ReservedLine {
         self.addr
     }
 
-    /// Inclusive last byte of this line. Saturates on overflow.
+    /// Inclusive last byte of this line. Saturating arithmetic; the
+    /// `containing` debug-assert keeps in-spec call sites away from
+    /// the saturation regime.
     #[inline]
     pub const fn end_inclusive(self) -> u64 {
         self.addr.saturating_add(RESERVATION_LINE_BYTES - 1)
@@ -59,12 +85,21 @@ impl ReservedLine {
     }
 }
 
-/// Committed atomic-reservation state, at most one entry per unit. A
-/// second `insert_or_replace` for the same unit drops the prior entry
-/// (matches PPC/SPU ABI: a second reserve invalidates the first).
+impl core::fmt::Display for ReservedLine {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:#x}", self.addr)
+    }
+}
+
+/// Committed atomic-reservation state, at most one entry per unit.
+/// A second `insert_or_replace` for the same unit drops the prior
+/// entry (a second reserve invalidates the first).
 // [PPC-Book2 p:10 s:1.7.3.1] "another lwarx/ldarx clears the first reservation".
 #[derive(Debug, Clone, Default)]
 pub struct ReservationTable {
+    /// `BTreeMap` keeps `state_hash` invariant under permutation by
+    /// walking unit ids in order. `UnitId: Ord` is load-bearing for
+    /// determinism, not an incidental derive.
     entries: BTreeMap<UnitId, ReservedLine>,
 }
 
@@ -117,17 +152,28 @@ impl ReservationTable {
         self.entries.iter().map(|(u, l)| (*u, *l))
     }
 
-    /// Drop every entry whose line overlaps `[addr, addr + len)`.
-    /// Returns the count dropped. O(n) over entries; short-circuits on
-    /// empty table or zero-length writes.
-    // [CBE-Handbook p:589 s:20.3] MFC atomic unit clears reservation on snoop of granule.
-    pub fn clear_covering(&mut self, addr: u64, len: u64) -> usize {
+    /// Drop every entry whose line overlaps `[addr, addr + len)`,
+    /// except `except`'s own entry. Returns the count dropped. O(n)
+    /// over entries.
+    ///
+    /// `except = Some(writer)` matches the spec: a unit's own store
+    /// does not clear its own reservation. `None` means either the
+    /// emitter's entry was dropped before this call (commit-side
+    /// `ConditionalStore` path) or the writer is not a unit
+    /// (privileged / external snoop).
+    // [PPC-Book2 p:10 s:1.7.3.1] "some other processor executes a Store" -- own-unit stores do not clear.
+    // [CBE-Handbook p:589 s:20.3] MFC atomic unit clears reservation on cross-processor snoop of granule.
+    pub fn clear_covering(&mut self, addr: u64, len: u64, except: Option<UnitId>) -> usize {
         if self.entries.is_empty() || len == 0 {
             return 0;
         }
         let before = self.entries.len();
-        self.entries
-            .retain(|_, line| !line.overlaps_range(addr, len));
+        self.entries.retain(|unit, line| {
+            if Some(*unit) == except {
+                return true;
+            }
+            !line.overlaps_range(addr, len)
+        });
         before - self.entries.len()
     }
 
@@ -205,6 +251,12 @@ mod tests {
     }
 
     #[test]
+    fn display_emits_hex_address() {
+        assert_eq!(format!("{}", ReservedLine::containing(0x1080)), "0x1080");
+        assert_eq!(format!("{}", ReservedLine::containing(0)), "0x0");
+    }
+
+    #[test]
     fn new_is_empty() {
         let t = ReservationTable::new();
         assert!(t.is_empty());
@@ -278,7 +330,7 @@ mod tests {
         t.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
         t.insert_or_replace(unit(2), ReservedLine::containing(0x1080));
         t.insert_or_replace(unit(3), ReservedLine::containing(0x2000));
-        let dropped = t.clear_covering(0x1040, 4);
+        let dropped = t.clear_covering(0x1040, 4, None);
         assert_eq!(dropped, 1);
         assert!(!t.is_held_by(unit(1)));
         assert!(t.is_held_by(unit(2)));
@@ -290,16 +342,30 @@ mod tests {
         let mut t = ReservationTable::new();
         t.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
         t.insert_or_replace(unit(2), ReservedLine::containing(0x1000));
-        let dropped = t.clear_covering(0x1000, 4);
+        let dropped = t.clear_covering(0x1000, 4, None);
         assert_eq!(dropped, 2);
         assert!(t.is_empty());
+    }
+
+    /// Without writer-exclusion, `lwarx; stw; stwcx.` on the same
+    /// line would always fail the conditional store.
+    // [PPC-Book2 p:10 s:1.7.3.1] "some other processor".
+    #[test]
+    fn clear_covering_preserves_excepted_unit() {
+        let mut t = ReservationTable::new();
+        t.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
+        t.insert_or_replace(unit(2), ReservedLine::containing(0x1000));
+        let dropped = t.clear_covering(0x1020, 4, Some(unit(1)));
+        assert_eq!(dropped, 1);
+        assert!(t.is_held_by(unit(1)));
+        assert!(!t.is_held_by(unit(2)));
     }
 
     #[test]
     fn clear_covering_zero_len_is_noop() {
         let mut t = ReservationTable::new();
         t.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
-        let dropped = t.clear_covering(0x1000, 0);
+        let dropped = t.clear_covering(0x1000, 0, None);
         assert_eq!(dropped, 0);
         assert!(t.is_held_by(unit(1)));
     }
@@ -307,7 +373,7 @@ mod tests {
     #[test]
     fn clear_covering_empty_table_is_noop() {
         let mut t = ReservationTable::new();
-        let dropped = t.clear_covering(0x1000, 128);
+        let dropped = t.clear_covering(0x1000, 128, None);
         assert_eq!(dropped, 0);
     }
 
@@ -318,7 +384,7 @@ mod tests {
         t.insert_or_replace(unit(2), ReservedLine::containing(0x1080));
         t.insert_or_replace(unit(3), ReservedLine::containing(0x1100));
         t.insert_or_replace(unit(4), ReservedLine::containing(0x2000));
-        let dropped = t.clear_covering(0x1000, 384);
+        let dropped = t.clear_covering(0x1000, 384, None);
         assert_eq!(dropped, 3);
         assert!(t.is_held_by(unit(4)));
         assert!(!t.is_held_by(unit(1)));
@@ -335,7 +401,7 @@ mod tests {
         t.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
         t.insert_or_replace(unit(2), ReservedLine::containing(0x1080));
         t.insert_or_replace(unit(3), ReservedLine::containing(0x1100));
-        let dropped = t.clear_covering(0x1000, 256);
+        let dropped = t.clear_covering(0x1000, 256, None);
         assert_eq!(dropped, 2);
         assert!(!t.is_held_by(unit(1)));
         assert!(!t.is_held_by(unit(2)));
@@ -347,6 +413,20 @@ mod tests {
         let a = ReservationTable::new();
         let b = ReservationTable::new();
         assert_eq!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    fn state_hash_is_idempotent() {
+        let mut t = ReservationTable::new();
+        t.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
+        let h1 = t.state_hash();
+        let h2 = t.state_hash();
+        assert_eq!(h1, h2);
+        t.insert_or_replace(unit(2), ReservedLine::containing(0x2000));
+        let h3 = t.state_hash();
+        let h4 = t.state_hash();
+        assert_eq!(h3, h4);
+        assert_ne!(h1, h3);
     }
 
     #[test]
@@ -418,10 +498,12 @@ mod tests {
                         t.remove_if_present(uid);
                     }
                     2 => {
-                        t.clear_covering(addr, 4);
+                        // Writer-exclusion path.
+                        t.clear_covering(addr, 4, Some(uid));
                     }
                     _ => {
-                        t.clear_covering(addr & !0xFF, 256);
+                        // Cross-processor / DMA / privileged-snoop path.
+                        t.clear_covering(addr & !0xFF, 256, None);
                     }
                 }
             }

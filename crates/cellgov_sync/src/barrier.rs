@@ -3,26 +3,54 @@
 //! lives at the registry that owns the primitive.
 
 /// Stable identifier for a barrier-shaped sync primitive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+///
+/// No `Default`: a derived default would alias the registry's
+/// first-issued id. Use `Option<BarrierId>` for "no barrier."
+/// No `Ord`: opaque handles, not creation-order keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BarrierId(u64);
 
 impl BarrierId {
-    /// Construct a `BarrierId` from a raw value.
+    /// Construct from a raw value.
     #[inline]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Underlying id value.
+    /// Underlying id value. Consumers: trace serialization and
+    /// diagnostic output.
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
     }
 }
 
+impl core::fmt::Display for BarrierId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl crate::registry::RegistryId for BarrierId {
+    fn new(raw: u64) -> Self {
+        Self::new(raw)
+    }
+    fn raw(self) -> u64 {
+        Self::raw(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    fn hash<T: Hash>(t: &T) -> u64 {
+        let mut h = DefaultHasher::new();
+        t.hash(&mut h);
+        h.finish()
+    }
 
     #[test]
     fn roundtrip() {
@@ -30,13 +58,26 @@ mod tests {
     }
 
     #[test]
-    fn default_is_zero() {
-        assert_eq!(BarrierId::default(), BarrierId::new(0));
+    fn hash_matches_eq() {
+        assert_eq!(hash(&BarrierId::new(7)), hash(&BarrierId::new(7)));
+        assert_ne!(hash(&BarrierId::new(7)), hash(&BarrierId::new(8)));
     }
 
     #[test]
-    fn ordering_is_total() {
-        assert!(BarrierId::new(8) < BarrierId::new(9));
-        assert_eq!(BarrierId::new(2), BarrierId::new(2));
+    fn copy_preserves_value() {
+        let a = BarrierId::new(5);
+        let b = a;
+        assert_eq!(a, b);
+        assert_eq!(a.raw(), 5);
+    }
+
+    #[test]
+    fn max_id_roundtrips() {
+        assert_eq!(BarrierId::new(u64::MAX).raw(), u64::MAX);
+    }
+
+    #[test]
+    fn display_emits_raw_integer() {
+        assert_eq!(format!("{}", BarrierId::new(42)), "42");
     }
 }

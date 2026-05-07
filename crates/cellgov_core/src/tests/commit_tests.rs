@@ -267,7 +267,7 @@ fn mailbox_send(mailbox: MailboxId, message: u32) -> Effect {
 #[test]
 fn mailbox_send_pushes_message_into_registry() {
     let mut bed = CommitTestBed::new(8);
-    let mb = bed.mailboxes.register();
+    let mb = bed.mailboxes.register(4);
     let (r, e) = step_with(YieldReason::BudgetExhausted, vec![mailbox_send(mb, 42)]);
     let outcome = bed.process(&r, &e).unwrap();
     assert_eq!(outcome.mailbox_sends_committed, 1);
@@ -279,7 +279,7 @@ fn mailbox_send_pushes_message_into_registry() {
 #[test]
 fn multiple_mailbox_sends_apply_in_emission_order() {
     let mut bed = CommitTestBed::new(8);
-    let mb = bed.mailboxes.register();
+    let mb = bed.mailboxes.register(4);
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
         vec![
@@ -299,7 +299,7 @@ fn multiple_mailbox_sends_apply_in_emission_order() {
 #[test]
 fn unknown_mailbox_aborts_batch_atomically() {
     let mut bed = CommitTestBed::new(8);
-    let known = bed.mailboxes.register();
+    let known = bed.mailboxes.register(4);
     let unknown = MailboxId::new(99);
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
@@ -319,7 +319,7 @@ fn unknown_mailbox_aborts_batch_atomically() {
 #[test]
 fn writes_and_mailbox_sends_compose_in_one_step() {
     let mut bed = CommitTestBed::new(8);
-    let mb = bed.mailboxes.register();
+    let mb = bed.mailboxes.register(4);
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
         vec![
@@ -407,7 +407,7 @@ fn fault_step_discards_dma_enqueues() {
 fn all_four_handled_effects_compose_in_one_step() {
     let mut bed = CommitTestBed::new(256);
     bed.now = GuestTicks::new(200);
-    let mb = bed.mailboxes.register();
+    let mb = bed.mailboxes.register(4);
     let sig = bed.signals.register();
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
@@ -442,9 +442,9 @@ fn mailbox_receive(mailbox: MailboxId, source: UnitId) -> Effect {
 fn receive_from_non_empty_mailbox_pops_and_delivers() {
     let mut bed = CommitTestBed::new(8);
     let receiver_id = bed.units.register_with(DummyUnit::runnable);
-    let mb = bed.mailboxes.register();
-    bed.mailboxes.get_mut(mb).unwrap().send(0xdead);
-    bed.mailboxes.get_mut(mb).unwrap().send(0xbeef);
+    let mb = bed.mailboxes.register(4);
+    bed.mailboxes.get_mut(mb).unwrap().force_send(0xdead);
+    bed.mailboxes.get_mut(mb).unwrap().force_send(0xbeef);
     let (r, e) = step_with(
         YieldReason::MailboxAccess,
         vec![mailbox_receive(mb, receiver_id)],
@@ -468,7 +468,7 @@ fn receive_from_non_empty_mailbox_pops_and_delivers() {
 fn receive_from_empty_mailbox_blocks_unit() {
     let mut bed = CommitTestBed::new(8);
     let receiver_id = bed.units.register_with(DummyUnit::runnable);
-    let mb = bed.mailboxes.register();
+    let mb = bed.mailboxes.register(4);
     // Mailbox is empty.
     let (r, e) = step_with(
         YieldReason::MailboxAccess,
@@ -676,7 +676,7 @@ fn unknown_signal_aborts_batch_atomically() {
 #[test]
 fn writes_mailbox_sends_and_signal_updates_compose_in_one_step() {
     let mut bed = CommitTestBed::new(8);
-    let mb = bed.mailboxes.register();
+    let mb = bed.mailboxes.register(4);
     let sig = bed.signals.register();
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
@@ -712,7 +712,7 @@ fn fault_step_discards_signal_updates() {
 #[test]
 fn fault_step_discards_mailbox_sends() {
     let mut bed = CommitTestBed::new(8);
-    let mb = bed.mailboxes.register();
+    let mb = bed.mailboxes.register(4);
     let (mut r, e) = step_with(YieldReason::Fault, vec![mailbox_send(mb, 1)]);
     r.fault = Some(FaultKind::Validation);
     let outcome = bed.process(&r, &e).unwrap();
@@ -725,9 +725,9 @@ fn fault_step_discards_mailbox_sends() {
 fn two_receives_same_mailbox_first_pops_second_blocks() {
     let mut bed = CommitTestBed::new(8);
     let receiver_id = bed.units.register_with(DummyUnit::runnable);
-    let mb = bed.mailboxes.register();
+    let mb = bed.mailboxes.register(4);
     // Put exactly one message in the mailbox.
-    bed.mailboxes.get_mut(mb).unwrap().send(42);
+    bed.mailboxes.get_mut(mb).unwrap().force_send(42);
     // Two receives from the same mailbox in one step.
     let (r, e) = step_with(
         YieldReason::MailboxAccess,
@@ -876,13 +876,15 @@ fn conditional_store_also_clears_other_units_reservations_on_same_line() {
 }
 
 #[test]
-fn same_unit_acquire_then_store_drops_reservation_in_emission_order() {
-    // Acquire at effect index 0, write at effect index 1; commit
-    // applies them in order, so the write's clear sweep drops the
-    // entry installed one effect earlier. Matches the ABI rule:
-    // same-unit store to the reserved line drops the reservation.
+fn same_unit_acquire_then_own_store_preserves_reservation() {
+    // Acquire at effect index 0, write at effect index 1 from the
+    // SAME unit; the write's clear sweep must preserve the
+    // emitter's own entry. PPC spec only invalidates on stores from
+    // *another* processor [PPC-Book2 p:10 s:1.7.3.1].
     let mut bed = CommitTestBed::new(4096);
     let u = bed.units.register_with(DummyUnit::runnable);
+    // write_intent hardcodes source = UnitId::new(0); the first
+    // registered unit gets id 0, so source matches u.
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
         vec![
@@ -891,7 +893,26 @@ fn same_unit_acquire_then_store_drops_reservation_in_emission_order() {
         ],
     );
     bed.process(&r, &e).unwrap();
-    assert!(!bed.reservations.is_held_by(u));
+    assert!(bed.reservations.is_held_by(u));
+}
+
+#[test]
+fn other_unit_store_clears_reservation_on_same_line() {
+    // Cross-unit store DOES invalidate: the reservation belongs to u
+    // (id 0), and the SharedWriteIntent's hardcoded source (id 0)
+    // is *not* u, so the clear sweep takes effect.
+    let mut bed = CommitTestBed::new(4096);
+    let writer = bed.units.register_with(DummyUnit::runnable); // id 0
+    let holder = UnitId::new(99);
+    bed.reservations
+        .insert_or_replace(holder, cellgov_sync::ReservedLine::containing(0x100));
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![write_intent(0x140, vec![1, 2, 3, 4])],
+    );
+    let _ = writer; // silence unused warning; we only needed it to advance the registry
+    bed.process(&r, &e).unwrap();
+    assert!(!bed.reservations.is_held_by(holder));
 }
 
 #[test]
