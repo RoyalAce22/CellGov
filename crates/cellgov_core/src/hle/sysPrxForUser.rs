@@ -27,7 +27,26 @@ pub(crate) fn dispatch(
             initialize_tls(&mut adapter(runtime, source, nid), args);
         }
         sys_nid::PROCESS_EXIT => {
-            process_exit(&mut adapter(runtime, source, nid), args);
+            // Real PS3's _sys_process_exit terminates every PPU/SPU
+            // thread before the process is reaped (RPCS3 oracle:
+            // tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_process.cpp's
+            // _sys_process_exit calls Emu.Kill()). Route through
+            // Lv2Request::ProcessExit so a leaked-but-blocked worker
+            // (e.g. an unjoined semaphore waiter) is also Finished;
+            // PSL1GHT's CRT calls this LAST in its exit chain, so
+            // earlier sys_tty_write / sys_fs_write flushes have
+            // already landed in the capture by this point.
+            let code = args[1] as u32;
+            runtime.dispatch_lv2_request(cellgov_lv2::Lv2Request::ProcessExit { code }, source);
+        }
+        sys_nid::PRX_EXITSPAWN_WITH_LEVEL => {
+            // RPCS3 oracle stubs this as a CELL_OK no-op (sys_prx_.cpp's
+            // sys_prx_exitspawn_with_level: sysPrxForUser.todo(...);
+            // return CELL_OK;). PSL1GHT's CRT issues it EARLY in the
+            // exit chain (before stdio is flushed) and expects a
+            // benign return so the rest of the chain can run; only
+            // the subsequent sys_process_exit actually terminates.
+            adapter(runtime, source, nid).set_return(0);
         }
         sys_nid::PROCESS_IS_STACK => {
             // Lower bound widened below the configured 0xD0000000
@@ -602,14 +621,6 @@ pub(crate) fn heap_memalign(ctx: &mut dyn HleContext, args: &[u64; 9]) {
         .heap_alloc(size, align)
         .expect("sys_heap_memalign: HLE heap exhausted");
     ctx.set_return(ptr as u64);
-}
-
-pub(crate) fn process_exit(ctx: &mut dyn HleContext, args: &[u64; 9]) {
-    // Finished units never resume; the syscall-return slot doubles
-    // as a post-mortem exit-code carrier. A registry change that
-    // clears the slot on Finished units would drop the exit code.
-    ctx.set_unit_finished();
-    ctx.set_return(args[0]);
 }
 
 #[cfg(test)]

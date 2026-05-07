@@ -1,32 +1,52 @@
-//! Boot whitelisted `.ppu.elf` files from `tools/ps3autotests/` via
-//! the `cellgov_cli run-game` binary and compare captured TTY
-//! against the real-PS3 `.expected` file. When the (gitignored)
-//! `tools/ps3autotests/` directory is absent, each test logs a
-//! skip note and returns clean so CI without the fixture stays
-//! green.
+//! Boots whitelisted `.ppu.elf` files from `tests/ps3autotests/` via
+//! `cellgov_cli run-game` and compares captured TTY against the
+//! real-PS3 `.expected` file.
+//!
+//! Skips silently when the (gitignored) corpus is absent;
+//! `CELLGOV_REQUIRE_AUTOTESTS=1` promotes that to a hard failure.
+//!
+//! Cross-module contract: assumes `sys_tty_write` HLE captures
+//! byte-identical output to a real PS3 TTY. A capture-side
+//! truncation cannot be detected from inside this harness.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use cellgov_compare::Observation;
+use cellgov_compare::{Observation, ObservedOutcome};
 
-/// Whitelist entry. `rel_dir` is relative to ps3autotests' `tests/`
-/// root. `stem` is both the ELF file stem (`<stem>.ppu.elf`) and the
-/// expected-output stem (`<stem>.expected`).
+/// `rel_dir` is relative to ps3autotests' `tests/` root; `stem` is
+/// shared between `<stem>.ppu.elf` and `<stem>.expected`.
 struct Case {
     rel_dir: &'static str,
     stem: &'static str,
+    /// Scheduler-step cap (not retired instructions; default budget
+    /// is 256 instructions/step). Tighten when the case's
+    /// `expected_steps` is far below the cap.
     max_steps: usize,
+    /// Reference step count. Drift outside +/-25% emits a WARN line.
+    /// `None` waives the check.
+    expected_steps: Option<usize>,
 }
 
-const PS3AUTOTESTS_RELPATH: &str = "tools/ps3autotests";
+const PS3AUTOTESTS_RELPATH: &str = "tests/ps3autotests";
 
+/// Walk up from `CARGO_MANIFEST_DIR` to the `[workspace]` Cargo.toml.
 fn workspace_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR is `apps/cellgov_cli`; workspace root is two up.
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.pop();
-    p.pop();
-    p
+    loop {
+        let cargo_toml = p.join("Cargo.toml");
+        if let Ok(text) = std::fs::read_to_string(&cargo_toml) {
+            if text.contains("[workspace]") {
+                return p;
+            }
+        }
+        if !p.pop() {
+            panic!(
+                "could not find workspace root walking up from CARGO_MANIFEST_DIR ({})",
+                env!("CARGO_MANIFEST_DIR")
+            );
+        }
+    }
 }
 
 fn ps3autotests_root() -> Option<PathBuf> {
@@ -34,19 +54,35 @@ fn ps3autotests_root() -> Option<PathBuf> {
     dir.is_dir().then_some(dir)
 }
 
-fn run_case(case: &Case) {
-    let Some(autotests) = ps3autotests_root() else {
-        eprintln!(
-            "ps3autotests: tools/ps3autotests/ not present; skipping {}/{}",
-            case.rel_dir, case.stem,
-        );
-        return;
-    };
+/// Cross-module contract: `cellgov_cli run-game` resolves the ELF
+/// from argv, not from the manifest's `eboot_candidates`. ps3autotests
+/// ELFs do not live in a PS3 VFS layout; the manifest carries the
+/// candidate purely so the schema validates.
+fn write_manifest(path: &Path, case: &Case) {
+    let content = format!(
+        r#"[title]
+content_id = "AT_{stem_upper}"
+short_name = "at_{stem}"
+display_name = "ps3autotests {rel_dir}/{stem}"
+eboot_candidates = ["{stem}.ppu.elf"]
 
+[checkpoint]
+kind = "process-exit"
+"#,
+        stem_upper = case.stem.to_uppercase(),
+        stem = case.stem,
+        rel_dir = case.rel_dir,
+    );
+    std::fs::write(path, content).expect("write manifest");
+}
+
+/// `run_id` discriminates concurrent or sequential re-runs of one
+/// case so they cannot race on the scratch dir's `observation.json`.
+fn run_observation(case: &Case, run_id: &str) -> Option<Observation> {
+    let autotests = ps3autotests_root()?;
     let test_dir = autotests.join("tests").join(case.rel_dir);
     let elf_path = test_dir.join(format!("{}.ppu.elf", case.stem));
     let expected_path = test_dir.join(format!("{}.expected", case.stem));
-
     assert!(
         elf_path.is_file(),
         "ps3autotests {}/{}: ELF missing at {elf_path:?}",
@@ -60,15 +96,12 @@ fn run_case(case: &Case) {
         case.stem
     );
 
-    let expected = std::fs::read(&expected_path).expect("read .expected");
-
-    // Per-case scratch dir so parallel tests do not collide on
-    // manifest or observation.json paths.
     let scratch = workspace_root()
         .join("target")
         .join("ps3autotests_scratch")
         .join(case.rel_dir.replace('/', "_"))
-        .join(case.stem);
+        .join(case.stem)
+        .join(run_id);
     std::fs::create_dir_all(&scratch).expect("create scratch");
 
     let manifest_path = scratch.join("manifest.toml");
@@ -109,44 +142,100 @@ fn run_case(case: &Case) {
         let json = std::fs::read_to_string(&observation_path).expect("read observation.json");
         serde_json::from_str(&json).expect("deserialize Observation")
     };
+    // A `None` here silently no-ops the drift-band check below; catch
+    // a future runner change that omits the field rather than letting
+    // step regressions slip through unnoticed.
+    debug_assert!(
+        observation.metadata.steps.is_some(),
+        "ps3autotests {}/{}: observation.metadata.steps was None",
+        case.rel_dir,
+        case.stem
+    );
+    Some(observation)
+}
 
+fn run_case(case: &Case) {
+    let Some(observation) = run_observation(case, "r0") else {
+        if std::env::var_os("CELLGOV_REQUIRE_AUTOTESTS").is_some() {
+            panic!(
+                "ps3autotests: CELLGOV_REQUIRE_AUTOTESTS is set but \
+                 {PS3AUTOTESTS_RELPATH}/ is missing or empty -- clone \
+                 https://github.com/AerialX/ps3autotests.git into that \
+                 path (see tests/ps3autotests.README.md)"
+            );
+        }
+        eprintln!(
+            "ps3autotests: skipping {}/{} ({PS3AUTOTESTS_RELPATH}/ not present)",
+            case.rel_dir, case.stem,
+        );
+        return;
+    };
+
+    let autotests = ps3autotests_root().expect("checked in run_observation");
+    let expected_path = autotests
+        .join("tests")
+        .join(case.rel_dir)
+        .join(format!("{}.expected", case.stem));
+    let expected = std::fs::read(&expected_path).expect("read .expected");
     report_verdict(case, &observation, &expected);
 }
 
-fn write_manifest(path: &Path, case: &Case) {
-    let content = format!(
-        r#"[title]
-content_id = "AT_{stem_upper}"
-short_name = "at_{stem}"
-display_name = "ps3autotests {rel_dir}/{stem}"
-eboot_candidates = ["{stem}.ppu.elf"]
-
-[checkpoint]
-kind = "process-exit"
-"#,
-        stem_upper = case.stem.to_uppercase(),
-        stem = case.stem,
-        rel_dir = case.rel_dir,
-    );
-    std::fs::write(path, content).expect("write manifest");
-}
-
+/// Outcome must be checked before TTY: a `Timeout` produces a
+/// truncated `tty_log` whose prefix may coincidentally match the
+/// `.expected` head, so a naive byte compare passes silently.
 fn report_verdict(case: &Case, observation: &Observation, expected: &[u8]) {
-    let captured = observation.tty_log.as_slice();
     let label = format!("{}/{}", case.rel_dir, case.stem);
+
+    match observation.outcome {
+        ObservedOutcome::Completed => {}
+        ObservedOutcome::Timeout => panic!(
+            "ps3autotests {label}: outcome=Timeout (max_steps={} reached). \
+             Either the test wedged in an infinite loop or the cap is too \
+             low. Investigate via `cellgov_cli run-game --max-steps N` \
+             before raising the cap.",
+            case.max_steps
+        ),
+        ObservedOutcome::Fault => panic!(
+            "ps3autotests {label}: outcome=Fault. The runtime took an \
+             architectural fault before reaching sys_process_exit. Run \
+             `cellgov_cli run-game` on the ELF to inspect."
+        ),
+        ObservedOutcome::Stalled => panic!(
+            "ps3autotests {label}: outcome=Stalled. No runnable units but \
+             pending events remain -- a deadlock or missed wake-up."
+        ),
+    }
+
+    let captured = observation.tty_log.as_slice();
+    let observed_steps = observation.metadata.steps;
+
+    if let (Some(expected), Some(actual)) = (case.expected_steps, observed_steps) {
+        // Scheduling tweaks routinely shift step counts a few percent;
+        // a >25% move is a real regression, not noise.
+        let lower = expected * 3 / 4;
+        let upper = expected * 5 / 4;
+        if !(lower..=upper).contains(&actual) {
+            eprintln!(
+                "ps3autotests {label}: WARN step count drift: expected ~{}, got {} \
+                 (band: [{}, {}])",
+                expected, actual, lower, upper
+            );
+        }
+    }
 
     if captured == expected {
         eprintln!(
-            "ps3autotests {label}: MATCH ({} bytes, outcome={:?})",
+            "ps3autotests {label}: MATCH ({} bytes, outcome={:?}, steps={:?})",
             captured.len(),
-            observation.outcome
+            observation.outcome,
+            observed_steps,
         );
         return;
     }
 
     eprintln!("ps3autotests {label}: DIVERGE");
     eprintln!("  outcome: {:?}", observation.outcome);
-    eprintln!("  expected: {} bytes", expected.len(),);
+    eprintln!("  expected: {} bytes", expected.len());
     eprintln!("  captured: {} bytes", captured.len());
     eprintln!("  expected preview: {:?}", preview(expected, 200));
     eprintln!("  captured preview: {:?}", preview(captured, 200));
@@ -154,7 +243,21 @@ fn report_verdict(case: &Case, observation: &Observation, expected: &[u8]) {
         "  first differing offset: {}",
         first_diff_offset(captured, expected)
     );
+    let cap_cr = count_byte(captured, b'\r');
+    let exp_cr = count_byte(expected, b'\r');
+    if cap_cr != exp_cr {
+        eprintln!(
+            "  NOTE: \\r count differs (captured={}, expected={}) -- the \
+             .expected file may have been autocrlf-mangled on Windows. \
+             See tests/ps3autotests.README.md.",
+            cap_cr, exp_cr,
+        );
+    }
     panic!("ps3autotests {label}: TTY divergence vs real-PS3 .expected");
+}
+
+fn count_byte(bytes: &[u8], target: u8) -> usize {
+    bytes.iter().filter(|&&b| b == target).count()
 }
 
 fn preview(bytes: &[u8], cap: usize) -> String {
@@ -186,6 +289,7 @@ fn cpu_basic() {
         rel_dir: "cpu/basic",
         stem: "basic",
         max_steps: 200_000,
+        expected_steps: Some(83),
     });
 }
 
@@ -195,6 +299,7 @@ fn cpu_ppu_branch() {
         rel_dir: "cpu/ppu_branch",
         stem: "ppu_branch",
         max_steps: 50_000_000,
+        expected_steps: Some(52_622),
     });
 }
 
@@ -204,6 +309,7 @@ fn lv2_sys_event_flag() {
         rel_dir: "lv2/sys_event_flag",
         stem: "sys_event_flag",
         max_steps: 10_000_000,
+        expected_steps: Some(1_494),
     });
 }
 
@@ -213,6 +319,7 @@ fn lv2_sys_process() {
         rel_dir: "lv2/sys_process",
         stem: "sys_process",
         max_steps: 10_000_000,
+        expected_steps: Some(3_686),
     });
 }
 
@@ -222,5 +329,51 @@ fn lv2_sys_semaphore() {
         rel_dir: "lv2/sys_semaphore",
         stem: "sys_semaphore",
         max_steps: 10_000_000,
+        expected_steps: Some(1_167),
     });
+}
+
+/// A flake here means a non-deterministic source has been
+/// introduced and every downstream cross-runner comparison is
+/// suspect until it is found.
+#[test]
+fn determinism_double_run_cpu_basic() {
+    let case = Case {
+        rel_dir: "cpu/basic",
+        stem: "basic",
+        max_steps: 200_000,
+        expected_steps: None,
+    };
+    let Some(first) = run_observation(&case, "determinism_a") else {
+        if std::env::var_os("CELLGOV_REQUIRE_AUTOTESTS").is_some() {
+            panic!(
+                "ps3autotests: CELLGOV_REQUIRE_AUTOTESTS set but corpus \
+                 missing -- cannot run determinism check"
+            );
+        }
+        eprintln!("ps3autotests: skipping determinism_double_run_cpu_basic");
+        return;
+    };
+    let second =
+        run_observation(&case, "determinism_b").expect("second run must produce an observation");
+    assert_eq!(
+        first.outcome, second.outcome,
+        "determinism: outcome differs between runs"
+    );
+    assert_eq!(
+        first.metadata.steps, second.metadata.steps,
+        "determinism: step count differs between runs"
+    );
+    assert_eq!(
+        first.tty_log, second.tty_log,
+        "determinism: tty_log differs between runs"
+    );
+    assert_eq!(
+        first.memory_regions, second.memory_regions,
+        "determinism: memory regions differ between runs"
+    );
+    assert_eq!(
+        first, second,
+        "determinism: full observation differs between runs"
+    );
 }

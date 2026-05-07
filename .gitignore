@@ -10,6 +10,12 @@ docs/dev/
 # tools/ is third-party; CellGov-owned bridges live under bridges/
 tools/
 
+# ps3autotests fixture: GPLv2-licensed test corpus from
+# https://github.com/AerialX/ps3autotests. Cloned locally by the
+# developer; not vendored, so cellgov stays MIT/Apache-2.0. The
+# tracked tests/ps3autotests.README.md sibling explains setup.
+/tests/ps3autotests/
+
 # test artifacts (compiled ELFs, objects, build output)
 tests/micro/**/*.bin
 tests/micro/**/*.elf
@@ -38,8 +44,7 @@ ps3_libs/
 .claude/
 CLAUDE.local.md
 
-# Python venv, ChromaDB, and local-only ingest scripts (doc
-# ingestion via scripts/ingest_official_docs.py).
+# Python venv, ChromaDB, and local-only ingest scripts
 .venv/
 .chroma_db/
 scripts/
