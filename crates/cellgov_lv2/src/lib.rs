@@ -1,7 +1,7 @@
 //! LV2 host model: image registry, thread group table, sync primitives, and syscall dispatch.
 
 pub mod dispatch;
-pub mod fs;
+pub mod fs_store;
 pub mod host;
 pub mod image;
 pub mod ppu_thread;
@@ -14,7 +14,7 @@ pub use dispatch::{
     CallbackReturnStage, CondMutexKind, Lv2BlockReason, Lv2Dispatch, PendingResponse,
     PpuThreadInitState, SpuImageHandle, SpuInitState,
 };
-pub use fs::{FileStat, FsError, FsStore, SeekWhence};
+pub use fs_store::{FileStat, FsError, FsMount, FsMountTable, FsStore, SeekWhence};
 pub use host::{Lv2Host, Lv2Runtime};
 pub use image::{ContentStore, SpuImageRecord};
 pub use ppu_thread::{

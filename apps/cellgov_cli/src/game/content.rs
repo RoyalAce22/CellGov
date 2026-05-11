@@ -274,6 +274,15 @@ mod tests {
         std::fs::write(path, bytes).unwrap();
     }
 
+    /// `Lv2Host::new()` registers a small set of synthetic blobs
+    /// (PARAM.SFO, output.txt) so PSL1GHT-test ELFs can probe for
+    /// presence without a manifest. Tests that assert
+    /// `register_content_blobs` populated a specific count must do
+    /// so as a delta against this baseline.
+    fn pristine_blob_count() -> usize {
+        Lv2Host::new().fs_store().blob_count()
+    }
+
     #[test]
     fn registers_all_entries_in_fs_store() {
         let tmp = TmpDir::new("happy_path");
@@ -294,8 +303,9 @@ mod tests {
             ],
         };
         let mut host = Lv2Host::new();
+        let baseline = host.fs_store().blob_count();
         register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host).unwrap();
-        assert_eq!(host.fs_store().blob_count(), 2);
+        assert_eq!(host.fs_store().blob_count(), baseline + 2);
         assert_eq!(
             host.fs_store()
                 .lookup_blob("/app_home/Data/Resources/first.xml"),
@@ -337,8 +347,9 @@ mod tests {
             }
             other => panic!("expected HostFileRead, got {other}"),
         }
-        // FsStore stays empty on failure.
-        assert_eq!(host.fs_store().blob_count(), 0);
+        // FsStore gains nothing on failure (delta-based to ignore
+        // synthetic blobs registered by Lv2Host::new()).
+        assert_eq!(host.fs_store().blob_count(), pristine_blob_count());
     }
 
     #[test]
@@ -411,8 +422,9 @@ mod tests {
             other => panic!("expected DuplicateGuestPath, got {other}"),
         }
         // The first entry registered before the failure; the
-        // second's bytes did not land.
-        assert_eq!(host.fs_store().blob_count(), 1);
+        // second's bytes did not land. Delta-based to ignore
+        // synthetic blobs registered by Lv2Host::new().
+        assert_eq!(host.fs_store().blob_count(), pristine_blob_count() + 1);
         assert_eq!(host.fs_store().lookup_blob("/dup"), Some(b"a".as_slice()));
     }
 
@@ -424,8 +436,9 @@ mod tests {
             files: vec![],
         };
         let mut host = Lv2Host::new();
+        let baseline = host.fs_store().blob_count();
         register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host).unwrap();
-        assert_eq!(host.fs_store().blob_count(), 0);
+        assert_eq!(host.fs_store().blob_count(), baseline);
     }
 
     #[test]

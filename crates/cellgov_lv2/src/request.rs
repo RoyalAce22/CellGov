@@ -505,6 +505,31 @@ pub enum Lv2Request {
         /// Out: CellFsStat buffer.
         stat_out_ptr: u32,
     },
+    /// `sys_fs_opendir` -- snapshot a host directory's entries
+    /// (sorted lexicographically) and allocate a directory fd.
+    FsOpendir {
+        /// In: path string pointer (NUL-terminated guest UTF-8).
+        path_ptr: u32,
+        /// Out: u32 directory fd, 4-byte aligned.
+        fd_out_ptr: u32,
+    },
+    /// `sys_fs_readdir` -- copy the next snapshot entry into a
+    /// 258-byte `CellFsDirent`, write the byte count to
+    /// `nread_out_ptr` (`sizeof(CellFsDirent) = 258` on success;
+    /// `0` at EOF).
+    FsReaddir {
+        /// In: directory fd.
+        fd: u32,
+        /// Out: CellFsDirent buffer (258 bytes, no required alignment).
+        dirent_out_ptr: u32,
+        /// Out: u64 byte count, 8-byte aligned.
+        nread_out_ptr: u32,
+    },
+    /// `sys_fs_closedir` -- release a directory fd.
+    FsClosedir {
+        /// In: directory fd to close.
+        fd: u32,
+    },
     /// `fd` is unused; bytes are appended to the host's unified
     /// `tty_log` so the ps3autotests harness can match either printf
     /// or fprintf output against `<test>.expected`.
@@ -932,6 +957,16 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             path_ptr: p!(0),
             stat_out_ptr: p!(1),
         },
+        syscall::FS_OPENDIR => Lv2Request::FsOpendir {
+            path_ptr: p!(0),
+            fd_out_ptr: p!(1),
+        },
+        syscall::FS_READDIR => Lv2Request::FsReaddir {
+            fd: p!(0),
+            dirent_out_ptr: p!(1),
+            nread_out_ptr: p!(2),
+        },
+        syscall::FS_CLOSEDIR => Lv2Request::FsClosedir { fd: p!(0) },
         syscall::FS_WRITE => Lv2Request::FsWrite {
             fd: p!(0),
             buf_ptr: p!(1),

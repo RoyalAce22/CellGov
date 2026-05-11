@@ -1,0 +1,135 @@
+//! `sys_fs_readdir` host dispatch.
+
+use cellgov_effects::{Effect, WritePayload};
+use cellgov_event::{PriorityClass, UnitId};
+use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::sys_fs::{
+    CELL_FS_DIRENT_SIZE, CELL_FS_MAX_FS_FILE_NAME_LENGTH, CELL_FS_TYPE_DIRECTORY,
+    CELL_FS_TYPE_REGULAR,
+};
+
+use crate::dispatch::Lv2Dispatch;
+use crate::fs_store::{DirEntry, FsError};
+use crate::host::{Lv2Host, Lv2Runtime};
+
+use super::ptr::out_ptr_writable;
+
+impl Lv2Host {
+    /// `sys_fs_readdir` -- copy the next snapshotted entry into a
+    /// 258-byte `CellFsDirent` and write the byte count to
+    /// `nread_out_ptr`.
+    ///
+    /// # Error precedence
+    ///
+    /// 1. `nread_out_ptr` NULL / misaligned / unwritable for u64 ->
+    ///    CELL_EFAULT, no effects.
+    /// 2. `dirent_out_ptr` NULL / unwritable for 258 bytes ->
+    ///    CELL_EFAULT, no effects.
+    /// 3. Unknown directory `fd` -> CELL_EBADF, no effects.
+    /// 4. Otherwise CELL_OK with two effects: the dirent buffer
+    ///    write and the nread write. At EOF the dirent is all
+    ///    zeros and nread = 0; on a real entry, nread = 258.
+    pub(in crate::host) fn dispatch_fs_readdir(
+        &mut self,
+        fd: u32,
+        dirent_out_ptr: u32,
+        nread_out_ptr: u32,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        // nread is a u64 (PSL1GHT signature: `u64 *nread`); 8-byte
+        // alignment.
+        if !out_ptr_writable(rt, nread_out_ptr, 8, 8) {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EFAULT.into(),
+                effects: vec![],
+            };
+        }
+        // CellFsDirent has no required alignment > 1 (its leading
+        // field is u8); the only bound is the 258-byte writable
+        // span at the supplied pointer.
+        if !out_ptr_writable(rt, dirent_out_ptr, CELL_FS_DIRENT_SIZE as usize, 1) {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EFAULT.into(),
+                effects: vec![],
+            };
+        }
+
+        let entry = match self.fs_store_mut().read_dir_entry(fd) {
+            Ok(e) => e,
+            Err(FsError::UnknownDir) => {
+                return Lv2Dispatch::Immediate {
+                    code: errno::CELL_EBADF.into(),
+                    effects: vec![],
+                };
+            }
+            Err(other) => {
+                self.record_invariant_break(
+                    "dispatch.fs_readdir.unexpected_fs_error",
+                    format_args!(
+                        "FsStore::read_dir_entry returned {other:?} for fd={fd:#x}; \
+                         contract violated"
+                    ),
+                );
+                return Lv2Dispatch::Immediate {
+                    code: errno::CELL_EFAULT.into(),
+                    effects: vec![],
+                };
+            }
+        };
+
+        let (dirent_bytes, nread) = match entry {
+            Some(e) => (build_dirent(&e), CELL_FS_DIRENT_SIZE),
+            None => (vec![0u8; CELL_FS_DIRENT_SIZE as usize], 0),
+        };
+
+        let tick = rt.current_tick();
+        let dirent_write = Effect::SharedWriteIntent {
+            range: ByteRange::new(GuestAddr::new(dirent_out_ptr as u64), CELL_FS_DIRENT_SIZE)
+                .expect("dirent_out_ptr range pre-validated by writable() above"),
+            bytes: WritePayload::from_slice(&dirent_bytes),
+            ordering: PriorityClass::Normal,
+            source: requester,
+            source_time: tick,
+        };
+        let nread_write = Effect::SharedWriteIntent {
+            range: ByteRange::new(GuestAddr::new(nread_out_ptr as u64), 8)
+                .expect("nread_out_ptr range pre-validated by writable() above"),
+            // PS3 is big-endian; guest reads via `ld`.
+            bytes: WritePayload::from_slice(&nread.to_be_bytes()),
+            ordering: PriorityClass::Normal,
+            source: requester,
+            source_time: tick,
+        };
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![dirent_write, nread_write],
+        }
+    }
+}
+
+/// Build the 258-byte `CellFsDirent` payload for `entry`. Names
+/// longer than [`CELL_FS_MAX_FS_FILE_NAME_LENGTH`] are truncated to
+/// that length AT BYTE BOUNDARIES (not codepoint boundaries) and
+/// `d_namlen` reports the truncated length. `d_name` is then
+/// NUL-terminated and zero-padded out to 256 bytes.
+fn build_dirent(entry: &DirEntry) -> Vec<u8> {
+    let mut buf = vec![0u8; CELL_FS_DIRENT_SIZE as usize];
+    let d_type = if entry.is_directory {
+        CELL_FS_TYPE_DIRECTORY
+    } else {
+        CELL_FS_TYPE_REGULAR
+    };
+    buf[0] = d_type;
+    let max_name = CELL_FS_MAX_FS_FILE_NAME_LENGTH as usize;
+    let name_bytes = entry.name.as_bytes();
+    let n = name_bytes.len().min(max_name);
+    // d_namlen is u8; it cannot exceed CELL_FS_MAX_FS_FILE_NAME_LENGTH
+    // (which is u8::MAX - 0 by construction), so the cast is safe.
+    buf[1] = n as u8;
+    buf[2..2 + n].copy_from_slice(&name_bytes[..n]);
+    // d_name index `n` is left as the existing 0 byte, terminating
+    // the string. The remaining slots stay zero (vec! initialized).
+    buf
+}

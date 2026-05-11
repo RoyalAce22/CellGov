@@ -28,6 +28,9 @@ pub(crate) fn dispatch(
         sys_fs_nid::LSEEK => fs_lseek(runtime, source, args),
         sys_fs_nid::FSTAT => fs_fstat(runtime, source, args),
         sys_fs_nid::STAT => fs_stat(runtime, source, args),
+        sys_fs_nid::OPENDIR => fs_opendir(runtime, source, args),
+        sys_fs_nid::READDIR => fs_readdir(runtime, source, args),
+        sys_fs_nid::CLOSEDIR => fs_closedir(runtime, source, args),
         _ => return None,
     }
     Some(())
@@ -111,6 +114,40 @@ fn fs_stat(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]) {
         },
         source,
     );
+}
+
+/// `cellFsOpendir(const char *path, s32 *fd)`.
+fn fs_opendir(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]) {
+    let path_ptr = args[1] as u32;
+    let fd_out_ptr = args[2] as u32;
+    runtime.dispatch_lv2_request(
+        Lv2Request::FsOpendir {
+            path_ptr,
+            fd_out_ptr,
+        },
+        source,
+    );
+}
+
+/// `cellFsReaddir(s32 fd, sysFSDirent *dir, u64 *nread)`.
+fn fs_readdir(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]) {
+    let fd = args[1] as u32;
+    let dirent_out_ptr = args[2] as u32;
+    let nread_out_ptr = args[3] as u32;
+    runtime.dispatch_lv2_request(
+        Lv2Request::FsReaddir {
+            fd,
+            dirent_out_ptr,
+            nread_out_ptr,
+        },
+        source,
+    );
+}
+
+/// `cellFsClosedir(s32 fd)`.
+fn fs_closedir(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]) {
+    let fd = args[1] as u32;
+    runtime.dispatch_lv2_request(Lv2Request::FsClosedir { fd }, source);
 }
 
 #[cfg(test)]

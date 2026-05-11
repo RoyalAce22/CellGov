@@ -538,6 +538,28 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
+    // Mount-table registration runs after content blobs so the
+    // dispatch layer sees them in the same order they appear in the
+    // manifest, and so a mount can shadow nothing in FsStore that
+    // [content] just registered (the FsStore path-existence check
+    // wins over mount resolution).
+    if !opts.title.mounts.is_empty() {
+        let workspace_root = std::env::current_dir()
+            .unwrap_or_else(|e| die(&format!("cannot read CWD for mount path resolution: {e}")));
+        let n = match super::mounts::register_mounts(
+            &opts.title.mounts,
+            &workspace_root,
+            |name| std::env::var(name).ok(),
+            rt.lv2_host_mut(),
+        ) {
+            Ok(n) => n,
+            Err(e) => die(&format!("mount provider failed: {e}")),
+        };
+        if opts.print_banner {
+            println!("mounts: registered {n} mount(s)");
+        }
+    }
+
     PreparedBoot {
         rt,
         hle_bindings,

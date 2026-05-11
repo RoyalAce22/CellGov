@@ -80,9 +80,14 @@ pub mod sys_fs {
     crate::nid_const!(LSEEK = 0xa397_d042, "cellFsLseek");
     crate::nid_const!(FSTAT = 0xef3e_fa34, "cellFsFstat");
     crate::nid_const!(STAT = 0x7de6_dced, "cellFsStat");
+    crate::nid_const!(OPENDIR = 0x3f61_245c, "cellFsOpendir");
+    crate::nid_const!(READDIR = 0x5c74_903d, "cellFsReaddir");
+    crate::nid_const!(CLOSEDIR = 0xff42_dcc3, "cellFsClosedir");
 
     /// Every NID this module owns.
-    pub const OWNED: &[u32] = &[OPEN, READ, CLOSE, LSEEK, FSTAT, STAT];
+    pub const OWNED: &[u32] = &[
+        OPEN, READ, CLOSE, LSEEK, FSTAT, STAT, OPENDIR, READDIR, CLOSEDIR,
+    ];
 }
 
 /// `cellSysutil` NIDs (video-out query surface today; will grow as
