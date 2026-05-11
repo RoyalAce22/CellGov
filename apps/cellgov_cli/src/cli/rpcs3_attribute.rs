@@ -169,9 +169,8 @@ where
             window[1] = window[2];
             window[2] = window[3];
             let mut one = [0u8; 1];
-            match reader.read(&mut one).map_err(ParseError::Io)? {
-                0 => break,
-                _ => {}
+            if reader.read(&mut one).map_err(ParseError::Io)? == 0 {
+                break;
             }
             window[3] = one[0];
             resyncs += 1;

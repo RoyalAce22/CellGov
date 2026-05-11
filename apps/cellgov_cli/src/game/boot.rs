@@ -196,6 +196,17 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             let bindings = cellgov_ppu::prx::bind_hle_stubs_with_layout(
                 &modules, &mut mem, hle_layout, tramp_base,
             );
+            if std::env::var("CELLGOV_DUMP_TRAMPOLINES").is_ok() {
+                eprintln!("hle trampoline map (Legacy24, tramp_base=0x{tramp_base:x}):");
+                for b in &bindings {
+                    let sc_addr = tramp_base + b.index * 24 + 16;
+                    let (module, name) = cellgov_ps3_abi::nid::lookup(b.nid).unwrap_or(("?", "?"));
+                    eprintln!(
+                        "  idx={:3} sc=0x{:08x} nid=0x{:08x} {}::{}",
+                        b.index, sc_addr, b.nid, module, name
+                    );
+                }
+            }
             if opts.print_banner {
                 println!(
                     "imports: {} modules, {} functions bound to HLE stubs",
