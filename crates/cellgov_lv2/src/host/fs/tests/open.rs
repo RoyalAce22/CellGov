@@ -1,7 +1,3 @@
-//! `dispatch_fs_open` tests: error precedence on out-pointer / path
-//! validation, manifest-blob routing, mount-resolve + cache, flag
-//! validation, and TTY-sink exemption.
-
 use cellgov_effects::Effect;
 use cellgov_ps3_abi::cell_errors as errno;
 use cellgov_ps3_abi::sys_fs::{
@@ -16,11 +12,10 @@ use super::common::{assert_immediate, extract_fd, fs_open, run, PathRuntime, Tem
 
 #[test]
 fn unknown_path_returns_enoent_with_no_effects() {
-    // POSIX: fd_out_ptr is undefined on error; real PS3 does
-    // not write it on ENOENT. The flags here include the
-    // canonical O_TRUNC | O_CREAT | O_WRONLY combo (`0o1101`)
-    // a title might use to create-or-truncate -- existence
-    // wins, so ENOENT regardless of write flags.
+    // Invariant: fd_out_ptr is undefined on error and real PS3
+    // does not write it on ENOENT. Existence wins over write
+    // flags, so the O_TRUNC | O_CREAT | O_WRONLY combo still
+    // ENOENTs.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/dev_hdd0/game/foo/USRDIR/bar.dat\0");
 
@@ -68,10 +63,10 @@ fn fd_out_ptr_in_reserved_region_returns_efault() {
 
 #[test]
 fn fd_out_ptr_null_returns_efault() {
-    // NULL passes the alignment check (`0 & 3 == 0`) so the
+    // NULL passes the alignment check (`0 & 3 == 0`); the
     // out_ptr_writable helper carries the explicit non-zero
-    // guard. Without it a buggy guest passing fd_out_ptr=0 would
-    // skate through.
+    // guard so a buggy guest passing fd_out_ptr=0 cannot skate
+    // through.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/foo\0");
     assert_immediate(
@@ -83,9 +78,8 @@ fn fd_out_ptr_null_returns_efault() {
 
 #[test]
 fn fs_open_bad_fd_out_ptr_takes_precedence_over_bad_path() {
-    // Both `fd_out_ptr` and `path_ptr` unmapped: the dispatch
-    // checks fd_out_ptr first (cheaper -- no path scan
-    // required). Pin the order so a future swap is visible.
+    // Precedence invariant: dispatch checks fd_out_ptr before
+    // path scan (cheaper).
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
@@ -97,12 +91,11 @@ fn fs_open_bad_fd_out_ptr_takes_precedence_over_bad_path() {
 
 #[test]
 fn o_creat_for_missing_path_returns_enoent_no_effects() {
-    // Existence wins over flag-error: a missing path with
-    // O_CREAT still ENOENTs (the kernel checks existence before
-    // it checks write semantics). The dispatch returns no
-    // effects -- POSIX says fd_out_ptr is undefined on error
-    // and real PS3 does not write it, so writing a synthetic
-    // zero would diverge in cross-runner compare.
+    // Existence wins over flag-error: the kernel checks
+    // existence before write semantics. No effects on the
+    // error path -- real PS3 does not write fd_out_ptr on
+    // ENOENT, so a synthetic zero would diverge in
+    // cross-runner compare.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/save\0");
     assert_immediate(
@@ -118,9 +111,6 @@ fn o_creat_for_missing_path_returns_enoent_no_effects() {
 
 #[test]
 fn source_time_matches_runtime_tick() {
-    // Pin source_time on the successful-open effect (the
-    // ENOENT path emits no effects). Register a manifest blob
-    // so the open hits the FsStore and produces the fd-write.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"x".to_vec())
@@ -152,17 +142,11 @@ fn registered_blob_path_routes_through_fs_layer() {
         fd >= FD_BASE,
         "fs-layer fd must be in the FsStore range (>= FD_BASE), got {fd:#x}",
     );
-    // FsStore tracked the open; kernel-side fs_fd_count tracked
-    // it too -- both routes through sys_process_get_number_of_object
-    // must agree on a single live fd.
     assert_eq!(host.fs_store().open_fd_count(), 1);
 }
 
 #[test]
 fn unknown_path_still_enoents_when_other_paths_are_registered() {
-    // Mixed-state regression: a manifest with `/registered`
-    // present must not change ENOENT for a different,
-    // unregistered path.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/registered".into(), b"x".to_vec())
@@ -173,7 +157,8 @@ fn unknown_path_still_enoents_when_other_paths_are_registered() {
         errno::CELL_ENOENT.code,
         0,
     );
-    // Failed FS lookup must not burn a host-side fd id.
+    // Invariant: a failed FS lookup must not burn a host-side
+    // fd id.
     assert_eq!(host.fs_store().open_fd_count(), 0);
 }
 
@@ -199,10 +184,8 @@ fn two_opens_of_same_registered_path_return_distinct_fds() {
 #[test]
 fn synthetic_param_sfo_blob_pre_registered() {
     // PSL1GHT-test ELFs probe `/app_home/PARAM.SFO` for
-    // existence before a real boot. The host registers it as
-    // a zero-byte blob in `Lv2Host::new()` so the open routes
-    // through FsStore (single allocator -- no fd-aliasing risk
-    // with a separate whitelist allocator).
+    // existence before a real boot. `Lv2Host::new()` registers
+    // it as a zero-byte blob so the open routes through FsStore.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/PARAM.SFO\0");
     let fd = extract_fd(
@@ -215,8 +198,8 @@ fn synthetic_param_sfo_blob_pre_registered() {
 
 #[test]
 fn synthetic_output_txt_blob_pre_registered() {
-    // PSL1GHT tests fopen + fwrite + fclose to output.txt. The
-    // sister of PARAM.SFO -- both registered up front so the
+    // Sister of PARAM.SFO: PSL1GHT tests fopen + fwrite +
+    // fclose to output.txt. Pre-registered so the
     // probe-for-existence open succeeds with a real FsStore fd.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/output.txt\0");
@@ -238,12 +221,10 @@ fn fs_open_resolves_via_mount_and_caches_blob() {
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data/level.xml\0");
 
-    // Pre-state: the path is not in the FsStore.
     let baseline_blobs = host.fs_store().blob_count();
     assert!(!host.fs_store().has_path("/app_home/Data/level.xml"));
 
     let effects = assert_immediate(run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)), 0, 1);
-    // Effect carries the new fd written to fd_out_ptr.
     match &effects[0] {
         Effect::SharedWriteIntent { range, bytes, .. } => {
             assert_eq!(range.start().raw(), 0x20000);
@@ -254,12 +235,10 @@ fn fs_open_resolves_via_mount_and_caches_blob() {
         other => panic!("expected SharedWriteIntent, got {other:?}"),
     }
 
-    // Post-state: the resolution registered the blob in the
-    // FsStore. Second open re-uses the cache without consulting
-    // the host filesystem at all (asserted via FsStore state
-    // rather than by deleting the host file -- avoids a host-fs
-    // side channel that could behave differently on Windows
-    // sharing-violation rules or future CI ports).
+    // Second open re-uses the cache (asserted via FsStore
+    // state rather than by deleting the host file -- avoids a
+    // host-fs side channel that could behave differently on
+    // Windows sharing-violation rules).
     assert_eq!(host.fs_store().blob_count(), baseline_blobs + 1);
     assert!(host.fs_store().has_path("/app_home/Data/level.xml"));
     let effects2 = assert_immediate(run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)), 0, 1);
@@ -273,8 +252,6 @@ fn fs_open_resolves_via_mount_and_caches_blob() {
 
 #[test]
 fn fs_open_mounted_missing_returns_enoent() {
-    // A path under a mount whose host file does not exist must
-    // ENOENT (not silently fall back to anywhere else).
     let dir = TempMountDir::new("open_missing");
     let mut host = Lv2Host::new();
     host.fs_mounts_mut()
@@ -305,10 +282,10 @@ fn fs_open_mount_path_traversal_returns_eacces() {
 
 #[test]
 fn fs_open_mounted_directory_returns_enoent_in_slice3() {
-    // Slice 3 only handles regular files; opendir/readdir
-    // arrive in slice 4. A guest open targeting a directory
-    // surfaces ENOENT until then so titles do not see a
-    // synthetic fd that has no readable bytes behind it.
+    // fs_open targets regular files only; directories surface
+    // ENOENT so titles do not see a synthetic fd with no
+    // readable bytes behind it. Directory access flows through
+    // fs_opendir/fs_readdir.
     let dir = TempMountDir::new("open_dir");
     std::fs::create_dir_all(dir.path.join("savedir")).expect("subdir");
     let mut host = Lv2Host::new();
@@ -331,11 +308,8 @@ fn fs_open_o_creat_under_mount_returns_erofs() {
     host.fs_mounts_mut()
         .add(crate::fs_store::FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
-    // O_CREAT under a read-only mount: the cache happens
-    // first (so the path is now in the FsStore), then the
-    // EROFS check fires before fd allocation. Repeat opens
-    // without O_CREAT must succeed, which is exactly the
-    // single-write determinism contract.
+    // Caching happens before the EROFS check so a subsequent
+    // read-only open succeeds without re-reading the host file.
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/scratch.bin\0");
     assert_immediate(
         run(
@@ -346,17 +320,12 @@ fn fs_open_o_creat_under_mount_returns_erofs() {
         errno::CELL_EROFS.code,
         0,
     );
-    // Subsequent read-only open hits the cache (no disk).
     std::fs::remove_file(dir.path.join("scratch.bin")).expect("remove");
     assert_immediate(run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)), 0, 1);
 }
 
 #[test]
 fn fs_open_with_o_wronly_on_existing_blob_returns_erofs() {
-    // Companion to `fs_open_o_creat_under_mount_returns_erofs`
-    // for the manifest path. A registered blob with a write
-    // flag must EROFS, not silently succeed with a read-only
-    // fd.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"x".to_vec())
@@ -375,12 +344,10 @@ fn fs_open_with_o_wronly_on_existing_blob_returns_erofs() {
 
 #[test]
 fn fs_open_output_txt_with_write_flags_succeeds() {
-    // PSL1GHT-test fixture: fopen("/app_home/output.txt", "w")
-    // decodes to O_WRONLY | O_CREAT | O_TRUNC. The synthetic
-    // blob is in FsStore so existence is satisfied; the
-    // tty-sink whitelist exempts it from the EROFS branch so
-    // the open succeeds and fs_write redirects bytes to
-    // tty_log.
+    // fopen("/app_home/output.txt", "w") decodes to
+    // O_WRONLY | O_CREAT | O_TRUNC. The tty-sink whitelist
+    // exempts output.txt from the EROFS branch so fs_write can
+    // redirect bytes to tty_log.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/output.txt\0");
     let flags = CELL_FS_O_WRONLY | CELL_FS_O_CREAT | CELL_FS_O_TRUNC;
@@ -393,9 +360,6 @@ fn fs_open_output_txt_with_write_flags_succeeds() {
 
 #[test]
 fn fs_open_with_o_rdonly_on_existing_blob_succeeds() {
-    // Negative for the EROFS test above: explicit RDONLY
-    // (which is `0`) must still open. Pinning this means an
-    // overzealous flag rejection is visible.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"x".to_vec())

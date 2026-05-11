@@ -1,25 +1,15 @@
 //! Boot-time mount-table provider.
 //!
-//! Reads each entry of a title's `[[fs.mounts]]` block, resolves the
-//! host directory (with optional per-mount env-var override), and
-//! adds a [`cellgov_lv2::FsMount`] to [`Lv2Host::fs_mounts_mut`].
-//! Called once during `super::boot::prepare`, before any
-//! `sys_fs_open` could land in the dispatch layer.
-//!
-//! A missing or non-directory host root is a startup error rather
-//! than a silent ENOENT-at-runtime: a misconfigured manifest must
-//! not look like a runtime FS bug. Mirrors `super::content`'s
-//! "fail loud at startup" policy.
+//! Reads each `[[fs.mounts]]` entry, resolves the host directory
+//! (with optional per-mount env-var override), and adds an
+//! [`FsMount`] to [`Lv2Host::fs_mounts_mut`]. A missing or
+//! non-directory host root is a startup error.
 //!
 //! # Validation order
 //!
-//! Per-entry the helper runs all pure-shape validation (prefix and
-//! host string) BEFORE any I/O or env lookup. This way a manifest
-//! with two co-occurring problems (e.g. an invalid prefix and a
-//! missing host directory) surfaces the prefix error first; the
-//! developer fixes the prefix, re-runs, and gets the host error
-//! next, instead of fixing the host only to hit the prefix error
-//! on the next attempt.
+//! Per-entry: pure-shape validation (prefix and host string) runs
+//! BEFORE any I/O or env lookup, so a multi-error manifest surfaces
+//! shape problems before I/O problems.
 
 use std::path::{Path, PathBuf};
 
@@ -30,56 +20,36 @@ use super::manifest::MountEntry;
 /// Why [`register_mounts`] could not register a mount entry.
 #[derive(Debug)]
 pub enum MountRegisterError {
-    /// `[[fs.mounts]] prefix = ...` failed shape validation. The
-    /// manifest loader catches the empty / non-`/` shapes earlier;
-    /// this helper guards against an upstream change that bypasses
-    /// the loader (e.g. a future `--mount` CLI flag) and also covers
-    /// the `..`-segment case the loader does not currently check.
+    /// Prefix failed shape validation (empty, non-`/`, `..` segment).
     InvalidPrefix { prefix: String, reason: String },
-    /// `[[fs.mounts]] host = ...` (or the resolved `override_env`
-    /// value) failed shape validation. Surfaces:
-    /// - empty host string,
-    /// - `..` segment anywhere in the host path,
-    /// - non-POSIX absolute shapes (Windows drive letter, UNC,
-    ///   backslash root) that would resolve differently across
-    ///   platforms,
-    /// - empty `override_env` name.
+    /// Host string failed shape validation (empty, `..` segment,
+    /// non-POSIX absolute shape, or empty `override_env` name).
     InvalidHost {
         prefix: String,
         host: String,
         reason: String,
     },
-    /// Host root does not exist (`std::io::ErrorKind::NotFound`).
+    /// Host root does not exist.
     HostRootMissing {
         prefix: String,
         host_path: PathBuf,
-        /// Name of the override env var that selected the host
-        /// path, when applicable. Surfaced in Display so a developer
-        /// who forgot to point the env at a real directory sees the
-        /// var name in the error.
+        /// Override env var name, surfaced in Display.
         override_env: Option<String>,
     },
-    /// Host root exists but is not a directory (regular file,
-    /// symlink-to-file, special, etc.).
+    /// Host root exists but is not a directory.
     HostRootNotDirectory {
         prefix: String,
         host_path: PathBuf,
         override_env: Option<String>,
     },
-    /// Host-root metadata probe failed for a reason other than
-    /// NotFound (permission denied, IO error, broken symlink with
-    /// a non-NotFound errno, etc.). Carrying the source error lets
-    /// the developer distinguish "wrong path" from "permission bug
-    /// on the right path."
+    /// Host-root metadata probe failed (non-NotFound I/O error).
     HostRootIo {
         prefix: String,
         host_path: PathBuf,
         source: std::io::Error,
         override_env: Option<String>,
     },
-    /// `FsMountTable::add` rejected the prefix (already registered).
-    /// The manifest loader catches duplicates earlier; this guards
-    /// against an upstream change that bypasses validation.
+    /// `FsMountTable::add` rejected the prefix.
     DuplicatePrefix { prefix: String },
 }
 
@@ -168,19 +138,13 @@ impl std::error::Error for MountRegisterError {
     }
 }
 
-/// Resolve `path` against `base` using POSIX-shape rules: a
-/// leading `/` makes it absolute on every host; otherwise relative
-/// to `base`. Pure path arithmetic, no I/O.
+/// POSIX-shape resolution: leading `/` is absolute on every host;
+/// otherwise relative to `base`. Pure path arithmetic.
 ///
-/// `Path::is_absolute` is deliberately NOT used here -- on Windows
-/// a string like `/abs/path` is "drive-relative," not absolute, so
-/// `Path::is_absolute` returns `false` and `base.join("/abs/path")`
-/// silently produces a different path than on Linux. The state-hash
-/// contract folds blob content into the observation; cross-platform
-/// path divergence becomes a byte-identical-replay break.
-///
-/// `validate_host_shape` rejects Windows-shape inputs (`C:\foo`,
-/// `\\server\share`) so non-POSIX strings never reach this resolver.
+/// `Path::is_absolute` is NOT used -- on Windows `/abs/path` is
+/// drive-relative, which would silently diverge from Linux and break
+/// byte-identical replay. `validate_host_shape` pre-rejects Windows-shape
+/// inputs so they never reach this resolver.
 fn resolve_against(base: &Path, path: &str) -> PathBuf {
     if path.starts_with('/') {
         PathBuf::from(path)
@@ -189,13 +153,8 @@ fn resolve_against(base: &Path, path: &str) -> PathBuf {
     }
 }
 
-/// Canonicalize a directory path that has already been verified to
-/// exist via `check_host_root_is_dir`. Surfacing the canonical path
-/// makes the mount table robust against symlinks anywhere in the
-/// chain: two checkouts where one path passes through a symlink
-/// and another does not produce the same `host_root` after this
-/// pass, so the FsStore blob cache and any downstream trace records
-/// are byte-identical.
+/// Canonicalize an already-verified directory so symlink-divergent
+/// checkouts produce the same `host_root` (byte-identical replay).
 fn canonicalize_existing(
     prefix: &str,
     host_path: &Path,
@@ -209,8 +168,7 @@ fn canonicalize_existing(
     })
 }
 
-/// Pure-shape prefix validation. Called BEFORE any I/O or env
-/// lookup so a multi-error manifest surfaces shape problems first.
+/// Pure-shape prefix validation. Runs BEFORE any I/O or env lookup.
 fn validate_prefix(prefix: &str) -> Result<(), MountRegisterError> {
     if prefix.is_empty() {
         return Err(MountRegisterError::InvalidPrefix {
@@ -233,19 +191,10 @@ fn validate_prefix(prefix: &str) -> Result<(), MountRegisterError> {
     Ok(())
 }
 
-/// Pure-shape host-string validation. Called BEFORE any I/O so a
-/// shape error always wins over an I/O error.
+/// Pure-shape host-string validation. Runs BEFORE any I/O.
 ///
-/// Rejects:
-/// - empty (would silently map to workspace_root via
-///   `Path::join("")`).
-/// - any `..` segment (a manifest must not be able to read files
-///   above its declared host root via path arithmetic).
-/// - non-POSIX absolute shapes (`C:\foo`, `C:/foo`,
-///   `\\server\share`). The resolver treats these as relative on
-///   non-Windows hosts, which would join the path under the
-///   workspace silently. POSIX-shape determinism wins on every
-///   platform.
+/// Rejects: empty, any `..` segment, and non-POSIX absolute shapes
+/// (`C:\foo`, `C:/foo`, `\\server\share`).
 fn validate_host_shape(prefix: &str, host: &str) -> Result<(), MountRegisterError> {
     if host.is_empty() {
         return Err(MountRegisterError::InvalidHost {
@@ -254,13 +203,10 @@ fn validate_host_shape(prefix: &str, host: &str) -> Result<(), MountRegisterErro
             reason: "host string is empty".to_string(),
         });
     }
-    // Backslash byte rejection MUST run before the components()
-    // scan: `Path::new("foo\\..\\bar").components()` parses as a
-    // single Normal segment on POSIX hosts (no ParentDir found,
-    // would pass the dotdot check) but as `[Normal, ParentDir,
-    // Normal]` on Windows. Pre-rejecting backslash closes that
-    // platform-dependent parsing window. PSL1GHT / PS3 paths are
-    // POSIX-only so any `\` in a manifest host is wrong.
+    // Backslash rejection MUST precede components(): a string like
+    // `foo\..\bar` parses as one Normal segment on POSIX but as
+    // `[Normal, ParentDir, Normal]` on Windows, so the dotdot
+    // detector would differ across platforms.
     if host.contains('\\') {
         return Err(MountRegisterError::InvalidHost {
             prefix: prefix.to_string(),
@@ -292,17 +238,14 @@ fn validate_host_shape(prefix: &str, host: &str) -> Result<(), MountRegisterErro
     Ok(())
 }
 
-/// Heuristic detector for non-POSIX absolute path shapes that
-/// would otherwise be treated as "relative" by `resolve_against`
-/// and silently joined under `workspace_root`.
+/// Detect non-POSIX absolute path shapes (UNC, backslash root,
+/// drive letter) that `resolve_against` would otherwise treat as
+/// relative.
 fn looks_non_posix_absolute(host: &str) -> bool {
     if host.starts_with('\\') {
-        // UNC (`\\server\share`) and backslash-rooted absolutes
-        // (`\foo`).
         return true;
     }
-    // Drive-letter form: alpha + `:` at offsets 0..=1, regardless
-    // of whether the third byte is `/` or `\` or absent.
+    // Drive-letter form: alpha + `:` at offsets 0..=1.
     let bytes = host.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
         return true;
@@ -310,10 +253,7 @@ fn looks_non_posix_absolute(host: &str) -> bool {
     false
 }
 
-/// Reject `override_env = Some("")` -- an empty env-var name is a
-/// manifest config error, not a runtime fall-through. Surfaced as
-/// `InvalidHost` reusing the field for the offending env name; the
-/// `reason` makes the source of the error unambiguous.
+/// Reject `override_env = Some("")`.
 fn validate_override_env_name(
     prefix: &str,
     env_name: Option<&str>,
@@ -333,14 +273,9 @@ fn validate_override_env_name(
     Ok(())
 }
 
-/// Look up `entry`'s `override_env` via `getter`. Returns the env
-/// value when set non-empty (after trimming) and the env-var name
-/// is valid; `None` otherwise (empty / whitespace-only value,
-/// absent var, or `override_env` unset). Whitespace-only values are
-/// treated as absent: a developer who exported `MY_OVERRIDE=" "`
-/// almost certainly meant "unset," and the alternative is to mount
-/// `workspace_root.join(" ")` which fails opaquely as
-/// `HostRootMissing`.
+/// Returns the env value when set non-empty after trimming; `None`
+/// otherwise. Whitespace-only is treated as unset to avoid mounting
+/// `workspace_root.join(" ")`.
 fn override_host_from_env<F>(entry: &MountEntry, mut getter: F) -> Option<String>
 where
     F: FnMut(&str) -> Option<String>,
@@ -354,10 +289,7 @@ where
     }
 }
 
-/// Probe `host_path` and return a typed error variant for each
-/// distinct failure shape (NotFound, exists-but-not-a-directory,
-/// other I/O). Caller fills in `prefix` / `override_env` for the
-/// surfaced error.
+/// Probe `host_path` and return a typed error per failure shape.
 fn check_host_root_is_dir(
     host_path: &Path,
     prefix: &str,
@@ -387,30 +319,24 @@ fn check_host_root_is_dir(
 }
 
 /// Register each manifest mount in `host.fs_mounts_mut()`. Relative
-/// `host` paths are resolved against `workspace_root`; per-mount
-/// `override_env` (when set non-empty in the process env via
-/// `getter`) replaces the manifest's `host`.
+/// `host` paths resolve against `workspace_root`; `override_env`
+/// (when set non-empty via `getter`) replaces the manifest's `host`.
 ///
 /// # Per-entry validation order
 ///
-/// 1. Prefix shape (no I/O, no env).
-/// 2. `override_env` name shape (no I/O, no env).
-/// 3. Manifest `host` shape (no I/O, no env).
-/// 4. Env override resolution; resolved value re-validated for
-///    shape (env-supplied paths obey the same rules as manifest
-///    paths).
-/// 5. Host directory probe (typed error per failure mode).
-/// 6. `std::fs::canonicalize` to pin the symlink-resolved path.
-/// 7. `FsMount::new` (normalizes the prefix), then in-slice and
-///    cross-call duplicate check using the normalized prefix.
+/// 1. Prefix shape.
+/// 2. `override_env` name shape.
+/// 3. Manifest `host` shape.
+/// 4. Env override resolution; resolved value re-validated for shape.
+/// 5. Host directory probe.
+/// 6. `std::fs::canonicalize`.
+/// 7. `FsMount::new`, then in-slice and cross-call duplicate check
+///    using the normalized prefix.
 ///
 /// # Atomicity
 ///
-/// All entries are validated and built into ready `FsMount` values
-/// before any mutation of `host`. If any entry fails the host's
-/// mount table is left untouched. The commit phase that follows
-/// can only fail on contract drift between `FsMountTable::add` and
-/// our snapshot -- not on guest- or manifest-induced inputs.
+/// All entries are validated and built into `FsMount` values before
+/// any mutation of `host`. On any failure the mount table is untouched.
 pub fn register_mounts<F>(
     mounts: &[MountEntry],
     workspace_root: &Path,
@@ -422,8 +348,8 @@ where
 {
     use std::collections::BTreeSet;
 
-    // Snapshot existing prefixes so cross-call duplicates surface
-    // during validation, not in the commit phase.
+    // Snapshot existing prefixes so cross-call duplicates surface in
+    // the validation phase.
     let existing_prefixes: BTreeSet<String> = host
         .fs_mounts()
         .mounts()
@@ -441,9 +367,8 @@ where
             Some(v) => (v, entry.override_env.clone()),
             None => (entry.host.clone(), None),
         };
-        // Re-validate when the override resolved to a different
-        // string: a developer's local env value must obey the same
-        // shape rules as the committed manifest path.
+        // Re-validate the env value: it obeys the same shape rules
+        // as the committed manifest path.
         if override_env_for_err.is_some() {
             validate_host_shape(&entry.prefix, &host_string)?;
         }
@@ -452,10 +377,9 @@ where
         check_host_root_is_dir(&host_path, &entry.prefix, &override_env_for_err)?;
         let canonical = canonicalize_existing(&entry.prefix, &host_path, &override_env_for_err)?;
 
-        // Prefix was just validated, so `FsMount::new` must succeed.
-        // If it does not, validate_prefix and FsMount::new have
-        // diverged -- a contract drift, surfaced as InvalidPrefix
-        // rather than a panic.
+        // Prefix was just validated, so FsMount::new must succeed.
+        // A None here means validate_prefix and FsMount::new have
+        // diverged; surface as InvalidPrefix rather than panicking.
         let mount = FsMount::new(entry.prefix.clone(), canonical).ok_or_else(|| {
             MountRegisterError::InvalidPrefix {
                 prefix: entry.prefix.clone(),
@@ -466,8 +390,7 @@ where
         })?;
 
         // Use the FsMount-normalized prefix (no trailing slash) for
-        // dedup so `/app_home` and `/app_home/` collide consistently
-        // with FsMountTable's matching rules.
+        // dedup so `/app_home` and `/app_home/` collide.
         let normalized = mount.prefix.clone();
         if existing_prefixes.contains(&normalized) || !seen_in_slice.insert(normalized.clone()) {
             return Err(MountRegisterError::DuplicatePrefix { prefix: normalized });
@@ -475,8 +398,7 @@ where
         prepared.push(mount);
     }
 
-    // Commit phase: every entry validated, host gets the full set
-    // or none. add() can only fail here on contract drift.
+    // Commit phase: full set or none.
     for mount in prepared {
         let prefix = mount.prefix.clone();
         host.fs_mounts_mut()
@@ -490,7 +412,6 @@ where
 mod tests {
     use super::*;
 
-    /// RAII tempdir for register_mounts tests.
     struct TmpDir(PathBuf);
 
     impl TmpDir {
@@ -521,14 +442,11 @@ mod tests {
         }
     }
 
-    /// `std::fs::canonicalize` adds a `\\?\` extended-length prefix
-    /// on Windows. Mount-table comparisons must use the same
-    /// canonical form on both sides so the assertion is portable.
+    /// Canonicalize on both sides so the `\\?\` prefix Windows adds
+    /// does not break portable assertions.
     fn canon(p: &Path) -> PathBuf {
         std::fs::canonicalize(p).expect("canonicalize")
     }
-
-    // -- pure-shape unit tests --
 
     #[test]
     fn validate_host_shape_rejects_empty() {
@@ -545,18 +463,12 @@ mod tests {
             }
             other => panic!("expected InvalidHost, got {other}"),
         }
-        // Pure leading `..` also rejected.
         assert!(validate_host_shape("/p", "../foo").is_err());
-        // `..` in absolute path also rejected (defensive: traversal
-        // semantics across symlinks are surprising).
         assert!(validate_host_shape("/p", "/abs/../escape").is_err());
     }
 
     #[test]
     fn validate_host_shape_rejects_windows_drive_letter() {
-        // Without this rule, `C:\foo` resolves to `<workspace>/C:\foo`
-        // on Linux silently. Forcing POSIX shape surfaces the
-        // mistake at startup.
         for shape in ["C:\\foo", "C:/foo", "C:", "Z:\\Users\\me"] {
             let err = validate_host_shape("/p", shape).expect_err(shape);
             assert!(
@@ -576,12 +488,6 @@ mod tests {
 
     #[test]
     fn validate_host_shape_rejects_mid_string_backslash() {
-        // Pin: a mid-string backslash like `foo\..\bar` parses as
-        // a single Normal component on POSIX and as
-        // [Normal, ParentDir, Normal] on Windows. The dotdot
-        // detector therefore yields different verdicts across
-        // platforms. The byte-level backslash rejection runs
-        // before components() to close that window.
         let inputs = ["foo\\..\\bar", "assets\\sub", "a/b\\c"];
         for shape in inputs {
             let err = validate_host_shape("/p", shape).expect_err(shape);
@@ -599,7 +505,6 @@ mod tests {
 
     #[test]
     fn validate_host_shape_accepts_posix_shapes() {
-        // Both forms are deterministic across platforms.
         validate_host_shape("/p", "tests/fixtures/foo").unwrap();
         validate_host_shape("/p", "/abs/path").unwrap();
         validate_host_shape("/p", "./relative").unwrap();
@@ -607,8 +512,6 @@ mod tests {
 
     #[test]
     fn resolve_against_treats_leading_slash_as_absolute_on_every_platform() {
-        // `Path::is_absolute` would return false here on Windows;
-        // the POSIX-shape rule keeps behavior identical across hosts.
         let r = resolve_against(Path::new("/workspace"), "/abs");
         assert_eq!(r, PathBuf::from("/abs"));
     }
@@ -618,8 +521,6 @@ mod tests {
         let r = resolve_against(Path::new("/workspace"), "assets/sub");
         assert_eq!(r, PathBuf::from("/workspace").join("assets/sub"));
     }
-
-    // -- I/O-bearing tests (use a workspace tempdir + relative hosts) --
 
     #[test]
     fn register_zero_entries_succeeds_with_count_zero() {
@@ -645,9 +546,6 @@ mod tests {
             .expect("one mount")
             .host_root
             .clone();
-        // Compare canonicalized form on both sides so the test
-        // works whether or not the workspace itself contains
-        // symlinks.
         assert_eq!(mount_host, canon(&workspace.path().join("assets")));
     }
 
@@ -655,8 +553,6 @@ mod tests {
     fn missing_host_root_returns_typed_missing_error() {
         let workspace = TmpDir::new("missing_root");
         let mut host = Lv2Host::new();
-        // Workspace-relative path that doesn't exist; portable
-        // across hosts (avoids Windows-shape paths).
         let entries = vec![entry("/app_home", "does/not/exist", None)];
         let err = register_mounts(&entries, workspace.path(), |_| None, &mut host)
             .expect_err("missing host root must surface");
@@ -691,13 +587,8 @@ mod tests {
 
     #[test]
     fn host_path_with_nul_byte_returns_host_root_io() {
-        // Coverage for the HostRootIo arm. A NUL byte in the host
-        // string passes validate_host_shape (it has no `\`, no
-        // `..`, no leading drive letter, and is non-empty), then
-        // metadata() rejects it with InvalidInput -- a non-NotFound
-        // error that maps to HostRootIo with the source attached.
-        // Cheap, portable substitute for a permission-denied probe
-        // (which is awkward to synthesize cross-platform).
+        // NUL passes shape validation but metadata() rejects with
+        // InvalidInput, exercising the HostRootIo arm portably.
         let workspace = TmpDir::new("nul_host");
         let mut host = Lv2Host::new();
         let entries = vec![entry("/app_home", "foo\0bar", None)];
@@ -706,8 +597,6 @@ mod tests {
         match err {
             MountRegisterError::HostRootIo { prefix, source, .. } => {
                 assert_eq!(prefix, "/app_home");
-                // Source attached so the developer can distinguish
-                // "wrong path" from "permission bug" at log read.
                 assert!(!source.to_string().is_empty());
             }
             other => panic!("expected HostRootIo, got {other}"),
@@ -773,10 +662,6 @@ mod tests {
 
     #[test]
     fn whitespace_only_override_env_value_falls_through_to_manifest_host() {
-        // Pin the trim-then-empty-fallthrough rule: a developer
-        // who exported `MY_OVERRIDE=" "` almost certainly meant
-        // "unset," and silently joining `workspace_root.join(" ")`
-        // would fail opaquely as HostRootMissing.
         let workspace = TmpDir::new("ws_override");
         std::fs::create_dir_all(workspace.path().join("fallback")).unwrap();
         let mut host = Lv2Host::new();
@@ -828,9 +713,6 @@ mod tests {
 
     #[test]
     fn override_env_value_must_obey_host_shape_rules() {
-        // A developer's local env var still has to be POSIX-shape.
-        // Without this check, `MY_OVERRIDE="../../escape"` would
-        // resolve under workspace_root and read sibling content.
         let workspace = TmpDir::new("env_shape");
         std::fs::create_dir_all(workspace.path().join("manifest_dir")).unwrap();
         let mut host = Lv2Host::new();
@@ -853,9 +735,6 @@ mod tests {
 
     #[test]
     fn empty_override_env_name_is_rejected() {
-        // `override_env = Some("")` is a manifest config error; an
-        // empty env-var name can never be set, so the field is
-        // useless / probably a typo.
         let workspace = TmpDir::new("empty_env_name");
         std::fs::create_dir_all(workspace.path().join("manifest_dir")).unwrap();
         let mut host = Lv2Host::new();
@@ -874,8 +753,6 @@ mod tests {
     fn empty_prefix_is_rejected_before_io() {
         let workspace = TmpDir::new("empty_prefix");
         let mut host = Lv2Host::new();
-        // Empty prefix + missing host: shape error wins because
-        // shape validation runs before the I/O probe.
         let entries = vec![entry("", "missing/dir", None)];
         let err = register_mounts(&entries, workspace.path(), |_| None, &mut host)
             .expect_err("empty prefix must surface");
@@ -900,8 +777,6 @@ mod tests {
 
     #[test]
     fn dotdot_in_prefix_is_rejected_before_io() {
-        // Manifest loader rejects this earlier in normal flow; the
-        // helper guards against a future bypass.
         let workspace = TmpDir::new("dotdot_prefix");
         std::fs::create_dir_all(workspace.path().join("ok_dir")).unwrap();
         let mut host = Lv2Host::new();
@@ -913,10 +788,6 @@ mod tests {
 
     #[test]
     fn empty_host_string_is_rejected_before_io() {
-        // Without this check, `Path::join("")` returns `base` and the
-        // metadata probe succeeds (the workspace root almost always
-        // exists), silently mounting the workspace as the title's
-        // host root.
         let workspace = TmpDir::new("empty_host_workspace");
         let mut host = Lv2Host::new();
         let entries = vec![entry("/app_home", "", None)];
@@ -933,9 +804,6 @@ mod tests {
 
     #[test]
     fn dotdot_in_host_is_rejected() {
-        // A title manifest must not be able to read sibling files
-        // via `host = "../../etc"`; resolution would land outside
-        // workspace_root.
         let workspace = TmpDir::new("dotdot_host");
         let mut host = Lv2Host::new();
         let entries = vec![entry("/app_home", "../escape", None)];
@@ -951,9 +819,6 @@ mod tests {
 
     #[test]
     fn windows_shape_host_is_rejected_for_determinism() {
-        // Pin the cross-platform divergence fix: a manifest with a
-        // Windows-shape host on Linux must NOT silently join the
-        // path under the workspace.
         let workspace = TmpDir::new("win_host");
         let mut host = Lv2Host::new();
         let entries = vec![entry("/app_home", "C:\\Users\\me\\flow", None)];
@@ -964,9 +829,6 @@ mod tests {
 
     #[test]
     fn invalid_prefix_takes_precedence_over_missing_host() {
-        // Co-occurring shape error + I/O error: shape wins so the
-        // developer sees the prefix problem first and fixes it
-        // before they hit the host problem.
         let workspace = TmpDir::new("precedence");
         let mut host = Lv2Host::new();
         let entries = vec![entry("not_rooted", "path/does/not/exist", None)];
@@ -999,9 +861,6 @@ mod tests {
 
     #[test]
     fn first_failure_leaves_host_mount_table_untouched() {
-        // Pin the pre-validate-then-commit atomicity contract:
-        // entry 0 is valid, entry 1 fails. The host's mount table
-        // must not have entry 0 partially registered.
         let workspace = TmpDir::new("atomicity");
         std::fs::create_dir_all(workspace.path().join("ok_dir")).unwrap();
         let mut host = Lv2Host::new();
@@ -1021,9 +880,6 @@ mod tests {
 
     #[test]
     fn in_slice_duplicate_prefix_is_rejected() {
-        // Two entries with the same normalized prefix in the same
-        // slice. Manifest loader catches this earlier; the helper
-        // guards against bypass.
         let workspace = TmpDir::new("slice_dup");
         std::fs::create_dir_all(workspace.path().join("a")).unwrap();
         std::fs::create_dir_all(workspace.path().join("b")).unwrap();
@@ -1032,17 +888,13 @@ mod tests {
         let err = register_mounts(&entries, workspace.path(), |_| None, &mut host)
             .expect_err("in-slice duplicate must surface");
         assert!(matches!(err, MountRegisterError::DuplicatePrefix { .. }));
-        // Atomicity: entry 0 must not have been committed.
         assert_eq!(host.fs_mounts().mounts().count(), 0);
     }
 
     #[test]
     fn trailing_slash_prefix_dedup_matches_fsmount_normalization() {
-        // FsMount::new strips trailing `/`. Two entries
-        // [`/app_home`, `/app_home/`] therefore normalize to the
-        // same prefix and must be rejected as duplicates -- a
-        // future change to FsMount's normalization rules would
-        // surface here.
+        // FsMount::new strips trailing `/`, so `/app_home` and
+        // `/app_home/` collide after normalization.
         let workspace = TmpDir::new("trailing_slash");
         std::fs::create_dir_all(workspace.path().join("a")).unwrap();
         std::fs::create_dir_all(workspace.path().join("b")).unwrap();
@@ -1058,9 +910,6 @@ mod tests {
 
     #[test]
     fn cross_call_duplicate_prefix_is_rejected() {
-        // Calling register_mounts twice on the same host with a
-        // colliding prefix must reject the second call as a
-        // duplicate, with no commit-phase mutation.
         let workspace = TmpDir::new("cross_call");
         std::fs::create_dir_all(workspace.path().join("a")).unwrap();
         std::fs::create_dir_all(workspace.path().join("b")).unwrap();
@@ -1080,15 +929,11 @@ mod tests {
         )
         .expect_err("cross-call duplicate must surface");
         assert!(matches!(err, MountRegisterError::DuplicatePrefix { .. }));
-        // Mount table should still have exactly the first entry.
         assert_eq!(host.fs_mounts().mounts().count(), 1);
     }
 
     #[test]
     fn disjoint_register_mounts_calls_compose() {
-        // Two disjoint calls compose: each registers its entries
-        // independently. Pinning so future tightening doesn't
-        // break the additive shape.
         let workspace = TmpDir::new("disjoint");
         std::fs::create_dir_all(workspace.path().join("a")).unwrap();
         std::fs::create_dir_all(workspace.path().join("b")).unwrap();

@@ -1,7 +1,3 @@
-//! `dispatch_fs_readdir` tests: out-pointer validation, EOF
-//! shape (zero dirent + nread=0), lexicographic order across a
-//! mount, file-vs-directory `d_type` classification.
-
 use cellgov_ps3_abi::cell_errors as errno;
 use cellgov_ps3_abi::sys_fs::{CELL_FS_DIRENT_SIZE, CELL_FS_TYPE_DIRECTORY, CELL_FS_TYPE_REGULAR};
 
@@ -81,7 +77,6 @@ fn empty_directory_eofs_immediately() {
         0x21000,
     );
     assert_eq!(nread, 0, "EOF must report nread = 0");
-    // Dirent buffer fully zero on EOF.
     assert_eq!(blob.len(), CELL_FS_DIRENT_SIZE as usize);
     assert!(blob.iter().all(|&b| b == 0));
 }
@@ -89,8 +84,8 @@ fn empty_directory_eofs_immediately() {
 #[test]
 fn readdir_walks_entries_lexicographically() {
     let dir = TempMountDir::new("readdir_lex");
-    // Insert in non-alphabetical order so the snapshot's sort
-    // step has to do work; the host FS may yield them in any order.
+    // Non-alphabetical insert order so the snapshot's sort
+    // step has to do work; the host FS may yield in any order.
     dir.write("zzz.xml", b"z");
     dir.write("a.xml", b"a");
     dir.write("middle.xml", b"m");
@@ -117,7 +112,6 @@ fn readdir_walks_entries_lexicographically() {
         assert_eq!(name, expected);
     }
 
-    // EOF after exhausting the snapshot.
     let rt = PathRuntime::empty(0x40000);
     let (_blob, nread) = extract_readdir(
         run(&mut host, &rt, fs_readdir(fd, 0x20000, 0x21000)),
@@ -138,7 +132,6 @@ fn readdir_classifies_subdirs_as_directory_type() {
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home");
 
-    // Lexicographic: 'f' (0x66) < 's' (0x73), so file.txt first.
     let rt = PathRuntime::empty(0x40000);
     let (blob, _) = extract_readdir(
         run(&mut host, &rt, fs_readdir(fd, 0x20000, 0x21000)),
@@ -169,7 +162,6 @@ fn readdir_eof_then_close_clean() {
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home");
-    // First read returns the entry.
     let rt = PathRuntime::empty(0x40000);
     let (_blob, nread) = extract_readdir(
         run(&mut host, &rt, fs_readdir(fd, 0x20000, 0x21000)),
@@ -177,7 +169,6 @@ fn readdir_eof_then_close_clean() {
         0x21000,
     );
     assert_eq!(nread, CELL_FS_DIRENT_SIZE);
-    // Second read EOFs.
     let rt = PathRuntime::empty(0x40000);
     let (_blob, nread) = extract_readdir(
         run(&mut host, &rt, fs_readdir(fd, 0x20000, 0x21000)),
@@ -185,7 +176,8 @@ fn readdir_eof_then_close_clean() {
         0x21000,
     );
     assert_eq!(nread, 0);
-    // Third read also EOFs (the snapshot stays drained).
+    // Invariant: the snapshot stays drained across repeated
+    // post-EOF reads.
     let rt = PathRuntime::empty(0x40000);
     let (_blob, nread) = extract_readdir(
         run(&mut host, &rt, fs_readdir(fd, 0x20000, 0x21000)),

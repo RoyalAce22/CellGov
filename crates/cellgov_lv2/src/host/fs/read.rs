@@ -46,11 +46,8 @@ impl Lv2Host {
             };
         }
 
-        // Peek fd validity without advancing the offset. fstat is
-        // read-only and returns UnknownFd for an unknown fd; that
-        // is the EBADF surface. read_at(fd, 0) would also work
-        // (0-byte reads do not advance the cursor) but fstat reads
-        // less out of the table and conveys intent.
+        // Peek fd validity without advancing the offset; fstat is
+        // read-only and returns UnknownFd for an unknown fd.
         if self.fs_store().fstat(fd).is_err() {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EBADF.into(),
@@ -58,11 +55,6 @@ impl Lv2Host {
             };
         }
 
-        // Pin nbytes into a usize for the FS layer. On 64-bit hosts
-        // (the only target) this is identity for any plausible
-        // value. The clamp is defensive against a hypothetical
-        // 32-bit build where huge guest-supplied nbytes could
-        // truncate.
         let nbytes_usize = usize::try_from(nbytes).unwrap_or(usize::MAX);
 
         // Validate the destination buffer BEFORE the FS layer

@@ -22,31 +22,26 @@ use cellgov_mem::Fnv1aHasher;
 
 /// Monotonic fd allocator base. Matches real PS3's `lv2_fs_object`
 /// `id_base = 3` (per `rpcs3/Emu/Cell/lv2/sys_fs.h`): file fds are
-/// small ints in `[3, 255)` on real PS3. PSL1GHT-built titles
-/// (flOw among them) encode the fd into narrow struct fields and
-/// load it with `lbz`/`lhz`/`lwz` semantics that truncate any high
-/// bits; returning fds in the billions corrupts the fd in the
-/// title's internal table and surfaces as `sys_fs_read` getting an
-/// unknown fd (= EBADF).
-///
-/// Exposed crate-wide so dispatch tests can assert
-/// `fd >= FD_BASE` rather than the weaker `fd != 0`.
+/// small ints in `[3, 255)` on real PS3. PSL1GHT-built titles encode
+/// the fd into narrow struct fields and load it with `lbz`/`lhz`/`lwz`
+/// semantics that truncate high bits; returning fds in the billions
+/// corrupts the fd in the title's internal table.
 pub(crate) const FD_BASE: u32 = 3;
 
 /// Whence values for [`FsStore::seek`]. Matches PS3 `CELL_FS_SEEK_*`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeekWhence {
-    /// Offset measured from the start of the file.
+    /// From the start of the file.
     Set = 0,
-    /// Offset measured from the current fd position.
+    /// From the current fd position.
     Cur = 1,
-    /// Offset measured from the end of the file.
+    /// From the end of the file.
     End = 2,
 }
 
 impl SeekWhence {
-    /// Decode a guest-supplied whence value. Returns `None` for any
-    /// out-of-range value so the caller can map it to CELL_EINVAL.
+    /// Returns `None` for any out-of-range value so the caller can
+    /// map it to CELL_EINVAL.
     pub fn from_guest(value: u32) -> Option<Self> {
         match value {
             0 => Some(Self::Set),
@@ -58,14 +53,9 @@ impl SeekWhence {
 }
 
 /// File-stat shape returned by [`FsStore::stat_path`] / [`FsStore::fstat`].
-///
-/// `mtime` / `atime` / `ctime` are deterministic constants (zero in
-/// the current implementation) -- the oracle has no concept of host
-/// time, and content blobs are immutable so a real timestamp would
-/// be misleading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileStat {
-    /// Size of the blob in bytes.
+    /// Blob size in bytes.
     pub size: u64,
 }
 
@@ -75,68 +65,46 @@ pub struct FileStat {
 pub enum FsError {
     /// Fd is not in the open-fd table.
     UnknownFd,
-    /// Fd is not in the open-dir table. Distinct from `UnknownFd`
-    /// so `close_fd` on a dir fd (or `close_dir` on a file fd)
-    /// surfaces as CELL_EBADF without conflating the two
-    /// allocators -- a guest that mixes them up should see the
-    /// type mismatch surface, not silent success.
+    /// Distinct from `UnknownFd` so `close_fd` on a dir fd (or
+    /// `close_dir` on a file fd) surfaces as CELL_EBADF rather than
+    /// silent success.
     UnknownDir,
     /// Path is not registered in the blob table.
     UnknownPath,
     /// Seek offset would land outside `[0, u64::MAX]`.
     SeekOutOfRange,
-    /// Fd allocator hit `u32::MAX`. Hard to provoke in practice;
-    /// reaching it would silently recycle fds (an aliased read
-    /// from one open advances another open's offset), so the
-    /// allocator surfaces it as an explicit error.
+    /// Fd allocator hit `u32::MAX`. Surfaced rather than recycled
+    /// so an aliased read cannot advance another open's offset.
     FdExhausted,
-    /// Manifest loader tried to register a second blob at a path
-    /// that already has one. Registration is single-write so a
-    /// later content swap cannot mutate bytes an open fd is
-    /// reading from.
+    /// Registration is single-write per path so a later content swap
+    /// cannot mutate bytes an open fd is reading from.
     PathAlreadyRegistered,
-    /// A mount table entry tried to register a second mount with
-    /// the same guest-path prefix. Mount tables are single-write
-    /// per prefix to keep guest-to-host resolution unambiguous.
+    /// Single-write per prefix to keep guest-to-host resolution
+    /// unambiguous.
     MountAlreadyRegistered,
-    /// A guest path tried to escape its mount via `..` segments.
     /// Surfaced as CELL_EACCES by the dispatch layer.
     PathTraversal,
 }
 
-/// One entry in a directory snapshot. The dispatcher captures
-/// these from the host filesystem at `sys_fs_opendir` time and
-/// hands them to [`FsStore::open_dir`]; `read_dir_entry` walks
-/// them in registration order. Sorting is the dispatcher's
-/// concern (the deterministic oracle requires lexicographic
-/// order; FsStore preserves whatever order the dispatcher hands
-/// over).
+/// One entry in a directory snapshot.
+///
+/// `read_dir_entry` walks entries in registration order; sorting
+/// is the dispatcher's concern.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirEntry {
     /// Filename (no path components). Must not contain `/` or
-    /// embedded NUL; the dispatcher filters those before
-    /// forwarding.
+    /// embedded NUL; the dispatcher filters those before forwarding.
     pub name: String,
-    /// Whether this entry is a sub-directory (vs a regular file).
-    /// Symlinks and special files are filtered out at snapshot
-    /// time so the dispatcher only ever forwards REGULAR or
-    /// DIRECTORY shapes.
+    /// `true` for a sub-directory, `false` for a regular file.
     pub is_directory: bool,
 }
 
 /// One read-only mount: a guest-path prefix served from a host
-/// directory. Used by the dispatch layer when a guest path is not
-/// pre-registered as a blob in [`FsStore`]. Examples:
-/// `prefix = "/app_home"` mapped to the title's USRDIR;
-/// `prefix = "/dev_hdd0"` mapped to a workspace dev_hdd0 mirror.
+/// directory.
 ///
-/// `prefix` is normalized at construction (no trailing `/`,
-/// must start with `/`).
-///
-/// Read-only by design: writes / mkdir / unlink return CELL_EROFS
-/// from the dispatch layer regardless of host-side permissions.
-/// CellGov is a deterministic oracle, not a runtime emulator;
-/// mutating host disk would leak host state into guest behavior.
+/// `prefix` is normalized at construction (no trailing `/`, must
+/// start with `/`). Writes / mkdir / unlink return CELL_EROFS from
+/// the dispatch layer regardless of host-side permissions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FsMount {
     /// Guest path prefix, e.g. `/app_home`. No trailing slash.
@@ -150,22 +118,16 @@ impl FsMount {
     ///
     /// # Errors
     ///
-    /// Returns `None` if `prefix` is empty, doesn't start with
-    /// `/`, or contains `..`. The dispatch layer must surface
-    /// these as configuration errors at boot, not runtime
-    /// failures.
+    /// Returns `None` if `prefix` is empty, doesn't start with `/`,
+    /// or contains `..`.
     pub fn new(prefix: impl Into<String>, host_root: PathBuf) -> Option<Self> {
         let mut prefix = prefix.into();
         if prefix.is_empty() || !prefix.starts_with('/') {
             return None;
         }
-        // Reject `..` in the prefix itself; it would let a
-        // resolution land outside any conceivable mount root.
         if prefix.split('/').any(|seg| seg == "..") {
             return None;
         }
-        // Strip trailing slash so `prefix` and `prefix/` resolve
-        // identically.
         while prefix.len() > 1 && prefix.ends_with('/') {
             prefix.pop();
         }
@@ -173,24 +135,21 @@ impl FsMount {
     }
 }
 
-/// Ordered set of [`FsMount`]s consulted by the dispatch layer
-/// when a guest path is not registered as a blob. Mounts are
-/// consulted in registration order; the first whose prefix
-/// matches resolves the path.
+/// Ordered set of [`FsMount`]s.
+///
+/// Mounts are consulted in registration order; the first whose
+/// prefix matches resolves the path.
 #[derive(Debug, Clone, Default)]
 pub struct FsMountTable {
     mounts: Vec<FsMount>,
 }
 
 impl FsMountTable {
-    /// Empty mount table. Boot wires real mounts via
-    /// [`Self::add`].
+    /// Empty mount table.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Register a mount. Errors on duplicate prefix.
-    ///
     /// # Errors
     ///
     /// - [`FsError::MountAlreadyRegistered`] if a mount with the
@@ -205,22 +164,13 @@ impl FsMountTable {
 
     /// Resolve a guest path to a host path.
     ///
-    /// Returns `Ok(Some(host_path))` when a mount matches.
-    /// Returns `Ok(None)` when no mount matches (the dispatcher
-    /// should surface this as ENOENT after consulting other
-    /// stores).
-    /// Returns `Err(FsError::PathTraversal)` when the resolved
-    /// path would escape the mount root via `..` segments.
+    /// Normalizes empty segments (`//`) and `.` segments; rejects
+    /// `..` segments as [`FsError::PathTraversal`].
     ///
-    /// Path normalization:
+    /// # Errors
     ///
-    /// - Empty segments (`//`) are skipped.
-    /// - `.` segments are skipped (titles routinely emit
-    ///   `/app_home/./Foo`).
-    /// - `..` segments are rejected outright. A title that
-    ///   genuinely needs `..` traversal is anti-scope; an
-    ///   investigation should determine whether the title is
-    ///   path-escaping by accident or by design.
+    /// - [`FsError::PathTraversal`] when the resolved path would
+    ///   escape the mount root via `..` segments.
     pub fn resolve(&self, guest_path: &str) -> Result<Option<PathBuf>, FsError> {
         for mount in &self.mounts {
             let Some(rest) = strip_mount_prefix(guest_path, &mount.prefix) else {
@@ -247,13 +197,9 @@ impl FsMountTable {
     }
 }
 
-/// Match `guest_path` against `prefix`. The match succeeds when
-/// `guest_path` equals `prefix` exactly OR begins with
-/// `prefix + '/'`; partial prefix matches like `/app_home` vs
-/// `/app_homeFoo` are rejected.
-///
-/// The root mount `/` is handled specially: any guest path
-/// starting with `/` matches, with the leading `/` stripped.
+/// Match `guest_path` against `prefix`, succeeding on exact match
+/// or `prefix + '/'`. The root mount `/` matches any path starting
+/// with `/`, stripping the leading slash.
 fn strip_mount_prefix<'a>(guest_path: &'a str, prefix: &str) -> Option<&'a str> {
     if guest_path == prefix {
         return Some("");
@@ -275,9 +221,8 @@ fn strip_mount_prefix<'a>(guest_path: &'a str, prefix: &str) -> Option<&'a str> 
 #[derive(Debug, Clone)]
 struct BlobEntry {
     bytes: Vec<u8>,
-    /// Pre-computed content hash. Folded into [`FsStore::state_hash`]
-    /// so a content swap surfaces as a determinism break, without
-    /// re-hashing the full blob on every step.
+    /// Pre-computed so [`FsStore::state_hash`] does not re-hash the
+    /// full blob on every step.
     content_hash: u64,
 }
 
@@ -291,7 +236,6 @@ struct FdEntry {
 struct DirSnapshot {
     /// Frozen at `open_dir` time; never re-read from disk.
     entries: Vec<DirEntry>,
-    /// Index of the next entry to return from `read_dir_entry`.
     /// Equal to `entries.len()` at EOF.
     cursor: usize,
 }
@@ -299,17 +243,12 @@ struct DirSnapshot {
 /// Path-indexed in-memory blob store with per-fd open-file and
 /// open-directory tables.
 ///
-/// `Default` is implemented manually rather than derived: a derived
-/// `Default` produces `next_fd = 0` (the [`u32`] default), which
-/// would silently hand out fd `0` on the first open and violate the
-/// never-recycle / never-zero invariant. The manual impl forwards to
-/// [`Self::new`] so both constructors start `next_fd` at `FD_BASE`.
+/// File and directory fds share a single monotonic allocator; the
+/// two open-tables stay distinct so `close_fd` on a dir fd (and
+/// vice versa) surfaces as CELL_EBADF.
 ///
-/// File and directory fds share a single monotonic allocator. The
-/// two open-tables are kept distinct so `close_fd` on a dir fd (and
-/// vice versa) surfaces as CELL_EBADF rather than silently
-/// succeeding -- a guest that mixes the two has a bug worth
-/// surfacing, not papering over.
+/// [`Default`] is implemented manually because a derived `Default`
+/// would set `next_fd = 0`, violating the never-zero invariant.
 #[derive(Debug, Clone)]
 pub struct FsStore {
     blobs: BTreeMap<String, BlobEntry>,
@@ -335,12 +274,9 @@ impl FsStore {
         }
     }
 
-    /// Register `bytes` under `path`. Single-write: a second
-    /// registration at the same path returns
-    /// [`FsError::PathAlreadyRegistered`] and the existing bytes
-    /// stay. Pinned by the open-fd contract -- the fd table stores
-    /// paths, not blob snapshots, so a silent replacement would
-    /// mutate bytes an open fd is mid-read on.
+    /// Register `bytes` under `path`. Single-write: the fd table
+    /// stores paths, not blob snapshots, so a silent replacement
+    /// would mutate bytes an open fd is mid-read on.
     ///
     /// # Errors
     ///
@@ -364,35 +300,27 @@ impl FsStore {
         Ok(())
     }
 
-    /// Read-only lookup; `None` if no blob is registered at `path`.
-    ///
-    /// **Host-side introspection only.** Guest reads must go through
-    /// the fd allocation path ([`Self::open_fd`] then
-    /// [`Self::read_at`]); using `lookup_blob` to short-circuit the
-    /// fd table would skip the offset advance and the state-hash
-    /// contribution that the determinism contract depends on.
+    /// Host-side introspection only. Guest reads must go through
+    /// [`Self::open_fd`] + [`Self::read_at`] so the offset advance
+    /// and state-hash contribution are observable.
     pub fn lookup_blob(&self, path: &str) -> Option<&[u8]> {
         self.blobs.get(path).map(|b| b.bytes.as_slice())
     }
 
-    /// Whether `path` is registered. Cheaper than `lookup_blob` when
-    /// the caller does not need the bytes -- the dispatch layer's
-    /// existence-then-flag precedence relies on this not borrowing
-    /// the blob bytes.
+    /// Cheaper than [`Self::lookup_blob`] when the caller does not
+    /// need the bytes; does not borrow the blob.
     pub fn has_path(&self, path: &str) -> bool {
         self.blobs.contains_key(path)
     }
 
-    /// Whether the store has any registered blobs or open fds /
-    /// open dirs.
+    /// Whether the store has any registered blobs or open fds / dirs.
     pub fn is_empty(&self) -> bool {
         self.blobs.is_empty() && self.open_fds.is_empty() && self.open_dirs.is_empty()
     }
 
-    /// Test-only: fast-forward the fd allocator. Used by dispatch
-    /// tests that need to provoke [`FsError::FdExhausted`] without
-    /// looping `open_fd` ~4 billion times. Crate-private so only
-    /// in-crate tests can reach it.
+    /// Fast-forward the fd allocator to provoke
+    /// [`FsError::FdExhausted`] without looping `open_fd` ~4 billion
+    /// times.
     #[cfg(test)]
     pub(crate) fn force_next_fd_for_test(&mut self, value: u32) {
         self.next_fd = value;
@@ -413,9 +341,8 @@ impl FsStore {
         self.open_dirs.len()
     }
 
-    /// Allocate a fresh fd against `path`. Bumps the never-recycle
-    /// counter only on success; the prior `next_fd` value is not
-    /// burned by an `UnknownPath` error.
+    /// Bumps the never-recycle counter only on success; `UnknownPath`
+    /// does not burn the prior `next_fd` value.
     ///
     /// # Errors
     ///
@@ -427,9 +354,6 @@ impl FsStore {
             return Err(FsError::UnknownPath);
         }
         let fd = self.next_fd;
-        // Advance first; on overflow, leave the table untouched so
-        // the caller can choose to surface CELL_FS_EMFILE without
-        // having silently recycled a live fd.
         let next = fd.checked_add(1).ok_or(FsError::FdExhausted)?;
         self.next_fd = next;
         self.open_fds.insert(
@@ -442,8 +366,7 @@ impl FsStore {
         Ok(fd)
     }
 
-    /// Release the fd. Subsequent reads / stats / closes on the same
-    /// fd return `UnknownFd`.
+    /// Release the fd; subsequent ops on it return `UnknownFd`.
     pub fn close_fd(&mut self, fd: u32) -> Result<(), FsError> {
         self.open_fds
             .remove(&fd)
@@ -451,37 +374,31 @@ impl FsStore {
             .ok_or(FsError::UnknownFd)
     }
 
-    /// Read up to `max_bytes` from the fd's current offset. Advances
-    /// the offset by the returned slice's length. Returns an empty
-    /// vector at EOF (caller maps to CELL_OK with bytes_read = 0).
-    ///
-    /// A 0-byte read does not move the offset, even when the offset
-    /// is past EOF; only bytes actually returned advance the cursor.
+    /// Read up to `max_bytes` from the fd's current offset, advancing
+    /// the offset by the returned length. Returns an empty vector at
+    /// EOF. A 0-byte read does not move the offset; only bytes
+    /// actually returned advance the cursor.
     pub fn read_at(&mut self, fd: u32, max_bytes: usize) -> Result<Vec<u8>, FsError> {
         let entry = self.open_fds.get_mut(&fd).ok_or(FsError::UnknownFd)?;
         let blob = self.blobs.get(&entry.path).ok_or(FsError::UnknownPath)?;
         let len = blob.bytes.len();
-        // Clamp first, THEN cast: `entry.offset as usize` would
-        // truncate on 32-bit hosts and a guest seek to >4 GiB
-        // would wrap to a small in-range value.
+        // Clamp before the usize cast: a 32-bit host would otherwise
+        // wrap a >4 GiB offset to a small in-range value.
         let start = entry.offset.min(len as u64) as usize;
-        // `len.saturating_sub(start)` is the bytes available; min
-        // with `max_bytes` gives the bytes to take. Computing this
-        // way avoids the `start + max_bytes` overflow that would
-        // panic in debug or wrap in release for huge `max_bytes`.
+        // `start + max_bytes` would overflow for huge `max_bytes`.
         let take = max_bytes.min(len.saturating_sub(start));
         let slice = blob.bytes[start..start + take].to_vec();
-        // Advance only by bytes actually returned, NOT by clamping
-        // to EOF. A 0-byte read after seeking past EOF must leave
-        // the offset where the seek left it.
         entry.offset = entry.offset.saturating_add(take as u64);
         Ok(slice)
     }
 
-    /// Update the fd's offset. Returns the new absolute position.
-    /// Seeks landing outside `[0, u64::MAX]` return
-    /// [`FsError::SeekOutOfRange`]; seeks past EOF (but within u64)
-    /// are allowed and the next read returns empty.
+    /// Returns the new absolute position. Seeks past EOF (but within
+    /// u64) are allowed; the next read returns empty.
+    ///
+    /// # Errors
+    ///
+    /// - [`FsError::SeekOutOfRange`] when the result lands outside
+    ///   `[0, u64::MAX]` (negative-past-zero or positive overflow).
     pub fn seek(&mut self, fd: u32, offset: i64, whence: SeekWhence) -> Result<u64, FsError> {
         let entry = self.open_fds.get_mut(&fd).ok_or(FsError::UnknownFd)?;
         let size = self
@@ -496,8 +413,6 @@ impl FsStore {
             SeekWhence::End => size as i128,
         };
         let new_pos = base + offset as i128;
-        // Symmetric range check: catch BOTH the negative-past-zero
-        // case AND the positive-overflow case before the u64 cast.
         if !(0..=u64::MAX as i128).contains(&new_pos) {
             return Err(FsError::SeekOutOfRange);
         }
@@ -506,7 +421,7 @@ impl FsStore {
         Ok(new_pos)
     }
 
-    /// Path-based stat. `Err(UnknownPath)` if no blob is registered.
+    /// Path-based stat.
     pub fn stat_path(&self, path: &str) -> Result<FileStat, FsError> {
         let blob = self.blobs.get(path).ok_or(FsError::UnknownPath)?;
         Ok(FileStat {
@@ -524,9 +439,8 @@ impl FsStore {
     }
 
     /// Allocate a fresh directory fd over `entries`. The dispatcher
-    /// is responsible for ordering (lexicographic byte order) and
-    /// for filtering symlinks / special files; FsStore stores
-    /// whatever it is handed and walks it in registration order.
+    /// owns ordering and filtering; FsStore walks entries in the
+    /// order it received them.
     ///
     /// # Errors
     ///
@@ -534,9 +448,6 @@ impl FsStore {
     ///   the full `u32::MAX - FD_BASE` fd range.
     pub fn open_dir(&mut self, entries: Vec<DirEntry>) -> Result<u32, FsError> {
         let fd = self.next_fd;
-        // Advance first; on overflow, leave the table untouched so
-        // an exhausted allocator surfaces as EMFILE without having
-        // silently recycled a live fd.
         let next = fd.checked_add(1).ok_or(FsError::FdExhausted)?;
         self.next_fd = next;
         self.open_dirs
@@ -545,8 +456,7 @@ impl FsStore {
     }
 
     /// Return the next directory entry for `fd` and advance the
-    /// cursor by one. Returns `Ok(None)` at EOF (the dispatcher
-    /// maps that to a zero-bytes-written `nread` per the PS3 ABI).
+    /// cursor. Returns `Ok(None)` at EOF.
     ///
     /// # Errors
     ///
@@ -561,14 +471,10 @@ impl FsStore {
         Ok(Some(entry))
     }
 
-    /// Release a directory fd. Subsequent reads / closes return
-    /// `UnknownDir`.
-    ///
     /// # Errors
     ///
-    /// - [`FsError::UnknownDir`] if `fd` is not an open directory
-    ///   (including the case where `fd` is a file fd; mixing the
-    ///   two is a guest bug worth surfacing).
+    /// - [`FsError::UnknownDir`] if `fd` is not an open directory,
+    ///   including the case where `fd` is a file fd.
     pub fn close_dir(&mut self, fd: u32) -> Result<(), FsError> {
         self.open_dirs
             .remove(&fd)
@@ -576,18 +482,12 @@ impl FsStore {
             .ok_or(FsError::UnknownDir)
     }
 
-    /// Determinism-stable hash of every observable piece of state:
-    /// content hashes per registered path, current fd offsets, and
-    /// the next-fd counter. Folded into [`crate::host::Lv2Host::state_hash`].
+    /// Determinism-stable hash of content per path, current fd
+    /// offsets, and the next-fd counter. Folded into
+    /// [`crate::host::Lv2Host::state_hash`].
     ///
-    /// Iteration order over `blobs` and `open_fds` is the
-    /// [`BTreeMap`] sort order on the key. Swapping either map for
-    /// a [`HashMap`] would make this hash insertion-order sensitive
-    /// and two runs could disagree. The
-    /// `state_hash_is_insertion_order_independent` test pins this
-    /// for blobs.
-    ///
-    /// [`HashMap`]: std::collections::HashMap
+    /// Iteration uses [`BTreeMap`] sort order; the
+    /// `state_hash_is_insertion_order_independent` test pins this.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = Fnv1aHasher::new();
         hasher.write(&(self.blobs.len() as u64).to_le_bytes());
@@ -672,7 +572,6 @@ mod tests {
     fn read_clamps_to_remaining_bytes() {
         let mut s = fs_with("/foo", b"abc");
         let fd = s.open_fd("/foo").unwrap();
-        // Asking for more than available -> truncated to remaining.
         assert_eq!(s.read_at(fd, 100).unwrap(), b"abc");
     }
 
@@ -698,7 +597,7 @@ mod tests {
     fn seek_cur_advances_relative() {
         let mut s = fs_with("/foo", b"abcdef");
         let fd = s.open_fd("/foo").unwrap();
-        let _ = s.read_at(fd, 2).unwrap(); // offset = 2
+        let _ = s.read_at(fd, 2).unwrap();
         assert_eq!(s.seek(fd, 2, SeekWhence::Cur).unwrap(), 4);
         assert_eq!(s.read_at(fd, 10).unwrap(), b"ef");
     }
@@ -777,11 +676,6 @@ mod tests {
 
     #[test]
     fn state_hash_is_insertion_order_independent() {
-        // Six paths -- forward vs reverse insertion. Two paths is a
-        // coin flip on whether a hypothetical `HashMap` swap iterates
-        // them in the same order; six is enough that a diverging
-        // iteration order would almost certainly produce a different
-        // hash, so the test would fail loudly under a map-type swap.
         let paths = ["/z", "/a", "/m", "/b", "/y", "/c"];
         let mut a = FsStore::new();
         for p in paths {
@@ -802,24 +696,16 @@ mod tests {
             s.register_blob("/foo".into(), b"second".to_vec()),
             Err(FsError::PathAlreadyRegistered),
         );
-        // Original bytes preserved on rejection.
         assert_eq!(s.lookup_blob("/foo"), Some(b"first".as_slice()));
     }
 
     #[test]
     fn fd_exhaustion_at_u32_max_is_explicit() {
         let mut s = fs_with("/foo", b"x");
-        // Fast-forward the allocator to one before the cap. The
-        // checked_add bumps next_fd to u32::MAX after this open; the
-        // following open finds nothing to hand out and errors. Last
-        // valid fd is u32::MAX - 1 (u32::MAX is the exhaustion
-        // sentinel).
         s.next_fd = u32::MAX - 1;
         let last = s.open_fd("/foo").unwrap();
         assert_eq!(last, u32::MAX - 1);
         assert_eq!(s.open_fd("/foo"), Err(FsError::FdExhausted));
-        // Failed open did NOT silently insert; the table still has
-        // exactly one entry.
         assert_eq!(s.open_fd_count(), 1);
     }
 
@@ -828,8 +714,6 @@ mod tests {
         let mut s = fs_with("/foo", b"x");
         let h0 = s.state_hash();
         assert_eq!(s.open_fd("/missing"), Err(FsError::UnknownPath));
-        // Failed open must not advance next_fd; otherwise UnknownPath
-        // probes from the guest leak fd id space.
         assert_eq!(s.state_hash(), h0);
     }
 
@@ -837,17 +721,12 @@ mod tests {
     fn seek_positive_overflow_returns_out_of_range() {
         let mut s = fs_with("/foo", b"x");
         let fd = s.open_fd("/foo").unwrap();
-        // Stage offset at u64::MAX via two compounding Cur seeks.
-        // i64::MAX + i64::MAX = u64::MAX - 1; one more Cur step
-        // hits u64::MAX exactly; the next overflows.
         assert_eq!(
             s.seek(fd, i64::MAX, SeekWhence::Set).unwrap(),
             i64::MAX as u64
         );
         assert_eq!(s.seek(fd, i64::MAX, SeekWhence::Cur).unwrap(), u64::MAX - 1);
         assert_eq!(s.seek(fd, 1, SeekWhence::Cur).unwrap(), u64::MAX);
-        // One more positive step would wrap: must surface as
-        // SeekOutOfRange, not silent wrap to small offset.
         assert_eq!(s.seek(fd, 1, SeekWhence::Cur), Err(FsError::SeekOutOfRange));
     }
 
@@ -857,7 +736,6 @@ mod tests {
         let fd = s.open_fd("/foo").unwrap();
         s.seek(fd, 100, SeekWhence::Set).unwrap();
         let _ = s.read_at(fd, 0).unwrap();
-        // Offset stayed at 100 -- a 0-byte read does not clamp to EOF.
         assert_eq!(s.seek(fd, 0, SeekWhence::Cur).unwrap(), 100);
     }
 
@@ -865,8 +743,6 @@ mod tests {
     fn huge_max_bytes_does_not_overflow_usize() {
         let mut s = fs_with("/foo", b"abc");
         let fd = s.open_fd("/foo").unwrap();
-        // usize::MAX would have panicked / wrapped under the
-        // pre-fix `start + max_bytes` calculation.
         assert_eq!(s.read_at(fd, usize::MAX).unwrap(), b"abc");
     }
 
@@ -899,10 +775,9 @@ mod tests {
         assert_ne!(h0, h1);
         s.close_fd(fd).unwrap();
         let h2 = s.state_hash();
-        // Open-then-close advances next_fd, so h2 differs from h0
-        // even though no fds remain open. Pin: never-recycle property.
+        // Pins the never-recycle property: next_fd advance is
+        // observable even after the fd is closed.
         assert_ne!(h0, h2);
-        // And differs from the open state too.
         assert_ne!(h1, h2);
     }
 
@@ -934,8 +809,6 @@ mod tests {
         s.register_blob("/foo".into(), b"x".to_vec()).unwrap();
         let file_fd = s.open_fd("/foo").unwrap();
         let dir_fd = s.open_dir(vec![dir_entry("a", false)]).unwrap();
-        // File and dir fds share the monotonic allocator: dir fd
-        // must be the next id, never coincide with a live file fd.
         assert_eq!(dir_fd, file_fd + 1);
         assert_ne!(dir_fd, file_fd);
     }
@@ -957,7 +830,6 @@ mod tests {
         let e2 = s.read_dir_entry(fd).unwrap().unwrap();
         assert_eq!(e2.name, "sub");
         assert!(e2.is_directory);
-        // EOF -- subsequent reads return None without erroring.
         assert!(s.read_dir_entry(fd).unwrap().is_none());
         assert!(s.read_dir_entry(fd).unwrap().is_none());
     }
@@ -965,9 +837,7 @@ mod tests {
     #[test]
     fn read_dir_entry_unknown_fd_is_unknown_dir() {
         let mut s = FsStore::new();
-        // Unallocated fd.
         assert_eq!(s.read_dir_entry(0xDEAD_BEEF), Err(FsError::UnknownDir));
-        // File fd is not a dir fd: type-mixing must surface.
         s.register_blob("/foo".into(), b"x".to_vec()).unwrap();
         let file_fd = s.open_fd("/foo").unwrap();
         assert_eq!(s.read_dir_entry(file_fd), Err(FsError::UnknownDir));
@@ -987,8 +857,6 @@ mod tests {
         let mut s = FsStore::new();
         s.register_blob("/foo".into(), b"x".to_vec()).unwrap();
         let file_fd = s.open_fd("/foo").unwrap();
-        // close_dir on a file fd is the type-mixing case; the
-        // file fd stays open so close_fd still works on it.
         assert_eq!(s.close_dir(file_fd), Err(FsError::UnknownDir));
         assert!(s.close_fd(file_fd).is_ok());
     }
@@ -997,8 +865,6 @@ mod tests {
     fn close_fd_rejects_dir_fd() {
         let mut s = FsStore::new();
         let dir_fd = s.open_dir(vec![dir_entry("a", false)]).unwrap();
-        // Symmetric: close_fd on a dir fd surfaces UnknownFd; the
-        // dir fd is still releasable via close_dir.
         assert_eq!(s.close_fd(dir_fd), Err(FsError::UnknownFd));
         assert!(s.close_dir(dir_fd).is_ok());
     }
@@ -1025,8 +891,6 @@ mod tests {
         s.close_dir(fd).unwrap();
         let h3 = s.state_hash();
         assert_ne!(h2, h3);
-        // Open then close advances next_fd, so h3 also differs
-        // from h0 (never-recycle property is observable).
         assert_ne!(h0, h3);
     }
 }
@@ -1093,8 +957,6 @@ mod mount_tests {
     #[test]
     fn resolve_handles_exact_prefix_match() {
         let t = standard_table();
-        // Bare prefix without trailing slash maps to the host
-        // root itself (used by opendir on a mount root).
         assert_eq!(
             t.resolve("/app_home").unwrap(),
             Some(PathBuf::from("/host/app"))
@@ -1112,8 +974,6 @@ mod mount_tests {
 
     #[test]
     fn resolve_partial_prefix_does_not_match() {
-        // "/app_homeFoo" is NOT under /app_home; the match is
-        // delimited by `/`, not byte prefix.
         let t = standard_table();
         assert_eq!(t.resolve("/app_homeFoo").unwrap(), None);
         assert_eq!(t.resolve("/app_homeFoo/bar").unwrap(), None);
@@ -1121,12 +981,9 @@ mod mount_tests {
 
     #[test]
     fn resolve_picks_first_matching_mount() {
-        // Registration order wins; the table is FIFO.
         let mut t = FsMountTable::new();
         t.add(FsMount::new("/app_home", PathBuf::from("/first")).unwrap())
             .unwrap();
-        // Pretend a second mount could match (e.g. a more
-        // generic root); this guards future re-orderings.
         t.add(FsMount::new("/app_home_alt", PathBuf::from("/second")).unwrap())
             .unwrap();
         assert_eq!(
@@ -1184,7 +1041,6 @@ mod mount_tests {
 
     #[test]
     fn resolve_root_mount_with_subpath() {
-        // Mount at "/" is unusual but supported (HostRoot opt-in).
         let mut t = FsMountTable::new();
         t.add(FsMount::new("/", PathBuf::from("/host")).unwrap())
             .unwrap();

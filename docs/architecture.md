@@ -408,7 +408,7 @@ and super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`,
 The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
 4 relocation types, and the PS3 PRX import-table parser.
-`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (61 entries) is the
+`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (60 entries) is the
 dispatch surface the runtime PRX binder consults; the larger
 NID lookup database (~5,327 entries) lives in
 `cellgov_ps3_abi::nid` and is accessed via `lookup(nid)` for
@@ -490,8 +490,11 @@ Classified into typed `Lv2Request` variants:
 | `sys_fs_read`                     | 802              | Reads up to `nbytes` from `fd`'s offset into the guest buffer; advances the offset by the actual count returned and writes that count (u64 BE) to `nread_out_ptr`. Error precedence: bad nread out-pointer (8-byte aligned + writable) -> CELL_EFAULT; unknown fd -> CELL_EBADF; bad buffer (when nbytes > 0) -> CELL_EFAULT BEFORE the offset advances (POSIX semantics). |
 | `sys_fs_close`                    | 804              | FsStore-tracked fds are removed from the open-fd table so subsequent reads / fstats return EBADF. Unknown fds return CELL_OK to preserve legacy whitelist `fclose` behaviour; this is a deliberate divergence pending whitelist retirement. `fs_fd_count` is left unchanged across close (real-PS3 invariant pinned by ps3autotests `sys_process`). |
 | `sys_fs_lseek`                    | 818              | SEEK_SET / CUR / END semantics via `FsStore::seek`. Errors: CELL_EFAULT (bad pos out-pointer), CELL_EINVAL (whence out of `{0,1,2}` or seek out of `[0, u64::MAX]`), CELL_EBADF (unknown fd). Failed seek leaves the offset unchanged. |
-| `sys_fs_fstat`                    | 805              | Writes a 56-byte `CellFsStat` to `stat_out_ptr` (8-byte aligned). `mode = S_IFREG \| 0o444`, `size` from the backing blob, `blksize = 4096`, all timestamp fields zero (oracle has no host time). CELL_EBADF on unknown fd. |
-| `sys_fs_stat`                     | 815              | Path-keyed variant of `sys_fs_fstat`; CELL_FS_ENOENT for unregistered paths. Same struct shape. |
+| `sys_fs_opendir`                  | 805              | Snapshots the manifest- or mount-resolved directory entries into a per-fd `BTreeMap<u32, DirEntry>`, sorted lexicographically by byte order. Returns a fresh dir-fd via `FsStore::open_dir`. CELL_FS_ENOENT for unknown paths (including mount-resolve misses). |
+| `sys_fs_readdir`                  | 806              | Yields the next `CellFsDirent` (258 bytes) at the dir-fd's cursor; writes the entry size to the caller's out-pointer (0 on end-of-directory). CELL_EBADF on unknown fd. |
+| `sys_fs_closedir`                 | 807              | Drops the dir-fd's snapshot and entry table. CELL_EBADF on unknown fd. |
+| `sys_fs_stat`                     | 808              | Path-keyed variant of `sys_fs_fstat`; manifest miss probes the mount table before returning CELL_FS_ENOENT. Same struct shape. |
+| `sys_fs_fstat`                    | 809              | Writes a 56-byte `CellFsStat` to `stat_out_ptr` (8-byte aligned). `mode = S_IFREG \| 0o444`, `size` from the backing blob, `blksize = 4096`, all timestamp fields zero (oracle has no host time). CELL_EBADF on unknown fd. |
 
 ### PPU thread lifecycle
 
@@ -576,26 +579,44 @@ capped by `cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP`
 caller, mapped to `CELL_EAGAIN`.
 
 The first consumer is `cellSaveDataAutoLoad` / `AutoLoad2`. The
-primitive also unblocks deferred Phase 21 (flip-handler) and
-Phase 26 (SPURS exception-handler / event-helper) consumers; both
-remain stubbed pending a title that surfaces them.
+primitive also unblocks deferred flip-handler and SPURS
+exception-handler / event-helper consumers; both remain stubbed
+pending a title that surfaces them.
 
 ### In-memory filesystem
 
 The read-side `sys_fs_*` surface routes through an in-memory
-blob store at `Lv2Host::fs_store` (`cellgov_lv2::fs::FsStore`).
-Two `BTreeMap`s back it: a path-keyed blob table
-(`String -> Vec<u8>` plus a pre-computed FNV-1a content hash)
-and a per-fd open-file table (`u32 -> { path, offset }`). Fds
-come from a monotonic `next_fd` counter starting at
-`0x4000_0001`; fds are never recycled within a boot, so a stale
-fd can never alias a fresh one. State-hash inclusion folds the
-content hashes, fd offsets, and the next-fd counter so a content
-swap, an unintended re-allocation, or a bogus extra read shows
-up as a state-hash divergence in post-step assertions. Single-
-write blob registration: a second `register_blob` at the same
-path is rejected with `FsError::PathAlreadyRegistered`, so
-content cannot mutate under an open fd.
+blob store at `Lv2Host::fs_store` (`cellgov_lv2::fs_store::FsStore`).
+Three `BTreeMap`s back it: a path-keyed blob table
+(`String -> Vec<u8>` plus a pre-computed FNV-1a content hash),
+a per-fd open-file table (`u32 -> { path, offset }`), and a
+per-fd open-directory table (`u32 -> { entries, cursor }`). Fds
+come from a monotonic `next_fd` counter starting at `3`, matching
+real PS3's `lv2_fs_object::id_base = 3` so the kernel-returned fd
+fits in the `[3, 255)` range that PSL1GHT's inline `cellFsRead`
+wrapper truncates on. Fds are never recycled within a boot, so a
+stale fd can never alias a fresh one. State-hash inclusion folds
+the content hashes, fd offsets, directory cursors, and the next-fd
+counter so a content swap, an unintended re-allocation, or a
+bogus extra read shows up as a state-hash divergence in post-step
+assertions. Single-write blob registration: a second
+`register_blob` at the same path is rejected with
+`FsError::PathAlreadyRegistered`, so content cannot mutate under
+an open fd.
+
+Path resolution beyond the manifest goes through `FsMountTable`:
+per-title mounts (default `/app_home`) carry a host-side root and
+a read-only flag. `dispatch_fs_open` / `dispatch_fs_stat` first
+probe the manifest blob set; on a miss, they call
+`try_mount_resolve_and_cache`, which resolves the guest path
+against the mount's host root, reads the bytes on demand, and
+inserts them into `FsStore` for the rest of the boot. The mount
+resolver canonicalizes path segments (drops empty / `.` segments,
+rejects `..`) so titles cannot escape their mount. Directory
+iteration (`sys_fs_opendir` / `_readdir` / `_closedir`) snapshots
+the directory contents at opendir time in lexicographic byte
+order, so subsequent reads are deterministic across host file
+system order.
 
 Per-title content lands in the store at boot via the manifest
 schema in `docs/titles/<content-id>.toml`:
@@ -1298,45 +1319,41 @@ Common boot sequence (per-title numbers below):
 
 **flOw (NPUA80001).** 140 HLE bindings; liblv2 surfaces 161
 exports. Boot completes CRT0, video-out probe, GCM init, PSSG
-(renderer init), and the SPURS surface initialization; the
-title's manifest enables `[rsx] mirror = true` so its
-put-pointer store at `0xC0000040` lands in the FIFO cursor
-instead of faulting, and the commit-boundary FIFO advance pass
-drains the queued NV4097 / NV406E commands so the GPU semaphore
-writebacks satisfy PSSG's polled completion flag. The SPURS
-PPU surface is faithfully implemented: CellSpurs control block
-populated, workload registry honors AddWorkload calls,
-ready-count and contention controls track per-wid state, info
-snapshots reflect live fields. The four `sys_lwmutex_*` HLE
-arms route through the LV2 lwmutex surface so contended locks
-produce real Blocked / Runnable transitions; the embedded
-`sleep_queue_id` is allocated from the LV2 lwmutex table at
-create time so subsequent lock / unlock / trylock / destroy
-resolve through the same id space. The read-side `sys_fs_*`
-surface is wired through the in-memory FS layer; flOw's manifest
-registers `Data/{Resources/first.xml,Local/Localization.xml,Classes/Classes.xml}`
-which the EBOOT-adjacent USRDIR auto-discovery serves with the
-real bytes already on disk next to `EBOOT.elf`.
+(renderer init), the SPURS PPU-surface initialization, full
+resource enumeration via the mount-table-backed cellFs (every
+file under `/app_home/Data/**` -- localization XML, classes,
+texture archives -- resolved against the title's content dir),
+and the worker-thread callback dispatch for
+`cellSaveDataAutoLoad`. The title's manifest enables
+`[rsx] mirror = true` so its put-pointer store at `0xC0000040`
+lands in the FIFO cursor instead of faulting. The four
+`sys_lwmutex_*` HLE arms route through the LV2 lwmutex surface
+so contended locks produce real Blocked / Runnable transitions;
+the embedded `sleep_queue_id` is allocated from the LV2 lwmutex
+table at create time so subsequent lock / unlock / trylock /
+destroy resolve through the same id space.
 
-Boot reaches a deterministic FAULT at step 100,047 (DECODE_ERROR
-at `PC=0x00000004`, raw=`0x00000000`). The driver is a NULL bcctr
-from flOw's `CFlOwApplication::m_InitEntityHierarchy` running in
-a child PPU thread (r1 in the child-stack region, r2 = 0). The
-prior frontier at step 85,291 / 86,527 was the same NULL-bcctr
-shape but in the post-AutoLoad return path because callbacks
-never fired; the worker-thread callback-dispatch primitive +
-`cellSaveDataAutoLoad`'s real funcStat dispatch unblocked that
-surface (TTY trace shows `cb_data_status_load`'s populated
-StatGet dump and the title taking the no-save branch with
-`CELL_SAVEDATA_ERROR_NODATA = 0x8002b40b`). The new fault opens
-a Stage C investigation against an uninitialized vtable slot the
-entity-init code dereferences -- most likely a sysmodule whose
-`module_start` was supposed to install the slot via
-`cellSysmoduleLoadModule`. Cross-runner refresh at the new
-frontier produced an outcome-class mismatch (CellGov FAULT vs
-RPCS3 Completed-at-first-sys_tty_write); a CellGov-side
-"stop-at-Nth-sys_tty_write" checkpoint flag is the prerequisite
-for byte-level comparable cross-runner output.
+Boot now reaches a deterministic MAX_STEPS at step 195,312 with
+the primary thread spinning on a PSL1GHT pthread coordination
+pattern (`sys_lwmutex_lock` / `_unlock` / `sys_ppu_thread_get_id`
+in a tight 3-syscall loop on HLE-import trampolines) and a sibling
+PPU thread (`entry=0x9b0a0` in flOw's `.text`) parked on
+`sys_event_queue_receive`. The sibling is a dedicated event-
+handler thread that exits when an event arrives from a port
+named `0xd1ed1ed1` (PSL1GHT's `OPD_EXIT` magic) -- it drains
+SPURS-workload completion events during normal operation.
+CellGov's cellSpurs HLE maintains the user-space SPURS data
+structures but never starts an SPU thread group, so no completion
+events ever fire and the handler thread waits forever. This is
+the post-Phase-30 frontier; the prior `m_InitEntityHierarchy`
+NULL-bcctr fault was cleared by the kernel-fd range fix
+(`FsStore::FD_BASE = 3`) which let PSL1GHT's inline `cellFsRead`
+wrapper see the fds in its expected `[3, 255)` range instead of
+the prior `0x4000_000N` allocation that the wrapper's narrow load
+truncated to `0x4` (mistaken for an unknown fd, returning EBADF
+on every resource-loading read). The kernel-fd fix combined with
+the cellFs mount-table fallback let flOw load all assets and
+clear the entity-init dereference chain.
 
 **Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
 modules (15 with dedicated CellGov handling); the harness uses a

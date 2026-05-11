@@ -1,6 +1,3 @@
-//! Open-flag invariants and the FS_TTY_SINK_PATHS / Lv2Host::new
-//! cross-site contract.
-
 use cellgov_ps3_abi::sys_fs::CELL_FS_O_CREAT;
 
 use crate::host::Lv2Host;

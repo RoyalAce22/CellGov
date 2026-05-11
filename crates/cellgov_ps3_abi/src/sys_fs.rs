@@ -73,8 +73,5 @@ pub const CELL_FS_TYPE_UNKNOWN: u8 = 0;
 pub const CELL_FS_TYPE_DIRECTORY: u8 = 1;
 /// `d_type` for a regular file.
 pub const CELL_FS_TYPE_REGULAR: u8 = 2;
-/// `d_type` for a symlink. CellGov does not enumerate symlinks
-/// (the read-only oracle has no use for them); this constant
-/// exists so future code that wants to represent them has a
-/// named home rather than a magic literal.
+/// `d_type` for a symlink.
 pub const CELL_FS_TYPE_SYMLINK: u8 = 3;

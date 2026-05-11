@@ -5745,10 +5745,6 @@ mod tests {
 
     #[test]
     fn classification_covers_user_listed_misclassifications() {
-        // Witnesses for the catch-all "noop-safe" gap that prompted the
-        // explicit-arm pass: heap allocators must be UnsafeToStub, heap
-        // creation and lwmutex creation must be Stateful, _sys_free is
-        // genuinely NoopSafe.
         assert_eq!(stub_classification(0x35168520), StubClass::UnsafeToStub); // _sys_heap_malloc
         assert_eq!(stub_classification(0x44265c08), StubClass::UnsafeToStub); // _sys_heap_memalign
         assert_eq!(stub_classification(0xb2fcf2c8), StubClass::Stateful); // _sys_heap_create_heap
@@ -5758,9 +5754,6 @@ mod tests {
 
     #[test]
     fn lookup_returns_empty_module_for_libstdcxx_symbols() {
-        // _Feraise has no PS3 module; lookup must signal that via "" so
-        // the caller can render it as "name-known, module-unknown"
-        // rather than treating the empty module as a real module name.
         let (m, n) = lookup(0x003395d9).expect("_Feraise is in nid_db");
         assert_eq!(m, "");
         assert_eq!(n, "_Feraise");

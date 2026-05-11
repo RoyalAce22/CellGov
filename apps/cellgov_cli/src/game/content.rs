@@ -1,14 +1,9 @@
 //! Boot-time content provider.
 //!
-//! Reads each entry of a [`ContentManifest`] off the host filesystem
-//! and registers the bytes in [`Lv2Host::fs_store_mut`] under the
-//! manifest's `guest_path`. Called once during [`super::boot::prepare`]
-//! before the title's step loop runs, so any `sys_fs_open` the title
-//! issues already sees the manifest-driven blobs.
-//!
-//! A missing host file is a startup error rather than a silent
-//! ENOENT-at-runtime, per the design doc: a misconfigured manifest
-//! must not look like a runtime FS bug.
+//! Reads each [`ContentManifest`] entry off the host filesystem and
+//! registers the bytes in [`Lv2Host::fs_store_mut`] under the manifest's
+//! `guest_path`. A missing host file is a startup error rather than a
+//! silent ENOENT-at-runtime.
 
 use std::path::{Path, PathBuf};
 
@@ -17,26 +12,19 @@ use cellgov_lv2::{FsError, Lv2Host};
 use super::manifest::ContentManifest;
 
 /// Why [`register_content_blobs`] could not register a manifest's
-/// content. Distinct variants let the caller surface the right
-/// startup-error message: "fixture missing on disk" reads
-/// differently than "two manifest entries collide on the same
-/// guest path".
+/// content.
 #[derive(Debug)]
 pub enum ContentRegisterError {
-    /// Reading the host file failed (most commonly NotFound, but
-    /// permission-denied / IO errors land here too).
+    /// Reading the host file failed (NotFound, permission-denied, IO).
     HostFileRead {
         guest_path: String,
         host_path: PathBuf,
         source: std::io::Error,
-        /// Name of the override env var that selected the base,
-        /// when applicable. Surfaced in the Display impl so a
-        /// developer who forgot to drop the file into their
-        /// override dir sees the env var name in the error.
+        /// Override env var name, surfaced in Display so a developer
+        /// sees which env they need to fix.
         override_env: Option<String>,
     },
-    /// Two manifest entries name the same `guest_path`. Single-write
-    /// blob registration forbids this.
+    /// Two manifest entries name the same `guest_path`.
     DuplicateGuestPath {
         guest_path: String,
         first_host_path: PathBuf,
@@ -87,8 +75,8 @@ impl std::fmt::Display for ContentRegisterError {
 
 impl std::error::Error for ContentRegisterError {}
 
-/// Resolve `path` against `base` if it is relative; absolute paths
-/// pass through unchanged. Pure path arithmetic, no I/O.
+/// Resolve `path` against `base` if relative; absolute passes through.
+/// Pure path arithmetic, no I/O.
 fn resolve(base: &Path, path: &str) -> PathBuf {
     let p = Path::new(path);
     if p.is_absolute() {
@@ -98,29 +86,19 @@ fn resolve(base: &Path, path: &str) -> PathBuf {
     }
 }
 
-/// Source of the resolved content base directory. Reported back
-/// so the boot banner can announce where blobs were sourced from.
+/// Source of the resolved content base directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContentBaseSource {
-    /// Manifest's checked-in `base` (synthetic stubs, default).
+    /// Manifest's checked-in `base`.
     Manifest,
-    /// EBOOT-relative USRDIR auto-discovered: every manifest entry
-    /// resolved to an existing file under the title's USRDIR
-    /// alongside the EBOOT being loaded. `path` carries the USRDIR
-    /// for the boot banner.
+    /// EBOOT-relative USRDIR auto-discovered.
     Usrdir { path: PathBuf },
-    /// Override env var named by `[content] override_base_env` was
-    /// set; `env` carries the var name so the boot banner can echo
-    /// it.
+    /// Override env var named by `[content] override_base_env`.
     Override { env: String },
 }
 
-/// Whether every manifest entry resolves to an existing regular
-/// file under `base`. Used as the soft probe for the USRDIR
-/// resolution tier: a partial USRDIR (some files missing) falls
-/// through to the manifest's checked-in base rather than failing
-/// loud, so a developer with an incomplete local install still
-/// gets the synthetic-stub fallback.
+/// Soft probe for the USRDIR tier: a partial USRDIR falls through to
+/// the manifest's checked-in base.
 fn all_entries_resolve_under(base: &Path, manifest: &ContentManifest) -> bool {
     manifest.files.iter().all(|entry| {
         let p = resolve(base, &entry.host_path);
@@ -159,8 +137,8 @@ pub fn register_content_blobs(
     host: &mut Lv2Host,
 ) -> Result<ContentBaseSource, ContentRegisterError> {
     let (base, source) = if let Some(p) = override_base {
-        // Even an override path may be relative; resolve against
-        // workspace_root for parity with the manifest path.
+        // Relative override resolves against workspace_root for parity
+        // with the manifest path.
         (
             resolve(workspace_root, &p.to_string_lossy()),
             ContentBaseSource::Override {
@@ -200,11 +178,8 @@ pub fn register_content_blobs(
             .fs_store_mut()
             .register_blob(entry.guest_path.clone(), bytes)
         {
-            // A duplicate guest_path within a single manifest is a
-            // schema error, not a runtime issue. Surface the host
-            // sources so the developer sees both colliding entries.
-            // Find the prior host source by looking back through the
-            // already-processed entries.
+            // Surface both colliding host sources so the developer
+            // sees the duplicate at a glance.
             let prior = manifest
                 .files
                 .iter()
@@ -222,14 +197,10 @@ pub fn register_content_blobs(
 }
 
 /// Look up the override base directory selected by a manifest's
-/// `override_base_env`. Returns `Some(path)` when the env var is
-/// set to a non-empty value; `None` otherwise (empty string,
-/// absent variable, or no `override_base_env` declared). The
-/// boot pipeline calls this and forwards the result to
-/// [`register_content_blobs`].
+/// `override_base_env`. Returns `Some(path)` when the env var is set
+/// non-empty; `None` otherwise.
 ///
-/// Read from `getter` rather than directly from `std::env::var` so
-/// tests can run without mutating process environment state.
+/// Takes a `getter` so tests can run without mutating process env.
 pub fn override_base_from_env<F>(manifest: &ContentManifest, mut getter: F) -> Option<PathBuf>
 where
     F: FnMut(&str) -> Option<String>,
@@ -247,7 +218,6 @@ mod tests {
     use super::*;
     use crate::game::manifest::ContentEntry;
 
-    /// Tempdir with the same RAII shape as the manifest tests.
     struct TmpDir(PathBuf);
     impl TmpDir {
         fn new(name: &str) -> Self {
@@ -274,11 +244,8 @@ mod tests {
         std::fs::write(path, bytes).unwrap();
     }
 
-    /// `Lv2Host::new()` registers a small set of synthetic blobs
-    /// (PARAM.SFO, output.txt) so PSL1GHT-test ELFs can probe for
-    /// presence without a manifest. Tests that assert
-    /// `register_content_blobs` populated a specific count must do
-    /// so as a delta against this baseline.
+    /// Baseline blob count from `Lv2Host::new()`; tests assert deltas
+    /// against this rather than absolute counts.
     fn pristine_blob_count() -> usize {
         Lv2Host::new().fs_store().blob_count()
     }
@@ -321,7 +288,6 @@ mod tests {
     #[test]
     fn missing_host_file_is_a_startup_error() {
         let tmp = TmpDir::new("missing");
-        // Note: no file written.
         let manifest = ContentManifest {
             base: tmp.path().to_string_lossy().into_owned(),
             override_base_env: None,
@@ -347,8 +313,6 @@ mod tests {
             }
             other => panic!("expected HostFileRead, got {other}"),
         }
-        // FsStore gains nothing on failure (delta-based to ignore
-        // synthetic blobs registered by Lv2Host::new()).
         assert_eq!(host.fs_store().blob_count(), pristine_blob_count());
     }
 
@@ -421,9 +385,6 @@ mod tests {
             }
             other => panic!("expected DuplicateGuestPath, got {other}"),
         }
-        // The first entry registered before the failure; the
-        // second's bytes did not land. Delta-based to ignore
-        // synthetic blobs registered by Lv2Host::new().
         assert_eq!(host.fs_store().blob_count(), pristine_blob_count() + 1);
         assert_eq!(host.fs_store().lookup_blob("/dup"), Some(b"a".as_slice()));
     }
@@ -445,8 +406,6 @@ mod tests {
     fn override_base_replaces_manifest_base_when_files_present() {
         let synthetic = TmpDir::new("synth_overridden");
         let real = TmpDir::new("real_override");
-        // Synthetic has stub content; real override has different
-        // bytes; the override path wins.
         write_file(&synthetic.path().join("first.xml"), b"SYNTH");
         write_file(&real.path().join("first.xml"), b"REAL");
         let manifest = ContentManifest {
@@ -476,9 +435,6 @@ mod tests {
 
     #[test]
     fn override_base_missing_file_error_carries_env_name() {
-        // The override env is set, but the override directory does
-        // not contain the named file. The diagnostic must name the
-        // env var so the developer knows which knob to fix.
         let real = TmpDir::new("real_missing");
         let manifest = ContentManifest {
             base: "tests/fixtures/synthetic_unused".to_string(),
@@ -497,8 +453,6 @@ mod tests {
             &mut host,
         )
         .expect_err("missing override file must surface");
-        // Render before destructuring so the Display impl can be
-        // checked alongside the structural assertion.
         let msg = format!("{}", err);
         match err {
             ContentRegisterError::HostFileRead {
@@ -528,8 +482,6 @@ mod tests {
 
     #[test]
     fn override_base_lookup_returns_none_for_empty_string() {
-        // An exported-but-empty value is treated as unset; useful
-        // for shell scripts that conditionally export.
         let manifest = ContentManifest {
             base: "fx".to_string(),
             override_base_env: Some("MAYBE_EMPTY".to_string()),
@@ -558,8 +510,6 @@ mod tests {
 
     #[test]
     fn override_base_lookup_returns_none_when_no_env_var_declared() {
-        // Manifest without override_base_env never reads any env;
-        // the getter must not be called for an undeclared override.
         let manifest = ContentManifest {
             base: "fx".to_string(),
             override_base_env: None,
@@ -571,10 +521,7 @@ mod tests {
         assert!(result.is_none());
     }
 
-    /// Build a manifest matching flOw's three-XML layout for the
-    /// USRDIR-resolution tests. host_path values are nested under
-    /// Data/.../X.xml so a real USRDIR (with the same nesting)
-    /// resolves to existing files.
+    /// Manifest matching flOw's two-XML layout for USRDIR-resolution tests.
     fn flow_shaped_manifest(synthetic_base: &Path) -> ContentManifest {
         ContentManifest {
             base: synthetic_base.to_string_lossy().into_owned(),
@@ -596,8 +543,6 @@ mod tests {
     fn usrdir_with_all_files_present_takes_priority_over_manifest_base() {
         let synth = TmpDir::new("usrdir_synth");
         let usrdir = TmpDir::new("usrdir_real");
-        // Both bases populated; USRDIR has different bytes so we
-        // can prove which one was used.
         write_file(&synth.path().join("Data/Resources/first.xml"), b"SYN");
         write_file(&synth.path().join("Data/Local/Localization.xml"), b"SYN");
         write_file(&usrdir.path().join("Data/Resources/first.xml"), b"USR");
@@ -623,15 +568,10 @@ mod tests {
 
     #[test]
     fn partial_usrdir_falls_through_to_manifest_base() {
-        // Pin the soft-probe contract: if even ONE manifest entry
-        // is missing under USRDIR, the whole tier is skipped and
-        // the synthetic base wins. A developer with an incomplete
-        // local install still gets a working test run.
         let synth = TmpDir::new("partial_synth");
         let usrdir = TmpDir::new("partial_usrdir");
         write_file(&synth.path().join("Data/Resources/first.xml"), b"SYN");
         write_file(&synth.path().join("Data/Local/Localization.xml"), b"SYN");
-        // Only one of the two files exists in USRDIR.
         write_file(&usrdir.path().join("Data/Resources/first.xml"), b"USR");
         let manifest = flow_shaped_manifest(synth.path());
         let mut host = Lv2Host::new();
@@ -648,7 +588,6 @@ mod tests {
             ContentBaseSource::Manifest,
             "partial USRDIR must fall through to manifest base",
         );
-        // Both blobs sourced from the synthetic base.
         assert_eq!(
             host.fs_store()
                 .lookup_blob("/app_home/Data/Resources/first.xml"),
@@ -658,9 +597,6 @@ mod tests {
 
     #[test]
     fn override_takes_priority_over_usrdir() {
-        // Pin the resolution order: env override beats USRDIR even
-        // when USRDIR has all the files. The override is the
-        // explicit "I know what I am doing" channel.
         let synth = TmpDir::new("prio_synth");
         let usrdir = TmpDir::new("prio_usrdir");
         let override_dir = TmpDir::new("prio_override");
@@ -696,8 +632,6 @@ mod tests {
 
     #[test]
     fn usrdir_none_uses_manifest_base() {
-        // No EBOOT-relative USRDIR available (e.g., bench-boot
-        // without a real EBOOT path); the manifest base wins.
         let synth = TmpDir::new("usrdir_none_synth");
         write_file(&synth.path().join("Data/Resources/first.xml"), b"SYN");
         write_file(&synth.path().join("Data/Local/Localization.xml"), b"SYN");

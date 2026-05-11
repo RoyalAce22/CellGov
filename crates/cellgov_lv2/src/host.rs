@@ -124,12 +124,9 @@ pub struct Lv2Host {
     /// feeds the `SYS_FS_FD_OBJECT` (0x73) query.
     fs_fd_count: u32,
     fs_store: FsStore,
-    /// Read-only mount table used by the dispatch layer to resolve
-    /// guest paths that are not pre-registered in [`Self::fs_store`].
-    /// Populated at boot from the title manifest (`[fs.app_home]`,
-    /// `[fs.dev_hdd0]`, etc.) and treated as immutable thereafter.
-    /// Empty by default so titles without mount configuration retain
-    /// the strict-blob behavior.
+    /// Consulted by the dispatch layer when a guest path is not
+    /// pre-registered in [`Self::fs_store`]. Boot populates from the
+    /// title manifest; immutable thereafter.
     fs_mounts: FsMountTable,
     /// Per-thread count of distinct lwmutexes held. Recursive
     /// re-acquires of the same lwmutex do not bump the count; only
@@ -169,24 +166,13 @@ impl Lv2Host {
 
     /// Construct an empty host with default tables and id allocators.
     ///
-    /// Two synthetic zero-byte blobs (`/app_home/PARAM.SFO` and
-    /// `/app_home/output.txt`) are registered up front so the
-    /// PSL1GHT-test ELF surface (probe-for-PARAM.SFO, fopen +
-    /// fwrite + fclose to output.txt) routes through the same
-    /// allocator as manifest content. This eliminates the
-    /// historical "whitelist allocator vs FsStore allocator"
-    /// fd-aliasing risk: a single fd-issuing source means a stale
-    /// fd cannot collide with a fresh one issued by the other
-    /// route.
-    ///
     /// # Cross-module contract
     ///
     /// `/app_home/output.txt` also appears in
     /// `host::fs::FS_TTY_SINK_PATHS`; the open-flag validator
-    /// exempts it from the EROFS branch so PSL1GHT-test fixtures'
-    /// `fopen("...", "w")` keeps working. The two sites must
-    /// agree; the `tty_sink_paths_are_pre_registered` regression
-    /// in `host::fs::tests` pins this.
+    /// exempts it from the EROFS branch. The two sites must agree;
+    /// the `tty_sink_paths_are_pre_registered` regression in
+    /// `host::fs::tests` pins this.
     pub fn new() -> Self {
         let mut fs_store = FsStore::new();
         fs_store
@@ -238,14 +224,13 @@ impl Lv2Host {
         &mut self.fs_store
     }
 
-    /// Read-only view of the mount table consulted when a guest path
-    /// is not registered as a blob.
+    /// Read-only view of the mount table.
     pub fn fs_mounts(&self) -> &FsMountTable {
         &self.fs_mounts
     }
 
-    /// Mutable view of the mount table. Boot wires real mounts via
-    /// this getter; the dispatch layer treats the table as read-only.
+    /// Boot wires real mounts here; the dispatch layer treats the
+    /// table as read-only.
     pub fn fs_mounts_mut(&mut self) -> &mut FsMountTable {
         &mut self.fs_mounts
     }

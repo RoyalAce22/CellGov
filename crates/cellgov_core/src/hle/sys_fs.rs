@@ -37,10 +37,6 @@ pub(crate) fn dispatch(
 }
 
 /// `cellFsOpen(const char *path, s32 oflag, s32 *fd, const void *arg, u64 size)`.
-///
-/// `mode = 0` matches the only currently-supported path (read-only
-/// opens of manifest-registered blobs); the LV2 arm rejects `O_CREAT`
-/// with ENOENT regardless of the `arg`/`size` extension bytes.
 fn fs_open(runtime: &mut Runtime, source: UnitId, args: &[u64; 9]) {
     let path_ptr = args[1] as u32;
     let flags = args[2] as u32;

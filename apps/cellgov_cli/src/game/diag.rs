@@ -10,7 +10,6 @@ use cellgov_core::{CommitError, Runtime};
 use cellgov_exec::UnitStatus;
 use cellgov_lv2::PpuThreadState;
 
-/// Render `bytes` as ASCII, replacing non-printable bytes with `.`.
 pub(super) fn ascii_safe_preview(bytes: &[u8]) -> String {
     bytes
         .iter()
@@ -24,15 +23,12 @@ pub(super) fn ascii_safe_preview(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// Fetch a 32-bit big-endian instruction word at `pc` from any mapped region.
 pub(super) fn fetch_raw_at(rt: &Runtime, pc: u64) -> Option<u32> {
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(pc), 4)?;
     let b = rt.memory().read(range)?;
     Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-/// Label the region containing `[addr, addr+len)`, or `"<unmapped>"`.
-///
 /// `len` must match the caller's read width; querying with `len=1` mislabels
 /// a PC 1-3 bytes before a boundary as mapped when a 4-byte fetch would fail.
 pub(super) fn region_label_at(rt: &Runtime, addr: u64, len: u64) -> &'static str {
@@ -43,8 +39,6 @@ pub(super) fn region_label_at(rt: &Runtime, addr: u64, len: u64) -> &'static str
 }
 
 /// Longest readable prefix of `[buf, buf+len)` via O(log len) probes.
-///
-/// Returns `None` when the first byte is unmapped.
 pub(super) fn longest_readable_prefix(
     mem: &cellgov_mem::GuestMemory,
     buf: u64,
@@ -74,7 +68,6 @@ pub(super) fn longest_readable_prefix(
     Some((lo, bytes))
 }
 
-/// Resolve an HLE index into `"{module}::{func}"`.
 pub(super) fn format_hle_idx(idx: u32, hle_bindings: &[cellgov_ppu::prx::HleBinding]) -> String {
     match hle_bindings.get(idx as usize) {
         Some(b) => match cellgov_ps3_abi::nid::lookup(b.nid) {
@@ -104,8 +97,7 @@ pub(super) fn print_trace_line(
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) {
     if let Some(pc) = result.local_diagnostics.pc {
-        // The zero word decodes as a valid PPC instruction, so unwrap_or(0)
-        // would conflate unmapped fetches with a real zero word.
+        // Zero decodes as a valid PPC instruction; distinguish unmapped from a real zero word.
         let raw = fetch_raw_at(rt, pc)
             .map(|w| format!("0x{w:08x}"))
             .unwrap_or_else(|| "<unmapped>".to_string());
@@ -229,11 +221,7 @@ pub(super) fn format_fault(
     out
 }
 
-/// Walk every GPR (plus LR / CTR) and dump 64 bytes at any value
-/// that looks like a plausible guest pointer (>= 0x1000). Region-
-/// aware so stack pointers do not get dropped. Mirrors the
-/// pre-refactor output of the DEBUG_BREAK arm so DEBUG_BREAK output
-/// is unchanged; other fault kinds gain the same context.
+/// Dump 64 bytes at any GPR/LR/CTR value >= 0x1000 (plausible pointer).
 pub(super) fn append_register_pointer_dump(
     out: &mut String,
     rt: &Runtime,
@@ -275,8 +263,6 @@ fn append_register_pointer_line(out: &mut String, rt: &Runtime, label: &str, val
     };
     let region = region_label_at(rt, val, 64);
     out.push_str(&format!("\n    [{label}=0x{val:016x} ({region})]: "));
-    // Count the non-printable tail so an ASCII header on a
-    // binary blob does not erase the rest.
     let printable = slice
         .iter()
         .take_while(|&&b| (0x20..0x7f).contains(&b))
@@ -295,11 +281,7 @@ fn append_register_pointer_line(out: &mut String, rt: &Runtime, label: &str, val
     }
 }
 
-/// Render explicit (addr, len) ranges from `--dump-mem-fault` as a
-/// hex+ASCII block. Each range gets a region label and a 16-byte-
-/// per-line layout. Unmapped or partial-straddle ranges emit the
-/// longest readable prefix plus a tail-unmapped count so the
-/// reviewer sees at least the bytes that are reachable.
+/// Render `--dump-mem-fault` ranges as hex+ASCII; partial-straddle ranges emit the readable prefix.
 pub(super) fn append_explicit_mem_dump(out: &mut String, rt: &Runtime, ranges: &[(u64, u64)]) {
     if ranges.is_empty() {
         return;
@@ -337,8 +319,7 @@ pub(super) fn append_explicit_mem_dump(out: &mut String, rt: &Runtime, ranges: &
     }
 }
 
-/// Render `bytes` as 16-byte rows of hex + ASCII, with offsets
-/// relative to `base_addr`. Mirrors `xxd -g1` style.
+/// `xxd -g1` style: 16-byte rows of hex + ASCII, offsets relative to `base_addr`.
 fn append_hex_ascii_block(out: &mut String, base_addr: u64, bytes: &[u8]) {
     for (row, chunk) in bytes.chunks(16).enumerate() {
         let row_addr = base_addr + (row as u64) * 16;
@@ -346,7 +327,6 @@ fn append_hex_ascii_block(out: &mut String, base_addr: u64, bytes: &[u8]) {
         for b in chunk {
             out.push_str(&format!(" {b:02x}"));
         }
-        // Pad short final row so the ASCII column lines up.
         for _ in chunk.len()..16 {
             out.push_str("   ");
         }
@@ -362,7 +342,6 @@ fn append_hex_ascii_block(out: &mut String, base_addr: u64, bytes: &[u8]) {
     }
 }
 
-/// Format a commit-pipeline rejection mirroring `format_fault`'s shape.
 pub(super) fn format_commit_fault(
     rt: &Runtime,
     err: &CommitError,
@@ -375,8 +354,6 @@ pub(super) fn format_commit_fault(
     out
 }
 
-/// Format a deadlock diagnostic naming each `Blocked` unit's reason.
-///
 /// Walks `rt.registry()` rather than `Lv2Host::ppu_threads()` so SPU units
 /// blocked on mailbox-receive or DMA wait surface alongside PPU threads.
 pub(super) fn format_deadlock(
@@ -418,7 +395,7 @@ pub(super) fn format_deadlock(
         }
     }
     if blocked_count == 0 {
-        // AllBlocked fires only when a unit is Blocked; an empty walk means
+        // AllBlocked fires only when a unit is Blocked; empty walk means
         // registry status and effective_status disagreed.
         out.push_str("\n  (no Blocked units in registry; AllBlocked may have raced a wake)");
     } else {
@@ -428,7 +405,6 @@ pub(super) fn format_deadlock(
     out
 }
 
-/// Append a stale-exit note to a non-`ProcessExit` terminal diagnostic.
 pub(super) fn append_orphan_exit_info(
     diagnostic: &mut String,
     last_exit: Option<&ProcessExitInfo>,
@@ -442,7 +418,6 @@ pub(super) fn append_orphan_exit_info(
     ));
 }
 
-/// Append a "last N PCs" block with decoded mnemonics.
 fn append_pc_ring_with_decode(
     out: &mut String,
     rt: &Runtime,
@@ -470,7 +445,6 @@ fn append_pc_ring_with_decode(
     }
 }
 
-/// Append a "last N PCs" block without decoding (no memory probes).
 fn append_pc_ring_terse(out: &mut String, pc_ring: &[u64; PC_RING_SIZE], pc_cursor: &RingCursor) {
     let filled = pc_cursor.filled();
     if filled == 0 {
@@ -506,7 +480,6 @@ fn append_syscall_ring(
     }
 }
 
-/// Format the diagnostic artifact for a guest-initiated `sys_process_exit`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn format_process_exit(
     exit: &ProcessExitInfo,
@@ -539,8 +512,7 @@ pub(super) fn format_process_exit(
                 out.push_str(&format!("{b:02x} "));
             }
         }
-        // Tag all-non-printable so a dots-only line is not mistaken for
-        // a stripped ASCII message.
+        // Tag all-non-printable so a dots-only line is not mistaken for stripped ASCII.
         let preview = ascii_safe_preview(&tty.raw_bytes);
         let all_nonprintable =
             !tty.raw_bytes.is_empty() && tty.raw_bytes.iter().all(|&b| !(0x20..=0x7E).contains(&b));
@@ -559,7 +531,6 @@ pub(super) fn format_process_exit(
     out
 }
 
-/// Format the MAX_STEPS diagnostic.
 pub(super) fn format_max_steps(
     rt: &Runtime,
     steps: usize,
@@ -576,13 +547,7 @@ pub(super) fn format_max_steps(
     out
 }
 
-/// Append a one-line-per-unit summary: id, effective status, and the
-/// LV2 PPU thread state if the unit has one. Used by terminal diagnostics
-/// where the question is "what is each unit doing at the moment we
-/// stopped?". Distinguishes scheduler-starvation (units exist but are
-/// Runnable yet not progressing), kernel-block-deadlock (all Blocked on
-/// a wake source that never fires), and "title is spinning in userspace
-/// on a polled flag" (only one unit, Runnable, no LV2 block state).
+/// One line per unit: id, effective status, LV2 PPU thread state if any.
 pub(super) fn append_unit_state_summary(out: &mut String, rt: &Runtime) {
     let ids: Vec<_> = rt.registry().ids().collect();
     out.push_str(&format!("\n  units: {} total", ids.len()));
@@ -677,7 +642,6 @@ pub(super) fn print_hle_summary(
 }
 
 pub(super) fn print_insn_coverage(insn_coverage: &std::collections::BTreeMap<&'static str, usize>) {
-    // Empty output must distinguish "no executions" from "feature disabled".
     if insn_coverage.is_empty() {
         println!("instruction_coverage: none");
         return;
@@ -690,10 +654,8 @@ pub(super) fn print_insn_coverage(insn_coverage: &std::collections::BTreeMap<&'s
     }
 }
 
-/// Report per-unit and summed instruction-shadow hit/miss counts.
-///
-/// A rising miss count on a single unit means its fetches moved outside
-/// the shadowed region (PRX bodies above 0x10000000).
+/// A rising per-unit miss count means its fetches moved outside the
+/// shadowed region (PRX bodies above 0x10000000).
 pub(super) fn print_shadow_stats(rt: &mut Runtime) {
     let mut per_unit: Vec<(u64, u64, u64)> = Vec::new();
     let mut total_hits = 0u64;
@@ -799,8 +761,6 @@ mod tests {
     #[test]
     fn longest_readable_prefix_finds_region_boundary_exactly() {
         let rt = rt_with_layout();
-        // Pinned precondition: a fixture that maps 0x4000_0000 would let
-        // this test pass without exercising the boundary.
         assert!(
             longest_readable_prefix(rt.memory(), 0x4000_0000, 1).is_none(),
             "precondition: nothing readable at main's end"
@@ -956,11 +916,10 @@ mod tests {
     #[test]
     fn append_register_pointer_dump_emits_for_pointer_gprs_and_skips_zero() {
         let mut rt = rt_with_layout();
-        // Plant ASCII so the dump prints printable text rather than hex.
         write_bytes(&mut rt, 0x0010_0000, b"hello world\x00\x00\x00\x00\x00");
         let mut regs = fault_regs();
-        regs.gprs[3] = 0x0010_0000; // valid pointer
-        regs.gprs[4] = 0; // skipped: < 0x1000
+        regs.gprs[3] = 0x0010_0000;
+        regs.gprs[4] = 0;
 
         let mut out = String::new();
         append_register_pointer_dump(&mut out, &rt, &regs);
@@ -974,7 +933,7 @@ mod tests {
     fn append_register_pointer_dump_handles_unmapped_pointer() {
         let rt = rt_with_layout();
         let mut regs = fault_regs();
-        regs.gprs[7] = 0x8000_0000; // unmapped per rt_with_layout
+        regs.gprs[7] = 0x8000_0000;
 
         let mut out = String::new();
         append_register_pointer_dump(&mut out, &rt, &regs);
@@ -999,7 +958,7 @@ mod tests {
     #[test]
     fn append_register_pointer_dump_emits_nothing_when_no_pointers() {
         let rt = rt_with_layout();
-        let regs = fault_regs(); // all zero
+        let regs = fault_regs();
 
         let mut out = String::new();
         append_register_pointer_dump(&mut out, &rt, &regs);
@@ -1030,7 +989,6 @@ mod tests {
     #[test]
     fn append_explicit_mem_dump_invalid_range_does_not_panic() {
         let rt = rt_with_layout();
-        // u64::MAX address with non-zero len: ByteRange::new should reject.
         let ranges = [(u64::MAX, 64u64)];
 
         let mut out = String::new();
@@ -1042,28 +1000,23 @@ mod tests {
     #[test]
     fn append_explicit_mem_dump_unmapped_falls_back_to_unmapped_marker() {
         let rt = rt_with_layout();
-        let ranges = [(0x8000_0000u64, 64u64)]; // unmapped
+        let ranges = [(0x8000_0000u64, 64u64)];
 
         let mut out = String::new();
         append_explicit_mem_dump(&mut out, &rt, &ranges);
-        // The address itself is not in any region, so region_label is
-        // "<unmapped>" and the read fails. longest_readable_prefix
-        // also fails (no readable byte at the address).
         assert!(out.contains("<unmapped>"), "got {out}");
     }
 
     #[test]
     fn append_explicit_mem_dump_partial_straddle_shows_prefix() {
         let mut rt = rt_with_layout();
-        // Lay bytes that straddle the end of the "main" region.
         let buf = 0x4000_0000 - 8;
         write_bytes(&mut rt, buf, &[0x55; 8]);
-        let ranges = [(buf, 32u64)]; // straddles the boundary
+        let ranges = [(buf, 32u64)];
 
         let mut out = String::new();
         append_explicit_mem_dump(&mut out, &rt, &ranges);
         assert!(out.contains("8/32 bytes (tail 24 unmapped)"), "got {out}");
-        // Hex row shows the 8 readable bytes.
         assert!(out.contains("55 55 55 55 55 55 55 55"), "got {out}");
     }
 

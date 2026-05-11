@@ -1,6 +1,4 @@
 //! Boot preparation shared between `run-game` and `bench-boot`.
-//!
-//! Both step loops see a byte-identical setup.
 
 use std::time::{Duration, Instant};
 
@@ -56,11 +54,9 @@ pub(super) struct PrepareOptions<'a> {
     pub module_start_max_steps: usize,
     pub print_banner: bool,
     pub profile_pairs: bool,
-    /// Echoed in the banner; the value the caller will pass to `Runtime::new`.
     pub runtime_max_steps: usize,
     /// Applied after `module_start`, before `Runtime` construction.
     pub patch_bytes: &'a [(u64, u8)],
-    /// Guest addresses to dump 32 bytes at after patches.
     pub dump_mem_boot_addrs: &'a [u64],
     pub budget_override: Option<u64>,
 }
@@ -84,9 +80,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     } else {
         cellgov_mem::RegionAccess::ReservedZeroReadable
     };
-    // `[rsx] mirror = true` needs the region writable so the PPU's
-    // put-pointer store lands in memory for the writeback mirror to
-    // route into the runtime cursor. `--strict-reserved` overrides.
+    // `[rsx] mirror = true` needs the region writable so the put-pointer
+    // store lands in memory; `--strict-reserved` overrides.
     let rsx_access = if opts.strict_reserved {
         reserved_access
     } else if opts.title.rsx_mirror() {
@@ -125,10 +120,9 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     ])
     .unwrap_or_else(|e| die(&format!("failed to build guest memory layout: {e:?}")));
 
-    // Callback-return trampoline must live inside the base-0 region: the
-    // PPU's instruction-fetch path only reads from region 0, so the body
-    // sits in the pre-user-heap scratch zone (`0..0x10000`) rather than
-    // the natural high-memory address.
+    // Callback-return trampoline must live inside region 0: instruction
+    // fetch only reads from region 0, so the body sits in the pre-user-heap
+    // scratch zone (`0..0x10000`).
     {
         use cellgov_ps3_abi::callback_dispatch::{
             CALLBACK_RETURN_CODE_ADDR, CALLBACK_RETURN_OPD_ADDR, TRAMPOLINE_CODE_BYTES,
@@ -244,7 +238,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
 
     pre_init_tls(&elf_data, &mut mem);
 
-    // Unset and empty both mean "do not skip".
     let skip_ms = match std::env::var("CELLGOV_SKIP_MODULE_START") {
         Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => true,
@@ -260,7 +253,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             mem = run_module_start(mem, info, &hle_bindings, opts.module_start_max_steps);
         }
         (Some(_), true) => {
-            // stderr keeps the banner pure-stdout across run-game and bench-boot.
             eprintln!("module_start: skipped (CELLGOV_SKIP_MODULE_START set)");
         }
         (None, true) => {
@@ -278,9 +270,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let trampoline_area_end = match opd_override {
         Some(opd_base) => (opd_base as usize) + HLE_PS3_SPEC_EXTENT as usize,
         None => {
-            // Legacy24: one 24-byte stub per binding at tramp_base.
-            // alloc_floor must clear this span or user-memory allocations
-            // overwrite HLE stubs.
+            // alloc_floor must clear the 24-byte-per-stub span or user-memory
+            // allocations overwrite HLE stubs.
             let end = (tramp_base as usize) + hle_bindings.len() * 24;
             (end + 0xFFFF) & !0xFFFF
         }
@@ -396,9 +387,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    // Code outside region 0 (PRX bodies above 0x10000000) falls through
-    // to decode-on-fetch; Runtime stepping invalidates stale slots via
-    // `invalidate_code` on each committed SharedWriteIntent.
     let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, mem.as_bytes());
 
     let mut rt = Runtime::new(mem, Budget::new(step_budget), adjusted_max_steps);
@@ -422,9 +410,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
         unit
     });
-    // Sync primitives (lwmutex, mutex, semaphore, event queue, cond)
-    // resolve the caller's PpuThreadId from its UnitId via this table;
-    // without the seed entry the primary's sync calls fall back to ESRCH.
+    // Without this seed entry the primary's sync calls fall back to ESRCH:
+    // sync primitives resolve PpuThreadId from UnitId via this table.
     rt.lv2_host_mut().seed_primary_ppu_thread(
         primary_unit_id,
         cellgov_lv2::PpuThreadAttrs {
@@ -437,8 +424,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         },
     );
 
-    // Child threads have no predecoded shadow and fall through to
-    // decode-on-fetch.
     rt.set_ppu_factory(|id, init| {
         let mut unit = PpuExecutionUnit::new(id);
         {
@@ -447,9 +432,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             state.gpr[1] = init.stack_top;
             state.gpr[2] = init.entry_toc;
             state.gpr[3] = init.arg;
-            // extra_args populates r4..=r10 for callback-dispatch workers
-            // carrying the parent's r3..=r10 capture; zero on the
-            // sys_ppu_thread_create path.
+            // extra_args populates r4..=r10 for callback-dispatch workers;
+            // zero on the sys_ppu_thread_create path.
             for (i, value) in init.extra_args.iter().enumerate() {
                 state.gpr[4 + i] = *value;
             }
@@ -473,8 +457,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         Box::new(unit)
     });
 
-    // Resolve `sysSpuImageOpen("/app_home/spu_main.elf")` against a
-    // sibling of the EBOOT.
+    // Resolve `sysSpuImageOpen("/app_home/spu_main.elf")` against an
+    // EBOOT sibling.
     if let Some(parent) = std::path::Path::new(opts.elf_path).parent() {
         let spu_candidate = parent.join("spu_main.elf");
         if spu_candidate.exists() {
@@ -495,22 +479,17 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    // Registration runs before any title-side step so the first
-    // sys_fs_open already sees the blobs. Missing host files surface as
-    // a startup error rather than a runtime FS fault.
-    //
     // Resolution priority (high to low):
-    //   1. override env var (gitignored developer-local content)
+    //   1. override env var
     //   2. EBOOT-relative USRDIR auto-discovery
-    //   3. manifest's checked-in base (synthetic stubs)
+    //   3. manifest's checked-in base
     if let Some(content) = opts.title.content.as_ref() {
         let workspace_root = std::env::current_dir()
             .unwrap_or_else(|e| die(&format!("cannot read CWD for content base resolution: {e}")));
         let override_base =
             super::content::override_base_from_env(content, |name| std::env::var(name).ok());
-        // EBOOT path resolves under USRDIR/<title>/EBOOT.elf; its parent
-        // is the title's USRDIR. Manifest host paths are USRDIR-relative
-        // (e.g. `Data/Resources/first.xml`).
+        // EBOOT parent is the title's USRDIR; manifest host paths are
+        // USRDIR-relative.
         let usrdir_base = std::path::Path::new(opts.elf_path).parent();
         let registration_result = super::content::register_content_blobs(
             content,
@@ -549,11 +528,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    // Mount-table registration runs after content blobs so the
-    // dispatch layer sees them in the same order they appear in the
-    // manifest, and so a mount can shadow nothing in FsStore that
-    // [content] just registered (the FsStore path-existence check
-    // wins over mount resolution).
+    // Mount registration follows content so the FsStore path-existence
+    // check wins over mount resolution for blobs registered above.
     if !opts.title.mounts.is_empty() {
         let workspace_root = std::env::current_dir()
             .unwrap_or_else(|e| die(&format!("cannot read CWD for mount path resolution: {e}")));

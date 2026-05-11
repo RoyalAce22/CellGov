@@ -1,7 +1,3 @@
-//! `dispatch_fs_fstat` and `dispatch_fs_stat` tests, including the
-//! cross-handler `fstat_after_close` (close + fstat, primary: fstat
-//! return).
-
 use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::host::Lv2Host;
@@ -30,18 +26,16 @@ fn fstat_returns_size_mode_and_blksize() {
 
 #[test]
 fn fstat_pads_and_zeros_deterministic_fields() {
-    // Pin the determinism contract: every CellFsStat byte that
-    // is not size / mode / blksize is zero. The atime / mtime /
-    // ctime fields and the gid->atime padding all read as
-    // zeros so two stats of the same blob hash bit-identical.
+    // Determinism invariant: every CellFsStat byte that is not
+    // size / mode / blksize is zero so two stats of the same
+    // blob hash bit-identical. Layout: uid 4..8, gid 8..12,
+    // pad 12..16, atime 16..24, mtime 24..32, ctime 32..40.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"x".to_vec())
         .unwrap();
     let (fd, rt) = open_registered(&mut host, b"/foo");
     let blob = extract_stat(run(&mut host, &rt, fs_fstat(fd, 0x40000)), 0x40000);
-    // uid offset 4..8, gid offset 8..12, pad 12..16, atime 16..24,
-    // mtime 24..32, ctime 32..40 -- all zero.
     for byte in &blob[4..40] {
         assert_eq!(*byte, 0, "deterministic-field byte must be zero");
     }
@@ -60,9 +54,7 @@ fn fstat_unknown_fd_returns_ebadf_with_no_effects() {
 
 #[test]
 fn fstat_after_close_returns_ebadf() {
-    // Cross-handler test (close + fstat): primary is the
-    // fstat return. The "closed fd is unusable for fstat"
-    // invariant the design doc calls out.
+    // Invariant: a closed fd is unusable for fstat.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"x".to_vec())
@@ -83,8 +75,6 @@ fn fstat_misaligned_stat_out_ptr_returns_efault() {
         .register_blob("/foo".into(), b"x".to_vec())
         .unwrap();
     let (fd, rt) = open_registered(&mut host, b"/foo");
-    // 8-byte alignment required for the embedded u64 fields;
-    // 0x40001 is misaligned.
     assert_immediate(
         run(&mut host, &rt, fs_fstat(fd, 0x40001)),
         errno::CELL_EFAULT.code,
@@ -122,7 +112,6 @@ fn stat_known_path_returns_size() {
 
 #[test]
 fn stat_unknown_path_returns_enoent_with_no_effects() {
-    // No blob registered at /missing.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x100000).write(0x10000, b"/missing\0");
     assert_immediate(
@@ -156,9 +145,8 @@ fn stat_path_without_null_terminator_returns_einval() {
 
 #[test]
 fn stat_misaligned_stat_out_ptr_returns_efault_before_path_check() {
-    // Pin precedence: bad stat_out_ptr is checked before path
-    // validation. A probe with bad out-pointer and bad path
-    // sees EFAULT, not EINVAL/ENOENT.
+    // Precedence invariant: bad stat_out_ptr is checked before
+    // path validation.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
@@ -170,9 +158,8 @@ fn stat_misaligned_stat_out_ptr_returns_efault_before_path_check() {
 
 #[test]
 fn stat_path_at_region_end_succeeds() {
-    // Sibling of `path::path_at_region_end_succeeds` for stat.
-    // The path-scan window in `dispatch_fs_stat` must reach
-    // the inclusive last byte of the mapped region.
+    // Invariant: the path-scan window in `dispatch_fs_stat`
+    // reaches the inclusive last byte of the mapped region.
     let mut host = Lv2Host::new();
     let path_ptr: u32 = 0x40000 - 5;
     let rt = PathRuntime::empty(0x100000).write(path_ptr, b"/foo\0");
@@ -195,8 +182,8 @@ fn fs_stat_resolves_via_mount_and_reports_size() {
 
     let dispatch = run(&mut host, &rt, fs_stat(0x10000, 0x20000));
     let blob = extract_stat(dispatch, 0x20000);
-    // size lives at offset 40 in CellFsStat (mode/uid/gid/pad
-    // + 3 x 8-byte timestamps).
+    // CellFsStat size offset: 40 (mode + uid + gid + pad + 3
+    // x 8-byte timestamps).
     let size = u64::from_be_bytes(blob[40..48].try_into().unwrap());
     assert_eq!(size, 10);
 }

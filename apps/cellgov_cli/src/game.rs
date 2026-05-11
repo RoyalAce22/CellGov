@@ -1,6 +1,4 @@
-//! `run-game` subcommand: boot a PS3 ELF and drive the PPU step loop
-//! to fault, stall, or step limit, emitting diagnostics and optional
-//! observation artifacts.
+//! `run-game` subcommand: boot a PS3 ELF and drive the PPU step loop.
 
 mod bench;
 mod boot;
@@ -27,7 +25,6 @@ use step_loop::{
     SYSCALL_RING_SIZE,
 };
 
-/// One `run-game` invocation; fields map 1:1 onto the CLI flags.
 pub struct RunGameOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
@@ -98,8 +95,6 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         rt.set_gcm_rsx_checkpoint(true);
     }
     if title.rsx_mirror() {
-        // Mirror requires control_addr at MMIO sentinel 0xC000_0040;
-        // the HLE-heap path leaves cursor.put unobserved.
         rt.set_gcm_rsx_checkpoint(true);
         rt.set_rsx_mirror_writes(true);
     }
@@ -155,8 +150,7 @@ pub fn run_game(opts: RunGameOptions<'_>) {
 
     println!("outcome: {outcome}");
     println!("steps: {steps}");
-    // Must match the base set in boot::prepare; bytes-used reports
-    // cumulative leak under leak-on-free.
+    // Must match the base set in boot::prepare.
     const HLE_HEAP_BASE: u32 = 0x10410000;
     let watermark = rt.hle_heap_watermark();
     let used = watermark.saturating_sub(HLE_HEAP_BASE);
@@ -192,8 +186,6 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         println!();
         println!("profile:");
         if t_loop.is_zero() {
-            // pct() returns 0.0 on zero total; distinguish that from
-            // a real all-zero profile.
             println!(
                 "  WARN: t_loop is zero (clock resolution artifact or instantaneous loop); percentages below are meaningless"
             );
@@ -268,8 +260,6 @@ pub fn run_game(opts: RunGameOptions<'_>) {
     }
 
     if let Some(path) = save_observation {
-        // Exit non-zero so the cross-runner diff does not silently
-        // treat a missing file as an empty observation.
         if let Err(msg) = save_boot_observation(
             path,
             &elf_data,

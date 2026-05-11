@@ -22,14 +22,14 @@ use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
 /// Typed LV2 syscall request decoded from PPU `sc` GPR state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lv2Request {
-    /// sys_spu_image_open syscall.
+    /// `sys_spu_image_open`.
     SpuImageOpen {
         /// In: SPU image struct pointer.
         img_ptr: u32,
         /// In: path string pointer.
         path_ptr: u32,
     },
-    /// sys_spu_thread_group_create syscall.
+    /// `sys_spu_thread_group_create`.
     SpuThreadGroupCreate {
         /// Out: group id.
         id_ptr: u32,
@@ -40,7 +40,7 @@ pub enum Lv2Request {
         /// In: attribute struct pointer.
         attr_ptr: u32,
     },
-    /// sys_spu_thread_initialize syscall.
+    /// `sys_spu_thread_initialize`.
     SpuThreadInitialize {
         /// Out: thread id.
         thread_ptr: u32,
@@ -55,12 +55,12 @@ pub enum Lv2Request {
         /// In: argument struct pointer.
         arg_ptr: u32,
     },
-    /// sys_spu_thread_group_start syscall.
+    /// `sys_spu_thread_group_start`.
     SpuThreadGroupStart {
         /// In: group id.
         group_id: u32,
     },
-    /// sys_spu_thread_group_join syscall.
+    /// `sys_spu_thread_group_join`.
     SpuThreadGroupJoin {
         /// In: group id.
         group_id: u32,
@@ -84,7 +84,7 @@ pub enum Lv2Request {
         /// Out: nanoseconds.
         nsec_ptr: u32,
     },
-    /// sys_time_get_timebase_frequency syscall.
+    /// `sys_time_get_timebase_frequency`.
     TimeGetTimebaseFrequency,
     /// CellGov is host-time-free, so both slots receive zero
     /// (UTC, no DST).
@@ -94,7 +94,7 @@ pub enum Lv2Request {
         /// Out: summer-time flag.
         summer_time_ptr: u32,
     },
-    /// sys_tty_write syscall.
+    /// `sys_tty_write`.
     TtyWrite {
         /// In: tty fd.
         fd: u32,
@@ -105,21 +105,21 @@ pub enum Lv2Request {
         /// Out: bytes written.
         nwritten_ptr: u32,
     },
-    /// sys_spu_thread_write_in_mbox syscall.
+    /// `sys_spu_thread_write_in_mbox`.
     SpuThreadWriteMb {
         /// In: target SPU thread id.
         thread_id: u32,
         /// In: mailbox value.
         value: u32,
     },
-    /// sys_mutex_create syscall.
+    /// `sys_mutex_create`.
     MutexCreate {
         /// Out: mutex id.
         id_ptr: u32,
         /// In: attribute struct pointer.
         attr_ptr: u32,
     },
-    /// sys_mutex_destroy syscall.
+    /// `sys_mutex_destroy`.
     MutexDestroy {
         /// In: mutex id to free.
         mutex_id: u32,
@@ -131,17 +131,17 @@ pub enum Lv2Request {
         /// In: timeout in microseconds.
         timeout: u64,
     },
-    /// sys_mutex_unlock syscall.
+    /// `sys_mutex_unlock`.
     MutexUnlock {
         /// In: mutex id.
         mutex_id: u32,
     },
-    /// sys_mutex_trylock syscall.
+    /// `sys_mutex_trylock`.
     MutexTryLock {
         /// In: mutex id.
         mutex_id: u32,
     },
-    /// sys_semaphore_create syscall.
+    /// `sys_semaphore_create`.
     SemaphoreCreate {
         /// Out: semaphore id.
         id_ptr: u32,
@@ -152,7 +152,7 @@ pub enum Lv2Request {
         /// In: max value.
         max: i32,
     },
-    /// sys_semaphore_destroy syscall.
+    /// `sys_semaphore_destroy`.
     SemaphoreDestroy {
         /// In: semaphore id.
         id: u32,
@@ -171,19 +171,19 @@ pub enum Lv2Request {
         /// In: post count.
         val: i32,
     },
-    /// sys_semaphore_trywait syscall.
+    /// `sys_semaphore_trywait`.
     SemaphoreTryWait {
         /// In: semaphore id.
         id: u32,
     },
-    /// sys_semaphore_get_value syscall.
+    /// `sys_semaphore_get_value`.
     SemaphoreGetValue {
         /// In: semaphore id.
         id: u32,
         /// Out: current value.
         out_ptr: u32,
     },
-    /// sys_event_queue_create syscall.
+    /// `sys_event_queue_create`.
     EventQueueCreate {
         /// Out: queue id.
         id_ptr: u32,
@@ -194,7 +194,7 @@ pub enum Lv2Request {
         /// In: queue depth.
         size: u32,
     },
-    /// sys_event_queue_destroy syscall.
+    /// `sys_event_queue_destroy`.
     EventQueueDestroy {
         /// In: queue id.
         queue_id: u32,
@@ -220,7 +220,7 @@ pub enum Lv2Request {
         /// In: event payload data3.
         data3: u64,
     },
-    /// sys_event_flag_create syscall.
+    /// `sys_event_flag_create`.
     EventFlagCreate {
         /// Out: event flag id.
         id_ptr: u32,
@@ -229,7 +229,7 @@ pub enum Lv2Request {
         /// In: initial bit pattern.
         init: u64,
     },
-    /// sys_event_flag_destroy syscall.
+    /// `sys_event_flag_destroy`.
     EventFlagDestroy {
         /// In: event flag id.
         id: u32,
@@ -248,21 +248,21 @@ pub enum Lv2Request {
         /// In: timeout in microseconds.
         timeout: u64,
     },
-    /// sys_event_flag_set syscall.
+    /// `sys_event_flag_set`.
     EventFlagSet {
         /// In: event flag id.
         id: u32,
         /// In: bits to set.
         bits: u64,
     },
-    /// sys_event_flag_clear syscall.
+    /// `sys_event_flag_clear`.
     EventFlagClear {
         /// In: event flag id.
         id: u32,
         /// In: bits to clear.
         bits: u64,
     },
-    /// sys_event_flag_trywait syscall.
+    /// `sys_event_flag_trywait`.
     EventFlagTryWait {
         /// In: event flag id.
         id: u32,
@@ -281,14 +281,14 @@ pub enum Lv2Request {
         /// Out: cancelled-waiter count.
         num_ptr: u32,
     },
-    /// sys_event_flag_get syscall.
+    /// `sys_event_flag_get`.
     EventFlagGet {
         /// In: event flag id.
         id: u32,
         /// Out: current bit pattern.
         flags_ptr: u32,
     },
-    /// sys_event_queue_tryreceive syscall.
+    /// `sys_event_queue_tryreceive`.
     EventQueueTryReceive {
         /// In: queue id.
         queue_id: u32,
@@ -308,29 +308,29 @@ pub enum Lv2Request {
         /// Out: allocated address.
         alloc_addr_ptr: u32,
     },
-    /// sys_memory_free syscall.
+    /// `sys_memory_free`.
     MemoryFree {
         /// In: address to free.
         addr: u32,
     },
-    /// sys_memory_get_user_memory_size syscall.
+    /// `sys_memory_get_user_memory_size`.
     MemoryGetUserMemorySize {
         /// Out: sys_memory_info_t struct.
         mem_info_ptr: u32,
     },
-    /// sys_memory_container_create syscall.
+    /// `sys_memory_container_create`.
     MemoryContainerCreate {
         /// Out: container id.
         cid_ptr: u32,
         /// In: container size in bytes.
         size: u64,
     },
-    /// sys_process_exit syscall.
+    /// `sys_process_exit`.
     ProcessExit {
         /// In: exit code.
         code: u32,
     },
-    /// sys_process_getpid syscall.
+    /// `sys_process_getpid`.
     ProcessGetPid,
     /// `class_id` is from `sys_process.h`'s `SYS_*_OBJECT` enum;
     /// `count_out_ptr` receives a size_t written as 64-bit BE.
@@ -340,7 +340,7 @@ pub enum Lv2Request {
         /// Out: object count.
         count_out_ptr: u32,
     },
-    /// sys_process_getppid syscall.
+    /// `sys_process_getppid`.
     ProcessGetPpid,
     /// CellGov models a single-process world; `pid` is ignored.
     ProcessGetSdkVersion {
@@ -354,7 +354,7 @@ pub enum Lv2Request {
         /// Out: SFO header buffer.
         buf_ptr: u32,
     },
-    /// sys_process_get_ppu_guid syscall.
+    /// `sys_process_get_ppu_guid`.
     ProcessGetPpuGuid,
     /// Stub: tracks live count for `sys_process_get_number_of_object`;
     /// no expiry semantics.
@@ -362,7 +362,7 @@ pub enum Lv2Request {
         /// Out: timer id.
         id_ptr: u32,
     },
-    /// sys_timer_destroy syscall.
+    /// `sys_timer_destroy`.
     TimerDestroy {
         /// In: timer id.
         id: u32,
@@ -374,7 +374,7 @@ pub enum Lv2Request {
         /// In: attribute struct pointer.
         attr_ptr: u32,
     },
-    /// sys_rwlock_destroy syscall.
+    /// `sys_rwlock_destroy`.
     RwlockDestroy {
         /// In: rwlock id.
         id: u32,
@@ -388,7 +388,7 @@ pub enum Lv2Request {
         /// In: port name.
         name: u64,
     },
-    /// sys_event_port_destroy syscall.
+    /// `sys_event_port_destroy`.
     EventPortDestroy {
         /// In: port id.
         id: u32,
@@ -399,28 +399,28 @@ pub enum Lv2Request {
         /// In: address to query.
         addr: u32,
     },
-    /// sys_ppu_thread_yield syscall.
+    /// `sys_ppu_thread_yield`.
     PpuThreadYield,
-    /// sys_ppu_thread_exit syscall.
+    /// `sys_ppu_thread_exit`.
     PpuThreadExit {
         /// In: exit value.
         exit_value: u64,
     },
-    /// sys_ppu_thread_join syscall.
+    /// `sys_ppu_thread_join`.
     PpuThreadJoin {
         /// In: target thread id.
         target: u64,
         /// Out: thread status.
         status_out_ptr: u32,
     },
-    /// sys_lwmutex_create syscall.
+    /// `sys_lwmutex_create`.
     LwMutexCreate {
         /// Out: lwmutex id.
         id_ptr: u32,
         /// In: attribute struct pointer.
         attr_ptr: u32,
     },
-    /// sys_lwmutex_destroy syscall.
+    /// `sys_lwmutex_destroy`.
     LwMutexDestroy {
         /// In: lwmutex id.
         id: u32,
@@ -439,18 +439,17 @@ pub enum Lv2Request {
         /// In: timeout in microseconds.
         timeout: u64,
     },
-    /// sys_lwmutex_unlock syscall.
+    /// `sys_lwmutex_unlock`.
     LwMutexUnlock {
         /// In: lwmutex id.
         id: u32,
     },
-    /// sys_lwmutex_trylock syscall.
+    /// `sys_lwmutex_trylock`.
     LwMutexTryLock {
         /// In: lwmutex id.
         id: u32,
     },
-    /// Minimal handler: whitelist is empty, so every call returns
-    /// `CELL_ENOENT` and writes 0 to `fd_out_ptr`.
+    /// `cellFsOpen`.
     FsOpen {
         /// In: path string pointer.
         path_ptr: u32,
@@ -461,7 +460,7 @@ pub enum Lv2Request {
         /// In: open mode.
         mode: u32,
     },
-    /// cellFsClose syscall.
+    /// `cellFsClose`.
     FsClose {
         /// In: fd to close.
         fd: u32,
@@ -543,7 +542,7 @@ pub enum Lv2Request {
         /// Out: bytes written.
         nwrite_ptr: u32,
     },
-    /// sys_cond_create syscall.
+    /// `sys_cond_create`.
     CondCreate {
         /// Out: cond id.
         id_ptr: u32,
@@ -552,7 +551,7 @@ pub enum Lv2Request {
         /// In: attribute struct pointer.
         attr_ptr: u32,
     },
-    /// sys_cond_destroy syscall.
+    /// `sys_cond_destroy`.
     CondDestroy {
         /// In: cond id.
         id: u32,
@@ -564,17 +563,17 @@ pub enum Lv2Request {
         /// In: timeout in microseconds.
         timeout: u64,
     },
-    /// sys_cond_signal syscall.
+    /// `sys_cond_signal`.
     CondSignal {
         /// In: cond id.
         id: u32,
     },
-    /// sys_cond_signal_all syscall.
+    /// `sys_cond_signal_all`.
     CondSignalAll {
         /// In: cond id.
         id: u32,
     },
-    /// sys_cond_signal_to syscall.
+    /// `sys_cond_signal_to`.
     CondSignalTo {
         /// In: cond id.
         id: u32,
@@ -596,7 +595,7 @@ pub enum Lv2Request {
         /// In: creation flags.
         flags: u64,
     },
-    /// sys_rsx_memory_allocate syscall.
+    /// `sys_rsx_memory_allocate`.
     SysRsxMemoryAllocate {
         /// Out: RSX memory handle.
         mem_handle_ptr: u32,
@@ -613,12 +612,12 @@ pub enum Lv2Request {
         /// In: raw arg7.
         a7: u64,
     },
-    /// sys_rsx_memory_free syscall.
+    /// `sys_rsx_memory_free`.
     SysRsxMemoryFree {
         /// In: RSX memory handle.
         mem_handle: u32,
     },
-    /// sys_rsx_context_allocate syscall.
+    /// `sys_rsx_context_allocate`.
     SysRsxContextAllocate {
         /// Out: context id.
         context_id_ptr: u32,
@@ -633,7 +632,7 @@ pub enum Lv2Request {
         /// In: system mode flags.
         system_mode: u64,
     },
-    /// sys_rsx_context_free syscall.
+    /// `sys_rsx_context_free`.
     SysRsxContextFree {
         /// In: RSX context id.
         context_id: u32,
@@ -749,10 +748,9 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             args: *args,
         };
     }
-    // `s!` reverses PPC64 sign extension via `as i64` then
-    // `i32::try_from`: a guest `int x = -1` arrives as
-    // 0xFFFF_FFFF_FFFF_FFFF, decodes to -1i64, and any value that
-    // isn't a clean sign extension (e.g. 0x1_0000_0001 or 2^31) is
+    // `s!` reverses PPC64 sign extension: guest `int x = -1` arrives
+    // as 0xFFFF_FFFF_FFFF_FFFF and decodes to -1i64. Values that
+    // aren't a clean sign extension (e.g. 0x1_0000_0001 or 2^31) are
     // rejected as Malformed rather than wrapped.
     macro_rules! p {
         ($idx:expr) => {
@@ -783,10 +781,9 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
         };
     }
 
-    // Match on every namespace explicitly so a new variant in
-    // SyscallNamespace forces a compile error here. HleImport is
-    // consumed upstream by NID lookup; surfacing it as Unsupported
-    // keeps the total-classification contract.
+    // Exhaustive match so a new SyscallNamespace variant forces a
+    // compile error. HleImport is consumed upstream by NID lookup;
+    // surfacing it as Unsupported keeps classify total.
     match SyscallNamespace::of(syscall_num) {
         Some(SyscallNamespace::CellGovPrivate) => {
             return match syscall_num {
@@ -1098,9 +1095,7 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             cid_ptr: p!(0),
             size: args[1],
         },
-        // SPU-thread syscalls with a known number but no modelled
-        // effect; listed here so adding a handler is a one-line edit
-        // rather than a search.
+        // SPU-thread syscalls with a known number but no modelled effect.
         171 | 174 | 175 | 176 | 179 | 180 | 192 => Lv2Request::Unsupported {
             number: syscall_num,
             args: *args,
@@ -1641,8 +1636,7 @@ mod tests {
 
     #[test]
     fn narrow_i32_rejects_large_positive() {
-        // 2^31 fits u32 but not i32; the prior `as i32` cast wrapped
-        // to i32::MIN -- verify the typed path now rejects.
+        // 2^31 fits u32 but not i32; an `as i32` cast wraps to i32::MIN.
         let args = [0x5000, 0x6000, 0x8000_0000, 10, 0, 0, 0, 0];
         assert!(matches!(
             classify(90, &args),
@@ -1650,9 +1644,9 @@ mod tests {
         ));
     }
 
-    /// Regression fence: every (syscall, slot) pair the table
-    /// covers must reject a non-zero high half rather than wrap.
-    /// Catches `args[N] as u32` slipping in for a new arm.
+    /// Every (syscall, slot) pair listed here must reject a non-zero
+    /// high half rather than wrap. Catches `args[N] as u32` slipping
+    /// in for a new arm.
     const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
         (22, &[0]),
         (44, &[1]),

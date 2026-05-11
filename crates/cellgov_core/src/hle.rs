@@ -1,28 +1,17 @@
 //! HLE router chaining per-library dispatch modules.
 //!
-//! Filenames mirror Sony library names for visual grep against RPCS3;
-//! `#[path]` keeps Rust identifiers snake_case.
-//!
 //! ## Cross-module contracts
 //!
-//! - **OWNED_NIDS authority.** Each per-library module exports
-//!   `OWNED_NIDS` and a `dispatch` fn. Sets must be disjoint across
-//!   modules (enforced by `hle_module_nid_sets_are_disjoint`); the
-//!   router probes them in fixed order and stops at the first claim.
-//! - **Unclaimed-NID fallback.** A NID no module claims sets r3 =
-//!   CELL_OK (0) with no other state mutation and bumps
-//!   [`HleState::unclaimed_nids`]. First occurrence emits one stderr
-//!   line so a downstream divergence can be attributed to a specific
-//!   unimplemented entry.
-//! - **Caller LR plumbing.** `caller_lr` flows from
-//!   [`cellgov_exec::LocalDiagnostics::lr`] through `dispatch_hle`
-//!   into the unclaimed-NID stderr line. `None` is permitted for
-//!   synthetic callers without an LR.
-//! - **Park-for-callback.** Handlers record a spawn intent into
-//!   [`HleState::pending_callback_spawn`] via
+//! - `OWNED_NIDS` sets must be disjoint across modules (enforced by
+//!   `hle_module_nid_sets_are_disjoint`); the router probes in fixed
+//!   order and stops at the first claim.
+//! - Unclaimed NID: sets r3 = CELL_OK (0), bumps
+//!   `HleState::unclaimed_nids`, emits one stderr line on first
+//!   occurrence so downstream divergence can be attributed.
+//! - Handlers record spawn intent into
+//!   `HleState::pending_callback_spawn` via
 //!   [`HleContext::park_for_callback`]; the router drains it after
-//!   every dispatch (handled or unclaimed) so the slot is always
-//!   `None` between calls.
+//!   every dispatch so the slot is always `None` between calls.
 
 use cellgov_event::UnitId;
 
@@ -51,26 +40,25 @@ pub(crate) struct HleState {
     /// `heap_ptr` to report bytes handed out rather than raw cursor.
     pub heap_base: u32,
     pub heap_ptr: u32,
-    /// Peak `heap_ptr`; `heap_alloc` emits a one-shot stderr warning
-    /// at the 1 MiB / 10 MiB / 100 MiB thresholds (mask below).
+    /// Peak `heap_ptr`. `heap_alloc` emits a one-shot stderr warning
+    /// at the 1 MiB / 10 MiB / 100 MiB thresholds.
     pub heap_watermark: u32,
     /// Bits: 0x1 = 1 MiB, 0x2 = 10 MiB, 0x4 = 100 MiB.
     pub heap_warning_mask: u8,
-    /// Monotonic kernel-object ID counter; starts above zero so a
-    /// zero-initialised guest field is distinguishable from a real id.
+    /// Starts above zero so a zero-initialised guest field is
+    /// distinguishable from a real id.
     pub next_id: u32,
     pub gcm: GcmState,
     /// Per-NID call count for unclaimed dispatches; first occurrence
-    /// of each NID emits a stderr line in `dispatch_hle`.
+    /// emits a stderr line in `dispatch_hle`.
     pub unclaimed_nids: std::collections::BTreeMap<u32, usize>,
-    /// Per-NID count of claimed handlers that returned without
-    /// mutating state. A non-zero entry means handler register state
-    /// reached the guest without a fresh r3; populated from
+    /// A non-zero entry means handler register state reached the
+    /// guest without a fresh r3; populated from
     /// [`context::RuntimeHleAdapter`]'s `Drop` in debug and release.
     pub handlers_without_mutation: std::collections::BTreeMap<u32, usize>,
-    /// Park-intent slot: set via [`HleContext::park_for_callback`],
-    /// drained by [`Runtime::dispatch_hle`] after the handler returns.
-    /// Always `None` between dispatches.
+    /// Set via [`HleContext::park_for_callback`], drained by
+    /// [`Runtime::dispatch_hle`] after the handler returns. Always
+    /// `None` between dispatches.
     pub pending_callback_spawn: Option<HleParkRequest>,
 }
 
@@ -92,9 +80,8 @@ impl HleState {
 }
 
 impl Runtime {
-    /// Dispatch an HLE import call by NID. `caller_lr` is the guest
-    /// LR at the syscall boundary; see module-level cross-module
-    /// contracts for the fallback and park-spawn behaviour.
+    /// Dispatch an HLE import call by NID. See module-level
+    /// cross-module contracts for fallback and park-spawn behaviour.
     pub(crate) fn dispatch_hle(
         &mut self,
         source: UnitId,

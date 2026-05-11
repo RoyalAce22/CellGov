@@ -65,7 +65,6 @@ impl Lv2Host {
             }
         };
 
-        // Owned because try_mount_resolve_dir takes &mut self.
         let path_owned = path.to_string();
         let entries = match self.try_mount_resolve_dir(&path_owned) {
             DirMountResolution::Snapshot(e) => e,
