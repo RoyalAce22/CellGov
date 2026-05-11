@@ -1,0 +1,133 @@
+From: CellGov <noreply@cellgov.local>
+Subject: [PATCH] cellgov: env-var-gated per-HLE-call trace with watch-address diff
+
+Adds a structured trace stream that captures every HLE module
+function call (every BIND_FUNC entry/exit pair) with its name,
+arguments, return value, and -- if a watch list is supplied --
+the bytes that changed at any watch address during the call.
+
+The CellGov side consumes the trace via
+`cellgov_cli rpcs3-attribute --trace <file> --addr 0xADDR` to
+answer "which HLE call wrote this guest address?" in one run,
+replacing per-NID Ghidra investigation.
+
+Environment variables:
+
+  CELLGOV_HLE_TRACE_PATH   Path to output binary trace file. When
+                           unset the hook is a no-op. The file is
+                           overwritten on each run.
+
+  CELLGOV_HLE_WATCH        Comma-separated list of `addr:size` pairs
+                           in hex (e.g. 0x101e3cb8:8,0x10400000:0x100).
+                           Each region is snapshotted at every HLE
+                           entry and diffed at exit; bytes that
+                           changed are recorded on the call's
+                           record. Empty -> records carry no writes
+                           but the trace still captures the full
+                           call stream.
+
+File format (little-endian, no padding):
+
+  Header:
+    u32 magic = 0xC0E60001
+    u32 version = 1
+
+  Record (repeated):
+    u32 record_magic = 0xC0E60002
+    u64 step           // PPU CIA at entry (best-effort step proxy)
+    u32 thread_id      // PPU thread id
+    u32 depth          // call depth (0 = outermost HLE call)
+    u32 name_len
+    bytes[name_len] name
+    u64[8] args        // r3..r10 at entry
+    u64 ret            // r3 at exit
+    u32 num_writes
+    Write (repeated num_writes times):
+      u64 addr
+      u32 size
+      bytes[size] new_bytes
+
+This hook is read-only with respect to guest state: it snapshots
+guest memory via vm::base() + memcpy and emits records to a host
+file. It does not perturb scheduler ordering or sleep/wake. Cost
+per HLE call is two memcpy passes over the watch regions plus one
+fwrite/fflush; on the dominant non-tracing path
+(`CELLGOV_HLE_TRACE_PATH` unset) it is a thread-local bool check.
+
+Target files:
+  rpcs3/Emu/Cell/cellgov_hle_trace.h    (new)
+  rpcs3/Emu/Cell/cellgov_hle_trace.cpp  (new)
+  rpcs3/Emu/Cell/PPUFunction.h          (BIND_FUNC macro modified)
+  rpcs3/Emu/CMakeLists.txt              (cpp added to source list)
+  rpcs3/emucore.vcxproj                 (cpp + h added to MSVC project)
+
+The full content of the new files lives in
+`tools/rpcs3-src/rpcs3/Emu/Cell/cellgov_hle_trace.{h,cpp}` after
+the patch is applied. Reproducing the patch by hand:
+
+  1. Drop cellgov_hle_trace.h and cellgov_hle_trace.cpp from
+     tools/rpcs3-src/rpcs3/Emu/Cell/ into a fresh RPCS3 checkout.
+  2. Apply the BIND_FUNC change in PPUFunction.h shown below.
+  3. Add the .cpp to rpcs3/Emu/CMakeLists.txt and emucore.vcxproj.
+
+---
+
+diff --git a/rpcs3/Emu/Cell/PPUFunction.h b/rpcs3/Emu/Cell/PPUFunction.h
+--- a/rpcs3/Emu/Cell/PPUFunction.h
++++ b/rpcs3/Emu/Cell/PPUFunction.h
+@@ -1,7 +1,8 @@
+ #pragma once
+
+ #include "PPUThread.h"
+ #include "PPUInterpreter.h"
++#include "cellgov_hle_trace.h"
+
+ #include "util/v128.hpp"
+
+ // BIND_FUNC macro "converts" any appropriate HLE function to ppu_intrp_func_t, binding it to PPU thread context.
+ #define BIND_FUNC(func, ...) (static_cast<ppu_intrp_func_t>([](ppu_thread& ppu, ppu_opcode_t, be_t<u32>* this_op, ppu_intrp_func*) {\
+        const auto old_f = ppu.current_function;\
+        if (!old_f) ppu.last_function = #func;\
+        ppu.current_function = #func;\
+        ppu.cia = vm::get_addr(this_op); \
+        std::memcpy(ppu.syscall_args, ppu.gpr + 3, sizeof(ppu.syscall_args)); \
++       cellgov_hle_trace::ensure_initialized();\
++       const bool _cellgov_trace = cellgov_hle_trace::is_active();\
++       if (_cellgov_trace) cellgov_hle_trace::enter(ppu, #func, ppu.syscall_args);\
+        ppu_func_detail::do_call(ppu, func);\
++       if (_cellgov_trace) cellgov_hle_trace::exit(ppu, ppu.gpr[3]);\
+        static_cast<void>(ppu.test_stopped());\
+        auto& history = ppu.syscall_history.data[ppu.syscall_history.index++ % ppu.syscall_history.data.size()];\
+
+diff --git a/rpcs3/Emu/CMakeLists.txt b/rpcs3/Emu/CMakeLists.txt
+--- a/rpcs3/Emu/CMakeLists.txt
++++ b/rpcs3/Emu/CMakeLists.txt
+@@ -169,6 +169,7 @@
+     Cell/PPUAnalyser.cpp
+     Cell/PPUDisAsm.cpp
+     Cell/PPUFunction.cpp
++    Cell/cellgov_hle_trace.cpp
+     Cell/PPUInterpreter.cpp
+     Cell/PPUModule.cpp
+     Cell/PPUThread.cpp
+
+diff --git a/rpcs3/emucore.vcxproj b/rpcs3/emucore.vcxproj
+--- a/rpcs3/emucore.vcxproj
++++ b/rpcs3/emucore.vcxproj
+@@ -458,6 +458,7 @@
+     <ClCompile Include="Emu\Cell\PPUDisAsm.cpp" />
+     <ClCompile Include="Emu\Cell\PPUFunction.cpp" />
++    <ClCompile Include="Emu\Cell\cellgov_hle_trace.cpp" />
+     <ClCompile Include="Emu\Cell\PPUInterpreter.cpp" />
+@@ -972,6 +973,7 @@
+     <ClInclude Include="Emu\Cell\PPUDisAsm.h" />
+     <ClInclude Include="Emu\Cell\PPUFunction.h" />
++    <ClInclude Include="Emu\Cell\cellgov_hle_trace.h" />
+     <ClInclude Include="Emu\Cell\PPUInterpreter.h" />
+
+(new files cellgov_hle_trace.h and cellgov_hle_trace.cpp are not
+included as a unified diff. They are tracked at
+`bridges/rpcs3-patch/files/Emu/Cell/cellgov_hle_trace.{h,cpp}`
+and must be copied into `tools/rpcs3-src/rpcs3/Emu/Cell/` before
+applying this patch. See the README in this directory for the
+full apply sequence.)

@@ -59,6 +59,7 @@ fn main() {
         "dump" => cli::dump::run(&args, SCENARIOS),
         "dump-imports" => dump_imports::run(&args),
         "disasm" => disasm::run(&args),
+        "rpcs3-attribute" => cli::rpcs3_attribute::run(&args),
         other => match run_scenario(other) {
             Some((label, result)) => println!("{}", report(label, &result)),
             None => die(&format!(
@@ -102,6 +103,9 @@ fn print_usage() {
         "       cellgov_cli dump-imports <--title NAME|--content-id ID|--title-manifest PATH>"
     );
     println!("       cellgov_cli disasm <elf-path> --vaddr <hex> [--count N]");
+    println!(
+        "       cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR [--len N]] [--list] [--ranked]"
+    );
     println!();
     println!("available scenarios:");
     for name in SCENARIOS {

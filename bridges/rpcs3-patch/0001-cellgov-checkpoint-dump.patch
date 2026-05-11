@@ -87,14 +87,34 @@ diff --git a/rpcs3/Emu/Cell/lv2/sys_process.cpp b/rpcs3/Emu/Cell/lv2/sys_process
 +		unsigned long long size = std::strtoull(pair.substr(colon + 1).c_str(), nullptr, 16);
 +		if (size == 0) continue;
 +
-+		const void* base = vm::base(static_cast<u32>(addr));
-+		if (!base)
++		// Page-aware write: walk the requested range in 4 KiB pages,
++		// fwriting committed pages and writing zeros for unmapped pages
++		// so the file offsets stay aligned with the requested region
++		// boundaries (the CellGov side decodes by manifest offset).
++		const u32 page_sz = 4096;
++		u32 cur = static_cast<u32>(addr);
++		const u32 end = static_cast<u32>(addr + size);
++		u32 wrote = 0;
++		u32 zeroed = 0;
++		static const u8 zeros[page_sz] = {0};
++		while (cur < end)
 +		{
-+			std::fprintf(stderr, "[cellgov] region 0x%llx:0x%llx has no base; skipping\n", addr, size);
-+			continue;
++			u32 chunk = page_sz - (cur % page_sz);
++			if (chunk > end - cur) chunk = end - cur;
++			if (vm::check_addr(cur, vm::page_readable, chunk))
++			{
++				std::fwrite(vm::base(cur), 1, chunk, f);
++				wrote++;
++			}
++			else
++			{
++				std::fwrite(zeros, 1, chunk, f);
++				zeroed++;
++			}
++			cur += chunk;
 +		}
-+
-+		std::fwrite(base, 1, static_cast<std::size_t>(size), f);
++		std::fprintf(stderr, "[cellgov] region 0x%llx:0x%llx wrote %u chunks, %u zero-filled\n",
++			addr, size, wrote, zeroed);
 +	}
 +
 +	std::fclose(f);
