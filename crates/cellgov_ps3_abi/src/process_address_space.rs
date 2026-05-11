@@ -28,3 +28,9 @@ pub const PS3_SPU_RESERVED_BASE: u64 = 0xE000_0000;
 
 /// Size in bytes of the SPU-shared MMIO region.
 pub const PS3_SPU_RESERVED_SIZE: usize = 0x2000_0000;
+
+/// Lowest plausible address for PS3 LV2 user text. Below this lives the
+/// trampoline scratch zone (`0..0x10000`); above it lives user heap and
+/// title text. Diagnostic walks reject candidate return addresses below
+/// this floor as obvious junk. OS-level convention, not architectural.
+pub const PS3_USER_TEXT_FLOOR: u64 = 0x0001_0000;

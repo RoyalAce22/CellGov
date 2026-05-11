@@ -61,7 +61,7 @@ pub(super) struct PrepareOptions<'a> {
     /// Applied after `module_start`, before `Runtime` construction.
     pub patch_bytes: &'a [(u64, u8)],
     /// Guest addresses to dump 32 bytes at after patches.
-    pub dump_mem_addrs: &'a [u64],
+    pub dump_mem_boot_addrs: &'a [u64],
     pub budget_override: Option<u64>,
 }
 
@@ -365,7 +365,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    for &addr in opts.dump_mem_addrs {
+    for &addr in opts.dump_mem_boot_addrs {
         match cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 32) {
             None => println!("mem[0x{addr:x}]: invalid address range"),
             Some(r) => match mem.read(r) {

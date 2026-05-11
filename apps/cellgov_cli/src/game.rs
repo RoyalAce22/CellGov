@@ -9,6 +9,7 @@ mod diag;
 pub mod manifest;
 mod observation;
 mod prx;
+mod stack_walk;
 mod step_loop;
 
 pub use bench::{bench_boot_one_run, bench_boot_pair};
@@ -36,7 +37,8 @@ pub struct RunGameOptions<'a> {
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,
     pub patch_bytes: &'a [(u64, u8)],
-    pub dump_mem_addrs: &'a [u64],
+    pub dump_mem_boot_addrs: &'a [u64],
+    pub dump_mem_fault_ranges: &'a [(u64, u64)],
     pub save_observation: Option<&'a str>,
     pub observation_manifest: Option<&'a str>,
     pub strict_reserved: bool,
@@ -55,7 +57,8 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         dump_at_pc,
         dump_skip,
         patch_bytes,
-        dump_mem_addrs,
+        dump_mem_boot_addrs,
+        dump_mem_fault_ranges,
         save_observation,
         observation_manifest,
         strict_reserved,
@@ -78,7 +81,7 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         print_banner: true,
         runtime_max_steps: max_steps,
         patch_bytes,
-        dump_mem_addrs,
+        dump_mem_boot_addrs,
         profile_pairs,
         budget_override,
     });
@@ -142,6 +145,7 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         checkpoint: title.checkpoint_trigger(),
         tty_oob_count: 0,
         bogus_fd_count: 0,
+        dump_mem_fault_ranges,
     };
     let (outcome, boot_outcome) = step_loop(&mut rt, &mut loop_ctx);
     let t_loop = t_loop_start.elapsed();

@@ -114,8 +114,12 @@ impl Runtime {
                 let lr_str = caller_lr
                     .map(|lr| format!("0x{lr:08x}"))
                     .unwrap_or_else(|| "<unknown>".to_string());
+                let name_str = match cellgov_ps3_abi::nid::lookup(nid) {
+                    Some((module, func)) => format!(" ({module}::{func})"),
+                    None => String::new(),
+                };
                 eprintln!(
-                    "HLE dispatch: unclaimed NID {nid:#010x} called from {source:?} \
+                    "HLE dispatch: unclaimed NID {nid:#010x}{name_str} called from {source:?} \
                      (LR={lr_str}); returning CELL_OK with no side effects (silent \
                      divergence risk)"
                 );

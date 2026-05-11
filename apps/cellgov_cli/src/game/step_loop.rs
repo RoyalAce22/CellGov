@@ -99,6 +99,9 @@ pub(super) struct StepLoopCtx<'a> {
     pub(super) tty_oob_count: usize,
     /// `sys_tty_write` calls whose fd exceeded `u32::MAX` (narrowed to sentinel).
     pub(super) bogus_fd_count: usize,
+    /// Address+length pairs to hex-dump from guest memory at fault
+    /// time. Empty by default; set via `run-game --dump-mem-fault`.
+    pub(super) dump_mem_fault_ranges: &'a [(u64, u64)],
 }
 
 /// Returns the RSX-region write address when a `ReservedWrite("rsx")`
@@ -336,6 +339,7 @@ pub(super) fn step_loop(
                             *ctx.steps,
                             &ctx.pc_ring,
                             &ctx.pc_ring_cursor,
+                            ctx.dump_mem_fault_ranges,
                         );
                         append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
                         break (diag, BootOutcome::Fault);
