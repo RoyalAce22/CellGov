@@ -17,7 +17,7 @@ pub use self::rsx::{
 use std::collections::BTreeMap;
 
 use crate::dispatch::Lv2Dispatch;
-use crate::fs::FsStore;
+use crate::fs_store::{FsMountTable, FsStore};
 use crate::image::ContentStore;
 use crate::ppu_thread::{
     PpuThread, PpuThreadAttrs, PpuThreadId, PpuThreadTable, ThreadStack, ThreadStackAllocator,
@@ -124,6 +124,13 @@ pub struct Lv2Host {
     /// feeds the `SYS_FS_FD_OBJECT` (0x73) query.
     fs_fd_count: u32,
     fs_store: FsStore,
+    /// Read-only mount table used by the dispatch layer to resolve
+    /// guest paths that are not pre-registered in [`Self::fs_store`].
+    /// Populated at boot from the title manifest (`[fs.app_home]`,
+    /// `[fs.dev_hdd0]`, etc.) and treated as immutable thereafter.
+    /// Empty by default so titles without mount configuration retain
+    /// the strict-blob behavior.
+    fs_mounts: FsMountTable,
     /// Per-thread count of distinct lwmutexes held. Recursive
     /// re-acquires of the same lwmutex do not bump the count; only
     /// first-acquire (FREE -> me) and kernel-side transfer
@@ -161,7 +168,33 @@ impl Lv2Host {
     pub const SYS_RSX_MEM_END: u32 = Self::SYS_RSX_MEM_BASE + 0x1000_0000;
 
     /// Construct an empty host with default tables and id allocators.
+    ///
+    /// Two synthetic zero-byte blobs (`/app_home/PARAM.SFO` and
+    /// `/app_home/output.txt`) are registered up front so the
+    /// PSL1GHT-test ELF surface (probe-for-PARAM.SFO, fopen +
+    /// fwrite + fclose to output.txt) routes through the same
+    /// allocator as manifest content. This eliminates the
+    /// historical "whitelist allocator vs FsStore allocator"
+    /// fd-aliasing risk: a single fd-issuing source means a stale
+    /// fd cannot collide with a fresh one issued by the other
+    /// route.
+    ///
+    /// # Cross-module contract
+    ///
+    /// `/app_home/output.txt` also appears in
+    /// `host::fs::FS_TTY_SINK_PATHS`; the open-flag validator
+    /// exempts it from the EROFS branch so PSL1GHT-test fixtures'
+    /// `fopen("...", "w")` keeps working. The two sites must
+    /// agree; the `tty_sink_paths_are_pre_registered` regression
+    /// in `host::fs::tests` pins this.
     pub fn new() -> Self {
+        let mut fs_store = FsStore::new();
+        fs_store
+            .register_blob("/app_home/PARAM.SFO".to_string(), Vec::new())
+            .expect("synthetic registration cannot collide on a fresh store");
+        fs_store
+            .register_blob("/app_home/output.txt".to_string(), Vec::new())
+            .expect("synthetic registration cannot collide on a fresh store");
         Self {
             content: ContentStore::new(),
             groups: ThreadGroupTable::new(),
@@ -187,7 +220,8 @@ impl Lv2Host {
             event_port_count: 0,
             lwcond_count: 0,
             fs_fd_count: 0,
-            fs_store: FsStore::new(),
+            fs_store,
+            fs_mounts: FsMountTable::new(),
             lwmutex_holds: BTreeMap::new(),
             callback_parents: BTreeMap::new(),
             callback_depth: BTreeMap::new(),
@@ -202,6 +236,18 @@ impl Lv2Host {
     /// Mutable view of the in-memory filesystem store.
     pub fn fs_store_mut(&mut self) -> &mut FsStore {
         &mut self.fs_store
+    }
+
+    /// Read-only view of the mount table consulted when a guest path
+    /// is not registered as a blob.
+    pub fn fs_mounts(&self) -> &FsMountTable {
+        &self.fs_mounts
+    }
+
+    /// Mutable view of the mount table. Boot wires real mounts via
+    /// this getter; the dispatch layer treats the table as read-only.
+    pub fn fs_mounts_mut(&mut self) -> &mut FsMountTable {
+        &mut self.fs_mounts
     }
 
     /// Distinct lwmutexes currently held by `tid`.
@@ -661,6 +707,16 @@ impl Lv2Host {
                 path_ptr,
                 stat_out_ptr,
             } => self.dispatch_fs_stat(path_ptr, stat_out_ptr, requester, rt),
+            Lv2Request::FsOpendir {
+                path_ptr,
+                fd_out_ptr,
+            } => self.dispatch_fs_opendir(path_ptr, fd_out_ptr, requester, rt),
+            Lv2Request::FsReaddir {
+                fd,
+                dirent_out_ptr,
+                nread_out_ptr,
+            } => self.dispatch_fs_readdir(fd, dirent_out_ptr, nread_out_ptr, requester, rt),
+            Lv2Request::FsClosedir { fd } => self.dispatch_fs_closedir(fd),
             Lv2Request::FsWrite {
                 buf_ptr,
                 size,
@@ -1704,5 +1760,46 @@ mod tests {
             .expect("thread exists")
             .state = PpuThreadState::Finished;
         assert!(host.is_ppu_thread_finished_for_unit(parent));
+    }
+
+    #[test]
+    fn fs_mounts_starts_empty() {
+        let host = Lv2Host::new();
+        assert_eq!(host.fs_mounts().mounts().count(), 0);
+    }
+
+    #[test]
+    fn fs_mounts_mut_accepts_registration_and_resolves() {
+        use std::path::PathBuf;
+
+        let mut host = Lv2Host::new();
+        let mount = crate::fs_store::FsMount::new("/app_home", PathBuf::from("/host/usr"))
+            .expect("valid mount");
+        host.fs_mounts_mut()
+            .add(mount)
+            .expect("first registration succeeds");
+
+        let resolved = host
+            .fs_mounts()
+            .resolve("/app_home/Data/level.xml")
+            .expect("no traversal");
+        assert_eq!(
+            resolved,
+            Some(PathBuf::from("/host/usr").join("Data").join("level.xml"))
+        );
+    }
+
+    #[test]
+    fn fs_mounts_unmatched_path_returns_none() {
+        use std::path::PathBuf;
+
+        let mut host = Lv2Host::new();
+        host.fs_mounts_mut()
+            .add(
+                crate::fs_store::FsMount::new("/dev_hdd0", PathBuf::from("/host/hdd"))
+                    .expect("valid mount"),
+            )
+            .expect("registration succeeds");
+        assert_eq!(host.fs_mounts().resolve("/app_home/foo"), Ok(None));
     }
 }

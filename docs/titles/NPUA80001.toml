@@ -43,3 +43,13 @@ files = [
     { guest_path = "/app_home/Data/Local/Localization.xml", host_path = "Data/Local/Localization.xml" },
     { guest_path = "/app_home/Data/Classes/Classes.xml", host_path = "Data/Classes/Classes.xml" },
 ]
+
+# Mount-table entry served by the cellFs VFS (sys_fs_open /
+# sys_fs_stat path miss + sys_fs_opendir snapshot enumeration).
+# The [content] block above pre-registers explicit blobs at
+# boot; this mount is the lazy disk-on-demand surface for the
+# resource enumerator.
+[[fs.mounts]]
+prefix = "/app_home"
+host = "tests/fixtures/NPUA80001_content"
+override_env = "CELLGOV_NPUA80001_CONTENT_DIR"

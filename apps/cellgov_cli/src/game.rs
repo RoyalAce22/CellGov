@@ -7,6 +7,7 @@ mod boot;
 mod content;
 mod diag;
 pub mod manifest;
+mod mounts;
 mod observation;
 mod prx;
 mod stack_walk;

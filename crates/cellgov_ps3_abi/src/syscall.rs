@@ -177,11 +177,24 @@ pub const FS_WRITE: u64 = 803;
 /// `sys_fs_close`.
 pub const FS_CLOSE: u64 = 804;
 
-/// `sys_fs_fstat` (populate a `CellFsStat` for an open fd).
-pub const FS_FSTAT: u64 = 805;
+/// `sys_fs_opendir` (open a directory snapshot for read-only
+/// enumeration; allocates a directory fd whose entries are
+/// captured at open time and served lexicographically).
+pub const FS_OPENDIR: u64 = 805;
+
+/// `sys_fs_readdir` (return the next snapshotted entry as a
+/// 258-byte `CellFsDirent`; writes 0 to `nread` at EOF).
+pub const FS_READDIR: u64 = 806;
+
+/// `sys_fs_closedir` (release a directory fd allocated by
+/// `sys_fs_opendir`).
+pub const FS_CLOSEDIR: u64 = 807;
 
 /// `sys_fs_stat` (populate a `CellFsStat` from a path).
-pub const FS_STAT: u64 = 815;
+pub const FS_STAT: u64 = 808;
+
+/// `sys_fs_fstat` (populate a `CellFsStat` for an open fd).
+pub const FS_FSTAT: u64 = 809;
 
 /// `sys_fs_lseek` (move an fd's offset to a new absolute position;
 /// SEEK_SET / SEEK_CUR / SEEK_END semantics).

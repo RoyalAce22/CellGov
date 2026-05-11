@@ -48,6 +48,28 @@ pub struct TitleManifest {
     /// registered in `Lv2Host::fs_store` at boot. Absent for
     /// titles that boot without title-specific content.
     pub content: Option<ContentManifest>,
+    /// Read-only host-disk mount table. Each entry maps a guest
+    /// path prefix (e.g. `/app_home`, `/dev_hdd0`) to a host
+    /// directory; `sys_fs_open` paths under the prefix are served
+    /// from that directory via single-read blob caching in
+    /// `Lv2Host::fs_store`. Registration order matches manifest
+    /// declaration order; the dispatch layer consults mounts in
+    /// that order on a path miss. Empty when the manifest has no
+    /// `[[fs.mounts]]` array.
+    pub mounts: Vec<MountEntry>,
+}
+
+/// One mount-table entry. `prefix` must start with `/` and is
+/// match-prefix tested against guest paths. `host` is resolved
+/// against the workspace root when relative; absolute host paths
+/// are used as-is. `override_env` lets a developer redirect the
+/// mount to a local-only directory without editing the committed
+/// manifest -- the env var, when set non-empty, replaces `host`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountEntry {
+    pub prefix: String,
+    pub host: String,
+    pub override_env: Option<String>,
 }
 
 /// Per-title content provider entries, each mapping a guest path
@@ -170,6 +192,23 @@ struct ManifestFile {
     source: Option<ManifestSource>,
     rsx: Option<ManifestRsx>,
     content: Option<ManifestContent>,
+    fs: Option<ManifestFs>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestFs {
+    #[serde(default)]
+    mounts: Vec<ManifestMount>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestMount {
+    prefix: String,
+    host: String,
+    #[serde(default)]
+    override_env: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -409,11 +448,12 @@ impl TitleManifest {
                 });
             }
             if let Some(table) = raw.as_table() {
-                let conflicting: Vec<&str> = ["title", "checkpoint", "source", "rsx", "content"]
-                    .iter()
-                    .copied()
-                    .filter(|k| table.contains_key(*k))
-                    .collect();
+                let conflicting: Vec<&str> =
+                    ["title", "checkpoint", "source", "rsx", "content", "fs"]
+                        .iter()
+                        .copied()
+                        .filter(|k| table.contains_key(*k))
+                        .collect();
                 if !conflicting.is_empty() {
                     return Err(ManifestError::Parse {
                         path: origin.to_path_buf(),
@@ -497,6 +537,41 @@ impl TitleManifest {
                 })
                 .collect(),
         });
+        let mounts: Vec<MountEntry> = file
+            .fs
+            .map(|f| f.mounts)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| MountEntry {
+                prefix: m.prefix,
+                host: m.host,
+                override_env: m.override_env,
+            })
+            .collect();
+        // Validate prefix shape at load time so a misconfigured
+        // manifest fails fast rather than at FsMount::new() during
+        // boot. The duplicate-prefix check is also done by
+        // FsMountTable::add at boot time, but surfacing it here
+        // gives the operator a path-relative error.
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for m in &mounts {
+            if !m.prefix.starts_with('/') {
+                return Err(ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: format!("[[fs.mounts]] prefix {:?} must start with '/'", m.prefix),
+                });
+            }
+            if !seen.insert(m.prefix.as_str()) {
+                return Err(ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: format!(
+                        "[[fs.mounts]] duplicate prefix {:?}; each prefix must \
+                         be declared at most once",
+                        m.prefix
+                    ),
+                });
+            }
+        }
         Ok(TitleManifest {
             content_id: file.title.content_id,
             short_name: file.title.short_name,
@@ -506,6 +581,7 @@ impl TitleManifest {
             source,
             rsx_mirror,
             content,
+            mounts,
         })
     }
 
@@ -1017,6 +1093,138 @@ mirror = true
     }
 
     #[test]
+    fn fs_mounts_block_absent_means_empty_mount_list() {
+        let m = parse(PROCESS_EXIT_TOML);
+        assert!(m.mounts.is_empty());
+    }
+
+    #[test]
+    fn parses_fs_mounts_array_in_declaration_order() {
+        let text = r#"
+[title]
+content_id = "NPAA66666"
+short_name = "mounts-fixture"
+display_name = "Mounts fixture"
+eboot_candidates = ["EBOOT.elf"]
+
+[checkpoint]
+kind = "process-exit"
+
+[[fs.mounts]]
+prefix = "/dev_hdd0"
+host = "tools/rpcs3/dev_hdd0"
+
+[[fs.mounts]]
+prefix = "/app_home"
+host = "tests/fixtures/flow_assets"
+override_env = "CELLGOV_FLOW_APP_HOME"
+"#;
+        let m = parse(text);
+        assert_eq!(m.mounts.len(), 2);
+        // Order matches declaration order; FsMountTable consults
+        // mounts in registration order so this matters.
+        assert_eq!(m.mounts[0].prefix, "/dev_hdd0");
+        assert_eq!(m.mounts[0].host, "tools/rpcs3/dev_hdd0");
+        assert!(m.mounts[0].override_env.is_none());
+        assert_eq!(m.mounts[1].prefix, "/app_home");
+        assert_eq!(m.mounts[1].host, "tests/fixtures/flow_assets");
+        assert_eq!(
+            m.mounts[1].override_env.as_deref(),
+            Some("CELLGOV_FLOW_APP_HOME"),
+        );
+    }
+
+    #[test]
+    fn parses_fs_mounts_from_nested_cellgov_section() {
+        let text = r#"
+[cellgov.title]
+content_id = "CG_MOUNTS"
+short_name = "cgmounts"
+display_name = "CG mounts"
+eboot_candidates = ["EBOOT.elf"]
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[[cellgov.fs.mounts]]
+prefix = "/app_home"
+host = "fx"
+"#;
+        let m = parse(text);
+        assert_eq!(m.mounts.len(), 1);
+        assert_eq!(m.mounts[0].prefix, "/app_home");
+    }
+
+    #[test]
+    fn fs_mounts_prefix_without_leading_slash_is_rejected() {
+        let text = r#"
+[title]
+content_id = "x"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["x"]
+
+[checkpoint]
+kind = "process-exit"
+
+[[fs.mounts]]
+prefix = "app_home"
+host = "fx"
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("bad.toml"))
+            .expect_err("non-rooted prefix must reject");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+    }
+
+    #[test]
+    fn fs_mounts_duplicate_prefix_is_rejected() {
+        let text = r#"
+[title]
+content_id = "x"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["x"]
+
+[checkpoint]
+kind = "process-exit"
+
+[[fs.mounts]]
+prefix = "/app_home"
+host = "fx1"
+
+[[fs.mounts]]
+prefix = "/app_home"
+host = "fx2"
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("dup.toml"))
+            .expect_err("duplicate prefix must reject");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+    }
+
+    #[test]
+    fn fs_mounts_unknown_field_is_rejected() {
+        // serde(deny_unknown_fields) catches typos like
+        // `host_path` (sister field name on [content], not [fs.mounts]).
+        let text = r#"
+[title]
+content_id = "x"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["x"]
+
+[checkpoint]
+kind = "process-exit"
+
+[[fs.mounts]]
+prefix = "/app_home"
+host_path = "fx"
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("typo.toml"))
+            .expect_err("unknown field must reject");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+    }
+
+    #[test]
     fn parses_pc_manifest() {
         let m = parse(PC_TOML);
         assert_eq!(m.checkpoint, CheckpointTrigger::Pc(0x10381ce8));
@@ -1269,6 +1477,7 @@ kind = "process-exit"
             source: GameSource::Hdd,
             rsx_mirror: false,
             content: None,
+            mounts: Vec::new(),
         }
     }
 
