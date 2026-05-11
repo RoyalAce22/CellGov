@@ -20,10 +20,18 @@ use std::path::PathBuf;
 
 use cellgov_mem::Fnv1aHasher;
 
-/// Monotonic fd allocator base. Also the lower bound of the FS-layer
-/// fd range -- exposed crate-wide so dispatch tests can assert
+/// Monotonic fd allocator base. Matches real PS3's `lv2_fs_object`
+/// `id_base = 3` (per `rpcs3/Emu/Cell/lv2/sys_fs.h`): file fds are
+/// small ints in `[3, 255)` on real PS3. PSL1GHT-built titles
+/// (flOw among them) encode the fd into narrow struct fields and
+/// load it with `lbz`/`lhz`/`lwz` semantics that truncate any high
+/// bits; returning fds in the billions corrupts the fd in the
+/// title's internal table and surfaces as `sys_fs_read` getting an
+/// unknown fd (= EBADF).
+///
+/// Exposed crate-wide so dispatch tests can assert
 /// `fd >= FD_BASE` rather than the weaker `fd != 0`.
-pub(crate) const FD_BASE: u32 = 0x4000_0001;
+pub(crate) const FD_BASE: u32 = 3;
 
 /// Whence values for [`FsStore::seek`]. Matches PS3 `CELL_FS_SEEK_*`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
