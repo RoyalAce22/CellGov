@@ -19,10 +19,7 @@ use crate::host::Lv2Runtime;
 use super::ptr::out_ptr_writable;
 
 /// `CellFsStat::mode` for a regular read-only file: `S_IFREG`
-/// plus `r--r--r--` (`IRUSR | IRGRP | IROTH`). Composed from the
-/// individual mode bits in [`cellgov_ps3_abi::sys_fs`] so a future
-/// caller that needs a different shape (e.g. directory stat) can
-/// compose the same primitives.
+/// plus `r--r--r--` (`IRUSR | IRGRP | IROTH`).
 pub(super) const CELL_FS_S_IFREG_R_ONLY_MODE: u32 =
     CELL_FS_S_IFREG | CELL_FS_S_IRUSR | CELL_FS_S_IRGRP | CELL_FS_S_IROTH;
 

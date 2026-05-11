@@ -1,7 +1,6 @@
 //! Step drivers for `run-game` (diagnostic) and `bench-boot` (throughput).
 //!
-//! Both loops share [`classify_step_outcome`] as the single source of
-//! verdict precedence.
+//! Both loops share [`classify_step_outcome`] for verdict precedence.
 
 use std::time::Instant;
 
@@ -17,8 +16,6 @@ use super::manifest;
 pub(super) const PC_RING_SIZE: usize = 64;
 pub(super) const SYSCALL_RING_SIZE: usize = 32;
 
-/// Bounded ring-buffer write cursor.
-///
 /// Invariant: `pos` is always in `[0, capacity)`; `full` flips on first wrap.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RingCursor {
@@ -104,9 +101,6 @@ pub(super) struct StepLoopCtx<'a> {
     pub(super) dump_mem_fault_ranges: &'a [(u64, u64)],
 }
 
-/// Returns the RSX-region write address when a `ReservedWrite("rsx")`
-/// commit error matches a [`manifest::CheckpointTrigger::FirstRsxWrite`]
-/// trigger; `None` otherwise.
 pub(super) fn rsx_write_checkpoint_addr(
     trigger: manifest::CheckpointTrigger,
     commit_result: &Result<CommitOutcome, CommitError>,
@@ -125,18 +119,14 @@ pub(super) fn rsx_write_checkpoint_addr(
     }
 }
 
-/// Per-step verdict shared by both loops.
-///
 /// Precedence (high to low):
 /// 1. `CommitFault` -- non-checkpoint commit error.
-/// 2. `StepFault` -- `YieldReason::Fault` raised by the unit, batch discarded.
-/// 3. `RsxCheckpoint(addr)` -- `ReservedWrite("rsx")` under a `FirstRsxWrite` trigger.
+/// 2. `StepFault` -- `YieldReason::Fault`, batch discarded.
+/// 3. `RsxCheckpoint(addr)` -- `ReservedWrite("rsx")` under `FirstRsxWrite`.
 /// 4. `PcReached(addr)` -- step retired the caller-supplied PC.
 /// 5. `Continue`.
 ///
-/// A callback-worker fault absorbed by commit (`callback_worker_fault_absorbed`)
-/// suppresses `StepFault` even when `step.fault.is_some()`, so the run can
-/// resume after the absorbing module recovered.
+/// `callback_worker_fault_absorbed` suppresses `StepFault` so the run can resume.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum StepVerdict {
     Continue,
@@ -146,11 +136,6 @@ pub(super) enum StepVerdict {
     PcReached(u64),
 }
 
-/// Apply [`StepVerdict`] precedence to a step + commit pair.
-///
-/// The relative ordering of `CommitFault` vs `StepFault` is forward-compatible
-/// guard rail: under current `commit_step` semantics a `YieldReason::Fault`
-/// returns `Ok(fault_discarded)`, so they cannot co-occur today.
 pub(super) fn classify_step_outcome(
     step: &cellgov_exec::ExecutionStepResult,
     commit_result: &Result<CommitOutcome, CommitError>,
@@ -179,7 +164,6 @@ pub(super) fn classify_step_outcome(
     StepVerdict::Continue
 }
 
-/// Pure decision over `(args, mem_bytes)` -- no I/O, no counter mutation.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum TtyCaptureDecision {
     /// Buffer fits in mapped memory, or `len == 0` (buf not dereferenced).
@@ -195,8 +179,6 @@ pub(super) enum TtyCaptureDecision {
     },
 }
 
-/// Classify a `sys_tty_write` call without touching runtime state.
-///
 /// Bytes are captured at full fidelity; display layers bound output width.
 pub(super) fn classify_tty_capture(args: &[u64; 9], mem_bytes: &[u8]) -> TtyCaptureDecision {
     let buf = args[2] as usize;
@@ -213,7 +195,6 @@ pub(super) fn classify_tty_capture(args: &[u64; 9], mem_bytes: &[u8]) -> TtyCapt
             bytes: Vec::new(),
         };
     }
-    // checked_add guards a guest `buf` near `usize::MAX`.
     let end = buf.checked_add(len);
     if end.is_none_or(|e| e > mem_bytes.len()) {
         return TtyCaptureDecision::Oob {
@@ -275,8 +256,8 @@ pub(super) fn step_loop(
             Ok(step) => {
                 *ctx.steps += 1;
 
-                // PC ring and distinct-PC set track attempted execution,
-                // so they advance before commit (kept on a discarded batch).
+                // PC ring and distinct-PC set track attempted execution;
+                // they advance before commit (kept on a discarded batch).
                 if let Some(pc) = step.result.local_diagnostics.pc {
                     ctx.distinct_pcs.insert(pc);
                     let idx = ctx.pc_ring_cursor.record();
@@ -350,9 +331,7 @@ pub(super) fn step_loop(
                     StepVerdict::Continue => {}
                 }
 
-                // Post-commit: pc_hits, coverage, syscall ring, last_tty,
-                // last_exit only advance when the batch was applied (a
-                // discarded batch leaves guest-visible state untouched).
+                // Post-commit counters: only advance when the batch was applied.
                 if let Some(pc) = step.result.local_diagnostics.pc {
                     *ctx.pc_hits.entry(pc).or_insert(0) += 1;
                 }
@@ -402,14 +381,12 @@ pub(super) fn step_loop(
                                 } else {
                                     ""
                                 };
-                                // ASCII-safe to survive cp1252/cp437 consoles.
                                 let preview = super::diag::ascii_safe_preview(&bytes);
                                 print!("  tty[fd={fd}{bogus_marker}]: {preview}");
                                 if !preview.ends_with('\n') {
                                     println!();
                                 }
-                                // Flush stdout so a stderr fault stack does
-                                // not interleave ahead of the tty line.
+                                // Flush stdout so a stderr fault stack does not interleave.
                                 use std::io::Write;
                                 let _ = std::io::stdout().flush();
                                 ctx.last_tty = Some(TtyCapture {
@@ -442,9 +419,7 @@ pub(super) fn step_loop(
                     t.step_time += t1 - t0;
                     t.commit_time += t3 - t2;
                     t.coverage_time += t_cov_end - t_cov_start;
-                    // Why this can't fire: monotonic clock + disjoint regions
-                    // imply tracked <= loop_start.elapsed(). Triggers only on
-                    // bucket overlap or a non-monotonic clock.
+                    // Monotonic clock + disjoint regions imply tracked <= loop_start.elapsed().
                     debug_assert!(
                         compute_untracked(
                             ctx.loop_start.elapsed(),
@@ -473,8 +448,7 @@ pub(super) fn step_loop(
                         BootOutcome::ProcessExit,
                     );
                 }
-                // Every unit drained without a sys_process_exit /
-                // sys_ppu_thread_exit dispatch -- guest-undefined state.
+                // Every unit drained without a process/thread-exit dispatch.
                 break (
                     format!(
                         "ALL_UNITS_FINISHED after {} steps without sys_process_exit",
@@ -484,7 +458,6 @@ pub(super) fn step_loop(
                 );
             }
             Err(StepError::AllBlocked) => {
-                // Deadlock: at least one Blocked unit, none Runnable.
                 let mut diag = format_deadlock(rt, *ctx.steps, &ctx.pc_ring, &ctx.pc_ring_cursor);
                 append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
                 break (diag, BootOutcome::Fault);
@@ -511,8 +484,6 @@ pub(super) fn step_loop(
     }
 }
 
-/// Throughput driver: tracks termination only, no diagnostic state.
-///
 /// `CommitFault` and `StepFault` both surface as `BootOutcome::Fault`;
 /// `NoRunnableUnit` and `AllBlocked` both surface as `ProcessExit`.
 pub(super) fn bench_step_loop(
@@ -547,10 +518,7 @@ pub(super) fn bench_step_loop(
     }
 }
 
-/// One-line label per [`GuestBlockReason`] for deadlock dumps.
-///
-/// Match is exhaustive so a new variant fails compilation rather than
-/// silently rendering via `Debug`.
+/// Exhaustive match: a new variant fails compilation rather than silently rendering via `Debug`.
 pub(super) fn block_reason_label(reason: &GuestBlockReason) -> String {
     match reason {
         GuestBlockReason::WaitingOnJoin { target } => {
@@ -871,7 +839,6 @@ mod tests {
         for _ in 0..5 {
             c.record();
         }
-        // pos = 5 % 3 = 2, full; oldest sits at the next write slot.
         let v: Vec<_> = c.iter_indices().collect();
         assert_eq!(v, vec![2, 0, 1]);
     }
@@ -979,7 +946,6 @@ mod tests {
 
     #[test]
     fn classify_tty_capture_zero_len_at_mem_end_is_inbounds() {
-        // buf == mem.len(), len == 0: empty slice is valid.
         let mem = vec![0u8; 16];
         let args = tty_args(1, 16, 0);
         let decision = classify_tty_capture(&args, &mem);
@@ -1016,8 +982,6 @@ mod tests {
         ];
         let unique: std::collections::BTreeSet<_> = labels.iter().collect();
         assert_eq!(unique.len(), labels.len(), "label collision: {labels:?}",);
-        // Resource id must reach the dump so the investigator can name
-        // the hanging sync object.
         assert!(labels[1].contains("id=7"), "got {}", labels[1]);
         assert!(labels[5].contains("mask=0xf0"), "got {}", labels[5]);
         assert!(labels[6].contains("cond=11"), "got {}", labels[6]);

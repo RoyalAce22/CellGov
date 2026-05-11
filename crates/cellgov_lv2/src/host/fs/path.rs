@@ -18,11 +18,7 @@ use crate::host::Lv2Runtime;
 /// two more `read_committed` probes -- one at byte 0 to separate
 /// "fully unmapped" from the rest, and one at the full window to
 /// separate "no NUL within mapped window" from "scan crossed an
-/// unmapped boundary." This re-walks the same address range the
-/// failed scan already touched. If `Lv2Runtime` ever becomes hot
-/// enough on the failure path to care, replace `read_committed_until`
-/// with a `PathReadOutcome` enum that threads the disambiguation
-/// out of a single scan.
+/// unmapped boundary."
 pub(super) fn read_path_bytes(
     rt: &dyn Lv2Runtime,
     path_ptr: u32,

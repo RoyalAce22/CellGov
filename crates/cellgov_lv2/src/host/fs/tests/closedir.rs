@@ -1,6 +1,3 @@
-//! `dispatch_fs_closedir` tests: success path, double-close,
-//! type-mixing across the file/dir fd surfaces.
-
 use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::fs_store::FsMount;
@@ -58,10 +55,6 @@ fn closedir_twice_returns_ebadf_on_second_call() {
 
 #[test]
 fn closedir_on_file_fd_returns_ebadf_and_leaves_file_open() {
-    // Mount has a file we can open through the regular fs_open
-    // path; then attempt to close that file fd via fs_closedir.
-    // The two stores are deliberately distinct so the dispatch
-    // surfaces EBADF and the file fd stays open for fs_close.
     let (mut host, dir) = open_mount("closedir_type_mixing");
     dir.write("data.xml", b"<x/>");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/data.xml\0");
@@ -75,7 +68,6 @@ fn closedir_on_file_fd_returns_ebadf_and_leaves_file_open() {
         errno::CELL_EBADF.code,
         0,
     );
-    // File fd still alive: fs_close on it succeeds.
     assert_eq!(host.fs_store().open_fd_count(), 1);
     assert_immediate(run(&mut host, &rt, fs_close(file_fd)), 0, 0);
     assert_eq!(host.fs_store().open_fd_count(), 0);
@@ -83,8 +75,6 @@ fn closedir_on_file_fd_returns_ebadf_and_leaves_file_open() {
 
 #[test]
 fn close_on_dir_fd_returns_ebadf_and_leaves_dir_open() {
-    // Symmetric to the above: a dir fd cannot be closed via
-    // fs_close, only via fs_closedir.
     let (mut host, dir) = open_mount("close_type_mixing");
     dir.write("a.xml", b"a");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home\0");

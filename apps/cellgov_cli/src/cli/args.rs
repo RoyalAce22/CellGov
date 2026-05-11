@@ -61,8 +61,7 @@ pub(crate) fn find_flag_value(args: &[String], flag: &str) -> Option<String> {
             .cloned()
             .unwrap_or_else(|| die(&format!("{flag} requires a value")));
         found = Some(val);
-        // Skip the value token so it cannot match a later flag
-        // comparison if the value coincidentally equals `flag`.
+        // Skip the value token so a value that equals `flag` does not match.
         i += 2;
     }
     found

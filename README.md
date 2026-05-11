@@ -52,7 +52,7 @@ Pre-Alpha. What works today:
 - **LV2**: 62 classified syscalls, 60 HLE exports (sys_rsx, cellSysutil, cellSpurs, sys_lwmutex, sys_fs, cellSaveDataAutoLoad).
 - **Worker-thread callback dispatch**: deterministic primitive for invoking guest callbacks; first consumer is `cellSaveDataAutoLoad`.
 - **Sync primitives**: lwmutex / event_flag / semaphore / mutex / cond match real-PS3 wake ordering (incl. ETIMEDOUT and CELL_ECANCELED paths).
-- **In-memory FS**: path-keyed blob store; both raw `sys_fs_*` and `cellFs*` HLE wrappers route through it.
+- **FS with host-backed VFS**: path-keyed blob store backs both `sys_fs_*` and `cellFs*` calls; per-title mounts (default `/app_home`) resolve guest paths against host directories with deterministic lexicographic enumeration. Directory iteration syscalls (opendir / readdir / closedir) operate on snapshot entries. Kernel fd allocation matches real PS3's `[3, 255)` range.
 - **PS3 conformance**: ps3autotests cross-runner harness; cpu/basic, cpu/ppu_branch, lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag match real-PS3 byte-for-byte.
 - 2,626 tests, zero `unsafe` (`unsafe_code = forbid`).
 

@@ -62,12 +62,8 @@ impl Lv2Host {
             Err(MountResolveErr::Failed(code)) => return MountResolution::Failed(code),
         };
 
-        // metadata() is read-only and does not consult host time;
-        // determinism only depends on the host file's bytes, which
-        // we capture immediately below. is_file() rejects
-        // directories so the regular-file `cell_fs_stat_write`
-        // shape stays correct; directory consumers go through
-        // [`Self::try_mount_resolve_dir`] instead.
+        // is_file() rejects directories; directory consumers go
+        // through [`Self::try_mount_resolve_dir`] instead.
         match std::fs::metadata(&host_path) {
             Ok(md) if md.is_file() => {}
             Ok(_) => return MountResolution::Failed(errno::CELL_ENOENT),
@@ -147,9 +143,7 @@ impl Lv2Host {
                 Ok(e) => e,
                 Err(_) => return DirMountResolution::Failed(errno::CELL_EIO),
             };
-            // file_type() is the cheap query that does not follow
-            // symlinks; metadata() would, and that would let a
-            // symlink to a directory sneak in as a directory entry.
+            // file_type() does not follow symlinks; metadata() would.
             let file_type = match entry.file_type() {
                 Ok(ft) => ft,
                 Err(_) => return DirMountResolution::Failed(errno::CELL_EIO),
@@ -189,9 +183,7 @@ enum MountResolveErr {
 }
 
 /// Shared prefix-resolution step for the file and directory
-/// surfaces. Pulled out so the two `try_mount_resolve_*` methods
-/// share their `..` rejection and invariant-break wiring without
-/// duplication.
+/// surfaces, including `..` rejection and invariant-break wiring.
 fn resolve_path(host: &mut Lv2Host, path: &str) -> Result<PathBuf, MountResolveErr> {
     match host.fs_mounts().resolve(path) {
         Ok(Some(p)) => Ok(p),

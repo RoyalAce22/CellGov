@@ -1,7 +1,3 @@
-//! `dispatch_fs_read` tests. Cross-handler tests where read is the
-//! pinning operation (`read_after_close`, `lseek_past_eof_then_read`)
-//! live here.
-
 use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::Lv2Dispatch;
@@ -57,14 +53,12 @@ fn read_past_eof_returns_zero_bytes_and_no_buffer_write() {
         .register_blob("/foo".into(), b"abc".to_vec())
         .unwrap();
     let (fd, rt) = open_registered(&mut host, b"/foo");
-    // Drain the file.
     let (n, _) = extract_read(
         run(&mut host, &rt, fs_read(fd, 0x30000, 100, 0x30100)),
         0x30000,
         0x30100,
     );
     assert_eq!(n, 3);
-    // Second read at EOF: nread=0, no buffer effect.
     let (n_eof, b_eof) = extract_read(
         run(&mut host, &rt, fs_read(fd, 0x30000, 100, 0x30100)),
         0x30000,
@@ -91,8 +85,7 @@ fn read_with_zero_nbytes_returns_ok_with_only_nread_write() {
     );
     assert_eq!(n, 0);
     assert!(b.is_none());
-    // Offset must not advance: a follow-up real read still
-    // returns the file from byte 0.
+    // Invariant: zero-byte read must not advance the offset.
     let (n2, b2) = extract_read(
         run(&mut host, &rt, fs_read(fd, 0x30000, 3, 0x30100)),
         0x30000,
@@ -106,7 +99,6 @@ fn read_with_zero_nbytes_returns_ok_with_only_nread_write() {
 fn read_unknown_fd_returns_ebadf_with_no_effects() {
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x100000);
-    // No fd ever opened; FsStore is empty.
     assert_immediate(
         run(&mut host, &rt, fs_read(0xCAFE_BABE, 0x30000, 8, 0x30100)),
         errno::CELL_EBADF.code,
@@ -121,19 +113,16 @@ fn read_bad_buffer_pointer_returns_efault_and_does_not_advance_offset() {
         .register_blob("/foo".into(), b"abcdef".to_vec())
         .unwrap();
     let (fd, rt_with_path) = open_registered(&mut host, b"/foo");
-    // Build a runtime with a reserved range covering the buffer
-    // we are about to pass; writes there must EFAULT.
     let rt = PathRuntime::empty(0x100000)
         .write(0x10000, b"/foo\0")
         .reserve(0x30000, 0x31000);
-    let _ = rt_with_path; // sandbox shape no longer needed.
+    let _ = rt_with_path;
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30100, 3, 0x40000)),
         errno::CELL_EFAULT.code,
         0,
     );
-    // Offset was not advanced: a subsequent valid read still
-    // returns the file from byte 0.
+    // Invariant: an EFAULT read must not advance the offset.
     let (n, b) = extract_read(
         run(&mut host, &rt, fs_read(fd, 0x40010, 6, 0x40000)),
         0x40010,
@@ -150,7 +139,6 @@ fn read_misaligned_nread_pointer_returns_efault() {
         .register_blob("/foo".into(), b"x".to_vec())
         .unwrap();
     let (fd, rt) = open_registered(&mut host, b"/foo");
-    // 8-byte alignment required; 0x30001 is misaligned.
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30000, 1, 0x30001)),
         errno::CELL_EFAULT.code,
@@ -174,9 +162,9 @@ fn read_unmapped_nread_pointer_returns_efault() {
 
 #[test]
 fn read_unknown_fd_takes_precedence_over_bad_buffer() {
-    // Pin error precedence: even if the buffer is bad, an
-    // unknown fd surfaces as EBADF first. The dispatcher must
-    // not leak buffer-write attempts on an invalid fd.
+    // Precedence invariant: an unknown fd surfaces as EBADF
+    // before buffer validation, so no buffer-write attempt is
+    // emitted on an invalid fd.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x100000).reserve(0x30000, 0x31000);
     assert_immediate(
@@ -188,11 +176,7 @@ fn read_unknown_fd_takes_precedence_over_bad_buffer() {
 
 #[test]
 fn read_after_close_returns_ebadf() {
-    // Cross-handler test (close + read): primary is the read
-    // return shape. Spec-correct invariant: closed fds are not
-    // reusable for reads. FsStore's close removes the entry,
-    // FsRead's fstat peek then surfaces UnknownFd as
-    // CELL_EBADF.
+    // Invariant: closed fds are not reusable for reads.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"abc".to_vec())
@@ -208,18 +192,14 @@ fn read_after_close_returns_ebadf() {
 
 #[test]
 fn read_zero_nbytes_with_bad_buf_ptr_returns_ok_with_only_nread_write() {
-    // POSIX-permitted skipping of buf validation when nbytes
-    // is zero. A future refactor that flips the && to || would
-    // silently break this; pin it.
+    // Invariant: nbytes == 0 skips buf_ptr writability check
+    // (POSIX-permitted). A future refactor that flips && to ||
+    // would silently break this.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"abc".to_vec())
         .unwrap();
     let (fd, _) = open_registered(&mut host, b"/foo");
-    // Reserve a region the buf_ptr will land in; nbytes = 0
-    // means the buf_ptr writability check must be skipped.
-    // The path bytes at 0x10000 are unused by fs_read but
-    // open_registered's runtime layout puts them there.
     let rt = PathRuntime::empty(0x100000)
         .write(0x10000, b"/foo\0")
         .reserve(0x30000, 0x31000);
@@ -233,16 +213,13 @@ fn read_zero_nbytes_with_bad_buf_ptr_returns_ok_with_only_nread_write() {
 
 #[test]
 fn lseek_past_eof_then_read_returns_zero_bytes() {
-    // Cross-handler test (lseek + read): primary is the read
-    // return value (0 bytes). SEEK_END + positive offset puts
-    // the cursor past EOF. Subsequent read returns 0 bytes
-    // (EOF semantics) rather than EINVAL or anything else.
+    // Invariant: a cursor past EOF reads 0 bytes (EOF
+    // semantics), not EINVAL.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"abcdef".to_vec())
         .unwrap();
     let (fd, rt) = open_registered(&mut host, b"/foo");
-    // SEEK_END + 100: position = 6 + 100 = 106.
     let dispatch = run(&mut host, &rt, fs_lseek(fd, 100, 2, 0x30000));
     match dispatch {
         Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, 0),

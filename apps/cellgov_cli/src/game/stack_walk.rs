@@ -31,7 +31,6 @@ use cellgov_ppu::decode;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ps3_abi::process_address_space::PS3_USER_TEXT_FLOOR;
 
-/// Maximum frames the walk follows before stopping.
 const MAX_BACK_CHAIN_FRAMES: usize = 32;
 
 /// BO2 in IBM MSB-first 5-bit-BO numbering. After the conventional
@@ -39,9 +38,7 @@ const MAX_BACK_CHAIN_FRAMES: usize = 32;
 /// resulting value (mask 0b00100).
 const BO_BIT2: u8 = 0b0_0100;
 
-/// Append a "back-chain walk" block to `out`, or a "skipped" line if
-/// r1 is invalid. Empty output means r1 sits below the user-text floor
-/// (e.g. NULL or trampoline-scratch).
+/// Empty output means r1 sits below the user-text floor (NULL or trampoline-scratch).
 pub(super) fn append_stack_walk(out: &mut String, rt: &Runtime, regs: &FaultRegisterDump) {
     let r1 = regs.gprs[1];
     if r1 < PS3_USER_TEXT_FLOOR {
@@ -54,9 +51,6 @@ pub(super) fn append_stack_walk(out: &mut String, rt: &Runtime, regs: &FaultRegi
             "\n  stack walk skipped: r1=0x{r1:016x} -- {}",
             walk.terminated.as_str(),
         ));
-        // For an InvalidBackChain, dump the bytes at the last visited
-        // sp so the reviewer can see what back-chain value we actually
-        // read. UnmappedRead has nothing to read, so skip the dump.
         if walk.terminated == Termination::InvalidBackChain {
             if let Some(sp) = walk.last_sp_visited {
                 append_back_chain_byte_dump(out, rt, sp);
@@ -76,9 +70,6 @@ pub(super) fn append_stack_walk(out: &mut String, rt: &Runtime, regs: &FaultRegi
             f.sp, f.saved_lr,
         ));
     }
-    // If the walk ran some frames but then hit an implausible
-    // back-chain, dump bytes at the SP whose back-chain pointed wrong
-    // so the reviewer can see the offending value.
     if walk.terminated == Termination::InvalidBackChain {
         if let Some(sp) = walk.last_sp_visited {
             append_back_chain_byte_dump(out, rt, sp);
@@ -86,11 +77,7 @@ pub(super) fn append_stack_walk(out: &mut String, rt: &Runtime, regs: &FaultRegi
     }
 }
 
-/// Print 16 quadwords (128 bytes) at `sp` so a reviewer reading an
-/// `InvalidBackChain` verdict can see the actual back-chain value
-/// (mem[sp+0]) and surrounding stack contents. Falls through silently
-/// when the read fails -- the diagnostic value is the bytes, not
-/// another error message.
+/// 16 quadwords (128 bytes) at `sp`; silent on read failure.
 fn append_back_chain_byte_dump(out: &mut String, rt: &Runtime, sp: u64) {
     const DUMP_LEN: u64 = 128;
     let Some(range) = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(sp), DUMP_LEN) else {
@@ -167,26 +154,16 @@ impl Termination {
 struct BackChainWalk {
     frames: Vec<BackChainFrame>,
     terminated: Termination,
-    /// Last SP the walker was about to read at when it stopped.
-    /// For InvalidBackChain mid-walk this is the SP whose back-chain
-    /// pointed somewhere implausible (i.e. one frame deeper than the
-    /// last pushed frame). For frame 0 it equals `r1`. None when the
-    /// walk terminated cleanly via NullBackChain or MaxFrames.
+    /// For InvalidBackChain mid-walk: the SP whose back-chain pointed somewhere
+    /// implausible. For frame 0 it equals `r1`. None on NullBackChain/MaxFrames.
     last_sp_visited: Option<u64>,
 }
 
-/// Walk the PPC64 ELFv1 back-chain anchored at `r1` per
-/// [CBE-Handbook p:398 s:14.3.1.3 Figure 14-3] and
-/// [AltiVec-PIM p:34 s:3]. Each frame's saved LR lives at its
-/// caller's SP+16 (not its own SP+16), so the walk reads
-/// `read_u64(next_sp + 16)` after following the back-chain.
-///
-/// Each pushed frame represents a function whose SP is `sp` and which
-/// will return to `saved_lr` (an address in its caller). The initial
-/// frame (NULL back-chain) has no caller and is pushed with
-/// `saved_lr = 0` / `call_kind = None`. Invalid or unreadable
-/// back-chain at any frame terminates without pushing a partial
-/// frame.
+/// Walk PPC64 ELFv1 back-chain anchored at `r1` per
+/// [CBE-Handbook p:398 s:14.3.1.3 Figure 14-3] and [AltiVec-PIM p:34 s:3].
+/// Each frame's saved LR lives at its caller's SP+16 (not its own), so the walk reads
+/// `read_u64(next_sp + 16)` after following the back-chain. The initial frame
+/// (NULL back-chain) is pushed with `saved_lr = 0` / `call_kind = None`.
 fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
     let mut frames: Vec<BackChainFrame> = Vec::new();
 
@@ -200,7 +177,6 @@ fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
         };
 
         if next_sp == 0 {
-            // Initial frame per Figure 14-2: no caller, no saved LR.
             frames.push(BackChainFrame {
                 sp,
                 saved_lr: 0,
@@ -212,21 +188,15 @@ fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
                 last_sp_visited: None,
             };
         }
-        // `next_sp < FLOOR` is shadowed by `next_sp <= sp` given the
-        // loop invariant `sp >= FLOOR`, but we keep it explicit so the
-        // rule survives any future refactor of the entry condition.
         if next_sp <= sp || next_sp < PS3_USER_TEXT_FLOOR {
             return BackChainWalk {
                 frames,
                 terminated: Termination::InvalidBackChain,
-                // sp is the frame whose back-chain pointed wrong. The
-                // dump at this sp reveals the bad next_sp value.
                 last_sp_visited: Some(sp),
             };
         }
 
-        // Read saved LR at next_sp + 16 (caller's r1 + 16). This is
-        // where THIS frame's prologue stored its caller-supplied LR.
+        // Saved LR at next_sp + 16 (caller's r1 + 16): where THIS frame's prologue stored it.
         let Some(saved_lr_addr) = next_sp.checked_add(16) else {
             return BackChainWalk {
                 frames,
@@ -243,8 +213,7 @@ fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
         };
 
         let call_kind = saved_lr_call_kind(rt, saved_lr_raw);
-        // Store the raw u64 so a corrupt slot with high bits set
-        // prints in full; `via not-a-call` is the corruption signal.
+        // Store raw u64 so corrupt high bits print in full; `via not-a-call` flags them.
         frames.push(BackChainFrame {
             sp,
             saved_lr: saved_lr_raw,
@@ -260,9 +229,7 @@ fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
     }
 }
 
-/// Classify the saved-LR raw u64 as a call site, or `None`. Rejects
-/// values with high 32 bits set (PS3 PPU code is 32-bit), misaligned
-/// values, values below `PS3_USER_TEXT_FLOOR`, and values whose
+/// Rejects high-32-bit-set, misaligned, below-floor, and values whose
 /// preceding word does not decode to a call-with-link.
 fn saved_lr_call_kind(rt: &Runtime, saved_lr_raw: u64) -> Option<CallKind> {
     if saved_lr_raw >> 32 != 0 {
@@ -289,10 +256,8 @@ fn read_u32(rt: &Runtime, addr: u64) -> Option<u32> {
     Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
-/// Decode the instruction at `addr` and classify it as a call (any
-/// branch-with-link), or return `None`. Rejects bcctr's invalid form
-/// per [PPC-Book1 p:25 s:Branch Conditional to Count Register]
-/// (BO2=0).
+/// Rejects bcctr's invalid form (BO2=0) per
+/// [PPC-Book1 p:25 s:Branch Conditional to Count Register].
 fn classify_call_at(rt: &Runtime, addr: u64) -> Option<CallKind> {
     debug_assert!(
         addr & 3 == 0,
@@ -303,9 +268,7 @@ fn classify_call_at(rt: &Runtime, addr: u64) -> Option<CallKind> {
     match insn {
         PpuInstruction::B { link: true, .. } => Some(CallKind::Bl),
         PpuInstruction::Bc { link: true, .. } => Some(CallKind::Bcl),
-        // [PPC-Book1 p:25 s:Branch Conditional to Count Register] BO2=0
-        // (decrement-and-test-CTR option) is invalid for bcctr; the
-        // PPU decoder accepts any BO so the classifier filters here.
+        // [PPC-Book1 p:25 s:Branch Conditional to Count Register] BO2=0 is invalid for bcctr.
         PpuInstruction::Bcctr { bo, link: true, .. } if bo & BO_BIT2 != 0 => Some(CallKind::Bcctrl),
         PpuInstruction::Bclr { link: true, .. } => Some(CallKind::Bclrl),
         _ => None,
@@ -404,10 +367,7 @@ mod tests {
 
     #[test]
     fn user_text_floor_const_matches_callback_dispatch_zone() {
-        // Trampoline scratch zone is 0..0x10000 per
-        // cellgov_ps3_abi::callback_dispatch; the user-text floor must
-        // sit at exactly the upper bound so trampoline addresses are
-        // not classified as title text.
+        // Trampoline scratch zone is 0..0x10000; floor must equal its upper bound.
         assert_eq!(PS3_USER_TEXT_FLOOR, 0x0001_0000);
     }
 
@@ -439,7 +399,6 @@ mod tests {
         let mut rt = rt_with_layout();
         let call_pc = 0x0010_0000u64;
         write_u32_be(&mut rt, call_pc, encode_bl(0x100));
-        // A return address of call_pc+4 should classify as Bl.
         assert_eq!(saved_lr_call_kind(&rt, call_pc + 4), Some(CallKind::Bl));
     }
 
@@ -481,11 +440,6 @@ mod tests {
         assert_eq!(classify_call_at(&rt, 0x0010_0000), Some(CallKind::Bcctrl));
     }
 
-    /// Per [PPC-Book1 p:25 s:Branch Conditional to Count Register],
-    /// BO2=0 is the invalid bcctr form. The PPU decoder accepts any
-    /// BO, so the classifier filters here -- a stack u64 that happens
-    /// to look like an invalid bcctrl must not surface as a real
-    /// frame.
     #[test]
     fn classify_call_at_rejects_invalid_form_bcctrl() {
         let mut rt = rt_with_layout();
@@ -533,15 +487,8 @@ mod tests {
         let _ = classify_call_at(&rt, 0x0010_0001);
     }
 
-    /// Realistic flOw m_InitEntityHierarchy fault shape: PC at NULL+4
-    /// (post-NULL-bcctr), back-chain still anchors a valid 3-frame
-    /// chain. The walker must surface all three frames including the
-    /// NULL terminator and label call kinds for the inner two.
-    ///
-    /// Layout (per [AltiVec-PIM p:34 s:3] convention):
-    ///   sp_a (innermost) -> back-chain to sp_b
-    ///   sp_b               -> back-chain to sp_c
-    ///   sp_c (outermost)   -> back-chain to NULL (initial frame)
+    /// Layout per [AltiVec-PIM p:34 s:3]:
+    ///   sp_a (innermost) -> sp_b -> sp_c -> NULL.
     /// sp_a's saved LR lives at sp_b+16; sp_b's saved LR at sp_c+16.
     #[test]
     fn back_chain_walk_recovers_callers_after_null_bcctr() {
@@ -556,9 +503,9 @@ mod tests {
         let sp_c = 0xD000_0180u64;
         write_u64_be(&mut rt, sp_a, sp_b);
         write_u64_be(&mut rt, sp_b, sp_c);
-        write_u64_be(&mut rt, sp_c, 0); // NULL initial frame
-        write_u64_be(&mut rt, sp_b + 16, inner_caller_pc + 4); // sp_a returns here
-        write_u64_be(&mut rt, sp_c + 16, outer_caller_pc + 4); // sp_b returns here
+        write_u64_be(&mut rt, sp_c, 0);
+        write_u64_be(&mut rt, sp_b + 16, inner_caller_pc + 4);
+        write_u64_be(&mut rt, sp_c + 16, outer_caller_pc + 4);
 
         let mut out = String::new();
         append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp_a));
@@ -578,19 +525,14 @@ mod tests {
             out.contains("NULL back-chain"),
             "expected NULL termination annotation in {out}",
         );
-        // 3 frames: sp_a (bcctrl), sp_b (bl), sp_c (NULL terminator).
         assert_eq!(count_frame_lines(&out), 3, "frame count drift in {out}");
     }
 
-    /// Back-chain points down (next_sp < sp). InvalidBackChain at
-    /// frame 0 means no frames are pushed; the dispatcher emits a
-    /// "stack walk skipped" line carrying the implausible-back-chain
-    /// annotation.
     #[test]
     fn back_chain_walk_terminates_on_non_increasing_sp() {
         let mut rt = rt_with_layout();
         let sp_a = 0xD000_0100u64;
-        let sp_b = 0xD000_0080u64; // below sp_a
+        let sp_b = 0xD000_0080u64;
         write_u64_be(&mut rt, sp_a, sp_b);
 
         let mut out = String::new();
@@ -603,14 +545,11 @@ mod tests {
         );
     }
 
-    /// Below-floor back-chain at frame 0 -- same shape as
-    /// non-increasing: 0 frames pushed, dispatcher emits skipped
-    /// message with the implausible annotation.
     #[test]
     fn back_chain_walk_terminates_on_below_floor_back_chain() {
         let mut rt = rt_with_layout();
         let sp = 0xD000_0080u64;
-        write_u64_be(&mut rt, sp, 0x42); // back-chain = 42, below floor
+        write_u64_be(&mut rt, sp, 0x42);
 
         let mut out = String::new();
         append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp));
@@ -620,18 +559,11 @@ mod tests {
         );
     }
 
-    /// On InvalidBackChain at frame 0, the dispatcher follows the
-    /// "skipped" line with a 16-quadword bytes block at sp so the
-    /// reviewer can read the actual back-chain value. Asserts the
-    /// header and the first row's offset / sp are present.
     #[test]
     fn append_stack_walk_dumps_bytes_on_invalid_back_chain_frame_0() {
         let mut rt = rt_with_layout();
         let sp = 0xD000_0080u64;
-        // back-chain = 0xCAFEBABE (looks like junk, below floor).
         write_u64_be(&mut rt, sp, 0xCAFE_BABE);
-        // Plant some recognisable bytes deeper in the stack region so
-        // the dump contains them.
         write_u64_be(&mut rt, sp + 16, 0xDEAD_BEEF_0000_0001);
 
         let mut out = String::new();
@@ -641,17 +573,10 @@ mod tests {
             out.contains(&format!("bytes at sp=0x{sp:016x} (back-chain at +0):")),
             "got {out}",
         );
-        // Hex bytes for 0xCAFEBABE: low 32 bits stored at sp+0..7 in
-        // big-endian, occupying sp+4..7 == "ca fe ba be".
         assert!(out.contains("ca fe ba be"), "got {out}");
-        // And the deeper recognisable value.
         assert!(out.contains("de ad be ef"), "got {out}");
     }
 
-    /// On InvalidBackChain after some frames have been pushed, the
-    /// dump fires at the LAST visited frame's sp (where the bad
-    /// back-chain was read). One frame walk + bad next_sp at sp_a's
-    /// back-chain target.
     #[test]
     fn append_stack_walk_dumps_bytes_on_invalid_back_chain_mid_walk() {
         let mut rt = rt_with_layout();
@@ -659,13 +584,8 @@ mod tests {
         let sp_b = 0xD000_0100u64;
         let bl_pc = 0x0020_0000u64;
         write_u32_be(&mut rt, bl_pc, encode_bl(0x100));
-        // sp_a's back-chain points up to sp_b (valid).
         write_u64_be(&mut rt, sp_a, sp_b);
-        // sp_a's saved-LR slot lives at sp_b+16 -- write a real bl
-        // return address so frame 0 classifies cleanly.
         write_u64_be(&mut rt, sp_b + 16, bl_pc + 4);
-        // sp_b's back-chain points DOWN (invalid; triggers
-        // InvalidBackChain after frame 0 was pushed).
         write_u64_be(&mut rt, sp_b, 0x10);
 
         let mut out = String::new();
@@ -673,16 +593,12 @@ mod tests {
         assert!(out.contains("back-chain walk"), "got {out}");
         assert!(out.contains("via bl"), "got {out}");
         assert!(out.contains("implausible"), "got {out}");
-        // Dump fires at sp_b (the last visited frame) per the
-        // contract.
         assert!(
             out.contains(&format!("bytes at sp=0x{sp_b:016x}")),
             "got {out}",
         );
     }
 
-    /// UnmappedRead does not emit a bytes block (there are no bytes
-    /// to read), only the skipped message.
     #[test]
     fn append_stack_walk_omits_byte_dump_on_unmapped_r1() {
         let rt = rt_with_layout();
@@ -693,10 +609,6 @@ mod tests {
         assert!(!out.contains("bytes at sp="), "unexpected dump in {out}");
     }
 
-    /// Each frame's saved LR lives at the next frame's SP+16 (the
-    /// caller's frame). So writing `bl_pc+4` at every frame's SP+16
-    /// means each iteration's saved-LR read at next_sp+16 hits one of
-    /// the prior writes.
     #[test]
     fn back_chain_walk_caps_at_max_frames() {
         let mut rt = rt_with_layout();
@@ -754,30 +666,22 @@ mod tests {
         assert!(out.is_empty(), "expected silence on r1=0, got {out}");
     }
 
-    /// Frame whose saved-LR slot (at the caller's SP+16) holds a
-    /// non-call-site value gets reported with `via not-a-call`.
-    /// Two-frame setup: sp_a -> sp_b -> NULL; the slot at sp_b+16
-    /// holds 0x100000 (zero word, not a call).
     #[test]
     fn back_chain_walk_reports_frame_with_not_a_call_when_saved_lr_is_junk() {
         let mut rt = rt_with_layout();
         let sp_a = 0xD000_0080u64;
         let sp_b = 0xD000_0100u64;
         write_u64_be(&mut rt, sp_a, sp_b);
-        write_u64_be(&mut rt, sp_b, 0); // NULL initial
-        write_u64_be(&mut rt, sp_b + 16, 0x0010_0000); // junk saved-LR for sp_a
+        write_u64_be(&mut rt, sp_b, 0);
+        write_u64_be(&mut rt, sp_b + 16, 0x0010_0000);
 
         let mut out = String::new();
         append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp_a));
-        // Two frames: sp_a (junk saved_lr), sp_b (NULL terminator).
         assert_eq!(count_frame_lines(&out), 2, "got {out}");
         assert!(out.contains("via not-a-call"), "got {out}");
         assert!(out.contains("saved_lr=0x0000000000100000"), "got {out}");
     }
 
-    /// Saved-LR with high bits set is unclassifiable but the printed
-    /// value preserves the high half. Two-frame setup: sp_a -> sp_b
-    /// -> NULL; sp_b+16 holds the corrupt value.
     #[test]
     fn back_chain_walk_preserves_high_half_in_corrupt_saved_lr() {
         let mut rt = rt_with_layout();
@@ -797,10 +701,6 @@ mod tests {
         );
     }
 
-    /// Happy path: 5-frame chain, all valid bl callers, terminating
-    /// at NullBackChain. The saved-LR for frame i lives at frame
-    /// (i+1)'s SP+16; frame 4 is the NULL terminator with no saved
-    /// LR.
     #[test]
     fn back_chain_walk_traverses_realistic_5_frame_chain_to_null() {
         let mut rt = rt_with_layout();
@@ -818,16 +718,12 @@ mod tests {
                 base + (i + 1) * frame_size
             };
             write_u64_be(&mut rt, sp, next_sp);
-            // saved-LR for frame (i-1) lives here; only meaningful
-            // for i >= 1.
             write_u64_be(&mut rt, sp + 16, bl_pc + 4);
         }
         let mut out = String::new();
         append_stack_walk(&mut out, &rt, &fault_regs_with_r1(base));
         assert!(out.contains("NULL back-chain"), "got {out}");
         assert_eq!(count_frame_lines(&out), N as usize, "got {out}");
-        // 4 inner frames classify as bl; the NULL terminator is
-        // not-a-call.
         assert_eq!(out.matches("via bl").count(), (N - 1) as usize, "got {out}");
         assert_eq!(out.matches("via not-a-call").count(), 1, "got {out}");
     }

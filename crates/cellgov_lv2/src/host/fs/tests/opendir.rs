@@ -1,7 +1,3 @@
-//! `dispatch_fs_opendir` tests: out-pointer / path validation,
-//! mount-resolve to a host directory, lexicographic enumeration,
-//! and the typed errnos for missing / not-a-directory roots.
-
 use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::fs_store::FsMount;
@@ -134,7 +130,6 @@ fn opendir_at_subdir_allocates_fd() {
 #[test]
 fn non_utf8_path_returns_enoent() {
     let mut host = Lv2Host::new();
-    // Lone 0xFF byte makes this not valid UTF-8.
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"\xFF/Data\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0x20000)),

@@ -58,8 +58,7 @@ pub struct WriteEntry {
     pub bytes: Vec<u8>,
 }
 
-/// Parser error variants. Local enum, no `From` impls; the dispatch
-/// site formats and dies.
+/// Failure modes while parsing the HLE trace.
 #[derive(Debug)]
 pub enum ParseError {
     Io(std::io::Error),
@@ -104,11 +103,6 @@ impl std::fmt::Display for ParseError {
 /// multi-GB traces stay in bounded memory.
 #[cfg(test)]
 pub fn parse(path: &Path) -> Result<Vec<CallRecord>, ParseError> {
-    // Convenience wrapper around `parse_streaming` for tests and
-    // small traces. Callers that handle multi-GB files (the common
-    // production case for long boots) should use
-    // `parse_streaming` directly so they can filter on the fly
-    // without buffering every record.
     let mut records = Vec::new();
     parse_streaming(path, |rec| {
         records.push(rec);
@@ -176,12 +170,9 @@ where
             resyncs += 1;
             continue;
         }
-        // Magic matched -- consume and parse the body. If the body
-        // is malformed (NameTooLong, WriteTooLarge, or stale
-        // UnexpectedEof on a fresh stream-while-being-written
-        // file), DON'T bail; resync into the next valid magic so
-        // the rest of the trace stays usable. The `Io` error path
-        // still surfaces (matched on `is_some_io` below).
+        // Body-parse failures (NameTooLong, WriteTooLarge, EOF on a
+        // file still being written) resync to the next valid magic
+        // instead of aborting. `Io` errors still surface.
         have_window = false;
         match parse_one_record(&mut reader) {
             Ok(rec) => on_record(rec)?,
@@ -190,8 +181,6 @@ where
                     return Err(e);
                 }
                 resyncs += 1;
-                // Force the next iteration to re-read a fresh 4-byte
-                // window starting at the current stream position.
                 continue;
             }
         }
@@ -382,11 +371,8 @@ pub fn run(args: &[String]) {
                 addr.saturating_add(len),
             );
         } else {
-            // Records arrive from `parse_streaming` in file order, which
-            // is the chronological emit order (single-writer mutex
-            // around the trace file). DO NOT sort by `step`: that field
-            // holds the PPU CIA at HLE entry, which is a code address,
-            // not a timestamp.
+            // `parse_streaming` yields records in chronological emit order;
+            // `step` is the PPU CIA at HLE entry, not a timestamp.
             println!(
                 "{} record(s) wrote into [0x{addr:016x}, 0x{:016x}) in chronological order:",
                 hits.len(),
@@ -553,9 +539,6 @@ mod tests {
 
     #[test]
     fn filter_addr_range_preserves_input_order() {
-        // Records are passed in chronological emit order (file
-        // order from `parse_streaming`); the filter must NOT
-        // reorder them. `step` is a code address, not a timestamp.
         let records = vec![
             fixture_record(
                 "first_writer",
@@ -601,11 +584,6 @@ mod tests {
 
     #[test]
     fn parse_resyncs_past_garbage_to_find_valid_records() {
-        // Resync semantics: garbage between the header and the
-        // first valid record is skipped (with a stderr warning).
-        // A real-world hit would be a buggy partial flush in the
-        // RPCS3 hook; the trace stays useful instead of being
-        // wholesale rejected.
         let records = vec![fixture_record("real_call", 0x100, Vec::new())];
         let valid = build_trace(&records);
         let mut bytes = Vec::new();
@@ -622,9 +600,6 @@ mod tests {
 
     #[test]
     fn parse_tolerates_trailing_partial_record_magic() {
-        // Simulates RPCS3 killed mid-fwrite: complete record + 3
-        // dangling bytes of the next magic. Parser must keep the
-        // complete record and silently truncate.
         let records = vec![fixture_record("complete_call", 0x100, Vec::new())];
         let mut bytes = build_trace(&records);
         bytes.push(0x02);
@@ -640,8 +615,6 @@ mod tests {
 
     #[test]
     fn parse_tolerates_truncation_inside_a_record_body() {
-        // Complete record + a record that has its magic but is cut
-        // off mid-step. Parser must keep the complete record.
         let records = vec![fixture_record("complete_call", 0x100, Vec::new())];
         let mut bytes = build_trace(&records);
         bytes.extend_from_slice(&RECORD_MAGIC.to_le_bytes());

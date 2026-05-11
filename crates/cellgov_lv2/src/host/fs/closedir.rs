@@ -10,9 +10,7 @@ impl Lv2Host {
     /// `sys_fs_closedir` -- release a directory fd allocated via
     /// [`Self::dispatch_fs_opendir`]. Returns CELL_EBADF for an
     /// unknown directory fd OR for a value that names a regular
-    /// file fd; the two stores are deliberately distinct so a
-    /// guest that mixes them sees the error rather than silently
-    /// closing the wrong handle.
+    /// file fd; the file and directory fd stores are distinct.
     pub(in crate::host) fn dispatch_fs_closedir(&mut self, fd: u32) -> Lv2Dispatch {
         match self.fs_store_mut().close_dir(fd) {
             Ok(()) => Lv2Dispatch::Immediate {

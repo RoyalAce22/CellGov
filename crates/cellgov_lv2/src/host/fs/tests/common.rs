@@ -203,11 +203,10 @@ pub(super) fn extract_fd(d: Lv2Dispatch, expected_addr: u64) -> u32 {
 }
 
 /// Open `path` against `host` (which must already have the blob
-/// registered) and return the allocated fd. Panics on any
-/// dispatch shape divergence.
+/// registered) and return the allocated fd plus the
+/// [`PathRuntime`] used for the open (so callers can reuse its
+/// sandbox layout). Panics on any dispatch shape divergence.
 pub(super) fn open_registered(host: &mut Lv2Host, path: &[u8]) -> (u32, PathRuntime) {
-    // Lay out the path at 0x10000 and reserve the rest of the
-    // 1 MiB sandbox for buffer / out-pointer use.
     let mut bytes = path.to_vec();
     bytes.push(0);
     let rt = PathRuntime::empty(0x100000).write(0x10000, &bytes);

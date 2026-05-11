@@ -116,8 +116,6 @@ impl Lv2Host {
         let stat = match self.fs_store().stat_path(path_str) {
             Ok(s) => s,
             Err(FsError::UnknownPath) => {
-                // Owned to release the &self borrow before we
-                // touch &mut self via try_mount_resolve_and_cache.
                 let path_owned = path_str.to_string();
                 match self.try_mount_resolve_and_cache(&path_owned) {
                     MountResolution::Cached => match self.fs_store().stat_path(&path_owned) {

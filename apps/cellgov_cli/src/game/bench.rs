@@ -1,9 +1,8 @@
 //! `bench-boot` / `bench-boot-once` / `bench-boot-pair` machinery.
 //!
-//! Two-process harness for boot throughput measurement. A pair runs
-//! two subprocesses back-to-back, parses a `BENCH_RESULT` line from
-//! each, and reports an agreement percentage as the reproducibility
-//! gate.
+//! A pair runs two subprocesses back-to-back, parses a `BENCH_RESULT`
+//! line from each, and reports an agreement percentage as the
+//! reproducibility gate.
 
 use std::time::Instant;
 
@@ -11,7 +10,6 @@ use super::boot;
 use super::manifest::{self, TitleManifest};
 use super::step_loop::bench_step_loop;
 
-/// Result of one [`bench_boot`] invocation.
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct BenchBootResult {
@@ -32,8 +30,7 @@ impl BenchBootResult {
 }
 
 /// Run one boot with the minimum step-loop bookkeeping needed to
-/// detect termination. Shares `boot::prepare` with `run-game`; only
-/// the step loop differs.
+/// detect termination.
 pub fn bench_boot(
     title: &TitleManifest,
     elf_path: &str,
@@ -80,14 +77,11 @@ pub fn bench_boot(
     }
 }
 
-/// Run a single bench invocation and print one `BENCH_RESULT` line
-/// to stdout.
+/// Run a single bench invocation and print one `BENCH_RESULT` line.
 ///
-/// Each measurement runs in its own subprocess: in-process
-/// back-to-back runs drift ~60 percent in wall time on Windows due
-/// to 1 GB guest-memory page-commit reuse. A fresh heap, page
-/// tables, and CPU caches are required for the two runs to be
-/// comparable.
+/// Each measurement runs in its own subprocess: in-process back-to-back
+/// runs drift ~60 percent in wall time on Windows due to 1 GB
+/// guest-memory page-commit reuse.
 pub fn bench_boot_one_run(
     title: &TitleManifest,
     elf_path: &str,
@@ -116,8 +110,7 @@ pub fn bench_boot_one_run(
     r
 }
 
-/// Render a [`cellgov_compare::BootOutcome`] for a `BENCH_RESULT`
-/// line. The canonical string form shared with [`parse_bench_result`].
+/// Canonical string form shared with [`parse_bench_result`].
 pub(crate) fn format_bench_outcome(outcome: cellgov_compare::BootOutcome) -> String {
     use cellgov_compare::BootOutcome;
     match outcome {
@@ -130,9 +123,8 @@ pub(crate) fn format_bench_outcome(outcome: cellgov_compare::BootOutcome) -> Str
     }
 }
 
-/// Run `bench_boot_one_run` twice in separate subprocesses and
-/// print a pair report. Rejects the pair when wall times disagree
-/// by more than 5 percent.
+/// Run `bench_boot_one_run` twice in separate subprocesses. Reports
+/// FAIL when wall times disagree by more than 5 percent.
 pub fn bench_boot_pair(
     title: &TitleManifest,
     elf_path: &str,
@@ -195,8 +187,8 @@ pub fn bench_boot_pair(
     (r1, r2)
 }
 
-/// Fork-and-exec the current binary as `bench-boot-once` and parse
-/// its `BENCH_RESULT` line from stdout. Stderr is inherited.
+/// Spawn the current binary as `bench-boot-once` and parse its
+/// `BENCH_RESULT` line from stdout.
 fn spawn_one_run(
     title: &TitleManifest,
     elf_path: &str,
@@ -233,8 +225,8 @@ fn spawn_one_run(
     cmd.arg(elf_path);
     let output = cmd.output().expect("subprocess runs");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // A nonzero-exit subprocess that emitted BENCH_RESULT before
-    // crashing would feed bogus data into the agreement gate.
+    // Reject a nonzero exit so a crash-after-BENCH_RESULT can't feed
+    // bogus data into the agreement gate.
     if !output.status.success() {
         eprintln!(
             "bench-boot: subprocess exited nonzero (status={:?}); refusing to accept its BENCH_RESULT",
@@ -270,8 +262,8 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Option<BenchBootResult> {
         } else if let Some(v) = tok.strip_prefix("wall_ms=") {
             wall_ms = v.parse().ok();
         } else if tok.starts_with("steps_per_sec=") {
-            // Derivable from steps and wall_ms; recognized so the
-            // unknown-token warning below does not fire on it.
+            // Derivable from steps and wall_ms; recognized to suppress
+            // the unknown-token warning below.
         } else if let Some(v) = tok.strip_prefix("outcome=") {
             outcome = match v {
                 "ProcessExit" => Some(cellgov_compare::BootOutcome::ProcessExit),
@@ -280,9 +272,8 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Option<BenchBootResult> {
                 "MaxSteps" => Some(cellgov_compare::BootOutcome::MaxSteps),
                 "TimeOverflow" => Some(cellgov_compare::BootOutcome::TimeOverflow),
                 other => {
-                    // PcReached(0xADDR) is the one variant that
-                    // carries a payload; malformed payloads return
-                    // None so the line fails loudly.
+                    // PcReached(0xADDR) is the one payload-bearing variant;
+                    // malformed payloads return None.
                     if let Some(addr_hex) = other
                         .strip_prefix("PcReached(0x")
                         .and_then(|s| s.strip_suffix(')'))
@@ -296,8 +287,8 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Option<BenchBootResult> {
                 }
             };
         } else {
-            // Surfaces a formatter/parser drift; parsing continues
-            // so required fields may still yield a result.
+            // Surfaces formatter/parser drift; parsing continues so
+            // required fields may still yield a result.
             eprintln!(
                 "parse_bench_result: warning: unknown token {tok:?} in BENCH_RESULT line; parser may be stale"
             );

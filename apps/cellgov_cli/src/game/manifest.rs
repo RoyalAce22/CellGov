@@ -1,15 +1,11 @@
 //! Title registry driven by TOML manifests under `docs/titles/`.
 //!
-//! One TOML file per title (named for its PSN content id or disc
-//! serial) carries content id, short name, display name, executable
-//! candidate list, and boot checkpoint. Title metadata lives only
-//! in `cellgov_cli`; no library crate below sees it.
+//! One TOML file per title. Title metadata lives only in `cellgov_cli`.
 
 use std::path::{Path, PathBuf};
 
 /// How the title's executable is located on disk. Defaults to `Hdd`
-/// when `[source]` is omitted; the loader does not infer disc from
-/// the content id.
+/// when `[source]` is omitted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GameSource {
     /// EBOOT at `<vfs>/game/<content-id>/USRDIR/`.
@@ -25,46 +21,25 @@ pub struct TitleManifest {
     /// PSN content id; primary lookup key and the directory name
     /// under `/dev_hdd0/game/`.
     pub content_id: String,
-    /// Short CLI name for `--title <name>`. Unique across the
-    /// registry.
+    /// Short CLI name for `--title <name>`. Unique across the registry.
     pub short_name: String,
     pub display_name: String,
-    /// Executable filenames tried in priority order under the
-    /// title's `USRDIR/`. Decrypted ELFs listed before SELFs.
+    /// Executable filenames tried in priority order under USRDIR.
     pub eboot_candidates: Vec<String>,
     /// Built-in boot checkpoint; CLI `--checkpoint` overrides.
     pub checkpoint: CheckpointTrigger,
     pub source: GameSource,
-    /// Maps the RSX region `ReadWrite` and enables
-    /// [`cellgov_core::Runtime::set_rsx_mirror_writes`] so FIFO
-    /// stores land in the RSX cursor for downstream advance.
-    ///
-    /// Mutually exclusive with `CheckpointTrigger::FirstRsxWrite`
-    /// (a writable region cannot fault on the put-pointer store);
-    /// the loader rejects both together.
+    /// Mutually exclusive with `CheckpointTrigger::FirstRsxWrite`:
+    /// a writable region cannot fault on the put-pointer store.
     pub rsx_mirror: bool,
-    /// Optional in-memory content provider. Read-only blobs the
-    /// title expects to load from `/app_home/...` paths get
-    /// registered in `Lv2Host::fs_store` at boot. Absent for
-    /// titles that boot without title-specific content.
     pub content: Option<ContentManifest>,
-    /// Read-only host-disk mount table. Each entry maps a guest
-    /// path prefix (e.g. `/app_home`, `/dev_hdd0`) to a host
-    /// directory; `sys_fs_open` paths under the prefix are served
-    /// from that directory via single-read blob caching in
-    /// `Lv2Host::fs_store`. Registration order matches manifest
-    /// declaration order; the dispatch layer consults mounts in
-    /// that order on a path miss. Empty when the manifest has no
-    /// `[[fs.mounts]]` array.
+    /// Mount-table registration order matches declaration order;
+    /// the dispatch layer consults mounts in that order on a miss.
     pub mounts: Vec<MountEntry>,
 }
 
-/// One mount-table entry. `prefix` must start with `/` and is
-/// match-prefix tested against guest paths. `host` is resolved
-/// against the workspace root when relative; absolute host paths
-/// are used as-is. `override_env` lets a developer redirect the
-/// mount to a local-only directory without editing the committed
-/// manifest -- the env var, when set non-empty, replaces `host`.
+/// One mount-table entry. `prefix` must start with `/`. `override_env`,
+/// when set non-empty, replaces `host`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountEntry {
     pub prefix: String,
@@ -72,53 +47,42 @@ pub struct MountEntry {
     pub override_env: Option<String>,
 }
 
-/// Per-title content provider entries, each mapping a guest path
-/// the title opens via `sys_fs_open` to a host file whose bytes
-/// get registered in `Lv2Host::fs_store` at boot.
+/// Per-title content provider; entries map a guest path to a host
+/// file registered in `Lv2Host::fs_store` at boot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentManifest {
-    /// Base directory for relative `host_path`s. Resolved against
-    /// the workspace root when relative; used as-is when absolute.
+    /// Base for relative `host_path`s; relative resolves against
+    /// the workspace root.
     pub base: String,
-    /// Optional environment variable name. When set in the
-    /// process environment to a non-empty value, that value is
-    /// used as the base directory instead of [`Self::base`]. The
-    /// override exists for the gitignored-developer-local content
-    /// path: a developer who has the real title content drops it
-    /// into a local directory and exports the env var, without
-    /// needing to edit the committed manifest.
+    /// When set non-empty in the process env, replaces [`Self::base`].
     pub override_base_env: Option<String>,
     pub files: Vec<ContentEntry>,
 }
 
-/// One blob to register: `guest_path` is what the title sees from
-/// `sys_fs_open`; `host_path` is the on-disk source (resolved
-/// against the [`ContentManifest::base`] when relative).
+/// One blob: `guest_path` is what `sys_fs_open` sees; `host_path` is
+/// the on-disk source (relative resolves against [`ContentManifest::base`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentEntry {
     pub guest_path: String,
     pub host_path: String,
 }
 
-/// Stop condition for a boot. Default comes from the manifest;
-/// `--checkpoint` overrides per run.
+/// Stop condition for a boot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckpointTrigger {
     /// Stop on `sys_process_exit`.
     ProcessExit,
-    /// Stop on the first PPU write into the RSX region. The
-    /// resulting `MemError::ReservedWrite { region: "rsx", .. }`
-    /// is classified as "checkpoint reached", not a fault.
+    /// Stop on the first PPU write into the RSX region; the resulting
+    /// `MemError::ReservedWrite { region: "rsx", .. }` is classified as
+    /// "checkpoint reached", not a fault.
     FirstRsxWrite,
-    /// Stop when a step retires at the given guest PC. Only
-    /// selectable via `--checkpoint pc=0xADDR`.
+    /// Stop when a step retires at the given guest PC.
     Pc(u64),
 }
 
 impl CheckpointTrigger {
-    /// Parse a `--checkpoint <kind>` value. Accepts `process-exit`,
-    /// `first-rsx-write`, `pc=0xHEX`, or `pc=DECIMAL`. Hex requires
-    /// the `0x`/`0X` prefix so `pc=10` is unambiguously decimal.
+    /// Accepts `process-exit`, `first-rsx-write`, `pc=0xHEX`, or
+    /// `pc=DECIMAL`. Hex requires the `0x`/`0X` prefix.
     pub fn parse_cli_value(value: &str) -> Result<Self, String> {
         match value {
             "process-exit" => Ok(Self::ProcessExit),
@@ -136,9 +100,8 @@ impl CheckpointTrigger {
         }
     }
 
-    /// Read `--checkpoint <kind>` from a raw args vector. `None`
-    /// means the flag was absent; `Some(Err)` means it was
-    /// supplied malformed, repeated, or missing its value.
+    /// `None` means the flag was absent; `Some(Err)` covers malformed,
+    /// repeated, or value-missing cases.
     pub fn parse_from_args(args: &[String]) -> Option<Result<Self, String>> {
         let mut found: Option<Result<Self, String>> = None;
         let mut i = 0;
@@ -161,17 +124,16 @@ impl CheckpointTrigger {
                 ),
             };
             found = Some(parsed);
-            // Skip the value token: a second `--checkpoint` used as
-            // the value must not be rematched as the flag.
+            // Skip the value token so a second `--checkpoint` used as
+            // a value is not rematched as the flag.
             i += 2;
         }
         found
     }
 }
 
-/// Parse a PC literal from `--checkpoint pc=...` or a manifest
-/// `pc = "..."`. Hex requires `0x`/`0X`; otherwise decimal. Same
-/// rule on both sides so CLI and manifest cannot disagree.
+/// Shared between `--checkpoint pc=...` and manifest `pc = "..."`.
+/// Hex requires `0x`/`0X`; otherwise decimal.
 fn parse_pc_literal(raw: &str) -> Result<u64, String> {
     if let Some(hex) = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
         u64::from_str_radix(hex, 16)
@@ -183,7 +145,7 @@ fn parse_pc_literal(raw: &str) -> Result<u64, String> {
     }
 }
 
-/// On-disk TOML schema, translated to [`TitleManifest`] at load.
+/// On-disk TOML schema, translated to [`TitleManifest`].
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ManifestFile {
@@ -258,19 +220,15 @@ struct ManifestCheckpoint {
 }
 
 /// Why [`TitleManifest::resolve_eboot`] could not return a path.
-/// Distinct variants let callers separate "not installed" from
-/// "vfs-root is misconfigured" from I/O errors during probing.
 #[derive(Debug)]
 pub enum ResolveEbootError {
-    /// Disc title with a `vfs_root` that has no non-empty parent,
-    /// so `dev_bdvd/<content-id>/...` cannot be located.
+    /// Disc title with a `vfs_root` that has no non-empty parent.
     MisconfiguredVfsRoot {
         vfs_root: PathBuf,
         short_name: String,
     },
     /// No candidate executable exists under the resolved USRDIR.
-    /// `probe_errors` collects non-NotFound I/O errors (permission
-    /// denied, broken symlink, stale NFS handle); usually empty.
+    /// `probe_errors` collects non-NotFound I/O errors.
     NotFound {
         searched: PathBuf,
         candidates: Vec<String>,
@@ -331,8 +289,7 @@ pub enum ManifestError {
         name: String,
         first: PathBuf,
         second: PathBuf,
-        /// Files are byte-identical on disk; hint that one is
-        /// likely a stray copy rather than a real conflict.
+        /// Hint that one is likely a stray copy.
         files_identical: bool,
     },
     DuplicateContentId {
@@ -343,9 +300,8 @@ pub enum ManifestError {
     },
 }
 
-/// True iff both reads succeed and contents match; silent false on
-/// I/O error since this is a diagnostic hint. Short-circuits on
-/// `metadata` length before slurping both files into memory.
+/// True iff both reads succeed and contents match; false on I/O
+/// error. Short-circuits on `metadata` length.
 fn files_have_identical_bytes(a: &Path, b: &Path) -> bool {
     match (std::fs::metadata(a), std::fs::metadata(b)) {
         (Ok(ma), Ok(mb)) if ma.len() == mb.len() => {}
@@ -414,7 +370,6 @@ impl std::fmt::Display for ManifestError {
 }
 
 impl TitleManifest {
-    /// Read and parse a manifest from a TOML file.
     pub fn load_from_path(path: &Path) -> Result<Self, ManifestError> {
         let text = std::fs::read_to_string(path).map_err(|source| ManifestError::Io {
             path: path.to_path_buf(),
@@ -423,11 +378,7 @@ impl TitleManifest {
         Self::load_from_text(&text, path)
     }
 
-    /// Parse a manifest from in-memory TOML text, attaching
-    /// `origin` to any error.
-    ///
-    /// Accepts two layouts: root-level tables (`[title]`,
-    /// `[checkpoint]`, optional `[source]`), or the same tables
+    /// Accepts two layouts: root-level tables, or the same tables
     /// nested under `[cellgov]` so microtests can co-locate the
     /// CellGov manifest with RPCS3 harness config in one file.
     pub fn load_from_text(text: &str, origin: &Path) -> Result<Self, ManifestError> {
@@ -436,8 +387,7 @@ impl TitleManifest {
             message: e.to_string(),
         })?;
         // A `cellgov` key selects the nested layout; scalar/array
-        // forms are shape errors, and root-level title tables
-        // alongside `[cellgov.*]` are ambiguous.
+        // forms or root-level tables alongside `[cellgov.*]` are errors.
         let file_value = if let Some(nested) = raw.get("cellgov") {
             if !nested.is_table() {
                 return Err(ManifestError::Parse {
@@ -503,7 +453,6 @@ impl TitleManifest {
                 }
             };
         let source = match file.source.as_ref().map(|s| s.kind.as_str()) {
-            // "hdd" as an explicit synonym for the default.
             Some("disc") => GameSource::Disc,
             Some("hdd") => GameSource::Hdd,
             Some(other) => {
@@ -548,11 +497,9 @@ impl TitleManifest {
                 override_env: m.override_env,
             })
             .collect();
-        // Validate prefix shape at load time so a misconfigured
-        // manifest fails fast rather than at FsMount::new() during
-        // boot. The duplicate-prefix check is also done by
-        // FsMountTable::add at boot time, but surfacing it here
-        // gives the operator a path-relative error.
+        // Validate prefix shape at load time so the error carries
+        // the manifest path (FsMountTable::add catches dup at boot
+        // but without the source path).
         let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
         for m in &mounts {
             if !m.prefix.starts_with('/') {
@@ -597,20 +544,16 @@ impl TitleManifest {
         self.checkpoint
     }
 
-    /// See the [`TitleManifest::rsx_mirror`] field doc.
     pub fn rsx_mirror(&self) -> bool {
         self.rsx_mirror
     }
 
-    /// Return the first [`eboot_candidates`] filename that exists
-    /// as a regular file under the title's USRDIR.
-    ///
-    /// [`eboot_candidates`]: TitleManifest::eboot_candidates
+    /// Return the first [`TitleManifest::eboot_candidates`] filename
+    /// that exists as a regular file under the title's USRDIR.
     ///
     /// # Errors
     ///
-    /// See [`ResolveEbootError`] for the three failure modes. The
-    /// function never prints; the caller renders.
+    /// See [`ResolveEbootError`].
     pub fn resolve_eboot(&self, vfs_root: &Path) -> Result<PathBuf, ResolveEbootError> {
         let usrdir = match self.source {
             GameSource::Hdd => vfs_root.join("game").join(&self.content_id).join("USRDIR"),
@@ -649,22 +592,18 @@ impl TitleManifest {
     }
 }
 
-/// Registry of known titles, built by scanning a directory of
-/// TOML manifests. Short name and content id are both unique keys.
+/// Registry of titles loaded from a directory of TOML manifests.
+/// Short name and content id are both unique keys.
 #[derive(Debug, Clone, Default)]
 pub struct TitleRegistry {
     manifests: Vec<TitleManifest>,
 }
 
 impl TitleRegistry {
-    /// Load every `*.toml` under `dir` as a [`TitleManifest`] and
-    /// validate short-name and content-id uniqueness. A missing
-    /// `dir` yields an empty registry; other I/O errors surface.
-    /// Entries are sorted by filename so iteration order is
-    /// deterministic.
+    /// Load every `*.toml` under `dir`, validate short-name and
+    /// content-id uniqueness, and sort by filename. A missing `dir`
+    /// yields an empty registry; other I/O errors surface.
     pub fn scan_dir(dir: &Path) -> Result<Self, ManifestError> {
-        // Only NotFound collapses to an empty registry; other
-        // errors (permission-denied, not-a-directory) must surface.
         let rd = match std::fs::read_dir(dir) {
             Ok(rd) => rd,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
@@ -683,8 +622,7 @@ impl TitleRegistry {
                 source,
             })?;
             let path = entry.path();
-            // Case-insensitive extension; skip dotfiles so
-            // backup/tooling files like `.backup.toml` do not load.
+            // Skip dotfiles so backup/tooling `.backup.toml` does not load.
             let is_toml = path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -739,18 +677,16 @@ impl TitleRegistry {
         self.manifests.iter()
     }
 
-    /// Look up a manifest by case-sensitive short name.
+    /// Case-sensitive short-name lookup.
     pub fn by_short_name(&self, name: &str) -> Option<&TitleManifest> {
         self.manifests.iter().find(|m| m.short_name == name)
     }
 
-    /// Look up a manifest by PSN content id or disc serial.
     pub fn by_content_id(&self, content_id: &str) -> Option<&TitleManifest> {
         self.manifests.iter().find(|m| m.content_id == content_id)
     }
 
-    /// Comma-separated short names in registry order, or
-    /// `"<none>"` when empty so CLI error messages stay legible.
+    /// Comma-separated short names, or `"<none>"` when empty.
     pub fn known_names_csv(&self) -> String {
         if self.manifests.is_empty() {
             return "<none>".to_string();
@@ -767,8 +703,6 @@ impl TitleRegistry {
 mod tests {
     use super::*;
 
-    /// RAII tempdir suffixed with the process id so concurrent
-    /// `cargo test` runs do not collide.
     struct TmpDir(PathBuf);
 
     impl TmpDir {
@@ -944,9 +878,6 @@ files = [
 
     #[test]
     fn parses_content_block_with_empty_files_array() {
-        // An empty `files` array is a valid (if pointless) shape;
-        // it lets a manifest scaffold the [content] block before
-        // any blobs are wired.
         let text = r#"
 [title]
 content_id = "NPAA77778"
@@ -988,8 +919,6 @@ files = []
 
     #[test]
     fn content_entry_with_unknown_field_is_rejected() {
-        // serde(deny_unknown_fields) catches typos like
-        // `host-path` (dash instead of underscore).
         let text = r#"
 [title]
 content_id = "x"
@@ -1121,8 +1050,6 @@ override_env = "CELLGOV_FLOW_APP_HOME"
 "#;
         let m = parse(text);
         assert_eq!(m.mounts.len(), 2);
-        // Order matches declaration order; FsMountTable consults
-        // mounts in registration order so this matters.
         assert_eq!(m.mounts[0].prefix, "/dev_hdd0");
         assert_eq!(m.mounts[0].host, "tools/rpcs3/dev_hdd0");
         assert!(m.mounts[0].override_env.is_none());
@@ -1203,8 +1130,6 @@ host = "fx2"
 
     #[test]
     fn fs_mounts_unknown_field_is_rejected() {
-        // serde(deny_unknown_fields) catches typos like
-        // `host_path` (sister field name on [content], not [fs.mounts]).
         let text = r#"
 [title]
 content_id = "x"
@@ -1527,8 +1452,7 @@ kind = "process-exit"
 
     #[test]
     fn resolve_eboot_disc_without_parent_returns_misconfigured() {
-        // "dev_hdd0" has `parent() == Some("")`; "/" and "" return
-        // `parent() == None`. Both must yield MisconfiguredVfsRoot.
+        // "dev_hdd0" has `parent() == Some("")`; "/" and "" return None.
         let mut m = hdd_manifest("NPAA00001", "disc-t", &["EBOOT.BIN"]);
         m.source = GameSource::Disc;
         for bad in ["dev_hdd0", "/", ""] {

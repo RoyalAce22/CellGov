@@ -125,11 +125,7 @@ fn build_dirent(entry: &DirEntry) -> Vec<u8> {
     let max_name = CELL_FS_MAX_FS_FILE_NAME_LENGTH as usize;
     let name_bytes = entry.name.as_bytes();
     let n = name_bytes.len().min(max_name);
-    // d_namlen is u8; it cannot exceed CELL_FS_MAX_FS_FILE_NAME_LENGTH
-    // (which is u8::MAX - 0 by construction), so the cast is safe.
     buf[1] = n as u8;
     buf[2..2 + n].copy_from_slice(&name_bytes[..n]);
-    // d_name index `n` is left as the existing 0 byte, terminating
-    // the string. The remaining slots stay zero (vec! initialized).
     buf
 }
