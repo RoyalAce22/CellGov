@@ -491,6 +491,7 @@ pub(super) fn step_loop(
             }
             Err(StepError::MaxStepsExceeded) => {
                 let mut diag = format_max_steps(
+                    rt,
                     *ctx.steps,
                     &ctx.pc_ring,
                     &ctx.pc_ring_cursor,

@@ -561,6 +561,7 @@ pub(super) fn format_process_exit(
 
 /// Format the MAX_STEPS diagnostic.
 pub(super) fn format_max_steps(
+    rt: &Runtime,
     steps: usize,
     pc_ring: &[u64; PC_RING_SIZE],
     pc_cursor: &RingCursor,
@@ -569,9 +570,59 @@ pub(super) fn format_max_steps(
     hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) -> String {
     let mut out = format!("MAX_STEPS after {} steps", steps);
+    append_unit_state_summary(&mut out, rt);
     append_pc_ring_terse(&mut out, pc_ring, pc_cursor);
     append_syscall_ring(&mut out, syscall_ring, syscall_cursor, hle_bindings);
     out
+}
+
+/// Append a one-line-per-unit summary: id, effective status, and the
+/// LV2 PPU thread state if the unit has one. Used by terminal diagnostics
+/// where the question is "what is each unit doing at the moment we
+/// stopped?". Distinguishes scheduler-starvation (units exist but are
+/// Runnable yet not progressing), kernel-block-deadlock (all Blocked on
+/// a wake source that never fires), and "title is spinning in userspace
+/// on a polled flag" (only one unit, Runnable, no LV2 block state).
+pub(super) fn append_unit_state_summary(out: &mut String, rt: &Runtime) {
+    let ids: Vec<_> = rt.registry().ids().collect();
+    out.push_str(&format!("\n  units: {} total", ids.len()));
+    for unit_id in ids {
+        let status = rt
+            .registry()
+            .effective_status(unit_id)
+            .map(|s| format!("{s:?}"))
+            .unwrap_or_else(|| "<missing>".to_string());
+        let thread_label = match rt.lv2_host().ppu_thread_for_unit(unit_id) {
+            Some(thread) => match &thread.state {
+                PpuThreadState::Blocked(reason) => {
+                    format!(
+                        "PPU thread {} entry=0x{:x} {}",
+                        thread.id.raw(),
+                        thread.attrs.entry,
+                        block_reason_label(reason)
+                    )
+                }
+                other => format!(
+                    "PPU thread {} entry=0x{:x} {:?}",
+                    thread.id.raw(),
+                    thread.attrs.entry,
+                    other
+                ),
+            },
+            None => "no LV2 PPU thread record (SPU or pre-LV2)".to_string(),
+        };
+        let pending = match rt.syscall_responses().peek(unit_id) {
+            Some(p) => format!(" pending={p:?}"),
+            None => String::new(),
+        };
+        out.push_str(&format!(
+            "\n    unit {} status={} {}{}",
+            unit_id.raw(),
+            status,
+            thread_label,
+            pending,
+        ));
+    }
 }
 
 pub(super) fn print_hle_summary(
