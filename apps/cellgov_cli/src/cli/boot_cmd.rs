@@ -43,12 +43,15 @@ pub(crate) fn run_game(args: &[String]) {
     let firmware_dir = find_flag_value(args, "--firmware-dir");
     let dump_at_pc = parse_hex_flag(args, "--dump-at-pc");
     let dump_skip: u32 = parse_flag_value(args, "--dump-skip").unwrap_or(0);
-    let dump_mem_addrs: Vec<u64> = find_flag_value(args, "--dump-mem")
+    let dump_mem_boot_addrs: Vec<u64> = find_flag_value(args, "--dump-mem-boot")
         .map(|v| {
             v.split(',')
-                .map(|s| parse_hex_u64(s, "--dump-mem"))
+                .map(|s| parse_hex_u64(s, "--dump-mem-boot"))
                 .collect()
         })
+        .unwrap_or_default();
+    let dump_mem_fault_ranges: Vec<(u64, u64)> = find_flag_value(args, "--dump-mem-fault")
+        .map(|v| v.split(',').map(parse_dump_mem_fault_range).collect())
         .unwrap_or_default();
     let patch_bytes: Vec<(u64, u8)> = find_flag_value(args, "--patch-byte")
         .map(|v| v.split(',').map(parse_patch_byte_pair).collect())
@@ -68,13 +71,30 @@ pub(crate) fn run_game(args: &[String]) {
         dump_at_pc,
         dump_skip,
         patch_bytes: &patch_bytes,
-        dump_mem_addrs: &dump_mem_addrs,
+        dump_mem_boot_addrs: &dump_mem_boot_addrs,
+        dump_mem_fault_ranges: &dump_mem_fault_ranges,
         save_observation: save_observation.as_deref(),
         observation_manifest: observation_manifest.as_deref(),
         strict_reserved,
         profile_pairs,
         budget_override,
     });
+}
+
+/// Parse a `--dump-mem-fault` element of the form `0xADDR` (default
+/// length 64 bytes) or `0xADDR:LEN` (LEN parsed as hex/decimal).
+/// Length is clamped at 64 KiB so an accidental megabyte request
+/// cannot dominate the diagnostic surface.
+fn parse_dump_mem_fault_range(spec: &str) -> (u64, u64) {
+    const DEFAULT_LEN: u64 = 64;
+    const MAX_LEN: u64 = 64 * 1024;
+    let (addr_str, len) = match spec.split_once(':') {
+        Some((a, l)) => (a, parse_hex_u64(l, "--dump-mem-fault length")),
+        None => (spec, DEFAULT_LEN),
+    };
+    let addr = parse_hex_u64(addr_str, "--dump-mem-fault address");
+    let len = len.min(MAX_LEN);
+    (addr, len)
 }
 
 pub(crate) fn bench_boot_once(args: &[String]) {

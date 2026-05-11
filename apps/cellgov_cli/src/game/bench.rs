@@ -54,7 +54,7 @@ pub fn bench_boot(
         print_banner: false,
         runtime_max_steps: max_steps,
         patch_bytes: &[],
-        dump_mem_addrs: &[],
+        dump_mem_boot_addrs: &[],
         profile_pairs: false,
         budget_override,
     });

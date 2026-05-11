@@ -3,6 +3,7 @@
 //! `pc_ring` readers assume a single-threaded stepper; a concurrent writer
 //! would tear reads.
 
+use crate::game::stack_walk::append_stack_walk;
 use crate::game::step_loop::{block_reason_label, RingCursor};
 use crate::game::{PC_RING_SIZE, SYSCALL_RING_SIZE};
 use cellgov_core::{CommitError, Runtime};
@@ -155,6 +156,7 @@ pub(super) fn format_fault(
     steps: usize,
     pc_ring: &[u64; PC_RING_SIZE],
     pc_cursor: &RingCursor,
+    dump_mem_fault_ranges: &[(u64, u64)],
 ) -> String {
     let pc = result.local_diagnostics.pc;
     let pc_str = pc
@@ -197,51 +199,7 @@ pub(super) fn format_fault(
                     let xo = code & 0x0000_FFFF;
                     format!("UNIMPLEMENTED_INSN (xo=0x{xo:x}) at PC={pc_str}")
                 }
-                FAULT_DEBUG_BREAK => {
-                    let mut s = format!("DEBUG_BREAK at PC={pc_str}");
-                    // Region-aware so stack pointers (0xD0000000+) are not dropped.
-                    if let Some(regs) = &result.local_diagnostics.fault_regs {
-                        for (i, &val) in regs.gprs.iter().enumerate() {
-                            if val < 0x1000 {
-                                continue;
-                            }
-                            let Some(range) =
-                                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(val), 64)
-                            else {
-                                s.push_str(&format!(
-                                    "\n  [r{i}=0x{val:08x}]: <invalid address range>"
-                                ));
-                                continue;
-                            };
-                            let Some(slice) = rt.memory().read(range) else {
-                                s.push_str(&format!("\n  [r{i}=0x{val:08x}]: <unreadable>"));
-                                continue;
-                            };
-                            let label = region_label_at(rt, val, 64);
-                            s.push_str(&format!("\n  [r{i}=0x{val:08x} ({label})]: "));
-                            // Count the non-printable tail so an ASCII header on a
-                            // binary blob does not erase the rest.
-                            let printable = slice
-                                .iter()
-                                .take_while(|&&b| (0x20..0x7f).contains(&b))
-                                .count();
-                            if printable >= 4 {
-                                let text: String =
-                                    slice[..printable].iter().map(|&b| b as char).collect();
-                                s.push_str(&format!("{text:?}"));
-                                let hidden = slice.len() - printable;
-                                if hidden > 0 {
-                                    s.push_str(&format!(" (+{hidden} non-printable bytes)"));
-                                }
-                            } else {
-                                for b in &slice[..16.min(slice.len())] {
-                                    s.push_str(&format!("{b:02x} "));
-                                }
-                            }
-                        }
-                    }
-                    s
-                }
+                FAULT_DEBUG_BREAK => format!("DEBUG_BREAK at PC={pc_str}"),
                 _ => format!("Guest(0x{code:08x}) at PC={pc_str}"),
             }
         }
@@ -261,11 +219,147 @@ pub(super) fn format_fault(
             "\n    LR=0x{:016x}  CTR=0x{:016x}  XER=0x{:016x}  CR=0x{:08x}",
             regs.lr, regs.ctr, regs.xer, regs.cr
         ));
+        append_register_pointer_dump(&mut out, rt, regs);
+        append_stack_walk(&mut out, rt, regs);
     }
 
+    append_explicit_mem_dump(&mut out, rt, dump_mem_fault_ranges);
     append_pc_ring_with_decode(&mut out, rt, pc_ring, pc_cursor);
 
     out
+}
+
+/// Walk every GPR (plus LR / CTR) and dump 64 bytes at any value
+/// that looks like a plausible guest pointer (>= 0x1000). Region-
+/// aware so stack pointers do not get dropped. Mirrors the
+/// pre-refactor output of the DEBUG_BREAK arm so DEBUG_BREAK output
+/// is unchanged; other fault kinds gain the same context.
+pub(super) fn append_register_pointer_dump(
+    out: &mut String,
+    rt: &Runtime,
+    regs: &cellgov_exec::FaultRegisterDump,
+) {
+    let mut emitted = false;
+    for (i, &val) in regs.gprs.iter().enumerate() {
+        if val < 0x1000 {
+            continue;
+        }
+        if !emitted {
+            out.push_str("\n  register pointers:");
+            emitted = true;
+        }
+        append_register_pointer_line(out, rt, &format!("r{i}"), val);
+    }
+    for (label, val) in [("LR", regs.lr), ("CTR", regs.ctr)] {
+        if val < 0x1000 {
+            continue;
+        }
+        if !emitted {
+            out.push_str("\n  register pointers:");
+            emitted = true;
+        }
+        append_register_pointer_line(out, rt, label, val);
+    }
+}
+
+fn append_register_pointer_line(out: &mut String, rt: &Runtime, label: &str, val: u64) {
+    let Some(range) = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(val), 64) else {
+        out.push_str(&format!(
+            "\n    [{label}=0x{val:016x}]: <invalid address range>"
+        ));
+        return;
+    };
+    let Some(slice) = rt.memory().read(range) else {
+        out.push_str(&format!("\n    [{label}=0x{val:016x}]: <unreadable>"));
+        return;
+    };
+    let region = region_label_at(rt, val, 64);
+    out.push_str(&format!("\n    [{label}=0x{val:016x} ({region})]: "));
+    // Count the non-printable tail so an ASCII header on a
+    // binary blob does not erase the rest.
+    let printable = slice
+        .iter()
+        .take_while(|&&b| (0x20..0x7f).contains(&b))
+        .count();
+    if printable >= 4 {
+        let text: String = slice[..printable].iter().map(|&b| b as char).collect();
+        out.push_str(&format!("{text:?}"));
+        let hidden = slice.len() - printable;
+        if hidden > 0 {
+            out.push_str(&format!(" (+{hidden} non-printable bytes)"));
+        }
+    } else {
+        for b in &slice[..16.min(slice.len())] {
+            out.push_str(&format!("{b:02x} "));
+        }
+    }
+}
+
+/// Render explicit (addr, len) ranges from `--dump-mem-fault` as a
+/// hex+ASCII block. Each range gets a region label and a 16-byte-
+/// per-line layout. Unmapped or partial-straddle ranges emit the
+/// longest readable prefix plus a tail-unmapped count so the
+/// reviewer sees at least the bytes that are reachable.
+pub(super) fn append_explicit_mem_dump(out: &mut String, rt: &Runtime, ranges: &[(u64, u64)]) {
+    if ranges.is_empty() {
+        return;
+    }
+    out.push_str("\n  explicit mem dumps:");
+    for &(addr, len) in ranges {
+        let Some(range) = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), len)
+        else {
+            out.push_str(&format!(
+                "\n    mem[0x{addr:016x}+{len}]: <invalid address range>"
+            ));
+            continue;
+        };
+        let region = region_label_at(rt, addr, len);
+        match rt.memory().read(range) {
+            Some(slice) => {
+                out.push_str(&format!(
+                    "\n    mem[0x{addr:016x} ({region}), {len} bytes]:"
+                ));
+                append_hex_ascii_block(out, addr, slice);
+            }
+            None => match longest_readable_prefix(rt.memory(), addr, len) {
+                Some((prefix_len, bytes)) => {
+                    let tail = len - prefix_len;
+                    out.push_str(&format!(
+                        "\n    mem[0x{addr:016x} ({region}), {prefix_len}/{len} bytes (tail {tail} unmapped)]:"
+                    ));
+                    append_hex_ascii_block(out, addr, &bytes);
+                }
+                None => out.push_str(&format!(
+                    "\n    mem[0x{addr:016x} ({region}), {len} bytes]: <unmapped>"
+                )),
+            },
+        }
+    }
+}
+
+/// Render `bytes` as 16-byte rows of hex + ASCII, with offsets
+/// relative to `base_addr`. Mirrors `xxd -g1` style.
+fn append_hex_ascii_block(out: &mut String, base_addr: u64, bytes: &[u8]) {
+    for (row, chunk) in bytes.chunks(16).enumerate() {
+        let row_addr = base_addr + (row as u64) * 16;
+        out.push_str(&format!("\n      +0x{:03x} (0x{row_addr:016x}):", row * 16));
+        for b in chunk {
+            out.push_str(&format!(" {b:02x}"));
+        }
+        // Pad short final row so the ASCII column lines up.
+        for _ in chunk.len()..16 {
+            out.push_str("   ");
+        }
+        out.push_str("  |");
+        for &b in chunk {
+            out.push(if (0x20..0x7f).contains(&b) {
+                b as char
+            } else {
+                '.'
+            });
+        }
+        out.push('|');
+    }
 }
 
 /// Format a commit-pipeline rejection mirroring `format_fault`'s shape.
@@ -787,5 +881,146 @@ mod tests {
             "SPU-shaped unit not labeled: {out}",
         );
         assert!(out.contains("2 blocked unit(s) total"), "got {out}");
+    }
+
+    use cellgov_exec::FaultRegisterDump;
+
+    fn write_bytes(rt: &mut Runtime, addr: u64, bytes: &[u8]) {
+        let range =
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), bytes.len() as u64)
+                .unwrap();
+        rt.memory_mut().apply_commit(range, bytes).unwrap();
+    }
+
+    fn fault_regs() -> FaultRegisterDump {
+        FaultRegisterDump {
+            gprs: [0; 32],
+            lr: 0,
+            ctr: 0,
+            xer: 0,
+            cr: 0,
+        }
+    }
+
+    #[test]
+    fn append_register_pointer_dump_emits_for_pointer_gprs_and_skips_zero() {
+        let mut rt = rt_with_layout();
+        // Plant ASCII so the dump prints printable text rather than hex.
+        write_bytes(&mut rt, 0x0010_0000, b"hello world\x00\x00\x00\x00\x00");
+        let mut regs = fault_regs();
+        regs.gprs[3] = 0x0010_0000; // valid pointer
+        regs.gprs[4] = 0; // skipped: < 0x1000
+
+        let mut out = String::new();
+        append_register_pointer_dump(&mut out, &rt, &regs);
+        assert!(out.contains("register pointers:"), "got {out}");
+        assert!(out.contains("[r3=0x0000000000100000 (main)]"), "got {out}");
+        assert!(out.contains("\"hello world\""), "got {out}");
+        assert!(!out.contains("[r4="), "zero r4 leaked: {out}");
+    }
+
+    #[test]
+    fn append_register_pointer_dump_handles_unmapped_pointer() {
+        let rt = rt_with_layout();
+        let mut regs = fault_regs();
+        regs.gprs[7] = 0x8000_0000; // unmapped per rt_with_layout
+
+        let mut out = String::new();
+        append_register_pointer_dump(&mut out, &rt, &regs);
+        assert!(out.contains("[r7=0x0000000080000000"), "got {out}");
+        assert!(out.contains("<unreadable>"), "got {out}");
+    }
+
+    #[test]
+    fn append_register_pointer_dump_includes_lr_and_ctr() {
+        let mut rt = rt_with_layout();
+        write_bytes(&mut rt, 0x0020_0000, &[0xab; 64]);
+        let mut regs = fault_regs();
+        regs.lr = 0x0020_0000;
+        regs.ctr = 0x0020_0000;
+
+        let mut out = String::new();
+        append_register_pointer_dump(&mut out, &rt, &regs);
+        assert!(out.contains("[LR=0x0000000000200000"), "got {out}");
+        assert!(out.contains("[CTR=0x0000000000200000"), "got {out}");
+    }
+
+    #[test]
+    fn append_register_pointer_dump_emits_nothing_when_no_pointers() {
+        let rt = rt_with_layout();
+        let regs = fault_regs(); // all zero
+
+        let mut out = String::new();
+        append_register_pointer_dump(&mut out, &rt, &regs);
+        assert!(out.is_empty(), "expected silence, got {out}");
+    }
+
+    #[test]
+    fn append_explicit_mem_dump_renders_hex_and_ascii() {
+        let mut rt = rt_with_layout();
+        write_bytes(&mut rt, 0x0010_0000, b"ABCDEFGHIJKLMNOP\x00\x01\x02\x03");
+        let ranges = [(0x0010_0000u64, 20u64)];
+
+        let mut out = String::new();
+        append_explicit_mem_dump(&mut out, &rt, &ranges);
+        assert!(out.contains("explicit mem dumps:"), "got {out}");
+        assert!(
+            out.contains("mem[0x0000000000100000 (main), 20 bytes]:"),
+            "got {out}"
+        );
+        // Hex bytes for "ABCDEFGHIJKLMNOP".
+        assert!(
+            out.contains("41 42 43 44 45 46 47 48"),
+            "hex row missing in {out}"
+        );
+        assert!(out.contains("|ABCDEFGHIJKLMNOP|"), "got {out}");
+    }
+
+    #[test]
+    fn append_explicit_mem_dump_invalid_range_does_not_panic() {
+        let rt = rt_with_layout();
+        // u64::MAX address with non-zero len: ByteRange::new should reject.
+        let ranges = [(u64::MAX, 64u64)];
+
+        let mut out = String::new();
+        append_explicit_mem_dump(&mut out, &rt, &ranges);
+        assert!(out.contains("explicit mem dumps:"), "got {out}");
+        assert!(out.contains("<invalid address range>"), "got {out}");
+    }
+
+    #[test]
+    fn append_explicit_mem_dump_unmapped_falls_back_to_unmapped_marker() {
+        let rt = rt_with_layout();
+        let ranges = [(0x8000_0000u64, 64u64)]; // unmapped
+
+        let mut out = String::new();
+        append_explicit_mem_dump(&mut out, &rt, &ranges);
+        // The address itself is not in any region, so region_label is
+        // "<unmapped>" and the read fails. longest_readable_prefix
+        // also fails (no readable byte at the address).
+        assert!(out.contains("<unmapped>"), "got {out}");
+    }
+
+    #[test]
+    fn append_explicit_mem_dump_partial_straddle_shows_prefix() {
+        let mut rt = rt_with_layout();
+        // Lay bytes that straddle the end of the "main" region.
+        let buf = 0x4000_0000 - 8;
+        write_bytes(&mut rt, buf, &[0x55; 8]);
+        let ranges = [(buf, 32u64)]; // straddles the boundary
+
+        let mut out = String::new();
+        append_explicit_mem_dump(&mut out, &rt, &ranges);
+        assert!(out.contains("8/32 bytes (tail 24 unmapped)"), "got {out}");
+        // Hex row shows the 8 readable bytes.
+        assert!(out.contains("55 55 55 55 55 55 55 55"), "got {out}");
+    }
+
+    #[test]
+    fn append_explicit_mem_dump_empty_ranges_emits_nothing() {
+        let rt = rt_with_layout();
+        let mut out = String::new();
+        append_explicit_mem_dump(&mut out, &rt, &[]);
+        assert!(out.is_empty(), "expected silence on empty, got {out}");
     }
 }
