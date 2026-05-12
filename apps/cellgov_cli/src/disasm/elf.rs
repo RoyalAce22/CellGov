@@ -10,6 +10,12 @@ pub(super) enum ElfError {
     NotBigEndian {
         ei_data: u8,
     },
+    UnknownElfVersion {
+        ei_version: u8,
+    },
+    NotPpc64 {
+        e_machine: u16,
+    },
     PhentsizeTooSmall {
         phentsize: u16,
     },
@@ -35,6 +41,17 @@ pub(super) enum ElfError {
         p_filesz: u64,
         file_len: u64,
     },
+    SegmentVaddrOverflow {
+        idx: usize,
+        p_vaddr: u64,
+        p_filesz: u64,
+        p_memsz: u64,
+    },
+    MemszLessThanFilesz {
+        idx: usize,
+        p_filesz: u64,
+        p_memsz: u64,
+    },
 }
 
 impl ElfError {
@@ -49,6 +66,12 @@ impl ElfError {
             ),
             Self::NotBigEndian { ei_data } => format!(
                 "ELF EI_DATA=0x{ei_data:02x}; this tool only handles ELFDATA2MSB (PS3 PPE objects)"
+            ),
+            Self::UnknownElfVersion { ei_version } => format!(
+                "ELF EI_VERSION=0x{ei_version:02x}; only EV_CURRENT (1) is supported"
+            ),
+            Self::NotPpc64 { e_machine } => format!(
+                "ELF e_machine={e_machine} (0x{e_machine:04x}); this tool only handles EM_PPC64 (21)"
             ),
             Self::PhentsizeTooSmall { phentsize } => format!(
                 "ELF e_phentsize={phentsize} is smaller than Elf64_Phdr (56)"
@@ -85,6 +108,21 @@ impl ElfError {
             } => format!(
                 "PT_LOAD #{idx} truncated: p_offset=0x{p_offset:x}+p_filesz=0x{p_filesz:x} runs past file_len=0x{file_len:x}"
             ),
+            Self::SegmentVaddrOverflow {
+                idx,
+                p_vaddr,
+                p_filesz,
+                p_memsz,
+            } => format!(
+                "PT_LOAD #{idx} vaddr-range overflows u64: p_vaddr=0x{p_vaddr:x} p_filesz=0x{p_filesz:x} p_memsz=0x{p_memsz:x}"
+            ),
+            Self::MemszLessThanFilesz {
+                idx,
+                p_filesz,
+                p_memsz,
+            } => format!(
+                "PT_LOAD #{idx} has p_memsz=0x{p_memsz:x} < p_filesz=0x{p_filesz:x}; the ELF spec requires p_memsz >= p_filesz"
+            ),
         }
     }
 }
@@ -116,6 +154,16 @@ pub(super) fn parse_pt_loads(data: &[u8]) -> Result<Vec<PtLoad>, ElfError> {
     }
     if data[5] != 2 {
         return Err(ElfError::NotBigEndian { ei_data: data[5] });
+    }
+    if data[6] != 1 {
+        return Err(ElfError::UnknownElfVersion {
+            ei_version: data[6],
+        });
+    }
+    let e_machine = u16::from_be_bytes([data[18], data[19]]);
+    // EM_PPC64 = 21 per the PowerPC ELF supplement.
+    if e_machine != 21 {
+        return Err(ElfError::NotPpc64 { e_machine });
     }
 
     let phoff = read_be_u64(data, 32);
@@ -179,6 +227,25 @@ pub(super) fn parse_pt_loads(data: &[u8]) -> Result<Vec<PtLoad>, ElfError> {
                 p_offset,
                 p_filesz,
                 file_len: data.len() as u64,
+            });
+        }
+        if p_memsz < p_filesz {
+            return Err(ElfError::MemszLessThanFilesz {
+                idx: i,
+                p_filesz,
+                p_memsz,
+            });
+        }
+        // Producer-side vaddr-range overflow check: select_segment and
+        // the disassemble loop assume p_vaddr + p_filesz (and p_memsz)
+        // fit in u64. Rejecting here lets the hot loop drop
+        // saturating_add for plain +.
+        if p_vaddr.checked_add(p_filesz).is_none() || p_vaddr.checked_add(p_memsz).is_none() {
+            return Err(ElfError::SegmentVaddrOverflow {
+                idx: i,
+                p_vaddr,
+                p_filesz,
+                p_memsz,
             });
         }
         out.push(PtLoad {
@@ -245,6 +312,27 @@ mod tests {
     }
 
     #[test]
+    fn pt_loads_rejects_non_ppc64_machine() {
+        let mut data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, NOP.to_vec())]);
+        // EM_X86_64 = 62; well-formed ELF64-BE, just wrong machine.
+        put_be_u16(&mut data, 18, 62);
+        assert_eq!(
+            parse_pt_loads(&data),
+            Err(ElfError::NotPpc64 { e_machine: 62 })
+        );
+    }
+
+    #[test]
+    fn pt_loads_rejects_invalid_elf_version() {
+        let mut data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, NOP.to_vec())]);
+        data[6] = 0; // EI_VERSION = invalid
+        assert_eq!(
+            parse_pt_loads(&data),
+            Err(ElfError::UnknownElfVersion { ei_version: 0 })
+        );
+    }
+
+    #[test]
     fn pt_loads_rejects_pn_xnum() {
         let mut data = build_elf64_be(&[]);
         put_be_u16(&mut data, 56, 0xFFFF);
@@ -293,6 +381,41 @@ mod tests {
         let data = build_elf64_be(&[spec]);
         let segs = parse_pt_loads(&data).unwrap();
         assert!(segs.is_empty());
+    }
+
+    #[test]
+    fn pt_loads_rejects_segment_vaddr_overflow() {
+        // p_vaddr = u64::MAX, p_filesz = 1 -> p_vaddr + p_filesz overflows.
+        let mut data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, NOP.to_vec())]);
+        let phdr_base = 64usize;
+        put_be_u64(&mut data, phdr_base + 16, u64::MAX); // p_vaddr
+                                                         // Leave p_filesz at 4 (the NOP we loaded) and p_memsz at 4.
+        let result = parse_pt_loads(&data);
+        match result {
+            Err(ElfError::SegmentVaddrOverflow { idx: 0, .. }) => {}
+            other => panic!("expected SegmentVaddrOverflow, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pt_loads_rejects_memsz_less_than_filesz() {
+        // 16 bytes of content; poke p_memsz to 8 so memsz < filesz.
+        let mut data = build_elf64_be(&[SegSpec::pt_load(
+            0x200,
+            0x10000,
+            [NOP, NOP, NOP, NOP].concat(),
+        )]);
+        let phdr_base = 64usize;
+        put_be_u64(&mut data, phdr_base + 40, 8); // p_memsz
+        let result = parse_pt_loads(&data);
+        match result {
+            Err(ElfError::MemszLessThanFilesz {
+                idx: 0,
+                p_filesz: 16,
+                p_memsz: 8,
+            }) => {}
+            other => panic!("expected MemszLessThanFilesz, got {other:?}"),
+        }
     }
 
     #[test]

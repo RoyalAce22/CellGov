@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, Write};
 
 use super::args::MAX_COUNT;
 use super::elf::PtLoad;
@@ -7,6 +7,16 @@ use super::elf::PtLoad;
 /// certainly pointed the disassembler at data, not code. One stderr
 /// note per run.
 const CONSECUTIVE_DECODE_NOTE_THRESHOLD: usize = 8;
+
+/// Failure modes for `disassemble`. `BadVaddr` is a usage error (the
+/// caller pointed us at an address not file-backed by any PT_LOAD).
+/// `Io` is a downstream-writer error -- the canonical case is a closed
+/// pipe (`| head`), which `run` treats as graceful early termination.
+#[derive(Debug)]
+pub(super) enum StreamError {
+    BadVaddr(DisasmError),
+    Io(io::Error),
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DisasmStats {
@@ -61,6 +71,10 @@ impl DisasmError {
 /// choice fully a function of the segment data, not phdr order.
 /// Emits a stderr note when more than one segment matches.
 fn select_segment(segments: &[PtLoad], vaddr: u64) -> Result<PtLoad, DisasmError> {
+    // parse_pt_loads rejects PtLoads whose vaddr range overflows u64,
+    // but this function is also reachable from tests that hand-roll
+    // PtLoads with extreme vaddrs. Keep saturating_add as a defensive
+    // floor; an overflowing range would otherwise wrap silently.
     let mut candidates: Vec<PtLoad> = segments
         .iter()
         .copied()
@@ -103,12 +117,12 @@ pub(super) fn disassemble<W: Write>(
     vaddr: u64,
     count: usize,
     out: &mut W,
-) -> Result<DisasmStats, DisasmError> {
+) -> Result<DisasmStats, StreamError> {
     debug_assert!(vaddr.is_multiple_of(4), "parse_args must enforce alignment");
     debug_assert!(count > 0, "parse_args must reject count == 0");
     debug_assert!(count <= MAX_COUNT, "parse_args must enforce the count cap");
 
-    let seg = select_segment(segments, vaddr)?;
+    let seg = select_segment(segments, vaddr).map_err(StreamError::BadVaddr)?;
 
     let mut stats = DisasmStats::default();
     let mut consecutive = 0usize;
@@ -118,7 +132,10 @@ pub(super) fn disassemble<W: Write>(
             .checked_mul(4)
             .and_then(|delta| vaddr.checked_add(delta))
         else {
-            let _ = writeln!(out, "<address overflow at iteration {n}>");
+            writeln!(out, "<address overflow: vaddr+4*{n} exceeds u64::MAX>")
+                .map_err(StreamError::Io)?;
+            stats.lines_written += 1;
+            stats.markers_written += 1;
             break;
         };
         let off_in_seg = addr - seg.vaddr;
@@ -126,16 +143,18 @@ pub(super) fn disassemble<W: Write>(
         match needed_end {
             Some(end) if end <= seg.filesz => {}
             Some(end) if end <= seg.memsz => {
-                let _ = writeln!(
+                writeln!(
                     out,
                     "0x{addr:016x}  --------  <in PT_LOAD but past filesz (BSS / zero-fill)>"
-                );
+                )
+                .map_err(StreamError::Io)?;
                 stats.lines_written += 1;
                 stats.markers_written += 1;
                 break;
             }
             _ => {
-                let _ = writeln!(out, "0x{addr:016x}  --------  <past segment end>");
+                writeln!(out, "0x{addr:016x}  --------  <past segment end>")
+                    .map_err(StreamError::Io)?;
                 stats.lines_written += 1;
                 stats.markers_written += 1;
                 break;
@@ -151,13 +170,14 @@ pub(super) fn disassemble<W: Write>(
         match cellgov_ppu::decode::decode(raw) {
             Ok(insn) => {
                 consecutive = 0;
-                let _ = writeln!(out, "0x{addr:016x}  {raw:08x}  {insn:?}");
+                writeln!(out, "0x{addr:016x}  {raw:08x}  {insn:?}").map_err(StreamError::Io)?;
                 stats.lines_written += 1;
             }
             Err(_) => {
                 consecutive += 1;
                 stats.decode_errors += 1;
-                let _ = writeln!(out, "0x{addr:016x}  {raw:08x}  <unsupported encoding>");
+                writeln!(out, "0x{addr:016x}  {raw:08x}  <unsupported encoding>")
+                    .map_err(StreamError::Io)?;
                 stats.lines_written += 1;
                 if !stats.data_warning_emitted && consecutive >= CONSECUTIVE_DECODE_NOTE_THRESHOLD {
                     eprintln!(
@@ -223,8 +243,8 @@ mod tests {
         let mut out = Vec::new();
         let err = disassemble(&data, &segs, 0x90000, 1, &mut out).unwrap_err();
         match err {
-            DisasmError::VaddrNotInPtLoad { vaddr: 0x90000, .. } => {}
-            other => panic!("expected VaddrNotInPtLoad, got {other:?}"),
+            StreamError::BadVaddr(DisasmError::VaddrNotInPtLoad { vaddr: 0x90000, .. }) => {}
+            other => panic!("expected BadVaddr/VaddrNotInPtLoad, got {other:?}"),
         }
     }
 
@@ -237,8 +257,8 @@ mod tests {
         let mut out = Vec::new();
         let err = disassemble(&data, &segs, 0x10004, 1, &mut out).unwrap_err();
         match err {
-            DisasmError::VaddrInBssOnly { vaddr: 0x10004, .. } => {}
-            other => panic!("expected VaddrInBssOnly, got {other:?}"),
+            StreamError::BadVaddr(DisasmError::VaddrInBssOnly { vaddr: 0x10004, .. }) => {}
+            other => panic!("expected BadVaddr/VaddrInBssOnly, got {other:?}"),
         }
     }
 
@@ -405,6 +425,87 @@ mod tests {
             DisasmError::VaddrNotInPtLoad { vaddr: 0x10010, .. } => {}
             other => panic!("expected VaddrNotInPtLoad, got {other:?}"),
         }
+    }
+
+    /// `Write` that returns `BrokenPipe` after `fail_after` successful
+    /// writes. Tracks how many writes the loop attempted so a test can
+    /// assert it stopped at the first failure.
+    struct BreakingWriter {
+        successes_before_break: usize,
+        writes_attempted: usize,
+    }
+
+    impl Write for BreakingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.writes_attempted += 1;
+            if self.writes_attempted > self.successes_before_break {
+                return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+            }
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn disassemble_propagates_broken_pipe() {
+        // Stream of nops; pipe breaks after 2 successful writes. The
+        // loop must stop with StreamError::Io(BrokenPipe), not silently
+        // burn through the remaining count.
+        let mut bytes = Vec::new();
+        for _ in 0..16 {
+            bytes.extend_from_slice(&NOP);
+        }
+        let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
+        let segs = parse_pt_loads(&data).unwrap();
+        let mut out = BreakingWriter {
+            successes_before_break: 2,
+            writes_attempted: 0,
+        };
+        let err = disassemble(&data, &segs, 0x10000, 16, &mut out).unwrap_err();
+        assert!(
+            matches!(&err, StreamError::Io(e) if e.kind() == std::io::ErrorKind::BrokenPipe),
+            "expected Io(BrokenPipe), got {err:?}"
+        );
+        // The third write is where the pipe breaks; the loop must
+        // bail immediately, not keep decoding the remaining 13 words.
+        assert_eq!(
+            out.writes_attempted, 3,
+            "loop kept writing after BrokenPipe"
+        );
+    }
+
+    #[test]
+    fn disassemble_address_overflow_marker_is_consistent() {
+        // Hand-roll a PtLoad at the top of the u64 vaddr range. The
+        // first iteration decodes one word at u64::MAX-3, the second
+        // tries vaddr+4 = u64::MAX+1 -> address-overflow marker fires.
+        // parse_pt_loads would reject this geometry (vaddr+filesz
+        // overflows), but disassemble is given a PtLoad directly here
+        // to exercise the defensive marker path.
+        let bytes = NOP.to_vec();
+        let seg = PtLoad {
+            vaddr: u64::MAX - 3,
+            offset: 0,
+            filesz: 4,
+            memsz: 4,
+        };
+        let mut out = Vec::new();
+        let stats = disassemble(&bytes, &[seg], u64::MAX - 3, 2, &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("<address overflow"),
+            "stream missing address-overflow marker:\n{text}"
+        );
+        // One real decoded line + one overflow marker.
+        assert_eq!(stats.lines_written, 2);
+        assert_eq!(stats.markers_written, 1);
+        assert!(
+            stats.markers_written <= 1,
+            "markers_written must never exceed 1"
+        );
+        assert_eq!(stats.decode_errors, 0);
     }
 
     #[test]
