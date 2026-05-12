@@ -170,7 +170,7 @@ fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputForma
             let json = serde_json::json!({
                 "exploration": serde_json::from_str::<serde_json::Value>(
                     &cellgov_explore::report::format_json(&r.exploration)
-                ).unwrap(),
+                ).expect("invariant: report::format_json emits valid JSON"),
                 "oracle": {
                     "baselines_count": baselines.len(),
                     "baseline_matches": baseline_matches,
@@ -179,7 +179,11 @@ fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputForma
                     "any_match": any_match,
                 },
             });
-            println!("{}", serde_json::to_string_pretty(&json).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json)
+                    .expect("invariant: serde_json::Value always serializes"),
+            );
         }
     }
 

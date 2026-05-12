@@ -4,6 +4,8 @@
 //! `write_u32(addr, value)` API is exposed. Region metadata (page-size class,
 //! access mode) lives on [`Region`].
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod addr;
 pub mod guest;
 pub mod hash;

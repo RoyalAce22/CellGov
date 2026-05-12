@@ -1,5 +1,12 @@
 //! Generate PPU ELF binaries for microtest scenarios.
 
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "CLI binary: stdout/stderr are the user-facing output channel"
+)]
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 mod elf64;
 mod ppc64;
 mod spu;

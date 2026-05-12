@@ -5,6 +5,8 @@
 //! implicit conversions so guest time can never silently become wall time
 //! or scheduler currency. Scheduler policy lives elsewhere.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod budget;
 pub mod epoch;
 pub mod ticks;

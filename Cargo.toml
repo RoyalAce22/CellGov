@@ -58,7 +58,27 @@ criterion = { version = "0.5", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-missing_docs = "deny"
+
+[workspace.lints.clippy]
+# Forgotten-debugging guardrails. `dbg!` and `todo!()` have no
+# legitimate home in main-branch code; `self_named_module_files`
+# enforces the workspace's `mod.rs + siblings` module layout.
+dbg_macro = "deny"
+todo = "deny"
+self_named_module_files = "deny"
+
+# Library print discipline. Binary crates opt out at the crate root
+# (stdout/stderr are their user-facing channels); library crates
+# annotate intentional one-shot diagnostics with
+# `#[allow(..., reason = "...")]` per-site.
+print_stdout = "deny"
+print_stderr = "deny"
+
+# Panic-discipline floor. Library and binary production paths must
+# propagate (`?`), pattern-match, or carry a documented
+# `.expect("invariant: ...")`. Test code, benches, and the testkit
+# scaffolding crate opt out via crate-root `#![allow]` / `#![cfg_attr]`.
+unwrap_used = "deny"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"

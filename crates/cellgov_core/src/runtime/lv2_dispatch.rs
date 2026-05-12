@@ -302,11 +302,17 @@ impl Runtime {
                         ..
                     }) => {}
                     Err(err) => {
-                        eprintln!(
-                            "lv2 host invariant break at process_exit.notify_spu_finished: \
-                             unit {:?}: {err:?}",
-                            uid,
-                        );
+                        #[allow(
+                            clippy::print_stderr,
+                            reason = "diagnostic for an LV2 host invariant break reachable only when thread-table state diverges from primitive state; one line per offending unit per host instance"
+                        )]
+                        {
+                            eprintln!(
+                                "lv2 host invariant break at process_exit.notify_spu_finished: \
+                                 unit {:?}: {err:?}",
+                                uid,
+                            );
+                        }
                     }
                 }
                 let _ = self.syscall_responses.try_take(*uid);

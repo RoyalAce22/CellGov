@@ -2,7 +2,7 @@
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
-use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
@@ -29,7 +29,7 @@ impl Lv2Host {
         ) {
             let exit_value = target_thread.exit_value.unwrap_or(0);
             let write = Effect::SharedWriteIntent {
-                range: ByteRange::new(GuestAddr::new(status_out_ptr as u64), 8).unwrap(),
+                range: ByteRange::contiguous_u32(status_out_ptr, 8),
                 bytes: WritePayload::from_slice(&exit_value.to_be_bytes()),
                 ordering: PriorityClass::Normal,
                 source: requester,
@@ -98,24 +98,14 @@ impl Lv2Host {
         // PS3 OPD is 8 bytes (u32 BE code_addr || u32 BE toc), not
         // the 24-byte PowerOpen layout. Resolve before allocating so
         // a bad pointer fails without observable side effects.
-        let opd_bytes = match rt.read_committed(entry_opd as u64, 8) {
-            Some(bytes) => {
-                debug_assert_eq!(
-                    bytes.len(),
-                    8,
-                    "Lv2Runtime::read_committed contract: Some(_) must carry exactly the \
-                     requested length",
-                );
-                if bytes.len() < 8 {
-                    return Lv2Dispatch::Immediate {
-                        code: errno::CELL_EFAULT.into(),
-                        effects: vec![],
-                    };
-                }
-                let mut arr = [0u8; 8];
-                arr.copy_from_slice(&bytes[..8]);
-                arr
-            }
+        // first_chunk::<8> folds the read's length check and the
+        // slice-to-array conversion into one infallible-on-Some op,
+        // replacing the manual length check + copy_from_slice.
+        let opd_bytes: [u8; 8] = match rt
+            .read_committed(entry_opd as u64, 8)
+            .and_then(|bytes| bytes.first_chunk::<8>().copied())
+        {
+            Some(arr) => arr,
             None => {
                 return Lv2Dispatch::Immediate {
                     code: errno::CELL_EFAULT.into(),
@@ -123,8 +113,12 @@ impl Lv2Host {
                 };
             }
         };
-        let entry_code = u32::from_be_bytes(opd_bytes[0..4].try_into().unwrap()) as u64;
-        let entry_toc = u32::from_be_bytes(opd_bytes[4..8].try_into().unwrap()) as u64;
+        // Direct array indexing of [u8; 8] with constant offsets:
+        // bounds are compile-time-evaluable, no runtime panic site.
+        let entry_code =
+            u32::from_be_bytes([opd_bytes[0], opd_bytes[1], opd_bytes[2], opd_bytes[3]]) as u64;
+        let entry_toc =
+            u32::from_be_bytes([opd_bytes[4], opd_bytes[5], opd_bytes[6], opd_bytes[7]]) as u64;
 
         // 0x4000 floor covers the ABI back-chain + register save area.
         let size = stacksize.max(0x4000);

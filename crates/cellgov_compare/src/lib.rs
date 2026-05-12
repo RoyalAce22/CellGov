@@ -6,6 +6,8 @@
 //! coalesces raw outputs into the shared schema; the comparison layer
 //! never touches runner-specific internals.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod baseline;
 pub mod compare;
 pub mod diverge;

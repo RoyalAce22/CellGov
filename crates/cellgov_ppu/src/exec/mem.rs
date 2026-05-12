@@ -438,8 +438,15 @@ pub(crate) fn execute(
                 return ExecuteVerdict::BufferFull;
             }
             let bytes = state.vr[vs as usize].to_be_bytes();
-            let hi = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
-            let lo = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
+            // Direct array indexing of [u8; 16] with constant offsets:
+            // bounds are compile-time-evaluable, no runtime panic site.
+            let hi = u64::from_be_bytes([
+                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            ]);
+            let lo = u64::from_be_bytes([
+                bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14],
+                bytes[15],
+            ]);
             let v1 = buffer_store(store_buf, state, ea, 8, hi);
             debug_assert_eq!(
                 v1,

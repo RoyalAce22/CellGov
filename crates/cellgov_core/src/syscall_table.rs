@@ -70,12 +70,18 @@ impl SyscallResponseTable {
                     .pending
                     .get(&unit)
                     .expect("just-inserted response must be present");
-                eprintln!(
-                    "SyscallResponseTable::insert: displaced pending response for {unit:?}: \
-                     {prev:?} (overwritten by {new_response:?}) -- original r3 and any owed \
-                     out-pointer writes are lost. Further displacements in this table will be \
-                     counted but not logged; inspect displacement_count() for the total."
-                );
+                #[allow(
+                    clippy::print_stderr,
+                    reason = "one-shot diagnostic for an invariant break: a pending syscall response was overwritten before the runtime read it; gated to first occurrence so a runaway loop cannot flood stderr"
+                )]
+                {
+                    eprintln!(
+                        "SyscallResponseTable::insert: displaced pending response for {unit:?}: \
+                         {prev:?} (overwritten by {new_response:?}) -- original r3 and any owed \
+                         out-pointer writes are lost. Further displacements in this table will be \
+                         counted but not logged; inspect displacement_count() for the total."
+                    );
+                }
             }
             self.displacement_count = self.displacement_count.saturating_add(1);
         }

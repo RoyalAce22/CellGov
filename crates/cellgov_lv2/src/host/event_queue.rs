@@ -80,7 +80,7 @@ impl Lv2Host {
                 buf[16..24].copy_from_slice(&payload.data2.to_be_bytes());
                 buf[24..32].copy_from_slice(&payload.data3.to_be_bytes());
                 let write = Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(out_ptr as u64), 32).unwrap(),
+                    range: ByteRange::contiguous_u32(out_ptr, 32),
                     bytes: WritePayload::from_slice(&buf),
                     ordering: PriorityClass::Normal,
                     source: requester,
@@ -170,8 +170,7 @@ impl Lv2Host {
                 source_time: self.current_tick,
             });
         }
-        let count_range =
-            ByteRange::new(GuestAddr::new(count_out as u64), 4).expect("validated above");
+        let count_range = ByteRange::contiguous_u32(count_out, 4);
         effects.push(Effect::SharedWriteIntent {
             range: count_range,
             bytes: WritePayload::from_slice(&count.to_be_bytes()),

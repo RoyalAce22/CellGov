@@ -7,7 +7,7 @@
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
-use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
@@ -152,7 +152,7 @@ impl Lv2Host {
             },
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
                 let write = Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(result_ptr as u64), 8).unwrap(),
+                    range: ByteRange::contiguous_u32(result_ptr, 8),
                     bytes: WritePayload::from_slice(&observed.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: requester,
@@ -228,7 +228,7 @@ impl Lv2Host {
             },
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
                 let write = Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(result_ptr as u64), 8).unwrap(),
+                    range: ByteRange::contiguous_u32(result_ptr, 8),
                     bytes: WritePayload::from_slice(&observed.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: requester,
@@ -325,7 +325,7 @@ impl Lv2Host {
         let mut effects: Vec<Effect> = Vec::new();
         if num_ptr != 0 {
             effects.push(Effect::SharedWriteIntent {
-                range: ByteRange::new(GuestAddr::new(num_ptr as u64), 4).unwrap(),
+                range: ByteRange::contiguous_u32(num_ptr, 4),
                 bytes: WritePayload::from_slice(&count.to_be_bytes()),
                 ordering: PriorityClass::Normal,
                 source: requester,
@@ -367,7 +367,7 @@ impl Lv2Host {
         }
         let bits = entry.bits();
         let write = Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(flags_ptr as u64), 8).unwrap(),
+            range: ByteRange::contiguous_u32(flags_ptr, 8),
             bytes: WritePayload::from_slice(&bits.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,

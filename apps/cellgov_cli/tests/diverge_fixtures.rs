@@ -1,6 +1,11 @@
 //! Integration fixtures for the diverge scanner. Wires cellgov_ppu
 //! state-hash traces through cellgov_compare scanning.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
+)]
+
 use cellgov_compare::{diverge, DivergeField, DivergeReport};
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit};

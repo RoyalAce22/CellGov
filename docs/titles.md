@@ -41,7 +41,7 @@ Column definitions:
 
 flOw's frontier moved from step 86,527 to 195,312 (+108,785 steps)
 once the cellFs real-disk VFS landed and the kernel-fd-range fix
-(`FsStore::FD_BASE = 3`, matching real PS3's `lv2_fs_object::id_base`)
+(`LV2_FS_OBJECT_ID_BASE = 3`, matching real PS3's `lv2_fs_object::id_base`)
 let PSL1GHT's inline `cellFsRead` wrapper see the fds in its
 expected `[3, 255)` range. Resource enumeration (every file under
 `/app_home/Data/**`) succeeds, the entity tree is fully populated,

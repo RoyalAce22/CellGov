@@ -63,7 +63,13 @@ fn skip_if_missing(path: &std::path::Path) -> bool {
     if std::env::var("CELLGOV_REQUIRE_MICROTESTS").is_ok() {
         panic!("required microtest fixture missing: {}", path.display());
     }
-    eprintln!("[skip] microtest fixture missing: {}", path.display());
+    #[allow(
+        clippy::print_stderr,
+        reason = "test-harness diagnostic when the optional microtest corpus is absent; CELLGOV_REQUIRE_MICROTESTS=1 promotes the skip to a panic"
+    )]
+    {
+        eprintln!("[skip] microtest fixture missing: {}", path.display());
+    }
     true
 }
 

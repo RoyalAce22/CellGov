@@ -7,7 +7,7 @@
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
-use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::sys_fs::{
     CELL_FS_BLOCK_SIZE, CELL_FS_STAT_SIZE, CELL_FS_S_IFREG, CELL_FS_S_IRGRP, CELL_FS_S_IROTH,
     CELL_FS_S_IRUSR,
@@ -48,8 +48,7 @@ pub(super) fn cell_fs_stat_write(
     blob[40..48].copy_from_slice(&stat.size.to_be_bytes());
     blob[48..56].copy_from_slice(&CELL_FS_BLOCK_SIZE.to_be_bytes());
     Effect::SharedWriteIntent {
-        range: ByteRange::new(GuestAddr::new(stat_out_ptr as u64), CELL_FS_STAT_SIZE)
-            .expect("stat_out_ptr range pre-validated by is_stat_ptr_writable"),
+        range: ByteRange::contiguous_u32(stat_out_ptr, CELL_FS_STAT_SIZE as u32),
         bytes: WritePayload::from_slice(&blob),
         ordering: PriorityClass::Normal,
         source,

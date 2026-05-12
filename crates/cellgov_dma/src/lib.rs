@@ -1,6 +1,8 @@
 //! DMA request/completion value types, a deterministic completion queue,
 //! and a pluggable latency-model trait.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod completion;
 pub mod latency;
 pub mod queue;

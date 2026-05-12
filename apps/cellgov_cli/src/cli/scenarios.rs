@@ -62,7 +62,7 @@ pub(crate) const MICROTESTS: &[&str] =
 /// Build a ScenarioFixture for an LV2-driven ELF microtest. Reads
 /// PPU and SPU ELF binaries from `tests/micro/<name>/build/`.
 pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
-    use cellgov_mem::{ByteRange, GuestAddr};
+    use cellgov_mem::ByteRange;
     use cellgov_ppu::PpuExecutionUnit;
     use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
     use cellgov_time::Budget;
@@ -86,14 +86,16 @@ pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
         .seed_memory(move |mem| {
             let li_r11_22: u32 = (14 << 26) | (11 << 21) | 22;
             let sc: u32 = 0x4400_0002;
-            let stub_range = ByteRange::new(GuestAddr::new(0), 8).unwrap();
+            let stub_range = ByteRange::contiguous_u32(0, 8);
             let mut stub_bytes = Vec::with_capacity(8);
             stub_bytes.extend_from_slice(&li_r11_22.to_be_bytes());
             stub_bytes.extend_from_slice(&sc.to_be_bytes());
-            mem.apply_commit(stub_range, &stub_bytes).unwrap();
+            mem.apply_commit(stub_range, &stub_bytes)
+                .expect("scenario seed: apply_commit on freshly-allocated memory");
 
             let mut state = cellgov_ppu::state::PpuState::new();
-            cellgov_ppu::loader::load_ppu_elf(&ppu_elf, mem, &mut state).unwrap();
+            cellgov_ppu::loader::load_ppu_elf(&ppu_elf, mem, &mut state)
+                .expect("scenario seed: load_ppu_elf on bundled microtest ELF");
             state.gpr[1] = stack_top;
             state.lr = 0;
             *primed_seed.borrow_mut() = Some(state);
@@ -105,7 +107,8 @@ pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
 
             rt.set_spu_factory(move |id, init| {
                 let mut unit = SpuExecutionUnit::new(id);
-                spu_loader::load_spu_elf(&init.ls_bytes, unit.state_mut()).unwrap();
+                spu_loader::load_spu_elf(&init.ls_bytes, unit.state_mut())
+                    .expect("scenario register: load_spu_elf on bundled microtest ELF");
                 unit.state_mut().pc = init.entry_pc;
                 unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
                 unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
@@ -115,7 +118,10 @@ pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
                 Box::new(unit)
             });
 
-            let ppu_state = primed_reg.borrow_mut().take().unwrap();
+            let ppu_state = primed_reg
+                .borrow_mut()
+                .take()
+                .expect("invariant: seed_memory populates primed_seed before register fires");
             rt.registry_mut().register_with(|id| {
                 let mut unit = PpuExecutionUnit::new(id);
                 *unit.state_mut() = ppu_state;

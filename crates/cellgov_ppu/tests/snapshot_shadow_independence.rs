@@ -11,6 +11,11 @@
 //! `cellgov_core::runtime::snapshot`, which catch any `clone_box`
 //! aliasing via post-snapshot mutation.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
+)]
+
 use cellgov_ppu::decode::decode;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::shadow::PredecodedShadow;

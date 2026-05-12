@@ -1,5 +1,10 @@
 //! End-to-end tests: adapter output feeds `cellgov_cli compare-observations`.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
+)]
+
 use cellgov_compare::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedHashes, ObservedOutcome,
 };

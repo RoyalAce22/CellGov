@@ -51,7 +51,7 @@ pub struct OracleExplorationResult {
     pub alternates: Vec<ScheduleSnapshot>,
 }
 
-/// Like [`crate::explore`] but also captures named regions from every
+/// Like [`crate::explore()`] but also captures named regions from every
 /// run.
 ///
 /// Returns `None` if the baseline has no branching points.

@@ -4,6 +4,11 @@
 //! `cargo build`. The runtime asserts double-check that the pinned
 //! constants take the values the macro pinned them to.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
+)]
+
 use cellgov_ps3_abi::nid_const;
 
 mod cell_spurs {

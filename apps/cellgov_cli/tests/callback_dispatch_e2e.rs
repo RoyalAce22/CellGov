@@ -1,5 +1,10 @@
 //! End-to-end PPU worker callback dispatch through the runtime trampoline.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
+)]
+
 use std::collections::BTreeSet;
 
 use cellgov_core::Runtime;

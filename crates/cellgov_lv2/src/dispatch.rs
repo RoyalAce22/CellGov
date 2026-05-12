@@ -9,7 +9,6 @@
 //! `woken_unit_ids` entry.
 
 use std::collections::BTreeMap;
-use std::num::NonZeroU32;
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -187,27 +186,6 @@ pub enum Lv2Dispatch {
         /// Effects committed at create time.
         effects: Vec<Effect>,
     },
-}
-
-/// Monotonic host-side token for a loaded SPU image. Non-zero.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SpuImageHandle(NonZeroU32);
-
-impl SpuImageHandle {
-    /// Wrap a raw handle value. Returns `None` if `raw == 0`.
-    #[inline]
-    pub const fn new(raw: u32) -> Option<Self> {
-        match NonZeroU32::new(raw) {
-            Some(nz) => Some(Self(nz)),
-            None => None,
-        }
-    }
-
-    /// Underlying non-zero handle value.
-    #[inline]
-    pub const fn raw(self) -> u32 {
-        self.0.get()
-    }
 }
 
 /// PPC64-ABI seed values for a new child PPU thread.
@@ -497,22 +475,6 @@ pub enum CondMutexKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn spu_image_handle_roundtrip() {
-        let h = SpuImageHandle::new(42).unwrap();
-        assert_eq!(h.raw(), 42);
-    }
-
-    #[test]
-    fn spu_image_handle_zero_rejected() {
-        assert!(SpuImageHandle::new(0).is_none());
-    }
-
-    #[test]
-    fn spu_image_handle_ordering() {
-        assert!(SpuImageHandle::new(1).unwrap() < SpuImageHandle::new(2).unwrap());
-    }
 
     #[test]
     fn pending_response_variant_tags_are_distinct() {

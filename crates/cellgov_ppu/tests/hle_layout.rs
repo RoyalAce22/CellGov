@@ -4,6 +4,11 @@
 //! OPDs whose bytes differ (slot indices move) but whose dispatch resolves
 //! to the same NID under each layout's own binding list.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
+)]
+
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
 use cellgov_ppu::prx::{
     bind_hle_stubs_with_layout, HleBinding, HleLayout, ImportedFunction, ImportedModule,

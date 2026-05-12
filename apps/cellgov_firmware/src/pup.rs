@@ -45,7 +45,11 @@ pub struct Pup {
 }
 
 fn read_be_u64(data: &[u8], offset: usize) -> u64 {
-    u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap())
+    u64::from_be_bytes(
+        data[offset..offset + 8]
+            .try_into()
+            .expect("invariant: fixed-length 8-byte slice always converts to [u8; 8]"),
+    )
 }
 
 pub fn parse(data: &[u8]) -> Result<Pup, String> {

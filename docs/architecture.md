@@ -1345,9 +1345,9 @@ SPURS-workload completion events during normal operation.
 CellGov's cellSpurs HLE maintains the user-space SPURS data
 structures but never starts an SPU thread group, so no completion
 events ever fire and the handler thread waits forever. This is
-the post-Phase-30 frontier; the prior `m_InitEntityHierarchy`
+flOw's current boot frontier; the prior `m_InitEntityHierarchy`
 NULL-bcctr fault was cleared by the kernel-fd range fix
-(`FsStore::FD_BASE = 3`) which let PSL1GHT's inline `cellFsRead`
+(`LV2_FS_OBJECT_ID_BASE = 3`) which let PSL1GHT's inline `cellFsRead`
 wrapper see the fds in its expected `[3, 255)` range instead of
 the prior `0x4000_000N` allocation that the wrapper's narrow load
 truncated to `0x4` (mistaken for an unknown fd, returning EBADF

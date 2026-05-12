@@ -1,5 +1,12 @@
 //! cellgov_cli -- run scenarios, dump traces, compare observations, explore schedules.
 
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "CLI binary: stdout/stderr are the user-facing output channel"
+)]
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 mod cli;
 mod disasm;
 mod dump_imports;
