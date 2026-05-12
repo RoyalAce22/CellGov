@@ -1,11 +1,10 @@
 use cellgov_effects::Effect;
 use cellgov_ps3_abi::cell_errors as errno;
 use cellgov_ps3_abi::sys_fs::{
-    CELL_FS_O_CREAT, CELL_FS_O_RDONLY, CELL_FS_O_TRUNC, CELL_FS_O_WRONLY,
+    CELL_FS_O_CREAT, CELL_FS_O_RDONLY, CELL_FS_O_TRUNC, CELL_FS_O_WRONLY, LV2_FS_OBJECT_ID_BASE,
 };
 use cellgov_time::GuestTicks;
 
-use crate::fs_store::FD_BASE;
 use crate::host::Lv2Host;
 
 use super::common::{assert_immediate, extract_fd, fs_open, run, PathRuntime, TempMountDir};
@@ -139,8 +138,8 @@ fn registered_blob_path_routes_through_fs_layer() {
         0x20000,
     );
     assert!(
-        fd >= FD_BASE,
-        "fs-layer fd must be in the FsStore range (>= FD_BASE), got {fd:#x}",
+        fd >= LV2_FS_OBJECT_ID_BASE,
+        "fs-layer fd must be in the FsStore range (>= LV2_FS_OBJECT_ID_BASE), got {fd:#x}",
     );
     assert_eq!(host.fs_store().open_fd_count(), 1);
 }
@@ -192,7 +191,7 @@ fn synthetic_param_sfo_blob_pre_registered() {
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
         0x20000,
     );
-    assert!(fd >= FD_BASE);
+    assert!(fd >= LV2_FS_OBJECT_ID_BASE);
     assert_eq!(host.fs_store().open_fd_count(), 1);
 }
 
@@ -207,7 +206,7 @@ fn synthetic_output_txt_blob_pre_registered() {
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
         0x20000,
     );
-    assert!(fd >= FD_BASE);
+    assert!(fd >= LV2_FS_OBJECT_ID_BASE);
     assert_eq!(host.fs_store().open_fd_count(), 1);
 }
 
@@ -230,7 +229,7 @@ fn fs_open_resolves_via_mount_and_caches_blob() {
             assert_eq!(range.start().raw(), 0x20000);
             assert_eq!(bytes.bytes().len(), 4);
             let fd = u32::from_be_bytes(bytes.bytes().try_into().unwrap());
-            assert!(fd >= FD_BASE);
+            assert!(fd >= LV2_FS_OBJECT_ID_BASE);
         }
         other => panic!("expected SharedWriteIntent, got {other:?}"),
     }

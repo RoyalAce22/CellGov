@@ -60,15 +60,27 @@ pub struct EncryptedSectionDescriptor {
 }
 
 fn read_be_u64(data: &[u8], offset: usize) -> u64 {
-    u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap())
+    u64::from_be_bytes(
+        data[offset..offset + 8]
+            .try_into()
+            .expect("invariant: fixed-length 8-byte slice always converts to [u8; 8]"),
+    )
 }
 
 fn read_be_u32(data: &[u8], offset: usize) -> u32 {
-    u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap())
+    u32::from_be_bytes(
+        data[offset..offset + 4]
+            .try_into()
+            .expect("invariant: fixed-length 4-byte slice always converts to [u8; 4]"),
+    )
 }
 
 fn read_be_u16(data: &[u8], offset: usize) -> u16 {
-    u16::from_be_bytes(data[offset..offset + 2].try_into().unwrap())
+    u16::from_be_bytes(
+        data[offset..offset + 2]
+            .try_into()
+            .expect("invariant: fixed-length 2-byte slice always converts to [u8; 2]"),
+    )
 }
 
 fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, String> {
@@ -178,7 +190,10 @@ fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8
             if std::env::var("CELLGOV_FW_DEBUG").is_ok() {
                 eprintln!("    -> using section[{i}] (ustar TAR)");
             }
-            return Ok(sections.into_iter().nth(i).unwrap());
+            return Ok(sections
+                .into_iter()
+                .nth(i)
+                .expect("invariant: i comes from sections.iter().enumerate() above"));
         }
     }
 
@@ -216,8 +231,12 @@ fn decrypt_sce_sections(
             .map_err(|e| format!("AES-256-CBC decrypt failed: {e}"))?;
     }
 
-    let aes_key: [u8; 16] = key_envelope_buf[0..16].try_into().unwrap();
-    let aes_iv: [u8; 16] = key_envelope_buf[0x20..0x30].try_into().unwrap();
+    let aes_key: [u8; 16] = key_envelope_buf[0..16]
+        .try_into()
+        .expect("invariant: fixed-length 16-byte slice always converts to [u8; 16]");
+    let aes_iv: [u8; 16] = key_envelope_buf[0x20..0x30]
+        .try_into()
+        .expect("invariant: fixed-length 16-byte slice always converts to [u8; 16]");
 
     // The two 16-byte padding regions must decrypt to zero; non-zero means the ERK/RIV
     // does not match this SELF revision.
@@ -293,8 +312,12 @@ fn decrypt_sce_sections(
             if k_off + 0x10 > data_keys.len() || iv_off + 0x10 > data_keys.len() {
                 return Err(format!("section {i} key/iv index out of range"));
             }
-            let sec_key: [u8; 16] = data_keys[k_off..k_off + 0x10].try_into().unwrap();
-            let sec_iv: [u8; 16] = data_keys[iv_off..iv_off + 0x10].try_into().unwrap();
+            let sec_key: [u8; 16] = data_keys[k_off..k_off + 0x10]
+                .try_into()
+                .expect("invariant: fixed-length 16-byte slice always converts to [u8; 16]");
+            let sec_iv: [u8; 16] = data_keys[iv_off..iv_off + 0x10]
+                .try_into()
+                .expect("invariant: fixed-length 16-byte slice always converts to [u8; 16]");
 
             let mut sec_cipher = Aes128Ctr::new(
                 aes::cipher::generic_array::GenericArray::from_slice(&sec_key),

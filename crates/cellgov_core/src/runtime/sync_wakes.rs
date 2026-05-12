@@ -140,10 +140,16 @@ impl Runtime {
             Ok(None) => return,
             Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit) => return,
             Err(err) => {
-                eprintln!(
-                    "lv2 host invariant break at resolve_join_wakes.notify_spu_finished: \
-                     unit {source:?}: {err:?}",
-                );
+                #[allow(
+                    clippy::print_stderr,
+                    reason = "diagnostic for an LV2 host invariant break reachable only when thread-table state diverges from primitive state; one line per offending unit per host instance"
+                )]
+                {
+                    eprintln!(
+                        "lv2 host invariant break at resolve_join_wakes.notify_spu_finished: \
+                         unit {source:?}: {err:?}",
+                    );
+                }
                 return;
             }
         };

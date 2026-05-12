@@ -9,10 +9,110 @@
 //! byte-identical output to a real PS3 TTY. A capture-side
 //! truncation cannot be detected from inside this harness.
 
+#![allow(
+    clippy::print_stderr,
+    reason = "integration test harness: stderr carries diagnostic output for skipped corpora and verdict mismatches"
+)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
+)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Condvar, Mutex, OnceLock};
 
 use cellgov_compare::{Observation, ObservedOutcome};
+
+/// Per-slot RAM budget. Nominal guest memory per subprocess is
+/// roughly 1.77 GiB (main 1 GiB at the boot.rs kernel floor, plus
+/// rsx 256 MiB, spu_reserved 512 MiB, child_stacks 15 MiB, primary
+/// stack 64 KiB). Transient peak runs higher because
+/// `--save-observation` serializes those bytes as JSON arrays,
+/// briefly holding a buffer several GiB larger than the layout.
+/// 4 GiB per slot covers nominal plus JSON overhead with margin;
+/// tightening this requires either eliminating the JSON-array
+/// memory dump (separate concern in observation.rs) or measuring
+/// peak RSS in CI. `CELLGOV_BOOT_TRACE_MEM=1` on
+/// `cellgov_cli run-game` confirms the 1 GiB floor is the actual
+/// `mem_size` for every ps3autotests case today.
+const PER_SLOT_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4 GiB
+
+/// Pin the concurrency limit to an exact value (floor 1). Useful for
+/// `=1` to serialize (matches the historical --test-threads=1
+/// workaround) or `=999` to effectively disable the gate.
+const OVERRIDE_ENV: &str = "CELLGOV_PS3AUTOTESTS_MAX_CONCURRENT";
+
+/// Counting semaphore: at most `n` permits in flight at a time.
+struct Semaphore {
+    available: Mutex<usize>,
+    cv: Condvar,
+}
+
+impl Semaphore {
+    fn new(n: usize) -> Self {
+        Self {
+            available: Mutex::new(n),
+            cv: Condvar::new(),
+        }
+    }
+
+    fn acquire(&self) -> Permit<'_> {
+        let mut g = self.available.lock().expect("semaphore mutex poisoned");
+        while *g == 0 {
+            g = self.cv.wait(g).expect("semaphore condvar wait failed");
+        }
+        *g -= 1;
+        Permit { sem: self }
+    }
+}
+
+struct Permit<'a> {
+    sem: &'a Semaphore,
+}
+
+impl Drop for Permit<'_> {
+    fn drop(&mut self) {
+        let mut g = self.sem.available.lock().expect("semaphore mutex poisoned");
+        *g += 1;
+        self.sem.cv.notify_one();
+    }
+}
+
+/// Acquire a slot for spawning `cellgov_cli run-game`. Each subprocess
+/// eagerly allocates several GiB of guest memory (the kernel floor in
+/// boot.rs plus high-vaddr BSS); without a gate, `cargo test` with
+/// default `--test-threads=nproc` OOMs once `nproc * peak-RSS` exceeds
+/// host RAM. The peak is empirically ~3 GiB, so [`PER_SLOT_BYTES`] is
+/// budgeted at 4 GiB.
+fn subprocess_permit() -> Permit<'static> {
+    static SEM: OnceLock<Semaphore> = OnceLock::new();
+    let sem = SEM.get_or_init(|| {
+        let limit = compute_limit();
+        let slot_gib = PER_SLOT_BYTES as f64 / (1024.0 * 1024.0 * 1024.0);
+        eprintln!(
+            "ps3autotests: gating subprocesses at {limit} concurrent \
+             (per-slot budget {slot_gib:.1} GiB; override via {OVERRIDE_ENV})"
+        );
+        Semaphore::new(limit)
+    });
+    sem.acquire()
+}
+
+fn compute_limit() -> usize {
+    if let Ok(s) = std::env::var(OVERRIDE_ENV) {
+        return s
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|&n| n >= 1)
+            .unwrap_or(1);
+    }
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    let ram = sys.total_memory(); // bytes since sysinfo 0.30
+    ((ram / PER_SLOT_BYTES) as usize).max(1)
+}
 
 /// `rel_dir` is relative to ps3autotests' `tests/` root; `stem` is
 /// shared between `<stem>.ppu.elf` and `<stem>.expected`.
@@ -113,18 +213,21 @@ fn run_observation(case: &Case, run_id: &str) -> Option<Observation> {
     }
 
     let cli_bin = env!("CARGO_BIN_EXE_cellgov_cli");
-    let output = Command::new(cli_bin)
-        .arg("run-game")
-        .arg("--title-manifest")
-        .arg(&manifest_path)
-        .arg("--max-steps")
-        .arg(case.max_steps.to_string())
-        .arg("--save-observation")
-        .arg(&observation_path)
-        .arg(&elf_path)
-        .current_dir(workspace_root())
-        .output()
-        .expect("spawn cellgov_cli run-game");
+    let output = {
+        let _permit = subprocess_permit();
+        Command::new(cli_bin)
+            .arg("run-game")
+            .arg("--title-manifest")
+            .arg(&manifest_path)
+            .arg("--max-steps")
+            .arg(case.max_steps.to_string())
+            .arg("--save-observation")
+            .arg(&observation_path)
+            .arg(&elf_path)
+            .current_dir(workspace_root())
+            .output()
+            .expect("spawn cellgov_cli run-game")
+    };
 
     if !output.status.success() {
         eprintln!(

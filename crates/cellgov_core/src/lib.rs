@@ -1,4 +1,5 @@
 #![deny(unused_must_use)]
+#![cfg_attr(test, allow(clippy::unwrap_used))]
 //! Top-level runtime orchestration: the `Runtime` struct, scheduler loop,
 //! unit registry, commit coordination, and stable-ordering rules. No
 //! architecture-specific logic; only traits and immutable data packets

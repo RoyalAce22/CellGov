@@ -8,6 +8,8 @@
 //! No dependency on a concrete scheduler. Architecture-specific
 //! decoding lives in `cellgov_ppu` / `cellgov_spu`, not here.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod context;
 pub mod fake_isa;
 pub mod step_result;

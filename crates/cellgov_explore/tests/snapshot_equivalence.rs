@@ -13,6 +13,11 @@
 //! construction-param variation is pinned by the `captured_*` debug
 //! assertions in `cellgov_core::runtime::snapshot`, not here.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
+)]
+
 use cellgov_core::Runtime;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
 use cellgov_explore::{

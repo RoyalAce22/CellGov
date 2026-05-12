@@ -2,7 +2,7 @@
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
-use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::Lv2Dispatch;
@@ -99,8 +99,7 @@ impl Lv2Host {
         };
 
         let write = Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(pos_out_ptr as u64), 8)
-                .expect("pos_out_ptr range pre-validated by writable() above"),
+            range: ByteRange::contiguous_u32(pos_out_ptr, 8),
             // PS3 is big-endian; guest reads via `ld`.
             bytes: WritePayload::from_slice(&new_pos.to_be_bytes()),
             ordering: PriorityClass::Normal,

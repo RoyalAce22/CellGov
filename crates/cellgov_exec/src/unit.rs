@@ -108,8 +108,13 @@ pub trait ExecutionUnit {
     }
 
     /// Notify the unit that guest memory in `[addr, addr+len)` was
-    /// written by the commit pipeline. Units with a predecoded
-    /// shadow override this to mark affected slots stale.
+    /// written by the commit pipeline.
+    ///
+    /// Any unit that caches decoded instructions, a translation-block
+    /// index, a shadow PC ring, or anything else derived from guest
+    /// code MUST override this to mark affected slots stale; the
+    /// default no-op is correct only for units that derive nothing
+    /// from guest code (synthetic / scenario units).
     fn invalidate_code(&mut self, _addr: u64, _len: u64) {}
 
     /// Return `(shadow_hits, shadow_misses)` for units with a

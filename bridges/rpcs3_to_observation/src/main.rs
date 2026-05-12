@@ -9,6 +9,13 @@
 //! `<kind>` is one of `completed|stalled|timeout|fault`. `--config-hash` is the
 //! 16-char hex FNV-1a of the canonical oracle-mode YAML; a mismatch is rejected.
 
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "CLI binary: stdout/stderr are the user-facing output channel"
+)]
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 use cellgov_compare::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedOutcome,
 };

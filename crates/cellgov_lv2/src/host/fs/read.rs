@@ -105,8 +105,7 @@ impl Lv2Host {
             });
         }
         effects.push(Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(nread_out_ptr as u64), 8)
-                .expect("nread_out_ptr range pre-validated by writable() above"),
+            range: ByteRange::contiguous_u32(nread_out_ptr, 8),
             // PS3 is big-endian; guest reads via `ld`.
             bytes: WritePayload::from_slice(&nread.to_be_bytes()),
             ordering: PriorityClass::Normal,

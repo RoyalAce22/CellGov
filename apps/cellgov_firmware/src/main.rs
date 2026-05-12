@@ -1,5 +1,12 @@
 //! PS3 firmware and SELF decryption CLI.
 
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "CLI binary: stdout/stderr are the user-facing output channel"
+)]
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 mod crypto;
 mod pup;
 mod sce;

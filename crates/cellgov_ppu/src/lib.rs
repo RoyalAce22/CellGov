@@ -3,6 +3,8 @@
 //! mid-batch faults discard the batch and roll architectural state
 //! back to the step's entry snapshot.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod decode;
 pub mod exec;
 mod fp;

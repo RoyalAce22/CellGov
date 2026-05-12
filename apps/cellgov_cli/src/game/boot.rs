@@ -74,6 +74,13 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let min_for_kernel = 0x4000_0000usize;
     let game_size = ((required_size + 0xFFFF) & !0xFFFF) + 0x200000;
     let mem_size = game_size.max(min_for_kernel);
+    if std::env::var_os("CELLGOV_BOOT_TRACE_MEM").is_some() {
+        eprintln!(
+            "boot: required_size=0x{required_size:x} game_size=0x{game_size:x} \
+             floor=0x{min_for_kernel:x} mem_size=0x{mem_size:x} ({:.2} GiB)",
+            mem_size as f64 / (1024.0 * 1024.0 * 1024.0),
+        );
+    }
     let mut state = cellgov_ppu::state::PpuState::new();
     let reserved_access = if opts.strict_reserved {
         cellgov_mem::RegionAccess::ReservedStrict
@@ -447,7 +454,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     rt.set_spu_factory(|id, init| {
         use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
         let mut unit = SpuExecutionUnit::new(id);
-        spu_loader::load_spu_elf(&init.ls_bytes, unit.state_mut()).unwrap();
+        spu_loader::load_spu_elf(&init.ls_bytes, unit.state_mut())
+            .expect("game boot: load_spu_elf on title-provided ELF; failure indicates a bad LV2 thread init");
         unit.state_mut().pc = init.entry_pc;
         unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
         unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);

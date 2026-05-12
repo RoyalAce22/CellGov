@@ -1,5 +1,10 @@
 //! Integration tests for the PS3 LV2 errno database.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
+)]
+
 use cellgov_ps3_abi::cell_errors::{
     self as errno, Lv2Error, CELL_EFAULT, CELL_EINVAL, CELL_EPERM, ENTRIES,
 };

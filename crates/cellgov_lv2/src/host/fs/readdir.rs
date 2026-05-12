@@ -2,7 +2,7 @@
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
-use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::cell_errors as errno;
 use cellgov_ps3_abi::sys_fs::{
     CELL_FS_DIRENT_SIZE, CELL_FS_MAX_FS_FILE_NAME_LENGTH, CELL_FS_TYPE_DIRECTORY,
@@ -86,16 +86,14 @@ impl Lv2Host {
 
         let tick = rt.current_tick();
         let dirent_write = Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(dirent_out_ptr as u64), CELL_FS_DIRENT_SIZE)
-                .expect("dirent_out_ptr range pre-validated by writable() above"),
+            range: ByteRange::contiguous_u32(dirent_out_ptr, CELL_FS_DIRENT_SIZE as u32),
             bytes: WritePayload::from_slice(&dirent_bytes),
             ordering: PriorityClass::Normal,
             source: requester,
             source_time: tick,
         };
         let nread_write = Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(nread_out_ptr as u64), 8)
-                .expect("nread_out_ptr range pre-validated by writable() above"),
+            range: ByteRange::contiguous_u32(nread_out_ptr, 8),
             // PS3 is big-endian; guest reads via `ld`.
             bytes: WritePayload::from_slice(&nread.to_be_bytes()),
             ordering: PriorityClass::Normal,

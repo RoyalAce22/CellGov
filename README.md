@@ -49,12 +49,12 @@ Pre-Alpha. What works today:
 
 - **3 titles boot to cross-runner checkpoints**: flOw, Super Stardust HD, WipEout HD Fury (see [docs/titles.md](docs/titles.md)).
 - **PPU and SPU interpreters**: 160 PPU instructions; full SPU.
-- **LV2**: 62 classified syscalls, 60 HLE exports (sys_rsx, cellSysutil, cellSpurs, sys_lwmutex, sys_fs, cellSaveDataAutoLoad).
+- **LV2**: 82 classified syscalls, 60 HLE exports (sys_rsx, cellSysutil, cellSpurs, sys_lwmutex, sys_fs, cellSaveDataAutoLoad).
 - **Worker-thread callback dispatch**: deterministic primitive for invoking guest callbacks; first consumer is `cellSaveDataAutoLoad`.
 - **Sync primitives**: lwmutex / event_flag / semaphore / mutex / cond match real-PS3 wake ordering (incl. ETIMEDOUT and CELL_ECANCELED paths).
 - **FS with host-backed VFS**: path-keyed blob store backs both `sys_fs_*` and `cellFs*` calls; per-title mounts (default `/app_home`) resolve guest paths against host directories with deterministic lexicographic enumeration. Directory iteration syscalls (opendir / readdir / closedir) operate on snapshot entries. Kernel fd allocation matches real PS3's `[3, 255)` range.
 - **PS3 conformance**: ps3autotests cross-runner harness; cpu/basic, cpu/ppu_branch, lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag match real-PS3 byte-for-byte.
-- 2,626 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 2,842 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [docs/architecture.md](docs/architecture.md) for the full pipeline, memory model, and per-subsystem details.
 

@@ -107,7 +107,7 @@ fn opendir_at_mount_root_allocates_fd() {
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home\0");
     let fd = extract_fd(run(&mut host, &rt, fs_opendir(0x10000, 0x20000)), 0x20000);
-    assert!(fd >= crate::fs_store::FD_BASE);
+    assert!(fd >= cellgov_ps3_abi::sys_fs::LV2_FS_OBJECT_ID_BASE);
     assert_eq!(host.fs_store().open_dir_count(), 1);
     assert_eq!(host.fs_store().open_fd_count(), 0);
 }
@@ -123,7 +123,7 @@ fn opendir_at_subdir_allocates_fd() {
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data\0");
     let fd = extract_fd(run(&mut host, &rt, fs_opendir(0x10000, 0x20000)), 0x20000);
-    assert!(fd >= crate::fs_store::FD_BASE);
+    assert!(fd >= cellgov_ps3_abi::sys_fs::LV2_FS_OBJECT_ID_BASE);
     assert_eq!(host.fs_store().open_dir_count(), 1);
 }
 

@@ -3,7 +3,7 @@
 
 use cellgov_effects::{Effect, MailboxMessage, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
-use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_mem::ByteRange;
 use cellgov_sync::MailboxId;
 
 use cellgov_ps3_abi::cell_errors as errno;
@@ -62,8 +62,7 @@ impl Lv2Host {
         let mut img_struct = [0u8; 16];
         img_struct[0..4].copy_from_slice(&handle.raw().to_be_bytes());
 
-        let range =
-            ByteRange::new(GuestAddr::new(img_ptr as u64), 16).expect("sys_spu_image_t range");
+        let range = ByteRange::contiguous_u32(img_ptr, 16);
         let effect = Effect::SharedWriteIntent {
             range,
             bytes: WritePayload::new(img_struct.to_vec()),
@@ -102,8 +101,7 @@ impl Lv2Host {
             }
         };
 
-        let range = ByteRange::new(GuestAddr::new(id_ptr as u64), 4)
-            .expect("sys_spu_thread_group_create id_ptr range");
+        let range = ByteRange::contiguous_u32(id_ptr, 4);
         let effect = Effect::SharedWriteIntent {
             range,
             bytes: WritePayload::new(group_id.to_be_bytes().to_vec()),
@@ -261,7 +259,7 @@ impl Lv2Host {
 
         // ContentStore never allocates handle 0; a guest-supplied 0 is
         // an invalid reference, surfaced as ESRCH.
-        let Some(handle) = crate::dispatch::SpuImageHandle::new(image_handle) else {
+        let Some(handle) = crate::image::SpuImageHandle::new(image_handle) else {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_ESRCH.into(),
                 effects: vec![],
@@ -292,7 +290,7 @@ impl Lv2Host {
             }
         }
 
-        let range = ByteRange::new(GuestAddr::new(thread_ptr as u64), 4).expect("thread_ptr range");
+        let range = ByteRange::contiguous_u32(thread_ptr, 4);
         let effect = Effect::SharedWriteIntent {
             range,
             bytes: WritePayload::new(thread_id.to_be_bytes().to_vec()),
@@ -347,8 +345,7 @@ impl Lv2Host {
             GroupState::Finished => {
                 let mut effects = vec![];
                 if cause_ptr != 0 {
-                    let range = ByteRange::new(GuestAddr::new(cause_ptr as u64), 4)
-                        .expect("cause_ptr range");
+                    let range = ByteRange::contiguous_u32(cause_ptr, 4);
                     effects.push(Effect::SharedWriteIntent {
                         range,
                         bytes: WritePayload::new(
@@ -360,8 +357,7 @@ impl Lv2Host {
                     });
                 }
                 if status_ptr != 0 {
-                    let range = ByteRange::new(GuestAddr::new(status_ptr as u64), 4)
-                        .expect("status_ptr range");
+                    let range = ByteRange::contiguous_u32(status_ptr, 4);
                     effects.push(Effect::SharedWriteIntent {
                         range,
                         bytes: WritePayload::new(0u32.to_be_bytes().to_vec()),
@@ -408,7 +404,7 @@ impl Lv2Host {
 mod tests {
     use super::*;
     use crate::host::test_support::FakeRuntime;
-    use cellgov_mem::GuestMemory;
+    use cellgov_mem::{GuestAddr, GuestMemory};
     use cellgov_time::GuestTicks;
 
     #[test]

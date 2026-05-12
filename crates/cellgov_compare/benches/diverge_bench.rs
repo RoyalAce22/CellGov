@@ -1,6 +1,10 @@
 //! Criterion benchmarks for the diverge scanner.
 
 #![allow(missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "bench scaffolding: .unwrap() panics on unexpected failure are the right behavior"
+)]
 
 use cellgov_compare::diverge;
 use cellgov_trace::{StateHash, TraceRecord, TraceWriter};

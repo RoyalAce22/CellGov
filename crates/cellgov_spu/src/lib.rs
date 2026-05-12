@@ -6,6 +6,8 @@
 //! from the frozen committed snapshot exposed by
 //! [`cellgov_exec::ExecutionContext::memory`].
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod decode;
 pub mod exec;
 pub mod instruction;

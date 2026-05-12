@@ -7,7 +7,9 @@ use cellgov_ppu::PpuExecutionUnit;
 use cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_BASE;
 use cellgov_time::Budget;
 
-use super::diag::fetch_raw_at;
+use super::diag::{append_syscall_ring, fetch_raw_at, format_fault};
+use super::step_loop::tty::{classify_tty_capture, TtyCaptureDecision};
+use super::step_loop::{RingCursor, PC_RING_SIZE, SYSCALL_RING_SIZE};
 use crate::cli::exit::die;
 
 pub(super) struct PrxLoadInfo {
@@ -199,14 +201,11 @@ pub(super) fn run_module_start(
     let mut hle_calls: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
     let mut lv2_calls: std::collections::BTreeMap<u64, usize> = std::collections::BTreeMap::new();
     let mut pc_hits: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
-    const MS_PC_RING_SIZE: usize = 32;
-    let mut pc_ring: [u64; MS_PC_RING_SIZE] = [0; MS_PC_RING_SIZE];
-    let mut pc_ring_pos: usize = 0;
-    // Syscall ring entries: (pc, nr, r3, r4, r5).
-    const MS_SC_RING_SIZE: usize = 8;
-    let mut sc_ring: [(u64, u64, u64, u64, u64); MS_SC_RING_SIZE] =
-        [(0, 0, 0, 0, 0); MS_SC_RING_SIZE];
-    let mut sc_ring_pos: usize = 0;
+    let mut pc_ring: [u64; PC_RING_SIZE] = [0; PC_RING_SIZE];
+    let mut pc_cursor = RingCursor::new(PC_RING_SIZE);
+    // (nr, pc) per the shared append_syscall_ring schema.
+    let mut sc_ring: [(u64, u64); SYSCALL_RING_SIZE] = [(0, 0); SYSCALL_RING_SIZE];
+    let mut sc_cursor = RingCursor::new(SYSCALL_RING_SIZE);
 
     let outcome: String = loop {
         match rt.step() {
@@ -216,8 +215,8 @@ pub(super) fn run_module_start(
                 if let Some(pc) = step.result.local_diagnostics.pc {
                     distinct_pcs.insert(pc);
                     *pc_hits.entry(pc).or_insert(0) += 1;
-                    pc_ring[pc_ring_pos % MS_PC_RING_SIZE] = pc;
-                    pc_ring_pos += 1;
+                    let idx = pc_cursor.record();
+                    pc_ring[idx] = pc;
                 }
 
                 if let Some(args) = &step.result.syscall_args {
@@ -228,27 +227,21 @@ pub(super) fn run_module_start(
                         *lv2_calls.entry(args[0]).or_insert(0) += 1;
                     }
                     let sc_pc = step.result.local_diagnostics.pc.unwrap_or(0);
-                    sc_ring[sc_ring_pos % MS_SC_RING_SIZE] =
-                        (sc_pc, args[0], args[1], args[2], args[3]);
-                    sc_ring_pos += 1;
+                    let idx = sc_cursor.record();
+                    sc_ring[idx] = (args[0], sc_pc);
 
-                    if args[0] == 403 {
-                        let buf = args[2] as usize;
-                        let len = (args[3] as usize).min(256);
-                        let m = rt.memory().as_bytes();
-                        // checked_add guards against guest-controlled
-                        // buf wrapping on 32-bit usize hosts.
-                        let end = buf.checked_add(len);
-                        if end.is_some_and(|e| e <= m.len()) {
-                            let text = String::from_utf8_lossy(&m[buf..buf + len]);
-                            print!("  module_start TTY: {text}");
-                        } else {
-                            eprintln!(
-                                "  module_start TTY dropped: buf=0x{:x}+0x{:x} exceeds guest memory (0x{:x})",
-                                buf,
-                                len,
-                                m.len()
-                            );
+                    if args[0] == cellgov_ps3_abi::syscall::TTY_WRITE {
+                        match classify_tty_capture(args, rt.memory().as_bytes()) {
+                            TtyCaptureDecision::InBounds { bytes, .. } => {
+                                let preview = &bytes[..bytes.len().min(256)];
+                                let text = String::from_utf8_lossy(preview);
+                                print!("  module_start TTY: {text}");
+                            }
+                            TtyCaptureDecision::Oob { buf, len, mem_len } => {
+                                eprintln!(
+                                    "  module_start TTY dropped: buf=0x{buf:x}+0x{len:x} exceeds guest memory (0x{mem_len:x})"
+                                );
+                            }
                         }
                     }
                 }
@@ -296,79 +289,20 @@ pub(super) fn run_module_start(
                     {
                         break format!("RETURNED after {} steps", steps);
                     }
+                    let mut fault_text =
+                        format_fault(&rt, &step.result, fault, steps, &pc_ring, &pc_cursor, &[]);
+                    // format_fault renders PC ring only; append the
+                    // syscall ring so module_start retains the same
+                    // signal as a run-game fault.
+                    append_syscall_ring(&mut fault_text, &sc_ring, &sc_cursor, hle_bindings);
+                    eprintln!("module_start {fault_text}");
                     let code_str = guest_code
                         .map(|c| format!("0x{c:08x}"))
                         .unwrap_or_else(|| format!("{fault:?}"));
-                    if let Some(ref regs) = step.result.local_diagnostics.fault_regs {
-                        println!("  module_start fault registers:");
-                        for row in 0..8 {
-                            let base = row * 4;
-                            println!(
-                                "    r{:<2}=0x{:016x}  r{:<2}=0x{:016x}  r{:<2}=0x{:016x}  r{:<2}=0x{:016x}",
-                                base, regs.gprs[base],
-                                base+1, regs.gprs[base+1],
-                                base+2, regs.gprs[base+2],
-                                base+3, regs.gprs[base+3],
-                            );
-                        }
-                        println!(
-                            "    LR=0x{:016x}  CTR=0x{:016x}  CR=0x{:08x}",
-                            regs.lr, regs.ctr, regs.cr,
-                        );
-                    }
                     let raw_str = match fetch_raw_at(&rt, fault_pc) {
                         Some(w) => format!("0x{w:08x}"),
                         None => "<unmapped>".to_string(),
                     };
-                    let sc_entries = sc_ring_pos.min(MS_SC_RING_SIZE);
-                    if sc_entries > 0 {
-                        println!("  module_start last {} syscalls before fault:", sc_entries);
-                        for i in 0..sc_entries {
-                            let idx =
-                                (sc_ring_pos + MS_SC_RING_SIZE - sc_entries + i) % MS_SC_RING_SIZE;
-                            let (pc, num, a1, a2, a3) = sc_ring[idx];
-                            let kind = if num >= 0x10000 {
-                                format!("HLE#{}", num - 0x10000)
-                            } else {
-                                format!("LV2 {}", num)
-                            };
-                            println!(
-                                "    [{:>2}] pc=0x{:08x} {}  r3=0x{:x} r4=0x{:x} r5=0x{:x}",
-                                (i as i64) - (sc_entries as i64 - 1),
-                                pc,
-                                kind,
-                                a1,
-                                a2,
-                                a3,
-                            );
-                        }
-                    }
-                    let entries = pc_ring_pos.min(MS_PC_RING_SIZE);
-                    if entries > 0 {
-                        println!("  module_start last {} PCs before fault:", entries);
-                        for i in 0..entries {
-                            let idx =
-                                (pc_ring_pos + MS_PC_RING_SIZE - entries + i) % MS_PC_RING_SIZE;
-                            let pc = pc_ring[idx];
-                            let (raw, name) = match fetch_raw_at(&rt, pc) {
-                                Some(w) => (
-                                    format!("0x{w:08x}"),
-                                    cellgov_ppu::decode::decode(w)
-                                        .ok()
-                                        .map(|insn| insn.variant_name().to_string())
-                                        .unwrap_or_else(|| "<baddec>".into()),
-                                ),
-                                None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
-                            };
-                            println!(
-                                "    [{:>2}] pc=0x{:08x} raw={} {}",
-                                (i as i64) - (entries as i64 - 1),
-                                pc,
-                                raw,
-                                name,
-                            );
-                        }
-                    }
                     break format!(
                         "FAULT {code_str} at pc=0x{fault_pc:x} (raw={raw_str}) after {steps} steps"
                     );

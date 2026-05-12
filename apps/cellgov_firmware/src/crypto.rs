@@ -24,7 +24,12 @@ pub struct SelfKey {
 fn hex_to_bytes_32(s: &str) -> [u8; 0x20] {
     let mut out = [0u8; 0x20];
     for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
-        out[i] = u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16).unwrap();
+        out[i] = u8::from_str_radix(
+            std::str::from_utf8(chunk)
+                .expect("invariant: hex constants are well-formed ASCII at compile time"),
+            16,
+        )
+        .expect("invariant: hex constants contain only [0-9a-fA-F] at compile time");
     }
     out
 }
@@ -32,7 +37,12 @@ fn hex_to_bytes_32(s: &str) -> [u8; 0x20] {
 fn hex_to_bytes_16(s: &str) -> [u8; 0x10] {
     let mut out = [0u8; 0x10];
     for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
-        out[i] = u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16).unwrap();
+        out[i] = u8::from_str_radix(
+            std::str::from_utf8(chunk)
+                .expect("invariant: hex constants are well-formed ASCII at compile time"),
+            16,
+        )
+        .expect("invariant: hex constants contain only [0-9a-fA-F] at compile time");
     }
     out
 }

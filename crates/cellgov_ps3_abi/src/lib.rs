@@ -1,6 +1,8 @@
 //! PS3 ABI constants: NIDs, error codes, struct offsets, and flag bits
 //! shared across workspace crates without inducing backward DAG edges.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod callback_dispatch;
 pub mod cell_errors;
 pub mod elf;
@@ -11,6 +13,7 @@ pub mod sha1;
 pub mod spu_channels;
 pub mod sys_fs;
 pub mod sys_memory;
+pub mod sys_process;
 pub mod sys_rsx;
 pub mod sys_spu;
 pub mod syscall;

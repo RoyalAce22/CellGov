@@ -2,6 +2,8 @@
 //! reservation table. State machines only; the scheduler decides
 //! wake order.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod barrier;
 pub mod mailbox;
 pub mod mailbox_registry;

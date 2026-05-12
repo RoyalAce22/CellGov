@@ -76,14 +76,16 @@ impl Lv2Host {
             .unwrap_or(0);
 
         // OPD layout: u32 BE code_addr || u32 BE toc.
+        // first_chunk::<8> folds the length check and the slice-to-array
+        // conversion into one infallible-on-Some operation.
         let opd_bytes = rt
             .read_committed(opd_addr as u64, 8)
             .ok_or(CallbackError::OpdReadFailed)?;
-        if opd_bytes.len() < 8 {
-            return Err(CallbackError::OpdReadFailed);
-        }
-        let entry_code = u32::from_be_bytes(opd_bytes[0..4].try_into().unwrap()) as u64;
-        let entry_toc = u32::from_be_bytes(opd_bytes[4..8].try_into().unwrap()) as u64;
+        let opd: &[u8; 8] = opd_bytes
+            .first_chunk::<8>()
+            .ok_or(CallbackError::OpdReadFailed)?;
+        let entry_code = u32::from_be_bytes([opd[0], opd[1], opd[2], opd[3]]) as u64;
+        let entry_toc = u32::from_be_bytes([opd[4], opd[5], opd[6], opd[7]]) as u64;
 
         let stack = self
             .allocate_child_stack(0x4000, 0x10)

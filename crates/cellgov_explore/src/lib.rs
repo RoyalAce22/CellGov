@@ -2,6 +2,8 @@
 //! runtime, classifying outcomes as schedule-stable, schedule-sensitive,
 //! or inconclusive.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod classify;
 pub mod config;
 pub mod decision;

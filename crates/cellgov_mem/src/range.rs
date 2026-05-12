@@ -23,6 +23,21 @@ impl ByteRange {
         }
     }
 
+    /// Construct a `ByteRange` for a 32-bit guest address plus a u32
+    /// length. Infallible: `u32::MAX + u32::MAX < u64::MAX`, so the
+    /// overflow path `new` guards against is unreachable here.
+    ///
+    /// Use this in dispatch handlers that source their pointer from a
+    /// classified `Lv2Request` u32 slot -- it removes the option/expect
+    /// pair the call site would otherwise carry.
+    #[inline]
+    pub const fn contiguous_u32(addr: u32, len: u32) -> Self {
+        Self {
+            start: GuestAddr::new(addr as u64),
+            length: len as u64,
+        }
+    }
+
     /// Inclusive lower bound.
     #[inline]
     pub const fn start(self) -> GuestAddr {
@@ -210,5 +225,29 @@ mod tests {
         let a = r(0x100, 0);
         let b = r(0x100, 0);
         assert!(!a.overlaps(b));
+    }
+
+    #[test]
+    fn contiguous_u32_round_trips_basic_inputs() {
+        let br = ByteRange::contiguous_u32(0x1000, 0x80);
+        assert_eq!(br.start(), GuestAddr::new(0x1000));
+        assert_eq!(br.length(), 0x80);
+        assert_eq!(br.end(), GuestAddr::new(0x1080));
+    }
+
+    #[test]
+    fn contiguous_u32_handles_u32_max_endpoints() {
+        // u32::MAX + u32::MAX = 0x1_FFFF_FFFE, well below u64::MAX.
+        let br = ByteRange::contiguous_u32(u32::MAX, u32::MAX);
+        assert_eq!(br.start(), GuestAddr::new(u32::MAX as u64));
+        assert_eq!(br.length(), u32::MAX as u64);
+        assert_eq!(br.end(), GuestAddr::new(0x1_FFFF_FFFE));
+    }
+
+    #[test]
+    fn contiguous_u32_zero_length_at_max() {
+        let br = ByteRange::contiguous_u32(u32::MAX, 0);
+        assert!(br.is_empty());
+        assert_eq!(br.end(), GuestAddr::new(u32::MAX as u64));
     }
 }

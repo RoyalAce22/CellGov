@@ -4,6 +4,8 @@
 //! Exists so execution units do not depend on runtime internals: units
 //! produce `Effect` values; the runtime consumes them.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod effect;
 pub mod payload;
 

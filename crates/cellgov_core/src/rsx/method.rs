@@ -1,60 +1,17 @@
-//! NV method-header decoder and dispatch-table scaffold.
+//! NV2A FIFO command decoder and method dispatch table.
 //!
-//! PS3 RSX consumes a FIFO of 32-bit command words. Each word is either
-//! a method header followed by argument dwords, or a control-flow
-//! command (jump / call / return). The advance pass reads one word at
-//! a time, decodes it via [`decode_header`], consumes the declared
-//! argument count, and either dispatches a registered handler or falls
-//! back to the unknown-method warning path.
-//!
-//! ### Provenance
-//!
-//! The PS3's RSX is a variant of Nvidia's NV40 / G71 GPU family, and
-//! the FIFO command encoding used here is the same NV2A / NV4097
-//! command format documented by open-source reverse engineering
-//! (Nouveau, envytools) and reimplemented in RPCS3.
-//!
-//! - **Command-type flag bits** (NON_INCREMENT, JUMP, CALL, RETURN)
-//!   and the **11-bit count field at bit 18** are NV2A-generation
-//!   hardware conventions that predate the PS3 and are documented
-//!   in Nouveau's `envytools` (MIT-licensed) and RPCS3's
-//!   `Emu/RSX/gcm_enums.h` (GPL-3.0).
-//! - **NV406E and NV4097 method addresses** (SET_REFERENCE,
-//!   SEMAPHORE_OFFSET, SEMAPHORE_RELEASE, NO_OPERATION,
-//!   GET_REPORT) are taken from RPCS3's `Emu/RSX/nv406e.h` /
-//!   `nv4097.h` which in turn follow Nouveau's register
-//!   specifications.
-//! - **GCM_FLIP_COMMAND** (`0xFEAC`) is a Sony-specific extension
-//!   not present in upstream Nvidia hardware; it is taken from
-//!   RPCS3's `Emu/RSX/gcm_enums.h` (`GCM_FLIP_COMMAND =
-//!   0x0000FEAC >> 2`) where it has been present since the early
-//!   RPCS3 RSX work.
-//!
-//! ### Method-address field
-//!
-//! The 14-bit method address field occupies bits 2..=15 of the raw
-//! word, with the bottom two bits always zero because RSX method
-//! addresses are 4-byte aligned. The NV2A hardware also packs a
-//! 3-bit subchannel into bits 13..=15, but Sony's libgcm exposes
-//! methods as a flat 14-bit address space via symbolic constants,
-//! so our decoder follows the same flat-address convention: the
-//! dispatch table keys on the full 14-bit method byte address.
-//!
-//! ### Endianness
-//!
-//! FIFO memory is little-endian u32 from the RSX's perspective.
-//! The PS3's PPU is big-endian, so libgcm byte-swaps command
-//! words before writing them. The advance pass reads raw LE
-//! bytes and this module operates on already-deswapped
-//! host-endian u32 values.
+//! [`decode_header`] turns a host-endian u32 FIFO word into an
+//! [`NvMethodHeader`]; the advance pass consumes the declared
+//! argument count and looks up the handler in [`NvMethodTable`].
+//! Unregistered methods take the advance pass's unknown-method
+//! fallback. Constants live in `cellgov_ps3_abi::cell_gcm`; this
+//! module is the decode and dispatch surface.
 
 use crate::rsx::RsxFifoCursor;
 use cellgov_effects::Effect;
 use cellgov_time::GuestTicks;
 use std::collections::BTreeMap;
 
-// NV header flags / shifts / masks, NV406E and NV4097 method codes,
-// GCM_FLIP_COMMAND. Sourced from `cellgov_ps3_abi::cell_gcm`.
 pub use cellgov_ps3_abi::cell_gcm::{
     GCM_FLIP_COMMAND, NV406E_SEMAPHORE_ACQUIRE, NV406E_SEMAPHORE_OFFSET, NV406E_SEMAPHORE_RELEASE,
     NV406E_SET_REFERENCE, NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE, NV4097_GET_REPORT,
@@ -64,93 +21,55 @@ pub use cellgov_ps3_abi::cell_gcm::{
     NV_NEW_JUMP_OFFSET_MASK, NV_OLD_JUMP_OFFSET_MASK,
 };
 
-/// Mask for the union of all non-normal-method bits. Used ONLY as
-/// the final catch-all after every control-flow classifier has
-/// failed: if any of these bits are still set, the header is
-/// malformed. RPCS3 calls this `RSX_METHOD_NON_METHOD_CMD_MASK`;
-/// no direct Sony name.
-///
-/// Contents: bits 0 (NEW_JUMP), 1 (CALL), 16 (reserved companion
-/// of RETURN's bit 17), 17 (RETURN), 29 (OLD JUMP), 31 (reserved).
-/// Bit 30 (NON_INCREMENT) is a normal-method modifier and is
-/// deliberately NOT in this mask. Bits 2..=15 (method address)
-/// and 18..=28 (count) are normal-method fields. Bit 16 appears
-/// here because RPCS3 tracks it alongside RETURN in its equivalent
-/// `RSX_METHOD_NON_METHOD_CMD_MASK`; a set bit 16 alone would
-/// otherwise fall through to the normal-method path and produce
-/// a bogus method address, so the catch-all catches it.
+/// Catch-all for non-normal-method bits after every control-flow
+/// classifier has failed. Bit 16 sits in this mask (alongside bit 17
+/// for RETURN) because a set bit 16 alone would otherwise pass as a
+/// normal-method header with a bogus address; RPCS3's
+/// `RSX_METHOD_NON_METHOD_CMD_MASK` includes it for the same reason.
 const NON_METHOD_MASK: u32 =
     0x8000_0000 | NV_FLAG_JUMP | NV_FLAG_RETURN | 0x0001_0000 | NV_FLAG_NEW_JUMP | NV_FLAG_CALL;
 
-/// A decoded command-class classification.
+/// Decoded command class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NvCommandKind {
-    /// Normal incrementing method. Each argument increments the
-    /// effective method address by 4.
+    /// Each argument increments the method address by 4.
     Increment,
-    /// Non-incrementing method. All arguments write to the same
-    /// method address. Observed in retail FIFO streams primarily
-    /// around DrawIndexArray emission; defensive modelling treats
-    /// any guest-emitted non-increment header as well-formed.
+    /// All arguments write to the same method address.
     NonIncrement,
-    /// Sony's old JUMP form. Jump target is 29-bit-offset byte
-    /// address (4-aligned).
+    /// Sony's JUMP form; 29-bit byte offset.
     Jump {
-        /// Target byte address (4-aligned) masked to 29 bits.
         offset: u32,
     },
-    /// RPCS3's "new" JUMP form. Jump target is 30-bit-offset
-    /// byte address. Defensive; libgcm does not emit this.
+    /// RPCS3's "new" JUMP form; 30-bit byte offset. libgcm does not
+    /// emit this; classified defensively.
     NewJump {
-        /// Target byte address (4-aligned) masked to 30 bits.
         offset: u32,
     },
-    /// Subroutine CALL. Return address is pushed onto the RSX
-    /// call stack; see NV_CALL_OFFSET_MASK.
+    /// CALL; return address pushed on the RSX call stack.
     Call {
-        /// Target byte address (4-aligned) masked to 29 bits.
         offset: u32,
     },
-    /// Subroutine RETURN.
     Return,
-    /// Header that failed every recognised pattern. Primary
-    /// examples: bit 31 set alone (reserved), RETURN flag with
-    /// stray method-address bits, or a combination of bits that
-    /// does not match the (generous, hardware-matching) masks for
-    /// RETURN / CALL / NEW_JUMP / OLD JUMP.
-    ///
-    /// The raw word is preserved verbatim so that a downstream
-    /// diagnostic can recover the exact bit pattern -- the
-    /// recognised-flag subset alone is insufficient to explain
-    /// what went wrong, because a RETURN with garbage and a
-    /// hypothetical future reserved-bit combination both surface
-    /// here.
+    /// Header that matched no recognised pattern. The raw word is
+    /// preserved so downstream diagnostics can distinguish cause
+    /// classes (RETURN-with-stray-bits, bit-31-alone, etc.).
     Malformed {
-        /// Raw 32-bit FIFO word preserved intact so diagnostics
-        /// can distinguish cause classes (e.g. RETURN+method vs
-        /// bit-31-alone vs multi-flag after every check failed).
         raw: u32,
     },
 }
 
-/// Decoded NV method header.
-///
-/// `method` and `count` are meaningful only for `Increment` and
-/// `NonIncrement` kinds; control-flow variants leave them zero.
+/// Decoded NV method header. `method` and `count` are zero for the
+/// control-flow variants of [`NvCommandKind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NvMethodHeader {
-    /// Command classification from the flag bits.
     pub kind: NvCommandKind,
-    /// Method byte address (bits 2..=15 of the raw word, bottom
-    /// two bits always zero). Zero for control-flow kinds.
+    /// Method byte address (bits 2..=15, 4-byte aligned).
     pub method: u16,
-    /// Number of 32-bit argument dwords following this header
-    /// in the FIFO stream (0..=2047). Zero for control-flow kinds.
+    /// Number of u32 argument dwords following the header (0..=2047).
     pub count: u16,
 }
 
 impl NvMethodHeader {
-    /// Construct an increment / non-increment normal-method header.
     #[inline]
     const fn normal(kind: NvCommandKind, method: u16, count: u16) -> Self {
         Self {
@@ -160,8 +79,6 @@ impl NvMethodHeader {
         }
     }
 
-    /// Construct a control-flow or nop header; method and count are
-    /// forced to zero because they have no meaning for these kinds.
     #[inline]
     const fn control(kind: NvCommandKind) -> Self {
         Self {
@@ -172,104 +89,43 @@ impl NvMethodHeader {
     }
 }
 
-/// Decode a raw FIFO word (already-deswapped, host-endian u32) into
-/// a structured header.
+/// Decode a host-endian u32 FIFO word into a structured header.
 ///
-/// ### Classification order and hardware-matching trade-off
+/// # Cross-runner contract
 ///
-/// The decoder matches RPCS3 and the NV2A hardware: each control-flow
-/// form is identified by a specific bit pattern, and the first
-/// matching check wins. The classification masks are Sony's
-/// `CELL_GCM_METHOD_FLAG_*` values combined with RPCS3-documented
-/// per-form masks:
+/// First-recognised-form wins for multi-flag inputs, matching NV2A
+/// hardware and RPCS3 byte-for-byte: e.g. CALL|JUMP decodes as CALL
+/// with the JUMP bit folded into the offset. Stricter classification
+/// would flag guest-side corruption but diverge from the RPCS3
+/// oracle. RETURN is the only form classified strictly (exact
+/// `cmd == NV_FLAG_RETURN`) because it carries no offset or count,
+/// so there is nothing legitimate to reject.
 ///
-/// - RETURN first, strict exact match (`cmd == 0x00020000`). Any
-///   stray method-address or count bits alongside RETURN take the
-///   malformed path -- this is stricter than RPCS3's loose RETURN
-///   mask. The asymmetry with CALL / JUMP / NEW_JUMP is
-///   deliberate: RETURN has no offset or argument field, so every
-///   bit outside bit 17 is unambiguously garbage and there is no
-///   legitimate value we would reject by being strict. CALL /
-///   JUMP / NEW_JUMP all carry wide offset fields (bits 2..=28
-///   or 2..=31), so strict classification there would reject
-///   valid offsets whose bits happened to overlap other flag
-///   positions. Being strict only where there is nothing legitimate
-///   to reject is the principle that makes this asymmetry safe.
-/// - CALL next: bits 0..=1 == `0b10`. Hardware ignores bits 2..=31
-///   beyond the offset, so extra flag bits in a CALL word are
-///   silently folded into the offset rather than flagged. This
-///   matches RPCS3's `(cmd & 0x3) == RSX_METHOD_CALL_CMD` check.
-/// - NEW_JUMP: `(cmd & 0xe0000003) == 0x1` -- bits 0..=1 == `0b01`
-///   with bits 29..=31 clear.
-/// - OLD JUMP: `(cmd & 0xe0000003) == 0x20000000` -- bit 29 set
-///   with bits 0..=1, 30..=31 clear.
-/// - Otherwise, if any NON_METHOD_MASK bit is set, Malformed.
-/// - Otherwise, normal method; bit 30 selects Increment vs
-///   NonIncrement, bits 2..=15 are the method address, bits
-///   18..=28 are the count.
-///
-/// **Multi-flag combinations match the first-recognised form.** A
-/// word with both CALL and JUMP bits set is classified as CALL
-/// because CALL is checked before JUMP -- the JUMP bit is silently
-/// folded into the CALL offset. This matches real NV2A FIFO
-/// behaviour and keeps cross-runner comparison against RPCS3
-/// byte-identical on pathological inputs. Stricter classification
-/// would correctly flag guest-side corruption but would diverge
-/// from RPCS3; we rely on other oracle machinery (per-step state
-/// hashing, cross-runner observation comparison) to catch
-/// corruption-class bugs instead.
-///
-/// ### Arity not enforced
-///
-/// `count` is returned verbatim from bits 18..=28. The decoder does
-/// NOT know how many arguments each method actually expects. A
-/// header like `CELL_GCM_METHOD(NV4097_GET_REPORT, 0)` decodes
-/// cleanly with `count == 0` even though the method semantically
-/// requires one argument. Per-method arity validation is a handler
-/// responsibility, not the decoder's. Handlers receive the full
-/// argument slice and may reject an unexpected length.
-///
-/// Similarly, a NonIncrement header with `count == 0` is
-/// structurally well-formed and decodes without warning. Sony
-/// restricts NonIncrement to DrawIndexArray but does not encode
-/// that restriction in the FIFO format; guests that emit
-/// zero-count NonIncrement headers are misusing the ABI, and the
-/// advance pass treats them as no-ops (zero args consumed).
+/// `count` is returned verbatim from bits 18..=28; arity validation
+/// (a method receiving fewer args than it semantically requires) is
+/// the handler's job, not the decoder's.
 pub const fn decode_header(cmd: u32) -> NvMethodHeader {
-    // RETURN: strict exact match. Any stray method / count bits
-    // take the malformed path below.
     if cmd == NV_FLAG_RETURN {
         return NvMethodHeader::control(NvCommandKind::Return);
     }
-    // CALL: bits 0..=1 == 0b10. RPCS3 uses mask 0x3 (no restriction
-    // on bits 29..=31 or higher offset regions); we match that so
-    // a word with extra flag bits decodes as CALL rather than
-    // Malformed. See doc note above.
     if (cmd & 0x0000_0003) == NV_FLAG_CALL {
         return NvMethodHeader::control(NvCommandKind::Call {
             offset: cmd & NV_CALL_OFFSET_MASK,
         });
     }
-    // NEW_JUMP: bits 0..=1 == 0b01, bits 29..=31 clear.
     if (cmd & 0xE000_0003) == NV_FLAG_NEW_JUMP {
         return NvMethodHeader::control(NvCommandKind::NewJump {
             offset: cmd & NV_NEW_JUMP_OFFSET_MASK,
         });
     }
-    // OLD JUMP (Sony's form): bit 29 set, bits 0..=1 and 30..=31
-    // clear.
     if (cmd & 0xE000_0003) == NV_FLAG_JUMP {
         return NvMethodHeader::control(NvCommandKind::Jump {
             offset: cmd & NV_OLD_JUMP_OFFSET_MASK,
         });
     }
-    // Any remaining NON_METHOD bit set and no control-flow mask
-    // matched: malformed. Primarily catches bit 31 set alone
-    // (reserved) or bit 17 set alone (RETURN flag with garbage).
     if (cmd & NON_METHOD_MASK) != 0 {
         return NvMethodHeader::control(NvCommandKind::Malformed { raw: cmd });
     }
-    // Normal method: bit 30 distinguishes INCREMENT / NON_INCREMENT.
     let kind = if (cmd & NV_FLAG_NON_INCREMENT) != 0 {
         NvCommandKind::NonIncrement
     } else {
@@ -280,84 +136,41 @@ pub const fn decode_header(cmd: u32) -> NvMethodHeader {
     NvMethodHeader::normal(kind, method, count)
 }
 
-/// Mutable dispatch context handed to every NV method handler.
-///
-/// Bundles the three pieces of state the RSX method handlers need
-/// to read or mutate during a FIFO drain:
-///
-/// - the cursor (for handlers that write a control-register field
-///   such as `current_reference`),
-/// - the transient semaphore-offset register (set by
-///   `NV406E_SEMAPHORE_OFFSET`, consumed by the next
-///   `NV406E_SEMAPHORE_RELEASE`),
-/// - the effect sink the drain forwards into the next commit batch.
-///
-/// All three are borrowed mutably from the runtime; the context is
-/// built fresh per-method-call. This mirrors
-/// [`crate::commit::CommitContext`]'s shape: one struct with many
-/// mutable refs so the handler signature does not widen with every
-/// new field.
+/// Mutable state handed to every NV method handler. Built fresh
+/// per-method-call by the FIFO drain.
 pub struct NvDispatchContext<'a> {
-    /// RSX FIFO cursor. Handlers that update the control register
-    /// (e.g. `NV406E_SET_REFERENCE`) mutate fields here; the advance
-    /// pass owns `get` mutation and does not grant handlers access
-    /// to it through this context.
     pub cursor: &'a mut RsxFifoCursor,
-    /// Transient label-write offset. The `NV406E_SEMAPHORE_OFFSET`
-    /// handler writes here; the `NV406E_SEMAPHORE_RELEASE` handler
-    /// reads it to construct the emitted [`Effect::RsxLabelWrite`].
-    /// Folded into the runtime sync-state hash so a forgotten reset
-    /// surfaces at the state-hash diff rather than as a silent
-    /// cross-drain leak.
+    /// Transient label-write offset written by
+    /// `NV406E_SEMAPHORE_OFFSET` and consumed by the next
+    /// `NV406E_SEMAPHORE_RELEASE`. Folded into the runtime sync-state
+    /// hash so a forgotten reset surfaces as a state-hash diff rather
+    /// than a silent cross-drain leak.
     pub sem_offset: &'a mut u32,
-    /// Sink for effects the handler asks the drain to forward into
-    /// the next commit batch. Pushed in FIFO address order; the
-    /// drain preserves that order when it hands effects to the
-    /// commit pipeline.
+    /// FIFO-order sink for effects the drain forwards into the next
+    /// commit batch.
     pub emitted: &'a mut Vec<Effect>,
-    /// Current guest-ticks clock at the time of this drain. Used
-    /// by handlers whose emitted value depends on the oracle's
-    /// monotonic clock (e.g. `NV4097_GET_REPORT` uses it as the
-    /// report timestamp). GuestTicks advances by
-    /// `result.consumed_cost` per commit; the value here is
-    /// frozen for the duration of the drain.
+    /// Frozen for the duration of one drain; advances by
+    /// `consumed_cost` per commit elsewhere.
     pub now: GuestTicks,
 }
 
-/// Handler signature for a registered NV method.
-///
-/// Receives the dispatch context (mutable cursor + semaphore
-/// offset + effect sink) and the decoded argument slice the advance
-/// pass read from the FIFO. Return value is deliberately unit: a
-/// handler that needs to report failure does so by emitting a
-/// specific effect, not by propagating a `Result`. An invalid-
-/// argument handler is a caller-side bug that should be caught in
-/// unit tests, not an expected runtime condition.
+/// Handler signature for a registered NV method. Failures are
+/// emitted as effects, not returned -- handler errors are caller-side
+/// bugs caught by unit tests, not a runtime condition.
 pub type NvMethodHandler = fn(ctx: &mut NvDispatchContext<'_>, args: &[u32]);
 
-/// `NV406E_SEMAPHORE_OFFSET` handler.
-///
-/// Stores the sole u32 argument into the transient semaphore-offset
-/// register. The next `NV406E_SEMAPHORE_RELEASE` will read it as
-/// the target label-area offset. Malformed FIFO streams (zero
-/// arguments) leave `sem_offset` unchanged -- the unknown-method
-/// fallback is the drain's contract for malformed shapes, not the
-/// handler's.
+/// `NV406E_SEMAPHORE_OFFSET`: store arg into the transient
+/// semaphore-offset register the next RELEASE will read.
 pub fn nv406e_semaphore_offset(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&offset) = args.first() {
         *ctx.sem_offset = offset;
     }
 }
 
-/// `NV406E_SEMAPHORE_RELEASE` handler.
-///
-/// Emits an [`Effect::RsxLabelWrite`] carrying the most recent
-/// `sem_offset` and the release value. Pre-handler the guest is
-/// expected to have issued an `NV406E_SEMAPHORE_OFFSET`; if it did
-/// not, the handler still emits using the current `sem_offset`
-/// value (zero after construction) rather than silently dropping
-/// the release -- the oracle records the exact CPU-visible outcome
-/// of the guest's FIFO stream, including stream bugs.
+/// `NV406E_SEMAPHORE_RELEASE`: emit an [`Effect::RsxLabelWrite`] at
+/// the current `sem_offset` with the release value. A release with
+/// no prior offset emits at offset 0; the oracle records the
+/// CPU-visible outcome of the stream including guest-side bugs.
 pub fn nv406e_semaphore_release(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&value) = args.first() {
         ctx.emitted.push(Effect::RsxLabelWrite {
@@ -367,27 +180,17 @@ pub fn nv406e_semaphore_release(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     }
 }
 
-/// `NV406E_SET_REFERENCE` handler.
-///
-/// Writes the sole u32 argument into the cursor's
-/// `current_reference` field. The guest observes the value by
-/// reading the RSX control register's reference slot at
-/// [`crate::rsx::RSX_CONTROL_REF_ADDR`]; Sony's libgcm does NOT
-/// expose a `cellGcmGetCurrentReference` getter NID (the public
-/// API is a direct register read), so no HLE-side companion is
-/// needed. Emits no effect -- the reference slot is pure RSX
-/// committed state folded into the runtime's sync-state hash via
-/// [`crate::rsx::RsxFifoCursor::state_hash`].
+/// `NV406E_SET_REFERENCE`: write the arg into the cursor's
+/// `current_reference` slot. Emits no effect; the slot is folded
+/// into [`crate::rsx::RsxFifoCursor::state_hash`].
 pub fn nv406e_set_reference(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&value) = args.first() {
         ctx.cursor.set_reference(value);
     }
 }
 
-/// Register the NV406E semaphore offset / release pair into
-/// `table` via [`NvMethodTable::register_unique`]. A collision
-/// indicates a double-registration bug; callers should propagate
-/// the error rather than silencing it.
+/// Register the NV406E semaphore offset / release pair. Errors on
+/// collision (call sites must propagate, not paper over).
 pub fn register_nv406e_label_handlers(
     table: &mut NvMethodTable,
 ) -> Result<(), DuplicateRegistration> {
@@ -396,11 +199,9 @@ pub fn register_nv406e_label_handlers(
     Ok(())
 }
 
-/// Register the `NV406E_SET_REFERENCE` handler into `table`.
-/// Separate from [`register_nv406e_label_handlers`] because the
-/// reference handler writes the control register's reference slot
-/// rather than the label area, and callers that only want label
-/// writes should not be forced to adopt reference semantics too.
+/// Register the `NV406E_SET_REFERENCE` handler. Separate from the
+/// label pair so a caller can opt into reference-slot semantics
+/// without also opting into label writes.
 pub fn register_nv406e_reference_handler(
     table: &mut NvMethodTable,
 ) -> Result<(), DuplicateRegistration> {
@@ -408,19 +209,10 @@ pub fn register_nv406e_reference_handler(
     Ok(())
 }
 
-/// `GCM_FLIP_COMMAND` handler (Sony-specific NV4097 flip-buffer
-/// method, address `0xFEAC`).
-///
-/// Emits an [`Effect::RsxFlipRequest`] carrying the low byte of
-/// the argument as the buffer index. Real libgcm's
-/// `cellGcmSetFlip` packs the display-buffer id (0..=7 in practice)
-/// into the method argument; we preserve the low 8 bits since
-/// higher bits are unused on shipping titles. State transitions
-/// (WAITING / DONE, pending) are applied by the commit pipeline
-/// when it processes the emitted effect in batch N+1, preserving
-/// the atomic-batch contract. The handler itself does NOT mutate
-/// flip state because flip state lives on the runtime, not inside
-/// the dispatch context.
+/// `GCM_FLIP_COMMAND` (`0xFEAC`, Sony extension): emit
+/// [`Effect::RsxFlipRequest`] with the low-byte buffer index. Flip
+/// state transitions happen on commit; this handler does not touch
+/// runtime flip state because it lives outside the dispatch context.
 pub fn nv4097_flip_buffer(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&arg) = args.first() {
         ctx.emitted.push(Effect::RsxFlipRequest {
@@ -429,10 +221,7 @@ pub fn nv4097_flip_buffer(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     }
 }
 
-/// Register the `GCM_FLIP_COMMAND` handler into `table`. Separate
-/// helper because flip state and label / reference state are
-/// distinct subsystems; callers that want one without the other
-/// should not have to reason about the full set.
+/// Register the `GCM_FLIP_COMMAND` handler.
 pub fn register_nv4097_flip_handler(
     table: &mut NvMethodTable,
 ) -> Result<(), DuplicateRegistration> {
@@ -440,43 +229,18 @@ pub fn register_nv4097_flip_handler(
     Ok(())
 }
 
-/// Mask for the report offset field packed into the
-/// `NV4097_GET_REPORT` argument.
-///
-/// The method's single u32 argument is a report descriptor where
-/// the low 24 bits encode a byte offset into the report region
-/// and the upper bits encode a report type / location tag. Real
-/// PS3 hardware has multiple report families distinguished by
-/// that tag, and real titles reach their report slots through
-/// label_base + (arg & 0x00FFFFFF). Our oracle widens this to
-/// the full u32 so microtests that run without cellGcmInit
-/// (label_base = 0) can target their own statics by absolute
-/// address, matching the NV406E semaphore path's absolute-offset
-/// semantics. Real titles set the upper bits to their report
-/// type tag; those bits land in the effective address and, if
-/// `label_base` is non-zero, they must encode a valid guest
-/// address -- behavior the oracle does not currently guard.
-/// Source: RPCS3's `Emu/RSX/rsx_methods.cpp` NV4097_SET_REPORT
-/// handler.
+/// Mask for the report offset field of `NV4097_GET_REPORT`'s arg.
+/// Widened to the full u32 (vs Sony's low-24) so microtests that
+/// run without `cellGcmInit` (label_base = 0) can target their own
+/// statics by absolute address, matching the NV406E absolute-offset
+/// convention.
 pub(crate) const NV4097_REPORT_OFFSET_MASK_U: u32 = NV4097_REPORT_OFFSET_MASK;
 
-/// `NV4097_GET_REPORT` handler (Sony / PS3 libgcm refers to the
-/// same method as `SetReport` from the guest-visible emit
-/// perspective; RPCS3 uses the Nouveau-standard `GET_REPORT`
-/// name for the register). Address `0x1800`.
-///
-/// Writes a 4-byte report payload at
-/// `label_base + (arg & NV4097_REPORT_OFFSET_MASK)`. The payload
-/// is the low 32 bits of the current guest-ticks clock --
-/// deterministic across runs because GuestTicks advances by
-/// `consumed_cost` per commit, which is itself deterministic.
-/// The observable 16-byte report envelope (timestamp low / high /
-/// value / type) is the shape retail titles poll (see RPCS3's
-/// `Emu/RSX/rsx_methods.cpp` GET_REPORT handler). The oracle
-/// currently writes only the 4-byte timestamp slot, which
-/// exercises the label-write translation path; the report shape
-/// can be widened when a title is observed reading the other
-/// fields.
+/// `NV4097_GET_REPORT` (`0x1800`): write the low 32 bits of
+/// guest-ticks as a 4-byte report payload at
+/// `label_base + (arg & NV4097_REPORT_OFFSET_MASK)`. The 16-byte
+/// envelope retail titles poll is wider; only the timestamp slot is
+/// written today.
 pub fn nv4097_get_report(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&arg) = args.first() {
         let offset = arg & NV4097_REPORT_OFFSET_MASK_U;
@@ -485,7 +249,7 @@ pub fn nv4097_get_report(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     }
 }
 
-/// Register the `NV4097_GET_REPORT` handler into `table`.
+/// Register the `NV4097_GET_REPORT` handler.
 pub fn register_nv4097_report_handler(
     table: &mut NvMethodTable,
 ) -> Result<(), DuplicateRegistration> {
@@ -493,37 +257,27 @@ pub fn register_nv4097_report_handler(
     Ok(())
 }
 
-/// Apply Sony's byte-0 / byte-2 pre-swap undo for
-/// `BACK_END_WRITE_SEMAPHORE_RELEASE`. The inline
-/// `cellGcmSetWriteBackEndLabel` pre-swaps bytes 0 and 2 before
-/// emitting the method; real PS3 GPU swaps them back on the
-/// write. The oracle reproduces the guest-visible outcome by
-/// applying the same XOR-style swap to the incoming FIFO arg.
-///
-/// Factored as a `const fn` so the test assertions can compute
-/// expected values without duplicating the bit math.
+/// Undo the inline `cellGcmSetWriteBackEndLabel` byte-0 / byte-2
+/// pre-swap. Real PS3 GPU performs the same swap on write; the
+/// oracle applies it here to land the same guest-visible bytes.
+/// `const fn` so tests can compute expected values without
+/// duplicating the bit math.
 pub const fn back_end_semaphore_value_swap(value: u32) -> u32 {
     (value & 0xFF00_FF00) | ((value >> 16) & 0xFF) | (((value) & 0xFF) << 16)
 }
 
-/// `NV4097_SET_SEMAPHORE_OFFSET` handler. Behaves identically to
-/// [`nv406e_semaphore_offset`] -- stores the arg into the
-/// transient semaphore-offset register. Sony's inline
-/// `cellGcmSetWriteBackEndLabel` emits this in tandem with
-/// [`nv4097_back_end_write_semaphore_release`]. The oracle treats
-/// the front-end / back-end variants as a single pool because it
-/// does not model the NV pipeline stages; both write through the
-/// same `sem_offset` register.
+/// `NV4097_SET_SEMAPHORE_OFFSET`: identical to
+/// [`nv406e_semaphore_offset`]; the front-end / back-end variants
+/// share `sem_offset` because we do not model NV pipeline stages.
 pub fn nv4097_set_semaphore_offset(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&offset) = args.first() {
         *ctx.sem_offset = offset;
     }
 }
 
-/// `NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE` handler. Emits an
-/// [`Effect::RsxLabelWrite`] carrying the current `sem_offset`
-/// and the byte-swapped release value (see
-/// [`back_end_semaphore_value_swap`] for the rule).
+/// `NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE`: emit an
+/// [`Effect::RsxLabelWrite`] with the byte-swapped release value (see
+/// [`back_end_semaphore_value_swap`]).
 pub fn nv4097_back_end_write_semaphore_release(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&value) = args.first() {
         ctx.emitted.push(Effect::RsxLabelWrite {
@@ -533,10 +287,7 @@ pub fn nv4097_back_end_write_semaphore_release(ctx: &mut NvDispatchContext<'_>, 
     }
 }
 
-/// Register the pair of back-end semaphore handlers. Separate
-/// helper from the NV406E pair because the two paths have
-/// distinct method addresses and distinct
-/// semantics (back-end release applies the byte-swap).
+/// Register the back-end semaphore offset / release pair.
 pub fn register_nv4097_back_end_semaphore_handlers(
     table: &mut NvMethodTable,
 ) -> Result<(), DuplicateRegistration> {
@@ -548,80 +299,48 @@ pub fn register_nv4097_back_end_semaphore_handlers(
     Ok(())
 }
 
-/// Method-address-keyed dispatch table.
-///
-/// Keyed on the 14-bit method byte address returned by
-/// [`decode_header`]. Populated at runtime construction by the
-/// `register_nv*` helpers in this module; unregistered method
-/// addresses take the unknown-method fallback in the advance pass.
+/// Method-address-keyed dispatch table populated at boot by the
+/// `register_nv*` helpers above. Unregistered methods take the
+/// advance pass's unknown-method fallback.
 #[derive(Debug, Default, Clone)]
 pub struct NvMethodTable {
     handlers: BTreeMap<u16, NvMethodHandler>,
 }
 
-/// Error returned by [`NvMethodTable::register_unique`] when a handler
-/// is already registered for the same method address. Carries both
-/// the conflicting method id (so the caller's init log line names
-/// the collision) and the prior handler pointer (so the caller can
-/// inspect or restore it).
-// PartialEq / Eq intentionally not derived: comparing fn pointers
-// is unpredictable (codegen units may assign the same address to
-// different functions, or different addresses to semantically
-// identical zero-sized fn items). Callers that need to act on a
-// collision should inspect the `method` field for the address and
-// log `prior` as a pointer for diagnostics only.
+/// Returned by [`NvMethodTable::register_unique`] when a handler is
+/// already registered at the same address. The table is unmodified;
+/// `prior` is the existing handler.
+// fn-pointer equality is unpredictable across codegen units so
+// PartialEq / Eq are intentionally not derived; treat `prior` as a
+// diagnostic pointer only.
 #[derive(Debug, Clone, Copy)]
 pub struct DuplicateRegistration {
-    /// Method address that the failing registration targeted.
     pub method: u16,
-    /// Handler that was already registered at `method`. Preserved
-    /// in the table; the failing registration's handler is NOT
-    /// stored.
     pub prior: NvMethodHandler,
 }
 
 impl NvMethodTable {
-    /// Construct an empty dispatch table.
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Register a handler for the given method address. Returns any
-    /// previously-registered handler.
+    /// Register a handler, silently replacing any prior handler at
+    /// the same address. Use [`Self::register_unique`] when a
+    /// collision should surface.
     ///
-    /// This variant silently replaces a prior handler at the same
-    /// method address. If you want a registration-time collision to
-    /// be surfaced, call [`Self::register_unique`] instead.
-    ///
-    /// Registering a handler at address `0x0000` will fire on every
-    /// NOP (Sony: `CELL_GCM_METHOD_NOP = 0x00000000`). NOPs appear
-    /// in real FIFO streams as alignment padding at command-buffer
-    /// boundaries and can occur millions of times per frame;
-    /// registering a handler there is almost certainly a bug.
+    /// Address `0x0000` fires on every NOP (alignment padding in
+    /// real FIFO streams); a handler there is almost always a bug.
     #[inline]
     pub fn register(&mut self, method: u16, handler: NvMethodHandler) -> Option<NvMethodHandler> {
         self.handlers.insert(method, handler)
     }
 
-    /// Register a handler that is expected to be the first at this
-    /// method address. Returns [`DuplicateRegistration`] on
-    /// collision, carrying the method id and the existing handler
-    /// -- meaning the caller's init sequence has a duplicate
-    /// registration bug.
+    /// Register a handler expected to be the first at this address.
+    /// Returns [`DuplicateRegistration`] on collision, leaving the
+    /// table untouched.
     ///
-    /// Prefer this at startup / bootstrap registration; a silent
-    /// collision on the fixed handler set is a real bug and should
-    /// fail loudly rather than get papered over.
-    /// The error's `method` field supplies the id so the caller's
-    /// panic / log message can name the offending method without
-    /// re-looking-up.
-    ///
-    /// On collision, the table is NOT mutated: the prior handler
-    /// remains in place and the new handler is discarded.
-    ///
-    /// Registering at `0x0000` carries the same caveat as
-    /// [`Self::register`]; see that method's doc.
+    /// Address `0x0000` has the same NOP caveat as [`Self::register`].
     #[inline]
     pub fn register_unique(
         &mut self,
@@ -636,21 +355,17 @@ impl NvMethodTable {
         }
     }
 
-    /// Look up the handler registered for `method`, if any. Returns
-    /// `None` if the method is not registered -- the advance pass
-    /// treats `None` as the unknown-method fallback.
+    /// `None` is the advance pass's unknown-method fallback.
     #[inline]
     pub fn lookup(&self, method: u16) -> Option<NvMethodHandler> {
         self.handlers.get(&method).copied()
     }
 
-    /// Number of registered handlers.
     #[inline]
     pub fn len(&self) -> usize {
         self.handlers.len()
     }
 
-    /// Whether the table has any registered handlers.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.handlers.is_empty()

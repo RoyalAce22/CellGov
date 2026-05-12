@@ -3,7 +3,8 @@
 //! Owns group lifecycle from create through finish. Group ids are
 //! monotonic u32 tokens starting at 1; 0 is reserved.
 
-use crate::dispatch::{SpuImageHandle, SpuInitState};
+use crate::dispatch::SpuInitState;
+use crate::image::SpuImageHandle;
 use cellgov_event::UnitId;
 use std::collections::BTreeMap;
 

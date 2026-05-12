@@ -248,11 +248,17 @@ impl HleContext for RuntimeHleAdapter<'_> {
             for &(threshold, bit, label) in HEAP_WATERMARK_BANDS {
                 if used >= threshold && (*self.heap_warning_mask & bit) == 0 {
                     *self.heap_warning_mask |= bit;
-                    eprintln!(
-                        "HLE heap_alloc: watermark crossed {label} above heap_base \
-                         ({used} bytes cumulative, bump-on-free allocator); \
-                         consider a real allocator -- see _sys_free TODO in hle::sys_prx_for_user"
-                    );
+                    #[allow(
+                        clippy::print_stderr,
+                        reason = "one-shot watermark warning, gated by heap_warning_mask so each band fires at most once per host instance"
+                    )]
+                    {
+                        eprintln!(
+                            "HLE heap_alloc: watermark crossed {label} above heap_base \
+                             ({used} bytes cumulative, bump-on-free allocator); \
+                             consider a real allocator -- see _sys_free TODO in hle::sys_prx_for_user"
+                        );
+                    }
                 }
             }
             Some(aligned)

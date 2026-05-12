@@ -3,6 +3,8 @@
 //! Text rendering is a downstream tool over the binary format, never the source
 //! of truth.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod hash;
 pub mod level;
 pub mod reader;

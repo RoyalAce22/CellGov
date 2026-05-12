@@ -3,6 +3,10 @@
 //! on the PS3 LV2 VA layout.
 
 #![allow(missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "bench scaffolding: .unwrap() panics on unexpected failure are the right behavior"
+)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 

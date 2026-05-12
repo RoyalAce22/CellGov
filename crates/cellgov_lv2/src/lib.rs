@@ -1,5 +1,7 @@
 //! LV2 host model: image registry, thread group table, sync primitives, and syscall dispatch.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod dispatch;
 pub mod fs_store;
 pub mod host;
@@ -12,11 +14,11 @@ pub mod thread_group;
 
 pub use dispatch::{
     CallbackReturnStage, CondMutexKind, Lv2BlockReason, Lv2Dispatch, PendingResponse,
-    PpuThreadInitState, SpuImageHandle, SpuInitState,
+    PpuThreadInitState, SpuInitState,
 };
 pub use fs_store::{FileStat, FsError, FsMount, FsMountTable, FsStore, SeekWhence};
 pub use host::{Lv2Host, Lv2Runtime};
-pub use image::{ContentStore, SpuImageRecord};
+pub use image::{ContentStore, SpuImageHandle, SpuImageRecord};
 pub use ppu_thread::{
     AddJoinWaiter, EventFlagWaitMode, GuestBlockReason, PpuThread, PpuThreadAttrs, PpuThreadId,
     PpuThreadIdAllocator, PpuThreadState, PpuThreadTable, ThreadStack, ThreadStackAllocator,
