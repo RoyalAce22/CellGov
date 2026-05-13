@@ -110,7 +110,15 @@ fn compute_limit() -> usize {
     }
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
-    let ram = sys.total_memory(); // bytes since sysinfo 0.30
+    // `available_memory`, not `total_memory`: budget against what
+    // the OS will let new allocations claim, accounting for other
+    // host processes already holding RAM. On Windows this maps to
+    // GlobalMemoryStatusEx::ullAvailPhys, the value Task Manager
+    // calls "Available". `total_memory` over-committed on hosts
+    // where other apps consumed enough that nominal `total /
+    // PER_SLOT` exceeded the headroom; the resulting OOMs surfaced
+    // as cpu/basic and friends randomly failing.
+    let ram = sys.available_memory();
     ((ram / PER_SLOT_BYTES) as usize).max(1)
 }
 
