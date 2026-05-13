@@ -1,16 +1,16 @@
 //! PS3 `sys_fs` ABI constants: open flags, the `CellFsStat` wire
 //! format, mode bits, and the maximum path length.
 //!
-//! Octal literals match the canonical form in PSL1GHT's `cell_fs.h`
-//! (using hex risks silent transcription errors on the
-//! order-of-magnitude nibble: `O_CREAT = 0o100 = 0x40`, NOT `0x4`).
+//! Octal literals match the canonical PS3 `cell_fs.h` form (using
+//! hex risks silent transcription errors on the order-of-magnitude
+//! nibble: `O_CREAT = 0o100 = 0x40`, NOT `0x4`).
 
 /// `lv2_fs_object::id_base` (per `rpcs3/Emu/Cell/lv2/sys_fs.h`):
 /// the starting fd value the kernel hands out for file/dir opens.
-/// File fds are small ints in `[3, 255)` on real PS3. PSL1GHT-built
-/// titles encode the fd into narrow struct fields and load it with
-/// `lbz`/`lhz`/`lwz` semantics that truncate high bits; returning fds
-/// in the billions corrupts the fd in the title's internal table.
+/// File fds are small ints in `[3, 255)` on real PS3. Titles encode
+/// the fd into narrow struct fields and load it with `lbz`/`lhz`/
+/// `lwz` semantics that truncate high bits; returning fds in the
+/// billions corrupts the fd in the title's internal table.
 pub const LV2_FS_OBJECT_ID_BASE: u32 = 3;
 
 // -- sys_fs_open flag bits --
@@ -41,7 +41,7 @@ pub const CELL_FS_MAX_PATH_LENGTH: usize = 1024;
 
 // -- CellFsStat wire format --
 
-/// Wire size of `CellFsStat`. The PSL1GHT struct is
+/// Wire size of `CellFsStat`. The PS3 struct is
 /// `{ s32 mode; s32 uid; s32 gid; <pad4>; s64 atime; s64 mtime;
 /// s64 ctime; u64 size; u64 blksize }`; 8-byte alignment of the
 /// 64-bit fields forces 4 bytes of padding between gid and atime.
@@ -65,8 +65,8 @@ pub const CELL_FS_S_IROTH: u32 = 0x004;
 // -- CellFsDirent wire format --
 
 /// Wire size of `CellFsDirent`. The struct is
-/// `{ u8 d_type; u8 d_namlen; char d_name[256] }`; PSL1GHT
-/// stores the name as a fixed 256-byte buffer (NUL-padded).
+/// `{ u8 d_type; u8 d_namlen; char d_name[256] }` with the name
+/// stored as a fixed 256-byte buffer (NUL-padded).
 pub const CELL_FS_DIRENT_SIZE: u64 = 258;
 
 /// Maximum filename length the kernel will write into

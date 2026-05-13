@@ -53,8 +53,9 @@ Pre-Alpha. What works today:
 - **Worker-thread callback dispatch**: deterministic primitive for invoking guest callbacks; first consumer is `cellSaveDataAutoLoad`.
 - **Sync primitives**: lwmutex / event_flag / semaphore / mutex / cond match real-PS3 wake ordering (incl. ETIMEDOUT and CELL_ECANCELED paths).
 - **FS with host-backed VFS**: path-keyed blob store backs both `sys_fs_*` and `cellFs*` calls; per-title mounts (default `/app_home`) resolve guest paths against host directories with deterministic lexicographic enumeration. Directory iteration syscalls (opendir / readdir / closedir) operate on snapshot entries. Kernel fd allocation matches real PS3's `[3, 255)` range.
+- **Real-firmware SELF decryption**: `cellgov_firmware install` peels a user-supplied `PS3UPDAT.PUP` into per-module SELFs; each one is decrypted on the fly at boot time. Twelve foundation SPRX modules decrypt bit-identically to RPCS3's pre-decrypted reference. APP keys cover firmware revisions 0x0000-0x001D.
 - **PS3 conformance**: ps3autotests cross-runner harness; cpu/basic, cpu/ppu_branch, lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag match real-PS3 byte-for-byte.
-- 2,842 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 2,871 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [docs/architecture.md](docs/architecture.md) for the full pipeline, memory model, and per-subsystem details.
 
@@ -85,17 +86,22 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 CellGov has no runtime dependency on RPCS3. Booting a real PS3 game
-requires PS3 system firmware (decrypted SPRX modules like
-`liblv2.sprx`). Download the official firmware update
+requires PS3 system firmware. Download the official firmware update
 (`PS3UPDAT.PUP`) from
 [playstation.com](https://www.playstation.com/en-us/support/hardware/ps3/system-software/)
-and decrypt it with the included tool:
+and install it with the included tool:
 
 ```bash
-cargo run -p cellgov_firmware -- install PS3UPDAT.PUP --output dev_flash
+cargo run -p cellgov_firmware -- install /path/to/PS3UPDAT.PUP
 ```
 
-Then pass `--firmware-dir dev_flash/sys/external` to `run-game`.
+The install unwraps the outer SCE/PUP envelope and writes per-module
+SELFs under `firmware/` (gitignored; bytes are never vendored). Each
+SELF stays encrypted on disk and is decrypted at boot time. `run-game`
+auto-discovers the install: `--firmware-dir` defaults to
+`firmware/sys/external/` when that directory exists at the current
+working directory; pass `--firmware-dir DIR` to override or set
+`CELLGOV_NO_FIRMWARE_DIR=1` to suppress the default.
 
 The `cellgov_compare` crate gates the RPCS3 process-spawning runner
 behind the default-on `rpcs3-runner` Cargo feature. Importers that

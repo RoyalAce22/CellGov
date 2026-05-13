@@ -33,7 +33,7 @@ pub(crate) fn dispatch(
             // _sys_process_exit calls Emu.Kill()). Route through
             // Lv2Request::ProcessExit so a leaked-but-blocked worker
             // (e.g. an unjoined semaphore waiter) is also Finished;
-            // PSL1GHT's CRT calls this LAST in its exit chain, so
+            // The PS3 CRT calls this LAST in its exit chain, so
             // earlier sys_tty_write / sys_fs_write flushes have
             // already landed in the capture by this point.
             let code = args[1] as u32;
@@ -42,7 +42,7 @@ pub(crate) fn dispatch(
         sys_nid::PRX_EXITSPAWN_WITH_LEVEL => {
             // RPCS3 oracle stubs this as a CELL_OK no-op (sys_prx_.cpp's
             // sys_prx_exitspawn_with_level: sysPrxForUser.todo(...);
-            // return CELL_OK;). PSL1GHT's CRT issues it EARLY in the
+            // return CELL_OK;). The PS3 CRT issues it EARLY in the
             // exit chain (before stdio is flushed) and expects a
             // benign return so the rest of the chain can run; only
             // the subsequent sys_process_exit actually terminates.
@@ -50,7 +50,7 @@ pub(crate) fn dispatch(
         }
         sys_nid::PROCESS_IS_STACK => {
             // Lower bound widened below the configured 0xD0000000
-            // stack base because PSL1GHT startup leaves locals
+            // stack base because PS3 startup code leaves locals
             // there before main() runs.
             let addr = args[1] as u32;
             const STACK_RANGE_LO: u32 = 0xCFF0_0000;
@@ -341,7 +341,7 @@ fn lwmutex_route<F>(
     runtime.dispatch_lv2_request(make_request(id, timeout), source);
 }
 
-// PSL1GHT `sys_lwmutex_t` layout:
+// `sys_lwmutex_t` layout (sysPrxForUser ABI):
 //   +0  u32 owner            (0xFFFF_FFFF == free)
 //   +4  u32 waiter           (kernel sleep-queue depth)
 //   +8  u32 attribute        (recursive | protocol)
@@ -432,7 +432,7 @@ pub(crate) fn lwmutex_lock_hle(runtime: &mut Runtime, source: UnitId, nid: u32, 
         return;
     }
     if fields.owner == me {
-        // PSL1GHT's wrapper owns recursive_count bookkeeping;
+        // The user-space wrapper owns recursive_count bookkeeping;
         // returning OK lets it proceed.
         if (fields.attribute & SYS_SYNC_RECURSIVE) != 0 {
             adapter(runtime, source, nid).set_return(0);

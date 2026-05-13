@@ -64,8 +64,8 @@ impl Lv2Host {
     /// Per-class active-object count for
     /// `sys_process_get_number_of_object`. Maps `sys_process.h`
     /// `SYS_*_OBJECT` ids onto CellGov's tables; unmodeled classes
-    /// report zero. Writes a 32-bit count (PSL1GHT `size_t` is 4
-    /// bytes in PPU64 ILP32).
+    /// report zero. Writes a 32-bit count (PS3 PPU64 ILP32:
+    /// `size_t` is 4 bytes).
     pub(in crate::host) fn dispatch_process_get_number_of_object(
         &self,
         class_id: u32,

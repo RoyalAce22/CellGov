@@ -68,11 +68,11 @@ pub mod sys_prx_for_user {
     ];
 }
 
-/// `sys_fs` NIDs. PSL1GHT-built titles call these HLE wrappers
-/// instead of issuing the raw `sys_fs_*` syscalls; the HLE
-/// dispatcher in `cellgov_core::hle::sys_fs` forwards each call
-/// to the matching `Lv2Request::Fs*` so titles see the same
-/// FsStore / manifest content via either path.
+/// `sys_fs` NIDs. PS3 titles call these HLE wrappers instead of
+/// issuing the raw `sys_fs_*` syscalls; the HLE dispatcher in
+/// `cellgov_core::hle::sys_fs` forwards each call to the matching
+/// `Lv2Request::Fs*` so titles see the same FsStore / manifest
+/// content via either path.
 pub mod sys_fs {
     crate::nid_const!(OPEN = 0x718b_f5f8, "cellFsOpen");
     crate::nid_const!(READ = 0x4d5f_f8e2, "cellFsRead");

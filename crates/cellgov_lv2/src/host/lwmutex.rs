@@ -2,9 +2,10 @@
 //!
 //! Mirrors RPCS3's `lv2_lwmutex` model: the kernel side is a
 //! signal flag plus a FIFO sleep queue, with no owner / recursion
-//! tracking. PSL1GHT (and PS3 SDK static-libc) keeps owner /
-//! recursion / waiter-count in the user-space `sys_lwmutex_t` and
-//! only invokes the kernel for actual contention. `dispatch_lwmutex_lock`
+//! tracking. The user-space wrappers (sysPrxForUser / libsysmodule,
+//! mirrored by PSL1GHT) keep owner / recursion / waiter-count in
+//! the user-space `sys_lwmutex_t` and only invoke the kernel for
+//! actual contention. `dispatch_lwmutex_lock`
 //! consumes a pending signal or parks the caller; `dispatch_lwmutex_unlock`
 //! wakes the head of the sleep queue or sets the signal for the
 //! next acquirer.
@@ -559,8 +560,8 @@ mod tests {
     fn lwmutex_unlock_with_waiters_transfers_to_head() {
         // Kernel-side unlock pops the FIFO head and reports it as
         // the wake target via `WakeAndReturn`. The unlocker's
-        // identity is not consulted -- PSL1GHT enforces the owner
-        // check in user space before invoking the kernel unlock.
+        // identity is not consulted -- the user-space wrapper
+        // enforces the owner check before invoking the kernel.
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let unlocker = UnitId::new(0);
@@ -618,8 +619,8 @@ mod tests {
 
     #[test]
     fn lwmutex_unlock_signals_when_only_blocked_caller_is_unlocker() {
-        // The kernel does not validate the unlocker. PSL1GHT does
-        // owner enforcement in user space before invoking unlock,
+        // The kernel does not validate the unlocker. The user-space
+        // wrapper does owner enforcement before invoking unlock,
         // so this kernel-side path can fire from any unit and just
         // signals (because the queue now has the unlocker himself
         // as a waiter, dequeued and transferred).

@@ -24,23 +24,12 @@ use std::sync::{Condvar, Mutex, OnceLock};
 
 use cellgov_compare::{Observation, ObservedOutcome};
 
-/// Per-slot RAM budget. Nominal guest memory per subprocess is
-/// roughly 1.77 GiB (main 1 GiB at the boot.rs kernel floor, plus
-/// rsx 256 MiB, spu_reserved 512 MiB, child_stacks 15 MiB, primary
-/// stack 64 KiB). Transient peak runs higher because
-/// `--save-observation` serializes those bytes as JSON arrays,
-/// briefly holding a buffer several GiB larger than the layout.
-/// 4 GiB per slot covers nominal plus JSON overhead with margin;
-/// tightening this requires either eliminating the JSON-array
-/// memory dump (separate concern in observation.rs) or measuring
-/// peak RSS in CI. `CELLGOV_BOOT_TRACE_MEM=1` on
-/// `cellgov_cli run-game` confirms the 1 GiB floor is the actual
-/// `mem_size` for every ps3autotests case today.
-const PER_SLOT_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4 GiB
+/// Peak RSS budget per subprocess: ~1.8 GiB guest memory plus a
+/// transient JSON-array dump from `--save-observation`. 4 GiB covers
+/// both with margin.
+const PER_SLOT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
-/// Pin the concurrency limit to an exact value (floor 1). Useful for
-/// `=1` to serialize (matches the historical --test-threads=1
-/// workaround) or `=999` to effectively disable the gate.
+/// Pin the concurrency limit to an exact value (floor 1).
 const OVERRIDE_ENV: &str = "CELLGOV_PS3AUTOTESTS_MAX_CONCURRENT";
 
 /// Counting semaphore: at most `n` permits in flight at a time.
@@ -79,12 +68,8 @@ impl Drop for Permit<'_> {
     }
 }
 
-/// Acquire a slot for spawning `cellgov_cli run-game`. Each subprocess
-/// eagerly allocates several GiB of guest memory (the kernel floor in
-/// boot.rs plus high-vaddr BSS); without a gate, `cargo test` with
-/// default `--test-threads=nproc` OOMs once `nproc * peak-RSS` exceeds
-/// host RAM. The peak is empirically ~3 GiB, so [`PER_SLOT_BYTES`] is
-/// budgeted at 4 GiB.
+/// Acquire a slot for spawning `cellgov_cli run-game`. Without this
+/// gate, `nproc * peak-RSS` can exceed host RAM and OOM the suite.
 fn subprocess_permit() -> Permit<'static> {
     static SEM: OnceLock<Semaphore> = OnceLock::new();
     let sem = SEM.get_or_init(|| {
@@ -110,14 +95,9 @@ fn compute_limit() -> usize {
     }
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
-    // `available_memory`, not `total_memory`: budget against what
-    // the OS will let new allocations claim, accounting for other
-    // host processes already holding RAM. On Windows this maps to
-    // GlobalMemoryStatusEx::ullAvailPhys, the value Task Manager
-    // calls "Available". `total_memory` over-committed on hosts
-    // where other apps consumed enough that nominal `total /
-    // PER_SLOT` exceeded the headroom; the resulting OOMs surfaced
-    // as cpu/basic and friends randomly failing.
+    // available_memory budgets against what the OS will actually
+    // hand out -- total_memory ignores RAM already held by other
+    // host processes.
     let ram = sys.available_memory();
     ((ram / PER_SLOT_BYTES) as usize).max(1)
 }
@@ -233,6 +213,9 @@ fn run_observation(case: &Case, run_id: &str) -> Option<Observation> {
             .arg(&observation_path)
             .arg(&elf_path)
             .current_dir(workspace_root())
+            // Synthetic test ELFs do not coexist with a real LV2 PRX
+            // boot; suppress the firmware/sys/external auto-default.
+            .env("CELLGOV_NO_FIRMWARE_DIR", "1")
             .output()
             .expect("spawn cellgov_cli run-game")
     };

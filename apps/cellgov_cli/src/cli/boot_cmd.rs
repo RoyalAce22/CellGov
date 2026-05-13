@@ -15,6 +15,30 @@ use super::title::{resolve_checkpoint_override, resolve_ps3_vfs_root, resolve_ti
 /// subprocess runs, as a percentage of the faster run.
 const AGREEMENT_GATE_PERCENT: f64 = 5.0;
 
+/// Where `cellgov_firmware install` lands foundation SPRXes by default.
+const DEFAULT_FIRMWARE_DIR: &str = "firmware/sys/external";
+
+/// Set by synthetic harnesses (e.g. ps3autotests) to suppress the
+/// auto-default.
+const DISABLE_DEFAULT_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
+
+/// Explicit `--firmware-dir` wins; otherwise auto-default to
+/// [`DEFAULT_FIRMWARE_DIR`] when it exists; `None` falls back to pure
+/// HLE.
+fn resolve_firmware_dir(args: &[String]) -> Option<String> {
+    if let Some(explicit) = find_flag_value(args, "--firmware-dir") {
+        return Some(explicit);
+    }
+    if std::env::var_os(DISABLE_DEFAULT_ENV).is_some() {
+        return None;
+    }
+    if std::path::Path::new(DEFAULT_FIRMWARE_DIR).is_dir() {
+        eprintln!("boot: --firmware-dir defaulted to {DEFAULT_FIRMWARE_DIR}");
+        return Some(DEFAULT_FIRMWARE_DIR.to_string());
+    }
+    None
+}
+
 struct BootInputs {
     title: game::manifest::TitleManifest,
     elf_path: String,
@@ -40,7 +64,7 @@ pub(crate) fn run_game(args: &[String]) {
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000);
     let trace = args.iter().any(|a| a == "--trace");
     let profile = args.iter().any(|a| a == "--profile");
-    let firmware_dir = find_flag_value(args, "--firmware-dir");
+    let firmware_dir = resolve_firmware_dir(args);
     let dump_at_pc = parse_hex_flag(args, "--dump-at-pc");
     let dump_skip: u32 = parse_flag_value(args, "--dump-skip").unwrap_or(0);
     let dump_mem_boot_addrs: Vec<u64> = find_flag_value(args, "--dump-mem-boot")
@@ -81,10 +105,8 @@ pub(crate) fn run_game(args: &[String]) {
     });
 }
 
-/// Parse a `--dump-mem-fault` element of the form `0xADDR` (default
-/// length 64 bytes) or `0xADDR:LEN` (LEN parsed as hex/decimal).
-/// Length is clamped at 64 KiB so an accidental megabyte request
-/// cannot dominate the diagnostic surface.
+/// Form: `0xADDR` (default 64 bytes) or `0xADDR:LEN`. LEN is clamped
+/// to 64 KiB.
 fn parse_dump_mem_fault_range(spec: &str) -> (u64, u64) {
     const DEFAULT_LEN: u64 = 64;
     const MAX_LEN: u64 = 64 * 1024;
@@ -100,7 +122,7 @@ fn parse_dump_mem_fault_range(spec: &str) -> (u64, u64) {
 pub(crate) fn bench_boot_once(args: &[String]) {
     let inputs = resolve_boot_inputs(args, "bench-boot-once");
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000_000);
-    let firmware_dir = find_flag_value(args, "--firmware-dir");
+    let firmware_dir = resolve_firmware_dir(args);
     let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot-once");
     let budget_override: Option<u64> = parse_flag_value(args, "--budget");
@@ -118,7 +140,7 @@ pub(crate) fn bench_boot_once(args: &[String]) {
 pub(crate) fn bench_boot(args: &[String]) {
     let inputs = resolve_boot_inputs(args, "bench-boot");
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000_000);
-    let firmware_dir = find_flag_value(args, "--firmware-dir");
+    let firmware_dir = resolve_firmware_dir(args);
     let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot");
     let budget_override: Option<u64> = parse_flag_value(args, "--budget");

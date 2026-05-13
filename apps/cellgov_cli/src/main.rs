@@ -95,7 +95,8 @@ fn print_usage() {
     println!("       cellgov_cli explore micro <name> [--format human|json]");
     println!(
         "       cellgov_cli run-game <elf-path|--title NAME> [--max-steps N] [--budget N] [--trace] [--profile]\n\
-         \t\t[--dump-mem-boot 0xADDR[,...]] [--dump-mem-fault 0xADDR[:LEN][,...]]"
+         \t\t[--firmware-dir DIR] [--dump-mem-boot 0xADDR[,...]] [--dump-mem-fault 0xADDR[:LEN][,...]]\n\
+         \t\t(default --firmware-dir: firmware/sys/external/ when present at the current working directory)"
     );
     println!(
         "       cellgov_cli bench-boot --title <name> [--max-steps N] [--budget N] [--firmware-dir DIR]\n\

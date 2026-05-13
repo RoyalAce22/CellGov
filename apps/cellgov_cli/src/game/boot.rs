@@ -15,7 +15,7 @@ use cellgov_ps3_abi::process_address_space::{
 
 use super::manifest::TitleManifest;
 use super::prx::{build_nid_map, load_firmware_prx, pre_init_tls, run_module_start, PrxLoadInfo};
-use crate::cli::exit::{die, load_file_or_die};
+use crate::cli::exit::{die, load_ppu_image_or_die};
 
 #[allow(dead_code)]
 pub(super) struct PreparedBoot {
@@ -63,7 +63,7 @@ pub(super) struct PrepareOptions<'a> {
 
 pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let t_start = Instant::now();
-    let elf_data = load_file_or_die(opts.elf_path);
+    let elf_data = load_ppu_image_or_die(opts.elf_path);
 
     let required_size = cellgov_ppu::loader::required_memory_size(&elf_data)
         .unwrap_or_else(|e| die(&format!("failed to parse ELF: {e:?}")));

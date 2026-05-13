@@ -113,11 +113,12 @@ Four structural rules worth calling out:
 - `cellgov_explore` lives above `cellgov_core` and drives the runtime
   externally through `Runtime::step` / `commit_step` /
   `set_scheduler`. It never modifies the runtime model.
-- `cellgov_firmware` is a standalone app with no workspace library
-  dependencies. It uses external crypto crates (`aes`, `cbc`, `ctr`,
-  `hmac`, `sha1`, `flate2`) that no library crate pulls. Its only
-  job is one-shot firmware extraction; no library crate imports it
-  and no runtime path depends on it.
+- `cellgov_firmware` is a lib+bin: the binary exposes the `install`
+  and `decrypt-self` subcommands; the library exposes the same PUP
+  / SCE / SELF / TAR / APP-key primitives. `cellgov_cli` takes a
+  library dependency to decrypt SCE-wrapped SELFs on the fly at
+  boot time. The crypto crates (`aes`, `cbc`, `ctr`, `hmac`,
+  `sha1`, `flate2`) are pulled by `cellgov_firmware` alone.
 
 External dependencies are minimal: `serde`, `serde_json`, and `toml`
 in `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore`
@@ -147,7 +148,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                |
 | `cellgov_cli`                  | The user-facing binary: `run-game`, `bench-boot`, `bench-boot-once`, `dump`, `dump-imports`, `disasm`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                                                                                                                  |
 | `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                                                                                                                                                                     |
-| `cellgov_firmware`             | PS3 firmware and SELF decrypter. Two subcommands: `install` extracts decrypted SPRX modules from a `PS3UPDAT.PUP` downloaded from Sony's website (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). `decrypt-self` decrypts a retail game `EBOOT.BIN` (SELF) into an `EBOOT.elf` using per-revision APP keys -- same AES pipeline, different key table. No RPCS3 dependency. |
+| `cellgov_firmware`             | PS3 firmware and SELF decrypter. Lib + bin. The binary's `install` subcommand peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` and writes per-module SELFs to `firmware/` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). The `decrypt-self` subcommand decrypts one SELF at a time. The library's `sce::decrypt_self_to_elf` is also called by `cellgov_cli`'s boot path to peel encrypted SELFs at load time. APP keys cover firmware revisions 0x0000-0x001D, mirroring RPCS3's `KeyVault::LoadSelfAPPKeys`. Twelve foundation SPRX modules decrypt bit-identically to the RPCS3 reference. No RPCS3 dependency. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                  |
 
 ## Guest memory layout
@@ -593,7 +594,7 @@ a per-fd open-file table (`u32 -> { path, offset }`), and a
 per-fd open-directory table (`u32 -> { entries, cursor }`). Fds
 come from a monotonic `next_fd` counter starting at `3`, matching
 real PS3's `lv2_fs_object::id_base = 3` so the kernel-returned fd
-fits in the `[3, 255)` range that PSL1GHT's inline `cellFsRead`
+fits in the `[3, 255)` range that the inline `cellFsRead`
 wrapper truncates on. Fds are never recycled within a boot, so a
 stale fd can never alias a fresh one. State-hash inclusion folds
 the content hashes, fd offsets, directory cursors, and the next-fd
@@ -646,7 +647,7 @@ against three tiers in priority order:
    committed to the public repo). Hard-fail on missing files.
 
 The HLE wrappers `cellFs{Open,Read,Close,Lseek,Fstat,Stat}` in
-`cellgov_core::hle::sys_fs` translate each PSL1GHT C-level
+`cellgov_core::hle::sys_fs` translate each PS3 cellFs C-level
 signature into the matching `Lv2Request::Fs*` and route through
 `runtime.dispatch_lv2_request` so the title's HLE path observes
 the same FsStore-backed behaviour as the raw-syscall path.
@@ -1301,11 +1302,15 @@ The diagnostic surface is:
 
 ## Boot status
 
-The `run-game` CLI subcommand loads a decrypted PS3 ELF and runs the
-PPU at instruction-level granularity (Budget=1). With
-`--firmware-dir`, it also loads decrypted firmware PRX modules,
-executes their `module_start` functions, and resolves game imports
-against real firmware exports.
+The `run-game` CLI subcommand loads a PS3 ELF -- raw, or
+SCE-wrapped (`SCE\0` magic is dispatched to
+`cellgov_firmware::sce::decrypt_self_to_elf` at load time) -- and
+runs the PPU at instruction-level granularity (Budget=1). When
+`--firmware-dir` resolves to a directory holding `liblv2.sprx` /
+`liblv2.prx` (it auto-defaults to `firmware/sys/external/` if that
+exists), the boot path also loads the firmware PRX, executes its
+`module_start`, and resolves game imports against real firmware
+exports. `CELLGOV_NO_FIRMWARE_DIR=1` suppresses the auto-default.
 
 Common boot sequence (per-title numbers below):
 
@@ -1334,20 +1339,21 @@ table at create time so subsequent lock / unlock / trylock /
 destroy resolve through the same id space.
 
 Boot now reaches a deterministic MAX_STEPS at step 195,312 with
-the primary thread spinning on a PSL1GHT pthread coordination
+the primary thread spinning on a sysPrxForUser pthread coordination
 pattern (`sys_lwmutex_lock` / `_unlock` / `sys_ppu_thread_get_id`
 in a tight 3-syscall loop on HLE-import trampolines) and a sibling
 PPU thread (`entry=0x9b0a0` in flOw's `.text`) parked on
 `sys_event_queue_receive`. The sibling is a dedicated event-
 handler thread that exits when an event arrives from a port
-named `0xd1ed1ed1` (PSL1GHT's `OPD_EXIT` magic) -- it drains
+named `0xd1ed1ed1` (the `OPD_EXIT` sentinel value; the symbol
+spelling is PSL1GHT's, the value is a PS3 convention) -- it drains
 SPURS-workload completion events during normal operation.
 CellGov's cellSpurs HLE maintains the user-space SPURS data
 structures but never starts an SPU thread group, so no completion
 events ever fire and the handler thread waits forever. This is
 flOw's current boot frontier; the prior `m_InitEntityHierarchy`
 NULL-bcctr fault was cleared by the kernel-fd range fix
-(`LV2_FS_OBJECT_ID_BASE = 3`) which let PSL1GHT's inline `cellFsRead`
+(`LV2_FS_OBJECT_ID_BASE = 3`) which let the inline `cellFsRead`
 wrapper see the fds in its expected `[3, 255)` range instead of
 the prior `0x4000_000N` allocation that the wrapper's narrow load
 truncated to `0x4` (mistaken for an unknown fd, returning EBADF
