@@ -37,8 +37,8 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // nread is a u64 (PSL1GHT signature: `u64 *nread`); enforce
-        // 8-byte alignment and writability.
+        // nread is a u64 (PS3 sys_fs_read signature: `u64 *nread`);
+        // enforce 8-byte alignment and writability.
         if !out_ptr_writable(rt, nread_out_ptr, 8, 8) {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EFAULT.into(),

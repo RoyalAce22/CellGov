@@ -384,18 +384,42 @@ pub(super) fn load_firmware_prx(
     tramp_base: u32,
 ) -> Option<PrxLoadInfo> {
     let dir = firmware_dir?;
-    let prx_path = std::path::PathBuf::from(dir).join("liblv2.prx");
-    if !prx_path.exists() {
-        println!("prx: {}: not found, using pure HLE", prx_path.display());
-        return None;
-    }
+    // Real firmware ships .sprx (SCE-wrapped); pre-decrypted dumps land
+    // as .prx. Probe both, then dispatch on SCE\0 magic below.
+    let dir_path = std::path::PathBuf::from(dir);
+    let prx_path = {
+        let sprx = dir_path.join("liblv2.sprx");
+        let prx = dir_path.join("liblv2.prx");
+        if sprx.exists() {
+            sprx
+        } else if prx.exists() {
+            prx
+        } else {
+            println!(
+                "prx: liblv2.sprx / liblv2.prx not found under {}, using pure HLE",
+                dir_path.display()
+            );
+            return None;
+        }
+    };
 
-    let prx_data = match std::fs::read(&prx_path) {
+    let raw = match std::fs::read(&prx_path) {
         Ok(d) => d,
         Err(e) => {
             println!("prx: failed to read {}: {e}", prx_path.display());
             return None;
         }
+    };
+    let prx_data = if raw.len() >= 4 && &raw[..4] == b"SCE\0" {
+        match cellgov_firmware::sce::decrypt_self_to_elf(&raw) {
+            Ok(d) => d,
+            Err(e) => {
+                println!("prx: failed to decrypt {}: {e}", prx_path.display());
+                return None;
+            }
+        }
+    } else {
+        raw
     };
 
     let parsed = match cellgov_ppu::sprx::parse_prx(&prx_data) {

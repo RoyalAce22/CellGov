@@ -324,8 +324,8 @@ pub enum PendingResponse {
         /// Guest out-pointer receiving the exit value (u64 BE).
         status_out_ptr: u32,
     },
-    /// On wake, write the event payload (4x u64 BE matching PSL1GHT's
-    /// `sys_event_t`: offsets 0 / 8 / 16 / 24 =
+    /// On wake, write the event payload (4x u64 BE matching the PS3
+    /// `sys_event_t` ABI: offsets 0 / 8 / 16 / 24 =
     /// source / data1 / data2 / data3) to `out_ptr` and set r3 = 0.
     ///
     /// # Panics
@@ -373,7 +373,7 @@ pub enum PendingResponse {
         /// User-space `sys_lwmutex_t` address (offset 0 = owner,
         /// offset 4 = waiter, offset 12 = recursive_count).
         mutex_ptr: u32,
-        /// Caller's PSL1GHT thread id (low 32 bits of `PpuThreadId`),
+        /// Caller's PPU thread id (low 32 bits of `PpuThreadId`),
         /// written into the user-space owner slot.
         caller: u32,
     },

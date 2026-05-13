@@ -6,10 +6,10 @@ use super::super::flags::FS_TTY_SINK_PATHS;
 
 #[test]
 fn cell_fs_o_creat_pinned_to_octal_100() {
-    // Regression: the constant was historically `0x4` which is a
-    // nibble-shift error from the PSL1GHT canonical `0o100`.
-    // Pin the actual bit value so a future copy-paste from a
-    // hex source surfaces immediately.
+    // Regression: the constant was historically `0x4`, a nibble-
+    // shift error from the canonical `0o100`. Pin the actual bit
+    // value so a future copy-paste from a hex source surfaces
+    // immediately.
     assert_eq!(CELL_FS_O_CREAT, 0o100);
     assert_eq!(CELL_FS_O_CREAT, 0x40);
 }

@@ -41,8 +41,8 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // pos is a u64 (PSL1GHT signature: `u64 *pos`); enforce
-        // 8-byte alignment and writability before any fd touch.
+        // pos is a u64 (PS3 sys_fs_lseek signature: `u64 *pos`);
+        // enforce 8-byte alignment and writability before any fd touch.
         if !out_ptr_writable(rt, pos_out_ptr, 8, 8) {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EFAULT.into(),

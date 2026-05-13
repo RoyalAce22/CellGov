@@ -42,13 +42,13 @@ Column definitions:
 flOw's frontier moved from step 86,527 to 195,312 (+108,785 steps)
 once the cellFs real-disk VFS landed and the kernel-fd-range fix
 (`LV2_FS_OBJECT_ID_BASE = 3`, matching real PS3's `lv2_fs_object::id_base`)
-let PSL1GHT's inline `cellFsRead` wrapper see the fds in its
+let the inline `cellFsRead` wrapper see the fds in its
 expected `[3, 255)` range. Resource enumeration (every file under
 `/app_home/Data/**`) succeeds, the entity tree is fully populated,
 and the `m_InitEntityHierarchy` NULL-bcctr chain clears. Boot now
 runs through video config, GCM init, SPURS PPU-surface
 initialization, and the title's pthread coordination barrier
-where it parks. The primary thread spins on the PSL1GHT
+where it parks. The primary thread spins on the sysPrxForUser
 `sys_lwmutex_lock` / `_unlock` / `sys_ppu_thread_get_id` HLE-import
 trio while a sibling event-handler thread (`entry=0x9b0a0`) parks
 on `sys_event_queue_receive` waiting for SPURS workload-completion
@@ -62,6 +62,15 @@ identical across the current correctness surface. WipEout's earlier
 MaxSteps anchor is gone -- sync-primitive correctness lets its boot
 proceed past the lwmutex / event_flag contention loops it
 previously spun in.
+
+The matrix records pure-HLE boot trajectories. The firmware-loaded
+path (auto-discovers `firmware/sys/external/`) now successfully
+decrypts and loads `liblv2.sprx` but does not yet survive its
+`module_start`: liblv2 calls `sys_prx_load_module`, which the
+CellGov LV2 HLE returns 0 from, and the inner code path null-
+branches at step ~24,991. `CELLGOV_NO_FIRMWARE_DIR=1` reproduces
+the recorded HLE anchors. Closing the firmware-boot frontier is
+a successor-phase concern.
 
 Cross-runner refresh: SSHD and WipEout reports stand from the
 prior phase. SSHD and WipEout reach FirstRsxWrite cleanly and

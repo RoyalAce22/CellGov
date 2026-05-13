@@ -1,9 +1,10 @@
 //! Lightweight mutex sleep queue.
 //!
 //! Models the kernel-side primitive only: a `signaled` flag plus a
-//! FIFO waiter list. PSL1GHT (and the PS3 SDK static-libc) tracks
-//! owner / recursion / waiter count in the user-space `sys_lwmutex_t`
-//! struct and only invokes the kernel for actual contention; the
+//! FIFO waiter list. The user-space wrappers (sysPrxForUser /
+//! libsysmodule, mirrored by PSL1GHT) track owner / recursion /
+//! waiter count in the user-space `sys_lwmutex_t` struct and only
+//! invoke the kernel for actual contention; the
 //! kernel-side object therefore mirrors RPCS3's `lv2_lwmutex`
 //! (`signaled` + sleep queue), not a full mutex with ownership.
 //!
@@ -72,7 +73,7 @@ pub enum LwMutexEnqueueError {
 ///
 /// `signaled` is the binary "wake pending" flag set by an unlock
 /// against an empty sleep queue and consumed by the next lock.
-/// PSL1GHT-side ownership and recursion tracking live in the
+/// User-space ownership and recursion tracking live in the
 /// guest's `sys_lwmutex_t` struct, not here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LwMutexEntry {
@@ -206,9 +207,9 @@ impl LwMutexTable {
     /// Try to consume a pending signal without enqueueing.
     ///
     /// Returns `Acquired` (signal consumed, caller proceeds) or
-    /// `Contended` (no signal, no state change). PSL1GHT-style
-    /// owner / recursion checks happen in the user-space wrapper
-    /// before this entry point fires.
+    /// `Contended` (no signal, no state change). Owner / recursion
+    /// checks happen in the user-space wrapper before this entry
+    /// point fires.
     pub fn try_acquire(&mut self, id: u32, _caller: PpuThreadId) -> Option<LwMutexAcquire> {
         let entry = self.entries.get_mut(&id)?;
         if entry.signaled {
@@ -274,8 +275,8 @@ impl LwMutexTable {
     /// Release. Wakes the head of the sleep queue if any waiter is
     /// parked (`Transferred`), otherwise sets the signal so the next
     /// lock-call passes without blocking (`Signaled`). The kernel
-    /// does not validate `_caller`; PSL1GHT verifies the owner in
-    /// user space before invoking unlock.
+    /// does not validate `_caller`; the user-space wrapper verifies
+    /// the owner before invoking unlock.
     pub fn release_and_wake_next(&mut self, id: u32, _caller: PpuThreadId) -> LwMutexRelease {
         let Some(entry) = self.entries.get_mut(&id) else {
             return LwMutexRelease::Unknown;
