@@ -850,7 +850,7 @@ mod tests {
         // Same bytes under two distinct keys: parse_prx produces the
         // same module_id; the duplicate check fires before any
         // memory writes. The variant names both originating paths.
-        let bytes = crate::sprx::tests::make_test_prx();
+        let bytes = crate::sprx::test_fixtures::make_test_prx();
         let mut by_path = BTreeMap::new();
         by_path.insert("alpha.sprx".to_string(), bytes.clone());
         by_path.insert("beta.sprx".to_string(), bytes);

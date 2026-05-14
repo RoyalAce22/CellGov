@@ -280,7 +280,7 @@ mod tests {
         // Divergence between this hash and parse_prx's derivation
         // would turn every edge into a phantom prerequisite or a
         // missing dependency.
-        let bytes = crate::sprx::tests::make_test_prx();
+        let bytes = crate::sprx::test_fixtures::make_test_prx();
         let parsed = crate::sprx::parse_prx(&bytes).expect("parse");
         assert_eq!(parsed.module_id, module_id_from_name(&parsed.name));
     }
