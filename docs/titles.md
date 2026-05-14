@@ -33,11 +33,11 @@ Column definitions:
 
 ## Matrix
 
-| Serial | Title | Year | Engine | Format | Checkpoint | Steps | Insns | Cross-runner |
-|--------|-------|------|--------|--------|------------|------:|------:|--------------|
-| NPUA80001 | flOw | 2007 | thatgamecompany | PSN HDD | MaxSteps (SPURS handler-thread parked on sys_event_queue_receive) | 195,312 | ~50M | outcome mismatch (MaxSteps vs Completed; needs shared-checkpoint flag) |
-| NPUA80068 | Super Stardust HD | 2007 | Housemarque | PSN HDD | FirstRsxWrite | 14,352,589 | ~3.7B | non-semantic (ELF e_ehsize at 0x35) |
-| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Disc ISO | FirstRsxWrite | 45,697 | ~12M | non-semantic (ELF e_version at 0x17) |
+| Serial    | Title             | Year | Engine          | Format   | Checkpoint                                                        |      Steps | Insns | Cross-runner                                                           |
+| --------- | ----------------- | ---- | --------------- | -------- | ----------------------------------------------------------------- | ---------: | ----: | ---------------------------------------------------------------------- |
+| NPUA80001 | flOw              | 2007 | thatgamecompany | PSN HDD  | MaxSteps (SPURS handler-thread parked on sys_event_queue_receive) |    195,312 |  ~50M | outcome mismatch (MaxSteps vs Completed; needs shared-checkpoint flag) |
+| NPUA80068 | Super Stardust HD | 2007 | Housemarque     | PSN HDD  | FirstRsxWrite                                                     | 14,352,589 | ~3.7B | non-semantic (ELF e_ehsize at 0x35)                                    |
+| BCES00664 | WipEout HD Fury   | 2009 | Sony Liverpool  | Disc ISO | FirstRsxWrite                                                     |     45,697 |  ~12M | non-semantic (ELF e_version at 0x17)                                   |
 
 flOw's frontier moved from step 86,527 to 195,312 (+108,785 steps)
 once the cellFs real-disk VFS landed and the kernel-fd-range fix
@@ -62,25 +62,3 @@ identical across the current correctness surface. WipEout's earlier
 MaxSteps anchor is gone -- sync-primitive correctness lets its boot
 proceed past the lwmutex / event_flag contention loops it
 previously spun in.
-
-The matrix records pure-HLE boot trajectories. The firmware-loaded
-path (auto-discovers `firmware/sys/external/`) now successfully
-decrypts and loads `liblv2.sprx` but does not yet survive its
-`module_start`: liblv2 calls `sys_prx_load_module`, which the
-CellGov LV2 HLE returns 0 from, and the inner code path null-
-branches at step ~24,991. `CELLGOV_NO_FIRMWARE_DIR=1` reproduces
-the recorded HLE anchors. Closing the firmware-boot frontier is
-a successor-phase concern.
-
-Cross-runner refresh: SSHD and WipEout reports stand from the
-prior phase. SSHD and WipEout reach FirstRsxWrite cleanly and
-diverge only on non-semantic ELF-header reconstruction bytes
-(`e_ehsize` at 0x35 for SSHD, `e_version` at 0x17 for WipEout);
-the same class flagged in earlier reports. flOw's CellGov-side
-now terminates in MaxSteps (rather than the prior fault) before
-the shared first-sys_tty_write checkpoint RPCS3 captures at,
-still producing an outcome-class mismatch the byte-level
-comparator stops on; a CellGov-side "stop at Nth sys_tty_write"
-flag (mirroring `CELLGOV_DUMP_TTY_NTH`) remains the prerequisite
-for returning flOw to byte-level comparable. Per-title compare
-reports live at `tests/fixtures/<serial>_cross_runner/compare_report.txt`.

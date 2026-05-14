@@ -35,8 +35,8 @@ pub fn classify(syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
 
 /// Build an [`Lv2Request`] from the `sc` LEV field, r11, and r3..=r10.
 ///
-/// Non-zero `lev` routes to [`Lv2Request::Hypercall`]; the LV2
-/// dispatcher must not see it.
+/// Non-zero `lev` routes to [`Lv2Request::Hypercall`]; LV2-syscall
+/// classification only runs for `lev == 0`.
 pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Request {
     if lev != 0 {
         return Lv2Request::Hypercall {
@@ -103,6 +103,12 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
         syscall::SPU_IMAGE_OPEN => Lv2Request::SpuImageOpen {
             img_ptr: p!(0),
             path_ptr: p!(1),
+        },
+        syscall::SPU_IMAGE_IMPORT => Lv2Request::SpuImageImport {
+            handle_out: p!(0),
+            img_ptr: p!(1),
+            size: p!(2),
+            type_id: p!(3),
         },
         syscall::SPU_THREAD_GROUP_CREATE => Lv2Request::SpuThreadGroupCreate {
             id_ptr: p!(0),
@@ -417,6 +423,21 @@ mod tests {
             Lv2Request::SpuImageOpen {
                 img_ptr: 0x1000,
                 path_ptr: 0x2000,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_spu_image_import() {
+        let args = [0x1000, 0x2000, 0x4000, 0xAA, 0, 0, 0, 0];
+        let req = classify(158, &args);
+        assert_eq!(
+            req,
+            Lv2Request::SpuImageImport {
+                handle_out: 0x1000,
+                img_ptr: 0x2000,
+                size: 0x4000,
+                type_id: 0xAA,
             }
         );
     }

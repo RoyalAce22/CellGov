@@ -94,6 +94,10 @@ impl Lv2Host {
                 hasher.write(&[*depth]);
             }
         }
+        if let Some(fw) = self.firmware_identity() {
+            hasher.write(&fw.image_version_hash.to_le_bytes());
+            hasher.write(&fw.pup_sha256_bytes);
+        }
         hasher.finish()
     }
 }
@@ -157,5 +161,32 @@ mod tests {
         let mut host = Lv2Host::new();
         let _ = host.allocate_child_stack(0x10_000, 0x10).unwrap();
         assert_ne!(pre, host.state_hash());
+    }
+
+    #[test]
+    fn state_hash_changes_after_firmware_identity_set() {
+        let pre = Lv2Host::new().state_hash();
+        let mut host = Lv2Host::new();
+        host.set_firmware_identity("4.85", [0u8; 32]);
+        assert_ne!(pre, host.state_hash());
+    }
+
+    #[test]
+    fn state_hash_differs_between_two_firmware_versions() {
+        let mut a = Lv2Host::new();
+        let mut b = Lv2Host::new();
+        a.set_firmware_identity("4.85", [0u8; 32]);
+        b.set_firmware_identity("4.86", [0u8; 32]);
+        assert_ne!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    fn state_hash_equal_across_two_runs_of_same_firmware() {
+        let mut a = Lv2Host::new();
+        let mut b = Lv2Host::new();
+        let digest: [u8; 32] = [0x42; 32];
+        a.set_firmware_identity("4.85", digest);
+        b.set_firmware_identity("4.85", digest);
+        assert_eq!(a.state_hash(), b.state_hash());
     }
 }

@@ -20,10 +20,10 @@
 //! occurred *in* lives in the LR register, which the surrounding
 //! `format_fault` register dump already shows.
 //!
-//! Walks terminate on NULL back chain (the initial frame, per
-//! Figure 14-2), unmapped read, an implausible back-chain pointer
-//! (non-increasing or below-floor -- monotonic-SP also subsumes cycle
-//! detection), or `MAX_BACK_CHAIN_FRAMES`.
+//! Walks terminate on NULL back chain (the initial frame), unmapped
+//! read, an implausible back-chain pointer (non-increasing or
+//! below-floor -- monotonic-SP also subsumes cycle detection), or
+//! `MAX_BACK_CHAIN_FRAMES`.
 
 use cellgov_core::Runtime;
 use cellgov_exec::FaultRegisterDump;

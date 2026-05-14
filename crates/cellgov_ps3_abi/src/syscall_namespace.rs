@@ -231,6 +231,7 @@ const LV2_SYSCALL_CATALOG: &[u64] = &[
     syscall::TIME_GET_CURRENT_TIME,
     syscall::TIME_GET_TIMEBASE_FREQUENCY,
     syscall::SPU_IMAGE_OPEN,
+    syscall::SPU_IMAGE_IMPORT,
     syscall::SPU_THREAD_GROUP_CREATE,
     syscall::SPU_THREAD_INITIALIZE,
     syscall::SPU_THREAD_GROUP_START,

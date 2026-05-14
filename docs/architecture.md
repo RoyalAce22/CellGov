@@ -148,7 +148,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                |
 | `cellgov_cli`                  | The user-facing binary: `run-game`, `bench-boot`, `bench-boot-once`, `dump`, `dump-imports`, `disasm`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                                                                                                                  |
 | `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                                                                                                                                                                     |
-| `cellgov_firmware`             | PS3 firmware and SELF decrypter. Lib + bin. The binary's `install` subcommand peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` and writes per-module SELFs to `firmware/` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). The `decrypt-self` subcommand decrypts one SELF at a time. The library's `sce::decrypt_self_to_elf` is also called by `cellgov_cli`'s boot path to peel encrypted SELFs at load time. APP keys cover firmware revisions 0x0000-0x001D, mirroring RPCS3's `KeyVault::LoadSelfAPPKeys`. Twelve foundation SPRX modules decrypt bit-identically to the RPCS3 reference. No RPCS3 dependency. |
+| `cellgov_firmware`             | PS3 firmware and SELF decrypter. Lib + bin. The binary's `install` subcommand peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` and writes per-module SELFs to `firmware/` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). The `decrypt-self` subcommand decrypts one SELF at a time. The library's `sce::decrypt_self_to_elf` is also called by `cellgov_cli`'s boot path to peel encrypted SELFs at load time. APP keys cover firmware revisions 0x0000-0x001D, mirroring RPCS3's `KeyVault::LoadSelfAPPKeys`. Twelve foundation SPRX modules from the user's PUP decrypt bit-identically to the output of RPCS3's decrypter run on the same PUP (the user supplies the PUP; neither RPCS3 nor CellGov ships firmware). No RPCS3 dependency at runtime. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                  |
 
 ## Guest memory layout
@@ -408,7 +408,10 @@ and super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`,
 
 The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
-4 relocation types, and the PS3 PRX import-table parser.
+relocation appliers covering the types listed in
+`cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES` (the single source of
+truth that the firmware reloc census audit also consults), and the
+PS3 PRX import-table parser.
 `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (60 entries) is the
 dispatch surface the runtime PRX binder consults; the larger
 NID lookup database (~5,327 entries) lives in
@@ -476,6 +479,7 @@ Classified into typed `Lv2Request` variants:
 | `sys_event_queue_*`               | 128-131, 138     | Create / destroy / receive / tryreceive / port_send. Bounded FIFO with 4-u64 payloads.                 |
 | `sys_time_get_timezone`           | 144              | Writes zero through both out-pointers (UTC, no DST). CellGov has no host-time dependency.              |
 | `sys_spu_image_open`              | 156              | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                    |
+| `sys_spu_image_import`            | 158              | Registers `size` bytes at the guest pointer into the `ContentStore` and writes a `sys_spu_image_t` referring to the registered blob. |
 | `sys_spu_thread_group_create`     | 170              | Allocates a monotonic group id, writes it to guest pointer.                                            |
 | `sys_spu_thread_initialize`       | 172              | Records image handle and args (copied at init time) per slot.                                          |
 | `sys_spu_thread_group_start`      | 173              | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
@@ -1306,20 +1310,39 @@ The `run-game` CLI subcommand loads a PS3 ELF -- raw, or
 SCE-wrapped (`SCE\0` magic is dispatched to
 `cellgov_firmware::sce::decrypt_self_to_elf` at load time) -- and
 runs the PPU at instruction-level granularity (Budget=1). When
-`--firmware-dir` resolves to a directory holding `liblv2.sprx` /
-`liblv2.prx` (it auto-defaults to `firmware/sys/external/` if that
-exists), the boot path also loads the firmware PRX, executes its
-`module_start`, and resolves game imports against real firmware
-exports. `CELLGOV_NO_FIRMWARE_DIR=1` suppresses the auto-default.
+`--firmware-dir` resolves to a directory holding the foundation
+SPRX set (it auto-defaults to `firmware/sys/external/` if that
+exists), the boot path also loads the foundation modules via
+`prx_loader::load_firmware_set`, executes their `module_start`
+functions in dependency order, and resolves game imports against
+real firmware exports. `CELLGOV_NO_FIRMWARE_DIR=1` suppresses the
+auto-default.
+
+Foundation-set loading is one atomic pipeline. Each parsed SPRX
+goes through the relocation applier in
+[`cellgov_ppu::sprx::load_prx`](../crates/cellgov_ppu/src/sprx/load.rs),
+which stages segment bytes, BSS zero-fill, and reloc patches into
+a single `cellgov_mem::StagingMemory` and commits via one
+`drain_into`; a faulting reloc discards the entire batch, so guest
+memory observes either the fully loaded module or none of it.
+Dependency edges across modules feed a Kahn topological sort in
+[`prx_loader::graph`](../crates/cellgov_ppu/src/prx_loader/graph.rs)
+(SCC-based cycle attribution names only the participants, not
+their innocent downstream consumers). `start_modules` then iterates
+the topo order and invokes each module's `module_start`. The
+firmware identity (PUP hash + per-file SHA-256s) folds into
+`Lv2Host::sync_state_hash`, so two runs over the same firmware
+install produce byte-identical state hashes.
 
 Common boot sequence (per-title numbers below):
 
 1. Load `EBOOT.elf` into guest memory; parse import tables; bind
    HLE trampolines.
-2. Load `liblv2.prx` (decrypted), apply relocations, surface
-   exports.
+2. Load the foundation SPRX closure (atomic-batch reloc applier),
+   apply relocations, surface exports.
 3. Pre-initialize TLS from the game's PT_TLS segment.
-4. Execute liblv2 `module_start` -- returns cleanly (~24K steps).
+4. Execute each foundation module's `module_start` in topo order
+   (liblv2 returns cleanly at ~24K steps).
 5. Run the game's CRT0 from the ELF entry point.
 
 **flOw (NPUA80001).** 140 HLE bindings; liblv2 surfaces 161

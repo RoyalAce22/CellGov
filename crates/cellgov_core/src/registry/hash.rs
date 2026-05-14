@@ -26,7 +26,7 @@ impl UnitRegistry {
     /// in id order. Uses effective status so overrides are hashed.
     ///
     /// Wire-format contract: pinned by `status_hash_wire_format_golden`.
-    /// [`status_byte`] is the explicit mapping (not `as u8`) so a future
+    /// `status_byte` is the explicit mapping (not `as u8`) so a future
     /// `#[repr]` change cannot silently drift the hash.
     pub fn status_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();

@@ -11,6 +11,7 @@ mod fp;
 pub mod instruction;
 pub mod loader;
 pub mod prx;
+pub mod prx_loader;
 pub mod shadow;
 pub mod sprx;
 pub mod state;

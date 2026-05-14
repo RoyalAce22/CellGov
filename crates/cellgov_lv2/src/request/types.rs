@@ -10,6 +10,20 @@ pub enum Lv2Request {
         /// In: path string pointer.
         path_ptr: u32,
     },
+    /// `sys_spu_image_import`. Register the `size` bytes at `img_ptr`
+    /// in [`crate::image::ContentStore`] under a synthetic
+    /// path-string and write the resulting handle into the SPU image
+    /// struct at `handle_out`.
+    SpuImageImport {
+        /// Out: SPU image struct pointer (16 bytes, BE).
+        handle_out: u32,
+        /// In: raw SPU ELF bytes pointer.
+        img_ptr: u32,
+        /// In: byte length of the raw SPU ELF.
+        size: u32,
+        /// In: image type tag; recorded in the synthetic path.
+        type_id: u32,
+    },
     /// `sys_spu_thread_group_create`.
     SpuThreadGroupCreate {
         /// Out: group id.

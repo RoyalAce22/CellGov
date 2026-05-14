@@ -19,7 +19,10 @@ cbc = "0.1"
 ctr = "0.9"
 hmac = "0.12"
 sha1 = "0.10"
+sha2 = "0.10"
 flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 [lints]
 workspace = true

@@ -3,15 +3,51 @@
 //! Game-side import parsing lives in [`crate::prx`].
 
 use cellgov_ps3_abi::elf::{
-    ELF_HEADER_SIZE, ELF_MAGIC, ET_PRX, NID_MODULE_START, NID_MODULE_STOP, PT_LOAD, PT_PRX_RELOC,
+    ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ET_PRX, NID_MODULE_START, NID_MODULE_STOP,
+    PT_LOAD, PT_PRX_RELOC,
 };
 
 use crate::loader;
 use std::collections::BTreeMap;
 
 pub use cellgov_ps3_abi::elf::{
-    R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO, R_PPC64_ADDR32,
+    R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO, R_PPC64_ADDR16_LO_DS, R_PPC64_ADDR32,
+    R_PPC64_ADDR64, R_PPC64_REL24,
 };
+
+/// Relocation types `apply_relocations` knows how to apply.
+///
+/// Source of truth for "what the applier covers." Any new arm added
+/// to the `match r.rtype` in `apply_relocations` must also land here;
+/// the `applier_supported_types_match_apply_relocations` test enforces
+/// alignment by feeding each entry through the applier and rejecting
+/// `UnsupportedReloc`.
+///
+/// External consumers (audit tooling, the firmware reloc census
+/// regenerator at `apps/cellgov_cli/tests/firmware_reloc_census.rs`)
+/// read this slice rather than hardcoding a parallel list, so the
+/// regenerated doc cannot disagree silently with the applier.
+pub const APPLIER_SUPPORTED_TYPES: &[u32] = &[
+    R_PPC64_ADDR32,
+    R_PPC64_ADDR16_LO,
+    R_PPC64_ADDR16_HI,
+    R_PPC64_ADDR16_HA,
+    R_PPC64_REL24,
+    R_PPC64_ADDR64,
+    R_PPC64_ADDR16_LO_DS,
+];
+
+/// `true` iff `apply_relocations` covers `rtype`.
+pub const fn is_applier_supported(rtype: u32) -> bool {
+    let mut i = 0;
+    while i < APPLIER_SUPPORTED_TYPES.len() {
+        if APPLIER_SUPPORTED_TYPES[i] == rtype {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
 
 /// Parsed decrypted PRX module ready for loading.
 ///
@@ -21,6 +57,8 @@ pub use cellgov_ps3_abi::elf::{
 pub struct ParsedPrx {
     /// Module name from `sys_prx_module_info_t`.
     pub name: String,
+    /// Stable id derived from [`Self::name`] via FNV-1a-32.
+    pub module_id: crate::prx_loader::PrxModuleId,
     /// Module TOC vaddr (unrelocated).
     pub toc: u32,
     /// Text PT_LOAD segment.
@@ -156,8 +194,14 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     let mut reloc_phdr: Option<RawPhdr> = None;
 
     for i in 0..phnum {
-        let base = phoff + i * phentsize;
-        if base + phentsize > data.len() {
+        let base = i
+            .checked_mul(phentsize)
+            .and_then(|off| phoff.checked_add(off))
+            .ok_or(PrxParseError::OutOfBounds)?;
+        let end = base
+            .checked_add(phentsize)
+            .ok_or(PrxParseError::OutOfBounds)?;
+        if end > data.len() {
             return Err(PrxParseError::OutOfBounds);
         }
         let p_type = loader::read_u32(data, base);
@@ -214,8 +258,10 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
         None => Vec::new(),
     };
 
+    let module_id = crate::prx_loader::graph::module_id_from_name(&name);
     Ok(ParsedPrx {
         name,
+        module_id,
         toc,
         text,
         data: data_seg,
@@ -252,7 +298,16 @@ fn v2f(seg_map: &[SegEntry], vaddr: usize) -> Option<usize> {
 }
 
 fn extract_segment(data: &[u8], phdr: &RawPhdr) -> Result<PrxSegment, PrxParseError> {
-    let end = phdr.p_offset + phdr.p_filesz as usize;
+    // ELF requires p_memsz >= p_filesz. The loader sizes its region
+    // check against memsz, so filesz > memsz would write past the
+    // validated range.
+    if phdr.p_filesz > phdr.p_memsz {
+        return Err(PrxParseError::OutOfBounds);
+    }
+    let end = phdr
+        .p_offset
+        .checked_add(phdr.p_filesz as usize)
+        .ok_or(PrxParseError::OutOfBounds)?;
     if end > data.len() {
         return Err(PrxParseError::OutOfBounds);
     }
@@ -273,15 +328,23 @@ fn parse_module_info(
     data: &[u8],
     file_off: usize,
 ) -> Result<(String, u32, VaddrRange, VaddrRange), PrxParseError> {
-    if file_off + 52 > data.len() {
+    let end = file_off
+        .checked_add(52)
+        .ok_or(PrxParseError::NoModuleInfo)?;
+    if end > data.len() {
         return Err(PrxParseError::NoModuleInfo);
     }
     let name_bytes = &data[file_off + 4..file_off + 32];
     let name_end = name_bytes.iter().position(|&b| b == 0).unwrap_or(28);
-    let name = String::from_utf8_lossy(&name_bytes[..name_end]).into_owned();
-    if name.is_empty() || !name.is_ascii() {
+    let raw = &name_bytes[..name_end];
+    // Printable ASCII + space only; ASCII control bytes in a module
+    // name would corrupt diagnostic strings downstream.
+    if raw.is_empty() || !raw.iter().all(|&b| b.is_ascii_graphic() || b == b' ') {
         return Err(PrxParseError::NoModuleInfo);
     }
+    let name = std::str::from_utf8(raw)
+        .map_err(|_| PrxParseError::NoModuleInfo)?
+        .to_owned();
 
     let toc = loader::read_u32(data, file_off + 32);
     let exp_start = loader::read_u32(data, file_off + 36);
@@ -395,7 +458,12 @@ fn read_export_entries(
     num_func: usize,
     total: usize,
 ) -> Result<(Vec<PrxExport>, Vec<PrxExport>), PrxParseError> {
-    if total == 0 || nid_ptr == 0 {
+    // Short-circuit on nid_ptr == 0 OR stub_ptr == 0; the latter
+    // would otherwise resolve `v2f(0)` to the text segment's file
+    // offset (when text vaddr starts at 0) and read instruction
+    // bytes as stub vaddrs, binding exports to spurious in-text
+    // addresses.
+    if total == 0 || nid_ptr == 0 || stub_ptr == 0 {
         return Ok((Vec::new(), Vec::new()));
     }
 
@@ -460,7 +528,11 @@ fn find_system_opd(
             let nid_table_ptr = loader::read_u32(data, pos + 20);
             let stub_table_ptr = loader::read_u32(data, pos + 24);
 
-            if nid_table_ptr != 0 {
+            // Same hole as `read_export_entries`: a system export
+            // entry with stub_table_ptr = 0 would resolve stub_foff
+            // to the text segment's file offset and read instruction
+            // bytes as OPD vaddrs.
+            if nid_table_ptr != 0 && stub_table_ptr != 0 {
                 let nid_foff =
                     v2f(seg_map, nid_table_ptr as usize).ok_or(PrxParseError::OutOfBounds)?;
                 let stub_foff =
@@ -480,6 +552,16 @@ fn find_system_opd(
                         }
                         let code = loader::read_u32(data, opd_foff);
                         let toc = loader::read_u32(data, opd_foff + 4);
+                        // Shipping firmware allows code = 0 (entry at
+                        // start of text) but always sets toc. toc = 0
+                        // is the corrupt-OPD signature; accepting it
+                        // would publish an entry whose first
+                        // GOT-relative load faults. `parse_real_liblv2`
+                        // (code=0, toc=0x1c620) is the regression
+                        // anchor for this branch.
+                        if toc == 0 {
+                            return Ok(None);
+                        }
                         return Ok(Some(PrxOpd {
                             opd_vaddr: opd_vaddr as u32,
                             code,
@@ -505,12 +587,11 @@ fn parse_relocations(data: &[u8], phdr: &RawPhdr) -> Result<Vec<PrxRelocation>, 
         return Err(PrxParseError::OutOfBounds);
     }
 
-    const RELA_SIZE: usize = 24;
-    let count = size / RELA_SIZE;
+    let count = size / ELF64_RELA_SIZE;
     let mut relocs = Vec::with_capacity(count);
 
     for i in 0..count {
-        let off = start + i * RELA_SIZE;
+        let off = start + i * ELF64_RELA_SIZE;
         let r_offset = loader::read_u64(data, off);
         let r_info = loader::read_u64(data, off + 8);
         let r_addend = loader::read_u64(data, off + 16) as i64;
@@ -529,6 +610,11 @@ fn parse_relocations(data: &[u8], phdr: &RawPhdr) -> Result<Vec<PrxRelocation>, 
 }
 
 fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
+    // 256 is comfortably above any real PRX library / module name
+    // and consistent with ELF SHT_STRTAB conventions. A corrupt
+    // name pointer that aims at unterminated bytes would otherwise
+    // return hundreds of KB of segment content as a "name".
+    const MAX_CSTRING_LEN: usize = 256;
     // Failed lookups embed the vaddr so corrupt name pointers stay
     // distinguishable from legitimately-empty strings downstream.
     let foff = match v2f(seg_map, vaddr) {
@@ -538,10 +624,11 @@ fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
     if foff >= data.len() {
         return format!("<oob:0x{vaddr:x}>");
     }
-    let end = data[foff..]
+    let scan_end = (foff + MAX_CSTRING_LEN).min(data.len());
+    let end = data[foff..scan_end]
         .iter()
         .position(|&b| b == 0)
-        .unwrap_or(data.len() - foff);
+        .unwrap_or(scan_end - foff);
     String::from_utf8_lossy(&data[foff..foff + end]).into_owned()
 }
 
@@ -555,6 +642,8 @@ fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
 pub struct LoadedPrx {
     /// Module name from `sys_prx_module_info_t`.
     pub name: String,
+    /// Stable id derived from [`Self::name`] via FNV-1a-32.
+    pub module_id: crate::prx_loader::PrxModuleId,
     /// Guest base at which the module was loaded.
     pub base: u64,
     /// Relocated TOC guest address.
@@ -596,8 +685,51 @@ pub enum PrxLoadError {
         /// Total in-memory size of the segment.
         size: u64,
     },
-    /// Guest memory write failed at the given address.
-    MemoryWrite(u64),
+    /// u64 overflow in segment-placement arithmetic. `cause`
+    /// distinguishes the `base + vaddr` (start) computation from the
+    /// `start + size` (end) computation. `segment` names which
+    /// segment produced it. `size` is meaningful only when
+    /// `cause = "start+size"`; for `cause = "base+vaddr"` size is
+    /// reported as 0 because it wasn't involved.
+    SegmentSizeOverflow {
+        /// Which segment produced the overflow.
+        segment: &'static str,
+        /// Which addition tripped: `"base+vaddr"` or `"start+size"`.
+        cause: &'static str,
+        /// Unrelocated PRX-space vaddr of the offending segment.
+        vaddr: u64,
+        /// The size field for end-overflow attribution; 0 when
+        /// `cause = "base+vaddr"`.
+        size: u64,
+    },
+    /// Text and data segments overlap in guest address space after
+    /// relocation. The applier would clobber bytes of one with the
+    /// other; surfacing rather than silently corrupting.
+    SegmentOverlap {
+        /// Computed end of the earlier segment (exclusive).
+        first_end: u64,
+        /// Computed start of the later segment.
+        second_start: u64,
+    },
+    /// `ByteRange::new` rejected the (addr, length) pair (overflow,
+    /// straddles a region boundary, etc.). Distinct from a region
+    /// validation failure, which produces `MemoryFault`.
+    MemoryRangeInvalid { addr: u64, length: u64 },
+    /// Per-write region check rejected the access. `source` is the
+    /// underlying `MemError`; covers both reads and writes routed
+    /// through `read_checked` / `apply_commit`.
+    MemoryFault {
+        addr: u64,
+        source: cellgov_mem::MemError,
+    },
+    /// Atomic-batch commit through `StagingMemory::drain_into`
+    /// rejected the batch as a whole. Item-level attribution is not
+    /// available at this layer; `count` is the number of staged
+    /// writes the batch carried.
+    BatchCommitFailed {
+        count: usize,
+        source: cellgov_mem::MemError,
+    },
     /// Relocation type code is not handled by the loader.
     UnsupportedReloc(u32),
     /// Relocation referenced a segment index outside the loaded
@@ -609,24 +741,127 @@ pub enum PrxLoadError {
         /// Decoded segment index that was out of range.
         seg: usize,
     },
+    /// Relocation `offset` falls outside its target segment's
+    /// `memsz`. A malformed PRX could otherwise patch into a
+    /// neighbouring segment.
+    RelocOffsetOutOfSegment {
+        rtype: u32,
+        offset: u64,
+        seg_size: u64,
+    },
+    /// REL24 displacement exceeds the signed 26-bit range; or
+    /// ADDR32 / ADDR16 wide variants where the computed value
+    /// requires bits past the encoded width.
+    RelocOverflow {
+        /// Type of the offending relocation.
+        rtype: u32,
+        /// Computed value or displacement (i64 for REL24, the value
+        /// itself for ADDR32-class).
+        delta: i64,
+    },
+    /// The patch offset, REL24 displacement, or ADDR16_LO_DS value
+    /// has nonzero low bits the encoded field cannot represent.
+    /// `kind` distinguishes the three sources; `value` carries the
+    /// offending quantity in the form `kind` names.
+    RelocMisaligned {
+        rtype: u32,
+        kind: RelocMisalignedKind,
+        /// `PatchOffset`: `r.offset as i64`. `Displacement`: the
+        /// computed REL24 delta. `EncodedValue`: the computed `S + A`.
+        value: i64,
+    },
 }
 
-/// Load a parsed PRX at `base` and apply relocations.
+/// Stage of the relocation pipeline that produced a misalignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelocMisalignedKind {
+    /// The patch offset within its target segment is not aligned
+    /// to the relocation's write width. Fires before any encoding-
+    /// specific check.
+    PatchOffset,
+    /// REL24 branch displacement (value - target) has nonzero low
+    /// bits; the `LI || 0b00` encoding requires the displacement be
+    /// 4-byte aligned.
+    Displacement,
+    /// ADDR16_LO_DS computed `S + A` has nonzero low bits; the
+    /// DS-form encoding requires 4-byte alignment.
+    EncodedValue,
+}
+
+/// Load a parsed PRX at `base` and apply relocations atomically.
 ///
-/// `base` must be page-aligned and above the game's own memory footprint.
+/// Segment bytes, BSS zero-fill, and relocation patches stage into
+/// one `StagingMemory` and commit via a single `drain_into`; any
+/// failure (size overflow, overlap, region unavailable, faulting
+/// reloc) leaves guest memory untouched.
+///
+/// `base` must be page-aligned and above the game's own footprint.
+/// RMW relocations (REL24, ADDR16_LO_DS) resolve against the
+/// parsed segment data, not guest memory, because segment bytes
+/// have not yet committed.
 pub fn load_prx(
     prx: &ParsedPrx,
     memory: &mut cellgov_mem::GuestMemory,
     base: u64,
 ) -> Result<LoadedPrx, PrxLoadError> {
-    let mem_size = memory.size();
+    let (text_start, text_end) = segment_extent(base, &prx.text, "text")?;
+    let (data_start, data_end) = segment_extent(base, &prx.data, "data")?;
 
-    write_segment(memory, base, &prx.text, mem_size)?;
-    write_segment(memory, base, &prx.data, mem_size)?;
+    // Reject content (filesz) overlap. Real PS3 PRXes routinely
+    // have text.memsz extending into BSS that data.vaddr overlaps
+    // -- that's benign because data overwrites BSS zeros, not text
+    // content. The dangerous case is text.filesz > data.vaddr,
+    // where data overwrites actual instruction bytes; that's what
+    // this check rejects. Symmetric form covers either ordering.
+    let text_content_end =
+        text_start
+            .checked_add(prx.text.filesz)
+            .ok_or(PrxLoadError::SegmentSizeOverflow {
+                segment: "text",
+                cause: "start+size",
+                vaddr: prx.text.vaddr,
+                size: prx.text.filesz,
+            })?;
+    let data_content_end =
+        data_start
+            .checked_add(prx.data.filesz)
+            .ok_or(PrxLoadError::SegmentSizeOverflow {
+                segment: "data",
+                cause: "start+size",
+                vaddr: prx.data.vaddr,
+                size: prx.data.filesz,
+            })?;
+    if text_content_end > data_start && data_content_end > text_start {
+        let (first_end, second_start) = if text_start <= data_start {
+            (text_content_end, data_start)
+        } else {
+            (data_content_end, text_start)
+        };
+        return Err(PrxLoadError::SegmentOverlap {
+            first_end,
+            second_start,
+        });
+    }
 
-    // Indexed by sym-encoded segment number: 0 = text, 1 = data.
-    let seg_vaddrs = [prx.text.vaddr, prx.data.vaddr];
-    let relocs_applied = apply_relocations(memory, base, &seg_vaddrs, &prx.relocations)?;
+    // Validate the target regions before any staging; this preserves
+    // the SegmentOutOfRange diagnostic at segment granularity.
+    validate_segment_region(memory, &prx.text, text_start)?;
+    validate_segment_region(memory, &prx.data, data_start)?;
+
+    let mut staging = cellgov_mem::StagingMemory::new();
+    let relocs_applied = match stage_load(&mut staging, prx, base, text_start, data_start) {
+        Ok(n) => n,
+        Err(e) => {
+            staging.clear();
+            return Err(e);
+        }
+    };
+
+    let count = staging.len();
+    if let Err(source) = staging.drain_into(memory) {
+        staging.clear();
+        return Err(PrxLoadError::BatchCommitFailed { count, source });
+    }
 
     let mut exports = BTreeMap::new();
     for lib in &prx.exports {
@@ -649,12 +884,13 @@ pub fn load_prx(
 
     Ok(LoadedPrx {
         name: prx.name.clone(),
+        module_id: prx.module_id,
         base,
         toc: base + prx.toc as u64,
-        text_start: base + prx.text.vaddr,
-        text_end: base + prx.text.vaddr + prx.text.memsz,
-        data_start: base + prx.data.vaddr,
-        data_end: base + prx.data.vaddr + prx.data.memsz,
+        text_start,
+        text_end,
+        data_start,
+        data_end,
         exports,
         module_start,
         module_stop,
@@ -662,131 +898,354 @@ pub fn load_prx(
     })
 }
 
-fn write_segment(
-    memory: &mut cellgov_mem::GuestMemory,
+/// Compute `(start, end)` for a segment in guest space, surfacing
+/// any u64 overflow as `SegmentSizeOverflow`. End is exclusive.
+/// `segment` names which segment for diagnostic attribution.
+fn segment_extent(
     base: u64,
     seg: &PrxSegment,
-    mem_size: u64,
-) -> Result<(), PrxLoadError> {
-    let guest_addr = base + seg.vaddr;
-    let total_size = seg.memsz;
+    segment: &'static str,
+) -> Result<(u64, u64), PrxLoadError> {
+    let start = base
+        .checked_add(seg.vaddr)
+        .ok_or(PrxLoadError::SegmentSizeOverflow {
+            segment,
+            cause: "base+vaddr",
+            vaddr: seg.vaddr,
+            size: 0,
+        })?;
+    let end = start
+        .checked_add(seg.memsz)
+        .ok_or(PrxLoadError::SegmentSizeOverflow {
+            segment,
+            cause: "start+size",
+            vaddr: seg.vaddr,
+            size: seg.memsz,
+        })?;
+    Ok((start, end))
+}
 
-    if guest_addr + total_size > mem_size {
+/// Region-availability check for a segment placement. The segment's
+/// full `[guest_addr, guest_addr + memsz)` range must lie inside a
+/// single region; `containing_region` returns `None` if it straddles
+/// a boundary or falls outside the region map.
+fn validate_segment_region(
+    memory: &cellgov_mem::GuestMemory,
+    seg: &PrxSegment,
+    guest_addr: u64,
+) -> Result<(), PrxLoadError> {
+    if memory.containing_region(guest_addr, seg.memsz).is_none() {
         return Err(PrxLoadError::SegmentOutOfRange {
             guest_addr,
-            size: total_size,
+            size: seg.memsz,
         });
     }
-
-    if !seg.data.is_empty() {
-        let range =
-            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(guest_addr), seg.filesz);
-        if let Some(range) = range {
-            memory
-                .apply_commit(range, &seg.data)
-                .map_err(|_| PrxLoadError::MemoryWrite(guest_addr))?;
-        }
-    }
-
-    let bss_size = seg.memsz.saturating_sub(seg.filesz);
-    if bss_size > 0 {
-        let bss_addr = guest_addr + seg.filesz;
-        let zeros = vec![0u8; bss_size as usize];
-        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(bss_addr), bss_size);
-        if let Some(range) = range {
-            memory
-                .apply_commit(range, &zeros)
-                .map_err(|_| PrxLoadError::MemoryWrite(bss_addr))?;
-        }
-    }
-
     Ok(())
 }
 
-/// Apply every relocation; `seg_vaddrs` is `[text_vaddr, data_vaddr]`.
-fn apply_relocations(
-    memory: &mut cellgov_mem::GuestMemory,
+/// Stage one segment's content bytes plus BSS zero-fill into the
+/// shared staging buffer. Region availability is the caller's
+/// responsibility (see [`validate_segment_region`]); this function
+/// only constructs [`ByteRange`]s and pushes writes.
+fn stage_segment(
+    staging: &mut cellgov_mem::StagingMemory,
+    seg: &PrxSegment,
+    guest_addr: u64,
+) -> Result<(), PrxLoadError> {
+    // Parser invariant: extract_segment slices exactly filesz
+    // bytes. A programmatic fixture that breaks it would miscompute
+    // the BSS zero-fill width below.
+    debug_assert_eq!(
+        seg.data.len() as u64,
+        seg.filesz,
+        "PrxSegment.data.len() must equal filesz; parser enforces this, fixture violated"
+    );
+    if !seg.data.is_empty() {
+        let range =
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(guest_addr), seg.filesz)
+                .ok_or(PrxLoadError::MemoryRangeInvalid {
+                    addr: guest_addr,
+                    length: seg.filesz,
+                })?;
+        staging.stage(cellgov_mem::StagedWrite {
+            range,
+            bytes: seg.data.clone(),
+        });
+    }
+    let bss_size = seg.memsz.saturating_sub(seg.filesz);
+    if bss_size > 0 {
+        let bss_addr = guest_addr + seg.filesz;
+        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(bss_addr), bss_size)
+            .ok_or(PrxLoadError::MemoryRangeInvalid {
+                addr: bss_addr,
+                length: bss_size,
+            })?;
+        staging.stage(cellgov_mem::StagedWrite {
+            range,
+            bytes: vec![0u8; bss_size as usize],
+        });
+    }
+    Ok(())
+}
+
+/// Stage all writes for a full module load: segments first, then
+/// relocations. Returns the relocation count on success. The
+/// caller owns the [`StagingMemory`]; on `Err` the caller must
+/// `clear()` it to satisfy the Drop precondition.
+fn stage_load(
+    staging: &mut cellgov_mem::StagingMemory,
+    prx: &ParsedPrx,
     base: u64,
-    seg_vaddrs: &[u64],
+    text_start: u64,
+    data_start: u64,
+) -> Result<usize, PrxLoadError> {
+    stage_segment(staging, &prx.text, text_start)?;
+    stage_segment(staging, &prx.data, data_start)?;
+    apply_relocations(staging, base, &prx.text, &prx.data, &prx.relocations)
+}
+
+/// Width in bytes of the patch a given relocation type writes.
+/// `None` for any unsupported type; caller maps to
+/// `PrxLoadError::UnsupportedReloc`.
+fn reloc_write_size(rtype: u32) -> Option<u64> {
+    match rtype {
+        R_PPC64_ADDR32 | R_PPC64_REL24 => Some(4),
+        R_PPC64_ADDR64 => Some(8),
+        R_PPC64_ADDR16_LO | R_PPC64_ADDR16_LO_DS | R_PPC64_ADDR16_HI | R_PPC64_ADDR16_HA => Some(2),
+        _ => None,
+    }
+}
+
+/// Stage every relocation into `staging` as one batch.
+///
+/// All validation happens before any write is pushed. RMW
+/// relocations (REL24, LO_DS) read existing bytes from the parsed
+/// segment data; reads past `filesz` return zero (BSS).
+///
+/// On `Err` the caller must `clear()` the staging buffer to satisfy
+/// the [`cellgov_mem::StagingMemory`] Drop precondition.
+///
+/// # Sequencing
+///
+/// Overlapping RMW relocations both see pre-batch content and stage
+/// order picks the winner. The debug-only check below rejects
+/// overlap rather than relying on last-staged-wins.
+fn apply_relocations(
+    staging: &mut cellgov_mem::StagingMemory,
+    base: u64,
+    text: &PrxSegment,
+    data: &PrxSegment,
     relocs: &[PrxRelocation],
 ) -> Result<usize, PrxLoadError> {
-    let mut count = 0;
+    let segs: [&PrxSegment; 2] = [text, data];
+    let seg_vaddrs = [text.vaddr, data.vaddr];
+    let seg_sizes = [text.memsz, data.memsz];
+    let mut staged_ranges: Vec<cellgov_mem::ByteRange> = Vec::with_capacity(relocs.len());
     for r in relocs {
+        // PS3 PRX RELA r_sym packs target / value segment indices
+        // in the low two bytes; bits 16:31 are unspecified and
+        // ignored.
         let target_seg = (r.sym & 0xFF) as usize;
         let value_seg = ((r.sym >> 8) & 0xFF) as usize;
 
-        let target_base =
-            seg_vaddrs
-                .get(target_seg)
-                .copied()
-                .ok_or(PrxLoadError::RelocSegmentOutOfRange {
-                    sym: r.sym,
-                    seg: target_seg,
+        if target_seg >= seg_vaddrs.len() {
+            return Err(PrxLoadError::RelocSegmentOutOfRange {
+                sym: r.sym,
+                seg: target_seg,
+            });
+        }
+        if value_seg >= seg_vaddrs.len() {
+            return Err(PrxLoadError::RelocSegmentOutOfRange {
+                sym: r.sym,
+                seg: value_seg,
+            });
+        }
+        let target_base = seg_vaddrs[target_seg];
+        let value_base = seg_vaddrs[value_seg];
+        let target_seg_size = seg_sizes[target_seg];
+
+        // Reject unsupported types up front so the bound check has
+        // a known write width.
+        let write_size =
+            reloc_write_size(r.rtype).ok_or(PrxLoadError::UnsupportedReloc(r.rtype))?;
+
+        // [PPC-Book1 p:11 s:1.7] PowerPC instructions are 4-byte
+        // aligned; ADDR16 halfwords and ADDR64 pointer-slots inherit
+        // the natural alignment of their width. A misaligned patch
+        // straddles two architectural slots.
+        if r.offset & (write_size - 1) != 0 {
+            return Err(PrxLoadError::RelocMisaligned {
+                rtype: r.rtype,
+                kind: RelocMisalignedKind::PatchOffset,
+                value: r.offset as i64,
+            });
+        }
+
+        // Offset + write_size must fit inside the target segment.
+        // The spill case (aligned offset + write_size > memsz) is
+        // only reachable with non-write-width-aligned memsz --
+        // synthetic PRXes; real segments are page-aligned.
+        let offset_end =
+            r.offset
+                .checked_add(write_size)
+                .ok_or(PrxLoadError::RelocOffsetOutOfSegment {
+                    rtype: r.rtype,
+                    offset: r.offset,
+                    seg_size: target_seg_size,
                 })?;
-        let value_base =
-            seg_vaddrs
-                .get(value_seg)
-                .copied()
-                .ok_or(PrxLoadError::RelocSegmentOutOfRange {
-                    sym: r.sym,
-                    seg: value_seg,
-                })?;
+        if offset_end > target_seg_size {
+            return Err(PrxLoadError::RelocOffsetOutOfSegment {
+                rtype: r.rtype,
+                offset: r.offset,
+                seg_size: target_seg_size,
+            });
+        }
 
         let target = base + target_base + r.offset;
         let value = (base + value_base).wrapping_add(r.addend as u64);
-        // PRX ADDR16_{LO,HI,HA} are PPC32-style halves; truncate to u32 so a
-        // base above 4 GiB does not bleed bits 32..47 into the halfword.
+
+        // ADDR32 / ADDR16 family encode the bottom 32 bits of the
+        // resolved value; `value >> 32 != 0` means the `as u32`
+        // truncation below would silently drop bits 32..63.
+        if matches!(
+            r.rtype,
+            R_PPC64_ADDR32
+                | R_PPC64_ADDR16_LO
+                | R_PPC64_ADDR16_LO_DS
+                | R_PPC64_ADDR16_HI
+                | R_PPC64_ADDR16_HA
+        ) && value >> 32 != 0
+        {
+            return Err(PrxLoadError::RelocOverflow {
+                rtype: r.rtype,
+                delta: value as i64,
+            });
+        }
+        // PRX ADDR16_{LO,HI,HA} are PPC32-style halves.
         let value32 = value as u32;
 
-        match r.rtype {
-            R_PPC64_ADDR32 => {
-                write_u32(memory, target, value32)?;
+        let bytes: Vec<u8> = match r.rtype {
+            R_PPC64_ADDR32 => value32.to_be_bytes().to_vec(),
+            R_PPC64_ADDR64 => value.to_be_bytes().to_vec(),
+            R_PPC64_ADDR16_LO => (value32 as u16).to_be_bytes().to_vec(),
+            R_PPC64_ADDR16_LO_DS => {
+                // ELFv1 PPC64 ABI: ADDR16_LO_DS computes `(S+A) &
+                // 0xFFFC`; the encoded DS field requires the value
+                // be 4-byte-aligned, so the low two bits of (S+A)
+                // must be zero. A misaligned value is a corrupt
+                // PRX; surface rather than silently zero.
+                if value32 & 0x3 != 0 {
+                    return Err(PrxLoadError::RelocMisaligned {
+                        rtype: r.rtype,
+                        kind: RelocMisalignedKind::EncodedValue,
+                        value: value as i64,
+                    });
+                }
+                // DS-form instructions reserve the low 2 bits of
+                // the 16-bit halfword for the XO subfield; the
+                // relocation must not disturb them.
+                let existing = read_seg_u16(segs[target_seg], r.offset);
+                let patched = ((value32 as u16) & 0xFFFC) | (existing & 0x0003);
+                patched.to_be_bytes().to_vec()
             }
-            R_PPC64_ADDR16_LO => {
-                write_u16(memory, target, value32 as u16)?;
-            }
-            R_PPC64_ADDR16_HI => {
-                write_u16(memory, target, (value32 >> 16) as u16)?;
-            }
+            R_PPC64_ADDR16_HI => ((value32 >> 16) as u16).to_be_bytes().to_vec(),
             R_PPC64_ADDR16_HA => {
                 // +0x8000 cancels sign-extension of the paired LO.
                 let ha = (value32.wrapping_add(0x8000) >> 16) as u16;
-                write_u16(memory, target, ha)?;
+                ha.to_be_bytes().to_vec()
             }
-            other => return Err(PrxLoadError::UnsupportedReloc(other)),
-        }
+            R_PPC64_REL24 => {
+                // [PPC-Book1 p:8 s:1.7.1] I-form: OPCD | LI | AA |
+                // LK with LI at IBM bits 6:29 (24 bits). The branch
+                // target is EXTS(LI || 0b00), so the displacement
+                // is forced 4-byte aligned; AA at IBM bit 30, LK at
+                // IBM bit 31 must be preserved.
+                let delta = (value as i64).wrapping_sub(target as i64);
+                if delta & 0x3 != 0 {
+                    return Err(PrxLoadError::RelocMisaligned {
+                        rtype: r.rtype,
+                        kind: RelocMisalignedKind::Displacement,
+                        value: delta,
+                    });
+                }
+                if !(-0x0200_0000..0x0200_0000).contains(&delta) {
+                    return Err(PrxLoadError::RelocOverflow {
+                        rtype: R_PPC64_REL24,
+                        delta,
+                    });
+                }
+                let mask: u32 = 0x03FF_FFFC;
+                let insn = read_seg_u32(segs[target_seg], r.offset);
+                let patched = (insn & !mask) | ((delta as u32) & mask);
+                patched.to_be_bytes().to_vec()
+            }
+            // `reloc_write_size` above already rejected unsupported
+            // types via UnsupportedReloc, so this arm is unreachable
+            // by construction; the panic guards a logic violation.
+            other => unreachable!("reloc_write_size accepted type {other} but match arm missing"),
+        };
 
-        count += 1;
+        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(target), write_size)
+            .ok_or(PrxLoadError::MemoryRangeInvalid {
+                addr: target,
+                length: write_size,
+            })?;
+        staged_ranges.push(range);
+        staging.stage(cellgov_mem::StagedWrite { range, bytes });
     }
-    Ok(count)
+
+    // No-overlap precondition: PRX corpora don't produce
+    // overlapping read-modify-write relocations. Scoped to the
+    // reloc range list because segment writes legitimately overlap
+    // with reloc patches in the full staging buffer.
+    #[cfg(debug_assertions)]
+    {
+        for i in 0..staged_ranges.len() {
+            for j in (i + 1)..staged_ranges.len() {
+                debug_assert!(
+                    !staged_ranges[i].overlaps(staged_ranges[j]),
+                    "apply_relocations: staged reloc writes {i} and {j} overlap"
+                );
+            }
+        }
+    }
+
+    Ok(relocs.len())
 }
 
-fn write_u32(
-    memory: &mut cellgov_mem::GuestMemory,
-    addr: u64,
-    value: u32,
-) -> Result<(), PrxLoadError> {
-    let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 4)
-        .ok_or(PrxLoadError::MemoryWrite(addr))?;
-    memory
-        .apply_commit(range, &value.to_be_bytes())
-        .map_err(|_| PrxLoadError::MemoryWrite(addr))
+/// Read 4 bytes from a parsed PRX segment at `seg_offset`. Reads
+/// past `filesz` return zero (BSS). Caller guarantees
+/// `seg_offset + 4 <= memsz` via the bound check upstream.
+fn read_seg_u32(seg: &PrxSegment, seg_offset: u64) -> u32 {
+    let off = seg_offset as usize;
+    let end = off.saturating_add(4);
+    if end as u64 <= seg.filesz {
+        u32::from_be_bytes([
+            seg.data[off],
+            seg.data[off + 1],
+            seg.data[off + 2],
+            seg.data[off + 3],
+        ])
+    } else {
+        0
+    }
 }
 
-fn write_u16(
-    memory: &mut cellgov_mem::GuestMemory,
-    addr: u64,
-    value: u16,
-) -> Result<(), PrxLoadError> {
-    let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 2)
-        .ok_or(PrxLoadError::MemoryWrite(addr))?;
-    memory
-        .apply_commit(range, &value.to_be_bytes())
-        .map_err(|_| PrxLoadError::MemoryWrite(addr))
+/// Read 2 bytes from a parsed PRX segment at `seg_offset`. Reads
+/// past `filesz` return zero (BSS). Caller guarantees
+/// `seg_offset + 2 <= memsz` via the bound check upstream.
+fn read_seg_u16(seg: &PrxSegment, seg_offset: u64) -> u16 {
+    let off = seg_offset as usize;
+    let end = off.saturating_add(2);
+    if end as u64 <= seg.filesz {
+        u16::from_be_bytes([seg.data[off], seg.data[off + 1]])
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Minimal PRX ELF64 fixture.
@@ -794,7 +1253,7 @@ mod tests {
     /// Layout: ELF header at 0, three 56-byte program headers at 0x40, text
     /// at 0x0F0 (vaddr 0), data at 0x1F0 (vaddr 0x100, holds module_info,
     /// export tables, OPDs), relocations at 0x3F0.
-    fn make_test_prx() -> Vec<u8> {
+    pub(crate) fn make_test_prx() -> Vec<u8> {
         let mut buf = vec![0u8; 0x500];
 
         buf[0..4].copy_from_slice(&ELF_MAGIC);
@@ -1273,6 +1732,56 @@ mod tests {
         // module_stop's OPD still carries 0x200; divergence proves per-OPD.
         let mstop = loaded.module_stop.expect("module_stop");
         assert_eq!(mstop.toc, base + 0x200);
+    }
+
+    #[test]
+    fn applier_supported_types_match_apply_relocations() {
+        // Feed each type in APPLIER_SUPPORTED_TYPES through
+        // apply_relocations and reject UnsupportedReloc. Other errors
+        // (overflow, write failure) are fine -- absence of
+        // UnsupportedReloc is the invariant.
+        let text = PrxSegment {
+            vaddr: 0,
+            filesz: 0x100,
+            memsz: 0x100,
+            data: vec![0u8; 0x100],
+        };
+        let data = PrxSegment {
+            vaddr: 0,
+            filesz: 0x100,
+            memsz: 0x100,
+            data: vec![0u8; 0x100],
+        };
+        for &rtype in APPLIER_SUPPORTED_TYPES {
+            let relocs = vec![PrxRelocation {
+                offset: 0,
+                rtype,
+                sym: 0,
+                addend: 0,
+            }];
+            let mut staging = cellgov_mem::StagingMemory::new();
+            let result = apply_relocations(&mut staging, 0, &text, &data, &relocs);
+            staging.clear();
+            match result {
+                Ok(_) => {}
+                Err(PrxLoadError::UnsupportedReloc(t)) => panic!(
+                    "type {t} listed in APPLIER_SUPPORTED_TYPES but apply_relocations has no match arm"
+                ),
+                Err(_) => {}
+            }
+        }
+    }
+
+    #[test]
+    fn is_applier_supported_matches_const_list() {
+        for &t in APPLIER_SUPPORTED_TYPES {
+            assert!(
+                is_applier_supported(t),
+                "type {t} missing from is_applier_supported"
+            );
+        }
+        assert!(!is_applier_supported(99), "type 99 is not covered");
+        assert!(!is_applier_supported(0), "type 0 (NONE) is not covered");
     }
 
     #[test]

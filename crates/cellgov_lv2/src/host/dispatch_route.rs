@@ -45,6 +45,12 @@ impl Lv2Host {
             Lv2Request::SpuImageOpen { img_ptr, path_ptr } => {
                 self.dispatch_image_open(img_ptr, path_ptr, requester, rt)
             }
+            Lv2Request::SpuImageImport {
+                handle_out,
+                img_ptr,
+                size,
+                type_id,
+            } => self.dispatch_image_import(handle_out, img_ptr, size, type_id, requester, rt),
             Lv2Request::SpuThreadGroupCreate {
                 id_ptr,
                 num_threads,

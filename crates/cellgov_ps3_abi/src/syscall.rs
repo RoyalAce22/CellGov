@@ -138,6 +138,8 @@ pub const TIME_GET_TIMEBASE_FREQUENCY: u64 = 147;
 
 /// `sys_spu_image_open`.
 pub const SPU_IMAGE_OPEN: u64 = 156;
+/// `sys_spu_image_import`.
+pub const SPU_IMAGE_IMPORT: u64 = 158;
 /// `sys_spu_thread_group_create`.
 pub const SPU_THREAD_GROUP_CREATE: u64 = 170;
 /// `sys_spu_thread_initialize`.

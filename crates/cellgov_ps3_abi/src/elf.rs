@@ -29,6 +29,19 @@ pub const PT_TLS: u32 = 7;
 /// `Elf64_Rela`-shaped entries the binder applies at load time).
 pub const PT_PRX_RELOC: u32 = 0x7000_00A4;
 
+/// `p_type` for the PS3 `PrxParamHeader` segment (carries the
+/// exports / imports table pointers).
+pub const PT_PRX_PARAM: u32 = 0x6000_0002;
+
+/// Magic value at offset +4 of the `PrxParamHeader` struct inside a
+/// PT_PRX_PARAM segment. Rejects unrelated PT_LOOS payloads before
+/// any table-pointer dereference.
+pub const PRX_PARAM_MAGIC: u32 = 0x1b43_4cec;
+
+/// ELF64 RELA entry size in bytes (`sizeof Elf64_Rela`: `r_offset`
+/// u64 + `r_info` u64 + `r_addend` i64).
+pub const ELF64_RELA_SIZE: usize = 24;
+
 /// `sh_type` for the symbol table section.
 pub const SHT_SYMTAB: u32 = 2;
 
@@ -46,6 +59,15 @@ pub const R_PPC64_ADDR16_HI: u32 = 5;
 
 /// `r_type` for `R_PPC64_ADDR16_HA` (high adjusted, sign-extension-aware).
 pub const R_PPC64_ADDR16_HA: u32 = 6;
+
+/// `r_type` for `R_PPC64_ADDR64` (64-bit absolute).
+pub const R_PPC64_ADDR64: u32 = 38;
+
+/// `r_type` for `R_PPC64_REL24` (24-bit pc-relative branch).
+pub const R_PPC64_REL24: u32 = 10;
+
+/// `r_type` for `R_PPC64_ADDR16_LO_DS` (low 16 bits, DS-form, low 2 bits preserved).
+pub const R_PPC64_ADDR16_LO_DS: u32 = 57;
 
 /// PS3 module entrypoint NID (`module_start` noname-export).
 pub const NID_MODULE_START: u32 = 0xbc9a_0086;
