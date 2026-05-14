@@ -109,7 +109,7 @@ pub struct RuntimeSnapshot {
 
 impl Runtime {
     /// Capture a deep clone of this runtime's mutable state. See
-    /// the [module doc](self) for excluded fields and cost notes.
+    /// the module doc for excluded fields and cost notes.
     ///
     /// # Panics
     ///
@@ -156,7 +156,7 @@ impl Runtime {
     }
 
     /// Overwrite this runtime's mutable state from `snap`. See
-    /// the [module doc](self) for the cross-module contracts:
+    /// the module doc for the cross-module contracts:
     /// epoch rewind, trace-writer clear, mandatory scheduler
     /// reinstall before the next step.
     pub fn restore_into(&mut self, snap: &RuntimeSnapshot) {

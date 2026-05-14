@@ -112,7 +112,7 @@ impl StagingMemory {
     /// Apply every staged write to `target` in stage order, draining the buffer.
     ///
     /// Atomic: validation runs once over the whole batch via
-    /// [`Self::validate_pending`]; on any failure both the staging buffer
+    /// `Self::validate_pending`; on any failure both the staging buffer
     /// and `target` are untouched.
     ///
     /// # Reservation clear-sweep contract
@@ -120,7 +120,7 @@ impl StagingMemory {
     /// Successful drain commits bytes to main memory but does **not**
     /// fire the reservation clear-sweep. Every caller must clear any
     /// `ReservationTable` entries that overlap the committed ranges
-    /// (per CBEA sec. 11.4 lock-line reservation lost semantics) or
+    /// (per [PPC-Book2 p:23 s:3.3.2] lock-line reservation semantics) or
     /// cross-unit `LL/SC` will silently lose the snoop. The commit
     /// pipeline at `cellgov_core::commit` does this per-effect-type
     /// because some effects (e.g. `ConditionalStore`) need the

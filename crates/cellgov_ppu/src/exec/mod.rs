@@ -3,7 +3,7 @@
 //! [`Effect`]s. Syscalls escape via [`ExecuteVerdict::Syscall`].
 //!
 //! Memory-touching vector ops (`lvx`, `lvlx`, `lvrx`, `stvx`) route
-//! through [`mem`] rather than [`vec`] so every load / store shares
+//! through `mem` rather than `vec` so every load / store shares
 //! one store-buffer-forward / region-view path.
 
 mod alu;

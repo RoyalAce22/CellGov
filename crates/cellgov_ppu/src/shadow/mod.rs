@@ -13,9 +13,9 @@
 //! The two passes that run during `build` live in their own
 //! submodules so each can be tested in isolation:
 //!
-//! - [`quicken`]: rewrite a single decoded instruction into a
+//! - `quicken`: rewrite a single decoded instruction into a
 //!   specialized variant (e.g. `addi r3, 0, imm` -> `Li`).
-//! - [`superpair`]: fuse two adjacent instructions into a single
+//! - `superpair`: fuse two adjacent instructions into a single
 //!   super-instruction variant (e.g. `lwz` + `cmpwi` -> `LwzCmpwi`),
 //!   replacing the second slot with `Consumed`.
 

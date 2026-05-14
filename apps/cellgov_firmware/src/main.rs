@@ -10,7 +10,11 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use cellgov_firmware::manifest::{
+    self, FirmwareFileEntry, FirmwareIdentity, FirmwareManifest, SUPPORTED_FORMAT_VERSION,
+};
 use cellgov_firmware::{pup, sce, tar};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -302,6 +306,126 @@ fn cmd_install(args: &[String]) {
         packages_attempted,
         extract_errors.len(),
     );
+
+    print!("  building firmware.toml...");
+    let manifest = match build_firmware_manifest(&pup_data, pup.image_version, &output_dir) {
+        Ok(m) => m,
+        Err(e) => {
+            println!(" FAILED ({e})");
+            std::process::exit(1);
+        }
+    };
+    let manifest_path = output_dir.join("firmware.toml");
+    let text = manifest::serialize_manifest(&manifest).unwrap_or_else(|e| {
+        eprintln!("\nfirmware.toml serialise failed: {e}");
+        std::process::exit(1);
+    });
+    std::fs::write(&manifest_path, text).unwrap_or_else(|e| {
+        eprintln!(
+            "\nfirmware.toml write to {} failed: {e}",
+            manifest_path.display()
+        );
+        std::process::exit(1);
+    });
+    println!(
+        " wrote {} ({} entries)",
+        manifest_path.display(),
+        manifest.files.len()
+    );
+}
+
+/// Walk `dir` recursively in lexicographic order and append every
+/// path ending in `.sprx` to `paths`.
+fn collect_sprx_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut sorted: Vec<PathBuf> = entries.filter_map(|r| r.ok()).map(|e| e.path()).collect();
+    sorted.sort();
+    for p in sorted {
+        if p.is_dir() {
+            collect_sprx_paths(&p, paths);
+        } else if p
+            .extension()
+            .and_then(|x| x.to_str())
+            .is_some_and(|x| x.eq_ignore_ascii_case("sprx"))
+        {
+            paths.push(p);
+        }
+    }
+}
+
+/// Build the firmware.toml manifest from a freshly-installed tree.
+/// PUP hash is over `pup_data`; per-file hashes are over the post-
+/// decrypt ELF bytes. Files unable to decrypt are skipped silently
+/// (e.g., revisions without an APP key in [`crypto::app_key_for_revision`]).
+fn build_firmware_manifest(
+    pup_data: &[u8],
+    pup_image_version: u64,
+    output_dir: &Path,
+) -> Result<FirmwareManifest, String> {
+    let mut pup_hasher = Sha256::new();
+    pup_hasher.update(pup_data);
+    let pup_sha256 = manifest::Sha256(pup_hasher.finalize().into());
+
+    let mut sprx_paths = Vec::new();
+    collect_sprx_paths(output_dir, &mut sprx_paths);
+
+    let mut files = Vec::with_capacity(sprx_paths.len());
+    let mut skipped = 0usize;
+    for sprx_path in &sprx_paths {
+        let raw =
+            std::fs::read(sprx_path).map_err(|e| format!("read {}: {e}", sprx_path.display()))?;
+        let elf = match sce::decrypt_self_to_elf(&raw) {
+            Ok(e) => e,
+            Err(_) => {
+                skipped += 1;
+                continue;
+            }
+        };
+        // decrypt_self_to_elf already parsed the same header to get
+        // here, so this parse cannot fail; expect rather than
+        // silent-fallback so a future change that decouples the two
+        // paths surfaces the violation instead of writing 0 (which
+        // collides with the legitimate revision-0 value).
+        let revision = sce::parse_sce_header(&raw)
+            .expect("decrypt_self_to_elf success implies parse_sce_header success")
+            .revision_flags
+            & 0x7FFF;
+        let mut h = Sha256::new();
+        h.update(&elf);
+        let sha256 = manifest::Sha256(h.finalize().into());
+        let rel = sprx_path
+            .strip_prefix(output_dir)
+            .map_err(|e| format!("strip_prefix({}): {e}", sprx_path.display()))?;
+        let path = rel
+            .to_str()
+            .ok_or_else(|| format!("non-utf8 firmware path: {}", rel.display()))?
+            .replace('\\', "/");
+        files.push(FirmwareFileEntry {
+            path,
+            sha256,
+            revision,
+        });
+    }
+    if skipped > 0 {
+        eprintln!("  ({skipped} SPRX skipped: undecryptable)");
+    }
+
+    Ok(FirmwareManifest {
+        format_version: SUPPORTED_FORMAT_VERSION,
+        firmware: FirmwareIdentity {
+            // PUP-header `image_version` is an opaque u64 identifier,
+            // not a user-facing version string (RPCS3 likewise reads
+            // user-facing version from `vsh/etc/version.txt`, not from
+            // this header field). Render as zero-padded hex so a
+            // human inspecting firmware.toml sees the raw value;
+            // decimal-of-u64 would round-trip but be unreadable.
+            image_version: format!("0x{pup_image_version:016x}"),
+            pup_sha256,
+        },
+        files,
+    })
 }
 
 #[cfg(test)]

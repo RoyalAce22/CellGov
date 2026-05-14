@@ -40,8 +40,7 @@ pub enum ImportParseError {
     OutOfBounds,
 }
 
-const PT_PRX_PARAM: u32 = 0x6000_0002;
-const PRX_PARAM_MAGIC: u32 = 0x1b43_4cec;
+use cellgov_ps3_abi::elf::{PRX_PARAM_MAGIC, PT_PRX_PARAM};
 
 /// Enumerate every imported module and its (NID, GOT slot) entries.
 pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseError> {

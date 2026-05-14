@@ -124,6 +124,19 @@ pub struct Lv2Host {
     /// Per-parent recursion depth, capped at
     /// `cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP`.
     callback_depth: BTreeMap<UnitId, u8>,
+    /// Firmware identity from `firmware.toml`. `None` until the CLI
+    /// boot path verifies the manifest; folded into [`Self::state_hash`]
+    /// when set so two boots of the same install hash identically.
+    firmware_identity: Option<FirmwareIdentity>,
+}
+
+/// Captured at boot via the verified `firmware.toml` manifest. The
+/// `image_version` hash and `pup_sha256` together identify the PUP
+/// the install came from; both fold into `Lv2Host::state_hash`.
+#[derive(Debug, Clone)]
+pub struct FirmwareIdentity {
+    pub image_version_hash: u64,
+    pub pup_sha256_bytes: [u8; 32],
 }
 
 impl Default for Lv2Host {
@@ -184,7 +197,26 @@ impl Lv2Host {
             lwmutex_holds: BTreeMap::new(),
             callback_parents: BTreeMap::new(),
             callback_depth: BTreeMap::new(),
+            firmware_identity: None,
         }
+    }
+
+    /// Record the verified-firmware identity from the CLI boot path.
+    /// `image_version` is FNV-1a-hashed; `pup_sha256_bytes` is the
+    /// 32-byte SHA-256 digest. Both fold into [`Self::state_hash`]
+    /// so two boots of the same install produce identical hashes.
+    pub fn set_firmware_identity(&mut self, image_version: &str, pup_sha256_bytes: [u8; 32]) {
+        let mut h = cellgov_mem::Fnv1aHasher::new();
+        h.write(image_version.as_bytes());
+        self.firmware_identity = Some(FirmwareIdentity {
+            image_version_hash: h.finish(),
+            pup_sha256_bytes,
+        });
+    }
+
+    /// Read-only view of the captured firmware identity.
+    pub fn firmware_identity(&self) -> Option<&FirmwareIdentity> {
+        self.firmware_identity.as_ref()
     }
 
     /// Read-only view of the in-memory filesystem store.
@@ -214,9 +246,10 @@ impl Lv2Host {
     }
 
     /// # Contract
-    /// Recursive re-acquires (where `tid` was already the owner)
-    /// must not call this; only first-acquire (FREE -> me) and
-    /// kernel-side transfer paths bump the count.
+    /// Bumps the count for a first-acquire (FREE -> tid) or a
+    /// kernel-side transfer. Recursive re-acquires (tid already
+    /// the owner) are tracked elsewhere and must not pass through
+    /// this entry.
     pub fn lwmutex_holds_inc(&mut self, tid: PpuThreadId) {
         let slot = self.lwmutex_holds.entry(tid).or_insert(0);
         *slot = slot.saturating_add(1);

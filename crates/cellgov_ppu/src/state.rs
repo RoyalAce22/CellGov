@@ -1,16 +1,7 @@
 //! PPU architectural state: register banks and SPRs mutated by `exec.rs`.
 
+use cellgov_ps3_abi::hardware::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
-
-/// Number of general-purpose registers (r0..r31).
-// [PPC-Book1 p:41 s:3.2.1] 32 General Purpose Registers (GPRs).
-pub const GPR_COUNT: usize = 32;
-/// Number of floating-point registers (f0..f31).
-// [PPC-Book1 p:97 s:4.2 Figure 27] 32 Floating-Point Registers (FPRs).
-pub const FPR_COUNT: usize = 32;
-/// Number of vector registers (v0..v31).
-// [AltiVec-PEM p:40 s:2.3.1] VRF: 32 vector registers, each 128 bits wide.
-pub const VR_COUNT: usize = 32;
 
 /// PPU architectural register file and SPRs.
 #[derive(Clone)]

@@ -16,6 +16,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod crypto;
+pub mod manifest;
 pub mod pup;
 pub mod sce;
 pub mod tar;

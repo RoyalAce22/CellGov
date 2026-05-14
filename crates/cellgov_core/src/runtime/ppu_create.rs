@@ -124,7 +124,7 @@ impl Runtime {
         }
     }
 
-    /// Public entry to [`Self::handle_callback_spawn`] for callers
+    /// Public entry to `Self::handle_callback_spawn` for callers
     /// outside the runtime's LV2 dispatch path.
     pub fn apply_callback_spawn(&mut self, dispatch: Lv2Dispatch) {
         self.handle_callback_spawn(dispatch);

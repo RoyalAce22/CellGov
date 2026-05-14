@@ -40,14 +40,14 @@ impl GuestAddr {
     /// D-form / DS-form / indexed Storage Access instructions do.
     /// Returns `None` on overflow above `u64::MAX` or underflow below 0.
     ///
-    /// The only architectural ceiling enforced here is `u64::MAX`. Per CBE
-    /// Programming Handbook v1.1 sec. 4.2.9 (p. 101), EA arithmetic is
-    /// always 64-bit two's-complement -- "the 64-bit EA is first calculated
-    /// as usual" -- regardless of `MSR\[SF\]`. The 32-bit-mode high-bits-cleared
-    /// behavior is a property of memory access (truncation at the MMU), not
-    /// of address computation. Tighter ceilings (32-bit MMU truncation,
-    /// region-map bounds, Cell's 2^42 RA limit per Figure 4-4 p. 100)
-    /// belong to the layer that performs the access, not to this type.
+    /// The only architectural ceiling enforced here is `u64::MAX`. Per
+    /// [CBE-Handbook p:101 s:4.2.9], EA arithmetic is always 64-bit
+    /// two's-complement regardless of `MSR\[SF\]`. The 32-bit-mode
+    /// high-bits-cleared behavior is a property of memory access
+    /// (truncation at the MMU), not of address computation. Tighter
+    /// ceilings (32-bit MMU truncation, region-map bounds, Cell's 2^42
+    /// RA limit per [CBE-Handbook p:100]) belong to the layer that
+    /// performs the access, not to this type.
     #[inline]
     pub const fn checked_offset(self, displacement: i64) -> Option<Self> {
         if displacement >= 0 {

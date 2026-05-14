@@ -13,11 +13,7 @@ use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::ReservedLine;
 use cellgov_time::GuestTicks;
 
-/// Data cache block size on the Cell PPU. The `dcbz` block is the
-/// implementation's data cache line; Cell PPU is 128 bytes.
-// [PPC-Book2 p:20 s:3.2 Cache Management Instructions] dcbz block is implementation-defined.
-// [CBE-Handbook p:135 s:6.1] PPE L1 DCache cache-line size is 128 bytes; coherence block matches.
-const DCBZ_BLOCK_BYTES: usize = 128;
+use cellgov_ps3_abi::hardware::DCBZ_BLOCK_BYTES;
 
 pub(crate) fn execute(
     insn: &PpuInstruction,

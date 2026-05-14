@@ -119,7 +119,7 @@ impl StoreBuffer {
 
     /// Insert a successful `stwcx` / `stdcx` for forwarding only.
     ///
-    /// Flush skips this entry (see [`StoreEntry`]). Returns `false`
+    /// Flush skips this entry (see `StoreEntry`). Returns `false`
     /// when the buffer is full.
     // [PPC-Book2 p:9 s:1.7.3 Atomic Update] stwcx./stdcx. commit through the ConditionalStore effect path; this entry exists only so intra-block loads forward the reserved bytes.
     #[inline]

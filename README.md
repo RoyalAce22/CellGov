@@ -53,9 +53,9 @@ Pre-Alpha. What works today:
 - **Worker-thread callback dispatch**: deterministic primitive for invoking guest callbacks; first consumer is `cellSaveDataAutoLoad`.
 - **Sync primitives**: lwmutex / event_flag / semaphore / mutex / cond match real-PS3 wake ordering (incl. ETIMEDOUT and CELL_ECANCELED paths).
 - **FS with host-backed VFS**: path-keyed blob store backs both `sys_fs_*` and `cellFs*` calls; per-title mounts (default `/app_home`) resolve guest paths against host directories with deterministic lexicographic enumeration. Directory iteration syscalls (opendir / readdir / closedir) operate on snapshot entries. Kernel fd allocation matches real PS3's `[3, 255)` range.
-- **Real-firmware SELF decryption**: `cellgov_firmware install` peels a user-supplied `PS3UPDAT.PUP` into per-module SELFs; each one is decrypted on the fly at boot time. Twelve foundation SPRX modules decrypt bit-identically to RPCS3's pre-decrypted reference. APP keys cover firmware revisions 0x0000-0x001D.
+- **Real-firmware SELF decryption + loading**: `cellgov_firmware install` peels a user-supplied `PS3UPDAT.PUP` into per-module SELFs; each one is decrypted on the fly at boot time and loaded into guest memory with PPC64 relocations applied as one atomic batch (ADDR32, ADDR64, ADDR16_LO/HI/HA/LO_DS, REL24). The foundation module set loads in topological-sort order with `module_start` invoked per module; the firmware identity contributes to the LV2 state hash. Twelve foundation SPRX modules from the user's PUP decrypt bit-identically to RPCS3's decrypter output. APP keys cover firmware revisions 0x0000-0x001D.
 - **PS3 conformance**: ps3autotests cross-runner harness; cpu/basic, cpu/ppu_branch, lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag match real-PS3 byte-for-byte.
-- 2,871 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 2,973 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [docs/architecture.md](docs/architecture.md) for the full pipeline, memory model, and per-subsystem details.
 

@@ -15,6 +15,67 @@ use crate::request::Lv2Request;
 use crate::thread_group::{GroupState, MAX_SLOTS_PER_GROUP};
 
 impl Lv2Host {
+    /// `sys_spu_image_import` -- register `size` bytes at `img_ptr`
+    /// in [`crate::image::ContentStore`] under a synthetic path and
+    /// write the resulting handle into the SPU image struct at
+    /// `handle_out`.
+    ///
+    /// # Error precedence
+    ///
+    /// 1. `img_ptr` / `size` out of guest bounds -> CELL_EINVAL,
+    ///    no effects.
+    /// 2. `handle_out` not writable for 16 bytes -> CELL_EFAULT,
+    ///    no effects.
+    /// 3. Otherwise CELL_OK with one effect: the SPU image struct
+    ///    write.
+    pub(super) fn dispatch_image_import(
+        &mut self,
+        handle_out: u32,
+        img_ptr: u32,
+        size: u32,
+        type_id: u32,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        let img_bytes = match rt.read_committed(u64::from(img_ptr), size as usize) {
+            Some(b) => b,
+            None => {
+                return Lv2Dispatch::Immediate {
+                    code: errno::CELL_EINVAL.into(),
+                    effects: vec![],
+                };
+            }
+        };
+        if !rt.writable(u64::from(handle_out), 16) {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EFAULT.into(),
+                effects: vec![],
+            };
+        }
+        // Synthetic path makes every (type_id, img_ptr) pair a
+        // distinct entry. The image's body is opaque here; SPU ELF
+        // parsing happens later at sys_spu_thread_initialize.
+        let path = format!("/:import:{type_id:#x}:{img_ptr:#x}");
+        let handle = self
+            .content_store_mut()
+            .register(path.as_bytes(), img_bytes.to_vec());
+
+        let mut img_struct = [0u8; 16];
+        img_struct[0..4].copy_from_slice(&handle.raw().to_be_bytes());
+        let range = ByteRange::contiguous_u32(handle_out, 16);
+        let effect = Effect::SharedWriteIntent {
+            range,
+            bytes: WritePayload::new(img_struct.to_vec()),
+            ordering: PriorityClass::Normal,
+            source: requester,
+            source_time: self.current_tick,
+        };
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![effect],
+        }
+    }
+
     pub(super) fn dispatch_image_open(
         &mut self,
         img_ptr: u32,
@@ -406,6 +467,91 @@ mod tests {
     use crate::host::test_support::FakeRuntime;
     use cellgov_mem::{GuestAddr, GuestMemory};
     use cellgov_time::GuestTicks;
+
+    #[test]
+    fn image_import_registers_distinct_entries_per_type_id_img_ptr() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x1_0000);
+        let req1 = Lv2Request::SpuImageImport {
+            handle_out: 0x100,
+            img_ptr: 0x200,
+            size: 32,
+            type_id: 0xAA,
+        };
+        let req2 = Lv2Request::SpuImageImport {
+            handle_out: 0x200,
+            img_ptr: 0x400,
+            size: 32,
+            type_id: 0xAA,
+        };
+        let r1 = host.dispatch(req1, UnitId::new(0), &rt);
+        let r2 = host.dispatch(req2, UnitId::new(0), &rt);
+        let (h1, h2) = match (&r1, &r2) {
+            (
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: e1,
+                },
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: e2,
+                },
+            ) => {
+                let Effect::SharedWriteIntent { bytes: b1, .. } = &e1[0] else {
+                    panic!("e1");
+                };
+                let Effect::SharedWriteIntent { bytes: b2, .. } = &e2[0] else {
+                    panic!("e2");
+                };
+                (
+                    u32::from_be_bytes(b1.bytes()[..4].try_into().unwrap()),
+                    u32::from_be_bytes(b2.bytes()[..4].try_into().unwrap()),
+                )
+            }
+            other => panic!("expected two Immediate code=0, got {other:?}"),
+        };
+        assert_ne!(h1, h2, "same type_id+img_ptr-distinct entries");
+    }
+
+    #[test]
+    fn image_import_out_of_range_img_ptr_returns_einval() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x1000);
+        let req = Lv2Request::SpuImageImport {
+            handle_out: 0x100,
+            img_ptr: 0x800,
+            size: 0x1000, // 0x800 + 0x1000 = 0x1800 > 0x1000
+            type_id: 1,
+        };
+        let result = host.dispatch(req, UnitId::new(0), &rt);
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, errno::CELL_EINVAL.into());
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_import_unwritable_handle_out_returns_efault() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x1000);
+        let req = Lv2Request::SpuImageImport {
+            handle_out: 0xFF8, // 0xFF8 + 16 = 0x1008 > 0x1000
+            img_ptr: 0x100,
+            size: 32,
+            type_id: 1,
+        };
+        let result = host.dispatch(req, UnitId::new(0), &rt);
+        match result {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, errno::CELL_EFAULT.into());
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
 
     #[test]
     fn image_open_out_of_range_path_returns_error() {
