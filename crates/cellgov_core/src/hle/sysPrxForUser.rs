@@ -36,7 +36,7 @@ pub(crate) fn dispatch(
             // The PS3 CRT calls this LAST in its exit chain, so
             // earlier sys_tty_write / sys_fs_write flushes have
             // already landed in the capture by this point.
-            let code = args[1] as u32;
+            let code = args[1] as i32;
             runtime.dispatch_lv2_request(cellgov_lv2::Lv2Request::ProcessExit { code }, source);
         }
         sys_nid::PRX_EXITSPAWN_WITH_LEVEL => {
@@ -134,7 +134,7 @@ pub(crate) fn dispatch(
                     id_ptr: args[1] as u32,
                     entry_opd,
                     arg: args[3],
-                    priority: args[4] as u32,
+                    priority: args[4] as i32,
                     stacksize: args[5],
                     flags: args[6],
                 },

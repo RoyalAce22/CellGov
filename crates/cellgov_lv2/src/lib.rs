@@ -7,6 +7,7 @@ pub mod fs_store;
 pub mod host;
 pub mod image;
 pub mod ppu_thread;
+pub mod prx_registry;
 pub mod request;
 pub mod sync_primitives;
 pub mod syscall_classification;
@@ -24,6 +25,7 @@ pub use ppu_thread::{
     PpuThreadIdAllocator, PpuThreadState, PpuThreadTable, ThreadStack, ThreadStackAllocator,
     TlsTemplate,
 };
+pub use prx_registry::{LoadedPrxEntry, LoadedPrxRegistry};
 pub use request::Lv2Request;
 pub use sync_primitives::{
     CondEntry, CondTable, DuplicateEnqueue, EventFlagCreateError, EventFlagEnqueueError,

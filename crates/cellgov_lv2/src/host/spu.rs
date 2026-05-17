@@ -32,12 +32,21 @@ impl Lv2Host {
         &mut self,
         handle_out: u32,
         img_ptr: u32,
-        size: u32,
+        size: u64,
         type_id: u32,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        let img_bytes = match rt.read_committed(u64::from(img_ptr), size as usize) {
+        // SPU local store is 256 KiB; a > usize image cannot satisfy
+        // a read and is rejected as CELL_EINVAL alongside the
+        // out-of-bounds branch.
+        let Ok(size) = usize::try_from(size) else {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EINVAL.into(),
+                effects: vec![],
+            };
+        };
+        let img_bytes = match rt.read_committed(u64::from(img_ptr), size) {
             Some(b) => b,
             None => {
                 return Lv2Dispatch::Immediate {

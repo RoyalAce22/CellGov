@@ -371,7 +371,7 @@ mod tests {
                 PpuThreadAttrs {
                     entry: 0x1000,
                     arg: 0,
-                    stack_base: 0xD001_0000,
+                    stack_base: 0xD010_0000,
                     stack_size: 0x4000,
                     priority: 0,
                     tls_base: 0,
@@ -439,7 +439,7 @@ mod tests {
                 PpuThreadAttrs {
                     entry: 0x1000,
                     arg: 0,
-                    stack_base: 0xD001_0000,
+                    stack_base: 0xD010_0000,
                     stack_size: 0x4000,
                     priority: 0,
                     tls_base: 0,

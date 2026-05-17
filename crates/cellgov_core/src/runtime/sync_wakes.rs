@@ -47,6 +47,10 @@ impl Runtime {
                     // no user-space struct.
                     if mutex_ptr != 0 {
                         let base = mutex_ptr as u64;
+                        // sys_lwmutex_t (24 bytes; see sys_lwmutex_create):
+                        //   offset 0  : owner (u32 BE)
+                        //   offset 4  : waiter count (u32 BE)
+                        //   offset 12 : recursive_count (u32 BE)
                         self.commit_bytes_at(base, &caller.to_be_bytes());
                         self.commit_bytes_at(base + 12, &1u32.to_be_bytes());
                         let waiter_addr = base + 4;
@@ -57,27 +61,57 @@ impl Runtime {
                             )
                             .expect("lwmutex_wake: bad waiter ByteRange"),
                         );
-                        let current = bytes
-                            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-                            .unwrap_or(0);
+                        let current = u32::from_be_bytes(
+                            bytes
+                                .expect(
+                                    "lwmutex wake: waiter slot read failed after owner \
+                                     write succeeded; lwmutex_t crosses an unmapped \
+                                     boundary or park-side validation regressed",
+                                )
+                                .first_chunk::<4>()
+                                .copied()
+                                .expect("4-byte read returned <4 bytes"),
+                        );
+                        debug_assert!(
+                            current > 0,
+                            "lwmutex wake: user-space waiter count already 0 at {waiter_addr:#x} \
+                             (host waiter list diverged from guest struct)",
+                        );
                         let next = current.saturating_sub(1);
                         self.commit_bytes_at(waiter_addr, &next.to_be_bytes());
                     }
-                    // Mirror the increment HLE lwmutex_lock does on the
-                    // uncontended fast path.
                     if let Some(tid) = self.lv2_host.ppu_thread_id_for_unit(waiter) {
                         self.lv2_host.lwmutex_holds_inc(tid);
                     }
                     self.registry.set_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::CondWakeReacquire { .. }) => {
-                    self.registry.set_syscall_return(waiter, 0);
+                    unreachable!(
+                        "resolve_sync_wakes: CondWakeReacquire for {waiter:?} reached the \
+                         wake resolver. The signal handler must swap to ReturnCode (or \
+                         re-park on the mutex waiter list) before adding the waiter to \
+                         woken_unit_ids; reaching here means the signal-side state \
+                         machine is broken, and returning r3=0 would tell the cond_wait \
+                         caller it acquired the mutex when it has not.",
+                    );
                 }
                 Some(PendingResponse::CallbackReturn { stage, args }) => {
                     self.resume_callback_return(waiter, stage, args);
                 }
-                Some(_) | None => {
-                    self.registry.set_syscall_return(waiter, 0);
+                Some(
+                    PendingResponse::ThreadGroupJoin { .. } | PendingResponse::PpuThreadJoin { .. },
+                ) => {
+                    unreachable!(
+                        "resolve_sync_wakes: join variant for {waiter:?}; join \
+                         responses resolve through resolve_join_wakes",
+                    );
+                }
+                None => {
+                    debug_assert!(
+                        false,
+                        "resolve_sync_wakes: {waiter:?} on the wake list with no pending \
+                         response (release-side double-wake or park-side missing record)",
+                    );
                 }
             }
             self.registry
@@ -132,6 +166,11 @@ impl Runtime {
         self.resolve_sync_wakes(woken_unit_ids);
     }
 
+    #[cfg(test)]
+    pub(crate) fn resolve_join_wakes_for_test(&mut self, source: UnitId) {
+        self.resolve_join_wakes(source);
+    }
+
     /// Notify the LV2 host that `source` finished; if the enclosing
     /// group is fully finished, wake any PPU blocked on its join.
     pub(super) fn resolve_join_wakes(&mut self, source: UnitId) {
@@ -140,9 +179,14 @@ impl Runtime {
             Ok(None) => return,
             Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit) => return,
             Err(err) => {
+                // Not a debug_assert: this path fires under normal
+                // multi-finalize flows (e.g. group teardown after the
+                // SPU has already been marked Finished), not only on
+                // a thread-table-vs-primitive divergence. Keeping the
+                // eprintln until a structured trace event lands.
                 #[allow(
                     clippy::print_stderr,
-                    reason = "diagnostic for an LV2 host invariant break reachable only when thread-table state diverges from primitive state; one line per offending unit per host instance"
+                    reason = "diagnostic for an LV2 host invariant break; one line per offending unit per host instance"
                 )]
                 {
                     eprintln!(
@@ -166,42 +210,29 @@ impl Runtime {
                 continue;
             }
             // `take_expected` so an intervening drain panics rather
-            // than silently falling through.
+            // than silently falling through. Runtime is single-threaded
+            // so peek and take_expected see the same variant; the
+            // let-else converts that guarantee into a typed binding.
             let pending = self.syscall_responses.take_expected(waiter_id);
-            {
-                match &pending {
-                    PendingResponse::ThreadGroupJoin {
-                        code,
-                        cause_ptr,
-                        status_ptr,
-                        cause,
-                        status,
-                        ..
-                    } => {
-                        self.registry.set_syscall_return(waiter_id, *code);
-                        self.registry
-                            .set_status_override(waiter_id, UnitStatus::Runnable);
-                        self.commit_bytes_at(*cause_ptr as u64, &cause.to_be_bytes());
-                        self.commit_bytes_at(*status_ptr as u64, &status.to_be_bytes());
-                    }
-                    PendingResponse::ReturnCode { code } => {
-                        self.registry.set_syscall_return(waiter_id, *code);
-                        self.registry
-                            .set_status_override(waiter_id, UnitStatus::Runnable);
-                    }
-                    PendingResponse::PpuThreadJoin { .. }
-                    | PendingResponse::EventQueueReceive { .. }
-                    | PendingResponse::CondWakeReacquire { .. }
-                    | PendingResponse::EventFlagWake { .. }
-                    | PendingResponse::LwMutexWake { .. }
-                    | PendingResponse::CallbackReturn { .. } => {
-                        // Each variant has its own wake path; recover
-                        // without writing to the out pointer.
-                        self.registry
-                            .set_status_override(waiter_id, UnitStatus::Runnable);
-                    }
-                }
-            }
+            let PendingResponse::ThreadGroupJoin {
+                code,
+                cause_ptr,
+                status_ptr,
+                cause,
+                status,
+                ..
+            } = pending
+            else {
+                unreachable!(
+                    "resolve_join_wakes: peek matched ThreadGroupJoin but take_expected \
+                     returned {pending:?} for {waiter_id:?}",
+                );
+            };
+            self.commit_bytes_at(cause_ptr as u64, &cause.to_be_bytes());
+            self.commit_bytes_at(status_ptr as u64, &status.to_be_bytes());
+            self.registry.set_syscall_return(waiter_id, code);
+            self.registry
+                .set_status_override(waiter_id, UnitStatus::Runnable);
         }
     }
 }
