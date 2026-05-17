@@ -86,3 +86,94 @@ pub const EXPORT_ATTR_SYSTEM: u16 = 0x8000;
 /// the loader looks up via the `.sys_proc_param` section. Every PS3
 /// title's process-param block starts with this 32-bit BE word.
 pub const SYS_PROCESS_PARAM_MAGIC: u32 = 0x13bc_c5f6;
+
+/// `e_phoff` field offset in the ELF64 header.
+pub const ELF_PHOFF_OFFSET: usize = 32;
+
+/// `e_phentsize` field offset in the ELF64 header.
+pub const ELF_PHENTSIZE_OFFSET: usize = 54;
+
+/// `e_phnum` field offset in the ELF64 header.
+pub const ELF_PHNUM_OFFSET: usize = 56;
+
+/// Size of one ELF64 program header entry.
+pub const ELF_PHENTSIZE: usize = 56;
+
+/// `p_offset` field offset within an ELF64 program header.
+pub const PHDR_P_OFFSET_OFFSET: usize = 8;
+
+/// `p_vaddr` field offset within an ELF64 program header.
+pub const PHDR_P_VADDR_OFFSET: usize = 16;
+
+/// `p_paddr` field offset within an ELF64 program header. PS3
+/// firmware PRXs repurpose this field on segment 0 to point at a
+/// `ppu_prx_library_info` struct; see [`PRX_LIB_INFO_SIZE`] and
+/// friends.
+pub const PHDR_P_PADDR_OFFSET: usize = 24;
+
+/// `p_filesz` field offset within an ELF64 program header.
+pub const PHDR_P_FILESZ_OFFSET: usize = 32;
+
+/// Offset of the `header_size` u32 field in `PrxParamHeader`.
+pub const PRX_PARAM_HEADER_SIZE_OFFSET: usize = 0;
+
+/// Offset of the `magic` u32 field in `PrxParamHeader`.
+pub const PRX_PARAM_MAGIC_OFFSET: usize = 4;
+
+/// Offset of the `imports_table_start` u32 field in `PrxParamHeader`.
+pub const PRX_PARAM_IMPORTS_START_OFFSET: usize = 24;
+
+/// Offset of the `imports_table_end` u32 field in `PrxParamHeader`.
+pub const PRX_PARAM_IMPORTS_END_OFFSET: usize = 28;
+
+/// Minimum `header_size` value accepted for a `PrxParamHeader`: the
+/// imports table fields live at +24/+28, so a declared size below
+/// 32 would let the parser read those offsets against unrelated
+/// bytes.
+pub const PRX_PARAM_HEADER_MIN_SIZE: u32 = 32;
+
+// `PrxImportEntry` mirrors RPCS3's `ppu_prx_module_info`
+// (`tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:667`).
+
+/// Offset of the `size` byte (declared entry size) in
+/// `PrxImportEntry`.
+pub const PRX_IMPORT_SIZE_OFFSET: usize = 0;
+
+/// Offset of the `num_func` u16 field in `PrxImportEntry`.
+pub const PRX_IMPORT_NUM_FUNC_OFFSET: usize = 6;
+
+/// Offset of the `name_ptr` u32 field in `PrxImportEntry`.
+pub const PRX_IMPORT_NAME_PTR_OFFSET: usize = 16;
+
+/// Offset of the `nids_ptr` u32 field in `PrxImportEntry`.
+pub const PRX_IMPORT_NIDS_PTR_OFFSET: usize = 20;
+
+/// Offset of the `addrs_ptr` u32 field (also called `stub_ptr`:
+/// the address of the GOT slot table the binder patches) in
+/// `PrxImportEntry`.
+pub const PRX_IMPORT_STUB_PTR_OFFSET: usize = 24;
+
+/// Canonical size of one `PrxImportEntry` in bytes. Matches
+/// `sizeof(ppu_prx_module_info)` in RPCS3; an entry whose declared
+/// `size` byte is below this is structurally corrupt (its fields
+/// would not cover the `addrs_ptr` field at +24).
+pub const PRX_IMPORT_ENTRY_MIN_SIZE: u8 = 0x1C;
+
+/// Cap on the length of a C string the PRX parser will accept when
+/// dereferencing a name pointer; anything longer is rejected as
+/// malformed rather than copied into an `ImportedModule`.
+pub const PRX_NAME_MAX_LEN: usize = 256;
+
+// `ppu_prx_library_info` mirrors RPCS3's struct of the same name
+// (`tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:1838`). Firmware
+// PRXs locate it via segment 0's `p_paddr` instead of a
+// `PT_PRX_PARAM` segment.
+
+/// Offset of the `imports_start` u32 field in `ppu_prx_library_info`.
+pub const PRX_LIB_INFO_IMPORTS_START_OFFSET: usize = 44;
+
+/// Offset of the `imports_end` u32 field in `ppu_prx_library_info`.
+pub const PRX_LIB_INFO_IMPORTS_END_OFFSET: usize = 48;
+
+/// Size in bytes of one `ppu_prx_library_info` struct.
+pub const PRX_LIB_INFO_SIZE: usize = 52;

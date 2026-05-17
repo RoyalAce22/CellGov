@@ -540,16 +540,47 @@ stack top, TLS base, LR sentinel) and returns a concrete
 This mirrors the SPU factory pattern so `cellgov_core` stays
 independent of `cellgov_ppu`.
 
-Two more are special-cased in the host dispatcher to return spec-correct
-error codes instead of CELL_OK (matching RPCS3 retail behavior):
+Many arms are special-cased in the host dispatcher to return
+spec-correct error codes or to stage guest-memory effects beyond the
+default CELL_OK fall-through (matching RPCS3 retail behavior). The
+source of truth is `cellgov_lv2::host::dispatch_route`; the table
+below enumerates each arm that returns a non-OK code or stages an
+effect.
 
-| Syscall                 | Number | Returns                            |
-| ----------------------- | ------ | ---------------------------------- |
-| `sys_tty_read`          | 402    | CELL_EIO when debug console off.   |
-| `_sys_prx_start_module` | 481    | CELL_EINVAL when id == 0 or !pOpt. |
+| Syscall / Request                                      | Number | Behavior                                                                                                                                                                                                                |
+| ------------------------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sys_ppu_thread_get_priority`                          | 48     | Writes target priority (s32) to `*priop`; unknown thread id falls back to 1001 (boot-seed primary priority). CELL_EFAULT on null `priop`.                                                                               |
+| `sys_tty_read`                                         | 402    | CELL_EIO (debug console off in retail).                                                                                                                                                                                 |
+| DEX-only unused slot                                   | 462    | CELL_ENOSYS so retail liblv2 takes its fallback path.                                                                                                                                                                   |
+| `sys_memory_container_create`                          | 324    | Mints kernel id, writes to `*cid_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                     |
+| `sys_mmapper_allocate_address`                         | 330    | Bumps a 256 MiB-aligned cursor from `0x4000_0000` (immediately above the sys_rsx window) toward `MMAPPER_REGION_END = 0xD000_0000` (start of the PPU stack region), writes base to `*alloc_addr_ptr`. CELL_ENOMEM on `size == 0`, u32 overflow, or cap-exceeded. CELL_EFAULT on null pointer.                                                                          |
+| `sys_mmapper_allocate_shared_memory`                   | 332    | Mints mem_id, writes to `*mem_id_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                     |
+| `sys_mmapper_search_and_map`                           | 337    | Writes `start_addr` verbatim to `*alloc_addr_ptr` (flat backing collapses the search). CELL_EINVAL when `start_addr` falls outside `[0x2000_0000, 0xC000_0000)`. CELL_EFAULT on null `alloc_addr_ptr`.                  |
+| `sys_mmapper_allocate_shared_memory_from_container`    | 362    | Same shape as 332 with `*mem_id_ptr` at r7.                                                                                                                                                                             |
+| `_sys_prx_load_module`                                 | 480    | Resolves path at r3 against the PRX registry; returns the registered kernel id on match, otherwise echoes the path pointer as a synthetic non-zero id.                                                                  |
+| `_sys_prx_start_module`                                | 481    | CELL_EINVAL when `id == 0` or `pOpt == 0`. Otherwise writes `~0` (no-start sentinel) to `pOpt->entry` and returns CELL_OK.                                                                                              |
+| `_sys_prx_register_module`                             | 484    | CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`) for non-VSH callers.                                                                                                                                                   |
+| `_sys_prx_get_module_list`                             | 494    | `flags & 0x2 == 0` -> CELL_OK no-op. With bit 2 set: CELL_EFAULT on null `pInfo`, otherwise walks the PRX registry (filtering liblv2.sprx) writing kernel ids to the `idlist` slot and the count to `pInfo->count`. Iteration is BTreeMap-keyed so the byte output is independent of registration order. |
+| `_sys_prx_load_module_on_memcontainer`                 | 497    | Same resolver as 480.                                                                                                                                                                                                   |
+| `SsAccessControlEngine` (`sys_ss_access_control_engine`) | --     | `pkg_id == 1` or `3` -> CELL_ENOSYS (debug/root only). `pkg_id == 2` writes the program-authority id (`0x1070_0000_3A00_0001`) to `*a2`; CELL_EFAULT when `a2 == 0` or does not fit `u32`. Other `pkg_id` values return SS-domain status `0x8001_051D`. |
+| `TimeGetTimezone`                                      | --     | Writes 0 to `*timezone_ptr` and `*summer_time_ptr` (UTC). CELL_EFAULT on any null pointer.                                                                                                                              |
+| `TimeGetCurrentTime`                                   | --     | Writes `(sec, nsec)` derived from the dispatch-entry tick snapshot. CELL_EFAULT on any null pointer.                                                                                                                    |
+| `TimeGetTimebaseFrequency`                             | --     | Returns `CELL_PPU_TIMEBASE_HZ` as the syscall code (no effects).                                                                                                                                                        |
+| `MemoryGetUserMemorySize`                              | --     | Writes `(total, available)` = `(0x0D50_0000, 0x0D50_0000)` (PS3 game-mode user-memory cap). CELL_EFAULT on null pointer.                                                                                                |
+| `MemoryContainerCreate`                                | --     | Mints kernel id, writes to `*cid_ptr` (same payload shape as syscall 324).                                                                                                                                              |
+| `Hypercall`                                            | --     | CELL_EINVAL + invariant-break log (PS3 usermode must not issue `sc` with `LEV != 0`).                                                                                                                                   |
+| `Malformed`                                            | --     | CELL_EINVAL + invariant-break log.                                                                                                                                                                                      |
 
-All other syscalls fall through the host dispatcher returning CELL_OK
-with no effects.
+`PpuThreadCreate` is decoded as a typed variant, not an `Unsupported`
+arm; nonzero `SYS_PPU_THREAD_CREATE_{JOINABLE,INTERRUPT}` flag bits
+are not modeled in the thread-table state and fire an invariant-break
+log on first occurrence.
+
+All remaining syscalls fall through the host dispatcher returning
+CELL_OK with no effects. Unknown `Unsupported` numbers also fire
+`dispatch.unsupported_stub` once so a previously-unseen call surfaces
+at the stderr layer instead of silently masquerading as a CELL_OK
+success.
 
 ### Worker-thread callback dispatch
 
@@ -1256,7 +1287,7 @@ NPUA80068`), or explicit manifest path (`--title-manifest
   region as a checkpoint hit.
 - **WipEout HD Fury** (BCES00664): disc ISO, same `first-rsx-write`
   checkpoint kind as SSHD; reaches the put-pointer checkpoint at
-  step 45,697. Disc titles add a `[source] kind = "disc"` block to
+  step 45,695. Disc titles add a `[source] kind = "disc"` block to
   the manifest; `resolve_eboot` then looks under
   `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead of
   the PSN HDD layout. The encrypted `EBOOT.BIN` is decrypted once
@@ -1316,7 +1347,13 @@ exists), the boot path also loads the foundation modules via
 `prx_loader::load_firmware_set`, executes their `module_start`
 functions in dependency order, and resolves game imports against
 real firmware exports. `CELLGOV_NO_FIRMWARE_DIR=1` suppresses the
-auto-default.
+auto-default. `--boot-mode firmware-set` opts the default boot
+path explicitly into the firmware-set loader (rather than the
+single-PRX path); under that mode the foundation closure includes
+libfiber and libsre alongside the original liblv2 / libsysmodule
+/ etc., and `_sys_prx_load_module` / `_sys_prx_get_module_list`
+resolve against the registered closure rather than echoing the
+path-pointer.
 
 Foundation-set loading is one atomic pipeline. Each parsed SPRX
 goes through the relocation applier in
@@ -1401,7 +1438,7 @@ from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_firmware decrypt-self`. 332 HLE
 bindings across 27 modules -- the largest HLE surface of the
 three tested titles. Same `FirstRsxWrite` checkpoint kind as
-SSHD; reaches the put-pointer write at step 45,697 (the
+SSHD; reaches the put-pointer write at step 45,691 (the
 `0xC0000040` MMIO sentinel write triggers the checkpoint after
 the title's renderer init runs to the GCM control register). See
 [tests/fixtures/BCES00664_cross_runner/compare_report.txt](../tests/fixtures/BCES00664_cross_runner/compare_report.txt)

@@ -40,6 +40,36 @@ pub const FAULT_DEBUG_BREAK: u32 = 0x0108_0000;
 /// Decoded instruction (typically a VMX sub-opcode) had no exec arm.
 pub const FAULT_UNIMPLEMENTED_INSN: u32 = 0x0109_0000;
 
+/// True when `code` belongs to the [`FAULT_DECODE_ERROR`] class.
+///
+/// Hides the `0xNNNN_0000` class-bit layout from callers so the LR=0
+/// sentinel check in module_start does not silently miss if the fault-
+/// code shape is ever refactored.
+#[inline]
+pub fn is_decode_error(code: u32) -> bool {
+    (code & 0xFFFF_0000) == FAULT_DECODE_ERROR
+}
+
+#[cfg(test)]
+mod fault_class_tests {
+    use super::*;
+
+    #[test]
+    fn is_decode_error_pinpoints_the_decode_class() {
+        assert!(is_decode_error(FAULT_DECODE_ERROR));
+        assert!(is_decode_error(FAULT_DECODE_ERROR | 0xABCD));
+        for other in [
+            FAULT_PC_OUT_OF_RANGE,
+            FAULT_INVALID_ADDRESS,
+            FAULT_UNSUPPORTED_SYSCALL,
+            FAULT_DEBUG_BREAK,
+            FAULT_UNIMPLEMENTED_INSN,
+        ] {
+            assert!(!is_decode_error(other), "spurious match for {other:#x}");
+        }
+    }
+}
+
 /// True for fused 2-instruction variants that require a `Consumed`
 /// placeholder at PC+4; false for 1-instruction quickenings.
 fn is_super_pair(insn: &instruction::PpuInstruction) -> bool {

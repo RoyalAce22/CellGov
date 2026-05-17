@@ -39,10 +39,6 @@ tests/fixtures/NPUA80068_cross_runner/*.dump
 tests/fixtures/BCES00664_cross_runner/*.json
 tests/fixtures/BCES00664_cross_runner/*.dump
 
-# Canonical Sony PS3 libraries extracted from PS3UPDAT.PUP via
-# cellgov_firmware. Not for redistribution.
-ps3_libs/
-
 # Firmware install destination (per Phase 31 design). cellgov_firmware
 # install extracts a user-supplied PS3UPDAT.PUP here; cellgov_cli reads
 # encrypted SELFs from firmware/sys/external/ at boot. Bytes are never

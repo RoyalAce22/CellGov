@@ -3,12 +3,16 @@
 /// Base guest virtual address of the primary thread's stack region.
 pub const PS3_PRIMARY_STACK_BASE: u64 = 0xD000_0000;
 
-/// Size in bytes of the primary thread's stack region.
-pub const PS3_PRIMARY_STACK_SIZE: usize = 0x0001_0000;
+/// Size in bytes of the primary thread's stack region. 1 MiB
+/// matches what real PS3 titles declare in their `sys_proc_param`
+/// (PROC_PARAM.primary_stacksize); a smaller floor used to alias
+/// onto the child-stacks region when a title asked for 1 MiB and
+/// the boot.rs check now refuses to truncate.
+pub const PS3_PRIMARY_STACK_SIZE: usize = 0x0010_0000;
 
 /// Sits immediately above the primary stack so child-stack allocator
 /// addresses land in real guest memory.
-pub const PS3_CHILD_STACKS_BASE: u64 = 0xD001_0000;
+pub const PS3_CHILD_STACKS_BASE: u64 = 0xD010_0000;
 
 /// Size in bytes of the child-thread stacks region.
 pub const PS3_CHILD_STACKS_SIZE: usize = 0x00F0_0000;

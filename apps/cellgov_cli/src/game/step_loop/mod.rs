@@ -39,7 +39,7 @@ pub(super) struct StepLoopCtx<'a> {
     pub(super) syscall_ring: [(u64, u64); SYSCALL_RING_SIZE],
     pub(super) syscall_ring_cursor: RingCursor,
     /// Top entries identify busy-loop bodies on max-steps.
-    pub(super) pc_hits: &'a mut std::collections::HashMap<u64, u64>,
+    pub(super) pc_hits: &'a mut std::collections::BTreeMap<u64, u64>,
     pub(super) checkpoint: manifest::CheckpointTrigger,
     /// `sys_tty_write` calls dropped because `buf + len` exceeded mapped memory.
     pub(super) tty_oob_count: usize,

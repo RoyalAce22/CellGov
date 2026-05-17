@@ -11,11 +11,14 @@ mod prx;
 mod stack_walk;
 mod step_loop;
 
-pub use bench::{bench_boot_one_run, bench_boot_pair};
-
-pub(crate) use bench::agreement_percent;
+pub use bench::{bench_boot_one_run, bench_boot_pair, BenchGate, BenchOptions};
+pub use boot::{BootMode, HLE_HEAP_BASE};
 
 use std::time::Instant;
+
+use cellgov_compare::BootOutcome;
+use cellgov_core::Runtime;
+use cellgov_time::Budget;
 
 use diag::{print_hle_summary, print_insn_coverage, print_shadow_stats, print_top_pcs};
 use manifest::TitleManifest;
@@ -32,6 +35,7 @@ pub struct RunGameOptions<'a> {
     pub trace: bool,
     pub profile: bool,
     pub firmware_dir: Option<&'a str>,
+    pub boot_mode: BootMode,
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,
     pub patch_bytes: &'a [(u64, u8)],
@@ -41,10 +45,55 @@ pub struct RunGameOptions<'a> {
     pub observation_manifest: Option<&'a str>,
     pub strict_reserved: bool,
     pub profile_pairs: bool,
-    pub budget_override: Option<u64>,
+    pub budget_override: Option<Budget>,
 }
 
-pub fn run_game(opts: RunGameOptions<'_>) {
+/// Terminal-state summary from [`run_game`], shaped for the CLI's
+/// exit-code gate.
+pub struct RunSummary {
+    pub outcome: BootOutcome,
+    pub had_critical_anomaly: bool,
+}
+
+/// Hard-error from [`run_game`].
+#[derive(Debug)]
+pub enum RunError {
+    /// `--save-observation` was requested but writing the file failed.
+    SaveObservation(String),
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SaveObservation(msg) => write!(f, "save-observation: {msg}"),
+        }
+    }
+}
+
+/// Apply the manifest-driven RSX init toggles.
+///
+/// `set_gcm_rsx_checkpoint` is a placement flag (puts the GCM control
+/// register in the reserved RSX region). Both the `FirstRsxWrite`
+/// trip-on-write checkpoint and the `rsx_mirror` redirect depend on
+/// that placement, so either manifest mode enables it.
+pub(super) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &TitleManifest) {
+    let needs_reserved = title.checkpoint_trigger() == manifest::CheckpointTrigger::FirstRsxWrite
+        || title.rsx_mirror();
+    if needs_reserved {
+        rt.set_gcm_rsx_checkpoint(true);
+    }
+    if title.rsx_mirror() {
+        rt.set_rsx_mirror_writes(true);
+    }
+}
+
+/// Boot a PS3 ELF and drive the PPU step loop until a terminal state.
+///
+/// # Errors
+///
+/// Returns [`RunError::SaveObservation`] when `--save-observation`
+/// was requested but writing the JSON failed.
+pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     let RunGameOptions {
         title,
         elf_path,
@@ -52,6 +101,7 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         trace,
         profile,
         firmware_dir,
+        boot_mode,
         dump_at_pc,
         dump_skip,
         patch_bytes,
@@ -63,6 +113,18 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         profile_pairs,
         budget_override,
     } = opts;
+    // Parser enforces these; the asserts catch direct
+    // `RunGameOptions` construction that bypasses it.
+    for (i, &(addr, len)) in dump_mem_fault_ranges.iter().enumerate() {
+        debug_assert!(
+            len > 0,
+            "dump_mem_fault_ranges[{i}]: zero length at addr 0x{addr:x}"
+        );
+        debug_assert!(
+            addr.checked_add(len.saturating_sub(1)).is_some(),
+            "dump_mem_fault_ranges[{i}]: addr 0x{addr:x} + len 0x{len:x} overflows u64"
+        );
+    }
     eprintln!(
         "run-game: title = {} ({})",
         title.name(),
@@ -72,6 +134,7 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         title,
         elf_path,
         firmware_dir,
+        boot_mode,
         strict_reserved,
         dump_at_pc,
         dump_skip,
@@ -91,13 +154,7 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         ..
     } = prepared;
 
-    if title.checkpoint_trigger() == manifest::CheckpointTrigger::FirstRsxWrite {
-        rt.set_gcm_rsx_checkpoint(true);
-    }
-    if title.rsx_mirror() {
-        rt.set_gcm_rsx_checkpoint(true);
-        rt.set_rsx_mirror_writes(true);
-    }
+    configure_rsx_from_manifest(&mut rt, title);
 
     if profile {
         println!("startup timing:");
@@ -120,8 +177,7 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         None
     };
 
-    let mut pc_hits: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
-    let t_loop_start = Instant::now();
+    let mut pc_hits: std::collections::BTreeMap<u64, u64> = std::collections::BTreeMap::new();
     let mut loop_ctx = StepLoopCtx {
         steps: &mut steps,
         distinct_pcs: &mut distinct_pcs,
@@ -130,7 +186,8 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         hle_bindings: &hle_bindings,
         trace,
         timing: &mut timing,
-        loop_start: t_loop_start,
+        // Overwritten below with the tightened start.
+        loop_start: Instant::now(),
         pc_ring: [0; PC_RING_SIZE],
         pc_ring_cursor: RingCursor::new(PC_RING_SIZE),
         last_tty: None,
@@ -143,6 +200,8 @@ pub fn run_game(opts: RunGameOptions<'_>) {
         bogus_fd_count: 0,
         dump_mem_fault_ranges,
     };
+    let t_loop_start = Instant::now();
+    loop_ctx.loop_start = t_loop_start;
     let (outcome, boot_outcome) = step_loop(&mut rt, &mut loop_ctx);
     let t_loop = t_loop_start.elapsed();
     let tty_oob_count = loop_ctx.tty_oob_count;
@@ -150,10 +209,14 @@ pub fn run_game(opts: RunGameOptions<'_>) {
 
     println!("outcome: {outcome}");
     println!("steps: {steps}");
-    // Must match the base set in boot::prepare.
-    const HLE_HEAP_BASE: u32 = 0x10410000;
     let watermark = rt.hle_heap_watermark();
-    let used = watermark.saturating_sub(HLE_HEAP_BASE);
+    let used = watermark.checked_sub(HLE_HEAP_BASE).unwrap_or_else(|| {
+        debug_assert!(
+            false,
+            "hle_heap_watermark 0x{watermark:08x} below base 0x{HLE_HEAP_BASE:08x}"
+        );
+        0
+    });
     println!(
         "hle_heap_watermark: 0x{watermark:08x} ({used} bytes used above base 0x{HLE_HEAP_BASE:08x})"
     );
@@ -221,18 +284,25 @@ pub fn run_game(opts: RunGameOptions<'_>) {
                 );
             }
         }
-        println!(
-            "  steps/sec:     {:.0}",
-            steps as f64 / t_loop.as_secs_f64()
-        );
+        if t_loop.is_zero() {
+            println!("  steps/sec:     n/a (loop time below clock resolution)");
+        } else {
+            println!(
+                "  steps/sec:     {:.0}",
+                steps as f64 / t_loop.as_secs_f64()
+            );
+        }
     }
 
     if profile_pairs {
-        eprintln!();
-        eprintln!("--- instruction frequency (raw decoded, top 40) ---");
-        for (_, unit) in rt.registry_mut().iter_mut() {
+        for (id, unit) in rt.registry_mut().iter_mut() {
             let insns = unit.drain_profile_insns();
             let total: u64 = insns.iter().map(|(_, c)| c).sum();
+            eprintln!();
+            eprintln!(
+                "--- unit {}: instruction frequency (raw decoded, top 40, total={total}) ---",
+                id.raw()
+            );
             for (name, count) in insns.iter().take(40) {
                 eprintln!(
                     "  {:>12}  {:.2}%  {}",
@@ -242,11 +312,14 @@ pub fn run_game(opts: RunGameOptions<'_>) {
                 );
             }
         }
-        eprintln!();
-        eprintln!("--- adjacent pair frequency (raw decoded, top 40) ---");
-        for (_, unit) in rt.registry_mut().iter_mut() {
+        for (id, unit) in rt.registry_mut().iter_mut() {
             let pairs = unit.drain_profile_pairs();
             let total: u64 = pairs.iter().map(|(_, c)| c).sum();
+            eprintln!();
+            eprintln!(
+                "--- unit {}: adjacent pair frequency (raw decoded, top 40, total={total}) ---",
+                id.raw()
+            );
             for ((a, b), count) in pairs.iter().take(40) {
                 eprintln!(
                     "  {:>12}  {:.2}%  {} ; {}",
@@ -260,7 +333,7 @@ pub fn run_game(opts: RunGameOptions<'_>) {
     }
 
     if let Some(path) = save_observation {
-        if let Err(msg) = save_boot_observation(
+        save_boot_observation(
             path,
             &elf_data,
             rt.memory().as_bytes(),
@@ -268,9 +341,12 @@ pub fn run_game(opts: RunGameOptions<'_>) {
             steps,
             observation_manifest,
             rt.lv2_host().tty_log(),
-        ) {
-            eprintln!("save-observation: {msg}");
-            std::process::exit(1);
-        }
+        )
+        .map_err(RunError::SaveObservation)?;
     }
+
+    Ok(RunSummary {
+        outcome: boot_outcome,
+        had_critical_anomaly: displacements > 0,
+    })
 }

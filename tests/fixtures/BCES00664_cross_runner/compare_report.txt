@@ -1,7 +1,7 @@
 DIVERGE region code: first byte differs at offset 0x17 (guest 0x10017) -- 00 vs 01
 
 Status: WipEout reaches the FirstRsxWrite checkpoint at PPU step
-45,697 (deterministic across two bench-boot runs,
+45,690 (deterministic across two bench-boot runs,
 `agreement: 0.59%`). The earlier "stuck at MaxSteps" frontier
 documented in the prior fixture is gone -- the SWAR-strlen +
 label-emission loop the title spun in is no longer the gating
@@ -40,7 +40,7 @@ mask semantics), WipEout's boot ran past 20,569 and (per the
 prior fixture) was observed to stall in a SWAR-strlen +
 label-emission loop, never reaching FirstRsxWrite within a 100M-
 or 1B-instruction window. That stall is also gone in the current
-build: the title reaches the legitimate FirstRsxWrite at 45,697
+build: the title reaches the legitimate FirstRsxWrite at 45,690
 steps without further decoder or scheduler work, so the prior
 "PRX module loading" frontier is no longer the gating issue for
 this checkpoint.
@@ -74,5 +74,10 @@ should re-classify by walking past the ELF-header divergence and
 confirming that the only remaining differences are the documented
 OPD layout class.
 
-Re-confirmed at the current branch tip: step count is 45,697
-(deterministic across runs).
+Re-confirmed at the current branch tip: step count is 45,690
+(deterministic across runs). Single-PRX bench-boot anchor; the
+firmware-set boot path lands at 45,770 because liblv2 and the
+13 other foundation PRXs each run their own `module_start` and
+issue additional LV2 syscalls that the single-PRX path skips.
+Both numbers are deterministic and the divergence-class verdict
+above is mode-independent.
