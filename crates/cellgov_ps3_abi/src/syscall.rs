@@ -212,3 +212,127 @@ pub const SYS_RSX_CONTEXT_ALLOCATE: u64 = 670;
 pub const SYS_RSX_CONTEXT_FREE: u64 = 671;
 /// `sys_rsx_context_attribute`.
 pub const SYS_RSX_CONTEXT_ATTRIBUTE: u64 = 674;
+
+/// `sys_ss_access_control_engine` -- privileged authority/identity
+/// gate used during user-PRX init to query the caller's SELF
+/// program-authority-id. Behavioral oracle:
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_ss.cpp`.
+pub const SS_ACCESS_CONTROL_ENGINE: u64 = 871;
+
+/// Every LV2 syscall number this module exposes as a `pub const`,
+/// in declaration order. Consumers iterate this to drive
+/// classifier-coverage cross-checks (e.g.
+/// `every_lv2_syscall_with_narrowing_appears_in_a_table` in
+/// `cellgov_lv2::request::classify`).
+///
+/// # Invariant
+///
+/// Every `pub const FOO: u64 = ...` in this file must appear here
+/// exactly once. The crate's own
+/// `all_lv2_numbers_are_unique` regression pins the
+/// uniqueness half; the matching-the-constants half is reviewer-
+/// gated.
+pub const ALL_LV2_NUMBERS: &[u64] = &[
+    PROCESS_GETPID,
+    PROCESS_GET_NUMBER_OF_OBJECT,
+    PROCESS_GETPPID,
+    PROCESS_EXIT,
+    PROCESS_GET_SDK_VERSION,
+    PROCESS_GET_PARAMSFO,
+    PROCESS_GET_PPU_GUID,
+    TIMER_CREATE,
+    TIMER_DESTROY,
+    RWLOCK_CREATE,
+    RWLOCK_DESTROY,
+    EVENT_PORT_CREATE,
+    EVENT_PORT_DESTROY,
+    PPU_THREAD_EXIT,
+    PPU_THREAD_YIELD,
+    PPU_THREAD_JOIN,
+    PPU_THREAD_CREATE,
+    EVENT_FLAG_CREATE,
+    EVENT_FLAG_DESTROY,
+    EVENT_FLAG_WAIT,
+    EVENT_FLAG_TRY_WAIT,
+    EVENT_FLAG_SET,
+    SEMAPHORE_CREATE,
+    SEMAPHORE_DESTROY,
+    SEMAPHORE_WAIT,
+    SEMAPHORE_TRY_WAIT,
+    SEMAPHORE_POST,
+    LWMUTEX_CREATE,
+    LWMUTEX_DESTROY,
+    MUTEX_DESTROY,
+    LWMUTEX_LOCK,
+    LWMUTEX_UNLOCK,
+    LWMUTEX_TRYLOCK,
+    MUTEX_CREATE,
+    MUTEX_LOCK,
+    MUTEX_TRYLOCK,
+    MUTEX_UNLOCK,
+    COND_CREATE,
+    COND_DESTROY,
+    COND_WAIT,
+    COND_SIGNAL,
+    COND_SIGNAL_ALL,
+    COND_SIGNAL_TO,
+    SEMAPHORE_GET_VALUE,
+    EVENT_FLAG_CANCEL,
+    EVENT_FLAG_GET,
+    EVENT_FLAG_CLEAR,
+    EVENT_QUEUE_CREATE,
+    EVENT_QUEUE_DESTROY,
+    EVENT_QUEUE_RECEIVE,
+    EVENT_QUEUE_TRY_RECEIVE,
+    EVENT_PORT_SEND,
+    TIME_GET_TIMEZONE,
+    TIME_GET_CURRENT_TIME,
+    TIME_GET_TIMEBASE_FREQUENCY,
+    SPU_IMAGE_OPEN,
+    SPU_IMAGE_IMPORT,
+    SPU_THREAD_GROUP_CREATE,
+    SPU_THREAD_INITIALIZE,
+    SPU_THREAD_GROUP_START,
+    SPU_THREAD_GROUP_TERMINATE,
+    SPU_THREAD_GROUP_JOIN,
+    SPU_THREAD_WRITE_MB,
+    MEMORY_CONTAINER_CREATE,
+    MEMORY_ALLOCATE,
+    MEMORY_FREE,
+    MEMORY_GET_USER_MEMORY_SIZE,
+    TTY_WRITE,
+    FS_OPEN,
+    FS_READ,
+    FS_WRITE,
+    FS_CLOSE,
+    FS_OPENDIR,
+    FS_READDIR,
+    FS_CLOSEDIR,
+    FS_STAT,
+    FS_FSTAT,
+    FS_LSEEK,
+    SYS_RSX_MEMORY_ALLOCATE,
+    SYS_RSX_MEMORY_FREE,
+    SYS_RSX_CONTEXT_ALLOCATE,
+    SYS_RSX_CONTEXT_FREE,
+    SYS_RSX_CONTEXT_ATTRIBUTE,
+    SS_ACCESS_CONTROL_ENGINE,
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn all_lv2_numbers_are_unique() {
+        let set: BTreeSet<u64> = ALL_LV2_NUMBERS.iter().copied().collect();
+        assert_eq!(
+            set.len(),
+            ALL_LV2_NUMBERS.len(),
+            "ALL_LV2_NUMBERS contains a duplicate; len()={} unique={}",
+            ALL_LV2_NUMBERS.len(),
+            set.len(),
+        );
+    }
+}

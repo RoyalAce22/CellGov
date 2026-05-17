@@ -470,9 +470,9 @@ mod tests {
                 assert_eq!(init.entry_toc, 0x10_0100);
                 assert_eq!(init.arg, 0xDEAD_BEEF);
                 assert_eq!(priority, 1500);
-                assert_eq!(stack_base, 0xD001_0000);
+                assert_eq!(stack_base, 0xD010_0000);
                 assert_eq!(stack_size, 0x10_000);
-                assert_eq!(init.stack_top, 0xD002_0000 - 0x10);
+                assert_eq!(init.stack_top, 0xD011_0000 - 0x10);
                 assert!(init.tls_base >= stack_base + stack_size);
                 assert_eq!(tls_bytes.len(), 0x100);
                 assert_eq!(&tls_bytes[..3], &[0xAB, 0xCD, 0xEF]);

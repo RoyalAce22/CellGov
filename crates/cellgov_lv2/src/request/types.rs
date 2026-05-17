@@ -1,3 +1,5 @@
+use std::num::NonZeroU8;
+
 use cellgov_event::UnitId;
 
 /// Typed LV2 syscall request decoded from PPU `sc` GPR state.
@@ -19,8 +21,11 @@ pub enum Lv2Request {
         handle_out: u32,
         /// In: raw SPU ELF bytes pointer.
         img_ptr: u32,
-        /// In: byte length of the raw SPU ELF.
-        size: u32,
+        /// In: byte length of the raw SPU ELF. `sys_spu_image_import`
+        /// takes `size_t size`; the full u64 is preserved at
+        /// classification, dispatcher caps against the 256 KiB SPU
+        /// local-store limit.
+        size: u64,
         /// In: image type tag; recorded in the synthetic path.
         type_id: u32,
     },
@@ -30,8 +35,10 @@ pub enum Lv2Request {
         id_ptr: u32,
         /// In: thread count.
         num_threads: u32,
-        /// In: group priority.
-        priority: u32,
+        /// In: group priority. LV2 ABI is signed `int priority`;
+        /// classify validates sign extension before constructing the
+        /// variant.
+        priority: i32,
         /// In: attribute struct pointer.
         attr_ptr: u32,
     },
@@ -119,7 +126,7 @@ pub enum Lv2Request {
         /// In: mutex id to free.
         mutex_id: u32,
     },
-    /// `timeout == 0` means infinite; the field is currently ignored.
+    /// `timeout == 0` means infinite; the field is ignored.
     MutexLock {
         /// In: mutex id.
         mutex_id: u32,
@@ -152,7 +159,7 @@ pub enum Lv2Request {
         /// In: semaphore id.
         id: u32,
     },
-    /// `timeout == 0` means infinite; the field is currently ignored.
+    /// `timeout == 0` means infinite; the field is ignored.
     SemaphoreWait {
         /// In: semaphore id.
         id: u32,
@@ -195,7 +202,7 @@ pub enum Lv2Request {
         queue_id: u32,
     },
     /// `out_ptr` receives 32 bytes: source / data1 / data2 / data3,
-    /// each u64 BE. `timeout == 0` means infinite (currently ignored).
+    /// each u64 BE. `timeout == 0` means infinite (ignored).
     EventQueueReceive {
         /// In: queue id.
         queue_id: u32,
@@ -322,8 +329,11 @@ pub enum Lv2Request {
     },
     /// `sys_process_exit`.
     ProcessExit {
-        /// In: exit code.
-        code: u32,
+        /// In: exit code. `sys_process_exit_with_status` takes
+        /// `int32_t status`, so a guest `exit(-1)` arrives as a
+        /// sign-extended `0xFFFF_FFFF_FFFF_FFFF` and decodes to
+        /// `-1`, not Malformed.
+        code: i32,
     },
     /// `sys_process_getpid`.
     ProcessGetPid,
@@ -337,7 +347,7 @@ pub enum Lv2Request {
     },
     /// `sys_process_getppid`.
     ProcessGetPpid,
-    /// CellGov models a single-process world; `pid` is ignored.
+    /// `sys_process_get_sdk_version`.
     ProcessGetSdkVersion {
         /// In: target pid (ignored).
         pid: u32,
@@ -351,8 +361,7 @@ pub enum Lv2Request {
     },
     /// `sys_process_get_ppu_guid`.
     ProcessGetPpuGuid,
-    /// Stub: tracks live count for `sys_process_get_number_of_object`;
-    /// no expiry semantics.
+    /// `sys_timer_create`.
     TimerCreate {
         /// Out: timer id.
         id_ptr: u32,
@@ -362,7 +371,7 @@ pub enum Lv2Request {
         /// In: timer id.
         id: u32,
     },
-    /// Stub: id allocator + live-count; no read/write contention.
+    /// `sys_rwlock_create`.
     RwlockCreate {
         /// Out: rwlock id.
         id_ptr: u32,
@@ -374,7 +383,7 @@ pub enum Lv2Request {
         /// In: rwlock id.
         id: u32,
     },
-    /// Stub: id allocator with live-count tracking.
+    /// `sys_event_port_create`.
     EventPortCreate {
         /// Out: port id.
         id_ptr: u32,
@@ -532,8 +541,10 @@ pub enum Lv2Request {
         fd: u32,
         /// In: buffer pointer.
         buf_ptr: u32,
-        /// In: byte count.
-        size: u32,
+        /// In: byte count. `sys_fs_write` takes `uint64_t size`,
+        /// so the full u64 is preserved at classification; the
+        /// dispatcher narrows for its tty-append fast path.
+        size: u64,
         /// Out: bytes written.
         nwrite_ptr: u32,
     },
@@ -551,7 +562,7 @@ pub enum Lv2Request {
         /// In: cond id.
         id: u32,
     },
-    /// `timeout == 0` means infinite (currently ignored).
+    /// `timeout == 0` means infinite (ignored).
     CondWait {
         /// In: cond id.
         id: u32,
@@ -583,8 +594,9 @@ pub enum Lv2Request {
         entry_opd: u32,
         /// In: thread argument.
         arg: u64,
-        /// In: priority.
-        priority: u32,
+        /// In: priority. LV2 ABI is signed `int priority`; classify
+        /// validates sign extension before constructing the variant.
+        priority: i32,
         /// In: stack size in bytes.
         stacksize: u64,
         /// In: creation flags.
@@ -671,12 +683,29 @@ pub enum Lv2Request {
         /// In: worker return registers.
         args: [u64; 8],
     },
+    /// `sys_ss_access_control_engine`. Three useful pkg_ids:
+    /// `1` writes the caller's authority-id to `*a3` (debug/root only;
+    /// user-perm returns CELL_ENOSYS). `2` writes authority-id to
+    /// `*a2` for any caller. `3` is a debug/root no-op. Anything else
+    /// is the SS-domain "invalid pkg_id" status.
+    SsAccessControlEngine {
+        /// In: subcommand selector (r3).
+        pkg_id: u64,
+        /// In/Out: pkg-dependent pointer; for pkg_id=2 this is the
+        /// out-pointer for the 64-bit authority-id.
+        a2: u64,
+        /// In/Out: pkg-dependent pointer; for pkg_id=1 this is the
+        /// out-pointer for the 64-bit authority-id.
+        a3: u64,
+    },
     /// `sc` with non-zero LEV. PS3 usermode must never issue this;
     /// the runtime rejects rather than letting the call reach LV2
     /// dispatch unflagged.
     Hypercall {
-        /// In: privilege level.
-        lev: u8,
+        /// In: privilege level. `NonZeroU8` because LEV=0 is the
+        /// normal-syscall path and never produces a `Hypercall`
+        /// variant; the type makes that contract unrepresentable.
+        lev: NonZeroU8,
         /// In: r11 (syscall-number register).
         r11: u64,
         /// In: r3..=r10 arguments.

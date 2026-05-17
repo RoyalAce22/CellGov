@@ -1,7 +1,12 @@
 //! Cross-primitive dispatch tests touching more than one LV2 primitive.
 
-use super::*;
+use cellgov_event::UnitId;
+
+use crate::dispatch::Lv2Dispatch;
 use crate::host::test_support::*;
+use crate::host::Lv2Host;
+use crate::ppu_thread::{PpuThreadAttrs, PpuThreadId};
+use crate::request::Lv2Request;
 
 #[test]
 fn lwmutex_and_mutex_id_spaces_are_independent() {
@@ -597,5 +602,187 @@ fn lost_wake_event_flag_set_before_wait_is_immediately_matched() {
     match wait {
         Lv2Dispatch::Immediate { code: 0, .. } => {}
         other => panic!("expected Immediate(0), got {other:?}"),
+    }
+}
+
+mod ss_access_control_engine {
+    use super::*;
+    use cellgov_effects::Effect;
+    use cellgov_ps3_abi::cell_errors as errno;
+
+    fn dispatch_ss(
+        host: &mut Lv2Host,
+        rt: &FakeRuntime,
+        src: UnitId,
+        req: Lv2Request,
+    ) -> Lv2Dispatch {
+        host.dispatch(req, src, rt)
+    }
+
+    #[test]
+    fn pkg_id_one_returns_enosys_with_no_writes() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let src = UnitId::new(0);
+        seed_primary_ppu(&mut host, src);
+        let r = dispatch_ss(
+            &mut host,
+            &rt,
+            src,
+            Lv2Request::SsAccessControlEngine {
+                pkg_id: 1,
+                a2: 0x0100_0500,
+                a3: 0xd000_7d90,
+            },
+        );
+        match r {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, u64::from(errno::CELL_ENOSYS));
+                assert!(effects.is_empty(), "pkg_id=1 must not stage any write");
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pkg_id_two_writes_program_authority_id_be_to_a2_and_returns_ok() {
+        // PAID_44 (bdj.self) per rpcs3/Crypto/key_vault.h.
+        const EXPECTED_AUTHID: u64 = 0x1070_0000_3A00_0001;
+
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let src = UnitId::new(0);
+        seed_primary_ppu(&mut host, src);
+        let r = dispatch_ss(
+            &mut host,
+            &rt,
+            src,
+            Lv2Request::SsAccessControlEngine {
+                pkg_id: 2,
+                a2: 0x800,
+                a3: 0,
+            },
+        );
+        match r {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0);
+                assert_eq!(effects.len(), 1);
+                match &effects[0] {
+                    Effect::SharedWriteIntent { range, bytes, .. } => {
+                        assert_eq!(range.length(), 8);
+                        assert_eq!(bytes.bytes(), &EXPECTED_AUTHID.to_be_bytes());
+                    }
+                    other => panic!("expected SharedWriteIntent, got {other:?}"),
+                }
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pkg_id_two_with_a2_above_u32_returns_efault() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let src = UnitId::new(0);
+        seed_primary_ppu(&mut host, src);
+        let r = dispatch_ss(
+            &mut host,
+            &rt,
+            src,
+            Lv2Request::SsAccessControlEngine {
+                pkg_id: 2,
+                a2: 0x1_0000_0000,
+                a3: 0,
+            },
+        );
+        match r {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, u64::from(errno::CELL_EFAULT));
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pkg_id_three_returns_enosys_with_no_writes() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let src = UnitId::new(0);
+        seed_primary_ppu(&mut host, src);
+        let r = dispatch_ss(
+            &mut host,
+            &rt,
+            src,
+            Lv2Request::SsAccessControlEngine {
+                pkg_id: 3,
+                a2: 0,
+                a3: 0,
+            },
+        );
+        match r {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, u64::from(errno::CELL_ENOSYS));
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_pkg_id_returns_ss_invalid_pkg_status() {
+        for pkg_id in [0, 5, 0xFFFF] {
+            let mut host = Lv2Host::new();
+            let rt = FakeRuntime::new(0x10000);
+            let src = UnitId::new(0);
+            seed_primary_ppu(&mut host, src);
+            let r = dispatch_ss(
+                &mut host,
+                &rt,
+                src,
+                Lv2Request::SsAccessControlEngine {
+                    pkg_id,
+                    a2: 0,
+                    a3: 0,
+                },
+            );
+            match r {
+                Lv2Dispatch::Immediate { code, effects } => {
+                    assert_eq!(
+                        code, 0x8001_051Du64,
+                        "pkg_id={pkg_id} should return 0x8001051D"
+                    );
+                    assert!(
+                        effects.is_empty(),
+                        "pkg_id={pkg_id} must not stage any write"
+                    );
+                }
+                other => panic!("pkg_id={pkg_id} expected Immediate, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn classify_maps_syscall_871_to_ss_request_with_raw_args() {
+        use crate::request::classify;
+        let args = [
+            0x2,         // pkg_id
+            0x0100_0500, // a2
+            0xd000_7d90, // a3
+            0,
+            0,
+            0,
+            0,
+            0,
+        ];
+        let req = classify(cellgov_ps3_abi::syscall::SS_ACCESS_CONTROL_ENGINE, &args);
+        assert_eq!(
+            req,
+            Lv2Request::SsAccessControlEngine {
+                pkg_id: 2,
+                a2: 0x0100_0500,
+                a3: 0xd000_7d90,
+            }
+        );
     }
 }
