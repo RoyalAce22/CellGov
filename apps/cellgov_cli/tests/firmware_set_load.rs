@@ -44,7 +44,7 @@ fn workspace_root() -> PathBuf {
     }
 }
 
-/// Foundation closure: the twelve modules for which we have a
+/// Foundation closure: the fourteen modules for which we have a
 /// parity oracle (each one's `cellgov_firmware`-decrypted output is
 /// known to match an RPCS3 decryption of the same PUP, verified by
 /// the `foundation_sprx_decrypt_matches_pre_decrypted_reference`
@@ -54,6 +54,7 @@ fn workspace_root() -> PathBuf {
 /// design doc names.
 const FOUNDATION_STEMS: &[&str] = &[
     "libaudio",
+    "libfiber",
     "libfs",
     "libgcm_sys",
     "libio",
@@ -61,6 +62,7 @@ const FOUNDATION_STEMS: &[&str] = &[
     "libnet",
     "libnetctl",
     "libspurs_jq",
+    "libsre",
     "libsync2",
     "libsysmodule",
     "libsysutil",

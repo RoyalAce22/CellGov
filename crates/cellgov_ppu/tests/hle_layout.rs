@@ -86,7 +86,8 @@ fn two_orderings_produce_semantically_equivalent_dispatch() {
             body_base: BODY_BASE,
         },
         0,
-    );
+    )
+    .expect("bind under Ps3Spec layout");
 
     let mut mem_b = build_mem();
     let bindings_b = bind_hle_stubs_with_layout(
@@ -97,7 +98,8 @@ fn two_orderings_produce_semantically_equivalent_dispatch() {
             body_base: BODY_BASE,
         },
         0,
-    );
+    )
+    .expect("bind under Ps3Spec layout");
 
     let nids_a: std::collections::BTreeSet<u32> = bindings_a.iter().map(|b| b.nid).collect();
     let nids_b: std::collections::BTreeSet<u32> = bindings_b.iter().map(|b| b.nid).collect();
@@ -188,7 +190,8 @@ fn high_16_bits_of_opd_pointers_match_across_orderings() {
             body_base: BODY_BASE,
         },
         0,
-    );
+    )
+    .expect("bind under Ps3Spec layout");
 
     let mut mem_b = build_mem();
     let bindings_b = bind_hle_stubs_with_layout(
@@ -199,7 +202,8 @@ fn high_16_bits_of_opd_pointers_match_across_orderings() {
             body_base: BODY_BASE,
         },
         0,
-    );
+    )
+    .expect("bind under Ps3Spec layout");
 
     for binding_a in &bindings_a {
         let nid = binding_a.nid;

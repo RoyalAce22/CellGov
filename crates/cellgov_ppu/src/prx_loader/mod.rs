@@ -20,6 +20,24 @@ pub use graph::{DependencyGraph, PrxModuleId};
 /// under the parse-time non-emptiness check.
 pub const SYNTHETIC_GAME_ELF_ID: PrxModuleId = PrxModuleId(0x811c_9dc5);
 
+/// Export-namespace names that the firmware corpus does not provide
+/// and that the loader accepts as dead-stub rather than rejecting
+/// the closure. Imports targeting these namespaces are dropped at
+/// both the dependency-check and GOT-patch steps; their GOT slots
+/// stay at the pre-load values, which means a guest call into one
+/// will trap on the unresolved stub address.
+///
+/// `cellLibprof` (PS3 SDK 2.70 debug-trace entrypoints
+/// `cellUserTraceRegister` / `cellUserTraceUnregister`) is not
+/// exported by any module under `firmware/sys/{external,internal}/`
+/// and is unreachable on the foundation-title boot-to-first-RSX-write
+/// path.
+const PERMITTED_MISSING_NAMESPACES: &[&str] = &["cellLibprof"];
+
+fn is_permitted_missing(namespace: &str) -> bool {
+    PERMITTED_MISSING_NAMESPACES.contains(&namespace)
+}
+
 /// Aggregate result of loading a firmware-PRX dependency closure.
 ///
 /// `loaded` is per-module source-of-truth; `export_table` is a
@@ -96,7 +114,7 @@ pub enum PrxLoaderError {
     /// Per-module import-table parse failed. Carries the originating
     /// module id and the underlying error so the failure does not
     /// silently degrade to "this module has no imports."
-    /// `NoPrxParam` is treated as the legitimate
+    /// `NoImportsTable` is treated as the legitimate
     /// no-imports-declared case and does not surface here.
     ImportTableParseFailed {
         module: PrxModuleId,
@@ -124,6 +142,18 @@ pub enum PrxLoaderError {
         id: PrxModuleId,
         first_path: String,
         second_path: String,
+    },
+    /// Two PRXs publish the same export-namespace name (e.g. both
+    /// claim to provide `sysPrxForUser`). Imports targeting that
+    /// namespace would silently bind to whichever the closure walked
+    /// first; surface both providers so the conflict is explicit.
+    /// `namespace` is the hashed namespace id (see
+    /// [`graph::module_id_from_name`]); `first` / `second` are the
+    /// providing modules.
+    DuplicateExportNamespace {
+        namespace: PrxModuleId,
+        first: PrxModuleId,
+        second: PrxModuleId,
     },
     /// Cursor arithmetic overflowed u64 while laying out modules.
     /// Practically unreachable in PS3-scale workloads but defended
@@ -215,7 +245,7 @@ fn check_relocations_within_text_data(
 }
 
 /// Parse a module's imports, treating the legitimate
-/// no-imports-declared case (`NoPrxParam`) as an empty list and
+/// no-imports-declared case (`NoImportsTable`) as an empty list and
 /// every other parse failure as a hard error. Reused by both
 /// `load_firmware_set` and `patch_game_imports` so the propagation
 /// policy lives in one place.
@@ -226,9 +256,10 @@ fn parse_imports_or_propagate(
     match crate::prx::parse_imports(bytes) {
         Ok(v) => Ok(v),
         // A PRX whose import table is structurally absent (no
-        // PT_PRX_PARAM segment) legitimately declares no imports;
+        // PT_PRX_PARAM segment and no ppu_prx_library_info on
+        // segment 0's p_paddr) legitimately declares no imports;
         // anything else is a malformed table and must surface.
-        Err(crate::prx::ImportParseError::NoPrxParam) => Ok(Vec::new()),
+        Err(crate::prx::ImportParseError::NoImportsTable) => Ok(Vec::new()),
         Err(source) => Err(PrxLoaderError::ImportTableParseFailed { module, source }),
     }
 }
@@ -285,7 +316,11 @@ pub fn load_firmware_set(
         BTreeMap::new();
     let mut path_by_id: BTreeMap<PrxModuleId, String> = BTreeMap::new();
     let mut imports_by_id: BTreeMap<PrxModuleId, Vec<crate::prx::ImportedModule>> = BTreeMap::new();
-    let mut import_targets_by_id: BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>> = BTreeMap::new();
+    // namespace_id (hash of an export-table module name like
+    // "sysPrxForUser") -> the parsed module that publishes it. A
+    // PRX's file-level identity (`parsed.module_id`) is distinct
+    // from the names it exports under.
+    let mut provider_of_namespace: BTreeMap<PrxModuleId, PrxModuleId> = BTreeMap::new();
 
     for (path, bytes) in &bytes_by_path {
         let parsed = crate::sprx::parse_prx(bytes).map_err(PrxLoaderError::Parse)?;
@@ -301,37 +336,54 @@ pub fn load_firmware_set(
             });
         }
         check_relocations_within_text_data(&parsed)?;
+        // Register every namespace this PRX publishes. Two PRXs
+        // sharing a namespace would silently fight over import
+        // resolution; surface the conflict.
+        for lib in &parsed.exports {
+            let ns_id = graph::module_id_from_name(&lib.name);
+            if let Some(&first) = provider_of_namespace.get(&ns_id) {
+                if first != id {
+                    return Err(PrxLoaderError::DuplicateExportNamespace {
+                        namespace: ns_id,
+                        first,
+                        second: id,
+                    });
+                }
+            }
+            provider_of_namespace.insert(ns_id, id);
+        }
         let imports = parse_imports_or_propagate(bytes, id)?;
-        let targets: BTreeSet<PrxModuleId> = imports
-            .iter()
-            .map(|i| graph::module_id_from_name(&i.name))
-            .filter(|t| *t != id)
-            .collect();
-        import_targets_by_id.insert(id, targets);
         imports_by_id.insert(id, imports);
         path_by_id.insert(id, path.clone());
         parsed_by_id.insert(id, (parsed, bytes.clone()));
     }
 
-    // Resolve named-target dependencies against the parsed set, BEFORE
-    // any load_prx call writes to memory. A module that names module B
-    // as an import target must find B in the closure. The NID-only
-    // UnresolvedImport check downstream would otherwise silently
-    // rebind to whatever module happens to export the same NID -- PS3
-    // NIDs are SHA-1-derived so a collision is improbable, but the
-    // manifest contract names imports by source module, and ignoring
-    // the name punctures that contract. Running this check before
-    // load_prx also ensures `memory` is untouched when the variant
-    // fires.
-    for (importer, targets) in &import_targets_by_id {
-        for target in targets {
-            if !parsed_by_id.contains_key(target) {
-                return Err(PrxLoaderError::MissingDependency {
-                    importer: *importer,
-                    target: *target,
-                });
+    // Translate each import's namespace name to the providing
+    // module's id. A namespace with no provider in this closure
+    // surfaces as MissingDependency unless it is on the
+    // PERMITTED_MISSING_NAMESPACES allowlist. The manifest contract
+    // names imports by namespace; resolving by NID alone would
+    // rebind to any module exporting the same NID.
+    let mut import_targets_by_id: BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>> = BTreeMap::new();
+    for (importer, imports) in &imports_by_id {
+        let mut targets: BTreeSet<PrxModuleId> = BTreeSet::new();
+        for imp in imports {
+            let ns_id = graph::module_id_from_name(&imp.name);
+            let provider = match provider_of_namespace.get(&ns_id) {
+                Some(&p) => p,
+                None if is_permitted_missing(&imp.name) => continue,
+                None => {
+                    return Err(PrxLoaderError::MissingDependency {
+                        importer: *importer,
+                        target: ns_id,
+                    });
+                }
+            };
+            if provider != *importer {
+                targets.insert(provider);
             }
         }
+        import_targets_by_id.insert(*importer, targets);
     }
 
     // Self-imports are dropped here so they never reach
@@ -340,13 +392,9 @@ pub fn load_firmware_set(
     // ensures every parsed module is a graph key even if it has
     // zero imports.
     let mut edges: BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>> = BTreeMap::new();
-    for (importer, imports) in &imports_by_id {
+    for (importer, targets) in &import_targets_by_id {
         edges.entry(*importer).or_default();
-        for imp in imports {
-            let target = graph::module_id_from_name(&imp.name);
-            if target == *importer {
-                continue;
-            }
+        for &target in targets {
             edges.entry(target).or_default().insert(*importer);
         }
     }
@@ -371,7 +419,24 @@ pub fn load_firmware_set(
         let Some(imports) = imports_by_id.get(id) else {
             continue;
         };
-        patch_imports_against(imports, &export_table, memory)?;
+        // Drop imports from permitted-missing namespaces so
+        // patch_imports_against does not surface UnresolvedImport
+        // for their NIDs; the matching dependency check above
+        // already skipped these.
+        let filtered: Vec<crate::prx::ImportedModule> = imports
+            .iter()
+            .filter(|m| !is_permitted_missing(&m.name))
+            .cloned()
+            .collect();
+        // f.stub_addr from parse_imports is the link-time vaddr,
+        // which for a PIC firmware PRX needs the runtime load base
+        // added; passing `loaded[id].base` rebases each slot to its
+        // post-load_prx address.
+        let load_base = loaded
+            .get(id)
+            .map(|l| l.base)
+            .expect("dep_graph.order id present in loaded");
+        patch_imports_against(&filtered, &export_table, load_base, memory)?;
     }
 
     Ok(FirmwareImage {
@@ -391,11 +456,21 @@ pub fn patch_game_imports(
     memory: &mut cellgov_mem::GuestMemory,
 ) -> Result<(), PrxLoaderError> {
     let imports = parse_imports_or_propagate(game_elf, SYNTHETIC_GAME_ELF_ID)?;
-    patch_imports_against(&imports, &image.export_table, memory)
+    // PS3 retail games link at fixed vaddrs that match their
+    // runtime placement, so the link-time stub_addrs are already
+    // valid guest addresses.
+    patch_imports_against(&imports, &image.export_table, 0, memory)
 }
 
 /// Walk one ELF's import table and patch each function's GOT slot
 /// with the address of the exporting module's OPD.
+///
+/// `load_base` is the runtime base at which the importing module's
+/// segments live. For PS3 game ELFs the link-time vaddr equals the
+/// runtime address by convention (pass `0`); for firmware PRXs
+/// loaded at a chosen base via [`crate::sprx::load_prx`], pass
+/// `LoadedPrx::base` so each pre-relocation `stub_addr` lands at
+/// its runtime location.
 ///
 /// # Atomicity
 ///
@@ -410,6 +485,7 @@ pub fn patch_game_imports(
 fn patch_imports_against(
     imports: &[crate::prx::ImportedModule],
     export_table: &FirmwareExportTable,
+    load_base: u64,
     memory: &mut cellgov_mem::GuestMemory,
 ) -> Result<(), PrxLoaderError> {
     // Phase 1: resolve every (nid, stub_addr) without touching
@@ -426,12 +502,17 @@ fn patch_imports_against(
                     nid: f.nid,
                     addr: opd_addr,
                 })?;
-            let range =
-                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(u64::from(f.stub_addr)), 4)
-                    .ok_or(PrxLoaderError::GotPatchFailed {
-                        stub_addr: f.stub_addr,
-                        nid: f.nid,
-                    })?;
+            let runtime_stub = load_base.checked_add(u64::from(f.stub_addr)).ok_or(
+                PrxLoaderError::GotPatchFailed {
+                    stub_addr: f.stub_addr,
+                    nid: f.nid,
+                },
+            )?;
+            let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(runtime_stub), 4)
+                .ok_or(PrxLoaderError::GotPatchFailed {
+                stub_addr: f.stub_addr,
+                nid: f.nid,
+            })?;
             resolved.push((range, opd_u32.to_be_bytes()));
         }
     }
@@ -744,7 +825,7 @@ mod tests {
         let table = FirmwareExportTable::default(); // empty
         let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
         let err =
-            patch_imports_against(&one_import(0xDEADBEEF, 0x100), &table, &mut mem).unwrap_err();
+            patch_imports_against(&one_import(0xDEADBEEF, 0x100), &table, 0, &mut mem).unwrap_err();
         assert_eq!(err, PrxLoaderError::UnresolvedImport { nid: 0xDEADBEEF });
     }
 
@@ -753,7 +834,7 @@ mod tests {
         let table = FirmwareExportTable::for_test(&[(0xCAFEBABE, 0x1_0000_0000u64)]);
         let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
         let err =
-            patch_imports_against(&one_import(0xCAFEBABE, 0x100), &table, &mut mem).unwrap_err();
+            patch_imports_against(&one_import(0xCAFEBABE, 0x100), &table, 0, &mut mem).unwrap_err();
         assert_eq!(
             err,
             PrxLoaderError::OpdAddressOutOfRange {
@@ -767,9 +848,38 @@ mod tests {
     fn patch_imports_against_succeeds_and_writes_be_opd_into_got_slot() {
         let table = FirmwareExportTable::for_test(&[(0xAAAA1111, 0x4000_0080u64)]);
         let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
-        patch_imports_against(&one_import(0xAAAA1111, 0x100), &table, &mut mem).expect("patch");
+        patch_imports_against(&one_import(0xAAAA1111, 0x100), &table, 0, &mut mem).expect("patch");
         let got = &mem.as_bytes()[0x100..0x104];
         assert_eq!(got, &0x4000_0080u32.to_be_bytes());
+    }
+
+    #[test]
+    fn patch_imports_against_writes_at_load_base_plus_stub_addr() {
+        // Firmware PRXs parse with PIC-base-0 vaddrs (e.g. libfs
+        // sysPrxForUser slots at vaddr 0xff10) and live at a chosen
+        // runtime base; the patch fires at `load_base + stub_addr`.
+        let opd_addr: u64 = 0x4000_0080;
+        let load_base: u64 = 0x2000;
+        let stub_vaddr: u32 = 0x300;
+        let runtime_stub = load_base + u64::from(stub_vaddr);
+        let table = FirmwareExportTable::for_test(&[(0xAAAA1111, opd_addr)]);
+        let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
+        patch_imports_against(
+            &one_import(0xAAAA1111, stub_vaddr),
+            &table,
+            load_base,
+            &mut mem,
+        )
+        .expect("patch");
+        assert_eq!(
+            &mem.as_bytes()[runtime_stub as usize..runtime_stub as usize + 4],
+            &(opd_addr as u32).to_be_bytes(),
+        );
+        assert_eq!(
+            &mem.as_bytes()[stub_vaddr as usize..stub_vaddr as usize + 4],
+            &[0u8; 4],
+            "load_base = 0x2000 should redirect the write away from vaddr 0x300"
+        );
     }
 
     #[test]
@@ -795,7 +905,7 @@ mod tests {
                 },
             ],
         }];
-        let err = patch_imports_against(&imports, &table, &mut mem).unwrap_err();
+        let err = patch_imports_against(&imports, &table, 0, &mut mem).unwrap_err();
         assert_eq!(err, PrxLoaderError::UnresolvedImport { nid: 0xBBBB2222 });
         assert_eq!(
             mem.content_hash(),
@@ -831,7 +941,7 @@ mod tests {
                 },
             ],
         }];
-        let err = patch_imports_against(&imports, &table, &mut mem).unwrap_err();
+        let err = patch_imports_against(&imports, &table, 0, &mut mem).unwrap_err();
         match err {
             PrxLoaderError::GotBatchPatchFailed { count, source: _ } => {
                 assert_eq!(count, 2, "batch carries the full staged count");
@@ -882,7 +992,101 @@ mod tests {
         let table = FirmwareExportTable::default();
         let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
         let before = mem.content_hash();
-        patch_imports_against(&[], &table, &mut mem).expect("patch");
+        patch_imports_against(&[], &table, 0, &mut mem).expect("patch");
         assert_eq!(mem.content_hash(), before);
+    }
+
+    // -- Export-namespace identity --
+
+    /// Add a single synthetic import entry to `make_test_prx`'s bytes
+    /// declaring an import of one NID from namespace `imp_name`. The
+    /// entry is placed in segment 1 (data) past the existing layout
+    /// at file offset 0x300; vaddr 0x210 in segment 1. The fixture's
+    /// library_info imports_start/end and the import-table entry's
+    /// name/nid/stub pointers are patched accordingly.
+    fn make_test_prx_importing(imp_name: &str) -> Vec<u8> {
+        let mut data = crate::sprx::test_fixtures::make_test_prx();
+        // Entry at file 0x300 (vaddr 0x210); 0x2C bytes; one function.
+        let entry_off: usize = 0x300;
+        let imp_name_off: usize = entry_off + 0x30; // file 0x330, vaddr 0x240
+        let imp_nid_off: usize = entry_off + 0x50; // file 0x350, vaddr 0x260
+        let imp_stub_off: usize = entry_off + 0x60; // file 0x360, vaddr 0x270
+
+        // library_info imports_start/end (file 0x1F0 + 44/48 = 0x21C/0x220):
+        // entry begins at vaddr 0x210, ends at vaddr 0x210 + 0x2C = 0x23C.
+        let mi = 0x1F0usize;
+        data[mi + 44..mi + 48].copy_from_slice(&0x210u32.to_be_bytes());
+        data[mi + 48..mi + 52].copy_from_slice(&0x23Cu32.to_be_bytes());
+
+        // PrxImportEntry @ entry_off (vaddr 0x210):
+        // size=0x2C, num_func=1, name_ptr/nid_ptr/stub_ptr.
+        data[entry_off] = 0x2C;
+        data[entry_off + 6..entry_off + 8].copy_from_slice(&1u16.to_be_bytes());
+        // name_ptr (vaddr 0x240)
+        data[entry_off + 16..entry_off + 20].copy_from_slice(&0x240u32.to_be_bytes());
+        // nid_ptr (vaddr 0x260)
+        data[entry_off + 20..entry_off + 24].copy_from_slice(&0x260u32.to_be_bytes());
+        // stub_ptr (vaddr 0x270)
+        data[entry_off + 24..entry_off + 28].copy_from_slice(&0x270u32.to_be_bytes());
+
+        // Write the import-module name (NUL-terminated).
+        let name_bytes = imp_name.as_bytes();
+        assert!(
+            name_bytes.len() < 32,
+            "test fixture: name too long for 0x20-byte region"
+        );
+        data[imp_name_off..imp_name_off + name_bytes.len()].copy_from_slice(name_bytes);
+        data[imp_name_off + name_bytes.len()] = 0;
+
+        // One NID + stub slot.
+        data[imp_nid_off..imp_nid_off + 4].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
+        data[imp_stub_off..imp_stub_off + 4].copy_from_slice(&0u32.to_be_bytes());
+
+        data
+    }
+
+    #[test]
+    fn load_firmware_set_missing_namespace_reports_namespace_id() {
+        // For a PRX importing namespace "ghostlib" with no module
+        // exporting under "ghostlib", the error's `target` is the
+        // hash of the namespace name, not of any file's internal
+        // identity.
+        let bytes = make_test_prx_importing("ghostlib");
+        let mut by_path = BTreeMap::new();
+        by_path.insert("solo.sprx".to_string(), bytes);
+        let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
+        let err = load_firmware_set(by_path, &mut mem, 0x1000_0000).unwrap_err();
+        match err {
+            PrxLoaderError::MissingDependency { target, .. } => {
+                let expected = graph::module_id_from_name("ghostlib");
+                assert_eq!(
+                    target, expected,
+                    "MissingDependency.target must be the namespace id, \
+                     not the file's library_info-name id"
+                );
+            }
+            other => panic!("expected MissingDependency, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_firmware_set_self_namespace_import_does_not_trip_missing_dependency() {
+        // make_test_prx exports under "testlib"; if the same file
+        // imports from "testlib", the loader recognises that as a
+        // self-namespace reference (provider == importer) and skips
+        // adding a graph edge. The closure stays well-formed.
+        let bytes = make_test_prx_importing("testlib");
+        let mut by_path = BTreeMap::new();
+        by_path.insert("solo.sprx".to_string(), bytes);
+        let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
+        // The load may still fail downstream on the unresolved NID,
+        // but not as MissingDependency.
+        let result = load_firmware_set(by_path, &mut mem, 0x1000_0000);
+        if let Err(PrxLoaderError::MissingDependency { target, .. }) = &result {
+            panic!(
+                "self-namespace import tripped MissingDependency (target={target:?}); \
+                 expected the loader to recognise testlib's own export"
+            );
+        }
     }
 }

@@ -28,6 +28,110 @@ pub enum BootOutcome {
     TimeOverflow,
 }
 
+/// Failure mode while parsing a [`BootOutcome`] from its canonical
+/// `Display` form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BootOutcomeParseError {
+    /// Tag does not match any known variant.
+    UnknownVariant(String),
+    /// `PcReached(...)` payload is not `0x`-prefixed hex.
+    MalformedPcReached(String),
+}
+
+impl std::fmt::Display for BootOutcomeParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownVariant(s) => write!(f, "unknown BootOutcome variant: {s:?}"),
+            Self::MalformedPcReached(s) => {
+                write!(f, "malformed PcReached payload: {s:?} (expected `0x<hex>`)")
+            }
+        }
+    }
+}
+
+impl std::error::Error for BootOutcomeParseError {}
+
+impl std::fmt::Display for BootOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ProcessExit => f.write_str("ProcessExit"),
+            Self::Fault => f.write_str("Fault"),
+            Self::MaxSteps => f.write_str("MaxSteps"),
+            Self::RsxWriteCheckpoint => f.write_str("RsxWriteCheckpoint"),
+            Self::PcReached(addr) => write!(f, "PcReached(0x{addr:x})"),
+            Self::TimeOverflow => f.write_str("TimeOverflow"),
+        }
+    }
+}
+
+impl std::str::FromStr for BootOutcome {
+    type Err = BootOutcomeParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ProcessExit" => Ok(Self::ProcessExit),
+            "Fault" => Ok(Self::Fault),
+            "MaxSteps" => Ok(Self::MaxSteps),
+            "RsxWriteCheckpoint" => Ok(Self::RsxWriteCheckpoint),
+            "TimeOverflow" => Ok(Self::TimeOverflow),
+            other => {
+                let payload = other
+                    .strip_prefix("PcReached(")
+                    .and_then(|s| s.strip_suffix(')'))
+                    .ok_or_else(|| BootOutcomeParseError::UnknownVariant(other.to_string()))?;
+                let addr_hex = payload.strip_prefix("0x").ok_or_else(|| {
+                    BootOutcomeParseError::MalformedPcReached(payload.to_string())
+                })?;
+                u64::from_str_radix(addr_hex, 16)
+                    .map(Self::PcReached)
+                    .map_err(|_| BootOutcomeParseError::MalformedPcReached(payload.to_string()))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod boot_outcome_round_trip {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn display_then_from_str_recovers_every_variant() {
+        let variants = [
+            BootOutcome::ProcessExit,
+            BootOutcome::Fault,
+            BootOutcome::MaxSteps,
+            BootOutcome::RsxWriteCheckpoint,
+            BootOutcome::PcReached(0x10381ce8),
+            BootOutcome::TimeOverflow,
+        ];
+        for v in variants {
+            let s = v.to_string();
+            let parsed = BootOutcome::from_str(&s)
+                .unwrap_or_else(|e| panic!("round-trip failed for {v:?} ({s:?}): {e}"));
+            assert_eq!(parsed, v, "round-trip mismatch for {v:?} via {s:?}");
+        }
+    }
+
+    #[test]
+    fn from_str_unknown_variant_errors() {
+        let err = BootOutcome::from_str("WhoKnows").unwrap_err();
+        assert!(matches!(err, BootOutcomeParseError::UnknownVariant(_)));
+    }
+
+    #[test]
+    fn from_str_pc_reached_without_hex_prefix_errors() {
+        let err = BootOutcome::from_str("PcReached(1234)").unwrap_err();
+        assert!(matches!(err, BootOutcomeParseError::MalformedPcReached(_)));
+    }
+
+    #[test]
+    fn from_str_pc_reached_non_hex_errors() {
+        let err = BootOutcome::from_str("PcReached(0xnothex)").unwrap_err();
+        assert!(matches!(err, BootOutcomeParseError::MalformedPcReached(_)));
+    }
+}
+
 /// Build an `Observation` from a completed boot run.
 ///
 /// State hashes are `None`: the boot path does not retain the per-step

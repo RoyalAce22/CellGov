@@ -57,12 +57,14 @@ pub(crate) fn make_test_prx() -> Vec<u8> {
     buf[mi + 3] = 1;
     buf[mi + 4..mi + 11].copy_from_slice(b"testmod");
     buf[mi + 32..mi + 36].copy_from_slice(&0x200u32.to_be_bytes()); // toc
-    buf[mi + 36..mi + 40].copy_from_slice(&0x130u32.to_be_bytes()); // exports_start
-    buf[mi + 40..mi + 44].copy_from_slice(&0x168u32.to_be_bytes()); // exports_end
-    buf[mi + 44..mi + 48].copy_from_slice(&0x168u32.to_be_bytes()); // imports_start
-    buf[mi + 48..mi + 52].copy_from_slice(&0x168u32.to_be_bytes()); // imports_end
+    buf[mi + 36..mi + 40].copy_from_slice(&0x134u32.to_be_bytes()); // exports_start
+    buf[mi + 40..mi + 44].copy_from_slice(&0x16Cu32.to_be_bytes()); // exports_end
+    buf[mi + 44..mi + 48].copy_from_slice(&0x16Cu32.to_be_bytes()); // imports_start
+    buf[mi + 48..mi + 52].copy_from_slice(&0x16Cu32.to_be_bytes()); // imports_end
 
-    let exp0 = 0x220;
+    // Export region starts at file 0x224 (vaddr 0x134) to leave the
+    // 52-byte library_info struct at file [0x1F0, 0x224) intact.
+    let exp0 = 0x224;
     buf[exp0] = 0x1C;
     buf[exp0 + 4..exp0 + 6].copy_from_slice(&0x8000u16.to_be_bytes());
     buf[exp0 + 6..exp0 + 8].copy_from_slice(&2u16.to_be_bytes());

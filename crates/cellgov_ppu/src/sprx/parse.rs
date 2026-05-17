@@ -743,7 +743,8 @@ mod tests {
     #[test]
     fn read_cstring_unmapped_pointer_produces_diagnostic_string() {
         let mut data = make_test_prx();
-        let exp1 = 0x220 + 28;
+        // exp0 lives at file 0x22; exp1 is 28 bytes after.
+        let exp1 = 0x224 + 28;
         let unmapped: u32 = 0xDEAD_0000;
         data[exp1 + 16..exp1 + 20].copy_from_slice(&unmapped.to_be_bytes());
 

@@ -104,12 +104,12 @@ pub(in crate::game) fn print_shadow_stats(rt: &mut Runtime) {
     }
 }
 
-pub(in crate::game) fn print_top_pcs(rt: &Runtime, pc_hits: &std::collections::HashMap<u64, u64>) {
+pub(in crate::game) fn print_top_pcs(rt: &Runtime, pc_hits: &std::collections::BTreeMap<u64, u64>) {
     if pc_hits.is_empty() {
         return;
     }
     let mut sorted: Vec<_> = pc_hits.iter().collect();
-    // Tie-break by PC so HashMap iteration order does not leak into replay diffs.
+    // Tie-break by PC so the ranking is independent of iteration order.
     sorted.sort_by(|&(pc_a, c_a), &(pc_b, c_b)| c_b.cmp(c_a).then(pc_a.cmp(pc_b)));
     println!("top_pcs_by_hit_count:");
     for (pc, count) in sorted.iter().take(20) {
