@@ -22,12 +22,19 @@ impl fmt::Display for HleWriteError {
             Self::InvalidRange => {
                 f.write_str("HLE write: ill-formed byte range (address/length overflow or empty)")
             }
-            Self::CommitFailed(err) => write!(f, "HLE write: commit rejected ({err:?})"),
+            Self::CommitFailed(err) => write!(f, "HLE write: commit rejected: {err}"),
         }
     }
 }
 
-impl std::error::Error for HleWriteError {}
+impl std::error::Error for HleWriteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidRange => None,
+            Self::CommitFailed(err) => Some(err),
+        }
+    }
+}
 
 /// Failure modes for [`HleContext::read_guest`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,12 +51,19 @@ impl fmt::Display for HleReadError {
             Self::InvalidRange => {
                 f.write_str("HLE read: ill-formed byte range (address/length overflow or empty)")
             }
-            Self::ReadFailed(err) => write!(f, "HLE read: read rejected ({err:?})"),
+            Self::ReadFailed(err) => write!(f, "HLE read: read rejected: {err}"),
         }
     }
 }
 
-impl std::error::Error for HleReadError {}
+impl std::error::Error for HleReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidRange => None,
+            Self::ReadFailed(err) => Some(err),
+        }
+    }
+}
 
 /// Park-intent record produced by a handler calling
 /// [`HleContext::park_for_callback`].

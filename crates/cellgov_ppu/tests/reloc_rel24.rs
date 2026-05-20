@@ -13,6 +13,7 @@ use cellgov_ppu::sprx::{
     load_prx, ParsedPrx, PrxLoadError, PrxRelocation, PrxSegment, RelocMisalignedKind,
     R_PPC64_REL24,
 };
+use cellgov_ps3_abi::ppc_isa::PPC_BL_OPCODE_LK as BL_OPCODE_LK;
 
 const TEXT_VADDR: u64 = 0x0000;
 const DATA_VADDR: u64 = 0x1_0000;
@@ -28,9 +29,6 @@ fn fresh_memory() -> GuestMemory {
     )])
     .expect("memory")
 }
-
-/// `bl 0` instruction word (opcode 18, LI = 0, AA = 0, LK = 1).
-const BL_OPCODE_LK: u32 = 0x4800_0001;
 
 fn parsed_with_rel24(
     offset: u64,
@@ -199,8 +197,13 @@ fn rel24_cross_segment_target_text_value_data_resolves_delta() {
 fn rel24_preserves_opcode_and_link_bits() {
     let mut mem = fresh_memory();
     // Patch a `b` (opcode 18, LK=0) at text+0x400 targeting text+0x800.
-    const B_OPCODE_NO_LK: u32 = 0x4800_0000;
-    let parsed = parsed_with_rel24(0x400, 0x800, 0, 0, B_OPCODE_NO_LK);
+    let parsed = parsed_with_rel24(
+        0x400,
+        0x800,
+        0,
+        0,
+        cellgov_ps3_abi::ppc_isa::PPC_B_OPCODE_NO_LK,
+    );
     let _ = load_prx(&parsed, &mut mem, BASE).expect("load");
     let patched = read_u32(&mem, BASE + TEXT_VADDR + 0x400);
     assert_eq!(patched & 0xFC00_0000, 0x4800_0000); // opcode 18

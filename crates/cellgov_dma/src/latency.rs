@@ -17,6 +17,12 @@ impl FixedLatency {
 }
 
 impl DmaLatencyModel for FixedLatency {
+    /// # Panics
+    ///
+    /// Panics if `now + ticks` overflows `u64`. Under the deterministic
+    /// time model `now` is bounded by `GuestTicks` advances against a
+    /// step-budget cap, so saturation is unreachable in any test or
+    /// title-boot flow that completes in finite steps.
     fn completion_time(&self, _req: &DmaRequest, now: GuestTicks) -> GuestTicks {
         now.checked_add(GuestTicks::new(self.ticks))
             .expect("completion time within u64 range")

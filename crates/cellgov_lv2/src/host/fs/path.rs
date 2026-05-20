@@ -22,7 +22,7 @@ use crate::host::Lv2Runtime;
 pub(super) fn read_path_bytes(
     rt: &dyn Lv2Runtime,
     path_ptr: u32,
-) -> Result<Vec<u8>, cellgov_ps3_abi::cell_errors::Lv2Error> {
+) -> Result<Vec<u8>, cellgov_ps3_abi::cell_errors::Lv2ErrCode> {
     if let Some(prefix) = rt.read_committed_until(path_ptr as u64, CELL_FS_MAX_PATH_LENGTH, 0) {
         return Ok(prefix.to_vec());
     }

@@ -56,48 +56,62 @@ pub(super) enum ElfError {
 
 impl ElfError {
     pub(super) fn message(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl std::fmt::Display for ElfError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TooSmall { len } => {
-                format!("not an ELF (file is {len} bytes; need >= 64)")
+                write!(f, "not an ELF (file is {len} bytes; need >= 64)")
             }
-            Self::BadMagic => "not an ELF (magic mismatch)".to_string(),
-            Self::NotElf64 { ei_class } => format!(
+            Self::BadMagic => f.write_str("not an ELF (magic mismatch)"),
+            Self::NotElf64 { ei_class } => write!(
+                f,
                 "ELF EI_CLASS=0x{ei_class:02x}; this tool only handles ELFCLASS64 (PS3 PPE objects)"
             ),
-            Self::NotBigEndian { ei_data } => format!(
+            Self::NotBigEndian { ei_data } => write!(
+                f,
                 "ELF EI_DATA=0x{ei_data:02x}; this tool only handles ELFDATA2MSB (PS3 PPE objects)"
             ),
-            Self::UnknownElfVersion { ei_version } => format!(
+            Self::UnknownElfVersion { ei_version } => write!(
+                f,
                 "ELF EI_VERSION=0x{ei_version:02x}; only EV_CURRENT (1) is supported"
             ),
-            Self::NotPpc64 { e_machine } => format!(
+            Self::NotPpc64 { e_machine } => write!(
+                f,
                 "ELF e_machine={e_machine} (0x{e_machine:04x}); this tool only handles EM_PPC64 (21)"
             ),
-            Self::PhentsizeTooSmall { phentsize } => format!(
+            Self::PhentsizeTooSmall { phentsize } => write!(
+                f,
                 "ELF e_phentsize={phentsize} is smaller than Elf64_Phdr (56)"
             ),
             Self::PhdrCountExtended => {
-                "ELF e_phnum=0xFFFF (PN_XNUM extension) is not supported by this tool".to_string()
+                f.write_str("ELF e_phnum=0xFFFF (PN_XNUM extension) is not supported by this tool")
             }
             Self::PhdrTableOverflow {
                 phoff,
                 phnum,
                 phentsize,
-            } => format!(
+            } => write!(
+                f,
                 "ELF program-header arithmetic overflows: phoff=0x{phoff:x} phnum={phnum} phentsize={phentsize}"
             ),
             Self::PhdrOutOfFile {
                 phoff,
                 phend,
                 file_len,
-            } => format!(
+            } => write!(
+                f,
                 "ELF program-header table runs past file: phoff=0x{phoff:x} end=0x{phend:x} file_len=0x{file_len:x}"
             ),
             Self::SegmentRangeOverflow {
                 idx,
                 p_offset,
                 p_filesz,
-            } => format!(
+            } => write!(
+                f,
                 "PT_LOAD #{idx} arithmetic overflows: p_offset=0x{p_offset:x} p_filesz=0x{p_filesz:x}"
             ),
             Self::SegmentTruncated {
@@ -105,7 +119,8 @@ impl ElfError {
                 p_offset,
                 p_filesz,
                 file_len,
-            } => format!(
+            } => write!(
+                f,
                 "PT_LOAD #{idx} truncated: p_offset=0x{p_offset:x}+p_filesz=0x{p_filesz:x} runs past file_len=0x{file_len:x}"
             ),
             Self::SegmentVaddrOverflow {
@@ -113,19 +128,23 @@ impl ElfError {
                 p_vaddr,
                 p_filesz,
                 p_memsz,
-            } => format!(
+            } => write!(
+                f,
                 "PT_LOAD #{idx} vaddr-range overflows u64: p_vaddr=0x{p_vaddr:x} p_filesz=0x{p_filesz:x} p_memsz=0x{p_memsz:x}"
             ),
             Self::MemszLessThanFilesz {
                 idx,
                 p_filesz,
                 p_memsz,
-            } => format!(
+            } => write!(
+                f,
                 "PT_LOAD #{idx} has p_memsz=0x{p_memsz:x} < p_filesz=0x{p_filesz:x}; the ELF spec requires p_memsz >= p_filesz"
             ),
         }
     }
 }
+
+impl std::error::Error for ElfError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PtLoad {

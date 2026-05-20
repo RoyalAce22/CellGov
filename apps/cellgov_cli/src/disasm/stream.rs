@@ -41,23 +41,49 @@ pub(super) enum DisasmError {
 
 impl DisasmError {
     pub(super) fn message(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl std::fmt::Display for DisasmError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::VaddrNotInPtLoad { vaddr, segments } => {
-                let segs = segments
-                    .iter()
-                    .map(|s| {
-                        format!(
-                            "\n  vaddr=0x{:x}+filesz=0x{:x} memsz=0x{:x} file=0x{:x}",
-                            s.vaddr, s.filesz, s.memsz, s.offset
-                        )
-                    })
-                    .collect::<String>();
-                format!("vaddr 0x{vaddr:x} not in any PT_LOAD; segments:{segs}")
+                write!(f, "vaddr 0x{vaddr:016x} not in any PT_LOAD; segments:")?;
+                for s in segments {
+                    write!(
+                        f,
+                        "\n  vaddr=0x{:016x}+filesz=0x{:x} memsz=0x{:x} file=0x{:x}",
+                        s.vaddr, s.filesz, s.memsz, s.offset
+                    )?;
+                }
+                Ok(())
             }
-            Self::VaddrInBssOnly { vaddr, seg } => format!(
-                "vaddr 0x{vaddr:x} is in PT_LOAD vaddr=0x{:x}+filesz=0x{:x} (memsz=0x{:x}) but past the file-backed range; nothing to disassemble (BSS / zero-fill)",
+            Self::VaddrInBssOnly { vaddr, seg } => write!(
+                f,
+                "vaddr 0x{vaddr:016x} is in PT_LOAD vaddr=0x{:016x}+filesz=0x{:x} (memsz=0x{:x}) but past the file-backed range; nothing to disassemble (BSS / zero-fill)",
                 seg.vaddr, seg.filesz, seg.memsz
             ),
+        }
+    }
+}
+
+impl std::error::Error for DisasmError {}
+
+impl std::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadVaddr(e) => write!(f, "disasm: {e}"),
+            Self::Io(e) => write!(f, "disasm I/O: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for StreamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::BadVaddr(e) => Some(e),
+            Self::Io(e) => Some(e),
         }
     }
 }

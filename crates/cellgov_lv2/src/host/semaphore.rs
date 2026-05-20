@@ -40,8 +40,7 @@ impl Lv2Host {
         };
         let protocol =
             u32::from_be_bytes([attr_bytes[0], attr_bytes[1], attr_bytes[2], attr_bytes[3]]);
-        const SYS_SYNC_FIFO: u32 = 0x1;
-        const SYS_SYNC_PRIORITY: u32 = 0x2;
+        use cellgov_ps3_abi::sys_sync::{SYS_SYNC_FIFO, SYS_SYNC_PRIORITY};
         if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EINVAL.into(),
@@ -59,7 +58,7 @@ impl Lv2Host {
         let id = self.alloc_id();
         match self.semaphores.create_with_id(id, initial, max) {
             Ok(()) => {}
-            Err(crate::sync_primitives::SemaphoreCreateError::IdCollision) => {
+            Err(crate::sync_primitives::SemaphoreCreateError::IdCollision(_)) => {
                 // Host-invariant break; ENOMEM is a best-effort
                 // errno since no Cell OS code maps to "allocator
                 // handed me a live id".

@@ -510,7 +510,20 @@ impl ExecutionUnit for PpuExecutionUnit {
                         syscall_args: None,
                     };
                 }
-                ExecuteVerdict::MemFault(ea) => {
+                ExecuteVerdict::MemFault(e) => {
+                    let ea = match &e {
+                        cellgov_mem::MemError::Unmapped(ctx) => ctx.addr,
+                        // load_ze/load_se/read_aligned_16 only produce
+                        // Unmapped via load_slice's None arm; other
+                        // variants are unreachable on this path.
+                        _ => {
+                            debug_assert!(
+                                false,
+                                "ExecuteVerdict::MemFault carrying non-Unmapped MemError: {e:?}"
+                            );
+                            0
+                        }
+                    };
                     // Same rollback policy as `Fault` above.
                     let diag = self.fault_diag_ea(step_pc, ea);
                     if remaining < max_budget {

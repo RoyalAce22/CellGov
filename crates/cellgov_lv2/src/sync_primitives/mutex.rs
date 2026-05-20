@@ -56,7 +56,7 @@ pub enum MutexRelease {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutexCreateError {
     /// An entry with this id was already present.
-    IdCollision,
+    IdCollision(super::IdCollision),
 }
 
 /// Failure modes of [`MutexTable::enqueue_waiter`].
@@ -71,6 +71,34 @@ pub enum MutexEnqueueError {
     /// recursive-lock attempts.
     WaiterIsOwner,
 }
+
+impl std::fmt::Display for MutexCreateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IdCollision(c) => write!(f, "mutex create: {c}"),
+        }
+    }
+}
+
+impl std::error::Error for MutexCreateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::IdCollision(c) => Some(c),
+        }
+    }
+}
+
+impl std::fmt::Display for MutexEnqueueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownId => f.write_str("mutex enqueue: unknown id"),
+            Self::DuplicateWaiter => f.write_str("mutex enqueue: duplicate waiter"),
+            Self::WaiterIsOwner => f.write_str("mutex enqueue: waiter is owner"),
+        }
+    }
+}
+
+impl std::error::Error for MutexEnqueueError {}
 
 /// Attribute bag captured from `sys_mutex_create`. No field
 /// affects blocking or waking; recursive locks surface as
@@ -138,7 +166,7 @@ impl MutexTable {
                 "mutex id {:#x} already present (existing {:?} owner={:?}, new {:?})",
                 id, existing.attrs, existing.owner, attrs,
             );
-            return Err(MutexCreateError::IdCollision);
+            return Err(MutexCreateError::IdCollision(super::IdCollision { id }));
         }
         self.entries.insert(id, MutexEntry::new(attrs));
         Ok(())
@@ -620,7 +648,9 @@ mod tests {
         t.create_with_id(5, default_attrs()).unwrap();
         assert_eq!(
             t.create_with_id(5, default_attrs()),
-            Err(MutexCreateError::IdCollision),
+            Err(MutexCreateError::IdCollision(super::super::IdCollision {
+                id: 5
+            })),
         );
         assert_eq!(t.len(), 1);
     }

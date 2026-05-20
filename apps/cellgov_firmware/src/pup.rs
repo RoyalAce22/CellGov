@@ -54,15 +54,75 @@ fn read_be_u64(data: &[u8], offset: usize) -> u64 {
     )
 }
 
-pub fn parse(data: &[u8]) -> Result<Pup, String> {
+/// Why PUP parsing or hash validation failed.
+#[derive(Debug)]
+pub enum PupError {
+    /// Input is shorter than the PUP header.
+    TooSmall { len: usize },
+    /// SCEUF magic mismatch; carries the first 4 observed bytes.
+    BadMagic([u8; 4]),
+    /// Entry / hash tables would extend past the file end.
+    TablesTruncated { required: usize, file_len: usize },
+    /// Entry and hash table lengths disagree (a malformed PUP).
+    TableLengthMismatch { entries: usize, hashes: usize },
+    /// Hash record's `index` field disagrees with its slot position.
+    HashIndexMismatch { position: usize, declared: u64 },
+    /// Payload referenced by an entry extends past the file end.
+    EntryPastFile { position: usize, entry_id: u64 },
+    /// HMAC-SHA1 initialization failed (wrong key length).
+    HmacInit(hmac::digest::InvalidLength),
+    /// HMAC-SHA1 mismatch between computed and recorded hash.
+    HmacMismatch { position: usize, entry_id: u64 },
+}
+
+impl std::fmt::Display for PupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooSmall { len } => write!(f, "PUP file too small for header (got {len} bytes)"),
+            Self::BadMagic(bytes) => write!(
+                f,
+                "bad PUP magic: {:02x}{:02x}{:02x}{:02x}",
+                bytes[0], bytes[1], bytes[2], bytes[3]
+            ),
+            Self::TablesTruncated { required, file_len } => write!(
+                f,
+                "PUP file truncated: tables need >= 0x{required:x} bytes, file is 0x{file_len:x}"
+            ),
+            Self::TableLengthMismatch { entries, hashes } => write!(
+                f,
+                "PUP entry table ({entries}) and hash table ({hashes}) length disagree"
+            ),
+            Self::HashIndexMismatch { position, declared } => write!(
+                f,
+                "PUP hash record at position {position} declares index {declared}"
+            ),
+            Self::EntryPastFile { position, entry_id } => write!(
+                f,
+                "entry {position} (id=0x{entry_id:x}) extends past file end"
+            ),
+            Self::HmacInit(e) => write!(f, "HMAC init: {e}"),
+            Self::HmacMismatch { position, entry_id } => {
+                write!(f, "HMAC mismatch for entry {position} (id=0x{entry_id:x})")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::HmacInit(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+pub fn parse(data: &[u8]) -> Result<Pup, PupError> {
     if data.len() < 0x30 {
-        return Err("file too small for PUP header".into());
+        return Err(PupError::TooSmall { len: data.len() });
     }
     if &data[0..8] != b"SCEUF\0\0\0" {
-        return Err(format!(
-            "bad PUP magic: {:02x}{:02x}{:02x}{:02x}",
-            data[0], data[1], data[2], data[3]
-        ));
+        return Err(PupError::BadMagic([data[0], data[1], data[2], data[3]]));
     }
 
     let image_version = read_be_u64(data, 0x10);
@@ -70,9 +130,13 @@ pub fn parse(data: &[u8]) -> Result<Pup, String> {
 
     let entry_table_start = 0x30usize;
     let hash_table_start = entry_table_start + file_count * 0x20;
+    let required = hash_table_start + file_count * 0x20;
 
-    if hash_table_start + file_count * 0x20 > data.len() {
-        return Err("PUP file truncated (tables exceed file size)".into());
+    if required > data.len() {
+        return Err(PupError::TablesTruncated {
+            required,
+            file_len: data.len(),
+        });
     }
 
     let mut entries = Vec::with_capacity(file_count);
@@ -107,37 +171,36 @@ pub fn parse(data: &[u8]) -> Result<Pup, String> {
 
 type HmacSha1 = Hmac<Sha1>;
 
-pub fn validate_hashes(data: &[u8], pup: &Pup) -> Result<(), String> {
+pub fn validate_hashes(data: &[u8], pup: &Pup) -> Result<(), PupError> {
     if pup.entries.len() != pup.hashes.len() {
-        return Err(format!(
-            "PUP entry table ({}) and hash table ({}) length disagree",
-            pup.entries.len(),
-            pup.hashes.len()
-        ));
+        return Err(PupError::TableLengthMismatch {
+            entries: pup.entries.len(),
+            hashes: pup.hashes.len(),
+        });
     }
     for (i, entry) in pup.entries.iter().enumerate() {
         if pup.hashes[i].index != i as u64 {
-            return Err(format!(
-                "PUP hash record at position {i} declares index {} (should be {i})",
-                pup.hashes[i].index,
-            ));
+            return Err(PupError::HashIndexMismatch {
+                position: i,
+                declared: pup.hashes[i].index,
+            });
         }
         let start = entry.data_offset as usize;
         let end = start + entry.data_length as usize;
         if end > data.len() {
-            return Err(format!(
-                "entry {} (id=0x{:x}) extends past file end",
-                i, entry.entry_id
-            ));
+            return Err(PupError::EntryPastFile {
+                position: i,
+                entry_id: entry.entry_id,
+            });
         }
-        let mut mac = HmacSha1::new_from_slice(&PUP_KEY).map_err(|e| format!("HMAC init: {e}"))?;
+        let mut mac = HmacSha1::new_from_slice(&PUP_KEY).map_err(PupError::HmacInit)?;
         mac.update(&data[start..end]);
         let result = mac.finalize().into_bytes();
         if result.as_slice() != pup.hashes[i].hash {
-            return Err(format!(
-                "HMAC mismatch for entry {} (id=0x{:x})",
-                i, entry.entry_id
-            ));
+            return Err(PupError::HmacMismatch {
+                position: i,
+                entry_id: entry.entry_id,
+            });
         }
     }
     Ok(())
@@ -156,7 +219,7 @@ mod tests {
     fn parse_rejects_bad_magic() {
         let mut data = [0u8; 0x30];
         data[0..8].copy_from_slice(b"NOTAPUP\0");
-        assert!(parse(&data).unwrap_err().contains("bad PUP magic"));
+        assert!(matches!(parse(&data).unwrap_err(), PupError::BadMagic(_)));
     }
 
     #[test]
@@ -214,7 +277,7 @@ mod tests {
         data[hash_table_start + 8] ^= 0xFF;
         let pup = parse(&data).expect("parse");
         let err = validate_hashes(&data, &pup).unwrap_err();
-        assert!(err.contains("HMAC mismatch"));
+        assert!(matches!(err, PupError::HmacMismatch { .. }));
     }
 
     #[test]
@@ -224,6 +287,6 @@ mod tests {
         data[hash_table_start..hash_table_start + 8].copy_from_slice(&5u64.to_be_bytes());
         let pup = parse(&data).expect("parse");
         let err = validate_hashes(&data, &pup).unwrap_err();
-        assert!(err.contains("declares index"));
+        assert!(matches!(err, PupError::HashIndexMismatch { .. }));
     }
 }

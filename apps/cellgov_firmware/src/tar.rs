@@ -14,17 +14,119 @@ pub struct TarEntry {
 
 /// Per-file failure surfaced by [`extract_to_disk`].
 #[derive(Debug)]
-pub struct ExtractError {
-    pub guest_path: String,
-    pub host_path: PathBuf,
-    pub kind: ExtractErrorKind,
+pub enum ExtractError {
+    /// Cleaned guest path contained a `..` component.
+    PathTraversal {
+        guest_path: String,
+        host_path: PathBuf,
+    },
+    /// `create_dir_all` on the destination's parent failed.
+    CreateDir {
+        guest_path: String,
+        host_path: PathBuf,
+        source: io::Error,
+    },
+    /// `std::fs::write` on the destination failed.
+    Write {
+        guest_path: String,
+        host_path: PathBuf,
+        source: io::Error,
+    },
 }
 
+impl std::fmt::Display for ExtractError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PathTraversal {
+                guest_path,
+                host_path,
+            } => write!(f, "path traversal: {guest_path} -> {}", host_path.display()),
+            Self::CreateDir {
+                guest_path,
+                host_path,
+                source,
+            } => write!(
+                f,
+                "create_dir_all for {guest_path} -> {}: {source}",
+                host_path.display()
+            ),
+            Self::Write {
+                guest_path,
+                host_path,
+                source,
+            } => write!(f, "write {guest_path} -> {}: {source}", host_path.display()),
+        }
+    }
+}
+
+impl std::error::Error for ExtractError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::CreateDir { source, .. } | Self::Write { source, .. } => Some(source),
+            Self::PathTraversal { .. } => None,
+        }
+    }
+}
+
+/// Why USTAR `parse` rejected the archive.
 #[derive(Debug)]
-pub enum ExtractErrorKind {
-    PathTraversal,
-    CreateDir(io::Error),
-    Write(io::Error),
+pub enum TarParseError {
+    /// A header's name field is not valid UTF-8.
+    NameNotUtf8 {
+        offset: usize,
+        source: std::str::Utf8Error,
+    },
+    /// A header's prefix field is not valid UTF-8.
+    PrefixNotUtf8 {
+        offset: usize,
+        source: std::str::Utf8Error,
+    },
+    /// The size field is not a valid octal string.
+    UnparseableSize { offset: usize, name: String },
+    /// The entry's declared payload extends past the archive.
+    PayloadPastArchive {
+        name: String,
+        offset: usize,
+        size: usize,
+        archive_size: usize,
+    },
+}
+
+impl std::fmt::Display for TarParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NameNotUtf8 { offset, source } => write!(
+                f,
+                "tar: header at offset 0x{offset:x} has non-UTF-8 name: {source}"
+            ),
+            Self::PrefixNotUtf8 { offset, source } => write!(
+                f,
+                "tar: header at offset 0x{offset:x} has non-UTF-8 prefix: {source}"
+            ),
+            Self::UnparseableSize { offset, name } => write!(
+                f,
+                "tar: header at offset 0x{offset:x} ({name:?}) has unparseable size field"
+            ),
+            Self::PayloadPastArchive {
+                name,
+                offset,
+                size,
+                archive_size,
+            } => write!(
+                f,
+                "tar: entry {name:?} payload extends past archive (offset 0x{offset:x}, size 0x{size:x}, archive 0x{archive_size:x})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TarParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::NameNotUtf8 { source, .. } | Self::PrefixNotUtf8 { source, .. } => Some(source),
+            Self::UnparseableSize { .. } | Self::PayloadPastArchive { .. } => None,
+        }
+    }
 }
 
 /// Summary returned by [`extract_to_disk`]. `errors` is non-empty when
@@ -50,7 +152,7 @@ fn octal_to_u64(s: &[u8]) -> Option<u64> {
     u64::from_str_radix(s, 8).ok()
 }
 
-pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, String> {
+pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
     let mut entries = Vec::new();
     let mut offset = 0usize;
 
@@ -64,7 +166,7 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, String> {
         let name_raw = &header[0..100];
         let name_end = name_raw.iter().position(|&b| b == 0).unwrap_or(100);
         let name_str = std::str::from_utf8(&name_raw[..name_end])
-            .map_err(|e| format!("tar: header at offset 0x{offset:x} has non-UTF-8 name: {e}"))?;
+            .map_err(|source| TarParseError::NameNotUtf8 { offset, source })?;
 
         let prefix_raw = &header[PREFIX_FIELD_OFFSET..PREFIX_FIELD_OFFSET + PREFIX_FIELD_SIZE];
         let prefix_end = prefix_raw
@@ -72,7 +174,7 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, String> {
             .position(|&b| b == 0)
             .unwrap_or(PREFIX_FIELD_SIZE);
         let prefix_str = std::str::from_utf8(&prefix_raw[..prefix_end])
-            .map_err(|e| format!("tar: header at offset 0x{offset:x} has non-UTF-8 prefix: {e}"))?;
+            .map_err(|source| TarParseError::PrefixNotUtf8 { offset, source })?;
 
         let full_name = if prefix_str.is_empty() {
             name_str.to_string()
@@ -81,7 +183,10 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, String> {
         };
 
         let size = octal_to_u64(&header[0x7C..0x7C + 12]).ok_or_else(|| {
-            format!("tar: header at offset 0x{offset:x} ({full_name:?}) has unparseable size field")
+            TarParseError::UnparseableSize {
+                offset,
+                name: full_name.clone(),
+            }
         })? as usize;
         let filetype = header[0x9C];
 
@@ -89,10 +194,12 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, String> {
 
         if (filetype == b'0' || filetype == 0) && size > 0 {
             if offset + size > data.len() {
-                return Err(format!(
-                    "tar: entry {full_name:?} payload extends past archive (offset 0x{offset:x}, size 0x{size:x}, archive 0x{:x})",
-                    data.len()
-                ));
+                return Err(TarParseError::PayloadPastArchive {
+                    name: full_name,
+                    offset,
+                    size,
+                    archive_size: data.len(),
+                });
             }
             entries.push(TarEntry {
                 name: full_name,
@@ -130,30 +237,29 @@ pub fn extract_to_disk(entries: &[TarEntry], base: &Path) -> ExtractReport {
             continue;
         }
         if !is_safe_relative(clean) {
-            report.errors.push(ExtractError {
+            report.errors.push(ExtractError::PathTraversal {
                 guest_path: entry.name.clone(),
                 host_path: base.join(clean),
-                kind: ExtractErrorKind::PathTraversal,
             });
             continue;
         }
         let dest: PathBuf = base.join(clean);
         if let Some(parent) = dest.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                report.errors.push(ExtractError {
+                report.errors.push(ExtractError::CreateDir {
                     guest_path: entry.name.clone(),
                     host_path: dest.clone(),
-                    kind: ExtractErrorKind::CreateDir(e),
+                    source: e,
                 });
                 continue;
             }
         }
         match std::fs::write(&dest, &entry.data) {
             Ok(()) => report.written += 1,
-            Err(e) => report.errors.push(ExtractError {
+            Err(e) => report.errors.push(ExtractError::Write {
                 guest_path: entry.name.clone(),
                 host_path: dest,
-                kind: ExtractErrorKind::Write(e),
+                source: e,
             }),
         }
     }
@@ -234,14 +340,14 @@ mod tests {
             *b = b'?';
         }
         let err = parse(&header).unwrap_err();
-        assert!(err.contains("unparseable size"));
+        assert!(matches!(err, TarParseError::UnparseableSize { .. }));
     }
 
     #[test]
     fn parse_rejects_payload_past_eof() {
         let header = ustar_header("f.bin", "", 100, b'0');
         let err = parse(&header).unwrap_err();
-        assert!(err.contains("extends past archive"));
+        assert!(matches!(err, TarParseError::PayloadPastArchive { .. }));
     }
 
     #[test]
@@ -300,8 +406,8 @@ mod tests {
         assert_eq!(report.written, 0);
         assert_eq!(report.errors.len(), 1);
         assert!(matches!(
-            report.errors[0].kind,
-            ExtractErrorKind::PathTraversal
+            report.errors[0],
+            ExtractError::PathTraversal { .. }
         ));
 
         std::fs::remove_dir_all(&dir).unwrap();

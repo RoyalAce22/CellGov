@@ -30,6 +30,11 @@ pub const TIMER_CREATE: u64 = 70;
 /// `sys_timer_destroy`.
 pub const TIMER_DESTROY: u64 = 71;
 
+/// `sys_timer_usleep`.
+pub const TIMER_USLEEP: u64 = 141;
+/// `sys_timer_sleep`.
+pub const TIMER_SLEEP: u64 = 142;
+
 /// `sys_rwlock_create`.
 pub const RWLOCK_CREATE: u64 = 120;
 /// `sys_rwlock_destroy`.

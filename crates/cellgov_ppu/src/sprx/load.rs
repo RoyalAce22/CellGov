@@ -93,11 +93,11 @@ pub struct LoadedOpd {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrxLoadError {
     /// Segment does not fit in guest memory at the chosen base.
+    /// `segment` names which of the PRX's two segments (typically
+    /// `"text"` or `"data"`) failed.
     SegmentOutOfRange {
-        /// Guest address where the segment would have started.
-        guest_addr: u64,
-        /// Total in-memory size of the segment.
-        size: u64,
+        placement: crate::loader::SegmentPlacement,
+        segment: &'static str,
     },
     /// u64 overflow in segment-placement arithmetic. `cause`
     /// distinguishes the `base + vaddr` (start) computation from the
@@ -202,6 +202,79 @@ pub enum RelocMisalignedKind {
     EncodedValue,
 }
 
+impl std::fmt::Display for PrxLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SegmentOutOfRange { placement, segment } => write!(
+                f,
+                "PRX {segment} segment out of range at 0x{:016x} (size 0x{:x})",
+                placement.addr, placement.size
+            ),
+            Self::SegmentSizeOverflow {
+                segment,
+                cause,
+                vaddr,
+                size,
+            } => write!(
+                f,
+                "PRX {segment} segment overflow ({cause}) vaddr 0x{vaddr:016x} size 0x{size:x}"
+            ),
+            Self::SegmentOverlap {
+                first_end,
+                second_start,
+            } => write!(
+                f,
+                "PRX segments overlap: first ends at 0x{first_end:016x}, second starts at 0x{second_start:016x}"
+            ),
+            Self::MemoryRangeInvalid { addr, length } => write!(
+                f,
+                "PRX memory range invalid at 0x{addr:016x} length 0x{length:x}"
+            ),
+            Self::MemoryFault { addr, source } => write!(
+                f,
+                "PRX memory fault at 0x{addr:016x}: {source}"
+            ),
+            Self::BatchCommitFailed { count, source } => write!(
+                f,
+                "PRX staging commit ({count} writes) rejected: {source}"
+            ),
+            Self::UnsupportedReloc(rtype) => {
+                write!(f, "PRX unsupported relocation type {rtype}")
+            }
+            Self::RelocSegmentOutOfRange { sym, seg } => write!(
+                f,
+                "PRX reloc segment {seg} out of range (sym 0x{sym:08x})"
+            ),
+            Self::RelocOffsetOutOfSegment {
+                rtype,
+                offset,
+                seg_size,
+            } => write!(
+                f,
+                "PRX reloc type {rtype} offset 0x{offset:x} out of segment (size 0x{seg_size:x})"
+            ),
+            Self::RelocOverflow { rtype, delta } => {
+                write!(f, "PRX reloc type {rtype} overflow delta {delta}")
+            }
+            Self::RelocMisaligned { rtype, kind, value } => write!(
+                f,
+                "PRX reloc type {rtype} misaligned ({kind:?}) value {value}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PrxLoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MemoryFault { source, .. } | Self::BatchCommitFailed { source, .. } => {
+                Some(source)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Load a parsed PRX at `base` and apply relocations atomically.
 ///
 /// Segment bytes, BSS zero-fill, and relocation patches stage into
@@ -259,8 +332,8 @@ pub fn load_prx(
 
     // Validate the target regions before any staging; this preserves
     // the SegmentOutOfRange diagnostic at segment granularity.
-    validate_segment_region(memory, &prx.text, text_start)?;
-    validate_segment_region(memory, &prx.data, data_start)?;
+    validate_segment_region(memory, &prx.text, text_start, "text")?;
+    validate_segment_region(memory, &prx.data, data_start, "data")?;
 
     let mut staging = cellgov_mem::StagingMemory::new();
     let relocs_applied = match stage_load(&mut staging, prx, base, text_start, data_start) {
@@ -347,11 +420,15 @@ fn validate_segment_region(
     memory: &cellgov_mem::GuestMemory,
     seg: &PrxSegment,
     guest_addr: u64,
+    segment: &'static str,
 ) -> Result<(), PrxLoadError> {
     if memory.containing_region(guest_addr, seg.memsz).is_none() {
         return Err(PrxLoadError::SegmentOutOfRange {
-            guest_addr,
-            size: seg.memsz,
+            placement: crate::loader::SegmentPlacement {
+                addr: guest_addr,
+                size: seg.memsz,
+            },
+            segment,
         });
     }
     Ok(())

@@ -36,3 +36,15 @@ pub const FPR_COUNT: usize = 32;
 /// Number of PPU vector (AltiVec / VMX) registers (v0..v31).
 // [AltiVec-PEM p:40 s:2.3.1] VRF: 32 vector registers, each 128 bits wide.
 pub const VR_COUNT: usize = 32;
+
+/// Cell BE effective-address space upper bound (42 bits).
+// [CBE-Handbook p:75 s:4.5.1]
+pub const CELL_EA_LIMIT: u64 = 0x0000_03FF_FFFF_FFFF;
+
+/// SPU local store size in bytes (256 KiB).
+// [CBEA p:79 s:6.2] Local Store is 256 KB.
+pub const SPU_LS_SIZE: usize = 256 * 1024;
+
+/// Number of SPU general-purpose 128-bit registers (r0..r127).
+// [SPU-ISA p:5 s:1.4] 128 GPRs, each 128 bits wide.
+pub const SPU_REG_COUNT: usize = 128;

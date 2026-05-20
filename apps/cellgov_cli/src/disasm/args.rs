@@ -30,24 +30,32 @@ pub(super) enum ArgError {
 
 impl ArgError {
     pub(super) fn message(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl std::fmt::Display for ArgError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Usage => usage().to_string(),
-            Self::MissingValueFor(flag) => format!("{flag} requires a value\n{}", usage()),
-            Self::InvalidHex { flag, value } => {
-                format!("invalid {flag}: {value} (expected hex u64; with or without 0x prefix)")
-            }
-            Self::InvalidCount(value) => {
-                format!("invalid --count: {value} (decimal usize)")
-            }
-            Self::CountIsZero => "--count must be >= 1".to_string(),
-            Self::CountTooLarge(n) => format!("--count {n} exceeds maximum {MAX_COUNT}"),
-            Self::UnalignedVaddr(v) => format!(
-                "--vaddr 0x{v:x} is not 4-byte aligned; PowerPC instructions are aligned words"
+            Self::Usage => f.write_str(usage()),
+            Self::MissingValueFor(flag) => write!(f, "{flag} requires a value\n{}", usage()),
+            Self::InvalidHex { flag, value } => write!(
+                f,
+                "invalid {flag}: {value} (expected hex u64; with or without 0x prefix)"
             ),
-            Self::UnknownFlag(s) => format!("unknown disasm flag: {s}\n{}", usage()),
+            Self::InvalidCount(value) => write!(f, "invalid --count: {value} (decimal usize)"),
+            Self::CountIsZero => f.write_str("--count must be >= 1"),
+            Self::CountTooLarge(n) => write!(f, "--count {n} exceeds maximum {MAX_COUNT}"),
+            Self::UnalignedVaddr(v) => write!(
+                f,
+                "--vaddr 0x{v:016x} is not 4-byte aligned; PowerPC instructions are aligned words"
+            ),
+            Self::UnknownFlag(s) => write!(f, "unknown disasm flag: {s}\n{}", usage()),
         }
     }
 }
+
+impl std::error::Error for ArgError {}
 
 pub(super) fn parse_args(args: &[String]) -> Result<DisasmArgs<'_>, ArgError> {
     let elf_path = args.get(2).map(String::as_str).ok_or(ArgError::Usage)?;

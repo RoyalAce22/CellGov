@@ -118,6 +118,59 @@ pub enum NotifySpuFinishedError {
     CounterUnderflow,
 }
 
+impl std::fmt::Display for InitializeThreadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownGroup => f.write_str("unknown thread group"),
+            Self::GroupAlreadyStarted { state } => {
+                write!(f, "thread group already started (state {state:?})")
+            }
+            Self::SlotOutOfBounds { slot, num_threads } => write!(
+                f,
+                "slot {slot} out of bounds (group declared {num_threads} threads)"
+            ),
+            Self::SlotOutOfRange => f.write_str("slot index out of supported range"),
+            Self::SlotAlreadyInitialized => f.write_str("slot already initialized"),
+        }
+    }
+}
+
+impl std::error::Error for InitializeThreadError {}
+
+impl std::fmt::Display for RecordSpuError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownGroup => f.write_str("unknown thread group"),
+            Self::GroupAlreadyFinished => f.write_str("thread group already finished"),
+            Self::DuplicateUnit => f.write_str("SPU unit already registered"),
+            Self::ThreadIdCollision => {
+                f.write_str("(group, slot) already maps to a different unit")
+            }
+            Self::SlotOutOfRange => f.write_str("slot index out of supported range"),
+            Self::ThreadIdOverflow => f.write_str("group_id * 256 + slot overflowed u32"),
+        }
+    }
+}
+
+impl std::error::Error for RecordSpuError {}
+
+impl std::fmt::Display for NotifySpuFinishedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownUnit => f.write_str("unknown SPU unit"),
+            Self::AlreadyFinished { group_id } => {
+                write!(f, "SPU notify already fired (group {group_id})")
+            }
+            Self::GroupNotRunning { state } => {
+                write!(f, "thread group not running (state {state:?})")
+            }
+            Self::CounterUnderflow => f.write_str("remaining_unfinished was already 0"),
+        }
+    }
+}
+
+impl std::error::Error for NotifySpuFinishedError {}
+
 /// Table of managed SPU thread groups.
 ///
 /// `unit_to_group` and `finished_units` partition the SPU

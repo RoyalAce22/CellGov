@@ -40,8 +40,11 @@ pub enum ExecuteVerdict {
     },
     /// Architectural fault.
     Fault(PpuFault),
-    /// Memory access at invalid effective address.
-    MemFault(u64),
+    /// Memory access into an unmapped region. Carries the
+    /// `cellgov_mem::MemError` produced at the loader boundary; the
+    /// effective address is reachable via
+    /// `MemError::Unmapped(FaultContext).addr`.
+    MemFault(cellgov_mem::MemError),
     /// Store buffer full; caller flushes, yields, then retries the
     /// same instruction.
     BufferFull,
@@ -60,6 +63,25 @@ pub enum PpuFault {
     /// offending sub-opcode.
     UnimplementedInstruction(u64),
 }
+
+impl std::fmt::Display for PpuFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PcOutOfRange(pc) => write!(f, "PPU PC out of range at 0x{pc:016x}"),
+            Self::InvalidAddress(addr) => {
+                write!(f, "PPU invalid address at 0x{addr:016x}")
+            }
+            Self::UnsupportedSyscall(nr) => {
+                write!(f, "PPU unsupported syscall {nr}")
+            }
+            Self::UnimplementedInstruction(op) => {
+                write!(f, "PPU unimplemented instruction sub-opcode 0x{op:x}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PpuFault {}
 
 /// Linear search for `[ea, ea+len)` covered by one region view.
 ///
@@ -81,6 +103,18 @@ pub(crate) fn load_slice<'a>(
     None
 }
 
+/// Synthesize a `MemError::Unmapped` for `ea` with no nearest-region
+/// labels populated; the helper does not have a `GuestMemory`
+/// reference to walk, only the flat region-view slice.
+#[inline]
+fn unmapped(ea: u64) -> cellgov_mem::MemError {
+    cellgov_mem::MemError::Unmapped(cellgov_mem::FaultContext {
+        addr: ea,
+        nearest_below: None,
+        nearest_above: None,
+    })
+}
+
 /// Zero-extending load with store-buffer forwarding.
 ///
 /// Slow path overlays buffered stores onto the region view, so
@@ -92,11 +126,11 @@ pub(crate) fn load_ze(
     store_buf: &StoreBuffer,
     ea: u64,
     size: u8,
-) -> Result<u64, u64> {
+) -> Result<u64, cellgov_mem::MemError> {
     if let Some(val) = store_buf.forward(ea, size) {
         return Ok(val as u64);
     }
-    let slice = load_slice(region_views, ea, size as usize).ok_or(ea)?;
+    let slice = load_slice(region_views, ea, size as usize).ok_or_else(|| unmapped(ea))?;
     let mut bytes = [0u8; 8];
     let n = size as usize;
     bytes[..n].copy_from_slice(&slice[..n]);
@@ -108,7 +142,7 @@ pub(crate) fn load_ze(
         8 => u64::from_be_bytes(bytes),
         _ => {
             debug_assert!(false, "load_ze: unexpected size {size}");
-            return Err(ea);
+            return Err(unmapped(ea));
         }
     })
 }
@@ -120,7 +154,7 @@ pub(crate) fn load_se(
     store_buf: &StoreBuffer,
     ea: u64,
     size: u8,
-) -> Result<u64, u64> {
+) -> Result<u64, cellgov_mem::MemError> {
     if let Some(val) = store_buf.forward(ea, size) {
         // `forward` right-aligns `size` bytes; sign must come from
         // the size's MSB, not u64 bit 63 (always 0 for sub-doubleword).
@@ -131,11 +165,11 @@ pub(crate) fn load_se(
             8 => val as u64,
             _ => {
                 debug_assert!(false, "load_se: unexpected size {size}");
-                return Err(ea);
+                return Err(unmapped(ea));
             }
         });
     }
-    let slice = load_slice(region_views, ea, size as usize).ok_or(ea)?;
+    let slice = load_slice(region_views, ea, size as usize).ok_or_else(|| unmapped(ea))?;
     let mut bytes = [0u8; 8];
     let n = size as usize;
     bytes[..n].copy_from_slice(&slice[..n]);
@@ -147,7 +181,7 @@ pub(crate) fn load_se(
         8 => u64::from_be_bytes(bytes),
         _ => {
             debug_assert!(false, "load_se: unexpected size {size}");
-            return Err(ea);
+            return Err(unmapped(ea));
         }
     })
 }

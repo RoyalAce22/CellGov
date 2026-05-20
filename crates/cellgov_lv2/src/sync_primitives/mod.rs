@@ -44,6 +44,31 @@ pub struct DuplicateEnqueue {
     pub id: PpuThreadId,
 }
 
+/// Shared `create_with_id` rejection across [`mutex`], [`event_flag`],
+/// [`semaphore`], and [`cond`]. Signals an allocator bug: the
+/// dispatch layer handed out an id that was already live.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdCollision {
+    /// The id the dispatch layer attempted to (re-)allocate.
+    pub id: u32,
+}
+
+impl std::fmt::Display for DuplicateEnqueue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "thread {:?} already parked", self.id)
+    }
+}
+
+impl std::error::Error for DuplicateEnqueue {}
+
+impl std::fmt::Display for IdCollision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "id 0x{:08x} already allocated", self.id)
+    }
+}
+
+impl std::error::Error for IdCollision {}
+
 /// FIFO queue of PPU threads parked on a single primitive.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WaiterList {

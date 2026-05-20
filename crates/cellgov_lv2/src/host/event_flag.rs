@@ -78,10 +78,9 @@ impl Lv2Host {
             attr_bytes[22],
             attr_bytes[23],
         ]);
-        const SYS_SYNC_FIFO: u32 = 0x1;
-        const SYS_SYNC_PRIORITY: u32 = 0x2;
-        const SYS_SYNC_WAITER_SINGLE: u32 = 0x10000;
-        const SYS_SYNC_WAITER_MULTIPLE: u32 = 0x20000;
+        use cellgov_ps3_abi::sys_sync::{
+            SYS_SYNC_FIFO, SYS_SYNC_PRIORITY, SYS_SYNC_WAITER_MULTIPLE, SYS_SYNC_WAITER_SINGLE,
+        };
         if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EINVAL.into(),

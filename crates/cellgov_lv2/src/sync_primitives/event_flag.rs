@@ -55,7 +55,7 @@ pub enum EventFlagWait {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventFlagCreateError {
     /// An entry with this id was already present.
-    IdCollision,
+    IdCollision(super::IdCollision),
 }
 
 /// Failure modes of [`EventFlagTable::enqueue_waiter`].
@@ -67,6 +67,33 @@ pub enum EventFlagEnqueueError {
     /// (fires `debug_assert!`).
     DuplicateWaiter,
 }
+
+impl std::fmt::Display for EventFlagCreateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IdCollision(c) => write!(f, "event_flag create: {c}"),
+        }
+    }
+}
+
+impl std::error::Error for EventFlagCreateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::IdCollision(c) => Some(c),
+        }
+    }
+}
+
+impl std::fmt::Display for EventFlagEnqueueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownId => f.write_str("event_flag enqueue: unknown id"),
+            Self::DuplicateWaiter => f.write_str("event_flag enqueue: duplicate waiter"),
+        }
+    }
+}
+
+impl std::error::Error for EventFlagEnqueueError {}
 
 /// A single event flag.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,7 +166,7 @@ impl EventFlagTable {
                 existing.waiters.len(),
                 init,
             );
-            return Err(EventFlagCreateError::IdCollision);
+            return Err(EventFlagCreateError::IdCollision(super::IdCollision { id }));
         }
         self.entries.insert(id, EventFlagEntry::new(init));
         Ok(())
@@ -676,7 +703,9 @@ mod tests {
         t.create_with_id(1, 0xAA).unwrap();
         assert_eq!(
             t.create_with_id(1, 0xBB),
-            Err(EventFlagCreateError::IdCollision),
+            Err(EventFlagCreateError::IdCollision(
+                super::super::IdCollision { id: 1 }
+            )),
         );
         assert_eq!(t.lookup(1).unwrap().init(), 0xAA);
     }

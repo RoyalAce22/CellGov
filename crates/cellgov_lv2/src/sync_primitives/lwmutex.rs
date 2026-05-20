@@ -69,6 +69,17 @@ pub enum LwMutexEnqueueError {
     DuplicateWaiter,
 }
 
+impl std::fmt::Display for LwMutexEnqueueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownId => f.write_str("lwmutex enqueue: unknown id"),
+            Self::DuplicateWaiter => f.write_str("lwmutex enqueue: duplicate waiter"),
+        }
+    }
+}
+
+impl std::error::Error for LwMutexEnqueueError {}
+
 /// A single lightweight mutex.
 ///
 /// `signaled` is the binary "wake pending" flag set by an unlock

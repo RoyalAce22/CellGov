@@ -2,6 +2,9 @@
 //! binaries (ELF32, big-endian, PT_LOAD segments only).
 
 use crate::state::SpuState;
+use cellgov_ps3_abi::elf::{
+    ELF32_HEADER_SIZE as ELF_HEADER_SIZE, ELF32_PHDR_SIZE as PHDR_SIZE, ELF_MAGIC, PT_LOAD,
+};
 
 /// Load failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,10 +28,23 @@ pub enum LoadError {
     },
 }
 
-const ELF_HEADER_SIZE: usize = 52;
-const PHDR_SIZE: usize = 32;
-const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
-const PT_LOAD: u32 = 1;
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooSmall => f.write_str("SPU ELF too small for header"),
+            Self::BadMagic => f.write_str("SPU ELF bad magic"),
+            Self::Not32Bit => f.write_str("SPU ELF is not 32-bit"),
+            Self::NotBigEndian => f.write_str("SPU ELF is not big-endian"),
+            Self::SegmentTruncated => f.write_str("SPU ELF LOAD segment truncated"),
+            Self::SegmentOutOfRange { vaddr, memsz } => write!(
+                f,
+                "SPU ELF LOAD segment at vaddr 0x{vaddr:08x} (memsz {memsz}) exceeds local store"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
 
 /// Load an SPU ELF binary into `state`, copying PT_LOAD segments into
 /// LS, zeroing `.bss` (memsz > filesz), and setting `state.pc` to the

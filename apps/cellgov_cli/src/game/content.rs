@@ -73,7 +73,14 @@ impl std::fmt::Display for ContentRegisterError {
     }
 }
 
-impl std::error::Error for ContentRegisterError {}
+impl std::error::Error for ContentRegisterError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::HostFileRead { source, .. } => Some(source),
+            Self::DuplicateGuestPath { .. } => None,
+        }
+    }
+}
 
 /// Resolve `path` against `base` if relative; absolute passes through.
 /// Pure path arithmetic, no I/O.

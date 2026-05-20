@@ -1,7 +1,7 @@
 //! Process-exit and whole-file-read helpers shared across every
 //! CLI subcommand.
 
-const SCE_MAGIC: &[u8; 4] = b"SCE\0";
+use cellgov_ps3_abi::sce::SCE_MAGIC;
 
 /// Print `msg` to stderr and exit with status 1.
 pub(crate) fn die(msg: &str) -> ! {
@@ -18,7 +18,7 @@ pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
 /// ELF bytes.
 pub(crate) fn load_ppu_image_or_die(path: &str) -> Vec<u8> {
     let bytes = load_file_or_die(path);
-    if bytes.len() >= 4 && &bytes[..4] == SCE_MAGIC {
+    if bytes.len() >= 4 && bytes[..4] == SCE_MAGIC {
         cellgov_firmware::sce::decrypt_self_to_elf(&bytes)
             .unwrap_or_else(|e| die(&format!("failed to decrypt SELF {path}: {e}")))
     } else {

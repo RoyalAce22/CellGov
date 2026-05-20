@@ -1,34 +1,36 @@
 //! CLI environment-variable parsing helpers.
 
+use super::cli_arg_error::CliArgError;
 use super::exit::die;
 
 /// Strict boolean parse for a `CELLGOV_*` env var. Unset and empty
 /// both read as `false`. Any other value dies with a named diagnostic
 /// so a stale shell setting cannot silently enable instrumentation.
 pub(crate) fn parse_env_bool(name: &str) -> bool {
-    parse_env_bool_inner(name, std::env::var(name).ok()).unwrap_or_else(|e| die(&e))
+    parse_env_bool_inner(name, std::env::var(name).ok()).unwrap_or_else(|e| die(&e.to_string()))
 }
 
-fn parse_env_bool_inner(name: &str, value: Option<String>) -> Result<bool, String> {
+fn parse_env_bool_inner(name: &str, value: Option<String>) -> Result<bool, CliArgError> {
     let Some(v) = value else {
         return Ok(false);
     };
     match v.trim().to_ascii_lowercase().as_str() {
         "" | "0" | "false" | "no" | "off" => Ok(false),
         "1" | "true" | "yes" | "on" => Ok(true),
-        other => Err(format!(
-            "{name}={other:?}: expected 0/1/true/false/yes/no/on/off"
-        )),
+        other => Err(CliArgError::EnvBoolUnknown {
+            name: name.to_string(),
+            got: other.to_string(),
+        }),
     }
 }
 
 /// Parse a `CELLGOV_*` env var as a hex `u32` with optional `0x`/`0X`
 /// prefix. `None` when the var is unset; dies on malformed input.
 pub(crate) fn parse_env_hex_u32(name: &str) -> Option<u32> {
-    parse_env_hex_u32_inner(name, std::env::var(name).ok()).unwrap_or_else(|e| die(&e))
+    parse_env_hex_u32_inner(name, std::env::var(name).ok()).unwrap_or_else(|e| die(&e.to_string()))
 }
 
-fn parse_env_hex_u32_inner(name: &str, value: Option<String>) -> Result<Option<u32>, String> {
+fn parse_env_hex_u32_inner(name: &str, value: Option<String>) -> Result<Option<u32>, CliArgError> {
     let Some(raw) = value else {
         return Ok(None);
     };
@@ -42,7 +44,11 @@ fn parse_env_hex_u32_inner(name: &str, value: Option<String>) -> Result<Option<u
         .unwrap_or(trimmed);
     u32::from_str_radix(stripped, 16)
         .map(Some)
-        .map_err(|e| format!("{name}={raw:?}: not a hex u32 ({e})"))
+        .map_err(|source| CliArgError::EnvHexU32Invalid {
+            name: name.to_string(),
+            raw: raw.clone(),
+            source,
+        })
 }
 
 #[cfg(test)]
@@ -81,7 +87,9 @@ mod tests {
 
     #[test]
     fn parse_env_bool_rejects_garbage() {
-        let err = parse_env_bool_inner("X", Some("maybe".to_string())).unwrap_err();
+        let err = parse_env_bool_inner("X", Some("maybe".to_string()))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("X="), "got: {err}");
         assert!(err.contains("maybe"), "got: {err}");
     }
@@ -129,7 +137,9 @@ mod tests {
 
     #[test]
     fn parse_env_hex_u32_rejects_non_hex() {
-        let err = parse_env_hex_u32_inner("X", Some("nope".to_string())).unwrap_err();
+        let err = parse_env_hex_u32_inner("X", Some("nope".to_string()))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("not a hex u32"), "got: {err}");
     }
 }

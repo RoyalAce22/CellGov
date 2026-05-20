@@ -31,7 +31,7 @@ pub(super) const FS_TTY_SINK_PATHS: &[&str] = &["/app_home/output.txt"];
 pub(super) fn validate_open_flags(
     flags: u32,
     path: &str,
-) -> Option<cellgov_ps3_abi::cell_errors::Lv2Error> {
+) -> Option<cellgov_ps3_abi::cell_errors::Lv2ErrCode> {
     if FS_TTY_SINK_PATHS.contains(&path) {
         return None;
     }

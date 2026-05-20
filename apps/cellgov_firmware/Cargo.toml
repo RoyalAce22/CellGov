@@ -14,6 +14,7 @@ name = "cellgov_firmware"
 path = "src/main.rs"
 
 [dependencies]
+cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }
 aes = "0.8"
 cbc = "0.1"
 ctr = "0.9"

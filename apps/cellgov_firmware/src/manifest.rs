@@ -158,6 +158,11 @@ pub enum ManifestError {
     Toml(toml::de::Error),
     /// Underlying TOML serialise failure.
     TomlSer(toml::ser::Error),
+    /// Manifest entry was never verified by [`ManifestVerifier`]
+    /// before `finish()`; the install pipeline either failed to
+    /// produce the corresponding SPRX or never queued it for
+    /// verification.
+    EntryUnverified(String),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -174,6 +179,21 @@ impl std::fmt::Display for ManifestError {
             }
             ManifestError::Toml(e) => write!(f, "firmware.toml parse: {e}"),
             ManifestError::TomlSer(e) => write!(f, "firmware.toml serialise: {e}"),
+            ManifestError::EntryUnverified(p) => {
+                write!(f, "firmware.toml entry {p:?} was never verified")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ManifestError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ManifestError::Toml(e) => Some(e),
+            ManifestError::TomlSer(e) => Some(e),
+            ManifestError::UnsupportedFormatVersion { .. }
+            | ManifestError::DuplicatePath(_)
+            | ManifestError::EntryUnverified(_) => None,
         }
     }
 }
@@ -279,6 +299,8 @@ impl std::fmt::Display for EmptyManifest {
     }
 }
 
+impl std::error::Error for EmptyManifest {}
+
 /// Aggregate verifier. Constructed once at boot, fed each loaded
 /// PRX's `(path, digest)` pair, and drained with [`Self::finish`] --
 /// which fails if any manifest entry went unverified. The boot path
@@ -329,16 +351,17 @@ impl<'a> ManifestVerifier<'a> {
     }
 
     /// Returns `Ok(())` iff every manifest entry has been
-    /// `Match`-verified. Otherwise returns the unmatched paths in
+    /// `Match`-verified. Otherwise returns one
+    /// [`ManifestError::EntryUnverified`] per unmatched path, in
     /// manifest order.
-    pub fn finish(self) -> Result<(), Vec<String>> {
-        let unmatched: Vec<String> = self
+    pub fn finish(self) -> Result<(), Vec<ManifestError>> {
+        let unmatched: Vec<ManifestError> = self
             .manifest
             .files
             .iter()
             .zip(&self.matched)
             .filter(|(_, m)| !**m)
-            .map(|(e, _)| e.path.clone())
+            .map(|(e, _)| ManifestError::EntryUnverified(e.path.clone()))
             .collect();
         if unmatched.is_empty() {
             Ok(())
@@ -601,6 +624,16 @@ revision = 0
         assert!(v.finish().is_ok());
     }
 
+    /// Extract the path from a single-element [`ManifestError::EntryUnverified`]
+    /// vec, panicking on any other shape; test-only.
+    fn single_unverified_path(errs: Vec<ManifestError>) -> String {
+        assert_eq!(errs.len(), 1, "expected exactly one unmatched: {errs:?}");
+        match errs.into_iter().next().unwrap() {
+            ManifestError::EntryUnverified(p) => p,
+            other => panic!("expected EntryUnverified, got {other:?}"),
+        }
+    }
+
     #[test]
     fn manifest_verifier_finish_returns_unmatched_paths_in_manifest_order() {
         let m = sample_manifest();
@@ -610,7 +643,10 @@ revision = 0
             VerifyOutcome::Match
         );
         let unmatched = v.finish().unwrap_err();
-        assert_eq!(unmatched, vec!["sys/external/liblv2.sprx".to_string()]);
+        assert_eq!(
+            single_unverified_path(unmatched),
+            "sys/external/liblv2.sprx"
+        );
     }
 
     #[test]
@@ -627,7 +663,7 @@ revision = 0
             VerifyOutcome::Match
         );
         let unmatched = v.finish().unwrap_err();
-        assert_eq!(unmatched, vec!["sys/external/libfs.sprx".to_string()]);
+        assert_eq!(single_unverified_path(unmatched), "sys/external/libfs.sprx");
     }
 
     #[test]
@@ -643,6 +679,9 @@ revision = 0
             VerifyOutcome::Match
         );
         let unmatched = v.finish().unwrap_err();
-        assert_eq!(unmatched, vec!["sys/external/liblv2.sprx".to_string()]);
+        assert_eq!(
+            single_unverified_path(unmatched),
+            "sys/external/liblv2.sprx"
+        );
     }
 }

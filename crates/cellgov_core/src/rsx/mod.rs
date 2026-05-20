@@ -10,14 +10,10 @@ pub mod flip;
 pub mod method;
 pub mod reports;
 
-/// Guest address of the RSX control register's `put` slot.
-pub const RSX_CONTROL_PUT_ADDR: u32 = 0xC000_0040;
-
-/// Guest address of the RSX control register's `get` slot.
-pub const RSX_CONTROL_GET_ADDR: u32 = 0xC000_0044;
-
-/// Guest address of the RSX control register's `reference` slot.
-pub const RSX_CONTROL_REF_ADDR: u32 = 0xC000_0048;
+pub use cellgov_ps3_abi::sys_rsx::control_register::{
+    GET_ADDR as RSX_CONTROL_GET_ADDR, PUT_ADDR as RSX_CONTROL_PUT_ADDR,
+    REF_ADDR as RSX_CONTROL_REF_ADDR,
+};
 
 /// Guest address of the fixed-address flip-status mirror.
 ///

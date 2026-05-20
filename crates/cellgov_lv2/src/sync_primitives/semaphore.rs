@@ -60,7 +60,7 @@ pub enum SemaphorePostN {
 pub enum SemaphoreCreateError {
     /// An entry with this id was already present; allocator bug
     /// (fires `debug_assert!`).
-    IdCollision,
+    IdCollision(super::IdCollision),
     /// `initial > max`, or either value was negative.
     InvalidBounds,
 }
@@ -74,6 +74,35 @@ pub enum SemaphoreEnqueueError {
     /// dispatch-layer bug (fires `debug_assert!`).
     DuplicateWaiter,
 }
+
+impl std::fmt::Display for SemaphoreCreateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IdCollision(c) => write!(f, "semaphore create: {c}"),
+            Self::InvalidBounds => f.write_str("semaphore create: invalid bounds"),
+        }
+    }
+}
+
+impl std::error::Error for SemaphoreCreateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::IdCollision(c) => Some(c),
+            Self::InvalidBounds => None,
+        }
+    }
+}
+
+impl std::fmt::Display for SemaphoreEnqueueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownId => f.write_str("semaphore enqueue: unknown id"),
+            Self::DuplicateWaiter => f.write_str("semaphore enqueue: duplicate waiter"),
+        }
+    }
+}
+
+impl std::error::Error for SemaphoreEnqueueError {}
 
 /// A single counting semaphore.
 ///
@@ -135,7 +164,7 @@ impl SemaphoreTable {
                 "semaphore {:#x} already present at create_with_id",
                 id,
             );
-            return Err(SemaphoreCreateError::IdCollision);
+            return Err(SemaphoreCreateError::IdCollision(super::IdCollision { id }));
         }
         if initial > max || initial < 0 || max < 0 {
             return Err(SemaphoreCreateError::InvalidBounds);
@@ -522,7 +551,9 @@ mod tests {
         t.create_with_id(5, 0, 10).unwrap();
         assert_eq!(
             t.create_with_id(5, 0, 10),
-            Err(SemaphoreCreateError::IdCollision),
+            Err(SemaphoreCreateError::IdCollision(
+                super::super::IdCollision { id: 5 }
+            )),
         );
         assert_eq!(t.len(), 1);
     }

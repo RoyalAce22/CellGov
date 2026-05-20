@@ -98,6 +98,19 @@ impl std::fmt::Display for ParseError {
     }
 }
 
+impl std::error::Error for ParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::BadHeaderMagic { .. }
+            | Self::BadVersion { .. }
+            | Self::NameTooLong { .. }
+            | Self::WriteTooLarge { .. }
+            | Self::UnexpectedEof { .. } => None,
+        }
+    }
+}
+
 /// Parse the entire trace file into a `Vec<CallRecord>`. Only used
 /// by tests; production callers stream via [`parse_streaming`] so
 /// multi-GB traces stay in bounded memory.

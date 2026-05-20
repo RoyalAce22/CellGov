@@ -4,23 +4,20 @@
 //! PROC_PARAM segment (p_type 0x60000001) that lv2 scans for
 //! `process_param_t` during ELF load.
 
-const ELFCLASS64: u8 = 2;
-const ELFDATA2MSB: u8 = 2;
-const EV_CURRENT: u8 = 1;
-const ET_EXEC: u16 = 2;
-const EM_PPC64: u16 = 21;
-const ELF64_EHDR_SIZE: u16 = 64;
-const ELF64_PHDR_SIZE: u16 = 56;
+use cellgov_ps3_abi::elf::{
+    ELFCLASS64, ELFDATA2MSB, ELF_HEADER_SIZE, ELF_PHENTSIZE, EM_PPC64, ET_EXEC, EV_CURRENT, PF_R,
+    PF_W, PF_X, PT_LOAD, PT_PROC_PARAM,
+};
 
-const PT_LOAD: u32 = 1;
-const PT_PROC_PARAM: u32 = 0x60000001;
+/// `e_ehsize` field value: cast of [`ELF_HEADER_SIZE`].
+const ELF64_EHDR_SIZE: u16 = ELF_HEADER_SIZE as u16;
 
-const PF_X: u32 = 1;
-const PF_W: u32 = 2;
-const PF_R: u32 = 4;
+/// `e_phentsize` field value: cast of [`ELF_PHENTSIZE`].
+const ELF64_PHDR_SIZE: u16 = ELF_PHENTSIZE as u16;
 
-/// Size of a `process_param_t` record in the data segment.
-pub const PROC_PARAM_SIZE: u64 = 32;
+/// Re-export of [`cellgov_ps3_abi::elf::PROC_PARAM_SIZE`] for callers
+/// that previously consumed it via this module.
+pub use cellgov_ps3_abi::elf::PROC_PARAM_SIZE;
 
 /// Build a `process_param_t` structure (32 bytes, big-endian).
 pub fn proc_param(sdk_version: u32) -> Vec<u8> {

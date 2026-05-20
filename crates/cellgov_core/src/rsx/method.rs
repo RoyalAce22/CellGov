@@ -319,6 +319,14 @@ pub struct DuplicateRegistration {
     pub prior: NvMethodHandler,
 }
 
+impl std::fmt::Display for DuplicateRegistration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NV method 0x{:04x} already registered", self.method)
+    }
+}
+
+impl std::error::Error for DuplicateRegistration {}
+
 impl NvMethodTable {
     #[inline]
     pub fn new() -> Self {

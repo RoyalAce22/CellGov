@@ -29,14 +29,10 @@ use cellgov_core::Runtime;
 use cellgov_exec::FaultRegisterDump;
 use cellgov_ppu::decode;
 use cellgov_ppu::instruction::PpuInstruction;
+use cellgov_ps3_abi::ppc_isa::PPC_BO_BIT2 as BO_BIT2;
 use cellgov_ps3_abi::process_address_space::PS3_USER_TEXT_FLOOR;
 
 const MAX_BACK_CHAIN_FRAMES: usize = 32;
-
-/// BO2 in IBM MSB-first 5-bit-BO numbering. After the conventional
-/// `(raw >> 21) & 0x1F` extraction into a `u8`, BO2 is bit 2 of the
-/// resulting value (mask 0b00100).
-const BO_BIT2: u8 = 0b0_0100;
 
 /// Empty output means r1 sits below the user-text floor (NULL or trampoline-scratch).
 pub(super) fn append_stack_walk(out: &mut String, rt: &Runtime, regs: &FaultRegisterDump) {
@@ -279,14 +275,8 @@ fn classify_call_at(rt: &Runtime, addr: u64) -> Option<CallKind> {
 mod tests {
     use super::*;
     use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
+    use cellgov_ps3_abi::ppc_isa::{PPC_BCCTR_XO as BCCTR_XO, PPC_BCLR_XO as BCLR_XO};
     use cellgov_time::Budget;
-
-    /// XO field for `bcctr` / `bcctrl` per [PPC-Book1 p:25 s:Branch
-    /// Conditional to Count Register].
-    const BCCTR_XO: u32 = 528;
-    /// XO field for `bclr` / `bclrl` per [PPC-Book1 p:25 s:Branch
-    /// Conditional to Link Register].
-    const BCLR_XO: u32 = 16;
 
     fn rt_with_layout() -> Runtime {
         let mem = GuestMemory::from_regions(vec![

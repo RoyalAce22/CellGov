@@ -7,7 +7,11 @@
 
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
-use crate::crypto::{SCEPKG_ERK, SCEPKG_RIV};
+use cellgov_ps3_abi::sce::{
+    SCEPKG_ERK, SCEPKG_RIV, SCE_COMP_KIND_NONE as COMP_KIND_NONE,
+    SCE_COMP_KIND_ZLIB as COMP_KIND_ZLIB, SCE_ENC_KIND_AES128_CTR as ENC_KIND_AES128_CTR,
+    SCE_ENC_KIND_PLAIN as ENC_KIND_PLAIN, SCE_SECTION_KIND_PHDR as SECTION_KIND_PHDR,
+};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -83,13 +87,162 @@ fn read_be_u16(data: &[u8], offset: usize) -> u16 {
     )
 }
 
-pub fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, String> {
+/// Why SCE/SELF parsing or decryption failed.
+#[derive(Debug)]
+pub enum SceError {
+    /// Buffer is too small for a fixed-size structure.
+    TooSmall {
+        what: &'static str,
+        got: usize,
+        need: usize,
+    },
+    /// SCE container magic mismatch.
+    BadMagic { got: u32 },
+    /// No APP key registered for the SELF revision.
+    NoAppKey { revision: u16 },
+    /// SELF's ELF header offset is outside the buffer.
+    HeaderOffsetOutOfRange { what: &'static str },
+    /// ELF EI_CLASS is not ELFCLASS64.
+    BadElfClass { got: u8 },
+    /// AES-256-CBC key-envelope decrypt failed.
+    AesCbcDecryptFailed,
+    /// Key-envelope padding did not decrypt to zero (likely wrong ERK/RIV).
+    KeyEnvelopePadding,
+    /// Decrypted metadata directory is shorter than its header.
+    MetadataTooSmall,
+    /// Metadata directory headers extend past the directory buffer.
+    MetadataHeadersTruncated { needed: usize, have: usize },
+    /// Section's encrypted payload extends past the file.
+    SectionPastFile { index: usize },
+    /// Section's key/iv slot index is outside the data-keys table.
+    SectionKeyIvIndexOutOfRange { index: usize },
+    /// Unknown encryption_kind in section header.
+    UnknownEncryptionKind { index: usize, got: u32 },
+    /// zlib decompress failed for a section.
+    ZlibDecompress {
+        index: usize,
+        source: std::io::Error,
+    },
+    /// Unknown compression_kind in section header.
+    UnknownCompressionKind { index: usize, got: u32 },
+    /// Section's program_segment_index >= e_phnum.
+    SectionProgramIndexOutOfRange { prog_idx: usize, e_phnum: usize },
+    /// Section size disagrees with phdr p_filesz.
+    SectionSizeMismatch {
+        prog_idx: usize,
+        got: usize,
+        expected: usize,
+    },
+    /// Section would write past the reconstructed ELF buffer.
+    SectionPastReconstructedElf {
+        prog_idx: usize,
+        offset: usize,
+        size: usize,
+        elf_size: usize,
+    },
+    /// Reconstructed ELF has bad magic.
+    ReconstructedBadMagic { got: u32 },
+    /// Decrypted package contained no usable section.
+    NoUsableSection,
+}
+
+impl std::fmt::Display for SceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooSmall { what, got, need } => write!(
+                f,
+                "SCE: {what} too small ({got} bytes, need {need})"
+            ),
+            Self::BadMagic { got } => write!(f, "SCE: bad magic 0x{got:08x}"),
+            Self::NoAppKey { revision } => {
+                write!(f, "SCE: no APP key for SELF revision 0x{revision:04x}")
+            }
+            Self::HeaderOffsetOutOfRange { what } => {
+                write!(f, "SCE: {what} offset out of range")
+            }
+            Self::BadElfClass { got } => write!(
+                f,
+                "SCE: SELF ELF header is not ELFCLASS64 (EI_CLASS=0x{got:02x})"
+            ),
+            Self::AesCbcDecryptFailed => f.write_str("SCE: AES-256-CBC decrypt failed"),
+            Self::KeyEnvelopePadding => f.write_str(
+                "SCE: MetadataKeyEnvelope padding validation failed (wrong key?)",
+            ),
+            Self::MetadataTooSmall => f.write_str("SCE: decrypted metadata too small for header"),
+            Self::MetadataHeadersTruncated { needed, have } => write!(
+                f,
+                "SCE: metadata headers truncated: need {needed} bytes, have {have}"
+            ),
+            Self::SectionPastFile { index } => {
+                write!(f, "SCE: section {index} extends past file end")
+            }
+            Self::SectionKeyIvIndexOutOfRange { index } => {
+                write!(f, "SCE: section {index} key/iv index out of range")
+            }
+            Self::UnknownEncryptionKind { index, got } => write!(
+                f,
+                "SCE: section {index} has unknown encryption_kind {got} (expected 1=plain or 3=aes128-ctr)"
+            ),
+            Self::ZlibDecompress { index, source } => write!(
+                f,
+                "SCE: zlib decompress failed for section {index}: {source}"
+            ),
+            Self::UnknownCompressionKind { index, got } => write!(
+                f,
+                "SCE: section {index} has unknown compression_kind {got} (expected 1=none or 2=zlib)"
+            ),
+            Self::SectionProgramIndexOutOfRange {
+                prog_idx,
+                e_phnum,
+            } => write!(
+                f,
+                "SCE: section program_segment_index {prog_idx} >= e_phnum {e_phnum}"
+            ),
+            Self::SectionSizeMismatch {
+                prog_idx,
+                got,
+                expected,
+            } => write!(
+                f,
+                "SCE: section for program segment {prog_idx} has {got} bytes but phdr p_filesz is {expected}"
+            ),
+            Self::SectionPastReconstructedElf {
+                prog_idx,
+                offset,
+                size,
+                elf_size,
+            } => write!(
+                f,
+                "SCE: section for program segment {prog_idx} (offset 0x{offset:x}, size 0x{size:x}) exceeds reconstructed ELF size 0x{elf_size:x}"
+            ),
+            Self::ReconstructedBadMagic { got } => {
+                write!(f, "SCE: reconstructed ELF has bad magic 0x{got:08x}")
+            }
+            Self::NoUsableSection => f.write_str("SCE: no usable section found in decrypted package"),
+        }
+    }
+}
+
+impl std::error::Error for SceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ZlibDecompress { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+pub fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, SceError> {
     if data.len() < 0x20 {
-        return Err("data too small for SCE header".into());
+        return Err(SceError::TooSmall {
+            what: "SCE header",
+            got: data.len(),
+            need: 0x20,
+        });
     }
     let magic = read_be_u32(data, 0);
     if magic != 0x53434500 {
-        return Err(format!("bad SCE magic: 0x{magic:08x}"));
+        return Err(SceError::BadMagic { got: magic });
     }
     Ok(SceContainerHeader {
         magic,
@@ -105,47 +258,43 @@ pub fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, String> {
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 type Aes128Ctr = ctr::Ctr128BE<aes::Aes128>;
 
-pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, String> {
+pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, SceError> {
     decrypt_sce(data, &SCEPKG_ERK, &SCEPKG_RIV)
 }
 
-/// Section type 2 carries a program-segment payload. Type 1 (SHDR)
-/// describes the original section-header table and is dropped.
-const SECTION_KIND_PHDR: u32 = 2;
-
-const ENC_KIND_PLAIN: u32 = 1;
-const ENC_KIND_AES128_CTR: u32 = 3;
-
-const COMP_KIND_NONE: u32 = 1;
-const COMP_KIND_ZLIB: u32 = 2;
-
-pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, String> {
+pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, SceError> {
     let hdr = parse_sce_header(data)?;
     let revision = hdr.revision_flags & 0x7FFF;
-    let key = crate::crypto::app_key_for_revision(revision)
-        .ok_or_else(|| format!("no APP key for SELF revision 0x{revision:04x}"))?;
+    let key =
+        crate::crypto::app_key_for_revision(revision).ok_or(SceError::NoAppKey { revision })?;
 
     if data.len() < 0x40 {
-        return Err("SELF too short for extended header".into());
+        return Err(SceError::TooSmall {
+            what: "SELF extended header",
+            got: data.len(),
+            need: 0x40,
+        });
     }
     let ehdr_offset = read_be_u64(data, 0x30) as usize;
     let phdr_offset = read_be_u64(data, 0x38) as usize;
 
     if ehdr_offset + 0x40 > data.len() {
-        return Err("SELF ELF header offset out of range".into());
+        return Err(SceError::HeaderOffsetOutOfRange {
+            what: "SELF ELF header",
+        });
     }
     // Field offsets below assume ELFCLASS64. EI_CLASS == 2 is the
     // only value PS3 SELFs use.
     let ei_class = data[ehdr_offset + 4];
     if ei_class != 2 {
-        return Err(format!(
-            "SELF ELF header is not ELFCLASS64 (EI_CLASS=0x{ei_class:02x})"
-        ));
+        return Err(SceError::BadElfClass { got: ei_class });
     }
     let e_phnum = read_be_u16(data, ehdr_offset + 0x38) as usize;
     let e_phentsize = read_be_u16(data, ehdr_offset + 0x36) as usize;
     if phdr_offset + e_phnum * e_phentsize > data.len() {
-        return Err("SELF program headers out of range".into());
+        return Err(SceError::HeaderOffsetOutOfRange {
+            what: "SELF program headers",
+        });
     }
 
     let sections = decrypt_sce_sections(data, &key.erk, &key.riv)?;
@@ -177,31 +326,32 @@ pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, String> {
         }
         let prog_idx = sec.program_segment_index as usize;
         if prog_idx >= e_phnum {
-            return Err(format!(
-                "SCE section program_segment_index {prog_idx} >= e_phnum {e_phnum}"
-            ));
+            return Err(SceError::SectionProgramIndexOutOfRange { prog_idx, e_phnum });
         }
         let ph_off = phdr_offset + prog_idx * e_phentsize;
         let p_offset = read_be_u64(data, ph_off + 0x08) as usize;
         let p_filesz = read_be_u64(data, ph_off + 0x20) as usize;
         if sec_data.len() != p_filesz {
-            return Err(format!(
-                "SCE section for program segment {prog_idx} has {} bytes but phdr p_filesz is {p_filesz}",
-                sec_data.len()
-            ));
+            return Err(SceError::SectionSizeMismatch {
+                prog_idx,
+                got: sec_data.len(),
+                expected: p_filesz,
+            });
         }
         if p_offset + p_filesz > elf.len() {
-            return Err(format!(
-                "SCE section for program segment {prog_idx} (offset 0x{p_offset:x}, size 0x{p_filesz:x}) exceeds reconstructed ELF size 0x{:x}",
-                elf.len()
-            ));
+            return Err(SceError::SectionPastReconstructedElf {
+                prog_idx,
+                offset: p_offset,
+                size: p_filesz,
+                elf_size: elf.len(),
+            });
         }
         elf[p_offset..p_offset + p_filesz].copy_from_slice(sec_data);
     }
 
     let magic = u32::from_be_bytes([elf[0], elf[1], elf[2], elf[3]]);
     if magic != 0x7F454C46 {
-        return Err(format!("reconstructed ELF has bad magic: 0x{magic:08x}"));
+        return Err(SceError::ReconstructedBadMagic { got: magic });
     }
 
     Ok(elf)
@@ -229,7 +379,7 @@ pub fn mask_non_semantic_elf_bytes(elf: &mut [u8]) {
     elf[0x3E..0x40].copy_from_slice(&0u16.to_be_bytes());
 }
 
-fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8>, String> {
+fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8>, SceError> {
     let sections = decrypt_sce_sections(data, erk, riv)?;
 
     if std::env::var("CELLGOV_FW_DEBUG").is_ok() {
@@ -259,7 +409,7 @@ fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8
     if let Some((_, largest)) = sections.into_iter().max_by_key(|(_, s)| s.len()) {
         Ok(largest)
     } else {
-        Err("no usable section found in decrypted package".into())
+        Err(SceError::NoUsableSection)
     }
 }
 
@@ -267,12 +417,16 @@ pub fn decrypt_sce_sections(
     data: &[u8],
     erk: &[u8; 0x20],
     riv: &[u8; 0x10],
-) -> Result<Vec<(EncryptedSectionDescriptor, Vec<u8>)>, String> {
+) -> Result<Vec<(EncryptedSectionDescriptor, Vec<u8>)>, SceError> {
     let hdr = parse_sce_header(data)?;
 
     let key_envelope_offset = hdr.metadata_offset as usize + 0x20;
     if key_envelope_offset + 0x40 > data.len() {
-        return Err("SCE file truncated at metadata info".into());
+        return Err(SceError::TooSmall {
+            what: "SCE metadata info",
+            got: data.len(),
+            need: key_envelope_offset + 0x40,
+        });
     }
 
     let mut key_envelope_buf = [0u8; 0x40];
@@ -287,7 +441,7 @@ pub fn decrypt_sce_sections(
         );
         decryptor
             .decrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut key_envelope_buf)
-            .map_err(|e| format!("AES-256-CBC decrypt failed: {e}"))?;
+            .map_err(|_| SceError::AesCbcDecryptFailed)?;
     }
 
     let aes_key: [u8; 16] = key_envelope_buf[0..16]
@@ -302,13 +456,17 @@ pub fn decrypt_sce_sections(
         && (key_envelope_buf[0x10..0x20].iter().any(|&b| b != 0)
             || key_envelope_buf[0x30..0x40].iter().any(|&b| b != 0))
     {
-        return Err("MetadataKeyEnvelope padding validation failed (wrong key?)".into());
+        return Err(SceError::KeyEnvelopePadding);
     }
 
     let directory_offset = key_envelope_offset + 0x40;
     let directory_end = hdr.header_size as usize;
     if directory_end > data.len() || directory_offset >= directory_end {
-        return Err("SCE file truncated at metadata headers".into());
+        return Err(SceError::TooSmall {
+            what: "SCE metadata headers",
+            got: data.len(),
+            need: directory_end,
+        });
     }
     let mut directory_buf = data[directory_offset..directory_end].to_vec();
 
@@ -320,7 +478,7 @@ pub fn decrypt_sce_sections(
     ctr_cipher.apply_keystream(&mut directory_buf);
 
     if directory_buf.len() < 0x20 {
-        return Err("decrypted metadata too small for header".into());
+        return Err(SceError::MetadataTooSmall);
     }
     let section_count = read_be_u32(&directory_buf, 0x0C) as usize;
     let key_count = read_be_u32(&directory_buf, 0x10) as usize;
@@ -330,11 +488,10 @@ pub fn decrypt_sce_sections(
     let keys_end = keys_start + key_count * 0x10;
 
     if keys_end > directory_buf.len() {
-        return Err(format!(
-            "metadata headers truncated: need {} bytes, have {}",
-            keys_end,
-            directory_buf.len()
-        ));
+        return Err(SceError::MetadataHeadersTruncated {
+            needed: keys_end,
+            have: directory_buf.len(),
+        });
     }
 
     let data_keys = &directory_buf[keys_start..keys_end];
@@ -359,7 +516,7 @@ pub fn decrypt_sce_sections(
         let sec_start = sec.payload_offset as usize;
         let sec_end = sec_start + sec.payload_size as usize;
         if sec_end > data.len() {
-            return Err(format!("section {i} extends past file end"));
+            return Err(SceError::SectionPastFile { index: i });
         }
 
         let mut sec_data = data[sec_start..sec_end].to_vec();
@@ -370,7 +527,7 @@ pub fn decrypt_sce_sections(
                 let k_off = sec.key_slot as usize * 0x10;
                 let iv_off = sec.iv_slot as usize * 0x10;
                 if k_off + 0x10 > data_keys.len() || iv_off + 0x10 > data_keys.len() {
-                    return Err(format!("section {i} key/iv index out of range"));
+                    return Err(SceError::SectionKeyIvIndexOutOfRange { index: i });
                 }
                 let sec_key: [u8; 16] = data_keys[k_off..k_off + 0x10]
                     .try_into()
@@ -387,9 +544,10 @@ pub fn decrypt_sce_sections(
                 sec_cipher.apply_keystream(&mut sec_data);
             }
             other => {
-                return Err(format!(
-                    "section {i} has unknown encryption_kind {other} (expected 1=plain or 3=aes128-ctr); refusing to emit partial-decrypted bytes"
-                ));
+                return Err(SceError::UnknownEncryptionKind {
+                    index: i,
+                    got: other,
+                });
             }
         }
 
@@ -402,13 +560,14 @@ pub fn decrypt_sce_sections(
                 let mut decompressed = Vec::new();
                 decoder
                     .read_to_end(&mut decompressed)
-                    .map_err(|e| format!("zlib decompress failed for section {i}: {e}"))?;
+                    .map_err(|source| SceError::ZlibDecompress { index: i, source })?;
                 sec_data = decompressed;
             }
             other => {
-                return Err(format!(
-                    "section {i} has unknown compression_kind {other} (expected 1=none or 2=zlib); refusing to emit still-compressed bytes"
-                ));
+                return Err(SceError::UnknownCompressionKind {
+                    index: i,
+                    got: other,
+                });
             }
         }
 
@@ -431,9 +590,10 @@ mod tests {
     fn parse_sce_header_rejects_bad_magic() {
         let mut data = [0u8; 0x20];
         data[0..4].copy_from_slice(&0xDEADBEEFu32.to_be_bytes());
-        assert!(parse_sce_header(&data)
-            .unwrap_err()
-            .contains("bad SCE magic"));
+        assert!(matches!(
+            parse_sce_header(&data).unwrap_err(),
+            SceError::BadMagic { .. }
+        ));
     }
 
     #[test]

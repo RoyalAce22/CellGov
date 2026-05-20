@@ -170,7 +170,7 @@ fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputForma
             let json = serde_json::json!({
                 "exploration": serde_json::from_str::<serde_json::Value>(
                     &cellgov_explore::report::format_json(&r.exploration)
-                ).expect("invariant: report::format_json emits valid JSON"),
+                ).expect("invariant: exploration report is float-free by construction (style doc 0.5d contract)"),
                 "oracle": {
                     "baselines_count": baselines.len(),
                     "baseline_matches": baseline_matches,
@@ -182,7 +182,7 @@ fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputForma
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json)
-                    .expect("invariant: serde_json::Value always serializes"),
+                    .expect("invariant: primitive-only serde_json::Value tree always serializes (style doc 0.5d contract)"),
             );
         }
     }
