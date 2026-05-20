@@ -611,9 +611,9 @@ mod tests {
         assert!(decrypt_package(&[0u8; 8]).is_err());
     }
 
-    /// Foundation SPRXes already have zero `e_shoff`/`e_shnum`/
-    /// `e_shstrndx` in the source, so this exercises the zeroing
-    /// against non-zero inputs.
+    /// Minimum-viable PRX SPRXes already have zero
+    /// `e_shoff`/`e_shnum`/`e_shstrndx` in the source, so this
+    /// exercises the zeroing against non-zero inputs.
     #[test]
     fn rewrite_elf_header_offsets_zeroes_section_header_fields() {
         let mut elf = vec![0u8; 0x80];

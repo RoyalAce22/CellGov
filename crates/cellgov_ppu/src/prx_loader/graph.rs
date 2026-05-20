@@ -256,8 +256,8 @@ mod tests {
     }
 
     #[test]
-    fn module_id_golden_values_for_canonical_foundation_names() {
-        // FNV-1a-32 over the canonical foundation-stem names.
+    fn module_id_golden_values_for_canonical_min_viable_prx_names() {
+        // FNV-1a-32 over the canonical minimum-viable PRX stem names.
         // These values are part of the determinism contract: the
         // sync_state_hash, the loader's dependency graph, and any
         // future trace record consuming module ids all transitively

@@ -748,8 +748,8 @@ fn syscall_332_writes_fresh_mem_id_to_mem_id_ptr() {
 #[test]
 fn syscall_480_returns_registered_kernel_id_for_known_stem() {
     // _sys_prx_load_module with a path whose stem matches a
-    // registered foundation PRX returns the registry's kernel
-    // id, not the path-pointer fallback.
+    // registered PRX returns the registry's kernel id, not the
+    // path-pointer fallback.
     let mut host = Lv2Host::new();
     let expected_id = host.prx_registry_mut().register(
         "libaudio".into(),

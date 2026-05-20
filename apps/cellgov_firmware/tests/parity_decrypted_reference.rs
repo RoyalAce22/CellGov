@@ -138,7 +138,7 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path) {
 }
 
 #[test]
-fn foundation_sprx_decrypt_matches_pre_decrypted_reference() {
+fn min_viable_prx_decrypt_matches_pre_decrypted_reference() {
     let Some((encrypted_dir, reference_dir)) = locate_fixtures() else {
         return;
     };

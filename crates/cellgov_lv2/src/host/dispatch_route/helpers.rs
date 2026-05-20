@@ -42,7 +42,8 @@ impl Lv2Host {
     /// Resolve the path at `path_ptr` against [`Self::prx_registry`]
     /// for syscalls 480 / 497. Returns the registered kernel id on
     /// match; on miss returns the path pointer as a synthetic id so
-    /// non-foundation modules still see a distinct non-zero value.
+    /// modules outside the minimum viable PRX set still see a
+    /// distinct non-zero value.
     pub(super) fn resolve_prx_load(&self, path_ptr: u64, rt: &dyn Lv2Runtime) -> Lv2Dispatch {
         const PATH_CAP: usize = 256;
         let bytes = rt.read_committed_until(path_ptr, PATH_CAP, 0);
