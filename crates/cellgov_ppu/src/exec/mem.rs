@@ -306,7 +306,15 @@ pub(crate) fn execute(
                 state.set_cr_field(0, 0b0010 | so);
                 let range = match ByteRange::new(GuestAddr::new(ea), 8) {
                     Some(r) => r,
-                    None => return ExecuteVerdict::MemFault(ea),
+                    None => {
+                        return ExecuteVerdict::MemFault(cellgov_mem::MemError::Unmapped(
+                            cellgov_mem::FaultContext {
+                                addr: ea,
+                                nearest_below: None,
+                                nearest_above: None,
+                            },
+                        ));
+                    }
                 };
                 let value = state.gpr[rs as usize];
                 let bytes = value.to_be_bytes();
@@ -368,7 +376,15 @@ pub(crate) fn execute(
                 state.set_cr_field(0, 0b0010 | so);
                 let range = match ByteRange::new(GuestAddr::new(ea), 4) {
                     Some(r) => r,
-                    None => return ExecuteVerdict::MemFault(ea),
+                    None => {
+                        return ExecuteVerdict::MemFault(cellgov_mem::MemError::Unmapped(
+                            cellgov_mem::FaultContext {
+                                addr: ea,
+                                nearest_below: None,
+                                nearest_above: None,
+                            },
+                        ));
+                    }
                 };
                 let value32 = state.gpr[rs as usize] as u32;
                 let bytes = value32.to_be_bytes();
@@ -679,13 +695,19 @@ fn read_aligned_16(
     aligned: u64,
     region_views: &[(u64, &[u8])],
     store_buf: &StoreBuffer,
-) -> Result<u128, u64> {
+) -> Result<u128, cellgov_mem::MemError> {
     if let Some(v) = store_buf.forward(aligned, 16) {
         return Ok(v);
     }
     let slice = match load_slice(region_views, aligned, 16) {
         Some(s) => s,
-        None => return Err(aligned),
+        None => {
+            return Err(cellgov_mem::MemError::Unmapped(cellgov_mem::FaultContext {
+                addr: aligned,
+                nearest_below: None,
+                nearest_above: None,
+            }));
+        }
     };
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(slice);
@@ -817,7 +839,10 @@ mod tests {
             },
             &mut s,
         );
-        assert_eq!(result, ExecuteVerdict::MemFault(0x1008));
+        assert!(matches!(
+            result,
+            ExecuteVerdict::MemFault(cellgov_mem::MemError::Unmapped(ctx)) if ctx.addr == 0x1008
+        ));
     }
 
     #[test]

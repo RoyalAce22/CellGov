@@ -308,3 +308,15 @@ pub enum SpuDecodeError {
     /// No matching encoding for this 32-bit word.
     Unsupported(u32),
 }
+
+impl std::fmt::Display for SpuDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsupported(word) => {
+                write!(f, "unsupported SPU instruction 0x{word:08x}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SpuDecodeError {}

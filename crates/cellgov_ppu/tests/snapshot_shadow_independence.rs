@@ -19,12 +19,7 @@
 use cellgov_ppu::decode::decode;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::shadow::PredecodedShadow;
-
-/// `addi r3, r3, 1`. Verified by [`encoding_decodes_to_expected`].
-const ADDI_R3_R3_1: u32 = 0x3863_0001;
-
-/// `blr`. Verified by [`encoding_decodes_to_expected`].
-const BLR: u32 = 0x4E80_0020;
+use cellgov_ps3_abi::ppc_isa::{PPC_ADDI_R3_R3_1 as ADDI_R3_R3_1, PPC_BLR as BLR};
 
 const SHADOW_BASE: u64 = 0x1000;
 

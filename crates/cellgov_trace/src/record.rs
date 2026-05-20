@@ -221,6 +221,23 @@ pub enum DecodeError {
     UnknownWakeReason(u8),
 }
 
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Truncated => f.write_str("byte stream ended mid-record"),
+            Self::UnknownTag(b) => write!(f, "unknown record tag 0x{b:02x}"),
+            Self::UnknownYieldReason(b) => write!(f, "unknown yield reason 0x{b:02x}"),
+            Self::UnknownHashKind(b) => write!(f, "unknown hash-checkpoint kind 0x{b:02x}"),
+            Self::InvalidBool(b) => write!(f, "fault-discarded flag is neither 0 nor 1: 0x{b:02x}"),
+            Self::UnknownEffectKind(b) => write!(f, "unknown effect kind 0x{b:02x}"),
+            Self::UnknownBlockReason(b) => write!(f, "unknown block reason 0x{b:02x}"),
+            Self::UnknownWakeReason(b) => write!(f, "unknown wake reason 0x{b:02x}"),
+        }
+    }
+}
+
+impl std::error::Error for DecodeError {}
+
 /// A single structured trace record.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

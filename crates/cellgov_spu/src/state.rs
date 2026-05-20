@@ -2,13 +2,7 @@
 
 use cellgov_sync::ReservedLine;
 
-/// SPU local store size: 256 KB.
-// [CBE-Handbook p:126 s:5.3.1] LS area for each SPE is 256 KB in size.
-pub const LS_SIZE: usize = 256 * 1024;
-
-/// Number of 128-bit general-purpose SPU registers.
-// [SPU-ISA p:25 s:2] 128 GPRs, each 128 bits wide.
-pub const REG_COUNT: usize = 128;
+pub use cellgov_ps3_abi::hardware::{SPU_LS_SIZE as LS_SIZE, SPU_REG_COUNT as REG_COUNT};
 
 /// Full SPU architectural state.
 #[derive(Clone)]

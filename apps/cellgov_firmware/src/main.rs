@@ -51,9 +51,86 @@ struct InstallArgs {
 
 const DEFAULT_INSTALL_OUTPUT: &str = "firmware";
 
-fn parse_install_args(args: &[String]) -> Result<InstallArgs, String> {
+/// Why a cellgov_firmware CLI helper failed.
+#[derive(Debug)]
+enum FirmwareCliError {
+    /// `install` invoked without a PUP path.
+    MissingPupPath,
+    /// `decrypt-self` invoked without a SELF path.
+    MissingSelfPath,
+    /// `--output` flag with no following argument.
+    OutputFlagMissingValue { kind: &'static str },
+    /// Unknown subcommand flag.
+    UnknownArgument(String),
+    /// `check_output_dir`: read_dir failed on the candidate output.
+    OutputDirReadFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// `check_output_dir`: existing output is non-empty and --force not set.
+    OutputDirNotEmpty { path: PathBuf },
+    /// `build_firmware_manifest`: reading an SPRX failed.
+    SprxReadFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// `build_firmware_manifest`: `strip_prefix(output_dir)` failed (the
+    /// path-walker produced a path that wasn't under `output_dir`, which
+    /// implies a `collect_sprx_paths` bug).
+    StripPrefixFailed {
+        path: PathBuf,
+        source: std::path::StripPrefixError,
+    },
+    /// `build_firmware_manifest`: an SPRX's path has non-UTF-8 bytes;
+    /// firmware.toml cannot represent it.
+    NonUtf8Path { path: PathBuf },
+}
+
+impl std::fmt::Display for FirmwareCliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingPupPath => f.write_str("install requires a PUP path"),
+            Self::MissingSelfPath => f.write_str("decrypt-self requires a SELF path"),
+            Self::OutputFlagMissingValue { kind } => {
+                write!(f, "--output requires a {kind} argument")
+            }
+            Self::UnknownArgument(s) => write!(f, "unknown argument: {s}"),
+            Self::OutputDirReadFailed { path, source } => {
+                write!(f, "failed to read {}: {source}", path.display())
+            }
+            Self::OutputDirNotEmpty { path } => write!(
+                f,
+                "output directory {} exists and is non-empty; pass --force to overwrite",
+                path.display()
+            ),
+            Self::SprxReadFailed { path, source } => {
+                write!(f, "read {}: {source}", path.display())
+            }
+            Self::StripPrefixFailed { path, source } => {
+                write!(f, "strip_prefix({}): {source}", path.display())
+            }
+            Self::NonUtf8Path { path } => {
+                write!(f, "non-utf8 firmware path: {}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for FirmwareCliError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::OutputDirReadFailed { source, .. } | Self::SprxReadFailed { source, .. } => {
+                Some(source)
+            }
+            Self::StripPrefixFailed { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+fn parse_install_args(args: &[String]) -> Result<InstallArgs, FirmwareCliError> {
     if args.len() < 3 {
-        return Err("install requires a PUP path".to_string());
+        return Err(FirmwareCliError::MissingPupPath);
     }
     let pup_path = PathBuf::from(&args[2]);
     let mut output_dir: Option<PathBuf> = None;
@@ -64,7 +141,7 @@ fn parse_install_args(args: &[String]) -> Result<InstallArgs, String> {
             "--output" => {
                 i += 1;
                 if i >= args.len() {
-                    return Err("--output requires a directory argument".to_string());
+                    return Err(FirmwareCliError::OutputFlagMissingValue { kind: "directory" });
                 }
                 output_dir = Some(PathBuf::from(&args[i]));
             }
@@ -72,7 +149,7 @@ fn parse_install_args(args: &[String]) -> Result<InstallArgs, String> {
                 force = true;
             }
             other => {
-                return Err(format!("unknown argument: {other}"));
+                return Err(FirmwareCliError::UnknownArgument(other.to_string()));
             }
         }
         i += 1;
@@ -85,17 +162,19 @@ fn parse_install_args(args: &[String]) -> Result<InstallArgs, String> {
 }
 
 /// Errors if `dir` exists and is non-empty without `force`.
-fn check_output_dir(dir: &Path, force: bool) -> Result<(), String> {
+fn check_output_dir(dir: &Path, force: bool) -> Result<(), FirmwareCliError> {
     if !dir.exists() {
         return Ok(());
     }
     let mut entries =
-        std::fs::read_dir(dir).map_err(|e| format!("failed to read {}: {e}", dir.display()))?;
+        std::fs::read_dir(dir).map_err(|source| FirmwareCliError::OutputDirReadFailed {
+            path: dir.to_path_buf(),
+            source,
+        })?;
     if entries.next().is_some() && !force {
-        return Err(format!(
-            "output directory {} exists and is non-empty; pass --force to overwrite",
-            dir.display()
-        ));
+        return Err(FirmwareCliError::OutputDirNotEmpty {
+            path: dir.to_path_buf(),
+        });
     }
     Ok(())
 }
@@ -106,9 +185,9 @@ struct DecryptSelfArgs {
     output_path: Option<PathBuf>,
 }
 
-fn parse_decrypt_self_args(args: &[String]) -> Result<DecryptSelfArgs, String> {
+fn parse_decrypt_self_args(args: &[String]) -> Result<DecryptSelfArgs, FirmwareCliError> {
     if args.len() < 3 {
-        return Err("decrypt-self requires a SELF path".to_string());
+        return Err(FirmwareCliError::MissingSelfPath);
     }
     let self_path = PathBuf::from(&args[2]);
     let mut output_path: Option<PathBuf> = None;
@@ -118,12 +197,12 @@ fn parse_decrypt_self_args(args: &[String]) -> Result<DecryptSelfArgs, String> {
             "--output" => {
                 i += 1;
                 if i >= args.len() {
-                    return Err("--output requires a path argument".to_string());
+                    return Err(FirmwareCliError::OutputFlagMissingValue { kind: "path" });
                 }
                 output_path = Some(PathBuf::from(&args[i]));
             }
             other => {
-                return Err(format!("unknown argument: {other}"));
+                return Err(FirmwareCliError::UnknownArgument(other.to_string()));
             }
         }
         i += 1;
@@ -283,12 +362,7 @@ fn cmd_install(args: &[String]) {
     if !extract_errors.is_empty() {
         eprintln!("cellgov_firmware: {} extract errors:", extract_errors.len());
         for err in &extract_errors {
-            eprintln!(
-                "  {:?}: {} -> {}",
-                err.kind,
-                err.guest_path,
-                err.host_path.display()
-            );
+            eprintln!("  {err}");
         }
     }
 
@@ -363,7 +437,7 @@ fn build_firmware_manifest(
     pup_data: &[u8],
     pup_image_version: u64,
     output_dir: &Path,
-) -> Result<FirmwareManifest, String> {
+) -> Result<FirmwareManifest, FirmwareCliError> {
     let mut pup_hasher = Sha256::new();
     pup_hasher.update(pup_data);
     let pup_sha256 = manifest::Sha256(pup_hasher.finalize().into());
@@ -374,8 +448,10 @@ fn build_firmware_manifest(
     let mut files = Vec::with_capacity(sprx_paths.len());
     let mut skipped = 0usize;
     for sprx_path in &sprx_paths {
-        let raw =
-            std::fs::read(sprx_path).map_err(|e| format!("read {}: {e}", sprx_path.display()))?;
+        let raw = std::fs::read(sprx_path).map_err(|source| FirmwareCliError::SprxReadFailed {
+            path: sprx_path.clone(),
+            source,
+        })?;
         let elf = match sce::decrypt_self_to_elf(&raw) {
             Ok(e) => e,
             Err(_) => {
@@ -395,12 +471,17 @@ fn build_firmware_manifest(
         let mut h = Sha256::new();
         h.update(&elf);
         let sha256 = manifest::Sha256(h.finalize().into());
-        let rel = sprx_path
-            .strip_prefix(output_dir)
-            .map_err(|e| format!("strip_prefix({}): {e}", sprx_path.display()))?;
+        let rel = sprx_path.strip_prefix(output_dir).map_err(|source| {
+            FirmwareCliError::StripPrefixFailed {
+                path: sprx_path.clone(),
+                source,
+            }
+        })?;
         let path = rel
             .to_str()
-            .ok_or_else(|| format!("non-utf8 firmware path: {}", rel.display()))?
+            .ok_or_else(|| FirmwareCliError::NonUtf8Path {
+                path: rel.to_path_buf(),
+            })?
             .replace('\\', "/");
         files.push(FirmwareFileEntry {
             path,

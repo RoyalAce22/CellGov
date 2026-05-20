@@ -8,8 +8,15 @@
 //! per-module file.
 
 /// A PS3 LV2 error code with its symbol and header description.
+///
+/// This is a value-catalogue entry (errno code + symbol + description),
+/// not a Rust-level error type. It is never returned as the `E` of any
+/// `Result`; only its `code` flows to guest code via
+/// `impl From<Lv2ErrCode> for u64`. The name avoids the "Error" suffix
+/// to keep the workspace's error-handling style contract clean
+/// (`docs/dev/error_handling_style.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Lv2Error {
+pub struct Lv2ErrCode {
     /// Numeric code.
     pub code: u32,
     /// Symbol name, e.g. `"CELL_EPERM"`.
@@ -21,14 +28,14 @@ pub struct Lv2Error {
 /// Widens to the `u64` shape the dispatch pipeline uses for syscall
 /// return codes; `errno::CELL_XXX.into()` keeps `errno::` in the path
 /// so every errno-emitting site is greppable.
-impl From<Lv2Error> for u64 {
-    fn from(err: Lv2Error) -> u64 {
+impl From<Lv2ErrCode> for u64 {
+    fn from(err: Lv2ErrCode) -> u64 {
         err.code as u64
     }
 }
 
 /// Success sentinel. Not a `CellError` member, not in [`ENTRIES`].
-pub const CELL_OK: Lv2Error = Lv2Error {
+pub const CELL_OK: Lv2ErrCode = Lv2ErrCode {
     code: 0,
     symbol: "CELL_OK",
     description: "",
@@ -40,7 +47,7 @@ macro_rules! errno_table {
     ( $( $name:ident = $code:literal , $desc:literal ; )* ) => {
         $(
             #[doc = $desc]
-            pub const $name: Lv2Error = Lv2Error {
+            pub const $name: Lv2ErrCode = Lv2ErrCode {
                 code: $code,
                 symbol: stringify!($name),
                 description: $desc,
@@ -48,7 +55,7 @@ macro_rules! errno_table {
         )*
 
         /// Every `CellError` entry, ascending by code.
-        pub const ENTRIES: &[&Lv2Error] = &[
+        pub const ENTRIES: &[&Lv2ErrCode] = &[
             $( & $name , )*
         ];
     };
@@ -123,7 +130,7 @@ errno_table! {
 /// `CellError` block, including `CELL_OK`.
 ///
 /// O(n) scan over [`ENTRIES`] (~60 entries, diagnostic paths only).
-pub fn lookup(code: u32) -> Option<&'static Lv2Error> {
+pub fn lookup(code: u32) -> Option<&'static Lv2ErrCode> {
     ENTRIES.iter().copied().find(|e| e.code == code)
 }
 

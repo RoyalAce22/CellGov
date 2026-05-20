@@ -13,6 +13,24 @@ pub enum BaselineError {
     Json(serde_json::Error),
 }
 
+impl std::fmt::Display for BaselineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "baseline I/O: {e}"),
+            Self::Json(e) => write!(f, "baseline JSON: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for BaselineError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Json(e) => Some(e),
+        }
+    }
+}
+
 impl From<io::Error> for BaselineError {
     fn from(e: io::Error) -> Self {
         Self::Io(e)

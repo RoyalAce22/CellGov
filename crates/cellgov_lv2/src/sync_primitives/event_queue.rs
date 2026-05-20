@@ -60,6 +60,17 @@ pub enum EventQueueEnqueueError {
     DuplicateWaiter,
 }
 
+impl std::fmt::Display for EventQueueEnqueueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownId => f.write_str("event_queue enqueue: unknown id"),
+            Self::DuplicateWaiter => f.write_str("event_queue enqueue: duplicate waiter"),
+        }
+    }
+}
+
+impl std::error::Error for EventQueueEnqueueError {}
+
 /// A parked `sys_event_queue_receive` caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventQueueWaiter {

@@ -72,6 +72,8 @@ impl std::fmt::Display for DuplicateHleBindingIndex {
     }
 }
 
+impl std::error::Error for DuplicateHleBindingIndex {}
+
 /// Build an HLE-index to NID map for fast runtime lookup.
 ///
 /// # Errors
@@ -455,14 +457,72 @@ fn find_firmware_module(dir_path: &Path, stem: &str) -> Option<PathBuf> {
     None
 }
 
+/// Why a firmware PRX failed to stage through the GOT-patch path.
+#[derive(Debug)]
+pub(super) enum PrxLoadStageError {
+    /// Reading the firmware module file failed.
+    Read {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+    /// SCE / SELF decryption failed.
+    Decrypt {
+        path: std::path::PathBuf,
+        source: cellgov_firmware::sce::SceError,
+    },
+    /// A staged GOT slot's 4-byte ByteRange could not be constructed.
+    GotSlotBadRange { stub_addr: u32, nid: u32 },
+    /// `StagingMemory::drain_into` rejected the batch; guest memory
+    /// is unchanged by the atomic-batch contract.
+    GotBatchCommit {
+        staged: usize,
+        source: cellgov_mem::MemError,
+    },
+}
+
+impl std::fmt::Display for PrxLoadStageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read { path, source } => write!(f, "read {}: {source}", path.display()),
+            Self::Decrypt { path, source } => write!(f, "decrypt {}: {source}", path.display()),
+            Self::GotSlotBadRange { stub_addr, nid } => write!(
+                f,
+                "GOT slot at 0x{stub_addr:08x} (nid 0x{nid:08x}): invalid 4-byte range"
+            ),
+            Self::GotBatchCommit { staged, source } => write!(
+                f,
+                "GOT batch validation failed ({source}); {staged} staged write(s) discarded"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PrxLoadStageError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } => Some(source),
+            Self::Decrypt { source, .. } => Some(source),
+            Self::GotBatchCommit { source, .. } => Some(source),
+            Self::GotSlotBadRange { .. } => None,
+        }
+    }
+}
+
 /// Read a firmware module file and decrypt if SCE-wrapped. Returns
 /// the raw bytes otherwise so pre-decrypted `.prx` files load through
 /// the same path.
-fn read_firmware_module_elf(path: &Path) -> Result<Vec<u8>, String> {
-    let raw = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+fn read_firmware_module_elf(path: &Path) -> Result<Vec<u8>, PrxLoadStageError> {
+    let raw = std::fs::read(path).map_err(|source| PrxLoadStageError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
     if raw.len() >= 4 && &raw[..4] == b"SCE\0" {
-        cellgov_firmware::sce::decrypt_self_to_elf(&raw)
-            .map_err(|e| format!("decrypt {}: {e}", path.display()))
+        cellgov_firmware::sce::decrypt_self_to_elf(&raw).map_err(|source| {
+            PrxLoadStageError::Decrypt {
+                path: path.to_path_buf(),
+                source,
+            }
+        })
     } else {
         Ok(raw)
     }
@@ -487,7 +547,7 @@ fn patch_got_atomic(
     mem: &mut GuestMemory,
     hle_keep_nids: &[u32],
     mut lookup: impl FnMut(u32) -> Option<u64>,
-) -> Result<GotPatchStats, String> {
+) -> Result<GotPatchStats, PrxLoadStageError> {
     let mut staging = StagingMemory::new();
     let mut stats = GotPatchStats::default();
     for binding in bindings {
@@ -500,25 +560,24 @@ fn patch_got_atomic(
             continue;
         };
         let opd_u32 = opd_addr as u32;
-        let range =
-            ByteRange::new(GuestAddr::new(binding.stub_addr as u64), 4).ok_or_else(|| {
-                format!(
-                    "GOT slot at 0x{:08x} (nid 0x{:08x}): invalid 4-byte range",
-                    binding.stub_addr, binding.nid
-                )
-            })?;
+        let range = ByteRange::new(GuestAddr::new(binding.stub_addr as u64), 4).ok_or(
+            PrxLoadStageError::GotSlotBadRange {
+                stub_addr: binding.stub_addr,
+                nid: binding.nid,
+            },
+        )?;
         staging.stage(StagedWrite {
             range,
             bytes: opd_u32.to_be_bytes().to_vec(),
         });
         stats.resolved += 1;
     }
-    staging.drain_into(mem).map_err(|e| {
-        format!(
-            "GOT batch validation failed ({e:?}); {} staged write(s) discarded",
-            stats.resolved
-        )
-    })?;
+    staging
+        .drain_into(mem)
+        .map_err(|source| PrxLoadStageError::GotBatchCommit {
+            staged: stats.resolved,
+            source,
+        })?;
     Ok(stats)
 }
 

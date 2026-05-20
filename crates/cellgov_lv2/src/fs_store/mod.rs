@@ -47,3 +47,20 @@ pub enum FsError {
     /// Surfaced as CELL_EACCES by the dispatch layer.
     PathTraversal,
 }
+
+impl std::fmt::Display for FsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownFd => f.write_str("unknown file descriptor"),
+            Self::UnknownDir => f.write_str("unknown directory descriptor"),
+            Self::UnknownPath => f.write_str("unknown path"),
+            Self::SeekOutOfRange => f.write_str("seek offset out of range"),
+            Self::FdExhausted => f.write_str("fd allocator exhausted"),
+            Self::PathAlreadyRegistered => f.write_str("path already registered"),
+            Self::MountAlreadyRegistered => f.write_str("mount prefix already registered"),
+            Self::PathTraversal => f.write_str("path traversal rejected"),
+        }
+    }
+}
+
+impl std::error::Error for FsError {}

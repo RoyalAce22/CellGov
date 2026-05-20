@@ -6,7 +6,7 @@
 )]
 
 use cellgov_ps3_abi::cell_errors::{
-    self as errno, Lv2Error, CELL_EFAULT, CELL_EINVAL, CELL_EPERM, ENTRIES,
+    self as errno, Lv2ErrCode, CELL_EFAULT, CELL_EINVAL, CELL_EPERM, ENTRIES,
 };
 
 #[test]
@@ -24,7 +24,7 @@ fn every_code_is_unique() {
 
 #[test]
 fn every_symbol_matches_its_constant_name() {
-    let expected: &[(&str, &Lv2Error)] = &[
+    let expected: &[(&str, &Lv2ErrCode)] = &[
         ("CELL_EINVAL", &CELL_EINVAL),
         ("CELL_EPERM", &CELL_EPERM),
         ("CELL_EFAULT", &CELL_EFAULT),

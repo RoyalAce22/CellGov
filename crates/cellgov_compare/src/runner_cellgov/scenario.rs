@@ -103,6 +103,19 @@ pub enum DeterminismError {
     HashMismatch,
 }
 
+impl std::fmt::Display for DeterminismError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OutcomeMismatch => f.write_str("two runs produced different outcomes"),
+            Self::MemoryMismatch => f.write_str("two runs produced different memory contents"),
+            Self::EventMismatch => f.write_str("two runs produced different event sequences"),
+            Self::HashMismatch => f.write_str("two runs produced different state hashes"),
+        }
+    }
+}
+
+impl std::error::Error for DeterminismError {}
+
 /// Run a scenario factory twice and verify both observations match;
 /// returns the observation, or the first field that diverged.
 pub fn observe_with_determinism_check(

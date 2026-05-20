@@ -23,6 +23,21 @@ pub mod region {
     pub const CONTEXT_RESERVATION: u32 = 0x0030_0000;
 }
 
+/// Fixed-address RSX command-FIFO control register slots inside the
+/// DMA control region. The guest reads / writes these to drive the
+/// RSX FIFO; both real PS3 and CellGov surface them at the same
+/// absolute addresses.
+pub mod control_register {
+    /// Guest address of the RSX control register's `put` slot.
+    pub const PUT_ADDR: u32 = 0xC000_0040;
+
+    /// Guest address of the RSX control register's `get` slot.
+    pub const GET_ADDR: u32 = 0xC000_0044;
+
+    /// Guest address of the RSX control register's `reference` slot.
+    pub const REF_ADDR: u32 = 0xC000_0048;
+}
+
 /// `RsxReports` substructure (1024 semaphore slots + 64 notify entries
 /// + 2048 report entries).
 pub mod reports {

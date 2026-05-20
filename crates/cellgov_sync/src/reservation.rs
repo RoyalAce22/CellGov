@@ -27,10 +27,7 @@ const _: () = assert!(
     "line mask arithmetic requires power-of-two granule"
 );
 
-/// Cell BE effective-address space is 42 bits
-/// [CBE-Handbook p:75 s:4.5.1]. Beyond this, the saturating
-/// arithmetic in `end_inclusive` lets near-`u64::MAX` lines collide.
-const CELL_EA_LIMIT: u64 = 0x0000_03FF_FFFF_FFFF;
+use cellgov_ps3_abi::hardware::CELL_EA_LIMIT;
 
 /// 128-byte-aligned guest address. Low 7 bits are always zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

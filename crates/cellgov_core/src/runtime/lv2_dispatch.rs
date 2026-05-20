@@ -139,8 +139,9 @@ impl Runtime {
 
         // Timer syscalls advance the simulated clock without yielding;
         // other PPU threads observe the new time on their next read.
-        const SYS_TIMER_USLEEP: u64 = 141;
-        const SYS_TIMER_SLEEP: u64 = 142;
+        use cellgov_ps3_abi::syscall::{
+            TIMER_SLEEP as SYS_TIMER_SLEEP, TIMER_USLEEP as SYS_TIMER_USLEEP,
+        };
         match args[0] {
             SYS_TIMER_USLEEP => {
                 let usec = args[1];

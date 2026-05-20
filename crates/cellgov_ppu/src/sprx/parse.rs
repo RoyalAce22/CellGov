@@ -124,6 +124,22 @@ pub enum PrxParseError {
     NoModuleInfo,
 }
 
+impl std::fmt::Display for PrxParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooSmall => f.write_str("PRX too small for ELF header"),
+            Self::BadMagic => f.write_str("PRX bad ELF magic"),
+            Self::NotElf64Be => f.write_str("PRX is not ELF64 big-endian"),
+            Self::NotPrx(et) => write!(f, "PRX e_type 0x{et:04x} is not 0xFFA4"),
+            Self::MissingSegments => f.write_str("PRX has fewer than 2 PT_LOAD segments"),
+            Self::OutOfBounds => f.write_str("PRX offset or size escaped buffer"),
+            Self::NoModuleInfo => f.write_str("PRX sys_prx_module_info_t missing"),
+        }
+    }
+}
+
+impl std::error::Error for PrxParseError {}
+
 /// Parse a decrypted PRX (ELF64 type 0xFFA4) into its components.
 ///
 /// Input must already be decrypted (e.g. via RPCS3 `--decrypt`), not a raw

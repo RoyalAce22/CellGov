@@ -63,6 +63,25 @@ pub enum SpuFault {
     UnsupportedMfcCommand(u32),
 }
 
+impl std::fmt::Display for SpuFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LsOutOfRange(addr) => {
+                write!(f, "SPU LS access out of range at 0x{addr:08x}")
+            }
+            Self::UnsupportedChannel { channel, is_write } => {
+                let dir = if *is_write { "wrch" } else { "rdch" };
+                write!(f, "SPU unsupported channel {dir} 0x{channel:02x}")
+            }
+            Self::UnsupportedMfcCommand(op) => {
+                write!(f, "SPU unsupported MFC command opcode 0x{op:08x}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SpuFault {}
+
 fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
     let a = (raw & 0x3FFF0) as usize;
     if a + 16 > ls_len {

@@ -1059,6 +1059,18 @@ pub enum PpuDecodeError {
     Unsupported(u32),
 }
 
+impl std::fmt::Display for PpuDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsupported(word) => {
+                write!(f, "unsupported PPU instruction 0x{word:08x}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PpuDecodeError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

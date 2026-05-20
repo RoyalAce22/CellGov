@@ -81,6 +81,57 @@ pub enum CommitError {
     Memory(MemError),
 }
 
+impl std::fmt::Display for CommitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PayloadLengthMismatch { effect_index } => write!(
+                f,
+                "effect[{effect_index}]: write payload length disagrees with range"
+            ),
+            Self::OutOfRange { effect_index } => {
+                write!(f, "effect[{effect_index}]: write target escapes regions")
+            }
+            Self::UnknownMailbox {
+                effect_index,
+                mailbox,
+            } => write!(f, "effect[{effect_index}]: unknown mailbox {mailbox}"),
+            Self::UnknownSignal {
+                effect_index,
+                signal,
+            } => write!(f, "effect[{effect_index}]: unknown signal {signal}"),
+            Self::UnknownWakeTarget {
+                effect_index,
+                target,
+            } => write!(
+                f,
+                "effect[{effect_index}]: unknown wake target unit {}",
+                target.raw()
+            ),
+            Self::UnknownSourceUnit {
+                effect_index,
+                source,
+            } => write!(
+                f,
+                "effect[{effect_index}]: unknown source unit {}",
+                source.raw()
+            ),
+            Self::DmaDestinationOutOfRange { effect_index } => {
+                write!(f, "effect[{effect_index}]: DMA destination escapes regions")
+            }
+            Self::Memory(e) => write!(f, "memory: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for CommitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Memory(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 /// Summary of what a commit pass accomplished.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CommitOutcome {
