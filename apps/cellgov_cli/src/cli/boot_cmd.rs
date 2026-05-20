@@ -26,19 +26,16 @@ const DEFAULT_FIRMWARE_DIR: &str = "firmware/sys/external";
 /// auto-default.
 const DISABLE_DEFAULT_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
 
-/// Process exit code for "two bench-boot runs disagreed on retired
-/// step count or boot outcome". Distinct from [`EXIT_WALL_DRIFT`] so
-/// CI can tell a determinism break from clock noise.
+/// Exit code: two bench-boot runs disagreed on step count or
+/// outcome.
 const EXIT_DETERMINISM_BREAK: i32 = 3;
 
-/// Process exit code for "wall-time disagreement exceeded the gate or
-/// was unmeasurable (zero / non-finite)".
+/// Exit code: wall-time disagreement exceeded the gate or was
+/// unmeasurable.
 const EXIT_WALL_DRIFT: i32 = 2;
 
-/// Process exit code for "a bench-boot subprocess failed or its
-/// `BENCH_RESULT` line was unparseable". Distinct from
-/// [`EXIT_DETERMINISM_BREAK`] and [`EXIT_WALL_DRIFT`] so the failing
-/// run is not conflated with a real determinism / drift signal.
+/// Exit code: a bench-boot subprocess failed or its `BENCH_RESULT`
+/// line was unparseable.
 const EXIT_SUBPROCESS_FAIL: i32 = 4;
 
 /// `run-game` terminated with a guest fault.
@@ -74,9 +71,8 @@ fn parse_boot_mode_inner(args: &[String]) -> Result<BootMode, String> {
     }
 }
 
-/// Reject `--boot-mode firmware-set` with no firmware-dir resolved;
-/// the foundation loader has nothing to load. Single-PRX is permitted
-/// in either firmware-dir state.
+/// Reject `--boot-mode firmware-set` with no firmware-dir
+/// resolved.
 fn cross_check_boot_mode_inner(mode: BootMode, firmware_dir: Option<&str>) -> Result<(), String> {
     match (mode, firmware_dir) {
         (BootMode::FirmwareSet, None) => {
@@ -169,6 +165,8 @@ pub(crate) fn run_game(args: &[String]) {
         .unwrap_or_default();
     let save_observation = find_flag_value(args, "--save-observation");
     let observation_manifest = find_flag_value(args, "--observation-manifest");
+    let save_boot_summary = find_flag_value(args, "--save-boot-summary");
+    let save_state_trace = find_flag_value(args, "--save-state-trace");
     let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
     let profile_pairs = args.iter().any(|a| a == "--profile-pairs");
     let budget_override: Option<Budget> =
@@ -188,6 +186,8 @@ pub(crate) fn run_game(args: &[String]) {
         dump_mem_fault_ranges: &dump_mem_fault_ranges,
         save_observation: save_observation.as_deref(),
         observation_manifest: observation_manifest.as_deref(),
+        save_boot_summary: save_boot_summary.as_deref(),
+        save_state_trace: save_state_trace.as_deref(),
         strict_reserved,
         profile_pairs,
         budget_override,
@@ -224,9 +224,7 @@ fn classify_run_game_exit(summary: &game::RunSummary) -> i32 {
 /// Sanity cap, in bytes, on a single `--dump-mem-fault` range.
 const MAX_DUMP_LEN: u64 = 64 * 1024;
 
-/// Default LEN when `--dump-mem-fault` is given only an address. The
-/// `0x` literal keeps the unit unambiguous against the hex-parsed
-/// explicit value.
+/// Default LEN when `--dump-mem-fault` is given only an address.
 const DEFAULT_DUMP_LEN: u64 = 0x40;
 
 /// Parse `0xADDR` (default LEN) or `0xADDR:LEN`. Both fields parse as
@@ -264,9 +262,8 @@ fn parse_dump_mem_fault_range_inner(spec: &str) -> Result<(u64, u64), String> {
     Ok((addr, len))
 }
 
-/// Parse a comma-separated list of hex addresses. Empty entries are
-/// rejected so a stray comma surfaces as a CSV-specific error, not
-/// as a hex-parse error on `""`.
+/// Parse a comma-separated list of hex addresses; empty entries
+/// are rejected.
 fn parse_hex_csv(value: &str, flag: &str) -> Vec<u64> {
     parse_hex_csv_inner(value, flag).unwrap_or_else(|e| die(&e))
 }

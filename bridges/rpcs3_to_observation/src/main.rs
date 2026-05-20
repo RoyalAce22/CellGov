@@ -73,18 +73,128 @@ fn expected_config_hash() -> u64 {
     fnv1a_64(ORACLE_MODE_CONFIG_YAML.as_bytes())
 }
 
-fn parse_hex_u64(s: &str) -> Result<u64, String> {
-    let trimmed = s.strip_prefix("0x").unwrap_or(s);
-    u64::from_str_radix(trimmed, 16).map_err(|e| format!("invalid hex '{s}': {e}"))
+/// Why the rpcs3 to-observation bridge failed.
+#[derive(Debug)]
+enum Rpcs3BridgeError {
+    /// Hex parse failed.
+    InvalidHex {
+        raw: String,
+        source: std::num::ParseIntError,
+    },
+    /// Outcome token unrecognized.
+    UnknownOutcome(String),
+    /// CLI flag with no following value.
+    FlagMissingValue { flag: String },
+    /// `--steps` value did not parse as usize.
+    InvalidSteps(std::num::ParseIntError),
+    /// Unknown CLI flag.
+    UnknownFlag(String),
+    /// A required CLI flag was missing.
+    RequiredFlagMissing { flag: &'static str },
+    /// `region.size` overflowed usize while accumulating cursor.
+    RegionSizeOverflow { region: String },
+    /// Dump file shorter than manifest's declared regions.
+    DumpTruncated {
+        region: String,
+        cursor: usize,
+        end: usize,
+        dump_len: usize,
+    },
+    /// rpcs3 oracle-mode config hash disagrees with the patch source.
+    ConfigHashMismatch { supplied: u64, expected: u64 },
+    /// Reading the manifest file failed.
+    ManifestRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// Parsing the manifest TOML failed.
+    ManifestParse(toml::de::Error),
+    /// Reading the dump file failed.
+    DumpRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// Serializing the observation to JSON failed.
+    Serialize(serde_json::Error),
+    /// Writing the output file failed.
+    OutputWrite {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
-fn parse_outcome(s: &str) -> Result<ObservedOutcome, String> {
+impl std::fmt::Display for Rpcs3BridgeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidHex { raw, source } => write!(f, "invalid hex '{raw}': {source}"),
+            Self::UnknownOutcome(s) => write!(f, "unknown outcome: {s}"),
+            Self::FlagMissingValue { flag } => write!(f, "flag {flag} requires a value"),
+            Self::InvalidSteps(e) => write!(f, "--steps: {e}"),
+            Self::UnknownFlag(s) => write!(f, "unknown flag: {s}"),
+            Self::RequiredFlagMissing { flag } => write!(f, "{flag} required"),
+            Self::RegionSizeOverflow { region } => write!(f, "region {region} size overflow"),
+            Self::DumpTruncated {
+                region,
+                cursor,
+                end,
+                dump_len,
+            } => write!(
+                f,
+                "dump truncated: region {region} needs bytes [{cursor}..{end}] but dump has {dump_len}"
+            ),
+            Self::ConfigHashMismatch { supplied, expected } => write!(
+                f,
+                "rpcs3 oracle-mode config mismatch: supplied 0x{supplied:016x}, expected 0x{expected:016x}. \
+                 The dump was produced under RPCS3 settings that differ from \
+                 bridges/rpcs3-patch/oracle_mode_config.yml. Cross-runner \
+                 observations from different settings are not comparable; \
+                 re-run RPCS3 with the canonical oracle-mode settings."
+            ),
+            Self::ManifestRead { path, source } => {
+                write!(f, "read manifest {}: {source}", path.display())
+            }
+            Self::ManifestParse(e) => write!(f, "parse manifest: {e}"),
+            Self::DumpRead { path, source } => {
+                write!(f, "read dump {}: {source}", path.display())
+            }
+            Self::Serialize(e) => write!(f, "serialize: {e}"),
+            Self::OutputWrite { path, source } => {
+                write!(f, "write {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for Rpcs3BridgeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidHex { source, .. } => Some(source),
+            Self::InvalidSteps(e) => Some(e),
+            Self::ManifestRead { source, .. }
+            | Self::DumpRead { source, .. }
+            | Self::OutputWrite { source, .. } => Some(source),
+            Self::ManifestParse(e) => Some(e),
+            Self::Serialize(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+fn parse_hex_u64(s: &str) -> Result<u64, Rpcs3BridgeError> {
+    let trimmed = s.strip_prefix("0x").unwrap_or(s);
+    u64::from_str_radix(trimmed, 16).map_err(|source| Rpcs3BridgeError::InvalidHex {
+        raw: s.to_string(),
+        source,
+    })
+}
+
+fn parse_outcome(s: &str) -> Result<ObservedOutcome, Rpcs3BridgeError> {
     match s {
         "completed" => Ok(ObservedOutcome::Completed),
         "stalled" => Ok(ObservedOutcome::Stalled),
         "timeout" => Ok(ObservedOutcome::Timeout),
         "fault" => Ok(ObservedOutcome::Fault),
-        other => Err(format!("unknown outcome: {other}")),
+        other => Err(Rpcs3BridgeError::UnknownOutcome(other.to_string())),
     }
 }
 
@@ -93,7 +203,7 @@ enum ParsedArgs {
     PrintExpectedConfigHash,
 }
 
-fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, String> {
+fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
     let mut dump: Option<PathBuf> = None;
     let mut manifest: Option<PathBuf> = None;
     let mut outcome: Option<ObservedOutcome> = None;
@@ -108,27 +218,29 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, String> {
         }
         let val = it
             .next()
-            .ok_or_else(|| format!("flag {flag} requires a value"))?;
+            .ok_or_else(|| Rpcs3BridgeError::FlagMissingValue { flag: flag.clone() })?;
         match flag.as_str() {
             "--dump" => dump = Some(PathBuf::from(val)),
             "--manifest" => manifest = Some(PathBuf::from(val)),
             "--outcome" => outcome = Some(parse_outcome(&val)?),
             "--steps" => {
-                steps = Some(val.parse().map_err(|e| format!("--steps: {e}"))?);
+                steps = Some(val.parse().map_err(Rpcs3BridgeError::InvalidSteps)?);
             }
             "--output" => output = Some(PathBuf::from(val)),
             "--config-hash" => config_hash = Some(parse_hex_u64(&val)?),
-            other => return Err(format!("unknown flag: {other}")),
+            other => return Err(Rpcs3BridgeError::UnknownFlag(other.to_string())),
         }
     }
 
     Ok(ParsedArgs::Convert(Args {
-        dump: dump.ok_or("--dump required")?,
-        manifest: manifest.ok_or("--manifest required")?,
-        outcome: outcome.ok_or("--outcome required")?,
+        dump: dump.ok_or(Rpcs3BridgeError::RequiredFlagMissing { flag: "--dump" })?,
+        manifest: manifest.ok_or(Rpcs3BridgeError::RequiredFlagMissing { flag: "--manifest" })?,
+        outcome: outcome.ok_or(Rpcs3BridgeError::RequiredFlagMissing { flag: "--outcome" })?,
         steps,
-        output: output.ok_or("--output required")?,
-        config_hash: config_hash.ok_or("--config-hash required")?,
+        output: output.ok_or(Rpcs3BridgeError::RequiredFlagMissing { flag: "--output" })?,
+        config_hash: config_hash.ok_or(Rpcs3BridgeError::RequiredFlagMissing {
+            flag: "--config-hash",
+        })?,
     }))
 }
 
@@ -142,20 +254,23 @@ fn build_observation(
     manifest: &Manifest,
     outcome: ObservedOutcome,
     steps: Option<usize>,
-) -> Result<Observation, String> {
+) -> Result<Observation, Rpcs3BridgeError> {
     let mut cursor: usize = 0;
     let mut regions = Vec::with_capacity(manifest.regions.len());
     for r in &manifest.regions {
         let size = r.size as usize;
         let end = cursor
             .checked_add(size)
-            .ok_or_else(|| format!("region {} size overflow", r.name))?;
+            .ok_or_else(|| Rpcs3BridgeError::RegionSizeOverflow {
+                region: r.name.clone(),
+            })?;
         if end > dump.len() {
-            return Err(format!(
-                "dump truncated: region {} needs bytes [{cursor}..{end}] but dump has {}",
-                r.name,
-                dump.len()
-            ));
+            return Err(Rpcs3BridgeError::DumpTruncated {
+                region: r.name.clone(),
+                cursor,
+                end,
+                dump_len: dump.len(),
+            });
         }
         regions.push(NamedMemoryRegion {
             name: r.name.clone(),
@@ -180,35 +295,37 @@ fn build_observation(
     })
 }
 
-fn check_config_hash(supplied: u64) -> Result<(), String> {
+fn check_config_hash(supplied: u64) -> Result<(), Rpcs3BridgeError> {
     let expected = expected_config_hash();
     if supplied != expected {
-        return Err(format!(
-            "rpcs3 oracle-mode config mismatch: supplied 0x{supplied:016x}, expected 0x{expected:016x}. \
-             The dump was produced under RPCS3 settings that differ from \
-             bridges/rpcs3-patch/oracle_mode_config.yml. Cross-runner \
-             observations from different settings are not comparable; \
-             re-run RPCS3 with the canonical oracle-mode settings."
-        ));
+        return Err(Rpcs3BridgeError::ConfigHashMismatch { supplied, expected });
     }
     Ok(())
 }
 
-fn run(args: Args) -> Result<(), String> {
+fn run(args: Args) -> Result<(), Rpcs3BridgeError> {
     check_config_hash(args.config_hash)?;
 
-    let manifest_text = fs::read_to_string(&args.manifest)
-        .map_err(|e| format!("read manifest {}: {e}", args.manifest.display()))?;
+    let manifest_text =
+        fs::read_to_string(&args.manifest).map_err(|source| Rpcs3BridgeError::ManifestRead {
+            path: args.manifest.clone(),
+            source,
+        })?;
     let manifest: Manifest =
-        toml::from_str(&manifest_text).map_err(|e| format!("parse manifest: {e}"))?;
+        toml::from_str(&manifest_text).map_err(Rpcs3BridgeError::ManifestParse)?;
 
-    let dump =
-        fs::read(&args.dump).map_err(|e| format!("read dump {}: {e}", args.dump.display()))?;
+    let dump = fs::read(&args.dump).map_err(|source| Rpcs3BridgeError::DumpRead {
+        path: args.dump.clone(),
+        source,
+    })?;
 
     let obs = build_observation(&dump, &manifest, args.outcome, args.steps)?;
 
-    let json = serde_json::to_string_pretty(&obs).map_err(|e| format!("serialize: {e}"))?;
-    fs::write(&args.output, json).map_err(|e| format!("write {}: {e}", args.output.display()))?;
+    let json = serde_json::to_string_pretty(&obs).map_err(Rpcs3BridgeError::Serialize)?;
+    fs::write(&args.output, json).map_err(|source| Rpcs3BridgeError::OutputWrite {
+        path: args.output.clone(),
+        source,
+    })?;
     Ok(())
 }
 
@@ -283,10 +400,10 @@ mod tests {
         let manifest = manifest_fixture();
         let err = build_observation(&dump, &manifest, ObservedOutcome::Completed, None)
             .expect_err("truncated");
-        assert!(
-            err.contains("second"),
-            "error names the truncated region: {err}"
-        );
+        match err {
+            Rpcs3BridgeError::DumpTruncated { region, .. } => assert_eq!(region, "second"),
+            other => panic!("expected DumpTruncated(second), got {other:?}"),
+        }
     }
 
     #[test]
@@ -301,10 +418,13 @@ mod tests {
 
     #[test]
     fn outcome_parser_accepts_four_kinds() {
-        assert_eq!(parse_outcome("completed"), Ok(ObservedOutcome::Completed));
-        assert_eq!(parse_outcome("stalled"), Ok(ObservedOutcome::Stalled));
-        assert_eq!(parse_outcome("timeout"), Ok(ObservedOutcome::Timeout));
-        assert_eq!(parse_outcome("fault"), Ok(ObservedOutcome::Fault));
+        assert_eq!(
+            parse_outcome("completed").unwrap(),
+            ObservedOutcome::Completed
+        );
+        assert_eq!(parse_outcome("stalled").unwrap(), ObservedOutcome::Stalled);
+        assert_eq!(parse_outcome("timeout").unwrap(), ObservedOutcome::Timeout);
+        assert_eq!(parse_outcome("fault").unwrap(), ObservedOutcome::Fault);
         assert!(parse_outcome("bogus").is_err());
     }
 
@@ -316,7 +436,8 @@ mod tests {
             .join("..")
             .join("tests")
             .join("fixtures")
-            .join("NPUA80001_checkpoint.toml");
+            .join("NPUA80001")
+            .join("checkpoint.toml");
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let m: Manifest = toml::from_str(&text).expect("manifest parses");
@@ -372,25 +493,26 @@ mod tests {
     #[test]
     fn check_config_hash_rejects_with_diagnostic_naming_both_sides() {
         let err = check_config_hash(0xdead_beef_dead_beef).expect_err("mismatch");
+        let rendered = err.to_string();
         assert!(
-            err.contains("oracle-mode config mismatch"),
-            "names the contract: {err}"
+            rendered.contains("oracle-mode config mismatch"),
+            "names the contract: {rendered}"
         );
         assert!(
-            err.contains("0xdeadbeefdeadbeef"),
-            "echoes supplied hash: {err}"
+            rendered.contains("0xdeadbeefdeadbeef"),
+            "echoes supplied hash: {rendered}"
         );
         let expected = format!("0x{:016x}", expected_config_hash());
         assert!(
-            err.contains(&expected),
-            "names expected hash {expected}: {err}"
+            rendered.contains(&expected),
+            "names expected hash {expected}: {rendered}"
         );
     }
 
     #[test]
     fn parse_hex_u64_accepts_both_prefixed_and_bare() {
-        assert_eq!(parse_hex_u64("0xabc"), Ok(0xabc));
-        assert_eq!(parse_hex_u64("abc"), Ok(0xabc));
+        assert_eq!(parse_hex_u64("0xabc").unwrap(), 0xabc);
+        assert_eq!(parse_hex_u64("abc").unwrap(), 0xabc);
         assert!(parse_hex_u64("xyz").is_err());
     }
 

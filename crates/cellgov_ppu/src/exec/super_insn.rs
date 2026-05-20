@@ -4,6 +4,9 @@
 //! rewrites them into these specialized variants. None of these
 //! arms is ISA-native; they all decompose into one or two real PPC
 //! instructions whose execution semantics they replicate.
+//!
+//! [Brunthaler2010 p:2 s:2] dispatch for quickened arms.
+//! [ErtlGregg2003 p:20 s:6.3] dispatch for super-instruction arms.
 
 use crate::exec::branch::branch_condition;
 use crate::exec::{buffer_store, load_ze, ExecuteVerdict};

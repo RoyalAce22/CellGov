@@ -133,6 +133,7 @@ pub fn bench_boot(opts: BenchOptions<'_>) -> BenchBootResult {
         dump_mem_boot_addrs: &[],
         profile_pairs: false,
         budget_override: opts.budget_override,
+        capture_state_trace: false,
     });
     let mut rt = prepared.rt;
     let active_checkpoint = opts
@@ -199,6 +200,16 @@ impl std::fmt::Display for SpawnError {
             Self::ParseFailed { error, .. } => {
                 write!(f, "BENCH_RESULT parse failed: {error}")
             }
+        }
+    }
+}
+
+impl std::error::Error for SpawnError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::ParseFailed { error, .. } => Some(error),
+            Self::SubprocessNonzero { .. } => None,
         }
     }
 }
@@ -363,6 +374,21 @@ impl std::fmt::Display for ParseBenchError {
             Self::UnparseableOutcome { token, source } => {
                 write!(f, "BENCH_RESULT: malformed outcome={token:?}: {source}")
             }
+        }
+    }
+}
+
+impl std::error::Error for ParseBenchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UnparseableOutcome { source, .. } => Some(source),
+            Self::NoResultLine
+            | Self::DuplicateResultLine
+            | Self::MissingSteps
+            | Self::MalformedSteps(_)
+            | Self::MissingWallMs
+            | Self::MalformedWallMs(_)
+            | Self::MissingOutcome => None,
         }
     }
 }

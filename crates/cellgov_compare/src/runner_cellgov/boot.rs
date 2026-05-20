@@ -1,38 +1,29 @@
-//! Long-running boot adapter: converts a finished boot run into the
-//! shared `Observation` schema. Separate from the scenario adapter
-//! because the testkit runner has no notion of process-exit, hard
-//! faults, or HLE-driven termination that a boot reports.
+//! Boot adapter: converts a finished boot run into the shared
+//! [`Observation`] schema.
 
 use crate::observation::{Observation, ObservationMetadata, ObservedOutcome};
 
 use super::region::{extract_regions, RegionDescriptor};
 
-/// How a long-running boot terminated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BootOutcome {
-    /// Guest reached `sys_process_exit` cleanly.
     ProcessExit,
-    /// PPU raised a hard fault (decode error, unimplemented, etc).
     Fault,
-    /// Max-step cap reached without termination.
     MaxSteps,
-    /// First PPU write into the RSX command region was attempted;
-    /// used as a cross-runner checkpoint for titles whose attract-mode
-    /// loops never exit on their own.
+    /// First PPU write into the RSX command region. Used as a
+    /// cross-runner checkpoint for titles whose attract-mode loops
+    /// never exit on their own.
     RsxWriteCheckpoint,
-    /// A step retired with its PC equal to a caller-supplied checkpoint PC.
+    /// A step retired with its PC equal to a caller-supplied PC.
     PcReached(u64),
-    /// Internal time counter overflowed. Distinct from `Fault` so a pair
-    /// yielding `TimeOverflow` on one side and `Fault` on the other is
-    /// not miscategorized as "both faulted".
+    /// Internal time counter overflowed; distinct from `Fault` so a
+    /// `TimeOverflow` / `Fault` cross-runner pair is not
+    /// miscategorized as "both faulted".
     TimeOverflow,
 }
 
-/// Failure mode while parsing a [`BootOutcome`] from its canonical
-/// `Display` form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootOutcomeParseError {
-    /// Tag does not match any known variant.
     UnknownVariant(String),
     /// `PcReached(...)` payload is not `0x`-prefixed hex.
     MalformedPcReached(String),

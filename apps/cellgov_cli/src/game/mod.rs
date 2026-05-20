@@ -43,6 +43,8 @@ pub struct RunGameOptions<'a> {
     pub dump_mem_fault_ranges: &'a [(u64, u64)],
     pub save_observation: Option<&'a str>,
     pub observation_manifest: Option<&'a str>,
+    pub save_boot_summary: Option<&'a str>,
+    pub save_state_trace: Option<&'a str>,
     pub strict_reserved: bool,
     pub profile_pairs: bool,
     pub budget_override: Option<Budget>,
@@ -55,27 +57,30 @@ pub struct RunSummary {
     pub had_critical_anomaly: bool,
 }
 
-/// Hard-error from [`run_game`].
 #[derive(Debug)]
 pub enum RunError {
-    /// `--save-observation` was requested but writing the file failed.
-    SaveObservation(String),
+    SaveObservation(observation::ObservationSaveError),
+    SaveBootSummary(observation::ObservationSaveError),
 }
 
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SaveObservation(msg) => write!(f, "save-observation: {msg}"),
+            Self::SaveObservation(e) => write!(f, "save-observation: {e}"),
+            Self::SaveBootSummary(e) => write!(f, "save-boot-summary: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::SaveObservation(e) | Self::SaveBootSummary(e) => Some(e),
         }
     }
 }
 
 /// Apply the manifest-driven RSX init toggles.
-///
-/// `set_gcm_rsx_checkpoint` is a placement flag (puts the GCM control
-/// register in the reserved RSX region). Both the `FirstRsxWrite`
-/// trip-on-write checkpoint and the `rsx_mirror` redirect depend on
-/// that placement, so either manifest mode enables it.
 pub(super) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &TitleManifest) {
     let needs_reserved = title.checkpoint_trigger() == manifest::CheckpointTrigger::FirstRsxWrite
         || title.rsx_mirror();
@@ -109,6 +114,8 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         dump_mem_fault_ranges,
         save_observation,
         observation_manifest,
+        save_boot_summary,
+        save_state_trace,
         strict_reserved,
         profile_pairs,
         budget_override,
@@ -125,6 +132,12 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             "dump_mem_fault_ranges[{i}]: addr 0x{addr:x} + len 0x{len:x} overflows u64"
         );
     }
+    // Four-checkpoint profile, gated behind CELLGOV_RUNGAME_PROFILE.
+    // T0 sits before `boot::prepare`; T1/T2/T3 are filled in below.
+    // Backs the audit's "what is the fixed-per-case ps3autotests cost"
+    // question (docs/dev/slow_tests_audit.md).
+    let profile_run = crate::cli::env::parse_env_bool("CELLGOV_RUNGAME_PROFILE");
+    let t_run_start = Instant::now();
     eprintln!(
         "run-game: title = {} ({})",
         title.name(),
@@ -145,12 +158,15 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         dump_mem_boot_addrs,
         profile_pairs,
         budget_override,
+        capture_state_trace: save_state_trace.is_some(),
     });
+    let t_after_prepare = Instant::now();
     let boot::PreparedBoot {
         mut rt,
         hle_bindings,
         elf_data,
         timings: st,
+        step_budget,
         ..
     } = prepared;
 
@@ -204,6 +220,8 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     loop_ctx.loop_start = t_loop_start;
     let (outcome, boot_outcome) = step_loop(&mut rt, &mut loop_ctx);
     let t_loop = t_loop_start.elapsed();
+    let t_after_steploop = Instant::now();
+    let dirty_pages_after_steploop = rt.memory().dirty_page_count();
     let tty_oob_count = loop_ctx.tty_oob_count;
     let bogus_fd_count = loop_ctx.bogus_fd_count;
 
@@ -343,6 +361,37 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             rt.lv2_host().tty_log(),
         )
         .map_err(RunError::SaveObservation)?;
+    }
+    if let Some(path) = save_boot_summary {
+        observation::save_boot_summary_json(path, title, boot_outcome, steps, step_budget)
+            .map_err(RunError::SaveBootSummary)?;
+    }
+    if let Some(path) = save_state_trace {
+        let bytes = rt.trace().bytes();
+        std::fs::write(path, bytes).unwrap_or_else(|e| {
+            crate::cli::exit::die(&format!(
+                "save-state-trace: failed to write {} ({} bytes): {e}",
+                path,
+                bytes.len(),
+            ))
+        });
+        eprintln!("save-state-trace: wrote {} bytes to {path}", bytes.len());
+    }
+    let t_after_save = Instant::now();
+
+    if profile_run {
+        let prepare_ms = t_after_prepare.duration_since(t_run_start).as_secs_f64() * 1000.0;
+        let steploop_ms = t_after_steploop
+            .duration_since(t_after_prepare)
+            .as_secs_f64()
+            * 1000.0;
+        let save_ms = t_after_save.duration_since(t_after_steploop).as_secs_f64() * 1000.0;
+        let total_ms = t_after_save.duration_since(t_run_start).as_secs_f64() * 1000.0;
+        eprintln!(
+            "rungame_profile: prepare={prepare_ms:.2}ms steploop={steploop_ms:.2}ms \
+             save={save_ms:.2}ms total={total_ms:.2}ms steps={steps} \
+             dirty_pages_at_steploop_exit={dirty_pages_after_steploop}",
+        );
     }
 
     Ok(RunSummary {

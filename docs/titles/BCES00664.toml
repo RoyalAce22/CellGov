@@ -1,8 +1,12 @@
 [title]
 content_id = "BCES00664"
 short_name = "wipeout"
-display_name = "WipEout HD Fury (Sony Liverpool, 2009)"
+display_name = "WipEout HD Fury"
 eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+year = 2009
+developer = "Sony Liverpool"
+engine = "Studio Liverpool proprietary"
+distribution = "disc-iso"
 
 [source]
 kind = "disc"

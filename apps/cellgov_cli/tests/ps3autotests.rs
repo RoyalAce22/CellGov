@@ -29,10 +29,9 @@ use cellgov_compare::{Observation, ObservedOutcome};
 /// both with margin.
 const PER_SLOT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
-/// Pin the concurrency limit to an exact value (floor 1).
+/// Env override for the concurrency limit (floor 1).
 const OVERRIDE_ENV: &str = "CELLGOV_PS3AUTOTESTS_MAX_CONCURRENT";
 
-/// Counting semaphore: at most `n` permits in flight at a time.
 struct Semaphore {
     available: Mutex<usize>,
     cv: Condvar,
@@ -95,9 +94,8 @@ fn compute_limit() -> usize {
     }
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
-    // available_memory budgets against what the OS will actually
-    // hand out -- total_memory ignores RAM already held by other
-    // host processes.
+    // `available_memory` reflects what the OS will hand out;
+    // `total_memory` ignores RAM held by other processes.
     let ram = sys.available_memory();
     ((ram / PER_SLOT_BYTES) as usize).max(1)
 }
@@ -142,7 +140,9 @@ fn ps3autotests_root() -> Option<PathBuf> {
     dir.is_dir().then_some(dir)
 }
 
-/// Cross-module contract: `cellgov_cli run-game` resolves the ELF
+/// # Cross-module contract
+///
+/// `cellgov_cli run-game` resolves the ELF
 /// from argv, not from the manifest's `eboot_candidates`. ps3autotests
 /// ELFs do not live in a PS3 VFS layout; the manifest carries the
 /// candidate purely so the schema validates.
@@ -153,6 +153,10 @@ content_id = "AT_{stem_upper}"
 short_name = "at_{stem}"
 display_name = "ps3autotests {rel_dir}/{stem}"
 eboot_candidates = ["{stem}.ppu.elf"]
+year = 2007
+developer = "ps3autotests"
+engine = "ps3autotests"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -427,9 +431,7 @@ fn lv2_sys_semaphore() {
     });
 }
 
-/// A flake here means a non-deterministic source has been
-/// introduced and every downstream cross-runner comparison is
-/// suspect until it is found.
+/// Determinism canary across two reruns of the same scenario.
 #[test]
 fn determinism_double_run_cpu_basic() {
     let case = Case {

@@ -24,15 +24,12 @@ use crate::cli::exit::{die, load_ppu_image_or_die};
 /// block is absent.
 const DEFAULT_PRIMARY_PRIO: u32 = 1001;
 
-/// Bump-arena base for HLE-side allocations inside the main region.
-/// Sits above the TLS scratch at `0x10400000`. The CLI summary uses
-/// the same base to compute bytes-above-base.
+/// Bump-arena base for HLE-side allocations, above the TLS scratch
+/// at `0x10400000`.
 pub const HLE_HEAP_BASE: u32 = 0x10410000;
 
-/// Narrow `u64` to `u32` at the host/guest boundary; dies with
-/// `label` named when the value does not fit. Guest VA space is
-/// `u32` everywhere downstream, so an overflow is a configuration
-/// error.
+/// Narrow `u64` to `u32` at the host/guest boundary; dies on
+/// overflow with `label` named.
 fn u32_or_die(label: &str, value: u64) -> u32 {
     u32::try_from(value)
         .unwrap_or_else(|_| die(&format!("{label}: 0x{value:x} does not fit in u32")))
@@ -59,6 +56,13 @@ pub(super) struct PreparedBoot {
     pub hle_bindings: Vec<HleBinding>,
     pub elf_data: Vec<u8>,
     pub timings: StartupTimings,
+    /// Guest-address range covering the HLE OPD + body trampoline
+    /// region this boot allocated. `None` when no HLE bindings were
+    /// produced.
+    #[allow(dead_code, reason = "retained for the cross-runner classifier")]
+    pub hle_opd_range: Option<core::ops::Range<u64>>,
+    /// Per-step budget resolved during `prepare`.
+    pub step_budget: Budget,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -92,6 +96,11 @@ pub(super) struct PrepareOptions<'a> {
     pub patch_bytes: &'a [(u64, u8)],
     pub dump_mem_boot_addrs: &'a [u64],
     pub budget_override: Option<Budget>,
+    /// When true, switch runtime mode from `FaultDriven` to
+    /// `DeterminismCheck` so per-step `PpuStateHash` records land in
+    /// the runtime's trace buffer. The caller writes the buffer to
+    /// disk; `prepare` only flips the mode.
+    pub capture_state_trace: bool,
 }
 
 /// Debug toggles captured by both the primary-thread `register_with`
@@ -278,6 +287,13 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     if parse_env_bool("CELLGOV_DUMP_TRAMPOLINES") {
         dump_trampoline_map(&hle_bindings, hle_layout, tramp_base);
     }
+    // `None` when zero imports were bound so consumers do not see a
+    // degenerate `start..start` range.
+    let hle_opd_range: Option<core::ops::Range<u64>> = if hle_bindings.is_empty() {
+        None
+    } else {
+        Some(hle_layout.extent_start(tramp_base) as u64..layout_end as u64)
+    };
     if opts.print_banner {
         println!(
             "imports: {} modules, {} functions bound to HLE stubs",
@@ -393,7 +409,11 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let malloc_pagesize = proc_param.map(|p| p.malloc_pagesize).unwrap_or(0x100000);
     state.gpr[12] = malloc_pagesize as u64;
 
-    let mode = RuntimeMode::FaultDriven;
+    let mode = if opts.capture_state_trace {
+        RuntimeMode::DeterminismCheck
+    } else {
+        RuntimeMode::FaultDriven
+    };
     let step_budget = {
         let b = opts
             .budget_override
@@ -424,7 +444,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
         None => DEFAULT_PRIMARY_PRIO,
     };
-    // SDK convention: `primary_stacksize == 0` reads as "use kernel
+    // `primary_stacksize == 0` reads as "use kernel
     // default", so it falls through to PS3_PRIMARY_STACK_SIZE rather
     // than seeding a zero-sized stack that faults on the first frame.
     let primary_stack_size: u32 = match proc_param.map(|p| p.primary_stacksize) {
@@ -504,7 +524,25 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, mem.as_bytes());
+    // Bound the predecode shadow to the upper end of executable code
+    // (`alloc_floor` = max of PT_LOAD vaddr end, HLE trampoline/OPD
+    // end, and PRX placement end). Anything above this address is
+    // either uncommitted zeros or non-executable data; the shadow
+    // would decode every 32-bit word as an instruction anyway and
+    // pay O(region size). The runtime fetch path's `None` branch
+    // falls back to live decode + `refresh`, so an out-of-bounds PC
+    // is still handled correctly -- it just doesn't cache.
+    let shadow_extent = (alloc_floor as usize).min(mem.as_bytes().len());
+    let t_shadow_start = std::time::Instant::now();
+    let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, &mem.as_bytes()[..shadow_extent]);
+    if parse_env_bool("CELLGOV_RUNGAME_PROFILE") {
+        eprintln!(
+            "rungame_profile_shadow: PredecodedShadow::build over {shadow_extent} bytes took {:.2}ms \
+             (alloc_floor=0x{alloc_floor:08x} user_region_end=0x{user_region_end:08x} \
+             code_floor=0x{code_floor:08x} prx_region_end=0x{prx_region_end:08x})",
+            t_shadow_start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
 
     let mut rt = Runtime::new(mem, step_budget, adjusted_max_steps);
     rt.set_mode(mode);
@@ -596,6 +634,17 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     });
 
     // Cell BE convention: args 0..3 map to r3..r6 (arg0 -> r3, etc.).
+    //
+    // # Panics
+    //
+    // The .expect on load_spu_elf below covers a structural gap: this
+    // closure runs at SPU-thread-create time, not at sys_spu_image_open
+    // time, so a malformed title-provided ELF first surfaces here as a
+    // panic. The clean fix is upstream pre-validation at image-open
+    // time so the bytes that reach this closure are already vetted;
+    // until then, the panic is the failure mode for a malformed title.
+    // Tracked separately from Phase 9 scope because converting requires
+    // changing the SpuFactory trait signature to return Result.
     rt.set_spu_factory(|id, init| {
         use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
         let mut unit = SpuExecutionUnit::new(id);
@@ -705,6 +754,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             hle_bind: t_hle_bind - t_elf_load,
             prx_load: t_prx_load - t_hle_bind,
         },
+        hle_opd_range,
+        step_budget,
     }
 }
 

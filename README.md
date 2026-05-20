@@ -49,14 +49,14 @@ Pre-Alpha. What works today:
 
 - **3 titles boot to cross-runner checkpoints**: flOw, Super Stardust HD, WipEout HD Fury (see [docs/titles.md](docs/titles.md)).
 - **PPU and SPU interpreters**: 160 PPU instructions; full SPU.
-- **LV2**: 82 classified syscalls, 60 HLE exports (sys_rsx, cellSysutil, cellSpurs, sys_lwmutex, sys_fs, cellSaveDataAutoLoad).
+- **LV2**: 86 classified syscalls, 68 HLE exports (sysPrxForUser, cellGcmSys, cellSysutil, cellSpurs, cellSaveData, sys_fs).
 - **Worker-thread callback dispatch**: deterministic primitive for invoking guest callbacks; first consumer is `cellSaveDataAutoLoad`.
 - **Sync primitives**: lwmutex / event_flag / semaphore / mutex / cond match real-PS3 wake ordering (incl. ETIMEDOUT and CELL_ECANCELED paths).
 - **FS with host-backed VFS**: path-keyed blob store backs both `sys_fs_*` and `cellFs*` calls; per-title mounts (default `/app_home`) resolve guest paths against host directories with deterministic lexicographic enumeration. Directory iteration syscalls (opendir / readdir / closedir) operate on snapshot entries. Kernel fd allocation matches real PS3's `[3, 255)` range.
 - **Real-firmware SELF decryption + loading**: `cellgov_firmware install` peels a user-supplied `PS3UPDAT.PUP` into per-module SELFs; each one is decrypted on the fly at boot time and loaded into guest memory with PPC64 relocations applied as one atomic batch (ADDR32, ADDR64, ADDR16_LO/HI/HA/LO_DS, REL24). The foundation module set (now including libfiber and libsre) loads in topological-sort order with `module_start` invoked per module under a synthetic kernel-context OPD; the firmware identity contributes to the LV2 state hash. `run-game --boot-mode firmware-set` opts the default boot path into the firmware loader. Twelve foundation SPRX modules from the user's PUP decrypt bit-identically to RPCS3's decrypter output. APP keys cover firmware revisions 0x0000-0x001D.
 - **PRX import inspection**: `cellgov_cli dump-prx-imports <path>` decodes any raw `.prx` or SCE-wrapped `.sprx` and prints the module's internal name, export namespaces, and full import table; auto-detects SCE wrappers and decrypts via `cellgov_firmware::sce`.
 - **PS3 conformance**: ps3autotests cross-runner harness; cpu/basic, cpu/ppu_branch, lv2/sys_process, lv2/sys_semaphore, lv2/sys_event_flag match real-PS3 byte-for-byte.
-- 3,227 tests, zero `unsafe` (`unsafe_code = forbid`).
+- 3,429 tests, zero `unsafe` (`unsafe_code = forbid`).
 
 See [docs/architecture.md](docs/architecture.md) for the full pipeline, memory model, and per-subsystem details.
 

@@ -4,11 +4,16 @@
 //! at construction, with a quickening and super-pairing pass applied
 //! before first use.
 //!
+//! [ErtlGregg2003 p:4 s:2] flat sequential VM-code layout.
+//! [Bala2000 p:2 s:2] code cache indexed by source-binary address.
+//!
 //! Self-modifying code (CRT0 relocations, HLE trampoline planting)
 //! goes through [`invalidate_range`](PredecodedShadow::invalidate_range)
 //! followed by [`refresh`](PredecodedShadow::refresh); the stale bit
 //! forces the caller onto the raw fetch + decode path until the
 //! slot is repopulated from committed memory.
+//!
+//! [Bala2000 p:3 s:4.1] flushable code cache.
 //!
 //! The two passes that run during `build` live in their own
 //! submodules so each can be tested in isolation:
@@ -62,7 +67,9 @@ impl PredecodedShadow {
     /// `base` is the guest address of `bytes[0]`. Decode is followed
     /// by a quickening pass and a super-pairing pass; block lengths
     /// are recomputed once super-pairing has fixed terminator status
-    /// for the fused variants.
+    /// for the fused variants. Any PC outside `[base, base +
+    /// bytes.len())` falls back to live decode + `refresh` on the
+    /// hot path.
     pub fn build(base: u64, bytes: &[u8]) -> Self {
         let n_slots = bytes.len() / 4;
         let mut slots = Vec::with_capacity(n_slots);

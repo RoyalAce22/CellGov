@@ -33,6 +33,10 @@ pub enum CallbackError {
     OpdReadFailed,
     /// Child-stack arena exhausted.
     StackAllocFailed,
+    /// `parent` is not in the PPU thread table. An HLE handler issuing
+    /// a callback on behalf of a non-existent thread is an upstream
+    /// invariant break, not a guest error.
+    UnknownParent { parent: UnitId },
 }
 
 impl Lv2Host {
@@ -56,6 +60,7 @@ impl Lv2Host {
     /// - [`CallbackError::TooDeep`]
     /// - [`CallbackError::OpdReadFailed`]
     /// - [`CallbackError::StackAllocFailed`]
+    /// - [`CallbackError::UnknownParent`]
     pub fn call_guest_callback_sync(
         &mut self,
         parent: UnitId,
@@ -64,6 +69,9 @@ impl Lv2Host {
         stage: CallbackReturnStage,
         rt: &dyn Lv2Runtime,
     ) -> Result<Lv2Dispatch, CallbackError> {
+        // A missing entry means `parent` has not yet attached any
+        // callback worker -- depth defaults to 0. `attach_callback_worker`
+        // is the only writer and inserts via `entry().or_insert(0)`.
         let current_depth = self.callback_depth.get(&parent).copied().unwrap_or(0);
         if current_depth >= CALLBACK_DEPTH_CAP {
             return Err(CallbackError::TooDeep);
@@ -73,7 +81,7 @@ impl Lv2Host {
             .ppu_threads
             .get_by_unit(parent)
             .map(|t| u64::from(t.attrs.tls_base))
-            .unwrap_or(0);
+            .ok_or(CallbackError::UnknownParent { parent })?;
 
         // OPD layout: u32 BE code_addr || u32 BE toc.
         // first_chunk::<8> folds the length check and the slice-to-array
@@ -301,6 +309,38 @@ mod tests {
             }
             other => panic!("expected CallbackSpawn, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn call_guest_callback_sync_rejects_parent_not_in_thread_table() {
+        // Build a host with no seeded parent PPU thread, then issue
+        // a callback on its behalf. Previously the missing entry was
+        // masked by `unwrap_or(0)` and the worker inherited tls_base=0.
+        let mut mem = GuestMemory::new(0x10_0000);
+        let mut bytes = [0u8; 8];
+        bytes[0..4].copy_from_slice(&0x1234_5678u32.to_be_bytes());
+        bytes[4..8].copy_from_slice(&0x9ABC_DEF0u32.to_be_bytes());
+        mem.apply_commit(ByteRange::new(GuestAddr::new(0x4000), 8).unwrap(), &bytes)
+            .unwrap();
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::with_memory(mem);
+
+        let ghost_parent = UnitId::new(99);
+        let err = host
+            .call_guest_callback_sync(
+                ghost_parent,
+                0x4000,
+                [0; 8],
+                CallbackReturnStage::Synthetic,
+                &rt,
+            )
+            .expect_err("missing parent must surface UnknownParent");
+        assert_eq!(
+            err,
+            CallbackError::UnknownParent {
+                parent: ghost_parent
+            }
+        );
     }
 
     #[test]

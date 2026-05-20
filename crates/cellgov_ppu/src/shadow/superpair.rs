@@ -3,6 +3,9 @@
 //! function; the shadow's `super_pair` method walks slot pairs and
 //! applies this, replacing the second slot with `Consumed`.
 //!
+//! [ErtlGregg2003 p:20 s:6.3] super-instruction fusion eliminates one dispatch per pair.
+//! [ErtlGregg2003 p:19 s:5.2.7] empirical effectiveness of super-instructions.
+//!
 //! Pair fusions that produce a block-terminator (`CmpwiBc`,
 //! `CmpwBc`) require the caller to recompute `block_len` after this
 //! pass.

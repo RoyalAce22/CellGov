@@ -15,6 +15,17 @@ pub enum ObservedOutcome {
     Fault,
 }
 
+impl std::fmt::Display for ObservedOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Completed => "Completed",
+            Self::Stalled => "Stalled",
+            Self::Timeout => "Timeout",
+            Self::Fault => "Fault",
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

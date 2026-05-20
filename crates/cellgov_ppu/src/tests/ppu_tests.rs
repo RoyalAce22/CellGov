@@ -5,6 +5,22 @@ use super::*;
 use cellgov_exec::ExecutionContext;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 
+use std::cell::RefCell;
+
+// One `GuestMemory` of the LV2-driven microtest size (~256 MiB)
+// per test thread; LV2-driven scenarios pay one fresh calloc per
+// thread and reuse via `reset_for_reuse`.
+thread_local! {
+    static LV2_DRIVEN_POOL: RefCell<cellgov_testkit::runner::MemoryPool> =
+        RefCell::new(cellgov_testkit::runner::MemoryPool::new());
+}
+
+fn run_pooled_lv2_driven(
+    fixture: cellgov_testkit::fixtures::ScenarioFixture,
+) -> cellgov_testkit::runner::ScenarioResult {
+    LV2_DRIVEN_POOL.with_borrow_mut(|pool| cellgov_testkit::runner::run_pooled(fixture, pool))
+}
+
 /// Drive a PPU unit to a non-Syscall yield, feeding `r3 = 0` back on each
 /// syscall resume. Panics after 1000 resume cycles.
 fn run_to_completion(
@@ -437,7 +453,7 @@ fn build_lv2_driven_fixture(
 #[test]
 fn spu_fixed_value_runs_through_scenario_runner() {
     use cellgov_testkit::fixtures::ScenarioFixture;
-    use cellgov_testkit::runner::{self, ScenarioOutcome};
+    use cellgov_testkit::runner::ScenarioOutcome;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -485,7 +501,7 @@ fn spu_fixed_value_runs_through_scenario_runner() {
         })
         .build();
 
-    let result = runner::run(fixture);
+    let result = run_pooled_lv2_driven(fixture);
     assert_eq!(
         result.outcome,
         ScenarioOutcome::Stalled,
@@ -627,7 +643,7 @@ fn spu_fixed_value_image_open_writes_handle_to_guest_memory() {
     let spu_elf = std::fs::read(spu_path).unwrap();
 
     let fixture = build_lv2_driven_fixture(ppu_elf, spu_elf, Budget::new(100_000), 10_000);
-    let result = cellgov_testkit::runner::run(fixture);
+    let result = run_pooled_lv2_driven(fixture);
     assert_eq!(
         result.outcome,
         cellgov_testkit::runner::ScenarioOutcome::Stalled,
@@ -651,7 +667,7 @@ fn spu_fixed_value_lv2_driven_factory_fires_and_completes() {
     let spu_elf = std::fs::read(spu_path).unwrap();
 
     let fixture = build_lv2_driven_fixture(ppu_elf, spu_elf, Budget::new(100_000), 10_000);
-    let result = cellgov_testkit::runner::run(fixture);
+    let result = run_pooled_lv2_driven(fixture);
     assert_eq!(
         result.outcome,
         cellgov_testkit::runner::ScenarioOutcome::Stalled,
@@ -675,7 +691,7 @@ fn run_lv2_driven_microtest(name: &str) -> Option<Vec<u8>> {
     let ppu_elf = std::fs::read(&ppu_path).unwrap();
     let spu_elf = std::fs::read(&spu_path).unwrap();
     let fixture = build_lv2_driven_fixture(ppu_elf, spu_elf, Budget::new(100_000), 10_000);
-    let result = cellgov_testkit::runner::run(fixture);
+    let result = run_pooled_lv2_driven(fixture);
     assert_eq!(
         result.outcome,
         cellgov_testkit::runner::ScenarioOutcome::Stalled,
@@ -727,16 +743,9 @@ fn run_lv2_driven_baseline_check(microtest: &str, symbol: &str, region_defs: &[(
         })
         .collect();
 
-    let factory = move || {
-        build_lv2_driven_fixture(
-            ppu_elf.clone(),
-            spu_elf.clone(),
-            Budget::new(100_000),
-            10_000,
-        )
-    };
-
-    let cellgov_obs = cellgov_compare::observe_with_determinism_check(factory, &regions).unwrap();
+    let fixture = build_lv2_driven_fixture(ppu_elf, spu_elf, Budget::new(100_000), 10_000);
+    let scenario_result = run_pooled_lv2_driven(fixture);
+    let cellgov_obs = cellgov_compare::observe(&scenario_result, &regions);
     assert_eq!(
         cellgov_obs.outcome,
         cellgov_compare::ObservedOutcome::Completed,
@@ -874,6 +883,58 @@ fn mailbox_roundtrip_lv2_driven() {
     // 0x42 XOR 0xFFFFFFFF == 0xFFFFFFBD.
     let expected = [0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xBD];
     assert!(mem.windows(8).any(|w| w == expected));
+}
+
+/// Canonical engine-determinism check for the LV2-driven scenario
+/// shape.
+#[test]
+fn lv2_driven_dma_completion_is_deterministic() {
+    let ppu_path =
+        std::path::Path::new("../../tests/micro/dma_completion/build/dma_completion.elf");
+    let spu_path = std::path::Path::new("../../tests/micro/dma_completion/build/spu_main.elf");
+    if skip_if_missing(ppu_path) || skip_if_missing(spu_path) {
+        return;
+    }
+    let ppu_elf = std::fs::read(ppu_path).unwrap();
+    let spu_elf = std::fs::read(spu_path).unwrap();
+
+    let base_addr = crate::loader::find_symbol(&ppu_elf, "result_buf")
+        .expect("symbol 'result_buf' not found in dma_completion");
+    let regions = vec![
+        cellgov_compare::RegionDescriptor {
+            name: "header".into(),
+            addr: base_addr,
+            size: 8,
+        },
+        cellgov_compare::RegionDescriptor {
+            name: "pattern".into(),
+            addr: base_addr + 16,
+            size: 128,
+        },
+    ];
+
+    let build = || {
+        build_lv2_driven_fixture(
+            ppu_elf.clone(),
+            spu_elf.clone(),
+            Budget::new(100_000),
+            10_000,
+        )
+    };
+    let r1 = run_pooled_lv2_driven(build());
+    let r2 = run_pooled_lv2_driven(build());
+    let o1 = cellgov_compare::observe(&r1, &regions);
+    let o2 = cellgov_compare::observe(&r2, &regions);
+    assert_eq!(o1.outcome, o2.outcome, "engine determinism: outcome");
+    assert_eq!(
+        o1.memory_regions, o2.memory_regions,
+        "engine determinism: memory regions"
+    );
+    assert_eq!(o1.events, o2.events, "engine determinism: event sequence");
+    assert_eq!(
+        o1.state_hashes, o2.state_hashes,
+        "engine determinism: state hashes"
+    );
 }
 
 #[test]
@@ -1582,7 +1643,7 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
     if skip_if_missing(spu_elf_path) {
         return;
     }
-    let spu_elf = std::fs::read(spu_elf_path).unwrap();
+    let spu_elf = std::sync::Arc::new(std::fs::read(spu_elf_path).unwrap());
 
     // Layout: 0x0100 PPU program, 0x1000 SPU result, 0x10000 atomic line.
     let ppu_pc: u64 = 0x100;
@@ -1590,7 +1651,7 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
     let spu_result_ea: u32 = 0x1000;
 
     fn run_at_budget(
-        spu_elf: Vec<u8>,
+        spu_elf: std::sync::Arc<Vec<u8>>,
         ppu_pc: u64,
         atomic_ea: u32,
         spu_result_ea: u32,
@@ -1674,7 +1735,13 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
     // stwcx; 256 batches the whole retry into one block.
     let expected = PPU_N + SPU_N;
     for &b in &[1u64, 2, 3, 7, 15, 256] {
-        let counter = run_at_budget(spu_elf.clone(), ppu_pc, atomic_ea, spu_result_ea, b);
+        let counter = run_at_budget(
+            std::sync::Arc::clone(&spu_elf),
+            ppu_pc,
+            atomic_ea,
+            spu_result_ea,
+            b,
+        );
         assert_eq!(counter, expected, "Budget={b}");
     }
 }

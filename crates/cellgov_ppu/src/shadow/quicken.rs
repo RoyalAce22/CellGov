@@ -2,6 +2,9 @@
 //! specialized variant when an idiom is recognized. Pure function;
 //! the shadow's `quicken` method walks slots and applies this in
 //! place.
+//!
+//! [Brunthaler2010 p:2 s:2] in-place specialization of decoded instructions.
+//! [Brunthaler2010 p:3 s:3.2] argument-pattern unfoldings.
 
 use crate::instruction::PpuInstruction;
 

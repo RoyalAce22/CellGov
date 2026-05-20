@@ -1,8 +1,12 @@
 [title]
 content_id = "NPUA80001"
 short_name = "flow"
-display_name = "flOw (thatgamecompany, 2007)"
+display_name = "flOw"
 eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+year = 2007
+developer = "thatgamecompany"
+engine = "PhyreEngine"
+distribution = "psn-hdd"
 
 [checkpoint]
 # Title checkpoint kind. `process-exit` stops the harness on
@@ -33,10 +37,10 @@ mirror = true
 # `override_base_env` names an env var that, when set, replaces
 # `base` for this run. Use it to point at a gitignored local copy
 # of the real title content; the synthetic stubs under
-# `tests/fixtures/NPUA80001_content/` stay checked in as the
-# default for the public test suite. See SOURCES.md in that dir
-# for the synthetic-vs-real choice rationale.
-base = "tests/fixtures/NPUA80001_content"
+# `boot_content/NPUA80001/` stay checked in as the default for
+# the public test suite. See SOURCES.md in that dir for the
+# synthetic-vs-real choice rationale.
+base = "boot_content/NPUA80001"
 override_base_env = "CELLGOV_NPUA80001_CONTENT_DIR"
 files = [
     { guest_path = "/app_home/Data/Resources/first.xml", host_path = "Data/Resources/first.xml" },
@@ -51,5 +55,5 @@ files = [
 # resource enumerator.
 [[fs.mounts]]
 prefix = "/app_home"
-host = "tests/fixtures/NPUA80001_content"
+host = "boot_content/NPUA80001"
 override_env = "CELLGOV_NPUA80001_CONTENT_DIR"

@@ -4,6 +4,18 @@
 use crate::state::PpuState;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 
+/// `(addr, size)` pair describing where a segment would have been
+/// placed. Shared by [`LoadError::SegmentOutOfRange`] (ELF PT_LOAD)
+/// and [`crate::sprx::PrxLoadError::SegmentOutOfRange`] (PRX
+/// text / data) so the two failure shapes diagnose identically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SegmentPlacement {
+    /// Guest address at which the segment would have started.
+    pub addr: u64,
+    /// In-memory size of the segment.
+    pub size: u64,
+}
+
 /// Why loading failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadError {
@@ -21,14 +33,35 @@ pub enum LoadError {
     SegmentTruncated,
     /// A LOAD segment's virtual address + size exceeds guest memory,
     /// overflows a 32-bit PS3 effective address, or arithmetic on the
-    /// vaddr/memsz pair overflowed.
+    /// vaddr/memsz pair overflowed. `segment_index` is the offending
+    /// segment's slot in the program-header table.
     SegmentOutOfRange {
-        /// Virtual address of the segment.
-        vaddr: u64,
-        /// Memory size of the segment.
-        memsz: u64,
+        placement: SegmentPlacement,
+        segment_index: usize,
     },
 }
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooSmall => f.write_str("PPU ELF too small for header"),
+            Self::BadMagic => f.write_str("PPU ELF bad magic"),
+            Self::Not64Bit => f.write_str("PPU ELF is not 64-bit"),
+            Self::NotBigEndian => f.write_str("PPU ELF is not big-endian"),
+            Self::SegmentTruncated => f.write_str("PPU ELF LOAD segment truncated"),
+            Self::SegmentOutOfRange {
+                placement,
+                segment_index,
+            } => write!(
+                f,
+                "PPU ELF LOAD segment[{segment_index}] at 0x{:016x} (size 0x{:x}) out of range",
+                placement.addr, placement.size
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
 
 use cellgov_ps3_abi::elf::{ELF_HEADER_SIZE, ELF_MAGIC, PT_LOAD};
 
@@ -48,12 +81,16 @@ fn ph_slot_base(data_len: usize, phoff: usize, phentsize: usize, i: usize) -> Op
 
 /// Entry point and the minimum guest memory size needed to hold every
 /// PT_LOAD segment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadResult {
     /// ELF entry point (set as state.pc).
     pub entry: u64,
     /// Minimum guest memory size to hold all segments.
     pub min_memory_size: usize,
+    /// Guest-address range covering the loaded `sys_process_param_t`
+    /// struct. `None` when the ELF carries no struct. Consumed by
+    /// the cross-runner classifier as a non-semantic range.
+    pub sys_proc_param_range: Option<core::ops::Range<u64>>,
 }
 
 /// Minimum guest memory needed to host every PT_LOAD (including BSS).
@@ -87,16 +124,20 @@ pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
         if p_memsz == 0 {
             continue;
         }
+        let placement = SegmentPlacement {
+            addr: p_vaddr,
+            size: p_memsz,
+        };
         let end = p_vaddr
             .checked_add(p_memsz)
             .ok_or(LoadError::SegmentOutOfRange {
-                vaddr: p_vaddr,
-                memsz: p_memsz,
+                placement,
+                segment_index: i,
             })?;
         if end > u64::from(u32::MAX) + 1 {
             return Err(LoadError::SegmentOutOfRange {
-                vaddr: p_vaddr,
-                memsz: p_memsz,
+                placement,
+                segment_index: i,
             });
         }
         if end > max_addr {
@@ -158,16 +199,20 @@ pub fn load_ppu_elf(
         // PS3 effective addresses are 32-bit; reject anything that would
         // wrap on add or land above the 4 GiB EA ceiling before we cast
         // to usize for the apply_commit call below.
+        let placement = SegmentPlacement {
+            addr: p_vaddr,
+            size: p_memsz,
+        };
         let end = p_vaddr
             .checked_add(p_memsz)
             .ok_or(LoadError::SegmentOutOfRange {
-                vaddr: p_vaddr,
-                memsz: p_memsz,
+                placement,
+                segment_index: i,
             })?;
         if end > u64::from(u32::MAX) + 1 || end > mem_size as u64 {
             return Err(LoadError::SegmentOutOfRange {
-                vaddr: p_vaddr,
-                memsz: p_memsz,
+                placement,
+                segment_index: i,
             });
         }
 
@@ -225,9 +270,13 @@ pub fn load_ppu_elf(
         state.pc = entry;
     }
 
+    let sys_proc_param_range =
+        find_sys_process_param(data).map(|p| p.guest_addr..p.guest_addr + p.struct_size as u64);
+
     Ok(LoadResult {
         entry,
         min_memory_size: max_addr as usize,
+        sys_proc_param_range,
     })
 }
 
@@ -422,36 +471,41 @@ pub struct SysProcessParam {
     pub malloc_pagesize: u32,
     /// PPC segment mode (0 = default, 1 = OVLM).
     pub ppc_seg: u32,
+    /// Guest address where the struct lives after the ELF is loaded,
+    /// derived by mapping the struct's file offset through the
+    /// containing PT_LOAD segment.
+    pub guest_addr: u64,
+    /// Value of the on-disk `size` field at struct offset 0
+    /// (typically 0x30 or 0x40 across observed SDKs).
+    pub struct_size: u32,
 }
 
-/// Whether file offset `file_off` falls within any PT_LOAD's
-/// `[p_offset, p_offset + p_filesz)` file range. Used to filter
-/// magic-scan false positives in string tables, debug sections, or
-/// embedded asset data.
-fn file_offset_in_pt_load(data: &[u8], file_off: usize) -> bool {
+/// Locate the PT_LOAD whose file range covers `file_off` and return
+/// the corresponding guest virtual address. Returns `None` if no
+/// PT_LOAD covers the offset; used both to filter magic-scan false
+/// positives and to compute the guest location of structs found by
+/// scanning.
+fn pt_load_file_to_guest(data: &[u8], file_off: usize) -> Option<u64> {
     if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC || data[4] != 2 || data[5] != 2 {
-        return false;
+        return None;
     }
     let phoff = read_u64(data, 32) as usize;
     let phentsize = read_u16(data, 54) as usize;
     let phnum = read_u16(data, 56) as usize;
     for i in 0..phnum {
-        let Some(base) = ph_slot_base(data.len(), phoff, phentsize, i) else {
-            return false;
-        };
+        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
         if read_u32(data, base) != PT_LOAD {
             continue;
         }
         let p_offset = read_u64(data, base + 8) as usize;
+        let p_vaddr = read_u64(data, base + 16);
         let p_filesz = read_u64(data, base + 32) as usize;
-        let Some(p_end) = p_offset.checked_add(p_filesz) else {
-            continue;
-        };
+        let p_end = p_offset.checked_add(p_filesz)?;
         if file_off >= p_offset && file_off < p_end {
-            return true;
+            return Some(p_vaddr + (file_off - p_offset) as u64);
         }
     }
-    false
+    None
 }
 
 /// Locate `.sys_proc_param` by scanning for its magic (avoids parsing
@@ -478,19 +532,99 @@ pub fn find_sys_process_param(data: &[u8]) -> Option<SysProcessParam> {
             idx = s + 4;
             continue;
         }
-        if !file_offset_in_pt_load(data, start) {
+        let Some(guest_addr) = pt_load_file_to_guest(data, start) else {
             idx = s + 4;
             continue;
-        }
+        };
         return Some(SysProcessParam {
             sdk_version: read_u32(data, start + 12),
             primary_prio: read_u32(data, start + 16) as i32,
             primary_stacksize: read_u32(data, start + 20),
             malloc_pagesize: read_u32(data, start + 24),
             ppc_seg: read_u32(data, start + 28),
+            guest_addr,
+            struct_size: size,
         });
     }
     None
+}
+
+/// Secondary OPD pointer table located by 8-byte header signature.
+///
+/// The PRX-link CRT0 walker patches these tables at runtime with
+/// HLE OPD addresses from the same address space as the primary
+/// import-stub table; the cross-runner classifier treats bytes
+/// inside these tables under the same `HleOpdSlot` rule that covers
+/// the primary table. Located by scan because the tables sit in the
+/// title's `.data` section, outside the SCE PRX_PARAM-described
+/// `lib_stub_start..lib_stub_end` primary import area.
+///
+/// Observed on SSHD (NPUA80068) and WipEout (BCES00664):
+///
+/// - 8-byte header: `04 02 NN 00  00 NN 00 00` where NN is a
+///   sequence-number byte (`01` on the first table, `02` on the
+///   second; identical across both titles).
+/// - 0x60 bytes of slot data following the header.
+/// - Two tables per title, adjacent in the data segment (second
+///   table's `guest_addr` equals first's `guest_addr + 0x68`).
+///
+/// Writer attribution: SSHD's PC 0x4dec64 is an FNID-lookup loop
+/// over `ppu_prx_module_info` nodes; the loop runs during CRT0 and
+/// rewrites each slot's static self-referential `.data` trampoline
+/// address with the loader's HLE OPD address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SecondaryOpdTable {
+    /// Guest virtual address of the table's first byte (header).
+    pub guest_addr: u64,
+    /// Total table size in bytes (header + slot array).
+    pub size: u64,
+}
+
+/// Total size of one secondary OPD table (header + slot array).
+pub const SECONDARY_OPD_TABLE_SIZE: u64 = 0x68;
+
+/// Locate every secondary OPD table in `data` by header-signature
+/// scan over the EBOOT file. Candidates outside any PT_LOAD file
+/// range are rejected via the same filter [`find_sys_process_param`]
+/// uses, so stray byte sequences in section-header strings or
+/// embedded assets cannot masquerade as real tables. Returns tables
+/// in file-order; caller is responsible for merging adjacent extents
+/// into a single classifier range if desired.
+///
+/// The scan is 4-byte aligned. A title whose PT_LOAD `p_offset` is
+/// not 4-byte aligned would miss legitimate matches, but the
+/// trade-off favours false-negatives over false-positives in stray
+/// data; the four-byte stride is consistent with the PPC OPD-pointer
+/// natural alignment.
+pub fn find_secondary_opd_tables(data: &[u8]) -> Vec<SecondaryOpdTable> {
+    let mut out = Vec::new();
+    if data.len() < 8 {
+        return out;
+    }
+    let mut i = 0usize;
+    while i + 8 <= data.len() {
+        let w0 = read_u32(data, i);
+        let w1 = read_u32(data, i + 4);
+        let w0_seq = (w0 >> 8) & 0xFF;
+        let w1_seq = (w1 >> 16) & 0xFF;
+        let header_match = (w0 & 0xFFFF_00FF) == 0x0402_0000
+            && w0_seq != 0
+            && (w1 & 0xFF00_FFFF) == 0
+            && w1_seq != 0
+            && w0_seq == w1_seq;
+        if header_match {
+            if let Some(guest_addr) = pt_load_file_to_guest(data, i) {
+                out.push(SecondaryOpdTable {
+                    guest_addr,
+                    size: SECONDARY_OPD_TABLE_SIZE,
+                });
+                i += SECONDARY_OPD_TABLE_SIZE as usize;
+                continue;
+            }
+        }
+        i += 4;
+    }
+    out
 }
 
 use cellgov_ps3_abi::elf::{SHT_DYNSYM, SHT_SYMTAB};
@@ -653,8 +787,8 @@ mod tests {
         assert_eq!(
             load_ppu_elf(&data, &mut mem, &mut s),
             Err(LoadError::SegmentOutOfRange {
-                vaddr: 0,
-                memsz: 512,
+                placement: SegmentPlacement { addr: 0, size: 512 },
+                segment_index: 0,
             })
         );
     }
@@ -919,8 +1053,11 @@ mod tests {
         assert_eq!(
             load_ppu_elf(&data, &mut mem, &mut s),
             Err(LoadError::SegmentOutOfRange {
-                vaddr: p_vaddr,
-                memsz: p_memsz,
+                placement: SegmentPlacement {
+                    addr: p_vaddr,
+                    size: p_memsz,
+                },
+                segment_index: 0,
             })
         );
     }
@@ -943,8 +1080,11 @@ mod tests {
         assert_eq!(
             load_ppu_elf(&data, &mut mem, &mut s),
             Err(LoadError::SegmentOutOfRange {
-                vaddr: p_vaddr,
-                memsz: p_memsz,
+                placement: SegmentPlacement {
+                    addr: p_vaddr,
+                    size: p_memsz,
+                },
+                segment_index: 0,
             })
         );
     }
@@ -1038,6 +1178,54 @@ mod tests {
         assert_eq!(p.primary_prio, 1000);
         assert_eq!(p.primary_stacksize, 0x10000);
         assert_eq!(p.malloc_pagesize, 0x10000);
+        // guest_addr = p_vaddr (0) + (file_off 0x140 - p_offset 0x100) = 0x40.
+        assert_eq!(p.guest_addr, 0x40);
+        assert_eq!(p.struct_size, 0x30);
+    }
+
+    #[test]
+    fn load_ppu_elf_populates_sys_proc_param_range_when_struct_present() {
+        let payload_offset = 0x140usize;
+        let pt_load_offset = 0x100usize;
+        let pt_load_size = 0x80usize;
+        let pt_load_vaddr: u64 = 0x10_0000;
+        let mut data = vec![0u8; pt_load_offset + pt_load_size + 64];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 2;
+        data[5] = 2;
+        data[32..40].copy_from_slice(&64u64.to_be_bytes());
+        data[54..56].copy_from_slice(&56u16.to_be_bytes());
+        data[56..58].copy_from_slice(&1u16.to_be_bytes());
+        let ph = 64;
+        data[ph..ph + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+        data[ph + 8..ph + 16].copy_from_slice(&(pt_load_offset as u64).to_be_bytes());
+        data[ph + 16..ph + 24].copy_from_slice(&pt_load_vaddr.to_be_bytes());
+        data[ph + 32..ph + 40].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
+        data[ph + 40..ph + 48].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
+        let start = payload_offset;
+        data[start..start + 4].copy_from_slice(&0x30u32.to_be_bytes());
+        data[start + 4..start + 8].copy_from_slice(&SYS_PROCESS_PARAM_MAGIC.to_be_bytes());
+
+        let mut s = PpuState::new();
+        let mut mem = GuestMemory::new(0x20_0000);
+        let result = load_ppu_elf(&data, &mut mem, &mut s).expect("load");
+        // guest_addr = 0x10_0000 + (0x140 - 0x100) = 0x10_0040.
+        // struct_size = 0x30.
+        assert_eq!(
+            result.sys_proc_param_range,
+            Some(0x10_0040..0x10_0070),
+            "sys_proc_param_range must cover [guest_addr, guest_addr + struct_size)",
+        );
+    }
+
+    #[test]
+    fn load_ppu_elf_leaves_sys_proc_param_range_none_without_struct() {
+        let mut data = mk_elf_header(1);
+        write_ph(&mut data, 0, 64 + 56, 0x10_0000, 0, 0);
+        let mut s = PpuState::new();
+        let mut mem = GuestMemory::new(0x20_0000);
+        let result = load_ppu_elf(&data, &mut mem, &mut s).expect("load");
+        assert!(result.sys_proc_param_range.is_none());
     }
 
     #[test]
@@ -1053,5 +1241,182 @@ mod tests {
         assert_eq!(tls.vaddr, 0x895cd0);
         assert_eq!(tls.filesz, 4);
         assert_eq!(tls.memsz, 0x1dc);
+    }
+
+    /// Build an ELF with one PT_LOAD covering `[pt_off, pt_off+pt_sz)`
+    /// at guest `pt_vaddr`, plus a writeable byte buffer the caller
+    /// can plant table-header bytes into. Returns the assembled file.
+    fn mk_elf_with_pt_load(pt_off: usize, pt_sz: usize, pt_vaddr: u64) -> Vec<u8> {
+        let mut data = vec![0u8; pt_off + pt_sz + 16];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 2;
+        data[5] = 2;
+        data[32..40].copy_from_slice(&64u64.to_be_bytes());
+        data[54..56].copy_from_slice(&56u16.to_be_bytes());
+        data[56..58].copy_from_slice(&1u16.to_be_bytes());
+        let ph = 64;
+        data[ph..ph + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+        data[ph + 8..ph + 16].copy_from_slice(&(pt_off as u64).to_be_bytes());
+        data[ph + 16..ph + 24].copy_from_slice(&pt_vaddr.to_be_bytes());
+        data[ph + 32..ph + 40].copy_from_slice(&(pt_sz as u64).to_be_bytes());
+        data[ph + 40..ph + 48].copy_from_slice(&(pt_sz as u64).to_be_bytes());
+        data
+    }
+
+    /// Write an 8-byte secondary-OPD-table header at `file_off`.
+    fn plant_table_header(data: &mut [u8], file_off: usize, seq: u8) {
+        data[file_off] = 0x04;
+        data[file_off + 1] = 0x02;
+        data[file_off + 2] = seq;
+        data[file_off + 3] = 0x00;
+        data[file_off + 4] = 0x00;
+        data[file_off + 5] = seq;
+        data[file_off + 6] = 0x00;
+        data[file_off + 7] = 0x00;
+    }
+
+    #[test]
+    fn find_secondary_opd_tables_finds_adjacent_pair() {
+        let pt_off = 0x200usize;
+        let pt_sz = 0x200usize;
+        let pt_vaddr = 0x82_0000u64;
+        let mut data = mk_elf_with_pt_load(pt_off, pt_sz, pt_vaddr);
+        let t1_file = pt_off + 0x40;
+        let t2_file = t1_file + 0x68;
+        plant_table_header(&mut data, t1_file, 1);
+        plant_table_header(&mut data, t2_file, 2);
+
+        let tables = find_secondary_opd_tables(&data);
+        assert_eq!(tables.len(), 2);
+        assert_eq!(tables[0].guest_addr, pt_vaddr + 0x40);
+        assert_eq!(tables[0].size, SECONDARY_OPD_TABLE_SIZE);
+        assert_eq!(tables[1].guest_addr, pt_vaddr + 0x40 + 0x68);
+        assert_eq!(tables[1].size, SECONDARY_OPD_TABLE_SIZE);
+    }
+
+    #[test]
+    fn find_secondary_opd_tables_finds_single_when_only_one_present() {
+        let pt_off = 0x200usize;
+        let pt_sz = 0x100usize;
+        let pt_vaddr = 0x82_0000u64;
+        let mut data = mk_elf_with_pt_load(pt_off, pt_sz, pt_vaddr);
+        let t1_file = pt_off + 0x40;
+        plant_table_header(&mut data, t1_file, 1);
+
+        let tables = find_secondary_opd_tables(&data);
+        assert_eq!(tables.len(), 1);
+        assert_eq!(tables[0].guest_addr, pt_vaddr + 0x40);
+    }
+
+    #[test]
+    fn find_secondary_opd_tables_rejects_header_outside_pt_load() {
+        // Plant the header at a file offset OUTSIDE any PT_LOAD range.
+        // A scanner without the PT_LOAD filter would emit a phantom
+        // table inside ELF padding / metadata.
+        let pt_off = 0x200usize;
+        let pt_sz = 0x40usize;
+        let pt_vaddr = 0x82_0000u64;
+        let outside_off = 0x300usize; // beyond pt_off + pt_sz = 0x240
+        let mut data = vec![0u8; outside_off + 0x80];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 2;
+        data[5] = 2;
+        data[32..40].copy_from_slice(&64u64.to_be_bytes());
+        data[54..56].copy_from_slice(&56u16.to_be_bytes());
+        data[56..58].copy_from_slice(&1u16.to_be_bytes());
+        let ph = 64;
+        data[ph..ph + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+        data[ph + 8..ph + 16].copy_from_slice(&(pt_off as u64).to_be_bytes());
+        data[ph + 16..ph + 24].copy_from_slice(&pt_vaddr.to_be_bytes());
+        data[ph + 32..ph + 40].copy_from_slice(&(pt_sz as u64).to_be_bytes());
+        data[ph + 40..ph + 48].copy_from_slice(&(pt_sz as u64).to_be_bytes());
+        plant_table_header(&mut data, outside_off, 1);
+
+        let tables = find_secondary_opd_tables(&data);
+        assert!(
+            tables.is_empty(),
+            "header outside PT_LOAD must be rejected; got {tables:?}"
+        );
+    }
+
+    #[test]
+    fn find_secondary_opd_tables_rejects_unaligned_or_mismatched_seq() {
+        // Two adversarial cases:
+        //   1. Header at a non-4-byte-aligned offset (scan strides
+        //      by 4 from offset 0, so an unaligned plant is invisible).
+        //   2. Header where the sequence byte in word 0 disagrees
+        //      with the sequence byte in word 1 (e.g., `04 02 01 00
+        //      00 02 00 00`). The match condition requires equality.
+        let pt_off = 0x200usize;
+        let pt_sz = 0x200usize;
+        let pt_vaddr = 0x82_0000u64;
+        let mut data = mk_elf_with_pt_load(pt_off, pt_sz, pt_vaddr);
+
+        // Case 1: unaligned plant at +0x42 (not 4-byte aligned).
+        let unaligned_off = pt_off + 0x42;
+        plant_table_header(&mut data, unaligned_off, 1);
+        let tables = find_secondary_opd_tables(&data);
+        assert!(
+            tables.is_empty(),
+            "unaligned header must be missed by 4-byte-strided scan; got {tables:?}"
+        );
+
+        // Reset.
+        for byte in &mut data[unaligned_off..unaligned_off + 8] {
+            *byte = 0;
+        }
+
+        // Case 2: aligned plant with mismatched sequence bytes.
+        let mismatch_off = pt_off + 0x40;
+        data[mismatch_off] = 0x04;
+        data[mismatch_off + 1] = 0x02;
+        data[mismatch_off + 2] = 0x01;
+        data[mismatch_off + 3] = 0x00;
+        data[mismatch_off + 4] = 0x00;
+        data[mismatch_off + 5] = 0x02; // != word-0 seq byte
+        data[mismatch_off + 6] = 0x00;
+        data[mismatch_off + 7] = 0x00;
+        let tables = find_secondary_opd_tables(&data);
+        assert!(
+            tables.is_empty(),
+            "mismatched seq bytes must not match; got {tables:?}"
+        );
+    }
+
+    #[test]
+    fn find_secondary_opd_tables_on_real_sshd_elf() {
+        let path =
+            std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.elf");
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        let tables = find_secondary_opd_tables(&data);
+        // SSHD has two adjacent tables at guest 0x829b10 and 0x829b78.
+        assert_eq!(tables.len(), 2, "SSHD must expose two secondary OPD tables");
+        assert_eq!(tables[0].guest_addr, 0x829b10);
+        assert_eq!(tables[0].size, SECONDARY_OPD_TABLE_SIZE);
+        assert_eq!(tables[1].guest_addr, 0x829b78);
+        assert_eq!(tables[1].size, SECONDARY_OPD_TABLE_SIZE);
+    }
+
+    #[test]
+    fn find_secondary_opd_tables_on_real_wipeout_elf() {
+        let path = std::path::PathBuf::from(
+            "../../tools/rpcs3/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.elf",
+        );
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        let tables = find_secondary_opd_tables(&data);
+        // WipEout has two adjacent tables at guest 0x925008 and 0x925070.
+        assert_eq!(
+            tables.len(),
+            2,
+            "WipEout must expose two secondary OPD tables"
+        );
+        assert_eq!(tables[0].guest_addr, 0x925008);
+        assert_eq!(tables[1].guest_addr, 0x925070);
     }
 }

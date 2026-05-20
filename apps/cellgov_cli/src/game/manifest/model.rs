@@ -18,6 +18,30 @@ pub enum GameSource {
     Disc,
 }
 
+/// Distribution channel for the `titles.md` Format column. Display
+/// only; runtime mount semantics live on [`GameSource`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Distribution {
+    /// Digital PSN download installed under `/dev_hdd0/game/`.
+    PsnHdd,
+    /// Retail disc installed to `/dev_hdd0/game/`.
+    RetailHdd,
+    /// BD-ROM disc image mounted under `/dev_bdvd/`.
+    DiscIso,
+}
+
+impl Distribution {
+    /// Matrix Format-column label.
+    #[allow(dead_code, reason = "consumed by titles-gen tests")]
+    pub fn format_label(self) -> &'static str {
+        match self {
+            Self::PsnHdd => "PSN HDD",
+            Self::RetailHdd => "Retail HDD",
+            Self::DiscIso => "Disc ISO",
+        }
+    }
+}
+
 /// One title's manifest as loaded from `docs/titles/<content-id>.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TitleManifest {
@@ -29,6 +53,12 @@ pub struct TitleManifest {
     pub display_name: String,
     /// Executable filenames tried in priority order under USRDIR.
     pub eboot_candidates: Vec<String>,
+    /// Year of first release; displayed in the `titles.md` matrix.
+    pub year: u16,
+    pub developer: String,
+    pub engine: String,
+    /// Distribution channel for the matrix's Format column.
+    pub distribution: Distribution,
     /// Built-in boot checkpoint; CLI `--checkpoint` overrides.
     pub checkpoint: CheckpointTrigger,
     pub source: GameSource,
@@ -62,8 +92,9 @@ pub struct ContentManifest {
     pub files: Vec<ContentEntry>,
 }
 
-/// One blob: `guest_path` is what `sys_fs_open` sees; `host_path` is
-/// the on-disk source (relative resolves against [`ContentManifest::base`]).
+/// `guest_path` is what `sys_fs_open` sees; `host_path` is the
+/// on-disk source (relative paths resolve against
+/// [`ContentManifest::base`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentEntry {
     pub guest_path: String,
@@ -114,6 +145,12 @@ impl std::fmt::Display for ResolveEbootError {
             }
         }
     }
+}
+
+impl std::error::Error for ResolveEbootError {
+    // NotFound carries Vec<(PathBuf, io::Error)>, a multi-error
+    // aggregate without a single canonical source; the per-error
+    // detail is folded into Display instead.
 }
 
 impl TitleManifest {
@@ -184,6 +221,10 @@ pub(super) fn hdd_manifest(content_id: &str, short: &str, candidates: &[&str]) -
         short_name: short.to_string(),
         display_name: short.to_string(),
         eboot_candidates: candidates.iter().map(|s| s.to_string()).collect(),
+        year: 2007,
+        developer: "test-developer".to_string(),
+        engine: "test-engine".to_string(),
+        distribution: Distribution::PsnHdd,
         checkpoint: CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,

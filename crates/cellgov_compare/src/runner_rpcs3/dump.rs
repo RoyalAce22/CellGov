@@ -13,21 +13,31 @@ pub fn parse_dump(
     regions: &[DumpRegion],
 ) -> Result<Vec<NamedMemoryRegion>, Rpcs3Error> {
     let data = std::fs::read(dump_path).map_err(Rpcs3Error::DumpRead)?;
+    let data_len = data.len() as u64;
     let mut result = Vec::with_capacity(regions.len());
 
     for region in regions {
-        let start = region.offset as usize;
-        let end = start + region.size as usize;
-        if end > data.len() {
+        let end = region.offset.checked_add(region.size).ok_or_else(|| {
+            Rpcs3Error::DumpOffsetOverflow {
+                region_name: region.name.clone(),
+                offset: region.offset,
+                size: region.size,
+            }
+        })?;
+        if end > data_len {
             return Err(Rpcs3Error::DumpTooSmall {
-                expected: end as u64,
-                actual: data.len() as u64,
+                region_name: region.name.clone(),
+                guest_addr: region.guest_addr,
+                expected: end,
+                actual: data_len,
             });
         }
+        let start = region.offset as usize;
+        let end_usz = end as usize;
         result.push(NamedMemoryRegion {
             name: region.name.clone(),
             addr: region.guest_addr,
-            data: data[start..end].to_vec(),
+            data: data[start..end_usz].to_vec(),
         });
     }
 
@@ -106,13 +116,44 @@ mod tests {
             guest_addr: 0x1000,
         }];
         let result = parse_dump(&path, &regions);
-        assert!(result.is_err());
         match result.unwrap_err() {
-            Rpcs3Error::DumpTooSmall { expected, actual } => {
+            Rpcs3Error::DumpTooSmall {
+                region_name,
+                guest_addr,
+                expected,
+                actual,
+            } => {
+                assert_eq!(region_name, "oob");
+                assert_eq!(guest_addr, 0x1000);
                 assert_eq!(expected, 12);
                 assert_eq!(actual, 8);
             }
             other => panic!("expected DumpTooSmall, got {other:?}"),
+        }
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn parse_dump_rejects_offset_size_overflow() {
+        let data = vec![0; 8];
+        let path = write_temp_dump(&data);
+        let regions = vec![DumpRegion {
+            name: "overflow".into(),
+            offset: u64::MAX - 4,
+            size: 100,
+            guest_addr: 0x1000,
+        }];
+        match parse_dump(&path, &regions).unwrap_err() {
+            Rpcs3Error::DumpOffsetOverflow {
+                region_name,
+                offset,
+                size,
+            } => {
+                assert_eq!(region_name, "overflow");
+                assert_eq!(offset, u64::MAX - 4);
+                assert_eq!(size, 100);
+            }
+            other => panic!("expected DumpOffsetOverflow, got {other:?}"),
         }
         std::fs::remove_file(&path).ok();
     }

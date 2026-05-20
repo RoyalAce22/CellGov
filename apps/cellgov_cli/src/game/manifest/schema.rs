@@ -64,6 +64,11 @@ pub(super) struct ManifestTitle {
     pub(super) short_name: String,
     pub(super) display_name: String,
     pub(super) eboot_candidates: Vec<String>,
+    pub(super) year: u16,
+    pub(super) developer: String,
+    pub(super) engine: String,
+    /// One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`.
+    pub(super) distribution: String,
 }
 
 #[derive(Debug, serde::Deserialize)]

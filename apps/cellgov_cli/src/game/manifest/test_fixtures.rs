@@ -31,6 +31,10 @@ content_id = "NPAA00001"
 short_name = "proc-exit-fixture"
 display_name = "Process-exit checkpoint fixture"
 eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+year = 2007
+developer = "test-developer"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -42,6 +46,10 @@ content_id = "NPAA00002"
 short_name = "rsx-write-fixture"
 display_name = "First-RSX-write checkpoint fixture"
 eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+year = 2007
+developer = "test-developer"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "first-rsx-write"
@@ -53,6 +61,10 @@ content_id = "NPAA00003"
 short_name = "pcstop"
 display_name = "PC-checkpoint test title"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test-developer"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "pc"

@@ -16,8 +16,15 @@ use std::fmt;
 ///
 /// `repr(transparent)` so the type is ABI-identical to the underlying
 /// `u64`. `Option<GuestAddr>` is still 16 bytes -- `u64` has no niche.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// Serde shape: bare JSON number (`#[serde(transparent)]`). On-disk
+/// addresses round-trip as raw `u64`s, not nested objects, so the
+/// wire format matches what `--checkpoint pc=0xADDR` accepts.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(transparent)]
+#[serde(transparent)]
 pub struct GuestAddr(u64);
 
 impl GuestAddr {

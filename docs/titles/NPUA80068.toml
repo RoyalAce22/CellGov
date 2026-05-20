@@ -1,8 +1,12 @@
 [title]
 content_id = "NPUA80068"
 short_name = "sshd"
-display_name = "Super Stardust HD (Housemarque, 2007)"
+display_name = "Super Stardust HD"
 eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+year = 2007
+developer = "Housemarque"
+engine = "Housemarque proprietary"
+distribution = "psn-hdd"
 
 [checkpoint]
 # SSHD's attract-mode loop never exits on its own; the first PPU

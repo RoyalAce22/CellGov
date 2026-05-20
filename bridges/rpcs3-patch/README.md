@@ -74,7 +74,7 @@ and pass it alongside the dump:
 EXPECTED=$(cargo run -q -p rpcs3_to_observation -- --print-expected-config-hash)
 cargo run -q -p rpcs3_to_observation -- \
     --dump /tmp/flow_rpcs3.dump \
-    --manifest tests/fixtures/NPUA80001_checkpoint.toml \
+    --manifest tests/fixtures/NPUA80001/checkpoint.toml \
     --outcome completed \
     --output /tmp/flow_rpcs3.json \
     --config-hash "$EXPECTED"

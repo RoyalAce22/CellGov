@@ -15,18 +15,10 @@ pub use checkpoint::CheckpointTrigger;
 pub use model::{ContentManifest, MountEntry, TitleManifest};
 pub use registry::TitleRegistry;
 
-// `ContentEntry`, `GameSource`, `ResolveEbootError`, and
-// `ManifestError` are named outside this module only by test code
-// (`ContentEntry`) or appear solely in method-return positions
-// (consumed via `?` / `Display` / inferred closure args). Kept
-// exported so a future caller that needs the name can find it.
-#[allow(
-    unused_imports,
-    reason = "named externally only by test code or method-return types"
-)]
+#[allow(unused_imports, reason = "named only by titles-gen tests")]
+pub use model::Distribution;
+
+#[allow(unused_imports, reason = "named only by tests or method-return types")]
 pub use loader::ManifestError;
-#[allow(
-    unused_imports,
-    reason = "named externally only by test code or method-return types"
-)]
+#[allow(unused_imports, reason = "named only by tests or method-return types")]
 pub use model::{ContentEntry, GameSource, ResolveEbootError};

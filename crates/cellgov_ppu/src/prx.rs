@@ -9,21 +9,28 @@ use cellgov_mem::{ByteRange, GuestAddr, StagedWrite, StagingMemory};
 use cellgov_ps3_abi::elf::{
     ELF_HEADER_SIZE, ELF_PHENTSIZE_OFFSET, ELF_PHNUM_OFFSET, ELF_PHOFF_OFFSET,
     PHDR_P_FILESZ_OFFSET, PHDR_P_OFFSET_OFFSET, PHDR_P_PADDR_OFFSET, PHDR_P_VADDR_OFFSET,
-    PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_NAME_PTR_OFFSET, PRX_IMPORT_NIDS_PTR_OFFSET,
-    PRX_IMPORT_NUM_FUNC_OFFSET, PRX_IMPORT_SIZE_OFFSET, PRX_IMPORT_STUB_PTR_OFFSET,
-    PRX_LIB_INFO_IMPORTS_END_OFFSET, PRX_LIB_INFO_IMPORTS_START_OFFSET, PRX_LIB_INFO_SIZE,
-    PRX_NAME_MAX_LEN, PRX_PARAM_HEADER_MIN_SIZE, PRX_PARAM_HEADER_SIZE_OFFSET,
-    PRX_PARAM_IMPORTS_END_OFFSET, PRX_PARAM_IMPORTS_START_OFFSET, PRX_PARAM_MAGIC,
-    PRX_PARAM_MAGIC_OFFSET, PT_LOAD, PT_PRX_PARAM,
+    PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_ENTRY_VAR_MIN_SIZE, PRX_IMPORT_NAME_PTR_OFFSET,
+    PRX_IMPORT_NIDS_PTR_OFFSET, PRX_IMPORT_NUM_FUNC_OFFSET, PRX_IMPORT_NUM_VAR_OFFSET,
+    PRX_IMPORT_SIZE_OFFSET, PRX_IMPORT_STUB_PTR_OFFSET, PRX_IMPORT_VNIDS_PTR_OFFSET,
+    PRX_IMPORT_VSTUBS_PTR_OFFSET, PRX_LIB_INFO_IMPORTS_END_OFFSET,
+    PRX_LIB_INFO_IMPORTS_START_OFFSET, PRX_LIB_INFO_SIZE, PRX_NAME_MAX_LEN,
+    PRX_PARAM_HEADER_MIN_SIZE, PRX_PARAM_HEADER_SIZE_OFFSET, PRX_PARAM_IMPORTS_END_OFFSET,
+    PRX_PARAM_IMPORTS_START_OFFSET, PRX_PARAM_MAGIC, PRX_PARAM_MAGIC_OFFSET, PT_LOAD, PT_PRX_PARAM,
 };
 
-/// A single imported PRX module with its function imports.
+/// A single imported PRX module with its function and variable
+/// imports.
 #[derive(Debug, Clone)]
 pub struct ImportedModule {
     /// Module name (e.g., `cellGcmSys`).
     pub name: String,
     /// Function imports declared by this module.
     pub functions: Vec<ImportedFunction>,
+    /// Variable imports declared by this module. Populated for
+    /// `PrxImportEntry` records whose declared size is at least 36
+    /// bytes (i.e., covers through `vstubs_ptr`); smaller entries
+    /// have no variable section and produce an empty `Vec`.
+    pub variables: Vec<ImportedVariable>,
 }
 
 /// One imported function: NID and the GOT slot the binder patches.
@@ -35,6 +42,20 @@ pub struct ImportedFunction {
     /// contents with an OPD address so callers dereference it as a
     /// normal PPC function pointer.
     pub stub_addr: u32,
+}
+
+/// One imported variable: VNID and the address of the slot the
+/// binder patches to point at the exporter's storage. Mirrors
+/// RPCS3's variable-import handling at
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:1029-1049`.
+#[derive(Debug, Clone, Copy)]
+pub struct ImportedVariable {
+    /// Variable NID (hashed name).
+    pub vnid: u32,
+    /// Guest address of the 4-byte slot that holds the imported
+    /// variable's address. The binder writes the exporter's storage
+    /// address into this slot at boot.
+    pub vref_addr: u32,
 }
 
 /// Failure modes for [`parse_imports`].
@@ -233,6 +254,26 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
         let nid_ptr = loader::read_u32(data, foff + PRX_IMPORT_NIDS_PTR_OFFSET);
         let stub_ptr = loader::read_u32(data, foff + PRX_IMPORT_STUB_PTR_OFFSET);
 
+        // Variable imports are only present when the declared entry
+        // size covers the `vstubs_ptr` field. Older 28-byte (`0x1C`)
+        // entries have function imports only.
+        let has_variables = entry_size as u8 >= PRX_IMPORT_ENTRY_VAR_MIN_SIZE;
+        let variable_count = if has_variables {
+            loader::read_u16(data, foff + PRX_IMPORT_NUM_VAR_OFFSET)
+        } else {
+            0
+        };
+        let vnid_ptr = if has_variables {
+            loader::read_u32(data, foff + PRX_IMPORT_VNIDS_PTR_OFFSET)
+        } else {
+            0
+        };
+        let vstub_ptr = if has_variables {
+            loader::read_u32(data, foff + PRX_IMPORT_VSTUBS_PTR_OFFSET)
+        } else {
+            0
+        };
+
         let name = read_cstring(data, &segments, name_ptr)?;
 
         let mut functions = Vec::with_capacity(function_count as usize);
@@ -287,7 +328,59 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
             }
         }
 
-        modules.push(ImportedModule { name, functions });
+        let mut variables = Vec::with_capacity(variable_count as usize);
+        if variable_count > 0 {
+            // The vnids and vstubs tables must each lie wholly inside
+            // one PT_LOAD (same constraint as the function tables);
+            // a slot the binder writes across a segment boundary is a
+            // hard error.
+            validate_stub_ptr_range(&segments, vnid_ptr, variable_count).ok_or(
+                ImportParseError::InvalidNidPtr {
+                    vaddr: vnid_ptr,
+                    function_count: variable_count,
+                },
+            )?;
+            validate_stub_ptr_range(&segments, vstub_ptr, variable_count).ok_or(
+                ImportParseError::InvalidStubPtr {
+                    vaddr: vstub_ptr,
+                    function_count: variable_count,
+                },
+            )?;
+            for i in 0..variable_count {
+                let nid_vaddr = vnid_ptr.checked_add(u32::from(i) * 4).ok_or(
+                    ImportParseError::InvalidNidPtr {
+                        vaddr: vnid_ptr,
+                        function_count: variable_count,
+                    },
+                )?;
+                let nid_foff = vaddr_to_file(&segments, nid_vaddr as usize).ok_or(
+                    ImportParseError::InvalidNidPtr {
+                        vaddr: vnid_ptr,
+                        function_count: variable_count,
+                    },
+                )?;
+                if nid_foff.checked_add(4).is_none_or(|end| end > data.len()) {
+                    return Err(ImportParseError::InvalidNidPtr {
+                        vaddr: vnid_ptr,
+                        function_count: variable_count,
+                    });
+                }
+                let vnid = loader::read_u32(data, nid_foff);
+                let vref_addr = vstub_ptr.checked_add(u32::from(i) * 4).ok_or(
+                    ImportParseError::InvalidStubPtr {
+                        vaddr: vstub_ptr,
+                        function_count: variable_count,
+                    },
+                )?;
+                variables.push(ImportedVariable { vnid, vref_addr });
+            }
+        }
+
+        modules.push(ImportedModule {
+            name,
+            functions,
+            variables,
+        });
         addr_vaddr = entry_end_vaddr;
     }
 
@@ -442,17 +535,16 @@ pub enum HleLayout {
 }
 
 impl HleLayout {
-    /// One-past-the-end guest address occupied by `n_bindings` worth
-    /// of OPDs + bodies under this layout. For `Legacy24` the result
-    /// is relative to `trampoline_base` and is computed assuming OPDs
-    /// and bodies are interleaved as `24 * n_bindings` from the same
-    /// base. For `Ps3Spec` the result is the absolute address.
-    ///
-    /// Byte-precise: the caller owns any page-alignment rounding the
-    /// downstream consumer requires (e.g., 64K alignment for PRX
-    /// placement on the `main` region).
-    ///
-    /// Returns `None` if the arithmetic overflows `u32`.
+    /// Lowest guest address the trampoline region occupies.
+    pub fn extent_start(self, legacy_base: u32) -> u32 {
+        match self {
+            HleLayout::Legacy24 => legacy_base,
+            HleLayout::Ps3Spec { opd_base, .. } => opd_base,
+        }
+    }
+
+    /// One-past-the-end guest address for `n_bindings` worth of
+    /// OPDs + bodies. Returns `None` on `u32` overflow.
     pub fn extent_end(self, legacy_base: u32, n_bindings: u32) -> Option<u32> {
         match self {
             HleLayout::Legacy24 => legacy_base.checked_add(n_bindings.checked_mul(24)?),
@@ -511,6 +603,47 @@ pub enum BindError {
         /// Number of staged writes the batch carried.
         staged_count: usize,
     },
+}
+
+impl std::fmt::Display for BindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LayoutOverflow {
+                binding_index,
+                kind,
+            } => write!(
+                f,
+                "HLE bind layout overflow at binding[{binding_index}] ({kind})"
+            ),
+            Self::NamespaceExhausted {
+                binding_index,
+                namespace_upper_bound,
+            } => write!(
+                f,
+                "HLE bind exhausted SyscallNamespace::HleImport at binding[{binding_index}] (upper bound 0x{namespace_upper_bound:x})"
+            ),
+            Self::BadRange { kind, addr, length } => write!(
+                f,
+                "HLE bind bad {kind} range at 0x{addr:08x} length {length}"
+            ),
+            Self::StagingCommitFailed {
+                source,
+                staged_count,
+            } => write!(
+                f,
+                "HLE bind staging commit ({staged_count} writes) rejected: {source}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BindError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::StagingCommitFailed { source, .. } => Some(source),
+            _ => None,
+        }
+    }
 }
 
 /// [`bind_hle_stubs_with_layout`] with [`HleLayout::Legacy24`].
@@ -936,6 +1069,27 @@ fn read_cstring(data: &[u8], segments: &[Segment], vaddr: u32) -> Result<String,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hle_layout_extent_legacy24_is_n_times_24_from_base() {
+        let layout = HleLayout::Legacy24;
+        assert_eq!(layout.extent_start(0x0090_0000), 0x0090_0000);
+        assert_eq!(layout.extent_end(0x0090_0000, 10), Some(0x0090_0000 + 240));
+        assert_eq!(layout.extent_end(0x0090_0000, 0), Some(0x0090_0000));
+    }
+
+    #[test]
+    fn hle_layout_extent_ps3_spec_covers_opd_through_body_end() {
+        let layout = HleLayout::Ps3Spec {
+            opd_base: 0x0090_0000,
+            body_base: 0x0090_0000 + 100 * 8,
+        };
+        assert_eq!(layout.extent_start(0xDEAD_BEEF), 0x0090_0000);
+        assert_eq!(
+            layout.extent_end(0xDEAD_BEEF, 100),
+            Some(0x0090_0000 + 2400)
+        );
+    }
 
     #[test]
     fn hle_implemented_nids_is_nonempty_and_unique() {
@@ -1564,6 +1718,7 @@ mod tests {
                         stub_addr: stub,
                     })
                     .collect(),
+                variables: Vec::new(),
             })
             .collect()
     }
