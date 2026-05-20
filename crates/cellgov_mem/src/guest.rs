@@ -39,12 +39,66 @@ pub enum RegionAccess {
     ReservedStrict,
 }
 
+/// 4 KiB tracking page used by [`Region::reset_for_reuse`].
+const RESET_PAGE_BITS: u32 = 12;
+const RESET_PAGE_SIZE: usize = 1 << RESET_PAGE_BITS;
+
+/// Bitmap of touched [`RESET_PAGE_SIZE`]-byte pages within a region.
+///
+/// Maintained by [`GuestMemory::apply_commit`] so
+/// [`Region::reset_for_reuse`] can zero only the pages a previous test
+/// case wrote, instead of memset-ing the whole region.
+#[derive(Debug, Clone, Default)]
+struct DirtyPages {
+    bits: Vec<u64>,
+}
+
+impl DirtyPages {
+    fn new(num_pages: usize) -> Self {
+        Self {
+            bits: vec![0u64; num_pages.div_ceil(64)],
+        }
+    }
+
+    #[inline]
+    fn mark_range(&mut self, first_page: usize, last_page_incl: usize) {
+        let mut p = first_page;
+        while p <= last_page_incl {
+            self.bits[p >> 6] |= 1u64 << (p & 63);
+            p += 1;
+        }
+    }
+
+    fn for_each_set<F: FnMut(usize)>(&self, mut f: F) {
+        for (word_idx, &word) in self.bits.iter().enumerate() {
+            let mut w = word;
+            while w != 0 {
+                let bit = w.trailing_zeros() as usize;
+                f((word_idx << 6) + bit);
+                w &= w - 1;
+            }
+        }
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        for w in &mut self.bits {
+            *w = 0;
+        }
+    }
+}
+
 /// A single contiguous guest memory region.
 ///
 /// `bytes` is `Arc<Vec<u8>>`: clone is a refcount bump,
 /// [`GuestMemory::apply_commit`] forks via [`Arc::make_mut`].
 /// Without COW, `Runtime::snapshot` would clone the full memory
 /// per branching point.
+///
+/// `dirty_pages` records 4 KiB-page-granular writes since the most
+/// recent [`Region::reset_for_reuse`] (or since construction).
+/// Cloned along with the region; live snapshots inherit it but do
+/// not interact with the reset path.
 #[derive(Debug, Clone)]
 pub struct Region {
     base: u64,
@@ -52,6 +106,7 @@ pub struct Region {
     label: &'static str,
     page_size: PageSize,
     access: RegionAccess,
+    dirty_pages: DirtyPages,
 }
 
 impl Region {
@@ -70,13 +125,38 @@ impl Region {
         page_size: PageSize,
         access: RegionAccess,
     ) -> Self {
+        let num_pages = size.div_ceil(RESET_PAGE_SIZE);
         Self {
             base,
             bytes: Arc::new(vec![0u8; size]),
             label,
             page_size,
             access,
+            dirty_pages: DirtyPages::new(num_pages),
         }
+    }
+
+    /// Zero every 4 KiB page that has been written since the most
+    /// recent reset (or construction). O(touched pages), not
+    /// O(region size). Clears the dirty-set so the region is ready
+    /// to reuse.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the region's backing `Arc<Vec<u8>>` is not
+    /// uniquely owned.
+    pub fn reset_for_reuse(&mut self) {
+        let bytes = Arc::get_mut(&mut self.bytes).expect(
+            "Region::reset_for_reuse requires unique ownership; an outstanding snapshot is \
+             holding the Arc",
+        );
+        let len = bytes.len();
+        self.dirty_pages.for_each_set(|p| {
+            let off = p << RESET_PAGE_BITS;
+            let end = (off + RESET_PAGE_SIZE).min(len);
+            bytes[off..end].fill(0);
+        });
+        self.dirty_pages.clear();
     }
 
     /// Access mode of the region.
@@ -188,6 +268,35 @@ pub enum MemError {
     },
 }
 
+impl std::fmt::Display for MemError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LengthMismatch => f.write_str("byte buffer length disagrees with range length"),
+            Self::OverlappingRegions => f.write_str("overlapping address ranges"),
+            Self::Unmapped(ctx) => {
+                write!(f, "unmapped access at 0x{:016x}", ctx.addr)?;
+                match (ctx.nearest_below, ctx.nearest_above) {
+                    (Some(b), Some(a)) => write!(f, " (between {b} and {a})"),
+                    (Some(b), None) => write!(f, " (after {b})"),
+                    (None, Some(a)) => write!(f, " (before {a})"),
+                    (None, None) => Ok(()),
+                }
+            }
+            Self::ReservedWrite { addr, region } => {
+                write!(f, "write into reserved region {region} at 0x{addr:016x}")
+            }
+            Self::ReservedStrictRead { addr, region } => {
+                write!(
+                    f,
+                    "read of reserved-strict region {region} at 0x{addr:016x}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for MemError {}
+
 impl GuestMemory {
     /// Construct a fresh `GuestMemory` with a single `"flat"` region at base 0.
     #[inline]
@@ -221,6 +330,23 @@ impl GuestMemory {
     #[inline]
     pub fn provisional_read_count(&self) -> u64 {
         self.provisional_read_count.get()
+    }
+
+    /// Number of 4 KiB pages currently marked dirty across every
+    /// region. O(bitmap words), not O(pages); useful for profile
+    /// instrumentation that wants to correlate page-touch volume with
+    /// per-case cost.
+    pub fn dirty_page_count(&self) -> u64 {
+        self.regions
+            .iter()
+            .map(|r| {
+                r.dirty_pages
+                    .bits
+                    .iter()
+                    .map(|w| u64::from(w.count_ones()))
+                    .sum::<u64>()
+            })
+            .sum()
     }
 
     /// Sum of every region's size in bytes. Gaps between regions are not counted.
@@ -336,22 +462,54 @@ impl GuestMemory {
         // make_mut forks the Vec only when the Arc is shared with a
         // live snapshot; unique-ref writes pay no copy.
         Arc::make_mut(&mut region.bytes)[offset..end].copy_from_slice(bytes);
+        if length > 0 {
+            let first_page = offset >> RESET_PAGE_BITS;
+            let last_page = (end - 1) >> RESET_PAGE_BITS;
+            region.dirty_pages.mark_range(first_page, last_page);
+        }
         self.cached_hash.set(None);
         Ok(())
     }
 
-    /// 64-bit FNV-1a digest of every region's bytes, hashed in address order.
+    /// Zero every page that has been written since the most recent
+    /// reset (or construction), across every region. Reuses the
+    /// existing `Arc<Vec<u8>>` backing stores in place: no
+    /// reallocation, O(touched pages) work.
     ///
-    /// Cached; a subsequent [`GuestMemory::apply_commit`] invalidates the
-    /// cache. The first call on a large memory is O(total bytes); cached
-    /// lookups are O(1).
+    /// # Panics
+    ///
+    /// Panics if any region's backing `Arc<Vec<u8>>` is not uniquely
+    /// owned. See [`Region::reset_for_reuse`].
+    pub fn reset_for_reuse(&mut self) {
+        for r in &mut self.regions {
+            r.reset_for_reuse();
+        }
+        self.cached_hash.set(None);
+        self.provisional_read_count.set(0);
+    }
+
+    /// 64-bit FNV-1a digest of the byte content + region map.
+    /// All-zero pages are skipped (fresh and reset regions skip the
+    /// walk entirely). Cached; [`GuestMemory::apply_commit`]
+    /// invalidates the cache. First call is `O(dirty pages)`.
     pub fn content_hash(&self) -> u64 {
         if let Some(h) = self.cached_hash.get() {
             return h;
         }
         let mut hasher = crate::hash::Fnv1aHasher::new();
         for region in &self.regions {
-            hasher.write(region.bytes.as_slice());
+            hasher.write(&region.base.to_le_bytes());
+            hasher.write(&(region.bytes.len() as u64).to_le_bytes());
+            let len = region.bytes.len();
+            region.dirty_pages.for_each_set(|p| {
+                let off = p << RESET_PAGE_BITS;
+                let end = (off + RESET_PAGE_SIZE).min(len);
+                let page_bytes = &region.bytes[off..end];
+                if !page_bytes.iter().all(|&b| b == 0) {
+                    hasher.write(&(p as u64).to_le_bytes());
+                    hasher.write(page_bytes);
+                }
+            });
         }
         let h = hasher.finish();
         self.cached_hash.set(Some(h));
@@ -907,5 +1065,94 @@ mod tests {
         let h3 = mem.content_hash();
         assert_eq!(h1, h2);
         assert_eq!(h2, h3);
+    }
+
+    #[test]
+    fn reset_for_reuse_zeroes_touched_bytes_and_matches_fresh_hash() {
+        let fresh = GuestMemory::new(0x4000).content_hash();
+        let mut mem = GuestMemory::new(0x4000);
+        mem.apply_commit(range(0x10, 4), &[1, 2, 3, 4]).unwrap();
+        mem.apply_commit(range(0x2000, 4), &[5, 6, 7, 8]).unwrap();
+        assert_ne!(mem.content_hash(), fresh);
+        mem.reset_for_reuse();
+        assert_eq!(mem.content_hash(), fresh);
+        assert_eq!(mem.read(range(0x10, 4)).unwrap(), &[0; 4]);
+        assert_eq!(mem.read(range(0x2000, 4)).unwrap(), &[0; 4]);
+    }
+
+    #[test]
+    fn reset_for_reuse_is_idempotent_on_clean_memory() {
+        let mut mem = GuestMemory::new(0x4000);
+        let h = mem.content_hash();
+        mem.reset_for_reuse();
+        mem.reset_for_reuse();
+        assert_eq!(mem.content_hash(), h);
+    }
+
+    #[test]
+    fn reset_for_reuse_clears_dirty_set_between_resets() {
+        let mut mem = GuestMemory::new(0x4000);
+        mem.apply_commit(range(0x0, 4), &[1, 2, 3, 4]).unwrap();
+        mem.reset_for_reuse();
+        mem.apply_commit(range(0x2000, 4), &[9, 9, 9, 9]).unwrap();
+        assert_eq!(mem.read(range(0x2000, 4)).unwrap(), &[9, 9, 9, 9]);
+        mem.reset_for_reuse();
+        assert_eq!(mem.read(range(0x2000, 4)).unwrap(), &[0; 4]);
+    }
+
+    #[test]
+    fn reset_for_reuse_across_multiple_regions() {
+        let mut mem = GuestMemory::from_regions(vec![
+            Region::new(0, 0x2000, "low", PageSize::Page64K),
+            Region::new(0x4000, 0x2000, "high", PageSize::Page64K),
+        ])
+        .unwrap();
+        let fresh = mem.content_hash();
+        mem.apply_commit(range(0x100, 4), &[1, 2, 3, 4]).unwrap();
+        mem.apply_commit(range(0x4100, 4), &[5, 6, 7, 8]).unwrap();
+        assert_ne!(mem.content_hash(), fresh);
+        mem.reset_for_reuse();
+        assert_eq!(mem.content_hash(), fresh);
+    }
+
+    #[test]
+    fn content_hash_invariant_under_write_then_zero_back() {
+        let fresh = GuestMemory::new(0x4000).content_hash();
+        let mut mem = GuestMemory::new(0x4000);
+        mem.apply_commit(range(0x100, 4), &[1, 2, 3, 4]).unwrap();
+        assert_ne!(mem.content_hash(), fresh);
+        mem.apply_commit(range(0x100, 4), &[0, 0, 0, 0]).unwrap();
+        assert_eq!(
+            mem.content_hash(),
+            fresh,
+            "all-zero pages in the dirty set must contribute the same as clean pages",
+        );
+    }
+
+    #[test]
+    fn content_hash_invariant_under_pool_reuse_vs_fresh() {
+        let mut fresh = GuestMemory::new(0x4000);
+        fresh.apply_commit(range(0x100, 4), &[1, 2, 3, 4]).unwrap();
+        let fresh_h = fresh.content_hash();
+
+        let mut pooled = GuestMemory::new(0x4000);
+        pooled.apply_commit(range(0x800, 4), &[9, 9, 9, 9]).unwrap();
+        pooled.reset_for_reuse();
+        pooled.apply_commit(range(0x100, 4), &[1, 2, 3, 4]).unwrap();
+        let pooled_h = pooled.content_hash();
+
+        assert_eq!(
+            fresh_h, pooled_h,
+            "same byte state via pool vs. fresh allocation must hash identically",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "unique ownership")]
+    fn reset_for_reuse_panics_when_arc_is_shared() {
+        let mut mem = GuestMemory::new(0x4000);
+        mem.apply_commit(range(0, 4), &[1, 2, 3, 4]).unwrap();
+        let _snap = mem.clone();
+        mem.reset_for_reuse();
     }
 }

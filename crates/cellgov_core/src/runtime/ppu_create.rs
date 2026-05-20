@@ -9,7 +9,7 @@ use cellgov_exec::UnitStatus;
 use cellgov_lv2::{
     host::CallbackError, Lv2Dispatch, PendingResponse, PpuThreadAttrs, PpuThreadInitState,
 };
-use cellgov_ps3_abi::cell_errors::{CELL_E2BIG, CELL_EAGAIN, CELL_EFAULT, CELL_ENOMEM};
+use cellgov_ps3_abi::cell_errors::{CELL_E2BIG, CELL_EAGAIN, CELL_EFAULT, CELL_ENOMEM, CELL_ESRCH};
 
 use super::trace_bridge::MemoryView;
 use super::Runtime;
@@ -96,6 +96,9 @@ impl Runtime {
     /// - [`CallbackError::TooDeep`] -> [`CELL_EAGAIN`]
     /// - [`CallbackError::OpdReadFailed`] -> [`CELL_EFAULT`]
     /// - [`CallbackError::StackAllocFailed`] -> [`CELL_ENOMEM`]
+    /// - [`CallbackError::UnknownParent`] -> [`CELL_ESRCH`] (invariant
+    ///   break: the source unit was just executing a syscall and must
+    ///   be in the PPU thread table)
     pub(crate) fn consume_pending_callback_spawn(&mut self, source: UnitId) {
         let Some(park) = self.hle.pending_callback_spawn.take() else {
             return;
@@ -120,6 +123,9 @@ impl Runtime {
             }
             Err(CallbackError::StackAllocFailed) => {
                 self.registry.set_syscall_return(source, CELL_ENOMEM.into());
+            }
+            Err(CallbackError::UnknownParent { .. }) => {
+                self.registry.set_syscall_return(source, CELL_ESRCH.into());
             }
         }
     }

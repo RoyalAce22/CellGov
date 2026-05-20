@@ -109,7 +109,10 @@ name = "cellgov_compare"
 version = "0.0.0"
 dependencies = [
  "cellgov_event",
+ "cellgov_mem",
+ "cellgov_ps3_abi",
  "cellgov_testkit",
+ "cellgov_time",
  "cellgov_trace",
  "criterion",
  "serde",
@@ -196,6 +199,7 @@ version = "0.0.0"
 dependencies = [
  "aes",
  "cbc",
+ "cellgov_ps3_abi",
  "ctr",
  "flate2",
  "hmac",
@@ -223,11 +227,15 @@ version = "0.0.0"
 dependencies = [
  "cellgov_time",
  "criterion",
+ "serde",
 ]
 
 [[package]]
 name = "cellgov_mkelf"
 version = "0.0.0"
+dependencies = [
+ "cellgov_ps3_abi",
+]
 
 [[package]]
 name = "cellgov_ppu"
@@ -299,6 +307,7 @@ name = "cellgov_time"
 version = "0.0.0"
 dependencies = [
  "cellgov_ps3_abi",
+ "serde",
 ]
 
 [[package]]

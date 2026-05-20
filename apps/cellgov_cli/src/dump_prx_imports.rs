@@ -91,10 +91,8 @@ fn try_parse_args(args: &[String]) -> Result<Args, String> {
     })
 }
 
-/// SCE container magic at offset 0 (`'S','C','E','\0'`). Raw ELFs
-/// instead start with `0x7F 'E' 'L' 'F'`.
-const SCE_MAGIC: [u8; 4] = *b"SCE\0";
-const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
+use cellgov_ps3_abi::elf::ELF_MAGIC;
+use cellgov_ps3_abi::sce::SCE_MAGIC;
 
 #[derive(Debug, PartialEq, Eq)]
 enum SourceKind {
@@ -116,6 +114,23 @@ enum LoadError {
     TooSmall { len: usize },
     BadMagic { magic: [u8; 4] },
 }
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooSmall { len } => {
+                write!(f, "PRX too small for header (got {len} bytes)")
+            }
+            Self::BadMagic { magic } => write!(
+                f,
+                "PRX bad magic: got {:02x} {:02x} {:02x} {:02x}",
+                magic[0], magic[1], magic[2], magic[3]
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
 
 /// Read `path` and return its plaintext ELF bytes plus the source
 /// kind. Auto-detects SCE wrappers by magic and decrypts them.
@@ -170,9 +185,8 @@ pub(crate) fn run(args: &[String]) {
     let parsed = try_parse_args(args).unwrap_or_else(|msg| crate::cli::exit::die(&msg));
     let (elf_bytes, source_kind) = load_elf_bytes(&parsed.path);
 
-    // Best-effort: game EBOOTs and partial fixtures parse via
-    // `parse_imports` but not `parse_prx`; the report degrades by
-    // omitting module identity rather than failing.
+    // Best-effort: game EBOOTs / partial fixtures parse imports
+    // but not the full PRX; degrade by omitting module identity.
     let sprx_parsed = cellgov_ppu::sprx::parse_prx(&elf_bytes).ok();
 
     let modules = cellgov_ppu::prx::parse_imports(&elf_bytes).unwrap_or_else(|e| {
@@ -288,9 +302,8 @@ pub(crate) fn run(args: &[String]) {
         }
     }
 
-    // Empty-modules trailer only meaningful for unfiltered dumps; a
-    // filtered run lists only the filtered subset and the count
-    // misleads as a file-wide claim.
+    // Skip the empty-modules trailer on filtered runs; the count
+    // would misleadingly read as file-wide.
     let unfiltered = parsed.filter_addr.is_none() && parsed.filter_module.is_none();
     if unfiltered && !empty_modules.is_empty() {
         eprintln!(
@@ -510,6 +523,7 @@ mod tests {
                     stub_addr: stub,
                 })
                 .collect(),
+            variables: Vec::new(),
         }
     }
 

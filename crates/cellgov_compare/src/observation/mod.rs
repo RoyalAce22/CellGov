@@ -9,44 +9,30 @@ mod outcome;
 
 pub use event::{ObservedEvent, ObservedEventKind};
 pub use hashes::ObservedHashes;
-pub use memory::NamedMemoryRegion;
+pub use memory::{NamedMemoryRegion, CODE_REGION_NAME};
 pub use outcome::ObservedOutcome;
 
 use serde::{Deserialize, Serialize};
 
-/// Metadata about who produced this observation and how.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservationMetadata {
-    /// Which runner produced this observation.
     pub runner: String,
-    /// Number of steps taken, or `None` when unavailable for the runner.
+    /// `None` when the runner does not expose a step count.
     pub steps: Option<usize>,
 }
 
-/// A complete normalized observation from a single test run.
-///
-/// Downstream consumers (baseline storage, the compare layer, divergence
-/// reports) depend on field stability and the serde schema. Adding or
-/// renaming fields is a breaking change for stored baselines; prefer
-/// `#[serde(default)]` only for fields where a missing value has a
-/// defined meaning, and never for required slices (see the
-/// `null_on_required_field_rejects` test).
+/// Normalized observation from a single test run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
-    /// How the test ended.
     pub outcome: ObservedOutcome,
-    /// Captured memory region snapshots.
     pub memory_regions: Vec<NamedMemoryRegion>,
-    /// Normalized event sequence.
     pub events: Vec<ObservedEvent>,
-    /// CellGov-side state hashes (None for RPCS3).
+    /// `None` for runners that do not expose internal state hashes
+    /// (e.g., RPCS3).
     pub state_hashes: Option<ObservedHashes>,
-    /// Runner identity and run metadata.
     pub metadata: ObservationMetadata,
-    /// `sys_tty_write` byte stream captured in dispatch order. Empty
-    /// when the runner did not capture TTY output, or when the guest
-    /// emitted none. `#[serde(default)]` lets pre-Step-1 baselines
-    /// load with an empty default.
+    /// `sys_tty_write` byte stream in dispatch order; empty when no
+    /// TTY output was captured.
     #[serde(default)]
     pub tty_log: Vec<u8>,
 }
@@ -117,6 +103,14 @@ mod tests {
     }
 
     #[test]
+    fn observation_with_hashes_roundtrips() {
+        let obs = sample_observation();
+        let json = serde_json::to_string(&obs).expect("serialize");
+        let loaded: Observation = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(obs, loaded);
+    }
+
+    #[test]
     fn observation_without_hashes_roundtrips() {
         let obs = Observation {
             outcome: ObservedOutcome::Completed,
@@ -135,9 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn pre_step1_baseline_without_tty_log_field_loads_with_empty_default() {
-        // Baselines saved before TTY capture existed serialize without
-        // a tty_log field. `#[serde(default)]` must let them load.
+    fn observation_without_tty_log_field_loads_with_empty_default() {
         let json = r#"{
             "outcome": "Completed",
             "memory_regions": [],
@@ -157,9 +149,6 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    // Guards against `#[serde(default)]` creeping onto required slice
-    // fields: a `null` memory_regions would silently become an empty
-    // vector and compare to MATCH vacuously.
     #[test]
     fn null_on_required_field_rejects() {
         let json = r#"{

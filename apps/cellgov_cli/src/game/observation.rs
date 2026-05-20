@@ -28,7 +28,7 @@ pub(super) struct CheckpointRegion {
 /// Returns 0 with a distinct stderr line for each failure mode
 /// (short input, bad magic, truncated phdr table, no user segments).
 pub(super) fn elf_user_region_end(data: &[u8]) -> usize {
-    const PT_LOAD: u32 = 1;
+    use cellgov_ps3_abi::elf::PT_LOAD;
     fn u16_be(d: &[u8], o: usize) -> u16 {
         u16::from_be_bytes([d[o], d[o + 1]])
     }
@@ -98,6 +98,77 @@ fn de_hex_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     u64::from_str_radix(trimmed, 16).map_err(serde::de::Error::custom)
 }
 
+/// Why writing the boot-checkpoint observation JSON failed.
+#[derive(Debug)]
+pub enum ObservationSaveError {
+    /// Reading the region manifest failed.
+    ManifestRead {
+        path: String,
+        source: std::io::Error,
+    },
+    /// Parsing the region manifest TOML failed.
+    ManifestParse {
+        path: String,
+        source: toml::de::Error,
+    },
+    /// Enumerating PT_LOAD segments from the ELF failed.
+    PtLoadEnum {
+        source: cellgov_ppu::loader::LoadError,
+    },
+    /// Creating the output file failed.
+    CreateOutput {
+        path: String,
+        source: std::io::Error,
+    },
+    /// Serializing the observation to JSON failed.
+    Serialize(serde_json::Error),
+    /// Writing the trailing newline to the output failed.
+    TrailingNewline {
+        path: String,
+        source: std::io::Error,
+    },
+    /// Flushing the output writer failed.
+    Flush {
+        path: String,
+        source: std::io::Error,
+    },
+    /// Constructing the BootSummary rejected the
+    /// checkpoint/outcome/steps tuple.
+    InvalidBootSummary(cellgov_compare::BootSummaryError),
+}
+
+impl std::fmt::Display for ObservationSaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ManifestRead { path, source } => write!(f, "read {path}: {source}"),
+            Self::ManifestParse { path, source } => write!(f, "parse {path}: {source}"),
+            Self::PtLoadEnum { source } => write!(f, "failed to enumerate PT_LOAD: {source}"),
+            Self::CreateOutput { path, source } => write!(f, "create {path} failed: {source}"),
+            Self::Serialize(e) => write!(f, "serialize failed: {e}"),
+            Self::TrailingNewline { path, source } => {
+                write!(f, "trailing newline {path} failed: {source}")
+            }
+            Self::Flush { path, source } => write!(f, "flush {path} failed: {source}"),
+            Self::InvalidBootSummary(e) => write!(f, "invalid boot summary: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ObservationSaveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ManifestRead { source, .. }
+            | Self::CreateOutput { source, .. }
+            | Self::TrailingNewline { source, .. }
+            | Self::Flush { source, .. } => Some(source),
+            Self::ManifestParse { source, .. } => Some(source),
+            Self::PtLoadEnum { source } => Some(source),
+            Self::Serialize(e) => Some(e),
+            Self::InvalidBootSummary(e) => Some(e),
+        }
+    }
+}
+
 /// Build a boot-checkpoint observation and write it as JSON.
 ///
 /// Regions default to one per PT_LOAD segment, named
@@ -107,8 +178,9 @@ fn de_hex_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
 ///
 /// # Errors
 ///
-/// Returns `Err(message)` on any I/O, parse, or serialization
-/// failure so the caller can translate it to a non-zero exit.
+/// Returns [`ObservationSaveError`] on any I/O, parse, or
+/// serialization failure so the caller can translate it to a
+/// non-zero exit.
 pub(super) fn save_boot_observation(
     path: &str,
     elf_data: &[u8],
@@ -117,13 +189,19 @@ pub(super) fn save_boot_observation(
     steps: usize,
     manifest_path: Option<&str>,
     tty_log: &[u8],
-) -> Result<(), String> {
+) -> Result<(), ObservationSaveError> {
     let regions: Vec<cellgov_compare::RegionDescriptor> = match manifest_path {
         Some(mp) => {
-            let manifest: CheckpointManifest = std::fs::read_to_string(mp)
-                .map_err(|e| format!("read {mp}: {e}"))
-                .and_then(|t| {
-                    toml::from_str::<CheckpointManifest>(&t).map_err(|e| format!("parse {mp}: {e}"))
+            let text = std::fs::read_to_string(mp).map_err(|source| {
+                ObservationSaveError::ManifestRead {
+                    path: mp.to_string(),
+                    source,
+                }
+            })?;
+            let manifest: CheckpointManifest =
+                toml::from_str(&text).map_err(|source| ObservationSaveError::ManifestParse {
+                    path: mp.to_string(),
+                    source,
                 })?;
             manifest
                 .regions
@@ -137,7 +215,7 @@ pub(super) fn save_boot_observation(
         }
         None => {
             let segments = cellgov_ppu::loader::pt_load_segments(elf_data)
-                .map_err(|e| format!("failed to enumerate PT_LOAD: {e:?}"))?;
+                .map_err(|source| ObservationSaveError::PtLoadEnum { source })?;
             segments
                 .iter()
                 .map(|s| {
@@ -153,9 +231,25 @@ pub(super) fn save_boot_observation(
     };
     let observation =
         cellgov_compare::observe_from_boot(final_memory, outcome, steps, &regions, tty_log);
-    let json =
-        serde_json::to_string_pretty(&observation).map_err(|e| format!("serialize failed: {e}"))?;
-    std::fs::write(path, json).map_err(|e| format!("write to {path} failed: {e}"))?;
+    // Pretty-print to match the RPCS3-side
+    // `rpcs3_to_observation`'s output shape, so the two
+    // observation files diff cleanly under standard line-diff
+    // tools during cluster investigation. The `data` arrays
+    // dominate the file size; pretty-printing roughly doubles
+    // total bytes but the files are gitignored, so the cost is
+    // local.
+    let file =
+        std::fs::File::create(path).map_err(|source| ObservationSaveError::CreateOutput {
+            path: path.to_string(),
+            source,
+        })?;
+    let mut writer = std::io::BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, &observation)
+        .map_err(ObservationSaveError::Serialize)?;
+    std::io::Write::flush(&mut writer).map_err(|source| ObservationSaveError::Flush {
+        path: path.to_string(),
+        source,
+    })?;
     println!(
         "observation: wrote {} regions covering {} bytes to {path}",
         observation.memory_regions.len(),
@@ -168,12 +262,100 @@ pub(super) fn save_boot_observation(
     Ok(())
 }
 
+/// Translate [`super::manifest::CheckpointTrigger`] to
+/// [`cellgov_compare::CheckpointKind`].
+fn checkpoint_to_kind(cp: super::manifest::CheckpointTrigger) -> cellgov_compare::CheckpointKind {
+    match cp {
+        super::manifest::CheckpointTrigger::ProcessExit => {
+            cellgov_compare::CheckpointKind::ProcessExit
+        }
+        super::manifest::CheckpointTrigger::FirstRsxWrite => {
+            cellgov_compare::CheckpointKind::FirstRsxWrite
+        }
+        super::manifest::CheckpointTrigger::Pc(addr) => cellgov_compare::CheckpointKind::Pc {
+            addr: cellgov_mem::GuestAddr::new(addr),
+        },
+    }
+}
+
+/// Serialize a [`cellgov_compare::BootSummary`] to `path` as
+/// pretty JSON.
+///
+/// # Errors
+///
+/// Returns `Err(message)` on any I/O or serialization failure, or
+/// if the checkpoint/outcome pair is inconsistent (see
+/// [`cellgov_compare::BootSummaryError`]).
+pub(super) fn save_boot_summary_json(
+    path: &str,
+    title: &super::manifest::TitleManifest,
+    outcome: cellgov_compare::BootOutcome,
+    steps: usize,
+    step_budget: cellgov_time::Budget,
+) -> Result<(), ObservationSaveError> {
+    let summary = cellgov_compare::BootSummary::new(
+        checkpoint_to_kind(title.checkpoint_trigger()),
+        outcome,
+        steps as u64,
+        step_budget,
+    )
+    .map_err(ObservationSaveError::InvalidBootSummary)?;
+    let file =
+        std::fs::File::create(path).map_err(|source| ObservationSaveError::CreateOutput {
+            path: path.to_string(),
+            source,
+        })?;
+    let mut writer = std::io::BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, &summary).map_err(ObservationSaveError::Serialize)?;
+    std::io::Write::write_all(&mut writer, b"\n").map_err(|source| {
+        ObservationSaveError::TrailingNewline {
+            path: path.to_string(),
+            source,
+        }
+    })?;
+    std::io::Write::flush(&mut writer).map_err(|source| ObservationSaveError::Flush {
+        path: path.to_string(),
+        source,
+    })?;
+    println!("boot-summary: wrote {path}");
+    Ok(())
+}
+
+#[cfg(test)]
+mod boot_summary_cross_check {
+    //! Pin the JSON wire shape `cellgov_cli`'s `CheckpointTrigger`
+    //! produces against `cellgov_compare::CheckpointKind`. When a
+    //! new variant lands on either side, this test fails first.
+
+    use super::checkpoint_to_kind;
+    use cellgov_mem::GuestAddr;
+
+    #[test]
+    fn each_trigger_maps_to_matching_kind_json() {
+        let cli = crate::game::manifest::CheckpointTrigger::ProcessExit;
+        assert_eq!(
+            serde_json::to_value(checkpoint_to_kind(cli)).unwrap(),
+            serde_json::json!({ "kind": "process_exit" }),
+        );
+
+        let cli = crate::game::manifest::CheckpointTrigger::FirstRsxWrite;
+        assert_eq!(
+            serde_json::to_value(checkpoint_to_kind(cli)).unwrap(),
+            serde_json::json!({ "kind": "first_rsx_write" }),
+        );
+
+        let cli = crate::game::manifest::CheckpointTrigger::Pc(0x10381ce8);
+        assert_eq!(
+            serde_json::to_value(checkpoint_to_kind(cli)).unwrap(),
+            serde_json::json!({ "kind": "pc", "addr": GuestAddr::new(0x10381ce8).raw() }),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Big-endian ELF64 header with N PT_LOAD phdrs at the given
-    /// (vaddr, memsz) tuples. Payloads are not materialized.
     fn synthetic_elf(loads: &[(u64, u64)]) -> Vec<u8> {
         let phoff: u64 = 64;
         let phentsize: u16 = 56;
@@ -295,7 +477,8 @@ mod tests {
             .join("..")
             .join("tests")
             .join("fixtures")
-            .join("NPUA80001_checkpoint.toml");
+            .join("NPUA80001")
+            .join("checkpoint.toml");
         let text = std::fs::read_to_string(&path).expect("read");
         let m: CheckpointManifest = toml::from_str(&text).expect("parses");
         assert!(!m.regions.is_empty());

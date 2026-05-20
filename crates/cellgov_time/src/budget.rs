@@ -47,7 +47,14 @@ impl fmt::Display for InstructionCost {
 }
 
 /// A remaining instruction allowance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// Serde shape: bare JSON number (`#[serde(transparent)]`). On-disk
+/// fixtures store the raw count, not a `{"raw": N}` object, so the
+/// wire format matches what `--budget N` accepts on the CLI.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct Budget(u64);
 
 impl Budget {

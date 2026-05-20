@@ -18,7 +18,10 @@ rpcs3-runner = []
 
 [dependencies]
 cellgov_event = { path = "../cellgov_event" }
+cellgov_mem = { path = "../cellgov_mem" }
+cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 cellgov_testkit = { path = "../cellgov_testkit" }
+cellgov_time = { path = "../cellgov_time" }
 cellgov_trace = { path = "../cellgov_trace" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

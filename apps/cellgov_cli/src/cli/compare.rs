@@ -95,7 +95,9 @@ fn compare_against_baseline(
         OutputFormat::Json => {
             println!(
                 "{}",
-                format_json(&result, &baseline, &obs).expect("json serialization")
+                format_json(&result, &baseline, &obs).expect(
+                    "observation data is float-free by construction (style doc 0.5d contract)"
+                )
             );
         }
     }
@@ -134,7 +136,9 @@ fn run_compare(
         OutputFormat::Json => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&obs).expect("json serialization")
+                serde_json::to_string_pretty(&obs).expect(
+                    "observation data is float-free by construction (style doc 0.5d contract)"
+                )
             );
         }
     }
@@ -210,7 +214,9 @@ fn run_manifest_compare(
             OutputFormat::Json => {
                 println!(
                     "{}",
-                    format_multi_json(&result, &baselines, &obs).expect("json serialization")
+                    format_multi_json(&result, &baselines, &obs).expect(
+                        "observation data is float-free by construction (style doc 0.5d contract)"
+                    )
                 );
             }
         }
@@ -235,7 +241,9 @@ fn run_manifest_compare(
             OutputFormat::Json => {
                 println!(
                     "{}",
-                    format_json(&result, &baseline, &obs).expect("json serialization")
+                    format_json(&result, &baseline, &obs).expect(
+                        "observation data is float-free by construction (style doc 0.5d contract)"
+                    )
                 );
             }
         }
@@ -269,16 +277,17 @@ fn run_manifest_compare(
             OutputFormat::Json => {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&obs).expect("json serialization")
+                    serde_json::to_string_pretty(&obs).expect(
+                        "observation data is float-free by construction (style doc 0.5d contract)"
+                    )
                 );
             }
         }
     }
 }
 
-/// Load all `.json` baseline files from a directory, sorted by name.
-/// `DirEntry` errors die via [`die`] so unreadable entries do not
-/// silently collapse into "no baselines found".
+/// Load all `.json` baseline files from a directory, sorted by
+/// name. Read failures die via [`die`].
 pub(crate) fn load_baselines_from_dir(dir: &str) -> Vec<Observation> {
     let rd = std::fs::read_dir(dir)
         .unwrap_or_else(|e| die(&format!("failed to read baselines directory {dir}: {e}")));
@@ -311,9 +320,13 @@ pub(crate) fn load_baselines_from_dir(dir: &str) -> Vec<Observation> {
 
 // -- compare-observations --
 
-/// `cellgov_cli compare-observations <a.json> <b.json>` -- diff two
-/// JSON-encoded `Observation` files. Stops at the first divergence.
-pub(crate) fn run_compare_observations(a_path: &str, b_path: &str) {
+/// `cellgov_cli compare-observations <a.json> <b.json> [--format
+/// human|json]` -- diff two JSON-encoded [`Observation`] files.
+pub(crate) fn run_compare_observations(args: &[String]) {
+    let a_path = &args[2];
+    let b_path = &args[3];
+    let format = super::args::parse_output_format(args);
+
     let a_bytes = load_file_or_die(a_path);
     let b_bytes = load_file_or_die(b_path);
     let a: cellgov_compare::Observation =
@@ -321,86 +334,48 @@ pub(crate) fn run_compare_observations(a_path: &str, b_path: &str) {
     let b: cellgov_compare::Observation =
         serde_json::from_slice(&b_bytes).unwrap_or_else(|e| die(&format!("parse {b_path}: {e}")));
 
-    if a.outcome != b.outcome {
-        println!("DIVERGE outcome: {:?} vs {:?}", a.outcome, b.outcome);
-        std::process::exit(1);
-    }
-    if a.memory_regions.len() != b.memory_regions.len() {
-        println!(
-            "DIVERGE region count: {} vs {}",
-            a.memory_regions.len(),
-            b.memory_regions.len()
-        );
-        std::process::exit(1);
-    }
-    for (ra, rb) in a.memory_regions.iter().zip(b.memory_regions.iter()) {
-        if ra.name != rb.name || ra.addr != rb.addr {
-            println!(
-                "DIVERGE region identity: {}@0x{:x} vs {}@0x{:x}",
-                ra.name, ra.addr, rb.name, rb.addr
+    let result = cellgov_compare::compare_observations(&a, &b);
+    match format {
+        super::args::OutputFormat::Human => {
+            print!(
+                "{}",
+                cellgov_compare::format_observation_compare_human(&result)
             );
-            std::process::exit(1);
-        }
-        // Length check must precede byte compare: for a prefix match
-        // `zip(...).position(x != y)` returns None and unwrap_or(0)
-        // would misreport "first byte differs at 0x0".
-        if ra.data.len() != rb.data.len() {
-            println!(
-                "DIVERGE region {}: length {} vs {} bytes",
-                ra.name,
-                ra.data.len(),
-                rb.data.len()
-            );
-            std::process::exit(1);
-        }
-        if ra.data != rb.data {
-            let first_diff = ra
-                .data
-                .iter()
-                .zip(rb.data.iter())
-                .position(|(x, y)| x != y)
-                .expect("equal-length slices that differ must have a first diff");
-            println!(
-                "DIVERGE region {}: first byte differs at offset 0x{:x} (guest 0x{:x}) -- {:02x} vs {:02x}",
-                ra.name,
-                first_diff,
-                ra.addr + first_diff as u64,
-                ra.data[first_diff],
-                rb.data[first_diff],
-            );
-            std::process::exit(1);
-        }
-    }
-    let total_bytes: usize = a.memory_regions.iter().map(|r| r.data.len()).sum();
-    println!(
-        "MATCH outcome={:?}, {} regions ({} bytes) identical, steps {:?} vs {:?}",
-        a.outcome,
-        a.memory_regions.len(),
-        total_bytes,
-        a.metadata.steps,
-        b.metadata.steps,
-    );
-    if a.memory_regions.is_empty() {
-        eprintln!(
-            "WARN: both observations carry zero memory regions; comparison is trivially vacuous"
-        );
-    }
-    // Same runner with differing step counts is a determinism failure;
-    // cross-runner step mismatches are expected.
-    if let (Some(sa), Some(sb)) = (a.metadata.steps, b.metadata.steps) {
-        if sa != sb {
-            if a.metadata.runner == b.metadata.runner {
-                println!(
-                    "DIVERGE step count: {sa} vs {sb} within runner '{}' (byte-equal state reached via different work -- a determinism failure)",
-                    a.metadata.runner
+            if result.is_vacuous() {
+                eprintln!(
+                    "WARN: both observations carry zero memory regions; nothing was compared"
                 );
-                std::process::exit(1);
             }
-            eprintln!(
-                "NOTE: step counts differ ({sa} vs {sb}); cross-runner comparison between '{}' and '{}' does not require matching step counts",
-                a.metadata.runner, b.metadata.runner
-            );
+            if let Some((sa, sb)) = result.cross_runner_step_note() {
+                eprintln!(
+                    "NOTE: step counts differ ({sa} vs {sb}); cross-runner comparison between '{}' and '{}' does not require matching step counts",
+                    result.a_runner, result.b_runner,
+                );
+            }
         }
+        super::args::OutputFormat::Json => {
+            // WARN / NOTE stay stderr-only; stdout must remain a
+            // machine-parseable JSON payload.
+            println!(
+                "{}",
+                cellgov_compare::format_observation_compare_json(&result)
+                    .expect("ObservationCompareResult is float-free by construction (style doc 0.5d contract)")
+            );
+            if result.is_vacuous() {
+                eprintln!(
+                    "WARN: both observations carry zero memory regions; nothing was compared"
+                );
+            }
+            if let Some((sa, sb)) = result.cross_runner_step_note() {
+                eprintln!(
+                    "NOTE: step counts differ ({sa} vs {sb}); cross-runner comparison between '{}' and '{}' does not require matching step counts",
+                    result.a_runner, result.b_runner,
+                );
+            }
+        }
+    }
+    if result.has_divergence() {
+        std::process::exit(1);
     }
 }
 

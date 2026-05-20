@@ -55,6 +55,7 @@ fn module(name: &str, funcs: &[(u32, u32)]) -> ImportedModule {
                 stub_addr: stub,
             })
             .collect(),
+        variables: Vec::new(),
     }
 }
 

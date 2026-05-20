@@ -1,0 +1,8 @@
+{
+  "checkpoint": {
+    "kind": "process_exit"
+  },
+  "outcome": "MaxSteps",
+  "steps": 117187,
+  "budget": 256
+}

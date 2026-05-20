@@ -5,10 +5,11 @@
 use std::path::{Path, PathBuf};
 
 use super::checkpoint::{parse_pc_literal, CheckpointTrigger};
-use super::model::{ContentEntry, ContentManifest, GameSource, MountEntry, TitleManifest};
+use super::model::{
+    ContentEntry, ContentManifest, Distribution, GameSource, MountEntry, TitleManifest,
+};
 use super::schema::ManifestFile;
 
-/// Why a manifest file failed to load.
 #[derive(Debug)]
 pub enum ManifestError {
     Io {
@@ -32,7 +33,6 @@ pub enum ManifestError {
         name: String,
         first: PathBuf,
         second: PathBuf,
-        /// Hint that one is likely a stray copy.
         files_identical: bool,
     },
     DuplicateContentId {
@@ -99,6 +99,19 @@ impl std::fmt::Display for ManifestError {
     }
 }
 
+impl std::error::Error for ManifestError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::Parse { .. }
+            | Self::UnknownCheckpointKind { .. }
+            | Self::BadCheckpointPc { .. }
+            | Self::DuplicateShortName { .. }
+            | Self::DuplicateContentId { .. } => None,
+        }
+    }
+}
+
 impl TitleManifest {
     pub fn load_from_path(path: &Path) -> Result<Self, ManifestError> {
         let text = std::fs::read_to_string(path).map_err(|source| ManifestError::Io {
@@ -108,9 +121,8 @@ impl TitleManifest {
         Self::load_from_text(&text, path)
     }
 
-    /// Accepts two layouts: root-level tables, or the same tables
-    /// nested under `[cellgov]` so microtests can co-locate the
-    /// CellGov manifest with RPCS3 harness config in one file.
+    /// Accepts tables either at root level or under `[cellgov]`
+    /// (microtests co-locate CellGov and RPCS3 config in one file).
     pub fn load_from_text(text: &str, origin: &Path) -> Result<Self, ManifestError> {
         let raw: toml::Value = toml::from_str(text).map_err(|e| ManifestError::Parse {
             path: origin.to_path_buf(),
@@ -156,32 +168,32 @@ impl TitleManifest {
                     path: origin.to_path_buf(),
                     message: e.to_string(),
                 })?;
-        let checkpoint =
-            match file.checkpoint.kind.as_str() {
-                "process-exit" => CheckpointTrigger::ProcessExit,
-                "first-rsx-write" => CheckpointTrigger::FirstRsxWrite,
-                "pc" => {
-                    let raw = file.checkpoint.pc.as_ref().ok_or_else(|| {
-                        ManifestError::BadCheckpointPc {
+        let checkpoint = match file.checkpoint.kind.as_str() {
+            "process-exit" => CheckpointTrigger::ProcessExit,
+            "first-rsx-write" => CheckpointTrigger::FirstRsxWrite,
+            "pc" => {
+                let raw =
+                    file.checkpoint
+                        .pc
+                        .as_ref()
+                        .ok_or_else(|| ManifestError::BadCheckpointPc {
                             path: origin.to_path_buf(),
                             detail: "checkpoint kind 'pc' requires a 'pc = \"0xADDR\"' value"
                                 .to_string(),
-                        }
-                    })?;
-                    let parsed =
-                        parse_pc_literal(raw).map_err(|detail| ManifestError::BadCheckpointPc {
-                            path: origin.to_path_buf(),
-                            detail,
                         })?;
-                    CheckpointTrigger::Pc(parsed)
-                }
-                other => {
-                    return Err(ManifestError::UnknownCheckpointKind {
-                        path: origin.to_path_buf(),
-                        kind: other.to_string(),
-                    })
-                }
-            };
+                let parsed = parse_pc_literal(raw).map_err(|e| ManifestError::BadCheckpointPc {
+                    path: origin.to_path_buf(),
+                    detail: e.to_string(),
+                })?;
+                CheckpointTrigger::Pc(parsed)
+            }
+            other => {
+                return Err(ManifestError::UnknownCheckpointKind {
+                    path: origin.to_path_buf(),
+                    kind: other.to_string(),
+                })
+            }
+        };
         let source = match file.source.as_ref().map(|s| s.kind.as_str()) {
             Some("disc") => GameSource::Disc,
             Some("hdd") => GameSource::Hdd,
@@ -249,11 +261,28 @@ impl TitleManifest {
                 });
             }
         }
+        let distribution = match file.title.distribution.as_str() {
+            "psn-hdd" => Distribution::PsnHdd,
+            "retail-hdd" => Distribution::RetailHdd,
+            "disc-iso" => Distribution::DiscIso,
+            other => {
+                return Err(ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: format!(
+                        "unknown distribution '{other}' (accepted: psn-hdd, retail-hdd, disc-iso)"
+                    ),
+                });
+            }
+        };
         Ok(TitleManifest {
             content_id: file.title.content_id,
             short_name: file.title.short_name,
             display_name: file.title.display_name,
             eboot_candidates: file.title.eboot_candidates,
+            year: file.title.year,
+            developer: file.title.developer,
+            engine: file.title.engine,
+            distribution,
             checkpoint,
             source,
             rsx_mirror,
@@ -279,6 +308,86 @@ mod tests {
         assert_eq!(m.short_name, "proc-exit-fixture");
         assert_eq!(m.eboot_candidates, vec!["EBOOT.elf", "EBOOT.BIN"]);
         assert_eq!(m.checkpoint, CheckpointTrigger::ProcessExit);
+        assert_eq!(m.year, 2007);
+        assert_eq!(m.developer, "test-developer");
+        assert_eq!(m.engine, "test-engine");
+        assert_eq!(m.distribution, Distribution::PsnHdd);
+    }
+
+    #[test]
+    fn parses_each_distribution_variant() {
+        for (token, expected) in [
+            ("psn-hdd", Distribution::PsnHdd),
+            ("retail-hdd", Distribution::RetailHdd),
+            ("disc-iso", Distribution::DiscIso),
+        ] {
+            let text = format!(
+                r#"
+[title]
+content_id = "X"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["EBOOT.elf"]
+year = 2009
+developer = "e"
+engine = "e"
+distribution = "{token}"
+
+[checkpoint]
+kind = "process-exit"
+"#
+            );
+            let m = TitleManifest::load_from_text(&text, Path::new("variant.toml")).unwrap();
+            assert_eq!(m.distribution, expected, "token {token:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_distribution() {
+        let text = r#"
+[title]
+content_id = "X"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["EBOOT.elf"]
+year = 2009
+developer = "e"
+engine = "e"
+distribution = "PSN-HDD"
+
+[checkpoint]
+kind = "process-exit"
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("bad.toml"))
+            .expect_err("uppercase variant must reject");
+        match err {
+            ManifestError::Parse { message, .. } => {
+                assert!(
+                    message.contains("psn-hdd"),
+                    "diagnostic names allowed values: {message}"
+                );
+            }
+            other => panic!("expected Parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_missing_required_distribution_field() {
+        let text = r#"
+[title]
+content_id = "X"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["EBOOT.elf"]
+year = 2009
+developer = "e"
+
+[checkpoint]
+kind = "process-exit"
+"#;
+        let err = TitleManifest::load_from_text(text, Path::new("missing.toml"))
+            .expect_err("missing distribution must reject");
+        assert!(matches!(err, ManifestError::Parse { .. }));
     }
 
     #[test]
@@ -304,6 +413,10 @@ content_id = "CG_TESTBED"
 short_name = "testbed"
 display_name = "Microtest bed"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -334,6 +447,10 @@ content_id = "NPAA77777"
 short_name = "content-fixture"
 display_name = "Content fixture"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -368,6 +485,10 @@ content_id = "NPAA77779"
 short_name = "override-fixture"
 display_name = "Override fixture"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -395,6 +516,10 @@ content_id = "NPAA77778"
 short_name = "empty-content"
 display_name = "Empty content"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -416,6 +541,10 @@ content_id = "x"
 short_name = "x"
 display_name = "x"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -436,6 +565,10 @@ content_id = "x"
 short_name = "x"
 display_name = "x"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -458,6 +591,10 @@ content_id = "CG_CONT"
 short_name = "cgcontent"
 display_name = "CG content"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -482,6 +619,10 @@ content_id = "NPAA99999"
 short_name = "mirror-fixture"
 display_name = "Mirror fixture"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -501,6 +642,10 @@ content_id = "CG_MIRROR"
 short_name = "cgmirror"
 display_name = "CG mirror"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -520,6 +665,10 @@ content_id = "NPAA88888"
 short_name = "conflict"
 display_name = "Conflict"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "first-rsx-write"
@@ -546,6 +695,10 @@ content_id = "NPAA66666"
 short_name = "mounts-fixture"
 display_name = "Mounts fixture"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -580,6 +733,10 @@ content_id = "CG_MOUNTS"
 short_name = "cgmounts"
 display_name = "CG mounts"
 eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -601,6 +758,10 @@ content_id = "x"
 short_name = "x"
 display_name = "x"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -622,6 +783,10 @@ content_id = "x"
 short_name = "x"
 display_name = "x"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -647,6 +812,10 @@ content_id = "x"
 short_name = "x"
 display_name = "x"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -674,6 +843,10 @@ content_id = "x"
 short_name = "x"
 display_name = "x"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "pc"
@@ -691,6 +864,10 @@ content_id = "x"
 short_name = "x"
 display_name = "x"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "whatever"
@@ -715,6 +892,10 @@ content_id = "x"
 short_name = "x"
 display_name = "x"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "pc"
@@ -732,6 +913,10 @@ content_id = "x"
 short_name = "x"
 display_name = "x"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "pc"
@@ -759,6 +944,10 @@ content_id = "root"
 short_name = "root"
 display_name = "root"
 eboot_candidates = ["x"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [checkpoint]
 kind = "process-exit"
@@ -768,6 +957,10 @@ content_id = "nested"
 short_name = "nested"
 display_name = "nested"
 eboot_candidates = ["y"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"

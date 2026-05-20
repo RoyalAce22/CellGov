@@ -1,9 +1,10 @@
 # Tested Titles
 
-Boot-frontier compatibility matrix. Each row is a title CellGov boots
-to a checkpoint whose observation is byte-equivalent (modulo
-classified non-semantic divergences) to an RPCS3 baseline at the
-same checkpoint.
+Boot-frontier compatibility matrix. Each row records two independent
+verdicts about a title: did CellGov reach the same architectural
+state as RPCS3 at the same checkpoint (Convergence), and is that
+state byte-identical modulo classified non-semantic divergences
+(Byte parity).
 
 This is not gameplay compatibility. See
 [architecture.md](architecture.md) for what CellGov does and does
@@ -11,17 +12,34 @@ not model.
 
 ## Reading the table
 
-Terminology used in the Cross-runner column comes from
-[concepts.md](concepts.md). In brief:
+Terminology used in the Convergence and Byte parity columns comes
+from [concepts.md](concepts.md). In brief:
 
-- `equivalent (N bytes non-semantic)` means the raw byte-level
-  comparison found N differing bytes, every one of which has been
-  classified as not affecting program behaviour (HLE OPD layout,
-  SELF reconstruction metadata, etc.).
-- `DIVERGE` (without the `equivalent` qualifier) means the
-  divergence is either unclassified or includes at least one
-  semantic difference. No title currently in the matrix sits in
-  that state.
+- **Convergence**: whether CellGov reaches the same architectural
+  state as RPCS3 (same outcome, same captured regions, same step
+  count within tolerance) at the checkpoint. `Yes` means CellGov
+  boots this title to the same place RPCS3 does and a byte-level
+  comparison is meaningful. `No (<reason>)` means CellGov and
+  RPCS3 diverge before the checkpoint; the byte walk does not run.
+
+- **Byte parity**: whether the memory state at that checkpoint is
+  byte-identical between runners.
+  - `equivalent` -- zero divergent bytes.
+  - `N non-semantic` -- every divergent byte classifies into
+    a structurally-grounded class (ELF header reconstruction,
+    HLE OPD slot layout, etc.).
+  - `M non-semantic + N pending` -- some bytes classified, some
+    awaiting a new structurally-grounded class. The pending bytes
+    are visible in the fixture's `compare_report.txt` and
+    `cross_runner_summary.json`; investigation continues in
+    `NOTES.md`.
+  - `--` -- byte parity is undefined because the runners did not
+    converge.
+
+A `Yes` convergence with `M non-semantic + N pending` is a
+successful boot with investigation outstanding, NOT a regression.
+The matrix renders progress and backlog side by side rather than
+collapsing them into a single verdict.
 
 Column definitions:
 
@@ -29,12 +47,18 @@ Column definitions:
   instructions). Use `--budget 1` for single-instruction stepping.
 - **Insns**: rough instruction count to checkpoint (`steps * budget`).
 - **Checkpoint**: the deterministic boot stopping point.
-- **Cross-runner**: classified verdict against the RPCS3 baseline.
+- **Convergence**: did CellGov reach the same architectural state
+  as RPCS3?
+- **Byte parity**: byte-level agreement at that state.
 
 ## Matrix
 
-| Serial    | Title             | Year | Engine          | Format   | Checkpoint                                                        |      Steps | Insns | Cross-runner                                                           |
-| --------- | ----------------- | ---- | --------------- | -------- | ----------------------------------------------------------------- | ---------: | ----: | ---------------------------------------------------------------------- |
-| NPUA80001 | flOw              | 2007 | thatgamecompany | PSN HDD  | MaxSteps (SPURS handler-thread parked on sys_event_queue_receive) |    195,312 |  ~50M | outcome mismatch (MaxSteps vs Completed; needs shared-checkpoint flag) |
-| NPUA80068 | Super Stardust HD | 2007 | Housemarque     | PSN HDD  | FirstRsxWrite                                                     | 14,352,589 | ~3.7B | non-semantic (ELF e_ehsize at 0x35)                                    |
-| BCES00664 | WipEout HD Fury   | 2009 | Sony Liverpool  | Disc ISO | FirstRsxWrite                                                     |     45,691 |  ~12M | non-semantic (ELF e_version at 0x17)                                   |
+| Serial | Title | Year | Developer | Engine | Format | Checkpoint | Steps | Insns | Convergence | Byte parity |
+| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
+| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | FirstRsxWrite -> Fault | 45,689 | 11,696,384 | No (outcome: Fault vs Completed) | -- |
+| NPUA80001 | flOw | 2007 | thatgamecompany | PhyreEngine | PSN HDD | ProcessExit -> MaxSteps | 117,187 | 29,999,872 | No (outcome: Timeout vs Completed) | -- |
+| NPUA80068 | Super Stardust HD | 2007 | Housemarque | Housemarque proprietary | PSN HDD | FirstRsxWrite -> RsxWriteCheckpoint | 14,352,588 | 3,674,262,528 | Yes | 620 non-semantic + 104 pending |
+
+Generated by `cellgov_cli titles-gen`. Do not hand-edit; rerun the
+generator after updating per-title manifests or capturing new
+cross-runner observations.

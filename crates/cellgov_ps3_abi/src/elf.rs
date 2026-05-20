@@ -12,12 +12,52 @@
 /// `\x7FELF` magic bytes at offset 0 of every ELF file.
 pub const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 
-/// Size of the PS3 ELF header (e_phoff and friends are read from this).
+/// Size of the PS3 PPU ELF header (ELF64). The PPU loader reads
+/// `e_phoff` and friends through this.
 pub const ELF_HEADER_SIZE: usize = 64;
+
+/// Size of the PS3 SPU ELF header (ELF32). SPU binaries are 32-bit
+/// big-endian; `cellgov_spu::loader` uses this.
+pub const ELF32_HEADER_SIZE: usize = 52;
+
+/// Size of one ELF32 program header entry. SPU PHDR table walks
+/// stride by this.
+pub const ELF32_PHDR_SIZE: usize = 32;
+
+/// `e_ident[EI_CLASS]` value for 64-bit ELF.
+pub const ELFCLASS64: u8 = 2;
+
+/// `e_ident[EI_DATA]` value for big-endian (MSB) ELF.
+pub const ELFDATA2MSB: u8 = 2;
+
+/// `e_ident[EI_VERSION]` and `e_version` value for the current ELF revision.
+pub const EV_CURRENT: u8 = 1;
+
+/// `e_type` value for executable files.
+pub const ET_EXEC: u16 = 2;
+
+/// `e_machine` value for 64-bit PowerPC.
+pub const EM_PPC64: u16 = 21;
 
 /// `e_type` value for PS3 PRX modules (Sony-specific extension to ELF
 /// `e_type`).
 pub const ET_PRX: u16 = 0xFFA4;
+
+/// `p_flags` bit: execute permission on a PT_LOAD segment.
+pub const PF_X: u32 = 1;
+
+/// `p_flags` bit: write permission on a PT_LOAD segment.
+pub const PF_W: u32 = 2;
+
+/// `p_flags` bit: read permission on a PT_LOAD segment.
+pub const PF_R: u32 = 4;
+
+/// `p_type` for PS3 process-param segments (`PT_PROC_PARAM`,
+/// 0x60000001 -- Sony PT_LOOS-range extension).
+pub const PT_PROC_PARAM: u32 = 0x6000_0001;
+
+/// Size in bytes of a PS3 `sys_process_param_t` record.
+pub const PROC_PARAM_SIZE: u64 = 32;
 
 /// `p_type` for normal loadable segments.
 pub const PT_LOAD: u32 = 1;
@@ -142,6 +182,11 @@ pub const PRX_IMPORT_SIZE_OFFSET: usize = 0;
 /// Offset of the `num_func` u16 field in `PrxImportEntry`.
 pub const PRX_IMPORT_NUM_FUNC_OFFSET: usize = 6;
 
+/// Offset of the `num_var` u16 field (variable imports) in
+/// `PrxImportEntry`. Mirrors RPCS3's `ppu_prx_module_info.num_var`
+/// at `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:674`.
+pub const PRX_IMPORT_NUM_VAR_OFFSET: usize = 8;
+
 /// Offset of the `name_ptr` u32 field in `PrxImportEntry`.
 pub const PRX_IMPORT_NAME_PTR_OFFSET: usize = 16;
 
@@ -152,6 +197,24 @@ pub const PRX_IMPORT_NIDS_PTR_OFFSET: usize = 20;
 /// the address of the GOT slot table the binder patches) in
 /// `PrxImportEntry`.
 pub const PRX_IMPORT_STUB_PTR_OFFSET: usize = 24;
+
+/// Offset of the `vnids_ptr` u32 field (imported VNIDs) in
+/// `PrxImportEntry`. Mirrors RPCS3's `ppu_prx_module_info.vnids` at
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:682`. Only present
+/// when the declared entry size is at least 32 bytes.
+pub const PRX_IMPORT_VNIDS_PTR_OFFSET: usize = 28;
+
+/// Offset of the `vstubs_ptr` u32 field (variable slot table the
+/// binder patches at boot) in `PrxImportEntry`. Mirrors RPCS3's
+/// `ppu_prx_module_info.vstubs` at
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:683`. Only present
+/// when the declared entry size is at least 36 bytes.
+pub const PRX_IMPORT_VSTUBS_PTR_OFFSET: usize = 32;
+
+/// Minimum declared entry size for variable-import parsing to be
+/// safe (covers through `vstubs_ptr` at +32). Entries smaller than
+/// this are treated as function-only.
+pub const PRX_IMPORT_ENTRY_VAR_MIN_SIZE: u8 = 36;
 
 /// Canonical size of one `PrxImportEntry` in bytes. Matches
 /// `sizeof(ppu_prx_module_info)` in RPCS3; an entry whose declared

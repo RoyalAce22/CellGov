@@ -44,7 +44,49 @@ pub struct ScenarioResult {
 
 /// Drive a scenario fixture to completion via the canonical path.
 pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
-    let mut memory = GuestMemory::new(fixture.memory_size);
+    let memory = GuestMemory::new(fixture.memory_size);
+    let (result, _mem) = run_internal(fixture, memory);
+    result
+}
+
+/// One-`GuestMemory`-per-size cache for tests that run many
+/// scenarios at the same `memory_size`. Not thread-safe;
+/// instantiate per thread via `thread_local!`.
+#[derive(Debug, Default)]
+pub struct MemoryPool {
+    cached: Option<GuestMemory>,
+}
+
+impl MemoryPool {
+    pub fn new() -> Self {
+        Self { cached: None }
+    }
+}
+
+/// Drive a scenario fixture using a pooled [`GuestMemory`]. The
+/// cached memory is reset via [`GuestMemory::reset_for_reuse`]
+/// (`O(touched pages)`); a size mismatch discards the cache and
+/// allocates fresh.
+///
+/// # Panics
+///
+/// Panics if the pooled memory's `Arc<Vec<u8>>` backing is held by
+/// an outstanding snapshot at reset time.
+pub fn run_pooled(fixture: ScenarioFixture, pool: &mut MemoryPool) -> ScenarioResult {
+    let memory = match pool.cached.take() {
+        Some(mut mem) if mem.size() == fixture.memory_size as u64 => {
+            mem.reset_for_reuse();
+            mem
+        }
+        _ => GuestMemory::new(fixture.memory_size),
+    };
+    let (result, mem) = run_internal(fixture, memory);
+    pool.cached = Some(mem);
+    result
+}
+
+fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResult, GuestMemory) {
+    let mut memory = memory;
     (fixture.seed_memory)(&mut memory);
     let mut rt = Runtime::new(memory, fixture.budget, fixture.max_steps);
     (fixture.register)(&mut rt);
@@ -70,7 +112,7 @@ pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
     // memory snapshot is taken.
     rt.drain_pending_dma();
 
-    ScenarioResult {
+    let result = ScenarioResult {
         outcome,
         steps_taken: rt.steps_taken(),
         trace_bytes: rt.trace().bytes().to_vec(),
@@ -78,7 +120,9 @@ pub fn run(fixture: ScenarioFixture) -> ScenarioResult {
         final_unit_status_hash: StateHash::new(rt.registry().status_hash()),
         final_sync_hash: StateHash::new(rt.sync_state_hash()),
         final_memory: rt.memory().as_bytes().to_vec(),
-    }
+    };
+    let mem = rt.into_memory();
+    (result, mem)
 }
 
 #[cfg(test)]

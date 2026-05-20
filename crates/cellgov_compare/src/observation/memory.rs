@@ -2,6 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Region name for the title's `code` PT_LOAD. Single source of
+/// truth for callers that look up the ELF-bearing region.
+pub const CODE_REGION_NAME: &str = "code";
+
 /// A named memory region snapshot taken at end of run.
 ///
 /// All observed regions must be test-owned and write-complete: the test

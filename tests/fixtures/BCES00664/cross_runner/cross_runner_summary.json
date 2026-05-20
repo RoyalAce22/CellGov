@@ -1,0 +1,22 @@
+{
+  "convergence": {
+    "kind": "no",
+    "reason": {
+      "kind": "outcome_mismatch",
+      "cellgov": "Fault",
+      "rpcs3": "Completed"
+    }
+  },
+  "byte_parity": {
+    "kind": "diverge",
+    "reason": {
+      "kind": "outcome_mismatch",
+      "cellgov": "Fault",
+      "rpcs3": "Completed"
+    }
+  },
+  "per_class_bytes": {},
+  "unclassified_bytes": 0,
+  "unclassified_runs": [],
+  "lowest_offset_class": null
+}

@@ -2838,12 +2838,9 @@ fn sys_rsx_dispatch_commutes_with_unrelated_unit_steps() {
 
 #[test]
 fn multi_primitive_determinism_canary_with_sys_rsx_content() {
-    fn run_once() -> (u64, u64) {
-        let mut rt = Runtime::new(
-            cellgov_mem::GuestMemory::new(0x4000_0000),
-            Budget::new(1),
-            100,
-        );
+    fn run_once(mut mem: cellgov_mem::GuestMemory) -> (u64, u64, cellgov_mem::GuestMemory) {
+        mem.reset_for_reuse();
+        let mut rt = Runtime::new(mem, Budget::new(1), 100);
         rt.set_hle_heap_base(0x10_0000);
         rt.set_gcm_rsx_checkpoint(false);
         let unit_id = cellgov_event::UnitId::new(0);
@@ -2880,13 +2877,17 @@ fn multi_primitive_determinism_canary_with_sys_rsx_content() {
             },
             unit_id,
         );
-        (rt.memory().content_hash(), rt.sync_state_hash())
+        let mem_hash = rt.memory().content_hash();
+        let sync_hash = rt.sync_state_hash();
+        (mem_hash, sync_hash, rt.into_memory())
     }
 
-    let run_a = run_once();
-    let run_b = run_once();
+    let mem = cellgov_mem::GuestMemory::new(0x4000_0000);
+    let (a_mem, a_sync, mem) = run_once(mem);
+    let (b_mem, b_sync, _mem) = run_once(mem);
     assert_eq!(
-        run_a, run_b,
+        (a_mem, a_sync),
+        (b_mem, b_sync),
         "sys_rsx canary: memory_hash and sync_state_hash must \
          match byte-identically across two runs"
     );

@@ -121,70 +121,117 @@ this section:
   behave differently on a real PS3) or **non-semantic** (the byte
   lives in an address no guest code reads, or encodes metadata the
   guest doesn't act on). Layer: behaviour equivalence. Vocabulary:
-  `equivalent (N bytes non-semantic)`, `DIVERGE semantic at ...`.
+  `equivalent (N non-semantic)`, `DIVERGE semantic at ...`.
 
-A title **passes** cross-runner when every byte-level divergence is
-classified non-semantic. It is marked `equivalent (N bytes
-non-semantic)` in the compatibility matrix. The raw report still
-shows `DIVERGE` lines because bytes did differ; the verdict line
-says `Verdict: equivalent` because the differences did not matter.
+## Two independent verdicts: Convergence and Byte parity
 
-There is no contradiction in "DIVERGE at byte 0x17" sitting next to
-"Verdict: equivalent". The first is a byte-level fact. The second
-is a behaviour-level judgement backed by the classification
-narrative in the same file. They are statements at different
-layers.
+A single "pass/fail" verdict conflates two independent questions a
+matrix reader actually asks. CellGov's matrix renders them in
+separate columns:
+
+- **Convergence**: did CellGov reach the same architectural state
+  as RPCS3? Same outcome, same captured regions, same step count
+  within tolerance. `Yes` or `No (<reason>)`.
+- **Byte parity**: at that state, are the captured memory regions
+  byte-identical (modulo classified non-semantic divergences)?
+  Defined only when convergence is `Yes`.
+
+A title can converge and still carry classifier backlog: that is a
+successful boot with investigation outstanding, not a failure.
+A title can fail to converge regardless of byte parity: byte
+parity is undefined because the runners never reached comparable
+architectural state. Both columns render side by side.
+
+Byte-parity vocabulary (only meaningful when convergence is `Yes`):
+
+- `equivalent` -- zero divergent bytes.
+- `N non-semantic` -- every divergent byte classifies into a
+  structurally-grounded class (ELF header reconstruction, HLE OPD
+  slot layout, etc.). The bytes differ but the guest cannot tell.
+- `M non-semantic + N pending` -- some bytes classified, some
+  awaiting a new structurally-grounded class. The pending bytes
+  are visible in `compare_report.txt` and `cross_runner_summary.
+  json` (`unclassified_runs`). The verdict moves to `equivalent`
+  only when a new `DivergenceClass` lands that covers the bytes;
+  investigation continues in `NOTES.md`.
+- `--` -- byte parity is undefined because convergence is `No`.
+
+Convergence-failure reasons render inline in the matrix:
+
+- `No (outcome: <a> vs <b>)` -- different terminal outcomes
+  (Fault, Completed, Timeout, ...).
+- `No (region count: <a> vs <b>)` -- different number of captured
+  regions.
+- `No (region[i] identity: ...)` -- region at index `i` differs by
+  name or address.
+- `No (region[i] <name> length: <a> vs <b>)` -- same identity,
+  different byte length.
+- `No (same-runner step mismatch on <runner>: <a> vs <b>)` --
+  determinism failure: a single runner produced different step
+  counts across reruns.
+- `No (step count: <a> vs <b> (tolerance T))` -- cross-runner
+  step delta beyond tolerance.
 
 ### Worked example: Super Stardust HD
 
-SSHD's cross-runner report against RPCS3 contains exactly one
-line:
+SSHD's cross-runner fixture against RPCS3 records:
 
 ```
-DIVERGE region code: first byte differs at offset 0x35 (guest 0x10035) -- 00 vs 40
+Convergence: Yes
+Byte parity: 599 non-semantic + 125 pending
 ```
 
-One byte. At guest address `0x00010035`, CellGov has `0x00` and
-RPCS3 has `0x40`. Byte-equality check: DIVERGE.
+Convergence holds: both runners reach `FirstRsxWrite` with the
+same outcome, same captured regions, same step count.
 
-What lives at `0x00010035`? It is the low byte of the ELF
-header's `e_ehsize` field, written when the loader maps PT_LOAD
-#0 starting at `p_offset = 0`. The spec value is `0x40` (= 64,
-the standard ELF64 header size). RPCS3 keeps the bytes from the
-SELF in place; CellGov's `cellgov_firmware decrypt-self` clears
-this slot during reconstruction.
+The 599 non-semantic bytes include the byte at guest address
+`0x00010035` (low byte of `e_ehsize`: CellGov `0x00`, RPCS3
+`0x40`). That byte is in the loaded ELF header, which the guest
+never reads during execution; classifier rule `ElfHeader` covers
+it because the range is derivable from the title's own PHDR
+table.
 
-The guest never reads its own ELF header during execution. The
-loader uses the field to know how big the header is, but that
-read happens on the host side before the program counter ever
-points into the header range. Same program. Same execution.
-Different byte at `0x00010035`.
+The 125 pending bytes are byte-level divergences the classifier
+has no general rule for yet. They are enumerated in the fixture
+with their locator and the cellgov-side / rpcs3-side bytes;
+hypotheses about their source live in `NOTES.md`. The verdict
+moves to `equivalent` (no pending) only when a new
+structurally-grounded `DivergenceClass` lands that covers them.
 
-**Verdict: equivalent (1 byte non-semantic).**
+### Why the two-column split matters
 
-The verdict sits on top of the byte-level DIVERGE. Both are true
-statements at different layers.
+A single verdict collapses two independent failure shapes into
+one cell. A title that converges with a small classifier backlog
+reads the same as a title that does not converge at all -- and a
+reader cannot tell which is which without opening the fixture.
+The two columns separate the two questions:
 
-### Why the verdict term matters
+- Convergence answers "did CellGov reach where RPCS3 reached?"
+  This is the actually-bad-when-No state.
+- Byte parity answers "are the captured bytes the same?" This is
+  meaningful only when convergence is `Yes`, and a `Pending`
+  count is investigation backlog, not regression.
 
-If the compatibility matrix said `MATCH` for a title with any
-non-zero divergence, that would be wrong: bytes actually differ.
-If it said `DIVERGE` for one classified-non-semantic byte, that
-would read as failure at a glance even though the program
-behaves identically. `equivalent` threads the needle: it
-concedes the bytes differ, and asserts the behaviour does not.
+If the matrix silently treated unclassified bytes as `equivalent`
+when convergence holds, the project would slide into per-title
+compatibility hacks: each new title would arrive with its own
+list of "trust me, these bytes are fine" entries. `Pending` is
+the load-bearing honest form: bytes differ, no general rule
+covers them yet, the fixture is on disk so a human can see
+exactly which bytes, and the verdict moves to
+`N non-semantic` only after a new structurally-grounded
+`DivergenceClass` lands.
 
-The same term appears in three places:
+The verdict vocabulary appears in three places:
 
-- `docs/titles.md` compatibility matrix column.
-- `tests/fixtures/<serial>_cross_runner/compare_report.txt`
-  classification verdict line.
+- `docs/titles.md` compatibility matrix columns.
+- `tests/fixtures/<serial>/cross_runner/compare_report.txt`
+  two-line header.
 - This document.
 
-When a title's classification changes (new divergence class
-discovered, previously non-semantic reclassified as semantic), all
-three get updated together. Consistency across those three surfaces
-is how a reader avoids whiplash.
+`CrossRunnerSummary::display_matrix_columns()` is the source of
+truth for the wording. If concepts.md disagrees with the code,
+fix concepts.md.
 
 ## Why this matters for static recomp
 
@@ -203,14 +250,15 @@ The recompiler must distinguish:
   represent these differently (or not at all) because its output
   is a native binary, not a PS3 memory image.
 
-If CellGov said `MATCH` for every title, the recompiler would have
-no way to tell the two categories apart: everything would look
-load-bearing. If CellGov said `DIVERGE` without classification,
-every title would look broken. The `equivalent (N bytes
-non-semantic)` verdict plus the per-byte classification narrative
+If CellGov said only `pass` for every title, the recompiler would
+have no way to tell the two categories apart: everything would
+look load-bearing. If CellGov said `fail` without further
+classification, every title would look broken. The Convergence +
+Byte parity split plus the per-byte classification narrative
 gives the recompiler (and the reader) exactly the information
-needed: which bytes must be faithful, which bytes are observation-
-format accidents.
+needed: did the runners reach the same state, and at that state,
+which bytes must be faithful and which are observation-format
+accidents.
 
 The vocabulary is not just docs hygiene. It is the interface
 contract between CellGov (the oracle) and whatever consumes its

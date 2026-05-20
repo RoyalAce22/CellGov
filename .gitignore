@@ -31,18 +31,15 @@ baselines/**/*.tty
 *.htrc
 
 # Large cross-runner observation artifacts (too big for git;
-# reproduced from tests/fixtures/*/REPRODUCTION.md)
-tests/fixtures/NPUA80001_cross_runner/*.json
-tests/fixtures/NPUA80001_cross_runner/*.dump
-tests/fixtures/NPUA80068_cross_runner/*.json
-tests/fixtures/NPUA80068_cross_runner/*.dump
-tests/fixtures/BCES00664_cross_runner/*.json
-tests/fixtures/BCES00664_cross_runner/*.dump
+# reproduced from tests/fixtures/<id>/cross_runner/REPRODUCTION.md).
+# Per-runner observations live under tests/fixtures/<id>/<runner>/.
+tests/fixtures/*/cellgov/observation.json
+tests/fixtures/*/rpcs3/observation.json
+tests/fixtures/*/rpcs3/*.dump
 
-# Firmware install destination (per Phase 31 design). cellgov_firmware
-# install extracts a user-supplied PS3UPDAT.PUP here; cellgov_cli reads
-# encrypted SELFs from firmware/sys/external/ at boot. Bytes are never
-# vendored.
+# Firmware install destination. cellgov_firmware install extracts a
+# user-supplied PS3UPDAT.PUP here; cellgov_cli reads encrypted SELFs
+# from firmware/sys/external/ at boot. Bytes are never vendored.
 firmware/
 
 # AI tooling

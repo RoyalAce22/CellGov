@@ -1,0 +1,8 @@
+{
+  "checkpoint": {
+    "kind": "first_rsx_write"
+  },
+  "outcome": "Fault",
+  "steps": 45689,
+  "budget": 256
+}

@@ -89,6 +89,8 @@ graph BT
   testkit --> compare
   trace --> compare
   event --> compare
+  time --> compare
+  mem --> compare
 
   ppu --> cli
   spu --> cli
@@ -659,7 +661,7 @@ schema in `docs/titles/<content-id>.toml`:
 
 ```toml
 [content]
-base = "tests/fixtures/<id>_content"
+base = "boot_content/<id>"
 override_base_env = "CELLGOV_<ID>_CONTENT_DIR"
 files = [
     { guest_path = "/app_home/Data/Resources/first.xml", host_path = "Data/Resources/first.xml" },
@@ -1229,6 +1231,15 @@ reports:
   byte-equal state) and tells the outer scanner it can resume from
   the next step. Surfaced via `cellgov_cli zoom <a> <b> <step>`.
 
+`run-game --save-state-trace <path>` writes the runtime's per-step
+`PpuStateHash` trace to disk (switching the runtime mode from
+`FaultDriven` to `DeterminismCheck` for the run); the resulting
+file is the input `diverge` and `zoom` consume. Combined with
+`--patch-byte` for boot-time memory injection, this lets an
+investigator answer "do these N bytes propagate into any tracked
+PPU register during the boot?" by capturing two CellGov traces
+(unpatched + patched) and diffing them.
+
 ### RPCS3 bridge
 
 `bridges/rpcs3-patch/0001-cellgov-checkpoint-dump.patch` adds an
@@ -1240,10 +1251,16 @@ file on process exit. `bridges/rpcs3_to_observation` then converts
 that dump plus a shared region manifest into the same `Observation`
 JSON `cellgov_cli compare-observations` reads.
 
+A second patch
+(`bridges/rpcs3-patch/0002-cellgov-hle-trace.patch`) emits a
+per-HLE-call binary trace stream with optional watch-address
+diffs; `cellgov_cli rpcs3-attribute --trace <path> --addr 0xADDR`
+parses the stream to attribute writes to a specific HLE call.
+
 The patched RPCS3 binary is built by the developer; the CellGov
 library has no Cargo or runtime dependency on RPCS3. The bridge is
 a verification-time tool, not a library coupling. See
-`tests/fixtures/NPUA80001_cross_runner/REPRODUCTION.md` for the build commands
+`tests/fixtures/NPUA80001/cross_runner/REPRODUCTION.md` for the build commands
 and the documented vendored-RPCS3 build-config workarounds.
 
 ### Oracle-mode config contract
@@ -1441,7 +1458,7 @@ three tested titles. Same `FirstRsxWrite` checkpoint kind as
 SSHD; reaches the put-pointer write at step 45,691 (the
 `0xC0000040` MMIO sentinel write triggers the checkpoint after
 the title's renderer init runs to the GCM control register). See
-[tests/fixtures/BCES00664_cross_runner/compare_report.txt](../tests/fixtures/BCES00664_cross_runner/compare_report.txt)
+[tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md)
 for history.
 
 ## Microtest corpus

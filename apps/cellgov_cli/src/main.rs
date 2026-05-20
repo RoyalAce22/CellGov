@@ -19,7 +19,8 @@ use cli::scenarios::{report, run_scenario, SCENARIOS};
 /// Usage lines for the fixed-arity subcommands. Both the per-arm
 /// `die` on wrong arity and the [`Subcommand::usage`] table reference
 /// these consts so the two cannot drift.
-const USAGE_COMPARE_OBSERVATIONS: &str = "cellgov_cli compare-observations <a.json> <b.json>";
+const USAGE_COMPARE_OBSERVATIONS: &str =
+    "cellgov_cli compare-observations <a.json> <b.json> [--format human|json]";
 const USAGE_DIVERGE: &str = "cellgov_cli diverge <a.state> <b.state>";
 const USAGE_ZOOM: &str = "cellgov_cli zoom <a.zoom.state> <b.zoom.state> <step>";
 
@@ -50,6 +51,12 @@ const USAGE_DUMP_PRX_IMPORTS: &str =
 const USAGE_DISASM: &str = "cellgov_cli disasm <elf-path> --vaddr <hex> [--count N]";
 const USAGE_RPCS3_ATTRIBUTE: &str =
     "cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR [--len N]] [--list] [--ranked]";
+const USAGE_FIXTURE_GEN: &str = "\
+cellgov_cli fixture-gen --manifest <path> --cellgov <path> --rpcs3 <path> --output-dir <path>
+\t\t[--vfs-root PATH] (defaults: CELLGOV_PS3_VFS_ROOT env, then tools/rpcs3/dev_hdd0)";
+const USAGE_TITLES_GEN: &str = "\
+cellgov_cli titles-gen [--registry DIR] [--fixtures-dir DIR] [--output PATH]
+\t\t(defaults: docs/titles, tests/fixtures, docs/titles.md)";
 
 /// Top-level dispatcher routes. Adding a variant produces an
 /// exhaustiveness error in [`Subcommand::tokens`], [`Subcommand::usage`],
@@ -71,6 +78,8 @@ enum Subcommand {
     DumpPrxImports,
     Disasm,
     Rpcs3Attribute,
+    FixtureGen,
+    TitlesGen,
 }
 
 impl Subcommand {
@@ -91,6 +100,8 @@ impl Subcommand {
             Self::DumpPrxImports => &["dump-prx-imports"],
             Self::Disasm => &["disasm"],
             Self::Rpcs3Attribute => &["rpcs3-attribute"],
+            Self::FixtureGen => &["fixture-gen"],
+            Self::TitlesGen => &["titles-gen"],
         }
     }
 
@@ -113,6 +124,8 @@ impl Subcommand {
             Self::DumpPrxImports => Some(USAGE_DUMP_PRX_IMPORTS),
             Self::Disasm => Some(USAGE_DISASM),
             Self::Rpcs3Attribute => Some(USAGE_RPCS3_ATTRIBUTE),
+            Self::FixtureGen => Some(USAGE_FIXTURE_GEN),
+            Self::TitlesGen => Some(USAGE_TITLES_GEN),
         }
     }
 
@@ -144,12 +157,11 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand::DumpPrxImports,
     Subcommand::Disasm,
     Subcommand::Rpcs3Attribute,
+    Subcommand::FixtureGen,
+    Subcommand::TitlesGen,
 ];
 
 fn main() {
-    // Invariant the type system cannot express: a scenario named
-    // after a dispatcher token would never reach `run_scenario`
-    // because the earlier match arm intercepts it.
     debug_assert!(
         SCENARIOS
             .iter()
@@ -169,10 +181,10 @@ fn main() {
         Some(Subcommand::Version) => println!("cellgov_cli {}", env!("CARGO_PKG_VERSION")),
         Some(Subcommand::Compare) => cli::compare::run(&args, SCENARIOS),
         Some(Subcommand::CompareObservations) => {
-            if args.len() != 4 {
+            if args.len() < 4 {
                 die(USAGE_COMPARE_OBSERVATIONS);
             }
-            cli::compare::run_compare_observations(&args[2], &args[3]);
+            cli::compare::run_compare_observations(&args);
         }
         Some(Subcommand::Diverge) => {
             if args.len() != 4 {
@@ -198,6 +210,8 @@ fn main() {
         Some(Subcommand::DumpPrxImports) => dump_prx_imports::run(&args),
         Some(Subcommand::Disasm) => disasm::run(&args),
         Some(Subcommand::Rpcs3Attribute) => cli::rpcs3_attribute::run(&args),
+        Some(Subcommand::FixtureGen) => cli::fixture_gen::run(&args),
+        Some(Subcommand::TitlesGen) => cli::titles_gen::run(&args),
         None => match run_scenario(token) {
             Some((label, result)) => println!("{}", report(label, &result)),
             None => die(&format!(
@@ -294,8 +308,6 @@ mod tests {
         assert!(parse_step_count("0xnope").is_err());
     }
 
-    /// Adding a variant requires updating both `SUBCOMMANDS` and
-    /// the `expected` mirror below; the test fails until they agree.
     #[test]
     fn subcommands_const_is_exhaustive() {
         for sub in SUBCOMMANDS {
@@ -323,6 +335,8 @@ mod tests {
             Subcommand::DumpPrxImports,
             Subcommand::Disasm,
             Subcommand::Rpcs3Attribute,
+            Subcommand::FixtureGen,
+            Subcommand::TitlesGen,
         ];
         assert_eq!(
             SUBCOMMANDS.len(),

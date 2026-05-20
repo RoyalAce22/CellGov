@@ -121,9 +121,10 @@ pub enum PrxLoaderError {
         source: crate::prx::ImportParseError,
     },
     /// A `module_start` invocation returned an error to the runner.
-    /// `reason` is the runner-supplied `ModuleStartRunError(String)`
-    /// payload, preserved so divergence-trace workflows can act on
-    /// the actionable signal instead of the bare module id.
+    /// `reason` is the runner-supplied
+    /// [`ModuleStartRunError::RunnerReported`] payload, preserved so
+    /// divergence-trace workflows can act on the actionable signal
+    /// instead of the bare module id.
     ModuleStartFailed { module: PrxModuleId, reason: String },
     /// A relocation referenced a segment index beyond `[text, data]`.
     /// The single-PRX applier handles 2 segments; multi-segment modules
@@ -181,6 +182,102 @@ pub enum PrxLoaderError {
     },
 }
 
+impl std::fmt::Display for PrxLoaderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CyclicDependency { involved } => {
+                write!(f, "cyclic PRX dependency (involves {} modules)", involved.len())
+            }
+            Self::MissingDependency { importer, target } => write!(
+                f,
+                "PRX module {importer:?} imports missing target {target:?}"
+            ),
+            Self::ConflictingExport { nid, first, second } => write!(
+                f,
+                "conflicting export NID 0x{nid:08x} between {first:?} and {second:?}"
+            ),
+            Self::UnresolvedImport { nid } => {
+                write!(f, "unresolved import NID 0x{nid:08x}")
+            }
+            Self::GotPatchFailed { stub_addr, nid } => write!(
+                f,
+                "GOT patch failed at stub 0x{stub_addr:08x} for NID 0x{nid:08x}"
+            ),
+            Self::GotBatchPatchFailed { count, source } => write!(
+                f,
+                "GOT batch patch ({count} writes) rejected: {source}"
+            ),
+            Self::OpdAddressOutOfRange { nid, addr } => write!(
+                f,
+                "OPD address 0x{addr:016x} for NID 0x{nid:08x} out of u32 range"
+            ),
+            Self::Load(e) => write!(f, "PRX load: {e}"),
+            Self::Parse(e) => write!(f, "PRX parse: {e}"),
+            Self::ImportTableParseFailed { module, source } => write!(
+                f,
+                "import-table parse for {module:?}: {source}"
+            ),
+            Self::ModuleStartFailed { module, reason } => write!(
+                f,
+                "module_start for {module:?} failed: {reason}"
+            ),
+            Self::MultiSegmentRelocations {
+                module,
+                segment_idx,
+            } => write!(
+                f,
+                "PRX {module:?} has multi-segment relocations (segment {segment_idx})"
+            ),
+            Self::DuplicateModuleId {
+                id,
+                first_path,
+                second_path,
+            } => write!(
+                f,
+                "duplicate PRX module id {id:?} in paths {first_path:?} and {second_path:?}"
+            ),
+            Self::DuplicateExportNamespace {
+                namespace,
+                first,
+                second,
+            } => write!(
+                f,
+                "duplicate export namespace {namespace:?} between {first:?} and {second:?}"
+            ),
+            Self::LoadAddressSpaceExhausted => f.write_str("load address space exhausted"),
+            Self::DuplicateModuleInOrder {
+                id,
+                first_index,
+                second_index,
+            } => write!(
+                f,
+                "duplicate module id {id:?} in order slice at indices {first_index} and {second_index}"
+            ),
+            Self::OrderLoadedMismatch {
+                in_order_not_loaded,
+                in_loaded_not_order,
+            } => write!(
+                f,
+                "order/loaded mismatch: {} only in order, {} only in loaded",
+                in_order_not_loaded.len(),
+                in_loaded_not_order.len()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PrxLoaderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Load(e) => Some(e),
+            Self::Parse(e) => Some(e),
+            Self::ImportTableParseFailed { source, .. } => Some(source),
+            Self::GotBatchPatchFailed { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
 /// Implemented by callers that drive `module_start` execution. The
 /// loader stays runtime-agnostic; the runner threads OPD calls through
 /// whatever runtime / scheduler the caller has on hand.
@@ -192,10 +289,26 @@ pub trait ModuleStartRunner {
     ) -> Result<(), ModuleStartRunError>;
 }
 
-/// Opaque runner-side failure surfaced through
+/// Runner-side failure surfaced through
 /// [`PrxLoaderError::ModuleStartFailed`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleStartRunError(pub String);
+pub enum ModuleStartRunError {
+    /// Runner-reported failure with a free-form reason. Production
+    /// runners (the deterministic step loop) have no concrete failure
+    /// modes today; this variant carries the test-fixture and any
+    /// future external impl's reason text.
+    RunnerReported { reason: String },
+}
+
+impl std::fmt::Display for ModuleStartRunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RunnerReported { reason } => write!(f, "runner reported: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for ModuleStartRunError {}
 
 /// Decide whether `load_firmware_set` would accept `bytes` without
 /// actually loading. Single source of truth for module-level
@@ -562,12 +675,14 @@ pub fn start_modules<R: ModuleStartRunner>(
             continue;
         };
         if let Some(opd) = prx.module_start {
-            runner
-                .run_module_start(prx, opd)
-                .map_err(|e| PrxLoaderError::ModuleStartFailed {
-                    module: *id,
-                    reason: e.0,
-                })?;
+            runner.run_module_start(prx, opd).map_err(|e| match e {
+                ModuleStartRunError::RunnerReported { reason } => {
+                    PrxLoaderError::ModuleStartFailed {
+                        module: *id,
+                        reason,
+                    }
+                }
+            })?;
         }
     }
     Ok(())
@@ -655,7 +770,9 @@ mod tests {
             module: &LoadedPrx,
             _opd: LoadedOpd,
         ) -> Result<(), ModuleStartRunError> {
-            Err(ModuleStartRunError(format!("synthetic: {}", module.name)))
+            Err(ModuleStartRunError::RunnerReported {
+                reason: format!("synthetic: {}", module.name),
+            })
         }
     }
 
@@ -817,6 +934,7 @@ mod tests {
         vec![crate::prx::ImportedModule {
             name: "synth".to_string(),
             functions: vec![crate::prx::ImportedFunction { nid, stub_addr }],
+            variables: Vec::new(),
         }]
     }
 
@@ -904,6 +1022,7 @@ mod tests {
                     stub_addr: 0x110,
                 },
             ],
+            variables: Vec::new(),
         }];
         let err = patch_imports_against(&imports, &table, 0, &mut mem).unwrap_err();
         assert_eq!(err, PrxLoaderError::UnresolvedImport { nid: 0xBBBB2222 });
@@ -940,6 +1059,7 @@ mod tests {
                     stub_addr: 0xFFFF_0000,
                 },
             ],
+            variables: Vec::new(),
         }];
         let err = patch_imports_against(&imports, &table, 0, &mut mem).unwrap_err();
         match err {
