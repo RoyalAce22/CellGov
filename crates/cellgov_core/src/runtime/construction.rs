@@ -72,7 +72,7 @@ impl Runtime {
             last_scheduled_unit: None,
             step_woke_others: false,
             effects_buf: Vec::new(),
-            hle: crate::hle::HleState::new(),
+            rsx_label_base: 0,
             mode: RuntimeMode::FullTrace,
             per_step_index: 0,
             zoom_trace: TraceWriter::new(),

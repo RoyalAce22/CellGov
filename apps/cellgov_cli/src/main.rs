@@ -9,7 +9,6 @@
 
 mod cli;
 mod disasm;
-mod dump_imports;
 mod dump_prx_imports;
 mod game;
 
@@ -44,8 +43,6 @@ cellgov_cli bench-boot-once <--title NAME|--content-id ID|--title-manifest PATH>
 \t\t[--max-steps N] [--budget N] [--firmware-dir DIR]
 \t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR]";
 const USAGE_DUMP: &str = "cellgov_cli dump <scenario>";
-const USAGE_DUMP_IMPORTS: &str =
-    "cellgov_cli dump-imports <--title NAME|--content-id ID|--title-manifest PATH>";
 const USAGE_DUMP_PRX_IMPORTS: &str =
     "cellgov_cli dump-prx-imports <path-to-prx-or-sprx> [--at 0xADDR] [--module NAME]";
 const USAGE_DISASM: &str = "cellgov_cli disasm <elf-path> --vaddr <hex> [--count N]";
@@ -74,7 +71,6 @@ enum Subcommand {
     BenchBoot,
     BenchBootOnce,
     Dump,
-    DumpImports,
     DumpPrxImports,
     Disasm,
     Rpcs3Attribute,
@@ -96,7 +92,6 @@ impl Subcommand {
             Self::BenchBoot => &["bench-boot"],
             Self::BenchBootOnce => &["bench-boot-once"],
             Self::Dump => &["dump"],
-            Self::DumpImports => &["dump-imports"],
             Self::DumpPrxImports => &["dump-prx-imports"],
             Self::Disasm => &["disasm"],
             Self::Rpcs3Attribute => &["rpcs3-attribute"],
@@ -120,7 +115,6 @@ impl Subcommand {
             Self::BenchBoot => Some(USAGE_BENCH_BOOT),
             Self::BenchBootOnce => Some(USAGE_BENCH_BOOT_ONCE),
             Self::Dump => Some(USAGE_DUMP),
-            Self::DumpImports => Some(USAGE_DUMP_IMPORTS),
             Self::DumpPrxImports => Some(USAGE_DUMP_PRX_IMPORTS),
             Self::Disasm => Some(USAGE_DISASM),
             Self::Rpcs3Attribute => Some(USAGE_RPCS3_ATTRIBUTE),
@@ -153,7 +147,6 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand::BenchBoot,
     Subcommand::BenchBootOnce,
     Subcommand::Dump,
-    Subcommand::DumpImports,
     Subcommand::DumpPrxImports,
     Subcommand::Disasm,
     Subcommand::Rpcs3Attribute,
@@ -206,7 +199,6 @@ fn main() {
         Some(Subcommand::BenchBoot) => cli::boot_cmd::bench_boot(&args),
         Some(Subcommand::BenchBootOnce) => cli::boot_cmd::bench_boot_once(&args),
         Some(Subcommand::Dump) => cli::dump::run(&args, SCENARIOS),
-        Some(Subcommand::DumpImports) => dump_imports::run(&args),
         Some(Subcommand::DumpPrxImports) => dump_prx_imports::run(&args),
         Some(Subcommand::Disasm) => disasm::run(&args),
         Some(Subcommand::Rpcs3Attribute) => cli::rpcs3_attribute::run(&args),
@@ -331,7 +323,6 @@ mod tests {
             Subcommand::BenchBoot,
             Subcommand::BenchBootOnce,
             Subcommand::Dump,
-            Subcommand::DumpImports,
             Subcommand::DumpPrxImports,
             Subcommand::Disasm,
             Subcommand::Rpcs3Attribute,

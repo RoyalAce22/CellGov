@@ -309,26 +309,6 @@ impl Lv2Host {
         }
     }
 
-    /// `CallbackDispatchSpawn` reaching dispatch via `Lv2Request` is
-    /// a layering bug: the request is fabricated internally by
-    /// `call_guest_callback_sync` and emitted as a `Lv2Dispatch::CallbackSpawn`,
-    /// never classified from the syscall. `record_invariant_break`
-    /// debug-panics on internal misuse (see `host/diagnostics.rs`).
-    pub(super) fn dispatch_callback_dispatch_spawn_invariant(&mut self) -> Lv2Dispatch {
-        self.record_invariant_break(
-            "dispatch.callback_dispatch_spawn_via_request",
-            format_args!(
-                "CallbackDispatchSpawn reached dispatch via Lv2Request; should be \
-                 constructed only as Lv2Dispatch::CallbackSpawn from \
-                 call_guest_callback_sync"
-            ),
-        );
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
-    }
-
     /// PS3 usermode never issues `sc` with LEV != 0; reject with
     /// CELL_EINVAL rather than letting the call fall through to
     /// LV2. Guest-reachable -> `log_invariant_break`.

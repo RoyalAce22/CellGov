@@ -7,7 +7,6 @@ pub(in crate::game) fn print_trace_line(
     unit: cellgov_event::UnitId,
     result: &cellgov_exec::ExecutionStepResult,
     steps: usize,
-    hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) {
     if let Some(pc) = result.local_diagnostics.pc {
         // Zero decodes as a valid PPC instruction; distinguish unmapped from a real zero word.
@@ -23,10 +22,7 @@ pub(in crate::game) fn print_trace_line(
     if let Some(args) = &result.syscall_args {
         if args[0] >= 0x10000 {
             let idx = (args[0] - 0x10000) as u32;
-            println!(
-                "       -> HLE #{idx}: {}",
-                format_hle_idx(idx, hle_bindings)
-            );
+            println!("       -> HLE #{idx}: {}", format_hle_idx(idx));
         } else if args[0] == 403 {
             let buf = args[2];
             let len = args[3];

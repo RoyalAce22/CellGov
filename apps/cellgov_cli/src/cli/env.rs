@@ -24,33 +24,6 @@ fn parse_env_bool_inner(name: &str, value: Option<String>) -> Result<bool, CliAr
     }
 }
 
-/// Parse a `CELLGOV_*` env var as a hex `u32` with optional `0x`/`0X`
-/// prefix. `None` when the var is unset; dies on malformed input.
-pub(crate) fn parse_env_hex_u32(name: &str) -> Option<u32> {
-    parse_env_hex_u32_inner(name, std::env::var(name).ok()).unwrap_or_else(|e| die(&e.to_string()))
-}
-
-fn parse_env_hex_u32_inner(name: &str, value: Option<String>) -> Result<Option<u32>, CliArgError> {
-    let Some(raw) = value else {
-        return Ok(None);
-    };
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    let stripped = trimmed
-        .strip_prefix("0x")
-        .or_else(|| trimmed.strip_prefix("0X"))
-        .unwrap_or(trimmed);
-    u32::from_str_radix(stripped, 16)
-        .map(Some)
-        .map_err(|source| CliArgError::EnvHexU32Invalid {
-            name: name.to_string(),
-            raw: raw.clone(),
-            source,
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,54 +65,5 @@ mod tests {
             .to_string();
         assert!(err.contains("X="), "got: {err}");
         assert!(err.contains("maybe"), "got: {err}");
-    }
-
-    #[test]
-    fn parse_env_hex_u32_unset_is_none() {
-        assert_eq!(parse_env_hex_u32_inner("X", None).unwrap(), None);
-    }
-
-    #[test]
-    fn parse_env_hex_u32_empty_is_none() {
-        assert_eq!(
-            parse_env_hex_u32_inner("X", Some(String::new())).unwrap(),
-            None
-        );
-        assert_eq!(
-            parse_env_hex_u32_inner("X", Some("   ".to_string())).unwrap(),
-            None
-        );
-    }
-
-    #[test]
-    fn parse_env_hex_u32_accepts_lower_prefix() {
-        assert_eq!(
-            parse_env_hex_u32_inner("X", Some("0xdeadbeef".to_string())).unwrap(),
-            Some(0xdeadbeef)
-        );
-    }
-
-    #[test]
-    fn parse_env_hex_u32_accepts_upper_prefix() {
-        assert_eq!(
-            parse_env_hex_u32_inner("X", Some("0XDEADBEEF".to_string())).unwrap(),
-            Some(0xdeadbeef)
-        );
-    }
-
-    #[test]
-    fn parse_env_hex_u32_accepts_no_prefix() {
-        assert_eq!(
-            parse_env_hex_u32_inner("X", Some("ff".to_string())).unwrap(),
-            Some(0xff)
-        );
-    }
-
-    #[test]
-    fn parse_env_hex_u32_rejects_non_hex() {
-        let err = parse_env_hex_u32_inner("X", Some("nope".to_string()))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("not a hex u32"), "got: {err}");
     }
 }

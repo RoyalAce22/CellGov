@@ -4,8 +4,6 @@
 //! that compute over multiple fields (e.g. `sync_state_hash`) stay in
 //! `mod.rs` next to the struct definition.
 
-use std::collections::BTreeMap;
-
 use cellgov_dma::DmaQueue;
 #[cfg(test)]
 use cellgov_effects::Effect;
@@ -140,50 +138,6 @@ impl Runtime {
         self.scheduler_dirty_after_restore = false;
     }
 
-    // -- HLE --
-
-    /// Map HLE index -> NID for dispatch.
-    pub fn set_hle_nids(&mut self, nids: BTreeMap<u32, u32>) {
-        self.hle.nids = nids;
-    }
-
-    /// Set the base address of the HLE bump-allocator heap.
-    pub fn set_hle_heap_base(&mut self, base: u32) {
-        assert_ne!(
-            base, 0,
-            "set_hle_heap_base: heap_base = 0 would let heap_alloc hand out address 0, \
-             which the dispatch witnesses in hle::cell_gcm_sys rely on being impossible"
-        );
-        self.hle.heap_base = base;
-        self.hle.heap_ptr = base;
-        self.hle.heap_watermark = base;
-        self.hle.heap_warning_mask = 0;
-    }
-
-    /// Peak address the HLE bump allocator has reached. Subtract the heap
-    /// base for cumulative bytes allocated across the scenario.
-    #[inline]
-    pub fn hle_heap_watermark(&self) -> u32 {
-        self.hle.heap_watermark
-    }
-
-    /// NIDs the HLE dispatcher saw that no module claimed, with per-NID
-    /// call counts. Non-empty after a run lists unimplemented library
-    /// entries the scenario touched.
-    #[inline]
-    pub fn hle_unclaimed_nids(&self) -> &BTreeMap<u32, usize> {
-        &self.hle.unclaimed_nids
-    }
-
-    /// NIDs whose handlers ran but produced no observable mutation
-    /// (no set_return, set_register, write_guest, set_unit_finished,
-    /// heap_alloc, or alloc_id). A non-empty map flags silent divergence:
-    /// stale register state leaks through to the guest.
-    #[inline]
-    pub fn hle_handlers_without_mutation(&self) -> &BTreeMap<u32, usize> {
-        &self.hle.handlers_without_mutation
-    }
-
     // -- mode / budget --
 
     /// Set the runtime trace / fault mode.
@@ -235,11 +189,12 @@ impl Runtime {
 
     // -- RSX --
 
-    /// When set, `_cellGcmInitBody` places the control register in the
-    /// reserved RSX region so the first put-pointer write trips a
-    /// ReservedWrite commit error the CLI translates to a checkpoint.
-    pub fn set_gcm_rsx_checkpoint(&mut self, enabled: bool) {
-        self.hle.gcm.rsx_checkpoint = enabled;
+    /// Sets the base address used by `RsxLabelWrite` effects when
+    /// computing the commit-side guest address. Synthetic test
+    /// scenarios call this to wire up label memory without booting
+    /// the firmware-set RSX init path.
+    pub fn set_rsx_label_base(&mut self, addr: u32) {
+        self.rsx_label_base = addr;
     }
 
     /// Immutable view of the RSX FIFO cursor.

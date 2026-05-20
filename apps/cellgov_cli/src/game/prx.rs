@@ -52,51 +52,6 @@ const FOUNDATION_STEMS: &[&str] = &[
     "libsysutil_np",
 ];
 
-/// A second [`cellgov_ppu::prx::HleBinding`] reuses an existing index;
-/// the table is malformed by the binder before it reached this map.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct DuplicateHleBindingIndex {
-    pub index: u32,
-    pub prev_nid: u32,
-    pub new_nid: u32,
-}
-
-impl std::fmt::Display for DuplicateHleBindingIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "duplicate HleBinding index {}: previous nid 0x{:08x} \
-             replaced by 0x{:08x} (upstream binder built a malformed table)",
-            self.index, self.prev_nid, self.new_nid
-        )
-    }
-}
-
-impl std::error::Error for DuplicateHleBindingIndex {}
-
-/// Build an HLE-index to NID map for fast runtime lookup.
-///
-/// # Errors
-///
-/// Returns [`DuplicateHleBindingIndex`] when two bindings share an
-/// index; the second binding would otherwise silently overwrite the
-/// first and dispatch a different NID than the index implies.
-pub(super) fn build_nid_map(
-    bindings: &[cellgov_ppu::prx::HleBinding],
-) -> Result<BTreeMap<u32, u32>, DuplicateHleBindingIndex> {
-    let mut map = BTreeMap::new();
-    for b in bindings {
-        if let Some(prev) = map.insert(b.index, b.nid) {
-            return Err(DuplicateHleBindingIndex {
-                index: b.index,
-                prev_nid: prev,
-                new_nid: b.nid,
-            });
-        }
-    }
-    Ok(map)
-}
-
 /// Must match the HLE `sys_initialize_tls` allocation in `cellgov_core::hle`.
 pub(super) const TLS_BASE: u64 = 0x10400000;
 
@@ -215,7 +170,6 @@ fn install_kernel_context_opd(mem: &mut GuestMemory) -> u64 {
 pub(super) fn run_module_start(
     mut mem: GuestMemory,
     prx_info: &PrxLoadInfo,
-    hle_bindings: &[cellgov_ppu::prx::HleBinding],
     max_steps: usize,
     alloc_base: u32,
 ) -> GuestMemory {
@@ -253,9 +207,6 @@ pub(super) fn run_module_start(
 
     let mut rt = Runtime::new(mem, Budget::new(1), max_steps);
     rt.set_mode(RuntimeMode::FaultDriven);
-    rt.set_hle_heap_base(HLE_HEAP_BASE);
-    let nid_map = build_nid_map(hle_bindings).unwrap_or_else(|e| die(&e.to_string()));
-    rt.set_hle_nids(nid_map);
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
     rt.registry_mut().register_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
@@ -363,7 +314,7 @@ pub(super) fn run_module_start(
                     // format_fault renders PC ring only; append the
                     // syscall ring so module_start retains the same
                     // signal as a run-game fault.
-                    append_syscall_ring(&mut fault_text, &sc_ring, &sc_cursor, hle_bindings);
+                    append_syscall_ring(&mut fault_text, &sc_ring, &sc_cursor);
                     eprintln!("module_start {fault_text}");
                     let code_str = guest_code
                         .map(|c| format!("0x{c:08x}"))
@@ -402,11 +353,7 @@ pub(super) fn run_module_start(
         let mut sorted: Vec<_> = hle_calls.iter().collect();
         sorted.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
         for (idx, count) in sorted.iter().take(10) {
-            let name = hle_bindings
-                .get(**idx as usize)
-                .and_then(|b| cellgov_ps3_abi::nid::lookup(b.nid).map(|(m, f)| format!("{m}::{f}")))
-                .unwrap_or_else(|| format!("hle_{idx}"));
-            println!("    {count:>8}x  {name}");
+            println!("    {count:>8}x  hle_{idx}");
         }
     }
     if !lv2_calls.is_empty() {
@@ -532,45 +479,43 @@ fn read_firmware_module_elf(path: &Path) -> Result<Vec<u8>, PrxLoadStageError> {
 #[derive(Debug, Clone, Copy, Default)]
 struct GotPatchStats {
     resolved: usize,
-    kept_hle: usize,
+    total: usize,
     no_export: usize,
 }
 
-/// Stage one 4-byte GOT write per binding (HLE-keep and missing-export
-/// excluded) and apply the whole batch atomically.
+/// Stage one 4-byte GOT write per import (missing-export excluded) and
+/// apply the whole batch atomically.
 ///
 /// On any per-item or batch validation failure the staging buffer is
 /// dropped and `Err` is returned; guest memory is unchanged so the
-/// caller can fall back to pure HLE without a half-patched table.
+/// caller can leave the GOT half-patched untouched.
 fn patch_got_atomic(
-    bindings: &[cellgov_ppu::prx::HleBinding],
+    modules: &[cellgov_ppu::prx::ImportedModule],
     mem: &mut GuestMemory,
-    hle_keep_nids: &[u32],
     mut lookup: impl FnMut(u32) -> Option<u64>,
 ) -> Result<GotPatchStats, PrxLoadStageError> {
     let mut staging = StagingMemory::new();
     let mut stats = GotPatchStats::default();
-    for binding in bindings {
-        if hle_keep_nids.contains(&binding.nid) {
-            stats.kept_hle += 1;
-            continue;
+    for module in modules {
+        for func in &module.functions {
+            stats.total += 1;
+            let Some(opd_addr) = lookup(func.nid) else {
+                stats.no_export += 1;
+                continue;
+            };
+            let opd_u32 = opd_addr as u32;
+            let range = ByteRange::new(GuestAddr::new(func.stub_addr as u64), 4).ok_or(
+                PrxLoadStageError::GotSlotBadRange {
+                    stub_addr: func.stub_addr,
+                    nid: func.nid,
+                },
+            )?;
+            staging.stage(StagedWrite {
+                range,
+                bytes: opd_u32.to_be_bytes().to_vec(),
+            });
+            stats.resolved += 1;
         }
-        let Some(opd_addr) = lookup(binding.nid) else {
-            stats.no_export += 1;
-            continue;
-        };
-        let opd_u32 = opd_addr as u32;
-        let range = ByteRange::new(GuestAddr::new(binding.stub_addr as u64), 4).ok_or(
-            PrxLoadStageError::GotSlotBadRange {
-                stub_addr: binding.stub_addr,
-                nid: binding.nid,
-            },
-        )?;
-        staging.stage(StagedWrite {
-            range,
-            bytes: opd_u32.to_be_bytes().to_vec(),
-        });
-        stats.resolved += 1;
     }
     staging
         .drain_into(mem)
@@ -589,7 +534,7 @@ fn patch_got_atomic(
 /// stay bound to their trampolines even when the PRX exports them.
 pub(super) fn load_firmware_prx(
     firmware_dir: Option<&str>,
-    hle_bindings: &[cellgov_ppu::prx::HleBinding],
+    modules: &[cellgov_ppu::prx::ImportedModule],
     mem: &mut GuestMemory,
     code_floor: u32,
 ) -> Option<PrxLoadInfo> {
@@ -599,7 +544,7 @@ pub(super) fn load_firmware_prx(
         Some(p) => p,
         None => {
             println!(
-                "prx: liblv2.sprx / liblv2.prx not found under {}, using pure HLE",
+                "prx: liblv2.sprx / liblv2.prx not found under {}",
                 dir_path.display()
             );
             return None;
@@ -632,26 +577,20 @@ pub(super) fn load_firmware_prx(
         }
     };
 
-    let stats = match patch_got_atomic(
-        hle_bindings,
-        mem,
-        cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS,
-        |nid| loaded.exports.get(&nid).copied(),
-    ) {
+    let stats = match patch_got_atomic(modules, mem, |nid| loaded.exports.get(&nid).copied()) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("prx: liblv2 GOT patch aborted ({e}); falling back to pure HLE");
+            eprintln!("prx: liblv2 GOT patch aborted ({e})");
             return None;
         }
     };
 
     println!(
-        "prx: loaded {} -- {} exports, {}/{} resolved to real code, {} kept as HLE, {} not exported",
+        "prx: loaded {} -- {} exports, {}/{} game imports resolved to firmware OPDs, {} not exported",
         loaded.name,
         loaded.exports.len(),
         stats.resolved,
-        hle_bindings.len(),
-        stats.kept_hle,
+        stats.total,
         stats.no_export,
     );
 
@@ -704,21 +643,20 @@ fn resolve_prx_base(code_floor: u32) -> u64 {
 }
 
 /// Load the foundation closure via [`cellgov_ppu::prx_loader::load_firmware_set`],
-/// patch the game ELF's HLE bindings against the resulting union export
-/// table (honoring [`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`] keep-list),
-/// and return one [`PrxLoadInfo`] per module in topological order.
+/// patch the game ELF's GOT slots against the resulting union export
+/// table, and return one [`PrxLoadInfo`] per module in topological order.
 ///
 /// Returns an empty vector when the firmware directory is absent, a
 /// foundation stem is missing, or any decrypt / parse / load / GOT-
-/// patch step fails. The caller falls back to pure HLE.
+/// patch step fails.
 pub(super) fn load_firmware_set_bound(
     firmware_dir: Option<&str>,
-    hle_bindings: &[cellgov_ppu::prx::HleBinding],
+    modules: &[cellgov_ppu::prx::ImportedModule],
     mem: &mut GuestMemory,
     code_floor: u32,
 ) -> Vec<PrxLoadInfo> {
     let Some(dir) = firmware_dir else {
-        println!("prx: firmware-set mode requires --firmware-dir; pure HLE in use");
+        println!("prx: firmware-set mode requires --firmware-dir");
         return Vec::new();
     };
     let dir_path = std::path::PathBuf::from(dir);
@@ -767,7 +705,7 @@ pub(super) fn load_firmware_set_bound(
     }
     if !missing.is_empty() {
         println!(
-            "prx: firmware-set mode: foundation stems missing under {}: {missing:?}; pure HLE",
+            "prx: firmware-set mode: foundation stems missing under {}: {missing:?}",
             dir_path.display()
         );
         return Vec::new();
@@ -778,31 +716,25 @@ pub(super) fn load_firmware_set_bound(
     let image = match cellgov_ppu::prx_loader::load_firmware_set(bytes_by_path, mem, prx_base) {
         Ok(img) => img,
         Err(e) => {
-            println!("prx: firmware-set load failed at base 0x{prx_base:x}: {e:?}; pure HLE");
+            println!("prx: firmware-set load failed at base 0x{prx_base:x}: {e:?}");
             return Vec::new();
         }
     };
 
-    let stats = match patch_got_atomic(
-        hle_bindings,
-        mem,
-        cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS,
-        |nid| image.export_table.get(nid),
-    ) {
+    let stats = match patch_got_atomic(modules, mem, |nid| image.export_table.get(nid)) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("prx: firmware-set GOT patch aborted ({e}); falling back to pure HLE");
+            eprintln!("prx: firmware-set GOT patch aborted ({e})");
             return Vec::new();
         }
     };
     println!(
         "prx: firmware-set loaded {} module(s), {} NIDs in export table, \
-         {}/{} game imports resolved to firmware OPDs, {} kept as HLE, {} not exported",
+         {}/{} game imports resolved to firmware OPDs, {} not exported",
         image.loaded.len(),
         image.export_table.len(),
         stats.resolved,
-        hle_bindings.len(),
-        stats.kept_hle,
+        stats.total,
         stats.no_export,
     );
 
@@ -823,38 +755,4 @@ pub(super) fn load_firmware_set_bound(
         });
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn binding(index: u32, nid: u32) -> cellgov_ppu::prx::HleBinding {
-        cellgov_ppu::prx::HleBinding {
-            index,
-            nid,
-            stub_addr: 0,
-            module: String::new(),
-        }
-    }
-
-    #[test]
-    fn build_nid_map_accepts_unique_indices() {
-        let map = build_nid_map(&[binding(0, 0xAA), binding(1, 0xBB)]).unwrap();
-        assert_eq!(map.get(&0), Some(&0xAA));
-        assert_eq!(map.get(&1), Some(&0xBB));
-    }
-
-    #[test]
-    fn build_nid_map_rejects_duplicate_index() {
-        let err = build_nid_map(&[binding(0, 0xAA), binding(0, 0xBB)]).unwrap_err();
-        assert_eq!(
-            err,
-            DuplicateHleBindingIndex {
-                index: 0,
-                prev_nid: 0xAA,
-                new_nid: 0xBB,
-            }
-        );
-    }
 }

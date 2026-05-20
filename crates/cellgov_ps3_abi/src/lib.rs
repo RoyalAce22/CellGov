@@ -3,7 +3,6 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
-pub mod callback_dispatch;
 pub mod cell_errors;
 pub mod elf;
 pub mod hardware;
@@ -23,16 +22,7 @@ pub mod syscall;
 pub mod syscall_namespace;
 pub mod trampoline_codegen;
 
-#[path = "sprx_modules/cellGcm.rs"]
-pub mod cell_gcm;
-#[path = "sprx_modules/cellGcmSys.rs"]
-pub mod cell_gcm_sys;
-#[path = "sprx_modules/cellSaveData.rs"]
-pub mod cell_save_data;
-#[path = "sprx_modules/cellSpurs.rs"]
-pub mod cell_spurs;
-#[path = "sprx_modules/cellVideoOut.rs"]
-pub mod cell_video_out;
+pub mod rsx_nv_hardware;
 
 /// Declares a NID constant whose hex literal is verified against
 /// `SHA-1(name || salt)` at compile time.

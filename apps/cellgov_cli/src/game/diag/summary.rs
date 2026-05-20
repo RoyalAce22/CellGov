@@ -2,54 +2,14 @@ use cellgov_core::Runtime;
 
 use super::{fetch_raw_at, format_hle_idx};
 
-pub(in crate::game) fn print_hle_summary(
-    hle_calls: &std::collections::BTreeMap<u32, usize>,
-    hle_bindings: &[cellgov_ppu::prx::HleBinding],
-) {
+pub(in crate::game) fn print_hle_summary(hle_calls: &std::collections::BTreeMap<u32, usize>) {
     let called_count = hle_calls.len();
-    let total_count = hle_bindings.len();
-    let uncalled_count = total_count - called_count.min(total_count);
-    println!("hle_imports: {total_count} bound, {called_count} called, {uncalled_count} uncalled");
-
-    use cellgov_ps3_abi::nid::StubClass;
-    if !hle_calls.is_empty() {
-        println!("  called:");
-        for (idx, count) in hle_calls {
-            let (name, class) = match hle_bindings.get(*idx as usize) {
-                Some(b) => (
-                    format_hle_idx(*idx, hle_bindings),
-                    cellgov_ps3_abi::nid::stub_classification(b.nid).as_str(),
-                ),
-                None => (format!("<hle-idx-oob {idx}>"), "<oob>"),
-            };
-            println!("    {name}: {count}x [{class}]");
-        }
+    if called_count == 0 {
+        return;
     }
-
-    let uncalled: Vec<_> = hle_bindings
-        .iter()
-        .filter(|b| !hle_calls.contains_key(&b.index))
-        .collect();
-    if !uncalled.is_empty() {
-        let stateful: Vec<_> = uncalled
-            .iter()
-            .filter(|b| cellgov_ps3_abi::nid::stub_classification(b.nid) != StubClass::NoopSafe)
-            .collect();
-        if !stateful.is_empty() {
-            println!("  uncalled (non-noop):");
-            for b in &stateful {
-                let func = match cellgov_ps3_abi::nid::lookup(b.nid) {
-                    Some((_, f)) => f.to_string(),
-                    None => format!("<unresolved-nid-0x{:08x}>", b.nid),
-                };
-                let class = cellgov_ps3_abi::nid::stub_classification(b.nid).as_str();
-                println!("    {}::{func} [{class}]", b.module);
-            }
-        }
-        let noop_count = uncalled.len() - stateful.len();
-        if noop_count > 0 {
-            println!("  uncalled (noop-safe): {noop_count} functions");
-        }
+    println!("hle_imports: {called_count} called (no binder; routed to LV2 Unsupported)");
+    for (idx, count) in hle_calls {
+        println!("    {}: {count}x", format_hle_idx(*idx));
     }
 }
 

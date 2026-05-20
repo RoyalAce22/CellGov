@@ -263,13 +263,7 @@ pub mod cell_spurs {
 /// workspace-level `HLE_IMPLEMENTED_NIDS` (in `cellgov_ppu::prx`) is
 /// the const-flattened union of these. Adding a module is one line
 /// here and one line in the prx flatten -- no per-NID duplication.
-pub const ALL_HLE_OWNED: &[&[u32]] = &[
-    sys_prx_for_user::OWNED,
-    cell_gcm_sys::OWNED,
-    cell_sysutil::OWNED,
-    cell_spurs::OWNED,
-    cell_save_data::OWNED,
-];
+pub const ALL_HLE_OWNED: &[&[u32]] = &[sys_prx_for_user::OWNED];
 
 /// Returns `Some((module, function))` if the NID is known. `module` may
 /// be the empty string for symbols that ship outside any named PS3

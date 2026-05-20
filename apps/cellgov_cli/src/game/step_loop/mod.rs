@@ -28,7 +28,6 @@ pub(super) struct StepLoopCtx<'a> {
     pub(super) distinct_pcs: &'a mut std::collections::BTreeSet<u64>,
     pub(super) hle_calls: &'a mut std::collections::BTreeMap<u32, usize>,
     pub(super) insn_coverage: &'a mut std::collections::BTreeMap<&'static str, usize>,
-    pub(super) hle_bindings: &'a [cellgov_ppu::prx::HleBinding],
     pub(super) trace: bool,
     pub(super) timing: &'a mut Option<StepTiming>,
     pub(super) loop_start: Instant,
@@ -84,7 +83,7 @@ pub(super) fn step_loop(
                 }
 
                 if ctx.trace {
-                    print_trace_line(rt, step.unit, &step.result, *ctx.steps, ctx.hle_bindings);
+                    print_trace_line(rt, step.unit, &step.result, *ctx.steps);
                 }
 
                 let t2 = Instant::now();
@@ -158,22 +157,10 @@ pub(super) fn step_loop(
 
                 if let Some(args) = &step.result.syscall_args {
                     let pc = step.result.local_diagnostics.pc.unwrap_or(0);
+                    let _ = pc;
                     if args[0] >= 0x10000 {
                         let idx = (args[0] - 0x10000) as u32;
                         *ctx.hle_calls.entry(idx).or_insert(0) += 1;
-                        if let Some(binding) = ctx.hle_bindings.get(idx as usize) {
-                            if binding.nid == cellgov_ps3_abi::nid::sys_prx_for_user::PROCESS_EXIT
-                                || binding.nid
-                                    == cellgov_ps3_abi::nid::sys_prx_for_user::PPU_THREAD_EXIT
-                                || binding.nid
-                                    == cellgov_ps3_abi::nid::sys_prx_for_user::PRX_EXITSPAWN_WITH_LEVEL
-                            {
-                                ctx.last_exit = Some(ProcessExitInfo {
-                                    code: args[1] as u32,
-                                    call_pc: pc,
-                                });
-                            }
-                        }
                     } else if args[0] == cellgov_ps3_abi::syscall::TTY_WRITE {
                         match classify_tty_capture(args, rt.memory().as_bytes()) {
                             TtyCaptureDecision::InBounds {
@@ -251,7 +238,6 @@ pub(super) fn step_loop(
                             &ctx.pc_ring_cursor,
                             &ctx.syscall_ring,
                             &ctx.syscall_ring_cursor,
-                            ctx.hle_bindings,
                         ),
                         BootOutcome::ProcessExit,
                     );
@@ -278,7 +264,6 @@ pub(super) fn step_loop(
                     &ctx.pc_ring_cursor,
                     &ctx.syscall_ring,
                     &ctx.syscall_ring_cursor,
-                    ctx.hle_bindings,
                 );
                 append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
                 break (diag, BootOutcome::MaxSteps);

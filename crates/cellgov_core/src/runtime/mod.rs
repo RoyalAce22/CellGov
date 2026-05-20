@@ -83,7 +83,11 @@ pub struct Runtime {
     /// `event_flag_set`) from non-waking ones (`tty_write`,
     /// `ppu_thread_get_id`).
     step_woke_others: bool,
-    pub(crate) hle: crate::hle::HleState,
+    /// Base address used by `RsxLabelWrite` effects when computing the
+    /// commit-side guest address (`base + offset`). Zero means RSX has
+    /// not allocated label memory yet; synthetic scenarios set it
+    /// directly via [`Runtime::set_rsx_label_base`].
+    rsx_label_base: u32,
     effects_buf: Vec<Effect>,
     mode: RuntimeMode,
     /// Monotonic over per-instruction state hashes; orthogonal to
@@ -163,7 +167,7 @@ impl Runtime {
             dma_latency: self.dma_latency.as_ref(),
             now: self.time,
             reservations: &mut self.reservations,
-            rsx_label_base: self.hle.gcm.label_addr,
+            rsx_label_base: self.rsx_label_base,
             rsx_flip: &mut self.rsx_flip,
         };
         let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
@@ -188,22 +192,6 @@ impl Runtime {
         if result.yield_reason == YieldReason::Syscall {
             self.dispatch_syscall(result, source);
         }
-        // Callback worker faulted mid-body: wake the parent with
-        // CELL_EFAULT and finish the worker. Fault stays recorded in the
-        // step result (visible to trace / diagnostics); the step-loop
-        // classifier treats it as `Continue` via
-        // `outcome.callback_worker_fault_absorbed`.
-        let absorbed = if result.yield_reason == YieldReason::Fault {
-            self.try_absorb_callback_worker_fault(source)
-        } else {
-            false
-        };
-        if absorbed {
-            if let Ok(ref mut o) = outcome {
-                o.callback_worker_fault_absorbed = true;
-            }
-        }
-
         self.epoch.advance();
         let due = self.fire_dma_completions();
         if let Ok(ref mut o) = outcome {

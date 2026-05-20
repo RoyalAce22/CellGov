@@ -79,21 +79,6 @@ impl Lv2Host {
         if !self.fs_store.is_empty() {
             hasher.write(&self.fs_store.state_hash().to_le_bytes());
         }
-        if !self.callback_parents.is_empty() {
-            hasher.write(&(self.callback_parents.len() as u64).to_le_bytes());
-            for (worker, (parent, stage)) in &self.callback_parents {
-                hasher.write(&worker.raw().to_le_bytes());
-                hasher.write(&parent.raw().to_le_bytes());
-                hasher.write(&[stage.stable_tag()]);
-            }
-        }
-        if !self.callback_depth.is_empty() {
-            hasher.write(&(self.callback_depth.len() as u64).to_le_bytes());
-            for (parent, depth) in &self.callback_depth {
-                hasher.write(&parent.raw().to_le_bytes());
-                hasher.write(&[*depth]);
-            }
-        }
         if let Some(fw) = self.firmware_identity() {
             hasher.write(&fw.image_version_hash.to_le_bytes());
             hasher.write(&fw.pup_sha256_bytes);

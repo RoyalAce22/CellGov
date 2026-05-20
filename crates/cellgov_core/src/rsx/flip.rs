@@ -10,7 +10,7 @@
 //! `handler` records the `cellGcmSetFlipHandler` address but PPU
 //! dispatch into it is not modelled.
 
-pub use cellgov_ps3_abi::cell_gcm::{
+pub use cellgov_ps3_abi::rsx_nv_hardware::{
     CELL_GCM_DISPLAY_FLIP_STATUS_DONE, CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
 };
 

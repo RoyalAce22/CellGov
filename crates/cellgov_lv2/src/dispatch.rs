@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 
-use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::EventPayload;
 
 /// How the runtime should complete a dispatched syscall.
@@ -120,42 +119,6 @@ pub enum Lv2Dispatch {
         /// Per-waiter pending-response overrides.
         response_updates: Vec<(UnitId, PendingResponse)>,
         /// Effects committed alongside the block-and-wake.
-        effects: Vec<Effect>,
-    },
-    /// Worker-thread callback-dispatch spawn: register a fresh PPU
-    /// thread for the callback AND park `parent` until the worker
-    /// returns. Fuses [`Self::PpuThreadCreate`] and [`Self::Block`]
-    /// so the runtime applies both transitions atomically per the
-    /// `call_guest_callback_sync` contract.
-    ///
-    /// The runtime materializes the worker via the existing
-    /// PpuThreadCreate path, allocates the worker's `PpuThreadId`
-    /// from `PpuThreadTable::create`, links the worker to `parent`
-    /// via `Lv2Host::attach_callback_worker`, and parks `parent`
-    /// with `parent_pending`. On the worker's terminal `blr` ->
-    /// trampoline -> `sc 0`, the runtime emits a [`Self::WakeAndReturn`]
-    /// keyed to `parent` with the worker's r3..=r10 as the `args`
-    /// field of [`PendingResponse::CallbackReturn`].
-    ///
-    /// # Invariants
-    /// - `parent_pending.variant_tag() == PendingResponse::CallbackReturn(_).variant_tag()`.
-    /// - The worker id is allocated by the runtime, not the host;
-    ///   the host learns it via `attach_callback_worker` after
-    ///   `PpuThreadTable::create` runs.
-    CallbackSpawn {
-        /// PPC64 register seed for the worker thread.
-        worker_init: PpuThreadInitState,
-        /// Worker stack base address.
-        worker_stack_base: u64,
-        /// Worker stack size in bytes.
-        worker_stack_size: u64,
-        /// Worker scheduling priority.
-        worker_priority: u32,
-        /// Caller parked until the worker returns.
-        parent: UnitId,
-        /// Must be a [`PendingResponse::CallbackReturn`].
-        parent_pending: PendingResponse,
-        /// Effects committed at spawn time.
         effects: Vec<Effect>,
     },
     /// `sys_ppu_thread_create` with the OPD already resolved.
@@ -277,15 +240,6 @@ pub enum Lv2BlockReason {
         /// Which mutex table `mutex_id` names (distinct id spaces).
         mutex_kind: CondMutexKind,
     },
-    /// Parked on a worker-thread callback dispatch
-    /// (`Lv2Host::call_guest_callback_sync`). Resolved when the
-    /// worker thread `worker` issues the CellGov-private return
-    /// trampoline syscall (`CB_RETURN_SYSCALL`).
-    CallbackDispatch {
-        /// Used by the trampoline-return dispatch arm to look up the
-        /// parent in `Lv2Host::callback_parents` and key the wake.
-        worker: PpuThreadId,
-    },
 }
 
 /// What the runtime should do when a blocked PPU is woken.
@@ -377,72 +331,6 @@ pub enum PendingResponse {
         /// written into the user-space owner slot.
         caller: u32,
     },
-    /// Resume a parkable HLE handler that previously called
-    /// `Lv2Host::call_guest_callback_sync`. `args` carries the
-    /// worker's `r3..=r10` captured at the trampoline. `stage`
-    /// discriminates which handler to resume (and where in that
-    /// handler's flow). The wake-side delivery writes `args[0]` (the
-    /// worker's r3) into the parent's r3; `args[1..=7]` stay in the
-    /// response payload for the resuming handler to read.
-    ///
-    /// # Invariants
-    /// - `args` is exactly the eight-register set captured from the
-    ///   worker at trampoline entry. Padding or zero-fill outside
-    ///   that set is forbidden -- the resuming handler may key on
-    ///   `args[N != 0]` and silent zero-fill would be
-    ///   indistinguishable from the worker actually returning zero.
-    /// - `stage` is constructed by the spawn-side handler and must
-    ///   not be mutated between spawn and wake.
-    CallbackReturn {
-        /// Continuation kind; selects which handler resumes and how.
-        stage: CallbackReturnStage,
-        /// Worker `r3..=r10` from the trampoline-entry capture.
-        args: [u64; 8],
-    },
-}
-
-/// Continuation kind for [`PendingResponse::CallbackReturn`].
-///
-/// Each parkable HLE handler adds a variant. `Synthetic` is the
-/// test-only placeholder; consumer-specific variants carry the
-/// per-handler resume state. `#[non_exhaustive]` makes a missing
-/// handler-resume case a compile error in the resume dispatcher
-/// while keeping crate-external matches forward-compatible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum CallbackReturnStage {
-    /// Test-only marker. Wake delivery writes the worker's `args[0]`
-    /// (r3) into the parent's r3 and routes nothing further.
-    Synthetic,
-    /// `cellSaveDataAutoLoad` / `cellSaveDataAutoLoad2` resume after
-    /// the title's `funcStat` callback returns. The resume arm reads
-    /// `cb_result.result` and either finalizes the AutoLoad call
-    /// (CELL_OK / `cellSaveData` error code) or transitions into the
-    /// funcFile loop.
-    AutoLoadAfterStat {
-        /// Guest pointer to the HLE-allocated `CellSaveDataCBResult`.
-        cb_result_addr: u32,
-        /// Guest pointer to the HLE-allocated `CellSaveDataStatGet`.
-        stat_get_addr: u32,
-        /// Guest pointer to the HLE-allocated `CellSaveDataStatSet`.
-        stat_set_addr: u32,
-        /// Title-supplied funcFile OPD pointer (for the OK_NEXT
-        /// transition into the funcFile loop).
-        func_file_opd: u32,
-    },
-}
-
-impl CallbackReturnStage {
-    /// Stable byte tag for state-hash serialization.
-    ///
-    /// Adding a variant MUST assign a fresh tag and bump the
-    /// consumer's state-hash format version.
-    pub fn stable_tag(self) -> u8 {
-        match self {
-            CallbackReturnStage::Synthetic => 0,
-            CallbackReturnStage::AutoLoadAfterStat { .. } => 1,
-        }
-    }
 }
 
 impl PendingResponse {
@@ -458,7 +346,6 @@ impl PendingResponse {
             PendingResponse::EventFlagWake { .. } => 4,
             PendingResponse::CondWakeReacquire { .. } => 5,
             PendingResponse::LwMutexWake { .. } => 6,
-            PendingResponse::CallbackReturn { .. } => 7,
         }
     }
 }
@@ -512,11 +399,6 @@ mod tests {
             PendingResponse::LwMutexWake {
                 mutex_ptr: 0,
                 caller: 0,
-            }
-            .variant_tag(),
-            PendingResponse::CallbackReturn {
-                stage: CallbackReturnStage::Synthetic,
-                args: [0; 8],
             }
             .variant_tag(),
         ];

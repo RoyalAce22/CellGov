@@ -6,7 +6,6 @@
 //! cross crate boundaries.
 
 pub mod commit;
-pub mod hle;
 pub mod registry;
 pub mod rsx;
 pub mod runtime;

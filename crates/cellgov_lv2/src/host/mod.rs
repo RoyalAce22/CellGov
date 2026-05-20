@@ -10,7 +10,6 @@
 //! guest memory directly; every write travels back to the runtime as
 //! an `Effect` so the commit pipeline orders it.
 
-mod callback_dispatch;
 mod cond;
 mod diagnostics;
 mod dispatch_route;
@@ -36,7 +35,6 @@ mod test_support;
 #[path = "../tests/host_tests.rs"]
 mod cross_primitive_tests;
 
-pub use callback_dispatch::CallbackError;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
 pub use rsx::{
     SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,

@@ -2,10 +2,10 @@
 //!
 //! Composes the pure namespace partition from
 //! `cellgov_ps3_abi::syscall_namespace` with the hypercall guard so
-//! the runtime can route an `sc` to LV2, an HLE binder, a private
-//! variant, or a fault path off a single typed value.
+//! the runtime can route an `sc` to LV2, an HLE binder, or a fault
+//! path off a single typed value.
 
-use cellgov_ps3_abi::syscall_namespace::{CellGovPrivateSyscall, SyscallNamespace};
+use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
 
 /// Dispatch hint produced by [`classify`] for a guest `sc` instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,8 +21,6 @@ pub enum SyscallClassification {
         /// 0-based offset inside the `HleImport` namespace.
         index: u32,
     },
-    /// Routes to a CellGov-private runtime hook.
-    CellGovPrivate(CellGovPrivateSyscall),
     /// Routes to the hypercall fault path; LEV >= 1 cannot originate from PS3 usermode.
     Hypercall {
         /// Privilege level from the `sc` operand.
@@ -52,14 +50,6 @@ pub const fn classify(lev: u8, r11: u64) -> SyscallClassification {
                 index: (r11 - start) as u32,
             }
         }
-        Some(SyscallNamespace::CellGovPrivate) => {
-            let (start, _) = SyscallNamespace::CellGovPrivate.range();
-            let index = (r11 - start) as u32;
-            match CellGovPrivateSyscall::from_index(index) {
-                Some(variant) => SyscallClassification::CellGovPrivate(variant),
-                None => SyscallClassification::Unknown { r11 },
-            }
-        }
         None => SyscallClassification::Unknown { r11 },
     }
 }
@@ -82,26 +72,10 @@ mod tests {
     }
 
     #[test]
-    fn classify_cellgov_private_returns_typed_variant() {
-        assert_eq!(
-            classify(0, 0x80000),
-            SyscallClassification::CellGovPrivate(CellGovPrivateSyscall::CallbackReturn),
-        );
-    }
-
-    #[test]
-    fn classify_unknown_private_index_falls_to_unknown() {
-        assert_eq!(
-            classify(0, 0x80001),
-            SyscallClassification::Unknown { r11: 0x80001 },
-        );
-    }
-
-    #[test]
     fn classify_above_all_namespaces_falls_to_unknown() {
         assert_eq!(
-            classify(0, 0x100000),
-            SyscallClassification::Unknown { r11: 0x100000 },
+            classify(0, 0x80000),
+            SyscallClassification::Unknown { r11: 0x80000 },
         );
     }
 

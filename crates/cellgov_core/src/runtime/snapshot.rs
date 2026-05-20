@@ -57,7 +57,6 @@ use cellgov_sync::{MailboxRegistry, ReservationTable, SignalRegistry};
 use cellgov_time::{Epoch, GuestTicks};
 
 use crate::commit::CommitPipeline;
-use crate::hle::HleState;
 use crate::registry::UnitRegistry;
 use crate::rsx::flip::RsxFlipState;
 use crate::rsx::method::NvMethodTable;
@@ -95,7 +94,6 @@ pub struct RuntimeSnapshot {
     pub(super) steps_taken: usize,
     pub(super) last_scheduled_unit: Option<UnitId>,
     pub(super) step_woke_others: bool,
-    pub(super) hle: HleState,
     pub(super) per_step_index: u64,
 
     /// Asserted unchanged in [`Runtime::restore_into`], not restored.
@@ -143,7 +141,6 @@ impl Runtime {
             steps_taken: self.steps_taken,
             last_scheduled_unit: self.last_scheduled_unit,
             step_woke_others: self.step_woke_others,
-            hle: self.hle.clone(),
             per_step_index: self.per_step_index,
 
             #[cfg(debug_assertions)]
@@ -199,7 +196,6 @@ impl Runtime {
         self.steps_taken = snap.steps_taken;
         self.last_scheduled_unit = snap.last_scheduled_unit;
         self.step_woke_others = snap.step_woke_others;
-        self.hle = snap.hle.clone();
         self.per_step_index = snap.per_step_index;
         // clear() not clone(): preserves allocator capacity across
         // repeated restores.

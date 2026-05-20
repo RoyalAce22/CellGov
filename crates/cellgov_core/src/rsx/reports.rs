@@ -57,7 +57,7 @@ pub struct RsxReports {
     pub report: [RsxReport; 2048],
 }
 
-pub use cellgov_ps3_abi::cell_gcm::{LABEL_COUNT, LABEL_STRIDE};
+pub use cellgov_ps3_abi::rsx_nv_hardware::{LABEL_COUNT, LABEL_STRIDE};
 
 /// DMA-control region. Put / get / ref live at +0x40 / +0x44 / +0x48;
 /// total 0x58 bytes.

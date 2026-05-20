@@ -27,7 +27,7 @@ from [concepts.md](concepts.md). In brief:
   - `equivalent` -- zero divergent bytes.
   - `N non-semantic` -- every divergent byte classifies into
     a structurally-grounded class (ELF header reconstruction,
-    HLE OPD slot layout, etc.).
+    GOT slot layout, etc.).
   - `M non-semantic + N pending` -- some bytes classified, some
     awaiting a new structurally-grounded class. The pending bytes
     are visible in the fixture's `compare_report.txt` and

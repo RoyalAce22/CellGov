@@ -132,7 +132,7 @@ Everything else is workspace-internal. The workspace compiles under
 
 | Crate                          | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cellgov_ps3_abi`              | PS3 ABI source-of-truth leaf: NIDs (with `nid_const!` SHA-1 verification), the global NID lookup table and `stub_classification`, LV2 errno database, LV2 syscall numbers, ELF / PRX / SPRX layout, CBE PPU hardware constants, and per-PS3-PRX-module ABI data (cellSpurs, cellGcmSys, cellVideoOut, cellGcm, cellSaveData) under `sprx_modules/`. Data only; no behaviour. Zero workspace dependencies.                                                |
+| `cellgov_ps3_abi`              | PS3 ABI source-of-truth leaf: NIDs (with `nid_const!` SHA-1 verification), the global NID lookup table and `stub_classification`, LV2 errno database, LV2 syscall numbers, ELF / PRX / SPRX layout, CBE PPU hardware constants, and RSX hardware constants under `rsx_nv_hardware.rs`. Data only; no behaviour. Zero workspace dependencies.                                                                                                                                                |
 | `cellgov_time`                 | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time.                                                                                                                                                                                                                                                                                                                                            |
 | `cellgov_event`                | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary.                                                                                                                                                                                                                                                                                                                                                              |
 | `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`, and `StagingMemory` / `StagedWrite` for batched pending writes.                                                                                                                                                                                                            |
@@ -143,7 +143,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                                                                                                                                                                               |
 | `cellgov_lv2`                  | LV2 model: image / content registry, thread-group table, PPU thread table, in-memory filesystem store, LV2 sync primitives (mutex, cond, semaphore, lwmutex, event-flag, event-queue), syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                              |
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                         |
-| `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, HLE binder, and `HLE_IMPLEMENTED_NIDS` dispatch surface. The NID lookup database itself lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                         |
+| `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, and the PRX loader's dependency-ordered multi-module import resolution. The NID lookup database itself lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                         |
 | `cellgov_spu`                  | SPU interpreter and SPU ELF loader. The MFC / SPU channel-number constants live in `cellgov_ps3_abi::spu_channels`.                                                                                                                                                                                                                                                                                                                                       |
 | `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace.                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                                                                                                                                                                             |
@@ -168,7 +168,7 @@ LV2 virtual-address layout:
 
 | Guest VA              | Size   | Label          | Access                           | Purpose                                                                  |
 | --------------------- | ------ | -------------- | -------------------------------- | ------------------------------------------------------------------------ |
-| 0x00000000-0x3FFFFFFF | 1 GB   | `main`         | `ReadWrite`                      | User memory: EBOOT PT_LOAD segments, TLS, HLE bump arena, allocator pool |
+| 0x00000000-0x3FFFFFFF | 1 GB   | `main`         | `ReadWrite`                      | User memory: EBOOT PT_LOAD segments, TLS, firmware PRX images, allocator pool |
 | 0xC0000000-0xCFFFFFFF | 256 MB | `rsx`          | `ReservedZeroReadable` (default) | Video / RSX local memory -- placeholder, reads zero and are counted      |
 | 0xD0000000-0xD000FFFF | 64 KB  | `stack`        | `ReadWrite`                      | Primary-thread stack (page-4K)                                           |
 | 0xD0010000-0xD0F0FFFF | 15 MB  | `child_stacks` | `ReadWrite`                      | Stack pool for PPU threads spawned by `sys_ppu_thread_create`            |
@@ -178,7 +178,7 @@ The `main` region's internal sub-layout is not tracked by the region
 map (it stays flat within that region): `sys_memory_allocate` starts
 above the loaded ELF footprint (computed at startup by scanning the
 ELF's highest user-region PT_LOAD end + 64 KB alignment); TLS sits
-at `0x10400000`; the HLE bump arena at `0x10410000`. The allocator
+at `0x10400000`; firmware PRX images load above that. The allocator
 base moves above the ELF because real PS3 LV2 shares
 `0x00010000-0x0FFFFFFF` between the loaded binary and the
 allocator pool; CellGov matches that layout so guest pointer
@@ -199,11 +199,11 @@ them:
   requiring real semantics, and surfaces any silent zero-reads in
   `run-game`'s end-of-boot summary.
 - **`ReservedStrict`**: reads via the legacy `GuestMemory::read`
-  return `None`; reads via `GuestMemory::read_checked` (the path the
-  HLE layer uses) fault with `MemError::ReservedStrictRead { addr,
-  region }`. Writes fault with `MemError::ReservedWrite`. Opted
-  into via `--strict-reserved` on the CLI, used by tests asserting
-  no code paths touch the region yet.
+  return `None`; reads via `GuestMemory::read_checked` fault with
+  `MemError::ReservedStrictRead { addr, region }`. Writes fault
+  with `MemError::ReservedWrite`. Opted into via
+  `--strict-reserved` on the CLI, used by tests asserting no code
+  paths touch the region yet.
 
 Out-of-region accesses (addresses that fall in no region) surface as
 `MemError::Unmapped(FaultContext)`, where `FaultContext` names the
@@ -345,8 +345,9 @@ Three optimization passes run at shadow build time:
    runtime uses this to size the inner loop's iteration count.
 
 Guest-visible code writes (self-modifying code, CRT0 relocations,
-HLE trampoline planting) invalidate the affected slots. The next
-fetch re-decodes from committed memory and re-applies quickening.
+GOT slot patching during PRX import binding) invalidate the
+affected slots. The next fetch re-decodes from committed memory
+and re-applies quickening.
 
 ## Effects and trace records
 
@@ -414,41 +415,21 @@ relocation appliers covering the types listed in
 `cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES` (the single source of
 truth that the firmware reloc census audit also consults), and the
 PS3 PRX import-table parser.
-`cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS` (60 entries) is the
-dispatch surface the runtime PRX binder consults; the larger
-NID lookup database (~5,327 entries) lives in
+The NID lookup database (~5,327 entries) lives in
 `cellgov_ps3_abi::nid` and is accessed via `lookup(nid)` for
-human-readable name resolution in `dump-imports` and fault
-diagnostics.
+human-readable name resolution in fault diagnostics.
 
-The HLE binder offers two layouts for the OPDs that satisfy
-`sys_prx_load_module`'s import resolution:
+The PRX loader resolves every game import to a firmware OPD if
+one exists; there is no userspace HLE keep-list. Foundation
+firmware modules load in topological-sort order, with
+`module_start` invoked per module under a synthetic kernel-context
+OPD.
 
-- **`HleLayout::Legacy24`** (default): one 24-byte trampoline per
-  binding at a high reserved address. OPD and inline body
-  (`lis r11, hi; ori r11, r11, lo; sc; blr`) live in the same
-  trampoline. Self-contained and easy to inspect.
-- **`HleLayout::Ps3Spec { opd_base, body_base }`**: 8-byte OPDs
-  packed at `opd_base` (matching RPCS3's `vm::alloc(N*8, vm::main)`
-  HLE-table shape), with separate 16-byte body trampolines at
-  `body_base`. Used by `run-game` when `CELLGOV_HLE_OPD_BASE` is
-  set so the GOT pointer values land in the user-memory address
-  range RPCS3 also uses for HLE-resolved imports.
-
-Both layouts produce semantically equivalent bindings -- the same
-NID reaches the same dispatch handler regardless of layout. The
-choice only affects where the OPDs sit in the address space, which
-matters for cross-runner byte comparisons. See
-[crates/cellgov_ppu/tests/hle_layout.rs](../crates/cellgov_ppu/tests/hle_layout.rs)
-for the equivalence test that backs this property.
-
-`run-game` exposes three env vars for firmware-loading experiments:
-`CELLGOV_PRX_BASE` overrides the firmware PRX load address;
-`CELLGOV_SKIP_MODULE_START=1` bypasses liblv2's `module_start`
-(which corrupts game memory through a stale fixup pointer when
-sys_prx_load_module returns failure for unimplemented submodules);
-`CELLGOV_HLE_OPD_BASE` switches HLE binding to the PS3-spec packed
-layout.
+`run-game` exposes two env vars for firmware-loading experiments:
+`CELLGOV_PRX_BASE` overrides the firmware PRX load address, and
+`CELLGOV_SKIP_MODULE_START=1` bypasses `module_start` for a
+firmware PRX whose initializer corrupts state under CellGov's
+current LV2 coverage.
 
 **SPU (`cellgov_spu`)**: 128x128-bit register file, 256 KB local
 store, channel file. Implements RR / RI7 / RI10 / RI16 / RI18 / RRR
@@ -584,43 +565,6 @@ CELL_OK with no effects. Unknown `Unsupported` numbers also fire
 at the stderr layer instead of silently masquerading as a CELL_OK
 success.
 
-### Worker-thread callback dispatch
-
-A generic primitive on `Lv2Host::call_guest_callback_sync` lets HLE
-handlers invoke a title-supplied function pointer on a worker PPU
-thread and park the calling unit until the worker returns. The
-contract: input `(opd_addr, args[0..=7], parent_unit, stage)`; the
-opd is read as a packed PS3 OPD (`u32 BE code_addr || u32 BE toc`),
-worker `r3..=r10` are populated from `args`, the worker's LR is
-staged to a re-entry trampoline at `0x0000_FF00`, and the parent
-parks with a [`PendingResponse::CallbackReturn { stage, args:
-[0; 8] }`]. The worker's terminal `blr` lands on the trampoline
-(`lis r11, 8; ori r11, r11, 0; sc 0`) which fires a CellGov-private
-LV2 syscall in the namespace
-`cellgov_ps3_abi::syscall_namespace::SyscallNamespace::CellGovPrivate`;
-the runtime classifies it as `CallbackDispatchReturn`, captures
-the worker's `r3..=r10`, marks the worker `Finished`, and emits a
-`Lv2Dispatch::WakeAndReturn` keyed to the parent. The runtime's
-`resume_callback_return` dispatches by stage to the consumer's
-resume function (currently
-`cellgov_core::hle::cell_save_data::resume_after_stat`).
-
-The trampoline lives inside the main user-memory region in the
-pre-user-heap scratch zone (`0x0000_FF00..0x0000_FF20`) because
-the PPU instruction-fetch path reads only from the base-0 region;
-the original sketch placed it just below `PS3_RSX_BASE` but that
-address was unreachable to fetch. Workers inherit the parent's
-`tls_base` so r13-relative TLS loads inside the callback
-resolve through the parent's TLS image. Recursion depth is
-capped by `cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP`
-(8) -- exceeding it surfaces as `CallbackError::TooDeep` to the
-caller, mapped to `CELL_EAGAIN`.
-
-The first consumer is `cellSaveDataAutoLoad` / `AutoLoad2`. The
-primitive also unblocks deferred flip-handler and SPURS
-exception-handler / event-helper consumers; both remain stubbed
-pending a title that surfaces them.
-
 ### In-memory filesystem
 
 The read-side `sys_fs_*` surface routes through an in-memory
@@ -683,11 +627,8 @@ against three tiers in priority order:
 3. The manifest's checked-in `base` (the synthetic stubs
    committed to the public repo). Hard-fail on missing files.
 
-The HLE wrappers `cellFs{Open,Read,Close,Lseek,Fstat,Stat}` in
-`cellgov_core::hle::sys_fs` translate each PS3 cellFs C-level
-signature into the matching `Lv2Request::Fs*` and route through
-`runtime.dispatch_lv2_request` so the title's HLE path observes
-the same FsStore-backed behaviour as the raw-syscall path.
+The firmware cellFs surface routes through the raw `sys_fs_*`
+LV2 syscall path, which is backed by the same `FsStore` model.
 
 ### Synchronization primitives
 
@@ -1016,164 +957,24 @@ at the points a guest polls them match the bytes the real
 PS3 LV2 places there for an equivalent single-context
 configuration."
 
-## HLE dispatch
+## Userspace surface (firmware-loaded)
 
-NID-based, separate from the syscall surface. `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`
-holds the 60 NIDs CellGov dispatches directly; the larger ~5,300-entry
-diagnostic database lives in `cellgov_ps3_abi::nid` (accessed via
-`lookup(nid)` for name resolution in `dump-imports` and fault output,
-not for dispatch). Module implementations
-are decoupled from the Runtime via the
-`HleContext` trait (`cellgov_core::hle::context`). Each module file
-(`sysPrxForUser.rs`, `cellGcmSys.rs`, `cellSysutil.rs`, `cellSpurs.rs`,
-`cellSaveData.rs`, `sys_fs.rs`) contains free functions that operate
-through `&mut dyn HleContext` -- 9 methods covering guest memory read
-(region-aware, returns `Result<&[u8], HleReadError>`) and write,
-return value, register write, unit status, heap allocation,
-kernel-object ID allocation, and parkable callback dispatch
-(`park_for_callback` records an `HleParkRequest` the post-dispatch
-helper consumes; see "Worker-thread callback dispatch" above).
+The userspace PS3 surfaces -- sysPrxForUser, cellGcmSys,
+cellSysutil, cellSpurs, cellSaveData, cellFs -- are loaded from
+the user's PUP install as Sony-authored firmware SPRX modules,
+not reimplemented in Rust. The PRX loader resolves each game
+import to a firmware OPD and writes the resulting address into
+the GOT slot; from the PPU's perspective every `bl` reaches the
+firmware module's code directly.
 
-### sysPrxForUser (`sysPrxForUser.rs`)
-
-| Function                | NID        | Classification | Behavior                                                      |
-| ----------------------- | ---------- | -------------- | ------------------------------------------------------------- |
-| `sys_initialize_tls`    | 0x744680a2 | stateful       | Copies TLS image, zeroes BSS, sets r13 = base + 0x7030.       |
-| `_sys_malloc`           | 0xbdb18f83 | unsafe-to-stub | Bump allocator, 16-byte aligned, never freed.                 |
-| `_sys_free`             | 0xf7f7fb20 | noop-safe      | No-op.                                                        |
-| `_sys_memset`           | 0x68b9b011 | stateful       | Writes val \* size bytes to guest memory, returns ptr.        |
-| `_sys_heap_create_heap` | 0xb2fcf2c8 | stateful       | Allocates a fresh heap id.                                    |
-| `_sys_heap_malloc`      | 0x35168520 | unsafe-to-stub | Bumps the shared HLE arena.                                   |
-| `_sys_heap_memalign`    | 0x44265c08 | unsafe-to-stub | Bumps with `max(align, 16)` rounding.                         |
-| `sys_lwmutex_create`    | 0x2f85c0ef | stateful       | Initializes the 24-byte sys_lwmutex_t with sleep_queue id from the LV2 lwmutex table. |
-| `sys_lwmutex_lock`      | 0x1573dc3f | stateful       | Reads embedded id from offset 0x10, routes to `Lv2Request::LwMutexLock` (Acquire / Block). |
-| `sys_lwmutex_unlock`    | 0x1bc200f4 | stateful       | Routes to `Lv2Request::LwMutexUnlock` (Free / Transfer-and-wake-next).                    |
-| `sys_lwmutex_trylock`   | 0xaeb78725 | stateful       | Routes to `Lv2Request::LwMutexTryLock` (Acquire / CELL_EBUSY-on-held).                    |
-| `sys_lwmutex_destroy`   | 0xc3476d0c | stateful       | Routes to `Lv2Request::LwMutexDestroy` (CELL_EBUSY if still owned or waiters present).    |
-| `sys_process_exit`      | 0xe6f2c1e7 | stateful       | Marks unit Finished.                                          |
-| All others              | --         | noop-safe      | Return 0.                                                     |
-
-### cellGcmSys HLE (RSX initialization)
-
-Provides the CPU-visible GCM surface the FIFO-cursor /
-method-advance path above builds on: context allocation,
-label area, control register mapping, and flip-handler
-registration. Behaviour splits on `set_gcm_rsx_checkpoint`,
-toggled per title via the title-manifest: the checkpoint
-path maps the control register at `0xC0000040` in the RSX
-reserved region so the first guest write triggers
-`FirstRsxWrite`; the non-checkpoint path forwards init and
-flip-handler registration to the `sys_rsx` LV2 syscall
-surface so reads land on the `RsxReports` /
-`RsxDriverInfo` / `RsxDmaControl` structs the surface
-allocates.
-
-| Function                    | NID        | Behavior                                                                 |
-| --------------------------- | ---------- | ------------------------------------------------------------------------ |
-| `_cellGcmInitBody`          | 0x15bae46b | Checkpoint path: allocates context, command buffer, callback stub, and   |
-|                             |            | control register at `0xC0000040`. Non-checkpoint path: forwards to       |
-|                             |            | `sys_rsx` (`SysRsxMemoryAllocate` + `SysRsxContextAllocate`).            |
-| `cellGcmGetConfiguration`   | 0xe315a0b2 | Writes CellGcmConfig (24 bytes) to caller pointer.                       |
-| `cellGcmGetControlRegister` | 0xa547adde | Returns control register guest address.                                  |
-| `cellGcmGetTiledPitchSize`  | 0x055bd74d | Table lookup: smallest valid tiled pitch >= input size.                  |
-| `cellGcmGetLabelAddress`    | 0xf80196c1 | Returns label_base + 0x10 \* index.                                      |
-| `cellGcmAddressToOffset`    | 0x21ac3697 | Translates guest VA into RSX-side offset for IO map and RSX local        |
-|                             |            | regions. Returns CELL_GCM_ERROR_FAILURE for out-of-range addresses.      |
-| `cellGcmSetFlipHandler`     | 0xa41ef7e8 | Records the callback address in `RsxFlipState::handler`. When a          |
-|                             |            | `sys_rsx` context is live, forwards to `SysRsxContextAttribute` with     |
-|                             |            | the internal `CELLGOV_SET_FLIP_HANDLER` sub-command. Not dispatched.     |
-
-### cellSysutil HLE (video-out query surface)
-
-Reports a deterministic primary 720p RGB display configuration
-that any title polling the video-out surface during init reads
-back. CellGov models exactly one device on `CELL_VIDEO_OUT_PRIMARY`
-and zero on `CELL_VIDEO_OUT_SECONDARY`.
-
-| Function                    | NID        | Behavior                                                                 |
-| --------------------------- | ---------- | ------------------------------------------------------------------------ |
-| `cellVideoOutGetState`      | 0x887572d5 | Writes a 16-byte CellVideoOutState (state ENABLED, RGB, 720p / 16:9 /    |
-|                             |            | 59.94Hz). Out-of-range videoOut returns UNSUPPORTED_VIDEO_OUT;           |
-|                             |            | deviceIndex out of range returns DEVICE_NOT_FOUND.                       |
-| `cellVideoOutGetResolution` | 0xe558748d | Writes 4-byte CellVideoOutResolution from the PS3 spec table             |
-|                             |            | (1080/720/480/576/1600x1080/1440x1080/1280x1080/960x1080).               |
-|                             |            | Unknown id returns ILLEGAL_PARAMETER.                                    |
-
-Without the title-manifest RSX mirror flag set, the control
-register stays in the RSX reserved region so the guest's first
-put-pointer write triggers a ReservedWrite commit error, which
-the CLI translates to the `FirstRsxWrite` checkpoint. Manifests
-that opt into `[rsx] mirror = true` map the region ReadWrite so
-the put-pointer write lands normally and the method-advance
-pass drives completion.
-
-### cellSpurs HLE (PPU-side SPU runtime surface)
-
-PPU-side surface for the PS3 SPURS (SPU Runtime System) library.
-The CellSpurs control block (alignas 128, 4096 bytes SPURS1 /
-8192 bytes SPURS2) lives in guest memory; `cellSpurs.rs` owns
-the field-offset constants and per-NID handlers that read and
-write that block. SPU-side workload dispatch, policy-module DMA,
-and taskset execution are out of scope -- the runtime ships only
-the deterministic PPU half.
-
-| Family                     | NIDs landed | Surface                                                              |
-| -------------------------- | ----------- | -------------------------------------------------------------------- |
-| Initialize / Finalize      | 5           | `_cellSpursAttributeInitialize`, `cellSpursInitialize`,              |
-|                            |             | `cellSpursInitializeWithAttribute[2]`, `cellSpursFinalize`           |
-| Workload registry          | 5           | `cellSpursAddWorkload`, `*WithAttribute`,                            |
-|                            |             | `_cellSpursWorkloadAttributeInitialize`,                             |
-|                            |             | `cellSpursShutdownWorkload`, `cellSpursWaitForWorkloadShutdown`      |
-| Ready-count / contention   | 8           | `cellSpursReadyCount{Store,Add,Swap,CompareAndSwap}`,                |
-|                            |             | `cellSpursRequestIdleSpu`, `cellSpursSetMaxContention`,              |
-|                            |             | `cellSpursSetPriorities`, `cellSpursSetPriority`                     |
-| Info + exception handlers  | 8           | `cellSpursGetInfo`, `cellSpursAttachLv2EventQueue`,                  |
-|                            |             | `cellSpursDetachLv2EventQueue`,                                      |
-|                            |             | `cellSpursSet/UnsetExceptionEventHandler`,                           |
-|                            |             | `cellSpursSet/UnsetGlobalExceptionEventHandler`,                     |
-|                            |             | `cellSpursEnableExceptionEventHandler`                               |
-
-Reads from guest-supplied pointers go through
-`HleContext::read_guest`, which honors region boundaries and
-surfaces unmapped or strict-reserved addresses as `HleReadError`
-rather than silently substituting zero bytes; the handlers map
-read failures to the spec-appropriate error code per namespace
-(`POLICY_MODULE_FAULT` in the workload family, `INVAL` in CORE).
-Writes use the established invariant-class / guest-pointer-class
-split: post-zero-init field writes use `.expect`, guest-supplied
-out-pointers use `try_write_*`.
-
-### cellSaveData HLE (autoload with real callback dispatch)
-
-The first consumer of the worker-thread callback-dispatch primitive
-(see "Worker-thread callback dispatch" under "LV2 host"). The
-handler allocates `CellSaveDataCBResult` (20 bytes), `StatGet`
-(`stat_get_layout::SIZE = 0x6A8`), and `StatSet` (`SIZE = 0x0C`)
-on the HLE bump heap, populates `statGet` with the no-save shape
-(`hddFreeSizeKB = 41,942,784` -- 40 GiB minus 256 KiB to match
-RPCS3, `isNewData = YES`, `sysSizeKB = 35`, echoed `dir.dirName`,
-`fileList = setBuf->buf`), and parks the calling unit on the
-title's funcStat OPD with `args = [cb_result_addr, stat_get_addr,
-stat_set_addr, 0, 0, 0, 0, 0]` and the
-`CallbackReturnStage::AutoLoadAfterStat` resume stage. On wake,
-`resume_after_stat` reads `cbResult.result` and finalizes (CELL_OK
-on `OK_LAST`, the matching `CELL_SAVEDATA_ERROR_*` for negative
-results, `PARAM` for `OK_LAST_NOCONFIRM` per RPCS3
-`savedata_op:1630`). The funcFile loop transition (on `OK_NEXT`)
-is wired but currently maps to `FAILURE` until the AutoLoadAfterFile
-variant lands.
-
-| Function                  | NID        | Behavior                                                                 |
-| ------------------------- | ---------- | ------------------------------------------------------------------------ |
-| `cellSaveDataAutoLoad`    | 0xc22c79b5 | NULL-pointer rejection (PARAM); heap-alloc and statGet populate; park    |
-|                           |            | for funcStat via `call_guest_callback_sync`. Resume reads cbResult.result|
-|                           |            | and returns CELL_OK or `CELL_SAVEDATA_ERROR_*` per the cb_result table.  |
-| `cellSaveDataAutoLoad2`   | 0xfbd5c856 | Same shape as AutoLoad plus `cbResult.userdata = args[8]` so the title's |
-|                           |            | callback observes the userdata pointer the title passed in r10.          |
-
-`AutoSave` and `ListAutoLoad` stay unclaimed (the autosave
-persistence side and the system-dialog wrapper are anti-scope
-until a title surfaces them).
+The RSX CPU-side completion surface (`cellgov_core::rsx`)
+remains in Rust: it owns the FIFO cursor, command-buffer
+parsing, label updates, and the reports / driver-info / DMA
+control structures. The firmware cellGcmSys.prx exists in the
+PUP and is loaded; firmware-driven init still routes through
+the CPU-side surface for the byte-for-byte register reads. The
+`FirstRsxWrite` checkpoint fires on the first guest write to the
+control register.
 
 ## Schedule exploration
 
@@ -1251,13 +1052,7 @@ file on process exit. `bridges/rpcs3_to_observation` then converts
 that dump plus a shared region manifest into the same `Observation`
 JSON `cellgov_cli compare-observations` reads.
 
-A second patch
-(`bridges/rpcs3-patch/0002-cellgov-hle-trace.patch`) emits a
-per-HLE-call binary trace stream with optional watch-address
-diffs; `cellgov_cli rpcs3-attribute --trace <path> --addr 0xADDR`
-parses the stream to attribute writes to a specific HLE call.
-
-The patched RPCS3 binary is built by the developer; the CellGov
+The patched RPCS3 binary is built by the user; the CellGov
 library has no Cargo or runtime dependency on RPCS3. The bridge is
 a verification-time tool, not a library coupling. See
 `tests/fixtures/NPUA80001/cross_runner/REPRODUCTION.md` for the build commands
@@ -1333,24 +1128,18 @@ defaults to `tools/rpcs3/dev_hdd0` and can be overridden by
 The diagnostic surface is:
 
 - `run-game --title <name>`: fault-driven bring-up run with full
-  per-step coverage (insn tally, PC hit counts, HLE call summary).
+  per-step coverage (insn tally, PC hit counts, syscall summary).
 - `bench-boot --title <name>`: two subprocess-isolated boot runs
   per invocation for reproducible wall-time measurement. The
-  subprocess split is deliberate; two in-process boots on Windows
-  see ~60 percent drift from 1 GB guest-memory allocation / page-
-  commit reuse across `Runtime` instances in one process.
-  `--checkpoint pc=0xADDR` stops at a specific retired PC, useful
-  for A/B measurements that need identical step counts across
-  runs.
-- `dump-imports --title <name>`: prints the title's full HLE
-  import table with NID, NID-DB name, stub classification, and
-  whether CellGov has dedicated handling (the `impl` / `stub`
-  classification reads from
-  `cellgov_ppu::prx::HLE_IMPLEMENTED_NIDS`, the single
-  library-level source of truth the runtime PRX binder also
-  consults). The regenerated artifacts live at
-  [docs/titles/NPUA80001_hle_inventory.md](titles/NPUA80001_hle_inventory.md)
-  and [docs/titles/NPUA80068_hle_inventory.md](titles/NPUA80068_hle_inventory.md).
+  subprocess split sidesteps ~60 percent drift from 1 GB
+  guest-memory allocation / page-commit reuse across `Runtime`
+  instances in one process. `--checkpoint pc=0xADDR` stops at a
+  specific retired PC, useful for A/B measurements that need
+  identical step counts across runs.
+- `dump-prx-imports <path>`: decodes any raw `.prx` or SCE-wrapped
+  `.sprx`, auto-detects SCE wrappers (decrypted via
+  `cellgov_firmware::sce`), and prints the module's internal name,
+  export namespaces, and full import table.
 
 ## Boot status
 
@@ -1390,74 +1179,40 @@ install produce byte-identical state hashes.
 
 Common boot sequence (per-title numbers below):
 
-1. Load `EBOOT.elf` into guest memory; parse import tables; bind
-   HLE trampolines.
+1. Load `EBOOT.elf` into guest memory; parse import tables.
 2. Load the foundation SPRX closure (atomic-batch reloc applier),
    apply relocations, surface exports.
-3. Pre-initialize TLS from the game's PT_TLS segment.
-4. Execute each foundation module's `module_start` in topo order
+3. Resolve every game GOT slot against the firmware export
+   table.
+4. Pre-initialize TLS from the game's PT_TLS segment.
+5. Execute each foundation module's `module_start` in topo order
    (liblv2 returns cleanly at ~24K steps).
-5. Run the game's CRT0 from the ELF entry point.
+6. Run the game's CRT0 from the ELF entry point.
 
-**flOw (NPUA80001).** 140 HLE bindings; liblv2 surfaces 161
-exports. Boot completes CRT0, video-out probe, GCM init, PSSG
-(renderer init), the SPURS PPU-surface initialization, full
-resource enumeration via the mount-table-backed cellFs (every
-file under `/app_home/Data/**` -- localization XML, classes,
-texture archives -- resolved against the title's content dir),
-and the worker-thread callback dispatch for
-`cellSaveDataAutoLoad`. The title's manifest enables
-`[rsx] mirror = true` so its put-pointer store at `0xC0000040`
-lands in the FIFO cursor instead of faulting. The four
-`sys_lwmutex_*` HLE arms route through the LV2 lwmutex surface
-so contended locks produce real Blocked / Runnable transitions;
-the embedded `sleep_queue_id` is allocated from the LV2 lwmutex
-table at create time so subsequent lock / unlock / trylock /
-destroy resolve through the same id space.
+With the userspace HLE retired, foundation-title boot is
+unreliable: any LV2 syscall the firmware modules invoke that
+CellGov has not implemented surfaces as `dispatch.unsupported_stub`
+followed by guest-side bad behaviour. The HLE handlers used to
+paper over these gaps; making each gap explicit is the point.
 
-Boot now reaches a deterministic MAX_STEPS at step 195,312 with
-the primary thread spinning on a sysPrxForUser pthread coordination
-pattern (`sys_lwmutex_lock` / `_unlock` / `sys_ppu_thread_get_id`
-in a tight 3-syscall loop on HLE-import trampolines) and a sibling
-PPU thread (`entry=0x9b0a0` in flOw's `.text`) parked on
-`sys_event_queue_receive`. The sibling is a dedicated event-
-handler thread that exits when an event arrives from a port
-named `0xd1ed1ed1` (the `OPD_EXIT` sentinel value; the symbol
-spelling is PSL1GHT's, the value is a PS3 convention) -- it drains
-SPURS-workload completion events during normal operation.
-CellGov's cellSpurs HLE maintains the user-space SPURS data
-structures but never starts an SPU thread group, so no completion
-events ever fire and the handler thread waits forever. This is
-flOw's current boot frontier; the prior `m_InitEntityHierarchy`
-NULL-bcctr fault was cleared by the kernel-fd range fix
-(`LV2_FS_OBJECT_ID_BASE = 3`) which let the inline `cellFsRead`
-wrapper see the fds in its expected `[3, 255)` range instead of
-the prior `0x4000_000N` allocation that the wrapper's narrow load
-truncated to `0x4` (mistaken for an unknown fd, returning EBADF
-on every resource-loading read). The kernel-fd fix combined with
-the cellFs mount-table fallback let flOw load all assets and
-clear the entity-init dereference chain.
+**flOw (NPUA80001).** The title's manifest enables `[rsx] mirror
+= true` so its put-pointer store at `0xC0000040` lands in the
+FIFO cursor instead of faulting. Boot currently faults early
+(~7K steps) on an unimplemented LV2 syscall the firmware
+sysPrxForUser invokes.
 
-**Super Stardust HD (NPUA80068).** 200 HLE bindings across 19
-modules (15 with dedicated CellGov handling); the harness uses a
+**Super Stardust HD (NPUA80068).** The harness uses a
 `FirstRsxWrite` checkpoint because the attract-mode loop never
-calls `sys_process_exit`. Boot advances through CRT0, C++ static
-init, TLS setup, lwmutex construction, GCM initialization
-(\_cellGcmInitBody, cellGcmGetConfiguration, cellGcmGetControlRegister),
-keyboard/pad init, SPURS init, video configuration, and into the
-main attract loop. The first RSX write (put-pointer update to the
-GCM control register at 0xC0000040) triggers at step 14,352,589
-(~3.7B instructions). SSHD's CRT0/init path is bit-identical
-across CellGov revisions for the current PPU correctness surface.
+calls `sys_process_exit`. The first RSX write (put-pointer
+update to the GCM control register at 0xC0000040) triggers at
+step 14,352,589 (~3.7B instructions) under HLE; the post-pivot
+firmware-driven anchor is recaptured in titles.md.
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
-SELF decryption via `cellgov_firmware decrypt-self`. 332 HLE
-bindings across 27 modules -- the largest HLE surface of the
-three tested titles. Same `FirstRsxWrite` checkpoint kind as
-SSHD; reaches the put-pointer write at step 45,691 (the
-`0xC0000040` MMIO sentinel write triggers the checkpoint after
-the title's renderer init runs to the GCM control register). See
+SELF decryption via `cellgov_firmware decrypt-self`. Same
+`FirstRsxWrite` checkpoint kind as SSHD; faults at ~45K steps on
+an unimplemented LV2 syscall under firmware boot. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md)
 for history.
 

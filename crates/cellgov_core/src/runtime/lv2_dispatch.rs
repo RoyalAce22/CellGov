@@ -46,50 +46,6 @@ impl Runtime {
         }
     }
 
-    /// Returns `true` when `source` was a callback worker and the fault
-    /// was absorbed (parent woken with `CELL_EFAULT`, worker finished);
-    /// `false` for regular threads (caller falls through to the
-    /// run-terminating path).
-    ///
-    /// Cross-module contract: dispatch is forced to `WakeAndReturn` so
-    /// `handle_wake_and_return`'s `is_ppu_thread_finished_for_unit`
-    /// branch transitions the worker's `UnitStatus` to `Finished`,
-    /// stopping the PPU execution loop from fetching past the fault PC.
-    pub(super) fn try_absorb_callback_worker_fault(&mut self, source: UnitId) -> bool {
-        use cellgov_ps3_abi::cell_errors::CELL_EFAULT;
-        let fault_code = u64::from(CELL_EFAULT);
-        let dispatch = match self
-            .lv2_host
-            .dispatch_callback_worker_fault(source, fault_code)
-        {
-            Some(d) => d,
-            None => return false,
-        };
-        match dispatch {
-            Lv2Dispatch::WakeAndReturn {
-                code,
-                woken_unit_ids,
-                response_updates,
-                effects,
-            } => {
-                if !woken_unit_ids.is_empty() {
-                    self.step_woke_others = true;
-                }
-                self.handle_wake_and_return(
-                    source,
-                    code,
-                    woken_unit_ids,
-                    response_updates,
-                    effects,
-                );
-                true
-            }
-            other => {
-                unreachable!("dispatch_callback_worker_fault returns WakeAndReturn, got {other:?}",)
-            }
-        }
-    }
-
     pub(super) fn dispatch_syscall(&mut self, result: &ExecutionStepResult, source: UnitId) {
         let Some(args) = &result.syscall_args else {
             return;
@@ -112,30 +68,11 @@ impl Runtime {
         }
 
         use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
-        match SyscallNamespace::of(args[0]) {
-            Some(SyscallNamespace::HleImport) => {
-                let hle_index = (args[0] - SyscallNamespace::HleImport.range().0) as u32;
-                let nid = self.hle.nids.get(&hle_index).copied().unwrap_or(0);
-                let caller_lr = result.local_diagnostics.lr;
-                self.dispatch_hle(source, nid, args, caller_lr);
-                return;
-            }
-            Some(SyscallNamespace::CellGovPrivate) => {
-                let request = cellgov_lv2::request::classify_with_lev(
-                    lev,
-                    args[0],
-                    &[
-                        args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
-                    ],
-                );
-                self.dispatch_lv2_request(request, source);
-                return;
-            }
-            Some(SyscallNamespace::Lv2) | None => {
-                // None falls through so classify produces Unsupported
-                // with the raw number preserved.
-            }
+        if SyscallNamespace::of(args[0]).is_none() {
+            // Out-of-namespace r11 falls through so classify produces
+            // Unsupported with the raw number preserved.
         }
+        // Lv2 namespace falls through to the LV2 syscall match below.
 
         // Timer syscalls advance the simulated clock without yielding;
         // other PPU threads observe the new time on their next read.
@@ -270,11 +207,6 @@ impl Runtime {
                     response_updates,
                     effects,
                 );
-            }
-            Lv2Dispatch::CallbackSpawn { .. } => {
-                // Worker enters Runnable: rotate scheduler.
-                self.step_woke_others = true;
-                self.handle_callback_spawn(dispatch);
             }
         }
     }

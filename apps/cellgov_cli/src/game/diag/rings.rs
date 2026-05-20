@@ -52,7 +52,6 @@ pub(in crate::game) fn append_syscall_ring(
     out: &mut String,
     syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
     syscall_cursor: &RingCursor,
-    hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) {
     let filled = syscall_cursor.filled();
     if filled == 0 {
@@ -63,7 +62,7 @@ pub(in crate::game) fn append_syscall_ring(
         let (nr, pc) = syscall_ring[i];
         if nr >= 0x10000 {
             let idx = (nr - 0x10000) as u32;
-            let name = format_hle_idx(idx, hle_bindings);
+            let name = format_hle_idx(idx);
             out.push_str(&format!("\n    HLE {name} at 0x{pc:08x}"));
         } else {
             out.push_str(&format!("\n    LV2 #{nr} at 0x{pc:08x}"));
