@@ -76,14 +76,8 @@ pub(super) fn longest_readable_prefix(
     Some((lo, bytes))
 }
 
-pub(super) fn format_hle_idx(idx: u32, hle_bindings: &[cellgov_ppu::prx::HleBinding]) -> String {
-    match hle_bindings.get(idx as usize) {
-        Some(b) => match cellgov_ps3_abi::nid::lookup(b.nid) {
-            Some((_, func)) => format!("{}::{func}", b.module),
-            None => format!("{}::<unresolved-nid-0x{:08x}>", b.module, b.nid),
-        },
-        None => format!("<hle-idx-oob {idx}>"),
-    }
+pub(super) fn format_hle_idx(idx: u32) -> String {
+    format!("<hle-idx-{idx}>")
 }
 
 #[cfg(test)]

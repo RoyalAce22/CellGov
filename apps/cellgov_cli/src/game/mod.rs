@@ -12,7 +12,7 @@ mod stack_walk;
 mod step_loop;
 
 pub use bench::{bench_boot_one_run, bench_boot_pair, BenchGate, BenchOptions};
-pub use boot::{BootMode, HLE_HEAP_BASE};
+pub use boot::BootMode;
 
 use std::time::Instant;
 
@@ -82,11 +82,6 @@ impl std::error::Error for RunError {
 
 /// Apply the manifest-driven RSX init toggles.
 pub(super) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &TitleManifest) {
-    let needs_reserved = title.checkpoint_trigger() == manifest::CheckpointTrigger::FirstRsxWrite
-        || title.rsx_mirror();
-    if needs_reserved {
-        rt.set_gcm_rsx_checkpoint(true);
-    }
     if title.rsx_mirror() {
         rt.set_rsx_mirror_writes(true);
     }
@@ -163,7 +158,6 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     let t_after_prepare = Instant::now();
     let boot::PreparedBoot {
         mut rt,
-        hle_bindings,
         elf_data,
         timings: st,
         step_budget,
@@ -199,7 +193,6 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         distinct_pcs: &mut distinct_pcs,
         hle_calls: &mut hle_calls,
         insn_coverage: &mut insn_coverage,
-        hle_bindings: &hle_bindings,
         trace,
         timing: &mut timing,
         // Overwritten below with the tightened start.
@@ -227,17 +220,6 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
 
     println!("outcome: {outcome}");
     println!("steps: {steps}");
-    let watermark = rt.hle_heap_watermark();
-    let used = watermark.checked_sub(HLE_HEAP_BASE).unwrap_or_else(|| {
-        debug_assert!(
-            false,
-            "hle_heap_watermark 0x{watermark:08x} below base 0x{HLE_HEAP_BASE:08x}"
-        );
-        0
-    });
-    println!(
-        "hle_heap_watermark: 0x{watermark:08x} ({used} bytes used above base 0x{HLE_HEAP_BASE:08x})"
-    );
     let prov = rt.memory().provisional_read_count();
     if prov > 0 {
         println!("provisional_reads: {prov} (reserved RSX/SPU regions returned zero)");
@@ -258,7 +240,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             "tty_bogus_fd_calls: {bogus_fd_count} (sys_tty_write calls with fd values not fitting in u32)"
         );
     }
-    print_hle_summary(&hle_calls, &hle_bindings);
+    print_hle_summary(&hle_calls);
     print_insn_coverage(&insn_coverage);
     print_top_pcs(&rt, &pc_hits);
     print_shadow_stats(&mut rt);

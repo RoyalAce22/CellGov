@@ -4,15 +4,15 @@
 //! [`NvMethodHeader`]; the advance pass consumes the declared
 //! argument count and looks up the handler in [`NvMethodTable`].
 //! Unregistered methods take the advance pass's unknown-method
-//! fallback. Constants live in `cellgov_ps3_abi::cell_gcm`; this
-//! module is the decode and dispatch surface.
+//! fallback. Constants live in `cellgov_ps3_abi::rsx_nv_hardware`;
+//! this module is the decode and dispatch surface.
 
 use crate::rsx::RsxFifoCursor;
 use cellgov_effects::Effect;
 use cellgov_time::GuestTicks;
 use std::collections::BTreeMap;
 
-pub use cellgov_ps3_abi::cell_gcm::{
+pub use cellgov_ps3_abi::rsx_nv_hardware::{
     GCM_FLIP_COMMAND, NV406E_SEMAPHORE_ACQUIRE, NV406E_SEMAPHORE_OFFSET, NV406E_SEMAPHORE_RELEASE,
     NV406E_SET_REFERENCE, NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE, NV4097_GET_REPORT,
     NV4097_NO_OPERATION, NV4097_REPORT_OFFSET_MASK, NV4097_SET_SEMAPHORE_OFFSET,

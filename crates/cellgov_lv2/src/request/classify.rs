@@ -1,6 +1,5 @@
 use std::num::NonZeroU8;
 
-use cellgov_ps3_abi::callback_dispatch::CB_RETURN_SYSCALL;
 use cellgov_ps3_abi::syscall;
 use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
 
@@ -84,15 +83,6 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
     // compile error. HleImport is consumed upstream by NID lookup;
     // surfacing it as Unsupported keeps classify total.
     match SyscallNamespace::of(syscall_num) {
-        Some(SyscallNamespace::CellGovPrivate) => {
-            return match syscall_num {
-                CB_RETURN_SYSCALL => Lv2Request::CallbackDispatchReturn { args: *args },
-                n => Lv2Request::Unsupported {
-                    number: n,
-                    args: *args,
-                },
-            };
-        }
         Some(SyscallNamespace::HleImport) => {
             return Lv2Request::Unsupported {
                 number: syscall_num,
@@ -1167,26 +1157,6 @@ mod tests {
                 context_id: 0x5555_5555,
             }
         );
-    }
-
-    #[test]
-    fn classify_callback_return_syscall_routes_via_bit19() {
-        let args = [
-            0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888,
-        ];
-        let req = classify(CB_RETURN_SYSCALL, &args);
-        assert_eq!(req, Lv2Request::CallbackDispatchReturn { args });
-    }
-
-    #[test]
-    fn classify_unknown_private_syscall_falls_through_to_unsupported() {
-        let args = [0; 8];
-        let bogus = CB_RETURN_SYSCALL | 0x1000;
-        let req = classify(bogus, &args);
-        match req {
-            Lv2Request::Unsupported { number, .. } => assert_eq!(number, bogus),
-            other => panic!("expected Unsupported, got {other:?}"),
-        }
     }
 
     #[test]

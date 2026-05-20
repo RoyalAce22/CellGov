@@ -1,12 +1,10 @@
 //! Single source of truth for the `r11` syscall-number namespace.
 //!
-//! Three disjoint, contiguous ranges share the r11 word:
+//! Two disjoint, contiguous ranges share the r11 word:
 //!
 //! - **`Lv2`** -- real PS3 LV2 syscalls (`0..0x10000`).
 //! - **`HleImport`** -- CellGov-emitted HLE import trampolines
 //!   (`0x10000..0x80000`), one number per PRX import.
-//! - **`CellGovPrivate`** -- runtime-installed control trampolines
-//!   (`0x80000..0x100000`).
 //!
 //! The LEV-aware dispatch-hint classifier lives in
 //! `cellgov_lv2::syscall_classification`; this module exposes pure
@@ -37,8 +35,6 @@ pub enum SyscallNamespace {
     Lv2,
     /// CellGov-emitted HLE import trampolines in `0x10000..0x80000`.
     HleImport,
-    /// Indexed by [`CellGovPrivateSyscall`].
-    CellGovPrivate,
 }
 
 impl SyscallNamespace {
@@ -48,7 +44,6 @@ impl SyscallNamespace {
         match self {
             Self::Lv2 => (0, 0x10000),
             Self::HleImport => (0x10000, 0x80000),
-            Self::CellGovPrivate => (0x80000, 0x100000),
         }
     }
 
@@ -83,18 +78,15 @@ impl SyscallNamespace {
 
     /// Classify a raw r11 value into its namespace.
     ///
-    /// Returns `None` for values above [`Self::CellGovPrivate`].
+    /// Returns `None` for values above [`Self::HleImport`].
     #[inline]
     pub const fn of(syscall_num: u64) -> Option<SyscallNamespace> {
         let (_lv2_lo, lv2_hi) = Self::Lv2.range();
         let (_hle_lo, hle_hi) = Self::HleImport.range();
-        let (_priv_lo, priv_hi) = Self::CellGovPrivate.range();
         if syscall_num < lv2_hi {
             Some(Self::Lv2)
         } else if syscall_num < hle_hi {
             Some(Self::HleImport)
-        } else if syscall_num < priv_hi {
-            Some(Self::CellGovPrivate)
         } else {
             None
         }
@@ -114,60 +106,16 @@ impl SyscallNamespace {
     }
 }
 
-/// Indexed catalog of CellGov-private syscalls.
-///
-/// # Invariant
-/// Discriminants are wire-visible -- they land in guest memory as
-/// the lo half of `lis r11; ori r11` and are captured in trace
-/// fixtures. Only ever append new variants; never renumber.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-#[repr(u32)]
-pub enum CellGovPrivateSyscall {
-    /// Trampoline a guest callback uses to return control to the runtime.
-    CallbackReturn = 0,
-}
-
-impl CellGovPrivateSyscall {
-    /// Encoded syscall number for this variant.
-    #[inline]
-    pub const fn encode(self) -> u64 {
-        SyscallNamespace::CellGovPrivate.encode(self as u32)
-    }
-
-    /// Recover the variant from a per-namespace `index`, or `None`
-    /// for indices not yet registered.
-    ///
-    /// # Cross-crate contract
-    /// A producer in another crate can emit a `CellGovPrivate`
-    /// syscall number whose variant has not been added here; that
-    /// emission routes through the classifier's `Unknown` arm
-    /// silently. Land the variant and every emitter in the same
-    /// change.
-    #[inline]
-    pub const fn from_index(index: u32) -> Option<Self> {
-        match index {
-            0 => Some(Self::CallbackReturn),
-            _ => None,
-        }
-    }
-}
-
-// Disjointness + contiguity: every r11 below 0x100000 lands in
+// Disjointness + contiguity: every r11 below 0x80000 lands in
 // exactly one namespace. A gap would let `of()` return None inside
 // the reserved range.
 const _: () = {
     let (lv2_lo, lv2_hi) = SyscallNamespace::Lv2.range();
-    let (hle_lo, hle_hi) = SyscallNamespace::HleImport.range();
-    let (priv_lo, _) = SyscallNamespace::CellGovPrivate.range();
+    let (hle_lo, _hle_hi) = SyscallNamespace::HleImport.range();
     assert!(lv2_lo == 0, "Lv2 namespace must start at 0");
     assert!(
         lv2_hi == hle_lo,
         "Lv2 and HleImport must be contiguous (no gap)",
-    );
-    assert!(
-        hle_hi == priv_lo,
-        "HleImport and CellGovPrivate must be contiguous (no gap)",
     );
 };
 
@@ -280,19 +228,11 @@ mod tests {
     fn namespace_ranges_are_pinned() {
         assert_eq!(SyscallNamespace::Lv2.range(), (0, 0x10000));
         assert_eq!(SyscallNamespace::HleImport.range(), (0x10000, 0x80000));
-        assert_eq!(
-            SyscallNamespace::CellGovPrivate.range(),
-            (0x80000, 0x100000)
-        );
     }
 
     #[test]
     fn namespaces_are_pairwise_disjoint() {
-        let all = [
-            SyscallNamespace::Lv2,
-            SyscallNamespace::HleImport,
-            SyscallNamespace::CellGovPrivate,
-        ];
+        let all = [SyscallNamespace::Lv2, SyscallNamespace::HleImport];
         for (i, a) in all.iter().enumerate() {
             for b in &all[i + 1..] {
                 let (a_lo, a_hi) = a.range();
@@ -315,9 +255,6 @@ mod tests {
             (SyscallNamespace::HleImport, 0),
             (SyscallNamespace::HleImport, 0x40000),
             (SyscallNamespace::HleImport, 0x6FFFF),
-            (SyscallNamespace::CellGovPrivate, 0),
-            (SyscallNamespace::CellGovPrivate, 0x40000),
-            (SyscallNamespace::CellGovPrivate, 0x7FFFF),
         ];
         for (ns, index) in cases {
             let n = ns.encode(index);
@@ -330,18 +267,17 @@ mod tests {
     fn encode_at_max_index_fits_each_namespace() {
         assert_eq!(SyscallNamespace::Lv2.encode(0xFFFF), 0xFFFF);
         assert_eq!(SyscallNamespace::HleImport.encode(0x6FFFF), 0x7FFFF);
-        assert_eq!(SyscallNamespace::CellGovPrivate.encode(0x7FFFF), 0xFFFFF);
     }
 
     #[test]
     fn of_returns_none_above_highest_namespace() {
-        assert_eq!(SyscallNamespace::of(0x100000), None);
+        assert_eq!(SyscallNamespace::of(0x80000), None);
         assert_eq!(SyscallNamespace::of(u64::MAX), None);
     }
 
     #[test]
     fn decode_returns_none_above_highest_namespace() {
-        assert_eq!(SyscallNamespace::decode(0x100000), None);
+        assert_eq!(SyscallNamespace::decode(0x80000), None);
         assert_eq!(SyscallNamespace::decode(u64::MAX), None);
     }
 
@@ -356,35 +292,6 @@ mod tests {
             SyscallNamespace::of(0x7FFFF),
             Some(SyscallNamespace::HleImport)
         );
-        assert_eq!(
-            SyscallNamespace::of(0x80000),
-            Some(SyscallNamespace::CellGovPrivate)
-        );
-        assert_eq!(
-            SyscallNamespace::of(0xFFFFF),
-            Some(SyscallNamespace::CellGovPrivate)
-        );
-    }
-
-    #[test]
-    fn callback_return_index_zero_in_private_namespace() {
-        let n = CellGovPrivateSyscall::CallbackReturn.encode();
-        assert_eq!(n, 0x80000);
-        assert_eq!(
-            SyscallNamespace::of(n),
-            Some(SyscallNamespace::CellGovPrivate)
-        );
-    }
-
-    #[test]
-    fn private_syscall_discriminants_are_pinned() {
-        assert_eq!(CellGovPrivateSyscall::CallbackReturn as u32, 0);
-        assert_eq!(CellGovPrivateSyscall::CallbackReturn.encode(), 0x80000);
-        assert_eq!(
-            CellGovPrivateSyscall::from_index(0),
-            Some(CellGovPrivateSyscall::CallbackReturn),
-        );
-        assert_eq!(CellGovPrivateSyscall::from_index(1), None);
     }
 
     #[test]
@@ -402,13 +309,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "syscall index out of range")]
-    fn encode_panics_at_cellgov_private_upper_bound() {
-        let _ = SyscallNamespace::CellGovPrivate.encode(0x80000);
-    }
-
-    #[test]
     fn try_encode_returns_some_within_range() {
         assert_eq!(SyscallNamespace::Lv2.try_encode(0), Some(0));
         assert_eq!(SyscallNamespace::Lv2.try_encode(0xFFFF), Some(0xFFFF));
@@ -422,7 +322,6 @@ mod tests {
     fn try_encode_returns_none_at_upper_bound() {
         assert_eq!(SyscallNamespace::Lv2.try_encode(0x10000), None);
         assert_eq!(SyscallNamespace::HleImport.try_encode(0x70000), None);
-        assert_eq!(SyscallNamespace::CellGovPrivate.try_encode(0x80000), None);
     }
 
     #[test]

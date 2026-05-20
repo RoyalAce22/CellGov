@@ -57,12 +57,6 @@ pub(crate) enum CliArgError {
     EmptyPositional,
     /// CELLGOV_* env-var value not a recognized boolean.
     EnvBoolUnknown { name: String, got: String },
-    /// CELLGOV_* env-var value not a hex u32.
-    EnvHexU32Invalid {
-        name: String,
-        raw: String,
-        source: std::num::ParseIntError,
-    },
 }
 
 impl std::fmt::Display for CliArgError {
@@ -141,9 +135,6 @@ impl std::fmt::Display for CliArgError {
             Self::EnvBoolUnknown { name, got } => {
                 write!(f, "{name}={got:?}: expected 0/1/true/false/yes/no/on/off")
             }
-            Self::EnvHexU32Invalid { name, raw, source } => {
-                write!(f, "{name}={raw:?}: not a hex u32 ({source})")
-            }
         }
     }
 }
@@ -151,9 +142,9 @@ impl std::fmt::Display for CliArgError {
 impl std::error::Error for CliArgError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::CannotParseHexU64 { source, .. }
-            | Self::CannotParseHexU8 { source, .. }
-            | Self::EnvHexU32Invalid { source, .. } => Some(source),
+            Self::CannotParseHexU64 { source, .. } | Self::CannotParseHexU8 { source, .. } => {
+                Some(source)
+            }
             _ => None,
         }
     }

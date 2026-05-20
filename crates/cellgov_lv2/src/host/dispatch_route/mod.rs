@@ -357,12 +357,6 @@ impl Lv2Host {
                 self.dispatch_event_port_create(id_ptr, requester)
             }
             Lv2Request::EventPortDestroy { .. } => self.dispatch_event_port_destroy(),
-            Lv2Request::CallbackDispatchSpawn { .. } => {
-                self.dispatch_callback_dispatch_spawn_invariant()
-            }
-            Lv2Request::CallbackDispatchReturn { args } => {
-                self.dispatch_callback_return(requester, args)
-            }
             Lv2Request::Hypercall { lev, r11, args } => {
                 self.dispatch_hypercall_rejection(lev.get(), r11, args)
             }

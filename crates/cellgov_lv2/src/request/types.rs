@@ -1,7 +1,5 @@
 use std::num::NonZeroU8;
 
-use cellgov_event::UnitId;
-
 /// Typed LV2 syscall request decoded from PPU `sc` GPR state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lv2Request {
@@ -659,29 +657,6 @@ pub enum Lv2Request {
         a5: u64,
         /// In: raw arg6.
         a6: u64,
-    },
-    /// Internal worker-spawn -- not guest-issued, never produced by
-    /// [`crate::request::classify::classify`]. Fabricated by HLE handlers via
-    /// `Lv2Host::call_guest_callback_sync`; the host materializes a
-    /// fresh worker PPU thread with the title-supplied OPD and parks
-    /// `parent` until the worker returns.
-    CallbackDispatchSpawn {
-        /// In: title-supplied OPD pointer.
-        opd: u32,
-        /// In: worker register arguments.
-        args: [u64; 8],
-        /// In: parent unit to park until return.
-        parent: UnitId,
-    },
-    /// Issued by the CellGov-private trampoline in
-    /// `cellgov_ps3_abi::callback_dispatch` when the worker's
-    /// terminal `blr` lands on it. [`crate::request::classify::classify`] decodes this from
-    /// `r11 = CB_RETURN_SYSCALL` (bit 19 set). `args` are forwarded
-    /// to the parent via
-    /// [`crate::dispatch::PendingResponse::CallbackReturn`].
-    CallbackDispatchReturn {
-        /// In: worker return registers.
-        args: [u64; 8],
     },
     /// `sys_ss_access_control_engine`. Three useful pkg_ids:
     /// `1` writes the caller's authority-id to `*a3` (debug/root only;

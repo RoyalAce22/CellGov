@@ -3,7 +3,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
-use cellgov_lv2::{CallbackReturnStage, PendingResponse};
+use cellgov_lv2::PendingResponse;
 
 use super::Runtime;
 
@@ -95,9 +95,6 @@ impl Runtime {
                          caller it acquired the mutex when it has not.",
                     );
                 }
-                Some(PendingResponse::CallbackReturn { stage, args }) => {
-                    self.resume_callback_return(waiter, stage, args);
-                }
                 Some(
                     PendingResponse::ThreadGroupJoin { .. } | PendingResponse::PpuThreadJoin { .. },
                 ) => {
@@ -116,48 +113,6 @@ impl Runtime {
             }
             self.registry
                 .set_status_override(waiter, UnitStatus::Runnable);
-        }
-    }
-
-    /// Stage dispatcher for a callback worker's wake.
-    ///
-    /// Each parkable HLE handler that schedules a worker via
-    /// `Lv2Host::call_guest_callback_sync` must land a matching
-    /// `CallbackReturnStage` arm here; the wildcard `unimplemented!`
-    /// catches new variants because `CallbackReturnStage` is
-    /// `#[non_exhaustive]` cross-crate.
-    ///
-    /// `args` is the worker's `r3..=r10` captured at trampoline entry
-    /// (PPC64 ELFv1: `args[0]` is r3).
-    fn resume_callback_return(
-        &mut self,
-        waiter: UnitId,
-        stage: CallbackReturnStage,
-        args: [u64; 8],
-    ) {
-        match stage {
-            CallbackReturnStage::Synthetic => {
-                self.registry.set_syscall_return(waiter, args[0]);
-            }
-            CallbackReturnStage::AutoLoadAfterStat {
-                cb_result_addr,
-                stat_get_addr,
-                stat_set_addr,
-                func_file_opd,
-            } => {
-                crate::hle::cell_save_data::resume_after_stat(
-                    self,
-                    waiter,
-                    cb_result_addr,
-                    stat_get_addr,
-                    stat_set_addr,
-                    func_file_opd,
-                    args,
-                );
-            }
-            _ => {
-                unimplemented!("resume_callback_return: stage {stage:?} has no resume arm");
-            }
         }
     }
 

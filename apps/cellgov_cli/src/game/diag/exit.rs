@@ -27,7 +27,6 @@ pub(in crate::game) fn format_process_exit(
     pc_cursor: &RingCursor,
     syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
     syscall_cursor: &RingCursor,
-    hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) -> String {
     let mut out = format!(
         "PROCESS_EXIT(code={}) at step {} (PC=0x{:08x})",
@@ -65,7 +64,7 @@ pub(in crate::game) fn format_process_exit(
     }
 
     append_pc_ring_terse(&mut out, pc_ring, pc_cursor);
-    append_syscall_ring(&mut out, syscall_ring, syscall_cursor, hle_bindings);
+    append_syscall_ring(&mut out, syscall_ring, syscall_cursor);
     out
 }
 
@@ -76,12 +75,11 @@ pub(in crate::game) fn format_max_steps(
     pc_cursor: &RingCursor,
     syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
     syscall_cursor: &RingCursor,
-    hle_bindings: &[cellgov_ppu::prx::HleBinding],
 ) -> String {
     let mut out = format!("MAX_STEPS after {} steps", steps);
     append_unit_state_summary(&mut out, rt);
     append_pc_ring_terse(&mut out, pc_ring, pc_cursor);
-    append_syscall_ring(&mut out, syscall_ring, syscall_cursor, hle_bindings);
+    append_syscall_ring(&mut out, syscall_ring, syscall_cursor);
     out
 }
 

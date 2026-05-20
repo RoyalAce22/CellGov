@@ -99,9 +99,6 @@ bytes differ; the program behaviour does not.
 
 - The ELF-in-memory layout includes metadata bytes the guest never
   reads.
-- HLE stub slots are laid out differently between CellGov and
-  RPCS3 because the two pick a different (but equally valid)
-  iteration order over a module's NID table.
 - SELF reconstruction (decrypting the signed-encrypted PS3
   executable format into a regular ELF) can land zero-initialised
   bytes in header slots CellGov does not populate but RPCS3 does.
@@ -146,7 +143,7 @@ Byte-parity vocabulary (only meaningful when convergence is `Yes`):
 
 - `equivalent` -- zero divergent bytes.
 - `N non-semantic` -- every divergent byte classifies into a
-  structurally-grounded class (ELF header reconstruction, HLE OPD
+  structurally-grounded class (ELF header reconstruction, GOT
   slot layout, etc.). The bytes differ but the guest cannot tell.
 - `M non-semantic + N pending` -- some bytes classified, some
   awaiting a new structurally-grounded class. The pending bytes

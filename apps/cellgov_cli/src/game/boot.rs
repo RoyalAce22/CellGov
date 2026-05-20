@@ -3,7 +3,6 @@
 use std::time::{Duration, Instant};
 
 use cellgov_core::{default_budget_for_mode, Runtime, RuntimeMode};
-use cellgov_ppu::prx::{HleBinding, HleLayout};
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_time::Budget;
 
@@ -14,10 +13,8 @@ use cellgov_ps3_abi::process_address_space::{
 };
 
 use super::manifest::TitleManifest;
-use super::prx::{
-    build_nid_map, load_firmware_prx, load_firmware_set_bound, pre_init_tls, run_module_start,
-};
-use crate::cli::env::{parse_env_bool, parse_env_hex_u32};
+use super::prx::{load_firmware_prx, load_firmware_set_bound, pre_init_tls, run_module_start};
+use crate::cli::env::parse_env_bool;
 use crate::cli::exit::{die, load_ppu_image_or_die};
 
 /// Default primary-thread priority when the title's `sys_proc_param`
@@ -53,14 +50,8 @@ impl BootMode {
 
 pub(super) struct PreparedBoot {
     pub rt: Runtime,
-    pub hle_bindings: Vec<HleBinding>,
     pub elf_data: Vec<u8>,
     pub timings: StartupTimings,
-    /// Guest-address range covering the HLE OPD + body trampoline
-    /// region this boot allocated. `None` when no HLE bindings were
-    /// produced.
-    #[allow(dead_code, reason = "retained for the cross-runner classifier")]
-    pub hle_opd_range: Option<core::ops::Range<u64>>,
     /// Per-step budget resolved during `prepare`.
     pub step_budget: Budget,
 }
@@ -185,33 +176,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     ])
     .unwrap_or_else(|e| die(&format!("failed to build guest memory layout: {e:?}")));
 
-    // Callback-return trampoline must live inside region 0: instruction
-    // fetch only reads from region 0, so the body sits in the pre-user-heap
-    // scratch zone (`0..0x10000`).
-    {
-        use cellgov_ps3_abi::callback_dispatch::{
-            CALLBACK_RETURN_CODE_ADDR, CALLBACK_RETURN_OPD_ADDR, TRAMPOLINE_CODE_BYTES,
-            TRAMPOLINE_OPD_BYTES,
-        };
-        mem.apply_commit(
-            cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new(CALLBACK_RETURN_CODE_ADDR as u64),
-                TRAMPOLINE_CODE_BYTES.len() as u64,
-            )
-            .expect("callback trampoline code range must be valid"),
-            &TRAMPOLINE_CODE_BYTES,
-        )
-        .expect("callback trampoline code commit");
-        mem.apply_commit(
-            cellgov_mem::ByteRange::new(
-                cellgov_mem::GuestAddr::new(CALLBACK_RETURN_OPD_ADDR as u64),
-                TRAMPOLINE_OPD_BYTES.len() as u64,
-            )
-            .expect("callback trampoline OPD range must be valid"),
-            &TRAMPOLINE_OPD_BYTES,
-        )
-        .expect("callback trampoline OPD commit");
-    }
     let t_mem_alloc = t_start.elapsed();
 
     let load_result = cellgov_ppu::loader::load_ppu_elf(&elf_data, &mut mem, &mut state)
@@ -227,79 +191,12 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         u32_or_die("tramp_base", rounded as u64)
     };
 
-    // Parse imports first so the binding count is available for layout
-    // arithmetic and for the env-override extent check.
-    let modules = cellgov_ppu::prx::parse_imports(&elf_data).unwrap_or_else(|e| {
-        die(&format!(
-            "imports: HLE parse failed: {e:?}; guest cannot boot without trampolines"
-        ))
-    });
-    let n_bindings: u32 = modules
-        .iter()
-        .map(|m| m.functions.len() as u64)
-        .sum::<u64>()
-        .try_into()
-        .unwrap_or_else(|_| die("imports: binding count exceeds u32"));
-
-    let opd_override: Option<u32> = match parse_env_hex_u32("CELLGOV_HLE_OPD_BASE") {
-        Some(v) => {
-            if v < tramp_base {
-                die(&format!(
-                    "CELLGOV_HLE_OPD_BASE=0x{v:x} overlaps ELF load region (must be >= 0x{tramp_base:x})"
-                ));
-            }
-            Some(v)
-        }
-        None => None,
-    };
-    let hle_layout = match opd_override {
-        Some(opd_base) => {
-            let opd_span = n_bindings.checked_mul(8).unwrap_or_else(|| {
-                die("CELLGOV_HLE_OPD_BASE: OPD span (n_bindings * 8) overflows u32")
-            });
-            let body_base = opd_base
-                .checked_add(opd_span)
-                .unwrap_or_else(|| die("CELLGOV_HLE_OPD_BASE: opd region end overflows u32"));
-            HleLayout::Ps3Spec {
-                opd_base,
-                body_base,
-            }
-        }
-        None => HleLayout::Legacy24,
-    };
-    let layout_end = hle_layout
-        .extent_end(tramp_base, n_bindings)
-        .unwrap_or_else(|| die("HLE layout: extent end overflows u32"));
-    if (layout_end as u64) > mem_size as u64 {
-        die(&format!(
-            "HLE layout: extent end 0x{layout_end:x} exceeds mem_size 0x{mem_size:x}"
-        ));
-    }
-
-    let hle_bindings = match cellgov_ppu::prx::bind_hle_stubs_with_layout(
-        &modules, &mut mem, hle_layout, tramp_base,
-    ) {
-        Ok(b) => b,
-        Err(e) => die(&format!(
-            "imports: HLE binder failed: {e:?}; guest cannot boot without trampolines"
-        )),
-    };
-    if parse_env_bool("CELLGOV_DUMP_TRAMPOLINES") {
-        dump_trampoline_map(&hle_bindings, hle_layout, tramp_base);
-    }
-    // `None` when zero imports were bound so consumers do not see a
-    // degenerate `start..start` range.
-    let hle_opd_range: Option<core::ops::Range<u64>> = if hle_bindings.is_empty() {
-        None
-    } else {
-        Some(hle_layout.extent_start(tramp_base) as u64..layout_end as u64)
-    };
+    // Parse imports so the firmware PRX loader can resolve game-side
+    // OPD stubs to firmware exports.
+    let modules = cellgov_ppu::prx::parse_imports(&elf_data)
+        .unwrap_or_else(|e| die(&format!("imports: parse failed: {e:?}")));
     if opts.print_banner {
-        println!(
-            "imports: {} modules, {} functions bound to HLE stubs",
-            modules.len(),
-            hle_bindings.len()
-        );
+        println!("imports: {} modules", modules.len());
         for m in &modules {
             let first_stub = m.functions.first().map(|f| f.stub_addr).unwrap_or(0);
             println!(
@@ -312,26 +209,25 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     }
     let t_hle_bind = t_start.elapsed();
 
-    // Code floor must clear every committed code region: trampolines
-    // (Legacy24) or OPD+body span (Ps3Spec).
-    let code_floor = layout_end;
+    // Code floor used to clear the now-deleted HLE trampoline region;
+    // with the binder gone, only the ELF PT_LOAD ranges and firmware
+    // PRX load region matter.
+    let code_floor = tramp_base;
 
     let prx_modules = match opts.boot_mode {
         BootMode::SinglePrx => {
-            match load_firmware_prx(opts.firmware_dir, &hle_bindings, &mut mem, code_floor) {
+            match load_firmware_prx(opts.firmware_dir, &modules, &mut mem, code_floor) {
                 Some(info) => vec![info],
                 None => Vec::new(),
             }
         }
         BootMode::FirmwareSet => {
-            load_firmware_set_bound(opts.firmware_dir, &hle_bindings, &mut mem, code_floor)
+            load_firmware_set_bound(opts.firmware_dir, &modules, &mut mem, code_floor)
         }
     };
     let t_prx_load = t_start.elapsed();
     if opts.firmware_dir.is_some() && prx_modules.is_empty() {
-        eprintln!(
-            "prx: firmware directory was supplied but no PRX was loaded; HLE-only bindings in use"
-        );
+        eprintln!("prx: firmware directory was supplied but no PRX was loaded");
     }
 
     pre_init_tls(&elf_data, &mut mem);
@@ -360,13 +256,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     match (prx_modules.is_empty(), skip_ms) {
         (false, false) => {
             for info in &prx_modules {
-                mem = run_module_start(
-                    mem,
-                    info,
-                    &hle_bindings,
-                    opts.module_start_max_steps,
-                    alloc_base,
-                );
+                mem = run_module_start(mem, info, opts.module_start_max_steps, alloc_base);
             }
         }
         (false, true) => {
@@ -546,8 +436,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
 
     let mut rt = Runtime::new(mem, step_budget, adjusted_max_steps);
     rt.set_mode(mode);
-    rt.set_hle_heap_base(HLE_HEAP_BASE);
-    rt.set_hle_nids(build_nid_map(&hle_bindings).unwrap_or_else(|e| die(&e.to_string())));
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
     // Cross-module contract: firmware-side `_sys_prx_load_module(path)`
     // resolves the guest path against this registry to recover the
@@ -643,8 +531,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // panic. The clean fix is upstream pre-validation at image-open
     // time so the bytes that reach this closure are already vetted;
     // until then, the panic is the failure mode for a malformed title.
-    // Tracked separately from Phase 9 scope because converting requires
-    // changing the SpuFactory trait signature to return Result.
+    // Cleaning this up requires changing the SpuFactory trait signature
+    // to return Result.
     rt.set_spu_factory(|id, init| {
         use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
         let mut unit = SpuExecutionUnit::new(id);
@@ -746,7 +634,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
 
     PreparedBoot {
         rt,
-        hle_bindings,
         elf_data,
         timings: StartupTimings {
             mem_alloc: t_mem_alloc,
@@ -754,46 +641,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             hle_bind: t_hle_bind - t_elf_load,
             prx_load: t_prx_load - t_hle_bind,
         },
-        hle_opd_range,
         step_budget,
-    }
-}
-
-/// CELLGOV_DUMP_TRAMPOLINES dump: prints the `sc` instruction address
-/// per binding under the active layout.
-fn dump_trampoline_map(bindings: &[HleBinding], layout: HleLayout, legacy_base: u32) {
-    match layout {
-        HleLayout::Legacy24 => {
-            eprintln!("hle trampoline map (Legacy24, tramp_base=0x{legacy_base:x}):");
-            for b in bindings {
-                // Legacy24: 8-byte OPD followed by 16-byte body; `sc`
-                // is the third word of the body -> offset 8 within
-                // the body, which itself starts 8 past the OPD.
-                let sc_addr = legacy_base + b.index * 24 + 8 + 8;
-                let (module, name) = cellgov_ps3_abi::nid::lookup(b.nid).unwrap_or(("?", "?"));
-                eprintln!(
-                    "  idx={:3} sc=0x{:08x} nid=0x{:08x} {}::{}",
-                    b.index, sc_addr, b.nid, module, name
-                );
-            }
-        }
-        HleLayout::Ps3Spec {
-            opd_base,
-            body_base,
-        } => {
-            eprintln!(
-                "hle trampoline map (Ps3Spec, opd_base=0x{opd_base:x}, body_base=0x{body_base:x}):"
-            );
-            for b in bindings {
-                // Ps3Spec body layout: `lis; ori; sc; blr`, four
-                // 4-byte words; `sc` sits at offset 8.
-                let sc_addr = body_base + b.index * 16 + 8;
-                let (module, name) = cellgov_ps3_abi::nid::lookup(b.nid).unwrap_or(("?", "?"));
-                eprintln!(
-                    "  idx={:3} sc=0x{:08x} nid=0x{:08x} {}::{}",
-                    b.index, sc_addr, b.nid, module, name
-                );
-            }
-        }
     }
 }

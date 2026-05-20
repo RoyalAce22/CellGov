@@ -84,21 +84,6 @@ pub struct Lv2Host {
     /// (LwMutexWake) do. Read by the runtime to drive
     /// critical-section-aware scheduler stickiness.
     pub(super) lwmutex_holds: BTreeMap<PpuThreadId, u32>,
-    /// Worker -> (parent unit, stage) linkage for callback-dispatch
-    /// workers spawned via [`Self::call_guest_callback_sync`].
-    ///
-    /// # Cross-module contract
-    ///
-    /// The parent unit stays parked while its entry is present.
-    /// `dispatch_callback_return` consumes the entry to build the
-    /// wake response; if the worker terminates without producing a
-    /// return event, the entry leaks and the parent never wakes.
-    /// `BTreeMap` for deterministic iteration.
-    pub(super) callback_parents:
-        BTreeMap<PpuThreadId, (UnitId, crate::dispatch::CallbackReturnStage)>,
-    /// Per-parent recursion depth, capped at
-    /// `cellgov_ps3_abi::callback_dispatch::CALLBACK_DEPTH_CAP`.
-    pub(super) callback_depth: BTreeMap<UnitId, u8>,
     /// Firmware identity from `firmware.toml`. `None` until the CLI
     /// boot path verifies the manifest; folded into [`Self::state_hash`]
     /// when set so two boots of the same install hash identically.
@@ -182,8 +167,6 @@ impl Lv2Host {
             fs_mounts: FsMountTable::new(),
             prx_registry: LoadedPrxRegistry::new(),
             lwmutex_holds: BTreeMap::new(),
-            callback_parents: BTreeMap::new(),
-            callback_depth: BTreeMap::new(),
             firmware_identity: None,
         }
     }
