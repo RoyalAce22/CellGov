@@ -74,7 +74,7 @@ pub struct Lv2Host {
     /// pre-registered in [`Self::fs_store`]. Boot populates from the
     /// title manifest; immutable thereafter.
     pub(super) fs_mounts: FsMountTable,
-    /// Foundation PRXs loaded by `firmware-set` boot. Looked up by
+    /// Minimum viable PRX set loaded by `firmware-set` boot. Looked up by
     /// `_sys_prx_load_module` (path -> kernel id) and walked by
     /// `_sys_prx_get_module_list`. Empty under `single-prx`.
     pub(super) prx_registry: LoadedPrxRegistry,
@@ -366,7 +366,8 @@ impl Lv2Host {
     }
 
     /// Mutable view of the loaded-PRX registry. Boot uses this to
-    /// register foundation modules after `load_firmware_set` returns.
+    /// register the minimum viable PRX set after `load_firmware_set`
+    /// returns.
     pub fn prx_registry_mut(&mut self) -> &mut LoadedPrxRegistry {
         &mut self.prx_registry
     }

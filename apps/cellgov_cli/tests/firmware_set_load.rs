@@ -1,20 +1,19 @@
 //! End-to-end exercise of [`cellgov_ppu::prx_loader::load_firmware_set`]
 //! against the user's installed firmware corpus, scoped to the
-//! foundation-PRX closure.
+//! minimum viable PRX set.
 //!
-//! The test asserts every named foundation module is present, then
-//! filters out modules whose relocations span more than two segments
-//! (via the loader's own `check_loadable`; the single-PRX applier
-//! handles 2 segments and multi-segment is a successor-phase
-//! extension). It feeds the post-decrypt bytes through
-//! `load_firmware_set` and asserts the resulting `FirmwareImage` is
-//! internally coherent: per-module identity bijection, bidirectional
-//! export-table consistency, topological order is a permutation of
-//! loaded keys AND respects the import partial order, and module
-//! memory ranges fit inside the firmware region without pairwise
-//! overlap.
+//! The test asserts every named PRX is present, then filters out
+//! modules whose relocations span more than two segments (via the
+//! loader's own `check_loadable`; the single-PRX applier handles 2
+//! segments and multi-segment is a successor-phase extension). It
+//! feeds the post-decrypt bytes through `load_firmware_set` and
+//! asserts the resulting `FirmwareImage` is internally coherent:
+//! per-module identity bijection, bidirectional export-table
+//! consistency, topological order is a permutation of loaded keys
+//! AND respects the import partial order, and module memory ranges
+//! fit inside the firmware region without pairwise overlap.
 //!
-//! Skipped silently when the firmware directory or any foundation
+//! Skipped silently when the firmware directory or any required PRX
 //! stem is absent. `CELLGOV_REQUIRE_FIRMWARE_SET_LOAD=1` promotes
 //! both conditions to a hard failure (CI knob).
 
@@ -44,15 +43,15 @@ fn workspace_root() -> PathBuf {
     }
 }
 
-/// Foundation closure: the fourteen modules for which we have a
-/// parity oracle (each one's `cellgov_firmware`-decrypted output is
-/// known to match an RPCS3 decryption of the same PUP, verified by
-/// the `foundation_sprx_decrypt_matches_pre_decrypted_reference`
-/// test). Loading the full 142-module install trips
-/// ConflictingExport because firmware re-exports shared NIDs across
-/// modules; this conflict-free parity subset is the closure the
-/// design doc names.
-const FOUNDATION_STEMS: &[&str] = &[
+/// Minimum viable PRX set: the fourteen modules for which we have
+/// a parity oracle (each one's `cellgov_firmware`-decrypted output
+/// is known to match an RPCS3 decryption of the same PUP, verified
+/// by the
+/// `min_viable_prx_decrypt_matches_pre_decrypted_reference` test).
+/// Loading the full 142-module install trips ConflictingExport
+/// because firmware re-exports shared NIDs across modules; this
+/// conflict-free parity subset is the closure the design doc names.
+const MIN_VIABLE_PRX_STEMS: &[&str] = &[
     "libaudio",
     "libfiber",
     "libfs",
@@ -69,7 +68,7 @@ const FOUNDATION_STEMS: &[&str] = &[
     "libsysutil_np",
 ];
 
-/// Expected count of foundation modules filtered by
+/// Expected count of minimum-viable PRXes filtered by
 /// `MultiSegmentRelocations` on the current firmware install. Drift
 /// in either direction is the test signal: a regression that
 /// suddenly rejects more modules trips, and a hand-rolled exception
@@ -105,28 +104,28 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         return;
     };
 
-    // Foundation completeness: every named stem must be present, or
-    // the test exercises a non-closure and the rest of the assertions
+    // Completeness check: every named stem must be present, or the
+    // test exercises a non-closure and the rest of the assertions
     // are meaningless. CELLGOV_REQUIRE_FIRMWARE_SET_LOAD promotes the
     // miss to a hard failure.
-    let missing: Vec<&&str> = FOUNDATION_STEMS
+    let missing: Vec<&&str> = MIN_VIABLE_PRX_STEMS
         .iter()
         .filter(|stem| !dir.join(format!("{stem}.sprx")).is_file())
         .collect();
     if !missing.is_empty() {
         let names: Vec<&str> = missing.iter().map(|s| **s).collect();
         if std::env::var_os("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD").is_some() {
-            panic!("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD set but foundation stems missing: {names:?}");
+            panic!("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD set but PRX stems missing: {names:?}");
         }
-        eprintln!("firmware_set_load: skipping (foundation stems missing: {names:?})");
+        eprintln!("firmware_set_load: skipping (PRX stems missing: {names:?})");
         return;
     }
 
-    // Read and decrypt every foundation stem. parse_prx failure is a
+    // Read and decrypt every PRX stem. parse_prx failure is a
     // regression, not a skip condition -- propagate via expect.
     let mut bytes_by_path: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut multi_seg_skipped = 0usize;
-    for stem in FOUNDATION_STEMS {
+    for stem in MIN_VIABLE_PRX_STEMS {
         let sprx_path = dir.join(format!("{stem}.sprx"));
         let raw = std::fs::read(&sprx_path)
             .unwrap_or_else(|e| panic!("read {}: {e}", sprx_path.display()));
@@ -161,15 +160,15 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     }
     assert_eq!(
         multi_seg_skipped, MULTI_SEG_EXPECTED,
-        "multi_seg_skipped diverged from the calibrated MULTI_SEG_EXPECTED; either a regression changed the loadable foundation subset or the constant needs recalibration"
+        "multi_seg_skipped diverged from the calibrated MULTI_SEG_EXPECTED; either a regression changed the loadable subset or the constant needs recalibration"
     );
     assert_eq!(
         bytes_by_path.len() + multi_seg_skipped,
-        FOUNDATION_STEMS.len(),
+        MIN_VIABLE_PRX_STEMS.len(),
         "missing modules unaccounted for"
     );
     eprintln!(
-        "firmware_set_load: prepared {} foundation PRX modules ({multi_seg_skipped} multi-segment-skipped)",
+        "firmware_set_load: prepared {} minimum-viable PRX modules ({multi_seg_skipped} multi-segment-skipped)",
         bytes_by_path.len()
     );
 
@@ -185,9 +184,9 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     }
     let n_inputs = bytes_by_path.len();
 
-    // Main region sized for 12 foundation modules at ~1 MiB each plus
-    // ample slack; the foundation set is the only thing this test
-    // ever loads.
+    // Main region sized for the 14-module minimum viable PRX set at
+    // ~1 MiB each plus ample slack; this set is the only thing this
+    // test ever loads.
     let region_size: usize = 0x8000_0000;
     let mut memory =
         GuestMemory::from_regions(vec![Region::new(0, region_size, "main", PageSize::Page64K)])
@@ -292,7 +291,7 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     }
 
     eprintln!(
-        "firmware_set_load: loaded {} foundation modules; export table {} NIDs",
+        "firmware_set_load: loaded {} minimum-viable PRX modules; export table {} NIDs",
         image.loaded.len(),
         image.export_table.len()
     );

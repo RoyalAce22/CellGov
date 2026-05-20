@@ -32,10 +32,10 @@ pub(super) struct PrxLoadInfo {
     pub(super) module_stop: Option<cellgov_ppu::sprx::LoadedOpd>,
 }
 
-/// Foundation closure for firmware-set boot. Mirrors
-/// `apps/cellgov_cli/tests/firmware_set_load.rs::FOUNDATION_STEMS`;
+/// Minimum viable PRX set for firmware-set boot. Mirrors
+/// `apps/cellgov_cli/tests/firmware_set_load.rs::MIN_VIABLE_PRX_STEMS`;
 /// keep the two in sync.
-const FOUNDATION_STEMS: &[&str] = &[
+const MIN_VIABLE_PRX_STEMS: &[&str] = &[
     "libaudio",
     "libfiber",
     "libfs",
@@ -52,7 +52,8 @@ const FOUNDATION_STEMS: &[&str] = &[
     "libsysutil_np",
 ];
 
-/// Must match the HLE `sys_initialize_tls` allocation in `cellgov_core::hle`.
+/// Must match the firmware sysPrxForUser `sys_initialize_tls`
+/// allocation seen by liblv2 at module_start time.
 pub(super) const TLS_BASE: u64 = 0x10400000;
 
 /// Guest address of the synthetic kernel-context OPD installed by
@@ -642,13 +643,14 @@ fn resolve_prx_base(code_floor: u32) -> u64 {
     base
 }
 
-/// Load the foundation closure via [`cellgov_ppu::prx_loader::load_firmware_set`],
-/// patch the game ELF's GOT slots against the resulting union export
-/// table, and return one [`PrxLoadInfo`] per module in topological order.
+/// Load the minimum viable PRX set via
+/// [`cellgov_ppu::prx_loader::load_firmware_set`], patch the game
+/// ELF's GOT slots against the resulting union export table, and
+/// return one [`PrxLoadInfo`] per module in topological order.
 ///
 /// Returns an empty vector when the firmware directory is absent, a
-/// foundation stem is missing, or any decrypt / parse / load / GOT-
-/// patch step fails.
+/// required PRX stem is missing, or any decrypt / parse / load /
+/// GOT-patch step fails.
 pub(super) fn load_firmware_set_bound(
     firmware_dir: Option<&str>,
     modules: &[cellgov_ppu::prx::ImportedModule],
@@ -667,7 +669,7 @@ pub(super) fn load_firmware_set_bound(
     // paths back to a kernel id.
     let mut id_to_stem: BTreeMap<cellgov_ppu::prx_loader::PrxModuleId, String> = BTreeMap::new();
     let mut missing: Vec<&str> = Vec::new();
-    for stem in FOUNDATION_STEMS {
+    for stem in MIN_VIABLE_PRX_STEMS {
         let path = match find_firmware_module(&dir_path, stem) {
             Some(p) => p,
             None => {
@@ -705,7 +707,7 @@ pub(super) fn load_firmware_set_bound(
     }
     if !missing.is_empty() {
         println!(
-            "prx: firmware-set mode: foundation stems missing under {}: {missing:?}",
+            "prx: firmware-set mode: minimum viable PRX stems missing under {}: {missing:?}",
             dir_path.display()
         );
         return Vec::new();
