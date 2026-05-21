@@ -89,20 +89,21 @@ impl Lv2Host {
     pub(super) fn dispatch_ppu_thread_create(
         &mut self,
         id_ptr: u32,
-        entry_opd: u32,
+        param_ptr: u32,
         arg: u64,
         priority: u32,
         stacksize: u64,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // PS3 OPD is 8 bytes (u32 BE code_addr || u32 BE toc), not
-        // the 24-byte PowerOpen layout. Resolve before allocating so
-        // a bad pointer fails without observable side effects.
-        // first_chunk::<8> folds the read's length check and the
-        // slice-to-array conversion into one infallible-on-Some op,
-        // replacing the manual length check + copy_from_slice.
-        let opd_bytes: [u8; 8] = match rt
-            .read_committed(entry_opd as u64, 8)
+        // syscall 52 (`_sys_ppu_thread_create`) takes a
+        // `ppu_thread_param_t *` in r4 (here `param_ptr`), NOT an OPD
+        // pointer. Layout: `{ u32 entry_opd_ptr; u32 tls; }`. First
+        // deref gives the OPD address; the OPD itself is the standard
+        // 8-byte PS3 `{ u32 code; u32 toc; }` (not PowerOpen 24).
+        // Either deref failing routes to CELL_EFAULT before any side
+        // effects (stack alloc, TLS commit).
+        let param_bytes: [u8; 8] = match rt
+            .read_committed(param_ptr as u64, 8)
             .and_then(|bytes| bytes.first_chunk::<8>().copied())
         {
             Some(arr) => arr,
@@ -113,8 +114,35 @@ impl Lv2Host {
                 };
             }
         };
-        // Direct array indexing of [u8; 8] with constant offsets:
-        // bounds are compile-time-evaluable, no runtime panic site.
+        let entry_opd_ptr = u32::from_be_bytes([
+            param_bytes[0],
+            param_bytes[1],
+            param_bytes[2],
+            param_bytes[3],
+        ]);
+        // `param->tls` is a TLS-template pointer the title pre-built;
+        // CellGov's TLS-template path already covers per-thread init,
+        // so the field is captured here for future use but not yet
+        // routed into PpuThreadInitState.
+        let _param_tls = u32::from_be_bytes([
+            param_bytes[4],
+            param_bytes[5],
+            param_bytes[6],
+            param_bytes[7],
+        ]);
+
+        let opd_bytes: [u8; 8] = match rt
+            .read_committed(entry_opd_ptr as u64, 8)
+            .and_then(|bytes| bytes.first_chunk::<8>().copied())
+        {
+            Some(arr) => arr,
+            None => {
+                return Lv2Dispatch::Immediate {
+                    code: errno::CELL_EFAULT.into(),
+                    effects: vec![],
+                };
+            }
+        };
         let entry_code =
             u32::from_be_bytes([opd_bytes[0], opd_bytes[1], opd_bytes[2], opd_bytes[3]]) as u64;
         let entry_toc =
@@ -446,7 +474,7 @@ mod tests {
         let result = host.dispatch(
             Lv2Request::PpuThreadCreate {
                 id_ptr: 0x1000,
-                entry_opd: 0x200,
+                param_ptr: 0x200,
                 arg: 0xDEAD_BEEF,
                 priority: 1500,
                 stacksize: 0x10_000,
@@ -490,7 +518,7 @@ mod tests {
         let result = host.dispatch(
             Lv2Request::PpuThreadCreate {
                 id_ptr: 0x1000,
-                entry_opd: 0x200,
+                param_ptr: 0x200,
                 arg: 0,
                 priority: 1000,
                 stacksize: 0x8000,
@@ -517,7 +545,7 @@ mod tests {
         let result = host.dispatch(
             Lv2Request::PpuThreadCreate {
                 id_ptr: 0x1000,
-                entry_opd: 0x200,
+                param_ptr: 0x200,
                 arg: 0,
                 priority: 1000,
                 stacksize: 0x100,
@@ -541,7 +569,42 @@ mod tests {
         let result = host.dispatch(
             Lv2Request::PpuThreadCreate {
                 id_ptr: 0x10,
-                entry_opd: 0xDEAD_BEEF,
+                param_ptr: 0xDEAD_BEEF,
+                arg: 0,
+                priority: 1000,
+                stacksize: 0x4000,
+                flags: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(
+            result,
+            Lv2Dispatch::Immediate {
+                code: errno::CELL_EFAULT.into(),
+                effects: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn ppu_thread_create_bad_opd_via_param_returns_efault() {
+        // First deref succeeds (param sits in bounds) but the
+        // entry_opd_ptr it carries is unmapped, so the second
+        // deref must surface CELL_EFAULT.
+        let mut mem = cellgov_mem::GuestMemory::new(0x1_0000);
+        let mut param_bytes = [0u8; 8];
+        param_bytes[0..4].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
+        let param_range =
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x200), 8).unwrap();
+        mem.apply_commit(param_range, &param_bytes).unwrap();
+        let rt = crate::host::test_support::FakeRuntime::with_memory(mem);
+
+        let mut host = Lv2Host::new();
+        let result = host.dispatch(
+            Lv2Request::PpuThreadCreate {
+                id_ptr: 0x10,
+                param_ptr: 0x200,
                 arg: 0,
                 priority: 1000,
                 stacksize: 0x4000,

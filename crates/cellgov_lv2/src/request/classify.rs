@@ -80,10 +80,13 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
     }
 
     // Exhaustive match so a new SyscallNamespace variant forces a
-    // compile error. HleImport is consumed upstream by NID lookup;
-    // surfacing it as Unsupported keeps classify total.
+    // compile error. The UnresolvedImport namespace currently
+    // carries one entry; the NID rides in r4 (args[1]).
     match SyscallNamespace::of(syscall_num) {
-        Some(SyscallNamespace::HleImport) => {
+        Some(SyscallNamespace::UnresolvedImport) if syscall_num == syscall::UNRESOLVED_IMPORT => {
+            return Lv2Request::UnresolvedImport { nid: p!(1) };
+        }
+        Some(SyscallNamespace::UnresolvedImport) => {
             return Lv2Request::Unsupported {
                 number: syscall_num,
                 args: *args,
@@ -117,6 +120,7 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             arg_ptr: p!(5),
         },
         syscall::SPU_THREAD_GROUP_START => Lv2Request::SpuThreadGroupStart { group_id: p!(0) },
+        syscall::SPU_THREAD_GROUP_DESTROY => Lv2Request::SpuThreadGroupDestroy { id: p!(0) },
         syscall::SPU_THREAD_GROUP_JOIN => Lv2Request::SpuThreadGroupJoin {
             group_id: p!(0),
             cause_ptr: p!(1),
@@ -158,6 +162,16 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
         },
         syscall::PROCESS_GET_PARAMSFO => Lv2Request::ProcessGetParamsfo { buf_ptr: p!(0) },
         syscall::PROCESS_GET_PPU_GUID => Lv2Request::ProcessGetPpuGuid,
+        syscall::PROCESS_IS_SPU_LOCK_LINE_RESERVATION_ADDRESS => {
+            Lv2Request::ProcessIsSpuLockLineReservationAddress {
+                addr: p!(0),
+                flags: args[1],
+            }
+        }
+        syscall::SPU_INITIALIZE => Lv2Request::SpuInitialize {
+            max_usable_spu: p!(0),
+            max_raw_spu: p!(1),
+        },
         syscall::TIMER_CREATE => Lv2Request::TimerCreate { id_ptr: p!(0) },
         syscall::TIMER_DESTROY => Lv2Request::TimerDestroy { id: p!(0) },
         syscall::RWLOCK_CREATE => Lv2Request::RwlockCreate {
@@ -177,7 +191,7 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
         },
         syscall::PPU_THREAD_CREATE => Lv2Request::PpuThreadCreate {
             id_ptr: p!(0),
-            entry_opd: p!(1),
+            param_ptr: p!(1),
             arg: args[2],
             priority: s!(3),
             stacksize: args[4],
@@ -407,6 +421,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn classify_unresolved_import_pulls_nid_from_r4() {
+        // Trampoline body loads NID into r4 (args[1]) and sets r11
+        // to syscall::UNRESOLVED_IMPORT.
+        let args = [0xdead_dead, 0x1234_5678, 0, 0, 0, 0, 0, 0];
+        let req = classify(syscall::UNRESOLVED_IMPORT, &args);
+        assert_eq!(req, Lv2Request::UnresolvedImport { nid: 0x1234_5678 });
+    }
+
+    #[test]
+    fn classify_unresolved_import_namespace_above_base_is_unsupported() {
+        // A syscall in the UnresolvedImport namespace but not at
+        // the reserved UNRESOLVED_IMPORT slot routes to Unsupported.
+        // This keeps room for future per-slot trampolines that
+        // encode the slot index in the syscall number.
+        let args = [0; 8];
+        let req = classify(syscall::UNRESOLVED_IMPORT + 1, &args);
+        assert!(matches!(req, Lv2Request::Unsupported { .. }));
+    }
+
+    #[test]
     fn classify_spu_image_open() {
         let args = [0x1000, 0x2000, 0, 0, 0, 0, 0, 0];
         let req = classify(156, &args);
@@ -623,7 +657,7 @@ mod tests {
             classify(52, &args),
             Lv2Request::PpuThreadCreate {
                 id_ptr: 0x3000,
-                entry_opd: 0x2_0000,
+                param_ptr: 0x2_0000,
                 arg: 0xCAFE_BABE,
                 priority: 1500,
                 stacksize: 0x10_000,
@@ -661,7 +695,7 @@ mod tests {
     #[test]
     fn spu_thread_group_range_stubs_classify_as_unsupported() {
         let args = [0; 8];
-        for n in [171, 174, 175, 176, 179, 180, 192] {
+        for n in [174, 175, 176, 179, 180, 192] {
             let req = classify(n, &args);
             assert!(
                 matches!(req, Lv2Request::Unsupported { number, .. } if number == n),
@@ -989,6 +1023,8 @@ mod tests {
         (syscall::PROCESS_GET_SDK_VERSION, &[0, 1]),
         (syscall::PROCESS_GET_PARAMSFO, &[0]),
         (syscall::PROCESS_GET_PPU_GUID, &[]),
+        (syscall::PROCESS_IS_SPU_LOCK_LINE_RESERVATION_ADDRESS, &[0]),
+        (syscall::SPU_INITIALIZE, &[0, 1]),
         (syscall::TIMER_CREATE, &[0]),
         (syscall::TIMER_DESTROY, &[0]),
         (syscall::RWLOCK_CREATE, &[0, 1]),
@@ -1039,6 +1075,7 @@ mod tests {
         (syscall::SPU_THREAD_GROUP_CREATE, &[0, 1, 3]),
         (syscall::SPU_THREAD_INITIALIZE, &[0, 1, 2, 3, 4, 5]),
         (syscall::SPU_THREAD_GROUP_START, &[0]),
+        (syscall::SPU_THREAD_GROUP_DESTROY, &[0]),
         (syscall::SPU_THREAD_GROUP_TERMINATE, &[0]),
         (syscall::SPU_THREAD_GROUP_JOIN, &[0, 1, 2]),
         (syscall::SPU_THREAD_WRITE_MB, &[0, 1]),
@@ -1173,6 +1210,39 @@ mod tests {
                 "syscall {n:#x} must classify into Lv2",
             );
         }
+    }
+
+    #[test]
+    fn classify_process_is_spu_lock_line_reservation_address() {
+        let args = [0xE001_0000, 0x3, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(syscall::PROCESS_IS_SPU_LOCK_LINE_RESERVATION_ADDRESS, &args),
+            Lv2Request::ProcessIsSpuLockLineReservationAddress {
+                addr: 0xE001_0000,
+                flags: 0x3,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_spu_thread_group_destroy() {
+        let args = [0x1234, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(syscall::SPU_THREAD_GROUP_DESTROY, &args),
+            Lv2Request::SpuThreadGroupDestroy { id: 0x1234 }
+        );
+    }
+
+    #[test]
+    fn classify_spu_initialize() {
+        let args = [6, 1, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify(syscall::SPU_INITIALIZE, &args),
+            Lv2Request::SpuInitialize {
+                max_usable_spu: 6,
+                max_raw_spu: 1,
+            }
+        );
     }
 
     #[test]

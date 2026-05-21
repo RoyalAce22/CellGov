@@ -420,10 +420,11 @@ The NID lookup database (~5,327 entries) lives in
 human-readable name resolution in fault diagnostics.
 
 The PRX loader resolves every game import to a firmware OPD if
-one exists; there is no userspace HLE keep-list. The minimum
-viable PRX set loads in topological-sort order, with
-`module_start` invoked per module under a synthetic kernel-context
-OPD.
+one exists. Imports without a matching firmware export are
+patched to the unresolved-import trampoline (see "LV2 host"
+table). The minimum viable PRX set loads in topological-sort
+order, with `module_start` invoked per module under a synthetic
+kernel-context OPD.
 
 `run-game` exposes two env vars for firmware-loading experiments:
 `CELLGOV_PRX_BASE` overrides the firmware PRX load address, and
@@ -449,6 +450,7 @@ Classified into typed `Lv2Request` variants:
 
 | Syscall                           | Number           | Behavior                                                                                               |
 | --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `sys_process_is_spu_lock_line_reservation_address` | 14   | Returns 0 (SUCCESS) for any address; the deterministic-oracle does not partition guest memory into SPU-reservable vs. not. Behavioural oracle: `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_process.cpp:263`. |
 | `sys_process_exit`                | 22               | Cascades Finished to all units in the process.                                                         |
 | `sys_ppu_thread_exit`             | 41               | Finishes the calling unit; wakes joiners with the exit value.                                          |
 | `sys_ppu_thread_yield`            | 43               | No-op scheduling hint; round-robin picks the next runnable unit.                                       |
@@ -463,7 +465,9 @@ Classified into typed `Lv2Request` variants:
 | `sys_time_get_timezone`           | 144              | Writes zero through both out-pointers (UTC, no DST). CellGov has no host-time dependency.              |
 | `sys_spu_image_open`              | 156              | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                    |
 | `sys_spu_image_import`            | 158              | Registers `size` bytes at the guest pointer into the `ContentStore` and writes a `sys_spu_image_t` referring to the registered blob. |
+| `sys_spu_initialize`              | 169              | Returns CELL_OK; the deterministic-oracle does not partition the SPU pool into "usable" vs "raw" slots. `max_usable_spu` / `max_raw_spu` captured for tracing. |
 | `sys_spu_thread_group_create`     | 170              | Allocates a monotonic group id, writes it to guest pointer.                                            |
+| `sys_spu_thread_group_destroy`    | 171              | Withdraws the group from the table, scrubs unit / thread maps, returns CELL_OK. CELL_ESRCH on unknown id, CELL_EBUSY if any SPU in the group is still Running. |
 | `sys_spu_thread_initialize`       | 172              | Records image handle and args (copied at init time) per slot.                                          |
 | `sys_spu_thread_group_start`      | 173              | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
 | `sys_spu_thread_group_terminate`  | 177              | Stub: returns CELL_OK without teardown (logged as invariant break). Split from join so dispatch cannot conflate the two ABI shapes. |
@@ -483,6 +487,7 @@ Classified into typed `Lv2Request` variants:
 | `sys_fs_closedir`                 | 807              | Drops the dir-fd's snapshot and entry table. CELL_EBADF on unknown fd. |
 | `sys_fs_stat`                     | 808              | Path-keyed variant of `sys_fs_fstat`; manifest miss probes the mount table before returning CELL_FS_ENOENT. Same struct shape. |
 | `sys_fs_fstat`                    | 809              | Writes a 56-byte `CellFsStat` to `stat_out_ptr` (8-byte aligned). `mode = S_IFREG \| 0o444`, `size` from the backing blob, `blksize = 4096`, all timestamp fields zero (oracle has no host time). CELL_EBADF on unknown fd. |
+| `UnresolvedImport`                | (trampoline)     | Issued by the guest-resident unresolved-import trampoline when CRT0 calls through a GOT slot whose NID had no matching firmware export. The PRX loader patches such slots to point at a trampoline OPD that loads the NID into r4 and fires this syscall. Dispatcher prints a named diagnostic (`dispatch.unresolved_import: NID 0x... in namespace X`) and returns CELL_EINVAL so the next observable effect is a structured fault, not control-flow corruption into junk PCs. |
 
 ### PPU thread lifecycle
 
@@ -560,10 +565,10 @@ are not modeled in the thread-table state and fire an invariant-break
 log on first occurrence.
 
 All remaining syscalls fall through the host dispatcher returning
-CELL_OK with no effects. Unknown `Unsupported` numbers also fire
-`dispatch.unsupported_stub` once so a previously-unseen call surfaces
-at the stderr layer instead of silently masquerading as a CELL_OK
-success.
+CELL_OK with no effects. Unknown `Unsupported` numbers fire a
+`dispatch.unsupported_stub` log line at first occurrence so the
+syscall number surfaces at the stderr layer rather than silently
+returning a CELL_OK success.
 
 ### In-memory filesystem
 
@@ -1079,21 +1084,18 @@ NPUA80068`), or explicit manifest path (`--title-manifest
 
 - **flOw** (NPUA80001): PSN HDD. Manifest declares the
   `process-exit` checkpoint kind and enables `[rsx] mirror = true`
-  so the title's GCM put-pointer stores land in the FIFO cursor
-  instead of faulting; boot currently halts at a deterministic
-  FAULT (NULL bcctr in `m_InitEntityHierarchy`) before reaching
-  `sys_process_exit`. The manifest also declares a `[content]`
-  block of read-only blobs (`first.xml`, `Localization.xml`,
-  `Classes.xml`) registered into `Lv2Host::fs_store` at boot via
-  the boot-time content provider in `apps/cellgov_cli/src/game/content.rs`.
+  so the title's GCM put-pointer stores land in the FIFO cursor.
+  The manifest also declares a `[content]` block of read-only
+  blobs (`first.xml`, `Localization.xml`, `Classes.xml`)
+  registered into `Lv2Host::fs_store` at boot via the boot-time
+  content provider in `apps/cellgov_cli/src/game/content.rs`.
 - **Super Stardust HD** (NPUA80068): PSN HDD, checkpoint is
   `first-rsx-write` -- SSHD's attract-mode loop never exits, so
   the harness treats the first PPU write into the `rsx` reserved
   region as a checkpoint hit.
 - **WipEout HD Fury** (BCES00664): disc ISO, same `first-rsx-write`
-  checkpoint kind as SSHD; reaches the put-pointer checkpoint at
-  step 45,695. Disc titles add a `[source] kind = "disc"` block to
-  the manifest; `resolve_eboot` then looks under
+  checkpoint kind as SSHD. Disc titles add a `[source] kind = "disc"`
+  block to the manifest; `resolve_eboot` then looks under
   `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead of
   the PSN HDD layout. The encrypted `EBOOT.BIN` is decrypted once
   via `cellgov_firmware decrypt-self`.
@@ -1177,38 +1179,61 @@ Common boot sequence (per-title numbers below):
 2. Load the minimum viable PRX set's SPRX closure (atomic-batch
    reloc applier), apply relocations, surface exports.
 3. Resolve every game GOT slot against the firmware export
-   table.
+   table. NIDs without a matching export are patched to a
+   guest-resident *unresolved-import trampoline* (one OPD per
+   NID, body issues `Lv2Request::UnresolvedImport { nid }`),
+   so a call through such a slot becomes a structured
+   diagnostic fault instead of a control-flow jump into
+   uninitialised memory.
 4. Pre-initialize TLS from the game's PT_TLS segment.
 5. Execute each loaded module's `module_start` in topo order
    (liblv2 returns cleanly at ~24K steps).
 6. Run the game's CRT0 from the ELF entry point.
 
-With the userspace HLE retired, foundation-title boot is
-unreliable: any LV2 syscall the firmware modules invoke that
-CellGov has not implemented surfaces as `dispatch.unsupported_stub`
-followed by guest-side bad behaviour. The HLE handlers used to
-paper over these gaps; making each gap explicit is the point.
+Foundation-title boot exercises the firmware modules
+end-to-end. The unresolved-import trampoline catches GOT
+slots without a firmware export and surfaces them as a named
+diagnostic via `Lv2Request::UnresolvedImport`. LV2 syscalls
+that CellGov has not implemented surface as a
+`dispatch.unsupported_stub` log line at first occurrence and
+return CELL_OK. Each fault driver is a named NID or syscall
+number; the per-title narratives below name the current
+frontier per title.
 
 **flOw (NPUA80001).** The title's manifest enables `[rsx] mirror
 = true` so its put-pointer store at `0xC0000040` lands in the
-FIFO cursor instead of faulting. Boot currently faults early
-(~7K steps) on an unimplemented LV2 syscall the firmware
-sysPrxForUser invokes.
+FIFO cursor. Under firmware-set boot, flOw reaches a
+firmware-side spin-poll inside `libgcm_sys.prx` at module-
+internal vaddr `0x7a08`: the poll reads `*(r3 + 8)`, compares
+to `r31`, and sleeps 30 microseconds via `sys_timer_usleep`
+when the values differ. The polled location holds the value
+the RSX would post via DMA / notify on real hardware. A
+child PPU thread is parked on `EventQueueReceive { out_ptr:
+0xD00FEED0, payload: None }`, waiting for an RSX-posted event
+on the same channel. Under default (single-PRX) boot, flOw
+calls through an unresolved-import trampoline for
+`cellSysmoduleLoadModule` (NID `0x32267a31`) at step 9,048.
 
 **Super Stardust HD (NPUA80068).** The harness uses a
 `FirstRsxWrite` checkpoint because the attract-mode loop never
-calls `sys_process_exit`. The first RSX write (put-pointer
-update to the GCM control register at 0xC0000040) triggers at
-step 14,352,589 (~3.7B instructions) under HLE; the post-pivot
-firmware-driven anchor is recaptured in titles.md.
+calls `sys_process_exit`. Under firmware-set boot, SSHD runs
+past 15.6M steps; one `dispatch.ppu_thread_create_unmodeled_flags`
+log line for `flags=0x10000` fires before the cap. Under
+default (single-PRX) boot, SSHD calls through an
+unresolved-import trampoline for `cellSysmoduleInitialize`
+(NID `0x63ff6ff9`) at step 14,342,058.
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
-SELF decryption via `cellgov_firmware decrypt-self`. Same
-`FirstRsxWrite` checkpoint kind as SSHD; faults at ~45K steps on
-an unimplemented LV2 syscall under firmware boot. See
-[tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md)
-for history.
+SELF decryption via `cellgov_firmware decrypt-self`. Under
+firmware-set boot, WipEout reaches step 43,066 then
+COMMIT_FAULTs on a write to `0x400000ec` inside the cellGcm
+RSX descriptor region; the descriptor writes target an IO
+window the kernel-side surface does not back. Under default
+(single-PRX) boot, WipEout calls through an unresolved-import
+trampoline for `cellSysutilRegisterCallback` (NID
+`0x9d98afa0`) at step 42,950. See
+[tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
 
 ## Microtest corpus
 

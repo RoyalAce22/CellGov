@@ -20,52 +20,82 @@ pub(crate) fn execute_vx(state: &mut PpuState, xo: u16, vt: u8, va: u8, vb: u8) 
 
     let result = match xo {
         // -- Integer add/sub --
-        0x000 => vadd_bytes(a, b), // vaddubm  // [AltiVec-PEM p:6-35 s:6.2] Vector Add Unsigned Byte Modulo
-        0x040 => vadd_halfs(a, b), // vadduhm  // [AltiVec-PEM p:6-37 s:6.2] Vector Add Unsigned Halfword Modulo
-        0x080 => vadd_words(a, b), // vadduwm  // [AltiVec-PEM p:6-39 s:6.2] Vector Add Unsigned Word Modulo
+        // [AltiVec-PEM p:6-35 s:6.2] vaddubm: Vector Add Unsigned Byte Modulo
+        0x000 => vadd_bytes(a, b),
+        // [AltiVec-PEM p:6-37 s:6.2] vadduhm: Vector Add Unsigned Halfword Modulo
+        0x040 => vadd_halfs(a, b),
+        // [AltiVec-PEM p:6-39 s:6.2] vadduwm: Vector Add Unsigned Word Modulo
+        0x080 => vadd_words(a, b),
 
         // -- Integer compare --
-        0x086 => vcmpequw(a, b), // vcmpequw   // [AltiVec-PEM p:6-56 s:6.2] Vector Compare Equal-to Unsigned Word
+        // [AltiVec-PEM p:6-56 s:6.2] vcmpequw: Vector Compare Equal-to Unsigned Word
+        0x086 => vcmpequw(a, b),
 
         // -- Logical --
-        0xac4 => a & b, // vand             // [AltiVec-PEM p:6-41 s:6.2] Vector Logical AND
-        0x6c4 => a | b, // vor              // [AltiVec-PEM p:6-111 s:6.2] Vector Logical OR
-        0x4c4 => a ^ b, // vxor (fallback)  // [AltiVec-PEM p:6-177 s:6.2] Vector Logical XOR
-        0x8c4 => a & !b, // vandc            // [AltiVec-PEM p:6-42 s:6.2] Vector Logical AND with Complement
-        0x7c4 => !(a | b), // vnor             // [AltiVec-PEM p:6-110 s:6.2] Vector Logical NOR
+        // [AltiVec-PEM p:6-41 s:6.2] vand: Vector Logical AND
+        0xac4 => a & b,
+        // [AltiVec-PEM p:6-111 s:6.2] vor: Vector Logical OR
+        0x6c4 => a | b,
+        // [AltiVec-PEM p:6-177 s:6.2] vxor: Vector Logical XOR (fallback path)
+        0x4c4 => a ^ b,
+        // [AltiVec-PEM p:6-42 s:6.2] vandc: Vector Logical AND with Complement
+        0x8c4 => a & !b,
+        // [AltiVec-PEM p:6-110 s:6.2] vnor: Vector Logical NOR
+        0x7c4 => !(a | b),
 
         // -- Shift --
-        0x284 => vslw(a, b), // vslw          // [AltiVec-PEM p:6-139 s:6.2] Vector Shift Left Integer Word
-        0x384 => vsrw(a, b), // vsrw          // [AltiVec-PEM p:6-154 s:6.2] Vector Shift Right Word
-        0x484 => vsraw(a, b), // vsraw         // [AltiVec-PEM p:6-150 s:6.2] Vector Shift Right Algebraic Word
-        0x444 => vsrah(a, b), // vsrah         // [AltiVec-PEM p:6-149 s:6.2] Vector Shift Right Algebraic Half Word
-        0x304 => vsrab(a, b), // vsrab         // [AltiVec-PEM p:6-148 s:6.2] Vector Shift Right Algebraic Byte
+        // [AltiVec-PEM p:6-139 s:6.2] vslw: Vector Shift Left Integer Word
+        0x284 => vslw(a, b),
+        // [AltiVec-PEM p:6-154 s:6.2] vsrw: Vector Shift Right Word
+        0x384 => vsrw(a, b),
+        // [AltiVec-PEM p:6-150 s:6.2] vsraw: Vector Shift Right Algebraic Word
+        0x484 => vsraw(a, b),
+        // [AltiVec-PEM p:6-149 s:6.2] vsrah: Vector Shift Right Algebraic Half Word
+        0x444 => vsrah(a, b),
+        // [AltiVec-PEM p:6-148 s:6.2] vsrab: Vector Shift Right Algebraic Byte
+        0x304 => vsrab(a, b),
 
         // -- Splat (PPC AltiVec ISA XO values) --
-        0x20c => vspltb(b, va), // vspltb (va is byte index)     // [AltiVec-PEM p:6-140 s:6.2] Vector Splat Byte
-        0x24c => vsplth(b, va), // vsplth (va is halfword index) // [AltiVec-PEM p:6-141 s:6.2] Vector Splat Half Word
-        0x28c => vspltw(b, va), // vspltw (va is word index)     // [AltiVec-PEM p:6-145 s:6.2] Vector Splat Word
-        0x30c => vspltisb(va), // vspltisb (sign-extended 5-bit imm) // [AltiVec-PEM p:6-142 s:6.2] Vector Splat Immediate Signed Byte
-        0x34c => vspltish(va), // vspltish    // [AltiVec-PEM p:6-143 s:6.2] Vector Splat Immediate Signed Half Word
-        0x38c => vspltisw(va), // vspltisw    // [AltiVec-PEM p:6-144 s:6.2] Vector Splat Immediate Signed Word
+        // [AltiVec-PEM p:6-140 s:6.2] vspltb: Vector Splat Byte (va is byte index)
+        0x20c => vspltb(b, va),
+        // [AltiVec-PEM p:6-141 s:6.2] vsplth: Vector Splat Half Word (va is halfword index)
+        0x24c => vsplth(b, va),
+        // [AltiVec-PEM p:6-145 s:6.2] vspltw: Vector Splat Word (va is word index)
+        0x28c => vspltw(b, va),
+        // [AltiVec-PEM p:6-142 s:6.2] vspltisb: Vector Splat Immediate Signed Byte (sign-extended 5-bit imm)
+        0x30c => vspltisb(va),
+        // [AltiVec-PEM p:6-143 s:6.2] vspltish: Vector Splat Immediate Signed Half Word
+        0x34c => vspltish(va),
+        // [AltiVec-PEM p:6-144 s:6.2] vspltisw: Vector Splat Immediate Signed Word
+        0x38c => vspltisw(va),
 
         // -- Merge --
-        0x00c => vmrghb(a, b), // vmrghb       // [AltiVec-PEM p:6-89 s:6.2] Vector Merge High Byte
-        0x04c => vmrghh(a, b), // vmrghh       // [AltiVec-PEM p:6-90 s:6.2] Vector Merge High Half Word
-        0x08c => vmrghw(a, b), // vmrghw       // [AltiVec-PEM p:6-91 s:6.2] Vector Merge High Word
-        0x40a => vmrglb(a, b), // vmrglb       // [AltiVec-PEM p:6-92 s:6.2] Vector Merge Low Byte
-        0x44a => vmrglh(a, b), // vmrglh       // [AltiVec-PEM p:6-93 s:6.2] Vector Merge Low Half Word
-        0x48a => vmrglw(a, b), // vmrglw       // [AltiVec-PEM p:6-94 s:6.2] Vector Merge Low Word
+        // [AltiVec-PEM p:6-89 s:6.2] vmrghb: Vector Merge High Byte
+        0x00c => vmrghb(a, b),
+        // [AltiVec-PEM p:6-90 s:6.2] vmrghh: Vector Merge High Half Word
+        0x04c => vmrghh(a, b),
+        // [AltiVec-PEM p:6-91 s:6.2] vmrghw: Vector Merge High Word
+        0x08c => vmrghw(a, b),
+        // [AltiVec-PEM p:6-92 s:6.2] vmrglb: Vector Merge Low Byte
+        0x40a => vmrglb(a, b),
+        // [AltiVec-PEM p:6-93 s:6.2] vmrglh: Vector Merge Low Half Word
+        0x44a => vmrglh(a, b),
+        // [AltiVec-PEM p:6-94 s:6.2] vmrglw: Vector Merge Low Word
+        0x48a => vmrglw(a, b),
 
         // -- Multiply --
-        0x048 => vmulouh(a, b), // vmulouh     // [AltiVec-PEM p:6-108 s:6.2] Vector Multiply Odd Unsigned Half Word
+        // [AltiVec-PEM p:6-108 s:6.2] vmulouh: Vector Multiply Odd Unsigned Half Word
+        0x048 => vmulouh(a, b),
 
         // -- Subtract --
-        0x600 => vsub_ubytes_sat(a, b), // vsububs (saturating)  // [AltiVec-PEM p:6-161 s:6.2] Vector Subtract Unsigned Byte Saturate
+        // [AltiVec-PEM p:6-161 s:6.2] vsububs: Vector Subtract Unsigned Byte Saturate
+        0x600 => vsub_ubytes_sat(a, b),
 
         // -- Int <-> Float conversions (VX-form, va field is uimm scale) --
-        0x34a => vcfsx(b, va), // vcfsx        // [AltiVec-PEM p:6-49 s:6.2] Vector Convert from Signed Fixed-Point Word
-        0x38a => vcfux(b, va), // vcfux        // [AltiVec-PEM p:6-50 s:6.2] Vector Convert from Unsigned Fixed-Point Word
+        // [AltiVec-PEM p:6-49 s:6.2] vcfsx: Vector Convert from Signed Fixed-Point Word
+        0x34a => vcfsx(b, va),
+        // [AltiVec-PEM p:6-50 s:6.2] vcfux: Vector Convert from Unsigned Fixed-Point Word
+        0x38a => vcfux(b, va),
 
         _ => {
             return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(xo as u64));
@@ -90,8 +120,10 @@ pub(crate) fn execute_va(
     let c = state.vr[vc as usize];
 
     let result = match xo {
-        0x2a => vsel(a, b, c), // vsel        // [AltiVec-PEM p:6-133 s:6.2] Vector Select
-        0x2b => vperm(a, b, c), // vperm       // [AltiVec-PEM p:6-112 s:6.2] Vector Permute
+        // [AltiVec-PEM p:6-133 s:6.2] vsel: Vector Select
+        0x2a => vsel(a, b, c),
+        // [AltiVec-PEM p:6-112 s:6.2] vperm: Vector Permute
+        0x2b => vperm(a, b, c),
         _ => {
             return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(xo as u64));
         }

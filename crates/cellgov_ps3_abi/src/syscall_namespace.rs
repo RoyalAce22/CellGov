@@ -3,8 +3,11 @@
 //! Two disjoint, contiguous ranges share the r11 word:
 //!
 //! - **`Lv2`** -- real PS3 LV2 syscalls (`0..0x10000`).
-//! - **`HleImport`** -- CellGov-emitted HLE import trampolines
-//!   (`0x10000..0x80000`), one number per PRX import.
+//! - **`UnresolvedImport`** -- CellGov-emitted unresolved-import
+//!   pseudo-syscall (`0x10000..0x80000`). Fired by the trampoline
+//!   installed in unpatched GOT slots; the NID rides in r4 and the
+//!   number itself currently sits at the namespace start
+//!   ([`crate::syscall::UNRESOLVED_IMPORT`]).
 //!
 //! The LEV-aware dispatch-hint classifier lives in
 //! `cellgov_lv2::syscall_classification`; this module exposes pure
@@ -33,8 +36,11 @@ use crate::syscall;
 pub enum SyscallNamespace {
     /// Real LV2 syscalls in `0..0x10000`.
     Lv2,
-    /// CellGov-emitted HLE import trampolines in `0x10000..0x80000`.
-    HleImport,
+    /// CellGov-emitted unresolved-import pseudo-syscalls in
+    /// `0x10000..0x80000`. Currently a single entry sits at the
+    /// namespace start; the NID for the offending GOT slot rides in
+    /// r4 at dispatch.
+    UnresolvedImport,
 }
 
 impl SyscallNamespace {
@@ -43,7 +49,7 @@ impl SyscallNamespace {
     pub const fn range(self) -> (u64, u64) {
         match self {
             Self::Lv2 => (0, 0x10000),
-            Self::HleImport => (0x10000, 0x80000),
+            Self::UnresolvedImport => (0x10000, 0x80000),
         }
     }
 
@@ -78,15 +84,15 @@ impl SyscallNamespace {
 
     /// Classify a raw r11 value into its namespace.
     ///
-    /// Returns `None` for values above [`Self::HleImport`].
+    /// Returns `None` for values above [`Self::UnresolvedImport`].
     #[inline]
     pub const fn of(syscall_num: u64) -> Option<SyscallNamespace> {
         let (_lv2_lo, lv2_hi) = Self::Lv2.range();
-        let (_hle_lo, hle_hi) = Self::HleImport.range();
+        let (_unres_lo, unres_hi) = Self::UnresolvedImport.range();
         if syscall_num < lv2_hi {
             Some(Self::Lv2)
-        } else if syscall_num < hle_hi {
-            Some(Self::HleImport)
+        } else if syscall_num < unres_hi {
+            Some(Self::UnresolvedImport)
         } else {
             None
         }
@@ -111,11 +117,11 @@ impl SyscallNamespace {
 // the reserved range.
 const _: () = {
     let (lv2_lo, lv2_hi) = SyscallNamespace::Lv2.range();
-    let (hle_lo, _hle_hi) = SyscallNamespace::HleImport.range();
+    let (unres_lo, _unres_hi) = SyscallNamespace::UnresolvedImport.range();
     assert!(lv2_lo == 0, "Lv2 namespace must start at 0");
     assert!(
-        lv2_hi == hle_lo,
-        "Lv2 and HleImport must be contiguous (no gap)",
+        lv2_hi == unres_lo,
+        "Lv2 and UnresolvedImport must be contiguous (no gap)",
     );
 };
 
@@ -125,6 +131,7 @@ const _: () = {
 const LV2_SYSCALL_CATALOG: &[u64] = &[
     syscall::PROCESS_GETPID,
     syscall::PROCESS_GET_NUMBER_OF_OBJECT,
+    syscall::PROCESS_IS_SPU_LOCK_LINE_RESERVATION_ADDRESS,
     syscall::PROCESS_GETPPID,
     syscall::PROCESS_EXIT,
     syscall::PROCESS_GET_SDK_VERSION,
@@ -180,7 +187,9 @@ const LV2_SYSCALL_CATALOG: &[u64] = &[
     syscall::TIME_GET_TIMEBASE_FREQUENCY,
     syscall::SPU_IMAGE_OPEN,
     syscall::SPU_IMAGE_IMPORT,
+    syscall::SPU_INITIALIZE,
     syscall::SPU_THREAD_GROUP_CREATE,
+    syscall::SPU_THREAD_GROUP_DESTROY,
     syscall::SPU_THREAD_INITIALIZE,
     syscall::SPU_THREAD_GROUP_START,
     syscall::SPU_THREAD_GROUP_TERMINATE,
@@ -227,12 +236,15 @@ mod tests {
     #[test]
     fn namespace_ranges_are_pinned() {
         assert_eq!(SyscallNamespace::Lv2.range(), (0, 0x10000));
-        assert_eq!(SyscallNamespace::HleImport.range(), (0x10000, 0x80000));
+        assert_eq!(
+            SyscallNamespace::UnresolvedImport.range(),
+            (0x10000, 0x80000)
+        );
     }
 
     #[test]
     fn namespaces_are_pairwise_disjoint() {
-        let all = [SyscallNamespace::Lv2, SyscallNamespace::HleImport];
+        let all = [SyscallNamespace::Lv2, SyscallNamespace::UnresolvedImport];
         for (i, a) in all.iter().enumerate() {
             for b in &all[i + 1..] {
                 let (a_lo, a_hi) = a.range();
@@ -252,9 +264,9 @@ mod tests {
             (SyscallNamespace::Lv2, 0u32),
             (SyscallNamespace::Lv2, 0x8000),
             (SyscallNamespace::Lv2, 0xFFFF),
-            (SyscallNamespace::HleImport, 0),
-            (SyscallNamespace::HleImport, 0x40000),
-            (SyscallNamespace::HleImport, 0x6FFFF),
+            (SyscallNamespace::UnresolvedImport, 0),
+            (SyscallNamespace::UnresolvedImport, 0x40000),
+            (SyscallNamespace::UnresolvedImport, 0x6FFFF),
         ];
         for (ns, index) in cases {
             let n = ns.encode(index);
@@ -266,7 +278,7 @@ mod tests {
     #[test]
     fn encode_at_max_index_fits_each_namespace() {
         assert_eq!(SyscallNamespace::Lv2.encode(0xFFFF), 0xFFFF);
-        assert_eq!(SyscallNamespace::HleImport.encode(0x6FFFF), 0x7FFFF);
+        assert_eq!(SyscallNamespace::UnresolvedImport.encode(0x6FFFF), 0x7FFFF);
     }
 
     #[test]
@@ -286,11 +298,11 @@ mod tests {
         assert_eq!(SyscallNamespace::of(0xFFFF), Some(SyscallNamespace::Lv2));
         assert_eq!(
             SyscallNamespace::of(0x10000),
-            Some(SyscallNamespace::HleImport)
+            Some(SyscallNamespace::UnresolvedImport)
         );
         assert_eq!(
             SyscallNamespace::of(0x7FFFF),
-            Some(SyscallNamespace::HleImport)
+            Some(SyscallNamespace::UnresolvedImport)
         );
     }
 
@@ -305,7 +317,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "syscall index out of range")]
     fn encode_panics_at_hle_upper_bound() {
-        let _ = SyscallNamespace::HleImport.encode(0x70000);
+        let _ = SyscallNamespace::UnresolvedImport.encode(0x70000);
     }
 
     #[test]
@@ -313,7 +325,7 @@ mod tests {
         assert_eq!(SyscallNamespace::Lv2.try_encode(0), Some(0));
         assert_eq!(SyscallNamespace::Lv2.try_encode(0xFFFF), Some(0xFFFF));
         assert_eq!(
-            SyscallNamespace::HleImport.try_encode(0x6FFFF),
+            SyscallNamespace::UnresolvedImport.try_encode(0x6FFFF),
             Some(0x7FFFF),
         );
     }
@@ -321,7 +333,7 @@ mod tests {
     #[test]
     fn try_encode_returns_none_at_upper_bound() {
         assert_eq!(SyscallNamespace::Lv2.try_encode(0x10000), None);
-        assert_eq!(SyscallNamespace::HleImport.try_encode(0x70000), None);
+        assert_eq!(SyscallNamespace::UnresolvedImport.try_encode(0x70000), None);
     }
 
     #[test]

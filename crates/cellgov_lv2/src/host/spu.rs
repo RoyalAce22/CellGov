@@ -12,7 +12,7 @@ use cellgov_ps3_abi::sys_spu;
 use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::request::Lv2Request;
-use crate::thread_group::{GroupState, MAX_SLOTS_PER_GROUP};
+use crate::thread_group::{DestroyGroupError, GroupState, MAX_SLOTS_PER_GROUP};
 
 impl Lv2Host {
     /// `sys_spu_image_import` -- register `size` bytes at `img_ptr`
@@ -183,6 +183,21 @@ impl Lv2Host {
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![effect],
+        }
+    }
+
+    /// `sys_spu_thread_group_destroy`: withdraw a group whose state is
+    /// not [`GroupState::Running`]. Unknown id -> CELL_ESRCH; running
+    /// group -> CELL_EBUSY (the title must terminate or join first).
+    pub(super) fn dispatch_group_destroy(&mut self, group_id: u32) -> Lv2Dispatch {
+        let code = match self.groups.destroy(group_id) {
+            Ok(()) => 0,
+            Err(DestroyGroupError::Unknown) => errno::CELL_ESRCH.into(),
+            Err(DestroyGroupError::Busy) => errno::CELL_EBUSY.into(),
+        };
+        Lv2Dispatch::Immediate {
+            code,
+            effects: vec![],
         }
     }
 

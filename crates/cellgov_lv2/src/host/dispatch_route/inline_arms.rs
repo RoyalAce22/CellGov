@@ -177,7 +177,7 @@ impl Lv2Host {
     pub(super) fn dispatch_ppu_thread_create_with_flag_log(
         &mut self,
         id_ptr: u32,
-        entry_opd: u32,
+        param_ptr: u32,
         arg: u64,
         priority: i32,
         stacksize: u64,
@@ -199,7 +199,7 @@ impl Lv2Host {
         // case it casts to a large u32 and the scheduler ignores it
         // (the round-robin does not consult priority).
         let priority = priority as u32;
-        self.dispatch_ppu_thread_create(id_ptr, entry_opd, arg, priority, stacksize, rt)
+        self.dispatch_ppu_thread_create(id_ptr, param_ptr, arg, priority, stacksize, rt)
     }
 
     /// `sys_ss_access_control_engine`. Oracle:
@@ -373,6 +373,46 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
+        Lv2Dispatch::Immediate {
+            code: errno::CELL_EINVAL.into(),
+            effects: vec![],
+        }
+    }
+
+    /// `UnresolvedImport` dispatch: the trampoline planted in an
+    /// unpatched GOT slot fired. Log the NID + resolved name (if
+    /// known) and return CELL_EINVAL so the title gets a real
+    /// errno rather than control-flow corruption.
+    pub(super) fn dispatch_unresolved_import(
+        &mut self,
+        nid: u32,
+        _requester: cellgov_event::UnitId,
+    ) -> Lv2Dispatch {
+        match cellgov_ps3_abi::nid::lookup(nid) {
+            Some((module, name)) => {
+                let module_label = if module.is_empty() {
+                    "<unknown>"
+                } else {
+                    module
+                };
+                self.log_invariant_break(
+                    "dispatch.unresolved_import",
+                    format_args!(
+                        "GOT slot for NID 0x{nid:08x} ({module_label}::{name}) was not bound \
+                         by patch_got_atomic; returning CELL_EINVAL",
+                    ),
+                );
+            }
+            None => {
+                self.log_invariant_break(
+                    "dispatch.unresolved_import",
+                    format_args!(
+                        "GOT slot for NID 0x{nid:08x} (no name in NID db) was not bound by \
+                         patch_got_atomic; returning CELL_EINVAL",
+                    ),
+                );
+            }
+        }
         Lv2Dispatch::Immediate {
             code: errno::CELL_EINVAL.into(),
             effects: vec![],

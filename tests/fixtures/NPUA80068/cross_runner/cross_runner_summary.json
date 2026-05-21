@@ -1,46 +1,22 @@
 {
   "convergence": {
-    "kind": "yes"
+    "kind": "no",
+    "reason": {
+      "kind": "outcome_mismatch",
+      "cellgov": "Fault",
+      "rpcs3": "Completed"
+    }
   },
   "byte_parity": {
-    "kind": "pending",
-    "non_semantic_bytes": 620,
-    "unclassified_bytes": 104
-  },
-  "per_class_bytes": {
-    "elf_header": 3,
-    "hle_opd_slot": 617,
-    "unclassified": 104
-  },
-  "unclassified_bytes": 104,
-  "unclassified_runs": [
-    {
-      "region_name": "data",
-      "offset": 257895,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 257916,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 257927,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 295232,
-      "length": 100
+    "kind": "diverge",
+    "reason": {
+      "kind": "outcome_mismatch",
+      "cellgov": "Fault",
+      "rpcs3": "Completed"
     }
-  ],
-  "lowest_offset_class": [
-    "elf_header",
-    {
-      "name": "code",
-      "addr": 65536
-    },
-    53
-  ]
+  },
+  "per_class_bytes": {},
+  "unclassified_bytes": 0,
+  "unclassified_runs": [],
+  "lowest_offset_class": null
 }

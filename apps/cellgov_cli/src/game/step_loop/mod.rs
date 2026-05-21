@@ -108,6 +108,7 @@ pub(super) fn step_loop(
                             rt,
                             err,
                             *ctx.steps,
+                            step.unit,
                             &ctx.pc_ring,
                             &ctx.pc_ring_cursor,
                         );

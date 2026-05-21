@@ -10,6 +10,12 @@ pub const PROCESS_GETPID: u64 = 1;
 /// `sys_process_get_number_of_object`.
 pub const PROCESS_GET_NUMBER_OF_OBJECT: u64 = 12;
 
+/// `sys_process_is_spu_lock_line_reservation_address` -- check
+/// whether `addr` falls in the SPU lock-line reservation range.
+/// Behavioural oracle:
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_process.cpp:263`.
+pub const PROCESS_IS_SPU_LOCK_LINE_RESERVATION_ADDRESS: u64 = 14;
+
 /// `sys_process_getppid`.
 pub const PROCESS_GETPPID: u64 = 18;
 
@@ -145,8 +151,17 @@ pub const TIME_GET_TIMEBASE_FREQUENCY: u64 = 147;
 pub const SPU_IMAGE_OPEN: u64 = 156;
 /// `sys_spu_image_import`.
 pub const SPU_IMAGE_IMPORT: u64 = 158;
+/// `sys_spu_initialize` -- announce per-process SPU resource
+/// limits (max usable / max raw SPUs). Behavioural oracle:
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_spu.cpp:455`.
+pub const SPU_INITIALIZE: u64 = 169;
 /// `sys_spu_thread_group_create`.
 pub const SPU_THREAD_GROUP_CREATE: u64 = 170;
+/// `sys_spu_thread_group_destroy` -- destroy a non-running thread
+/// group. Returns CELL_ESRCH on unknown id, CELL_EBUSY when the
+/// group is still running. Behavioural oracle:
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_spu.cpp:1118`.
+pub const SPU_THREAD_GROUP_DESTROY: u64 = 171;
 /// `sys_spu_thread_initialize`.
 pub const SPU_THREAD_INITIALIZE: u64 = 172;
 /// `sys_spu_thread_group_start`.
@@ -224,6 +239,16 @@ pub const SYS_RSX_CONTEXT_ATTRIBUTE: u64 = 674;
 /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_ss.cpp`.
 pub const SS_ACCESS_CONTROL_ENGINE: u64 = 871;
 
+/// CellGov-private pseudo-syscall: fired by the unresolved-import
+/// trampoline when the guest calls through a GOT slot whose NID
+/// has no firmware export. The trampoline loads the NID into r4
+/// and the dispatcher emits a structured diagnostic.
+///
+/// Sits at the start of [`crate::syscall_namespace::SyscallNamespace::UnresolvedImport`]
+/// so the namespace classifier routes it without colliding with
+/// the LV2 syscall range (0..0x10000).
+pub const UNRESOLVED_IMPORT: u64 = 0x10000;
+
 /// Every LV2 syscall number this module exposes as a `pub const`,
 /// in declaration order. Consumers iterate this to drive
 /// classifier-coverage cross-checks (e.g.
@@ -240,6 +265,7 @@ pub const SS_ACCESS_CONTROL_ENGINE: u64 = 871;
 pub const ALL_LV2_NUMBERS: &[u64] = &[
     PROCESS_GETPID,
     PROCESS_GET_NUMBER_OF_OBJECT,
+    PROCESS_IS_SPU_LOCK_LINE_RESERVATION_ADDRESS,
     PROCESS_GETPPID,
     PROCESS_EXIT,
     PROCESS_GET_SDK_VERSION,
@@ -295,7 +321,9 @@ pub const ALL_LV2_NUMBERS: &[u64] = &[
     TIME_GET_TIMEBASE_FREQUENCY,
     SPU_IMAGE_OPEN,
     SPU_IMAGE_IMPORT,
+    SPU_INITIALIZE,
     SPU_THREAD_GROUP_CREATE,
+    SPU_THREAD_GROUP_DESTROY,
     SPU_THREAD_INITIALIZE,
     SPU_THREAD_GROUP_START,
     SPU_THREAD_GROUP_TERMINATE,

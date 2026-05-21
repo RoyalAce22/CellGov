@@ -133,14 +133,25 @@ pub(super) fn primary_attrs() -> PpuThreadAttrs {
     }
 }
 
-pub(super) fn opd_runtime(opd_addr: u32, entry_code: u64, entry_toc: u64) -> FakeRuntime {
+/// Lay out the two-step indirection that `_sys_ppu_thread_create`
+/// expects in guest memory: a `ppu_thread_param_t` at `param_addr`
+/// whose first u32 points at an OPD planted 8 bytes after it, and
+/// that OPD's `{ code, toc }` pair.
+pub(super) fn opd_runtime(param_addr: u32, entry_code: u64, entry_toc: u64) -> FakeRuntime {
     let mut mem = GuestMemory::new(0x1_0000);
-    let range = ByteRange::new(GuestAddr::new(opd_addr as u64), 8).unwrap();
-    let mut bytes = [0u8; 8];
-    // PS3 OPDs are 8 bytes: u32 BE code | u32 BE toc.
-    bytes[0..4].copy_from_slice(&(entry_code as u32).to_be_bytes());
-    bytes[4..8].copy_from_slice(&(entry_toc as u32).to_be_bytes());
-    mem.apply_commit(range, &bytes).unwrap();
+    let opd_addr = param_addr + 8;
+
+    let mut param_bytes = [0u8; 8];
+    param_bytes[0..4].copy_from_slice(&opd_addr.to_be_bytes());
+    let param_range = ByteRange::new(GuestAddr::new(param_addr as u64), 8).unwrap();
+    mem.apply_commit(param_range, &param_bytes).unwrap();
+
+    let mut opd_bytes = [0u8; 8];
+    opd_bytes[0..4].copy_from_slice(&(entry_code as u32).to_be_bytes());
+    opd_bytes[4..8].copy_from_slice(&(entry_toc as u32).to_be_bytes());
+    let opd_range = ByteRange::new(GuestAddr::new(opd_addr as u64), 8).unwrap();
+    mem.apply_commit(opd_range, &opd_bytes).unwrap();
+
     FakeRuntime::with_memory(mem)
 }
 

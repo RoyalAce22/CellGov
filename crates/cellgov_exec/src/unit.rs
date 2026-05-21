@@ -124,6 +124,15 @@ pub trait ExecutionUnit {
     fn shadow_stats(&self) -> (u64, u64) {
         (0, 0)
     }
+
+    /// Snapshot the unit's current arch-neutral register state for
+    /// diagnostic dumps (e.g. CLI `COMMIT_FAULT` formatters where the
+    /// step did not produce a PC-side fault). Synthetic units leave
+    /// this `None`; PPU / SPU implementations override to return the
+    /// post-step register state.
+    fn register_dump(&self) -> Option<crate::FaultRegisterDump> {
+        None
+    }
 }
 
 #[cfg(test)]

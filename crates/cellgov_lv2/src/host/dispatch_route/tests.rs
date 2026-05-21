@@ -293,6 +293,43 @@ fn stub_dispatch_returns_cell_ok_for_unsupported() {
 }
 
 #[test]
+fn unresolved_import_dispatch_returns_cell_einval() {
+    // Trampoline fires with a known NID; dispatcher emits the
+    // structured diagnostic and returns CELL_EINVAL so the
+    // caller sees a real errno rather than control-flow corruption.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let req = Lv2Request::UnresolvedImport {
+        nid: 0x744680a2, // sys_initialize_tls
+    };
+    let result = host.dispatch(req, UnitId::new(0), &rt);
+    assert_eq!(
+        result,
+        Lv2Dispatch::Immediate {
+            code: cellgov_ps3_abi::cell_errors::CELL_EINVAL.into(),
+            effects: vec![],
+        }
+    );
+}
+
+#[test]
+fn unresolved_import_dispatch_handles_unknown_nid() {
+    // A NID outside the database still produces a clean
+    // CELL_EINVAL fault, just without a name in the diagnostic.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let req = Lv2Request::UnresolvedImport { nid: 0xdead_beef };
+    let result = host.dispatch(req, UnitId::new(0), &rt);
+    assert_eq!(
+        result,
+        Lv2Dispatch::Immediate {
+            code: cellgov_ps3_abi::cell_errors::CELL_EINVAL.into(),
+            effects: vec![],
+        }
+    );
+}
+
+#[test]
 fn syscall_621_returns_ok() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
@@ -1511,7 +1548,7 @@ fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
     let _ = host.dispatch(
         Lv2Request::PpuThreadCreate {
             id_ptr: 0x9000,
-            entry_opd: 0x4000_0000,
+            param_ptr: 0x4000_0000,
             arg: 0,
             priority: 1000,
             stacksize: 0x4000,
@@ -1524,4 +1561,201 @@ fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
         host.invariant_break_count() > before,
         "expected log_invariant_break to fire on nonzero flags"
     );
+}
+
+fn dispatch_lock_line(addr: u32, flags: u64) -> Lv2Dispatch {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    host.dispatch(
+        Lv2Request::ProcessIsSpuLockLineReservationAddress { addr, flags },
+        UnitId::new(0),
+        &rt,
+    )
+}
+
+#[test]
+fn process_is_spu_lock_line_reservation_address_zero_flags_is_einval() {
+    let result = dispatch_lock_line(0xE000_0000, 0);
+    match result {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, errno::CELL_EINVAL.into());
+            assert!(effects.is_empty());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_is_spu_lock_line_reservation_address_unknown_flag_bit_is_einval() {
+    let result = dispatch_lock_line(0xE000_0000, 0x4);
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_eq!(code, errno::CELL_EINVAL.into());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_is_spu_lock_line_reservation_address_raw_spu_region_returns_ok() {
+    let result = dispatch_lock_line(0xE000_0000, 0x1);
+    match result {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, 0);
+            assert!(effects.is_empty());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_is_spu_lock_line_reservation_address_private_spu_rejects_raw_flag() {
+    let result = dispatch_lock_line(0xF000_0000, 0x1);
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_eq!(code, errno::CELL_EPERM.into());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_is_spu_lock_line_reservation_address_private_spu_accepts_thr_flag() {
+    let result = dispatch_lock_line(0xF000_0000, 0x2);
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, 0),
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_is_spu_lock_line_reservation_address_ppu_stack_is_eperm() {
+    let result = dispatch_lock_line(0xD000_0000, 0x2);
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_eq!(code, errno::CELL_EPERM.into());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_is_spu_lock_line_reservation_address_unknown_region_is_einval() {
+    let result = dispatch_lock_line(0x3000_0000, 0x2);
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_eq!(code, errno::CELL_EINVAL.into());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+fn dispatch_spu_init(max_usable_spu: u32, max_raw_spu: u32) -> Lv2Dispatch {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    host.dispatch(
+        Lv2Request::SpuInitialize {
+            max_usable_spu,
+            max_raw_spu,
+        },
+        UnitId::new(0),
+        &rt,
+    )
+}
+
+#[test]
+fn spu_initialize_accepts_typical_lv2_caps() {
+    let result = dispatch_spu_init(6, 1);
+    match result {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, 0);
+            assert!(effects.is_empty());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn spu_initialize_rejects_max_raw_above_five() {
+    let result = dispatch_spu_init(6, 6);
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_eq!(code, errno::CELL_EINVAL.into());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn spu_initialize_accepts_zero_raw_spu() {
+    let result = dispatch_spu_init(6, 0);
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, 0),
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn spu_thread_group_destroy_unknown_id_is_esrch() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::SpuThreadGroupDestroy { id: 0xDEAD },
+        UnitId::new(0),
+        &rt,
+    );
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, errno::CELL_ESRCH.into()),
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn spu_thread_group_destroy_created_group_returns_ok() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let create = host.dispatch(
+        Lv2Request::SpuThreadGroupCreate {
+            id_ptr: 0x9000,
+            num_threads: 1,
+            priority: 100,
+            attr_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let group_id = match create {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, 0);
+            let payload = match &effects[0] {
+                cellgov_effects::Effect::SharedWriteIntent { bytes, .. } => bytes.bytes(),
+                other => panic!("expected SharedWriteIntent, got {other:?}"),
+            };
+            u32::from_be_bytes(payload[..4].try_into().unwrap())
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    };
+    let destroy = host.dispatch(
+        Lv2Request::SpuThreadGroupDestroy { id: group_id },
+        UnitId::new(0),
+        &rt,
+    );
+    match destroy {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, 0);
+            assert!(effects.is_empty());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+    // Subsequent destroy of the same id must report CELL_ESRCH because
+    // the table entry has been withdrawn.
+    let second = host.dispatch(
+        Lv2Request::SpuThreadGroupDestroy { id: group_id },
+        UnitId::new(0),
+        &rt,
+    );
+    match second {
+        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, errno::CELL_ESRCH.into()),
+        other => panic!("expected Immediate, got {other:?}"),
+    }
 }
