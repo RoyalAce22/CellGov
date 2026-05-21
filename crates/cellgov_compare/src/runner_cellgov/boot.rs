@@ -133,9 +133,13 @@ mod boot_outcome_round_trip {
 /// data to record.
 ///
 /// Outcome mapping:
-/// - `ProcessExit`, `RsxWriteCheckpoint`, `PcReached` -> `Completed`
-/// - `MaxSteps`, `TimeOverflow` -> `Timeout`
-/// - `Fault` -> `Fault`
+/// - `ProcessExit` -> `ProcessExit` (the title called sys_process_exit;
+///   may be a legitimate title-side shutdown or a synthesized exit
+///   from a fault path, e.g. an unresolved import returning EINVAL).
+/// - `RsxWriteCheckpoint`, `PcReached` -> `Completed` (the harness
+///   stopped the run at a designated checkpoint).
+/// - `MaxSteps`, `TimeOverflow` -> `Timeout`.
+/// - `Fault` -> `Fault`.
 pub fn observe_from_boot(
     final_memory: &[u8],
     outcome: BootOutcome,
@@ -144,7 +148,7 @@ pub fn observe_from_boot(
     tty_log: &[u8],
 ) -> Observation {
     let observed_outcome = match outcome {
-        BootOutcome::ProcessExit => ObservedOutcome::Completed,
+        BootOutcome::ProcessExit => ObservedOutcome::ProcessExit,
         BootOutcome::Fault => ObservedOutcome::Fault,
         BootOutcome::MaxSteps => ObservedOutcome::Timeout,
         BootOutcome::RsxWriteCheckpoint => ObservedOutcome::Completed,
@@ -170,10 +174,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn observe_from_boot_maps_process_exit_to_completed() {
+    fn observe_from_boot_maps_process_exit_to_process_exit() {
         let mem = vec![0u8; 16];
         let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1000, &[], &[]);
-        assert_eq!(obs.outcome, ObservedOutcome::Completed);
+        assert_eq!(obs.outcome, ObservedOutcome::ProcessExit);
         assert_eq!(obs.metadata.runner, "cellgov-boot");
         assert_eq!(obs.metadata.steps, Some(1000));
         assert!(obs.state_hashes.is_none());

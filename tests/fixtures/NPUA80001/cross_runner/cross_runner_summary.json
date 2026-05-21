@@ -1,22 +1,22 @@
 {
   "convergence": {
-    "kind": "yes"
+    "kind": "no",
+    "reason": {
+      "kind": "outcome_mismatch",
+      "cellgov": "ProcessExit",
+      "rpcs3": "Completed"
+    }
   },
   "byte_parity": {
-    "kind": "non_semantic",
-    "bytes": 556
+    "kind": "diverge",
+    "reason": {
+      "kind": "outcome_mismatch",
+      "cellgov": "ProcessExit",
+      "rpcs3": "Completed"
+    }
   },
-  "per_class_bytes": {
-    "hle_opd_slot": 556
-  },
+  "per_class_bytes": {},
   "unclassified_bytes": 0,
   "unclassified_runs": [],
-  "lowest_offset_class": [
-    "hle_opd_slot",
-    {
-      "name": "data",
-      "addr": 8519680
-    },
-    30568
-  ]
+  "lowest_offset_class": null
 }
