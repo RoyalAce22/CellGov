@@ -9,9 +9,15 @@ pub(in crate::host) use counts::ProcessCounts;
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
+use cellgov_ps3_abi::cell_errors as errno;
 
 use super::Lv2Host;
 use crate::dispatch::Lv2Dispatch;
+
+/// `sys_memory_access_right_raw_spu` flag value from `sys_memory.h`.
+const SYS_MEMORY_ACCESS_RIGHT_RAW_SPU: u64 = 0x0000_0000_0000_0001;
+/// `sys_memory_access_right_spu_thr` flag value from `sys_memory.h`.
+const SYS_MEMORY_ACCESS_RIGHT_SPU_THR: u64 = 0x0000_0000_0000_0002;
 
 impl Lv2Host {
     /// `sys_process_exit`: the kernel handler discards the requesting
@@ -57,6 +63,64 @@ impl Lv2Host {
     pub(in crate::host) fn dispatch_process_is_stack(&self) -> Lv2Dispatch {
         Lv2Dispatch::Immediate {
             code: 0u64,
+            effects: vec![],
+        }
+    }
+
+    /// `sys_process_is_spu_lock_line_reservation_address`. Mirrors LV2:
+    /// the flags must be non-zero and only carry SPU_THR / RAW_SPU
+    /// bits; the address's top nibble selects the verdict. CellGov
+    /// does not track sys_mmapper regions, so unknown top nibbles
+    /// fall through to CELL_EINVAL rather than RPCS3's vm-region
+    /// lookup.
+    pub(in crate::host) fn dispatch_process_is_spu_lock_line_reservation_address(
+        &self,
+        addr: u32,
+        flags: u64,
+    ) -> Lv2Dispatch {
+        let known_bits = SYS_MEMORY_ACCESS_RIGHT_SPU_THR | SYS_MEMORY_ACCESS_RIGHT_RAW_SPU;
+        if flags == 0 || (flags & !known_bits) != 0 {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EINVAL.into(),
+                effects: vec![],
+            };
+        }
+        let code = match addr >> 28 {
+            0x0 | 0x1 | 0x2 | 0xc | 0xe => 0u64,
+            0xf => {
+                if flags & SYS_MEMORY_ACCESS_RIGHT_RAW_SPU != 0 {
+                    errno::CELL_EPERM.into()
+                } else {
+                    0
+                }
+            }
+            0xd => errno::CELL_EPERM.into(),
+            _ => errno::CELL_EINVAL.into(),
+        };
+        Lv2Dispatch::Immediate {
+            code,
+            effects: vec![],
+        }
+    }
+
+    /// `sys_spu_initialize`. Real LV2 records per-process SPU limits
+    /// in a kernel-side `spu_limits_t`. CellGov is the oracle, not a
+    /// scheduler: it validates `max_raw_spu <= 5` (matches LV2 and
+    /// RPCS3) and otherwise reports CELL_OK without persisting any
+    /// state -- nothing in the runtime keys on the announced limits.
+    pub(in crate::host) fn dispatch_spu_initialize(
+        &self,
+        _max_usable_spu: u32,
+        max_raw_spu: u32,
+    ) -> Lv2Dispatch {
+        if max_raw_spu > 5 {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EINVAL.into(),
+                effects: vec![],
+            };
+        }
+        Lv2Dispatch::Immediate {
+            code: 0,
             effects: vec![],
         }
     }

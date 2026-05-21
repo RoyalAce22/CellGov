@@ -218,10 +218,30 @@ pub(in crate::game) fn format_commit_fault(
     rt: &Runtime,
     err: &CommitError,
     steps: usize,
+    source: cellgov_event::UnitId,
     pc_ring: &[u64; PC_RING_SIZE],
     pc_cursor: &RingCursor,
 ) -> String {
     let mut out = format!("COMMIT_FAULT at step {steps}: {err:?}");
+    // PC-side `FAULT` populates `result.local_diagnostics.fault_regs`
+    // before commit runs; the commit path has no equivalent, so dump
+    // the source unit's post-step state via `RegisteredUnit::register_dump`.
+    if let Some(regs) = rt.registry().get(source).and_then(|u| u.register_dump()) {
+        out.push_str(&format!("\n  source unit: {}", source.raw()));
+        out.push_str("\n  registers:");
+        for (i, &val) in regs.gprs.iter().enumerate() {
+            if i % 4 == 0 {
+                out.push_str("\n    ");
+            }
+            out.push_str(&format!("r{i:<2}=0x{val:016x}  "));
+        }
+        out.push_str(&format!(
+            "\n    LR=0x{:016x}  CTR=0x{:016x}  XER=0x{:016x}  CR=0x{:08x}",
+            regs.lr, regs.ctr, regs.xer, regs.cr
+        ));
+        append_register_pointer_dump(&mut out, rt, &regs);
+        append_stack_walk(&mut out, rt, &regs);
+    }
     append_pc_ring_with_decode(&mut out, rt, pc_ring, pc_cursor);
     out
 }
@@ -320,7 +340,14 @@ mod tests {
             let idx = cursor.record();
             ring[idx] = pc;
         }
-        let out = format_commit_fault(&rt, &err, 1234, &ring, &cursor);
+        let out = format_commit_fault(
+            &rt,
+            &err,
+            1234,
+            cellgov_event::UnitId::new(0),
+            &ring,
+            &cursor,
+        );
         assert!(out.starts_with("COMMIT_FAULT at step 1234"), "got {out}");
         assert!(out.contains("PayloadLengthMismatch"), "got {out}");
         assert!(out.contains("last 3 PCs:"), "got {out}");

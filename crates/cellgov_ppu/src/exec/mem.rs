@@ -318,9 +318,13 @@ pub(crate) fn execute(
                 };
                 let value = state.gpr[rs as usize];
                 let bytes = value.to_be_bytes();
-                // Flush plain stores first so ConditionalStore
-                // follows them in program order.
-                store_buf.flush(effects, unit_id);
+                // Ordering at commit time is enforced by the commit
+                // pipeline: every SharedWriteIntent (whether emitted
+                // mid-batch or at batch-end flush) stages and applies
+                // atomically before ConditionalStore. Draining the
+                // buffer here would discard the plain-store entries
+                // and break intra-batch load forwarding for any
+                // subsequent load that targets the same address.
                 effects.push(Effect::ConditionalStore {
                     range,
                     bytes: WritePayload::from_slice(&bytes),
@@ -329,7 +333,7 @@ pub(crate) fn execute(
                     source_time: GuestTicks::ZERO,
                 });
                 // Forwarding-only entry: a subsequent lwarx in the
-                // same step sees the bytes this stwcx committed
+                // same step sees the bytes this stdcx committed
                 // rather than pre-step memory. The flush pass skips
                 // conditional entries so no SharedWriteIntent fires.
                 store_buf.insert_conditional(ea, 8, value as u128);
@@ -388,7 +392,10 @@ pub(crate) fn execute(
                 };
                 let value32 = state.gpr[rs as usize] as u32;
                 let bytes = value32.to_be_bytes();
-                store_buf.flush(effects, unit_id);
+                // See `Stdcx` for why we do not drain the plain-store
+                // buffer here: doing so would break intra-batch load
+                // forwarding for any subsequent load that targets the
+                // same address as a prior plain store in this batch.
                 effects.push(Effect::ConditionalStore {
                     range,
                     bytes: WritePayload::from_slice(&bytes),

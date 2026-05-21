@@ -2,7 +2,7 @@
   "checkpoint": {
     "kind": "first_rsx_write"
   },
-  "outcome": "RsxWriteCheckpoint",
-  "steps": 14352588,
+  "outcome": "Fault",
+  "steps": 14342058,
   "budget": 256
 }

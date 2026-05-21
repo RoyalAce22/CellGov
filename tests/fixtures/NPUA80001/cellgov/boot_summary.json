@@ -2,7 +2,7 @@
   "checkpoint": {
     "kind": "process_exit"
   },
-  "outcome": "MaxSteps",
-  "steps": 117187,
+  "outcome": "ProcessExit",
+  "steps": 9048,
   "budget": 256
 }

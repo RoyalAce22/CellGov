@@ -118,6 +118,27 @@ pub enum NotifySpuFinishedError {
     CounterUnderflow,
 }
 
+/// Failure modes of [`ThreadGroupTable::destroy`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestroyGroupError {
+    /// Group id does not exist (`sys_spu_thread_group_destroy` -> CELL_ESRCH).
+    Unknown,
+    /// Group is in [`GroupState::Running`]; the title must terminate
+    /// or join it first (`sys_spu_thread_group_destroy` -> CELL_EBUSY).
+    Busy,
+}
+
+impl std::fmt::Display for DestroyGroupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unknown => f.write_str("unknown thread group"),
+            Self::Busy => f.write_str("thread group is running"),
+        }
+    }
+}
+
+impl std::error::Error for DestroyGroupError {}
+
 impl std::fmt::Display for InitializeThreadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -270,6 +291,28 @@ impl ThreadGroupTable {
     /// Mutably look up a group by id.
     pub fn get_mut(&mut self, group_id: u32) -> Option<&mut ThreadGroup> {
         self.groups.get_mut(&group_id)
+    }
+
+    /// Withdraw a group whose state allows destruction.
+    ///
+    /// Mirrors `sys_spu_thread_group_destroy`: a group in
+    /// [`GroupState::Running`] is in-flight and reports
+    /// [`DestroyGroupError::Busy`]; an unknown id reports
+    /// [`DestroyGroupError::Unknown`]. The unit / thread-id maps for
+    /// the group's slots are scrubbed so a future `create` reusing
+    /// the same id starts clean.
+    pub fn destroy(&mut self, group_id: u32) -> Result<(), DestroyGroupError> {
+        match self.groups.get(&group_id) {
+            None => return Err(DestroyGroupError::Unknown),
+            Some(g) if g.state == GroupState::Running => return Err(DestroyGroupError::Busy),
+            Some(_) => {}
+        }
+        self.groups.remove(&group_id);
+        self.unit_to_group.retain(|_, gid| *gid != group_id);
+        self.finished_units.retain(|_, gid| *gid != group_id);
+        self.thread_id_to_unit
+            .retain(|tid, _| tid / MAX_SLOTS_PER_GROUP != group_id);
+        Ok(())
     }
 
     /// Number of groups.

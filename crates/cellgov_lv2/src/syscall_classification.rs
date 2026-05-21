@@ -2,8 +2,8 @@
 //!
 //! Composes the pure namespace partition from
 //! `cellgov_ps3_abi::syscall_namespace` with the hypercall guard so
-//! the runtime can route an `sc` to LV2, an HLE binder, or a fault
-//! path off a single typed value.
+//! the runtime can route an `sc` to LV2, an unresolved-import
+//! trampoline, or a fault path off a single typed value.
 
 use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
 
@@ -16,9 +16,11 @@ pub enum SyscallClassification {
         /// LV2 syscall number from `r11`.
         number: u64,
     },
-    /// Routes to the HLE import binder.
-    HleImport {
-        /// 0-based offset inside the `HleImport` namespace.
+    /// Routes to the unresolved-import diagnostic dispatch.
+    UnresolvedImport {
+        /// 0-based offset inside the `UnresolvedImport` namespace.
+        /// Currently always 0; the NID itself rides in r4 at
+        /// dispatch time.
         index: u32,
     },
     /// Routes to the hypercall fault path; LEV >= 1 cannot originate from PS3 usermode.
@@ -44,9 +46,9 @@ pub const fn classify(lev: u8, r11: u64) -> SyscallClassification {
     }
     match SyscallNamespace::of(r11) {
         Some(SyscallNamespace::Lv2) => SyscallClassification::Lv2 { number: r11 },
-        Some(SyscallNamespace::HleImport) => {
-            let (start, _) = SyscallNamespace::HleImport.range();
-            SyscallClassification::HleImport {
+        Some(SyscallNamespace::UnresolvedImport) => {
+            let (start, _) = SyscallNamespace::UnresolvedImport.range();
+            SyscallClassification::UnresolvedImport {
                 index: (r11 - start) as u32,
             }
         }
@@ -64,10 +66,10 @@ mod tests {
     }
 
     #[test]
-    fn classify_hle_import_decodes_index() {
+    fn classify_unresolved_import_decodes_index() {
         assert_eq!(
             classify(0, 0x10005),
-            SyscallClassification::HleImport { index: 5 },
+            SyscallClassification::UnresolvedImport { index: 5 },
         );
     }
 

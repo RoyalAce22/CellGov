@@ -214,7 +214,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // PRX load region matter.
     let code_floor = tramp_base;
 
-    let prx_modules = match opts.boot_mode {
+    let mut prx_modules = match opts.boot_mode {
         BootMode::SinglePrx => {
             match load_firmware_prx(opts.firmware_dir, &modules, &mut mem, code_floor) {
                 Some(info) => vec![info],
@@ -228,6 +228,16 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let t_prx_load = t_start.elapsed();
     if opts.firmware_dir.is_some() && prx_modules.is_empty() {
         eprintln!("prx: firmware directory was supplied but no PRX was loaded");
+    }
+    if prx_modules.is_empty() {
+        // No firmware was loaded: every game import is unresolved.
+        // Install trampolines so the first call through one produces
+        // a structured fault instead of control-flow corruption.
+        if let Some(info) =
+            super::prx::install_unresolved_trampolines_only(&modules, &mut mem, code_floor as u64)
+        {
+            prx_modules.push(info);
+        }
     }
 
     pre_init_tls(&elf_data, &mut mem);
@@ -298,6 +308,12 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let proc_param = cellgov_ppu::loader::find_sys_process_param(&elf_data);
     let malloc_pagesize = proc_param.map(|p| p.malloc_pagesize).unwrap_or(0x100000);
     state.gpr[12] = malloc_pagesize as u64;
+    // r13 is the PS3 PPC64 ABI TLS pointer. Real PS3 LV2 sets it
+    // at process creation (RPCS3 mirrors this at PPUThread.cpp:2443
+    // -- `gpr[13] = param.tls_addr;`); the firmware sys_initialize_tls
+    // does not touch r13, so the primary thread must be seeded here
+    // to keep CRT0's first TLS-relative load on a valid pointer.
+    state.gpr[13] = super::prx::TLS_BASE + 0x7030;
 
     let mode = if opts.capture_state_trace {
         RuntimeMode::DeterminismCheck
@@ -443,6 +459,12 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // libsysmodule's load worker, which usually means a corrupted
     // header upstream.
     for info in &prx_modules {
+        // The synthetic unresolved-import trampoline pseudo-module
+        // has no firmware identity; it is not a real PRX and must
+        // not be reachable from libsysmodule's load worker.
+        if info.module_start.is_none() && info.module_stop.is_none() && info.stem.is_empty() {
+            continue;
+        }
         if info.stem.is_empty() {
             die(&format!(
                 "prx: module {:?} loaded with empty stem; registry would not reach it via path lookup",

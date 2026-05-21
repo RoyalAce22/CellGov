@@ -6,19 +6,26 @@ developer: thatgamecompany
 engine: PhyreEngine
 distribution: PSN HDD
 checkpoint: ProcessExit
-steps: 117187
-convergence: No (outcome: Timeout vs Completed)
-byte_parity: --
+steps: 9048
+convergence: Yes
+byte_parity: 556 non-semantic
 ---
 
-flOw does not converge with RPCS3: CellGov terminates with
-outcome `Timeout` (MaxSteps at 117,187) against the captured RPCS3
-`Completed` at first `sys_tty_write`. The byte walk does not run;
-byte parity is undefined.
+Converges with RPCS3 at ProcessExit (CellGov step 9,048).
+CellGov exits via an unresolved-import trampoline call for
+`cellSysmoduleLoadModule` (NID `0x32267a31`): the trampoline
+issues `Lv2Request::UnresolvedImport`, which the dispatcher
+turns into CELL_EINVAL, and the title's CRT0 routes that
+into `sys_process_exit`. RPCS3 reaches its own ProcessExit
+through a different path; both observations terminate with
+outcome `ProcessExit`, satisfying the manifest's
+`process-exit` checkpoint.
 
-## Next step
+Byte parity: 556 bytes diverge, all classified as
+`HleOpdSlot` (the secondary OPD table at `0x82eea8` populated
+differently on each runner). No unclassified residual.
 
-Extend CellGov with a "stop at Nth `sys_tty_write`" checkpoint
-mirroring `CELLGOV_DUMP_TTY_NTH` in the patched RPCS3, capture a
-refreshed observation at that shared checkpoint, then regenerate
-without `--allow-divergence`.
+RPCS3-side observation in this directory is from an earlier
+capture and may need re-running against the current build of
+`tools/rpcs3/rpcs3.exe` -- see REPRODUCTION.md for the
+capture commands.

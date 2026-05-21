@@ -60,6 +60,13 @@ pub enum Lv2Request {
         /// In: group id.
         group_id: u32,
     },
+    /// `sys_spu_thread_group_destroy`. LV2 rejects with CELL_EBUSY
+    /// while the group is still running; the title must terminate or
+    /// join before destroying.
+    SpuThreadGroupDestroy {
+        /// In: group id.
+        id: u32,
+    },
     /// `sys_spu_thread_group_join`.
     SpuThreadGroupJoin {
         /// In: group id.
@@ -401,6 +408,25 @@ pub enum Lv2Request {
         /// In: address to query.
         addr: u32,
     },
+    /// `sys_process_is_spu_lock_line_reservation_address`. Asks LV2
+    /// whether `addr` falls inside the SPU lock-line reservation range
+    /// (`0xE000_0000..=0xFFFF_FFFF`). `flags` is the optional second
+    /// argument; LV2 rejects unknown bits.
+    ProcessIsSpuLockLineReservationAddress {
+        /// In: address to query.
+        addr: u32,
+        /// In: reservation flags.
+        flags: u64,
+    },
+    /// `sys_spu_initialize`. Announces per-process SPU resource caps
+    /// (max usable / max raw). CellGov does not model VSH-side SPU
+    /// resource accounting; the dispatcher only validates the cap.
+    SpuInitialize {
+        /// In: maximum number of usable SPUs.
+        max_usable_spu: u32,
+        /// In: maximum number of raw SPUs.
+        max_raw_spu: u32,
+    },
     /// `sys_ppu_thread_yield`.
     PpuThreadYield,
     /// `sys_ppu_thread_exit`.
@@ -584,12 +610,15 @@ pub enum Lv2Request {
         /// In: target thread id.
         target_thread: u32,
     },
-    /// `entry_opd` points to a 16-byte OPD: code || toc.
+    /// `_sys_ppu_thread_create` (syscall 52). `param_ptr` is the
+    /// `ppu_thread_param_t` pointer: `{ u32 entry_opd_ptr; u32 tls; }`.
+    /// The dispatcher reads `param_ptr` for the OPD pointer, then
+    /// reads that OPD's 8 bytes to recover `{ entry_code, entry_toc }`.
     PpuThreadCreate {
         /// Out: thread id.
         id_ptr: u32,
-        /// In: entry OPD pointer.
-        entry_opd: u32,
+        /// In: `ppu_thread_param_t` pointer.
+        param_ptr: u32,
         /// In: thread argument.
         arg: u64,
         /// In: priority. LV2 ABI is signed `int priority`; classify
@@ -692,6 +721,14 @@ pub enum Lv2Request {
         number: u64,
         /// In: raw arguments.
         args: [u64; 8],
+    },
+    /// Fired by the unresolved-import trampoline planted in
+    /// unpatched GOT slots. The NID rides in r4 (`args[1]`) and
+    /// names the missing import. Dispatcher surfaces a structured
+    /// diagnostic and fails the unit.
+    UnresolvedImport {
+        /// In: NID of the unresolved import.
+        nid: u32,
     },
     /// Recognised syscall whose arguments are out of ABI range;
     /// `reason` names the failing field, dispatcher routes to

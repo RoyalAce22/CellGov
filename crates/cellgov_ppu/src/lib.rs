@@ -643,6 +643,16 @@ impl ExecutionUnit for PpuExecutionUnit {
     fn shadow_stats(&self) -> (u64, u64) {
         (self.shadow_hits, self.shadow_misses)
     }
+
+    fn register_dump(&self) -> Option<cellgov_exec::FaultRegisterDump> {
+        Some(cellgov_exec::FaultRegisterDump {
+            gprs: self.state.gpr,
+            lr: self.state.lr,
+            ctr: self.state.ctr,
+            xer: self.state.xer,
+            cr: self.state.cr,
+        })
+    }
 }
 
 #[cfg(test)]

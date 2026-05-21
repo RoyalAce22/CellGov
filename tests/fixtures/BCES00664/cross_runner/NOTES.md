@@ -6,14 +6,21 @@ developer: Sony Liverpool
 engine: Studio Liverpool proprietary
 distribution: Disc ISO
 checkpoint: FirstRsxWrite
-steps: 45689
+steps: 42950
 convergence: No (outcome: Fault vs Completed)
 byte_parity: --
 ---
 
 Does not converge with RPCS3 at FirstRsxWrite: CellGov faults
-at step 45,689 before RPCS3 completes at 45,697. Byte parity
-undefined until convergence.
+at step 42,950 on an unresolved-import trampoline call for
+`cellSysutilRegisterCallback` (NID `0x9d98afa0`); RPCS3
+completes the checkpoint. Byte parity undefined until
+convergence.
+
+RPCS3-side observation in this directory is from an earlier
+capture and may need re-running against the current build of
+`tools/rpcs3/rpcs3.exe` -- see REPRODUCTION.md for the
+capture commands.
 
 ## Next step
 

@@ -8,7 +8,9 @@
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus};
+use cellgov_exec::{
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, UnitStatus,
+};
 use cellgov_time::Budget;
 
 /// Object-safe view of an execution unit.
@@ -58,6 +60,10 @@ pub trait RegisteredUnit: 'static {
 
     /// Shadow hit/miss counters. See [`ExecutionUnit::shadow_stats`].
     fn shadow_stats(&self) -> (u64, u64);
+
+    /// Current register snapshot for diagnostic dumps. See
+    /// [`ExecutionUnit::register_dump`].
+    fn register_dump(&self) -> Option<FaultRegisterDump>;
 }
 
 impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
@@ -114,5 +120,10 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn shadow_stats(&self) -> (u64, u64) {
         ExecutionUnit::shadow_stats(self)
+    }
+
+    #[inline]
+    fn register_dump(&self) -> Option<FaultRegisterDump> {
+        ExecutionUnit::register_dump(self)
     }
 }

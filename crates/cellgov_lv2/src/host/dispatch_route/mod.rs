@@ -56,6 +56,7 @@ impl Lv2Host {
                 self.dispatch_thread_initialize(req, requester, rt)
             }
             Lv2Request::SpuThreadGroupStart { group_id } => self.dispatch_group_start(group_id),
+            Lv2Request::SpuThreadGroupDestroy { id } => self.dispatch_group_destroy(id),
             Lv2Request::SpuThreadGroupJoin {
                 group_id,
                 cause_ptr,
@@ -244,13 +245,13 @@ impl Lv2Host {
             }
             Lv2Request::PpuThreadCreate {
                 id_ptr,
-                entry_opd,
+                param_ptr,
                 arg,
                 priority,
                 stacksize,
                 flags,
             } => self.dispatch_ppu_thread_create_with_flag_log(
-                id_ptr, entry_opd, arg, priority, stacksize, flags, rt,
+                id_ptr, param_ptr, arg, priority, stacksize, flags, rt,
             ),
             Lv2Request::PpuThreadJoin {
                 target,
@@ -335,6 +336,13 @@ impl Lv2Host {
             Lv2Request::ProcessGetPpid => self.dispatch_process_get_ppid(),
             Lv2Request::ProcessGetPpuGuid => self.dispatch_process_get_ppu_guid(),
             Lv2Request::ProcessIsStack { .. } => self.dispatch_process_is_stack(),
+            Lv2Request::ProcessIsSpuLockLineReservationAddress { addr, flags } => {
+                self.dispatch_process_is_spu_lock_line_reservation_address(addr, flags)
+            }
+            Lv2Request::SpuInitialize {
+                max_usable_spu,
+                max_raw_spu,
+            } => self.dispatch_spu_initialize(max_usable_spu, max_raw_spu),
             Lv2Request::ProcessGetNumberOfObject {
                 class_id,
                 count_out_ptr,
@@ -368,6 +376,7 @@ impl Lv2Host {
                 reason,
                 args,
             } => self.dispatch_malformed_rejection(number, reason, args),
+            Lv2Request::UnresolvedImport { nid } => self.dispatch_unresolved_import(nid, requester),
         }
     }
 }
