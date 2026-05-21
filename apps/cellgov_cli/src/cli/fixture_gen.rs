@@ -9,8 +9,8 @@ use std::path::Path;
 
 use cellgov_compare::{
     classify, classify::ClassifierContext, summarize, ByteParity, Convergence, CrossRunnerSummary,
-    DivergenceClass, Observation, ObservationCompareResult, RegionPairOutcome, UnclassifiedRun,
-    CODE_REGION_NAME, ELF_HEADER_SIZE,
+    DivergenceClass, Observation, ObservationCompareResult, ObservedOutcome, RegionPairOutcome,
+    UnclassifiedRun, CODE_REGION_NAME, ELF_HEADER_SIZE,
 };
 
 use super::args::find_flag_value;
@@ -222,6 +222,31 @@ pub(crate) fn run(args: &[String]) {
         .unwrap_or_else(|e| die(&format!("fixture-gen: parse {cellgov_path}: {e}")));
     let rpcs3: Observation = serde_json::from_slice(&load_file_or_die(&rpcs3_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: parse {rpcs3_path}: {e}")));
+
+    // Zero-region observations with a non-Timeout outcome are silently
+    // wrong: the comparator will produce a confident verdict against
+    // empty data. A Timeout observation may legitimately carry no
+    // regions when the runner aborted before the snapshot fired;
+    // anything else (Completed / ProcessExit / Fault / Stalled) should
+    // have captured at least one region. Reject early with a clear
+    // message pointing at the capture step.
+    if cellgov.memory_regions.is_empty() && !matches!(cellgov.outcome, ObservedOutcome::Timeout) {
+        die(&format!(
+            "fixture-gen: CellGov observation at {cellgov_path} has zero \
+             memory regions but reports outcome={}; the dump is incomplete. \
+             Re-capture via `run-game --save-observation`.",
+            cellgov.outcome,
+        ));
+    }
+    if rpcs3.memory_regions.is_empty() && !matches!(rpcs3.outcome, ObservedOutcome::Timeout) {
+        die(&format!(
+            "fixture-gen: RPCS3 observation at {rpcs3_path} has zero \
+             memory regions but reports outcome={}; the dump is incomplete. \
+             Re-capture per REPRODUCTION.md, or pass --outcome timeout to \
+             the bridge if the RPCS3 run was actually capped.",
+            rpcs3.outcome,
+        ));
+    }
 
     let result = cellgov_compare::compare_observations(&cellgov, &rpcs3);
     let ctx = build_classifier_context(&eboot_bytes, &cellgov)

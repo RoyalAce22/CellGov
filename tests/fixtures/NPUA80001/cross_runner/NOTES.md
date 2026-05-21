@@ -7,25 +7,29 @@ engine: PhyreEngine
 distribution: PSN HDD
 checkpoint: ProcessExit
 steps: 9048
-convergence: Yes
-byte_parity: 556 non-semantic
+convergence: No (outcome: ProcessExit vs Completed)
+byte_parity: --
 ---
 
-Converges with RPCS3 at ProcessExit (CellGov step 9,048).
-CellGov exits via an unresolved-import trampoline call for
-`cellSysmoduleLoadModule` (NID `0x32267a31`): the trampoline
-issues `Lv2Request::UnresolvedImport`, which the dispatcher
-turns into CELL_EINVAL, and the title's CRT0 routes that
-into `sys_process_exit`. RPCS3 reaches its own ProcessExit
-through a different path; both observations terminate with
-outcome `ProcessExit`, satisfying the manifest's
-`process-exit` checkpoint.
+Does not converge with RPCS3 at the manifest's `process-exit`
+checkpoint: outcomes are distinct. CellGov terminates with
+`ProcessExit` at step 9,048 because an unresolved-import
+trampoline call for `cellSysmoduleLoadModule` (NID
+`0x32267a31`) returns CELL_EINVAL, which the title's CRT0
+routes into `sys_process_exit`. The RPCS3-side capture
+terminates with outcome `Completed` -- a different
+terminal state, captured at the operator-declared
+checkpoint, not at a guest-side `sys_process_exit`. The
+title is playable end-to-end on RPCS3; it does not exit
+early via `sys_process_exit` there.
 
-Byte parity: 556 bytes diverge, all classified as
-`HleOpdSlot` (the secondary OPD table at `0x82eea8` populated
-differently on each runner). No unclassified residual.
+The byte walk does not run; byte parity is undefined.
 
-RPCS3-side observation in this directory is from an earlier
-capture and may need re-running against the current build of
-`tools/rpcs3/rpcs3.exe` -- see REPRODUCTION.md for the
-capture commands.
+## Next step
+
+Resolve the unresolved-import driver -- either route
+`cellSysmoduleLoadModule` to a direct LV2 syscall handler or
+include `cellSysmodule` in the loaded firmware PRX set -- so
+CellGov can advance past step 9,048. Then either pick a
+shared PC-based checkpoint reachable on both runners or
+re-capture RPCS3 at the matching ProcessExit point.

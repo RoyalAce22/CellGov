@@ -191,6 +191,7 @@ fn parse_hex_u64(s: &str) -> Result<u64, Rpcs3BridgeError> {
 fn parse_outcome(s: &str) -> Result<ObservedOutcome, Rpcs3BridgeError> {
     match s {
         "completed" => Ok(ObservedOutcome::Completed),
+        "process_exit" | "process-exit" => Ok(ObservedOutcome::ProcessExit),
         "stalled" => Ok(ObservedOutcome::Stalled),
         "timeout" => Ok(ObservedOutcome::Timeout),
         "fault" => Ok(ObservedOutcome::Fault),

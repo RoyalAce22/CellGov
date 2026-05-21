@@ -285,7 +285,7 @@ fn report_verdict(case: &Case, observation: &Observation, expected: &[u8]) {
     let label = format!("{}/{}", case.rel_dir, case.stem);
 
     match observation.outcome {
-        ObservedOutcome::Completed => {}
+        ObservedOutcome::Completed | ObservedOutcome::ProcessExit => {}
         ObservedOutcome::Timeout => panic!(
             "ps3autotests {label}: outcome=Timeout (max_steps={} reached). \
              Either the test wedged in an infinite loop or the cap is too \
