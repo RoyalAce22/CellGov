@@ -11,7 +11,7 @@ use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::Lv2Dispatch;
 
-use super::super::{Lv2Host, Lv2Runtime};
+use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
     /// `sys_spu_thread_group_terminate` stub: logs an invariant-break
@@ -29,19 +29,13 @@ impl Lv2Host {
                  stubbed; no SPU teardown performed"
             ),
         );
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_memory_free`: no dealloc tracking; titles keying on
     /// free's errno will misbehave.
     pub(super) fn dispatch_memory_free_noop(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0u64,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0u64)
     }
 
     /// Mints a kernel id and writes it through `*cid_ptr`. The
@@ -62,18 +56,12 @@ impl Lv2Host {
     /// The round-robin walk advances on the syscall yield itself,
     /// so the host has nothing further to do.
     pub(super) fn dispatch_ppu_thread_yield(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// Returns `CELL_PPU_TIMEBASE_HZ` as the syscall code.
     pub(super) fn dispatch_time_get_timebase_frequency(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: cellgov_time::CELL_PPU_TIMEBASE_HZ,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(cellgov_time::CELL_PPU_TIMEBASE_HZ)
     }
 
     /// Writes UTC zeros through both out-pointers; EFAULT on null.
@@ -217,19 +205,10 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         match pkg_id {
-            1 | 3 => Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOSYS.into(),
-                effects: vec![],
-            },
+            1 | 3 => Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()),
             2 => match u32::try_from(a2) {
-                Err(_) => Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                },
-                Ok(0) => Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                },
+                Err(_) => Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
+                Ok(0) => Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
                 Ok(addr) => {
                     const PROGRAM_AUTHORITY_ID: u64 = 0x1070_0000_3A00_0001;
                     let authid_be = PROGRAM_AUTHORITY_ID.to_be_bytes();
@@ -246,10 +225,7 @@ impl Lv2Host {
                     }
                 }
             },
-            _ => Lv2Dispatch::Immediate {
-                code: 0x8001_051D,
-                effects: vec![],
-            },
+            _ => Lv2Dispatch::immediate(0x8001_051D),
         }
     }
 
@@ -265,10 +241,7 @@ impl Lv2Host {
     /// timer counter and returns CELL_OK.
     pub(super) fn dispatch_timer_destroy(&mut self) -> Lv2Dispatch {
         self.process_counts.timer_dec();
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_rwlock_create` stub: mirrors [`Self::dispatch_timer_create`]
@@ -282,10 +255,7 @@ impl Lv2Host {
     /// `sys_rwlock_destroy` stub: mirrors [`Self::dispatch_timer_destroy`].
     pub(super) fn dispatch_rwlock_destroy(&mut self) -> Lv2Dispatch {
         self.process_counts.rwlock_dec();
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_event_port_create` stub: mirrors [`Self::dispatch_timer_create`]
@@ -303,10 +273,7 @@ impl Lv2Host {
     /// `sys_event_port_destroy` stub: mirrors [`Self::dispatch_timer_destroy`].
     pub(super) fn dispatch_event_port_destroy(&mut self) -> Lv2Dispatch {
         self.process_counts.event_port_dec();
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// PS3 usermode never issues `sc` with LEV != 0; reject with
@@ -327,10 +294,7 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 
     /// `Unsupported` catch-all: logs the syscall number and args
@@ -351,10 +315,7 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::Immediate {
-            code: 0u64,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0u64)
     }
 
     /// `Malformed` rejection: classifier failed to bind the request
@@ -373,10 +334,7 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 
     /// `UnresolvedImport` dispatch: the trampoline planted in an
@@ -413,9 +371,6 @@ impl Lv2Host {
                 );
             }
         }
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 }

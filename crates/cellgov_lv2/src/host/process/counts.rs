@@ -12,7 +12,7 @@ use cellgov_ps3_abi::sys_process::{
     SYS_MUTEX_OBJECT, SYS_RWLOCK_OBJECT, SYS_SEMAPHORE_OBJECT, SYS_TIMER_OBJECT,
 };
 
-use super::super::Lv2Host;
+use crate::host::Lv2Host;
 
 /// Counters for primitives stubbed as ID allocators only.
 ///

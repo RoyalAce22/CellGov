@@ -38,22 +38,27 @@ pub enum NvCommandKind {
     NonIncrement,
     /// Sony's JUMP form; 29-bit byte offset.
     Jump {
+        /// Absolute byte offset into the FIFO target buffer.
         offset: u32,
     },
     /// RPCS3's "new" JUMP form; 30-bit byte offset. libgcm does not
     /// emit this; classified defensively.
     NewJump {
+        /// Absolute byte offset, 30-bit range.
         offset: u32,
     },
     /// CALL; return address pushed on the RSX call stack.
     Call {
+        /// Subroutine entry byte offset into the FIFO target buffer.
         offset: u32,
     },
+    /// RSX RETURN: pops the call stack to resume the caller.
     Return,
     /// Header that matched no recognised pattern. The raw word is
     /// preserved so downstream diagnostics can distinguish cause
     /// classes (RETURN-with-stray-bits, bit-31-alone, etc.).
     Malformed {
+        /// Original header word; preserved verbatim for diagnostics.
         raw: u32,
     },
 }
@@ -62,6 +67,7 @@ pub enum NvCommandKind {
 /// control-flow variants of [`NvCommandKind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NvMethodHeader {
+    /// Classified command form (Increment / NonIncrement / Jump / Call / Return / Malformed).
     pub kind: NvCommandKind,
     /// Method byte address (bits 2..=15, 4-byte aligned).
     pub method: u16,
@@ -136,9 +142,12 @@ pub const fn decode_header(cmd: u32) -> NvMethodHeader {
     NvMethodHeader::normal(kind, method, count)
 }
 
-/// Mutable state handed to every NV method handler. Built fresh
-/// per-method-call by the FIFO drain.
+/// Mutable state handed to every NV method handler. Built once per
+/// FIFO header by the drain and reused across that header's handler
+/// dispatches.
 pub struct NvDispatchContext<'a> {
+    /// Drain-owned FIFO cursor; handlers read/write reference and
+    /// flip state via this rather than the runtime directly.
     pub cursor: &'a mut RsxFifoCursor,
     /// Transient label-write offset written by
     /// `NV406E_SEMAPHORE_OFFSET` and consumed by the next
@@ -313,21 +322,18 @@ pub struct NvMethodTable {
 // fn-pointer equality is unpredictable across codegen units so
 // PartialEq / Eq are intentionally not derived; treat `prior` as a
 // diagnostic pointer only.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("NV method 0x{method:04x} already registered")]
 pub struct DuplicateRegistration {
+    /// Method address whose handler was already bound.
     pub method: u16,
+    /// Handler that was already installed at `method`.
     pub prior: NvMethodHandler,
 }
 
-impl std::fmt::Display for DuplicateRegistration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "NV method 0x{:04x} already registered", self.method)
-    }
-}
-
-impl std::error::Error for DuplicateRegistration {}
-
 impl NvMethodTable {
+    /// Empty table; populate via [`register`](Self::register) or
+    /// [`register_unique`](Self::register_unique).
     #[inline]
     pub fn new() -> Self {
         Self::default()
@@ -369,11 +375,14 @@ impl NvMethodTable {
         self.handlers.get(&method).copied()
     }
 
+    /// Number of registered handlers.
     #[inline]
     pub fn len(&self) -> usize {
         self.handlers.len()
     }
 
+    /// True when no handlers are registered (every method takes the
+    /// unknown-method fallback).
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.handlers.is_empty()

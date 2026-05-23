@@ -10,50 +10,104 @@ use crate::observation::{
     NamedMemoryRegion, Observation, ObservedEvent, ObservedHashes, ObservedOutcome,
 };
 
+/// Aggregate verdict from comparing two [`Observation`]s.
+///
+/// One field per compared dimension; `a_runner` / `b_runner` carry
+/// the runner names from each observation's metadata so renderers can
+/// label divergence lines without re-threading the source observations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservationCompareResult {
+    /// True iff the two observations reported the same [`ObservedOutcome`].
     pub outcome_match: bool,
+    /// Outcome reported by observation `a` (preserved verbatim for
+    /// renderer use even when `outcome_match` is true).
     pub a_outcome: ObservedOutcome,
+    /// Outcome reported by observation `b`.
     pub b_outcome: ObservedOutcome,
+    /// Per-region comparison summary; see [`RegionCompareSummary`].
     pub region_compare: RegionCompareSummary,
+    /// Event-sequence comparison verdict.
     pub event_compare: EventCompare,
+    /// State-hash comparison verdict (same-runner only counts as
+    /// divergence; see [`StateHashCompare`]).
     pub state_hash_compare: StateHashCompare,
+    /// Step-count comparison verdict (same-runner only counts as
+    /// divergence; see [`StepCompare`]).
     pub step_compare: StepCompare,
+    /// Runner name from `a.metadata.runner` (e.g., `"cellgov"`,
+    /// `"rpcs3"`).
     pub a_runner: String,
+    /// Runner name from `b.metadata.runner`.
     pub b_runner: String,
 }
 
+/// Aggregate of per-region pair outcomes plus the raw region counts.
+///
+/// `a_count` / `b_count` are the lengths of each side's
+/// `memory_regions` vector. When the counts disagree, `pairs` is
+/// empty -- no per-pair walk happens because there is no
+/// well-defined zipping.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegionCompareSummary {
+    /// Number of regions in observation `a`.
     pub a_count: usize,
+    /// Number of regions in observation `b`.
     pub b_count: usize,
     /// Per-pair outcomes in observation order. Empty when region
     /// counts disagree.
     pub pairs: Vec<RegionPairOutcome>,
 }
 
+/// Outcome for one zipped pair of [`NamedMemoryRegion`]s.
+///
+/// Variants are checked in order: identity, then length, then byte
+/// content. The first mismatch terminates the pair (a length
+/// mismatch suppresses the byte walk), but subsequent region pairs
+/// are still walked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RegionPairOutcome {
+    /// Regions share name, address, length, and byte content.
     Match {
+        /// Region name shared by both sides.
         name: String,
+        /// Guest base address shared by both sides.
         addr: u64,
+        /// Region length in bytes.
         length: u64,
     },
+    /// Region pair disagrees on name or guest base address.
+    ///
+    /// Distinguishing name vs address is left to the renderer; both
+    /// pairs are recorded so callers can report the actual mismatch.
     IdentityMismatch {
+        /// Region name from observation `a`.
         a_name: String,
+        /// Guest base address from observation `a`.
         a_addr: u64,
+        /// Region name from observation `b`.
         b_name: String,
+        /// Guest base address from observation `b`.
         b_addr: u64,
     },
+    /// Region pair shares identity but disagrees on byte length.
+    /// Suppresses the byte-level walk for this pair.
     LengthMismatch {
+        /// Region name (matches on both sides).
         name: String,
+        /// Byte length of observation `a`'s data buffer.
         a_length: u64,
+        /// Byte length of observation `b`'s data buffer.
         b_length: u64,
     },
+    /// Region pair shares identity and length but has at least one
+    /// differing byte.
     ByteDivergence {
+        /// Region name (matches on both sides).
         name: String,
+        /// Guest base address (matches on both sides).
         addr: u64,
+        /// Region length in bytes (matches on both sides).
         length: u64,
         /// Coalesced runs of differing bytes within the region, in
         /// ascending offset order. A single differing byte produces
@@ -71,36 +125,57 @@ pub enum RegionPairOutcome {
 /// source observations and re-slice by `(name, offset, length)`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ByteDivergence {
+    /// Byte offset within the region where this run starts.
     pub offset: u64,
     /// Always >= 1; the producer asserts this and classifier
     /// consumers may `debug_assert!` it too.
     pub length: u64,
+    /// Byte from observation `a` at `offset` (only the first pair in
+    /// the run is recorded; consumers needing more must reopen the
+    /// source observation).
     pub a_byte: u8,
+    /// Byte from observation `b` at `offset`.
     pub b_byte: u8,
 }
 
+/// Step-count comparison verdict.
+///
+/// Step counts are reported only by runners that expose an internal
+/// step counter (CellGov). Same-runner mismatches indicate
+/// non-determinism; cross-runner mismatches are notes because the
+/// two runners can legitimately reach the same observable state via
+/// different amounts of internal work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StepCompare {
+    /// Neither observation carries a step count.
     NoStepInfo,
+    /// Both observations report the same step count.
     Equal {
+        /// Step count shared by both sides.
         steps: usize,
     },
     /// Differing step counts within the same runner: a determinism
     /// failure.
     SameRunnerMismatch {
+        /// Step count from observation `a`.
         a: usize,
+        /// Step count from observation `b`.
         b: usize,
     },
     /// Differing step counts across runners: informational only.
     CrossRunnerNote {
+        /// Step count from observation `a`.
         a: usize,
+        /// Step count from observation `b`.
         b: usize,
     },
     /// One observation reports a step count, the other does not.
     /// Producer guarantees exactly one of `a` / `b` is `Some`.
     OneMissing {
+        /// Step count from observation `a`, or `None` if absent.
         a: Option<usize>,
+        /// Step count from observation `b`, or `None` if absent.
         b: Option<usize>,
     },
 }
@@ -112,17 +187,25 @@ pub enum StepCompare {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EventCompare {
+    /// Both sequences have identical events at every index.
     Equal {
+        /// Number of events in the (matching) sequences.
         count: usize,
     },
+    /// Sequences differ in length; per-index walk is suppressed.
     LengthMismatch {
+        /// Number of events in observation `a`.
         a: usize,
+        /// Number of events in observation `b`.
         b: usize,
     },
     /// First index where the two sequences disagree. `index < min(a_len, b_len)`.
     FirstIndexDiffers {
+        /// Zero-based index of the first differing event.
         index: usize,
+        /// Event from observation `a` at `index`.
         a: ObservedEvent,
+        /// Event from observation `b` at `index`.
         b: ObservedEvent,
     },
 }
@@ -143,36 +226,51 @@ pub enum EventCompare {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StateHashCompare {
+    /// Neither observation carries state hashes.
     NoHashInfo,
+    /// Both observations carry matching state hashes.
     Equal,
+    /// One side carries state hashes and the other does not.
     OneMissing {
+        /// True iff observation `a` carried state hashes.
         a_present: bool,
+        /// True iff observation `b` carried state hashes.
         b_present: bool,
     },
     /// Same-runner pair with differing hashes; a determinism failure.
     SameRunnerMismatch {
+        /// Hashes from observation `a`.
         a: ObservedHashes,
+        /// Hashes from observation `b`.
         b: ObservedHashes,
     },
     /// Cross-runner pair with differing hashes; informational only
     /// (state-hash shape is CellGov-defined).
     CrossRunnerNote {
+        /// Hashes from observation `a`.
         a: ObservedHashes,
+        /// Hashes from observation `b`.
         b: ObservedHashes,
     },
 }
 
 impl RegionCompareSummary {
+    /// True iff the two observations reported different numbers of
+    /// regions. When true, `pairs` is empty.
     pub fn is_count_mismatch(&self) -> bool {
         self.a_count != self.b_count
     }
 
+    /// True iff at least one zipped pair is anything other than
+    /// [`RegionPairOutcome::Match`].
     pub fn has_pair_divergence(&self) -> bool {
         self.pairs
             .iter()
             .any(|p| !matches!(p, RegionPairOutcome::Match { .. }))
     }
 
+    /// Total bytes across all [`RegionPairOutcome::Match`] entries
+    /// (sum of their `length` fields). Used by the MATCH summary line.
     pub fn matched_bytes(&self) -> u64 {
         self.pairs
             .iter()
@@ -183,6 +281,7 @@ impl RegionCompareSummary {
             .sum()
     }
 
+    /// Number of [`RegionPairOutcome::Match`] entries in `pairs`.
     pub fn matched_regions(&self) -> u64 {
         self.pairs
             .iter()

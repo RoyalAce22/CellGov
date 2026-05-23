@@ -95,7 +95,12 @@ pub struct Lv2Host {
 /// the install came from; both fold into `Lv2Host::state_hash`.
 #[derive(Debug, Clone)]
 pub struct FirmwareIdentity {
+    /// FNV-1a hash of the verified `image_version` string from
+    /// `firmware.toml`. Pairs with `pup_sha256_bytes` to uniquely
+    /// identify the PUP this install was decrypted from.
     pub image_version_hash: u64,
+    /// Raw SHA-256 of the originating PUP file, copied verbatim
+    /// from `firmware.toml`.
     pub pup_sha256_bytes: [u8; 32],
 }
 

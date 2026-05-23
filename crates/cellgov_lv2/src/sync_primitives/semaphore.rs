@@ -56,53 +56,28 @@ pub enum SemaphorePostN {
 }
 
 /// Failure modes of [`SemaphoreTable::create_with_id`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SemaphoreCreateError {
     /// An entry with this id was already present; allocator bug
     /// (fires `debug_assert!`).
-    IdCollision(super::IdCollision),
+    #[error("semaphore create: {0}")]
+    IdCollision(#[source] super::IdCollision),
     /// `initial > max`, or either value was negative.
+    #[error("semaphore create: invalid bounds")]
     InvalidBounds,
 }
 
 /// Failure modes of [`SemaphoreTable::enqueue_waiter`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SemaphoreEnqueueError {
     /// No semaphore with this id.
+    #[error("semaphore enqueue: unknown id")]
     UnknownId,
     /// Thread is already parked on this semaphore;
     /// dispatch-layer bug (fires `debug_assert!`).
+    #[error("semaphore enqueue: duplicate waiter")]
     DuplicateWaiter,
 }
-
-impl std::fmt::Display for SemaphoreCreateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::IdCollision(c) => write!(f, "semaphore create: {c}"),
-            Self::InvalidBounds => f.write_str("semaphore create: invalid bounds"),
-        }
-    }
-}
-
-impl std::error::Error for SemaphoreCreateError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::IdCollision(c) => Some(c),
-            Self::InvalidBounds => None,
-        }
-    }
-}
-
-impl std::fmt::Display for SemaphoreEnqueueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownId => f.write_str("semaphore enqueue: unknown id"),
-            Self::DuplicateWaiter => f.write_str("semaphore enqueue: duplicate waiter"),
-        }
-    }
-}
-
-impl std::error::Error for SemaphoreEnqueueError {}
 
 /// A single counting semaphore.
 ///
@@ -552,7 +527,7 @@ mod tests {
         assert_eq!(
             t.create_with_id(5, 0, 10),
             Err(SemaphoreCreateError::IdCollision(
-                super::super::IdCollision { id: 5 }
+                crate::sync_primitives::IdCollision { id: 5 }
             )),
         );
         assert_eq!(t.len(), 1);

@@ -109,28 +109,13 @@ impl SourceKind {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 enum LoadError {
+    #[error("PRX too small for header (got {len} bytes)")]
     TooSmall { len: usize },
+    #[error("PRX bad magic: got {:02x} {:02x} {:02x} {:02x}", magic[0], magic[1], magic[2], magic[3])]
     BadMagic { magic: [u8; 4] },
 }
-
-impl std::fmt::Display for LoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TooSmall { len } => {
-                write!(f, "PRX too small for header (got {len} bytes)")
-            }
-            Self::BadMagic { magic } => write!(
-                f,
-                "PRX bad magic: got {:02x} {:02x} {:02x} {:02x}",
-                magic[0], magic[1], magic[2], magic[3]
-            ),
-        }
-    }
-}
-
-impl std::error::Error for LoadError {}
 
 /// Read `path` and return its plaintext ELF bytes plus the source
 /// kind. Auto-detects SCE wrappers by magic and decrypts them.

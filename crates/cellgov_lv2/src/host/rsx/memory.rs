@@ -25,22 +25,13 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         if size == 0 {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOMEM.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         let Some(end) = self.rsx_mem_alloc_ptr.checked_add(size) else {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOMEM.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         if end > Self::SYS_RSX_MEM_END {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOMEM.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
 
         let handle = self.rsx_mem_handle_counter;
@@ -74,10 +65,7 @@ impl Lv2Host {
 
     /// sys_rsx_memory_free (667). No-op: the bump allocator never reclaims.
     pub(in crate::host) fn dispatch_sys_rsx_memory_free_noop(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 }
 

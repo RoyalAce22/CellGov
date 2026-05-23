@@ -139,7 +139,7 @@ pub fn bench_boot(opts: BenchOptions<'_>) -> BenchBootResult {
     let active_checkpoint = opts
         .checkpoint_override
         .unwrap_or_else(|| opts.title.checkpoint_trigger());
-    super::configure_rsx_from_manifest(&mut rt, opts.title);
+    super::run::configure_rsx_from_manifest(&mut rt, opts.title);
 
     let mut steps: usize = 0;
     let t0 = Instant::now();
@@ -171,11 +171,13 @@ pub fn bench_boot_one_run(opts: BenchOptions<'_>) -> BenchBootResult {
 }
 
 /// Subprocess invocation failure surfaced by [`spawn_one_run`].
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SpawnError {
     /// `Command::output` itself returned an I/O error.
-    Io(std::io::Error),
+    #[error("subprocess spawn failed: {0}")]
+    Io(#[source] std::io::Error),
     /// The subprocess exited with a nonzero status.
+    #[error("subprocess exited nonzero (status={status:?})")]
     SubprocessNonzero {
         status: Option<i32>,
         stdout: String,
@@ -183,35 +185,13 @@ pub enum SpawnError {
     },
     /// The subprocess exited cleanly but its stdout could not be
     /// parsed into a `BenchBootResult`.
+    #[error("BENCH_RESULT parse failed: {error}")]
     ParseFailed {
+        #[source]
         error: ParseBenchError,
         stdout: String,
         stderr: String,
     },
-}
-
-impl std::fmt::Display for SpawnError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "subprocess spawn failed: {e}"),
-            Self::SubprocessNonzero { status, .. } => {
-                write!(f, "subprocess exited nonzero (status={status:?})")
-            }
-            Self::ParseFailed { error, .. } => {
-                write!(f, "BENCH_RESULT parse failed: {error}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SpawnError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::ParseFailed { error, .. } => Some(error),
-            Self::SubprocessNonzero { .. } => None,
-        }
-    }
 }
 
 impl SpawnError {
@@ -338,59 +318,36 @@ fn classify_pair(r1: &BenchBootResult, r2: &BenchBootResult, drift_pct: Option<f
 
 /// Failure mode while parsing a `BENCH_RESULT` line out of subprocess
 /// stdout.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ParseBenchError {
     /// No line starting with `BENCH_RESULT ` was present.
+    #[error("no BENCH_RESULT line")]
     NoResultLine,
     /// More than one `BENCH_RESULT` line was present.
+    #[error("more than one BENCH_RESULT line")]
     DuplicateResultLine,
     /// The line was present but the `steps=` field was missing.
+    #[error("BENCH_RESULT: missing steps= field")]
     MissingSteps,
     /// The `steps=` field was present but could not parse as `usize`.
+    #[error("BENCH_RESULT: malformed steps={0:?}")]
     MalformedSteps(String),
     /// The line was present but the `wall_ms=` field was missing.
+    #[error("BENCH_RESULT: missing wall_ms= field")]
     MissingWallMs,
     /// The `wall_ms=` field was present but could not parse as `u64`.
+    #[error("BENCH_RESULT: malformed wall_ms={0:?}")]
     MalformedWallMs(String),
     /// The line was present but the `outcome=` field was missing.
+    #[error("BENCH_RESULT: missing outcome= field")]
     MissingOutcome,
     /// The `outcome=` field could not parse as a [`BootOutcome`].
+    #[error("BENCH_RESULT: malformed outcome={token:?}: {source}")]
     UnparseableOutcome {
         token: String,
+        #[source]
         source: BootOutcomeParseError,
     },
-}
-
-impl std::fmt::Display for ParseBenchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoResultLine => f.write_str("no BENCH_RESULT line"),
-            Self::DuplicateResultLine => f.write_str("more than one BENCH_RESULT line"),
-            Self::MissingSteps => f.write_str("BENCH_RESULT: missing steps= field"),
-            Self::MalformedSteps(s) => write!(f, "BENCH_RESULT: malformed steps={s:?}"),
-            Self::MissingWallMs => f.write_str("BENCH_RESULT: missing wall_ms= field"),
-            Self::MalformedWallMs(s) => write!(f, "BENCH_RESULT: malformed wall_ms={s:?}"),
-            Self::MissingOutcome => f.write_str("BENCH_RESULT: missing outcome= field"),
-            Self::UnparseableOutcome { token, source } => {
-                write!(f, "BENCH_RESULT: malformed outcome={token:?}: {source}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ParseBenchError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::UnparseableOutcome { source, .. } => Some(source),
-            Self::NoResultLine
-            | Self::DuplicateResultLine
-            | Self::MissingSteps
-            | Self::MalformedSteps(_)
-            | Self::MissingWallMs
-            | Self::MalformedWallMs(_)
-            | Self::MissingOutcome => None,
-        }
-    }
 }
 
 /// Parse the `BENCH_RESULT steps=N wall_ms=M steps_per_sec=X outcome=O`

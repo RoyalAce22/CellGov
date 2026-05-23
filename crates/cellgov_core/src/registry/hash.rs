@@ -58,8 +58,8 @@ fn status_byte(status: UnitStatus) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_fixtures::status_unit;
     use super::*;
+    use crate::registry::test_fixtures::status_unit;
 
     #[test]
     fn status_hash_of_empty_registry_is_stable() {

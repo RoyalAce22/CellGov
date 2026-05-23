@@ -151,6 +151,18 @@ pub enum Lv2Dispatch {
     },
 }
 
+impl Lv2Dispatch {
+    /// Shorthand for the error-return shape:
+    /// `Immediate { code, effects: vec![] }`. Use at sites that bail
+    /// without committing effects.
+    pub fn immediate(code: u64) -> Self {
+        Self::Immediate {
+            code,
+            effects: vec![],
+        }
+    }
+}
+
 /// PPC64-ABI seed values for a new child PPU thread.
 ///
 /// `entry_code` / `entry_toc` are the resolved OPD words, not the OPD

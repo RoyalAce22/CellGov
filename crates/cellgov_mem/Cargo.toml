@@ -11,8 +11,11 @@ workspace = true
 [dependencies]
 cellgov_time = { path = "../cellgov_time" }
 serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+derive_more = { version = "2", default-features = false, features = ["display"] }
 
 [dev-dependencies]
+cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 criterion.workspace = true
 
 [[bench]]

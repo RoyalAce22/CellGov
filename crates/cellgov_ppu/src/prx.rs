@@ -58,21 +58,32 @@ pub struct ImportedVariable {
 }
 
 /// Failure modes for [`parse_imports`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ImportParseError {
     /// Neither known locator found an imports table: no
     /// `PT_PRX_PARAM` (LOOS+2) program header, and no
     /// `ppu_prx_library_info` reachable via segment 0's `p_paddr`.
+    #[error(
+        "no imports table: neither PT_PRX_PARAM (LOOS+2) nor \
+         ppu_prx_library_info (via segment 0 p_paddr) was found"
+    )]
     NoImportsTable,
     /// `PrxParamHeader` magic did not match `PRX_PARAM_MAGIC`.
+    #[error("PrxParamHeader magic 0x{:08x} != expected 0x{:08x}", .0, PRX_PARAM_MAGIC)]
     BadMagic(u32),
     /// `header_size` declared smaller than the
     /// imports_table_start/end fields at +24/+28.
+    #[error(
+        "PrxParamHeader.header_size {} below minimum {} (imports table fields live at +24/+28)",
+        .0, PRX_PARAM_HEADER_MIN_SIZE
+    )]
     ParamHeaderTooSmall(u32),
     /// A read or virtual-address resolution went past the file or segment.
+    #[error("read or vaddr resolution past file or segment")]
     OutOfBounds,
     /// `imports_table_end` is below `imports_table_start`; the
     /// table's bounds are inverted or the header is corrupt.
+    #[error("imports_table_end 0x{end:08x} below imports_table_start 0x{start:08x}")]
     BadImportsTableRange {
         /// Declared start v-addr.
         start: u32,
@@ -82,6 +93,10 @@ pub enum ImportParseError {
     /// One import entry's declared `size` byte is below
     /// [`PRX_IMPORT_ENTRY_MIN_SIZE`]; reading the entry's fields at
     /// `+16/+20/+24` would consume bytes belonging to the next entry.
+    #[error(
+        "import entry size byte 0x{declared:02x} below minimum 0x{:02x}",
+        PRX_IMPORT_ENTRY_MIN_SIZE
+    )]
     EntryTooSmall {
         /// Declared `size` byte from the entry header.
         declared: u8,
@@ -89,6 +104,9 @@ pub enum ImportParseError {
     /// The current entry's bounds (`entry_start + entry_size`) extend
     /// past the declared `imports_table_end`. Either the entry is
     /// corrupt or the table's `end` field is wrong; both surface here.
+    #[error(
+        "import entry at 0x{entry_start:08x} ({entry_size} bytes) extends past imports_table_end 0x{imports_table_end:08x}"
+    )]
     EntryPastImportsTable {
         /// Entry's start v-addr.
         entry_start: u32,
@@ -101,6 +119,10 @@ pub enum ImportParseError {
     /// segment, or its NUL terminator was not found within
     /// [`PRX_NAME_MAX_LEN`] bytes of the resolved file offset
     /// (or before the containing segment's end).
+    #[error(
+        "import name_ptr 0x{vaddr:08x} unmapped, or NUL not found within {} byte(s) or segment end",
+        PRX_NAME_MAX_LEN
+    )]
     InvalidNamePtr {
         /// The v-addr the entry declared.
         vaddr: u32,
@@ -109,6 +131,10 @@ pub enum ImportParseError {
     /// `function_count * 4` does not fit in a single PT_LOAD segment.
     /// The GOT-patch step would write into unmapped memory or across
     /// segment boundaries.
+    #[error(
+        "import stub_ptr 0x{vaddr:08x} unmapped, or stub table \
+         ({function_count} * 4 bytes) crosses a PT_LOAD segment boundary"
+    )]
     InvalidStubPtr {
         /// The v-addr the entry declared.
         vaddr: u32,
@@ -119,6 +145,10 @@ pub enum ImportParseError {
     /// `function_count * 4`) straddles a segment boundary or extends
     /// past the file. The trailing entries would otherwise read
     /// bytes from an unrelated segment or zero-padding.
+    #[error(
+        "import nid_ptr 0x{vaddr:08x} unmapped, or NID table \
+         ({function_count} * 4 bytes) crosses a PT_LOAD segment boundary"
+    )]
     InvalidNidPtr {
         /// The v-addr the entry declared.
         vaddr: u32,
@@ -126,68 +156,6 @@ pub enum ImportParseError {
         function_count: u16,
     },
 }
-
-impl std::fmt::Display for ImportParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoImportsTable => f.write_str(
-                "no imports table: neither PT_PRX_PARAM (LOOS+2) nor \
-                 ppu_prx_library_info (via segment 0 p_paddr) was found",
-            ),
-            Self::BadMagic(got) => write!(
-                f,
-                "PrxParamHeader magic 0x{got:08x} != expected 0x{:08x}",
-                PRX_PARAM_MAGIC
-            ),
-            Self::ParamHeaderTooSmall(declared) => write!(
-                f,
-                "PrxParamHeader.header_size {declared} below minimum {} (imports table fields live at +24/+28)",
-                PRX_PARAM_HEADER_MIN_SIZE
-            ),
-            Self::OutOfBounds => f.write_str("read or vaddr resolution past file or segment"),
-            Self::BadImportsTableRange { start, end } => write!(
-                f,
-                "imports_table_end 0x{end:08x} below imports_table_start 0x{start:08x}"
-            ),
-            Self::EntryTooSmall { declared } => write!(
-                f,
-                "import entry size byte 0x{declared:02x} below minimum 0x{:02x}",
-                PRX_IMPORT_ENTRY_MIN_SIZE
-            ),
-            Self::EntryPastImportsTable {
-                entry_start,
-                entry_size,
-                imports_table_end,
-            } => write!(
-                f,
-                "import entry at 0x{entry_start:08x} ({entry_size} bytes) extends past imports_table_end 0x{imports_table_end:08x}"
-            ),
-            Self::InvalidNamePtr { vaddr } => write!(
-                f,
-                "import name_ptr 0x{vaddr:08x} unmapped, or NUL not found within {} byte(s) or segment end",
-                PRX_NAME_MAX_LEN
-            ),
-            Self::InvalidStubPtr {
-                vaddr,
-                function_count,
-            } => write!(
-                f,
-                "import stub_ptr 0x{vaddr:08x} unmapped, or stub table \
-                 ({function_count} * 4 bytes) crosses a PT_LOAD segment boundary"
-            ),
-            Self::InvalidNidPtr {
-                vaddr,
-                function_count,
-            } => write!(
-                f,
-                "import nid_ptr 0x{vaddr:08x} unmapped, or NID table \
-                 ({function_count} * 4 bytes) crosses a PT_LOAD segment boundary"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ImportParseError {}
 
 /// Enumerate every imported module and its (NID, GOT slot) entries.
 ///

@@ -34,10 +34,7 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         if self.rsx_context.allocated {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let base = if self.rsx_context.pending_mem_addr != 0 {
             self.rsx_context.pending_mem_addr
@@ -46,16 +43,10 @@ impl Lv2Host {
                 .rsx_mem_alloc_ptr
                 .checked_add(region::CONTEXT_RESERVATION)
             else {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ENOMEM.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
             };
             if end > Self::SYS_RSX_MEM_END {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ENOMEM.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
             }
             let start = self.rsx_mem_alloc_ptr;
             self.rsx_mem_alloc_ptr = end;
@@ -146,10 +137,7 @@ impl Lv2Host {
     /// sys_rsx_context_free (671). No-op: the single-context model does not
     /// tear down state, and a subsequent allocate is still rejected.
     pub(in crate::host) fn dispatch_sys_rsx_context_free_noop(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 }
 

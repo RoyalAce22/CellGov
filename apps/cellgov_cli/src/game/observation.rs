@@ -99,74 +99,56 @@ fn de_hex_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
 }
 
 /// Why writing the boot-checkpoint observation JSON failed.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ObservationSaveError {
     /// Reading the region manifest failed.
+    #[error("read {path}: {source}")]
     ManifestRead {
         path: String,
+        #[source]
         source: std::io::Error,
     },
     /// Parsing the region manifest TOML failed.
+    #[error("parse {path}: {source}")]
     ManifestParse {
         path: String,
+        #[source]
         source: toml::de::Error,
     },
     /// Enumerating PT_LOAD segments from the ELF failed.
+    #[error("failed to enumerate PT_LOAD: {source}")]
     PtLoadEnum {
+        #[source]
         source: cellgov_ppu::loader::LoadError,
     },
     /// Creating the output file failed.
+    #[error("create {path} failed: {source}")]
     CreateOutput {
         path: String,
+        #[source]
         source: std::io::Error,
     },
     /// Serializing the observation to JSON failed.
-    Serialize(serde_json::Error),
+    #[error("serialize failed: {0}")]
+    Serialize(#[source] serde_json::Error),
     /// Writing the trailing newline to the output failed.
+    #[error("trailing newline {path} failed: {source}")]
     TrailingNewline {
         path: String,
+        #[source]
         source: std::io::Error,
     },
     /// Flushing the output writer failed.
+    #[error("flush {path} failed: {source}")]
     Flush {
         path: String,
+        #[source]
         source: std::io::Error,
     },
     /// Constructing the BootSummary rejected the
     /// checkpoint/outcome/steps tuple.
-    InvalidBootSummary(cellgov_compare::BootSummaryError),
-}
-
-impl std::fmt::Display for ObservationSaveError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ManifestRead { path, source } => write!(f, "read {path}: {source}"),
-            Self::ManifestParse { path, source } => write!(f, "parse {path}: {source}"),
-            Self::PtLoadEnum { source } => write!(f, "failed to enumerate PT_LOAD: {source}"),
-            Self::CreateOutput { path, source } => write!(f, "create {path} failed: {source}"),
-            Self::Serialize(e) => write!(f, "serialize failed: {e}"),
-            Self::TrailingNewline { path, source } => {
-                write!(f, "trailing newline {path} failed: {source}")
-            }
-            Self::Flush { path, source } => write!(f, "flush {path} failed: {source}"),
-            Self::InvalidBootSummary(e) => write!(f, "invalid boot summary: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for ObservationSaveError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::ManifestRead { source, .. }
-            | Self::CreateOutput { source, .. }
-            | Self::TrailingNewline { source, .. }
-            | Self::Flush { source, .. } => Some(source),
-            Self::ManifestParse { source, .. } => Some(source),
-            Self::PtLoadEnum { source } => Some(source),
-            Self::Serialize(e) => Some(e),
-            Self::InvalidBootSummary(e) => Some(e),
-        }
-    }
+    #[error("invalid boot summary: {0}")]
+    InvalidBootSummary(#[source] cellgov_compare::BootSummaryError),
 }
 
 /// Build a boot-checkpoint observation and write it as JSON.

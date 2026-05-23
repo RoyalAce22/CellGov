@@ -80,6 +80,24 @@ fn read_fifo_word(memory: &GuestMemory, addr: u32) -> Option<u32> {
     Some(word)
 }
 
+fn dispatch_method(
+    table: &NvMethodTable,
+    method: u16,
+    args: &[u32],
+    ctx: &mut NvDispatchContext<'_>,
+    outcome: &mut RsxAdvanceOutcome,
+) {
+    match table.lookup(method) {
+        Some(handler) => {
+            handler(ctx, args);
+            outcome.methods_dispatched = outcome.methods_dispatched.saturating_add(1);
+        }
+        None => {
+            outcome.methods_unknown = outcome.methods_unknown.saturating_add(1);
+        }
+    }
+}
+
 /// Drain the FIFO from `cursor.get()` up to `cursor.put()`.
 ///
 /// Advances `cursor.get`, updates `sem_offset` via the semaphore
@@ -159,45 +177,28 @@ pub fn rsx_advance(
                     }
                 }
                 cursor.set_get(next_get);
+                let mut ctx = NvDispatchContext {
+                    cursor: &mut *cursor,
+                    sem_offset: &mut *sem_offset,
+                    emitted: &mut *emitted,
+                    now,
+                };
                 match header.kind {
                     NvCommandKind::Increment => {
                         for (i, arg) in args.iter().enumerate() {
                             let sub_method = header.method.wrapping_add((i as u16) * 4);
-                            match table.lookup(sub_method) {
-                                Some(handler) => {
-                                    let mut ctx = NvDispatchContext {
-                                        cursor,
-                                        sem_offset,
-                                        emitted,
-                                        now,
-                                    };
-                                    handler(&mut ctx, std::slice::from_ref(arg));
-                                    outcome.methods_dispatched =
-                                        outcome.methods_dispatched.saturating_add(1);
-                                }
-                                None => {
-                                    outcome.methods_unknown =
-                                        outcome.methods_unknown.saturating_add(1);
-                                }
-                            }
+                            dispatch_method(
+                                table,
+                                sub_method,
+                                std::slice::from_ref(arg),
+                                &mut ctx,
+                                &mut outcome,
+                            );
                         }
                     }
-                    NvCommandKind::NonIncrement => match table.lookup(header.method) {
-                        Some(handler) => {
-                            let mut ctx = NvDispatchContext {
-                                cursor,
-                                sem_offset,
-                                emitted,
-                                now,
-                            };
-                            handler(&mut ctx, &args);
-                            outcome.methods_dispatched =
-                                outcome.methods_dispatched.saturating_add(1);
-                        }
-                        None => {
-                            outcome.methods_unknown = outcome.methods_unknown.saturating_add(1);
-                        }
-                    },
+                    NvCommandKind::NonIncrement => {
+                        dispatch_method(table, header.method, &args, &mut ctx, &mut outcome);
+                    }
                     _ => unreachable!("outer match guards Increment / NonIncrement only"),
                 }
             }

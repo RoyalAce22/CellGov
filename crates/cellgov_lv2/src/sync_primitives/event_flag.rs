@@ -52,48 +52,24 @@ pub enum EventFlagWait {
 ///
 /// `IdCollision` indicates an allocator bug; `debug_assert!`
 /// fires. Release keeps the existing entry and returns `Err`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum EventFlagCreateError {
     /// An entry with this id was already present.
-    IdCollision(super::IdCollision),
+    #[error("event_flag create: {0}")]
+    IdCollision(#[source] super::IdCollision),
 }
 
 /// Failure modes of [`EventFlagTable::enqueue_waiter`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum EventFlagEnqueueError {
     /// No event flag with this id.
+    #[error("event_flag enqueue: unknown id")]
     UnknownId,
     /// Thread is already parked on this flag; dispatch-layer bug
     /// (fires `debug_assert!`).
+    #[error("event_flag enqueue: duplicate waiter")]
     DuplicateWaiter,
 }
-
-impl std::fmt::Display for EventFlagCreateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::IdCollision(c) => write!(f, "event_flag create: {c}"),
-        }
-    }
-}
-
-impl std::error::Error for EventFlagCreateError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::IdCollision(c) => Some(c),
-        }
-    }
-}
-
-impl std::fmt::Display for EventFlagEnqueueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownId => f.write_str("event_flag enqueue: unknown id"),
-            Self::DuplicateWaiter => f.write_str("event_flag enqueue: duplicate waiter"),
-        }
-    }
-}
-
-impl std::error::Error for EventFlagEnqueueError {}
 
 /// A single event flag.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -704,7 +680,7 @@ mod tests {
         assert_eq!(
             t.create_with_id(1, 0xBB),
             Err(EventFlagCreateError::IdCollision(
-                super::super::IdCollision { id: 1 }
+                crate::sync_primitives::IdCollision { id: 1 }
             )),
         );
         assert_eq!(t.lookup(1).unwrap().init(), 0xAA);

@@ -2,11 +2,13 @@ use std::collections::BTreeMap;
 
 use cellgov_mem::Fnv1aHasher;
 use cellgov_ps3_abi::sys_fs::LV2_FS_OBJECT_ID_BASE;
+use num_enum::TryFromPrimitive;
 
 use super::FsError;
 
 /// Whence values for [`FsStore::seek`]. Matches PS3 `CELL_FS_SEEK_*`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+#[repr(u32)]
 pub enum SeekWhence {
     /// From the start of the file.
     Set = 0,
@@ -20,12 +22,7 @@ impl SeekWhence {
     /// Returns `None` for any out-of-range value so the caller can
     /// map it to CELL_EINVAL.
     pub fn from_guest(value: u32) -> Option<Self> {
-        match value {
-            0 => Some(Self::Set),
-            1 => Some(Self::Cur),
-            2 => Some(Self::End),
-            _ => None,
-        }
+        Self::try_from(value).ok()
     }
 }
 

@@ -1,45 +1,24 @@
 //! Boot stop-condition and its CLI parser.
 
 /// Why parsing a `--checkpoint` argument or manifest `pc = "..."` failed.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CheckpointParseError {
     /// Unknown checkpoint kind keyword.
+    #[error("unknown checkpoint kind '{0}' (accepted: process-exit, first-rsx-write, pc=0xADDR)")]
     UnknownKind(String),
     /// `--checkpoint` was specified more than once.
+    #[error("--checkpoint was specified more than once; pass it exactly once.")]
     RepeatedFlag,
     /// `--checkpoint` had no following value.
+    #[error("--checkpoint requires a value (process-exit, first-rsx-write, or pc=0xADDR)")]
     MissingValue,
     /// `pc=` value has `0x`/`0X` prefix but is not valid hex u64.
+    #[error("checkpoint pc value '{0}' is not a hex u64")]
     PcNotHex(String),
     /// `pc=` value has no hex prefix and is not a valid decimal u64.
+    #[error("checkpoint pc value '{0}' is not a decimal u64 (use 0x prefix for hex)")]
     PcNotDecimal(String),
 }
-
-impl std::fmt::Display for CheckpointParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownKind(v) => write!(
-                f,
-                "unknown checkpoint kind '{v}' (accepted: \
-                 process-exit, first-rsx-write, pc=0xADDR)"
-            ),
-            Self::RepeatedFlag => {
-                f.write_str("--checkpoint was specified more than once; pass it exactly once.")
-            }
-            Self::MissingValue => f.write_str(
-                "--checkpoint requires a value (process-exit, first-rsx-write, \
-                 or pc=0xADDR)",
-            ),
-            Self::PcNotHex(raw) => write!(f, "checkpoint pc value '{raw}' is not a hex u64"),
-            Self::PcNotDecimal(raw) => write!(
-                f,
-                "checkpoint pc value '{raw}' is not a decimal u64 (use 0x prefix for hex)"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for CheckpointParseError {}
 
 /// Stop condition for a boot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

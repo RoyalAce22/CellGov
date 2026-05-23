@@ -18,16 +18,12 @@ use super::PrxLoaderError;
 /// same ids; cross-build-stable contributors to `sync_state_hash`
 /// must read the `pub u32` field and feed `to_be_bytes()` into the
 /// workspace FNV-1a routine rather than `std::hash::Hash`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+///
+/// `Display` renders as `mod#0xHHHHHHHH` -- compact, sortable, and
+/// distinguishable from a raw u32 in error messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, derive_more::Display)]
+#[display("mod#{_0:#010x}")]
 pub struct PrxModuleId(pub u32);
-
-impl std::fmt::Display for PrxModuleId {
-    /// `mod#0xHHHHHHHH` -- compact, sortable, and distinguishable
-    /// from a raw u32 in error messages.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "mod#{:#010x}", self.0)
-    }
-}
 
 /// Topologically sorted dependency closure for a firmware-PRX set.
 #[derive(Debug)]

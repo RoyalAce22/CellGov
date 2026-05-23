@@ -5,8 +5,89 @@
 
 use cellgov_compare::CompareMode;
 
-use super::cli_arg_error::CliArgError;
 use super::exit::die;
+
+/// Why a CLI argument or environment-variable parser rejected its input.
+///
+/// Inner `_inner` parsers in `cli/args.rs` and `cli/env.rs` return
+/// `Result<_, CliArgError>`. The outer wrappers call `die()` on the
+/// Display rendering, so the user-visible message is unchanged.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CliArgError {
+    /// Hex literal is empty after trimming whitespace.
+    #[error("{context}: empty hex value")]
+    EmptyHexValue { context: String },
+    /// `0x` / `0X` prefix with no following digits.
+    #[error("{context}: hex prefix with no digits in {raw:?}")]
+    HexPrefixNoDigits { context: String, raw: String },
+    /// Hex parse via `u64::from_str_radix` failed.
+    #[error("{context}: cannot parse hex {raw:?}: {source}")]
+    CannotParseHexU64 {
+        context: String,
+        raw: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+    /// Hex parse via `u8::from_str_radix` failed.
+    #[error("{context}: cannot parse hex u8 {raw:?}: {source}")]
+    CannotParseHexU8 {
+        context: String,
+        raw: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+    /// Hex u8 literal is longer than 2 digits.
+    #[error("{context}: expected 1-2 hex digits, got {digits} in {raw:?}")]
+    HexU8TooLong {
+        context: String,
+        raw: String,
+        digits: usize,
+    },
+    /// `--flag` was specified more than once.
+    #[error("{flag} was specified more than once; pass it exactly once")]
+    DuplicateFlag { flag: String },
+    /// `--flag` has no following value.
+    #[error("{flag} requires a value")]
+    FlagRequiresValue { flag: String },
+    /// `--flag=value` form used where the two-token form is required.
+    #[error("{flag}=... not supported; use the two-token form: {flag} <value>")]
+    FlagEqNotSupported { flag: String },
+    /// `--flag value` where `value` itself starts with `--`.
+    #[error(
+        "{flag} expects a value but got flag-like token {value:?}; likely a missing value upstream"
+    )]
+    FlagValueLooksLikeFlag { flag: String, value: String },
+    /// `--format <kind>` got an unknown kind.
+    #[error("unknown output format: {got}\nvalid formats: human, json")]
+    UnknownOutputFormat { got: String },
+    /// `--mode <kind>` got an unknown kind.
+    #[error("unknown compare mode: {got}\nvalid modes: strict, memory, events, prefix")]
+    UnknownCompareMode { got: String },
+    /// `--patch-byte ""`.
+    #[error("--patch-byte: empty argument (expected ADDR=VALUE)")]
+    PatchByteEmpty,
+    /// `--patch-byte` value lacks `=`.
+    #[error("--patch-byte: missing '=' in {pair:?} (expected ADDR=VALUE)")]
+    PatchByteMissingEq { pair: String },
+    /// `--patch-byte =VALUE`.
+    #[error("--patch-byte: empty address in {pair:?} (expected ADDR=VALUE)")]
+    PatchByteEmptyAddress { pair: String },
+    /// `--patch-byte ADDR=`.
+    #[error("--patch-byte: empty value in {pair:?} (expected ADDR=VALUE)")]
+    PatchByteEmptyValue { pair: String },
+    /// `--patch-byte ADDR=VAL=EXTRA`.
+    #[error("--patch-byte: extra '=' in {pair:?} (expected ADDR=VALUE)")]
+    PatchByteExtraEq { pair: String },
+    /// run-game positional: a second non-flag-non-value token.
+    #[error("unexpected extra positional: {value:?} (already have {existing:?})")]
+    ExtraPositional { value: String, existing: String },
+    /// run-game positional: empty argv slot.
+    #[error("unexpected empty positional argument")]
+    EmptyPositional,
+    /// CELLGOV_* env-var value not a recognized boolean.
+    #[error("{name}={got:?}: expected 0/1/true/false/yes/no/on/off")]
+    EnvBoolUnknown { name: String, got: String },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OutputFormat {

@@ -2,7 +2,6 @@
 
 pub(crate) mod args;
 pub(crate) mod boot_cmd;
-pub(crate) mod cli_arg_error;
 pub(crate) mod compare;
 pub(crate) mod dump;
 pub(crate) mod env;

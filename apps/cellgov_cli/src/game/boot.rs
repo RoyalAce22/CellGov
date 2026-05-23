@@ -32,6 +32,26 @@ fn u32_or_die(label: &str, value: u64) -> u32 {
         .unwrap_or_else(|_| die(&format!("{label}: 0x{value:x} does not fit in u32")))
 }
 
+fn content_source_label(
+    source: &super::content::ContentBaseSource,
+    manifest_base: &str,
+    override_base: Option<&std::path::Path>,
+) -> String {
+    use super::content::ContentBaseSource;
+    match source {
+        ContentBaseSource::Manifest => format!("manifest base ({manifest_base})"),
+        ContentBaseSource::Usrdir { path } => {
+            format!("EBOOT-adjacent USRDIR ({})", path.display())
+        }
+        ContentBaseSource::Override { env } => format!(
+            "override env {env}={}",
+            override_base
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+        ),
+    }
+}
+
 /// Which firmware-loading pipeline `boot::prepare` should drive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootMode {
@@ -608,23 +628,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         match registration_result {
             Ok(source) => {
                 if opts.print_banner {
-                    let label = match source {
-                        super::content::ContentBaseSource::Manifest => {
-                            format!("manifest base ({})", content.base)
-                        }
-                        super::content::ContentBaseSource::Usrdir { path } => {
-                            format!("EBOOT-adjacent USRDIR ({})", path.display())
-                        }
-                        super::content::ContentBaseSource::Override { env } => {
-                            format!(
-                                "override env {env}={}",
-                                override_base
-                                    .as_ref()
-                                    .map(|p| p.display().to_string())
-                                    .unwrap_or_default(),
-                            )
-                        }
-                    };
+                    let label =
+                        content_source_label(&source, &content.base, override_base.as_deref());
                     println!(
                         "content: registered {} blob(s) from {label}",
                         content.files.len(),

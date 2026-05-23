@@ -3,7 +3,8 @@
 //! / `buffer_store` / `load_slice` vocabulary in the parent module so
 //! the reservation clear-sweep stays consistent across them.
 
-use crate::exec::{buffer_store, load_se, load_slice, load_ze, ExecuteVerdict};
+use crate::exec::memory_helpers::{buffer_store, load_se, load_slice, load_ze};
+use crate::exec::ExecuteVerdict;
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;

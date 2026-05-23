@@ -58,6 +58,8 @@ pub struct MemoryPool {
 }
 
 impl MemoryPool {
+    /// Empty pool; first call to a pooled runner allocates the
+    /// backing `GuestMemory`.
     pub fn new() -> Self {
         Self { cached: None }
     }

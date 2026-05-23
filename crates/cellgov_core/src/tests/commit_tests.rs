@@ -982,8 +982,8 @@ fn reservation_acquire_with_unregistered_source_rejects_batch() {
         err,
         Err(CommitError::UnknownSourceUnit {
             effect_index: 0,
-            source
-        }) if source == ghost
+            source_unit
+        }) if source_unit == ghost
     ));
     // Nothing pollutes the table on rejection.
     assert!(bed.reservations.is_empty());
@@ -1002,8 +1002,8 @@ fn conditional_store_with_unregistered_source_rejects_batch() {
         err,
         Err(CommitError::UnknownSourceUnit {
             effect_index: 0,
-            source
-        }) if source == ghost
+            source_unit
+        }) if source_unit == ghost
     ));
     // Store did not commit to memory on rejection.
     assert!(bed

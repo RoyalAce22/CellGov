@@ -7,19 +7,25 @@ use cellgov_ps3_abi::elf::{
 };
 
 /// Load failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LoadError {
     /// File is too small to contain an ELF header.
+    #[error("SPU ELF too small for header")]
     TooSmall,
     /// ELF magic bytes (0x7F 'E' 'L' 'F') not found.
+    #[error("SPU ELF bad magic")]
     BadMagic,
     /// Not a 32-bit ELF.
+    #[error("SPU ELF is not 32-bit")]
     Not32Bit,
     /// Not big-endian.
+    #[error("SPU ELF is not big-endian")]
     NotBigEndian,
     /// A LOAD segment extends past the end of the file.
+    #[error("SPU ELF LOAD segment truncated")]
     SegmentTruncated,
     /// A LOAD segment's virtual address + size exceeds local store.
+    #[error("SPU ELF LOAD segment at vaddr 0x{vaddr:08x} (memsz {memsz}) exceeds local store")]
     SegmentOutOfRange {
         /// Virtual address of the segment.
         vaddr: u32,
@@ -27,24 +33,6 @@ pub enum LoadError {
         memsz: u32,
     },
 }
-
-impl std::fmt::Display for LoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TooSmall => f.write_str("SPU ELF too small for header"),
-            Self::BadMagic => f.write_str("SPU ELF bad magic"),
-            Self::Not32Bit => f.write_str("SPU ELF is not 32-bit"),
-            Self::NotBigEndian => f.write_str("SPU ELF is not big-endian"),
-            Self::SegmentTruncated => f.write_str("SPU ELF LOAD segment truncated"),
-            Self::SegmentOutOfRange { vaddr, memsz } => write!(
-                f,
-                "SPU ELF LOAD segment at vaddr 0x{vaddr:08x} (memsz {memsz}) exceeds local store"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for LoadError {}
 
 /// Load an SPU ELF binary into `state`, copying PT_LOAD segments into
 /// LS, zeroing `.bss` (memsz > filesz), and setting `state.pc` to the

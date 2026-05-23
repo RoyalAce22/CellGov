@@ -33,20 +33,19 @@ const REPRODUCTION_TEMPLATE: &str = include_str!("templates/REPRODUCTION.md.temp
 const INLINE_BYTE_LIMIT: u64 = 16;
 
 /// Why the ELF-header-plus-PHDR-table parser rejected the EBOOT.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ElfHeaderParseError {
-    TooShort {
-        len: usize,
-    },
-    BadMagic {
-        found: [u8; 4],
-    },
-    WrongClass {
-        found: u8,
-    },
-    WrongEndian {
-        found: u8,
-    },
+    #[error("EBOOT shorter than ELF64 header (got {len} bytes, need 64)")]
+    TooShort { len: usize },
+    #[error("EBOOT magic is not 0x7f 'E' 'L' 'F' (got {:02x} {:02x} {:02x} {:02x})", found[0], found[1], found[2], found[3])]
+    BadMagic { found: [u8; 4] },
+    #[error("EBOOT EI_CLASS is not ELFCLASS64 (got {found})")]
+    WrongClass { found: u8 },
+    #[error("EBOOT EI_DATA is not ELFDATA2MSB (got {found})")]
+    WrongEndian { found: u8 },
+    #[error(
+        "ELF PHDR table end overflows u64 (phoff={phoff}, phentsize={phentsize}, phnum={phnum})"
+    )]
     PhdrTableOverflow {
         phoff: u64,
         phentsize: u64,
@@ -54,107 +53,35 @@ pub(crate) enum ElfHeaderParseError {
     },
 }
 
-impl std::fmt::Display for ElfHeaderParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TooShort { len } => {
-                write!(f, "EBOOT shorter than ELF64 header (got {len} bytes, need 64)")
-            }
-            Self::BadMagic { found } => write!(
-                f,
-                "EBOOT magic is not 0x7f 'E' 'L' 'F' (got {:02x} {:02x} {:02x} {:02x})",
-                found[0], found[1], found[2], found[3]
-            ),
-            Self::WrongClass { found } => {
-                write!(f, "EBOOT EI_CLASS is not ELFCLASS64 (got {found})")
-            }
-            Self::WrongEndian { found } => {
-                write!(f, "EBOOT EI_DATA is not ELFDATA2MSB (got {found})")
-            }
-            Self::PhdrTableOverflow {
-                phoff,
-                phentsize,
-                phnum,
-            } => write!(
-                f,
-                "ELF PHDR table end overflows u64 (phoff={phoff}, phentsize={phentsize}, phnum={phnum})"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ElfHeaderParseError {}
-
 /// Errors `fixture-gen` raises before the report writers; `run()` is
 /// the boundary between typed errors and the process-exit `die()`.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub(crate) enum FixtureGenError {
+    #[error("{context}: {source}")]
     Io {
         context: String,
+        #[source]
         source: std::io::Error,
     },
+    #[error("serialize summary: {source}")]
     Serialize {
+        #[source]
         source: serde_json::Error,
     },
-    ElfHeaderParse(ElfHeaderParseError),
-    ImportParse(cellgov_ppu::prx::ImportParseError),
+    #[error("ELF header: {0}")]
+    ElfHeaderParse(#[from] ElfHeaderParseError),
+    #[error("parse imports: {0}")]
+    ImportParse(#[from] cellgov_ppu::prx::ImportParseError),
     /// `r.addr + phdr_end` would overflow `u64`. fixture-gen reads
     /// user-provided observation JSON, so `addr` near `u64::MAX` is
     /// reachable input even though a well-formed PS3 EBOOT never
     /// approaches it.
-    CodeRegionAddrOverflow {
-        addr: u64,
-        phdr_end: u64,
-    },
+    #[error("code region addr 0x{addr:016x} + PHDR-table end 0x{phdr_end:016x} overflows u64")]
+    CodeRegionAddrOverflow { addr: u64, phdr_end: u64 },
     /// Same rationale as [`Self::CodeRegionAddrOverflow`], applied
     /// to `guest_addr + struct_size` in the sys_proc_param scan.
-    SysProcParamAddrOverflow {
-        addr: u64,
-        struct_size: u64,
-    },
-}
-
-impl std::fmt::Display for FixtureGenError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io { context, source } => write!(f, "{context}: {source}"),
-            Self::Serialize { source } => write!(f, "serialize summary: {source}"),
-            Self::ElfHeaderParse(e) => write!(f, "ELF header: {e}"),
-            Self::ImportParse(e) => write!(f, "parse imports: {e}"),
-            Self::CodeRegionAddrOverflow { addr, phdr_end } => write!(
-                f,
-                "code region addr 0x{addr:016x} + PHDR-table end 0x{phdr_end:016x} overflows u64"
-            ),
-            Self::SysProcParamAddrOverflow { addr, struct_size } => write!(
-                f,
-                "sys_process_param addr 0x{addr:016x} + struct_size {struct_size} overflows u64"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for FixtureGenError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io { source, .. } => Some(source),
-            Self::Serialize { source } => Some(source),
-            Self::ElfHeaderParse(e) => Some(e),
-            Self::ImportParse(e) => Some(e),
-            Self::CodeRegionAddrOverflow { .. } | Self::SysProcParamAddrOverflow { .. } => None,
-        }
-    }
-}
-
-impl From<ElfHeaderParseError> for FixtureGenError {
-    fn from(e: ElfHeaderParseError) -> Self {
-        Self::ElfHeaderParse(e)
-    }
-}
-
-impl From<cellgov_ppu::prx::ImportParseError> for FixtureGenError {
-    fn from(e: cellgov_ppu::prx::ImportParseError) -> Self {
-        Self::ImportParse(e)
-    }
+    #[error("sys_process_param addr 0x{addr:016x} + struct_size {struct_size} overflows u64")]
+    SysProcParamAddrOverflow { addr: u64, struct_size: u64 },
 }
 
 /// Substitute `{{name}}` tokens in `template` with values from

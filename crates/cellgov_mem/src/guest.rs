@@ -243,16 +243,32 @@ pub struct FaultContext {
     pub nearest_above: Option<&'static str>,
 }
 
+impl std::fmt::Display for FaultContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unmapped access at 0x{:016x}", self.addr)?;
+        match (self.nearest_below, self.nearest_above) {
+            (Some(b), Some(a)) => write!(f, " (between {b} and {a})"),
+            (Some(b), None) => write!(f, " (after {b})"),
+            (None, Some(a)) => write!(f, " (before {a})"),
+            (None, None) => Ok(()),
+        }
+    }
+}
+
 /// Why a `GuestMemory` operation failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum MemError {
     /// Supplied byte buffer's length differs from the range's length.
+    #[error("byte buffer length disagrees with range length")]
     LengthMismatch,
     /// `from_regions` received overlapping address ranges.
+    #[error("overlapping address ranges")]
     OverlappingRegions,
     /// Range is not entirely contained within any single mapped region.
+    #[error("{0}")]
     Unmapped(FaultContext),
     /// Write targeted a non-`ReadWrite` region.
+    #[error("write into reserved region {region} at 0x{addr:016x}")]
     ReservedWrite {
         /// Guest address of the faulting write.
         addr: u64,
@@ -260,6 +276,7 @@ pub enum MemError {
         region: &'static str,
     },
     /// Read targeted a `ReservedStrict` region.
+    #[error("read of reserved-strict region {region} at 0x{addr:016x}")]
     ReservedStrictRead {
         /// Guest address of the faulting read.
         addr: u64,
@@ -267,35 +284,6 @@ pub enum MemError {
         region: &'static str,
     },
 }
-
-impl std::fmt::Display for MemError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::LengthMismatch => f.write_str("byte buffer length disagrees with range length"),
-            Self::OverlappingRegions => f.write_str("overlapping address ranges"),
-            Self::Unmapped(ctx) => {
-                write!(f, "unmapped access at 0x{:016x}", ctx.addr)?;
-                match (ctx.nearest_below, ctx.nearest_above) {
-                    (Some(b), Some(a)) => write!(f, " (between {b} and {a})"),
-                    (Some(b), None) => write!(f, " (after {b})"),
-                    (None, Some(a)) => write!(f, " (before {a})"),
-                    (None, None) => Ok(()),
-                }
-            }
-            Self::ReservedWrite { addr, region } => {
-                write!(f, "write into reserved region {region} at 0x{addr:016x}")
-            }
-            Self::ReservedStrictRead { addr, region } => {
-                write!(
-                    f,
-                    "read of reserved-strict region {region} at 0x{addr:016x}"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for MemError {}
 
 impl GuestMemory {
     /// Construct a fresh `GuestMemory` with a single `"flat"` region at base 0.
@@ -486,6 +474,23 @@ impl GuestMemory {
         }
         self.cached_hash.set(None);
         self.provisional_read_count.set(0);
+    }
+
+    /// Force the next [`content_hash`](Self::content_hash) call to
+    /// re-walk dirty pages instead of returning the cached digest.
+    /// `apply_commit` already invalidates the cache; this hook exists
+    /// so benchmarks and determinism tests can measure the uncached
+    /// walk without going through a write.
+    #[doc(hidden)]
+    pub fn invalidate_content_hash(&self) {
+        self.cached_hash.set(None);
+    }
+
+    /// True if the content-hash cache currently holds a value.
+    /// Diagnostic and invariant-checking hook; not on any hot path.
+    #[doc(hidden)]
+    pub fn is_content_hash_cached(&self) -> bool {
+        self.cached_hash.get().is_some()
     }
 
     /// 64-bit FNV-1a digest of the byte content + region map.

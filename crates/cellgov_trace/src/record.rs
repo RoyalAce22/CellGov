@@ -10,30 +10,32 @@
 //! tags. The current set is fixed-size, so there is no length field after the
 //! tag.
 //!
-//! | Tag    | Variant               | Bytes                          |
-//! |--------|-----------------------|--------------------------------|
-//! | `0x00` | `UnitScheduled`       | 1 + 8 + 8 + 8 + 8 = 33         |
-//! | `0x01` | `StepCompleted`       | 1 + 8 + 1 + 8 + 8 = 26         |
-//! | `0x02` | `CommitApplied`       | 1 + 8 + 4 + 4 + 1 + 8 = 26     |
-//! | `0x03` | `StateHashCheckpoint` | 1 + 1 + 8 = 10                 |
-//! | `0x04` | `EffectEmitted`       | 1 + 8 + 4 + 1 = 14             |
-//! | `0x05` | `UnitBlocked`         | 1 + 8 + 1 = 10                 |
-//! | `0x06` | `UnitWoken`           | 1 + 8 + 1 = 10                 |
-//! | `0x07` | `PpuStateHash`        | 1 + 8 + 8 + 8 = 25             |
+//! | Tag    | Variant               | Bytes                                  |
+//! |--------|-----------------------|----------------------------------------|
+//! | `0x00` | `UnitScheduled`       | 1 + 8 + 8 + 8 + 8 = 33                 |
+//! | `0x01` | `StepCompleted`       | 1 + 8 + 1 + 8 + 8 = 26                 |
+//! | `0x02` | `CommitApplied`       | 1 + 8 + 4 + 4 + 1 + 8 = 26             |
+//! | `0x03` | `StateHashCheckpoint` | 1 + 1 + 8 = 10                         |
+//! | `0x04` | `EffectEmitted`       | 1 + 8 + 4 + 1 = 14                     |
+//! | `0x05` | `UnitBlocked`         | 1 + 8 + 1 = 10                         |
+//! | `0x06` | `UnitWoken`           | 1 + 8 + 1 = 10                         |
+//! | `0x07` | `PpuStateHash`        | 1 + 8 + 8 + 8 = 25                     |
 //! | `0x08` | `PpuStateFull`        | 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 = 301 |
 
 use crate::hash::StateHash;
 use crate::level::TraceLevel;
 use cellgov_event::UnitId;
 use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 /// Mirror of `cellgov_exec::YieldReason` for the trace stream.
 ///
 /// Discriminants must match the source enum: the trace crate cannot depend on
 /// `cellgov_exec` (DAG: effects -> exec, effects -> trace), so the bridge maps
 /// by raw value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_yield_reason))]
 pub enum TracedYieldReason {
     /// Unit consumed its full granted budget.
     BudgetExhausted = 0,
@@ -59,27 +61,10 @@ pub enum TracedYieldReason {
     Hypercall = 9,
 }
 
-impl TracedYieldReason {
-    fn from_u8(v: u8) -> Option<Self> {
-        Some(match v {
-            0 => Self::BudgetExhausted,
-            1 => Self::MailboxAccess,
-            2 => Self::DmaSubmitted,
-            3 => Self::DmaWait,
-            4 => Self::WaitingSync,
-            5 => Self::Syscall,
-            6 => Self::InterruptBoundary,
-            7 => Self::Fault,
-            8 => Self::Finished,
-            9 => Self::Hypercall,
-            _ => return None,
-        })
-    }
-}
-
 /// Which piece of state a [`TraceRecord::StateHashCheckpoint`] hashes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_hash_kind))]
 pub enum HashCheckpointKind {
     /// Hash covers committed shared memory.
     CommittedMemory = 0,
@@ -91,21 +76,10 @@ pub enum HashCheckpointKind {
     UnitStatus = 3,
 }
 
-impl HashCheckpointKind {
-    fn from_u8(v: u8) -> Option<Self> {
-        Some(match v {
-            0 => Self::CommittedMemory,
-            1 => Self::RunnableQueue,
-            2 => Self::SyncState,
-            3 => Self::UnitStatus,
-            _ => return None,
-        })
-    }
-}
-
 /// Why a unit was blocked, as the trace records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_block_reason))]
 pub enum TracedBlockReason {
     /// Unit blocked waiting on a sync event.
     WaitOnEvent = 0,
@@ -113,19 +87,10 @@ pub enum TracedBlockReason {
     MailboxEmpty = 1,
 }
 
-impl TracedBlockReason {
-    fn from_u8(v: u8) -> Option<Self> {
-        Some(match v {
-            0 => Self::WaitOnEvent,
-            1 => Self::MailboxEmpty,
-            _ => return None,
-        })
-    }
-}
-
 /// Why a unit was woken, as the trace records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_wake_reason))]
 pub enum TracedWakeReason {
     /// Unit woken by a wake effect.
     WakeEffect = 0,
@@ -133,23 +98,14 @@ pub enum TracedWakeReason {
     DmaCompletion = 1,
 }
 
-impl TracedWakeReason {
-    fn from_u8(v: u8) -> Option<Self> {
-        Some(match v {
-            0 => Self::WakeEffect,
-            1 => Self::DmaCompletion,
-            _ => return None,
-        })
-    }
-}
-
 /// Mirror of `cellgov_effects::Effect` for the trace stream.
 ///
 /// Discriminants must match the source variant order: the trace crate cannot
 /// depend on `cellgov_effects` (DAG: effects -> trace), so the bridge maps by
 /// raw value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_effect_kind))]
 pub enum TracedEffectKind {
     /// Shared-memory write intent.
     SharedWriteIntent = 0,
@@ -179,64 +135,56 @@ pub enum TracedEffectKind {
     RsxFlipRequest = 12,
 }
 
-impl TracedEffectKind {
-    fn from_u8(v: u8) -> Option<Self> {
-        Some(match v {
-            0 => Self::SharedWriteIntent,
-            1 => Self::MailboxSend,
-            2 => Self::MailboxReceiveAttempt,
-            3 => Self::DmaEnqueue,
-            4 => Self::WaitOnEvent,
-            5 => Self::WakeUnit,
-            6 => Self::SignalUpdate,
-            7 => Self::FaultRaised,
-            8 => Self::TraceMarker,
-            9 => Self::ReservationAcquire,
-            10 => Self::ConditionalStore,
-            11 => Self::RsxLabelWrite,
-            12 => Self::RsxFlipRequest,
-            _ => return None,
-        })
-    }
-}
-
 /// Why decoding a trace record stream failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
     /// Byte stream ended mid-record.
+    #[error("byte stream ended mid-record")]
     Truncated,
     /// Record tag byte is not a known variant.
+    #[error("unknown record tag 0x{0:02x}")]
     UnknownTag(u8),
     /// Yield-reason byte is not a known variant.
+    #[error("unknown yield reason 0x{0:02x}")]
     UnknownYieldReason(u8),
     /// Hash-checkpoint-kind byte is not a known variant.
+    #[error("unknown hash-checkpoint kind 0x{0:02x}")]
     UnknownHashKind(u8),
     /// `fault_discarded` flag was neither 0 nor 1.
+    #[error("fault-discarded flag is neither 0 nor 1: 0x{0:02x}")]
     InvalidBool(u8),
     /// Effect-kind byte is not a known variant.
+    #[error("unknown effect kind 0x{0:02x}")]
     UnknownEffectKind(u8),
     /// Block-reason byte is not a known variant.
+    #[error("unknown block reason 0x{0:02x}")]
     UnknownBlockReason(u8),
     /// Wake-reason byte is not a known variant.
+    #[error("unknown wake reason 0x{0:02x}")]
     UnknownWakeReason(u8),
 }
 
-impl std::fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Truncated => f.write_str("byte stream ended mid-record"),
-            Self::UnknownTag(b) => write!(f, "unknown record tag 0x{b:02x}"),
-            Self::UnknownYieldReason(b) => write!(f, "unknown yield reason 0x{b:02x}"),
-            Self::UnknownHashKind(b) => write!(f, "unknown hash-checkpoint kind 0x{b:02x}"),
-            Self::InvalidBool(b) => write!(f, "fault-discarded flag is neither 0 nor 1: 0x{b:02x}"),
-            Self::UnknownEffectKind(b) => write!(f, "unknown effect kind 0x{b:02x}"),
-            Self::UnknownBlockReason(b) => write!(f, "unknown block reason 0x{b:02x}"),
-            Self::UnknownWakeReason(b) => write!(f, "unknown wake reason 0x{b:02x}"),
-        }
+impl DecodeError {
+    fn unknown_yield_reason(v: u8) -> Self {
+        Self::UnknownYieldReason(v)
+    }
+
+    fn unknown_hash_kind(v: u8) -> Self {
+        Self::UnknownHashKind(v)
+    }
+
+    fn unknown_block_reason(v: u8) -> Self {
+        Self::UnknownBlockReason(v)
+    }
+
+    fn unknown_wake_reason(v: u8) -> Self {
+        Self::UnknownWakeReason(v)
+    }
+
+    fn unknown_effect_kind(v: u8) -> Self {
+        Self::UnknownEffectKind(v)
     }
 }
-
-impl std::error::Error for DecodeError {}
 
 /// A single structured trace record.
 #[allow(clippy::large_enum_variant)]
@@ -397,7 +345,7 @@ impl TraceRecord {
             } => {
                 buf.push(TAG_STEP_COMPLETED);
                 write_u64(buf, unit.raw());
-                buf.push(*yield_reason as u8);
+                buf.push(u8::from(*yield_reason));
                 write_u64(buf, consumed_cost.raw());
                 write_u64(buf, time_after.raw());
             }
@@ -417,7 +365,7 @@ impl TraceRecord {
             }
             TraceRecord::StateHashCheckpoint { kind, hash } => {
                 buf.push(TAG_STATE_HASH_CHECKPOINT);
-                buf.push(*kind as u8);
+                buf.push(u8::from(*kind));
                 write_u64(buf, hash.raw());
             }
             TraceRecord::EffectEmitted {
@@ -428,17 +376,17 @@ impl TraceRecord {
                 buf.push(TAG_EFFECT_EMITTED);
                 write_u64(buf, unit.raw());
                 write_u32(buf, *sequence);
-                buf.push(*kind as u8);
+                buf.push(u8::from(*kind));
             }
             TraceRecord::UnitBlocked { unit, reason } => {
                 buf.push(TAG_UNIT_BLOCKED);
                 write_u64(buf, unit.raw());
-                buf.push(*reason as u8);
+                buf.push(u8::from(*reason));
             }
             TraceRecord::UnitWoken { unit, reason } => {
                 buf.push(TAG_UNIT_WOKEN);
                 write_u64(buf, unit.raw());
-                buf.push(*reason as u8);
+                buf.push(u8::from(*reason));
             }
             TraceRecord::PpuStateHash { step, pc, hash } => {
                 buf.push(TAG_PPU_STATE_HASH);
@@ -489,8 +437,7 @@ impl TraceRecord {
             TAG_STEP_COMPLETED => {
                 let unit = UnitId::new(read_u64(bytes, &mut pos)?);
                 let yr_byte = read_u8(bytes, &mut pos)?;
-                let yield_reason = TracedYieldReason::from_u8(yr_byte)
-                    .ok_or(DecodeError::UnknownYieldReason(yr_byte))?;
+                let yield_reason = TracedYieldReason::try_from(yr_byte)?;
                 let consumed_cost = InstructionCost::new(read_u64(bytes, &mut pos)?);
                 let time_after = GuestTicks::new(read_u64(bytes, &mut pos)?);
                 TraceRecord::StepCompleted {
@@ -521,8 +468,7 @@ impl TraceRecord {
             }
             TAG_STATE_HASH_CHECKPOINT => {
                 let kind_byte = read_u8(bytes, &mut pos)?;
-                let kind = HashCheckpointKind::from_u8(kind_byte)
-                    .ok_or(DecodeError::UnknownHashKind(kind_byte))?;
+                let kind = HashCheckpointKind::try_from(kind_byte)?;
                 let hash = StateHash::new(read_u64(bytes, &mut pos)?);
                 TraceRecord::StateHashCheckpoint { kind, hash }
             }
@@ -530,8 +476,7 @@ impl TraceRecord {
                 let unit = UnitId::new(read_u64(bytes, &mut pos)?);
                 let sequence = read_u32(bytes, &mut pos)?;
                 let kind_byte = read_u8(bytes, &mut pos)?;
-                let kind = TracedEffectKind::from_u8(kind_byte)
-                    .ok_or(DecodeError::UnknownEffectKind(kind_byte))?;
+                let kind = TracedEffectKind::try_from(kind_byte)?;
                 TraceRecord::EffectEmitted {
                     unit,
                     sequence,
@@ -541,15 +486,13 @@ impl TraceRecord {
             TAG_UNIT_BLOCKED => {
                 let unit = UnitId::new(read_u64(bytes, &mut pos)?);
                 let reason_byte = read_u8(bytes, &mut pos)?;
-                let reason = TracedBlockReason::from_u8(reason_byte)
-                    .ok_or(DecodeError::UnknownBlockReason(reason_byte))?;
+                let reason = TracedBlockReason::try_from(reason_byte)?;
                 TraceRecord::UnitBlocked { unit, reason }
             }
             TAG_UNIT_WOKEN => {
                 let unit = UnitId::new(read_u64(bytes, &mut pos)?);
                 let reason_byte = read_u8(bytes, &mut pos)?;
-                let reason = TracedWakeReason::from_u8(reason_byte)
-                    .ok_or(DecodeError::UnknownWakeReason(reason_byte))?;
+                let reason = TracedWakeReason::try_from(reason_byte)?;
                 TraceRecord::UnitWoken { unit, reason }
             }
             TAG_PPU_STATE_HASH => {

@@ -34,41 +34,26 @@ impl Lv2Host {
         _a6: u64,
     ) -> Lv2Dispatch {
         if !self.rsx_context.allocated || context_id != self.rsx_context.context_id {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         match package_id {
             package::FLIP_MODE => {
                 self.rsx_context.flip_mode = _a4 as u32;
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: vec![],
-                }
+                Lv2Dispatch::immediate(0)
             }
             package::FLIP_BUFFER => self.sys_rsx_attribute_flip(_a3, _a4),
             package::SET_DISPLAY_BUFFER => self.sys_rsx_attribute_set_display_buffer(_a3, _a4, _a5),
             PACKAGE_CELLGOV_SET_FLIP_HANDLER => {
                 self.rsx_context.flip_handler_addr = _a3 as u32;
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: vec![],
-                }
+                Lv2Dispatch::immediate(0)
             }
             PACKAGE_CELLGOV_SET_VBLANK_HANDLER => {
                 self.rsx_context.vblank_handler_addr = _a3 as u32;
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: vec![],
-                }
+                Lv2Dispatch::immediate(0)
             }
             PACKAGE_CELLGOV_SET_USER_HANDLER => {
                 self.rsx_context.user_handler_addr = _a3 as u32;
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: vec![],
-                }
+                Lv2Dispatch::immediate(0)
             }
             _ => self.sys_rsx_attribute_unknown(package_id),
         }
@@ -79,10 +64,7 @@ impl Lv2Host {
     fn sys_rsx_attribute_set_display_buffer(&mut self, a3: u64, a4: u64, a5: u64) -> Lv2Dispatch {
         let id = (a3 & 0xFF) as usize;
         if id >= display_buffer::COUNT_MAX {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let width = (a4 >> 32) as u32;
         let height = a4 as u32;
@@ -98,10 +80,7 @@ impl Lv2Host {
         if next_count > self.rsx_context.display_buffers_count {
             self.rsx_context.display_buffers_count = next_count;
         }
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// 0x102 FLIP_BUFFER: emits an [`Effect::RsxFlipRequest`] so the
@@ -129,10 +108,7 @@ impl Lv2Host {
                  returning CELL_OK stub"
             ),
         );
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 }
 

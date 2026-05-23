@@ -21,9 +21,15 @@ use crate::runner_cellgov::BootOutcome;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "BootSummaryShadow")]
 pub struct BootSummary {
+    /// Checkpoint the boot was asked to stop at.
     pub checkpoint: CheckpointKind,
+    /// How the boot actually ended.
     pub outcome: BootOutcome,
+    /// Steps retired before the boot ended (one step = `budget`
+    /// guest instructions).
     pub steps: u64,
+    /// Per-step instruction budget; `steps * budget` is the total
+    /// guest instructions retired.
     pub budget: Budget,
 }
 
@@ -132,64 +138,56 @@ impl TryFrom<BootSummaryShadow> for BootSummary {
 }
 
 /// Why [`BootSummary::validate`] rejected a candidate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BootSummaryError {
     /// `BootOutcome::RsxWriteCheckpoint` only pairs with
     /// `CheckpointKind::FirstRsxWrite`.
-    RsxWriteOutcomeWithoutRsxCheckpoint { checkpoint: CheckpointKind },
-    /// `BootOutcome::PcReached` requires `CheckpointKind::Pc`.
-    PcReachedWithoutPcCheckpoint {
+    #[error("RsxWriteCheckpoint outcome requires FirstRsxWrite checkpoint, got {checkpoint:?}")]
+    RsxWriteOutcomeWithoutRsxCheckpoint {
+        /// Checkpoint that was actually requested.
         checkpoint: CheckpointKind,
+    },
+    /// `BootOutcome::PcReached` requires `CheckpointKind::Pc`.
+    #[error("PcReached({outcome}) outcome requires Pc checkpoint, got {checkpoint:?}")]
+    PcReachedWithoutPcCheckpoint {
+        /// Checkpoint that was actually requested.
+        checkpoint: CheckpointKind,
+        /// PC the run reported having reached.
         outcome: GuestAddr,
     },
     /// `BootOutcome::PcReached(a)` and `CheckpointKind::Pc { addr: b }`
     /// must address-match.
+    #[error("Pc checkpoint addr {checkpoint} does not match PcReached addr {outcome}")]
     PcAddressMismatch {
+        /// Address declared in the `CheckpointKind::Pc` checkpoint.
         checkpoint: GuestAddr,
+        /// Address carried by the `BootOutcome::PcReached` outcome.
         outcome: GuestAddr,
     },
     /// `steps * budget` does not fit in `u64`.
-    InsnsOverflow { steps: u64, budget: Budget },
+    #[error("steps * budget overflowed u64: {steps} * {budget}")]
+    InsnsOverflow {
+        /// Step count that triggered the overflow.
+        steps: u64,
+        /// Per-step budget that triggered the overflow.
+        budget: Budget,
+    },
 }
-
-impl std::fmt::Display for BootSummaryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::RsxWriteOutcomeWithoutRsxCheckpoint { checkpoint } => write!(
-                f,
-                "RsxWriteCheckpoint outcome requires FirstRsxWrite checkpoint, got {checkpoint:?}"
-            ),
-            Self::PcReachedWithoutPcCheckpoint {
-                checkpoint,
-                outcome,
-            } => write!(
-                f,
-                "PcReached({outcome}) outcome requires Pc checkpoint, got {checkpoint:?}"
-            ),
-            Self::PcAddressMismatch {
-                checkpoint,
-                outcome,
-            } => write!(
-                f,
-                "Pc checkpoint addr {checkpoint} does not match PcReached addr {outcome}"
-            ),
-            Self::InsnsOverflow { steps, budget } => {
-                write!(f, "steps * budget overflowed u64: {steps} * {budget}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for BootSummaryError {}
 
 /// 1:1 mirror of `cellgov_cli`'s `CheckpointTrigger`; the CLI-side
 /// `boot_summary_cross_check` test pins the cross-crate wire shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CheckpointKind {
+    /// Stop when the guest issues `_sys_process_exit`.
     ProcessExit,
+    /// Stop on the first PPU write into the RSX command region.
     FirstRsxWrite,
-    Pc { addr: GuestAddr },
+    /// Stop when a step retires with PC equal to `addr`.
+    Pc {
+        /// Guest address the boot is anchored at.
+        addr: GuestAddr,
+    },
 }
 
 #[cfg(test)]

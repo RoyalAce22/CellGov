@@ -5,42 +5,14 @@ use std::path::Path;
 use super::Manifest;
 
 /// Why manifest loading failed.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
     /// File system error.
-    Io(std::io::Error),
+    #[error("manifest I/O: {0}")]
+    Io(#[from] std::io::Error),
     /// TOML parse error.
-    Parse(toml::de::Error),
-}
-
-impl std::fmt::Display for ManifestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "manifest I/O: {e}"),
-            Self::Parse(e) => write!(f, "manifest parse: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for ManifestError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::Parse(e) => Some(e),
-        }
-    }
-}
-
-impl From<std::io::Error> for ManifestError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<toml::de::Error> for ManifestError {
-    fn from(e: toml::de::Error) -> Self {
-        Self::Parse(e)
-    }
+    #[error("manifest parse: {0}")]
+    Parse(#[from] toml::de::Error),
 }
 
 /// Load and parse a manifest from a TOML file.
@@ -57,8 +29,8 @@ pub fn parse(text: &str) -> Result<Manifest, ManifestError> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fields::DecoderField;
     use super::*;
+    use crate::manifest::fields::DecoderField;
 
     #[test]
     fn load_spu_mailbox_write_manifest() {

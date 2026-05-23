@@ -5,8 +5,6 @@
 //! constructed `GuestAddr` would point at `0x0` -- a real, mapped PS3
 //! address, not a sentinel.
 
-use std::fmt;
-
 /// A location in the guest's flat address space, in bytes from zero.
 ///
 /// No `Add<u64>`: overflow on address arithmetic must surface as a
@@ -21,10 +19,22 @@ use std::fmt;
 /// addresses round-trip as raw `u64`s, not nested objects, so the
 /// wire format matches what `--checkpoint pc=0xADDR` accepts.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    derive_more::Display,
+    derive_more::LowerHex,
 )]
 #[repr(transparent)]
 #[serde(transparent)]
+#[display("0x{_0:016x}")]
 pub struct GuestAddr(u64);
 
 impl GuestAddr {
@@ -75,18 +85,6 @@ impl GuestAddr {
     #[inline]
     pub const fn checked_distance_from(self, earlier: GuestAddr) -> Option<u64> {
         self.0.checked_sub(earlier.0)
-    }
-}
-
-impl fmt::Display for GuestAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "0x{:016x}", self.0)
-    }
-}
-
-impl fmt::LowerHex for GuestAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::LowerHex::fmt(&self.0, f)
     }
 }
 

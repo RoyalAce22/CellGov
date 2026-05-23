@@ -106,39 +106,30 @@ pub struct PrxRelocation {
 }
 
 /// Failure mode while parsing a decrypted PRX.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PrxParseError {
     /// Input is shorter than the ELF header.
+    #[error("PRX too small for ELF header")]
     TooSmall,
     /// First four bytes are not the ELF magic.
+    #[error("PRX bad ELF magic")]
     BadMagic,
     /// ELF class/encoding is not ELF64 big-endian.
+    #[error("PRX is not ELF64 big-endian")]
     NotElf64Be,
     /// ELF e_type was not 0xFFA4 (PS3 PRX); carries the observed type.
+    #[error("PRX e_type 0x{0:04x} is not 0xFFA4")]
     NotPrx(u16),
     /// Fewer than 2 PT_LOAD segments.
+    #[error("PRX has fewer than 2 PT_LOAD segments")]
     MissingSegments,
     /// A computed file offset or size escaped the input buffer.
+    #[error("PRX offset or size escaped buffer")]
     OutOfBounds,
     /// `sys_prx_module_info_t` was missing or unreadable.
+    #[error("PRX sys_prx_module_info_t missing")]
     NoModuleInfo,
 }
-
-impl std::fmt::Display for PrxParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TooSmall => f.write_str("PRX too small for ELF header"),
-            Self::BadMagic => f.write_str("PRX bad ELF magic"),
-            Self::NotElf64Be => f.write_str("PRX is not ELF64 big-endian"),
-            Self::NotPrx(et) => write!(f, "PRX e_type 0x{et:04x} is not 0xFFA4"),
-            Self::MissingSegments => f.write_str("PRX has fewer than 2 PT_LOAD segments"),
-            Self::OutOfBounds => f.write_str("PRX offset or size escaped buffer"),
-            Self::NoModuleInfo => f.write_str("PRX sys_prx_module_info_t missing"),
-        }
-    }
-}
-
-impl std::error::Error for PrxParseError {}
 
 /// Parse a decrypted PRX (ELF64 type 0xFFA4) into its components.
 ///
@@ -612,7 +603,7 @@ mod tests {
     use super::*;
     use crate::sprx::{R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO, R_PPC64_ADDR32};
 
-    use super::super::test_fixtures::make_test_prx;
+    use crate::sprx::test_fixtures::make_test_prx;
 
     #[test]
     fn parse_test_prx_basic() {

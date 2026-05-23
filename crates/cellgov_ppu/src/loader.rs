@@ -17,51 +17,40 @@ pub struct SegmentPlacement {
 }
 
 /// Why loading failed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LoadError {
     /// File is too small to contain an ELF header (or program-header
     /// table arithmetic overflowed -- treated identically: there is
     /// no usable ELF structure to load).
+    #[error("PPU ELF too small for header")]
     TooSmall,
     /// ELF magic bytes (0x7F 'E' 'L' 'F') not found.
+    #[error("PPU ELF bad magic")]
     BadMagic,
     /// Not a 64-bit ELF (PPU ELFs must be ELF64).
+    #[error("PPU ELF is not 64-bit")]
     Not64Bit,
     /// Not big-endian (PPU ELFs must be MSB).
+    #[error("PPU ELF is not big-endian")]
     NotBigEndian,
     /// A LOAD segment extends past the end of the file.
+    #[error("PPU ELF LOAD segment truncated")]
     SegmentTruncated,
     /// A LOAD segment's virtual address + size exceeds guest memory,
     /// overflows a 32-bit PS3 effective address, or arithmetic on the
     /// vaddr/memsz pair overflowed. `segment_index` is the offending
     /// segment's slot in the program-header table.
+    #[error(
+        "PPU ELF LOAD segment[{segment_index}] at 0x{:016x} (size 0x{:x}) out of range",
+        placement.addr, placement.size
+    )]
     SegmentOutOfRange {
+        /// Where the segment would have been placed in guest memory.
         placement: SegmentPlacement,
+        /// Index of the offending PT_LOAD in the program-header table.
         segment_index: usize,
     },
 }
-
-impl std::fmt::Display for LoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TooSmall => f.write_str("PPU ELF too small for header"),
-            Self::BadMagic => f.write_str("PPU ELF bad magic"),
-            Self::Not64Bit => f.write_str("PPU ELF is not 64-bit"),
-            Self::NotBigEndian => f.write_str("PPU ELF is not big-endian"),
-            Self::SegmentTruncated => f.write_str("PPU ELF LOAD segment truncated"),
-            Self::SegmentOutOfRange {
-                placement,
-                segment_index,
-            } => write!(
-                f,
-                "PPU ELF LOAD segment[{segment_index}] at 0x{:016x} (size 0x{:x}) out of range",
-                placement.addr, placement.size
-            ),
-        }
-    }
-}
-
-impl std::error::Error for LoadError {}
 
 use cellgov_ps3_abi::elf::{ELF_HEADER_SIZE, ELF_MAGIC, PT_LOAD};
 

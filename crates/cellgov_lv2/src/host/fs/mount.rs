@@ -177,22 +177,13 @@ impl Lv2Host {
 
 /// Inner error of `resolve_path`: either no mount matched or the
 /// resolve itself failed (path traversal, internal contract drift).
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum MountResolveErr {
+    #[error("no mount matched")]
     Unmounted,
+    #[error("mount resolve failed: lv2 errno 0x{:08x}", .0.code)]
     Failed(cellgov_ps3_abi::cell_errors::Lv2ErrCode),
 }
-
-impl std::fmt::Display for MountResolveErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Unmounted => f.write_str("no mount matched"),
-            Self::Failed(e) => write!(f, "mount resolve failed: lv2 errno 0x{:08x}", e.code),
-        }
-    }
-}
-
-impl std::error::Error for MountResolveErr {}
 
 /// Shared prefix-resolution step for the file and directory
 /// surfaces, including `..` rejection and invariant-break wiring.

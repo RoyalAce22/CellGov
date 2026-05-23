@@ -3,8 +3,7 @@ use cellgov_exec::UnitStatus;
 use cellgov_lv2::PpuThreadState;
 
 use crate::game::stack_walk::append_stack_walk;
-use crate::game::step_loop::{block_reason_label, RingCursor};
-use crate::game::PC_RING_SIZE;
+use crate::game::step_loop::{block_reason_label, RingCursor, PC_RING_SIZE};
 
 use super::rings::{append_pc_ring_terse, append_pc_ring_with_decode};
 use super::{fetch_raw_at, longest_readable_prefix, region_label_at};

@@ -25,34 +25,20 @@ const KNOWN_FLAGS: &[&str] = &["--registry", "--fixtures-dir", "--output"];
 
 /// Why loading a per-title summary JSON file failed. ENOENT is
 /// modeled as `Ok(None)` upstream and does not produce this error.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub(crate) enum SummaryLoadError {
+    #[error("read {}: {err}", path.display())]
     Io {
         path: PathBuf,
+        #[source]
         err: io::Error,
     },
+    #[error("parse {}: {err}", path.display())]
     Parse {
         path: PathBuf,
+        #[source]
         err: serde_json::Error,
     },
-}
-
-impl std::fmt::Display for SummaryLoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io { path, err } => write!(f, "read {}: {err}", path.display()),
-            Self::Parse { path, err } => write!(f, "parse {}: {err}", path.display()),
-        }
-    }
-}
-
-impl std::error::Error for SummaryLoadError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io { err, .. } => Some(err),
-            Self::Parse { err, .. } => Some(err),
-        }
-    }
 }
 
 pub(crate) fn run(args: &[String]) {

@@ -103,10 +103,10 @@ pub fn parse_tty_log(
 
 #[cfg(test)]
 mod tests {
-    use super::super::config::Rpcs3Decoder;
-    use super::super::observe_from_tty;
     use super::*;
     use crate::observation::ObservedOutcome;
+    use crate::runner_rpcs3::config::Rpcs3Decoder;
+    use crate::runner_rpcs3::observe_from_tty;
     use std::io::Write;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};

@@ -17,7 +17,8 @@
 ///
 /// No `Default`/`Ord`: opaque handles. Use `Option<SignalId>` for
 /// "no signal." Storage lives in [`crate::Registry`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+#[display("{_0}")]
 pub struct SignalId(u64);
 
 impl SignalId {
@@ -31,12 +32,6 @@ impl SignalId {
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
-    }
-}
-
-impl core::fmt::Display for SignalId {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

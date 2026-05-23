@@ -51,25 +51,16 @@ pub enum EventQueueSend {
 }
 
 /// Failure modes of [`EventQueueTable::enqueue_waiter`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum EventQueueEnqueueError {
     /// No event queue with this id.
+    #[error("event_queue enqueue: unknown id")]
     UnknownId,
     /// Thread is already parked on this queue; dispatch-layer
     /// bug (fires `debug_assert!`).
+    #[error("event_queue enqueue: duplicate waiter")]
     DuplicateWaiter,
 }
-
-impl std::fmt::Display for EventQueueEnqueueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownId => f.write_str("event_queue enqueue: unknown id"),
-            Self::DuplicateWaiter => f.write_str("event_queue enqueue: duplicate waiter"),
-        }
-    }
-}
-
-impl std::error::Error for EventQueueEnqueueError {}
 
 /// A parked `sys_event_queue_receive` caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

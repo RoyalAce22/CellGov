@@ -61,24 +61,15 @@ pub enum LwMutexRelease {
 ///
 /// All non-`UnknownId` variants indicate dispatch-layer bugs and
 /// fire `debug_assert!`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum LwMutexEnqueueError {
     /// No lwmutex with this id.
+    #[error("lwmutex enqueue: unknown id")]
     UnknownId,
     /// Thread is already on the waiter list.
+    #[error("lwmutex enqueue: duplicate waiter")]
     DuplicateWaiter,
 }
-
-impl std::fmt::Display for LwMutexEnqueueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownId => f.write_str("lwmutex enqueue: unknown id"),
-            Self::DuplicateWaiter => f.write_str("lwmutex enqueue: duplicate waiter"),
-        }
-    }
-}
-
-impl std::error::Error for LwMutexEnqueueError {}
 
 /// A single lightweight mutex.
 ///

@@ -207,10 +207,7 @@ fn time_get_timebase_frequency_returns_cell_ppu_timebase_hz() {
     let result = host.dispatch(Lv2Request::TimeGetTimebaseFrequency, UnitId::new(0), &rt);
     assert_eq!(
         result,
-        Lv2Dispatch::Immediate {
-            code: cellgov_time::CELL_PPU_TIMEBASE_HZ,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(cellgov_time::CELL_PPU_TIMEBASE_HZ)
     );
     assert_eq!(cellgov_time::CELL_PPU_TIMEBASE_HZ, 79_800_000);
 }
@@ -265,13 +262,7 @@ fn stub_dispatch_returns_cell_ok_for_process_exit() {
     let rt = FakeRuntime::new(256);
     let req = Lv2Request::ProcessExit { code: 0 };
     let result = host.dispatch(req, UnitId::new(0), &rt);
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -283,13 +274,7 @@ fn stub_dispatch_returns_cell_ok_for_unsupported() {
         args: [0; 8],
     };
     let result = host.dispatch(req, UnitId::new(0), &rt);
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -305,10 +290,7 @@ fn unresolved_import_dispatch_returns_cell_einval() {
     let result = host.dispatch(req, UnitId::new(0), &rt);
     assert_eq!(
         result,
-        Lv2Dispatch::Immediate {
-            code: cellgov_ps3_abi::cell_errors::CELL_EINVAL.into(),
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_EINVAL.into())
     );
 }
 
@@ -322,10 +304,7 @@ fn unresolved_import_dispatch_handles_unknown_nid() {
     let result = host.dispatch(req, UnitId::new(0), &rt);
     assert_eq!(
         result,
-        Lv2Dispatch::Immediate {
-            code: cellgov_ps3_abi::cell_errors::CELL_EINVAL.into(),
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_EINVAL.into())
     );
 }
 
@@ -341,13 +320,7 @@ fn syscall_621_returns_ok() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -362,13 +335,7 @@ fn syscall_512_returns_zero_non_root() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -383,13 +350,7 @@ fn syscall_677_returns_ok_no_effects() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -471,13 +432,7 @@ fn syscall_334_returns_ok_no_effects() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -524,13 +479,7 @@ fn syscall_337_rejects_out_of_range_start_addr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        below,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(below, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
     let above = host.dispatch(
         Lv2Request::Unsupported {
             number: 337,
@@ -539,13 +488,7 @@ fn syscall_337_rejects_out_of_range_start_addr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        above,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(above, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -626,10 +569,7 @@ fn syscall_330_returns_enomem_when_cursor_would_cross_kernel_stack_region() {
     let exhausted = host.dispatch(req(), UnitId::new(0), &rt);
     assert_eq!(
         exhausted,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_ENOMEM.into(),
-            effects: vec![],
-        },
+        Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
         "the 10th 256 MiB allocation must cap-fail and surface CELL_ENOMEM"
     );
 }
@@ -646,13 +586,7 @@ fn syscall_494_flags_without_bit2_returns_ok_no_effects() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -695,13 +629,7 @@ fn syscall_136_returns_ok() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -812,13 +740,7 @@ fn syscall_480_returns_registered_kernel_id_for_known_stem() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: u64::from(expected_id),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(u64::from(expected_id)));
 }
 
 #[test]
@@ -842,13 +764,7 @@ fn syscall_480_unknown_path_falls_back_to_pointer_echo() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0x5000,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0x5000));
 }
 
 #[test]
@@ -881,13 +797,7 @@ fn syscall_497_routes_through_same_resolver_as_480() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: u64::from(expected_id),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(u64::from(expected_id)));
 }
 
 #[test]
@@ -969,13 +879,7 @@ fn syscall_486_returns_ok() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -990,13 +894,7 @@ fn syscall_484_returns_elf_is_registered() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0x8001_1910,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0x8001_1910));
 }
 
 #[test]
@@ -1011,13 +909,7 @@ fn syscall_462_returns_enosys() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_ENOSYS.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
 }
 
 #[test]
@@ -1032,13 +924,7 @@ fn tty_read_returns_eio() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EIO.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EIO.into()));
 }
 
 #[test]
@@ -1083,10 +969,7 @@ fn prx_load_module_returns_r3_as_synthetic_id() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::Immediate {
-            code: path_ptr,
-            effects: vec![],
-        },
+        Lv2Dispatch::immediate(path_ptr),
         "syscall 480 must echo r3 as the synthesised module ID"
     );
 }
@@ -1103,13 +986,7 @@ fn syscall_481_rejects_zero_id_with_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -1124,13 +1001,7 @@ fn syscall_481_rejects_zero_p_opt_with_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -1145,13 +1016,7 @@ fn syscall_494_rejects_null_p_info_with_efault() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EFAULT.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -1254,13 +1119,7 @@ fn ss_access_control_engine_pkg_id_1_returns_enosys() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_ENOSYS.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
 }
 
 #[test]
@@ -1306,13 +1165,7 @@ fn ss_access_control_engine_pkg_id_2_efault_on_zero_a2() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EFAULT.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -1328,13 +1181,7 @@ fn ss_access_control_engine_pkg_id_2_efault_when_a2_overflows_u32() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EFAULT.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -1350,13 +1197,7 @@ fn ss_access_control_engine_default_pkg_id_returns_ss_status() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0x8001_051D,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0x8001_051D));
 }
 
 #[test]
@@ -1398,13 +1239,7 @@ fn memory_get_user_memory_size_efault_on_null_ptr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EFAULT.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -1419,26 +1254,14 @@ fn time_get_timezone_efault_on_null_ptr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EFAULT.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
 fn immediate_write_u32_efault_on_null_ptr() {
     let host = Lv2Host::new();
     let result = host.immediate_write_u32(0xCAFE, 0, UnitId::new(0));
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EFAULT.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -1446,13 +1269,7 @@ fn memory_free_is_no_op_returning_ok() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(Lv2Request::MemoryFree { addr: 0x1000 }, UnitId::new(0), &rt);
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -1460,13 +1277,7 @@ fn ppu_thread_yield_is_no_op_returning_ok() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(Lv2Request::PpuThreadYield, UnitId::new(0), &rt);
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
 }
 
 #[test]
@@ -1483,13 +1294,7 @@ fn malformed_request_records_invariant_break_and_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
     assert!(host.invariant_break_count() > before);
 }
 
@@ -1507,13 +1312,7 @@ fn hypercall_records_invariant_break_and_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EINVAL.into(),
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
     assert!(host.invariant_break_count() > before);
 }
 
@@ -1530,13 +1329,7 @@ fn spu_thread_group_terminate_logs_invariant_break() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
     assert!(host.invariant_break_count() > before);
 }
 

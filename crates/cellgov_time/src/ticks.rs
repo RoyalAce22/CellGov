@@ -1,7 +1,5 @@
 //! The runtime's monotonic ordering clock for guest-visible events.
 
-use core::fmt;
-
 /// A point in guest virtual time, in ticks since runtime start.
 ///
 /// Totally ordered, monotonically non-decreasing, never derived from host
@@ -16,7 +14,10 @@ use core::fmt;
 /// use cellgov_time::{Budget, GuestTicks};
 /// let _: GuestTicks = Budget::ZERO.into();
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, derive_more::Display,
+)]
+#[display("{_0}")]
 pub struct GuestTicks(u64);
 
 impl GuestTicks {
@@ -65,13 +66,6 @@ impl GuestTicks {
             Some(v) => Some(Self(v)),
             None => None,
         }
-    }
-}
-
-impl fmt::Display for GuestTicks {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
     }
 }
 

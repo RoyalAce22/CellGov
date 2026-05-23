@@ -18,18 +18,26 @@ use cellgov_lv2::{FsMount, Lv2Host};
 use super::manifest::MountEntry;
 
 /// Why [`register_mounts`] could not register a mount entry.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum MountRegisterError {
     /// Prefix failed shape validation (empty, non-`/`, `..` segment).
+    #[error("mounts: prefix {prefix:?} is invalid: {reason}")]
     InvalidPrefix { prefix: String, reason: String },
     /// Host string failed shape validation (empty, `..` segment,
     /// non-POSIX absolute shape, or empty `override_env` name).
+    #[error("mounts: host {host:?} for prefix {prefix:?} is invalid: {reason}")]
     InvalidHost {
         prefix: String,
         host: String,
         reason: String,
     },
     /// Host root does not exist.
+    #[error(
+        "mounts: prefix {:?} resolved to {} which does not exist{}",
+        prefix,
+        host_path.display(),
+        render_override_hint(override_env)
+    )]
     HostRootMissing {
         prefix: String,
         host_path: PathBuf,
@@ -37,104 +45,43 @@ pub enum MountRegisterError {
         override_env: Option<String>,
     },
     /// Host root exists but is not a directory.
+    #[error(
+        "mounts: prefix {:?} resolved to {} which exists but is not a directory{}",
+        prefix,
+        host_path.display(),
+        render_override_hint(override_env)
+    )]
     HostRootNotDirectory {
         prefix: String,
         host_path: PathBuf,
         override_env: Option<String>,
     },
     /// Host-root metadata probe failed (non-NotFound I/O error).
+    #[error(
+        "mounts: prefix {:?} could not stat {}: {source}{}",
+        prefix,
+        host_path.display(),
+        render_override_hint(override_env)
+    )]
     HostRootIo {
         prefix: String,
         host_path: PathBuf,
+        #[source]
         source: std::io::Error,
         override_env: Option<String>,
     },
     /// `FsMountTable::add` rejected the prefix.
+    #[error("mounts: prefix {prefix:?} is already registered (FsMountTable rejected it)")]
     DuplicatePrefix { prefix: String },
 }
 
-impl std::fmt::Display for MountRegisterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidPrefix { prefix, reason } => {
-                write!(f, "mounts: prefix {prefix:?} is invalid: {reason}",)
-            }
-            Self::InvalidHost {
-                prefix,
-                host,
-                reason,
-            } => write!(
-                f,
-                "mounts: host {host:?} for prefix {prefix:?} is invalid: {reason}",
-            ),
-            Self::HostRootMissing {
-                prefix,
-                host_path,
-                override_env,
-            } => {
-                write!(
-                    f,
-                    "mounts: prefix {:?} resolved to {} which does not exist",
-                    prefix,
-                    host_path.display(),
-                )?;
-                write_override_hint(f, override_env)
-            }
-            Self::HostRootNotDirectory {
-                prefix,
-                host_path,
-                override_env,
-            } => {
-                write!(
-                    f,
-                    "mounts: prefix {:?} resolved to {} which exists but is not a directory",
-                    prefix,
-                    host_path.display(),
-                )?;
-                write_override_hint(f, override_env)
-            }
-            Self::HostRootIo {
-                prefix,
-                host_path,
-                source,
-                override_env,
-            } => {
-                write!(
-                    f,
-                    "mounts: prefix {:?} could not stat {}: {source}",
-                    prefix,
-                    host_path.display(),
-                )?;
-                write_override_hint(f, override_env)
-            }
-            Self::DuplicatePrefix { prefix } => write!(
-                f,
-                "mounts: prefix {prefix:?} is already registered (FsMountTable rejected it)",
-            ),
-        }
-    }
-}
-
-fn write_override_hint(
-    f: &mut std::fmt::Formatter<'_>,
-    override_env: &Option<String>,
-) -> std::fmt::Result {
-    if let Some(env) = override_env {
-        write!(
-            f,
+fn render_override_hint(override_env: &Option<String>) -> String {
+    match override_env {
+        Some(env) => format!(
             " (override env var {env} is set; either point it at a real directory or \
-             unset {env} to fall back to the manifest's checked-in host)",
-        )?;
-    }
-    Ok(())
-}
-
-impl std::error::Error for MountRegisterError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::HostRootIo { source, .. } => Some(source),
-            _ => None,
-        }
+             unset {env} to fall back to the manifest's checked-in host)"
+        ),
+        None => String::new(),
     }
 }
 

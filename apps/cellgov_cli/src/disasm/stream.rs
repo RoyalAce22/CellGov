@@ -12,10 +12,12 @@ const CONSECUTIVE_DECODE_NOTE_THRESHOLD: usize = 8;
 /// caller pointed us at an address not file-backed by any PT_LOAD).
 /// `Io` is a downstream-writer error -- the canonical case is a closed
 /// pipe (`| head`), which `run` treats as graceful early termination.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub(super) enum StreamError {
-    BadVaddr(DisasmError),
-    Io(io::Error),
+    #[error("disasm: {0}")]
+    BadVaddr(#[source] DisasmError),
+    #[error("disasm I/O: {0}")]
+    Io(#[source] io::Error),
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -33,9 +35,14 @@ pub(super) struct DisasmStats {
     pub(super) data_warning_emitted: bool,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub(super) enum DisasmError {
+    #[error("{}", render_vaddr_not_in_pt_load(*vaddr, segments))]
     VaddrNotInPtLoad { vaddr: u64, segments: Vec<PtLoad> },
+    #[error(
+        "vaddr 0x{vaddr:016x} is in PT_LOAD vaddr=0x{:016x}+filesz=0x{:x} (memsz=0x{:x}) but past the file-backed range; nothing to disassemble (BSS / zero-fill)",
+        seg.vaddr, seg.filesz, seg.memsz
+    )]
     VaddrInBssOnly { vaddr: u64, seg: PtLoad },
 }
 
@@ -45,47 +52,17 @@ impl DisasmError {
     }
 }
 
-impl std::fmt::Display for DisasmError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::VaddrNotInPtLoad { vaddr, segments } => {
-                write!(f, "vaddr 0x{vaddr:016x} not in any PT_LOAD; segments:")?;
-                for s in segments {
-                    write!(
-                        f,
-                        "\n  vaddr=0x{:016x}+filesz=0x{:x} memsz=0x{:x} file=0x{:x}",
-                        s.vaddr, s.filesz, s.memsz, s.offset
-                    )?;
-                }
-                Ok(())
-            }
-            Self::VaddrInBssOnly { vaddr, seg } => write!(
-                f,
-                "vaddr 0x{vaddr:016x} is in PT_LOAD vaddr=0x{:016x}+filesz=0x{:x} (memsz=0x{:x}) but past the file-backed range; nothing to disassemble (BSS / zero-fill)",
-                seg.vaddr, seg.filesz, seg.memsz
-            ),
-        }
+fn render_vaddr_not_in_pt_load(vaddr: u64, segments: &[PtLoad]) -> String {
+    use std::fmt::Write as _;
+    let mut s = format!("vaddr 0x{vaddr:016x} not in any PT_LOAD; segments:");
+    for seg in segments {
+        let _ = write!(
+            s,
+            "\n  vaddr=0x{:016x}+filesz=0x{:x} memsz=0x{:x} file=0x{:x}",
+            seg.vaddr, seg.filesz, seg.memsz, seg.offset
+        );
     }
-}
-
-impl std::error::Error for DisasmError {}
-
-impl std::fmt::Display for StreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BadVaddr(e) => write!(f, "disasm: {e}"),
-            Self::Io(e) => write!(f, "disasm I/O: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for StreamError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::BadVaddr(e) => Some(e),
-            Self::Io(e) => Some(e),
-        }
-    }
+    s
 }
 
 /// Pick the PT_LOAD that file-backs `vaddr`. With overlapping
@@ -219,9 +196,9 @@ pub(super) fn disassemble<W: Write>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::elf::parse_pt_loads;
-    use super::super::test_support::*;
     use super::*;
+    use crate::disasm::elf::parse_pt_loads;
+    use crate::disasm::test_support::*;
 
     fn nop_elf() -> (Vec<u8>, Vec<PtLoad>) {
         let mut bytes = Vec::new();

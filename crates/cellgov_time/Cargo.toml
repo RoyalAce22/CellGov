@@ -11,3 +11,4 @@ workspace = true
 [dependencies]
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 serde = { version = "1", features = ["derive"] }
+derive_more = { version = "2", default-features = false, features = ["display"] }

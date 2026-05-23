@@ -16,7 +16,9 @@ use crate::observation_compare::{ObservationCompareResult, RegionPairOutcome};
 /// live in `NamedMemoryRegion` instead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegionIdent {
+    /// Region label as carried in the observation (e.g. `code`, `data`).
     pub name: String,
+    /// Region base guest address.
     pub addr: u64,
 }
 
@@ -24,8 +26,11 @@ pub struct RegionIdent {
 /// `Unclassified`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnclassifiedRun {
+    /// Owning region's label.
     pub region_name: String,
+    /// Run start, in bytes from the region base.
     pub offset: u64,
+    /// Run length in bytes; always >= 1.
     pub length: u64,
 }
 
@@ -40,12 +45,19 @@ pub struct UnclassifiedRun {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "CrossRunnerSummaryShadow")]
 pub struct CrossRunnerSummary {
+    /// Architectural-state verdict: did the two runners reach the
+    /// same end state.
     pub convergence: Convergence,
+    /// Byte-level verdict; defined only when [`Convergence::Yes`].
     pub byte_parity: ByteParity,
     /// Byte counts per `DivergenceClass`, sorted by the enum's
     /// discriminant for deterministic JSON output.
     pub per_class_bytes: BTreeMap<DivergenceClass, u64>,
+    /// Denormalized copy of `per_class_bytes[Unclassified]`; kept as
+    /// its own field for JSON readability and validated to agree.
     pub unclassified_bytes: u64,
+    /// Per-run locators for every `Unclassified` byte-divergence; sum
+    /// of `length` agrees with `unclassified_bytes`.
     pub unclassified_runs: Vec<UnclassifiedRun>,
     /// Byte-divergence run with the lowest guest start address;
     /// `None` when no byte divergences were found.
@@ -63,115 +75,86 @@ struct CrossRunnerSummaryShadow {
 }
 
 /// Why [`CrossRunnerSummary::validate`] rejected a candidate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CrossRunnerSummaryError {
     /// `convergence == Yes` requires `byte_parity != Diverge`.
+    #[error("convergence == Yes paired with byte_parity == Diverge")]
     ConvergedButByteParityDiverged,
     /// `convergence == No(r)` requires `byte_parity == Diverge(r)`
     /// with `r` matching.
+    #[error("convergence == No paired with byte_parity != Diverge")]
     DivergedButByteParityNotDiverge,
     /// `convergence == No(r1)` paired with `byte_parity ==
     /// Diverge(r2)` where `r1 != r2`.
+    #[error("Convergence::No(r1) and ByteParity::Diverge(r2) carry different reasons")]
     DivergeReasonsDisagree,
     /// `convergence == No` requires `per_class_bytes` empty.
+    #[error("convergence == No with non-empty per_class_bytes")]
     DivergedButPerClassNonEmpty,
     /// `convergence == No` requires `unclassified_bytes == 0`.
+    #[error("convergence == No with non-zero unclassified_bytes")]
     DivergedButUnclassifiedBytesNonZero,
     /// `convergence == No` requires `unclassified_runs` empty.
+    #[error("convergence == No with non-empty unclassified_runs")]
     DivergedButUnclassifiedRunsNonEmpty,
     /// `convergence == No` requires `lowest_offset_class == None`.
+    #[error("convergence == No with Some(_) lowest_offset_class")]
     DivergedButLowestOffsetSome,
     /// `per_class_bytes[Unclassified]` and the `unclassified_bytes`
     /// field are denormalized and must agree.
+    #[error("per_class_bytes[Unclassified] ({per_class_unclassified}) != unclassified_bytes field ({unclassified_bytes_field})")]
     UnclassifiedDenormalizationMismatch {
+        /// Count read from `per_class_bytes[Unclassified]`.
         per_class_unclassified: u64,
+        /// Count read from the top-level `unclassified_bytes` field.
         unclassified_bytes_field: u64,
     },
     /// Sum of `unclassified_runs[i].length` must equal
     /// `unclassified_bytes`.
+    #[error("sum(unclassified_runs.length) ({runs_length_sum}) != unclassified_bytes field ({unclassified_bytes_field})")]
     UnclassifiedRunsSumMismatch {
+        /// Computed sum of every `unclassified_runs[i].length`.
         runs_length_sum: u64,
+        /// Count read from the top-level `unclassified_bytes` field.
         unclassified_bytes_field: u64,
     },
     /// `byte_parity == Equivalent` requires zero non-semantic bytes
     /// and zero unclassified bytes.
+    #[error("byte_parity == Equivalent but byte totals are non-zero")]
     ByteParityEquivalentButTotalsNonZero,
     /// `byte_parity == NonSemantic { bytes }` carries a count that
     /// disagrees with the sum of non-Unclassified entries in
     /// `per_class_bytes`.
-    ByteParityNonSemanticBytesMismatch { variant: u64, computed: u64 },
+    #[error("byte_parity == NonSemantic {{ bytes: {variant} }} disagrees with computed non-semantic total {computed}")]
+    ByteParityNonSemanticBytesMismatch {
+        /// Count read from the `NonSemantic { bytes }` variant.
+        variant: u64,
+        /// Sum recomputed from non-`Unclassified` `per_class_bytes` entries.
+        computed: u64,
+    },
     /// `byte_parity == NonSemantic { .. }` requires `unclassified_bytes == 0`.
+    #[error("byte_parity == NonSemantic with non-zero unclassified_bytes (expected Pending)")]
     ByteParityNonSemanticButUnclassifiedNonZero,
     /// `byte_parity == Pending { non_semantic_bytes: a, .. }` carries
     /// a count that disagrees with the sum of non-Unclassified
     /// entries in `per_class_bytes`.
-    ByteParityPendingNonSemanticMismatch { variant: u64, computed: u64 },
+    #[error("byte_parity == Pending non_semantic_bytes ({variant}) disagrees with computed total {computed}")]
+    ByteParityPendingNonSemanticMismatch {
+        /// Count read from `Pending { non_semantic_bytes, .. }`.
+        variant: u64,
+        /// Sum recomputed from non-`Unclassified` `per_class_bytes` entries.
+        computed: u64,
+    },
     /// `byte_parity == Pending { unclassified_bytes: a, .. }` carries
     /// a count that disagrees with the `unclassified_bytes` field.
-    ByteParityPendingUnclassifiedMismatch { variant: u64, field: u64 },
+    #[error("byte_parity == Pending unclassified_bytes ({variant}) disagrees with unclassified_bytes field ({field})")]
+    ByteParityPendingUnclassifiedMismatch {
+        /// Count read from `Pending { unclassified_bytes, .. }`.
+        variant: u64,
+        /// Count read from the top-level `unclassified_bytes` field.
+        field: u64,
+    },
 }
-
-impl std::fmt::Display for CrossRunnerSummaryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ConvergedButByteParityDiverged => {
-                f.write_str("convergence == Yes paired with byte_parity == Diverge")
-            }
-            Self::DivergedButByteParityNotDiverge => {
-                f.write_str("convergence == No paired with byte_parity != Diverge")
-            }
-            Self::DivergeReasonsDisagree => f.write_str(
-                "Convergence::No(r1) and ByteParity::Diverge(r2) carry different reasons",
-            ),
-            Self::DivergedButPerClassNonEmpty => {
-                f.write_str("convergence == No with non-empty per_class_bytes")
-            }
-            Self::DivergedButUnclassifiedBytesNonZero => {
-                f.write_str("convergence == No with non-zero unclassified_bytes")
-            }
-            Self::DivergedButUnclassifiedRunsNonEmpty => {
-                f.write_str("convergence == No with non-empty unclassified_runs")
-            }
-            Self::DivergedButLowestOffsetSome => {
-                f.write_str("convergence == No with Some(_) lowest_offset_class")
-            }
-            Self::UnclassifiedDenormalizationMismatch {
-                per_class_unclassified,
-                unclassified_bytes_field,
-            } => write!(
-                f,
-                "per_class_bytes[Unclassified] ({per_class_unclassified}) != unclassified_bytes field ({unclassified_bytes_field})",
-            ),
-            Self::UnclassifiedRunsSumMismatch {
-                runs_length_sum,
-                unclassified_bytes_field,
-            } => write!(
-                f,
-                "sum(unclassified_runs.length) ({runs_length_sum}) != unclassified_bytes field ({unclassified_bytes_field})",
-            ),
-            Self::ByteParityEquivalentButTotalsNonZero => {
-                f.write_str("byte_parity == Equivalent but byte totals are non-zero")
-            }
-            Self::ByteParityNonSemanticBytesMismatch { variant, computed } => write!(
-                f,
-                "byte_parity == NonSemantic {{ bytes: {variant} }} disagrees with computed non-semantic total {computed}",
-            ),
-            Self::ByteParityNonSemanticButUnclassifiedNonZero => f.write_str(
-                "byte_parity == NonSemantic with non-zero unclassified_bytes (expected Pending)",
-            ),
-            Self::ByteParityPendingNonSemanticMismatch { variant, computed } => write!(
-                f,
-                "byte_parity == Pending non_semantic_bytes ({variant}) disagrees with computed total {computed}",
-            ),
-            Self::ByteParityPendingUnclassifiedMismatch { variant, field } => write!(
-                f,
-                "byte_parity == Pending unclassified_bytes ({variant}) disagrees with unclassified_bytes field ({field})",
-            ),
-        }
-    }
-}
-
-impl std::error::Error for CrossRunnerSummaryError {}
 
 impl TryFrom<CrossRunnerSummaryShadow> for CrossRunnerSummary {
     type Error = CrossRunnerSummaryError;
@@ -328,45 +311,82 @@ impl CrossRunnerSummary {
 }
 
 /// Whether CellGov reached the same architectural state as RPCS3.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Convergence {
+    /// Architectural state matches: outcome, region shape, and step
+    /// counts (modulo cross-runner step notes) all agree.
+    #[error("Yes")]
     Yes,
-    No { reason: ConvergenceFailure },
+    /// Architectural state did not match; `reason` is the first
+    /// disqualifying condition in canonical priority order.
+    #[error("No ({reason})")]
+    No {
+        /// First convergence-disqualifying condition encountered.
+        reason: ConvergenceFailure,
+    },
 }
 
 /// Why the two runners did not converge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ConvergenceFailure {
+    /// Outcomes (e.g. `Completed` vs `Fault`) disagree.
+    #[error("outcome: {cellgov} vs {rpcs3}")]
     OutcomeMismatch {
+        /// CellGov-side outcome.
         cellgov: ObservedOutcome,
+        /// RPCS3-side outcome.
         rpcs3: ObservedOutcome,
     },
+    /// The two observations expose a different number of memory regions.
+    #[error("region count: {cellgov} vs {rpcs3}")]
     RegionCountMismatch {
+        /// CellGov region count.
         cellgov: usize,
+        /// RPCS3 region count.
         rpcs3: usize,
     },
+    /// A region pair disagrees on `(name, addr)` at a given index.
+    #[error("region[{index}] identity: {}@0x{:x} vs {}@0x{:x}", cellgov.name, cellgov.addr, rpcs3.name, rpcs3.addr)]
     RegionIdentityMismatch {
+        /// Position of the offending pair in observation order.
         index: usize,
+        /// CellGov-side region identity.
         cellgov: RegionIdent,
+        /// RPCS3-side region identity.
         rpcs3: RegionIdent,
     },
+    /// Region identities agree but byte lengths do not.
+    #[error("region[{index}] {name} length: {cellgov_length} vs {rpcs3_length}")]
     RegionLengthMismatch {
+        /// Position of the offending pair in observation order.
         index: usize,
+        /// Shared region label.
         name: String,
+        /// CellGov-side byte length.
         cellgov_length: u64,
+        /// RPCS3-side byte length.
         rpcs3_length: u64,
     },
     /// Determinism failure: a single runner produced different step
     /// counts across reruns.
+    #[error("same-runner step mismatch on {runner}: {a} vs {b}")]
     SameRunnerStepMismatch {
+        /// Name of the runner whose two reruns disagreed.
         runner: String,
+        /// Step count from the first observation.
         a: usize,
+        /// Step count from the second observation.
         b: usize,
     },
+    /// Step counts differ across runners (only a convergence failure
+    /// when neither side is informational; cf. `StepCompare::CrossRunnerNote`).
+    #[error("step count: {cellgov} vs {rpcs3}")]
     CrossRunnerStepMismatch {
+        /// CellGov-side step count.
         cellgov: usize,
+        /// RPCS3-side step count.
         rpcs3: usize,
     },
 }
@@ -377,83 +397,32 @@ pub enum ConvergenceFailure {
 pub type ByteParityDivergeReason = ConvergenceFailure;
 
 /// Byte-level agreement between converged observations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ByteParity {
     /// Byte-identical: zero divergent bytes.
+    #[error("equivalent")]
     Equivalent,
     /// Every byte divergence classified into a non-semantic class.
-    NonSemantic { bytes: u64 },
+    #[error("{bytes} non-semantic")]
+    NonSemantic {
+        /// Total non-semantic divergent bytes.
+        bytes: u64,
+    },
     /// Some bytes classified, some still `Unclassified`.
+    #[error("{non_semantic_bytes} non-semantic + {unclassified_bytes} pending")]
     Pending {
+        /// Bytes classified into a non-semantic class.
         non_semantic_bytes: u64,
+        /// Bytes still left `Unclassified`.
         unclassified_bytes: u64,
     },
     /// Byte parity is undefined because convergence failed.
-    Diverge { reason: ByteParityDivergeReason },
-}
-
-impl std::fmt::Display for Convergence {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Yes => f.write_str("Yes"),
-            Self::No { reason } => write!(f, "No ({reason})"),
-        }
-    }
-}
-
-impl std::fmt::Display for ConvergenceFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::OutcomeMismatch { cellgov, rpcs3 } => {
-                write!(f, "outcome: {cellgov} vs {rpcs3}")
-            }
-            Self::RegionCountMismatch { cellgov, rpcs3 } => {
-                write!(f, "region count: {cellgov} vs {rpcs3}")
-            }
-            Self::RegionIdentityMismatch {
-                index,
-                cellgov,
-                rpcs3,
-            } => write!(
-                f,
-                "region[{index}] identity: {}@0x{:x} vs {}@0x{:x}",
-                cellgov.name, cellgov.addr, rpcs3.name, rpcs3.addr,
-            ),
-            Self::RegionLengthMismatch {
-                index,
-                name,
-                cellgov_length,
-                rpcs3_length,
-            } => write!(
-                f,
-                "region[{index}] {name} length: {cellgov_length} vs {rpcs3_length}",
-            ),
-            Self::SameRunnerStepMismatch { runner, a, b } => {
-                write!(f, "same-runner step mismatch on {runner}: {a} vs {b}")
-            }
-            Self::CrossRunnerStepMismatch { cellgov, rpcs3 } => {
-                write!(f, "step count: {cellgov} vs {rpcs3}")
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for ByteParity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Equivalent => f.write_str("equivalent"),
-            Self::NonSemantic { bytes } => write!(f, "{bytes} non-semantic"),
-            Self::Pending {
-                non_semantic_bytes,
-                unclassified_bytes,
-            } => write!(
-                f,
-                "{non_semantic_bytes} non-semantic + {unclassified_bytes} pending",
-            ),
-            Self::Diverge { .. } => f.write_str("--"),
-        }
-    }
+    #[error("--")]
+    Diverge {
+        /// Convergence failure that disqualified byte parity.
+        reason: ByteParityDivergeReason,
+    },
 }
 
 /// Summarize a cross-runner comparison.

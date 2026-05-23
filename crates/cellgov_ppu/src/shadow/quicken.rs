@@ -106,10 +106,10 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{
+    use crate::instruction::PpuInstruction;
+    use crate::shadow::test_support::{
         build_from_words, cmpwi_raw, li_raw, or_raw, ori_raw, rldicl_raw, rldicr_raw, rlwinm_raw,
     };
-    use crate::instruction::PpuInstruction;
 
     #[test]
     fn quicken_addi_ra0_becomes_li() {

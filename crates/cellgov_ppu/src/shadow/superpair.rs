@@ -189,11 +189,11 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{
+    use crate::instruction::PpuInstruction;
+    use crate::shadow::test_support::{
         b_raw, bc_raw, build_from_words, cmpw_raw, cmpwi_raw, ld_raw, li_raw, lwz_raw, mflr_raw,
         mtlr_raw, std_raw, stw_raw,
     };
-    use crate::instruction::PpuInstruction;
 
     #[test]
     fn super_pair_lwz_cmpwi() {

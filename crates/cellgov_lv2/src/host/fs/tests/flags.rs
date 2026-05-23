@@ -2,7 +2,7 @@ use cellgov_ps3_abi::sys_fs::CELL_FS_O_CREAT;
 
 use crate::host::Lv2Host;
 
-use super::super::flags::FS_TTY_SINK_PATHS;
+use crate::host::fs::flags::FS_TTY_SINK_PATHS;
 
 #[test]
 fn cell_fs_o_creat_pinned_to_octal_100() {

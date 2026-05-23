@@ -27,32 +27,23 @@ pub struct RuntimeStep {
 }
 
 /// Why a [`crate::Runtime::step`] call could not produce a step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum StepError {
     /// Terminal stall: registry empty or every unit Faulted / Finished.
+    #[error("no runnable unit")]
     NoRunnableUnit,
     /// At least one unit Blocked, none runnable. Liveness probe, not
     /// semantic deadlock proof; the caller decides whether to inject
     /// a pending wake, advance time, or treat it as a stall.
+    #[error("all units blocked")]
     AllBlocked,
     /// Deadlock detector: `max_steps` reached. Callers must abort.
+    #[error("max-steps cap exceeded")]
     MaxStepsExceeded,
     /// Consumed budget would push guest time past `u64::MAX`.
+    #[error("guest time would overflow u64")]
     TimeOverflow,
 }
-
-impl std::fmt::Display for StepError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoRunnableUnit => f.write_str("no runnable unit"),
-            Self::AllBlocked => f.write_str("all units blocked"),
-            Self::MaxStepsExceeded => f.write_str("max-steps cap exceeded"),
-            Self::TimeOverflow => f.write_str("guest time would overflow u64"),
-        }
-    }
-}
-
-impl std::error::Error for StepError {}
 
 /// Constructs an SPU unit when `Lv2Dispatch::RegisterSpu` fires.
 pub type SpuFactory = Box<dyn Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit>>;

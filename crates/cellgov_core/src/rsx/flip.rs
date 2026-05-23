@@ -14,6 +14,15 @@ pub use cellgov_ps3_abi::rsx_nv_hardware::{
     CELL_GCM_DISPLAY_FLIP_STATUS_DONE, CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
 };
 
+/// Guest address of the fixed-address flip-status mirror.
+///
+/// Written as a 4-byte big-endian u32 with the status in the low
+/// byte. Updated only on transitions, so a reader observes each
+/// status change exactly once. The writer is the commit pipeline,
+/// not [`RsxFlipState`]; this constant lives here for semantic
+/// ownership of the flip-status domain.
+pub const RSX_FLIP_STATUS_MIRROR_ADDR: u32 = 0xC000_0050;
+
 /// Hash-input shape version. Bump when [`RsxFlipState::state_hash`]
 /// changes field order, endianness, or hasher family.
 pub const STATE_HASH_FORMAT_VERSION: u8 = 1;

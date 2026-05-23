@@ -18,48 +18,47 @@ pub use cellgov_ps3_abi::elf::ELF_HEADER_SIZE;
 /// a deterministic BTreeMap key order; the discriminant ordering is
 /// load-bearing for that contract (see `summary.rs`'s
 /// `per_class_bytes_iterates_in_discriminant_order` test).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+///
+/// Display strings are fixed per variant; pinned by
+/// `divergence_class_display_strings_are_stable`. Renderers that
+/// produce on-disk fixtures (`compare_report.txt`, hand-authored
+/// `NOTES.md`) read this rather than `{:?}` so a future rename
+/// cannot silently churn the text.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, thiserror::Error,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DivergenceClass {
     /// Bytes inside the loaded ELF header. Non-semantic; the running
     /// program never reads them.
+    #[error("ElfHeader")]
     ElfHeader,
     /// Bytes inside the `sys_process_param_t` struct's load location.
     /// Non-semantic; both runners read the parsed fields via internal
     /// state, not by re-reading the loaded bytes.
+    #[error("SysProcParam")]
     SysProcParam,
     /// Bytes inside an HLE OPD trampoline slot. Non-semantic;
     /// per-slot pointer indices differ across runners but the
     /// resolved entry points are equivalent.
+    #[error("HleOpdSlot")]
     HleOpdSlot,
     /// No populated context range contained this divergence run.
     /// Counted in the byte-parity Pending bucket and enumerated in
     /// `cross_runner_summary.json`'s `unclassified_runs`.
+    #[error("Unclassified")]
     Unclassified,
 }
 
 impl DivergenceClass {
+    /// True for classes whose bytes are known not to influence
+    /// guest-observable behavior; the [`Unclassified`](Self::Unclassified)
+    /// catch-all returns false.
     pub fn is_non_semantic(&self) -> bool {
         match self {
             Self::ElfHeader | Self::SysProcParam | Self::HleOpdSlot => true,
             Self::Unclassified => false,
         }
-    }
-}
-
-/// Fixed identifier per variant; pinned by
-/// `divergence_class_display_strings_are_stable`. Renderers that
-/// produce on-disk fixtures (`compare_report.txt`, hand-authored
-/// `NOTES.md`) read this rather than `{:?}` so a future rename
-/// cannot silently churn the text.
-impl std::fmt::Display for DivergenceClass {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::ElfHeader => "ElfHeader",
-            Self::SysProcParam => "SysProcParam",
-            Self::HleOpdSlot => "HleOpdSlot",
-            Self::Unclassified => "Unclassified",
-        })
     }
 }
 
@@ -87,8 +86,15 @@ impl std::fmt::Display for DivergenceClass {
 /// the classifier sees the corrupted ranges.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClassifierContext {
+    /// Guest-address range of the loaded ELF header, or `None` until
+    /// a populator slice supplies it.
     pub elf_header_range: Option<Range<u64>>,
+    /// Guest-address range of the `sys_process_param_t` struct's load
+    /// location, or `None` until a populator slice supplies it.
     pub sys_proc_param_range: Option<Range<u64>>,
+    /// Guest-address ranges of HLE OPD trampoline slots (primary
+    /// table, variable stubs, FNID-walker-patched sibling tables).
+    /// Empty until a populator slice fills them in.
     pub hle_opd_ranges: Vec<Range<u64>>,
 }
 

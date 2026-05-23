@@ -17,7 +17,8 @@
 /// No `Default`: a derived default would alias the first registered
 /// mailbox. Use `Option<MailboxId>` for "no mailbox."
 /// No `Ord`: opaque handles, not allocation-order keys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+#[display("{_0}")]
 pub struct MailboxId(u64);
 
 impl MailboxId {
@@ -32,12 +33,6 @@ impl MailboxId {
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
-    }
-}
-
-impl core::fmt::Display for MailboxId {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

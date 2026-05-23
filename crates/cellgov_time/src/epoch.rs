@@ -1,7 +1,5 @@
 //! Commit-batch counter used as the granularity for state hashes.
 
-use core::fmt;
-
 /// A commit-batch counter; advances once per closed batch.
 ///
 /// Within one epoch the commit pipeline's apply pass is atomic:
@@ -18,7 +16,8 @@ use core::fmt;
 /// use cellgov_time::{Epoch, Budget};
 /// let _: Budget = Epoch::ZERO.into();
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Display)]
+#[display("{_0}")]
 pub struct Epoch(u64);
 
 impl Epoch {
@@ -59,13 +58,6 @@ impl Epoch {
             "epoch overflow at u64::MAX: advancing would fold distinct committed batches \
              into the same sync_state_hash",
         );
-    }
-}
-
-impl fmt::Display for Epoch {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
     }
 }
 
