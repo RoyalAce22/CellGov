@@ -13,18 +13,31 @@ use super::manifest::ContentManifest;
 
 /// Why [`register_content_blobs`] could not register a manifest's
 /// content.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ContentRegisterError {
     /// Reading the host file failed (NotFound, permission-denied, IO).
+    #[error(
+        "content: failed to read host file {} for guest path {:?}: {source}{}",
+        host_path.display(),
+        guest_path,
+        render_override_hint(override_env)
+    )]
     HostFileRead {
         guest_path: String,
         host_path: PathBuf,
+        #[source]
         source: std::io::Error,
         /// Override env var name, surfaced in Display so a developer
         /// sees which env they need to fix.
         override_env: Option<String>,
     },
     /// Two manifest entries name the same `guest_path`.
+    #[error(
+        "content: duplicate guest path {:?} in manifest (first host source {}, second host source {})",
+        guest_path,
+        first_host_path.display(),
+        second_host_path.display(),
+    )]
     DuplicateGuestPath {
         guest_path: String,
         first_host_path: PathBuf,
@@ -32,53 +45,14 @@ pub enum ContentRegisterError {
     },
 }
 
-impl std::fmt::Display for ContentRegisterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::HostFileRead {
-                guest_path,
-                host_path,
-                source,
-                override_env,
-            } => {
-                write!(
-                    f,
-                    "content: failed to read host file {} for guest path {:?}: {source}",
-                    host_path.display(),
-                    guest_path,
-                )?;
-                if let Some(env) = override_env {
-                    write!(
-                        f,
-                        " (override env var {env} is set; either drop the \
-                         file into that directory or unset {env} to fall \
-                         back to the manifest's checked-in base)",
-                    )?;
-                }
-                Ok(())
-            }
-            Self::DuplicateGuestPath {
-                guest_path,
-                first_host_path,
-                second_host_path,
-            } => write!(
-                f,
-                "content: duplicate guest path {:?} in manifest \
-                 (first host source {}, second host source {})",
-                guest_path,
-                first_host_path.display(),
-                second_host_path.display(),
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ContentRegisterError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::HostFileRead { source, .. } => Some(source),
-            Self::DuplicateGuestPath { .. } => None,
-        }
+fn render_override_hint(override_env: &Option<String>) -> String {
+    match override_env {
+        Some(env) => format!(
+            " (override env var {env} is set; either drop the \
+             file into that directory or unset {env} to fall \
+             back to the manifest's checked-in base)"
+        ),
+        None => String::new(),
     }
 }
 

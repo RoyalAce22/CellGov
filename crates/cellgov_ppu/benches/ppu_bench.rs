@@ -1,12 +1,16 @@
 //! PPU microbenchmarks: decode, execute per-variant, and `run_until_yield`.
 
-#![allow(missing_docs)]
+#![allow(
+    missing_docs,
+    reason = "criterion_group! expands to pub fns that an outer doc \
+              comment cannot reach"
+)]
 #![allow(
     clippy::unwrap_used,
     reason = "bench scaffolding: .unwrap() panics on unexpected failure are the right behavior"
 )]
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit};
@@ -14,6 +18,7 @@ use cellgov_mem::GuestMemory;
 use cellgov_ppu::decode::decode;
 use cellgov_ppu::exec::execute;
 use cellgov_ppu::instruction::PpuInstruction;
+use cellgov_ppu::shadow::PredecodedShadow;
 use cellgov_ppu::state::PpuState;
 use cellgov_ppu::store_buffer::StoreBuffer;
 use cellgov_ppu::PpuExecutionUnit;
@@ -58,7 +63,7 @@ fn bench_decode_mixed_batch(c: &mut Criterion) {
     c.bench_function("decode/mixed_batch_8", |b| {
         b.iter(|| {
             for &w in &words {
-                let _ = decode(black_box(w));
+                let _ = black_box(decode(black_box(w)));
             }
         })
     });
@@ -262,28 +267,14 @@ fn bench_execute_rlwinm(c: &mut Criterion) {
     });
 }
 
-fn bench_run_until_yield_100(c: &mut Criterion) {
-    let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
-    let addi_bytes = addi_word.to_be_bytes();
-
-    let mem_size = 4096;
-    let mut mem = GuestMemory::new(mem_size);
-    for i in 0..1000 {
-        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(i * 4), 4).unwrap();
-        mem.apply_commit(range, &addi_bytes).unwrap();
-    }
-
-    c.bench_function("run_until_yield/budget_100_addi", |b| {
-        b.iter(|| {
-            let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
-            let ctx = ExecutionContext::new(&mem);
-            ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new())
-        })
-    });
-}
-
+// Budget=1: single-step mode, matching run-game's per-call pattern.
+// Plain `iter()` keeps PPU construction + context inside the timed
+// region because run-game pays that construction cost on every
+// single-step iteration; the measured value is the construction-
+// inclusive cost, not the `run_until_yield` body in isolation. Not
+// a delta participant against the `iter_batched` arms; do not diff
+// its absolute number against `per_step_off_addi100`.
 fn bench_run_until_yield_budget_1(c: &mut Criterion) {
-    // Budget=1: single-step mode, matching run-game usage.
     let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
     let addi_bytes = addi_word.to_be_bytes();
 
@@ -303,35 +294,8 @@ fn bench_run_until_yield_budget_1(c: &mut Criterion) {
     });
 }
 
-fn bench_run_until_yield_mixed(c: &mut Criterion) {
-    let mut mem = GuestMemory::new(4096);
-    // Straight-line sequence (no back-branch) tiled 250x; runs to budget exhaustion.
-    let instructions: &[(u64, u32)] = &[
-        (0x00, (14 << 26) | (3 << 21) | (3 << 16) | 1),
-        (
-            0x04,
-            (31 << 26) | (4 << 21) | (3 << 16) | (5 << 11) | (266 << 1),
-        ),
-        (0x08, (11 << 26) | (3 << 16) | 100),
-        (0x0C, (14 << 26) | (5 << 21) | (5 << 16) | 1),
-    ];
-    for rep in 0..250 {
-        for &(off, word) in instructions {
-            let addr = rep * 16 + off;
-            let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 4).unwrap();
-            mem.apply_commit(range, &word.to_be_bytes()).unwrap();
-        }
-    }
-
-    c.bench_function("run_until_yield/budget_100_mixed", |b| {
-        b.iter(|| {
-            let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
-            let ctx = ExecutionContext::new(&mem);
-            ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new())
-        })
-    });
-}
-
+// Per-instruction decode microbenchmarks; covers each instruction
+// form the dispatch table routes through.
 criterion_group!(
     decode_benches,
     bench_decode_addi,
@@ -342,6 +306,8 @@ criterion_group!(
     bench_decode_mixed_batch,
 );
 
+// Per-instruction execute microbenchmarks; isolates dispatch and
+// register/memory write cost from the fetch loop.
 criterion_group!(
     execute_benches,
     bench_execute_addi,
@@ -353,46 +319,399 @@ criterion_group!(
     bench_execute_rlwinm,
 );
 
-/// Zero-cost default path: per-step state-hash trace OFF. Pairs with
-/// [`bench_run_until_yield_per_step_on`] to quantify the overhead.
+/// Un-shadowed baseline for the addi100 fixture. Pairs with
+/// `run_until_yield_shadowed/trace_off_addi100` to form the
+/// quickening-guard delta. Uses the same `addi rT, 0, imm` Li form as
+/// the shadowed arm so the delta is apples-to-apples.
+///
+/// `iter_batched` keeps `PpuExecutionUnit::new` out of the timed
+/// region; the shadowed counterpart pays an additional
+/// `set_instruction_shadow + shadow.clone()` in its setup. Routine
+/// returns the PPU so its drop runs after the measurement loop.
 fn bench_run_until_yield_per_step_off(c: &mut Criterion) {
-    let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
-    let addi_bytes = addi_word.to_be_bytes();
-    let mut mem = GuestMemory::new(4096);
-    for i in 0..1000 {
-        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(i * 4), 4).unwrap();
-        mem.apply_commit(range, &addi_bytes).unwrap();
-    }
-
+    let pattern = [enc_li(3, 1)];
+    let mem = fill_mem_with_pattern(&pattern);
     c.bench_function("run_until_yield/per_step_off_addi100", |b| {
-        b.iter(|| {
-            let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
-            let ctx = ExecutionContext::new(&mem);
-            ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new())
-        })
+        b.iter_batched(
+            || PpuExecutionUnit::new(UnitId::new(0)),
+            |mut ppu| {
+                let ctx = ExecutionContext::new(&mem);
+                let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
+                (ppu, r)
+            },
+            BatchSize::SmallInput,
+        );
     });
 }
 
-/// Per-step trace ON: pays one `state_hash()` and one Vec push per retired
-/// instruction.
+/// Per-step trace ON, un-shadowed. The trace-cost delta against
+/// `per_step_off_addi100` documents the miss-path trace overhead;
+/// the shadowed equivalent is `trace_hashes_addi100`. The drain
+/// returns a Vec held in the routine output, so its drop is
+/// untimed alongside the PPU's.
 fn bench_run_until_yield_per_step_on(c: &mut Criterion) {
-    let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
-    let addi_bytes = addi_word.to_be_bytes();
-    let mut mem = GuestMemory::new(4096);
-    for i in 0..1000 {
-        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(i * 4), 4).unwrap();
-        mem.apply_commit(range, &addi_bytes).unwrap();
-    }
-
+    let pattern = [enc_li(3, 1)];
+    let mem = fill_mem_with_pattern(&pattern);
     c.bench_function("run_until_yield/per_step_on_addi100", |b| {
-        b.iter(|| {
-            let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
-            let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
-            let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
-            // Drain per iteration; buffer would otherwise grow unbounded.
-            let _ = ppu.drain_retired_state_hashes();
-            r
-        })
+        b.iter_batched(
+            || PpuExecutionUnit::new(UnitId::new(0)),
+            |mut ppu| {
+                let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
+                let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
+                let drained = ppu.drain_retired_state_hashes();
+                (ppu, r, drained)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+// Inline raw-instruction encoders for the centerpiece fixtures below.
+// Mirror the (pub(super)) helpers in `shadow::test_support`; duplicated
+// here because the bench crate has no access to module-private helpers.
+
+// [PPC-Book1 p:51 s:3.3.8] addi: RT <- (RA|0) + EXTS(SI); RA=0 yields the
+// `li RT,simm` extended mnemonic that the quickening pass rewrites to `Li`.
+// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD(0:5)=14, RT(6:10), RA(11:15), SI(16:31).
+fn enc_li(rt: u32, simm: i16) -> u32 {
+    (14 << 26) | ((rt & 0x1F) << 21) | ((simm as u16) as u32)
+}
+
+// [PPC-Book1 p:42 s:3.3.3] stw: MEM(EA,4) <- (RS)32:63; EA = (RA|0)+EXTS(D).
+// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD=36.
+fn enc_stw(rs: u32, ra: u32, off: i16) -> u32 {
+    (36 << 26) | ((rs & 0x1F) << 21) | ((ra & 0x1F) << 16) | (off as u16 as u32)
+}
+
+// [PPC-Book1 p:37 s:3.3.2] lwz: RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D).
+// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD=32.
+fn enc_lwz(rt: u32, ra: u32, off: i16) -> u32 {
+    (32 << 26) | ((rt & 0x1F) << 21) | ((ra & 0x1F) << 16) | (off as u16 as u32)
+}
+
+// [PPC-Book1 p:82 s:3.3.13] mflr = mfspr RT,LR (SPR=8). The 10-bit
+// encoded SPR field is split with halves swapped relative to the SPR
+// number: instruction bits 11:15 hold the LOW 5 bits of the SPR
+// number, instruction bits 16:20 hold the HIGH 5 bits, so decode
+// reassembles SPR# = (inst[16:20] << 5) | inst[11:15].
+// SPR=8 = 0b00000_01000 -- low half 0b01000 = 8 at PPC bits 11:15,
+// high half 0 at PPC bits 16:20. `(8 << 16)` writes that bits-11:15
+// field (same instruction-bit position as RA in X-form).
+// [PPC-Book1 p:9 s:1.7.8 XFX-Form] OPCD=31, XO(21:30)=339.
+fn enc_mflr(rt: u32) -> u32 {
+    (31 << 26) | ((rt & 0x1F) << 21) | (8 << 16) | (339 << 1)
+}
+
+// [PPC-Book1 p:81 s:3.3.13] mtlr = mtspr LR,RS (SPR=8); same XFX-form
+// SPR-field half-swap as mflr above. XO(21:30)=467.
+fn enc_mtlr(rs: u32) -> u32 {
+    (31 << 26) | ((rs & 0x1F) << 21) | (8 << 16) | (467 << 1)
+}
+
+// [PPC-Book1 p:39 s:3.3.2] ld: RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
+// [PPC-Book1 p:8 s:1.7.5 DS-Form] OPCD=58, DS(16:29) || 0b00, XO(30:31)=00.
+// `& 0xFFFC` clears the low 2 bits of the encoded offset (keeping DS aligned
+// to 4 bytes) and the XO field (selecting plain ld, not ldu/lwa).
+fn enc_ld(rt: u32, ra: u32, off: i16) -> u32 {
+    (58 << 26) | ((rt & 0x1F) << 21) | ((ra & 0x1F) << 16) | ((off as u16 as u32) & 0xFFFC)
+}
+
+// [PPC-Book1 p:43 s:3.3.3] std: MEM(EA,8) <- (RS); EA = (RA|0)+EXTS(DS||0b00).
+// [PPC-Book1 p:8 s:1.7.5 DS-Form] OPCD=62, XO(30:31)=00 selects std (not stdu).
+fn enc_std(rs: u32, ra: u32, off: i16) -> u32 {
+    (62 << 26) | ((rs & 0x1F) << 21) | ((ra & 0x1F) << 16) | ((off as u16 as u32) & 0xFFFC)
+}
+
+// [PPC-Book1 p:60 s:3.3.9] cmpi (cmpwi when L=0): signed compare of (RA)32:63
+// against EXTS(SI); CR[BF] <- c || XER[SO]. The L bit at PPC bit 10 stays
+// zero by virtue of no operand occupying that position.
+// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD=11, BF(6:8), L(10), RA(11:15), SI(16:31).
+fn enc_cmpwi(bf: u32, ra: u32, imm: i16) -> u32 {
+    (11 << 26) | ((bf & 0x7) << 23) | ((ra & 0x1F) << 16) | (imm as u16 as u32)
+}
+
+// [PPC-Book1 p:60 s:3.3.9] cmp (cmpw when L=0): signed compare of (RA)32:63
+// against (RB)32:63 into CR[BF].
+// [PPC-Book1 p:9 s:1.7.6 X-Form] OPCD=31, XO(21:30)=0.
+fn enc_cmpw(bf: u32, ra: u32, rb: u32) -> u32 {
+    (31 << 26) | ((bf & 0x7) << 23) | ((ra & 0x1F) << 16) | ((rb & 0x1F) << 11)
+}
+
+// [PPC-Book1 p:24 s:2.4] bc BO,BI,target: branch B-form, non-linking with
+// AA=LK=0. `& 0xFFFC` clears AA(30) and LK(31) regardless of caller bits and
+// forces BD to 4-byte alignment; without it a non-aligned offset would
+// silently flip AA/LK and produce a different branch class.
+// [PPC-Book1 p:8 s:1.7.2 B-Form] OPCD=16, BO(6:10), BI(11:15), BD(16:29).
+fn enc_bc(bo: u32, bi: u32, offset: i16) -> u32 {
+    (16 << 26) | ((bo & 0x1F) << 21) | ((bi & 0x1F) << 16) | ((offset as u16 as u32) & 0xFFFC)
+}
+
+// 18-instruction tile hitting each of the nine super-pair fused
+// variants exactly once: LiStw, MflrStw, LwzMtlr, MflrStd, LdMtlr,
+// StdStd, LwzCmpwi, CmpwBc, CmpwiBc. Pair membership requirements
+// (same destination/source register, store-offset adjacency for
+// StdStd, non-linking bc) per `shadow::superpair::make_super_pair`.
+//
+// Comparisons set EQ false and both bc forms use BO=12 BI=2, so every
+// conditional branch falls through and execution proceeds linearly past
+// the budget cap. Both `bc` offsets are 0 (self-target); a hypothetical
+// taken branch would spin in place until budget exhaustion rather than
+// run off the end of the shadow.
+// [PPC-Book1 p:20 s:2.4.1 Figure 21] BO=12 (0b01100) is "branch if
+// CR[BI]==1" with the BO_4 software hint clear; combined with EQ=0 the
+// branch is never taken.
+// [PPC-Book1 p:18 s:2.3.1] CR0 bit assignments are LT(0), GT(1), EQ(2),
+// SO(3); BI=2 indexes the EQ bit of CR0.
+//
+// r1 stays at 0 (PpuState::new zeros all GPRs), so every load/store
+// uses base 0 and aliases the instruction bytes in mem. Because
+// `run_until_yield` does not commit effects, the aliased stores
+// land in the store buffer and subsequent same-address loads forward
+// from it -- the only place this bench exercises the store-buffer
+// overlay path.
+fn mixed100_tile() -> [u32; 18] {
+    [
+        enc_li(3, 10),       // 0x00: addi r3, 0, 10 -- quickens to Li
+        enc_stw(3, 1, 0),    // 0x04: LiStw       (li.rt == stw.rs == 3)
+        enc_mflr(4),         // 0x08
+        enc_stw(4, 1, 4),    // 0x0C: MflrStw     (mflr.rt == stw.rs == 4)
+        enc_lwz(5, 1, 0),    // 0x10
+        enc_mtlr(5),         // 0x14: LwzMtlr     (lwz.rt == mtlr.rs == 5)
+        enc_mflr(6),         // 0x18
+        enc_std(6, 1, 8),    // 0x1C: MflrStd     (mflr.rt == std.rs == 6)
+        enc_ld(7, 1, 8),     // 0x20
+        enc_mtlr(7),         // 0x24: LdMtlr      (ld.rt == mtlr.rs == 7)
+        enc_std(3, 1, 16),   // 0x28
+        enc_std(4, 1, 24),   // 0x2C: StdStd      (off2 - off1 == 8, ra1 == ra2)
+        enc_lwz(8, 1, 32),   // 0x30
+        enc_cmpwi(0, 8, 99), // 0x34: LwzCmpwi    (lwz.rt == cmpwi.ra == 8)
+        enc_cmpw(0, 3, 9),   // 0x38              (r3 = 10, r9 = 0 -> EQ false)
+        enc_bc(12, 2, 0),    // 0x3C: CmpwBc      (BO=12 BI=2 falls through)
+        enc_cmpwi(0, 3, 99), // 0x40              (r3 = 10, imm = 99 -> EQ false)
+        enc_bc(12, 2, 0),    // 0x44: CmpwiBc     (falls through)
+    ]
+}
+
+// Populate a 4 KiB GuestMemory by filling it (truncated to whole
+// instructions) from `pattern.iter().cycle()`. Matches the existing
+// un-shadowed `run_until_yield` benches, which fill far more memory
+// than budget=100 can consume.
+fn fill_mem_with_pattern(pattern: &[u32]) -> GuestMemory {
+    const MEM_SIZE: usize = 4096;
+    let slots = MEM_SIZE / 4;
+    let mut mem = GuestMemory::new(MEM_SIZE);
+    for i in 0..slots {
+        let word = pattern[i % pattern.len()];
+        let range =
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new((i * 4) as u64), 4).unwrap();
+        mem.apply_commit(range, &word.to_be_bytes()).unwrap();
+    }
+    mem
+}
+
+// PC walk for budget=100 is at most 400 bytes (each retired instruction
+// advances PC by 4, and the super-pair head + Consumed pair advances by
+// 8 per fused pair across two budget units). 1024 bytes (256 slots)
+// gives ample headroom; `shadow.clone()` is moved out of the timed
+// region via `iter_batched` setup, so the clone cost no longer pressures
+// us toward a tight shadow.
+const SHADOW_SIZE: usize = 1024;
+
+// Shadow byte slice for the centerpiece arms. Sized via `SHADOW_SIZE`.
+fn shadow_bytes_for(pattern: &[u32]) -> Vec<u8> {
+    let slots = SHADOW_SIZE / 4;
+    let mut bytes = Vec::with_capacity(SHADOW_SIZE);
+    for i in 0..slots {
+        bytes.extend_from_slice(&pattern[i % pattern.len()].to_be_bytes());
+    }
+    bytes
+}
+
+// Un-shadowed baseline for the mixed100 fixture. Pairs with
+// `run_until_yield_shadowed/trace_off_mixed100` to form the
+// super-pairing-guard delta.
+fn bench_run_until_yield_per_step_off_mixed100(c: &mut Criterion) {
+    let pattern = mixed100_tile();
+    let mem = fill_mem_with_pattern(&pattern);
+    c.bench_function("run_until_yield/per_step_off_mixed100", |b| {
+        b.iter_batched(
+            || PpuExecutionUnit::new(UnitId::new(0)),
+            |mut ppu| {
+                let ctx = ExecutionContext::new(&mem);
+                let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
+                (ppu, r)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+// One-shot PC-bound probe shared by every shadowed arm. Runs the
+// bench's prologue once at registration and panics if PC walks past
+// `SHADOW_SIZE`. Uses `assert!` rather than `debug_assert!` because
+// `cargo bench` runs the release profile, which strips the latter.
+// Per-iteration cost is zero: the probe runs once and the result is
+// discarded.
+fn assert_pc_bound(mem: &GuestMemory, shadow: &PredecodedShadow, trace_on: bool) {
+    let mut probe = PpuExecutionUnit::new(UnitId::new(0));
+    probe.set_instruction_shadow(shadow.clone());
+    let ctx = if trace_on {
+        ExecutionContext::new(mem).with_trace_per_step(true)
+    } else {
+        ExecutionContext::new(mem)
+    };
+    let _ = probe.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
+    if trace_on {
+        let _ = probe.drain_retired_state_hashes();
+    }
+    assert!(
+        probe.state().pc < SHADOW_SIZE as u64,
+        "PC walked out of shadow: {:#x} (SHADOW_SIZE = {})",
+        probe.state().pc,
+        SHADOW_SIZE,
+    );
+}
+
+// Centerpiece: shadowed `run_until_yield`, trace OFF, addi100.
+// Quickening-guard arm. Homogeneous addi stream contains no adjacent
+// fusable pairs, so super-pairing contributes zero; the delta vs
+// `run_until_yield/per_step_off_addi100` isolates the >0.5%
+// quickening rule plus shadow-fast-path dispatch. The slot-0 assert
+// catches a quickening-pass regression that would otherwise silently
+// measure unquickened dispatch.
+fn bench_run_until_yield_shadowed_off_addi100(c: &mut Criterion) {
+    let pattern = [enc_li(3, 1)];
+    let mem = fill_mem_with_pattern(&pattern);
+    let shadow_bytes = shadow_bytes_for(&pattern);
+    let shadow = PredecodedShadow::build(0, &shadow_bytes);
+    assert!(
+        matches!(shadow.get(0), Some(PpuInstruction::Li { .. })),
+        "addi100 shadow slot 0 should quicken to Li; got {:?}",
+        shadow.get(0)
+    );
+    assert_pc_bound(&mem, &shadow, false);
+    c.bench_function("run_until_yield_shadowed/trace_off_addi100", |b| {
+        b.iter_batched(
+            || {
+                let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
+                ppu.set_instruction_shadow(shadow.clone());
+                ppu
+            },
+            |mut ppu| {
+                let ctx = ExecutionContext::new(&mem);
+                let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
+                (ppu, r)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+// Centerpiece: shadowed, trace OFF, mixed100. Super-pairing guard.
+// Delta vs `run_until_yield/per_step_off_mixed100` is the only
+// guard for the nine fused variants the >1% pair rule produces.
+// `shadow.get` is PC-byte-addressed; `get(4)` is slot 1, the
+// `Consumed` partner of the slot-0 fusion. If the pair rule erodes,
+// the slots stay un-fused and the bench would degrade to the
+// un-shadowed cost.
+fn bench_run_until_yield_shadowed_off_mixed100(c: &mut Criterion) {
+    let pattern = mixed100_tile();
+    let mem = fill_mem_with_pattern(&pattern);
+    let shadow_bytes = shadow_bytes_for(&pattern);
+    let shadow = PredecodedShadow::build(0, &shadow_bytes);
+    assert!(
+        matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })),
+        "mixed100 shadow slot 0 should fuse to LiStw; got {:?}",
+        shadow.get(0)
+    );
+    assert!(
+        matches!(shadow.get(4), Some(PpuInstruction::Consumed)),
+        "mixed100 slot 1 (byte offset 4) should be Consumed; got {:?}",
+        shadow.get(4)
+    );
+    assert_pc_bound(&mem, &shadow, false);
+    c.bench_function("run_until_yield_shadowed/trace_off_mixed100", |b| {
+        b.iter_batched(
+            || {
+                let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
+                ppu.set_instruction_shadow(shadow.clone());
+                ppu
+            },
+            |mut ppu| {
+                let ctx = ExecutionContext::new(&mem);
+                let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
+                (ppu, r)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+// Centerpiece: shadowed, trace ON (per-step state-hash), addi100.
+// Delta vs `trace_off_addi100` is the per-100-instruction trace-cost
+// number on the shadowed (fast) path.
+fn bench_run_until_yield_shadowed_hashes_addi100(c: &mut Criterion) {
+    let pattern = [enc_li(3, 1)];
+    let mem = fill_mem_with_pattern(&pattern);
+    let shadow_bytes = shadow_bytes_for(&pattern);
+    let shadow = PredecodedShadow::build(0, &shadow_bytes);
+    assert!(
+        matches!(shadow.get(0), Some(PpuInstruction::Li { .. })),
+        "addi100 shadow slot 0 should quicken to Li; got {:?}",
+        shadow.get(0)
+    );
+    assert_pc_bound(&mem, &shadow, true);
+    c.bench_function("run_until_yield_shadowed/trace_hashes_addi100", |b| {
+        b.iter_batched(
+            || {
+                let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
+                ppu.set_instruction_shadow(shadow.clone());
+                ppu
+            },
+            |mut ppu| {
+                let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
+                let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
+                let drained = ppu.drain_retired_state_hashes();
+                (ppu, r, drained)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+// Centerpiece: shadowed, trace ON, mixed100. Trace-cost delta on a
+// mix that exercises every fused variant.
+fn bench_run_until_yield_shadowed_hashes_mixed100(c: &mut Criterion) {
+    let pattern = mixed100_tile();
+    let mem = fill_mem_with_pattern(&pattern);
+    let shadow_bytes = shadow_bytes_for(&pattern);
+    let shadow = PredecodedShadow::build(0, &shadow_bytes);
+    assert!(
+        matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })),
+        "mixed100 shadow slot 0 should fuse to LiStw; got {:?}",
+        shadow.get(0)
+    );
+    assert!(
+        matches!(shadow.get(4), Some(PpuInstruction::Consumed)),
+        "mixed100 slot 1 (byte offset 4) should be Consumed; got {:?}",
+        shadow.get(4)
+    );
+    assert_pc_bound(&mem, &shadow, true);
+    c.bench_function("run_until_yield_shadowed/trace_hashes_mixed100", |b| {
+        b.iter_batched(
+            || {
+                let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
+                ppu.set_instruction_shadow(shadow.clone());
+                ppu
+            },
+            |mut ppu| {
+                let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
+                let r = ppu.run_until_yield(black_box(Budget::new(100)), &ctx, &mut Vec::new());
+                let drained = ppu.drain_retired_state_hashes();
+                (ppu, r, drained)
+            },
+            BatchSize::SmallInput,
+        );
     });
 }
 
@@ -411,13 +730,20 @@ fn bench_state_hash(c: &mut Criterion) {
     });
 }
 
+// `run_until_yield` benchmarks: un-shadowed baselines, shadowed
+// centerpiece arms (addi100 quickening guard, mixed100 super-pairing
+// guard, both trace-off and trace-on), plus the standalone state-hash
+// and budget=1 single-step costs.
 criterion_group!(
     run_benches,
-    bench_run_until_yield_100,
     bench_run_until_yield_budget_1,
-    bench_run_until_yield_mixed,
     bench_run_until_yield_per_step_off,
     bench_run_until_yield_per_step_on,
+    bench_run_until_yield_per_step_off_mixed100,
+    bench_run_until_yield_shadowed_off_addi100,
+    bench_run_until_yield_shadowed_off_mixed100,
+    bench_run_until_yield_shadowed_hashes_addi100,
+    bench_run_until_yield_shadowed_hashes_mixed100,
     bench_state_hash,
 );
 

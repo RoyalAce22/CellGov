@@ -74,26 +74,37 @@ fn expected_config_hash() -> u64 {
 }
 
 /// Why the rpcs3 to-observation bridge failed.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum Rpcs3BridgeError {
     /// Hex parse failed.
+    #[error("invalid hex '{raw}': {source}")]
     InvalidHex {
         raw: String,
+        #[source]
         source: std::num::ParseIntError,
     },
     /// Outcome token unrecognized.
+    #[error("unknown outcome: {0}")]
     UnknownOutcome(String),
     /// CLI flag with no following value.
+    #[error("flag {flag} requires a value")]
     FlagMissingValue { flag: String },
     /// `--steps` value did not parse as usize.
-    InvalidSteps(std::num::ParseIntError),
+    #[error("--steps: {0}")]
+    InvalidSteps(#[source] std::num::ParseIntError),
     /// Unknown CLI flag.
+    #[error("unknown flag: {0}")]
     UnknownFlag(String),
     /// A required CLI flag was missing.
+    #[error("{flag} required")]
     RequiredFlagMissing { flag: &'static str },
     /// `region.size` overflowed usize while accumulating cursor.
+    #[error("region {region} size overflow")]
     RegionSizeOverflow { region: String },
     /// Dump file shorter than manifest's declared regions.
+    #[error(
+        "dump truncated: region {region} needs bytes [{cursor}..{end}] but dump has {dump_len}"
+    )]
     DumpTruncated {
         region: String,
         cursor: usize,
@@ -101,83 +112,41 @@ enum Rpcs3BridgeError {
         dump_len: usize,
     },
     /// rpcs3 oracle-mode config hash disagrees with the patch source.
+    #[error(
+        "rpcs3 oracle-mode config mismatch: supplied 0x{supplied:016x}, expected 0x{expected:016x}. \
+         The dump was produced under RPCS3 settings that differ from \
+         bridges/rpcs3-patch/oracle_mode_config.yml. Cross-runner \
+         observations from different settings are not comparable; \
+         re-run RPCS3 with the canonical oracle-mode settings."
+    )]
     ConfigHashMismatch { supplied: u64, expected: u64 },
     /// Reading the manifest file failed.
+    #[error("read manifest {}: {source}", path.display())]
     ManifestRead {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
     /// Parsing the manifest TOML failed.
-    ManifestParse(toml::de::Error),
+    #[error("parse manifest: {0}")]
+    ManifestParse(#[source] toml::de::Error),
     /// Reading the dump file failed.
+    #[error("read dump {}: {source}", path.display())]
     DumpRead {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
     /// Serializing the observation to JSON failed.
-    Serialize(serde_json::Error),
+    #[error("serialize: {0}")]
+    Serialize(#[source] serde_json::Error),
     /// Writing the output file failed.
+    #[error("write {}: {source}", path.display())]
     OutputWrite {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
-}
-
-impl std::fmt::Display for Rpcs3BridgeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidHex { raw, source } => write!(f, "invalid hex '{raw}': {source}"),
-            Self::UnknownOutcome(s) => write!(f, "unknown outcome: {s}"),
-            Self::FlagMissingValue { flag } => write!(f, "flag {flag} requires a value"),
-            Self::InvalidSteps(e) => write!(f, "--steps: {e}"),
-            Self::UnknownFlag(s) => write!(f, "unknown flag: {s}"),
-            Self::RequiredFlagMissing { flag } => write!(f, "{flag} required"),
-            Self::RegionSizeOverflow { region } => write!(f, "region {region} size overflow"),
-            Self::DumpTruncated {
-                region,
-                cursor,
-                end,
-                dump_len,
-            } => write!(
-                f,
-                "dump truncated: region {region} needs bytes [{cursor}..{end}] but dump has {dump_len}"
-            ),
-            Self::ConfigHashMismatch { supplied, expected } => write!(
-                f,
-                "rpcs3 oracle-mode config mismatch: supplied 0x{supplied:016x}, expected 0x{expected:016x}. \
-                 The dump was produced under RPCS3 settings that differ from \
-                 bridges/rpcs3-patch/oracle_mode_config.yml. Cross-runner \
-                 observations from different settings are not comparable; \
-                 re-run RPCS3 with the canonical oracle-mode settings."
-            ),
-            Self::ManifestRead { path, source } => {
-                write!(f, "read manifest {}: {source}", path.display())
-            }
-            Self::ManifestParse(e) => write!(f, "parse manifest: {e}"),
-            Self::DumpRead { path, source } => {
-                write!(f, "read dump {}: {source}", path.display())
-            }
-            Self::Serialize(e) => write!(f, "serialize: {e}"),
-            Self::OutputWrite { path, source } => {
-                write!(f, "write {}: {source}", path.display())
-            }
-        }
-    }
-}
-
-impl std::error::Error for Rpcs3BridgeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidHex { source, .. } => Some(source),
-            Self::InvalidSteps(e) => Some(e),
-            Self::ManifestRead { source, .. }
-            | Self::DumpRead { source, .. }
-            | Self::OutputWrite { source, .. } => Some(source),
-            Self::ManifestParse(e) => Some(e),
-            Self::Serialize(e) => Some(e),
-            _ => None,
-        }
-    }
 }
 
 fn parse_hex_u64(s: &str) -> Result<u64, Rpcs3BridgeError> {

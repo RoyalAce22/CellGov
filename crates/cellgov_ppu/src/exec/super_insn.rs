@@ -9,7 +9,8 @@
 //! [ErtlGregg2003 p:20 s:6.3] dispatch for super-instruction arms.
 
 use crate::exec::branch::branch_condition;
-use crate::exec::{buffer_store, load_ze, ExecuteVerdict};
+use crate::exec::memory_helpers::{buffer_store, load_ze};
+use crate::exec::ExecuteVerdict;
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;

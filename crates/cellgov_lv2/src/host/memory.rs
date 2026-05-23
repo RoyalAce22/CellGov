@@ -29,32 +29,20 @@ impl Lv2Host {
         // outside user memory.
         const ALIGN: u32 = 0x1_0000;
         let Ok(size) = u32::try_from(size) else {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOMEM.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         let Some(aligned_ptr) = self
             .mem_alloc_ptr
             .checked_add(ALIGN - 1)
             .map(|p| p & !(ALIGN - 1))
         else {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOMEM.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         let Some(next) = aligned_ptr.checked_add(size) else {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOMEM.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         if next > MEM_ALLOC_REGION_END {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOMEM.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         self.mem_alloc_ptr = next;
         self.immediate_write_u32(aligned_ptr, alloc_addr_ptr, requester)
@@ -140,13 +128,7 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        assert_eq!(
-            result,
-            Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![]
-            }
-        );
+        assert_eq!(result, Lv2Dispatch::immediate(0));
     }
 
     #[test]

@@ -59,56 +59,26 @@ pub struct WriteEntry {
 }
 
 /// Failure modes while parsing the HLE trace.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ParseError {
-    Io(std::io::Error),
+    #[error("I/O error: {0}")]
+    Io(#[source] std::io::Error),
+    #[error(
+        "trace header magic mismatch: got 0x{got:08x}, expected 0x{:08x}",
+        HEADER_MAGIC
+    )]
     BadHeaderMagic { got: u32 },
+    #[error(
+        "trace version {got} unsupported (this build expects {})",
+        TRACE_VERSION
+    )]
     BadVersion { got: u32 },
+    #[error("record name length {len} exceeds 1 KiB sanity cap")]
     NameTooLong { len: u32 },
+    #[error("write payload size {size} exceeds 1 MiB sanity cap")]
     WriteTooLarge { size: u32 },
+    #[error("unexpected EOF while reading {in_field}")]
     UnexpectedEof { in_field: &'static str },
-}
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "I/O error: {e}"),
-            Self::BadHeaderMagic { got } => {
-                write!(
-                    f,
-                    "trace header magic mismatch: got 0x{got:08x}, expected 0x{HEADER_MAGIC:08x}"
-                )
-            }
-            Self::BadVersion { got } => {
-                write!(
-                    f,
-                    "trace version {got} unsupported (this build expects {TRACE_VERSION})"
-                )
-            }
-            Self::NameTooLong { len } => {
-                write!(f, "record name length {len} exceeds 1 KiB sanity cap")
-            }
-            Self::WriteTooLarge { size } => {
-                write!(f, "write payload size {size} exceeds 1 MiB sanity cap")
-            }
-            Self::UnexpectedEof { in_field } => {
-                write!(f, "unexpected EOF while reading {in_field}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::BadHeaderMagic { .. }
-            | Self::BadVersion { .. }
-            | Self::NameTooLong { .. }
-            | Self::WriteTooLarge { .. }
-            | Self::UnexpectedEof { .. } => None,
-        }
-    }
 }
 
 /// Parse the entire trace file into a `Vec<CallRecord>`. Only used

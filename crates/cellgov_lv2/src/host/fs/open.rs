@@ -39,19 +39,13 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         if !out_ptr_writable(rt, fd_out_ptr, 4, 4) {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         let path_bytes_owned = match read_path_bytes(rt, path_ptr) {
             Ok(b) => b,
             Err(err) => {
-                return Lv2Dispatch::Immediate {
-                    code: err.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(err.into());
             }
         };
 
@@ -61,10 +55,7 @@ impl Lv2Host {
         // above. A future manifest schema with non-UTF-8 keys
         // replaces the from_utf8 gate with the chosen decode policy.
         let Ok(p) = std::str::from_utf8(&path_bytes_owned) else {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOENT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
         };
 
         let flag_err = validate_open_flags(flags, p);
@@ -75,10 +66,7 @@ impl Lv2Host {
         // table (lazy disk-to-blob cache). Probe in that order.
         if self.fs_store().has_path(p) {
             if let Some(err) = flag_err {
-                return Lv2Dispatch::Immediate {
-                    code: err.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(err.into());
             }
             return self.open_existing_blob(p, fd_out_ptr, requester);
         }
@@ -86,21 +74,12 @@ impl Lv2Host {
         match self.try_mount_resolve_and_cache(p) {
             MountResolution::Cached => {
                 if let Some(err) = flag_err {
-                    return Lv2Dispatch::Immediate {
-                        code: err.into(),
-                        effects: vec![],
-                    };
+                    return Lv2Dispatch::immediate(err.into());
                 }
                 self.open_existing_blob(p, fd_out_ptr, requester)
             }
-            MountResolution::Failed(err) => Lv2Dispatch::Immediate {
-                code: err.into(),
-                effects: vec![],
-            },
-            MountResolution::Unmounted => Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOENT.into(),
-                effects: vec![],
-            },
+            MountResolution::Failed(err) => Lv2Dispatch::immediate(err.into()),
+            MountResolution::Unmounted => Lv2Dispatch::immediate(errno::CELL_ENOENT.into()),
         }
     }
 
@@ -129,10 +108,7 @@ impl Lv2Host {
                 self.fs_fd_count_inc();
                 self.immediate_write_u32(fd, fd_out_ptr, requester)
             }
-            Err(FsError::FdExhausted) => Lv2Dispatch::Immediate {
-                code: errno::CELL_EMFILE.into(),
-                effects: vec![],
-            },
+            Err(FsError::FdExhausted) => Lv2Dispatch::immediate(errno::CELL_EMFILE.into()),
             Err(other) => {
                 self.record_invariant_break(
                     "dispatch.fs_open.path_table_vs_fd_allocator_drift",
@@ -142,10 +118,7 @@ impl Lv2Host {
                          fd allocator disagree about the same path"
                     ),
                 );
-                Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                }
+                Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
             }
         }
     }

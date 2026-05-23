@@ -53,52 +53,28 @@ pub enum MutexRelease {
 ///
 /// `IdCollision` indicates an allocator bug; `debug_assert!`
 /// fires. Release keeps the existing entry and returns `Err`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum MutexCreateError {
     /// An entry with this id was already present.
-    IdCollision(super::IdCollision),
+    #[error("mutex create: {0}")]
+    IdCollision(#[source] super::IdCollision),
 }
 
 /// Failure modes of [`MutexTable::enqueue_waiter`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum MutexEnqueueError {
     /// No mutex with this id.
+    #[error("mutex enqueue: unknown id")]
     UnknownId,
     /// Thread is already on the waiter list. Always state
     /// corruption; callers route to `record_invariant_break`.
+    #[error("mutex enqueue: duplicate waiter")]
     DuplicateWaiter,
     /// Thread is the current owner. Reachable from guest
     /// recursive-lock attempts.
+    #[error("mutex enqueue: waiter is owner")]
     WaiterIsOwner,
 }
-
-impl std::fmt::Display for MutexCreateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::IdCollision(c) => write!(f, "mutex create: {c}"),
-        }
-    }
-}
-
-impl std::error::Error for MutexCreateError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::IdCollision(c) => Some(c),
-        }
-    }
-}
-
-impl std::fmt::Display for MutexEnqueueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownId => f.write_str("mutex enqueue: unknown id"),
-            Self::DuplicateWaiter => f.write_str("mutex enqueue: duplicate waiter"),
-            Self::WaiterIsOwner => f.write_str("mutex enqueue: waiter is owner"),
-        }
-    }
-}
-
-impl std::error::Error for MutexEnqueueError {}
 
 /// Attribute bag captured from `sys_mutex_create`. No field
 /// affects blocking or waking; recursive locks surface as
@@ -648,9 +624,9 @@ mod tests {
         t.create_with_id(5, default_attrs()).unwrap();
         assert_eq!(
             t.create_with_id(5, default_attrs()),
-            Err(MutexCreateError::IdCollision(super::super::IdCollision {
-                id: 5
-            })),
+            Err(MutexCreateError::IdCollision(
+                crate::sync_primitives::IdCollision { id: 5 }
+            )),
         );
         assert_eq!(t.len(), 1);
     }

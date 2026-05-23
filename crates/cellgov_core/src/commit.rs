@@ -26,19 +26,22 @@ use cellgov_sync::{
 use cellgov_time::GuestTicks;
 
 /// Why a commit batch could not be applied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CommitError {
     /// A `SharedWriteIntent` payload length did not match its range length.
+    #[error("effect[{effect_index}]: write payload length disagrees with range")]
     PayloadLengthMismatch {
         /// Index of the offending effect within the batch.
         effect_index: usize,
     },
     /// A `SharedWriteIntent` target range escapes any registered region.
+    #[error("effect[{effect_index}]: write target escapes regions")]
     OutOfRange {
         /// Index of the offending effect within the batch.
         effect_index: usize,
     },
     /// A `MailboxSend` or `MailboxReceiveAttempt` targeted an unregistered mailbox.
+    #[error("effect[{effect_index}]: unknown mailbox {mailbox}")]
     UnknownMailbox {
         /// Index of the offending effect within the batch.
         effect_index: usize,
@@ -46,6 +49,7 @@ pub enum CommitError {
         mailbox: MailboxId,
     },
     /// A `SignalUpdate` targeted an unregistered signal.
+    #[error("effect[{effect_index}]: unknown signal {signal}")]
     UnknownSignal {
         /// Index of the offending effect within the batch.
         effect_index: usize,
@@ -53,6 +57,7 @@ pub enum CommitError {
         signal: SignalId,
     },
     /// A `WakeUnit` targeted an unregistered unit.
+    #[error("effect[{effect_index}]: unknown wake target unit {}", target.raw())]
     UnknownWakeTarget {
         /// Index of the offending effect within the batch.
         effect_index: usize,
@@ -61,75 +66,27 @@ pub enum CommitError {
     },
     /// A source-side effect named an unregistered unit; rejecting keeps
     /// the reservation table and pending-receive inbox registry-consistent.
+    #[error("effect[{effect_index}]: unknown source unit {}", source_unit.raw())]
     UnknownSourceUnit {
         /// Index of the offending effect within the batch.
         effect_index: usize,
         /// Source unit id that was not found in the registry.
-        source: UnitId,
+        source_unit: UnitId,
     },
     /// A `DmaEnqueue` destination range escapes any registered region.
     ///
     /// Source ranges are not pre-validated; they may legitimately reference
     /// SPU local stores or staging buffers that the completion handler
     /// resolves by path.
+    #[error("effect[{effect_index}]: DMA destination escapes regions")]
     DmaDestinationOutOfRange {
         /// Index of the offending effect within the batch.
         effect_index: usize,
     },
     /// The memory layer rejected the drain (permissions, or a
     /// pre-validation/drain disagreement on containment).
-    Memory(MemError),
-}
-
-impl std::fmt::Display for CommitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::PayloadLengthMismatch { effect_index } => write!(
-                f,
-                "effect[{effect_index}]: write payload length disagrees with range"
-            ),
-            Self::OutOfRange { effect_index } => {
-                write!(f, "effect[{effect_index}]: write target escapes regions")
-            }
-            Self::UnknownMailbox {
-                effect_index,
-                mailbox,
-            } => write!(f, "effect[{effect_index}]: unknown mailbox {mailbox}"),
-            Self::UnknownSignal {
-                effect_index,
-                signal,
-            } => write!(f, "effect[{effect_index}]: unknown signal {signal}"),
-            Self::UnknownWakeTarget {
-                effect_index,
-                target,
-            } => write!(
-                f,
-                "effect[{effect_index}]: unknown wake target unit {}",
-                target.raw()
-            ),
-            Self::UnknownSourceUnit {
-                effect_index,
-                source,
-            } => write!(
-                f,
-                "effect[{effect_index}]: unknown source unit {}",
-                source.raw()
-            ),
-            Self::DmaDestinationOutOfRange { effect_index } => {
-                write!(f, "effect[{effect_index}]: DMA destination escapes regions")
-            }
-            Self::Memory(e) => write!(f, "memory: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for CommitError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Memory(e) => Some(e),
-            _ => None,
-        }
-    }
+    #[error("memory: {0}")]
+    Memory(#[source] MemError),
 }
 
 /// Summary of what a commit pass accomplished.
@@ -332,7 +289,7 @@ impl CommitPipeline {
                         if ctx.units.get(*source).is_none() {
                             return Err(CommitError::UnknownSourceUnit {
                                 effect_index: idx,
-                                source: *source,
+                                source_unit: *source,
                             });
                         }
                     }
@@ -371,7 +328,7 @@ impl CommitPipeline {
                         if ctx.units.get(*source).is_none() {
                             return Err(CommitError::UnknownSourceUnit {
                                 effect_index: idx,
-                                source: *source,
+                                source_unit: *source,
                             });
                         }
                         waits += 1;
@@ -396,7 +353,7 @@ impl CommitPipeline {
                         if ctx.units.get(*source).is_none() {
                             return Err(CommitError::UnknownSourceUnit {
                                 effect_index: idx,
-                                source: *source,
+                                source_unit: *source,
                             });
                         }
                         staging.stage(StagedWrite {
@@ -409,7 +366,7 @@ impl CommitPipeline {
                         if ctx.units.get(*source).is_none() {
                             return Err(CommitError::UnknownSourceUnit {
                                 effect_index: idx,
-                                source: *source,
+                                source_unit: *source,
                             });
                         }
                     }

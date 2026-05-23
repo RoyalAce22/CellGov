@@ -52,80 +52,50 @@ struct InstallArgs {
 const DEFAULT_INSTALL_OUTPUT: &str = "firmware";
 
 /// Why a cellgov_firmware CLI helper failed.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum FirmwareCliError {
     /// `install` invoked without a PUP path.
+    #[error("install requires a PUP path")]
     MissingPupPath,
     /// `decrypt-self` invoked without a SELF path.
+    #[error("decrypt-self requires a SELF path")]
     MissingSelfPath,
     /// `--output` flag with no following argument.
+    #[error("--output requires a {kind} argument")]
     OutputFlagMissingValue { kind: &'static str },
     /// Unknown subcommand flag.
+    #[error("unknown argument: {0}")]
     UnknownArgument(String),
     /// `check_output_dir`: read_dir failed on the candidate output.
+    #[error("failed to read {}: {source}", path.display())]
     OutputDirReadFailed {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
     /// `check_output_dir`: existing output is non-empty and --force not set.
+    #[error("output directory {} exists and is non-empty; pass --force to overwrite", path.display())]
     OutputDirNotEmpty { path: PathBuf },
     /// `build_firmware_manifest`: reading an SPRX failed.
+    #[error("read {}: {source}", path.display())]
     SprxReadFailed {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
     /// `build_firmware_manifest`: `strip_prefix(output_dir)` failed (the
     /// path-walker produced a path that wasn't under `output_dir`, which
     /// implies a `collect_sprx_paths` bug).
+    #[error("strip_prefix({}): {source}", path.display())]
     StripPrefixFailed {
         path: PathBuf,
+        #[source]
         source: std::path::StripPrefixError,
     },
     /// `build_firmware_manifest`: an SPRX's path has non-UTF-8 bytes;
     /// firmware.toml cannot represent it.
+    #[error("non-utf8 firmware path: {}", path.display())]
     NonUtf8Path { path: PathBuf },
-}
-
-impl std::fmt::Display for FirmwareCliError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingPupPath => f.write_str("install requires a PUP path"),
-            Self::MissingSelfPath => f.write_str("decrypt-self requires a SELF path"),
-            Self::OutputFlagMissingValue { kind } => {
-                write!(f, "--output requires a {kind} argument")
-            }
-            Self::UnknownArgument(s) => write!(f, "unknown argument: {s}"),
-            Self::OutputDirReadFailed { path, source } => {
-                write!(f, "failed to read {}: {source}", path.display())
-            }
-            Self::OutputDirNotEmpty { path } => write!(
-                f,
-                "output directory {} exists and is non-empty; pass --force to overwrite",
-                path.display()
-            ),
-            Self::SprxReadFailed { path, source } => {
-                write!(f, "read {}: {source}", path.display())
-            }
-            Self::StripPrefixFailed { path, source } => {
-                write!(f, "strip_prefix({}): {source}", path.display())
-            }
-            Self::NonUtf8Path { path } => {
-                write!(f, "non-utf8 firmware path: {}", path.display())
-            }
-        }
-    }
-}
-
-impl std::error::Error for FirmwareCliError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::OutputDirReadFailed { source, .. } | Self::SprxReadFailed { source, .. } => {
-                Some(source)
-            }
-            Self::StripPrefixFailed { source, .. } => Some(source),
-            _ => None,
-        }
-    }
 }
 
 fn parse_install_args(args: &[String]) -> Result<InstallArgs, FirmwareCliError> {

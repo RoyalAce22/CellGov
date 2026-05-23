@@ -20,10 +20,10 @@ pub use cellgov_ps3_abi::elf::{
 /// alignment by feeding each entry through the applier and rejecting
 /// `UnsupportedReloc`.
 ///
-/// External consumers (audit tooling, the firmware reloc census
-/// regenerator at `apps/cellgov_cli/tests/firmware_reloc_census.rs`)
-/// read this slice rather than hardcoding a parallel list, so the
-/// regenerated doc cannot disagree silently with the applier.
+/// External consumers (the firmware reloc census regenerator at
+/// `apps/cellgov_cli/tests/firmware_reloc_census.rs`) read this
+/// slice rather than hardcoding a parallel list, so the regenerated
+/// doc cannot disagree silently with the applier.
 pub const APPLIER_SUPPORTED_TYPES: &[u32] = &[
     R_PPC64_ADDR32,
     R_PPC64_ADDR16_LO,
@@ -90,13 +90,19 @@ pub struct LoadedOpd {
 }
 
 /// Failure mode while loading a parsed PRX into guest memory.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PrxLoadError {
     /// Segment does not fit in guest memory at the chosen base.
     /// `segment` names which of the PRX's two segments (typically
     /// `"text"` or `"data"`) failed.
+    #[error(
+        "PRX {segment} segment out of range at 0x{:016x} (size 0x{:x})",
+        placement.addr, placement.size
+    )]
     SegmentOutOfRange {
+        /// Where the segment would have been placed in guest memory.
         placement: crate::loader::SegmentPlacement,
+        /// Which PRX segment failed: `"text"` or `"data"`.
         segment: &'static str,
     },
     /// u64 overflow in segment-placement arithmetic. `cause`
@@ -105,6 +111,7 @@ pub enum PrxLoadError {
     /// segment produced it. `size` is meaningful only when
     /// `cause = "start+size"`; for `cause = "base+vaddr"` size is
     /// reported as 0 because it wasn't involved.
+    #[error("PRX {segment} segment overflow ({cause}) vaddr 0x{vaddr:016x} size 0x{size:x}")]
     SegmentSizeOverflow {
         /// Which segment produced the overflow.
         segment: &'static str,
@@ -119,6 +126,9 @@ pub enum PrxLoadError {
     /// Text and data segments overlap in guest address space after
     /// relocation. The applier would clobber bytes of one with the
     /// other; surfacing rather than silently corrupting.
+    #[error(
+        "PRX segments overlap: first ends at 0x{first_end:016x}, second starts at 0x{second_start:016x}"
+    )]
     SegmentOverlap {
         /// Computed end of the earlier segment (exclusive).
         first_end: u64,
@@ -128,27 +138,43 @@ pub enum PrxLoadError {
     /// `ByteRange::new` rejected the (addr, length) pair (overflow,
     /// straddles a region boundary, etc.). Distinct from a region
     /// validation failure, which produces `MemoryFault`.
-    MemoryRangeInvalid { addr: u64, length: u64 },
+    #[error("PRX memory range invalid at 0x{addr:016x} length 0x{length:x}")]
+    MemoryRangeInvalid {
+        /// Guest address the rejected `ByteRange` started at.
+        addr: u64,
+        /// Length in bytes the rejected `ByteRange` requested.
+        length: u64,
+    },
     /// Per-write region check rejected the access. `source` is the
     /// underlying `MemError`; covers both reads and writes routed
     /// through `read_checked` / `apply_commit`.
+    #[error("PRX memory fault at 0x{addr:016x}: {source}")]
     MemoryFault {
+        /// Guest address the faulting access targeted.
         addr: u64,
+        /// Underlying `MemError` from the region check.
+        #[source]
         source: cellgov_mem::MemError,
     },
     /// Atomic-batch commit through `StagingMemory::drain_into`
     /// rejected the batch as a whole. Item-level attribution is not
     /// available at this layer; `count` is the number of staged
     /// writes the batch carried.
+    #[error("PRX staging commit ({count} writes) rejected: {source}")]
     BatchCommitFailed {
+        /// Number of staged writes in the rejected batch.
         count: usize,
+        /// Underlying `MemError` reported by `drain_into`.
+        #[source]
         source: cellgov_mem::MemError,
     },
     /// Relocation type code is not handled by the loader.
+    #[error("PRX unsupported relocation type {0}")]
     UnsupportedReloc(u32),
     /// Relocation referenced a segment index outside the loaded
     /// `[text, data]` pair (>= 2). Indicates corruption or a firmware
     /// shape the loader does not yet model.
+    #[error("PRX reloc segment {seg} out of range (sym 0x{sym:08x})")]
     RelocSegmentOutOfRange {
         /// Raw `sym` field carrying the offending segment index.
         sym: u32,
@@ -158,14 +184,19 @@ pub enum PrxLoadError {
     /// Relocation `offset` falls outside its target segment's
     /// `memsz`. A malformed PRX could otherwise patch into a
     /// neighbouring segment.
+    #[error("PRX reloc type {rtype} offset 0x{offset:x} out of segment (size 0x{seg_size:x})")]
     RelocOffsetOutOfSegment {
+        /// Type of the offending relocation.
         rtype: u32,
+        /// Patch offset within the target segment.
         offset: u64,
+        /// `memsz` of the target segment the offset overflowed.
         seg_size: u64,
     },
     /// REL24 displacement exceeds the signed 26-bit range; or
     /// ADDR32 / ADDR16 wide variants where the computed value
     /// requires bits past the encoded width.
+    #[error("PRX reloc type {rtype} overflow delta {delta}")]
     RelocOverflow {
         /// Type of the offending relocation.
         rtype: u32,
@@ -177,8 +208,11 @@ pub enum PrxLoadError {
     /// has nonzero low bits the encoded field cannot represent.
     /// `kind` distinguishes the three sources; `value` carries the
     /// offending quantity in the form `kind` names.
+    #[error("PRX reloc type {rtype} misaligned ({kind:?}) value {value}")]
     RelocMisaligned {
+        /// Type of the offending relocation.
         rtype: u32,
+        /// Pipeline stage that produced the misalignment.
         kind: RelocMisalignedKind,
         /// `PatchOffset`: `r.offset as i64`. `Displacement`: the
         /// computed REL24 delta. `EncodedValue`: the computed `S + A`.
@@ -200,79 +234,6 @@ pub enum RelocMisalignedKind {
     /// ADDR16_LO_DS computed `S + A` has nonzero low bits; the
     /// DS-form encoding requires 4-byte alignment.
     EncodedValue,
-}
-
-impl std::fmt::Display for PrxLoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SegmentOutOfRange { placement, segment } => write!(
-                f,
-                "PRX {segment} segment out of range at 0x{:016x} (size 0x{:x})",
-                placement.addr, placement.size
-            ),
-            Self::SegmentSizeOverflow {
-                segment,
-                cause,
-                vaddr,
-                size,
-            } => write!(
-                f,
-                "PRX {segment} segment overflow ({cause}) vaddr 0x{vaddr:016x} size 0x{size:x}"
-            ),
-            Self::SegmentOverlap {
-                first_end,
-                second_start,
-            } => write!(
-                f,
-                "PRX segments overlap: first ends at 0x{first_end:016x}, second starts at 0x{second_start:016x}"
-            ),
-            Self::MemoryRangeInvalid { addr, length } => write!(
-                f,
-                "PRX memory range invalid at 0x{addr:016x} length 0x{length:x}"
-            ),
-            Self::MemoryFault { addr, source } => write!(
-                f,
-                "PRX memory fault at 0x{addr:016x}: {source}"
-            ),
-            Self::BatchCommitFailed { count, source } => write!(
-                f,
-                "PRX staging commit ({count} writes) rejected: {source}"
-            ),
-            Self::UnsupportedReloc(rtype) => {
-                write!(f, "PRX unsupported relocation type {rtype}")
-            }
-            Self::RelocSegmentOutOfRange { sym, seg } => write!(
-                f,
-                "PRX reloc segment {seg} out of range (sym 0x{sym:08x})"
-            ),
-            Self::RelocOffsetOutOfSegment {
-                rtype,
-                offset,
-                seg_size,
-            } => write!(
-                f,
-                "PRX reloc type {rtype} offset 0x{offset:x} out of segment (size 0x{seg_size:x})"
-            ),
-            Self::RelocOverflow { rtype, delta } => {
-                write!(f, "PRX reloc type {rtype} overflow delta {delta}")
-            }
-            Self::RelocMisaligned { rtype, kind, value } => write!(
-                f,
-                "PRX reloc type {rtype} misaligned ({kind:?}) value {value}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for PrxLoadError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::MemoryFault { source, .. } | Self::BatchCommitFailed { source, .. } => {
-                Some(source)
-            }
-            _ => None,
-        }
-    }
 }
 
 /// Load a parsed PRX at `base` and apply relocations atomically.
@@ -740,7 +701,7 @@ mod tests {
     use super::*;
     use crate::sprx::parse_prx;
 
-    use super::super::test_fixtures::make_test_prx;
+    use crate::sprx::test_fixtures::make_test_prx;
 
     #[test]
     fn load_test_prx_segments() {

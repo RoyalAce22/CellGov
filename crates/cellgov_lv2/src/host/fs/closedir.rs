@@ -13,14 +13,8 @@ impl Lv2Host {
     /// file fd; the file and directory fd stores are distinct.
     pub(in crate::host) fn dispatch_fs_closedir(&mut self, fd: u32) -> Lv2Dispatch {
         match self.fs_store_mut().close_dir(fd) {
-            Ok(()) => Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![],
-            },
-            Err(FsError::UnknownDir) => Lv2Dispatch::Immediate {
-                code: errno::CELL_EBADF.into(),
-                effects: vec![],
-            },
+            Ok(()) => Lv2Dispatch::immediate(0),
+            Err(FsError::UnknownDir) => Lv2Dispatch::immediate(errno::CELL_EBADF.into()),
             Err(other) => {
                 self.record_invariant_break(
                     "dispatch.fs_closedir.unexpected_fs_error",
@@ -29,10 +23,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                }
+                Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
             }
         }
     }

@@ -51,13 +51,17 @@ impl CondEntry {
 /// Both variants indicate a dispatch-layer bug and fire a
 /// `debug_assert!`. In release the existing entry is preserved
 /// and the caller's binding is dropped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CondCreateError {
     /// Same id, same binding.
+    #[error("cond create: redundant registration")]
     RedundantRegistration,
     /// Same id, different binding. `collision.id` is the colliding
     /// id; the `existing_*` fields describe the pre-existing entry.
+    #[error("cond create: {collision} (existing bound to mutex 0x{existing_mutex_id:08x} kind {existing_mutex_kind:?})")]
     IdCollision {
+        /// Underlying id-collision diagnostic shared across primitives.
+        #[source]
         collision: super::IdCollision,
         /// `mutex_id` of the pre-existing entry.
         existing_mutex_id: u32,
@@ -67,70 +71,27 @@ pub enum CondCreateError {
 }
 
 /// Failure modes of [`CondTable::enqueue_waiter`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CondEnqueueError {
     /// No cond with this id.
+    #[error("cond enqueue: unknown id")]
     UnknownId,
     /// Thread is already parked on this cond; dispatch-layer bug
     /// (fires `debug_assert!`).
+    #[error("cond enqueue: duplicate waiter")]
     DuplicateWaiter,
 }
 
 /// Failure modes of [`CondTable::signal_to`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CondSignalToError {
     /// No cond with this id.
+    #[error("cond signal-to: unknown id")]
     UnknownId,
     /// Cond exists but `target` is not on the waiter list.
+    #[error("cond signal-to: target not waiting")]
     TargetNotWaiting,
 }
-
-impl std::fmt::Display for CondCreateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::RedundantRegistration => f.write_str("cond create: redundant registration"),
-            Self::IdCollision {
-                collision,
-                existing_mutex_id,
-                existing_mutex_kind,
-            } => write!(
-                f,
-                "cond create: {collision} (existing bound to mutex 0x{existing_mutex_id:08x} kind {existing_mutex_kind:?})"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for CondCreateError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::IdCollision { collision, .. } => Some(collision),
-            Self::RedundantRegistration => None,
-        }
-    }
-}
-
-impl std::fmt::Display for CondEnqueueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownId => f.write_str("cond enqueue: unknown id"),
-            Self::DuplicateWaiter => f.write_str("cond enqueue: duplicate waiter"),
-        }
-    }
-}
-
-impl std::error::Error for CondEnqueueError {}
-
-impl std::fmt::Display for CondSignalToError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownId => f.write_str("cond signal-to: unknown id"),
-            Self::TargetNotWaiting => f.write_str("cond signal-to: target not waiting"),
-        }
-    }
-}
-
-impl std::error::Error for CondSignalToError {}
 
 /// Table of condition variables.
 #[derive(Debug, Clone, Default)]
@@ -342,7 +303,7 @@ mod tests {
         assert_eq!(
             t.create_with_id(5, 2, CondMutexKind::Mutex),
             Err(CondCreateError::IdCollision {
-                collision: super::super::IdCollision { id: 5 },
+                collision: crate::sync_primitives::IdCollision { id: 5 },
                 existing_mutex_id: 1,
                 existing_mutex_kind: CondMutexKind::LwMutex,
             })

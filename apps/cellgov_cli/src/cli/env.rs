@@ -1,6 +1,6 @@
 //! CLI environment-variable parsing helpers.
 
-use super::cli_arg_error::CliArgError;
+use super::args::CliArgError;
 use super::exit::die;
 
 /// Strict boolean parse for a `CELLGOV_*` env var. Unset and empty

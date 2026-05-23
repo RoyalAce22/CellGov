@@ -1,8 +1,7 @@
 use cellgov_core::Runtime;
 use cellgov_lv2::PpuThreadState;
 
-use crate::game::step_loop::{block_reason_label, RingCursor};
-use crate::game::{PC_RING_SIZE, SYSCALL_RING_SIZE};
+use crate::game::step_loop::{block_reason_label, RingCursor, PC_RING_SIZE, SYSCALL_RING_SIZE};
 
 use super::ascii_safe_preview;
 use super::rings::{append_pc_ring_terse, append_syscall_ring};

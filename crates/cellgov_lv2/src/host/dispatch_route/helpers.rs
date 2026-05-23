@@ -17,7 +17,7 @@ use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::Lv2Dispatch;
 
-use super::super::{Lv2Host, Lv2Runtime};
+use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
     /// Append the TTY buffer into [`Self::tty_log`] and write
@@ -79,10 +79,7 @@ impl Lv2Host {
         source: UnitId,
     ) -> Lv2Dispatch {
         if ptr == 0 {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(ptr, 4),
@@ -103,10 +100,7 @@ impl Lv2Host {
     /// the unit sees the documented errno instead of a commit fault.
     pub(super) fn efault_if_null(&self, ptrs: &[u32]) -> Option<Lv2Dispatch> {
         if ptrs.contains(&0) {
-            Some(Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            })
+            Some(Lv2Dispatch::immediate(errno::CELL_EFAULT.into()))
         } else {
             None
         }

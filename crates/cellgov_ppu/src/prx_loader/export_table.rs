@@ -119,9 +119,9 @@ impl FirmwareExportTable {
         self.entries.is_empty()
     }
 
-    /// Iterate every recorded NID. Used by audit and bidirectional-
-    /// consistency tests that need a key-only view of the table
-    /// without exposing internal origin tracking.
+    /// Iterate every recorded NID. Used by bidirectional-consistency
+    /// tests that need a key-only view of the table without exposing
+    /// internal origin tracking.
     pub fn nids(&self) -> impl Iterator<Item = u32> + '_ {
         self.entries.keys().copied()
     }

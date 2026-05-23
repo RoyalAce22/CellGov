@@ -19,6 +19,7 @@ cellgov_exec = { path = "../cellgov_exec" }
 cellgov_lv2 = { path = "../cellgov_lv2" }
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 cellgov_trace = { path = "../cellgov_trace" }
+thiserror = "2"
 
 [dev-dependencies]
 criterion.workspace = true

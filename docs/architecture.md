@@ -170,8 +170,8 @@ LV2 virtual-address layout:
 | --------------------- | ------ | -------------- | -------------------------------- | ------------------------------------------------------------------------ |
 | 0x00000000-0x3FFFFFFF | 1 GB   | `main`         | `ReadWrite`                      | User memory: EBOOT PT_LOAD segments, TLS, firmware PRX images, allocator pool |
 | 0xC0000000-0xCFFFFFFF | 256 MB | `rsx`          | `ReservedZeroReadable` (default) | Video / RSX local memory -- placeholder, reads zero and are counted      |
-| 0xD0000000-0xD000FFFF | 64 KB  | `stack`        | `ReadWrite`                      | Primary-thread stack (page-4K)                                           |
-| 0xD0010000-0xD0F0FFFF | 15 MB  | `child_stacks` | `ReadWrite`                      | Stack pool for PPU threads spawned by `sys_ppu_thread_create`            |
+| 0xD0000000-0xD00FFFFF | 1 MB   | `stack`        | `ReadWrite`                      | Primary-thread stack (page-4K); matches `PROC_PARAM.primary_stacksize` typical for retail titles |
+| 0xD0100000-0xD0FFFFFF | 15 MB  | `child_stacks` | `ReadWrite`                      | Stack pool for PPU threads spawned by `sys_ppu_thread_create`            |
 | 0xE0000000-0xFFFFFFFF | 512 MB | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX                    |
 
 The `main` region's internal sub-layout is not tracked by the region
@@ -512,7 +512,7 @@ used by diagnostics and fault backtraces but never by the
 scheduler, which stays agnostic to the blocking cause.
 
 Child stacks come from the 15 MB `child_stacks` region at
-`0xD0010000+`. `ThreadStackAllocator` is a deterministic bump
+`0xD0100000+`. `ThreadStackAllocator` is a deterministic bump
 allocator: two fresh allocators produce byte-identical sequences.
 
 Per-thread TLS is instantiated from the captured `TlsTemplate`:

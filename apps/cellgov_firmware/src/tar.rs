@@ -6,127 +6,93 @@
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+/// One regular file extracted from a USTAR archive.
 #[derive(Debug)]
 pub struct TarEntry {
+    /// Full archive-relative path (prefix + `/` + name when the USTAR
+    /// header used the prefix field; bare name otherwise).
     pub name: String,
+    /// Raw file payload, unpadded.
     pub data: Vec<u8>,
 }
 
 /// Per-file failure surfaced by [`extract_to_disk`].
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ExtractError {
     /// Cleaned guest path contained a `..` component.
+    #[error("path traversal: {guest_path} -> {}", host_path.display())]
     PathTraversal {
+        /// Original archive-relative path as recorded in the tar header.
         guest_path: String,
+        /// Host path the entry would have resolved to under `base`.
         host_path: PathBuf,
     },
     /// `create_dir_all` on the destination's parent failed.
+    #[error("create_dir_all for {guest_path} -> {}: {source}", host_path.display())]
     CreateDir {
+        /// Original archive-relative path.
         guest_path: String,
+        /// Host destination whose parent could not be created.
         host_path: PathBuf,
+        /// Underlying filesystem error from `std::fs::create_dir_all`.
+        #[source]
         source: io::Error,
     },
     /// `std::fs::write` on the destination failed.
+    #[error("write {guest_path} -> {}: {source}", host_path.display())]
     Write {
+        /// Original archive-relative path.
         guest_path: String,
+        /// Host destination whose write failed.
         host_path: PathBuf,
+        /// Underlying filesystem error from `std::fs::write`.
+        #[source]
         source: io::Error,
     },
 }
 
-impl std::fmt::Display for ExtractError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::PathTraversal {
-                guest_path,
-                host_path,
-            } => write!(f, "path traversal: {guest_path} -> {}", host_path.display()),
-            Self::CreateDir {
-                guest_path,
-                host_path,
-                source,
-            } => write!(
-                f,
-                "create_dir_all for {guest_path} -> {}: {source}",
-                host_path.display()
-            ),
-            Self::Write {
-                guest_path,
-                host_path,
-                source,
-            } => write!(f, "write {guest_path} -> {}: {source}", host_path.display()),
-        }
-    }
-}
-
-impl std::error::Error for ExtractError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::CreateDir { source, .. } | Self::Write { source, .. } => Some(source),
-            Self::PathTraversal { .. } => None,
-        }
-    }
-}
-
 /// Why USTAR `parse` rejected the archive.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TarParseError {
     /// A header's name field is not valid UTF-8.
+    #[error("tar: header at offset 0x{offset:x} has non-UTF-8 name: {source}")]
     NameNotUtf8 {
+        /// Byte offset of the offending 512-byte header in the archive.
         offset: usize,
+        /// UTF-8 decode error from the name field (header bytes 0..100).
+        #[source]
         source: std::str::Utf8Error,
     },
     /// A header's prefix field is not valid UTF-8.
+    #[error("tar: header at offset 0x{offset:x} has non-UTF-8 prefix: {source}")]
     PrefixNotUtf8 {
+        /// Byte offset of the offending 512-byte header in the archive.
         offset: usize,
+        /// UTF-8 decode error from the USTAR prefix field
+        /// (header bytes 0x159..0x1F4).
+        #[source]
         source: std::str::Utf8Error,
     },
     /// The size field is not a valid octal string.
-    UnparseableSize { offset: usize, name: String },
-    /// The entry's declared payload extends past the archive.
-    PayloadPastArchive {
-        name: String,
+    #[error("tar: header at offset 0x{offset:x} ({name:?}) has unparseable size field")]
+    UnparseableSize {
+        /// Byte offset of the offending header in the archive.
         offset: usize,
+        /// Assembled full name of the entry whose size field failed to parse.
+        name: String,
+    },
+    /// The entry's declared payload extends past the archive.
+    #[error("tar: entry {name:?} payload extends past archive (offset 0x{offset:x}, size 0x{size:x}, archive 0x{archive_size:x})")]
+    PayloadPastArchive {
+        /// Assembled full name of the over-long entry.
+        name: String,
+        /// Byte offset where the payload was expected to start.
+        offset: usize,
+        /// Declared payload size from the header (bytes).
         size: usize,
+        /// Total archive size for context.
         archive_size: usize,
     },
-}
-
-impl std::fmt::Display for TarParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NameNotUtf8 { offset, source } => write!(
-                f,
-                "tar: header at offset 0x{offset:x} has non-UTF-8 name: {source}"
-            ),
-            Self::PrefixNotUtf8 { offset, source } => write!(
-                f,
-                "tar: header at offset 0x{offset:x} has non-UTF-8 prefix: {source}"
-            ),
-            Self::UnparseableSize { offset, name } => write!(
-                f,
-                "tar: header at offset 0x{offset:x} ({name:?}) has unparseable size field"
-            ),
-            Self::PayloadPastArchive {
-                name,
-                offset,
-                size,
-                archive_size,
-            } => write!(
-                f,
-                "tar: entry {name:?} payload extends past archive (offset 0x{offset:x}, size 0x{size:x}, archive 0x{archive_size:x})"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for TarParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::NameNotUtf8 { source, .. } | Self::PrefixNotUtf8 { source, .. } => Some(source),
-            Self::UnparseableSize { .. } | Self::PayloadPastArchive { .. } => None,
-        }
-    }
 }
 
 /// Summary returned by [`extract_to_disk`]. `errors` is non-empty when
@@ -134,7 +100,9 @@ impl std::error::Error for TarParseError {
 /// the install or is logged and tolerated.
 #[derive(Debug, Default)]
 pub struct ExtractReport {
+    /// Number of entries successfully written to disk.
     pub written: usize,
+    /// Per-entry failures, in the order they occurred.
     pub errors: Vec<ExtractError>,
 }
 
@@ -152,6 +120,11 @@ fn octal_to_u64(s: &[u8]) -> Option<u64> {
     u64::from_str_radix(s, 8).ok()
 }
 
+/// Parse a USTAR archive into its regular-file entries.
+///
+/// Non-regular records (symlinks, directories, device nodes, etc.) are
+/// silently skipped. A pair of all-zero 512-byte blocks terminates the
+/// archive; trailing padding past that is ignored.
 pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
     let mut entries = Vec::new();
     let mut offset = 0usize;
@@ -221,6 +194,12 @@ fn is_safe_relative(clean: &str) -> bool {
         .all(|c| !matches!(c, Component::ParentDir))
 }
 
+/// Write `entries` under `base`, stripping PUP packaging prefixes
+/// (`000/`, `dev_flash/`) so `base` ends up as the dev_flash VFS root.
+/// Path-traversal (`..`) entries are rejected and recorded in the
+/// returned report. Per-entry I/O failures are collected rather than
+/// short-circuiting; the caller decides whether the report's `errors`
+/// vec aborts the install.
 pub fn extract_to_disk(entries: &[TarEntry], base: &Path) -> ExtractReport {
     let mut report = ExtractReport::default();
     for entry in entries {

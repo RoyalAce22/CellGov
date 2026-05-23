@@ -91,8 +91,8 @@ impl UnitRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_fixtures::{CountingUnit, LyingUnit};
     use super::*;
+    use crate::registry::test_fixtures::{CountingUnit, LyingUnit};
 
     #[test]
     fn register_assigns_sequential_ids() {

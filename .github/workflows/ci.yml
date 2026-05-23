@@ -69,3 +69,6 @@ jobs:
 
       - name: cargo test --release
         run: cargo test --workspace --release
+
+      - name: cargo bench --no-run --benches
+        run: cargo bench --workspace --no-run --benches

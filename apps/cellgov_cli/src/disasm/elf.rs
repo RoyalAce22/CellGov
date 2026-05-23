@@ -1,52 +1,56 @@
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub(super) enum ElfError {
-    TooSmall {
-        len: usize,
-    },
+    #[error("not an ELF (file is {len} bytes; need >= 64)")]
+    TooSmall { len: usize },
+    #[error("not an ELF (magic mismatch)")]
     BadMagic,
-    NotElf64 {
-        ei_class: u8,
-    },
-    NotBigEndian {
-        ei_data: u8,
-    },
-    UnknownElfVersion {
-        ei_version: u8,
-    },
-    NotPpc64 {
-        e_machine: u16,
-    },
-    PhentsizeTooSmall {
-        phentsize: u16,
-    },
+    #[error("ELF EI_CLASS=0x{ei_class:02x}; this tool only handles ELFCLASS64 (PS3 PPE objects)")]
+    NotElf64 { ei_class: u8 },
+    #[error("ELF EI_DATA=0x{ei_data:02x}; this tool only handles ELFDATA2MSB (PS3 PPE objects)")]
+    NotBigEndian { ei_data: u8 },
+    #[error("ELF EI_VERSION=0x{ei_version:02x}; only EV_CURRENT (1) is supported")]
+    UnknownElfVersion { ei_version: u8 },
+    #[error("ELF e_machine={e_machine} (0x{e_machine:04x}); this tool only handles EM_PPC64 (21)")]
+    NotPpc64 { e_machine: u16 },
+    #[error("ELF e_phentsize={phentsize} is smaller than Elf64_Phdr (56)")]
+    PhentsizeTooSmall { phentsize: u16 },
+    #[error("ELF e_phnum=0xFFFF (PN_XNUM extension) is not supported by this tool")]
     PhdrCountExtended,
+    #[error("ELF program-header arithmetic overflows: phoff=0x{phoff:x} phnum={phnum} phentsize={phentsize}")]
     PhdrTableOverflow {
         phoff: u64,
         phnum: u16,
         phentsize: u16,
     },
+    #[error("ELF program-header table runs past file: phoff=0x{phoff:x} end=0x{phend:x} file_len=0x{file_len:x}")]
     PhdrOutOfFile {
         phoff: u64,
         phend: u64,
         file_len: u64,
     },
+    #[error(
+        "PT_LOAD #{idx} arithmetic overflows: p_offset=0x{p_offset:x} p_filesz=0x{p_filesz:x}"
+    )]
     SegmentRangeOverflow {
         idx: usize,
         p_offset: u64,
         p_filesz: u64,
     },
+    #[error("PT_LOAD #{idx} truncated: p_offset=0x{p_offset:x}+p_filesz=0x{p_filesz:x} runs past file_len=0x{file_len:x}")]
     SegmentTruncated {
         idx: usize,
         p_offset: u64,
         p_filesz: u64,
         file_len: u64,
     },
+    #[error("PT_LOAD #{idx} vaddr-range overflows u64: p_vaddr=0x{p_vaddr:x} p_filesz=0x{p_filesz:x} p_memsz=0x{p_memsz:x}")]
     SegmentVaddrOverflow {
         idx: usize,
         p_vaddr: u64,
         p_filesz: u64,
         p_memsz: u64,
     },
+    #[error("PT_LOAD #{idx} has p_memsz=0x{p_memsz:x} < p_filesz=0x{p_filesz:x}; the ELF spec requires p_memsz >= p_filesz")]
     MemszLessThanFilesz {
         idx: usize,
         p_filesz: u64,
@@ -59,92 +63,6 @@ impl ElfError {
         self.to_string()
     }
 }
-
-impl std::fmt::Display for ElfError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TooSmall { len } => {
-                write!(f, "not an ELF (file is {len} bytes; need >= 64)")
-            }
-            Self::BadMagic => f.write_str("not an ELF (magic mismatch)"),
-            Self::NotElf64 { ei_class } => write!(
-                f,
-                "ELF EI_CLASS=0x{ei_class:02x}; this tool only handles ELFCLASS64 (PS3 PPE objects)"
-            ),
-            Self::NotBigEndian { ei_data } => write!(
-                f,
-                "ELF EI_DATA=0x{ei_data:02x}; this tool only handles ELFDATA2MSB (PS3 PPE objects)"
-            ),
-            Self::UnknownElfVersion { ei_version } => write!(
-                f,
-                "ELF EI_VERSION=0x{ei_version:02x}; only EV_CURRENT (1) is supported"
-            ),
-            Self::NotPpc64 { e_machine } => write!(
-                f,
-                "ELF e_machine={e_machine} (0x{e_machine:04x}); this tool only handles EM_PPC64 (21)"
-            ),
-            Self::PhentsizeTooSmall { phentsize } => write!(
-                f,
-                "ELF e_phentsize={phentsize} is smaller than Elf64_Phdr (56)"
-            ),
-            Self::PhdrCountExtended => {
-                f.write_str("ELF e_phnum=0xFFFF (PN_XNUM extension) is not supported by this tool")
-            }
-            Self::PhdrTableOverflow {
-                phoff,
-                phnum,
-                phentsize,
-            } => write!(
-                f,
-                "ELF program-header arithmetic overflows: phoff=0x{phoff:x} phnum={phnum} phentsize={phentsize}"
-            ),
-            Self::PhdrOutOfFile {
-                phoff,
-                phend,
-                file_len,
-            } => write!(
-                f,
-                "ELF program-header table runs past file: phoff=0x{phoff:x} end=0x{phend:x} file_len=0x{file_len:x}"
-            ),
-            Self::SegmentRangeOverflow {
-                idx,
-                p_offset,
-                p_filesz,
-            } => write!(
-                f,
-                "PT_LOAD #{idx} arithmetic overflows: p_offset=0x{p_offset:x} p_filesz=0x{p_filesz:x}"
-            ),
-            Self::SegmentTruncated {
-                idx,
-                p_offset,
-                p_filesz,
-                file_len,
-            } => write!(
-                f,
-                "PT_LOAD #{idx} truncated: p_offset=0x{p_offset:x}+p_filesz=0x{p_filesz:x} runs past file_len=0x{file_len:x}"
-            ),
-            Self::SegmentVaddrOverflow {
-                idx,
-                p_vaddr,
-                p_filesz,
-                p_memsz,
-            } => write!(
-                f,
-                "PT_LOAD #{idx} vaddr-range overflows u64: p_vaddr=0x{p_vaddr:x} p_filesz=0x{p_filesz:x} p_memsz=0x{p_memsz:x}"
-            ),
-            Self::MemszLessThanFilesz {
-                idx,
-                p_filesz,
-                p_memsz,
-            } => write!(
-                f,
-                "PT_LOAD #{idx} has p_memsz=0x{p_memsz:x} < p_filesz=0x{p_filesz:x}; the ELF spec requires p_memsz >= p_filesz"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ElfError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PtLoad {
@@ -292,8 +210,8 @@ pub(super) fn read_be_u64(data: &[u8], off: usize) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::*;
     use super::*;
+    use crate::disasm::test_support::*;
 
     #[test]
     fn pt_loads_rejects_too_small() {

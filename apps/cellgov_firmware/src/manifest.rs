@@ -84,15 +84,20 @@ fn parse_lowercase_hex_32(s: &str) -> Result<[u8; 32], String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "RawManifest")]
 pub struct FirmwareManifest {
+    /// Schema version; checked against [`SUPPORTED_FORMAT_VERSION`] at parse.
     pub format_version: u32,
+    /// Which PUP this install came from.
     pub firmware: FirmwareIdentity,
+    /// Per-file integrity entries. Serialised in sorted-by-`path` order.
     pub files: Vec<FirmwareFileEntry>,
 }
 
 /// Identifies the PUP a firmware install came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FirmwareIdentity {
+    /// Human-readable image version string from the PUP (e.g., `"4.85"`).
     pub image_version: String,
+    /// SHA-256 over the source PUP file bytes.
     pub pup_sha256: Sha256,
 }
 
@@ -102,8 +107,12 @@ pub struct FirmwareIdentity {
 /// per-file revision tag.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FirmwareFileEntry {
+    /// Install-root-relative path (e.g., `sys/external/liblv2.sprx`).
+    /// Unique across the manifest; duplicates are rejected at parse time.
     pub path: String,
+    /// SHA-256 over the post-decrypt ELF bytes.
     pub sha256: Sha256,
+    /// SCE container per-file revision tag the entry was decrypted under.
     pub revision: u16,
 }
 
@@ -144,70 +153,34 @@ impl TryFrom<RawManifest> for FirmwareManifest {
     }
 }
 
-#[derive(Debug)]
+/// Failure modes for parsing, serialising, or verifying a firmware manifest.
+#[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
+    /// `format_version` field did not equal [`SUPPORTED_FORMAT_VERSION`].
+    #[error("unsupported firmware.toml format_version {found} (expected {expected})")]
     UnsupportedFormatVersion {
+        /// `format_version` value read from the manifest.
         found: u32,
+        /// Schema version this build understands.
         expected: u32,
     },
     /// Two `[[files]]` entries shared the same `path`. Carries the
     /// offending path so the operator can locate the duplicate.
+    #[error("firmware.toml has duplicate [[files]].path: {0:?}")]
     DuplicatePath(String),
     /// Underlying TOML parse failure (malformed input, missing
     /// required field, type mismatch, malformed hex digest).
-    Toml(toml::de::Error),
+    #[error("firmware.toml parse: {0}")]
+    Toml(#[from] toml::de::Error),
     /// Underlying TOML serialise failure.
-    TomlSer(toml::ser::Error),
+    #[error("firmware.toml serialise: {0}")]
+    TomlSer(#[from] toml::ser::Error),
     /// Manifest entry was never verified by [`ManifestVerifier`]
     /// before `finish()`; the install pipeline either failed to
     /// produce the corresponding SPRX or never queued it for
     /// verification.
+    #[error("firmware.toml entry {0:?} was never verified")]
     EntryUnverified(String),
-}
-
-impl std::fmt::Display for ManifestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ManifestError::UnsupportedFormatVersion { found, expected } => {
-                write!(
-                    f,
-                    "unsupported firmware.toml format_version {found} (expected {expected})"
-                )
-            }
-            ManifestError::DuplicatePath(p) => {
-                write!(f, "firmware.toml has duplicate [[files]].path: {p:?}")
-            }
-            ManifestError::Toml(e) => write!(f, "firmware.toml parse: {e}"),
-            ManifestError::TomlSer(e) => write!(f, "firmware.toml serialise: {e}"),
-            ManifestError::EntryUnverified(p) => {
-                write!(f, "firmware.toml entry {p:?} was never verified")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ManifestError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ManifestError::Toml(e) => Some(e),
-            ManifestError::TomlSer(e) => Some(e),
-            ManifestError::UnsupportedFormatVersion { .. }
-            | ManifestError::DuplicatePath(_)
-            | ManifestError::EntryUnverified(_) => None,
-        }
-    }
-}
-
-impl From<toml::de::Error> for ManifestError {
-    fn from(e: toml::de::Error) -> Self {
-        ManifestError::Toml(e)
-    }
-}
-
-impl From<toml::ser::Error> for ManifestError {
-    fn from(e: toml::ser::Error) -> Self {
-        ManifestError::TomlSer(e)
-    }
 }
 
 /// Parse a `firmware.toml` text. Rejects unsupported
@@ -238,7 +211,9 @@ pub enum VerifyOutcome {
     NotInManifest,
     /// Hash disagreed; carries both digests as bytes.
     Mismatch {
+        /// Digest the manifest entry recorded.
         expected: [u8; 32],
+        /// Digest computed over the loaded PRX's post-decrypt bytes.
         actual: [u8; 32],
     },
 }
@@ -287,19 +262,9 @@ pub fn verify_post_decrypt(
 /// entries. The boot path constructs the verifier through
 /// [`ManifestVerifier::new`] and gets this error back instead of a
 /// trivially-passing `finish()`.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("firmware.toml has zero [[files]] entries; cannot verify vacuously")]
 pub struct EmptyManifest;
-
-impl std::fmt::Display for EmptyManifest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "firmware.toml has zero [[files]] entries; cannot verify vacuously"
-        )
-    }
-}
-
-impl std::error::Error for EmptyManifest {}
 
 /// Aggregate verifier. Constructed once at boot, fed each loaded
 /// PRX's `(path, digest)` pair, and drained with [`Self::finish`] --

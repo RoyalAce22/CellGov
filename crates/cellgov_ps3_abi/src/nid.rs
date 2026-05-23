@@ -105,7 +105,7 @@ pub mod cell_sysutil {
 
 /// `cellSaveData` NIDs. PRX-registered under `cellSysutil` per
 /// RPCS3's `REG_FUNC(cellSysutil, ...)` declarations, but grouped
-/// here by C source file to mirror PSL1GHT / SCE SDK convention.
+/// here by C source file to mirror PSL1GHT's header layout.
 /// Layouts and constants live in `crate::cell_save_data`.
 ///
 /// `OWNED` lists only the NIDs the HLE dispatcher currently claims

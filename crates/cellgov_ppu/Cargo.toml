@@ -16,6 +16,8 @@ cellgov_mem = { path = "../cellgov_mem" }
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
+thiserror = "2"
+derive_more = { version = "2", default-features = false, features = ["display"] }
 
 [dev-dependencies]
 cellgov_compare = { path = "../cellgov_compare" }

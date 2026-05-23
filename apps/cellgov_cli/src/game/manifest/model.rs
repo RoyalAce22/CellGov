@@ -102,55 +102,44 @@ pub struct ContentEntry {
 }
 
 /// Why [`TitleManifest::resolve_eboot`] could not return a path.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ResolveEbootError {
     /// Disc title with a `vfs_root` that has no non-empty parent.
+    #[error(
+        "disc title '{short_name}' needs vfs-root with a parent directory (got {})",
+        vfs_root.display()
+    )]
     MisconfiguredVfsRoot {
         vfs_root: PathBuf,
         short_name: String,
     },
     /// No candidate executable exists under the resolved USRDIR.
     /// `probe_errors` collects non-NotFound I/O errors.
+    #[error("{}", render_not_found(searched, candidates, probe_errors))]
     NotFound {
         searched: PathBuf,
         candidates: Vec<String>,
         probe_errors: Vec<(PathBuf, std::io::Error)>,
     },
-}
-
-impl std::fmt::Display for ResolveEbootError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MisconfiguredVfsRoot {
-                vfs_root,
-                short_name,
-            } => write!(
-                f,
-                "disc title '{short_name}' needs vfs-root with a parent directory (got {})",
-                vfs_root.display()
-            ),
-            Self::NotFound {
-                searched,
-                candidates,
-                probe_errors,
-            } => {
-                write!(f, "no executable found; looked for:")?;
-                for name in candidates {
-                    write!(f, "\n  {}", searched.join(name).display())?;
-                }
-                for (p, e) in probe_errors {
-                    write!(f, "\n  probe error: {}: {e}", p.display())?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl std::error::Error for ResolveEbootError {
     // NotFound carries Vec<(PathBuf, io::Error)>, a multi-error
     // aggregate without a single canonical source; the per-error
     // detail is folded into Display instead.
+}
+
+fn render_not_found(
+    searched: &Path,
+    candidates: &[String],
+    probe_errors: &[(PathBuf, std::io::Error)],
+) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::from("no executable found; looked for:");
+    for name in candidates {
+        let _ = write!(s, "\n  {}", searched.join(name).display());
+    }
+    for (p, e) in probe_errors {
+        let _ = write!(s, "\n  probe error: {}: {e}", p.display());
+    }
+    s
 }
 
 impl TitleManifest {

@@ -9,7 +9,7 @@ use cellgov_ps3_abi::cell_errors as errno;
 
 use crate::dispatch::Lv2Dispatch;
 
-use super::super::{Lv2Host, Lv2Runtime};
+use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
     /// `sys_ppu_thread_get_priority` (48). Oracle:
@@ -52,10 +52,7 @@ impl Lv2Host {
     /// so `sys_event_port_send` after this call is a no-op at the
     /// oracle layer.
     pub(super) fn dispatch_event_port_connect_local(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_memory_container_create` (324). Oracle:
@@ -119,10 +116,7 @@ impl Lv2Host {
                     effects: vec![write],
                 }
             }
-            None => Lv2Dispatch::Immediate {
-                code: errno::CELL_ENOMEM.into(),
-                effects: vec![],
-            },
+            None => Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
         }
     }
 
@@ -159,10 +153,7 @@ impl Lv2Host {
     /// VM range at `addr`. The oracle's flat backing already aliases
     /// real bytes, so the map is a logical no-op.
     pub(super) fn dispatch_mmapper_map_shared_memory(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_mmapper_search_and_map` (337). Oracle:
@@ -182,10 +173,7 @@ impl Lv2Host {
             return d;
         }
         if !(0x2000_0000..0xC000_0000).contains(&start_addr) {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(alloc_addr_ptr, 4),
@@ -230,20 +218,14 @@ impl Lv2Host {
     /// `sys_tty_read` (402): CELL_OK spins CRT input loops forever;
     /// real LV2 returns EIO outside debug console mode.
     pub(super) fn dispatch_tty_read(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_EIO.into(),
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(errno::CELL_EIO.into())
     }
 
     /// DEX-only slot (462). `uns_func` in
     /// `rpcs3/Emu/Cell/lv2/lv2.cpp:511`; retail liblv2 expects ENOSYS
     /// to take its fallback path.
     pub(super) fn dispatch_uns_func_462(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: errno::CELL_ENOSYS.into(),
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
     /// `_sys_prx_start_module` (481). Oracle:
@@ -262,10 +244,7 @@ impl Lv2Host {
         let id = args[0] as u32;
         let p_opt = args[2] as u32;
         if id == 0 || p_opt == 0 {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let entry_addr = p_opt.wrapping_add(16);
         let no_start = u64::MAX.to_be_bytes();
@@ -287,10 +266,7 @@ impl Lv2Host {
     /// CELL_PRX_ERROR_ELF_IS_REGISTERED for non-VSH callers (wrapped
     /// in `not_an_error`).
     pub(super) fn dispatch_prx_register_module(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0x8001_1910,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0x8001_1910)
     }
 
     /// `_sys_prx_register_library` (486). Oracle:
@@ -298,10 +274,7 @@ impl Lv2Host {
     /// table for a match. With no firmware-side import resolution
     /// modeled, CELL_OK matches the kernel's "no match" success path.
     pub(super) fn dispatch_prx_register_library(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// `_sys_prx_get_module_list` (494). Oracle:
@@ -321,16 +294,10 @@ impl Lv2Host {
         let flags = args[0];
         let p_info = args[1] as u32;
         if flags & 0x2 == 0 {
-            return Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(0);
         }
         if p_info == 0 {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let mut effects = Vec::new();
         let max_addr = p_info.wrapping_add(0x0C);
@@ -385,10 +352,7 @@ impl Lv2Host {
     /// `rpcs3/Emu/Cell/lv2/sys_hid.cpp:140` returns the caller's
     /// root bit. Retail titles run unprivileged (false).
     pub(super) fn dispatch_hid_is_root(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_gamepad_ycon_if` (621). Oracle:
@@ -396,19 +360,13 @@ impl Lv2Host {
     /// `packet_id`; no sub-handler mutates guest memory and the
     /// default branch returns CELL_OK.
     pub(super) fn dispatch_gamepad_ycon_if(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_rsx_attribute` (677). Oracle:
     /// `rpcs3/Emu/Cell/lv2/sys_rsx.cpp:983` logs and returns CELL_OK
     /// without state change.
     pub(super) fn dispatch_rsx_attribute(&self) -> Lv2Dispatch {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![],
-        }
+        Lv2Dispatch::immediate(0)
     }
 }

@@ -10,31 +10,42 @@ use super::model::{
 };
 use super::schema::ManifestFile;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
+    #[error("read {}: {source}", path.display())]
     Io {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
-    Parse {
-        path: PathBuf,
-        message: String,
-    },
-    UnknownCheckpointKind {
-        path: PathBuf,
-        kind: String,
-    },
+    #[error("parse {}: {message}", path.display())]
+    Parse { path: PathBuf, message: String },
+    #[error(
+        "{}: unknown checkpoint kind '{kind}' (accepted: process-exit, first-rsx-write, pc)",
+        path.display()
+    )]
+    UnknownCheckpointKind { path: PathBuf, kind: String },
     /// `kind = "pc"` without a value, or with a malformed value.
-    BadCheckpointPc {
-        path: PathBuf,
-        detail: String,
-    },
+    #[error("{}: {detail}", path.display())]
+    BadCheckpointPc { path: PathBuf, detail: String },
+    #[error(
+        "duplicate title short_name '{name}' in {} and {}{}",
+        first.display(),
+        second.display(),
+        render_files_identical_hint(*files_identical)
+    )]
     DuplicateShortName {
         name: String,
         first: PathBuf,
         second: PathBuf,
         files_identical: bool,
     },
+    #[error(
+        "duplicate title content_id '{content_id}' in {} and {}{}",
+        first.display(),
+        second.display(),
+        render_files_identical_hint(*files_identical)
+    )]
     DuplicateContentId {
         content_id: String,
         first: PathBuf,
@@ -43,72 +54,11 @@ pub enum ManifestError {
     },
 }
 
-impl std::fmt::Display for ManifestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io { path, source } => {
-                write!(f, "read {}: {source}", path.display())
-            }
-            Self::Parse { path, message } => {
-                write!(f, "parse {}: {message}", path.display())
-            }
-            Self::UnknownCheckpointKind { path, kind } => write!(
-                f,
-                "{}: unknown checkpoint kind '{kind}' (accepted: \
-                 process-exit, first-rsx-write, pc)",
-                path.display()
-            ),
-            Self::BadCheckpointPc { path, detail } => {
-                write!(f, "{}: {detail}", path.display())
-            }
-            Self::DuplicateShortName {
-                name,
-                first,
-                second,
-                files_identical,
-            } => {
-                write!(
-                    f,
-                    "duplicate title short_name '{name}' in {} and {}",
-                    first.display(),
-                    second.display()
-                )?;
-                if *files_identical {
-                    write!(f, " (files are byte-identical; one is likely a stray copy)")?;
-                }
-                Ok(())
-            }
-            Self::DuplicateContentId {
-                content_id,
-                first,
-                second,
-                files_identical,
-            } => {
-                write!(
-                    f,
-                    "duplicate title content_id '{content_id}' in {} and {}",
-                    first.display(),
-                    second.display()
-                )?;
-                if *files_identical {
-                    write!(f, " (files are byte-identical; one is likely a stray copy)")?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl std::error::Error for ManifestError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io { source, .. } => Some(source),
-            Self::Parse { .. }
-            | Self::UnknownCheckpointKind { .. }
-            | Self::BadCheckpointPc { .. }
-            | Self::DuplicateShortName { .. }
-            | Self::DuplicateContentId { .. } => None,
-        }
+fn render_files_identical_hint(files_identical: bool) -> &'static str {
+    if files_identical {
+        " (files are byte-identical; one is likely a stray copy)"
+    } else {
+        ""
     }
 }
 

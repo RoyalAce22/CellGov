@@ -48,11 +48,13 @@ pub enum SpuStepOutcome {
 }
 
 /// SPU-specific fault categories.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SpuFault {
     /// LS access outside valid range.
+    #[error("SPU LS access out of range at 0x{0:08x}")]
     LsOutOfRange(u32),
     /// Unsupported channel operation.
+    #[error("SPU unsupported channel {} 0x{channel:02x}", if *is_write { "wrch" } else { "rdch" })]
     UnsupportedChannel {
         /// Channel number.
         channel: u8,
@@ -60,27 +62,9 @@ pub enum SpuFault {
         is_write: bool,
     },
     /// Unsupported MFC command opcode.
+    #[error("SPU unsupported MFC command opcode 0x{0:08x}")]
     UnsupportedMfcCommand(u32),
 }
-
-impl std::fmt::Display for SpuFault {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::LsOutOfRange(addr) => {
-                write!(f, "SPU LS access out of range at 0x{addr:08x}")
-            }
-            Self::UnsupportedChannel { channel, is_write } => {
-                let dir = if *is_write { "wrch" } else { "rdch" };
-                write!(f, "SPU unsupported channel {dir} 0x{channel:02x}")
-            }
-            Self::UnsupportedMfcCommand(op) => {
-                write!(f, "SPU unsupported MFC command opcode 0x{op:08x}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SpuFault {}
 
 fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
     let a = (raw & 0x3FFF0) as usize;

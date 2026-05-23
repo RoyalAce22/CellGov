@@ -8,7 +8,8 @@ use crate::GuestTicks;
 use core::fmt;
 
 /// Cost of a unit of work in retired guest instructions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Display)]
+#[display("{_0}")]
 pub struct InstructionCost(u64);
 
 impl InstructionCost {
@@ -36,13 +37,6 @@ impl From<InstructionCost> for GuestTicks {
     #[inline]
     fn from(cost: InstructionCost) -> Self {
         GuestTicks::new(cost.raw())
-    }
-}
-
-impl fmt::Display for InstructionCost {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
     }
 }
 

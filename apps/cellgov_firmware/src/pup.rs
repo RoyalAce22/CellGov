@@ -8,41 +8,62 @@ use sha1::Sha1;
 
 use crate::crypto::PUP_KEY;
 
+/// On-disk PUP header at file offset 0, 0x30 bytes, all fields big-endian.
 #[derive(Debug)]
 #[repr(C)]
 #[cfg_attr(not(test), allow(dead_code))]
 pub struct PupHeader {
+    /// Offset 0x00: must equal `b"SCEUF\0\0\0"`.
     pub magic: [u8; 8],
+    /// Offset 0x08: PUP container format version.
     pub package_version: u64,
+    /// Offset 0x10: firmware image version (e.g. 0x0004008200000000 for 4.82).
     pub image_version: u64,
+    /// Offset 0x18: number of records in both the entry and hash tables.
     pub file_count: u64,
+    /// Offset 0x20: byte length of the header region (header + entry table + hash table).
     pub header_length: u64,
+    /// Offset 0x28: byte length of the payload region following the header.
     pub data_length: u64,
 }
 
+/// One record in the entry table; 0x20 bytes, big-endian.
 #[derive(Debug)]
 #[repr(C)]
 pub struct PupFileEntry {
+    /// Offset 0x00: stable file identifier (matches Sony's known-id table).
     pub entry_id: u64,
+    /// Offset 0x08: payload start, measured from the PUP file base.
     pub data_offset: u64,
+    /// Offset 0x10: payload length in bytes.
     pub data_length: u64,
+    /// Offset 0x18: 8 reserved bytes, observed zero.
     pub _padding: [u8; 8],
 }
 
+/// One record in the hash table; 0x20 bytes, big-endian.
+///
 /// `index` is the record's own position in the hash table, not the
 /// sibling entry's `entry_id`; payload-to-hash mapping is positional.
 #[derive(Debug)]
 #[repr(C)]
 pub struct PupHashEntry {
+    /// Offset 0x00: this record's positional index, must equal its slot number.
     pub index: u64,
+    /// Offset 0x08: HMAC-SHA1 of the referenced payload under `PUP_KEY`.
     pub hash: [u8; 20],
+    /// Offset 0x1C: 4 reserved bytes, observed zero.
     pub _padding: [u8; 4],
 }
 
+/// Parsed PUP: image version plus the entry and hash tables (payloads stay in the input buffer).
 #[derive(Debug)]
 pub struct Pup {
+    /// Firmware image version copied from the header.
     pub image_version: u64,
+    /// Entry table records in declaration order.
     pub entries: Vec<PupFileEntry>,
+    /// Hash table records in declaration order; `hashes[i]` covers `entries[i]`'s payload.
     pub hashes: Vec<PupHashEntry>,
 }
 
@@ -55,68 +76,63 @@ fn read_be_u64(data: &[u8], offset: usize) -> u64 {
 }
 
 /// Why PUP parsing or hash validation failed.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PupError {
     /// Input is shorter than the PUP header.
-    TooSmall { len: usize },
+    #[error("PUP file too small for header (got {len} bytes)")]
+    TooSmall {
+        /// Observed input length in bytes.
+        len: usize,
+    },
     /// SCEUF magic mismatch; carries the first 4 observed bytes.
+    #[error("bad PUP magic: {:02x}{:02x}{:02x}{:02x}", _0[0], _0[1], _0[2], _0[3])]
     BadMagic([u8; 4]),
     /// Entry / hash tables would extend past the file end.
-    TablesTruncated { required: usize, file_len: usize },
+    #[error("PUP file truncated: tables need >= 0x{required:x} bytes, file is 0x{file_len:x}")]
+    TablesTruncated {
+        /// Minimum byte length the header plus tables would occupy.
+        required: usize,
+        /// Actual byte length of the input buffer.
+        file_len: usize,
+    },
     /// Entry and hash table lengths disagree (a malformed PUP).
-    TableLengthMismatch { entries: usize, hashes: usize },
+    #[error("PUP entry table ({entries}) and hash table ({hashes}) length disagree")]
+    TableLengthMismatch {
+        /// Number of records in the entry table.
+        entries: usize,
+        /// Number of records in the hash table.
+        hashes: usize,
+    },
     /// Hash record's `index` field disagrees with its slot position.
-    HashIndexMismatch { position: usize, declared: u64 },
+    #[error("PUP hash record at position {position} declares index {declared}")]
+    HashIndexMismatch {
+        /// Slot position in the hash table (zero-based).
+        position: usize,
+        /// Value the record's `index` field carries.
+        declared: u64,
+    },
     /// Payload referenced by an entry extends past the file end.
-    EntryPastFile { position: usize, entry_id: u64 },
+    #[error("entry {position} (id=0x{entry_id:x}) extends past file end")]
+    EntryPastFile {
+        /// Slot position of the offending entry in the entry table.
+        position: usize,
+        /// `entry_id` field of the offending entry.
+        entry_id: u64,
+    },
     /// HMAC-SHA1 initialization failed (wrong key length).
-    HmacInit(hmac::digest::InvalidLength),
+    #[error("HMAC init: {0}")]
+    HmacInit(#[source] hmac::digest::InvalidLength),
     /// HMAC-SHA1 mismatch between computed and recorded hash.
-    HmacMismatch { position: usize, entry_id: u64 },
+    #[error("HMAC mismatch for entry {position} (id=0x{entry_id:x})")]
+    HmacMismatch {
+        /// Slot position of the entry whose payload failed verification.
+        position: usize,
+        /// `entry_id` field of the failing entry.
+        entry_id: u64,
+    },
 }
 
-impl std::fmt::Display for PupError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TooSmall { len } => write!(f, "PUP file too small for header (got {len} bytes)"),
-            Self::BadMagic(bytes) => write!(
-                f,
-                "bad PUP magic: {:02x}{:02x}{:02x}{:02x}",
-                bytes[0], bytes[1], bytes[2], bytes[3]
-            ),
-            Self::TablesTruncated { required, file_len } => write!(
-                f,
-                "PUP file truncated: tables need >= 0x{required:x} bytes, file is 0x{file_len:x}"
-            ),
-            Self::TableLengthMismatch { entries, hashes } => write!(
-                f,
-                "PUP entry table ({entries}) and hash table ({hashes}) length disagree"
-            ),
-            Self::HashIndexMismatch { position, declared } => write!(
-                f,
-                "PUP hash record at position {position} declares index {declared}"
-            ),
-            Self::EntryPastFile { position, entry_id } => write!(
-                f,
-                "entry {position} (id=0x{entry_id:x}) extends past file end"
-            ),
-            Self::HmacInit(e) => write!(f, "HMAC init: {e}"),
-            Self::HmacMismatch { position, entry_id } => {
-                write!(f, "HMAC mismatch for entry {position} (id=0x{entry_id:x})")
-            }
-        }
-    }
-}
-
-impl std::error::Error for PupError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::HmacInit(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
+/// Parse a PUP buffer into its header tables; does not verify payload hashes.
 pub fn parse(data: &[u8]) -> Result<Pup, PupError> {
     if data.len() < 0x30 {
         return Err(PupError::TooSmall { len: data.len() });
@@ -171,6 +187,7 @@ pub fn parse(data: &[u8]) -> Result<Pup, PupError> {
 
 type HmacSha1 = Hmac<Sha1>;
 
+/// Recompute HMAC-SHA1 of each payload under `PUP_KEY` and compare against the recorded hash.
 pub fn validate_hashes(data: &[u8], pup: &Pup) -> Result<(), PupError> {
     if pup.entries.len() != pup.hashes.len() {
         return Err(PupError::TableLengthMismatch {

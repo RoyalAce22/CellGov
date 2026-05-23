@@ -4,11 +4,11 @@ use crate::host::Lv2Host;
 
 use cellgov_ps3_abi::sys_fs::{CELL_FS_BLOCK_SIZE, CELL_FS_MAX_PATH_LENGTH};
 
-use super::super::stat_layout::CELL_FS_S_IFREG_R_ONLY_MODE;
 use super::common::{
     assert_immediate, extract_stat, fs_close, fs_fstat, fs_stat, open_registered, parse_stat, run,
     PathRuntime, TempMountDir,
 };
+use crate::host::fs::stat_layout::CELL_FS_S_IFREG_R_ONLY_MODE;
 
 #[test]
 fn fstat_returns_size_mode_and_blksize() {

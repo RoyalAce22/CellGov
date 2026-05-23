@@ -42,8 +42,8 @@ impl UnitRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_fixtures::status_unit;
     use super::*;
+    use crate::registry::test_fixtures::status_unit;
 
     #[test]
     fn effective_status_returns_unit_self_report_by_default() {

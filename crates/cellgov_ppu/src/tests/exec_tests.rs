@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::exec::test_support::{exec_no_mem, exec_with_mem, uid};
+use crate::instruction::PpuInstruction;
+use crate::state::PpuState;
 
 #[test]
 fn sc_returns_syscall() {

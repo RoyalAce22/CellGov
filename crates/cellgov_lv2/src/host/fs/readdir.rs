@@ -41,28 +41,19 @@ impl Lv2Host {
         // nread is a u64 (PS3 sys_fs_readdir signature: `u64 *nread`);
         // 8-byte alignment.
         if !out_ptr_writable(rt, nread_out_ptr, 8, 8) {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         // CellFsDirent has no required alignment > 1 (its leading
         // field is u8); the only bound is the 258-byte writable
         // span at the supplied pointer.
         if !out_ptr_writable(rt, dirent_out_ptr, CELL_FS_DIRENT_SIZE as usize, 1) {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         let entry = match self.fs_store_mut().read_dir_entry(fd) {
             Ok(e) => e,
             Err(FsError::UnknownDir) => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EBADF.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EBADF.into());
             }
             Err(other) => {
                 self.record_invariant_break(
@@ -72,10 +63,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
 

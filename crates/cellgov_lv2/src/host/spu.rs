@@ -41,25 +41,16 @@ impl Lv2Host {
         // a read and is rejected as CELL_EINVAL alongside the
         // out-of-bounds branch.
         let Ok(size) = usize::try_from(size) else {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
         let img_bytes = match rt.read_committed(u64::from(img_ptr), size) {
             Some(b) => b,
             None => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EINVAL.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         };
         if !rt.writable(u64::from(handle_out), 16) {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         // Synthetic path makes every (type_id, img_ptr) pair a
         // distinct entry. The image's body is opaque here; SPU ELF
@@ -95,20 +86,14 @@ impl Lv2Host {
         let path_bytes = match rt.read_committed(path_ptr as u64, sys_spu::IMAGE_PATH_MAX) {
             Some(bytes) => bytes,
             None => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
         // Missing NUL: EINVAL (malformed), not ENOENT (not found).
         let path_len = match path_bytes.iter().position(|&b| b == 0) {
             Some(n) => n,
             None => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EINVAL.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         };
         let path = &path_bytes[..path_len];
@@ -116,10 +101,7 @@ impl Lv2Host {
         let record = match self.content.lookup_by_path(path) {
             Some(r) => r,
             None => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ENOENT.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
             }
         };
 
@@ -155,19 +137,13 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         // Enforce the thread-id packing limit up front.
         if num_threads > MAX_SLOTS_PER_GROUP {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let group_id = match self.groups.create(num_threads) {
             Some(id) => id,
             None => {
                 // u32 id space exhausted; EAGAIN so retries terminate.
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EAGAIN.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
             }
         };
 
@@ -205,10 +181,7 @@ impl Lv2Host {
         let group = match self.groups.get_mut(group_id) {
             Some(g) => g,
             None => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ESRCH.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
         };
 
@@ -218,10 +191,7 @@ impl Lv2Host {
         let slot_entries: Vec<_> = group.slots.iter().map(|(&k, v)| (k, v.clone())).collect();
         for (_slot_idx, slot) in &slot_entries {
             if self.content.lookup_by_handle(slot.image_handle).is_none() {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ESRCH.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
         }
 
@@ -275,10 +245,7 @@ impl Lv2Host {
                     false,
                     "dispatch_thread_initialize got wrong request variant: {other:?}"
                 );
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EINVAL.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         };
 
@@ -289,10 +256,7 @@ impl Lv2Host {
                 u32::from_be_bytes(fixed)
             }
             _ => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
 
@@ -314,19 +278,13 @@ impl Lv2Host {
                     a
                 }
                 _ => {
-                    return Lv2Dispatch::Immediate {
-                        code: errno::CELL_EFAULT.into(),
-                        effects: vec![],
-                    };
+                    return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 }
             }
         };
 
         if thread_num >= MAX_SLOTS_PER_GROUP {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         // Surface a wrap near u32::MAX as EINVAL, not a silent collision.
         let thread_id = match group_id
@@ -335,20 +293,14 @@ impl Lv2Host {
         {
             Some(id) => id,
             None => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EINVAL.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         };
 
         // ContentStore never allocates handle 0; a guest-supplied 0 is
         // an invalid reference, surfaced as ESRCH.
         let Some(handle) = crate::image::SpuImageHandle::new(image_handle) else {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ESRCH.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self
             .groups
@@ -356,22 +308,13 @@ impl Lv2Host {
         {
             Ok(()) => {}
             Err(crate::thread_group::InitializeThreadError::UnknownGroup) => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ESRCH.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
             Err(crate::thread_group::InitializeThreadError::SlotAlreadyInitialized) => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EBUSY.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
             }
             Err(_) => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EINVAL.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         }
 
@@ -400,10 +343,7 @@ impl Lv2Host {
         let group = match self.groups.get(group_id) {
             Some(g) => g,
             None => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ESRCH.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
         };
 
@@ -411,10 +351,7 @@ impl Lv2Host {
         // termination reason once abnormal causes are tracked, instead
         // of hard-coding GROUP_EXIT / status 0 for both branches below.
         match group.state {
-            GroupState::Created => Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: vec![],
-            },
+            GroupState::Created => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             GroupState::Running => Lv2Dispatch::Block {
                 reason: Lv2BlockReason::ThreadGroupJoin { group_id },
                 pending: PendingResponse::ThreadGroupJoin {
@@ -467,10 +404,7 @@ impl Lv2Host {
         let target_uid = match self.groups.running_unit_for_thread(thread_id) {
             Some(uid) => uid,
             None => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ESRCH.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
         };
         let effect = Effect::MailboxSend {

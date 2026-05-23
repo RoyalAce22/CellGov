@@ -106,18 +106,7 @@ pub(in crate::game) fn run_module_start(
                     sc_ring[idx] = (args[0], sc_pc);
 
                     if args[0] == cellgov_ps3_abi::syscall::TTY_WRITE {
-                        match classify_tty_capture(args, rt.memory().as_bytes()) {
-                            TtyCaptureDecision::InBounds { bytes, .. } => {
-                                let preview = &bytes[..bytes.len().min(256)];
-                                let text = String::from_utf8_lossy(preview);
-                                print!("  module_start TTY: {text}");
-                            }
-                            TtyCaptureDecision::Oob { buf, len, mem_len } => {
-                                eprintln!(
-                                    "  module_start TTY dropped: buf=0x{buf:x}+0x{len:x} exceeds guest memory (0x{mem_len:x})"
-                                );
-                            }
-                        }
+                        handle_module_start_tty(args, rt.memory().as_bytes());
                     }
                 }
 
@@ -240,4 +229,19 @@ pub(in crate::game) fn run_module_start(
     }
 
     rt.into_memory()
+}
+
+fn handle_module_start_tty(args: &[u64; 9], mem: &[u8]) {
+    match classify_tty_capture(args, mem) {
+        TtyCaptureDecision::InBounds { bytes, .. } => {
+            let preview = &bytes[..bytes.len().min(256)];
+            let text = String::from_utf8_lossy(preview);
+            print!("  module_start TTY: {text}");
+        }
+        TtyCaptureDecision::Oob { buf, len, mem_len } => {
+            eprintln!(
+                "  module_start TTY dropped: buf=0x{buf:x}+0x{len:x} exceeds guest memory (0x{mem_len:x})"
+            );
+        }
+    }
 }

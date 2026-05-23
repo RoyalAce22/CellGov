@@ -59,8 +59,8 @@ impl UnitRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_fixtures::{status_unit, CountingUnit};
     use super::*;
+    use crate::registry::test_fixtures::{status_unit, CountingUnit};
     use cellgov_exec::ExecutionContext;
     use cellgov_mem::GuestMemory;
     use cellgov_time::{Budget, InstructionCost};

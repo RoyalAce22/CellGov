@@ -40,19 +40,13 @@ impl Lv2Host {
         // nread is a u64 (PS3 sys_fs_read signature: `u64 *nread`);
         // enforce 8-byte alignment and writability.
         if !out_ptr_writable(rt, nread_out_ptr, 8, 8) {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         // Peek fd validity without advancing the offset; fstat is
         // read-only and returns UnknownFd for an unknown fd.
         if self.fs_store().fstat(fd).is_err() {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EBADF.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EBADF.into());
         }
 
         let nbytes_usize = usize::try_from(nbytes).unwrap_or(usize::MAX);
@@ -63,10 +57,7 @@ impl Lv2Host {
         // after read_at would advance the offset and then return
         // EFAULT, which is a semantic break.
         if nbytes > 0 && !rt.writable(buf_ptr as u64, nbytes_usize) {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         // fstat said the fd is valid, so read_at must not surface
@@ -84,10 +75,7 @@ impl Lv2Host {
                          (fstat said valid); contract violated"
                     ),
                 );
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
 

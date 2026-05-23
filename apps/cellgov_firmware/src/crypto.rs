@@ -8,9 +8,12 @@
 
 pub use cellgov_ps3_abi::sce::{PUP_KEY, SCEPKG_ERK, SCEPKG_RIV};
 
+/// AES-256-CBC key + IV pair for one SELF revision's APP-key slot.
 #[derive(Copy, Clone)]
 pub struct SelfKey {
+    /// 32-byte AES-256 key.
     pub erk: [u8; 0x20],
+    /// 16-byte initialization vector.
     pub riv: [u8; 0x10],
 }
 
@@ -260,6 +263,9 @@ const APP_KEYS: &[(u16, SelfKey)] = &[
     ),
 ];
 
+/// Look up the APP key for a SELF container's revision tag. Returns
+/// `None` for the unknown-revision gaps (0x0012, 0x0015) and for any
+/// revision past the highest known entry.
 pub fn app_key_for_revision(revision: u16) -> Option<SelfKey> {
     APP_KEYS
         .iter()

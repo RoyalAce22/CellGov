@@ -7,7 +7,8 @@
 /// No `Default`: a derived default would alias the registry's
 /// first-issued id. Use `Option<BarrierId>` for "no barrier."
 /// No `Ord`: opaque handles, not creation-order keys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+#[display("{_0}")]
 pub struct BarrierId(u64);
 
 impl BarrierId {
@@ -22,12 +23,6 @@ impl BarrierId {
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
-    }
-}
-
-impl core::fmt::Display for BarrierId {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

@@ -39,29 +39,20 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         if !out_ptr_writable(rt, fd_out_ptr, 4, 4) {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EFAULT.into(),
-                effects: vec![],
-            };
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         let path_bytes_owned = match read_path_bytes(rt, path_ptr) {
             Ok(b) => b,
             Err(err) => {
-                return Lv2Dispatch::Immediate {
-                    code: err.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(err.into());
             }
         };
 
         let path = match std::str::from_utf8(&path_bytes_owned) {
             Ok(s) => s,
             Err(_) => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ENOENT.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
             }
         };
 
@@ -69,16 +60,10 @@ impl Lv2Host {
         let entries = match self.try_mount_resolve_dir(&path_owned) {
             DirMountResolution::Snapshot(e) => e,
             DirMountResolution::Failed(err) => {
-                return Lv2Dispatch::Immediate {
-                    code: err.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(err.into());
             }
             DirMountResolution::Unmounted => {
-                return Lv2Dispatch::Immediate {
-                    code: errno::CELL_ENOENT.into(),
-                    effects: vec![],
-                };
+                return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
             }
         };
 
@@ -87,10 +72,7 @@ impl Lv2Host {
                 self.fs_fd_count_inc();
                 self.immediate_write_u32(fd, fd_out_ptr, requester)
             }
-            Err(FsError::FdExhausted) => Lv2Dispatch::Immediate {
-                code: errno::CELL_EMFILE.into(),
-                effects: vec![],
-            },
+            Err(FsError::FdExhausted) => Lv2Dispatch::immediate(errno::CELL_EMFILE.into()),
             Err(other) => {
                 self.record_invariant_break(
                     "dispatch.fs_opendir.unexpected_fs_error",
@@ -99,10 +81,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                }
+                Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
             }
         }
     }

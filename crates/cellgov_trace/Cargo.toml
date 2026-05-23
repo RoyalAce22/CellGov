@@ -12,3 +12,5 @@ workspace = true
 cellgov_time = { path = "../cellgov_time" }
 cellgov_event = { path = "../cellgov_event" }
 cellgov_effects = { path = "../cellgov_effects" }
+thiserror = "2"
+num_enum = "0.7"

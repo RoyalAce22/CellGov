@@ -16,14 +16,8 @@ impl Lv2Host {
     /// ps3autotests.
     pub(in crate::host) fn dispatch_fs_close(&mut self, fd: u32) -> Lv2Dispatch {
         match self.fs_store_mut().close_fd(fd) {
-            Ok(()) => Lv2Dispatch::Immediate {
-                code: 0,
-                effects: vec![],
-            },
-            Err(FsError::UnknownFd) => Lv2Dispatch::Immediate {
-                code: errno::CELL_EBADF.into(),
-                effects: vec![],
-            },
+            Ok(()) => Lv2Dispatch::immediate(0),
+            Err(FsError::UnknownFd) => Lv2Dispatch::immediate(errno::CELL_EBADF.into()),
             Err(other) => {
                 // close_fd's contract: only Ok or UnknownFd.
                 // Anything else means FsError grew without dispatch
@@ -36,10 +30,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                Lv2Dispatch::Immediate {
-                    code: errno::CELL_EFAULT.into(),
-                    effects: vec![],
-                }
+                Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
             }
         }
     }

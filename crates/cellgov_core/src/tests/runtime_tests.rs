@@ -1,9 +1,12 @@
 use super::*;
 use cellgov_effects::Effect;
+use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
-use cellgov_time::InstructionCost;
+use cellgov_mem::GuestMemory;
+use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
+use cellgov_trace::TraceWriter;
 use std::cell::Cell;
 
 // cellgov_testkit depends on cellgov_core; doubles live here to avoid the cycle.

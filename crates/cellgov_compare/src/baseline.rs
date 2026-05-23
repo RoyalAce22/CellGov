@@ -5,42 +5,14 @@ use std::io;
 use std::path::Path;
 
 /// Why a baseline operation failed.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum BaselineError {
     /// File system error during save or load.
-    Io(io::Error),
+    #[error("baseline I/O: {0}")]
+    Io(#[from] io::Error),
     /// JSON serialization or deserialization error.
-    Json(serde_json::Error),
-}
-
-impl std::fmt::Display for BaselineError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "baseline I/O: {e}"),
-            Self::Json(e) => write!(f, "baseline JSON: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for BaselineError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::Json(e) => Some(e),
-        }
-    }
-}
-
-impl From<io::Error> for BaselineError {
-    fn from(e: io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<serde_json::Error> for BaselineError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
-    }
+    #[error("baseline JSON: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 /// Serialize `observation` as pretty-printed JSON to `path`.
