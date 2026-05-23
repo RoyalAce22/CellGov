@@ -12,6 +12,7 @@
 //! PRX path resolver) live in [`super::helpers`].
 
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::syscall;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::request::Lv2Request;
@@ -294,43 +295,82 @@ impl Lv2Host {
             Lv2Request::SsAccessControlEngine { pkg_id, a2, .. } => {
                 self.dispatch_ss_access_control_engine(pkg_id, a2, requester)
             }
-            Lv2Request::Unsupported { number: 480, args } => self.resolve_prx_load(args[0], rt),
-            Lv2Request::Unsupported { number: 497, args } => self.resolve_prx_load(args[0], rt),
-            Lv2Request::Unsupported { number: 481, args } => {
-                self.dispatch_prx_start_module(args, requester)
-            }
-            Lv2Request::Unsupported { number: 402, .. } => self.dispatch_tty_read(),
-            Lv2Request::Unsupported { number: 462, .. } => self.dispatch_uns_func_462(),
-            Lv2Request::Unsupported { number: 484, .. } => self.dispatch_prx_register_module(),
-            Lv2Request::Unsupported { number: 486, .. } => self.dispatch_prx_register_library(),
-            Lv2Request::Unsupported { number: 48, args } => {
-                self.dispatch_ppu_thread_get_priority(args, requester)
-            }
-            Lv2Request::Unsupported { number: 494, args } => {
-                self.dispatch_prx_get_module_list(args, requester, rt)
-            }
-            Lv2Request::Unsupported { number: 136, .. } => self.dispatch_event_port_connect_local(),
-            Lv2Request::Unsupported { number: 621, .. } => self.dispatch_gamepad_ycon_if(),
-            Lv2Request::Unsupported { number: 512, .. } => self.dispatch_hid_is_root(),
-            Lv2Request::Unsupported { number: 677, .. } => self.dispatch_rsx_attribute(),
-            Lv2Request::Unsupported { number: 324, args } => {
-                self.dispatch_memory_container_create_324(args, requester)
-            }
-            Lv2Request::Unsupported { number: 330, args } => {
-                self.dispatch_mmapper_allocate_address(args, requester)
-            }
-            Lv2Request::Unsupported { number: 334, .. } => {
-                self.dispatch_mmapper_map_shared_memory()
-            }
-            Lv2Request::Unsupported { number: 337, args } => {
-                self.dispatch_mmapper_search_and_map(args, requester)
-            }
-            Lv2Request::Unsupported { number: 362, args } => {
-                self.dispatch_mmapper_allocate_shared_memory_from_container(args, requester)
-            }
-            Lv2Request::Unsupported { number: 332, args } => {
-                self.dispatch_mmapper_allocate_shared_memory(args, requester)
-            }
+            Lv2Request::Unsupported {
+                number: syscall::SYS_PRX_LOAD_MODULE,
+                args,
+            } => self.resolve_prx_load(args[0], rt),
+            Lv2Request::Unsupported {
+                number: syscall::SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER,
+                args,
+            } => self.resolve_prx_load(args[0], rt),
+            Lv2Request::Unsupported {
+                number: syscall::SYS_PRX_START_MODULE,
+                args,
+            } => self.dispatch_prx_start_module(args, requester),
+            Lv2Request::Unsupported {
+                number: syscall::TTY_READ,
+                ..
+            } => self.dispatch_tty_read(),
+            Lv2Request::Unsupported {
+                number: syscall::UNS_FUNC_462,
+                ..
+            } => self.dispatch_uns_func_462(),
+            Lv2Request::Unsupported {
+                number: syscall::SYS_PRX_REGISTER_MODULE,
+                ..
+            } => self.dispatch_prx_register_module(),
+            Lv2Request::Unsupported {
+                number: syscall::SYS_PRX_REGISTER_LIBRARY,
+                ..
+            } => self.dispatch_prx_register_library(),
+            Lv2Request::Unsupported {
+                number: syscall::PPU_THREAD_GET_PRIORITY,
+                args,
+            } => self.dispatch_ppu_thread_get_priority(args, requester),
+            Lv2Request::Unsupported {
+                number: syscall::SYS_PRX_GET_MODULE_LIST,
+                args,
+            } => self.dispatch_prx_get_module_list(args, requester, rt),
+            Lv2Request::Unsupported {
+                number: syscall::EVENT_PORT_CONNECT_LOCAL,
+                ..
+            } => self.dispatch_event_port_connect_local(),
+            Lv2Request::Unsupported {
+                number: syscall::GAMEPAD_YCON_IF,
+                ..
+            } => self.dispatch_gamepad_ycon_if(),
+            Lv2Request::Unsupported {
+                number: syscall::HID_IS_ROOT,
+                ..
+            } => self.dispatch_hid_is_root(),
+            Lv2Request::Unsupported {
+                number: syscall::RSX_ATTRIBUTE,
+                ..
+            } => self.dispatch_rsx_attribute(),
+            Lv2Request::Unsupported {
+                number: syscall::MEMORY_CONTAINER_CREATE_324,
+                args,
+            } => self.dispatch_memory_container_create_324(args, requester),
+            Lv2Request::Unsupported {
+                number: syscall::MMAPPER_ALLOCATE_ADDRESS,
+                args,
+            } => self.dispatch_mmapper_allocate_address(args, requester),
+            Lv2Request::Unsupported {
+                number: syscall::MMAPPER_MAP_SHARED_MEMORY,
+                ..
+            } => self.dispatch_mmapper_map_shared_memory(),
+            Lv2Request::Unsupported {
+                number: syscall::MMAPPER_SEARCH_AND_MAP,
+                args,
+            } => self.dispatch_mmapper_search_and_map(args, requester),
+            Lv2Request::Unsupported {
+                number: syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER,
+                args,
+            } => self.dispatch_mmapper_allocate_shared_memory_from_container(args, requester),
+            Lv2Request::Unsupported {
+                number: syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+                args,
+            } => self.dispatch_mmapper_allocate_shared_memory(args, requester),
             Lv2Request::ProcessExit { .. } => self.dispatch_process_exit(),
             Lv2Request::ProcessGetPid => self.dispatch_process_get_pid(),
             Lv2Request::ProcessGetPpid => self.dispatch_process_get_ppid(),

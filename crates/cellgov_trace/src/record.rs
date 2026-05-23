@@ -21,6 +21,7 @@
 //! | `0x06` | `UnitWoken`           | 1 + 8 + 1 = 10                         |
 //! | `0x07` | `PpuStateHash`        | 1 + 8 + 8 + 8 = 25                     |
 //! | `0x08` | `PpuStateFull`        | 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 = 301 |
+//! | `0x09` | `HostInvariantBreak`  | 1 + 1 = 2                              |
 
 use crate::hash::StateHash;
 use crate::level::TraceLevel;
@@ -33,7 +34,9 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 /// Discriminants must match the source enum: the trace crate cannot depend on
 /// `cellgov_exec` (DAG: effects -> exec, effects -> trace), so the bridge maps
 /// by raw value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
 #[repr(u8)]
 #[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_yield_reason))]
 pub enum TracedYieldReason {
@@ -55,14 +58,16 @@ pub enum TracedYieldReason {
     Fault = 7,
     /// Unit reached its terminal state.
     Finished = 8,
-    /// `sc` with LEV >= 1 (CBE Handbook 11.1). PS3 usermode never issues these;
+    /// `sc` with LEV >= 1 (hypercall). PS3 usermode never issues these;
     /// distinguished from `Syscall` so a rejection cannot byte-collide with an
     /// unrelated LV2 handler returning `CELL_EINVAL`.
     Hypercall = 9,
 }
 
 /// Which piece of state a [`TraceRecord::StateHashCheckpoint`] hashes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
 #[repr(u8)]
 #[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_hash_kind))]
 pub enum HashCheckpointKind {
@@ -103,7 +108,9 @@ pub enum TracedWakeReason {
 /// Discriminants must match the source variant order: the trace crate cannot
 /// depend on `cellgov_effects` (DAG: effects -> trace), so the bridge maps by
 /// raw value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
 #[repr(u8)]
 #[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_effect_kind))]
 pub enum TracedEffectKind {
@@ -135,6 +142,21 @@ pub enum TracedEffectKind {
     RsxFlipRequest = 12,
 }
 
+/// Reason a host-side invariant break was recorded into the trace
+/// stream. The bridge in `cellgov_core::runtime::trace_bridge` maps
+/// the lv2-owned source enum onto this mirror by exhaustive match
+/// (no `_` arm); a new reason on either side is a compile break.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
+#[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_invariant_break_reason))]
+pub enum TracedInvariantBreakReason {
+    /// Catch-all placeholder emitted for every host invariant break
+    /// observed during dispatch.
+    Unspecified = 0,
+}
+
 /// Why decoding a trace record stream failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
@@ -162,6 +184,9 @@ pub enum DecodeError {
     /// Wake-reason byte is not a known variant.
     #[error("unknown wake reason 0x{0:02x}")]
     UnknownWakeReason(u8),
+    /// Invariant-break-reason byte is not a known variant.
+    #[error("unknown invariant break reason 0x{0:02x}")]
+    UnknownInvariantBreakReason(u8),
 }
 
 impl DecodeError {
@@ -183,6 +208,10 @@ impl DecodeError {
 
     fn unknown_effect_kind(v: u8) -> Self {
         Self::UnknownEffectKind(v)
+    }
+
+    fn unknown_invariant_break_reason(v: u8) -> Self {
+        Self::UnknownInvariantBreakReason(v)
     }
 }
 
@@ -294,6 +323,12 @@ pub enum TraceRecord {
         /// Condition register.
         cr: u32,
     },
+    /// Host-side invariant break observed during `Lv2Host::dispatch`.
+    /// One record per `record_invariant_break` call in `cellgov_lv2`.
+    HostInvariantBreak {
+        /// Category of the break.
+        reason: TracedInvariantBreakReason,
+    },
 }
 
 const TAG_UNIT_SCHEDULED: u8 = 0x00;
@@ -305,6 +340,7 @@ const TAG_UNIT_BLOCKED: u8 = 0x05;
 const TAG_UNIT_WOKEN: u8 = 0x06;
 const TAG_PPU_STATE_HASH: u8 = 0x07;
 const TAG_PPU_STATE_FULL: u8 = 0x08;
+const TAG_HOST_INVARIANT_BREAK: u8 = 0x09;
 
 impl TraceRecord {
     /// Trace level this record belongs to.
@@ -319,6 +355,7 @@ impl TraceRecord {
             | TraceRecord::PpuStateHash { .. }
             | TraceRecord::PpuStateFull { .. } => TraceLevel::Hashes,
             TraceRecord::EffectEmitted { .. } => TraceLevel::Effects,
+            TraceRecord::HostInvariantBreak { .. } => TraceLevel::Scheduling,
         }
     }
 
@@ -413,6 +450,10 @@ impl TraceRecord {
                 write_u64(buf, *ctr);
                 write_u64(buf, *xer);
                 write_u32(buf, *cr);
+            }
+            TraceRecord::HostInvariantBreak { reason } => {
+                buf.push(TAG_HOST_INVARIANT_BREAK);
+                buf.push(u8::from(*reason));
             }
         }
     }
@@ -521,6 +562,11 @@ impl TraceRecord {
                     xer,
                     cr,
                 }
+            }
+            TAG_HOST_INVARIANT_BREAK => {
+                let reason_byte = read_u8(bytes, &mut pos)?;
+                let reason = TracedInvariantBreakReason::try_from(reason_byte)?;
+                TraceRecord::HostInvariantBreak { reason }
             }
             other => return Err(DecodeError::UnknownTag(other)),
         };

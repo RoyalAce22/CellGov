@@ -20,21 +20,11 @@ fn unit_scheduled_roundtrip() {
 
 #[test]
 fn step_completed_roundtrip_each_yield_reason() {
-    let reasons = [
-        TracedYieldReason::BudgetExhausted,
-        TracedYieldReason::MailboxAccess,
-        TracedYieldReason::DmaSubmitted,
-        TracedYieldReason::DmaWait,
-        TracedYieldReason::WaitingSync,
-        TracedYieldReason::Syscall,
-        TracedYieldReason::InterruptBoundary,
-        TracedYieldReason::Fault,
-        TracedYieldReason::Finished,
-    ];
-    for r in reasons {
+    use strum::VariantArray;
+    for r in TracedYieldReason::VARIANTS {
         roundtrip(TraceRecord::StepCompleted {
             unit: UnitId::new(1),
-            yield_reason: r,
+            yield_reason: *r,
             consumed_cost: InstructionCost::new(50),
             time_after: GuestTicks::new(100),
         });
@@ -61,15 +51,10 @@ fn commit_applied_roundtrip() {
 
 #[test]
 fn state_hash_checkpoint_roundtrip_each_kind() {
-    let kinds = [
-        HashCheckpointKind::CommittedMemory,
-        HashCheckpointKind::RunnableQueue,
-        HashCheckpointKind::SyncState,
-        HashCheckpointKind::UnitStatus,
-    ];
-    for k in kinds {
+    use strum::VariantArray;
+    for k in HashCheckpointKind::VARIANTS {
         roundtrip(TraceRecord::StateHashCheckpoint {
-            kind: k,
+            kind: *k,
             hash: StateHash::new(0xdead_beef_cafe_babe),
         });
     }
@@ -77,26 +62,12 @@ fn state_hash_checkpoint_roundtrip_each_kind() {
 
 #[test]
 fn effect_emitted_roundtrip_each_kind() {
-    let kinds = [
-        TracedEffectKind::SharedWriteIntent,
-        TracedEffectKind::MailboxSend,
-        TracedEffectKind::MailboxReceiveAttempt,
-        TracedEffectKind::DmaEnqueue,
-        TracedEffectKind::WaitOnEvent,
-        TracedEffectKind::WakeUnit,
-        TracedEffectKind::SignalUpdate,
-        TracedEffectKind::FaultRaised,
-        TracedEffectKind::TraceMarker,
-        TracedEffectKind::ReservationAcquire,
-        TracedEffectKind::ConditionalStore,
-        TracedEffectKind::RsxLabelWrite,
-        TracedEffectKind::RsxFlipRequest,
-    ];
-    for (i, k) in kinds.into_iter().enumerate() {
+    use strum::VariantArray;
+    for (i, k) in TracedEffectKind::VARIANTS.iter().enumerate() {
         roundtrip(TraceRecord::EffectEmitted {
             unit: UnitId::new(3),
             sequence: i as u32,
-            kind: k,
+            kind: *k,
         });
     }
 }
@@ -510,4 +481,49 @@ fn blocked_and_woken_are_scheduling_level() {
     };
     assert_eq!(blocked.level(), TraceLevel::Scheduling);
     assert_eq!(woken.level(), TraceLevel::Scheduling);
+}
+
+#[test]
+fn host_invariant_break_encode_decode_roundtrip() {
+    use crate::record::TracedInvariantBreakReason;
+    roundtrip(TraceRecord::HostInvariantBreak {
+        reason: TracedInvariantBreakReason::Unspecified,
+    });
+}
+
+/// Pins the tag byte for `HostInvariantBreak` at `0x09`. Wire-format
+/// invariant: new variants must use strictly greater tags.
+#[test]
+fn host_invariant_break_tag_is_0x09() {
+    use crate::record::TracedInvariantBreakReason;
+    let r = TraceRecord::HostInvariantBreak {
+        reason: TracedInvariantBreakReason::Unspecified,
+    };
+    let mut buf = Vec::new();
+    r.encode(&mut buf);
+    assert_eq!(buf[0], 0x09);
+    assert_eq!(
+        buf.len(),
+        2,
+        "documented wire size: 1 tag + 1 reason byte = 2"
+    );
+}
+
+#[test]
+fn unknown_invariant_break_reason_returns_error() {
+    let mut buf = vec![TAG_HOST_INVARIANT_BREAK];
+    buf.push(99);
+    assert_eq!(
+        TraceRecord::decode(&buf),
+        Err(DecodeError::UnknownInvariantBreakReason(99))
+    );
+}
+
+#[test]
+fn host_invariant_break_level_is_scheduling() {
+    use crate::record::TracedInvariantBreakReason;
+    let r = TraceRecord::HostInvariantBreak {
+        reason: TracedInvariantBreakReason::Unspecified,
+    };
+    assert_eq!(r.level(), TraceLevel::Scheduling);
 }

@@ -956,6 +956,62 @@ mod tests {
         assert!(!is_applier_supported(0), "type 0 (NONE) is not covered");
     }
 
+    /// Bidirectional check: every reloc-type integer in a swept
+    /// range that is NOT in APPLIER_SUPPORTED_TYPES must trigger
+    /// UnsupportedReloc, proving `apply_relocations` does not silently
+    /// accept any type missing from the const list. The complementary
+    /// direction (`applier_supported_types_match_apply_relocations`
+    /// above) proves every type in the const list IS handled.
+    /// Together: const list and applier match-arm set are equal.
+    #[test]
+    fn unsupported_reloc_types_rejected_outside_const_list() {
+        use std::collections::BTreeSet;
+        let supported: BTreeSet<u32> = APPLIER_SUPPORTED_TYPES.iter().copied().collect();
+        let text = PrxSegment {
+            vaddr: 0,
+            filesz: 0x100,
+            memsz: 0x100,
+            data: vec![0u8; 0x100],
+        };
+        let data = PrxSegment {
+            vaddr: 0,
+            filesz: 0x100,
+            memsz: 0x100,
+            data: vec![0u8; 0x100],
+        };
+        // 0..=120 covers the R_PPC64 reloc-type integer range
+        // including R_PPC64_REL24 (10) and the ADDR16_*_DS family
+        // (56-58). Beyond this every value is reserved or vendor.
+        for rtype in 0u32..=120 {
+            if supported.contains(&rtype) {
+                continue;
+            }
+            let relocs = vec![PrxRelocation {
+                offset: 0,
+                rtype,
+                sym: 0,
+                addend: 0,
+            }];
+            let mut staging = cellgov_mem::StagingMemory::new();
+            let result = apply_relocations(&mut staging, 0, &text, &data, &relocs);
+            staging.clear();
+            match result {
+                Err(PrxLoadError::UnsupportedReloc(t)) => assert_eq!(
+                    t, rtype,
+                    "UnsupportedReloc reported wrong type ({t}) for input {rtype}",
+                ),
+                Ok(_) => panic!(
+                    "type {rtype} not in APPLIER_SUPPORTED_TYPES but \
+                     apply_relocations accepted it -- missing const-list entry",
+                ),
+                Err(other) => panic!(
+                    "type {rtype} produced non-UnsupportedReloc error {other:?}; \
+                     either add to APPLIER_SUPPORTED_TYPES or extend the test fixture",
+                ),
+            }
+        }
+    }
+
     #[test]
     fn load_prx_rejects_unsupported_reloc() {
         let mut data = make_test_prx();

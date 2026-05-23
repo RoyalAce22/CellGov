@@ -18,6 +18,7 @@ cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
 thiserror = "2"
 derive_more = { version = "2", default-features = false, features = ["display"] }
+strum = { version = "0.26", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 cellgov_compare = { path = "../cellgov_compare" }

@@ -14,7 +14,7 @@ use cellgov_time::Budget;
 ///
 /// Discriminants are part of the binary trace format: do not reorder
 /// or renumber.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 #[repr(u8)]
 pub enum UnitStatus {
     /// Eligible to be scheduled.
@@ -142,6 +142,14 @@ mod tests {
     use crate::LocalDiagnostics;
     use cellgov_mem::GuestMemory;
     use cellgov_time::InstructionCost;
+    use strum::VariantArray;
+
+    #[test]
+    fn unit_status_variants_are_distinct() {
+        let unique: std::collections::BTreeSet<u8> =
+            UnitStatus::VARIANTS.iter().map(|s| *s as u8).collect();
+        assert_eq!(unique.len(), UnitStatus::VARIANTS.len());
+    }
 
     #[derive(Clone)]
 

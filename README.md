@@ -53,7 +53,7 @@ Pre-Alpha. What works today:
 - Sync primitives (lwmutex, event flag, semaphore, mutex, cond), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`).
 - Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`; 14 SPRX modules decrypt bit-identically to RPCS3's output.
 - ps3autotests cross-runner harness present.
-- 3,168 tests in release, 3,210 in debug; zero `unsafe` (`unsafe_code = forbid`).
+- 3,201 tests in release, 3,241 in debug; zero `unsafe` (`unsafe_code = forbid`).
 
 See [docs/architecture.md](docs/architecture.md) for the full pipeline, memory model, and per-subsystem details.
 

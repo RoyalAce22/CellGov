@@ -1,19 +1,12 @@
 //! Lightweight mutex sleep queue.
 //!
 //! Models the kernel-side primitive only: a `signaled` flag plus a
-//! FIFO waiter list. The user-space wrappers (sysPrxForUser /
-//! libsysmodule, mirrored by PSL1GHT) track owner / recursion /
-//! waiter count in the user-space `sys_lwmutex_t` struct and only
-//! invoke the kernel for actual contention; the
-//! kernel-side object therefore mirrors RPCS3's `lv2_lwmutex`
-//! (`signaled` + sleep queue), not a full mutex with ownership.
+//! FIFO waiter list. User-space wrappers track owner / recursion /
+//! waiter count in the `sys_lwmutex_t` struct and only invoke the
+//! kernel on contention, so this mirrors RPCS3's `lv2_lwmutex`
+//! (`signaled` + sleep queue) rather than a full mutex.
 //!
-//! Initial state of a fresh entry is `signaled = true`: the first
-//! lock-call to land in the kernel consumes the signal and returns
-//! without blocking, matching real PS3 behaviour where a freshly
-//! created lwmutex is takeable.
-//!
-//! Ids are minted monotonically by [`LwMutexIdAllocator`]. The
+//! Ids are minted monotonically by [`LwMutexIdAllocator`]; the
 //! id space is distinct from the heavy mutex table.
 
 use crate::ppu_thread::PpuThreadId;
@@ -85,14 +78,9 @@ pub struct LwMutexEntry {
 
 impl LwMutexEntry {
     fn new() -> Self {
-        // A freshly created lwmutex starts un-signaled. The HLE
-        // wrapper for `sys_lwmutex_lock` only invokes the kernel
-        // on actual contention (its user-space CAS already covers
-        // the uncontended case), so a kernel-side `acquire` always
-        // means "block until the holder posts a wake". Starting
-        // `signaled = true` would silently break that invariant by
-        // letting the very first contender skip the queue while
-        // the holder still owns the user-space struct.
+        // Starts un-signaled: the HLE wrapper only invokes the
+        // kernel on contention, so a kernel acquire always means
+        // "block until the holder posts a wake".
         Self {
             signaled: false,
             waiters: WaiterList::new(),
@@ -273,12 +261,11 @@ impl LwMutexTable {
         Ok(())
     }
 
-    /// Release on behalf of `caller`. Recursive: a release that
-    /// Release. Wakes the head of the sleep queue if any waiter is
-    /// parked (`Transferred`), otherwise sets the signal so the next
-    /// lock-call passes without blocking (`Signaled`). The kernel
-    /// does not validate `_caller`; the user-space wrapper verifies
-    /// the owner before invoking unlock.
+    /// Release on behalf of `caller`. Wakes the head of the sleep
+    /// queue if any waiter is parked (`Transferred`), otherwise sets
+    /// the signal so the next lock-call passes without blocking
+    /// (`Signaled`). The kernel does not validate `_caller`; the
+    /// user-space wrapper verifies the owner before invoking unlock.
     pub fn release_and_wake_next(&mut self, id: u32, _caller: PpuThreadId) -> LwMutexRelease {
         let Some(entry) = self.entries.get_mut(&id) else {
             return LwMutexRelease::Unknown;

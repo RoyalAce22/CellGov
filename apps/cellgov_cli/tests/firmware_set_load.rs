@@ -2,17 +2,6 @@
 //! against the user's installed firmware corpus, scoped to the
 //! minimum viable PRX set.
 //!
-//! The test asserts every named PRX is present, then filters out
-//! modules whose relocations span more than two segments (via the
-//! loader's own `check_loadable`; the single-PRX applier handles 2
-//! segments and multi-segment is a successor-phase extension). It
-//! feeds the post-decrypt bytes through `load_firmware_set` and
-//! asserts the resulting `FirmwareImage` is internally coherent:
-//! per-module identity bijection, bidirectional export-table
-//! consistency, topological order is a permutation of loaded keys
-//! AND respects the import partial order, and module memory ranges
-//! fit inside the firmware region without pairwise overlap.
-//!
 //! Skipped silently when the firmware directory or any required PRX
 //! stem is absent. `CELLGOV_REQUIRE_FIRMWARE_SET_LOAD=1` promotes
 //! both conditions to a hard failure (CI knob).
@@ -43,30 +32,7 @@ fn workspace_root() -> PathBuf {
     }
 }
 
-/// Minimum viable PRX set: the fourteen modules for which we have
-/// a parity oracle (each one's `cellgov_firmware`-decrypted output
-/// is known to match an RPCS3 decryption of the same PUP, verified
-/// by the
-/// `min_viable_prx_decrypt_matches_pre_decrypted_reference` test).
-/// Loading the full 142-module install trips ConflictingExport
-/// because firmware re-exports shared NIDs across modules; this
-/// conflict-free parity subset is the closure the design doc names.
-const MIN_VIABLE_PRX_STEMS: &[&str] = &[
-    "libaudio",
-    "libfiber",
-    "libfs",
-    "libgcm_sys",
-    "libio",
-    "liblv2",
-    "libnet",
-    "libnetctl",
-    "libspurs_jq",
-    "libsre",
-    "libsync2",
-    "libsysmodule",
-    "libsysutil",
-    "libsysutil_np",
-];
+use cellgov_ppu::prx_loader::MIN_VIABLE_PRX_STEMS;
 
 /// Expected count of minimum-viable PRXes filtered by
 /// `MultiSegmentRelocations` on the current firmware install. Drift
@@ -104,10 +70,6 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         return;
     };
 
-    // Completeness check: every named stem must be present, or the
-    // test exercises a non-closure and the rest of the assertions
-    // are meaningless. CELLGOV_REQUIRE_FIRMWARE_SET_LOAD promotes the
-    // miss to a hard failure.
     let missing: Vec<&&str> = MIN_VIABLE_PRX_STEMS
         .iter()
         .filter(|stem| !dir.join(format!("{stem}.sprx")).is_file())
@@ -121,8 +83,6 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         return;
     }
 
-    // Read and decrypt every PRX stem. parse_prx failure is a
-    // regression, not a skip condition -- propagate via expect.
     let mut bytes_by_path: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut multi_seg_skipped = 0usize;
     for stem in MIN_VIABLE_PRX_STEMS {
@@ -172,10 +132,8 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         bytes_by_path.len()
     );
 
-    // Pre-parse only what the loader cannot independently witness:
-    // the set of module ids the input is expected to produce. The
-    // import graph used for the topological-property check comes
-    // back on `image.imports_by_id`, so no second parse for imports.
+    // Pre-parse the set of module ids the input is expected to
+    // produce; the loader cannot independently witness it.
     let mut expected_ids: BTreeSet<PrxModuleId> = BTreeSet::new();
     for (path, bytes) in &bytes_by_path {
         let parsed =
@@ -184,9 +142,6 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     }
     let n_inputs = bytes_by_path.len();
 
-    // Main region sized for the 14-module minimum viable PRX set at
-    // ~1 MiB each plus ample slack; this set is the only thing this
-    // test ever loads.
     let region_size: usize = 0x8000_0000;
     let mut memory =
         GuestMemory::from_regions(vec![Region::new(0, region_size, "main", PageSize::Page64K)])
@@ -197,8 +152,7 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     let image = load_firmware_set(bytes_by_path, &mut memory, firmware_base)
         .unwrap_or_else(|e| panic!("load_firmware_set failed: {e:?}"));
 
-    // (a) Identity bijection: every input id is in image.loaded and
-    // no extras were synthesized.
+    // (a) Identity bijection: loaded ids == input ids.
     let loaded_ids: BTreeSet<PrxModuleId> = image.loaded.keys().copied().collect();
     assert_eq!(image.loaded.len(), n_inputs, "loaded count != input count");
     assert_eq!(
@@ -206,8 +160,7 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         "loaded ids differ from input ids (synthesized or dropped)"
     );
 
-    // (b) Export-table bidirectional consistency: the table is the
-    // union of every module's exports -- no fewer, no extra.
+    // (b) Export-table == union of every module's exports.
     let union: BTreeSet<u32> = image
         .loaded
         .values()
@@ -242,8 +195,7 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     );
 
     // (d) Topological property: every import target precedes its
-    // importer in the order. Read the import map from the loader's
-    // own resolved view -- no re-parse.
+    // importer in the order.
     let position: BTreeMap<PrxModuleId, usize> = image
         .topological_order
         .iter()

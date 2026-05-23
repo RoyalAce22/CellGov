@@ -1546,10 +1546,8 @@ mod tests {
     #[test]
     fn cond_signal_before_wait_does_not_wake_subsequent_waiter() {
         // Anchors the non-sticky signal contract across all three
-        // variants. A regression that added a semaphore-style
-        // pending-signal counter would fail this test: the
-        // subsequent cond_wait would complete Immediate instead
-        // of Block.
+        // variants: a pending-signal counter would let a subsequent
+        // cond_wait complete Immediate instead of Block.
         for variant in ["signal_one", "signal_all", "signal_to"] {
             let mut host = Lv2Host::new();
             let rt = FakeRuntime::new(0x10000);

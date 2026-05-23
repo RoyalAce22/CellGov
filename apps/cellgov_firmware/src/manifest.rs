@@ -24,10 +24,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub const SUPPORTED_FORMAT_VERSION: u32 = 1;
 
 /// Fixed-width SHA-256 digest. On-disk form is 64 lowercase hex
-/// chars; in-memory form is `[u8; 32]`. Custom serde keeps the type
-/// wall intact: callers compare digests by byte equality, never by
-/// string equality (which would silently mismatch on case, padding,
-/// or `0x` prefix).
+/// chars; in-memory form is `[u8; 32]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sha256(pub [u8; 32]);
 
@@ -76,11 +73,9 @@ fn parse_lowercase_hex_32(s: &str) -> Result<[u8; 32], String> {
     Ok(out)
 }
 
-/// Top-level manifest. Field order matches the on-disk format so a
-/// round-trip serialise / parse is stable. Construction outside this
-/// module goes through `TryFrom<RawManifest>` so the
-/// version/duplicate-path checks cannot be bypassed by a caller that
-/// reaches for `toml::from_str::<FirmwareManifest>` directly.
+/// Top-level manifest. Construction goes through `TryFrom<RawManifest>`
+/// so the version/duplicate-path checks cannot be bypassed by a
+/// `toml::from_str::<FirmwareManifest>` caller.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "RawManifest")]
 pub struct FirmwareManifest {

@@ -27,12 +27,9 @@ pub fn observe(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<Observati
         events: vec![],
         state_hashes: None,
         metadata: ObservationMetadata {
-            runner: format!("rpcs3-{:?}", config.decoder).to_lowercase(),
+            runner: config.decoder.as_runner_str().to_string(),
             steps: None,
         },
-        // Region-extraction adapter does not surface raw TTY bytes
-        // beyond the magic-tagged payload it parses. Step-2 ps3autotests
-        // path will read TTY directly via its own helper.
         tty_log: Vec::new(),
     })
 }
@@ -51,7 +48,7 @@ pub fn observe_from_tty(
         events: vec![],
         state_hashes: None,
         metadata: ObservationMetadata {
-            runner: format!("rpcs3-{:?}", decoder).to_lowercase(),
+            runner: decoder.as_runner_str().to_string(),
             steps: None,
         },
         tty_log: Vec::new(),
@@ -64,9 +61,10 @@ mod tests {
 
     #[test]
     fn decoder_format_in_metadata() {
-        let name = format!("rpcs3-{:?}", Rpcs3Decoder::Interpreter).to_lowercase();
-        assert_eq!(name, "rpcs3-interpreter");
-        let name = format!("rpcs3-{:?}", Rpcs3Decoder::Llvm).to_lowercase();
-        assert_eq!(name, "rpcs3-llvm");
+        assert_eq!(
+            Rpcs3Decoder::Interpreter.as_runner_str(),
+            "rpcs3-interpreter"
+        );
+        assert_eq!(Rpcs3Decoder::Llvm.as_runner_str(), "rpcs3-llvm");
     }
 }

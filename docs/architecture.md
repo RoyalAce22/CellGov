@@ -358,11 +358,13 @@ The full vocabulary of guest-visible operations:
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
   `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
   `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`.
-- **9 trace record variants** in `cellgov_trace::TraceRecord` --
+- **10 trace record variants** in `cellgov_trace::TraceRecord` --
   seven decision-level (`UnitScheduled`, `StepCompleted`,
   `CommitApplied`, `StateHashCheckpoint`, `EffectEmitted`,
-  `UnitBlocked`, `UnitWoken`) plus two per-step variants for the
-  divergence trace (`PpuStateHash`, `PpuStateFull`).
+  `UnitBlocked`, `UnitWoken`), two per-step variants for the
+  divergence trace (`PpuStateHash`, `PpuStateFull`), and one
+  diagnostic side-channel for host-side invariant breaks
+  (`HostInvariantBreak`).
 
 Trace emission is gated by `RuntimeMode` (`FaultDriven` /
 `DeterminismCheck` / `FullTrace`). Fault-driven boot pays no trace

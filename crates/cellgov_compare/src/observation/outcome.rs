@@ -3,7 +3,18 @@
 use serde::{Deserialize, Serialize};
 
 /// How a test run terminated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, thiserror::Error)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    thiserror::Error,
+    strum::VariantArray,
+)]
 pub enum ObservedOutcome {
     /// Title ran to a designated harness stop point: first RSX write,
     /// a manifest-declared PC checkpoint, or natural end-of-test in
@@ -11,12 +22,10 @@ pub enum ObservedOutcome {
     #[error("Completed")]
     Completed,
     /// Title called `sys_process_exit`. Distinct from `Completed`
-    /// because a `sys_process_exit` may be an intentional title-side
-    /// shutdown OR a synthesized exit from a fault path (for example,
-    /// an unresolved import returning CELL_EINVAL which the title's
-    /// CRT0 routes into `sys_process_exit`). Equality with
-    /// `Completed` is intentionally false so cross-runner comparison
-    /// surfaces this distinction.
+    /// because a `sys_process_exit` may be a title-side shutdown OR
+    /// a synthesized exit from a fault path (for example, an
+    /// unresolved import returning CELL_EINVAL which the title's CRT0
+    /// routes into `sys_process_exit`).
     #[error("ProcessExit")]
     ProcessExit,
     /// No runnable units, but pending events or blocked receivers remain.
@@ -33,18 +42,14 @@ pub enum ObservedOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strum::VariantArray;
 
+    /// Trip-wire: iterates `Self::VARIANTS` so a new variant is
+    /// automatically covered.
     #[test]
     fn outcome_variants_are_distinct() {
-        let outcomes = [
-            ObservedOutcome::Completed,
-            ObservedOutcome::ProcessExit,
-            ObservedOutcome::Stalled,
-            ObservedOutcome::Timeout,
-            ObservedOutcome::Fault,
-        ];
-        for (i, a) in outcomes.iter().enumerate() {
-            for (j, b) in outcomes.iter().enumerate() {
+        for (i, a) in ObservedOutcome::VARIANTS.iter().enumerate() {
+            for (j, b) in ObservedOutcome::VARIANTS.iter().enumerate() {
                 if i == j {
                     assert_eq!(a, b);
                 } else {

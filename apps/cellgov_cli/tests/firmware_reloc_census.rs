@@ -1,27 +1,17 @@
 //! Regenerate `docs/dev/firmware_reloc_census.md` from the installed
-//! firmware corpus.
-//!
-//! Run with:
+//! firmware corpus. Run with:
 //!
 //! ```text
 //! cargo test -p cellgov_cli --test firmware_reloc_census --release \
 //!   -- --ignored regenerate_firmware_reloc_census
 //! ```
 //!
-//! The test writes `docs/dev/firmware_reloc_census.md` directly via
-//! `std::fs::write`; no stdout redirection. Iterates
-//! `<firmware-dir>/*.sprx` (env override `CELLGOV_FIRMWARE_DIR`,
-//! default `firmware/sys/external`), decrypts each via
-//! `cellgov_firmware::sce::decrypt_self_to_elf`, parses relocations
-//! via `cellgov_ppu::sprx::parse_prx`, and emits the per-PRX type
-//! table plus the union.
-//!
-//! The "Applier covered?" column reads
-//! [`cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`] directly so the
-//! regenerated doc cannot disagree silently with the applier. Unknown
-//! reloc-type numerics surface in their own section and trip a
-//! `debug_assert!` so a new firmware revision emitting an unknown
-//! type fails loudly in debug builds.
+//! Iterates `<firmware-dir>/*.sprx` (env `CELLGOV_FIRMWARE_DIR`,
+//! default `firmware/sys/external`), decrypts and parses each,
+//! and writes the per-PRX type table plus the union. The
+//! "Applier covered?" column reads
+//! [`cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`] so the doc cannot
+//! disagree silently with the applier.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -140,10 +130,8 @@ fn reloc_type_name(rtype: u32) -> &'static str {
 fn workspace_root() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
-        // is_ok_and: a permission-denied read at some intermediate
-        // ancestor is silently treated as "not a workspace root" and
-        // the walk continues up. The loop terminates at filesystem
-        // root via pop() returning false either way.
+        // is_ok_and: a permission-denied read on an ancestor falls
+        // through; the loop still terminates via pop() returning false.
         if std::fs::read_to_string(p.join("Cargo.toml")).is_ok_and(|t| t.contains("[workspace]")) {
             return p;
         }
@@ -234,8 +222,6 @@ fn regenerate_firmware_reloc_census() {
         per_module.insert(name, counts);
     }
 
-    // Aggregate per-type totals once for the union table and the
-    // unknown-types section.
     let mut totals: BTreeMap<u32, u64> = BTreeMap::new();
     for counts in per_module.values() {
         for (&t, &c) in counts {
@@ -377,8 +363,7 @@ fn regenerate_firmware_reloc_census() {
     }
 
     let dst = workspace_root().join("docs/dev/firmware_reloc_census.md");
-    // docs/dev/ is gitignored, so a cold clone does not have it.
-    // Create the parent dir so `fs::write` does not fail with ENOENT.
+    // docs/dev/ is gitignored; create it so fs::write does not ENOENT.
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent).expect("create docs/dev parent dir");
     }
@@ -390,4 +375,27 @@ fn regenerate_firmware_reloc_census() {
         unknowns.len(),
         unknowns
     );
+}
+
+/// Every type in `APPLIER_SUPPORTED_TYPES` must resolve to a
+/// non-`R_PPC64_UNKNOWN` name in `reloc_type_name`. The regeneration
+/// test above is `#[ignore]` (it needs a decrypted firmware corpus);
+/// this companion test runs in CI and catches a drift where the
+/// applier supports a numeric the local table cannot label.
+#[test]
+fn reloc_type_name_covers_applier_supported() {
+    for &t in cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES {
+        let name = reloc_type_name(t);
+        assert_ne!(
+            name, "R_PPC64_UNKNOWN",
+            "applier supports type {t} but reloc_type_name has no entry",
+        );
+        assert!(
+            name.starts_with("R_PPC64_"),
+            "reloc_type_name({t}) = {name:?}; expected R_PPC64_* prefix",
+        );
+    }
+    assert_eq!(reloc_type_name(0), "R_PPC64_NONE");
+    assert_eq!(reloc_type_name(38), "R_PPC64_ADDR64");
+    assert_eq!(reloc_type_name(u32::MAX), "R_PPC64_UNKNOWN");
 }

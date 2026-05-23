@@ -20,10 +20,7 @@ impl Lv2Host {
         let Some(target_thread) = self.ppu_threads.get(target_id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
-        if matches!(
-            target_thread.state,
-            crate::ppu_thread::PpuThreadState::Finished
-        ) {
+        if target_thread.state.is_finished() {
             let exit_value = target_thread.exit_value.unwrap_or(0);
             let write = Effect::SharedWriteIntent {
                 range: ByteRange::contiguous_u32(status_out_ptr, 8),
@@ -37,8 +34,6 @@ impl Lv2Host {
                 effects: vec![write],
             };
         }
-        // No fallback to PRIMARY: that would route the exit-wake to
-        // the wrong unit when the caller is not in the table.
         let Some(caller_thread_id) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
@@ -102,10 +97,9 @@ impl Lv2Host {
             param_bytes[2],
             param_bytes[3],
         ]);
-        // `param->tls` is a TLS-template pointer the title pre-built;
-        // CellGov's TLS-template path already covers per-thread init,
-        // so the field is captured here for future use but not yet
-        // routed into PpuThreadInitState.
+        // `param->tls` is a guest TLS-template pointer; not yet
+        // routed into PpuThreadInitState (the host's own template
+        // path covers per-thread init).
         let _param_tls = u32::from_be_bytes([
             param_bytes[4],
             param_bytes[5],

@@ -1,10 +1,4 @@
-//! [`PpuInstruction`] variants and the `#[cfg(test)] mod tests`
-//! that exercise `variant_name` (implemented in [`super::display`]).
-//!
-//!
-//! Variants carry decoded register indices, immediates, and flags.
-//! Decode produces these; execute consumes them. Unknown encodings
-//! decode to `PpuDecodeError::Unsupported` rather than a variant.
+//! [`PpuInstruction`] variants.
 //!
 //! **DS-form immediates** (`Ld`, `Ldu`, `Std`, `Stdu`, `Lwa`) are
 //! stored as byte offsets with the low 2 bits always zero, not the
@@ -16,7 +10,12 @@
 
 /// A decoded PPU instruction. Field names follow PPC ISA conventions
 /// (`rt`/`rs`/`ra`/`rb`, `imm`, `offset`, `link`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `IntoStaticStr` produces the variant identifier as a `&'static str`
+/// via `<&'static str>::from(&insn)`. Consumers
+/// (e.g. `PpuExecutionUnit::profile_prev`) store the name in
+/// `&'static str` fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
 #[allow(missing_docs)]
 pub enum PpuInstruction {
     // -- Integer loads --
@@ -1052,6 +1051,358 @@ pub enum PpuInstruction {
     },
 }
 
+impl PpuInstruction {
+    /// Whether this instruction is a fused 2-instruction super-pair
+    /// requiring a [`PpuInstruction::Consumed`] placeholder at PC+4.
+    /// One-instruction quickenings (`Li`, `Slwi`, `Srwi`, `Clrlwi`)
+    /// are NOT super-pairs.
+    ///
+    /// Exhaustive: every variant must declare its super-pair status
+    /// at compile time. Producer side lives in
+    /// `crate::shadow::superpair`; the fused variants emitted there
+    /// must match the variants returning `true` here. A divergence
+    /// causes silent re-execution of the second half of the pair
+    /// (see `lib.rs:run_until_yield` `Consumed`-retirement guard).
+    pub fn is_super_pair(&self) -> bool {
+        match self {
+            PpuInstruction::LwzCmpwi { .. }
+            | PpuInstruction::LiStw { .. }
+            | PpuInstruction::MflrStw { .. }
+            | PpuInstruction::LwzMtlr { .. }
+            | PpuInstruction::MflrStd { .. }
+            | PpuInstruction::LdMtlr { .. }
+            | PpuInstruction::StdStd { .. }
+            | PpuInstruction::CmpwiBc { .. }
+            | PpuInstruction::CmpwBc { .. } => true,
+            PpuInstruction::Lwz { .. }
+            | PpuInstruction::Lbz { .. }
+            | PpuInstruction::Lhz { .. }
+            | PpuInstruction::Lha { .. }
+            | PpuInstruction::Lwzu { .. }
+            | PpuInstruction::Lbzu { .. }
+            | PpuInstruction::Lhzu { .. }
+            | PpuInstruction::Ldu { .. }
+            | PpuInstruction::Ld { .. }
+            | PpuInstruction::Lwa { .. }
+            | PpuInstruction::Stw { .. }
+            | PpuInstruction::Stwu { .. }
+            | PpuInstruction::Stdu { .. }
+            | PpuInstruction::Stb { .. }
+            | PpuInstruction::Stbu { .. }
+            | PpuInstruction::Sth { .. }
+            | PpuInstruction::Sthu { .. }
+            | PpuInstruction::Std { .. }
+            | PpuInstruction::Addi { .. }
+            | PpuInstruction::Addis { .. }
+            | PpuInstruction::Subfic { .. }
+            | PpuInstruction::Mulli { .. }
+            | PpuInstruction::Addic { .. }
+            | PpuInstruction::AddicDot { .. }
+            | PpuInstruction::Add { .. }
+            | PpuInstruction::Or { .. }
+            | PpuInstruction::Subf { .. }
+            | PpuInstruction::Subfc { .. }
+            | PpuInstruction::Subfe { .. }
+            | PpuInstruction::Neg { .. }
+            | PpuInstruction::Mullw { .. }
+            | PpuInstruction::Mulhwu { .. }
+            | PpuInstruction::Mulhw { .. }
+            | PpuInstruction::Mulhdu { .. }
+            | PpuInstruction::Mulhd { .. }
+            | PpuInstruction::Adde { .. }
+            | PpuInstruction::Addze { .. }
+            | PpuInstruction::Mulld { .. }
+            | PpuInstruction::Ldarx { .. }
+            | PpuInstruction::Stdcx { .. }
+            | PpuInstruction::Lwarx { .. }
+            | PpuInstruction::Stwcx { .. }
+            | PpuInstruction::Xori { .. }
+            | PpuInstruction::Xoris { .. }
+            | PpuInstruction::Divw { .. }
+            | PpuInstruction::Divwu { .. }
+            | PpuInstruction::Divd { .. }
+            | PpuInstruction::Divdu { .. }
+            | PpuInstruction::And { .. }
+            | PpuInstruction::Andc { .. }
+            | PpuInstruction::Nor { .. }
+            | PpuInstruction::Xor { .. }
+            | PpuInstruction::AndiDot { .. }
+            | PpuInstruction::AndisDot { .. }
+            | PpuInstruction::Slw { .. }
+            | PpuInstruction::Srw { .. }
+            | PpuInstruction::Srawi { .. }
+            | PpuInstruction::Sraw { .. }
+            | PpuInstruction::Srad { .. }
+            | PpuInstruction::Sradi { .. }
+            | PpuInstruction::Sld { .. }
+            | PpuInstruction::Srd { .. }
+            | PpuInstruction::Cntlzw { .. }
+            | PpuInstruction::Cntlzd { .. }
+            | PpuInstruction::Orc { .. }
+            | PpuInstruction::Extsh { .. }
+            | PpuInstruction::Extsb { .. }
+            | PpuInstruction::Extsw { .. }
+            | PpuInstruction::Ori { .. }
+            | PpuInstruction::Oris { .. }
+            | PpuInstruction::Cmpwi { .. }
+            | PpuInstruction::Cmplwi { .. }
+            | PpuInstruction::Cmpdi { .. }
+            | PpuInstruction::Cmpldi { .. }
+            | PpuInstruction::Cmpw { .. }
+            | PpuInstruction::Cmplw { .. }
+            | PpuInstruction::Cmpd { .. }
+            | PpuInstruction::Cmpld { .. }
+            | PpuInstruction::B { .. }
+            | PpuInstruction::Bc { .. }
+            | PpuInstruction::Bclr { .. }
+            | PpuInstruction::Bcctr { .. }
+            | PpuInstruction::Mcrf { .. }
+            | PpuInstruction::Crand { .. }
+            | PpuInstruction::Crandc { .. }
+            | PpuInstruction::Cror { .. }
+            | PpuInstruction::Crorc { .. }
+            | PpuInstruction::Crxor { .. }
+            | PpuInstruction::Crnand { .. }
+            | PpuInstruction::Crnor { .. }
+            | PpuInstruction::Creqv { .. }
+            | PpuInstruction::Lwzx { .. }
+            | PpuInstruction::Lbzx { .. }
+            | PpuInstruction::Ldx { .. }
+            | PpuInstruction::Lhzx { .. }
+            | PpuInstruction::Stwx { .. }
+            | PpuInstruction::Stdx { .. }
+            | PpuInstruction::Stdux { .. }
+            | PpuInstruction::Stbx { .. }
+            | PpuInstruction::Mftb { .. }
+            | PpuInstruction::Mftbu { .. }
+            | PpuInstruction::Mfcr { .. }
+            | PpuInstruction::Mtcrf { .. }
+            | PpuInstruction::Mflr { .. }
+            | PpuInstruction::Mtlr { .. }
+            | PpuInstruction::Mfctr { .. }
+            | PpuInstruction::Mtctr { .. }
+            | PpuInstruction::Rlwinm { .. }
+            | PpuInstruction::Rlwimi { .. }
+            | PpuInstruction::Rlwnm { .. }
+            | PpuInstruction::Rldicl { .. }
+            | PpuInstruction::Rldicr { .. }
+            | PpuInstruction::Rldic { .. }
+            | PpuInstruction::Rldimi { .. }
+            | PpuInstruction::Vx { .. }
+            | PpuInstruction::Va { .. }
+            | PpuInstruction::Vxor { .. }
+            | PpuInstruction::Vsldoi { .. }
+            | PpuInstruction::Lvlx { .. }
+            | PpuInstruction::Lvrx { .. }
+            | PpuInstruction::Stvx { .. }
+            | PpuInstruction::Lfs { .. }
+            | PpuInstruction::Lfd { .. }
+            | PpuInstruction::Stfs { .. }
+            | PpuInstruction::Stfd { .. }
+            | PpuInstruction::Stfsu { .. }
+            | PpuInstruction::Stfdu { .. }
+            | PpuInstruction::Stfiwx { .. }
+            | PpuInstruction::Lfsx { .. }
+            | PpuInstruction::Lfsux { .. }
+            | PpuInstruction::Lfdx { .. }
+            | PpuInstruction::Lfdux { .. }
+            | PpuInstruction::Stfsx { .. }
+            | PpuInstruction::Stfsux { .. }
+            | PpuInstruction::Stfdx { .. }
+            | PpuInstruction::Stfdux { .. }
+            | PpuInstruction::Fp63 { .. }
+            | PpuInstruction::Fp59 { .. }
+            | PpuInstruction::Li { .. }
+            | PpuInstruction::Mr { .. }
+            | PpuInstruction::Slwi { .. }
+            | PpuInstruction::Srwi { .. }
+            | PpuInstruction::Clrlwi { .. }
+            | PpuInstruction::Nop
+            | PpuInstruction::CmpwZero { .. }
+            | PpuInstruction::Clrldi { .. }
+            | PpuInstruction::Sldi { .. }
+            | PpuInstruction::Srdi { .. }
+            | PpuInstruction::Consumed
+            | PpuInstruction::Dcbz { .. }
+            | PpuInstruction::Sc { .. } => false,
+        }
+    }
+
+    /// Whether this instruction ends a basic block (control-flow
+    /// transfer or syscall). Used by the shadow builder to compute
+    /// per-slot block lengths.
+    ///
+    /// Exhaustive: every variant must declare its terminator status
+    /// at compile time. A new branch-shaped variant added without
+    /// updating this method would silently extend basic-block
+    /// boundaries past it, drifting shadow precomputation from the
+    /// physical reality of the code.
+    pub fn is_block_terminator(&self) -> bool {
+        match self {
+            PpuInstruction::B { .. }
+            | PpuInstruction::Bc { .. }
+            | PpuInstruction::Bclr { .. }
+            | PpuInstruction::Bcctr { .. }
+            | PpuInstruction::CmpwiBc { .. }
+            | PpuInstruction::CmpwBc { .. }
+            | PpuInstruction::Sc { .. } => true,
+            PpuInstruction::Lwz { .. }
+            | PpuInstruction::Lbz { .. }
+            | PpuInstruction::Lhz { .. }
+            | PpuInstruction::Lha { .. }
+            | PpuInstruction::Lwzu { .. }
+            | PpuInstruction::Lbzu { .. }
+            | PpuInstruction::Lhzu { .. }
+            | PpuInstruction::Ldu { .. }
+            | PpuInstruction::Ld { .. }
+            | PpuInstruction::Lwa { .. }
+            | PpuInstruction::Stw { .. }
+            | PpuInstruction::Stwu { .. }
+            | PpuInstruction::Stdu { .. }
+            | PpuInstruction::Stb { .. }
+            | PpuInstruction::Stbu { .. }
+            | PpuInstruction::Sth { .. }
+            | PpuInstruction::Sthu { .. }
+            | PpuInstruction::Std { .. }
+            | PpuInstruction::Addi { .. }
+            | PpuInstruction::Addis { .. }
+            | PpuInstruction::Subfic { .. }
+            | PpuInstruction::Mulli { .. }
+            | PpuInstruction::Addic { .. }
+            | PpuInstruction::AddicDot { .. }
+            | PpuInstruction::Add { .. }
+            | PpuInstruction::Or { .. }
+            | PpuInstruction::Subf { .. }
+            | PpuInstruction::Subfc { .. }
+            | PpuInstruction::Subfe { .. }
+            | PpuInstruction::Neg { .. }
+            | PpuInstruction::Mullw { .. }
+            | PpuInstruction::Mulhwu { .. }
+            | PpuInstruction::Mulhw { .. }
+            | PpuInstruction::Mulhdu { .. }
+            | PpuInstruction::Mulhd { .. }
+            | PpuInstruction::Adde { .. }
+            | PpuInstruction::Addze { .. }
+            | PpuInstruction::Mulld { .. }
+            | PpuInstruction::Ldarx { .. }
+            | PpuInstruction::Stdcx { .. }
+            | PpuInstruction::Lwarx { .. }
+            | PpuInstruction::Stwcx { .. }
+            | PpuInstruction::Xori { .. }
+            | PpuInstruction::Xoris { .. }
+            | PpuInstruction::Divw { .. }
+            | PpuInstruction::Divwu { .. }
+            | PpuInstruction::Divd { .. }
+            | PpuInstruction::Divdu { .. }
+            | PpuInstruction::And { .. }
+            | PpuInstruction::Andc { .. }
+            | PpuInstruction::Nor { .. }
+            | PpuInstruction::Xor { .. }
+            | PpuInstruction::AndiDot { .. }
+            | PpuInstruction::AndisDot { .. }
+            | PpuInstruction::Slw { .. }
+            | PpuInstruction::Srw { .. }
+            | PpuInstruction::Srawi { .. }
+            | PpuInstruction::Sraw { .. }
+            | PpuInstruction::Srad { .. }
+            | PpuInstruction::Sradi { .. }
+            | PpuInstruction::Sld { .. }
+            | PpuInstruction::Srd { .. }
+            | PpuInstruction::Cntlzw { .. }
+            | PpuInstruction::Cntlzd { .. }
+            | PpuInstruction::Orc { .. }
+            | PpuInstruction::Extsh { .. }
+            | PpuInstruction::Extsb { .. }
+            | PpuInstruction::Extsw { .. }
+            | PpuInstruction::Ori { .. }
+            | PpuInstruction::Oris { .. }
+            | PpuInstruction::Cmpwi { .. }
+            | PpuInstruction::Cmplwi { .. }
+            | PpuInstruction::Cmpdi { .. }
+            | PpuInstruction::Cmpldi { .. }
+            | PpuInstruction::Cmpw { .. }
+            | PpuInstruction::Cmplw { .. }
+            | PpuInstruction::Cmpd { .. }
+            | PpuInstruction::Cmpld { .. }
+            | PpuInstruction::Mcrf { .. }
+            | PpuInstruction::Crand { .. }
+            | PpuInstruction::Crandc { .. }
+            | PpuInstruction::Cror { .. }
+            | PpuInstruction::Crorc { .. }
+            | PpuInstruction::Crxor { .. }
+            | PpuInstruction::Crnand { .. }
+            | PpuInstruction::Crnor { .. }
+            | PpuInstruction::Creqv { .. }
+            | PpuInstruction::Lwzx { .. }
+            | PpuInstruction::Lbzx { .. }
+            | PpuInstruction::Ldx { .. }
+            | PpuInstruction::Lhzx { .. }
+            | PpuInstruction::Stwx { .. }
+            | PpuInstruction::Stdx { .. }
+            | PpuInstruction::Stdux { .. }
+            | PpuInstruction::Stbx { .. }
+            | PpuInstruction::Mftb { .. }
+            | PpuInstruction::Mftbu { .. }
+            | PpuInstruction::Mfcr { .. }
+            | PpuInstruction::Mtcrf { .. }
+            | PpuInstruction::Mflr { .. }
+            | PpuInstruction::Mtlr { .. }
+            | PpuInstruction::Mfctr { .. }
+            | PpuInstruction::Mtctr { .. }
+            | PpuInstruction::Rlwinm { .. }
+            | PpuInstruction::Rlwimi { .. }
+            | PpuInstruction::Rlwnm { .. }
+            | PpuInstruction::Rldicl { .. }
+            | PpuInstruction::Rldicr { .. }
+            | PpuInstruction::Rldic { .. }
+            | PpuInstruction::Rldimi { .. }
+            | PpuInstruction::Vx { .. }
+            | PpuInstruction::Va { .. }
+            | PpuInstruction::Vxor { .. }
+            | PpuInstruction::Vsldoi { .. }
+            | PpuInstruction::Lvlx { .. }
+            | PpuInstruction::Lvrx { .. }
+            | PpuInstruction::Stvx { .. }
+            | PpuInstruction::Lfs { .. }
+            | PpuInstruction::Lfd { .. }
+            | PpuInstruction::Stfs { .. }
+            | PpuInstruction::Stfd { .. }
+            | PpuInstruction::Stfsu { .. }
+            | PpuInstruction::Stfdu { .. }
+            | PpuInstruction::Stfiwx { .. }
+            | PpuInstruction::Lfsx { .. }
+            | PpuInstruction::Lfsux { .. }
+            | PpuInstruction::Lfdx { .. }
+            | PpuInstruction::Lfdux { .. }
+            | PpuInstruction::Stfsx { .. }
+            | PpuInstruction::Stfsux { .. }
+            | PpuInstruction::Stfdx { .. }
+            | PpuInstruction::Stfdux { .. }
+            | PpuInstruction::Fp63 { .. }
+            | PpuInstruction::Fp59 { .. }
+            | PpuInstruction::Li { .. }
+            | PpuInstruction::Mr { .. }
+            | PpuInstruction::Slwi { .. }
+            | PpuInstruction::Srwi { .. }
+            | PpuInstruction::Clrlwi { .. }
+            | PpuInstruction::Nop
+            | PpuInstruction::CmpwZero { .. }
+            | PpuInstruction::Clrldi { .. }
+            | PpuInstruction::Sldi { .. }
+            | PpuInstruction::Srdi { .. }
+            | PpuInstruction::LwzCmpwi { .. }
+            | PpuInstruction::LiStw { .. }
+            | PpuInstruction::MflrStw { .. }
+            | PpuInstruction::LwzMtlr { .. }
+            | PpuInstruction::MflrStd { .. }
+            | PpuInstruction::LdMtlr { .. }
+            | PpuInstruction::StdStd { .. }
+            | PpuInstruction::Consumed
+            | PpuInstruction::Dcbz { .. } => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1106,16 +1457,16 @@ mod tests {
                 .split_once([' ', '{'])
                 .map(|(n, _)| n)
                 .unwrap_or(&debug);
+            let name: &'static str = insn.into();
             assert_eq!(
-                insn.variant_name(),
-                prefix,
-                "variant_name mismatch for {debug}"
+                name, prefix,
+                "IntoStaticStr-derived name mismatch for {debug}",
             );
         }
     }
 
     #[test]
-    fn variant_name_is_static() {
+    fn into_static_str_returns_variant_ident() {
         let insn = PpuInstruction::Add {
             rt: 3,
             ra: 4,
@@ -1123,7 +1474,7 @@ mod tests {
             oe: false,
             rc: false,
         };
-        let name: &'static str = insn.variant_name();
+        let name: &'static str = (&insn).into();
         assert_eq!(name, "Add");
     }
 }

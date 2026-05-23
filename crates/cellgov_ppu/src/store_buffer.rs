@@ -186,8 +186,9 @@ impl StoreBuffer {
             let payload = WritePayload::from_slice(&bytes[offset..]);
             // The insert paths reject any (addr, len) that would
             // overflow on `addr + len`, so `ByteRange::new` cannot
-            // fail here; treat a `None` as a load-bearing invariant
-            // breach rather than silently dropping a guest store.
+            // fail here; a `None` would be an invariant breach, and
+            // panicking surfaces it rather than silently dropping a
+            // guest store.
             let range = ByteRange::new(GuestAddr::new(e.addr), e.len as u64)
                 .expect("store buffer entry violates addr+len invariant; insert should reject");
             effects.push(Effect::SharedWriteIntent {
@@ -211,9 +212,9 @@ impl StoreBuffer {
     /// (yield + flush + retry on every partial overlap) collapses
     /// batch size when scalar stores and vector loads share a line.
     ///
-    /// Conditional entries are intentionally included: within a
-    /// single step the context is frozen, so committed memory still
-    /// holds the pre-batch bytes even after `stwcx`/`stdcx` emits a
+    /// Conditional entries are included because within a single step
+    /// the context is frozen, so committed memory still holds the
+    /// pre-batch bytes even after `stwcx`/`stdcx` emits a
     /// `ConditionalStore` effect. The buffered conditional entry is
     /// the only intra-step record of those bytes, and a vector load
     /// that overlaps must observe them.

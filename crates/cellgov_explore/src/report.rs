@@ -64,16 +64,28 @@ pub fn format_json(result: &ExplorationResult) -> String {
 }
 
 fn outcome_label(o: OutcomeClass) -> &'static str {
-    match o {
-        OutcomeClass::ScheduleStable => "schedule-stable",
-        OutcomeClass::ScheduleSensitive => "schedule-sensitive",
-        OutcomeClass::Inconclusive => "inconclusive",
-    }
+    <&'static str>::from(&o)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strum::VariantArray;
+
+    #[test]
+    fn outcome_label_is_total_and_distinct() {
+        let labels: Vec<&'static str> = OutcomeClass::VARIANTS
+            .iter()
+            .map(|c| outcome_label(*c))
+            .collect();
+        for (i, a) in labels.iter().enumerate() {
+            for (j, b) in labels.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "outcome_label not distinct at {i}/{j}");
+                }
+            }
+        }
+    }
     use crate::classify::{ExplorationResult, OutcomeClass, ScheduleRecord};
     use cellgov_event::UnitId;
 

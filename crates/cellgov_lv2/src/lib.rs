@@ -17,7 +17,7 @@ pub use dispatch::{
     CondMutexKind, Lv2BlockReason, Lv2Dispatch, PendingResponse, PpuThreadInitState, SpuInitState,
 };
 pub use fs_store::{FileStat, FsError, FsMount, FsMountTable, FsStore, SeekWhence};
-pub use host::{Lv2Host, Lv2Runtime};
+pub use host::{InvariantBreakReason, Lv2Host, Lv2Runtime};
 pub use image::{ContentStore, SpuImageHandle, SpuImageRecord};
 pub use ppu_thread::{
     AddJoinWaiter, EventFlagWaitMode, GuestBlockReason, PpuThread, PpuThreadAttrs, PpuThreadId,

@@ -18,10 +18,8 @@ use super::exit::{die, load_file_or_die};
 use super::title::resolve_ps3_vfs_root;
 use crate::game::manifest::TitleManifest;
 
-/// The ELF64 header reads in [`elf_header_plus_phdr_table_end`] go
-/// up to byte offset 58 (`e_phnum` at 56..58). If `ELF_HEADER_SIZE`
-/// ever drifts below that the `expect` arms become unsound; this
-/// compile-time assertion catches that drift.
+/// `ELF_HEADER_SIZE >= 58` is required for the `e_phnum` (56..58)
+/// reads in [`elf_header_plus_phdr_table_end`] to be in bounds.
 const _: () = assert!(ELF_HEADER_SIZE >= 58);
 
 const COMPARE_REPORT_TEMPLATE: &str =
@@ -85,9 +83,8 @@ pub(crate) enum FixtureGenError {
 }
 
 /// Substitute `{{name}}` tokens in `template` with values from
-/// `subs`. Unknown tokens are left in place. Substitution is a
-/// single left-to-right scan: a value containing `{{key}}` renders
-/// literally and does not re-trigger substitution.
+/// `subs`. Unknown tokens are left in place. Single-pass: a value
+/// containing `{{key}}` is not re-substituted.
 pub(crate) fn apply_subs(template: &str, subs: &[(&str, &str)]) -> String {
     let map: BTreeMap<&str, &str> = subs.iter().copied().collect();
     let mut out = String::with_capacity(template.len());
@@ -128,8 +125,6 @@ pub(crate) fn run(args: &[String]) {
         .unwrap_or_else(|| die("fixture-gen: --rpcs3 <path> is required"));
     let output_dir = find_flag_value(args, "--output-dir")
         .unwrap_or_else(|| die("fixture-gen: --output-dir <path> is required"));
-    // Convergence::No exits 1 by default; --allow-divergence
-    // flips that to 0. Pending bytes never affect exit code.
     let allow_divergence = args.iter().any(|a| a == "--allow-divergence");
 
     let manifest = TitleManifest::load_from_path(Path::new(&manifest_path))
@@ -150,13 +145,8 @@ pub(crate) fn run(args: &[String]) {
     let rpcs3: Observation = serde_json::from_slice(&load_file_or_die(&rpcs3_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: parse {rpcs3_path}: {e}")));
 
-    // Zero-region observations with a non-Timeout outcome are silently
-    // wrong: the comparator will produce a confident verdict against
-    // empty data. A Timeout observation may legitimately carry no
-    // regions when the runner aborted before the snapshot fired;
-    // anything else (Completed / ProcessExit / Fault / Stalled) should
-    // have captured at least one region. Reject early with a clear
-    // message pointing at the capture step.
+    // A zero-region non-Timeout observation lets the comparator emit a
+    // confident verdict against empty data; reject before that happens.
     if cellgov.memory_regions.is_empty() && !matches!(cellgov.outcome, ObservedOutcome::Timeout) {
         die(&format!(
             "fixture-gen: CellGov observation at {cellgov_path} has zero \
@@ -216,8 +206,7 @@ pub(crate) fn run(args: &[String]) {
     }
 }
 
-/// Build a [`ClassifierContext`] from the EBOOT bytes + the
-/// observation that names the regions.
+/// Build a [`ClassifierContext`] from EBOOT bytes + observation.
 ///
 /// # Errors
 ///
@@ -394,10 +383,8 @@ fn compute_hle_opd_ranges(eboot_bytes: &[u8]) -> Result<Vec<Range<u64>>, Fixture
     Ok(ranges)
 }
 
-/// Sort, dedup, and merge a list of 4-byte stub addresses into the
-/// smallest set of non-overlapping `Range<u64>` covering them.
-/// Adjacent stubs (one ending where the next begins) merge into a
-/// single range; non-adjacent stubs stay separate.
+/// Sort, dedup, and merge 4-byte stub addresses into the smallest
+/// set of non-overlapping ranges; abutting stubs merge.
 fn merge_adjacent_stub_ranges(stubs: &mut Vec<u32>) -> Vec<Range<u64>> {
     stubs.sort_unstable();
     stubs.dedup();
@@ -624,11 +611,7 @@ fn hex_run(bytes: &[u8]) -> String {
 }
 
 fn write_reproduction(out_dir: &Path, manifest: &TitleManifest) -> Result<(), FixtureGenError> {
-    let checkpoint_kind = match manifest.checkpoint_trigger() {
-        crate::game::manifest::CheckpointTrigger::ProcessExit => "process-exit".to_string(),
-        crate::game::manifest::CheckpointTrigger::FirstRsxWrite => "first-rsx-write".to_string(),
-        crate::game::manifest::CheckpointTrigger::Pc(addr) => format!("pc=0x{addr:x}"),
-    };
+    let checkpoint_kind = manifest.checkpoint_trigger().as_cli_str();
     let body = apply_subs(
         REPRODUCTION_TEMPLATE,
         &[
@@ -722,8 +705,6 @@ mod tests {
 
     #[test]
     fn apply_subs_does_not_re_substitute_into_value() {
-        // A value containing `{{b}}` must NOT be substituted by the
-        // later pass; substitution is single-pass left-to-right.
         let out = apply_subs("[{{a}}]", &[("a", "{{b}}"), ("b", "EVIL")]);
         assert_eq!(out, "[{{b}}]");
     }
@@ -949,9 +930,7 @@ mod tests {
 
     #[test]
     fn build_classifier_context_overflows_on_sys_proc_param_addr_near_u64_max() {
-        // Positive control: confirm the synthetic fixture drives
-        // find_sys_process_param to Some(_) before asserting overflow,
-        // so the overflow check below is not vacuous.
+        // Positive control so the overflow assertion below is not vacuous.
         let normal_eboot = synthetic_eboot_with_sys_proc_param_at(0x10_0000, 0x30);
         let normal_obs = obs(ObservedOutcome::Completed, vec![]);
         let normal_ctx = build_classifier_context(&normal_eboot, &normal_obs).unwrap();
@@ -976,10 +955,9 @@ mod tests {
             ObservedOutcome::Completed,
             vec![region("code", 0x10000, vec![0u8; 4])],
         );
-        // Hand-built result: compare_observations can never emit a
-        // ByteDivergence whose addr disagrees with the cellgov region,
-        // so the only way to exercise the debug_assert is to construct
-        // the shape directly.
+        // Hand-built: compare_observations cannot legitimately emit an
+        // addr-disagreeing pair, so the debug_assert can only be reached
+        // by constructing the shape directly.
         let result = ObservationCompareResult {
             outcome_match: true,
             a_outcome: ObservedOutcome::Completed,
@@ -1044,11 +1022,10 @@ mod tests {
         assert_eq!(classes, vec![DivergenceClass::Unclassified]);
     }
 
-    // The `DivergenceClass` Display strings used in the `contains`
-    // checks below are pinned upstream by
+    // `DivergenceClass` Display strings are pinned upstream by
     // `divergence_class_display_strings_are_stable` in
-    // crates/cellgov_compare/src/classify.rs. These local consumer
-    // tests double-pin them from the renderer side.
+    // crates/cellgov_compare/src/classify.rs; the consumer-side
+    // `contains` checks below double-pin them.
     #[test]
     fn render_summary_section_non_semantic_lists_per_class_and_lowest_offset() {
         let a = obs(
@@ -1128,8 +1105,6 @@ mod tests {
 
     #[test]
     fn render_summary_section_multiple_classes_are_byte_deterministic() {
-        // `per_class_bytes` is a BTreeMap; with multiple distinct
-        // classes its iteration order is observable across renders.
         let a = obs(
             ObservedOutcome::Completed,
             vec![

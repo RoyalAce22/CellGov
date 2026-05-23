@@ -114,7 +114,7 @@ pub(in crate::game) fn step_loop(
                 if let Some(pc) = step.result.local_diagnostics.pc {
                     if let Some(raw) = fetch_raw_at(rt, pc) {
                         let name = match cellgov_ppu::decode::decode(raw) {
-                            Ok(insn) => insn.variant_name(),
+                            Ok(insn) => <&'static str>::from(&insn),
                             Err(_) => "DECODE_ERROR",
                         };
                         *ctx.insn_coverage.entry(name).or_insert(0) += 1;

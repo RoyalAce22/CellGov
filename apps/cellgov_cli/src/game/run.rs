@@ -90,8 +90,8 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         profile_pairs,
         budget_override,
     } = opts;
-    // Parser enforces these; the asserts catch direct
-    // `RunGameOptions` construction that bypasses it.
+    // The CLI parser enforces these; the asserts catch direct
+    // `RunGameOptions` construction that bypasses parsing.
     for (i, &(addr, len)) in dump_mem_fault_ranges.iter().enumerate() {
         debug_assert!(
             len > 0,
@@ -102,8 +102,6 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             "dump_mem_fault_ranges[{i}]: addr 0x{addr:x} + len 0x{len:x} overflows u64"
         );
     }
-    // Four-checkpoint profile, gated behind CELLGOV_RUNGAME_PROFILE.
-    // T0 sits before `boot::prepare`; T1/T2/T3 are filled in below.
     let profile_run = crate::cli::env::parse_env_bool("CELLGOV_RUNGAME_PROFILE");
     let t_run_start = Instant::now();
     eprintln!(
@@ -168,7 +166,6 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         insn_coverage: &mut insn_coverage,
         trace,
         timing: &mut timing,
-        // Overwritten below with the tightened start.
         loop_start: Instant::now(),
         pc_ring: [0; PC_RING_SIZE],
         pc_ring_cursor: RingCursor::new(PC_RING_SIZE),
@@ -318,8 +315,16 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         .map_err(RunError::SaveObservation)?;
     }
     if let Some(path) = save_boot_summary {
-        observation::save_boot_summary_json(path, title, boot_outcome, steps, step_budget)
-            .map_err(RunError::SaveBootSummary)?;
+        let host_invariant_breaks = rt.lv2_host().invariant_break_count() as u64;
+        observation::save_boot_summary_json(
+            path,
+            title,
+            boot_outcome,
+            steps,
+            step_budget,
+            host_invariant_breaks,
+        )
+        .map_err(RunError::SaveBootSummary)?;
     }
     if let Some(path) = save_state_trace {
         let bytes = rt.trace().bytes();

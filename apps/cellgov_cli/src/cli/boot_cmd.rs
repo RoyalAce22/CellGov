@@ -62,14 +62,18 @@ fn resolve_boot_mode(args: &[String]) -> BootMode {
 fn parse_boot_mode_inner(args: &[String]) -> Result<BootMode, String> {
     match find_flag_value(args, "--boot-mode") {
         None => Ok(BootMode::SinglePrx),
-        Some(v) => match v.as_str() {
-            "single-prx" => Ok(BootMode::SinglePrx),
-            "firmware-set" => Ok(BootMode::FirmwareSet),
-            other => Err(format!(
-                "unknown --boot-mode value: {other:?}\nvalid values: single-prx, firmware-set"
-            )),
-        },
+        Some(v) => __test_parse_boot_mode(&v),
     }
+}
+
+/// Parse a single `--boot-mode` value, wrapping the strum error in
+/// the CLI's user-facing message.
+#[doc(hidden)]
+pub(crate) fn __test_parse_boot_mode(v: &str) -> Result<BootMode, String> {
+    use std::str::FromStr;
+    BootMode::from_str(v).map_err(|_| {
+        format!("unknown --boot-mode value: {v:?}\nvalid values: single-prx, firmware-set")
+    })
 }
 
 /// Reject `--boot-mode firmware-set` with no firmware-dir

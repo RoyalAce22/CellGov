@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn outcome_parser_accepts_four_kinds() {
+    fn outcome_parser_accepts_all_kinds() {
         assert_eq!(
             parse_outcome("completed").unwrap(),
             ObservedOutcome::Completed
@@ -395,6 +395,14 @@ mod tests {
         assert_eq!(parse_outcome("stalled").unwrap(), ObservedOutcome::Stalled);
         assert_eq!(parse_outcome("timeout").unwrap(), ObservedOutcome::Timeout);
         assert_eq!(parse_outcome("fault").unwrap(), ObservedOutcome::Fault);
+        assert_eq!(
+            parse_outcome("process_exit").unwrap(),
+            ObservedOutcome::ProcessExit
+        );
+        assert_eq!(
+            parse_outcome("process-exit").unwrap(),
+            ObservedOutcome::ProcessExit
+        );
         assert!(parse_outcome("bogus").is_err());
     }
 

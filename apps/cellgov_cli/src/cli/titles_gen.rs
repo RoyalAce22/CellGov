@@ -1,15 +1,13 @@
 //! `cellgov_cli titles-gen` -- regenerate `docs/titles.md` from
 //! `TitleRegistry::scan_dir` + per-title `boot_summary.json` and
-//! `cross_runner_summary.json`. ENOENT on a summary file renders
-//! as `--` cells (the normal "no fixture yet" state); any other
-//! I/O or JSON-parse failure surfaces as a typed error with the
-//! failing path so a corrupted summary cannot silently read the
-//! same as an absent one.
+//! `cross_runner_summary.json`. ENOENT on a summary renders as `--`;
+//! any other I/O or parse failure surfaces as a typed error so a
+//! corrupted file cannot read the same as an absent one.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cellgov_compare::{format_with_commas, BootSummary, CheckpointKind, CrossRunnerSummary};
+use cellgov_compare::{format_with_commas, BootSummary, CrossRunnerSummary};
 
 use super::args::find_flag_value;
 use super::exit::die;
@@ -24,7 +22,7 @@ const DEFAULT_OUTPUT: &str = "docs/titles.md";
 const KNOWN_FLAGS: &[&str] = &["--registry", "--fixtures-dir", "--output"];
 
 /// Why loading a per-title summary JSON file failed. ENOENT is
-/// modeled as `Ok(None)` upstream and does not produce this error.
+/// `Ok(None)` upstream, never this error.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SummaryLoadError {
     #[error("read {}: {err}", path.display())]
@@ -64,8 +62,7 @@ pub(crate) fn run(args: &[String]) {
 }
 
 /// Refuse any `--flag` (or `--flag=value`) not in [`KNOWN_FLAGS`]
-/// so a typo like `--regsitry` does not silently fall back to the
-/// default and write a `docs/titles.md` from the wrong source.
+/// so a typo cannot silently fall back to a default.
 fn reject_unknown_flags(args: &[String]) {
     for arg in args {
         let name = arg.split('=').next().unwrap_or(arg);
@@ -76,9 +73,6 @@ fn reject_unknown_flags(args: &[String]) {
 }
 
 /// Render every title's row in `content_id`-ascending order.
-/// Sorting at the call site, rather than relying on
-/// `TitleRegistry::scan_dir`'s filename sort alone, keeps the
-/// deterministic-output contract visible at the consumer.
 fn render_rows_sorted<'a>(
     titles: impl IntoIterator<Item = &'a TitleManifest>,
     fixtures: &Path,
@@ -136,23 +130,15 @@ fn render_row(title: &TitleManifest, fixtures: &Path) -> Result<String, SummaryL
     ))
 }
 
-/// `checkpoint` names the intended stopping point; `outcome` names
-/// what actually happened. Rendering both on every `CheckpointKind`
-/// keeps a regressed run (e.g. `FirstRsxWrite -> Fault`) visibly
-/// distinct from a clean one (`FirstRsxWrite -> RsxWriteCheckpoint`).
+/// `<checkpoint kind> -> <observed outcome>`; both columns render so
+/// a regressed run (`FirstRsxWrite -> Fault`) is visibly distinct
+/// from a clean one (`FirstRsxWrite -> RsxWriteCheckpoint`).
 fn format_checkpoint(b: &BootSummary) -> String {
-    let kind = match b.checkpoint {
-        CheckpointKind::ProcessExit => "ProcessExit".to_string(),
-        CheckpointKind::FirstRsxWrite => "FirstRsxWrite".to_string(),
-        CheckpointKind::Pc { addr } => format!("Pc={addr:#x}"),
-    };
-    format!("{kind} -> {}", b.outcome)
+    format!("{} -> {}", b.checkpoint.as_markdown_label(), b.outcome)
 }
 
-/// Panics in debug if a textual manifest cell contains `|` or a
-/// newline. Both characters silently break markdown-table row
-/// counts. Gated on `debug_assertions` so a release publish still
-/// completes (with a malformed row) rather than panicking mid-write.
+/// Debug-only check that `value` contains no markdown-table-breaking
+/// `|` or newline.
 fn assert_table_safe(field: &str, value: &str) {
     debug_assert!(
         !value.contains('|') && !value.contains('\n'),
@@ -215,6 +201,36 @@ mod tests {
     };
     use cellgov_time::Budget;
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn known_flags_covers_every_find_flag_value_call() {
+        let source = include_str!("titles_gen.rs");
+        let mut used: BTreeSet<&str> = BTreeSet::new();
+        for (idx, _) in source.match_indices("find_flag_value(args, \"") {
+            let tail = &source[idx + "find_flag_value(args, \"".len()..];
+            if let Some(end) = tail.find('"') {
+                used.insert(&tail[..end]);
+            }
+        }
+        let declared: BTreeSet<&str> = KNOWN_FLAGS.iter().copied().collect();
+        // Strip placeholders the grep can hit in doc comments; a real
+        // flag is `--` plus lowercase letters / hyphens only.
+        let used: BTreeSet<&str> = used
+            .into_iter()
+            .filter(|s| {
+                s.starts_with("--")
+                    && s[2..].chars().all(|c| c.is_ascii_lowercase() || c == '-')
+                    && s.len() > 2
+            })
+            .collect();
+        assert_eq!(
+            used, declared,
+            "KNOWN_FLAGS ({declared:?}) and find_flag_value call sites ({used:?}) disagree; \
+             a flag in find_flag_value but not KNOWN_FLAGS lets typos through, \
+             a flag in KNOWN_FLAGS but not in find_flag_value is dead-list drift",
+        );
+    }
 
     fn title(content_id: &str, display: &str, year: u16, developer: &str) -> TitleManifest {
         use crate::game::manifest::{CheckpointTrigger, Distribution, GameSource};
@@ -405,8 +421,6 @@ mod tests {
     fn checkpoint_cell_shows_actual_outcome_for_all_kinds() {
         let tmp = TmpDir::new("ckpt");
 
-        // ProcessExit + MaxSteps -- regressed run reads distinct
-        // from a clean ProcessExit.
         let t1 = title("NPAA10001", "PE", 2007, "Studio");
         write_json(
             &tmp.path().join("NPAA10001/cellgov/boot_summary.json"),
@@ -421,8 +435,6 @@ mod tests {
         let row = render_row(&t1, tmp.path()).unwrap();
         assert!(row.contains("ProcessExit -> MaxSteps"), "got: {row}");
 
-        // FirstRsxWrite + Fault -- regression case that previously
-        // rendered identically to FirstRsxWrite + RsxWriteCheckpoint.
         let t2 = title("NPAA10002", "Rsx", 2008, "Studio");
         write_json(
             &tmp.path().join("NPAA10002/cellgov/boot_summary.json"),
@@ -437,7 +449,6 @@ mod tests {
         let row = render_row(&t2, tmp.path()).unwrap();
         assert!(row.contains("FirstRsxWrite -> Fault"), "got: {row}");
 
-        // Pc { addr } -- documented as a frontier-exploration form.
         let t3 = title("NPAA10003", "Frontier", 2010, "Studio");
         write_json(
             &tmp.path().join("NPAA10003/cellgov/boot_summary.json"),

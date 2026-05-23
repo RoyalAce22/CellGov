@@ -100,6 +100,7 @@ dependencies = [
  "cellgov_trace",
  "serde",
  "serde_json",
+ "strum",
  "sysinfo",
  "thiserror",
  "toml",
@@ -118,6 +119,7 @@ dependencies = [
  "criterion",
  "serde",
  "serde_json",
+ "strum",
  "thiserror",
  "toml",
 ]
@@ -165,6 +167,7 @@ name = "cellgov_event"
 version = "0.0.0"
 dependencies = [
  "cellgov_time",
+ "strum",
 ]
 
 [[package]]
@@ -177,6 +180,7 @@ dependencies = [
  "cellgov_mem",
  "cellgov_sync",
  "cellgov_time",
+ "strum",
 ]
 
 [[package]]
@@ -194,6 +198,7 @@ dependencies = [
  "cellgov_time",
  "serde",
  "serde_json",
+ "strum",
 ]
 
 [[package]]
@@ -264,6 +269,7 @@ dependencies = [
  "criterion",
  "derive_more",
  "sha1",
+ "strum",
  "thiserror",
 ]
 
@@ -332,6 +338,7 @@ dependencies = [
  "cellgov_event",
  "cellgov_time",
  "num_enum",
+ "strum",
  "thiserror",
 ]
 
@@ -602,6 +609,12 @@ name = "hashbrown"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+
+[[package]]
+name = "heck"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hermit-abi"
@@ -935,6 +948,28 @@ name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
+
+[[package]]
+name = "strum"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+dependencies = [
+ "strum_macros",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.26.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+]
 
 [[package]]
 name = "subtle"

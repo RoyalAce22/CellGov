@@ -61,8 +61,7 @@ pub(super) fn elf_user_region_end(data: &[u8]) -> usize {
     let phoff = u64_be(data, 32) as usize;
     let phentsize = u16_be(data, 54) as usize;
     let phnum = u16_be(data, 56) as usize;
-    // Up-front bound check: a corrupted phnum that overflows
-    // data.len() must not mid-scan `break` and silently truncate.
+    // Up-front bound check: a mid-scan `break` would silently truncate.
     let ph_table_end = phoff.saturating_add(phentsize.saturating_mul(phnum));
     if ph_table_end > data.len() {
         eprintln!(
@@ -213,13 +212,8 @@ pub(super) fn save_boot_observation(
     };
     let observation =
         cellgov_compare::observe_from_boot(final_memory, outcome, steps, &regions, tty_log);
-    // Pretty-print to match the RPCS3-side
-    // `rpcs3_to_observation`'s output shape, so the two
-    // observation files diff cleanly under standard line-diff
-    // tools during cluster investigation. The `data` arrays
-    // dominate the file size; pretty-printing roughly doubles
-    // total bytes but the files are gitignored, so the cost is
-    // local.
+    // Pretty-print matches `rpcs3_to_observation`'s shape so the two
+    // observation files diff cleanly under line-diff tools.
     let file =
         std::fs::File::create(path).map_err(|source| ObservationSaveError::CreateOutput {
             path: path.to_string(),
@@ -274,12 +268,14 @@ pub(super) fn save_boot_summary_json(
     outcome: cellgov_compare::BootOutcome,
     steps: usize,
     step_budget: cellgov_time::Budget,
+    host_invariant_breaks: u64,
 ) -> Result<(), ObservationSaveError> {
-    let summary = cellgov_compare::BootSummary::new(
+    let summary = cellgov_compare::BootSummary::new_with_breaks(
         checkpoint_to_kind(title.checkpoint_trigger()),
         outcome,
         steps as u64,
         step_budget,
+        host_invariant_breaks,
     )
     .map_err(ObservationSaveError::InvalidBootSummary)?;
     let file =

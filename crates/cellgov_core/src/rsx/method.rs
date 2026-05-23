@@ -319,9 +319,9 @@ pub struct NvMethodTable {
 /// Returned by [`NvMethodTable::register_unique`] when a handler is
 /// already registered at the same address. The table is unmodified;
 /// `prior` is the existing handler.
-// fn-pointer equality is unpredictable across codegen units so
-// PartialEq / Eq are intentionally not derived; treat `prior` as a
-// diagnostic pointer only.
+// fn-pointer equality is unpredictable across codegen units; `prior`
+// is a diagnostic pointer only, which is why PartialEq / Eq are not
+// derived.
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 #[error("NV method 0x{method:04x} already registered")]
 pub struct DuplicateRegistration {

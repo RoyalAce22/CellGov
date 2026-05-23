@@ -50,6 +50,16 @@ impl CheckpointTrigger {
         }
     }
 
+    /// Inverse of [`Self::parse_cli_value`]: `"process-exit"`,
+    /// `"first-rsx-write"`, or `"pc=0xADDR"`.
+    pub fn as_cli_str(&self) -> String {
+        match self {
+            Self::ProcessExit => "process-exit".to_string(),
+            Self::FirstRsxWrite => "first-rsx-write".to_string(),
+            Self::Pc(addr) => format!("pc=0x{addr:x}"),
+        }
+    }
+
     /// `None` means the flag was absent; `Some(Err)` covers malformed,
     /// repeated, or value-missing cases.
     pub fn parse_from_args(args: &[String]) -> Option<Result<Self, CheckpointParseError>> {
@@ -68,8 +78,7 @@ impl CheckpointTrigger {
                 None => Err(CheckpointParseError::MissingValue),
             };
             found = Some(parsed);
-            // Skip the value token so a second `--checkpoint` used as
-            // a value is not rematched as the flag.
+            // Skip past the value so it cannot rematch as a flag.
             i += 2;
         }
         found
@@ -152,5 +161,103 @@ mod tests {
     fn parse_from_args_returns_none_when_flag_absent() {
         let args = vec!["run-game".to_string(), "--other".to_string()];
         assert!(CheckpointTrigger::parse_from_args(&args).is_none());
+    }
+
+    // Same PC used in `boot_summary_cross_check` in observation.rs;
+    // grep `0x10381ce8` to find all wire-form pins.
+    const SAMPLE_PC: u64 = 0x10381ce8;
+
+    fn wire_form_cases() -> [CheckpointTrigger; 3] {
+        // Compile-break on a new variant so the array stays in sync.
+        match CheckpointTrigger::ProcessExit {
+            CheckpointTrigger::ProcessExit
+            | CheckpointTrigger::FirstRsxWrite
+            | CheckpointTrigger::Pc(_) => {}
+        }
+        [
+            CheckpointTrigger::ProcessExit,
+            CheckpointTrigger::FirstRsxWrite,
+            CheckpointTrigger::Pc(SAMPLE_PC),
+        ]
+    }
+
+    #[test]
+    fn cli_wire_form_round_trips() {
+        for case in wire_form_cases() {
+            let s = case.as_cli_str();
+            let back =
+                CheckpointTrigger::parse_cli_value(&s).expect("emitted form must round-trip");
+            assert_eq!(back, case, "round-trip failed for {case:?} via {s:?}");
+        }
+    }
+
+    #[test]
+    fn cli_wire_form_emits_expected_strings() {
+        assert_eq!(CheckpointTrigger::ProcessExit.as_cli_str(), "process-exit");
+        assert_eq!(
+            CheckpointTrigger::FirstRsxWrite.as_cli_str(),
+            "first-rsx-write"
+        );
+        assert_eq!(
+            CheckpointTrigger::Pc(SAMPLE_PC).as_cli_str(),
+            "pc=0x10381ce8"
+        );
+    }
+
+    #[test]
+    fn markdown_wire_form_emits_expected_strings() {
+        // Pin the markdown form (PascalCase) against the CLI form
+        // (kebab) so the two cannot drift apart silently.
+        let cli_to_kind = |c: CheckpointTrigger| -> cellgov_compare::CheckpointKind {
+            match c {
+                CheckpointTrigger::ProcessExit => cellgov_compare::CheckpointKind::ProcessExit,
+                CheckpointTrigger::FirstRsxWrite => cellgov_compare::CheckpointKind::FirstRsxWrite,
+                CheckpointTrigger::Pc(addr) => cellgov_compare::CheckpointKind::Pc {
+                    addr: cellgov_mem::GuestAddr::new(addr),
+                },
+            }
+        };
+        assert_eq!(
+            cli_to_kind(CheckpointTrigger::ProcessExit).as_markdown_label(),
+            "ProcessExit"
+        );
+        assert_eq!(
+            cli_to_kind(CheckpointTrigger::FirstRsxWrite).as_markdown_label(),
+            "FirstRsxWrite"
+        );
+        assert_eq!(
+            cli_to_kind(CheckpointTrigger::Pc(SAMPLE_PC)).as_markdown_label(),
+            "Pc=0x10381ce8"
+        );
+    }
+
+    #[test]
+    fn all_three_wire_forms_cover_every_variant() {
+        // Pin that wire forms are pairwise-distinct across variants;
+        // two variants must not collapse to the same string.
+        let mut cli_seen = std::collections::BTreeSet::new();
+        let mut md_seen = std::collections::BTreeSet::new();
+        for case in wire_form_cases() {
+            let cli = case.as_cli_str();
+            assert!(!cli.is_empty(), "CLI form empty for {case:?}");
+            assert!(
+                cli_seen.insert(cli.clone()),
+                "CLI form collision: {cli:?} appears for two variants"
+            );
+
+            let kind = match case {
+                CheckpointTrigger::ProcessExit => cellgov_compare::CheckpointKind::ProcessExit,
+                CheckpointTrigger::FirstRsxWrite => cellgov_compare::CheckpointKind::FirstRsxWrite,
+                CheckpointTrigger::Pc(addr) => cellgov_compare::CheckpointKind::Pc {
+                    addr: cellgov_mem::GuestAddr::new(addr),
+                },
+            };
+            let md = kind.as_markdown_label();
+            assert!(!md.is_empty(), "markdown form empty for {case:?}");
+            assert!(
+                md_seen.insert(md.clone()),
+                "markdown form collision: {md:?} appears for two variants"
+            );
+        }
     }
 }

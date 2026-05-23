@@ -21,7 +21,9 @@ pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
 }
 
 fn dump_trace(result: &ScenarioResult) {
-    use cellgov_trace::{TraceRecord, TracedBlockReason, TracedWakeReason};
+    use cellgov_trace::{
+        TraceRecord, TracedBlockReason, TracedInvariantBreakReason, TracedWakeReason,
+    };
 
     let mut count = 0usize;
     for (i, rec) in TraceReader::new(&result.trace_bytes).enumerate() {
@@ -122,6 +124,12 @@ fn dump_trace(result: &ScenarioResult) {
             }
             TraceRecord::PpuStateFull { step, pc, .. } => {
                 println!("{i:4}  PpuStateFull       step={step} pc=0x{pc:x} (window capture)");
+            }
+            TraceRecord::HostInvariantBreak { reason } => {
+                let reason_str = match reason {
+                    TracedInvariantBreakReason::Unspecified => "Unspecified",
+                };
+                println!("{i:4}  HostInvariantBreak reason={reason_str}");
             }
         }
     }

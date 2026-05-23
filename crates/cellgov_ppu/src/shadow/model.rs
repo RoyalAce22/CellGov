@@ -21,19 +21,6 @@ pub struct PredecodedShadow {
     block_len: Vec<u16>,
 }
 
-fn is_block_terminator(insn: &PpuInstruction) -> bool {
-    matches!(
-        insn,
-        PpuInstruction::B { .. }
-            | PpuInstruction::Bc { .. }
-            | PpuInstruction::Bclr { .. }
-            | PpuInstruction::Bcctr { .. }
-            | PpuInstruction::CmpwiBc { .. }
-            | PpuInstruction::CmpwBc { .. }
-            | PpuInstruction::Sc { .. }
-    )
-}
-
 impl PredecodedShadow {
     /// Build a shadow from raw guest memory bytes.
     ///
@@ -76,7 +63,7 @@ impl PredecodedShadow {
         // End of shadow is an implicit block boundary.
         for i in (0..n.saturating_sub(1)).rev() {
             match &slots[i] {
-                Some(insn) if !is_block_terminator(insn) => {
+                Some(insn) if !insn.is_block_terminator() => {
                     bl[i] = bl[i + 1].saturating_add(1);
                 }
                 _ => {
@@ -190,16 +177,9 @@ impl PredecodedShadow {
     /// `Some(None)` means decode failed (same slot state as the
     /// build-time decode-error path).
     ///
-    /// Quickening is re-applied; super-pairing is intentionally not.
-    /// Re-pairing on a single refreshed slot would have to inspect
-    /// both neighbors, possibly tear down or re-form an adjacent
-    /// fusion, and reason about a partner that may itself be stale
-    /// or freshly written. The cost is that two slots whose new
-    /// content forms a fusable pair (e.g., post-relocation `lwz +
-    /// cmpwi`) will run as separate dispatches until a full shadow
-    /// rebuild. The correctness vs perf tradeoff favors correctness:
-    /// a partly-rewritten fusion state is harder to reason about
-    /// than a missed optimization.
+    /// Quickening is re-applied; super-pairing is not. Two slots
+    /// whose refreshed content forms a fusable pair will run as
+    /// separate dispatches until the next full shadow rebuild.
     pub fn refresh(&mut self, pc: u64, raw: u32) -> Option<Option<PpuInstruction>> {
         if pc < self.base {
             return None;
@@ -243,7 +223,7 @@ impl PredecodedShadow {
 
     fn rescan_block_len(&mut self, idx: usize) {
         let is_term = match &self.slots[idx] {
-            Some(insn) => is_block_terminator(insn),
+            Some(insn) => insn.is_block_terminator(),
             None => true,
         };
         if is_term || idx + 1 >= self.slots.len() || self.stale.get(idx + 1) == Some(&true) {
@@ -258,7 +238,7 @@ impl PredecodedShadow {
                 break;
             }
             match &self.slots[i] {
-                Some(insn) if !is_block_terminator(insn) => {
+                Some(insn) if !insn.is_block_terminator() => {
                     self.block_len[i] = self.block_len[i + 1].saturating_add(1);
                 }
                 _ => break,

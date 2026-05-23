@@ -10,7 +10,7 @@
 /// contract: do not reorder, do not insert in the middle, do not
 /// renumber. New variants append at the end with discriminants
 /// strictly greater than [`YieldReason::Finished`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 #[repr(u8)]
 pub enum YieldReason {
     /// Scheduler-granted budget exhausted before a more meaningful
@@ -46,6 +46,44 @@ pub enum YieldReason {
     Finished = 8,
 }
 
+impl YieldReason {
+    /// Whether this yield reason BREAKS a critical section the unit
+    /// was holding. The scheduler uses this to decide whether to
+    /// keep the unit sticky (continue scheduling it before its peers)
+    /// or release stickiness so peers can run.
+    pub fn breaks_critical_section(&self) -> bool {
+        match self {
+            YieldReason::WaitingSync
+            | YieldReason::DmaWait
+            | YieldReason::Finished
+            | YieldReason::Fault => true,
+            YieldReason::BudgetExhausted
+            | YieldReason::MailboxAccess
+            | YieldReason::DmaSubmitted
+            | YieldReason::Syscall
+            | YieldReason::InterruptBoundary => false,
+        }
+    }
+
+    /// Whether the commit pipeline's trivial-step fast path is
+    /// eligible for this yield. The fast path skips per-step LV2
+    /// drain / syscall-response arbitration; a yield reason that
+    /// implies runtime arbitration (`Syscall`, `Finished`) must NOT
+    /// take the fast path.
+    pub fn allows_trivial_fast_path(&self) -> bool {
+        match self {
+            YieldReason::Syscall | YieldReason::Finished => false,
+            YieldReason::BudgetExhausted
+            | YieldReason::MailboxAccess
+            | YieldReason::DmaSubmitted
+            | YieldReason::DmaWait
+            | YieldReason::WaitingSync
+            | YieldReason::InterruptBoundary
+            | YieldReason::Fault => true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,19 +103,10 @@ mod tests {
 
     #[test]
     fn variants_are_distinct() {
-        let all = [
-            YieldReason::BudgetExhausted,
-            YieldReason::MailboxAccess,
-            YieldReason::DmaSubmitted,
-            YieldReason::DmaWait,
-            YieldReason::WaitingSync,
-            YieldReason::Syscall,
-            YieldReason::InterruptBoundary,
-            YieldReason::Fault,
-            YieldReason::Finished,
-        ];
-        let unique: std::collections::BTreeSet<u8> = all.iter().map(|y| *y as u8).collect();
-        assert_eq!(unique.len(), all.len());
+        use strum::VariantArray;
+        let unique: std::collections::BTreeSet<u8> =
+            YieldReason::VARIANTS.iter().map(|y| *y as u8).collect();
+        assert_eq!(unique.len(), YieldReason::VARIANTS.len());
     }
 
     #[test]

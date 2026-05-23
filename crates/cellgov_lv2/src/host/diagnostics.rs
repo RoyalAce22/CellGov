@@ -2,21 +2,26 @@
 //!
 //! Submodules call `record_invariant_break` (debug-panic + log-once)
 //! or `log_invariant_break` (log-once only, for guest-reachable
-//! degraded paths). `resolve_wake_thread` is the recurring caller
-//! pattern: dequeue-from-primitive-waiter-list followed by table
-//! lookup, with the missing-table-entry case routed through
-//! `record_invariant_break` and the wake skipped.
-//!
-//! The `invariant_break_count` field lives on [`Lv2Host`] because
-//! submodules fold it via their dispatch paths and it must stay
-//! co-located with the rest of the host's state. Only the methods
-//! move; the field stays.
+//! degraded paths). Both push onto `pending_invariant_breaks` and
+//! bump `invariant_break_count`; the runtime drains the buffer and
+//! emits `TraceRecord::HostInvariantBreak` per reason via the
+//! bridge in `cellgov_core::runtime::trace_bridge` (the lv2 crate
+//! does not depend on `cellgov_trace`).
 
 use cellgov_event::UnitId;
 
 use crate::ppu_thread::PpuThreadId;
 
 use super::Lv2Host;
+
+/// Category of a host-side invariant break. Mirrored by
+/// `TracedInvariantBreakReason` in `cellgov_trace` via the bridge in
+/// `cellgov_core::runtime::trace_bridge`; variant order must match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InvariantBreakReason {
+    /// Catch-all placeholder; every push currently uses this variant.
+    Unspecified,
+}
 
 impl Lv2Host {
     /// Running count of host-invariant breaks observed during dispatch.
@@ -25,7 +30,16 @@ impl Lv2Host {
         self.invariant_break_count
     }
 
-    /// Debug-panic + log-once for a host-invariant break.
+    /// Drain pending [`InvariantBreakReason`] events. The runtime
+    /// calls this after `Lv2Host::dispatch` and emits one
+    /// `TraceRecord::HostInvariantBreak` per drained reason when
+    /// trace mode is enabled.
+    pub fn drain_pending_invariant_breaks(&mut self) -> std::vec::Drain<'_, InvariantBreakReason> {
+        self.pending_invariant_breaks.drain(..)
+    }
+
+    /// Debug-panic + log-once for a host-invariant break. Delegates
+    /// to `log_invariant_break` for the buffer push.
     pub(super) fn record_invariant_break(
         &mut self,
         site: &'static str,
@@ -37,7 +51,9 @@ impl Lv2Host {
 
     /// Log-once without `debug_assert!`, for paths reachable by
     /// guest input during normal operation (e.g. `Unsupported`
-    /// syscalls during real boots).
+    /// syscalls during real boots). Pushes one
+    /// [`InvariantBreakReason::Unspecified`] and bumps
+    /// `invariant_break_count`.
     pub(super) fn log_invariant_break(
         &mut self,
         site: &'static str,
@@ -52,6 +68,8 @@ impl Lv2Host {
                 eprintln!("lv2 host invariant break at {site}: {details}");
             }
         }
+        self.pending_invariant_breaks
+            .push(InvariantBreakReason::Unspecified);
         self.invariant_break_count = self.invariant_break_count.saturating_add(1);
     }
 

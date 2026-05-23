@@ -30,3 +30,27 @@ pub enum ExecuteVerdict {
     /// same instruction.
     BufferFull,
 }
+
+impl ExecuteVerdict {
+    /// Whether this verdict represents "the instruction succeeded
+    /// enough to perform its side-effect," in the context of
+    /// store-with-update RA writeback and fused store-pair
+    /// second-half execution. Only `Continue` triggers the writeback;
+    /// every other verdict skips it.
+    ///
+    /// Exhaustive: every variant must declare its writeback verdict.
+    /// A new "deferred success" verdict (`Stalled`, `RetryNextStep`)
+    /// defaulting to allow-writeback corrupts the guest RA. A new
+    /// failure variant defaulting to allow-writeback writes back on
+    /// a logically-failed store.
+    pub fn allows_writeback(&self) -> bool {
+        match self {
+            ExecuteVerdict::Continue => true,
+            ExecuteVerdict::Branch
+            | ExecuteVerdict::Syscall { .. }
+            | ExecuteVerdict::Fault(_)
+            | ExecuteVerdict::MemFault(_)
+            | ExecuteVerdict::BufferFull => false,
+        }
+    }
+}

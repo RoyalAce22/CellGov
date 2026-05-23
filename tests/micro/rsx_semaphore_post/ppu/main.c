@@ -13,13 +13,13 @@
  * because Sony's libgcm groups SetReport alongside the
  * semaphore-release family under the "back-end semaphore post"
  * label (gcm_implementation_sub.h). The method exercised is
- * GET_REPORT / 0x1800 specifically, but the slice name uses
- * the Sony-family name for consistency with the phase doc.
+ * GET_REPORT / 0x1800 specifically; the directory name uses
+ * the Sony-family name to match the public RSX surface.
  *
  * FIFO:
  *   [0] NV4097_GET_REPORT header (method 0x1800, count 1)
  *   [1] report argument (low 24 bits = absolute label address;
- *       upper 8 bits = report-type tag, unused in the Phase 20
+ *       upper 8 bits = report-type tag, unused by the CellGov
  *       oracle)
  *
  * Output (TTY payload = CGOV magic + 16 bytes):

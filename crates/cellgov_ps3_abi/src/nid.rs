@@ -9,98 +9,66 @@
 /// `sysPrxForUser` NIDs: the user-mode PRX shim that wraps LV2
 /// syscalls (TLS init, heap, lwmutex create, time, thread, process).
 pub mod sys_prx_for_user {
-    crate::nid_const!(INITIALIZE_TLS = 0x7446_80a2, "sys_initialize_tls");
-    crate::nid_const!(PROCESS_EXIT = 0xe6f2_c1e7, "sys_process_exit");
-    crate::nid_const!(MALLOC = 0xbdb1_8f83, "_sys_malloc");
-    crate::nid_const!(FREE = 0xf7f7_fb20, "_sys_free");
-    crate::nid_const!(MEMSET = 0x68b9_b011, "_sys_memset");
-    crate::nid_const!(LWMUTEX_CREATE = 0x2f85_c0ef, "sys_lwmutex_create");
-    crate::nid_const!(LWMUTEX_LOCK = 0x1573_dc3f, "sys_lwmutex_lock");
-    crate::nid_const!(LWMUTEX_UNLOCK = 0x1bc2_00f4, "sys_lwmutex_unlock");
-    crate::nid_const!(LWMUTEX_DESTROY = 0xc347_6d0c, "sys_lwmutex_destroy");
-    crate::nid_const!(LWMUTEX_TRYLOCK = 0xaeb7_8725, "sys_lwmutex_trylock");
-    crate::nid_const!(LWCOND_CREATE = 0xda0e_b71a, "sys_lwcond_create");
-    crate::nid_const!(LWCOND_DESTROY = 0x1c9a_942c, "sys_lwcond_destroy");
-    crate::nid_const!(PROCESS_IS_STACK = 0x4f71_72c9, "sys_process_is_stack");
-    crate::nid_const!(
-        PRX_EXITSPAWN_WITH_LEVEL = 0xa2c7_ba64,
-        "sys_prx_exitspawn_with_level"
-    );
-    crate::nid_const!(HEAP_CREATE_HEAP = 0xb2fc_f2c8, "_sys_heap_create_heap");
-    crate::nid_const!(HEAP_DELETE_HEAP = 0xaede_4b03, "_sys_heap_delete_heap");
-    crate::nid_const!(HEAP_MALLOC = 0x3516_8520, "_sys_heap_malloc");
-    crate::nid_const!(HEAP_MEMALIGN = 0x4426_5c08, "_sys_heap_memalign");
-    crate::nid_const!(HEAP_FREE = 0x8a56_1d92, "_sys_heap_free");
-    crate::nid_const!(PPU_THREAD_GET_ID = 0x350d_454e, "sys_ppu_thread_get_id");
-    crate::nid_const!(PPU_THREAD_CREATE = 0x24a1_ea07, "sys_ppu_thread_create");
-    crate::nid_const!(PPU_THREAD_EXIT = 0xaff0_80a4, "sys_ppu_thread_exit");
-    crate::nid_const!(
-        TIME_GET_SYSTEM_TIME = 0x8461_e528,
-        "sys_time_get_system_time"
-    );
-
-    /// Every NID this module owns. Single source of truth: the
-    /// dispatcher match arms and the workspace-level
-    /// `HLE_IMPLEMENTED_NIDS` slice both derive from this.
-    pub const OWNED: &[u32] = &[
-        INITIALIZE_TLS,
-        PROCESS_EXIT,
-        MALLOC,
-        FREE,
-        MEMSET,
-        LWMUTEX_CREATE,
-        LWMUTEX_DESTROY,
-        LWMUTEX_LOCK,
-        LWMUTEX_UNLOCK,
-        LWMUTEX_TRYLOCK,
-        LWCOND_CREATE,
-        LWCOND_DESTROY,
-        HEAP_CREATE_HEAP,
-        HEAP_DELETE_HEAP,
-        HEAP_MALLOC,
-        HEAP_MEMALIGN,
-        HEAP_FREE,
-        PPU_THREAD_GET_ID,
-        PPU_THREAD_CREATE,
-        PPU_THREAD_EXIT,
-        PRX_EXITSPAWN_WITH_LEVEL,
-        TIME_GET_SYSTEM_TIME,
-    ];
+    crate::nid_module! {
+        classified {
+            INITIALIZE_TLS = 0x7446_80a2, "sys_initialize_tls";
+            PROCESS_EXIT = 0xe6f2_c1e7, "sys_process_exit";
+            MALLOC = 0xbdb1_8f83, "_sys_malloc";
+            FREE = 0xf7f7_fb20, "_sys_free";
+            MEMSET = 0x68b9_b011, "_sys_memset";
+            LWMUTEX_CREATE = 0x2f85_c0ef, "sys_lwmutex_create";
+            LWMUTEX_DESTROY = 0xc347_6d0c, "sys_lwmutex_destroy";
+            LWMUTEX_LOCK = 0x1573_dc3f, "sys_lwmutex_lock";
+            LWMUTEX_UNLOCK = 0x1bc2_00f4, "sys_lwmutex_unlock";
+            LWMUTEX_TRYLOCK = 0xaeb7_8725, "sys_lwmutex_trylock";
+            LWCOND_CREATE = 0xda0e_b71a, "sys_lwcond_create";
+            LWCOND_DESTROY = 0x1c9a_942c, "sys_lwcond_destroy";
+            HEAP_CREATE_HEAP = 0xb2fc_f2c8, "_sys_heap_create_heap";
+            HEAP_DELETE_HEAP = 0xaede_4b03, "_sys_heap_delete_heap";
+            HEAP_MALLOC = 0x3516_8520, "_sys_heap_malloc";
+            HEAP_MEMALIGN = 0x4426_5c08, "_sys_heap_memalign";
+            HEAP_FREE = 0x8a56_1d92, "_sys_heap_free";
+            PPU_THREAD_GET_ID = 0x350d_454e, "sys_ppu_thread_get_id";
+            PPU_THREAD_CREATE = 0x24a1_ea07, "sys_ppu_thread_create";
+            PPU_THREAD_EXIT = 0xaff0_80a4, "sys_ppu_thread_exit";
+            PRX_EXITSPAWN_WITH_LEVEL = 0xa2c7_ba64, "sys_prx_exitspawn_with_level";
+            TIME_GET_SYSTEM_TIME = 0x8461_e528, "sys_time_get_system_time";
+        }
+        unclassified {
+            PROCESS_IS_STACK = 0x4f71_72c9, "sys_process_is_stack";
+        }
+    }
 }
 
-/// `sys_fs` NIDs. PS3 titles call these HLE wrappers instead of
-/// issuing the raw `sys_fs_*` syscalls; the HLE dispatcher in
-/// `cellgov_core::hle::sys_fs` forwards each call to the matching
-/// `Lv2Request::Fs*` so titles see the same FsStore / manifest
-/// content via either path.
+/// `sys_fs` NIDs. PS3 titles call these PRX wrappers from
+/// `libfs.sprx`; the firmware-set loader's GOT patching binds them
+/// to the corresponding firmware OPDs at boot, so guest calls land
+/// in real firmware code that then issues raw `sys_fs_*` syscalls
+/// handled by `Lv2Host::dispatch`.
 pub mod sys_fs {
-    crate::nid_const!(OPEN = 0x718b_f5f8, "cellFsOpen");
-    crate::nid_const!(READ = 0x4d5f_f8e2, "cellFsRead");
-    crate::nid_const!(CLOSE = 0x2cb5_1f0d, "cellFsClose");
-    crate::nid_const!(LSEEK = 0xa397_d042, "cellFsLseek");
-    crate::nid_const!(FSTAT = 0xef3e_fa34, "cellFsFstat");
-    crate::nid_const!(STAT = 0x7de6_dced, "cellFsStat");
-    crate::nid_const!(OPENDIR = 0x3f61_245c, "cellFsOpendir");
-    crate::nid_const!(READDIR = 0x5c74_903d, "cellFsReaddir");
-    crate::nid_const!(CLOSEDIR = 0xff42_dcc3, "cellFsClosedir");
-
-    /// Every NID this module owns.
-    pub const OWNED: &[u32] = &[
-        OPEN, READ, CLOSE, LSEEK, FSTAT, STAT, OPENDIR, READDIR, CLOSEDIR,
-    ];
+    crate::nid_module! {
+        classified {
+            OPEN = 0x718b_f5f8, "cellFsOpen";
+            READ = 0x4d5f_f8e2, "cellFsRead";
+            CLOSE = 0x2cb5_1f0d, "cellFsClose";
+            LSEEK = 0xa397_d042, "cellFsLseek";
+            FSTAT = 0xef3e_fa34, "cellFsFstat";
+            STAT = 0x7de6_dced, "cellFsStat";
+            OPENDIR = 0x3f61_245c, "cellFsOpendir";
+            READDIR = 0x5c74_903d, "cellFsReaddir";
+            CLOSEDIR = 0xff42_dcc3, "cellFsClosedir";
+        }
+    }
 }
 
-/// `cellSysutil` NIDs (video-out query surface today; will grow as
-/// title boots exercise more of this module's exports).
+/// `cellSysutil` NIDs.
 pub mod cell_sysutil {
-    crate::nid_const!(VIDEO_OUT_GET_STATE = 0x8875_72d5, "cellVideoOutGetState");
-    crate::nid_const!(
-        VIDEO_OUT_GET_RESOLUTION = 0xe558_748d,
-        "cellVideoOutGetResolution"
-    );
-
-    /// Every NID this module owns.
-    pub const OWNED: &[u32] = &[VIDEO_OUT_GET_STATE, VIDEO_OUT_GET_RESOLUTION];
+    crate::nid_module! {
+        classified {
+            VIDEO_OUT_GET_STATE = 0x8875_72d5, "cellVideoOutGetState";
+            VIDEO_OUT_GET_RESOLUTION = 0xe558_748d, "cellVideoOutGetResolution";
+        }
+    }
 }
 
 /// `cellSaveData` NIDs. PRX-registered under `cellSysutil` per
@@ -108,162 +76,76 @@ pub mod cell_sysutil {
 /// here by C source file to mirror PSL1GHT's header layout.
 /// Layouts and constants live in `crate::cell_save_data`.
 ///
-/// `OWNED` lists only the NIDs the HLE dispatcher currently claims
-/// (the AutoLoad NODATA fast path). `AUTO_SAVE` / `AUTO_SAVE_2` /
-/// `LIST_AUTO_LOAD` are defined here for the typed callsites and
-/// stay outside `OWNED` so the unclaimed-NID path keeps logging
-/// them until a real worker-thread dispatch lands.
+/// `CLASSIFIED_NIDS` lists only the AutoLoad NODATA fast-path NIDs
+/// that have explicit `stub_classification` verdicts. `AUTO_SAVE` /
+/// `AUTO_SAVE_2` / `LIST_AUTO_LOAD` are declared in the
+/// `unclassified { ... }` block so they reach typed callsites but
+/// keep surfacing through the unclaimed-NID log path until a
+/// per-NID review lands.
 pub mod cell_save_data {
-    crate::nid_const!(AUTO_LOAD = 0xc22c_79b5, "cellSaveDataAutoLoad");
-    crate::nid_const!(AUTO_SAVE = 0xf8a1_75ec, "cellSaveDataAutoSave");
-    crate::nid_const!(AUTO_LOAD_2 = 0xfbd5_c856, "cellSaveDataAutoLoad2");
-    crate::nid_const!(AUTO_SAVE_2 = 0x8b7e_d64b, "cellSaveDataAutoSave2");
-    crate::nid_const!(LIST_AUTO_LOAD = 0x2142_5307, "cellSaveDataListAutoLoad");
-
-    /// Every NID this module owns at the HLE dispatcher.
-    pub const OWNED: &[u32] = &[AUTO_LOAD, AUTO_LOAD_2];
+    crate::nid_module! {
+        classified {
+            AUTO_LOAD = 0xc22c_79b5, "cellSaveDataAutoLoad";
+            AUTO_LOAD_2 = 0xfbd5_c856, "cellSaveDataAutoLoad2";
+        }
+        unclassified {
+            AUTO_SAVE = 0xf8a1_75ec, "cellSaveDataAutoSave";
+            AUTO_SAVE_2 = 0x8b7e_d64b, "cellSaveDataAutoSave2";
+            LIST_AUTO_LOAD = 0x2142_5307, "cellSaveDataListAutoLoad";
+        }
+    }
 }
 
 /// `cellGcmSys` NIDs.
 pub mod cell_gcm_sys {
-    crate::nid_const!(
-        GET_TILED_PITCH_SIZE = 0x055b_d74d,
-        "cellGcmGetTiledPitchSize"
-    );
-    crate::nid_const!(INIT_BODY = 0x15ba_e46b, "_cellGcmInitBody");
-    crate::nid_const!(GET_CONFIGURATION = 0xe315_a0b2, "cellGcmGetConfiguration");
-    crate::nid_const!(
-        GET_CONTROL_REGISTER = 0xa547_adde,
-        "cellGcmGetControlRegister"
-    );
-    crate::nid_const!(GET_LABEL_ADDRESS = 0xf801_96c1, "cellGcmGetLabelAddress");
-    crate::nid_const!(ADDRESS_TO_OFFSET = 0x21ac_3697, "cellGcmAddressToOffset");
-    crate::nid_const!(SET_FLIP_HANDLER = 0xa41e_f7e8, "cellGcmSetFlipHandler");
-
-    /// Every NID this module owns.
-    pub const OWNED: &[u32] = &[
-        GET_TILED_PITCH_SIZE,
-        INIT_BODY,
-        GET_CONFIGURATION,
-        GET_CONTROL_REGISTER,
-        GET_LABEL_ADDRESS,
-        ADDRESS_TO_OFFSET,
-        SET_FLIP_HANDLER,
-    ];
+    crate::nid_module! {
+        classified {
+            GET_TILED_PITCH_SIZE = 0x055b_d74d, "cellGcmGetTiledPitchSize";
+            INIT_BODY = 0x15ba_e46b, "_cellGcmInitBody";
+            GET_CONFIGURATION = 0xe315_a0b2, "cellGcmGetConfiguration";
+            GET_CONTROL_REGISTER = 0xa547_adde, "cellGcmGetControlRegister";
+            GET_LABEL_ADDRESS = 0xf801_96c1, "cellGcmGetLabelAddress";
+            ADDRESS_TO_OFFSET = 0x21ac_3697, "cellGcmAddressToOffset";
+            SET_FLIP_HANDLER = 0xa41e_f7e8, "cellGcmSetFlipHandler";
+        }
+    }
 }
 
 /// `cellSpurs` NIDs (PPU-side surface). Verified at compile time
 /// against SHA-1 of the original guest function name via
 /// [`crate::nid_const`].
 pub mod cell_spurs {
-    crate::nid_const!(
-        ATTRIBUTE_INITIALIZE = 0x9518_0230,
-        "_cellSpursAttributeInitialize"
-    );
-    crate::nid_const!(INITIALIZE = 0xacfc_8dbc, "cellSpursInitialize");
-    crate::nid_const!(
-        INITIALIZE_WITH_ATTRIBUTE = 0xaa62_69a8,
-        "cellSpursInitializeWithAttribute"
-    );
-    crate::nid_const!(
-        INITIALIZE_WITH_ATTRIBUTE2 = 0x30aa_96c4,
-        "cellSpursInitializeWithAttribute2"
-    );
-    crate::nid_const!(FINALIZE = 0xca4c_4600, "cellSpursFinalize");
-    crate::nid_const!(ADD_WORKLOAD = 0x6972_6aa2, "cellSpursAddWorkload");
-    crate::nid_const!(
-        ADD_WORKLOAD_WITH_ATTRIBUTE = 0xc015_8d8b,
-        "cellSpursAddWorkloadWithAttribute"
-    );
-    crate::nid_const!(
-        WORKLOAD_ATTRIBUTE_INITIALIZE = 0xefeb_2679,
-        "_cellSpursWorkloadAttributeInitialize"
-    );
-    crate::nid_const!(SHUTDOWN_WORKLOAD = 0x98d5_b343, "cellSpursShutdownWorkload");
-    crate::nid_const!(
-        WAIT_FOR_WORKLOAD_SHUTDOWN = 0x5fd4_3fe4,
-        "cellSpursWaitForWorkloadShutdown"
-    );
-    crate::nid_const!(READY_COUNT_STORE = 0xf843_818d, "cellSpursReadyCountStore");
-    crate::nid_const!(READY_COUNT_ADD = 0x7521_1196, "cellSpursReadyCountAdd");
-    crate::nid_const!(READY_COUNT_SWAP = 0x49a3_426d, "cellSpursReadyCountSwap");
-    crate::nid_const!(
-        READY_COUNT_COMPARE_AND_SWAP = 0xf1d3_552d,
-        "cellSpursReadyCountCompareAndSwap"
-    );
-    crate::nid_const!(REQUEST_IDLE_SPU = 0x182d_9890, "cellSpursRequestIdleSpu");
-    crate::nid_const!(
-        SET_MAX_CONTENTION = 0x84d2_f6d5,
-        "cellSpursSetMaxContention"
-    );
-    crate::nid_const!(SET_PRIORITIES = 0x80a2_9e27, "cellSpursSetPriorities");
-    crate::nid_const!(SET_PRIORITY = 0xb52e_1bda, "cellSpursSetPriority");
-    crate::nid_const!(GET_INFO = 0x1f40_2f8f, "cellSpursGetInfo");
-    crate::nid_const!(
-        ATTACH_LV2_EVENT_QUEUE = 0xb9bc_6207,
-        "cellSpursAttachLv2EventQueue"
-    );
-    crate::nid_const!(
-        DETACH_LV2_EVENT_QUEUE = 0x4e66_d483,
-        "cellSpursDetachLv2EventQueue"
-    );
-    crate::nid_const!(
-        SET_EXCEPTION_EVENT_HANDLER = 0xd2e2_3fa9,
-        "cellSpursSetExceptionEventHandler"
-    );
-    crate::nid_const!(
-        UNSET_EXCEPTION_EVENT_HANDLER = 0x4c75_deb8,
-        "cellSpursUnsetExceptionEventHandler"
-    );
-    crate::nid_const!(
-        SET_GLOBAL_EXCEPTION_EVENT_HANDLER = 0x7517_724a,
-        "cellSpursSetGlobalExceptionEventHandler"
-    );
-    crate::nid_const!(
-        UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER = 0x8612_37f8,
-        "cellSpursUnsetGlobalExceptionEventHandler"
-    );
-    crate::nid_const!(
-        ENABLE_EXCEPTION_EVENT_HANDLER = 0x32b9_4add,
-        "cellSpursEnableExceptionEventHandler"
-    );
-
-    /// Every NID this module owns.
-    pub const OWNED: &[u32] = &[
-        ATTRIBUTE_INITIALIZE,
-        INITIALIZE,
-        INITIALIZE_WITH_ATTRIBUTE,
-        INITIALIZE_WITH_ATTRIBUTE2,
-        FINALIZE,
-        ADD_WORKLOAD,
-        ADD_WORKLOAD_WITH_ATTRIBUTE,
-        WORKLOAD_ATTRIBUTE_INITIALIZE,
-        SHUTDOWN_WORKLOAD,
-        WAIT_FOR_WORKLOAD_SHUTDOWN,
-        READY_COUNT_STORE,
-        READY_COUNT_ADD,
-        READY_COUNT_SWAP,
-        READY_COUNT_COMPARE_AND_SWAP,
-        REQUEST_IDLE_SPU,
-        SET_MAX_CONTENTION,
-        SET_PRIORITIES,
-        SET_PRIORITY,
-        GET_INFO,
-        ATTACH_LV2_EVENT_QUEUE,
-        DETACH_LV2_EVENT_QUEUE,
-        SET_EXCEPTION_EVENT_HANDLER,
-        UNSET_EXCEPTION_EVENT_HANDLER,
-        SET_GLOBAL_EXCEPTION_EVENT_HANDLER,
-        UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER,
-        ENABLE_EXCEPTION_EVENT_HANDLER,
-    ];
+    crate::nid_module! {
+        classified {
+            ATTRIBUTE_INITIALIZE = 0x9518_0230, "_cellSpursAttributeInitialize";
+            INITIALIZE = 0xacfc_8dbc, "cellSpursInitialize";
+            INITIALIZE_WITH_ATTRIBUTE = 0xaa62_69a8, "cellSpursInitializeWithAttribute";
+            INITIALIZE_WITH_ATTRIBUTE2 = 0x30aa_96c4, "cellSpursInitializeWithAttribute2";
+            FINALIZE = 0xca4c_4600, "cellSpursFinalize";
+            ADD_WORKLOAD = 0x6972_6aa2, "cellSpursAddWorkload";
+            ADD_WORKLOAD_WITH_ATTRIBUTE = 0xc015_8d8b, "cellSpursAddWorkloadWithAttribute";
+            WORKLOAD_ATTRIBUTE_INITIALIZE = 0xefeb_2679, "_cellSpursWorkloadAttributeInitialize";
+            SHUTDOWN_WORKLOAD = 0x98d5_b343, "cellSpursShutdownWorkload";
+            WAIT_FOR_WORKLOAD_SHUTDOWN = 0x5fd4_3fe4, "cellSpursWaitForWorkloadShutdown";
+            READY_COUNT_STORE = 0xf843_818d, "cellSpursReadyCountStore";
+            READY_COUNT_ADD = 0x7521_1196, "cellSpursReadyCountAdd";
+            READY_COUNT_SWAP = 0x49a3_426d, "cellSpursReadyCountSwap";
+            READY_COUNT_COMPARE_AND_SWAP = 0xf1d3_552d, "cellSpursReadyCountCompareAndSwap";
+            REQUEST_IDLE_SPU = 0x182d_9890, "cellSpursRequestIdleSpu";
+            SET_MAX_CONTENTION = 0x84d2_f6d5, "cellSpursSetMaxContention";
+            SET_PRIORITIES = 0x80a2_9e27, "cellSpursSetPriorities";
+            SET_PRIORITY = 0xb52e_1bda, "cellSpursSetPriority";
+            GET_INFO = 0x1f40_2f8f, "cellSpursGetInfo";
+            ATTACH_LV2_EVENT_QUEUE = 0xb9bc_6207, "cellSpursAttachLv2EventQueue";
+            DETACH_LV2_EVENT_QUEUE = 0x4e66_d483, "cellSpursDetachLv2EventQueue";
+            SET_EXCEPTION_EVENT_HANDLER = 0xd2e2_3fa9, "cellSpursSetExceptionEventHandler";
+            UNSET_EXCEPTION_EVENT_HANDLER = 0x4c75_deb8, "cellSpursUnsetExceptionEventHandler";
+            SET_GLOBAL_EXCEPTION_EVENT_HANDLER = 0x7517_724a, "cellSpursSetGlobalExceptionEventHandler";
+            UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER = 0x8612_37f8, "cellSpursUnsetGlobalExceptionEventHandler";
+            ENABLE_EXCEPTION_EVENT_HANDLER = 0x32b9_4add, "cellSpursEnableExceptionEventHandler";
+        }
+    }
 }
-
-/// Every per-module HLE NID `OWNED` slice, in dispatch order. The
-/// workspace-level `HLE_IMPLEMENTED_NIDS` (in `cellgov_ppu::prx`) is
-/// the const-flattened union of these. Adding a module is one line
-/// here and one line in the prx flatten -- no per-NID duplication.
-pub const ALL_HLE_OWNED: &[&[u32]] = &[sys_prx_for_user::OWNED];
 
 /// Returns `Some((module, function))` if the NID is known. `module` may
 /// be the empty string for symbols that ship outside any named PS3
@@ -303,12 +185,36 @@ impl StubClass {
     }
 }
 
-/// Class for `nid`. Implemented NIDs (`prx::HLE_IMPLEMENTED_NIDS`) are
-/// classified explicitly; everything else defaults to `NoopSafe`. The
-/// default is presumptive, not verified -- a NID we haven't reviewed
-/// could be `Stateful` or `UnsafeToStub`. Any NID added to
-/// `HLE_IMPLEMENTED_NIDS` should grow an explicit arm here.
+/// Diagnostic class for `nid`. Used by `cellgov_cli dump-prx-imports`
+/// to label unresolved-or-zero-bound PRX imports as `noop-safe` /
+/// `stateful` / `unsafe-to-stub`. Reviewed NIDs are classified
+/// explicitly; everything else defaults to `NoopSafe`. The default
+/// is presumptive, not verified -- a NID we have not reviewed could
+/// be `Stateful` or `UnsafeToStub`. NIDs grouped under any module's
+/// `CLASSIFIED_NIDS` slice must classify explicitly (enforced by
+/// `tests::every_classified_nid_has_explicit_arm`).
+///
+/// For "is this NID explicitly classified or did it fall through the
+/// default" use [`stub_classification_explicit`]; this wrapper is the
+/// total form for consumers (e.g. `dump-prx-imports`) that just want
+/// a label.
+///
+/// NOT a dispatch table. The project does not substitute Rust
+/// handlers for PRX libraries; PRX-side surfaces are bound via
+/// `cellgov_ppu::prx_loader::patch_imports_against` to firmware
+/// OPDs at boot.
 pub fn stub_classification(nid: u32) -> StubClass {
+    stub_classification_explicit(nid).unwrap_or(StubClass::NoopSafe)
+}
+
+/// Like [`stub_classification`] but returns `None` for NIDs that
+/// fall through to the default `NoopSafe` catch-all. Used by the
+/// `every_classified_nid_has_explicit_arm` regression to enforce
+/// that every NID listed in any module's `CLASSIFIED_NIDS` slice is
+/// reviewed rather than presumptively-NoopSafe. A legitimately-
+/// NoopSafe NID (e.g. `_sys_free` -- "leak is OK") still has its
+/// own explicit arm returning `Some(StubClass::NoopSafe)`.
+pub fn stub_classification_explicit(nid: u32) -> Option<StubClass> {
     use cell_gcm_sys as gcm;
     use cell_save_data as savedata;
     use cell_spurs as spurs;
@@ -323,43 +229,51 @@ pub fn stub_classification(nid: u32) -> StubClass {
         | gcm::GET_CONTROL_REGISTER
         | gcm::GET_CONFIGURATION
         | gcm::GET_LABEL_ADDRESS
-        | gcm::ADDRESS_TO_OFFSET => StubClass::Stateful,
+        | gcm::ADDRESS_TO_OFFSET
+        | gcm::SET_FLIP_HANDLER => Some(StubClass::Stateful),
         // sysPrxForUser TLS / memory primitives.
-        sys::INITIALIZE_TLS | sys::MEMSET | sys::PROCESS_EXIT => StubClass::Stateful,
-        sys::MALLOC => StubClass::UnsafeToStub,
-        sys::FREE => StubClass::NoopSafe, // leak is OK
+        sys::INITIALIZE_TLS | sys::MEMSET | sys::PROCESS_EXIT => Some(StubClass::Stateful),
+        sys::MALLOC => Some(StubClass::UnsafeToStub),
+        sys::FREE => Some(StubClass::NoopSafe), // leak is OK
         // User-mode heap allocator.
-        sys::HEAP_CREATE_HEAP => StubClass::Stateful,
-        sys::HEAP_MALLOC | sys::HEAP_MEMALIGN => StubClass::UnsafeToStub,
+        sys::HEAP_CREATE_HEAP => Some(StubClass::Stateful),
+        sys::HEAP_DELETE_HEAP => Some(StubClass::Stateful),
+        sys::HEAP_MALLOC | sys::HEAP_MEMALIGN => Some(StubClass::UnsafeToStub),
+        // HEAP_FREE: freeing a pointer the title later reuses is a
+        // use-after-free; same class as HEAP_MALLOC / HEAP_MEMALIGN.
+        sys::HEAP_FREE => Some(StubClass::UnsafeToStub),
         // Lightweight mutex family: every entry mutates sync state.
         sys::LWMUTEX_CREATE
         | sys::LWMUTEX_LOCK
         | sys::LWMUTEX_DESTROY
         | sys::LWMUTEX_UNLOCK
-        | sys::LWMUTEX_TRYLOCK => StubClass::Stateful,
+        | sys::LWMUTEX_TRYLOCK => Some(StubClass::Stateful),
         // Lightweight cond family: count-only stubs today, but the
         // count itself is observable state.
-        sys::LWCOND_CREATE | sys::LWCOND_DESTROY => StubClass::Stateful,
+        sys::LWCOND_CREATE | sys::LWCOND_DESTROY => Some(StubClass::Stateful),
         // Time / thread / process queries.
         sys::TIME_GET_SYSTEM_TIME
         | sys::PPU_THREAD_GET_ID
         | sys::PPU_THREAD_CREATE
+        | sys::PPU_THREAD_EXIT
         | sys::PROCESS_IS_STACK
-        | sys::PRX_EXITSPAWN_WITH_LEVEL => StubClass::Stateful,
+        | sys::PRX_EXITSPAWN_WITH_LEVEL => Some(StubClass::Stateful),
         // cellSysutil video-out queries.
-        sysutil::VIDEO_OUT_GET_STATE | sysutil::VIDEO_OUT_GET_RESOLUTION => StubClass::Stateful,
+        sysutil::VIDEO_OUT_GET_STATE | sysutil::VIDEO_OUT_GET_RESOLUTION => {
+            Some(StubClass::Stateful)
+        }
         // cellSpurs initialize family.
         spurs::ATTRIBUTE_INITIALIZE
         | spurs::INITIALIZE
         | spurs::INITIALIZE_WITH_ATTRIBUTE
         | spurs::INITIALIZE_WITH_ATTRIBUTE2
-        | spurs::FINALIZE => StubClass::Stateful,
+        | spurs::FINALIZE => Some(StubClass::Stateful),
         // cellSpurs workload registry.
         spurs::WORKLOAD_ATTRIBUTE_INITIALIZE
         | spurs::ADD_WORKLOAD
         | spurs::ADD_WORKLOAD_WITH_ATTRIBUTE
         | spurs::SHUTDOWN_WORKLOAD
-        | spurs::WAIT_FOR_WORKLOAD_SHUTDOWN => StubClass::Stateful,
+        | spurs::WAIT_FOR_WORKLOAD_SHUTDOWN => Some(StubClass::Stateful),
         // cellSpurs ready-count, contention, idle-spu, priority controls.
         spurs::READY_COUNT_STORE
         | spurs::READY_COUNT_ADD
@@ -368,7 +282,7 @@ pub fn stub_classification(nid: u32) -> StubClass {
         | spurs::REQUEST_IDLE_SPU
         | spurs::SET_MAX_CONTENTION
         | spurs::SET_PRIORITIES
-        | spurs::SET_PRIORITY => StubClass::Stateful,
+        | spurs::SET_PRIORITY => Some(StubClass::Stateful),
         // cellSpurs info getter + exception handler registration.
         spurs::GET_INFO
         | spurs::ATTACH_LV2_EVENT_QUEUE
@@ -377,21 +291,29 @@ pub fn stub_classification(nid: u32) -> StubClass {
         | spurs::UNSET_EXCEPTION_EVENT_HANDLER
         | spurs::SET_GLOBAL_EXCEPTION_EVENT_HANDLER
         | spurs::UNSET_GLOBAL_EXCEPTION_EVENT_HANDLER
-        | spurs::ENABLE_EXCEPTION_EVENT_HANDLER => StubClass::Stateful,
+        | spurs::ENABLE_EXCEPTION_EVENT_HANDLER => Some(StubClass::Stateful),
         // sys_fs HLE wrappers: every entry forwards to the LV2
         // sys_fs_* surface and mutates fd-table / blob state. A
         // 0-returning stub would let the title proceed with an
         // uninitialized fd or skipped read, corrupting downstream
         // state.
-        fs::OPEN | fs::READ | fs::CLOSE | fs::LSEEK | fs::FSTAT | fs::STAT => StubClass::Stateful,
+        fs::OPEN
+        | fs::READ
+        | fs::CLOSE
+        | fs::LSEEK
+        | fs::FSTAT
+        | fs::STAT
+        | fs::OPENDIR
+        | fs::READDIR
+        | fs::CLOSEDIR => Some(StubClass::Stateful),
         // cellSaveData autoload: the stub returns the no-save
         // sentinel (sign-extended NODATA) before any title callback
         // fires. A blanket 0-return would hand back CELL_OK and let
         // the title proceed as if save data were loaded; explicit
         // Stateful classification flags this as "non-noop, must
         // implement" rather than "leak-safe stub".
-        savedata::AUTO_LOAD | savedata::AUTO_LOAD_2 => StubClass::Stateful,
-        _ => StubClass::NoopSafe,
+        savedata::AUTO_LOAD | savedata::AUTO_LOAD_2 => Some(StubClass::Stateful),
+        _ => Some(StubClass::NoopSafe),
     }
 }
 
@@ -5751,5 +5673,41 @@ mod tests {
         let (m, n) = lookup(0x003395d9).expect("_Feraise is in nid_db");
         assert_eq!(m, "");
         assert_eq!(n, "_Feraise");
+    }
+
+    /// Every NID listed in any module's `CLASSIFIED_NIDS` slice must
+    /// classify explicitly (not fall to the default `NoopSafe`
+    /// catch-all). The default arm of `stub_classification` is
+    /// "unreviewed"; reaching it from a slice-listed NID is a
+    /// documentation/reviewer gap. This is a DIAGNOSTIC contract
+    /// (the classifier is HLE-as-tooling, not a dispatch table); the
+    /// `CLASSIFIED_NIDS` slices are the classifier's
+    /// NID-set-of-record.
+    ///
+    /// `cell_save_data`'s `CLASSIFIED_NIDS` carries only `AUTO_LOAD`
+    /// and `AUTO_LOAD_2`; the `AUTO_SAVE` / `AUTO_SAVE_2` /
+    /// `LIST_AUTO_LOAD` NIDs declared in that module sit outside the
+    /// slice (see the module docstring) so they are not in scope
+    /// for this check.
+    #[test]
+    fn every_classified_nid_has_explicit_arm() {
+        let classified_slices: &[(&str, &[u32])] = &[
+            ("sys_prx_for_user", sys_prx_for_user::CLASSIFIED_NIDS),
+            ("sys_fs", sys_fs::CLASSIFIED_NIDS),
+            ("cell_sysutil", cell_sysutil::CLASSIFIED_NIDS),
+            ("cell_save_data", cell_save_data::CLASSIFIED_NIDS),
+            ("cell_gcm_sys", cell_gcm_sys::CLASSIFIED_NIDS),
+            ("cell_spurs", cell_spurs::CLASSIFIED_NIDS),
+        ];
+        for (module, classified) in classified_slices {
+            for &nid in *classified {
+                assert!(
+                    stub_classification_explicit(nid).is_some(),
+                    "{module}::CLASSIFIED_NIDS NID 0x{nid:08x} fell to the \
+                     default (presumptive-NoopSafe) arm; add an explicit \
+                     classification arm or remove it from CLASSIFIED_NIDS",
+                );
+            }
+        }
     }
 }

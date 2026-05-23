@@ -152,6 +152,16 @@ mod tests {
     use super::*;
     use cellgov_trace::{TraceRecord, TraceWriter};
 
+    /// Trip-wire: `GPR_FIELD_NAMES[i]` must equal `format!("gpr{i}")`
+    /// for `i in 0..32`. A typo (e.g. `"grp19"`) would silently
+    /// mislabel a divergence field in the `RegDiff` report stream.
+    #[test]
+    fn gpr_field_names_match_index() {
+        for (i, name) in GPR_FIELD_NAMES.iter().enumerate() {
+            assert_eq!(*name, format!("gpr{i}"), "GPR_FIELD_NAMES[{i}] mismatch");
+        }
+    }
+
     fn encode(records: &[TraceRecord]) -> Vec<u8> {
         let mut w = TraceWriter::new();
         for r in records {

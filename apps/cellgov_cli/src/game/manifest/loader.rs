@@ -211,19 +211,15 @@ impl TitleManifest {
                 });
             }
         }
-        let distribution = match file.title.distribution.as_str() {
-            "psn-hdd" => Distribution::PsnHdd,
-            "retail-hdd" => Distribution::RetailHdd,
-            "disc-iso" => Distribution::DiscIso,
-            other => {
-                return Err(ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: format!(
-                        "unknown distribution '{other}' (accepted: psn-hdd, retail-hdd, disc-iso)"
-                    ),
-                });
+        let distribution = Distribution::from_kebab(&file.title.distribution).ok_or_else(|| {
+            ManifestError::Parse {
+                path: origin.to_path_buf(),
+                message: format!(
+                    "unknown distribution {:?} (accepted: psn-hdd, retail-hdd, disc-iso)",
+                    file.title.distribution
+                ),
             }
-        };
+        })?;
         Ok(TitleManifest {
             content_id: file.title.content_id,
             short_name: file.title.short_name,

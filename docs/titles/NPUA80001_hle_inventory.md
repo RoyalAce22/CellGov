@@ -11,10 +11,14 @@ Classification columns:
 - **Class**: `stub_classification(nid)` from the NID DB.
   `stateful` / `unsafe-to-stub` need real impls; `noop-safe`
   is fine returning 0.
-- **CellGov**: `impl` if the NID has dedicated handling in
-  `cellgov_core::hle::dispatch_hle` or the HLE-keep list in
-  `game::prx::load_firmware_prx`; `stub` otherwise (default
-  returns 0).
+- **CellGov**: PRX-side surfaces bind to firmware OPDs at boot via
+  `cellgov_ppu::prx_loader::patch_imports_against`; the project
+  does not substitute Rust handlers for PRX libraries. The
+  `stub` column here records what `dump-prx-imports` would label
+  an unbound NID; in firmware-set boots every NID with a real
+  PRX export is resolved at GOT-patching time. Use
+  `cellgov_cli dump-prx-imports --title NPUA80001` for current
+  per-NID classification.
 
 ## cellSysutil (15 functions)
 

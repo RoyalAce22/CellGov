@@ -68,7 +68,7 @@ fn alloc_canonical() -> GuestMemory {
 }
 
 /// Simulate a ps3autotests-sized workload: write a handful of KiB
-/// at a handful of pages. Footprint is intentionally small so the
+/// at a handful of pages. Footprint stays small so the
 /// reset-vs-calloc ratio reflects "most pages clean."
 fn simulate_workload(mem: &mut GuestMemory) {
     let payload = [0xAAu8; 256];

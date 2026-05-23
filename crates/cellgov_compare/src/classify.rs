@@ -14,18 +14,21 @@ pub use cellgov_ps3_abi::elf::ELF_HEADER_SIZE;
 
 /// Classified shape of a single byte-divergence run.
 ///
-/// `Ord` is derived to give [`per_class_bytes`](crate::CrossRunnerSummary)
-/// a deterministic BTreeMap key order; the discriminant ordering is
-/// load-bearing for that contract (see `summary.rs`'s
-/// `per_class_bytes_iterates_in_discriminant_order` test).
-///
-/// Display strings are fixed per variant; pinned by
-/// `divergence_class_display_strings_are_stable`. Renderers that
-/// produce on-disk fixtures (`compare_report.txt`, hand-authored
-/// `NOTES.md`) read this rather than `{:?}` so a future rename
-/// cannot silently churn the text.
+/// Display strings are part of the on-disk fixture wire form
+/// (`compare_report.txt`, `NOTES.md`); pinned by
+/// `divergence_class_display_strings_are_stable`.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, thiserror::Error,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    thiserror::Error,
+    strum::VariantArray,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum DivergenceClass {
@@ -63,27 +66,18 @@ impl DivergenceClass {
 }
 
 /// Pre-computed guest-address ranges the classifier checks for
-/// containment. Each range is `None` (or empty Vec) until its
-/// corresponding populator slice lands.
+/// containment.
 ///
-/// `hle_opd_ranges` may contain multiple structurally distinct
-/// range kinds, all classifying as `HleOpdSlot`:
-///   1. Primary function-stub table -- one contiguous range covering
-///      the title's main OPD slot table (from the SCE PRX_PARAM
-///      `lib_stub_start..lib_stub_end` import area).
-///   2. Variable-stub slots -- zero or more 4-byte ranges for the
-///      scattered variable-stub slots that don't share the primary
-///      table's contiguity.
-///   3. Secondary OPD tables -- zero or more contiguous ranges for
-///      the FNID-walker-patched sibling tables identified by the
-///      `0x04020100` / `0x04020200` header signature (typically two
-///      per title, adjacent and merged into one Range; see SSHD
-///      `0x829b10`/`0x829b78` and WipEout `0x925008`/`0x925070`).
+/// `hle_opd_ranges` aggregates three structurally distinct kinds,
+/// all classifying as `HleOpdSlot`: the primary function-stub
+/// table (one contiguous range from SCE PRX_PARAM
+/// `lib_stub_start..lib_stub_end`), zero or more 4-byte
+/// variable-stub slots, and zero or more contiguous secondary
+/// tables identified by the `0x04020100` / `0x04020200` header
+/// signature.
 ///
-/// All entries must be pairwise non-overlapping. Verified by
-/// [`debug_assert_disjoint`](Self::debug_assert_disjoint); if a
-/// future title's layout violates this, the assert fires before
-/// the classifier sees the corrupted ranges.
+/// All entries must be pairwise non-overlapping; checked by
+/// [`debug_assert_disjoint`](Self::debug_assert_disjoint).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClassifierContext {
     /// Guest-address range of the loaded ELF header, or `None` until
@@ -98,47 +92,65 @@ pub struct ClassifierContext {
     pub hle_opd_ranges: Vec<Range<u64>>,
 }
 
+/// Errors from [`ClassifierContext::from_observation`]. Only fires
+/// on synthetic / malformed observations; real PRX/ELF inputs
+/// satisfy the size and overflow preconditions.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum ClassifierContextError {
+    /// Observation has no region named `CODE_REGION_NAME`.
+    #[error("observation lacks the {CODE_REGION_NAME:?} region")]
+    MissingCodeRegion,
+    /// The `code` region carries fewer than `ELF_HEADER_SIZE` bytes,
+    /// so an ELF-header range past end-of-data would be constructed.
+    #[error("{CODE_REGION_NAME:?} region carries {len} bytes (< ELF_HEADER_SIZE = {needed})")]
+    ShortCodeRegion {
+        /// Actual region data length.
+        len: usize,
+        /// Required minimum (`ELF_HEADER_SIZE`).
+        needed: usize,
+    },
+    /// `region.addr + ELF_HEADER_SIZE` overflows u64.
+    #[error("code region addr 0x{addr:016x} + ELF_HEADER_SIZE overflows u64")]
+    RegionEndOverflow {
+        /// The region's base address.
+        addr: u64,
+    },
+}
+
 impl ClassifierContext {
     /// Build a context with only `elf_header_range` populated from
     /// the observation's `"code"` region. Real boots build the
     /// fuller context from EBOOT bytes; this path is for synthetic
     /// fixtures.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// In debug, if the observation has no `"code"` region or that
-    /// region carries fewer than [`ELF_HEADER_SIZE`] bytes.
-    pub fn from_observation(obs: &Observation) -> Self {
+    /// Returns [`ClassifierContextError`] if the observation has no
+    /// `"code"` region, that region is shorter than [`ELF_HEADER_SIZE`],
+    /// or the region's address+ELF_HEADER_SIZE overflows.
+    pub fn from_observation(obs: &Observation) -> Result<Self, ClassifierContextError> {
         let code = obs
             .memory_regions
             .iter()
-            .find(|r| r.name == CODE_REGION_NAME);
-        debug_assert!(
-            code.is_some(),
-            "from_observation called on observation lacking the {CODE_REGION_NAME:?} region"
-        );
-        let elf_header_range = code.map(|r| {
-            debug_assert!(
-                r.data.len() >= ELF_HEADER_SIZE,
-                "{CODE_REGION_NAME:?} region carries {} bytes (< ELF_HEADER_SIZE = {})",
-                r.data.len(),
-                ELF_HEADER_SIZE
-            );
-            let end = r
-                .addr
-                .checked_add(ELF_HEADER_SIZE as u64)
-                .expect("code region addr + ELF_HEADER_SIZE overflows u64");
-            r.addr..end
-        });
+            .find(|r| r.name == CODE_REGION_NAME)
+            .ok_or(ClassifierContextError::MissingCodeRegion)?;
+        if code.data.len() < ELF_HEADER_SIZE {
+            return Err(ClassifierContextError::ShortCodeRegion {
+                len: code.data.len(),
+                needed: ELF_HEADER_SIZE,
+            });
+        }
+        let end = code
+            .addr
+            .checked_add(ELF_HEADER_SIZE as u64)
+            .ok_or(ClassifierContextError::RegionEndOverflow { addr: code.addr })?;
         let ctx = Self {
-            elf_header_range,
+            elf_header_range: Some(code.addr..end),
             sys_proc_param_range: None,
             hle_opd_ranges: Vec::new(),
         };
-        // Empty pairwise loop today (only one range populated); the
-        // check becomes load-bearing if this constructor grows.
         ctx.debug_assert_disjoint();
-        ctx
+        Ok(ctx)
     }
 
     /// Panic in debug builds if any populated range is inverted
@@ -177,17 +189,10 @@ impl ClassifierContext {
 }
 
 /// Classify a single byte-divergence run by full containment in one
-/// of `ctx`'s named ranges. Partial overlap returns `Unclassified`:
-/// a cross-class divergence needs human attention rather than
-/// vote-by-first-byte.
+/// of `ctx`'s named ranges. Partial overlap returns `Unclassified`.
 ///
-/// `region_addr` is the guest address of the region's first byte
-/// (i.e. the `addr` field of the [`NamedMemoryRegion`] the
-/// divergence belongs to); the classifier needs no other field.
-///
-/// Check order (`ElfHeader`, `SysProcParam`, `HleOpdSlot`) is
-/// irrelevant for [disjoint](ClassifierContext::debug_assert_disjoint)
-/// contexts.
+/// `region_addr` is the `addr` field of the [`NamedMemoryRegion`] the
+/// divergence belongs to.
 ///
 /// # Panics
 ///
@@ -230,6 +235,23 @@ pub fn classify(
 mod tests {
     use super::*;
     use crate::observation::{NamedMemoryRegion, ObservationMetadata, ObservedOutcome};
+    use strum::VariantArray;
+
+    /// Trip-wire: iterates `Self::VARIANTS` so a new variant must
+    /// keep its label distinct; [`crate::summary`] emits these as
+    /// JSON keys.
+    #[test]
+    fn divergence_class_variants_are_distinct_and_labels_are_unique() {
+        let labels: std::collections::BTreeSet<String> = DivergenceClass::VARIANTS
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        assert_eq!(
+            labels.len(),
+            DivergenceClass::VARIANTS.len(),
+            "DivergenceClass label collision under to_string(): {labels:?}",
+        );
+    }
 
     fn region(name: &str, addr: u64, length: u64) -> NamedMemoryRegion {
         NamedMemoryRegion {
@@ -413,7 +435,8 @@ mod tests {
         let ctx = ClassifierContext::from_observation(&obs_with(vec![
             region("code", 0x10000, 0x800000),
             region("data", 0x820000, 0x80000),
-        ]));
+        ]))
+        .expect("well-formed code region must classify");
         assert_eq!(ctx.elf_header_range, Some(0x10000..0x10040));
         assert!(ctx.sys_proc_param_range.is_none());
         assert!(ctx.hle_opd_ranges.is_empty());
@@ -424,22 +447,30 @@ mod tests {
         let ctx = ClassifierContext::from_observation(&obs_with(vec![
             region("code", 0x10000, 0x800000),
             region("code", 0x20000, 0x800000),
-        ]));
+        ]))
+        .expect("first matching code region must classify");
         assert_eq!(ctx.elf_header_range, Some(0x10000..0x10040));
     }
 
-    #[cfg(debug_assertions)]
     #[test]
-    #[should_panic(expected = "lacking the \"code\" region")]
-    fn from_observation_panics_without_code_region_in_debug() {
-        ClassifierContext::from_observation(&obs_with(vec![region("data", 0x820000, 0x80000)]));
+    fn from_observation_rejects_observation_without_code_region() {
+        let err =
+            ClassifierContext::from_observation(&obs_with(vec![region("data", 0x820000, 0x80000)]))
+                .expect_err("observation without code region must Err");
+        assert_eq!(err, ClassifierContextError::MissingCodeRegion);
     }
 
-    #[cfg(debug_assertions)]
     #[test]
-    #[should_panic(expected = "< ELF_HEADER_SIZE")]
-    fn from_observation_panics_on_short_code_region_in_debug() {
-        ClassifierContext::from_observation(&obs_with(vec![region("code", 0x10000, 16)]));
+    fn from_observation_rejects_short_code_region() {
+        let err = ClassifierContext::from_observation(&obs_with(vec![region("code", 0x10000, 16)]))
+            .expect_err("code region shorter than ELF_HEADER_SIZE must Err");
+        assert_eq!(
+            err,
+            ClassifierContextError::ShortCodeRegion {
+                len: 16,
+                needed: ELF_HEADER_SIZE,
+            }
+        );
     }
 
     #[test]
@@ -447,7 +478,8 @@ mod tests {
         // 0x35 is the low byte of ELF64 `e_ehsize` (BE).
         // 0x17 is the low byte of ELF64 `e_version` (BE).
         let r = region("code", 0x10000, 0x800000);
-        let ctx = ClassifierContext::from_observation(&obs_with(vec![r.clone()]));
+        let ctx = ClassifierContext::from_observation(&obs_with(vec![r.clone()]))
+            .expect("well-formed code region must classify");
         assert_eq!(
             classify(&div(0x35, 1), r.addr, &ctx),
             DivergenceClass::ElfHeader

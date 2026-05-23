@@ -5,7 +5,6 @@
 //! decode to `PpuDecodeError::Unsupported` rather than a variant.
 
 mod decode_error;
-mod display;
 mod insn;
 
 pub use decode_error::PpuDecodeError;

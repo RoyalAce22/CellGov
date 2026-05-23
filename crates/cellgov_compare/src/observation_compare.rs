@@ -217,12 +217,6 @@ pub enum EventCompare {
 /// `OneMissing` or `NoHashInfo` and are never a divergence. A
 /// same-runner pair carrying differing hashes is a determinism
 /// failure analogous to [`StepCompare::SameRunnerMismatch`].
-///
-/// If a second runner ever starts emitting state hashes, the
-/// `CrossRunnerNote` arm has to grow a real-vs-noise decision:
-/// today it silently buries any cross-runner state-hash
-/// divergence, which is safe only while RPCS3 is the only
-/// non-CellGov producer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StateHashCompare {
@@ -264,9 +258,7 @@ impl RegionCompareSummary {
     /// True iff at least one zipped pair is anything other than
     /// [`RegionPairOutcome::Match`].
     pub fn has_pair_divergence(&self) -> bool {
-        self.pairs
-            .iter()
-            .any(|p| !matches!(p, RegionPairOutcome::Match { .. }))
+        self.pairs.iter().any(|p| !p.is_match())
     }
 
     /// Total bytes across all [`RegionPairOutcome::Match`] entries
@@ -283,26 +275,74 @@ impl RegionCompareSummary {
 
     /// Number of [`RegionPairOutcome::Match`] entries in `pairs`.
     pub fn matched_regions(&self) -> u64 {
-        self.pairs
-            .iter()
-            .filter(|p| matches!(p, RegionPairOutcome::Match { .. }))
-            .count() as u64
+        self.pairs.iter().filter(|p| p.is_match()).count() as u64
+    }
+}
+
+impl RegionPairOutcome {
+    /// Whether this pair is a [`RegionPairOutcome::Match`].
+    pub fn is_match(&self) -> bool {
+        match self {
+            RegionPairOutcome::Match { .. } => true,
+            RegionPairOutcome::IdentityMismatch { .. }
+            | RegionPairOutcome::LengthMismatch { .. }
+            | RegionPairOutcome::ByteDivergence { .. } => false,
+        }
+    }
+
+    /// Inverse of [`Self::is_match`].
+    pub fn is_divergent(&self) -> bool {
+        !self.is_match()
     }
 }
 
 impl EventCompare {
+    /// Whether this verdict represents two equal event sequences.
+    pub fn is_equal(&self) -> bool {
+        match self {
+            EventCompare::Equal { .. } => true,
+            EventCompare::LengthMismatch { .. } | EventCompare::FirstIndexDiffers { .. } => false,
+        }
+    }
+
     /// True iff the event sequences are non-equal.
     pub fn is_divergent(&self) -> bool {
-        !matches!(self, Self::Equal { .. })
+        !self.is_equal()
     }
 }
 
 impl StateHashCompare {
-    /// True iff this verdict drives a non-zero exit code (only
+    /// Whether this verdict drives a non-zero exit code (only
     /// same-runner hash mismatches qualify; cross-runner mismatches
     /// are informational).
+    pub fn is_same_runner_mismatch(&self) -> bool {
+        match self {
+            StateHashCompare::SameRunnerMismatch { .. } => true,
+            StateHashCompare::NoHashInfo
+            | StateHashCompare::Equal
+            | StateHashCompare::OneMissing { .. }
+            | StateHashCompare::CrossRunnerNote { .. } => false,
+        }
+    }
+
+    /// True iff this verdict drives a non-zero exit code.
     pub fn is_divergent(&self) -> bool {
-        matches!(self, Self::SameRunnerMismatch { .. })
+        self.is_same_runner_mismatch()
+    }
+}
+
+impl StepCompare {
+    /// Whether this verdict represents a same-runner step-count
+    /// mismatch (a determinism failure). Cross-runner mismatches
+    /// are informational.
+    pub fn is_same_runner_mismatch(&self) -> bool {
+        match self {
+            StepCompare::SameRunnerMismatch { .. } => true,
+            StepCompare::NoStepInfo
+            | StepCompare::Equal { .. }
+            | StepCompare::CrossRunnerNote { .. }
+            | StepCompare::OneMissing { .. } => false,
+        }
     }
 }
 
@@ -318,7 +358,7 @@ impl ObservationCompareResult {
             || self.region_compare.has_pair_divergence()
             || self.event_compare.is_divergent()
             || self.state_hash_compare.is_divergent()
-            || matches!(self.step_compare, StepCompare::SameRunnerMismatch { .. })
+            || self.step_compare.is_same_runner_mismatch()
     }
 
     /// True iff outcomes and regions match and both observations
@@ -1385,8 +1425,6 @@ mod tests {
 
     #[test]
     fn tty_log_differences_do_not_diverge() {
-        // tty_log is informational; differences must NOT flip
-        // has_divergence().
         let mut a = obs(ObservedOutcome::Completed, vec![], "cellgov", Some(1));
         let mut b = obs(ObservedOutcome::Completed, vec![], "rpcs3", Some(1));
         a.tty_log = b"hello\n".to_vec();
@@ -1416,7 +1454,6 @@ mod tests {
         let json = format_observation_compare_json(&r).unwrap();
         let parsed: ObservationCompareResult = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, r);
-        // Sanity: structured fields show up in the JSON.
         assert!(json.contains("\"a_runner\": \"cellgov\""));
         assert!(json.contains("\"b_runner\": \"rpcs3\""));
         assert!(json.contains("\"length\": 2"));
@@ -1505,5 +1542,178 @@ mod tests {
             out.contains("state hashes differ (cross-runner)"),
             "got: {out}"
         );
+    }
+
+    /// Exhaustive label fn for `RegionPairOutcome`.
+    fn region_pair_kind(v: &RegionPairOutcome) -> &'static str {
+        match v {
+            RegionPairOutcome::Match { .. } => "match",
+            RegionPairOutcome::IdentityMismatch { .. } => "identity_mismatch",
+            RegionPairOutcome::LengthMismatch { .. } => "length_mismatch",
+            RegionPairOutcome::ByteDivergence { .. } => "byte_divergence",
+        }
+    }
+
+    #[test]
+    fn region_pair_outcome_serde_round_trips_per_variant() {
+        let variants: Vec<RegionPairOutcome> = vec![
+            RegionPairOutcome::Match {
+                name: "code".into(),
+                addr: 0x10000,
+                length: 4,
+            },
+            RegionPairOutcome::IdentityMismatch {
+                a_name: "code".into(),
+                a_addr: 0x10000,
+                b_name: "data".into(),
+                b_addr: 0x20000,
+            },
+            RegionPairOutcome::LengthMismatch {
+                name: "code".into(),
+                a_length: 4,
+                b_length: 8,
+            },
+            RegionPairOutcome::ByteDivergence {
+                name: "code".into(),
+                addr: 0x10000,
+                length: 4,
+                bytes: vec![ByteDivergence {
+                    offset: 0,
+                    length: 1,
+                    a_byte: 0xAA,
+                    b_byte: 0xBB,
+                }],
+            },
+        ];
+        let kinds: std::collections::BTreeSet<&'static str> =
+            variants.iter().map(region_pair_kind).collect();
+        assert_eq!(
+            kinds.len(),
+            variants.len(),
+            "hand-built variant list contains duplicates per kind label",
+        );
+        for v in &variants {
+            let json = serde_json::to_string(v).expect("serialize");
+            let back: RegionPairOutcome = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(*v, back, "round-trip mismatch for {v:?} via {json}");
+            assert!(
+                json.contains(&format!(r#""kind":"{}""#, region_pair_kind(v))),
+                "tagged JSON missing kind discriminator for {v:?}: {json}",
+            );
+        }
+    }
+
+    /// Exhaustive label fn for `StepCompare`.
+    fn step_compare_kind(v: &StepCompare) -> &'static str {
+        match v {
+            StepCompare::NoStepInfo => "no_step_info",
+            StepCompare::Equal { .. } => "equal",
+            StepCompare::SameRunnerMismatch { .. } => "same_runner_mismatch",
+            StepCompare::CrossRunnerNote { .. } => "cross_runner_note",
+            StepCompare::OneMissing { .. } => "one_missing",
+        }
+    }
+
+    #[test]
+    fn step_compare_serde_round_trips_per_variant() {
+        let variants: Vec<StepCompare> = vec![
+            StepCompare::NoStepInfo,
+            StepCompare::Equal { steps: 100 },
+            StepCompare::SameRunnerMismatch { a: 100, b: 101 },
+            StepCompare::CrossRunnerNote { a: 100, b: 200 },
+            StepCompare::OneMissing {
+                a: Some(100),
+                b: None,
+            },
+        ];
+        let kinds: std::collections::BTreeSet<&'static str> =
+            variants.iter().map(step_compare_kind).collect();
+        assert_eq!(kinds.len(), variants.len());
+        for v in &variants {
+            let json = serde_json::to_string(v).expect("serialize");
+            let back: StepCompare = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(*v, back, "round-trip mismatch for {v:?} via {json}");
+            assert!(
+                json.contains(&format!(r#""kind":"{}""#, step_compare_kind(v))),
+                "tagged JSON missing kind discriminator for {v:?}: {json}",
+            );
+        }
+    }
+
+    /// Exhaustive label fn for `EventCompare`.
+    fn event_compare_kind(v: &EventCompare) -> &'static str {
+        match v {
+            EventCompare::Equal { .. } => "equal",
+            EventCompare::LengthMismatch { .. } => "length_mismatch",
+            EventCompare::FirstIndexDiffers { .. } => "first_index_differs",
+        }
+    }
+
+    #[test]
+    fn event_compare_serde_round_trips_per_variant() {
+        let variants: Vec<EventCompare> = vec![
+            EventCompare::Equal { count: 5 },
+            EventCompare::LengthMismatch { a: 3, b: 5 },
+            EventCompare::FirstIndexDiffers {
+                index: 2,
+                a: evt(ObservedEventKind::MailboxSend, 1, 2),
+                b: evt(ObservedEventKind::MailboxReceive, 1, 2),
+            },
+        ];
+        let kinds: std::collections::BTreeSet<&'static str> =
+            variants.iter().map(event_compare_kind).collect();
+        assert_eq!(kinds.len(), variants.len());
+        for v in &variants {
+            let json = serde_json::to_string(v).expect("serialize");
+            let back: EventCompare = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(*v, back, "round-trip mismatch for {v:?} via {json}");
+            assert!(
+                json.contains(&format!(r#""kind":"{}""#, event_compare_kind(v))),
+                "tagged JSON missing kind discriminator for {v:?}: {json}",
+            );
+        }
+    }
+
+    /// Exhaustive label fn for `StateHashCompare`.
+    fn state_hash_compare_kind(v: &StateHashCompare) -> &'static str {
+        match v {
+            StateHashCompare::NoHashInfo => "no_hash_info",
+            StateHashCompare::Equal => "equal",
+            StateHashCompare::OneMissing { .. } => "one_missing",
+            StateHashCompare::SameRunnerMismatch { .. } => "same_runner_mismatch",
+            StateHashCompare::CrossRunnerNote { .. } => "cross_runner_note",
+        }
+    }
+
+    #[test]
+    fn state_hash_compare_serde_round_trips_per_variant() {
+        let variants: Vec<StateHashCompare> = vec![
+            StateHashCompare::NoHashInfo,
+            StateHashCompare::Equal,
+            StateHashCompare::OneMissing {
+                a_present: true,
+                b_present: false,
+            },
+            StateHashCompare::SameRunnerMismatch {
+                a: hashes(1, 2, 3),
+                b: hashes(4, 5, 6),
+            },
+            StateHashCompare::CrossRunnerNote {
+                a: hashes(1, 2, 3),
+                b: hashes(4, 5, 6),
+            },
+        ];
+        let kinds: std::collections::BTreeSet<&'static str> =
+            variants.iter().map(state_hash_compare_kind).collect();
+        assert_eq!(kinds.len(), variants.len());
+        for v in &variants {
+            let json = serde_json::to_string(v).expect("serialize");
+            let back: StateHashCompare = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(*v, back, "round-trip mismatch for {v:?} via {json}");
+            assert!(
+                json.contains(&format!(r#""kind":"{}""#, state_hash_compare_kind(v))),
+                "tagged JSON missing kind discriminator for {v:?}: {json}",
+            );
+        }
     }
 }
