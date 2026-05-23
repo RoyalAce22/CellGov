@@ -11,7 +11,7 @@
 //! an `Effect` so the commit pipeline orders it.
 
 mod cond;
-mod diagnostics;
+pub mod diagnostics;
 mod dispatch_route;
 mod event_flag;
 mod event_queue;
@@ -35,6 +35,7 @@ mod test_support;
 #[path = "../tests/host_tests.rs"]
 mod cross_primitive_tests;
 
+pub use diagnostics::InvariantBreakReason;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
 pub use rsx::{
     SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,

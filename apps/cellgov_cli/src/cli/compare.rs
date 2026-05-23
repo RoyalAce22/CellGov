@@ -220,10 +220,7 @@ fn run_manifest_compare(
                 );
             }
         }
-        if matches!(
-            result.classification,
-            Classification::Divergence | Classification::UnsettledOracle
-        ) {
+        if result.classification.exits_failure() {
             std::process::exit(1);
         }
     } else if let Some(path) = against_path {

@@ -127,105 +127,27 @@ const _: () = {
 
 // Every LV2 syscall constant in `crate::syscall` must fit the
 // `Lv2` namespace; a constant at `0x10000+` would otherwise route
-// as an HLE import at runtime. New constants extend this table.
-const LV2_SYSCALL_CATALOG: &[u64] = &[
-    syscall::PROCESS_GETPID,
-    syscall::PROCESS_GET_NUMBER_OF_OBJECT,
-    syscall::PROCESS_IS_SPU_LOCK_LINE_RESERVATION_ADDRESS,
-    syscall::PROCESS_GETPPID,
-    syscall::PROCESS_EXIT,
-    syscall::PROCESS_GET_SDK_VERSION,
-    syscall::PROCESS_GET_PARAMSFO,
-    syscall::PROCESS_GET_PPU_GUID,
-    syscall::TIMER_CREATE,
-    syscall::TIMER_DESTROY,
-    syscall::RWLOCK_CREATE,
-    syscall::RWLOCK_DESTROY,
-    syscall::EVENT_PORT_CREATE,
-    syscall::EVENT_PORT_DESTROY,
-    syscall::PPU_THREAD_EXIT,
-    syscall::PPU_THREAD_YIELD,
-    syscall::PPU_THREAD_JOIN,
-    syscall::PPU_THREAD_CREATE,
-    syscall::EVENT_FLAG_CREATE,
-    syscall::EVENT_FLAG_DESTROY,
-    syscall::EVENT_FLAG_WAIT,
-    syscall::EVENT_FLAG_TRY_WAIT,
-    syscall::EVENT_FLAG_SET,
-    syscall::SEMAPHORE_CREATE,
-    syscall::SEMAPHORE_DESTROY,
-    syscall::SEMAPHORE_WAIT,
-    syscall::SEMAPHORE_TRY_WAIT,
-    syscall::SEMAPHORE_POST,
-    syscall::LWMUTEX_CREATE,
-    syscall::LWMUTEX_DESTROY,
-    syscall::MUTEX_DESTROY,
-    syscall::LWMUTEX_LOCK,
-    syscall::LWMUTEX_UNLOCK,
-    syscall::LWMUTEX_TRYLOCK,
-    syscall::MUTEX_CREATE,
-    syscall::MUTEX_LOCK,
-    syscall::MUTEX_TRYLOCK,
-    syscall::MUTEX_UNLOCK,
-    syscall::COND_CREATE,
-    syscall::COND_DESTROY,
-    syscall::COND_WAIT,
-    syscall::COND_SIGNAL,
-    syscall::COND_SIGNAL_ALL,
-    syscall::COND_SIGNAL_TO,
-    syscall::SEMAPHORE_GET_VALUE,
-    syscall::EVENT_FLAG_CANCEL,
-    syscall::EVENT_FLAG_GET,
-    syscall::EVENT_FLAG_CLEAR,
-    syscall::EVENT_QUEUE_CREATE,
-    syscall::EVENT_QUEUE_DESTROY,
-    syscall::EVENT_QUEUE_RECEIVE,
-    syscall::EVENT_QUEUE_TRY_RECEIVE,
-    syscall::EVENT_PORT_SEND,
-    syscall::TIME_GET_TIMEZONE,
-    syscall::TIME_GET_CURRENT_TIME,
-    syscall::TIME_GET_TIMEBASE_FREQUENCY,
-    syscall::SPU_IMAGE_OPEN,
-    syscall::SPU_IMAGE_IMPORT,
-    syscall::SPU_INITIALIZE,
-    syscall::SPU_THREAD_GROUP_CREATE,
-    syscall::SPU_THREAD_GROUP_DESTROY,
-    syscall::SPU_THREAD_INITIALIZE,
-    syscall::SPU_THREAD_GROUP_START,
-    syscall::SPU_THREAD_GROUP_TERMINATE,
-    syscall::SPU_THREAD_GROUP_JOIN,
-    syscall::SPU_THREAD_WRITE_MB,
-    syscall::MEMORY_CONTAINER_CREATE,
-    syscall::MEMORY_ALLOCATE,
-    syscall::MEMORY_FREE,
-    syscall::MEMORY_GET_USER_MEMORY_SIZE,
-    syscall::TTY_WRITE,
-    syscall::FS_OPEN,
-    syscall::FS_READ,
-    syscall::FS_WRITE,
-    syscall::FS_CLOSE,
-    syscall::FS_OPENDIR,
-    syscall::FS_READDIR,
-    syscall::FS_CLOSEDIR,
-    syscall::FS_FSTAT,
-    syscall::FS_STAT,
-    syscall::FS_LSEEK,
-    syscall::SYS_RSX_MEMORY_ALLOCATE,
-    syscall::SYS_RSX_MEMORY_FREE,
-    syscall::SYS_RSX_CONTEXT_ALLOCATE,
-    syscall::SYS_RSX_CONTEXT_FREE,
-    syscall::SYS_RSX_CONTEXT_ATTRIBUTE,
-];
-
+// as an HLE import at runtime. We drive this check from the macro-
+// emitted `syscall::ALL_LV2_NUMBERS` (typed-arm set) and the
+// unsupported-routed set so a new constant added to either is
+// automatically covered.
 const _: () = {
     let lv2_hi = SyscallNamespace::Lv2.range().1;
     let mut i = 0;
-    while i < LV2_SYSCALL_CATALOG.len() {
+    while i < syscall::ALL_LV2_NUMBERS.len() {
         assert!(
-            LV2_SYSCALL_CATALOG[i] < lv2_hi,
+            syscall::ALL_LV2_NUMBERS[i] < lv2_hi,
             "LV2 syscall constant escaped the Lv2 namespace; widen the namespace or rehome the constant",
         );
         i += 1;
+    }
+    let mut j = 0;
+    while j < syscall::ALL_LV2_UNSUPPORTED_ROUTED_NUMBERS.len() {
+        assert!(
+            syscall::ALL_LV2_UNSUPPORTED_ROUTED_NUMBERS[j] < lv2_hi,
+            "unsupported-routed LV2 syscall escaped the Lv2 namespace",
+        );
+        j += 1;
     }
 };
 

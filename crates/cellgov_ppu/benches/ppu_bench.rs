@@ -270,10 +270,7 @@ fn bench_execute_rlwinm(c: &mut Criterion) {
 // Budget=1: single-step mode, matching run-game's per-call pattern.
 // Plain `iter()` keeps PPU construction + context inside the timed
 // region because run-game pays that construction cost on every
-// single-step iteration; the measured value is the construction-
-// inclusive cost, not the `run_until_yield` body in isolation. Not
-// a delta participant against the `iter_batched` arms; do not diff
-// its absolute number against `per_step_off_addi100`.
+// single-step iteration.
 fn bench_run_until_yield_budget_1(c: &mut Criterion) {
     let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
     let addi_bytes = addi_word.to_be_bytes();
@@ -294,8 +291,6 @@ fn bench_run_until_yield_budget_1(c: &mut Criterion) {
     });
 }
 
-// Per-instruction decode microbenchmarks; covers each instruction
-// form the dispatch table routes through.
 criterion_group!(
     decode_benches,
     bench_decode_addi,
@@ -306,8 +301,6 @@ criterion_group!(
     bench_decode_mixed_batch,
 );
 
-// Per-instruction execute microbenchmarks; isolates dispatch and
-// register/memory write cost from the fetch loop.
 criterion_group!(
     execute_benches,
     bench_execute_addi,
@@ -321,13 +314,8 @@ criterion_group!(
 
 /// Un-shadowed baseline for the addi100 fixture. Pairs with
 /// `run_until_yield_shadowed/trace_off_addi100` to form the
-/// quickening-guard delta. Uses the same `addi rT, 0, imm` Li form as
-/// the shadowed arm so the delta is apples-to-apples.
-///
-/// `iter_batched` keeps `PpuExecutionUnit::new` out of the timed
-/// region; the shadowed counterpart pays an additional
-/// `set_instruction_shadow + shadow.clone()` in its setup. Routine
-/// returns the PPU so its drop runs after the measurement loop.
+/// quickening-guard delta. `iter_batched` keeps `PpuExecutionUnit::new`
+/// out of the timed region.
 fn bench_run_until_yield_per_step_off(c: &mut Criterion) {
     let pattern = [enc_li(3, 1)];
     let mem = fill_mem_with_pattern(&pattern);
@@ -345,10 +333,7 @@ fn bench_run_until_yield_per_step_off(c: &mut Criterion) {
 }
 
 /// Per-step trace ON, un-shadowed. The trace-cost delta against
-/// `per_step_off_addi100` documents the miss-path trace overhead;
-/// the shadowed equivalent is `trace_hashes_addi100`. The drain
-/// returns a Vec held in the routine output, so its drop is
-/// untimed alongside the PPU's.
+/// `per_step_off_addi100` documents the miss-path trace overhead.
 fn bench_run_until_yield_per_step_on(c: &mut Criterion) {
     let pattern = [enc_li(3, 1)];
     let mem = fill_mem_with_pattern(&pattern);
@@ -366,9 +351,9 @@ fn bench_run_until_yield_per_step_on(c: &mut Criterion) {
     });
 }
 
-// Inline raw-instruction encoders for the centerpiece fixtures below.
-// Mirror the (pub(super)) helpers in `shadow::test_support`; duplicated
-// here because the bench crate has no access to module-private helpers.
+// Inline raw-instruction encoders. Mirror the `pub(super)` helpers
+// in `shadow::test_support`; the bench crate has no access to
+// module-private helpers.
 
 // [PPC-Book1 p:51 s:3.3.8] addi: RT <- (RA|0) + EXTS(SI); RA=0 yields the
 // `li RT,simm` extended mnemonic that the quickening pass rewrites to `Li`.
@@ -449,26 +434,18 @@ fn enc_bc(bo: u32, bi: u32, offset: i16) -> u32 {
 // 18-instruction tile hitting each of the nine super-pair fused
 // variants exactly once: LiStw, MflrStw, LwzMtlr, MflrStd, LdMtlr,
 // StdStd, LwzCmpwi, CmpwBc, CmpwiBc. Pair membership requirements
-// (same destination/source register, store-offset adjacency for
-// StdStd, non-linking bc) per `shadow::superpair::make_super_pair`.
+// per `shadow::superpair::make_super_pair`.
 //
-// Comparisons set EQ false and both bc forms use BO=12 BI=2, so every
-// conditional branch falls through and execution proceeds linearly past
-// the budget cap. Both `bc` offsets are 0 (self-target); a hypothetical
-// taken branch would spin in place until budget exhaustion rather than
-// run off the end of the shadow.
+// Both bc forms use BO=12 BI=2 and comparisons set EQ=false, so every
+// conditional branch falls through.
 // [PPC-Book1 p:20 s:2.4.1 Figure 21] BO=12 (0b01100) is "branch if
-// CR[BI]==1" with the BO_4 software hint clear; combined with EQ=0 the
-// branch is never taken.
+// CR[BI]==1" with the BO_4 software hint clear.
 // [PPC-Book1 p:18 s:2.3.1] CR0 bit assignments are LT(0), GT(1), EQ(2),
 // SO(3); BI=2 indexes the EQ bit of CR0.
 //
-// r1 stays at 0 (PpuState::new zeros all GPRs), so every load/store
-// uses base 0 and aliases the instruction bytes in mem. Because
-// `run_until_yield` does not commit effects, the aliased stores
-// land in the store buffer and subsequent same-address loads forward
-// from it -- the only place this bench exercises the store-buffer
-// overlay path.
+// r1 stays at 0 (PpuState::new zeros GPRs), so every load/store
+// aliases the instruction bytes in mem and forwards through the
+// store buffer.
 fn mixed100_tile() -> [u32; 18] {
     [
         enc_li(3, 10),       // 0x00: addi r3, 0, 10 -- quickens to Li
@@ -492,10 +469,8 @@ fn mixed100_tile() -> [u32; 18] {
     ]
 }
 
-// Populate a 4 KiB GuestMemory by filling it (truncated to whole
-// instructions) from `pattern.iter().cycle()`. Matches the existing
-// un-shadowed `run_until_yield` benches, which fill far more memory
-// than budget=100 can consume.
+// Populate a 4 KiB GuestMemory by repeating `pattern` (truncated to
+// whole instructions). Far more memory than budget=100 can consume.
 fn fill_mem_with_pattern(pattern: &[u32]) -> GuestMemory {
     const MEM_SIZE: usize = 4096;
     let slots = MEM_SIZE / 4;
@@ -509,15 +484,11 @@ fn fill_mem_with_pattern(pattern: &[u32]) -> GuestMemory {
     mem
 }
 
-// PC walk for budget=100 is at most 400 bytes (each retired instruction
-// advances PC by 4, and the super-pair head + Consumed pair advances by
-// 8 per fused pair across two budget units). 1024 bytes (256 slots)
-// gives ample headroom; `shadow.clone()` is moved out of the timed
-// region via `iter_batched` setup, so the clone cost no longer pressures
-// us toward a tight shadow.
+// 1024 bytes covers the worst-case PC walk for budget=100 (400 bytes)
+// with headroom. `shadow.clone()` runs in `iter_batched` setup, so
+// shadow size does not pressure the timed region.
 const SHADOW_SIZE: usize = 1024;
 
-// Shadow byte slice for the centerpiece arms. Sized via `SHADOW_SIZE`.
 fn shadow_bytes_for(pattern: &[u32]) -> Vec<u8> {
     let slots = SHADOW_SIZE / 4;
     let mut bytes = Vec::with_capacity(SHADOW_SIZE);
@@ -527,9 +498,7 @@ fn shadow_bytes_for(pattern: &[u32]) -> Vec<u8> {
     bytes
 }
 
-// Un-shadowed baseline for the mixed100 fixture. Pairs with
-// `run_until_yield_shadowed/trace_off_mixed100` to form the
-// super-pairing-guard delta.
+// Un-shadowed baseline for the mixed100 fixture.
 fn bench_run_until_yield_per_step_off_mixed100(c: &mut Criterion) {
     let pattern = mixed100_tile();
     let mem = fill_mem_with_pattern(&pattern);
@@ -546,12 +515,9 @@ fn bench_run_until_yield_per_step_off_mixed100(c: &mut Criterion) {
     });
 }
 
-// One-shot PC-bound probe shared by every shadowed arm. Runs the
-// bench's prologue once at registration and panics if PC walks past
-// `SHADOW_SIZE`. Uses `assert!` rather than `debug_assert!` because
-// `cargo bench` runs the release profile, which strips the latter.
-// Per-iteration cost is zero: the probe runs once and the result is
-// discarded.
+// One-shot PC-bound probe shared by every shadowed arm. Runs once at
+// registration and panics if PC walks past `SHADOW_SIZE`. Uses
+// `assert!` because `cargo bench` runs the release profile.
 fn assert_pc_bound(mem: &GuestMemory, shadow: &PredecodedShadow, trace_on: bool) {
     let mut probe = PpuExecutionUnit::new(UnitId::new(0));
     probe.set_instruction_shadow(shadow.clone());
@@ -572,13 +538,10 @@ fn assert_pc_bound(mem: &GuestMemory, shadow: &PredecodedShadow, trace_on: bool)
     );
 }
 
-// Centerpiece: shadowed `run_until_yield`, trace OFF, addi100.
-// Quickening-guard arm. Homogeneous addi stream contains no adjacent
-// fusable pairs, so super-pairing contributes zero; the delta vs
-// `run_until_yield/per_step_off_addi100` isolates the >0.5%
-// quickening rule plus shadow-fast-path dispatch. The slot-0 assert
-// catches a quickening-pass regression that would otherwise silently
-// measure unquickened dispatch.
+// Shadowed `run_until_yield`, trace OFF, addi100. Quickening-guard
+// arm: homogeneous addi stream has no fusable pairs, so the delta
+// vs `run_until_yield/per_step_off_addi100` isolates the quickening
+// rule plus shadow-fast-path dispatch.
 fn bench_run_until_yield_shadowed_off_addi100(c: &mut Criterion) {
     let pattern = [enc_li(3, 1)];
     let mem = fill_mem_with_pattern(&pattern);
@@ -607,13 +570,10 @@ fn bench_run_until_yield_shadowed_off_addi100(c: &mut Criterion) {
     });
 }
 
-// Centerpiece: shadowed, trace OFF, mixed100. Super-pairing guard.
-// Delta vs `run_until_yield/per_step_off_mixed100` is the only
-// guard for the nine fused variants the >1% pair rule produces.
-// `shadow.get` is PC-byte-addressed; `get(4)` is slot 1, the
-// `Consumed` partner of the slot-0 fusion. If the pair rule erodes,
-// the slots stay un-fused and the bench would degrade to the
-// un-shadowed cost.
+// Shadowed, trace OFF, mixed100. Super-pairing-guard arm: the delta
+// vs `run_until_yield/per_step_off_mixed100` covers the nine fused
+// variants the pair rule produces. `shadow.get(4)` is slot 1, the
+// `Consumed` partner of the slot-0 fusion.
 fn bench_run_until_yield_shadowed_off_mixed100(c: &mut Criterion) {
     let pattern = mixed100_tile();
     let mem = fill_mem_with_pattern(&pattern);
@@ -647,9 +607,9 @@ fn bench_run_until_yield_shadowed_off_mixed100(c: &mut Criterion) {
     });
 }
 
-// Centerpiece: shadowed, trace ON (per-step state-hash), addi100.
-// Delta vs `trace_off_addi100` is the per-100-instruction trace-cost
-// number on the shadowed (fast) path.
+// Shadowed, trace ON (per-step state-hash), addi100. Delta vs
+// `trace_off_addi100` is the per-100-instruction trace cost on the
+// shadowed fast path.
 fn bench_run_until_yield_shadowed_hashes_addi100(c: &mut Criterion) {
     let pattern = [enc_li(3, 1)];
     let mem = fill_mem_with_pattern(&pattern);
@@ -679,8 +639,8 @@ fn bench_run_until_yield_shadowed_hashes_addi100(c: &mut Criterion) {
     });
 }
 
-// Centerpiece: shadowed, trace ON, mixed100. Trace-cost delta on a
-// mix that exercises every fused variant.
+// Shadowed, trace ON, mixed100. Trace-cost delta on a mix that
+// exercises every fused variant.
 fn bench_run_until_yield_shadowed_hashes_mixed100(c: &mut Criterion) {
     let pattern = mixed100_tile();
     let mem = fill_mem_with_pattern(&pattern);
@@ -730,10 +690,6 @@ fn bench_state_hash(c: &mut Criterion) {
     });
 }
 
-// `run_until_yield` benchmarks: un-shadowed baselines, shadowed
-// centerpiece arms (addi100 quickening guard, mixed100 super-pairing
-// guard, both trace-off and trace-on), plus the standalone state-hash
-// and budget=1 single-step costs.
 criterion_group!(
     run_benches,
     bench_run_until_yield_budget_1,

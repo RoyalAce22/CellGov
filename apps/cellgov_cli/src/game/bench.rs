@@ -1,8 +1,5 @@
 //! `bench-boot` / `bench-boot-once` / `bench-boot-pair` machinery.
-//!
-//! A pair runs two subprocesses back-to-back, parses a `BENCH_RESULT`
-//! line from each, and reports an agreement percentage as the
-//! reproducibility gate.
+//! A pair runs two subprocesses and gates on per-run agreement.
 
 use std::str::FromStr;
 use std::time::Instant;
@@ -50,18 +47,12 @@ impl BenchOptions<'_> {
             cmd.arg("--strict-reserved");
         }
         if let Some(cp) = self.checkpoint_override {
-            let value = match cp {
-                manifest::CheckpointTrigger::ProcessExit => "process-exit".to_string(),
-                manifest::CheckpointTrigger::FirstRsxWrite => "first-rsx-write".to_string(),
-                manifest::CheckpointTrigger::Pc(a) => format!("pc=0x{a:x}"),
-            };
-            cmd.arg("--checkpoint").arg(value);
+            cmd.arg("--checkpoint").arg(cp.as_cli_str());
         }
         if let Some(b) = self.budget_override {
             cmd.arg("--budget").arg(b.raw().to_string());
         }
-        // ELF path intentionally omitted: bench-boot-once is title-driven,
-        // and the child resolves the EBOOT via the same title manifest.
+        // ELF path omitted; bench-boot-once resolves it via the title.
     }
 }
 
@@ -246,11 +237,7 @@ fn spawn_one_run(opts: BenchOptions<'_>) -> Result<BenchBootResult, SpawnError> 
 /// classify the pair against the gate.
 pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, SpawnError> {
     let checkpoint_label = match opts.checkpoint_override {
-        Some(manifest::CheckpointTrigger::Pc(a)) => format!(" checkpoint=pc=0x{a:x}"),
-        Some(manifest::CheckpointTrigger::ProcessExit) => " checkpoint=process-exit".to_string(),
-        Some(manifest::CheckpointTrigger::FirstRsxWrite) => {
-            " checkpoint=first-rsx-write".to_string()
-        }
+        Some(cp) => format!(" checkpoint={}", cp.as_cli_str()),
         None => String::new(),
     };
     let budget_label = opts

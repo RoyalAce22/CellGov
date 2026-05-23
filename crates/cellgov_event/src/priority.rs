@@ -9,7 +9,9 @@
 ///
 /// Variant order and `#[repr(u8)]` discriminants are part of the
 /// determinism contract; a reorder silently changes every tie-break.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, strum::VariantArray,
+)]
 #[repr(u8)]
 pub enum PriorityClass {
     /// Runtime-essential events that must not be reordered behind
@@ -60,16 +62,12 @@ mod tests {
     /// Derived `Ord` follows declaration order; `repr(u8)` fixes
     /// layout. A non-sequential discriminant (e.g. `Urgent = 5`
     /// slotted between existing variants) would desync the two and
-    /// corrupt any trace wire format keyed on the `u8`.
+    /// corrupt any trace wire format keyed on the `u8`. Iterates
+    /// `Self::VARIANTS` so a new variant is automatically covered.
     #[test]
     fn ord_agrees_with_discriminant_order() {
-        let variants = [
-            PriorityClass::Critical,
-            PriorityClass::High,
-            PriorityClass::Normal,
-            PriorityClass::Background,
-        ];
-        for pair in variants.windows(2) {
+        use strum::VariantArray;
+        for pair in PriorityClass::VARIANTS.windows(2) {
             assert!(
                 pair[0] < pair[1],
                 "{:?} (disc {}) should compare less than {:?} (disc {})",

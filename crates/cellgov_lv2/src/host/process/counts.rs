@@ -17,8 +17,7 @@ use crate::host::Lv2Host;
 /// Counters for primitives stubbed as ID allocators only.
 ///
 /// Not folded into [`Lv2Host::state_hash`] -- counts are derived
-/// helpers, not primary state. They only move when something else
-/// also moves; do not reflexively add them to the hash.
+/// helpers that only move when something else also moves.
 #[derive(Debug, Clone, Default)]
 pub(in crate::host) struct ProcessCounts {
     timer: u32,

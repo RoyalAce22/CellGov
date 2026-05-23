@@ -16,8 +16,7 @@ use crate::runner_cellgov::BootOutcome;
 /// kind (`RsxWriteCheckpoint`, `PcReached`) must pair with the
 /// matching `CheckpointKind`, and `PcReached(a)` must address-match
 /// `Pc { addr }`. Pre-checkpoint outcomes (`ProcessExit`, `Fault`,
-/// `MaxSteps`, `TimeOverflow`) admit any `CheckpointKind` because
-/// the run ended before the checkpoint fired.
+/// `MaxSteps`, `TimeOverflow`) admit any `CheckpointKind`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "BootSummaryShadow")]
 pub struct BootSummary {
@@ -31,10 +30,16 @@ pub struct BootSummary {
     /// Per-step instruction budget; `steps * budget` is the total
     /// guest instructions retired.
     pub budget: Budget,
+    /// Count of host-side invariant breaks observed during the
+    /// boot (`Lv2Host::invariant_break_count`). Always serialized;
+    /// deserialization defaults to 0 if absent. Measurement-only:
+    /// nonzero counts do not drive a non-zero exit code.
+    pub host_invariant_breaks: u64,
 }
 
 impl BootSummary {
-    /// Construct with validation.
+    /// Construct with validation. `host_invariant_breaks` defaults
+    /// to 0; callers measuring breaks use [`Self::new_with_breaks`].
     ///
     /// # Errors
     ///
@@ -45,11 +50,29 @@ impl BootSummary {
         steps: u64,
         budget: Budget,
     ) -> Result<Self, BootSummaryError> {
+        Self::new_with_breaks(checkpoint, outcome, steps, budget, 0)
+    }
+
+    /// Construct with validation, carrying the host-invariant-break
+    /// count. The count is not validated against checkpoint/outcome
+    /// -- it is a side-channel diagnostic.
+    ///
+    /// # Errors
+    ///
+    /// See [`BootSummaryError`] for the rejected cases.
+    pub fn new_with_breaks(
+        checkpoint: CheckpointKind,
+        outcome: BootOutcome,
+        steps: u64,
+        budget: Budget,
+        host_invariant_breaks: u64,
+    ) -> Result<Self, BootSummaryError> {
         let s = Self {
             checkpoint,
             outcome,
             steps,
             budget,
+            host_invariant_breaks,
         };
         s.validate()?;
         Ok(s)
@@ -127,13 +150,21 @@ struct BootSummaryShadow {
     outcome: BootOutcome,
     steps: u64,
     budget: Budget,
+    #[serde(default)]
+    host_invariant_breaks: u64,
 }
 
 impl TryFrom<BootSummaryShadow> for BootSummary {
     type Error = BootSummaryError;
 
     fn try_from(s: BootSummaryShadow) -> Result<Self, Self::Error> {
-        Self::new(s.checkpoint, s.outcome, s.steps, s.budget)
+        Self::new_with_breaks(
+            s.checkpoint,
+            s.outcome,
+            s.steps,
+            s.budget,
+            s.host_invariant_breaks,
+        )
     }
 }
 
@@ -188,6 +219,22 @@ pub enum CheckpointKind {
         /// Guest address the boot is anchored at.
         addr: GuestAddr,
     },
+}
+
+impl CheckpointKind {
+    /// PascalCase form used in the titles.md matrix row's
+    /// `checkpoint -> outcome` cell. Distinct from the snake_case
+    /// JSON form and the kebab CLI form on `cellgov_cli`'s
+    /// `CheckpointTrigger`. The exhaustive match makes a new
+    /// variant break the build here rather than fall through to
+    /// Debug.
+    pub fn as_markdown_label(&self) -> String {
+        match self {
+            Self::ProcessExit => "ProcessExit".to_string(),
+            Self::FirstRsxWrite => "FirstRsxWrite".to_string(),
+            Self::Pc { addr } => format!("Pc={addr:#x}"),
+        }
+    }
 }
 
 #[cfg(test)]

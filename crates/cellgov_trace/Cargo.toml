@@ -14,3 +14,4 @@ cellgov_event = { path = "../cellgov_event" }
 cellgov_effects = { path = "../cellgov_effects" }
 thiserror = "2"
 num_enum = "0.7"
+strum = { version = "0.26", default-features = false, features = ["derive"] }

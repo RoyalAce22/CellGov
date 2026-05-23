@@ -27,10 +27,7 @@ impl Runtime {
         if self.mode == crate::runtime::types::RuntimeMode::FaultDriven
             && effects.is_empty()
             && result.fault.is_none()
-            && !matches!(
-                result.yield_reason,
-                YieldReason::Syscall | YieldReason::Finished
-            )
+            && result.yield_reason.allows_trivial_fast_path()
             && self.dma_queue.is_empty()
             && self.pending_rsx_effects.is_empty()
             && self.rsx_cursor.get() == self.rsx_cursor.put()

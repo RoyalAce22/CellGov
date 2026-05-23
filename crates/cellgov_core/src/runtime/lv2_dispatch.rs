@@ -9,8 +9,13 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus};
 use cellgov_lv2::{Lv2Dispatch, PendingResponse, SpuInitState};
+use cellgov_trace::TraceRecord;
 
-use super::{trace_bridge::MemoryView, Runtime};
+use super::types::RuntimeMode;
+use super::{
+    trace_bridge::{traced_invariant_break_reason, MemoryView},
+    Runtime,
+};
 
 impl Runtime {
     /// Mailbox sends wake any unit Blocked on the matching `UnitId`;
@@ -26,10 +31,8 @@ impl Runtime {
                     mailbox, message, ..
                 } => {
                     if let Some(mbox) = self.mailbox_registry.get_mut(*mailbox) {
-                        // force_send mirrors commit-pipeline
-                        // [CBE-Handbook p:541 s:19.6.6.2]; the
-                        // outbound write-blocking path is not
-                        // wired here yet.
+                        // [CBE-Handbook p:541 s:19.6.6.2] outbound
+                        // write-blocking path is not wired here yet.
                         mbox.force_send(message.raw());
                     }
                     let target = UnitId::new(mailbox.raw());
@@ -66,13 +69,6 @@ impl Runtime {
             self.dispatch_lv2_request(request, source);
             return;
         }
-
-        use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
-        if SyscallNamespace::of(args[0]).is_none() {
-            // Out-of-namespace r11 falls through so classify produces
-            // Unsupported with the raw number preserved.
-        }
-        // Lv2 namespace falls through to the LV2 syscall match below.
 
         // Timer syscalls advance the simulated clock without yielding;
         // other PPU threads observe the new time on their next read.
@@ -128,10 +124,22 @@ impl Runtime {
                 current_tick: self.time,
             },
         );
+        // Always drain so the buffer stays bounded; only emit trace
+        // records under modes that write a trace stream. FaultDriven
+        // consults `invariant_break_count` via the boot summary.
+        if self.mode == RuntimeMode::FaultDriven {
+            for _ in self.lv2_host.drain_pending_invariant_breaks() {}
+        } else {
+            let reasons: Vec<_> = self.lv2_host.drain_pending_invariant_breaks().collect();
+            for reason in reasons {
+                self.trace.record(&TraceRecord::HostInvariantBreak {
+                    reason: traced_invariant_break_reason(reason),
+                });
+            }
+        }
         match dispatch {
             Lv2Dispatch::Immediate { code, effects } => {
                 if is_process_exit {
-                    // Every other unit transitions to Finished.
                     self.step_woke_others = true;
                 }
                 self.handle_immediate(source, code, effects, is_process_exit);
@@ -211,8 +219,7 @@ impl Runtime {
         }
     }
 
-    /// `ProcessExit` finishes every unit and drops parked responses;
-    /// other syscalls write `code` into r3 of the source unit.
+    /// `ProcessExit` finishes every unit and drops parked responses.
     fn handle_immediate(
         &mut self,
         source: UnitId,
@@ -284,12 +291,30 @@ impl Runtime {
                     cellgov_sync::MailboxId::new(uid.raw()),
                     SPU_INBOUND_MBOX_DEPTH,
                 );
-                debug_assert!(
-                    inserted,
-                    "RegisterSpu for UnitId({:?}) found an existing mailbox; \
-                     the dispatch layer must allocate a fresh unit id per SPU",
-                    uid.raw()
-                );
+                if !inserted {
+                    // Collision means the dispatch layer reused a
+                    // UnitId that already had a mailbox -- SPU
+                    // mailbox state would silently cross-talk
+                    // between units.
+                    #[allow(
+                        clippy::print_stderr,
+                        reason = "one-shot release-build diagnostic for SPU mailbox id collision; not guest-reachable under normal operation"
+                    )]
+                    {
+                        eprintln!(
+                            "lv2 host invariant break at dispatch.register_spu_mailbox_collision: \
+                             UnitId({:?}) reused an existing mailbox slot; SPU mailbox crosstalk \
+                             is possible. Baseline anchors must be re-validated if this fires.",
+                            uid.raw()
+                        );
+                    }
+                    debug_assert!(
+                        inserted,
+                        "RegisterSpu for UnitId({:?}) found an existing mailbox; \
+                         the dispatch layer must allocate a fresh unit id per SPU",
+                        uid.raw()
+                    );
+                }
             }
         }
         self.registry.set_syscall_return(source, code);
@@ -298,6 +323,23 @@ impl Runtime {
     fn handle_block(&mut self, source: UnitId, pending: PendingResponse, effects: Vec<Effect>) {
         self.apply_lv2_effects(&effects);
         let displaced = self.syscall_responses.insert(source, pending);
+        if let Some(prev) = &displaced {
+            // Displacement overwrites a pending response, losing the
+            // original wake. SyscallResponseTable::insert log-once
+            // covers first occurrence; this site adds source/variant
+            // for cross-syscall attribution.
+            #[allow(
+                clippy::print_stderr,
+                reason = "one-shot release-build diagnostic for pending-response displacement; not guest-reachable under normal operation"
+            )]
+            {
+                eprintln!(
+                    "lv2 host invariant break at dispatch.handle_block.displacement: \
+                     source {source:?} already had pending response {prev:?}; \
+                     new response will be silently overwritten."
+                );
+            }
+        }
         debug_assert!(
             displaced.is_none(),
             "handle_block: source {source:?} already had a pending response: {displaced:?}"
@@ -306,9 +348,9 @@ impl Runtime {
             .set_status_override(source, UnitStatus::Blocked);
     }
 
-    /// Each join waiter: consume `PpuThreadJoin`, write exit value
-    /// through the out pointer, return CELL_OK via r3. Waiters without
-    /// a matching response wake with the raw exit value in r3.
+    /// Waiters without a matching `PpuThreadJoin` response wake with
+    /// the raw exit value in r3 instead of writing through the out
+    /// pointer.
     fn handle_ppu_thread_exit(
         &mut self,
         source: UnitId,
@@ -339,9 +381,7 @@ impl Runtime {
         }
     }
 
-    /// Release path: caller returns `code` and stays runnable, each
-    /// waiter pulls its pending response and transitions Blocked ->
-    /// Runnable. Overrides replace (not merge) the existing entry;
+    /// Overrides replace (not merge) the existing entry;
     /// [`Self::assert_response_updates_valid`] enforces that every
     /// updated unit is in `woken_unit_ids` and each update's variant
     /// matches the existing entry.
@@ -352,8 +392,7 @@ impl Runtime {
     /// worker's terminal action). `is_ppu_thread_finished_for_unit`
     /// mirrors that into `UnitStatus::Finished` so the PPU loop does
     /// not fetch the next instruction past the trampoline (which
-    /// lands on OPD bytes and decode-faults). Other callers leave
-    /// the source's `PpuThread` Running, making the check a no-op.
+    /// lands on OPD bytes and decode-faults).
     fn handle_wake_and_return(
         &mut self,
         source: UnitId,
@@ -383,9 +422,8 @@ impl Runtime {
         }
     }
 
-    /// Park-and-release (e.g. cond_wait): wake held waiters first, then
-    /// park source on `pending` and flip it Blocked. No r3 set here;
-    /// the eventual wake that resolves `pending` writes r3.
+    /// Park-and-release (e.g. cond_wait): r3 is set by the eventual
+    /// wake that resolves `pending`, not by this site.
     fn handle_block_and_wake(
         &mut self,
         source: UnitId,
@@ -435,8 +473,6 @@ impl Runtime {
     }
 }
 
-/// Free function so tests can exercise the invariants without
-/// standing up a full `Runtime`.
 pub(crate) fn check_response_updates(
     site: &'static str,
     table: &crate::syscall_table::SyscallResponseTable,

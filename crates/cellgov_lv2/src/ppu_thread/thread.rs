@@ -17,6 +17,35 @@ pub enum PpuThreadState {
     Detached,
 }
 
+impl PpuThreadState {
+    /// Whether this thread could still post / set an awaited condition.
+    /// An "alive" thread can be scheduled to run; a non-alive thread
+    /// cannot, so any peer waiting on it must trip its timeout rather
+    /// than block. Exhaustive: a new terminal variant must opt in to a
+    /// verdict at compile time.
+    pub fn is_alive(&self) -> bool {
+        match self {
+            PpuThreadState::Runnable | PpuThreadState::Blocked(_) => true,
+            PpuThreadState::Finished | PpuThreadState::Detached => false,
+        }
+    }
+
+    /// Whether this thread is in the `Finished` state specifically (and
+    /// therefore has a populated `exit_value` joinable via
+    /// `sys_ppu_thread_join`). Distinct from `Detached` (terminal but
+    /// not joinable) and from any future terminal variant. Exhaustive:
+    /// a new variant must decide whether its semantics include a
+    /// populated `exit_value`.
+    pub fn is_finished(&self) -> bool {
+        match self {
+            PpuThreadState::Finished => true,
+            PpuThreadState::Runnable | PpuThreadState::Blocked(_) | PpuThreadState::Detached => {
+                false
+            }
+        }
+    }
+}
+
 /// Attributes captured from `sys_ppu_thread_create`.
 #[derive(Debug, Clone)]
 pub struct PpuThreadAttrs {

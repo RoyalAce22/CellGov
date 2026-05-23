@@ -501,10 +501,6 @@ mod tests {
 
     #[test]
     fn clear_bits_masks_without_waking() {
-        // sys_event_flag_clear is mask-and: bits in `mask` survive,
-        // bits outside `mask` are dropped. Matches RPCS3
-        // (`pattern &= bitptn`). Old value `0b0111` masked by
-        // `0b0101` -> `0b0101`.
         let mut t = EventFlagTable::new();
         t.create_with_id(1, 0b0111).unwrap();
         t.enqueue_waiter(

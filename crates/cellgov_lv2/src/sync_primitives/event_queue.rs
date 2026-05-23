@@ -182,6 +182,26 @@ impl EventQueueTable {
     /// Try to pop a payload; `None` if `id` is unknown.
     pub fn try_receive(&mut self, id: u32) -> Option<EventQueueReceive> {
         let entry = self.entries.get_mut(&id)?;
+        // Mutual-exclusion invariant: the queue holds buffered
+        // payloads OR parked waiters, never both. Without this
+        // guard `try_receive` could pop a head payload while
+        // leaving a parked waiter on a drained queue.
+        if !(entry.waiters.is_empty() || entry.payloads.is_empty()) {
+            #[allow(
+                clippy::print_stderr,
+                reason = "one-shot release-build diagnostic for a host invariant break that is not guest-reachable under normal operation"
+            )]
+            {
+                eprintln!(
+                    "lv2 host invariant break at sync_primitives.event_queue.mutual_exclusion: \
+                     event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s); \
+                     waiters may be stranded on a drained queue.",
+                    id,
+                    entry.payloads.len(),
+                    entry.waiters.len(),
+                );
+            }
+        }
         debug_assert!(
             entry.waiters.is_empty() || entry.payloads.is_empty(),
             "event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s)",
@@ -199,6 +219,23 @@ impl EventQueueTable {
     /// `id` is unknown.
     pub fn try_receive_batch(&mut self, id: u32, max: usize) -> Option<Vec<EventPayload>> {
         let entry = self.entries.get_mut(&id)?;
+        // Same mutual-exclusion invariant as `try_receive`.
+        if !(entry.waiters.is_empty() || entry.payloads.is_empty()) {
+            #[allow(
+                clippy::print_stderr,
+                reason = "one-shot release-build diagnostic for a host invariant break that is not guest-reachable under normal operation"
+            )]
+            {
+                eprintln!(
+                    "lv2 host invariant break at sync_primitives.event_queue.mutual_exclusion: \
+                     event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s); \
+                     waiters may be stranded on a drained queue.",
+                    id,
+                    entry.payloads.len(),
+                    entry.waiters.len(),
+                );
+            }
+        }
         debug_assert!(
             entry.waiters.is_empty() || entry.payloads.is_empty(),
             "event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s)",

@@ -219,7 +219,7 @@ pub(in crate::game) fn run_module_start(
                     format!("0x{w:08x}"),
                     cellgov_ppu::decode::decode(w)
                         .ok()
-                        .map(|insn| insn.variant_name().to_string())
+                        .map(|insn| <&'static str>::from(&insn).to_string())
                         .unwrap_or_else(|| "<baddec>".into()),
                 ),
                 None => ("<unmapped>".to_string(), "<unmapped>".to_string()),

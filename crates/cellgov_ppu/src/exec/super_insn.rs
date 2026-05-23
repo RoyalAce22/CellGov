@@ -189,7 +189,7 @@ pub(crate) fn execute(
             // StdStd needs an `offset2` field.
             let ea1 = state.ea_d_form(ra, offset1);
             let v1 = buffer_store(store_buf, state, ea1, 8, state.gpr[rs1 as usize]);
-            if !matches!(v1, ExecuteVerdict::Continue) {
+            if !v1.allows_writeback() {
                 return v1;
             }
             let ea2 = ea1.wrapping_add(8);
@@ -552,9 +552,6 @@ mod tests {
         assert_eq!(s.cr_field(0), 0b1000); // LT
     }
 
-    // li_stw needs at least one effect to be emitted; verify that
-    // separately from li_stw_negative_imm so the existence test is
-    // independent.
     #[test]
     fn li_stw_emits_store_effect() {
         let mut s = PpuState::new();

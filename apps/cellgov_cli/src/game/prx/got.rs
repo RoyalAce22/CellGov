@@ -15,9 +15,11 @@ const UNRESOLVED_TRAMP_BODY_BYTES: usize = 24;
 /// into r4, set r11 to [`cellgov_ps3_abi::syscall::UNRESOLVED_IMPORT`],
 /// `sc`, `blr`.
 ///
-/// The `clrldi r4, r4, 32` is load-bearing: [PowerISA-3.1 I32 s:3.3.8]
-/// sign-extends `lis rT, SI` to 64 bits when `SI` has bit 15 set, so
-/// without it the classifier's u32 narrow rejects half of all NIDs.
+/// The `clrldi r4, r4, 32` clears the upper 32 bits because
+/// [PowerISA-3.1 p:I76 s:3.3.9] sign-extends `lis rT, SI` (extended
+/// mnemonic for `addis rT, 0, SI`) to 64 bits when `SI` has bit 15
+/// set; without the clear, the classifier's u32 narrow rejects half
+/// of all NIDs.
 fn build_unresolved_trampoline_body(nid: u32) -> [u8; UNRESOLVED_TRAMP_BODY_BYTES] {
     let hi = (nid >> 16) & 0xFFFF;
     let lo = nid & 0xFFFF;

@@ -11,25 +11,7 @@ use crate::cli::exit::die;
 use super::got::patch_got_atomic;
 use super::types::{PrxLoadInfo, PrxLoadStageError};
 
-/// Minimum viable PRX set for firmware-set boot. Mirrors
-/// `apps/cellgov_cli/tests/firmware_set_load.rs::MIN_VIABLE_PRX_STEMS`;
-/// keep the two in sync.
-const MIN_VIABLE_PRX_STEMS: &[&str] = &[
-    "libaudio",
-    "libfiber",
-    "libfs",
-    "libgcm_sys",
-    "libio",
-    "liblv2",
-    "libnet",
-    "libnetctl",
-    "libspurs_jq",
-    "libsre",
-    "libsync2",
-    "libsysmodule",
-    "libsysutil",
-    "libsysutil_np",
-];
+use cellgov_ppu::prx_loader::MIN_VIABLE_PRX_STEMS;
 
 /// Locate the firmware module file for `stem` under `dir_path`.
 ///
@@ -113,10 +95,9 @@ fn resolve_prx_base(code_floor: u32) -> u64 {
 /// Load liblv2 and re-patch GOT entries for every exported NID.
 ///
 /// Returns `None` when the firmware directory is not configured, the
-/// module is absent, or the decrypt / parse / load / GOT-patch step
-/// fails; boot continues without firmware. Imports the firmware does
-/// not export route through [`super::got::patch_got_atomic`]'s
-/// unresolved-import trampoline.
+/// module is absent, or any decrypt / parse / load / GOT-patch step
+/// fails. Imports the firmware does not export route through
+/// [`super::got::patch_got_atomic`]'s unresolved-import trampoline.
 pub(in crate::game) fn load_firmware_prx(
     firmware_dir: Option<&str>,
     modules: &[cellgov_ppu::prx::ImportedModule],
@@ -338,8 +319,7 @@ pub(in crate::game) fn load_firmware_set_bound(
     let mut out: Vec<PrxLoadInfo> = Vec::with_capacity(image.loaded.len());
     // Park the trampoline region as a synthetic PrxLoadInfo entry so
     // boot.rs's alloc_base computation accounts for it via
-    // `prx_region_end`. Synthetic entry: no module_start, no
-    // module_stop, name marks intent.
+    // `prx_region_end`.
     if stats.trampolined > 0 {
         out.push(PrxLoadInfo {
             name: "<unresolved-import-trampolines>".to_string(),

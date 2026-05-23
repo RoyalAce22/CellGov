@@ -83,8 +83,8 @@ impl StagingMemory {
     /// structural agreement is what lets [`Self::drain_into`] apply with
     /// an infallible `expect` after a successful validation pass.
     ///
-    /// `&GuestMemory` here is intentional: the apply pass takes
-    /// `&mut GuestMemory`, but the borrow checker prevents any other
+    /// Validation takes `&GuestMemory` even though the apply pass takes
+    /// `&mut GuestMemory`; the borrow checker prevents any other
     /// mutation between validation and apply, so the validation result
     /// stays accurate.
     fn validate_pending(&self, target: &GuestMemory) -> Result<(), MemError> {
@@ -156,8 +156,8 @@ impl Drop for StagingMemory {
         // Defense-in-depth: a non-empty drop means the commit pipeline
         // forgot to drain on success or clear on fault. Catching it
         // here turns a silent intent leak into a debug-build panic at
-        // the seam where the contract operates. Skip during an active
-        // unwind so a double-panic does not abort.
+        // the boundary where the contract applies. Skip during an
+        // active unwind so a double-panic does not abort.
         if std::thread::panicking() {
             return;
         }

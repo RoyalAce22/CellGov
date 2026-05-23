@@ -7,9 +7,9 @@ use cellgov_time::GuestTicks;
 
 /// A modeled DMA completion event.
 ///
-/// `Ord` is deliberately not derived: [`crate::DmaQueue`] orders
-/// completions by `(completion_time, queue-assigned sequence)`, and the
-/// sequence is not part of this value.
+/// `Ord` is not derived because [`crate::DmaQueue`] orders completions
+/// by `(completion_time, queue-assigned sequence)`, and the sequence is
+/// not part of this value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DmaCompletion {
     request: DmaRequest,

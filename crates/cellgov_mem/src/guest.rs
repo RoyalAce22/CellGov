@@ -589,12 +589,6 @@ mod tests {
         assert_eq!(bytes, &[0u8; 16]);
     }
 
-    // These canaries pin behaviour, not mechanism: a future
-    // deep-clone implementation would still pass. Cache-invalidation
-    // efficiency ("cheap snapshots") is a doc contract, not tested
-    // here -- a bug that re-invalidates the unaffected cache and
-    // recomputes to the same value slips through.
-
     const COW_OFFSET: u64 = 0;
     const COW_LEN: u64 = 4;
     const ORIGINAL_BYTES: [u8; 4] = [0x11, 0x22, 0x33, 0x44];

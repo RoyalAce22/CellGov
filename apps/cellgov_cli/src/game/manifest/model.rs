@@ -20,7 +20,10 @@ pub enum GameSource {
 
 /// Distribution channel for the `titles.md` Format column. Display
 /// only; runtime mount semantics live on [`GameSource`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Two wire forms: kebab-case (`"psn-hdd"`) in TOML; title-case with
+/// spaces (`"PSN HDD"`) in the matrix emitter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
 pub enum Distribution {
     /// Digital PSN download installed under `/dev_hdd0/game/`.
     PsnHdd,
@@ -31,13 +34,73 @@ pub enum Distribution {
 }
 
 impl Distribution {
-    /// Matrix Format-column label.
+    /// Matrix Format-column label (title case with spaces).
     #[allow(dead_code, reason = "consumed by titles-gen tests")]
     pub fn format_label(self) -> &'static str {
         match self {
             Self::PsnHdd => "PSN HDD",
             Self::RetailHdd => "Retail HDD",
             Self::DiscIso => "Disc ISO",
+        }
+    }
+
+    /// Kebab-case wire form used in TOML `distribution = "..."`
+    /// fields. Single source of truth for the TOML parser.
+    pub fn kebab_label(self) -> &'static str {
+        match self {
+            Self::PsnHdd => "psn-hdd",
+            Self::RetailHdd => "retail-hdd",
+            Self::DiscIso => "disc-iso",
+        }
+    }
+
+    /// Inverse of [`Self::kebab_label`]. `Err` carries the unknown
+    /// token for the parser's diagnostic.
+    pub fn from_kebab(s: &str) -> Option<Self> {
+        use strum::VariantArray;
+        Self::VARIANTS
+            .iter()
+            .find(|v| v.kebab_label() == s)
+            .copied()
+    }
+}
+
+#[cfg(test)]
+mod distribution_tests {
+    use super::*;
+    use strum::VariantArray;
+
+    #[test]
+    fn both_wire_forms_total_and_distinct() {
+        let mut formats = Vec::new();
+        let mut kebabs = Vec::new();
+        for d in Distribution::VARIANTS {
+            formats.push(d.format_label());
+            kebabs.push(d.kebab_label());
+        }
+        for (i, a) in formats.iter().enumerate() {
+            for (j, b) in formats.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "format_label not distinct at {i}/{j}");
+                }
+            }
+        }
+        for (i, a) in kebabs.iter().enumerate() {
+            for (j, b) in kebabs.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "kebab_label not distinct at {i}/{j}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn kebab_label_round_trips() {
+        for d in Distribution::VARIANTS {
+            let s = d.kebab_label();
+            let back =
+                Distribution::from_kebab(s).unwrap_or_else(|| panic!("{s:?} did not round-trip"));
+            assert_eq!(back, *d);
         }
     }
 }
@@ -121,9 +184,6 @@ pub enum ResolveEbootError {
         candidates: Vec<String>,
         probe_errors: Vec<(PathBuf, std::io::Error)>,
     },
-    // NotFound carries Vec<(PathBuf, io::Error)>, a multi-error
-    // aggregate without a single canonical source; the per-error
-    // detail is folded into Display instead.
 }
 
 fn render_not_found(

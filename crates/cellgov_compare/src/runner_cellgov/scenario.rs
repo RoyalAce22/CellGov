@@ -62,7 +62,18 @@ fn extract_events(trace_bytes: &[u8]) -> Vec<ObservedEvent> {
                     Some((ObservedEventKind::MailboxReceive, unit.raw()))
                 }
                 TracedEffectKind::DmaEnqueue => Some((ObservedEventKind::DmaComplete, unit.raw())),
-                _ => None,
+                // Exhaustive: a new TracedEffectKind must declare its
+                // observed-event intent at compile time.
+                TracedEffectKind::SharedWriteIntent
+                | TracedEffectKind::WaitOnEvent
+                | TracedEffectKind::WakeUnit
+                | TracedEffectKind::SignalUpdate
+                | TracedEffectKind::FaultRaised
+                | TracedEffectKind::TraceMarker
+                | TracedEffectKind::ReservationAcquire
+                | TracedEffectKind::ConditionalStore
+                | TracedEffectKind::RsxLabelWrite
+                | TracedEffectKind::RsxFlipRequest => None,
             },
             TraceRecord::UnitBlocked { unit, .. } => {
                 Some((ObservedEventKind::UnitBlock, unit.raw()))

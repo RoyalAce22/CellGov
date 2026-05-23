@@ -1,6 +1,6 @@
 //! Wire-format hashes over the registry: runnable-queue hash and
-//! full status hash. Goldens here are the load-bearing CI signal that
-//! changes to surrounding code are byte-identical for replay.
+//! full status hash. Pinned by golden tests so trace replay stays
+//! byte-identical across code changes.
 
 use cellgov_exec::UnitStatus;
 

@@ -29,10 +29,6 @@ impl PpuThreadTable {
     /// - If `create` has already run.
     /// - Debug-only if `unit_id` already maps to another thread.
     pub fn insert_primary(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) {
-        // Hard `assert!`s guard a single-shot boot invariant; a
-        // release violation would leave the host
-        // half-initialised. The unit-id check is debug-only
-        // because it repeats for every thread.
         assert!(
             !self.threads.contains_key(&PpuThreadId::PRIMARY),
             "primary thread already inserted",
@@ -126,19 +122,15 @@ impl PpuThreadTable {
         let Some(thread) = self.threads.get_mut(&id) else {
             return Vec::new();
         };
-        let already_terminal = matches!(
-            thread.state,
-            PpuThreadState::Finished | PpuThreadState::Detached
-        );
         debug_assert!(
-            !already_terminal,
+            thread.state.is_alive(),
             "mark_finished on {id:?} which is already {:?}",
             thread.state,
         );
         // Release guard: a second call must not overwrite
         // exit_value or drop Detached. Joiners drained on the
         // first call.
-        if already_terminal {
+        if !thread.state.is_alive() {
             return Vec::new();
         }
         thread.state = PpuThreadState::Finished;
@@ -211,9 +203,9 @@ impl PpuThreadTable {
     /// possibly post / set the awaited condition, blocking would
     /// deadlock the schedule, so the wait must time-trip immediately.
     pub fn has_other_alive_thread(&self, caller: PpuThreadId) -> bool {
-        self.threads.iter().any(|(id, t)| {
-            *id != caller && !matches!(t.state, PpuThreadState::Finished | PpuThreadState::Detached)
-        })
+        self.threads
+            .iter()
+            .any(|(id, t)| *id != caller && t.state.is_alive())
     }
 
     /// Whether any thread whose low-32-bit id matches `raw_low32` is
@@ -235,10 +227,7 @@ impl PpuThreadTable {
         else {
             return true;
         };
-        !matches!(
-            thread.state,
-            PpuThreadState::Finished | PpuThreadState::Detached
-        )
+        thread.state.is_alive()
     }
 
     /// FNV-1a fold for determinism checking.

@@ -14,12 +14,42 @@ pub struct Rpcs3Config {
 }
 
 /// Which RPCS3 decoder combination to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
 pub enum Rpcs3Decoder {
     /// PPU Interpreter + SPU Interpreter.
     Interpreter,
     /// PPU LLVM + SPU LLVM.
     Llvm,
+}
+
+impl Rpcs3Decoder {
+    /// Runner-name fragment used in `Observation::metadata.runner`.
+    pub fn as_runner_str(self) -> &'static str {
+        match self {
+            Self::Interpreter => "rpcs3-interpreter",
+            Self::Llvm => "rpcs3-llvm",
+        }
+    }
+}
+
+#[cfg(test)]
+mod rpcs3_decoder_tests {
+    use super::*;
+    use strum::VariantArray;
+
+    /// Trip-wire: every variant's `as_runner_str()` must match
+    /// `format!("rpcs3-{:?}", v).to_lowercase()`.
+    #[test]
+    fn as_runner_str_matches_debug_derived_form() {
+        for d in Rpcs3Decoder::VARIANTS {
+            let debug_form = format!("rpcs3-{:?}", d).to_lowercase();
+            assert_eq!(
+                d.as_runner_str(),
+                debug_form,
+                "as_runner_str() drifted from Debug-derived form for {d:?}",
+            );
+        }
+    }
 }
 
 /// How to extract the result buffer from RPCS3 after a test run.

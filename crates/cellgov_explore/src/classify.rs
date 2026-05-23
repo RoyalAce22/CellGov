@@ -3,13 +3,21 @@
 use cellgov_event::UnitId;
 
 /// Verdict of a bounded exploration run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `IntoStaticStr` derive is the single source of truth for the
+/// human / JSON wire-form: `schedule-stable`, `schedule-sensitive`,
+/// `inconclusive`. `report::outcome_label` delegates to the derived
+/// `From<&OutcomeClass> for &'static str` impl.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr)]
 pub enum OutcomeClass {
     /// All explored schedules produced identical committed memory.
+    #[strum(serialize = "schedule-stable")]
     ScheduleStable,
     /// At least two explored schedules produced distinct committed memory.
+    #[strum(serialize = "schedule-sensitive")]
     ScheduleSensitive,
     /// Bounds were hit before a divergence was observed or ruled out.
+    #[strum(serialize = "inconclusive")]
     Inconclusive,
 }
 

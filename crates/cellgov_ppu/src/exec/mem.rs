@@ -252,7 +252,7 @@ pub(crate) fn execute(
             debug_assert_store_with_update("stdux", ra);
             let ea = state.ea_x_form(ra, rb);
             let verdict = buffer_store(store_buf, state, ea, 8, state.gpr[rs as usize]);
-            if matches!(verdict, ExecuteVerdict::Continue) {
+            if verdict.allows_writeback() {
                 state.gpr[ra as usize] = ea;
             }
             verdict
@@ -688,17 +688,14 @@ pub(crate) fn execute_lvx(
     ExecuteVerdict::Continue
 }
 
-/// Resolve a 16-byte aligned vector-line read.
+/// Resolve a 16-byte aligned vector-line read, overlaying any
+/// partially-overlapping buffered stores byte-by-byte when the
+/// `forward` fast path does not fully cover the line.
 ///
-/// Fast path: a single buffered store fully covers the line, so
-/// `forward` returns `Some` and the region is not touched.
+/// # Errors
 ///
-/// Slow path: read the line from the region view and overlay any
-/// partially-overlapping buffered stores byte-by-byte. This avoids
-/// the otherwise-pessimistic flush+retry that scalar-store /
-/// vector-load patterns on a shared cache line would force.
-///
-/// Returns `Err(aligned)` when no region view covers the line.
+/// Returns an `Unmapped` `MemError` when no region view covers
+/// the line.
 fn read_aligned_16(
     aligned: u64,
     region_views: &[(u64, &[u8])],

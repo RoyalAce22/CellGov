@@ -2,10 +2,10 @@
 //! and exposes a read-only `MemoryView` to `Lv2Host::dispatch`.
 
 use cellgov_exec::YieldReason;
-use cellgov_lv2::Lv2Runtime;
+use cellgov_lv2::{InvariantBreakReason, Lv2Runtime};
 use cellgov_mem::GuestMemory;
 use cellgov_time::GuestTicks;
-use cellgov_trace::{TracedEffectKind, TracedYieldReason};
+use cellgov_trace::{TracedEffectKind, TracedInvariantBreakReason, TracedYieldReason};
 
 pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKind {
     use cellgov_effects::Effect;
@@ -23,6 +23,18 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
         Effect::ConditionalStore { .. } => TracedEffectKind::ConditionalStore,
         Effect::RsxLabelWrite { .. } => TracedEffectKind::RsxLabelWrite,
         Effect::RsxFlipRequest { .. } => TracedEffectKind::RsxFlipRequest,
+    }
+}
+
+/// Cross-crate mirror for the lv2-owned [`InvariantBreakReason`]
+/// onto its `cellgov_trace` discriminant. The match has no `_` arm
+/// so a new source variant is a build break across the crate
+/// boundary, mirroring `traced_effect_kind` / `traced_yield_reason`.
+pub(super) fn traced_invariant_break_reason(
+    reason: InvariantBreakReason,
+) -> TracedInvariantBreakReason {
+    match reason {
+        InvariantBreakReason::Unspecified => TracedInvariantBreakReason::Unspecified,
     }
 }
 

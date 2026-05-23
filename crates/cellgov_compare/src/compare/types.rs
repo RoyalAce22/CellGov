@@ -3,7 +3,7 @@
 use crate::observation::{ObservedEvent, ObservedOutcome};
 
 /// Which fields to compare.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 pub enum CompareMode {
     /// Outcome + memory + full event sequence.
     Strict,
@@ -16,7 +16,7 @@ pub enum CompareMode {
 }
 
 /// Overall classification of a comparison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 pub enum Classification {
     /// All compared fields agree.
     Match,
@@ -26,6 +26,20 @@ pub enum Classification {
     Unsupported,
     /// Baselines disagree with each other; CellGov result is inconclusive.
     UnsettledOracle,
+}
+
+impl Classification {
+    /// Whether this classification should produce a non-zero CLI
+    /// exit code. `Match` and `Unsupported` exit 0; `Divergence` and
+    /// `UnsettledOracle` exit 1.
+    ///
+    /// Exhaustive: every variant must declare its CI exit intent.
+    pub fn exits_failure(&self) -> bool {
+        match self {
+            Classification::Divergence | Classification::UnsettledOracle => true,
+            Classification::Match | Classification::Unsupported => false,
+        }
+    }
 }
 
 /// First byte-level difference between two named memory regions.

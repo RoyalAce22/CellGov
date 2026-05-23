@@ -347,9 +347,9 @@ fn equivalence_dma_overlapping_writes() {
 /// `'outer: break` path that default-config scenarios don't touch.
 #[test]
 fn equivalence_three_overlapping_with_tight_bounds() {
-    // Spread is intentional: a future ExplorationConfig field
-    // should silently inherit the default rather than break the
-    // test on a literal-init compile error.
+    // Spread keeps a future ExplorationConfig field inheriting the
+    // default rather than breaking the test on a literal-init compile
+    // error.
     #[allow(clippy::needless_update)]
     let config = ExplorationConfig {
         max_schedules: 1,

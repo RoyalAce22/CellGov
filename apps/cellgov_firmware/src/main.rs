@@ -432,8 +432,7 @@ fn build_firmware_manifest(
         // decrypt_self_to_elf already parsed the same header to get
         // here, so this parse cannot fail; expect rather than
         // silent-fallback so a future change that decouples the two
-        // paths surfaces the violation instead of writing 0 (which
-        // collides with the legitimate revision-0 value).
+        // paths surfaces the violation instead of writing 0.
         let revision = sce::parse_sce_header(&raw)
             .expect("decrypt_self_to_elf success implies parse_sce_header success")
             .revision_flags

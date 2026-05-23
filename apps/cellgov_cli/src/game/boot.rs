@@ -53,17 +53,38 @@ fn content_source_label(
 }
 
 /// Which firmware-loading pipeline `boot::prepare` should drive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The `#[strum(serialize = "...")]` attributes are the single source
+/// of truth for the CLI wire form; the parser delegates to `FromStr`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr, strum::EnumString,
+)]
 pub enum BootMode {
+    #[strum(serialize = "single-prx")]
     SinglePrx,
+    #[strum(serialize = "firmware-set")]
     FirmwareSet,
 }
 
 impl BootMode {
     pub(crate) fn as_cli_str(self) -> &'static str {
-        match self {
-            BootMode::SinglePrx => "single-prx",
-            BootMode::FirmwareSet => "firmware-set",
+        <&'static str>::from(self)
+    }
+}
+
+#[cfg(test)]
+mod boot_mode_tests {
+    use super::*;
+    use std::str::FromStr;
+    use strum::VariantArray;
+
+    #[test]
+    fn cli_str_round_trips_via_parser() {
+        for mode in BootMode::VARIANTS {
+            let s = mode.as_cli_str();
+            let parsed =
+                BootMode::from_str(s).unwrap_or_else(|e| panic!("{s:?} did not round-trip: {e:?}"));
+            assert_eq!(parsed, *mode, "round-trip mismatch for {mode:?} via {s:?}");
         }
     }
 }
@@ -567,14 +588,10 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     //
     // # Panics
     //
-    // The .expect on load_spu_elf below covers a structural gap: this
-    // closure runs at SPU-thread-create time, not at sys_spu_image_open
-    // time, so a malformed title-provided ELF first surfaces here as a
-    // panic. The clean fix is upstream pre-validation at image-open
-    // time so the bytes that reach this closure are already vetted;
-    // until then, the panic is the failure mode for a malformed title.
-    // Cleaning this up requires changing the SpuFactory trait signature
-    // to return Result.
+    // The `.expect` on `load_spu_elf` below panics on a malformed
+    // title-provided ELF: this closure runs at SPU-thread-create
+    // time, after `sys_spu_image_open` has already accepted the
+    // bytes, so there is no error path back to the caller.
     rt.set_spu_factory(|id, init| {
         use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
         let mut unit = SpuExecutionUnit::new(id);

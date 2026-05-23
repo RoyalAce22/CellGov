@@ -22,11 +22,6 @@ use super::process;
 use super::rsx::SysRsxContext;
 
 /// LV2 host model driven by [`Self::dispatch`].
-///
-/// Every field is `pub(super)` so the host's submodule cluster
-/// (state-hash fold, dispatch handlers, primitive helpers) sees
-/// the same surface it saw when the type lived in `host/mod.rs`.
-/// Nothing outside `crate::host` reaches into the fields directly.
 #[derive(Debug, Clone)]
 pub struct Lv2Host {
     pub(super) content: ContentStore,
@@ -60,14 +55,18 @@ pub struct Lv2Host {
     /// least one wake or table update fell back to a degraded
     /// response. Not hashed.
     pub(super) invariant_break_count: usize,
+    /// Pending invariant-break events drained after each
+    /// `Lv2Host::dispatch` by the runtime and emitted as
+    /// `TraceRecord::HostInvariantBreak` records via the cross-crate
+    /// bridge in `cellgov_core::runtime::trace_bridge`. Not folded
+    /// into [`Self::state_hash`].
+    pub(super) pending_invariant_breaks: Vec<super::diagnostics::InvariantBreakReason>,
     /// Captured `sys_tty_write` byte stream in dispatch order.
     /// Observation channel; not folded into [`Self::state_hash`].
     pub(super) tty_log: Vec<u8>,
     /// Live-object counters for primitives stubbed as ID allocators
     /// only; feed `sys_process_get_number_of_object`. Not folded
-    /// into [`Self::state_hash`] -- counts are derived helpers,
-    /// not primary state; they only move when something else
-    /// in this struct also moves.
+    /// into [`Self::state_hash`].
     pub(super) process_counts: process::ProcessCounts,
     pub(super) fs_store: FsStore,
     /// Consulted by the dispatch layer when a guest path is not
@@ -84,9 +83,8 @@ pub struct Lv2Host {
     /// (LwMutexWake) do. Read by the runtime to drive
     /// critical-section-aware scheduler stickiness.
     pub(super) lwmutex_holds: BTreeMap<PpuThreadId, u32>,
-    /// Firmware identity from `firmware.toml`. `None` until the CLI
-    /// boot path verifies the manifest; folded into [`Self::state_hash`]
-    /// when set so two boots of the same install hash identically.
+    /// Firmware identity from `firmware.toml`. Folded into
+    /// [`Self::state_hash`] when set.
     pub(super) firmware_identity: Option<FirmwareIdentity>,
 }
 
@@ -166,6 +164,7 @@ impl Lv2Host {
             conds: CondTable::new(),
             current_tick: GuestTicks::ZERO,
             invariant_break_count: 0,
+            pending_invariant_breaks: Vec::new(),
             tty_log: Vec::new(),
             process_counts: process::ProcessCounts::new(),
             fs_store,
@@ -178,10 +177,8 @@ impl Lv2Host {
 
     /// Record the verified-firmware identity from the CLI boot path.
     /// `image_version` is FNV-1a-hashed; `pup_sha256_bytes` is the
-    /// 32-byte SHA-256 digest. Both fold into [`Self::state_hash`]
-    /// so two boots of the same install produce identical hashes.
-    /// Boot is one-shot; a second call would silently shift the
-    /// folded hash, so the no-overwrite invariant is asserted.
+    /// 32-byte SHA-256 digest. Boot is one-shot; the no-overwrite
+    /// invariant is asserted.
     pub fn set_firmware_identity(&mut self, image_version: &str, pup_sha256_bytes: [u8; 32]) {
         debug_assert!(
             self.firmware_identity.is_none(),
@@ -195,28 +192,27 @@ impl Lv2Host {
         });
     }
 
-    /// Read-only view of the captured firmware identity.
+    /// Captured firmware identity, or `None` before boot recorded one.
     pub fn firmware_identity(&self) -> Option<&FirmwareIdentity> {
         self.firmware_identity.as_ref()
     }
 
-    /// Read-only view of the in-memory filesystem store.
+    /// In-memory filesystem store.
     pub fn fs_store(&self) -> &FsStore {
         &self.fs_store
     }
 
-    /// Mutable view of the in-memory filesystem store.
+    /// Mutable view of [`Self::fs_store`].
     pub fn fs_store_mut(&mut self) -> &mut FsStore {
         &mut self.fs_store
     }
 
-    /// Read-only view of the mount table.
+    /// Mount table mapping guest paths to host paths.
     pub fn fs_mounts(&self) -> &FsMountTable {
         &self.fs_mounts
     }
 
-    /// Boot wires real mounts here; the dispatch layer treats the
-    /// table as read-only.
+    /// Mutable view of [`Self::fs_mounts`]; written by boot only.
     pub fn fs_mounts_mut(&mut self) -> &mut FsMountTable {
         &mut self.fs_mounts
     }
@@ -240,12 +236,8 @@ impl Lv2Host {
         *slot += 1;
     }
 
-    /// Underflow signals a leak in the increment path: a `dec`
-    /// without a matching `inc`, or a `dec` on a thread the
-    /// table has already cleared. The invariant is asserted so
-    /// the leak fires at the call site instead of being swallowed
-    /// by a saturating subtraction. Release builds saturate at 0
-    /// so a leak does not corrupt downstream counters.
+    /// Debug-asserts that the count is non-zero; release builds
+    /// saturate at 0 so a leak does not corrupt downstream counters.
     pub fn lwmutex_holds_dec(&mut self, tid: PpuThreadId) {
         if let Some(slot) = self.lwmutex_holds.get_mut(&tid) {
             debug_assert!(*slot > 0, "lwmutex hold count underflow on {tid:?}",);
@@ -318,7 +310,7 @@ impl Lv2Host {
         self.mem_alloc_ptr = base;
     }
 
-    /// Read-only view of the sys_rsx host context.
+    /// sys_rsx host context.
     #[inline]
     pub fn sys_rsx_context(&self) -> &SysRsxContext {
         &self.rsx_context
@@ -355,44 +347,43 @@ impl Lv2Host {
         Some(base)
     }
 
-    /// Read-only view of the per-title content manifest store.
+    /// Per-title content manifest store.
     pub fn content_store(&self) -> &ContentStore {
         &self.content
     }
 
-    /// Mutable view of the per-title content manifest store.
+    /// Mutable view of [`Self::content_store`].
     pub fn content_store_mut(&mut self) -> &mut ContentStore {
         &mut self.content
     }
 
-    /// Read-only view of the loaded-PRX registry.
+    /// Loaded-PRX registry.
     pub fn prx_registry(&self) -> &LoadedPrxRegistry {
         &self.prx_registry
     }
 
-    /// Mutable view of the loaded-PRX registry. Boot uses this to
-    /// register the minimum viable PRX set after `load_firmware_set`
-    /// returns.
+    /// Boot uses this to register the minimum viable PRX set after
+    /// `load_firmware_set` returns.
     pub fn prx_registry_mut(&mut self) -> &mut LoadedPrxRegistry {
         &mut self.prx_registry
     }
 
-    /// Read-only view of the SPU thread-group table.
+    /// SPU thread-group table.
     pub fn thread_groups(&self) -> &ThreadGroupTable {
         &self.groups
     }
 
-    /// Mutable view of the SPU thread-group table.
+    /// Mutable view of [`Self::thread_groups`].
     pub fn thread_groups_mut(&mut self) -> &mut ThreadGroupTable {
         &mut self.groups
     }
 
-    /// Read-only view of the PPU thread table.
+    /// PPU thread table.
     pub fn ppu_threads(&self) -> &PpuThreadTable {
         &self.ppu_threads
     }
 
-    /// Mutable view of the PPU thread table.
+    /// Mutable view of [`Self::ppu_threads`].
     pub fn ppu_threads_mut(&mut self) -> &mut PpuThreadTable {
         &mut self.ppu_threads
     }
@@ -413,15 +404,11 @@ impl Lv2Host {
     }
 
     /// `true` only when `unit_id` maps to a `PpuThread` whose state
-    /// is [`crate::ppu_thread::PpuThreadState::Finished`]. Every other
-    /// case -- the unit has no PPU mapping, or the mapped thread is in
-    /// any non-`Finished` state -- returns `false`. The runtime
-    /// mirrors a host-driven thread finish (callback-worker terminal
-    /// trampoline) into the unit's lifecycle so the PPU execution
-    /// loop stops fetching past the trampoline `sc 0`.
+    /// is [`crate::ppu_thread::PpuThreadState::Finished`]. A unit with
+    /// no PPU mapping returns `false`.
     pub fn is_ppu_thread_finished_for_unit(&self, unit_id: UnitId) -> bool {
         match self.ppu_threads.get_by_unit(unit_id) {
-            Some(thread) => matches!(thread.state, crate::ppu_thread::PpuThreadState::Finished),
+            Some(thread) => thread.state.is_finished(),
             None => false,
         }
     }
@@ -431,72 +418,72 @@ impl Lv2Host {
         self.tls_template = template;
     }
 
-    /// Read-only view of the installed TLS template.
+    /// Installed TLS template.
     pub fn tls_template(&self) -> &TlsTemplate {
         &self.tls_template
     }
 
-    /// Read-only view of the lwmutex table.
+    /// Lightweight mutex table.
     pub fn lwmutexes(&self) -> &LwMutexTable {
         &self.lwmutexes
     }
 
-    /// Mutable view of the lwmutex table.
+    /// Mutable view of [`Self::lwmutexes`].
     pub fn lwmutexes_mut(&mut self) -> &mut LwMutexTable {
         &mut self.lwmutexes
     }
 
-    /// Read-only view of the mutex table.
+    /// Mutex table.
     pub fn mutexes(&self) -> &MutexTable {
         &self.mutexes
     }
 
-    /// Mutable view of the mutex table.
+    /// Mutable view of [`Self::mutexes`].
     pub fn mutexes_mut(&mut self) -> &mut MutexTable {
         &mut self.mutexes
     }
 
-    /// Read-only view of the semaphore table.
+    /// Semaphore table.
     pub fn semaphores(&self) -> &SemaphoreTable {
         &self.semaphores
     }
 
-    /// Mutable view of the semaphore table.
+    /// Mutable view of [`Self::semaphores`].
     pub fn semaphores_mut(&mut self) -> &mut SemaphoreTable {
         &mut self.semaphores
     }
 
-    /// Read-only view of the event-queue table.
+    /// Event-queue table.
     pub fn event_queues(&self) -> &EventQueueTable {
         &self.event_queues
     }
 
-    /// Mutable view of the event-queue table.
+    /// Mutable view of [`Self::event_queues`].
     pub fn event_queues_mut(&mut self) -> &mut EventQueueTable {
         &mut self.event_queues
     }
 
-    /// Read-only view of the event-flag table.
+    /// Event-flag table.
     pub fn event_flags(&self) -> &EventFlagTable {
         &self.event_flags
     }
 
-    /// Read-only view of the condition-variable table.
+    /// Condition-variable table.
     pub fn conds(&self) -> &CondTable {
         &self.conds
     }
 
-    /// Mutable view of the condition-variable table.
+    /// Mutable view of [`Self::conds`].
     pub fn conds_mut(&mut self) -> &mut CondTable {
         &mut self.conds
     }
 
-    /// Mutable view of the event-flag table.
+    /// Mutable view of [`Self::event_flags`].
     pub fn event_flags_mut(&mut self) -> &mut EventFlagTable {
         &mut self.event_flags
     }
 
-    /// Allocate a new child-thread stack of `size` bytes at `align`.
+    /// Allocate a child-thread stack of `size` bytes at `align`.
     pub fn allocate_child_stack(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
         self.stack_allocator.allocate(size, align)
     }

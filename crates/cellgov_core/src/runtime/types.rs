@@ -9,20 +9,19 @@ use cellgov_lv2::{PpuThreadInitState, SpuInitState};
 use cellgov_time::{Budget, Epoch, GuestTicks};
 
 /// One pass of the runtime pipeline, returned by
-/// [`crate::Runtime::step`] on success. `epoch_after` is unchanged from
-/// before the step -- the epoch advances only at commit boundaries.
+/// [`crate::Runtime::step`] on success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeStep {
-    /// Selected unit.
+    /// The scheduled unit.
     pub unit: UnitId,
-    /// Return value of `run_until_yield`.
+    /// Execution result from `run_until_yield`.
     pub result: ExecutionStepResult,
-    /// Emitted in the order the unit produced them; the runtime never
-    /// reorders.
+    /// Emission order preserved; the runtime never reorders.
     pub effects: Vec<Effect>,
     /// Guest time after the step's consumed budget was applied.
     pub time_after: GuestTicks,
-    /// Epoch value observed at step completion.
+    /// Epoch observed at step completion (unchanged within a step;
+    /// advances only at commit boundaries).
     pub epoch_after: Epoch,
 }
 
@@ -54,20 +53,15 @@ pub type PpuFactory = Box<dyn Fn(UnitId, PpuThreadInitState) -> Box<dyn Register
 /// Controls which trace records emit and whether per-instruction
 /// state-hash fingerprints are captured.
 ///
-/// Two orthogonal axes drive the modes:
+/// Two orthogonal axes:
 ///
 /// 1. *Per-yield* records (`UnitScheduled`, `StepCompleted`,
-///    `EffectEmitted`, commit-boundary state-hash checkpoints):
-///    fire once per `run_until_yield` call. `FullTrace` enables
-///    them all; `DeterminismCheck` enables the commit-boundary
-///    subset; `FaultDriven` disables them.
-/// 2. *Per-instruction* `PpuStateHash` fingerprints: fire once per
-///    retired instruction. The runtime sets the
-///    `ExecutionContext::trace_per_step` flag based on mode
-///    (`FullTrace` and `DeterminismCheck` set it, `FaultDriven`
-///    does not). The unit's per-step hash buffer accumulates
-///    `(pc, hash)` per retirement at any budget size, so trace
-///    fidelity is independent of slice granularity.
+///    `EffectEmitted`, commit-boundary state-hash checkpoints).
+/// 2. *Per-instruction* `PpuStateHash` fingerprints, gated by
+///    `ExecutionContext::trace_per_step`. The unit's per-step hash
+///    buffer accumulates one `(pc, hash)` per retirement at any
+///    budget size, so trace fidelity is independent of slice
+///    granularity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeMode {
     /// No trace records, no per-instruction hashes.
@@ -78,14 +72,10 @@ pub enum RuntimeMode {
     FullTrace,
 }
 
-/// All non-trivial modes return the throughput batch size (256).
-/// `PpuStateHash` records carry their own retired-instruction PC and
-/// the unit's per-step hash buffer accumulates one entry per retired
-/// instruction independent of yield size, so the trace fidelity is
-/// orthogonal to budget choice. The yield-boundary records
-/// (`UnitScheduled`, `StepCompleted`, `EffectEmitted`) describe a
-/// scheduler decision and a budget consumption; under FullTrace they
-/// fire once per yield, not once per instruction.
+/// All current modes return 256 (the throughput batch size). The
+/// exhaustive match without an `_` arm is a trip-wire: a new
+/// `RuntimeMode` variant breaks compilation here and forces the
+/// author to pick its budget rather than silently inheriting 256.
 pub fn default_budget_for_mode(mode: RuntimeMode) -> Budget {
     match mode {
         RuntimeMode::FullTrace | RuntimeMode::FaultDriven | RuntimeMode::DeterminismCheck => {

@@ -81,6 +81,28 @@ pub enum ParseError {
     UnexpectedEof { in_field: &'static str },
 }
 
+impl ParseError {
+    /// Whether this error is fatal (no resync possible). Streaming
+    /// parsers abort on fatal errors; non-fatal errors trigger
+    /// byte-by-byte resync to the next valid record magic.
+    ///
+    /// Exhaustive: every variant must declare its fatal-ness. A new
+    /// fatal-shape variant (e.g., `CorruptHeader`, `VersionMismatch`,
+    /// `OutOfMemory`) defaulting to non-fatal is silently resync-
+    /// skipped, throwing away the trace stream while the diagnostic
+    /// eprintln reports only a cosmetic `resyncs` count.
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            ParseError::Io(_) => true,
+            ParseError::BadHeaderMagic { .. }
+            | ParseError::BadVersion { .. }
+            | ParseError::NameTooLong { .. }
+            | ParseError::WriteTooLarge { .. }
+            | ParseError::UnexpectedEof { .. } => false,
+        }
+    }
+}
+
 /// Parse the entire trace file into a `Vec<CallRecord>`. Only used
 /// by tests; production callers stream via [`parse_streaming`] so
 /// multi-GB traces stay in bounded memory.
@@ -160,7 +182,7 @@ where
         match parse_one_record(&mut reader) {
             Ok(rec) => on_record(rec)?,
             Err(e) => {
-                if matches!(e, ParseError::Io(_)) {
+                if e.is_fatal() {
                     return Err(e);
                 }
                 resyncs += 1;
@@ -420,8 +442,7 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    /// Build a minimal trace blob in the on-disk format. Used to
-    /// pin the parser without needing a real RPCS3 run.
+    /// Build a minimal trace blob in the on-disk format.
     fn build_trace(records: &[CallRecord]) -> Vec<u8> {
         let mut buf = Vec::new();
         buf.write_all(&HEADER_MAGIC.to_le_bytes()).unwrap();

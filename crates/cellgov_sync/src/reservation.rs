@@ -95,8 +95,8 @@ impl core::fmt::Display for ReservedLine {
 #[derive(Debug, Clone, Default)]
 pub struct ReservationTable {
     /// `BTreeMap` keeps `state_hash` invariant under permutation by
-    /// walking unit ids in order. `UnitId: Ord` is load-bearing for
-    /// determinism, not an incidental derive.
+    /// walking unit ids in order. `UnitId: Ord` is what makes that
+    /// determinism hold; it is not an incidental derive.
     entries: BTreeMap<UnitId, ReservedLine>,
 }
 

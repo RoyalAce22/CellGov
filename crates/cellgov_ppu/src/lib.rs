@@ -70,23 +70,6 @@ mod fault_class_tests {
     }
 }
 
-/// True for fused 2-instruction variants that require a `Consumed`
-/// placeholder at PC+4; false for 1-instruction quickenings.
-fn is_super_pair(insn: &instruction::PpuInstruction) -> bool {
-    matches!(
-        insn,
-        instruction::PpuInstruction::LwzCmpwi { .. }
-            | instruction::PpuInstruction::LiStw { .. }
-            | instruction::PpuInstruction::MflrStw { .. }
-            | instruction::PpuInstruction::LwzMtlr { .. }
-            | instruction::PpuInstruction::MflrStd { .. }
-            | instruction::PpuInstruction::LdMtlr { .. }
-            | instruction::PpuInstruction::StdStd { .. }
-            | instruction::PpuInstruction::CmpwiBc { .. }
-            | instruction::PpuInstruction::CmpwBc { .. }
-    )
-}
-
 /// PPU architectural state snapshot for replay.
 // [PPC-Book1 p:18 s:2.3 Branch Processor Registers] CR is 32 bits in eight 4-bit fields; LR and CTR are 64-bit branch registers.
 #[derive(Debug, Clone)]
@@ -433,11 +416,14 @@ impl ExecutionUnit for PpuExecutionUnit {
             ) {
                 ExecuteVerdict::Continue => {
                     self.state.pc += 4;
-                    // A super-pair without a `Consumed` at PC+4 would re-execute
-                    // its second half. Cannot fire if the shadow builder and
-                    // fusion tables agree.
-                    debug_assert!(
-                        !is_super_pair(&insn)
+                    // A super-pair without a `Consumed` at PC+4 would
+                    // re-execute its second half. `shadow::superpair`
+                    // and `PpuInstruction::is_super_pair` must agree
+                    // on which variants are fused; this assert covers
+                    // producer-emission, `is_super_pair`'s exhaustive
+                    // match covers the variant set.
+                    assert!(
+                        !insn.is_super_pair()
                             || self
                                 .instruction_shadow
                                 .as_ref()
@@ -447,7 +433,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                                     instruction::PpuInstruction::Consumed
                                 )),
                         "super-pair {} at 0x{step_pc:x} not followed by Consumed at 0x{:x}",
-                        insn.variant_name(),
+                        <&'static str>::from(&insn),
                         self.state.pc,
                     );
                 }
@@ -561,7 +547,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                 // Attribute work to the dispatched variant (quickenings,
                 // super-pairs) rather than the raw encoding, so fusion shows
                 // up in the profile instead of being hidden behind its origin.
-                let name = insn.variant_name();
+                let name: &'static str = (&insn).into();
                 *self.profile_insns.entry(name).or_insert(0) += 1;
                 if let Some(prev) = self.profile_prev {
                     *self.profile_pairs.entry((prev, name)).or_insert(0) += 1;

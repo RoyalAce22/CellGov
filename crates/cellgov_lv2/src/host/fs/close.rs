@@ -8,12 +8,9 @@ use crate::host::Lv2Host;
 
 impl Lv2Host {
     /// `sys_fs_close` -- release an fd allocated via the FS layer.
-    /// Unknown fds surface CELL_EBADF.
-    ///
-    /// `fs_fd_count` is not decremented: real PS3 keeps the
-    /// kernel-side fs-object count untouched across `sys_fs_close`,
-    /// pinned by the `sys_process_get_number_of_object` matrix in
-    /// ps3autotests.
+    /// Unknown fds surface CELL_EBADF. `fs_fd_count` is not
+    /// decremented: real PS3 keeps the kernel-side fs-object count
+    /// untouched across `sys_fs_close`.
     pub(in crate::host) fn dispatch_fs_close(&mut self, fd: u32) -> Lv2Dispatch {
         match self.fs_store_mut().close_fd(fd) {
             Ok(()) => Lv2Dispatch::immediate(0),

@@ -10,3 +10,4 @@ workspace = true
 
 [dependencies]
 cellgov_time = { path = "../cellgov_time" }
+strum = { version = "0.26", default-features = false, features = ["derive"] }
