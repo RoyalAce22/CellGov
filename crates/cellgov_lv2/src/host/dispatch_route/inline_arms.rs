@@ -14,9 +14,8 @@ use crate::dispatch::Lv2Dispatch;
 use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
-    /// `sys_spu_thread_group_terminate` stub: logs an invariant-break
-    /// (guest-reachable, log-once -- the SPU teardown side is not
-    /// modeled) and returns CELL_OK.
+    /// `sys_spu_thread_group_terminate`: SPU teardown is not
+    /// modeled; returns CELL_ENOSYS.
     pub(super) fn dispatch_spu_thread_group_terminate_stub(
         &mut self,
         group_id: u32,
@@ -26,15 +25,32 @@ impl Lv2Host {
             "dispatch.spu_thread_group_terminate_stub",
             format_args!(
                 "sys_spu_thread_group_terminate(group_id={group_id}, value={value}) \
-                 stubbed; no SPU teardown performed"
+                 not implemented; returning CELL_ENOSYS"
             ),
         );
-        Lv2Dispatch::immediate(0)
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
-    /// `sys_memory_free`: no dealloc tracking; titles keying on
-    /// free's errno will misbehave.
-    pub(super) fn dispatch_memory_free_noop(&self) -> Lv2Dispatch {
+    /// `sys_memory_free`: no dealloc tracking. The honest answer
+    /// depends on whether the caller's `start_addr` is a valid prior
+    /// allocation -- real LV2 returns CELL_OK on a valid free,
+    /// CELL_EINVAL on a bad pointer, CELL_ESRCH on an unknown id.
+    /// CellGov's bump allocator does not track per-allocation state,
+    /// so it cannot distinguish the cases; a blanket ENOSYS would
+    /// itself be a lie (allocation works). The interim is to log
+    /// every free as a known model gap: the no-op-with-trace is a
+    /// convergent honest gap as long as no title in the corpus
+    /// frees, re-allocates expecting reuse, and observes the
+    /// difference. A proper fix requires per-allocation lifecycle
+    /// tracking.
+    pub(super) fn dispatch_memory_free_noop(&mut self) -> Lv2Dispatch {
+        self.log_invariant_break(
+            "dispatch.memory_free_noop",
+            format_args!(
+                "sys_memory_free: bump allocator does not reclaim; \
+                 returning CELL_OK without state change"
+            ),
+        );
         Lv2Dispatch::immediate(0u64)
     }
 
@@ -56,6 +72,20 @@ impl Lv2Host {
     /// The round-robin walk advances on the syscall yield itself,
     /// so the host has nothing further to do.
     pub(super) fn dispatch_ppu_thread_yield(&self) -> Lv2Dispatch {
+        Lv2Dispatch::immediate(0)
+    }
+
+    /// `sys_ppu_thread_start`: no-op returning CELL_OK because
+    /// [`Self::dispatch_ppu_thread_create`] schedules the new unit
+    /// atomically; the thread is already running.
+    ///
+    /// # Known model gap (create/start ordering)
+    ///
+    /// Real LV2 creates threads SUSPENDED and transitions them to
+    /// RUNNING here; CellGov collapses both into create. A title
+    /// that observes the create-to-start interval would see a
+    /// different ordering than real LV2 produces.
+    pub(super) fn dispatch_ppu_thread_start(&self, _target: u64) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0)
     }
 
@@ -297,10 +327,8 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 
-    /// `Unsupported` catch-all: logs the syscall number and args
-    /// once and returns CELL_OK so the guest keeps moving. Guests
-    /// keying on a real errno will misbehave; the log surfaces the
-    /// arm on first hit.
+    /// `Unsupported` catch-all: logs once and returns
+    /// CELL_ENOSYS.
     pub(super) fn dispatch_unsupported_default(
         &mut self,
         number: u64,
@@ -310,12 +338,11 @@ impl Lv2Host {
             "dispatch.unsupported_stub",
             format_args!(
                 "syscall {number} has no dispatch handler (r3={:#x} r4={:#x} r5={:#x} \
-                 r6={:#x} r7={:#x} r8={:#x} r9={:#x} r10={:#x}); returning CELL_OK stub \
-                 (guests keying on errno for this syscall will misbehave)",
+                 r6={:#x} r7={:#x} r8={:#x} r9={:#x} r10={:#x}); returning CELL_ENOSYS",
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::immediate(0u64)
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
     /// `Malformed` rejection: classifier failed to bind the request

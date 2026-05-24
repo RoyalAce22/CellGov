@@ -21,9 +21,7 @@ pub const PACKAGE_CELLGOV_SET_VBLANK_HANDLER: u32 = 0x8000_010C;
 pub const PACKAGE_CELLGOV_SET_USER_HANDLER: u32 = 0x8000_010D;
 
 impl Lv2Host {
-    /// sys_rsx_context_attribute (674). Dispatches on `package_id`.
-    /// Unknown sub-commands return CELL_OK and log an invariant-break
-    /// so the first unhandled id is visible without silent success.
+    /// `sys_rsx_context_attribute` (674). Dispatches on `package_id`.
     pub(in crate::host) fn dispatch_sys_rsx_context_attribute(
         &mut self,
         context_id: u32,
@@ -100,15 +98,18 @@ impl Lv2Host {
         }
     }
 
+    /// Fallback for unknown `sys_rsx_context_attribute` package_ids;
+    /// returns CELL_EINVAL per RPCS3 default-arm
+    /// (`rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:917-918`).
     fn sys_rsx_attribute_unknown(&mut self, package_id: u32) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.sys_rsx_context_attribute_unknown_package",
             format_args!(
                 "sys_rsx_context_attribute package_id {package_id:#x} not yet wired; \
-                 returning CELL_OK stub"
+                 returning CELL_EINVAL (matches RPCS3 default-arm errno)"
             ),
         );
-        Lv2Dispatch::immediate(0)
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 }
 
@@ -367,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn sys_rsx_context_attribute_unknown_package_returns_ok() {
+    fn sys_rsx_context_attribute_unknown_package_returns_einval() {
         let mut host = Lv2Host::new();
         let source = UnitId::new(0);
         allocate_context(&mut host, source);
@@ -385,9 +386,10 @@ mod tests {
             source,
             &rt,
         );
+        let expected = u64::from(errno::CELL_EINVAL);
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code: 0, effects } if effects.is_empty()
+            Lv2Dispatch::Immediate { code, effects } if code == expected && effects.is_empty()
         ));
     }
 

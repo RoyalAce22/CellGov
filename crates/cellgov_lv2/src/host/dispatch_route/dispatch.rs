@@ -230,6 +230,7 @@ impl Lv2Host {
                 self.dispatch_memory_container_create(cid_ptr, requester)
             }
             Lv2Request::PpuThreadYield => self.dispatch_ppu_thread_yield(),
+            Lv2Request::PpuThreadStart { target } => self.dispatch_ppu_thread_start(target),
             Lv2Request::TimeGetTimebaseFrequency => self.dispatch_time_get_timebase_frequency(),
             Lv2Request::TimeGetTimezone {
                 timezone_ptr,
@@ -375,7 +376,7 @@ impl Lv2Host {
             Lv2Request::ProcessGetPid => self.dispatch_process_get_pid(),
             Lv2Request::ProcessGetPpid => self.dispatch_process_get_ppid(),
             Lv2Request::ProcessGetPpuGuid => self.dispatch_process_get_ppu_guid(),
-            Lv2Request::ProcessIsStack { .. } => self.dispatch_process_is_stack(),
+            Lv2Request::ProcessIsStack { addr } => self.dispatch_process_is_stack(addr),
             Lv2Request::ProcessIsSpuLockLineReservationAddress { addr, flags } => {
                 self.dispatch_process_is_spu_lock_line_reservation_address(addr, flags)
             }

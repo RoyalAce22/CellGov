@@ -266,7 +266,7 @@ fn stub_dispatch_returns_cell_ok_for_process_exit() {
 }
 
 #[test]
-fn stub_dispatch_returns_cell_ok_for_unsupported() {
+fn unsupported_dispatch_returns_cell_enosys() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(256);
     let req = Lv2Request::Unsupported {
@@ -274,7 +274,7 @@ fn stub_dispatch_returns_cell_ok_for_unsupported() {
         args: [0; 8],
     };
     let result = host.dispatch(req, UnitId::new(0), &rt);
-    assert_eq!(result, Lv2Dispatch::immediate(0));
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
 }
 
 #[test]
@@ -618,7 +618,12 @@ fn syscall_494_flags_with_bit2_writes_zero_count_at_offset_0x10() {
 }
 
 #[test]
-fn syscall_136_returns_ok() {
+fn syscall_136_event_port_connect_local_returns_enosys() {
+    // sys_event_port_connect_local is a divergent honest gap: RPCS3
+    // persists the port -> queue binding and returns CELL_OK
+    // (tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_event.cpp:666-694);
+    // CellGov does not model the binding, so the honest response is
+    // CELL_ENOSYS.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -629,7 +634,7 @@ fn syscall_136_returns_ok() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(0));
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
 }
 
 #[test]
@@ -1281,6 +1286,64 @@ fn ppu_thread_yield_is_no_op_returning_ok() {
 }
 
 #[test]
+fn ppu_thread_start_returns_ok_because_auto_started_at_create() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::PpuThreadStart { target: 0x101 },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
+}
+
+#[test]
+fn process_is_stack_returns_real_answer_from_tracked_thread_ranges() {
+    // Regression pin: `sys_process_is_stack` now reads the real
+    // per-thread stack ranges from the thread table and returns a
+    // computed answer, rather than the prior unconditional 0
+    // (which fabricated "not on stack" without checking).
+    use crate::ppu_thread::PpuThreadAttrs;
+    let mut host = Lv2Host::new();
+    host.seed_primary_ppu_thread(
+        UnitId::new(0),
+        PpuThreadAttrs {
+            entry: 0x1000,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x1_0000,
+            priority: 1001,
+            tls_base: 0,
+        },
+    );
+    let rt = FakeRuntime::new(0x10000);
+
+    // Address inside [stack_base, stack_base + stack_size) -> 1
+    let on_stack = host.dispatch(
+        Lv2Request::ProcessIsStack { addr: 0xD000_0500 },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(on_stack, Lv2Dispatch::immediate(1));
+
+    // Address below stack_base -> 0
+    let below = host.dispatch(
+        Lv2Request::ProcessIsStack { addr: 0xCFFF_FFFF },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(below, Lv2Dispatch::immediate(0));
+
+    // Address at exact end (stack_base + stack_size) -> 0 (half-open)
+    let at_end = host.dispatch(
+        Lv2Request::ProcessIsStack { addr: 0xD001_0000 },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(at_end, Lv2Dispatch::immediate(0));
+}
+
+#[test]
 fn malformed_request_records_invariant_break_and_returns_einval() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
@@ -1317,7 +1380,7 @@ fn hypercall_records_invariant_break_and_returns_einval() {
 }
 
 #[test]
-fn spu_thread_group_terminate_logs_invariant_break() {
+fn spu_thread_group_terminate_logs_invariant_break_and_returns_enosys() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let before = host.invariant_break_count();
@@ -1329,7 +1392,7 @@ fn spu_thread_group_terminate_logs_invariant_break() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(0));
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
     assert!(host.invariant_break_count() > before);
 }
 

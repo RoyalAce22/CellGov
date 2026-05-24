@@ -63,8 +63,17 @@ impl Lv2Host {
         }
     }
 
-    /// sys_rsx_memory_free (667). No-op: the bump allocator never reclaims.
-    pub(in crate::host) fn dispatch_sys_rsx_memory_free_noop(&self) -> Lv2Dispatch {
+    /// sys_rsx_memory_free (669). No-op: the bump allocator never
+    /// reclaims. Logs an invariant-break so a caller that frees and
+    /// then re-allocates expecting the slot reused will be visible
+    /// in the trace; until that case is observed in the title
+    /// corpus, the no-op-with-trace is treated as a convergent
+    /// honest gap.
+    pub(in crate::host) fn dispatch_sys_rsx_memory_free_noop(&mut self) -> Lv2Dispatch {
+        self.log_invariant_break(
+            "dispatch.sys_rsx_memory_free_noop",
+            format_args!("sys_rsx_memory_free is a no-op against the bump allocator"),
+        );
         Lv2Dispatch::immediate(0)
     }
 }

@@ -6,27 +6,50 @@ developer: Sony Liverpool
 engine: Studio Liverpool proprietary
 distribution: Disc ISO
 checkpoint: FirstRsxWrite
-steps: 42950
+steps: 43137
 convergence: No (outcome: Fault vs Completed)
 byte_parity: --
 ---
 
 Does not converge with RPCS3 at FirstRsxWrite: CellGov faults
-at step 42,950 on an unresolved-import trampoline call for
-`cellSysutilRegisterCallback` (NID `0x9d98afa0`); RPCS3
+at step 43,137 with `DECODE_ERROR at PC=0x00000000`; RPCS3
 completes the checkpoint. Byte parity undefined until
-convergence.
+convergence. Re-anchored under the complete firmware-set
+boot: the prior fault at step 42,950 measured under-loaded
+boot contamination
+(`dispatch.unresolved_import` for cellSysutilRegisterCallback,
+plus the fake-CELL_OK lie on `sys_rsx_device_map` shifting
+the downstream COMMIT_FAULT location).
 
-RPCS3-side observation in this directory is from an earlier
-capture and may need re-running against the current build of
-`tools/rpcs3/rpcs3.exe` -- see REPRODUCTION.md for the
-capture commands.
+Post-re-anchor fault root cause: the title calls
+`sys_rsx_context_attribute` (LV2 syscall 674) during RSX
+init. CellGov does not model that syscall path; the
+unsupported-syscall stub returns `CELL_ENOSYS` (the honest
+"not implemented" errno, no longer a fake CELL_OK that the
+guest consumes as success). The title proceeds to an
+indirect call through a function pointer that resolved to
+NULL, faulting with DECODE_ERROR at PC=0. r11=0x2a2 (674)
+at the fault confirms the most-recent syscall was 674. The
+4 host invariant breaks during this run are all honest:
+`dispatch.unsupported_stub` ENOSYS firings for the unmodeled
+RSX syscalls plus one `dispatch.memory_free_noop` from the
+first sys_memory_free call against the bump allocator. No
+contaminating falsehoods.
+
+RPCS3 corpus state (Stage E):
+  outcome: Completed
+  step: (not recorded in observation)
+  checkpoint: FirstRsxWrite (manifest)
+  reached: yes -- RPCS3 boots WipEout HD end-to-end through
+           the operator-declared FirstRsxWrite point.
 
 ## Next step
 
-Resolve the CellGov fault OR pick a PC-based checkpoint reachable
-on both runners before the fault, then regenerate the fixture
-without `--allow-divergence`.
+The RSX-init progression work closes this divergence: model
+`sys_rsx_context_attribute` (LV2 syscall 674) and the sister
+RSX syscalls (673 / 675 / 676 / 677) so libgcm's RSX setup
+reaches the title's first-RSX-write checkpoint without an
+indirect-NULL fault.
 
 ## Structural pre-analysis (pending convergence)
 

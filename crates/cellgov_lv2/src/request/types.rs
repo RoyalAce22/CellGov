@@ -429,6 +429,11 @@ pub enum Lv2Request {
     },
     /// `sys_ppu_thread_yield`.
     PpuThreadYield,
+    /// `sys_ppu_thread_start`.
+    PpuThreadStart {
+        /// In: target thread id.
+        target: u64,
+    },
     /// `sys_ppu_thread_exit`.
     PpuThreadExit {
         /// In: exit value.

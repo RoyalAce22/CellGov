@@ -186,6 +186,7 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
         },
         syscall::EVENT_PORT_DESTROY => Lv2Request::EventPortDestroy { id: p!(0) },
         syscall::PPU_THREAD_YIELD => Lv2Request::PpuThreadYield,
+        syscall::PPU_THREAD_START => Lv2Request::PpuThreadStart { target: args[0] },
         syscall::PPU_THREAD_EXIT => Lv2Request::PpuThreadExit {
             exit_value: args[0],
         },

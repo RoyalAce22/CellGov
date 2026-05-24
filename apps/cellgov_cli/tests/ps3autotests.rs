@@ -215,10 +215,11 @@ fn run_observation(case: &Case, run_id: &str) -> Option<Observation> {
             .arg(case.max_steps.to_string())
             .arg("--save-observation")
             .arg(&observation_path)
+            // Synthetic test ELFs have no firmware-side imports.
+            .arg("--boot-mode")
+            .arg("single-prx")
             .arg(&elf_path)
             .current_dir(workspace_root())
-            // Synthetic test ELFs do not coexist with a real LV2 PRX
-            // boot; suppress the firmware/sys/external auto-default.
             .env("CELLGOV_NO_FIRMWARE_DIR", "1")
             .output()
             .expect("spawn cellgov_cli run-game")
