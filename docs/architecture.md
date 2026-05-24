@@ -139,7 +139,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier ids, and the atomic reservation table.                                                                                                                                                                                                                                                                                                                                                                  |
 | `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `cellgov_effects`              | The 13-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                                                                                                                                                                      |
-| `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The seam between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                                                                                                                                                                              |
+| `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The boundary between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                                                                                                                                                                          |
 | `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                                                                                                                                                                               |
 | `cellgov_lv2`                  | LV2 model: image / content registry, thread-group table, PPU thread table, in-memory filesystem store, LV2 sync primitives (mutex, cond, semaphore, lwmutex, event-flag, event-queue), syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                              |
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                         |
@@ -472,7 +472,7 @@ Classified into typed `Lv2Request` variants:
 | `sys_spu_thread_group_destroy`    | 171              | Withdraws the group from the table, scrubs unit / thread maps, returns CELL_OK. CELL_ESRCH on unknown id, CELL_EBUSY if any SPU in the group is still Running. |
 | `sys_spu_thread_initialize`       | 172              | Records image handle and args (copied at init time) per slot.                                          |
 | `sys_spu_thread_group_start`      | 173              | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
-| `sys_spu_thread_group_terminate`  | 177              | Stub: returns CELL_OK without teardown (logged as invariant break). Split from join so dispatch cannot conflate the two ABI shapes. |
+| `sys_spu_thread_group_terminate`  | 177              | Not modeled; returns CELL_ENOSYS via the null backend (logged as invariant break). Split from join so dispatch cannot conflate the two ABI shapes. RPCS3 reference: `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_spu.cpp:1476`. |
 | `sys_spu_thread_group_join`       | 178              | Blocks caller; wakes when all SPUs in the group finish.                                                |
 | `sys_spu_thread_write_spu_mb`     | 190              | Deposits a value into the target SPU's inbound mailbox.                                                |
 | `sys_memory_container_create`     | 341              | Allocates a monotonic container id, writes it to guest pointer.                                        |
@@ -531,11 +531,12 @@ This mirrors the SPU factory pattern so `cellgov_core` stays
 independent of `cellgov_ppu`.
 
 Many arms are special-cased in the host dispatcher to return
-spec-correct error codes or to stage guest-memory effects beyond the
-default CELL_OK fall-through (matching RPCS3 retail behavior). The
+spec-correct error codes or to stage guest-memory effects. The
 source of truth is `cellgov_lv2::host::dispatch_route`; the table
-below enumerates each arm that returns a non-OK code or stages an
-effect.
+below enumerates each arm that carries a non-default behavior.
+Syscalls without a typed-variant arm route through the null
+backend (see "Null backend for unmodeled syscalls" below) and
+return `CELL_ENOSYS` with a traced diagnostic.
 
 | Syscall / Request                                      | Number | Behavior                                                                                                                                                                                                                |
 | ------------------------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -566,11 +567,39 @@ arm; nonzero `SYS_PPU_THREAD_CREATE_{JOINABLE,INTERRUPT}` flag bits
 are not modeled in the thread-table state and fire an invariant-break
 log on first occurrence.
 
-All remaining syscalls fall through the host dispatcher returning
-CELL_OK with no effects. Unknown `Unsupported` numbers fire a
-`dispatch.unsupported_stub` log line at first occurrence so the
-syscall number surfaces at the stderr layer rather than silently
-returning a CELL_OK success.
+### Null backend for unmodeled syscalls
+
+Any syscall without a typed-variant arm dispatches to the
+**null backend**: an ABI-honest per-syscall "not implemented"
+response, traced as a first-class event. The default arm
+returns `CELL_ENOSYS` and emits a
+`dispatch.unsupported_stub` invariant-break record naming
+the syscall number; specific arms with a known RPCS3-divergent
+contract return the matching errno instead (e.g.
+`sys_rsx_context_attribute`'s unknown-package fallback
+returns `CELL_EINVAL` per RPCS3
+`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:917-918`).
+The runtime never returns a blanket `CELL_OK` for a path it
+did not execute; a fabricated success would let an unmodeled
+syscall contaminate downstream guest state with a result the
+guest consumes as truth, and the null backend exists to make
+that failure mode impossible.
+
+The criterion the null backend enforces: every guest
+syscall produces either a real CellGov-computed result (the
+typed-variant arm ran) or an honest traced "not implemented"
+response (the null-backend arm ran). No fabricated success
+ever reaches the guest. The traced records feed cross-runner
+analysis: an unmodeled-syscall diagnostic on a title's boot
+path identifies a specific implementation target, classified
+as **divergent honest gap** (RPCS3 delivers a real result
+where CellGov ENOSYS-es; an implementation target) or
+**convergent honest gap** (CellGov matches RPCS3's own
+divergence-from-hardware; not a target, the diagnostic can
+downgrade once a classifier emerges). The honest / convergent /
+divergent vocabulary is shared with the cross-runner matrix
+in [titles.md](titles.md) and the convergence sections of
+[concepts.md](concepts.md).
 
 ### In-memory filesystem
 
@@ -1192,49 +1221,69 @@ Common boot sequence (per-title numbers below):
    (liblv2 returns cleanly at ~24K steps).
 6. Run the game's CRT0 from the ELF entry point.
 
-Foundation-title boot exercises the firmware modules
-end-to-end. The unresolved-import trampoline catches GOT
-slots without a firmware export and surfaces them as a named
-diagnostic via `Lv2Request::UnresolvedImport`. LV2 syscalls
-that CellGov has not implemented surface as a
+Title boot exercises the firmware modules end-to-end. The
+implicit `--boot-mode` default is `firmware-set`
+(unconditional -- the cross-check turns missing firmware-dir
+into a named hard error so a misconfigured environment cannot
+silently downgrade to a contaminated single-PRX boot); the
+synthetic harness `ps3autotests` declares
+`--boot-mode single-prx` explicitly because its ELFs have no
+firmware-side imports. The unresolved-import trampoline
+catches GOT slots without a firmware export and surfaces them
+as a named diagnostic via `Lv2Request::UnresolvedImport`. LV2
+syscalls that CellGov has not implemented surface as a
 `dispatch.unsupported_stub` log line at first occurrence and
-return CELL_OK. Each fault driver is a named NID or syscall
-number; the per-title narratives below name the current
-frontier per title.
+return `CELL_ENOSYS` (the honest "not implemented" errno);
+guests see a detectable failure rather than a fabricated
+success. Each fault driver is a named NID or syscall number;
+the per-title narratives below name the current frontier per
+title.
 
 **flOw (NPUA80001).** The title's manifest enables `[rsx] mirror
 = true` so its put-pointer store at `0xC0000040` lands in the
-FIFO cursor. Under firmware-set boot, flOw reaches a
-firmware-side spin-poll inside `libgcm_sys.prx` at module-
-internal vaddr `0x7a08`: the poll reads `*(r3 + 8)`, compares
-to `r31`, and sleeps 30 microseconds via `sys_timer_usleep`
-when the values differ. The polled location holds the value
-the RSX would post via DMA / notify on real hardware. A
-child PPU thread is parked on `EventQueueReceive { out_ptr:
-0xD00FEED0, payload: None }`, waiting for an RSX-posted event
-on the same channel. Under default (single-PRX) boot, flOw
-calls through an unresolved-import trampoline for
-`cellSysmoduleLoadModule` (NID `0x32267a31`) at step 9,048.
+FIFO cursor. Under firmware-set boot (default), flOw reaches
+step 11,256 and exits via its own
+`sys_process_exit(1)` -- libgcm's `cellGcmInit()` calls
+`sys_rsx_device_map` (LV2 syscall 675), CellGov honestly
+returns `CELL_ENOSYS` because the RSX device-map syscall is
+not modeled, libgcm reports "cellGcmInit() failed", and flOw's
+CRT0 runs its abort sequence ("Waiting for the SPU thread
+group to be terminated...", `sys_spu_thread_group_join` fails
+with CELL_ESRCH because no group was created, `abort()` is
+invoked, the title calls `sys_process_exit`). The 43 residual
+`host_invariant_breaks` are all honest: ENOSYS returns for
+unmodeled syscalls the abort path exercises plus
+no-op-with-trace logs for handlers like memory_free against
+the bump allocator. No contaminating fake-success returns
+remain on the boot path.
 
 **Super Stardust HD (NPUA80068).** The harness uses a
 `FirstRsxWrite` checkpoint because the attract-mode loop never
-calls `sys_process_exit`. Under firmware-set boot, SSHD runs
-past 15.6M steps; one `dispatch.ppu_thread_create_unmodeled_flags`
-log line for `flags=0x10000` fires before the cap. Under
-default (single-PRX) boot, SSHD calls through an
-unresolved-import trampoline for `cellSysmoduleInitialize`
-(NID `0x63ff6ff9`) at step 14,342,058.
+calls `sys_process_exit`. Under firmware-set boot, SSHD
+reaches step 14,341,833 then faults during RSX setup. The 3
+residual `host_invariant_breaks` are all honest: two
+`dispatch.ppu_thread_create_unmodeled_flags` (flags=0x10000)
+firings (a convergent honest gap -- RPCS3's
+`_sys_ppu_thread_create` implementation only consults
+`flags & 3` for joinable/interrupt bits per
+`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_ppu_thread.cpp:492`,
+silently ignoring bit `0x10000`; CellGov matches), plus one
+no-op-with-trace log the boot triggers in an unmodeled
+handler.
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_firmware decrypt-self`. Under
-firmware-set boot, WipEout reaches step 43,066 then
-COMMIT_FAULTs on a write to `0x400000ec` inside the cellGcm
-RSX descriptor region; the descriptor writes target an IO
-window the kernel-side surface does not back. Under default
-(single-PRX) boot, WipEout calls through an unresolved-import
-trampoline for `cellSysutilRegisterCallback` (NID
-`0x9d98afa0`) at step 42,950. See
+firmware-set boot, WipEout reaches step 43,137 then faults with
+DECODE_ERROR at PC=0x0 -- the title called
+`sys_rsx_context_attribute` (LV2 syscall 674) which honestly
+returns `CELL_ENOSYS`, proceeded along a path expecting that
+syscall to have set up context state, and dereferenced a
+function pointer that resolved to NULL. The 4 residual
+`host_invariant_breaks` are all honest: ENOSYS returns for
+unmodeled RSX syscalls plus one no-op-with-trace log from
+the boot's first call into one of the unmodeled-no-op
+handlers. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
 
 ## Microtest corpus

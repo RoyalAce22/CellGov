@@ -248,3 +248,71 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         image.export_table.len()
     );
 }
+
+/// Static counterpart to the runtime `host_invariant_breaks`
+/// reading: union of the 15-stem set's export namespaces must
+/// contain every namespace any title in the corpus imports via
+/// the unresolved-trampoline path.
+#[test]
+fn min_viable_prx_set_exports_required_namespaces() {
+    let Some(dir) = locate_firmware_dir() else {
+        return;
+    };
+
+    let mut namespaces: BTreeSet<String> = BTreeSet::new();
+    let mut missing_stems: Vec<&str> = Vec::new();
+    for stem in MIN_VIABLE_PRX_STEMS {
+        let path = dir.join(format!("{stem}.sprx"));
+        if !path.is_file() {
+            missing_stems.push(*stem);
+            continue;
+        }
+        let raw = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let elf = cellgov_firmware::sce::decrypt_self_to_elf(&raw)
+            .unwrap_or_else(|e| panic!("decrypt {}: {e}", path.display()));
+        let parsed = cellgov_ppu::sprx::parse_prx(&elf)
+            .unwrap_or_else(|e| panic!("parse_prx {}: {e:?}", path.display()));
+        for lib in &parsed.exports {
+            namespaces.insert(lib.name.clone());
+        }
+    }
+    if !missing_stems.is_empty() {
+        if std::env::var_os("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD").is_some() {
+            panic!("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD set but stems missing: {missing_stems:?}");
+        }
+        eprintln!(
+            "min_viable_prx_set_exports_required_namespaces: namespace union built from \
+             {}/{} stems (missing: {missing_stems:?})",
+            MIN_VIABLE_PRX_STEMS.len() - missing_stems.len(),
+            MIN_VIABLE_PRX_STEMS.len(),
+        );
+    }
+
+    // Namespaces titles in the corpus import via the
+    // unresolved-trampoline path; every one must be exported by
+    // some stem in the loaded set.
+    const REQUIRED: &[&str] = &[
+        "cellSysmodule",
+        "cellSysutil",
+        "cellGcmSys",
+        "cellSpurs",
+        "sys_io",
+        "cellSysutilAvconfExt",
+    ];
+    for ns in REQUIRED {
+        assert!(
+            namespaces.contains(*ns),
+            "{ns}: namespace identified as a contamination source by the \
+             closure investigation is not exported by the {n}-stem firmware set; \
+             closure-walk regression",
+            n = MIN_VIABLE_PRX_STEMS.len()
+        );
+    }
+    eprintln!(
+        "min_viable_prx_set_exports_required_namespaces: {} namespaces exported by {}-stem set, \
+         all {} required namespaces present",
+        namespaces.len(),
+        MIN_VIABLE_PRX_STEMS.len(),
+        REQUIRED.len()
+    );
+}

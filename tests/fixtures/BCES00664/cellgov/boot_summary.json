@@ -3,6 +3,7 @@
     "kind": "first_rsx_write"
   },
   "outcome": "Fault",
-  "steps": 42950,
-  "budget": 256
+  "steps": 43137,
+  "budget": 256,
+  "host_invariant_breaks": 4
 }

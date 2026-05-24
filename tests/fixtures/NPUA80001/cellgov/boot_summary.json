@@ -3,6 +3,7 @@
     "kind": "process_exit"
   },
   "outcome": "ProcessExit",
-  "steps": 9048,
-  "budget": 256
+  "steps": 11256,
+  "budget": 256,
+  "host_invariant_breaks": 43
 }

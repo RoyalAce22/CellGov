@@ -6,24 +6,48 @@ developer: Housemarque
 engine: Housemarque proprietary
 distribution: PSN HDD
 checkpoint: FirstRsxWrite
-steps: 14342058
+steps: 14341833
 convergence: No (outcome: Fault vs Completed)
 byte_parity: --
 ---
 
 Does not converge with RPCS3 at FirstRsxWrite: CellGov faults
-at step 14,342,058 on an unresolved-import trampoline call
-for `cellSysmoduleInitialize` (NID `0x63ff6ff9`); RPCS3
-completes the checkpoint. Byte parity undefined until
-convergence.
+at step 14,341,833; RPCS3 completes the checkpoint. Byte
+parity undefined until convergence. Re-anchored under the
+complete firmware-set boot: the prior fault at step
+14,342,058 was measured under
+contamination from `dispatch.unresolved_import` (the
+`cellVideoOutGetScreenSize` NID required by SSHD was the
+lone outlier the closure walk surfaced -- exported by
+`libsysutil_avconf_ext`, now in MIN_VIABLE_PRX_STEMS).
 
-RPCS3-side observation in this directory is from an earlier
-capture and may need re-running against the current build of
-`tools/rpcs3/rpcs3.exe` -- see REPRODUCTION.md for the
-capture commands.
+Post-re-anchor: zero unresolved-import breaks; closure walk
+closes. The 3 remaining host invariant breaks are all honest:
+two `dispatch.ppu_thread_create_unmodeled_flags` firings for
+`flags=0x10000` (a convergent honest gap -- RPCS3's
+`_sys_ppu_thread_create` only consults `flags & 3` per
+`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_ppu_thread.cpp:492`,
+silently ignoring bit `0x10000`; CellGov matches), plus one
+log from one of the unmodeled-no-op handlers (memory_free,
+spu_initialize, RSX free, event-port-connect-local ENOSYS, or
+similar) the boot exercises. The downstream fault is not
+derived from these honest gaps; it is a separate RSX-init
+divergence the RSX-init progression work owns.
+
+RPCS3 corpus state (Stage E):
+  outcome: Completed
+  step: (not recorded in observation)
+  checkpoint: FirstRsxWrite (manifest)
+  reached: yes -- RPCS3 boots SSHD end-to-end through the
+           operator-declared FirstRsxWrite point.
 
 ## Next step
 
-Resolve the unresolved-import fault driver -- either map the
-NID to a direct LV2 syscall handler or include `cellSysmodule`
-in the loaded firmware PRX set -- then regenerate the fixture.
+The RSX-init progression work closes this divergence: model
+the RSX syscalls SSHD exercises during GCM init so the
+title's FirstRsxWrite checkpoint is reached. The 0x10000
+thread-flag log can downgrade from invariant-break to a
+one-line note in the same effort if a lie-vs-gap classifier
+emerges; until then the count of 3 reflects honest
+"unmodeled" reports against RPCS3-faithful behavior plus
+the unmodeled-no-op handler logs the boot triggers.

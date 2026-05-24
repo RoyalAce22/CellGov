@@ -127,6 +127,8 @@ lv2_syscalls! {
     PPU_THREAD_JOIN = 44;
     /// `_sys_ppu_thread_create` (LV2-side; sysPrxForUser wraps it).
     PPU_THREAD_CREATE = 52;
+    /// `sys_ppu_thread_start`.
+    PPU_THREAD_START = 53;
 
     /// `sys_event_flag_create`.
     EVENT_FLAG_CREATE = 82;

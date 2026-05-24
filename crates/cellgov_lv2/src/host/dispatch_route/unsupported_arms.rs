@@ -46,13 +46,22 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_event_port_connect_local` (136). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_event.cpp:666` attaches a port to a
-    /// queue. The port -> queue binding is not modeled in this slice,
-    /// so `sys_event_port_send` after this call is a no-op at the
-    /// oracle layer.
-    pub(super) fn dispatch_event_port_connect_local(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(0)
+    /// `sys_event_port_connect_local` (136). Port -> queue binding is
+    /// not modeled. RPCS3 implements the binding and returns CELL_OK
+    /// after persisting it
+    /// (`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_event.cpp:666-694`);
+    /// returning CELL_OK without the binding would let the guest
+    /// proceed believing sends will deliver when they would silently
+    /// vanish. CELL_ENOSYS is the honest divergent gap.
+    pub(super) fn dispatch_event_port_connect_local(&mut self) -> Lv2Dispatch {
+        self.log_invariant_break(
+            "dispatch.event_port_connect_local_unmodeled",
+            format_args!(
+                "sys_event_port_connect_local: port -> queue binding not modeled; \
+                 returning CELL_ENOSYS"
+            ),
+        );
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
     /// `sys_memory_container_create` (324). Oracle:
@@ -355,11 +364,21 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `sys_gamepad_ycon_if` (621). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_gamepad.cpp:68` multiplexes on
-    /// `packet_id`; no sub-handler mutates guest memory and the
-    /// default branch returns CELL_OK.
-    pub(super) fn dispatch_gamepad_ycon_if(&self) -> Lv2Dispatch {
+    /// `sys_gamepad_ycon_if` (621). Convergent honest gap: RPCS3's
+    /// implementation is also a stub -- every packet_id sub-handler
+    /// logs `todo()` and returns CELL_OK; the unknown-packet
+    /// default also returns CELL_OK
+    /// (`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_gamepad.cpp:7-98`).
+    /// CellGov matches that shape; the diagnostic fires so the
+    /// stub is traced.
+    pub(super) fn dispatch_gamepad_ycon_if(&mut self) -> Lv2Dispatch {
+        self.log_invariant_break(
+            "dispatch.gamepad_ycon_if_stub",
+            format_args!(
+                "sys_gamepad_ycon_if: stub returning CELL_OK; matches RPCS3's \
+                 todo-and-OK stub"
+            ),
+        );
         Lv2Dispatch::immediate(0)
     }
 

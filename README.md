@@ -28,6 +28,36 @@ and no per-title compatibility hacks. RPCS3 is the right tool to play
 a game. CellGov is the right tool to ask, byte-for-byte, what a PS3
 game would produce under any legal schedule.
 
+## The fidelity ethos
+
+Every LV2 syscall any loaded firmware PRX makes is modeled to
+RPCS3-faithful behavior; the **null backend** makes each
+unmodeled syscall an honest, traced, named not-implemented
+response (`CELL_ENOSYS` and similar -- never a blanket
+`CELL_OK`). The consequence: every cross-runner divergence is
+**an implementation target the oracle named, not a failure of
+the oracle**. The titles matrix is a frontier map of the
+unimplemented syscall surface, not a pass/fail scoreboard;
+each `No` row identifies the specific firmware path whose
+modeling closes the divergence. See
+[docs/concepts.md](docs/concepts.md) for the honest /
+contaminating / convergent / divergent vocabulary the matrix
+uses.
+
+The path forward: CellGov loads the firmware PRXes a title
+needs; those PRXes amplify the title's handful of direct
+calls into a much larger LV2 syscall traffic; unmodeled
+syscalls surface as honest divergences via the null backend;
+each subsequent phase models a family of them; a title
+transitions from "boots-with-honest-gaps" to "boots-clean
+(converges)" when the divergent-gap count for its PRX closure
+reaches zero. The current "minimum PRX set" is scaffolding,
+not a goal -- it dissolves title-by-title as syscall coverage
+grows, and loading a title's full transitive PRX closure
+becomes safe to attempt precisely because the null backend
+makes a premature load fail honestly (named divergence)
+instead of silently (fabricated success).
+
 ## Why determinism matters for static recomp
 
 PS3 games run PPU and SPU threads concurrently. A static recompiler
@@ -47,13 +77,30 @@ CellGov answers that question:
 
 Pre-Alpha. What works today:
 
-- 3 titles boot to cross-runner checkpoints (flOw, Super Stardust HD, WipEout HD Fury -- see [docs/titles.md](docs/titles.md)).
-- PPU and SPU interpreters: 160 PPU instructions; full SPU.
-- LV2: 88 classified syscalls. Userspace surfaces load as firmware SPRX modules from the user's PUP. Unresolved imports surface as named diagnostics via a guest-resident trampoline.
+- 3 titles boot to deterministic checkpoints (flOw at
+  `ProcessExit`, Super Stardust HD and WipEout HD Fury at
+  `FirstRsxWrite` or the named fault downstream of it -- see
+  [docs/titles.md](docs/titles.md)). All three currently
+  diverge from RPCS3 at the checkpoint; each divergence names
+  the specific set of unmodeled syscalls as the next
+  implementation target (see "The fidelity ethos" above).
+- PPU and SPU interpreters: complete decode for the PPC64 and
+  SPU ABI surfaces titles in the current corpus exercise;
+  coverage grows per phase (see
+  [docs/architecture.md](docs/architecture.md) for the current
+  per-instruction surface).
+- LV2: a growing set of classified syscalls (numbers shift
+  every phase as PRX coverage grows; see
+  [docs/architecture.md](docs/architecture.md)). Userspace
+  surfaces load as firmware SPRX modules from the user's PUP.
+  Unmodeled syscalls return an ABI-honest "not implemented"
+  response via the null backend. Unresolved imports surface
+  as named diagnostics via a guest-resident trampoline.
 - Sync primitives (lwmutex, event flag, semaphore, mutex, cond), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`).
-- Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`; 14 SPRX modules decrypt bit-identically to RPCS3's output.
+- Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`; 15 SPRX modules decrypt bit-identically to RPCS3's output.
 - ps3autotests cross-runner harness present.
-- 3,201 tests in release, 3,241 in debug; zero `unsafe` (`unsafe_code = forbid`).
+- Workspace test suite green in debug and release; zero
+  `unsafe` (`unsafe_code = forbid`); strict clippy gate.
 
 See [docs/architecture.md](docs/architecture.md) for the full pipeline, memory model, and per-subsystem details.
 

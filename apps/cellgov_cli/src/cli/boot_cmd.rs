@@ -54,14 +54,15 @@ const EXIT_RUN_GAME_CRITICAL_ANOMALY: i32 = 13;
 const EXIT_RUN_GAME_SAVE_OBSERVATION: i32 = 14;
 
 /// Parse `--boot-mode <single-prx|firmware-set>`; defaults to
-/// [`BootMode::SinglePrx`].
+/// [`BootMode::FirmwareSet`]. See [`cross_check_boot_mode_inner`]
+/// for the `firmware-set + no firmware-dir` rejection invariant.
 fn resolve_boot_mode(args: &[String]) -> BootMode {
     parse_boot_mode_inner(args).unwrap_or_else(|e| die(&e))
 }
 
 fn parse_boot_mode_inner(args: &[String]) -> Result<BootMode, String> {
     match find_flag_value(args, "--boot-mode") {
-        None => Ok(BootMode::SinglePrx),
+        None => Ok(BootMode::FirmwareSet),
         Some(v) => __test_parse_boot_mode(&v),
     }
 }
@@ -412,8 +413,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_boot_mode_defaults_to_single_prx() {
+    fn parse_boot_mode_defaults_to_firmware_set() {
         let args = vec!["cli".into(), "run-game".into()];
+        assert_eq!(parse_boot_mode_inner(&args).unwrap(), BootMode::FirmwareSet);
+    }
+
+    #[test]
+    fn parse_boot_mode_reads_explicit_single_prx() {
+        let args = vec![
+            "cli".into(),
+            "run-game".into(),
+            "--boot-mode".into(),
+            "single-prx".into(),
+        ];
         assert_eq!(parse_boot_mode_inner(&args).unwrap(), BootMode::SinglePrx);
     }
 

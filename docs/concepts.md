@@ -4,7 +4,7 @@ The vocabulary you need to read the rest of CellGov's docs without
 being surprised by contradictions. Read this before [titles.md](titles.md)
 or [architecture.md](architecture.md).
 
-Five ideas. Thirty minutes.
+Six ideas. Thirty minutes.
 
 ## What CellGov produces: observations
 
@@ -62,12 +62,70 @@ lands instead of tripping the checkpoint.
 A title that exits its budget cap without hitting any of the above
 has no checkpoint observation; cross-runner comparison for it is
 queued pending boot advancement to a deterministic stopping point.
-flOw and WipEout HD Fury are in that state today.
+The three titles in the current matrix all reach a checkpoint
+(flOw at ProcessExit, WipEout HD Fury and Super Stardust HD at
+their first RSX writes or the fault downstream of it); whether
+they CONVERGE with RPCS3 at that checkpoint is a separate
+question, addressed in the convergence sections below.
 
 The point of a checkpoint is: at this specific deterministic event,
 capture the observable state, stop the run, emit the observation.
 Two runs of the same title to the same checkpoint produce
 byte-identical observations. That is the determinism anchor.
+
+## The null backend: honest vs contaminating divergence
+
+CellGov's central claim is fidelity: every observable the
+guest sees should match what a real PS3 (or RPCS3, as the
+closest faithful reference) would produce. The corpus of
+syscalls a loaded PRX exercises is large; not all of them
+are modeled yet. CellGov's policy for the unmodeled gap is
+the **null backend**: every syscall a loaded PRX makes that
+CellGov has not modeled yet returns an ABI-honest,
+per-syscall, traced "not implemented" response (typically
+`CELL_ENOSYS` for routes without a specific contract,
+`CELL_EINVAL` where the RPCS3 reference returns that for
+the unknown-input arm, etc.). Never a blanket `CELL_OK`,
+never a fabricated success the guest then consumes as truth.
+
+That policy splits cross-runner divergence into two named
+kinds:
+
+- **Honest divergence.** CellGov faithfully reports "not
+  modeled" via the null backend and diverges from RPCS3
+  because RPCS3 has implemented what CellGov has not yet.
+  The divergence is traced and the gap is named. Two
+  sub-kinds:
+  - **Divergent honest gap.** RPCS3 delivers a real result
+    where CellGov returns the not-implemented response.
+    This is an implementation target: model the syscall and
+    the gap closes.
+  - **Convergent honest gap.** CellGov matches RPCS3's own
+    divergence-from-hardware (both ignore the same flag
+    bits, both reject the same input shape with the same
+    errno, etc.). The diagnostic fires as a verbose log of
+    behavior that matches RPCS3 anyway, and the guest
+    proceeds believing something true. Not an implementation
+    target; the diagnostic can downgrade to a one-line note
+    when a classifier emerges.
+- **Contaminating divergence.** CellGov returns a result
+  it did not compute -- a fabricated success the guest
+  consumes as truth, after which downstream behavior is
+  wrong in a way CellGov cannot detect. This is the failure
+  mode the null backend exists to make impossible: every
+  unmodeled syscall returns an honest "not implemented"
+  response, so no contaminating divergence can arise.
+
+State the criterion plainly: **CellGov never fabricates a
+result it did not compute.** Unmodeled syscalls get an
+ABI-honest, per-syscall, traced "not implemented" response;
+modeled syscalls produce the result; nothing in between.
+
+A divergence from RPCS3 is therefore an implementation
+target the oracle named, not a failure of the oracle. The
+matrix's `No` verdicts are the worklist; the criterion
+the matrix enforces is that none of those `No`s are
+fabrications.
 
 ## Cross-runner comparison
 
@@ -139,6 +197,18 @@ A title can fail to converge regardless of byte parity: byte
 parity is undefined because the runners never reached comparable
 architectural state. Both columns render side by side.
 
+A `No` convergence row from an honest divergence (the null
+backend reported not-implemented at one or more syscalls and
+the title's boot path consumed the not-implemented response)
+is **the oracle working as designed**: the matrix is naming
+which syscalls or which firmware paths are the next
+implementation target, not flagging a broken title. A `No`
+that would indicate contamination (a fabricated success the
+guest consumed as truth) cannot arise under the null backend
+-- that is the invariant the policy enforces. The matrix is a
+frontier map of the unimplemented syscall surface, not a
+pass/fail scoreboard.
+
 Byte-parity vocabulary (only meaningful when convergence is `Yes`):
 
 - `equivalent` -- zero divergent bytes.
@@ -169,31 +239,39 @@ Convergence-failure reasons render inline in the matrix:
 - `No (step count: <a> vs <b> (tolerance T))` -- cross-runner
   step delta beyond tolerance.
 
-### Worked example: Super Stardust HD
+### Worked example: what a converged row would look like
 
-SSHD's cross-runner fixture against RPCS3 records:
+No title in the current matrix converges yet (see
+[titles.md](titles.md) -- all three rows render `No (outcome:
+... vs Completed)`). This example is therefore illustrative:
+it describes what a fixture would carry once a title's
+divergent-honest-gap count reaches zero and convergence
+becomes possible. Treat it as a teaching shape, not a
+present verdict.
+
+A converged row's cross-runner fixture would record:
 
 ```
 Convergence: Yes
 Byte parity: 599 non-semantic + 125 pending
 ```
 
-Convergence holds: both runners reach `FirstRsxWrite` with the
-same outcome, same captured regions, same step count.
+Convergence holds: both runners reach the manifest checkpoint
+with the same outcome, same captured regions, same step count.
 
-The 599 non-semantic bytes include the byte at guest address
-`0x00010035` (low byte of `e_ehsize`: CellGov `0x00`, RPCS3
-`0x40`). That byte is in the loaded ELF header, which the guest
-never reads during execution; classifier rule `ElfHeader` covers
-it because the range is derivable from the title's own PHDR
-table.
+The 599 non-semantic bytes would include addresses like the
+low byte of `e_ehsize` (CellGov `0x00`, RPCS3 `0x40`) -- in
+the loaded ELF header, which the guest never reads during
+execution; classifier rule `ElfHeader` covers it because the
+range is derivable from the title's own PHDR table.
 
-The 125 pending bytes are byte-level divergences the classifier
-has no general rule for yet. They are enumerated in the fixture
-with their locator and the cellgov-side / rpcs3-side bytes;
-hypotheses about their source live in `NOTES.md`. The verdict
-moves to `equivalent` (no pending) only when a new
-structurally-grounded `DivergenceClass` lands that covers them.
+The 125 pending bytes would be byte-level divergences the
+classifier has no general rule for yet. They would be
+enumerated in the fixture with their locator and the
+cellgov-side / rpcs3-side bytes; hypotheses about their
+source would live in `NOTES.md`. The verdict moves to
+`equivalent` (no pending) only when a new structurally-grounded
+`DivergenceClass` lands that covers them.
 
 ### Why the two-column split matters
 
@@ -212,12 +290,11 @@ The two columns separate the two questions:
 If the matrix silently treated unclassified bytes as `equivalent`
 when convergence holds, the project would slide into per-title
 compatibility hacks: each new title would arrive with its own
-list of "trust me, these bytes are fine" entries. `Pending` is
-the load-bearing honest form: bytes differ, no general rule
-covers them yet, the fixture is on disk so a human can see
-exactly which bytes, and the verdict moves to
-`N non-semantic` only after a new structurally-grounded
-`DivergenceClass` lands.
+list of "trust me, these bytes are fine" entries. `Pending`
+is the honest verdict: bytes differ, no general rule covers
+them yet, the fixture is on disk so a human can see exactly
+which bytes, and the verdict moves to `N non-semantic` only
+after a new structurally-grounded `DivergenceClass` lands.
 
 The verdict vocabulary appears in three places:
 
@@ -248,8 +325,8 @@ The recompiler must distinguish:
   is a native binary, not a PS3 memory image.
 
 If CellGov said only `pass` for every title, the recompiler would
-have no way to tell the two categories apart: everything would
-look load-bearing. If CellGov said `fail` without further
+have no way to tell the two categories apart: every byte would
+look semantically required. If CellGov said `fail` without further
 classification, every title would look broken. The Convergence +
 Byte parity split plus the per-byte classification narrative
 gives the recompiler (and the reader) exactly the information
