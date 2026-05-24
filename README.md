@@ -78,8 +78,8 @@ CellGov answers that question:
 Pre-Alpha. What works today:
 
 - 3 titles boot to deterministic checkpoints (flOw at
-  `ProcessExit`, Super Stardust HD and WipEout HD Fury at
-  `FirstRsxWrite` or the named fault downstream of it -- see
+  `ProcessExit`; Super Stardust HD and WipEout HD Fury halt at
+  named faults on the path to `FirstRsxWrite` -- see
   [docs/titles.md](docs/titles.md)). All three currently
   diverge from RPCS3 at the checkpoint; each divergence names
   the specific set of unmodeled syscalls as the next

@@ -300,8 +300,12 @@ lv2_syscalls! {
     SYS_RSX_CONTEXT_ALLOCATE = 670;
     /// `sys_rsx_context_free`.
     SYS_RSX_CONTEXT_FREE = 671;
+    /// `sys_rsx_context_iomap`.
+    SYS_RSX_CONTEXT_IOMAP = 672;
     /// `sys_rsx_context_attribute`.
     SYS_RSX_CONTEXT_ATTRIBUTE = 674;
+    /// `sys_rsx_device_map`.
+    SYS_RSX_DEVICE_MAP = 675;
 
     /// `sys_ss_access_control_engine` -- privileged authority/identity
     /// gate used during user-PRX init to query the caller's SELF

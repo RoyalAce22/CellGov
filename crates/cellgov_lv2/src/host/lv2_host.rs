@@ -73,9 +73,10 @@ pub struct Lv2Host {
     /// pre-registered in [`Self::fs_store`]. Boot populates from the
     /// title manifest; immutable thereafter.
     pub(super) fs_mounts: FsMountTable,
-    /// Minimum viable PRX set loaded by `firmware-set` boot. Looked up by
+    /// Minimum viable PRX set loaded at boot. Looked up by
     /// `_sys_prx_load_module` (path -> kernel id) and walked by
-    /// `_sys_prx_get_module_list`. Empty under `single-prx`.
+    /// `_sys_prx_get_module_list`. Empty when no firmware-dir was
+    /// configured (e.g. synthetic-ELF harnesses).
     pub(super) prx_registry: LoadedPrxRegistry,
     /// Per-thread count of distinct lwmutexes held. Recursive
     /// re-acquires of the same lwmutex do not bump the count; only
@@ -117,11 +118,24 @@ impl Lv2Host {
     /// Upper bound (exclusive) of the sys_rsx memory region.
     pub const SYS_RSX_MEM_END: u32 = Self::SYS_RSX_MEM_BASE + 0x1000_0000;
 
+    /// Lower bound (inclusive) of the `sys_mmapper_allocate_address`
+    /// handout window. Set to `0x5000_0000` -- 256 MiB above
+    /// `SYS_RSX_MEM_END` -- so the reserved
+    /// `[0x4000_0000, 0x5000_0000)` rsx_context window (covering
+    /// `sys_rsx::device::RSX_DEVICE_ADDR` and any future
+    /// per-context allocations placed in the same window) cannot
+    /// alias an mmapper handout. RPCS3 achieves the same disjoint
+    /// guarantee via `vm::reserve_map(vm::rsx_context, 0,
+    /// 0x10000000, 0x403)` before either 670 or 675 allocates
+    /// inside it.
+    pub const MMAPPER_REGION_START: u32 = 0x5000_0000;
+
     /// Upper bound (exclusive) of the `sys_mmapper_allocate_address`
-    /// region. Beyond this address sits the kernel-reserved PPU
-    /// stack region; the mmapper allocator refuses grants that
-    /// would cross into it.
-    pub const MMAPPER_REGION_END: u32 = 0xD000_0000;
+    /// region. Capped at `0xC000_0000` so the mmapper allocator
+    /// cannot hand out an address that aliases the RSX dma_control
+    /// MMIO region at `control_register::DMA_CONTROL_BASE`. Beyond
+    /// the MMIO region sits the kernel-reserved PPU stack region.
+    pub const MMAPPER_REGION_END: u32 = 0xC000_0000;
 
     /// Construct an empty host with default tables and id allocators.
     ///
@@ -152,7 +166,7 @@ impl Lv2Host {
             // mmapper grants and sys_rsx-region addresses never
             // alias. Capped at MMAPPER_REGION_END (0xD000_0000) so
             // mmapper grants cannot walk into the PPU stack region.
-            mmapper_addr_cursor: Self::SYS_RSX_MEM_END,
+            mmapper_addr_cursor: Self::MMAPPER_REGION_START,
             rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
             rsx_mem_handle_counter: 1,
             rsx_context: SysRsxContext::new(),
@@ -702,9 +716,9 @@ mod tests {
     }
 
     #[test]
-    fn mmapper_alloc_first_grant_sits_above_sys_rsx_window() {
+    fn mmapper_alloc_first_grant_sits_at_mmapper_region_start() {
         let mut host = Lv2Host::new();
-        assert_eq!(host.mmapper_alloc(0x1), Some(Lv2Host::SYS_RSX_MEM_END));
+        assert_eq!(host.mmapper_alloc(0x1), Some(Lv2Host::MMAPPER_REGION_START));
     }
 
     #[test]
@@ -721,9 +735,9 @@ mod tests {
         let a = host.mmapper_alloc(0x1).expect("first");
         let b = host.mmapper_alloc(0x1).expect("second");
         let c = host.mmapper_alloc(0x1).expect("third");
-        assert_eq!(a, Lv2Host::SYS_RSX_MEM_END);
-        assert_eq!(b, Lv2Host::SYS_RSX_MEM_END + 0x1000_0000);
-        assert_eq!(c, Lv2Host::SYS_RSX_MEM_END + 0x2000_0000);
+        assert_eq!(a, Lv2Host::MMAPPER_REGION_START);
+        assert_eq!(b, Lv2Host::MMAPPER_REGION_START + 0x1000_0000);
+        assert_eq!(c, Lv2Host::MMAPPER_REGION_START + 0x2000_0000);
     }
 
     #[test]
@@ -731,26 +745,33 @@ mod tests {
         let mut host = Lv2Host::new();
         assert_eq!(host.mmapper_alloc(0), None);
         // Cursor unchanged after rejection.
-        assert_eq!(host.mmapper_alloc(0x1), Some(Lv2Host::SYS_RSX_MEM_END));
+        assert_eq!(host.mmapper_alloc(0x1), Some(Lv2Host::MMAPPER_REGION_START));
     }
 
     #[test]
     fn mmapper_alloc_caps_at_mmapper_region_end() {
         let mut host = Lv2Host::new();
-        // (MMAPPER_REGION_END - SYS_RSX_MEM_END) / granule = 9 grants.
-        for _ in 0..9 {
+        // (MMAPPER_REGION_END - MMAPPER_REGION_START) / granule
+        //   = (0xC000_0000 - 0x5000_0000) / 0x1000_0000 = 7 grants.
+        for _ in 0..7 {
             host.mmapper_alloc(0x1).expect("within region");
         }
-        // The 10th grant would walk into the kernel-stack region.
+        // The 8th grant would walk into the RSX dma_control MMIO
+        // region at 0xC000_0000.
         assert_eq!(host.mmapper_alloc(0x1), None);
     }
 
     #[test]
-    fn mmapper_alloc_never_returns_address_in_sys_rsx_window() {
+    fn mmapper_alloc_never_returns_address_in_reserved_rsx_window() {
+        // The reserved [0x4000_0000, 0x5000_0000) window holds
+        // RSX_DEVICE_ADDR (and any future per-context allocations
+        // placed in the same window) so mmapper handouts must
+        // never alias it.
         let mut host = Lv2Host::new();
-        for _ in 0..9 {
+        for _ in 0..7 {
             let addr = host.mmapper_alloc(0x1).expect("within region");
-            assert!(addr >= Lv2Host::SYS_RSX_MEM_END);
+            assert!(addr >= Lv2Host::MMAPPER_REGION_START);
+            assert!(addr >= 0x5000_0000);
         }
     }
 

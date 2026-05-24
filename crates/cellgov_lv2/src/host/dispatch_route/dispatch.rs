@@ -293,6 +293,18 @@ impl Lv2Host {
                 a5,
                 a6,
             } => self.dispatch_sys_rsx_context_attribute(context_id, package_id, a3, a4, a5, a6),
+            Lv2Request::SysRsxContextIomap {
+                context_id,
+                io,
+                ea,
+                size,
+                flags,
+            } => self.dispatch_sys_rsx_context_iomap(context_id, io, ea, size, flags),
+            Lv2Request::SysRsxDeviceMap {
+                dev_addr_ptr,
+                a2_ptr,
+                dev_id,
+            } => self.dispatch_sys_rsx_device_map(dev_addr_ptr, a2_ptr, dev_id, requester),
             Lv2Request::SsAccessControlEngine { pkg_id, a2, .. } => {
                 self.dispatch_ss_access_control_engine(pkg_id, a2, requester)
             }
@@ -358,8 +370,8 @@ impl Lv2Host {
             } => self.dispatch_mmapper_allocate_address(args, requester),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_MAP_SHARED_MEMORY,
-                ..
-            } => self.dispatch_mmapper_map_shared_memory(),
+                args,
+            } => self.dispatch_mmapper_map_shared_memory(args, rt),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_SEARCH_AND_MAP,
                 args,

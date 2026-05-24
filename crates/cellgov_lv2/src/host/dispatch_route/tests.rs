@@ -421,18 +421,45 @@ fn syscall_324_writes_fresh_cid_to_out_ptr() {
 }
 
 #[test]
-fn syscall_334_returns_ok_no_effects() {
+fn syscall_334_backed_target_returns_ok_no_effects() {
+    // FakeRuntime::new(0x10000) backs [0, 0x10000). A 334 call
+    // targeting an address inside that range is a genuine honest
+    // no-op: the flat backing aliases real bytes, so the map
+    // succeeds without any per-handle work.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 334,
-            args: [0x3000_0000, 0x4000_0007, 0x40000, 0, 0, 0, 0, 0],
+            args: [0x1000, 0x4000_0007, 0x40000, 0, 0, 0, 0, 0],
         },
         UnitId::new(0),
         &rt,
     );
     assert_eq!(result, Lv2Dispatch::immediate(0));
+}
+
+#[test]
+fn syscall_334_unbacked_target_returns_enosys_and_logs_break() {
+    // A 334 call targeting an address outside any backed region
+    // (e.g. the mmapper handout window WipEout hits) returns
+    // CELL_ENOSYS with a logged invariant break: the honest
+    // statement is "CellGov does not model backing here," not
+    // "the system is out of memory" (which would impersonate a
+    // real LV2 condition that isn't occurring).
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let breaks_before = host.invariant_break_count();
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0x5000_0000, 0x4000_0007, 0x40000, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
 }
 
 #[test]
@@ -544,19 +571,21 @@ fn syscall_330_writes_monotonic_256mib_aligned_address() {
 }
 
 #[test]
-fn syscall_330_returns_enomem_when_cursor_would_cross_kernel_stack_region() {
+fn syscall_330_returns_enomem_when_cursor_would_cross_mmio_region() {
     // mmapper_alloc bumps a 256 MiB-aligned cursor starting at
-    // SYS_RSX_MEM_END (0x4000_0000) and refuses grants that would
-    // cross MMAPPER_REGION_END (0xD000_0000) into the kernel-reserved
-    // PPU stack region. The window holds nine 256 MiB grants; the
-    // tenth must surface CELL_ENOMEM.
+    // MMAPPER_REGION_START (0x5000_0000) and refuses grants that
+    // would cross MMAPPER_REGION_END (0xC000_0000) into the RSX
+    // dma_control MMIO region. The window holds seven 256 MiB
+    // grants; the eighth must surface CELL_ENOMEM. The 256 MiB
+    // gap below MMAPPER_REGION_START is reserved for the
+    // rsx_context window holding RSX_DEVICE_ADDR.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let req = || Lv2Request::Unsupported {
         number: 330,
         args: [0x1000_0000, 0, 0, 0x9000, 0, 0, 0, 0],
     };
-    for i in 0..9 {
+    for i in 0..7 {
         let result = host.dispatch(req(), UnitId::new(0), &rt);
         match result {
             Lv2Dispatch::Immediate { code, effects } => {
@@ -570,7 +599,7 @@ fn syscall_330_returns_enomem_when_cursor_would_cross_kernel_stack_region() {
     assert_eq!(
         exhausted,
         Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
-        "the 10th 256 MiB allocation must cap-fail and surface CELL_ENOMEM"
+        "the 8th 256 MiB allocation must cap-fail and surface CELL_ENOMEM"
     );
 }
 

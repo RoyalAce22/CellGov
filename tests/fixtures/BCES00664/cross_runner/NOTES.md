@@ -6,35 +6,48 @@ developer: Sony Liverpool
 engine: Studio Liverpool proprietary
 distribution: Disc ISO
 checkpoint: FirstRsxWrite
-steps: 43137
+steps: 43066
 convergence: No (outcome: Fault vs Completed)
 byte_parity: --
 ---
 
 Does not converge with RPCS3 at FirstRsxWrite: CellGov faults
-at step 43,137 with `DECODE_ERROR at PC=0x00000000`; RPCS3
-completes the checkpoint. Byte parity undefined until
-convergence. Re-anchored under the complete firmware-set
-boot: the prior fault at step 42,950 measured under-loaded
-boot contamination
-(`dispatch.unresolved_import` for cellSysutilRegisterCallback,
-plus the fake-CELL_OK lie on `sys_rsx_device_map` shifting
-the downstream COMMIT_FAULT location).
+at step 43,066 with `COMMIT_FAULT: OutOfRange { effect_index: 0 }`;
+RPCS3 completes the checkpoint. Byte parity undefined until
+convergence.
 
-Post-re-anchor fault root cause: the title calls
-`sys_rsx_context_attribute` (LV2 syscall 674) during RSX
-init. CellGov does not model that syscall path; the
-unsupported-syscall stub returns `CELL_ENOSYS` (the honest
-"not implemented" errno, no longer a fake CELL_OK that the
-guest consumes as success). The title proceeds to an
-indirect call through a function pointer that resolved to
-NULL, faulting with DECODE_ERROR at PC=0. r11=0x2a2 (674)
-at the fault confirms the most-recent syscall was 674. The
-4 host invariant breaks during this run are all honest:
-`dispatch.unsupported_stub` ENOSYS firings for the unmodeled
-RSX syscalls plus one `dispatch.memory_free_noop` from the
-first sys_memory_free call against the bump allocator. No
-contaminating falsehoods.
+The step count moved 43,137 -> 43,066 between Phase 36.7 and
+Phase 37 because the 670 / 675 / 672 modeling routed the boot
+through the real libgcm init path (which reaches an earlier
+structural blocker) instead of the broken NULL-callback path
+(which faulted later, on a function pointer libgcm never got
+to populate). The lower step count is forward progress in
+capability: WipEout now executes `_cellGcmInitBody`'s real
+allocation and mapping sequence rather than dying on an
+unwritten OPD.
+
+Post-Phase-37 fault root cause: libgcm's init calls
+`sys_mmapper_map_shared_memory` (LV2 syscall 334) to map a
+shared-memory handle into an `sys_mmapper_allocate_address`-
+returned virtual at `0x5000_0000`. CellGov has no page
+backing for the mmapper handout window
+`[0x5000_0000, 0xC000_0000)`, so 334 returns CELL_ENOSYS
+with a `dispatch.mmapper_map_shared_memory_unbacked`
+invariant break naming the unbacked address. WipEout's title
+does not check 334's return (verified at title vaddrs
+`0x003e155c-0x003e1568`: post-syscall epilogue discards r3
+without inspection), proceeds with the handout address in
+its global state, and the first guest write through it
+(`Stw r11, 72(r5)` at title vaddr `0x01565af0`, `r5=0x500000a4`)
+trips OutOfRange at step 43,066.
+
+The 4 host invariant breaks during this run are all honest:
+two `dispatch.mmapper_map_shared_memory_unbacked` entries
+(one per 334 call libgcm issues during init), plus the
+existing `dispatch.memory_free_noop` and one
+`dispatch.unsupported_stub` ENOSYS for an RSX-init syscall.
+The fault is downstream of an honestly-attributed gap, not a
+fabricated success.
 
 RPCS3 corpus state (Stage E):
   outcome: Completed
@@ -45,11 +58,12 @@ RPCS3 corpus state (Stage E):
 
 ## Next step
 
-The RSX-init progression work closes this divergence: model
-`sys_rsx_context_attribute` (LV2 syscall 674) and the sister
-RSX syscalls (673 / 675 / 676 / 677) so libgcm's RSX setup
-reaches the title's first-RSX-write checkpoint without an
-indirect-NULL fault.
+A successor phase backs the mmapper handout window with real
+page allocation (page allocator + virtual-to-physical map),
+turning the honest `dispatch.mmapper_map_shared_memory_unbacked`
+gap into actual mapped memory. With backing in place, the
+title's writes through the handout succeed and libgcm
+proceeds to the put-pointer write that fires FirstRsxWrite.
 
 ## Structural pre-analysis (pending convergence)
 

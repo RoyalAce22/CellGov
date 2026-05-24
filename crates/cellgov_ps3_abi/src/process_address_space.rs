@@ -21,6 +21,17 @@ pub const PS3_CHILD_STACKS_SIZE: usize = 0x00F0_0000;
 pub const PS3_PRIMARY_STACK_TOP: u64 =
     PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 - 0x10;
 
+/// Base of the iomap region `sys_rsx_context_iomap` (672) maps into.
+/// libgcm asks for an IO window starting here; backing it as
+/// ReadWrite from boot lets the title's FIFO command buffer
+/// allocations land in a writable region.
+pub const PS3_RSX_IOMAP_BASE: u64 = 0x4000_0000;
+
+/// Size of the backed iomap region. Captured from WipEout's first
+/// `sys_rsx_context_iomap` call (the `size` argument); larger
+/// requests trip the over-cap diagnostic in the 672 dispatch handler.
+pub const PS3_RSX_IOMAP_SIZE: usize = 0x0550_0000;
+
 /// RSX video/local-memory MMIO: reads return zero, writes fault.
 pub const PS3_RSX_BASE: u64 = 0xC000_0000;
 
@@ -38,3 +49,10 @@ pub const PS3_SPU_RESERVED_SIZE: usize = 0x2000_0000;
 /// title text. Diagnostic walks reject candidate return addresses below
 /// this floor as obvious junk. OS-level convention, not architectural.
 pub const PS3_USER_TEXT_FLOOR: u64 = 0x0001_0000;
+
+// The boot-composed iomap window must not overlap the RSX MMIO
+// region. Consumed by the boot region composer that places
+// `[PS3_RSX_IOMAP_BASE, +PS3_RSX_IOMAP_SIZE)`; sibling regions
+// (primary stack, child stacks, SPU MMIO) sit above PS3_RSX_BASE
+// and are layout-disjoint by construction.
+const _: () = assert!(PS3_RSX_IOMAP_BASE + PS3_RSX_IOMAP_SIZE as u64 <= PS3_RSX_BASE);

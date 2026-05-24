@@ -929,15 +929,20 @@ the `FirstRsxWrite` checkpoint.
 ### LV2 sys_rsx syscall surface
 
 `cellgov_lv2::host::rsx` models the kernel-side surface the
-PS3 LV2 exposes under syscall numbers 668, 669, 670, 671, and
-674. The surface is a single allocated RSX context plus a
-bump-allocated memory region and the structures the guest
-poll paths read -- `RsxReports` (37 KB: semaphore array,
-notify array, report array), `RsxDriverInfo` (0x12F8 bytes,
-handler-queue id at offset 0x12D0), and `RsxDmaControl`
-(put / get / reference fields at offsets 0x40 / 0x44 / 0x48
-after a 0x40-byte reserved prefix). Init-time fills follow
-the same patterns as the real LV2 (semaphore sentinel
+PS3 LV2 exposes under syscall numbers 668, 669, 670, 671,
+672, 674, and 675. The surface is a single allocated RSX
+context plus a bump-allocated memory region and the
+structures the guest poll paths read -- `RsxReports` (37 KB:
+semaphore array, notify array, report array),
+`RsxDriverInfo` (0x12F8 bytes, handler-queue id at offset
+0x12D0), and `RsxDmaControl` (put / get / reference fields
+at offsets 0x40 / 0x44 / 0x48 from the MMIO base
+`control_register::DMA_CONTROL_BASE = 0xC000_0000`). The
+iomap region `[PS3_RSX_IOMAP_BASE, +PS3_RSX_IOMAP_SIZE)`
+(85 MiB starting at `0x4000_0000`) is composed at boot as
+ReadWrite so the IO offsets `sys_rsx_context_iomap` records
+have backing for the title's later writes. Init-time fills
+follow the same patterns as the real LV2 (semaphore sentinel
 0x1337C0D3 at index 1020, companion sentinels at 1021--1023,
 zeroed notify and report tables).
 
@@ -945,9 +950,11 @@ zeroed notify and report tables).
 | ------- | -------------------------- | ------------------------------------------------------------------- |
 | 668     | `SysRsxMemoryAllocate`     | Bump a 3 MB `mem_handle` from the RSX reservation range.            |
 | 669     | `SysRsxMemoryFree`         | Noop-safe (returns CELL_OK); bump allocator does not free.          |
-| 670     | `SysRsxContextAllocate`    | Emit reports / driver-info / DMA-control init + event queue.        |
+| 670     | `SysRsxContextAllocate`    | Emit reports / driver-info / dma_control init + event queue. lpar_dma_control_ptr OUT receives `0xC000_0000` (libgcm derives the put-pointer at `+0x40`). |
 | 671     | `SysRsxContextFree`        | Noop-safe (returns CELL_OK); single-context model.                  |
+| 672     | `SysRsxContextIomap`       | Records the IO->EA mapping on the live context. Validates per RPCS3 `sys_rsx.cpp:398-453` (context_id, 1 MiB alignment, `ea+size` below `PS3_RSX_BASE`, `io+size` within baked iomap region using u64 arithmetic). |
 | 674     | `SysRsxContextAttribute`   | Sub-command dispatch: FLIP_BUFFER, FLIP_MODE, SET_DISPLAY_BUFFER, handler register. |
+| 675     | `SysRsxDeviceMap`          | Idempotent: every `dev_id == 8` call returns `sys_rsx::device_map::ADDR` (`0x4000_0000`) in the OUT slot (CELL_OK); other dev_ids return CELL_EINVAL with a recorded invariant break. |
 
 **MMIO sentinel checkpoint.** Titles whose harness expects the
 `FirstRsxWrite` checkpoint hit the pre-sys_rsx MMIO sentinel at
@@ -1238,18 +1245,22 @@ current frontier per title.
 
 **flOw (NPUA80001).** The title's manifest enables `[rsx] mirror
 = true` so its put-pointer store at `0xC0000040` lands in the
-FIFO cursor. Under firmware-set boot (default), flOw reaches
-step 11,256 and exits via its own
-`sys_process_exit(1)` -- libgcm's `cellGcmInit()` calls
-`sys_rsx_device_map` (LV2 syscall 675), CellGov honestly
-returns `CELL_ENOSYS` because the RSX device-map syscall is
-not modeled, libgcm reports "cellGcmInit() failed", and flOw's
-CRT0 runs its abort sequence ("Waiting for the SPU thread
-group to be terminated...", `sys_spu_thread_group_join` fails
-with CELL_ESRCH because no group was created, `abort()` is
-invoked, the title calls `sys_process_exit`). The 43 residual
-`host_invariant_breaks` are all honest: ENOSYS returns for
-unmodeled syscalls the abort path exercises plus
+FIFO cursor. Under firmware-set boot, flOw reaches step
+11,271 and exits via its own `sys_process_exit(1)`. With
+`sys_rsx_device_map` (675) and `sys_rsx_context_iomap` (672)
+now modeled, libgcm's `cellGcmInit()` proceeds further into
+`_cellGcmInitBody` than before; the next honest gap is the
+mmapper handout window `[0x5000_0000, 0xC000_0000)` having
+no page backing (`sys_mmapper_map_shared_memory` returns
+CELL_ENOSYS via the null backend with a
+`dispatch.mmapper_map_shared_memory_unbacked` invariant
+break). libgcm reports "cellGcmInit() failed" and flOw's
+CRT0 runs its abort sequence
+(`sys_spu_thread_group_join` -> CELL_ESRCH because no group
+was created -> `abort()` -> `sys_process_exit`). The 42
+residual `host_invariant_breaks` are all honest: ENOSYS
+returns for unmodeled syscalls the abort path exercises,
+mmapper-unbacked logs for the handout window, plus
 no-op-with-trace logs for handlers like memory_free against
 the bump allocator. No contaminating fake-success returns
 remain on the boot path.
@@ -1271,16 +1282,20 @@ handler.
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_firmware decrypt-self`. Under
-firmware-set boot, WipEout reaches step 43,137 then faults with
-DECODE_ERROR at PC=0x0 -- the title called
-`sys_rsx_context_attribute` (LV2 syscall 674) which honestly
-returns `CELL_ENOSYS`, proceeded along a path expecting that
-syscall to have set up context state, and dereferenced a
-function pointer that resolved to NULL. The 4 residual
-`host_invariant_breaks` are all honest: ENOSYS returns for
-unmodeled RSX syscalls plus one no-op-with-trace log from
-the boot's first call into one of the unmodeled-no-op
-handlers. See
+firmware-set boot, WipEout reaches step 43,066 then faults
+with `COMMIT_FAULT: OutOfRange { effect_index: 0 }` -- libgcm's
+`_cellGcmInitBody` calls `sys_mmapper_map_shared_memory`
+(LV2 syscall 334) to map a shared-memory handle into the
+mmapper handout window, CellGov honestly returns
+`CELL_ENOSYS` because that virtual range has no page backing,
+the title does not check the syscall's return, and the first
+guest write through the handout address trips OutOfRange.
+The 4 residual `host_invariant_breaks` are all honest: two
+`dispatch.mmapper_map_shared_memory_unbacked` entries (one
+per 334 call libgcm issues), one
+`dispatch.unsupported_stub` ENOSYS for an unmodeled RSX
+syscall, and one `dispatch.memory_free_noop` from sys_memory_free
+against the bump allocator. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
 
 ## Microtest corpus

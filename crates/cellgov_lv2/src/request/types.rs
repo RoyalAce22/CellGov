@@ -676,6 +676,40 @@ pub enum Lv2Request {
         /// In: RSX context id.
         context_id: u32,
     },
+    /// `sys_rsx_context_iomap`. Records the IO -> EA mapping in
+    /// `SysRsxContext`. RPCS3's validation set lives at
+    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:398-453`:
+    /// `context_id` must be `0x5555_5555`, `io` / `ea` / `size`
+    /// must be non-zero and 1 MiB aligned, and `size` must fit in
+    /// the backed iomap region (see
+    /// `cellgov_ps3_abi::process_address_space::PS3_RSX_IOMAP_SIZE`).
+    SysRsxContextIomap {
+        /// In: RSX context id (must be `0x5555_5555`).
+        context_id: u32,
+        /// In: IO offset within the iomap region.
+        io: u32,
+        /// In: guest EA the IO offset maps to.
+        ea: u32,
+        /// In: size of the mapping in bytes.
+        size: u32,
+        /// In: mapping flags (unused by CellGov's model).
+        flags: u64,
+    },
+    /// `sys_rsx_device_map`. Returns the RSX device-map address in
+    /// `dev_addr` OUT (low 32 bits of an 8-byte BE u64 store);
+    /// libgcm's gate at the call site reads the value only when the
+    /// syscall returns `CELL_OK`. `a2` OUT is documented "Unused"
+    /// (RPCS3 `sys_rsx.cpp:927`) and observed unread by libgcm.
+    SysRsxDeviceMap {
+        /// Out: dev_addr (8-byte BE u64; libgcm reads low 32 bits).
+        dev_addr_ptr: u32,
+        /// Out: documented "Unused"; libgcm does not read it.
+        a2_ptr: u32,
+        /// In: device id. Must be `8` (the only id used during boot;
+        /// `cellGcmInitPerfMon` would use 7 / 9 / 10 / 11 / 12 but
+        /// those paths are not modeled yet).
+        dev_id: u32,
+    },
     /// `package_id` selects the sub-command (FLIP_MODE, FLIP_BUFFER,
     /// SET_DISPLAY_BUFFER, SET_FLIP_HANDLER, SET_VBLANK_HANDLER, ...).
     SysRsxContextAttribute {
