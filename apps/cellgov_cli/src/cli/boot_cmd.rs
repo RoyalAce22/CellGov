@@ -6,7 +6,6 @@ use cellgov_compare::BootOutcome;
 use cellgov_time::Budget;
 
 use crate::game;
-use crate::game::BootMode;
 
 use super::args::{
     find_flag_value, find_run_game_elf_path, parse_flag_value, parse_hex_flag, parse_hex_u64,
@@ -52,43 +51,6 @@ const EXIT_RUN_GAME_TIME_OVERFLOW: i32 = 12;
 const EXIT_RUN_GAME_CRITICAL_ANOMALY: i32 = 13;
 /// `--save-observation` was supplied but writing the JSON failed.
 const EXIT_RUN_GAME_SAVE_OBSERVATION: i32 = 14;
-
-/// Parse `--boot-mode <single-prx|firmware-set>`; defaults to
-/// [`BootMode::FirmwareSet`]. See [`cross_check_boot_mode_inner`]
-/// for the `firmware-set + no firmware-dir` rejection invariant.
-fn resolve_boot_mode(args: &[String]) -> BootMode {
-    parse_boot_mode_inner(args).unwrap_or_else(|e| die(&e))
-}
-
-fn parse_boot_mode_inner(args: &[String]) -> Result<BootMode, String> {
-    match find_flag_value(args, "--boot-mode") {
-        None => Ok(BootMode::FirmwareSet),
-        Some(v) => __test_parse_boot_mode(&v),
-    }
-}
-
-/// Parse a single `--boot-mode` value, wrapping the strum error in
-/// the CLI's user-facing message.
-#[doc(hidden)]
-pub(crate) fn __test_parse_boot_mode(v: &str) -> Result<BootMode, String> {
-    use std::str::FromStr;
-    BootMode::from_str(v).map_err(|_| {
-        format!("unknown --boot-mode value: {v:?}\nvalid values: single-prx, firmware-set")
-    })
-}
-
-/// Reject `--boot-mode firmware-set` with no firmware-dir
-/// resolved.
-fn cross_check_boot_mode_inner(mode: BootMode, firmware_dir: Option<&str>) -> Result<(), String> {
-    match (mode, firmware_dir) {
-        (BootMode::FirmwareSet, None) => {
-            Err("--boot-mode firmware-set requires a firmware directory; \
-             pass --firmware-dir or place SPRXes under firmware/sys/external"
-                .to_string())
-        }
-        _ => Ok(()),
-    }
-}
 
 /// Explicit `--firmware-dir` wins (validated as an existing
 /// directory); otherwise auto-default to [`DEFAULT_FIRMWARE_DIR`]
@@ -153,8 +115,6 @@ pub(crate) fn run_game(args: &[String]) {
     let trace = args.iter().any(|a| a == "--trace");
     let profile = args.iter().any(|a| a == "--profile");
     let firmware_dir = resolve_firmware_dir(args);
-    let boot_mode = resolve_boot_mode(args);
-    cross_check_boot_mode_inner(boot_mode, firmware_dir.as_deref()).unwrap_or_else(|e| die(&e));
     let dump_at_pc = parse_hex_flag(args, "--dump-at-pc");
     let dump_skip: u32 = parse_flag_value(args, "--dump-skip").unwrap_or(0);
     if dump_skip > 0 && dump_at_pc.is_none() {
@@ -184,7 +144,6 @@ pub(crate) fn run_game(args: &[String]) {
         trace,
         profile,
         firmware_dir: firmware_dir.as_deref(),
-        boot_mode,
         dump_at_pc,
         dump_skip,
         patch_bytes: &patch_bytes,
@@ -327,8 +286,6 @@ pub(crate) fn bench_boot_once(args: &[String]) {
     let inputs = resolve_boot_inputs(args, "bench-boot-once", false);
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000_000);
     let firmware_dir = resolve_firmware_dir(args);
-    let boot_mode = resolve_boot_mode(args);
-    cross_check_boot_mode_inner(boot_mode, firmware_dir.as_deref()).unwrap_or_else(|e| die(&e));
     let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot-once");
     let budget_override: Option<Budget> =
@@ -338,7 +295,6 @@ pub(crate) fn bench_boot_once(args: &[String]) {
         elf_path: &inputs.elf_path,
         max_steps,
         firmware_dir: firmware_dir.as_deref(),
-        boot_mode,
         strict_reserved,
         checkpoint_override,
         budget_override,
@@ -349,8 +305,6 @@ pub(crate) fn bench_boot(args: &[String]) {
     let inputs = resolve_boot_inputs(args, "bench-boot", false);
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000_000);
     let firmware_dir = resolve_firmware_dir(args);
-    let boot_mode = resolve_boot_mode(args);
-    cross_check_boot_mode_inner(boot_mode, firmware_dir.as_deref()).unwrap_or_else(|e| die(&e));
     let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot");
     let budget_override: Option<Budget> =
@@ -360,7 +314,6 @@ pub(crate) fn bench_boot(args: &[String]) {
         elf_path: &inputs.elf_path,
         max_steps,
         firmware_dir: firmware_dir.as_deref(),
-        boot_mode,
         strict_reserved,
         checkpoint_override,
         budget_override,
@@ -411,64 +364,6 @@ pub(crate) fn bench_boot(args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_boot_mode_defaults_to_firmware_set() {
-        let args = vec!["cli".into(), "run-game".into()];
-        assert_eq!(parse_boot_mode_inner(&args).unwrap(), BootMode::FirmwareSet);
-    }
-
-    #[test]
-    fn parse_boot_mode_reads_explicit_single_prx() {
-        let args = vec![
-            "cli".into(),
-            "run-game".into(),
-            "--boot-mode".into(),
-            "single-prx".into(),
-        ];
-        assert_eq!(parse_boot_mode_inner(&args).unwrap(), BootMode::SinglePrx);
-    }
-
-    #[test]
-    fn parse_boot_mode_reads_firmware_set() {
-        let args = vec![
-            "cli".into(),
-            "run-game".into(),
-            "--boot-mode".into(),
-            "firmware-set".into(),
-        ];
-        assert_eq!(parse_boot_mode_inner(&args).unwrap(), BootMode::FirmwareSet);
-    }
-
-    #[test]
-    fn parse_boot_mode_rejects_unknown() {
-        let args = vec![
-            "cli".into(),
-            "run-game".into(),
-            "--boot-mode".into(),
-            "wat".into(),
-        ];
-        let err = parse_boot_mode_inner(&args).unwrap_err();
-        assert!(err.contains("unknown --boot-mode value"), "got: {err}");
-    }
-
-    #[test]
-    fn cross_check_rejects_firmware_set_without_dir() {
-        let err = cross_check_boot_mode_inner(BootMode::FirmwareSet, None).unwrap_err();
-        assert!(err.contains("firmware-set"), "got: {err}");
-        assert!(err.contains("--firmware-dir"), "got: {err}");
-    }
-
-    #[test]
-    fn cross_check_allows_single_prx_with_or_without_dir() {
-        assert!(cross_check_boot_mode_inner(BootMode::SinglePrx, None).is_ok());
-        assert!(cross_check_boot_mode_inner(BootMode::SinglePrx, Some("foo")).is_ok());
-    }
-
-    #[test]
-    fn cross_check_allows_firmware_set_with_dir() {
-        assert!(cross_check_boot_mode_inner(BootMode::FirmwareSet, Some("foo")).is_ok());
-    }
 
     #[test]
     fn parse_dump_mem_fault_range_default_len() {

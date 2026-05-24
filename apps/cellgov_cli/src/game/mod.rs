@@ -13,5 +13,4 @@ mod stack_walk;
 mod step_loop;
 
 pub use bench::{bench_boot_one_run, bench_boot_pair, BenchGate, BenchOptions};
-pub use boot::BootMode;
 pub use run::{run_game, RunGameOptions, RunSummary};

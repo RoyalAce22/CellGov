@@ -308,7 +308,6 @@ pub(crate) const RUN_GAME_VALUE_FLAGS: &[&str] = &[
     "--max-steps",
     "--budget",
     "--firmware-dir",
-    "--boot-mode",
     "--dump-at-pc",
     "--dump-skip",
     "--dump-mem-boot",

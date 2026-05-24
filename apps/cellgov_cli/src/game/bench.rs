@@ -7,7 +7,7 @@ use std::time::Instant;
 use cellgov_compare::{BootOutcome, BootOutcomeParseError};
 use cellgov_time::Budget;
 
-use super::boot::{self, BootMode};
+use super::boot;
 use super::manifest::{self, TitleManifest};
 use super::step_loop::bench_step_loop;
 
@@ -23,7 +23,6 @@ pub struct BenchOptions<'a> {
     pub elf_path: &'a str,
     pub max_steps: usize,
     pub firmware_dir: Option<&'a str>,
-    pub boot_mode: BootMode,
     pub strict_reserved: bool,
     pub checkpoint_override: Option<manifest::CheckpointTrigger>,
     pub budget_override: Option<Budget>,
@@ -37,9 +36,7 @@ impl BenchOptions<'_> {
             .arg("--title")
             .arg(self.title.name())
             .arg("--max-steps")
-            .arg(self.max_steps.to_string())
-            .arg("--boot-mode")
-            .arg(self.boot_mode.as_cli_str());
+            .arg(self.max_steps.to_string());
         if let Some(d) = self.firmware_dir {
             cmd.arg("--firmware-dir").arg(d);
         }
@@ -113,7 +110,6 @@ pub fn bench_boot(opts: BenchOptions<'_>) -> BenchBootResult {
         title: opts.title,
         elf_path: opts.elf_path,
         firmware_dir: opts.firmware_dir,
-        boot_mode: opts.boot_mode,
         strict_reserved: opts.strict_reserved,
         dump_at_pc: None,
         dump_skip: 0,

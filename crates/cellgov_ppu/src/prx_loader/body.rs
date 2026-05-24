@@ -134,8 +134,8 @@ pub enum PrxLoaderError {
     MultiSegmentRelocations {
         /// Module whose relocation table referenced an unsupported segment.
         module: PrxModuleId,
-        /// Decoded segment index (>= 2) that the single-PRX applier
-        /// cannot handle.
+        /// Decoded segment index (>= 2) that the per-module relocation
+        /// applier cannot handle.
         segment_idx: usize,
     },
     /// Two paths in `bytes_by_path` produced the same `PrxModuleId`.
@@ -234,8 +234,9 @@ fn check_relocations_within_text_data(
     for r in &parsed.relocations {
         // PrxRelocation::sym encoding: low byte = target segment to
         // patch; next byte = value segment whose vaddr the addend is
-        // relative to. The single-PRX applier only knows segments 0
-        // (text) and 1 (data); >= 2 is the multi-segment case.
+        // relative to. The per-module relocation applier only knows
+        // segments 0 (text) and 1 (data); >= 2 is the multi-segment
+        // case.
         let target_seg = (r.sym & 0xFF) as usize;
         let value_seg = ((r.sym >> 8) & 0xFF) as usize;
         if target_seg >= 2 {
