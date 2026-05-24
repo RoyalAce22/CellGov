@@ -7,7 +7,7 @@ use cellgov_compare::BootOutcome;
 use cellgov_core::Runtime;
 use cellgov_time::Budget;
 
-use crate::game::boot::{self, BootMode};
+use crate::game::boot;
 use crate::game::diag::{
     print_hle_summary, print_insn_coverage, print_shadow_stats, print_top_pcs,
 };
@@ -25,7 +25,6 @@ pub struct RunGameOptions<'a> {
     pub trace: bool,
     pub profile: bool,
     pub firmware_dir: Option<&'a str>,
-    pub boot_mode: BootMode,
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,
     pub patch_bytes: &'a [(u64, u8)],
@@ -76,7 +75,6 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         trace,
         profile,
         firmware_dir,
-        boot_mode,
         dump_at_pc,
         dump_skip,
         patch_bytes,
@@ -113,7 +111,6 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         title,
         elf_path,
         firmware_dir,
-        boot_mode,
         strict_reserved,
         dump_at_pc,
         dump_skip,

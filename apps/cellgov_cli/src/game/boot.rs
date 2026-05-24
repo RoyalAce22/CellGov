@@ -13,7 +13,7 @@ use cellgov_ps3_abi::process_address_space::{
 };
 
 use super::manifest::TitleManifest;
-use super::prx::{load_firmware_prx, load_firmware_set_bound, pre_init_tls, run_module_start};
+use super::prx::{load_firmware_set_bound, pre_init_tls, run_module_start};
 use crate::cli::env::parse_env_bool;
 use crate::cli::exit::{die, load_ppu_image_or_die};
 
@@ -52,43 +52,6 @@ fn content_source_label(
     }
 }
 
-/// Which firmware-loading pipeline `boot::prepare` should drive.
-///
-/// The `#[strum(serialize = "...")]` attributes are the single source
-/// of truth for the CLI wire form; the parser delegates to `FromStr`.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr, strum::EnumString,
-)]
-pub enum BootMode {
-    #[strum(serialize = "single-prx")]
-    SinglePrx,
-    #[strum(serialize = "firmware-set")]
-    FirmwareSet,
-}
-
-impl BootMode {
-    pub(crate) fn as_cli_str(self) -> &'static str {
-        <&'static str>::from(self)
-    }
-}
-
-#[cfg(test)]
-mod boot_mode_tests {
-    use super::*;
-    use std::str::FromStr;
-    use strum::VariantArray;
-
-    #[test]
-    fn cli_str_round_trips_via_parser() {
-        for mode in BootMode::VARIANTS {
-            let s = mode.as_cli_str();
-            let parsed =
-                BootMode::from_str(s).unwrap_or_else(|e| panic!("{s:?} did not round-trip: {e:?}"));
-            assert_eq!(parsed, *mode, "round-trip mismatch for {mode:?} via {s:?}");
-        }
-    }
-}
-
 pub(super) struct PreparedBoot {
     pub rt: Runtime,
     pub elf_data: Vec<u8>,
@@ -115,7 +78,6 @@ pub(super) struct PrepareOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
     pub firmware_dir: Option<&'a str>,
-    pub boot_mode: BootMode,
     pub strict_reserved: bool,
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,
@@ -255,17 +217,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // PRX load region matter.
     let code_floor = tramp_base;
 
-    let mut prx_modules = match opts.boot_mode {
-        BootMode::SinglePrx => {
-            match load_firmware_prx(opts.firmware_dir, &modules, &mut mem, code_floor) {
-                Some(info) => vec![info],
-                None => Vec::new(),
-            }
-        }
-        BootMode::FirmwareSet => {
-            load_firmware_set_bound(opts.firmware_dir, &modules, &mut mem, code_floor)
-        }
-    };
+    let mut prx_modules =
+        load_firmware_set_bound(opts.firmware_dir, &modules, &mut mem, code_floor);
     let t_prx_load = t_start.elapsed();
     if opts.firmware_dir.is_some() && prx_modules.is_empty() {
         eprintln!("prx: firmware directory was supplied but no PRX was loaded");

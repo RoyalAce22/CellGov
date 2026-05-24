@@ -1175,18 +1175,18 @@ SCE-wrapped (`SCE\0` magic is dispatched to
 runs the PPU at instruction-level granularity (Budget=1). When
 `--firmware-dir` resolves to a directory holding the minimum
 viable PRX set (it auto-defaults to `firmware/sys/external/` if
-that exists), the boot path also loads those modules via
+that exists), the boot path loads those modules via
 `prx_loader::load_firmware_set`, executes their `module_start`
 functions in dependency order, and resolves game imports against
 real firmware exports. `CELLGOV_NO_FIRMWARE_DIR=1` suppresses the
-auto-default. `--boot-mode firmware-set` opts the default boot
-path explicitly into the firmware-set loader (rather than the
-single-PRX path); the set covers liblv2, libsysmodule, libfiber,
-libsre, libfs, libio, libnet, libnetctl, libspurs_jq, libsync2,
-libsysutil, libsysutil_np, libgcm_sys, libaudio, and
-`_sys_prx_load_module` / `_sys_prx_get_module_list` resolve
-against the registered closure rather than echoing the
-path-pointer.
+auto-default; the boot then runs with no PRX loaded and every
+game import routes to the unresolved-import trampoline. The
+firmware set covers liblv2, libsysmodule, libfiber, libsre,
+libfs, libio, libnet, libnetctl, libspurs_jq, libsync2,
+libsysutil, libsysutil_np, libsysutil_avconf_ext, libgcm_sys,
+and libaudio; `_sys_prx_load_module` /
+`_sys_prx_get_module_list` resolve against the registered
+closure rather than echoing the path-pointer.
 
 Minimum-viable-PRX-set loading is one atomic pipeline. Each parsed SPRX
 goes through the relocation applier in
@@ -1222,22 +1222,19 @@ Common boot sequence (per-title numbers below):
 6. Run the game's CRT0 from the ELF entry point.
 
 Title boot exercises the firmware modules end-to-end. The
-implicit `--boot-mode` default is `firmware-set`
-(unconditional -- the cross-check turns missing firmware-dir
-into a named hard error so a misconfigured environment cannot
-silently downgrade to a contaminated single-PRX boot); the
-synthetic harness `ps3autotests` declares
-`--boot-mode single-prx` explicitly because its ELFs have no
-firmware-side imports. The unresolved-import trampoline
-catches GOT slots without a firmware export and surfaces them
-as a named diagnostic via `Lv2Request::UnresolvedImport`. LV2
-syscalls that CellGov has not implemented surface as a
-`dispatch.unsupported_stub` log line at first occurrence and
-return `CELL_ENOSYS` (the honest "not implemented" errno);
-guests see a detectable failure rather than a fabricated
-success. Each fault driver is a named NID or syscall number;
-the per-title narratives below name the current frontier per
-title.
+firmware-set boot is unconditional; the synthetic harness
+`ps3autotests` runs with `CELLGOV_NO_FIRMWARE_DIR=1` so no PRX
+loads and every import routes to the unresolved-import
+trampoline (the harness's ELFs have no firmware-side imports).
+The unresolved-import trampoline catches GOT slots without a
+firmware export and surfaces them as a named diagnostic via
+`Lv2Request::UnresolvedImport`. LV2 syscalls that CellGov has
+not implemented surface as a `dispatch.unsupported_stub` log
+line at first occurrence and return `CELL_ENOSYS` (the honest
+"not implemented" errno); guests see a detectable failure
+rather than a fabricated success. Each fault driver is a named
+NID or syscall number; the per-title narratives below name the
+current frontier per title.
 
 **flOw (NPUA80001).** The title's manifest enables `[rsx] mirror
 = true` so its put-pointer store at `0xC0000040` lands in the

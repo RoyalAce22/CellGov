@@ -215,9 +215,10 @@ fn run_observation(case: &Case, run_id: &str) -> Option<Observation> {
             .arg(case.max_steps.to_string())
             .arg("--save-observation")
             .arg(&observation_path)
-            // Synthetic test ELFs have no firmware-side imports.
-            .arg("--boot-mode")
-            .arg("single-prx")
+            // Synthetic test ELFs have no firmware-side imports;
+            // CELLGOV_NO_FIRMWARE_DIR suppresses the auto-default
+            // firmware-dir lookup so the boot installs unresolved
+            // trampolines instead of loading the firmware set.
             .arg(&elf_path)
             .current_dir(workspace_root())
             .env("CELLGOV_NO_FIRMWARE_DIR", "1")
@@ -383,10 +384,11 @@ fn first_diff_offset(a: &[u8], b: &[u8]) -> String {
 }
 
 #[test]
-#[ignore = "Default single-PRX boot path needs sysPrxForUser/sys_fs NIDs that the \
-            userspace HLE used to provide; the firmware-set boot mode covers them via \
-            the PUP-installed PRXes. Un-ignore once the harness either switches to \
-            `--boot-mode firmware-set` or the missing NIDs route to direct LV2 syscalls."]
+#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
+            trampoline does not currently route to direct LV2 syscalls; the harness \
+            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
+            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
+            syscalls or the harness loads firmware for synthetic boots."]
 fn cpu_basic() {
     run_case(&Case {
         rel_dir: "cpu/basic",
@@ -397,10 +399,11 @@ fn cpu_basic() {
 }
 
 #[test]
-#[ignore = "Default single-PRX boot path needs sysPrxForUser/sys_fs NIDs that the \
-            userspace HLE used to provide; the firmware-set boot mode covers them via \
-            the PUP-installed PRXes. Un-ignore once the harness either switches to \
-            `--boot-mode firmware-set` or the missing NIDs route to direct LV2 syscalls."]
+#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
+            trampoline does not currently route to direct LV2 syscalls; the harness \
+            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
+            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
+            syscalls or the harness loads firmware for synthetic boots."]
 fn cpu_ppu_branch() {
     run_case(&Case {
         rel_dir: "cpu/ppu_branch",
@@ -411,10 +414,11 @@ fn cpu_ppu_branch() {
 }
 
 #[test]
-#[ignore = "Default single-PRX boot path needs sysPrxForUser/sys_fs NIDs that the \
-            userspace HLE used to provide; the firmware-set boot mode covers them via \
-            the PUP-installed PRXes. Un-ignore once the harness either switches to \
-            `--boot-mode firmware-set` or the missing NIDs route to direct LV2 syscalls."]
+#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
+            trampoline does not currently route to direct LV2 syscalls; the harness \
+            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
+            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
+            syscalls or the harness loads firmware for synthetic boots."]
 fn lv2_sys_event_flag() {
     run_case(&Case {
         rel_dir: "lv2/sys_event_flag",
@@ -425,10 +429,11 @@ fn lv2_sys_event_flag() {
 }
 
 #[test]
-#[ignore = "Default single-PRX boot path needs sysPrxForUser/sys_fs NIDs that the \
-            userspace HLE used to provide; the firmware-set boot mode covers them via \
-            the PUP-installed PRXes. Un-ignore once the harness either switches to \
-            `--boot-mode firmware-set` or the missing NIDs route to direct LV2 syscalls."]
+#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
+            trampoline does not currently route to direct LV2 syscalls; the harness \
+            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
+            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
+            syscalls or the harness loads firmware for synthetic boots."]
 fn lv2_sys_process() {
     run_case(&Case {
         rel_dir: "lv2/sys_process",
@@ -439,10 +444,11 @@ fn lv2_sys_process() {
 }
 
 #[test]
-#[ignore = "Default single-PRX boot path needs sysPrxForUser/sys_fs NIDs that the \
-            userspace HLE used to provide; the firmware-set boot mode covers them via \
-            the PUP-installed PRXes. Un-ignore once the harness either switches to \
-            `--boot-mode firmware-set` or the missing NIDs route to direct LV2 syscalls."]
+#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
+            trampoline does not currently route to direct LV2 syscalls; the harness \
+            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
+            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
+            syscalls or the harness loads firmware for synthetic boots."]
 fn lv2_sys_semaphore() {
     run_case(&Case {
         rel_dir: "lv2/sys_semaphore",
@@ -454,10 +460,11 @@ fn lv2_sys_semaphore() {
 
 /// Determinism canary across two reruns of the same scenario.
 #[test]
-#[ignore = "Default single-PRX boot path needs sysPrxForUser/sys_fs NIDs that the \
-            userspace HLE used to provide; the firmware-set boot mode covers them via \
-            the PUP-installed PRXes. Un-ignore once the harness either switches to \
-            `--boot-mode firmware-set` or the missing NIDs route to direct LV2 syscalls."]
+#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
+            trampoline does not currently route to direct LV2 syscalls; the harness \
+            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
+            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
+            syscalls or the harness loads firmware for synthetic boots."]
 fn determinism_double_run_cpu_basic() {
     let case = Case {
         rel_dir: "cpu/basic",
