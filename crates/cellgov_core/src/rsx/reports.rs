@@ -13,7 +13,7 @@ use core::mem::size_of;
 pub const STATE_HASH_FORMAT_VERSION: u8 = 2;
 
 pub use cellgov_lv2::host::rsx::{RSX_CONTEXT_ID, SEMAPHORE_INIT_PATTERN};
-pub use cellgov_ps3_abi::sys_rsx::{driver_info_init, region};
+pub use cellgov_ps3_abi::sys_rsx::{control_register, driver_info_init, region};
 
 /// BE u32 semaphore slot.
 pub type RsxSemaphore = u32;
@@ -298,7 +298,11 @@ impl RsxContext {
             self.mem_addr,
             region::CONTEXT_RESERVATION
         );
-        let dma_control_addr = self.mem_addr + region::DMA_CONTROL_OFFSET;
+        // dma_control_addr is the fixed MMIO base 0xC0000000 (libgcm
+        // adds +0x40 internally to derive the put-pointer write at
+        // 0xC0000040). driver_info / reports are RAM-backed inside
+        // the per-context reservation.
+        let dma_control_addr = control_register::DMA_CONTROL_BASE;
         let driver_info_addr = self.mem_addr + region::DRIVER_INFO_OFFSET;
         let reports_addr = self.mem_addr + region::REPORTS_OFFSET;
         debug_assert!(
@@ -489,19 +493,25 @@ mod tests {
 
     #[test]
     fn reservation_offsets_match_rpcs3_layout() {
-        assert_eq!(region::DMA_CONTROL_OFFSET, 0x0000_0000);
         assert_eq!(region::DRIVER_INFO_OFFSET, 0x0010_0000);
         assert_eq!(region::REPORTS_OFFSET, 0x0020_0000);
         assert_eq!(region::CONTEXT_RESERVATION, 0x0030_0000);
         // u64 guards against future sizes truncating via `as u32`.
-        let dma = RSX_DMA_CONTROL_SIZE as u64;
         let dri = driver_info::SIZE as u64;
         let rep = reports::SIZE as u64;
-        assert!(
-            u64::from(region::DRIVER_INFO_OFFSET) >= u64::from(region::DMA_CONTROL_OFFSET) + dma
-        );
         assert!(u64::from(region::REPORTS_OFFSET) >= u64::from(region::DRIVER_INFO_OFFSET) + dri);
         assert!(u64::from(region::REPORTS_OFFSET) + rep <= u64::from(region::CONTEXT_RESERVATION));
+    }
+
+    #[test]
+    fn dma_control_base_plus_offset_equals_put_addr() {
+        assert_eq!(
+            u64::from(control_register::DMA_CONTROL_BASE) + 0x40,
+            u64::from(control_register::PUT_ADDR),
+            "dma_control_base + 0x40 must equal PUT_ADDR"
+        );
+        assert_eq!(control_register::DMA_CONTROL_BASE, 0xC000_0000);
+        assert_eq!(control_register::PUT_ADDR, 0xC000_0040);
     }
 
     #[test]
@@ -590,10 +600,7 @@ mod tests {
 
         assert!(ctx.allocated);
         assert_eq!(ctx.context_id, RSX_CONTEXT_ID);
-        assert_eq!(
-            ctx.dma_control_addr,
-            0x3000_0000 + region::DMA_CONTROL_OFFSET
-        );
+        assert_eq!(ctx.dma_control_addr, control_register::DMA_CONTROL_BASE);
         assert_eq!(
             ctx.driver_info_addr,
             0x3000_0000 + region::DRIVER_INFO_OFFSET

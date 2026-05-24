@@ -225,6 +225,18 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             a5: args[4],
             a6: args[5],
         },
+        syscall::SYS_RSX_CONTEXT_IOMAP => Lv2Request::SysRsxContextIomap {
+            context_id: p!(0),
+            io: p!(1),
+            ea: p!(2),
+            size: p!(3),
+            flags: args[4],
+        },
+        syscall::SYS_RSX_DEVICE_MAP => Lv2Request::SysRsxDeviceMap {
+            dev_addr_ptr: p!(0),
+            a2_ptr: p!(1),
+            dev_id: p!(2),
+        },
         syscall::SS_ACCESS_CONTROL_ENGINE => Lv2Request::SsAccessControlEngine {
             pkg_id: args[0],
             a2: args[1],
@@ -1100,6 +1112,8 @@ mod tests {
         (syscall::SYS_RSX_CONTEXT_ALLOCATE, &[0, 1, 2, 3]),
         (syscall::SYS_RSX_CONTEXT_FREE, &[0]),
         (syscall::SYS_RSX_CONTEXT_ATTRIBUTE, &[0, 1]),
+        (syscall::SYS_RSX_CONTEXT_IOMAP, &[0, 1, 2, 3]),
+        (syscall::SYS_RSX_DEVICE_MAP, &[0, 1, 2]),
     ];
 
     #[test]

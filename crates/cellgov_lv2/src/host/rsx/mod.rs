@@ -2,7 +2,9 @@
 
 mod attribute;
 mod context;
+mod device;
 mod init;
+mod iomap;
 mod memory;
 mod state;
 

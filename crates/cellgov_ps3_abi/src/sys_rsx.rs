@@ -10,25 +10,68 @@
 //! `SEMAPHORE_INIT_PATTERN`, `PACKAGE_CELLGOV_*`) are NOT PS3 ABI and
 //! stay in `cellgov_lv2::host::rsx`.
 
-/// Offsets from the sys_rsx context base to each substructure.
+/// Offsets from the sys_rsx context base to the RAM-backed
+/// substructures (`driver_info`, `reports`). The DMA control
+/// registers live in the MMIO region at
+/// [`control_register::DMA_CONTROL_BASE`] and are not allocated
+/// from the rsx-region base.
 pub mod region {
-    /// Offset to the DMA control region.
-    pub const DMA_CONTROL_OFFSET: u32 = 0x0000_0000;
     /// Offset to the driver-info region.
     pub const DRIVER_INFO_OFFSET: u32 = 0x0010_0000;
     /// Offset to the reports region.
     pub const REPORTS_OFFSET: u32 = 0x0020_0000;
-    /// Bytes reserved per sys_rsx context (covers all three regions
-    /// plus padding).
+    /// Bytes reserved per sys_rsx context (covers driver_info,
+    /// reports, plus padding).
     pub const CONTEXT_RESERVATION: u32 = 0x0030_0000;
 }
 
+/// `sys_rsx_device_map` (675) OUT-pointer value and the kernel
+/// reservation it lives in. RPCS3 documents the address range
+/// `0x40000000..0xB0000000` at
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:925-926` and
+/// allocates inside it via `vm::reserve_map(vm::rsx_context, 0,
+/// 0x10000000, 0x403)` -- the `0x10000000` size is the PS3 ABI
+/// reservation; the address itself is a deterministic pick from
+/// the documented range.
+pub mod device_map {
+    /// Device-map address `sys_rsx_device_map (675)` returns in
+    /// its `dev_addr` OUT for `dev_id == 8`.
+    pub const ADDR: u32 = 0x4000_0000;
+
+    /// Size of the kernel `rsx_context` reservation that holds
+    /// [`ADDR`]. The host's mmapper allocator skips
+    /// `[ADDR, ADDR + RESERVATION_SIZE)` so device-map and mmapper
+    /// allocations never alias.
+    pub const RESERVATION_SIZE: u32 = 0x1000_0000;
+}
+
+/// `sys_rsx_context_iomap` (672) argument-validation constants per
+/// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:398-453`.
+pub mod iomap {
+    /// `context_id` value the kernel pins for the single allocated
+    /// RSX context.
+    pub const CONTEXT_ID: u32 = 0x5555_5555;
+
+    /// 1 MiB alignment mask. `io`, `ea`, and `size` must all be
+    /// 1 MiB aligned; non-zero `value & ALIGN_MASK` is `CELL_EINVAL`.
+    pub const ALIGN_MASK: u32 = 0x000F_FFFF;
+}
+
 /// Fixed-address RSX command-FIFO control register slots inside the
-/// DMA control region. The guest reads / writes these to drive the
-/// RSX FIFO; both real PS3 and CellGov surface them at the same
-/// absolute addresses.
+/// MMIO region. The guest reads / writes these to drive the RSX
+/// FIFO; both real PS3 and CellGov surface them at the same absolute
+/// addresses. Libgcm receives [`control_register::DMA_CONTROL_BASE`]
+/// from `sys_rsx_context_allocate` (670) as the dma_control OUT and
+/// adds `+0x40` internally to derive the put-pointer write target --
+/// see `tools/rpcs3-src/rpcs3/Emu/Cell/Modules/cellGcmSys.cpp:450,465`.
 pub mod control_register {
-    /// Guest address of the RSX control register's `put` slot.
+    /// Guest address of the RSX dma_control region base.
+    /// `sys_rsx_context_allocate` (670) returns this in its
+    /// `lpar_dma_control` OUT.
+    pub const DMA_CONTROL_BASE: u32 = 0xC000_0000;
+
+    /// Guest address of the RSX control register's `put` slot
+    /// (`DMA_CONTROL_BASE + 0x40`).
     pub const PUT_ADDR: u32 = 0xC000_0040;
 
     /// Guest address of the RSX control register's `get` slot.

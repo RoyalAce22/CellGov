@@ -59,6 +59,14 @@ pub struct SysRsxContext {
     pub display_buffers_count: u32,
     /// Flip mode flag (1 = hsync, 2 = vsync). 0 until FLIP_MODE fires.
     pub flip_mode: u32,
+    /// Most recent `sys_rsx_context_iomap` mapping. `io_size == 0`
+    /// means no mapping has been recorded.
+    pub iomap_io: u32,
+    /// EA the most-recent iomap call mapped to (see [`Self::iomap_io`]).
+    pub iomap_ea: u32,
+    /// Size of the most-recent iomap mapping in bytes. Zero means
+    /// no mapping recorded.
+    pub iomap_size: u32,
 }
 
 impl SysRsxContext {
@@ -87,6 +95,9 @@ impl SysRsxContext {
             }; display_buffer::COUNT_MAX],
             display_buffers_count: 0,
             flip_mode: 0,
+            iomap_io: 0,
+            iomap_ea: 0,
+            iomap_size: 0,
         }
     }
 
@@ -109,6 +120,9 @@ impl SysRsxContext {
             display_buffers,
             display_buffers_count,
             flip_mode,
+            iomap_io,
+            iomap_ea,
+            iomap_size,
         } = *self;
         let mut h = cellgov_mem::Fnv1aHasher::new();
         h.write(&[u8::from(allocated)]);
@@ -126,6 +140,9 @@ impl SysRsxContext {
         h.write(&user_handler_addr.to_le_bytes());
         h.write(&display_buffers_count.to_le_bytes());
         h.write(&flip_mode.to_le_bytes());
+        h.write(&iomap_io.to_le_bytes());
+        h.write(&iomap_ea.to_le_bytes());
+        h.write(&iomap_size.to_le_bytes());
         for buf in display_buffers.iter() {
             h.write(&buf.offset.to_le_bytes());
             h.write(&buf.pitch.to_le_bytes());

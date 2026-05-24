@@ -4,7 +4,9 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::cell_errors as errno;
-use cellgov_ps3_abi::sys_rsx::{driver_info, driver_info_init, event_queue, region, reports};
+use cellgov_ps3_abi::sys_rsx::{
+    control_register, driver_info, driver_info_init, event_queue, region, reports,
+};
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -13,10 +15,14 @@ use super::init::{write_rsx_driver_info_init, write_rsx_reports_init};
 use super::state::{SysRsxContext, RSX_CONTEXT_ID};
 
 impl Lv2Host {
-    /// sys_rsx_context_allocate (670). Reserves a 0x300000-byte slice,
-    /// splits it into DMA-control / driver-info / reports sub-regions,
-    /// emits init effects for reports and driver-info, and creates the
-    /// handler event-queue / port pair.
+    /// sys_rsx_context_allocate (670). Reserves a 0x300000-byte slice
+    /// for the driver-info and reports sub-regions, emits init effects
+    /// for both, creates the handler event-queue / port pair, and
+    /// returns the fixed MMIO dma_control base
+    /// (`control_register::DMA_CONTROL_BASE = 0xC0000000`) in the
+    /// `lpar_dma_control` OUT. Libgcm adds `+0x40` internally to
+    /// derive the put-pointer write target at
+    /// `control_register::PUT_ADDR = 0xC0000040`.
     ///
     /// # Errors
     ///
@@ -52,7 +58,12 @@ impl Lv2Host {
             self.rsx_mem_alloc_ptr = end;
             start
         };
-        let dma_control_addr = base + region::DMA_CONTROL_OFFSET;
+        // dma_control_addr is the MMIO base 0xC0000000; libgcm
+        // adds the +0x40 offset internally to derive the
+        // put-pointer write target at 0xC0000040 (PUT_ADDR).
+        // driver_info and reports are RAM-backed and live inside
+        // the rsx region.
+        let dma_control_addr = control_register::DMA_CONTROL_BASE;
         let driver_info_addr = base + region::DRIVER_INFO_OFFSET;
         let reports_addr = base + region::REPORTS_OFFSET;
 
@@ -173,9 +184,17 @@ mod tests {
         };
         assert_eq!(effects.len(), 6);
         assert_eq!(extract_write_u32(&effects[0]), RSX_CONTEXT_ID);
+        // lpar_dma_control_ptr receives the fixed MMIO base
+        // 0xC0000000; libgcm adds +0x40 internally to derive the
+        // put-pointer write target at PUT_ADDR = 0xC0000040.
         assert_eq!(
             extract_write_u64(&effects[1]),
-            Lv2Host::SYS_RSX_MEM_BASE as u64
+            u64::from(control_register::DMA_CONTROL_BASE)
+        );
+        assert_eq!(
+            u64::from(control_register::DMA_CONTROL_BASE) + 0x40,
+            u64::from(control_register::PUT_ADDR),
+            "dma_control_base + 0x40 must equal PUT_ADDR"
         );
         assert_eq!(
             extract_write_u64(&effects[2]),
@@ -237,7 +256,7 @@ mod tests {
         let ctx = host.sys_rsx_context();
         assert!(ctx.allocated);
         assert_eq!(ctx.context_id, RSX_CONTEXT_ID);
-        assert_eq!(ctx.dma_control_addr, Lv2Host::SYS_RSX_MEM_BASE);
+        assert_eq!(ctx.dma_control_addr, control_register::DMA_CONTROL_BASE);
         assert_eq!(
             ctx.driver_info_addr,
             Lv2Host::SYS_RSX_MEM_BASE + region::DRIVER_INFO_OFFSET

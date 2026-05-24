@@ -43,11 +43,16 @@ RPCS3 corpus state (Stage E):
 
 ## Next step
 
-The RSX-init progression work closes this divergence: model
-the RSX syscalls SSHD exercises during GCM init so the
-title's FirstRsxWrite checkpoint is reached. The 0x10000
-thread-flag log can downgrade from invariant-break to a
-one-line note in the same effort if a lie-vs-gap classifier
-emerges; until then the count of 3 reflects honest
-"unmodeled" reports against RPCS3-faithful behavior plus
-the unmodeled-no-op handler logs the boot triggers.
+SSHD's fault is orthogonal to the 670 / 675 / 672 modeling
+that Phase 37 landed (verified: SSHD's anchor is unchanged
+at 14,341,833 / Fault / breaks=3 across Phase 36.7 and
+Phase 37). The downstream RSX-init divergence sits past the
+unbacked-mmapper blocker WipEout currently hits at step
+43,066; a successor phase backs the mmapper handout window
+and re-measures SSHD to confirm which RSX-init step is the
+next honest fault. The 0x10000 thread-flag log can downgrade
+from invariant-break to a one-line note in the same effort
+if a lie-vs-gap classifier emerges; until then the count of
+3 reflects honest "unmodeled" reports against RPCS3-faithful
+behavior plus the unmodeled-no-op handler logs the boot
+triggers.

@@ -157,12 +157,46 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_mmapper_map_shared_memory` (334). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:613` binds an shm into the
-    /// VM range at `addr`. The oracle's flat backing already aliases
-    /// real bytes, so the map is a logical no-op.
-    pub(super) fn dispatch_mmapper_map_shared_memory(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(0)
+    /// `sys_mmapper_map_shared_memory` (334). The flat-backing
+    /// "logical no-op" CELL_OK is honest only when the target
+    /// `addr` lies in a ReadWrite region; for an unbacked `addr`
+    /// (e.g. the mmapper handout window `[0x5000_0000, 0xC000_0000)`
+    /// that no boot region covers) returning CELL_OK would be a
+    /// fabricated success the guest later consumes as truth, then
+    /// faults on at the first write through the mapped address.
+    ///
+    /// # Errors
+    ///
+    /// `CELL_ENOSYS` with a `dispatch.mmapper_map_shared_memory_unbacked`
+    /// invariant break when `addr` is not in any ReadWrite region.
+    /// ENOSYS rather than ENOMEM is the honest answer: the truth is
+    /// "CellGov does not model backing for this region," not "the
+    /// system is out of memory" -- the latter would impersonate a
+    /// real LV2 runtime condition that is not occurring. Real
+    /// per-handle page backing is a successor-phase surface.
+    pub(super) fn dispatch_mmapper_map_shared_memory(
+        &mut self,
+        args: [u64; 8],
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        let addr = args[0];
+        // Spot-check the first byte of the target. The shm's full
+        // size lives in the (unmodeled) shm table; the unbacked-vs-
+        // backed distinction we need here is whether `addr` is in
+        // any RW region at all -- a one-byte writable probe is
+        // enough to discriminate the handout-window case from
+        // genuinely-mapped main / iomap / stack targets.
+        if rt.writable(addr, 1) {
+            return Lv2Dispatch::immediate(errno::CELL_OK.into());
+        }
+        self.log_invariant_break(
+            "dispatch.mmapper_map_shared_memory_unbacked",
+            format_args!(
+                "sys_mmapper_map_shared_memory addr={addr:#x} is not in any ReadWrite \
+                 region; returning CELL_ENOSYS (CellGov does not model backing here)"
+            ),
+        );
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
     /// `sys_mmapper_search_and_map` (337). Oracle:

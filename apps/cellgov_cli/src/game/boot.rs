@@ -8,8 +8,8 @@ use cellgov_time::Budget;
 
 use cellgov_ps3_abi::process_address_space::{
     PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
-    PS3_PRIMARY_STACK_TOP, PS3_RSX_BASE, PS3_RSX_SIZE, PS3_SPU_RESERVED_BASE,
-    PS3_SPU_RESERVED_SIZE,
+    PS3_PRIMARY_STACK_TOP, PS3_RSX_BASE, PS3_RSX_IOMAP_BASE, PS3_RSX_IOMAP_SIZE, PS3_RSX_SIZE,
+    PS3_SPU_RESERVED_BASE, PS3_SPU_RESERVED_SIZE,
 };
 
 use super::manifest::TitleManifest;
@@ -148,8 +148,22 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     } else {
         reserved_access
     };
+    // Main must end at or below PS3_RSX_IOMAP_BASE so the iomap
+    // region the title later writes through stays disjoint.
+    if mem_size as u64 > PS3_RSX_IOMAP_BASE {
+        die(&format!(
+            "boot: required_size 0x{required_size:x} requires main mem_size \
+             0x{mem_size:x} which exceeds PS3_RSX_IOMAP_BASE 0x{PS3_RSX_IOMAP_BASE:x}"
+        ));
+    }
     let mut mem = cellgov_mem::GuestMemory::from_regions(vec![
         cellgov_mem::Region::new(0, mem_size, "main", cellgov_mem::PageSize::Page64K),
+        cellgov_mem::Region::new(
+            PS3_RSX_IOMAP_BASE,
+            PS3_RSX_IOMAP_SIZE,
+            "rsx_iomap",
+            cellgov_mem::PageSize::Page64K,
+        ),
         cellgov_mem::Region::new(
             PS3_PRIMARY_STACK_BASE,
             PS3_PRIMARY_STACK_SIZE,

@@ -6,35 +6,32 @@ developer: thatgamecompany
 engine: PhyreEngine
 distribution: PSN HDD
 checkpoint: ProcessExit
-steps: 11256
+steps: 11271
 convergence: No (outcome: ProcessExit vs Completed)
 byte_parity: --
 ---
 
 Does not converge with RPCS3 at the manifest's `process-exit`
-checkpoint: outcomes are distinct. Re-anchored under the
-complete firmware-set boot: the prior anchor measured an
-under-loaded early-exit on failed module load (see
-`docs/dev/bug_investigations/firmware_set_closure.md`).
+checkpoint: outcomes are distinct.
 
-CellGov terminates with `ProcessExit` at step 11,256 because
-the firmware-set boot now loads the full 15-stem set
-(MIN_VIABLE_PRX_STEMS), so the early `cellSysmoduleLoadModule`
-calls succeed against `libsysmodule`/`libgcm_sys`/etc. and the
-title proceeds past the previous EINVAL contamination. Boot
-then runs through libgcm's `cellGcmInit()`, which calls
-`sys_rsx_device_map` (LV2 syscall 675). CellGov does not model
-sys_rsx_device_map; the unsupported-syscall path returns
-`CELL_ENOSYS` (the honest "not implemented" errno, replacing
-the prior fake-CELL_OK lie). libgcm honestly reports
-"cellGcmInit() failed", flOw's CRT0 enters its abort path
-("Waiting for the SPU thread group to be terminated...",
-`sys_spu_thread_group_join` fails with CELL_ESRCH because no
-group was created, abort() is called), and the title invokes
-`sys_process_exit(1)` cleanly. 43 host invariant breaks during
-this run are honest ENOSYS / no-op-with-trace returns for the
-unmodeled syscalls libgcm and the abort path exercise -- mostly
-`dispatch.unsupported_stub` for RSX syscalls, plus one
+CellGov terminates with `ProcessExit` at step 11,271 (+15
+from the Phase 36.7 anchor of 11,256). The +15 step advance
+comes from Phase 37's 675 modeling: `sys_rsx_device_map`
+now returns CELL_OK with a non-zero device address, so
+libgcm proceeds slightly further into `cellGcmInit` before
+the next gap surfaces. flOw still ends up in its abort path
+because libgcm's later setup still hits unmodeled state
+(the unbacked mmapper handout window is one such gap; see
+WipEout NOTES for the structural blocker the next phase
+addresses). flOw's CRT0 invokes
+`sys_process_exit(1)` cleanly on the abort path.
+
+The 42 host invariant breaks during this run are honest:
+ENOSYS / no-op-with-trace returns for the unmodeled syscalls
+libgcm and the abort path exercise -- `dispatch.unsupported_stub`
+for the RSX syscalls Phase 37 did not model, the
+`dispatch.mmapper_map_shared_memory_unbacked` entries for
+the new honest mmapper gap, and one
 `dispatch.memory_free_noop` from the boot's first call to
 sys_memory_free against the bump allocator. No contaminating
 falsehoods.
@@ -52,10 +49,8 @@ the outcomes differ.
 
 ## Next step
 
-The RSX-init progression work closes this divergence: model
-`sys_rsx_device_map` (LV2 syscall 675) and the sister RSX
-syscalls (673 / 674 / 676 / 677) so libgcm's `cellGcmInit`
-succeeds and flOw proceeds past the abort path. With
-cellGcmInit succeeding, flOw's gameplay-loop boot path runs
-the same instruction trace RPCS3 records; the two runners
-can then converge at the manifest's ProcessExit checkpoint.
+A successor phase backs the mmapper handout window so
+libgcm's `_cellGcmInitBody` succeeds end-to-end, the abort
+path no longer fires, and flOw proceeds to its gameplay loop.
+The two runners can then converge at the manifest's
+ProcessExit checkpoint.
