@@ -1,22 +1,14 @@
 Convergence: Yes
-Byte parity: 1055 non-semantic + 110 pending
+Byte parity: 1055 non-semantic + 86 pending
 
 Classified non-semantic bytes: 1055
-Pending bytes: 110 across 42 run(s)
+Pending bytes: 86 across 34 run(s)
 Per-class breakdown:
   HleOpdSlot: 1055 bytes
-  Unclassified: 110 bytes
-Lowest-offset divergence: Unclassified in region code@0x10000 at offset 0x848e03
+  Unclassified: 86 bytes
+Lowest-offset divergence: HleOpdSlot in region data@0x860000 at offset 0xffed
 
 Unclassified runs:
-  code@0x848e03+5: cellgov=0000000000 rpcs3=2013bcc5f6
-  code@0x848e0a+1: cellgov=00 rpcs3=90
-  code@0x848e0d+1: cellgov=00 rpcs3=25
-  code@0x848e0f+1: cellgov=00 rpcs3=01
-  code@0x848e12+2: cellgov=0000 rpcs3=03e9
-  code@0x848e15+1: cellgov=00 rpcs3=04
-  code@0x848e19+1: cellgov=00 rpcs3=10
-  data@0x61110+12: cellgov=637274303a70323530303031 rpcs3=0100000000000001007b5f90
   data@0x618ac+8: cellgov=3fa666663fa66666 rpcs3=0000000000000000
   data@0x61b6c+1: cellgov=00 rpcs3=01
   data@0x61b74+1: cellgov=00 rpcs3=01

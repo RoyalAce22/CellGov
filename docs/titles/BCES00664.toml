@@ -2,7 +2,7 @@
 content_id = "BCES00664"
 short_name = "wipeout"
 display_name = "WipEout HD Fury"
-eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+eboot_candidates = ["EBOOT.BIN", "EBOOT.elf"]
 year = 2009
 developer = "Sony Liverpool"
 engine = "Studio Liverpool proprietary"

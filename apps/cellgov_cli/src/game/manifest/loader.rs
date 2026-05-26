@@ -220,6 +220,34 @@ impl TitleManifest {
                 ),
             }
         })?;
+        // EBOOT.BIN is the SCE-wrapped canonical source; EBOOT.elf is
+        // an in-tree decrypt that can drift relative to the on-disk
+        // SELF when a stale copy lingers (the bytes ship to disk via
+        // tools that have evolved across phases). Force the canonical
+        // candidate to be probed first so the decrypted bytes always
+        // come from the runtime-decrypted SELF, not from a cached
+        // .elf that might disagree by 24 bytes. Synthetic-ELF test
+        // harnesses without SCE wrappers may list only EBOOT.elf.
+        if let (Some(elf_pos), Some(bin_pos)) = (
+            file.title
+                .eboot_candidates
+                .iter()
+                .position(|c| c == "EBOOT.elf"),
+            file.title
+                .eboot_candidates
+                .iter()
+                .position(|c| c == "EBOOT.BIN"),
+        ) {
+            if elf_pos < bin_pos {
+                return Err(ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: "eboot_candidates lists EBOOT.elf before EBOOT.BIN; reorder so the \
+                         SCE-wrapped EBOOT.BIN is tried first. A stale plaintext .elf in the \
+                         USRDIR would otherwise shadow the canonical SELF."
+                        .to_string(),
+                });
+            }
+        }
         Ok(TitleManifest {
             content_id: file.title.content_id,
             short_name: file.title.short_name,
@@ -252,12 +280,66 @@ mod tests {
         let m = parse(PROCESS_EXIT_TOML);
         assert_eq!(m.content_id, "NPAA00001");
         assert_eq!(m.short_name, "proc-exit-fixture");
-        assert_eq!(m.eboot_candidates, vec!["EBOOT.elf", "EBOOT.BIN"]);
+        assert_eq!(m.eboot_candidates, vec!["EBOOT.BIN", "EBOOT.elf"]);
         assert_eq!(m.checkpoint, CheckpointTrigger::ProcessExit);
         assert_eq!(m.year, 2007);
         assert_eq!(m.developer, "test-developer");
         assert_eq!(m.engine, "test-engine");
         assert_eq!(m.distribution, Distribution::PsnHdd);
+    }
+
+    #[test]
+    fn rejects_eboot_candidates_with_elf_before_bin() {
+        // EBOOT.BIN must be probed first so a stale cached .elf cannot
+        // shadow the runtime SCE decryption. The loader gate is the
+        // tripwire that catches a regression in any future manifest
+        // edit; a stale .elf was the actual cause of Phase 38's
+        // Cluster 1 + 2 pending bytes.
+        let bad = r#"
+[title]
+content_id = "X"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+year = 2009
+developer = "e"
+engine = "e"
+distribution = "psn-hdd"
+
+[checkpoint]
+kind = "process-exit"
+"#;
+        match TitleManifest::load_from_text(bad, Path::new("bad.toml")) {
+            Err(ManifestError::Parse { message, .. }) => {
+                assert!(
+                    message.contains("EBOOT.elf before EBOOT.BIN"),
+                    "expected message to name the order violation; got {message:?}"
+                );
+            }
+            other => panic!("expected Parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elf_only_candidates_list_is_accepted() {
+        // Synthetic test fixtures without an SCE wrapper list only
+        // EBOOT.elf; the gate only fires when both are listed.
+        let ok = r#"
+[title]
+content_id = "X"
+short_name = "x"
+display_name = "x"
+eboot_candidates = ["EBOOT.elf"]
+year = 2009
+developer = "e"
+engine = "e"
+distribution = "psn-hdd"
+
+[checkpoint]
+kind = "process-exit"
+"#;
+        let m = TitleManifest::load_from_text(ok, Path::new("synthetic.toml")).unwrap();
+        assert_eq!(m.eboot_candidates, vec!["EBOOT.elf"]);
     }
 
     #[test]
