@@ -46,6 +46,23 @@ pub enum DivergenceClass {
     /// resolved entry points are equivalent.
     #[error("HleOpdSlot")]
     HleOpdSlot,
+    /// Bytes inside an LV2 sync-primitive user-side handle slot
+    /// (e.g. `sys_lwmutex_t::sleep_queue`). Non-semantic on a
+    /// different warrant than `HleOpdSlot`: the field carries an
+    /// ABI-opaque kernel-allocated id consumed only through
+    /// sync-primitive syscalls (`_sys_lwmutex_lock`,
+    /// `sys_lwmutex_unlock`, etc.), which look the id up in the
+    /// runner-local id table. The per-runner id values differ
+    /// because the two kernels run independent allocators, but
+    /// every read of the field flows back to its owning kernel
+    /// and resolves to the same logical sync object. The warrant
+    /// is ABI-contract (handle is opaque to user code), not
+    /// structural-impossibility -- a title that stored a sync id
+    /// in non-handle data the title itself reads would be
+    /// misclassified, so the populator must key only on slots
+    /// whose layout proves the field is a kernel handle.
+    #[error("SyncPrimitiveId")]
+    SyncPrimitiveId,
     /// No populated context range contained this divergence run.
     /// Counted in the byte-parity Pending bucket and enumerated in
     /// `cross_runner_summary.json`'s `unclassified_runs`.
@@ -59,7 +76,7 @@ impl DivergenceClass {
     /// catch-all returns false.
     pub fn is_non_semantic(&self) -> bool {
         match self {
-            Self::ElfHeader | Self::SysProcParam | Self::HleOpdSlot => true,
+            Self::ElfHeader | Self::SysProcParam | Self::HleOpdSlot | Self::SyncPrimitiveId => true,
             Self::Unclassified => false,
         }
     }
@@ -90,6 +107,15 @@ pub struct ClassifierContext {
     /// table, variable stubs, FNID-walker-patched sibling tables).
     /// Empty until a populator slice fills them in.
     pub hle_opd_ranges: Vec<Range<u64>>,
+    /// Guest-address ranges of LV2 sync-primitive handle slots
+    /// (currently the `sys_lwmutex_t::sleep_queue` field at +0x10
+    /// of every `sys_lwmutex_t` in the title's data segment).
+    /// Each range covers exactly the 4-byte handle field; the
+    /// rest of the sync-primitive struct (lock_var, attribute,
+    /// recursive_count, pad) is not claimed because it does not
+    /// share the opaque-handle warrant. Empty until a populator
+    /// slice fills it in.
+    pub sync_primitive_id_ranges: Vec<Range<u64>>,
 }
 
 /// Errors from [`ClassifierContext::from_observation`]. Only fires
@@ -148,6 +174,7 @@ impl ClassifierContext {
             elf_header_range: Some(code.addr..end),
             sys_proc_param_range: None,
             hle_opd_ranges: Vec::new(),
+            sync_primitive_id_ranges: Vec::new(),
         };
         ctx.debug_assert_disjoint();
         Ok(ctx)
@@ -167,6 +194,9 @@ impl ClassifierContext {
             }
             for r in &self.hle_opd_ranges {
                 all.push(("hle_opd_ranges", r));
+            }
+            for r in &self.sync_primitive_id_ranges {
+                all.push(("sync_primitive_id_ranges", r));
             }
             for (n, r) in &all {
                 assert!(
@@ -226,6 +256,11 @@ pub fn classify(
     for r in &ctx.hle_opd_ranges {
         if r.start <= start && end <= r.end {
             return DivergenceClass::HleOpdSlot;
+        }
+    }
+    for r in &ctx.sync_primitive_id_ranges {
+        if r.start <= start && end <= r.end {
+            return DivergenceClass::SyncPrimitiveId;
         }
     }
     DivergenceClass::Unclassified
@@ -289,15 +324,38 @@ mod tests {
         assert_eq!(format!("{}", DivergenceClass::ElfHeader), "ElfHeader");
         assert_eq!(format!("{}", DivergenceClass::SysProcParam), "SysProcParam");
         assert_eq!(format!("{}", DivergenceClass::HleOpdSlot), "HleOpdSlot");
+        assert_eq!(
+            format!("{}", DivergenceClass::SyncPrimitiveId),
+            "SyncPrimitiveId",
+        );
         assert_eq!(format!("{}", DivergenceClass::Unclassified), "Unclassified");
     }
 
     #[test]
-    fn divergence_class_is_non_semantic_for_three_known_classes() {
+    fn divergence_class_is_non_semantic_for_four_known_classes() {
         assert!(DivergenceClass::ElfHeader.is_non_semantic());
         assert!(DivergenceClass::SysProcParam.is_non_semantic());
         assert!(DivergenceClass::HleOpdSlot.is_non_semantic());
+        assert!(DivergenceClass::SyncPrimitiveId.is_non_semantic());
         assert!(!DivergenceClass::Unclassified.is_non_semantic());
+    }
+
+    #[test]
+    fn sync_primitive_id_range_classifies_when_populated() {
+        let r = region("data", 0x860000, 0x10000);
+        let range: Range<u64> = 0x862000..0x862004;
+        let ctx = ClassifierContext {
+            sync_primitive_id_ranges: vec![range],
+            ..ClassifierContext::default()
+        };
+        assert_eq!(
+            classify(&div(0x2000, 4), r.addr, &ctx),
+            DivergenceClass::SyncPrimitiveId,
+        );
+        assert_eq!(
+            classify(&div(0x2004, 4), r.addr, &ctx),
+            DivergenceClass::Unclassified,
+        );
     }
 
     #[test]
@@ -498,6 +556,7 @@ mod tests {
             elf_header_range: Some(0x10000..0x10040),
             sys_proc_param_range: Some(0x10020..0x10080),
             hle_opd_ranges: Vec::new(),
+            sync_primitive_id_ranges: Vec::new(),
         };
         ctx.debug_assert_disjoint();
     }
@@ -508,6 +567,7 @@ mod tests {
             elf_header_range: Some(0x10000..0x10040),
             sys_proc_param_range: Some(0x10040..0x10080),
             hle_opd_ranges: Vec::new(),
+            sync_primitive_id_ranges: Vec::new(),
         };
         ctx.debug_assert_disjoint();
     }
@@ -524,6 +584,7 @@ mod tests {
             elf_header_range: Some(0x10040..0x10000),
             sys_proc_param_range: None,
             hle_opd_ranges: Vec::new(),
+            sync_primitive_id_ranges: Vec::new(),
         };
         ctx.debug_assert_disjoint();
     }

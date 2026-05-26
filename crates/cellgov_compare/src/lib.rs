@@ -22,6 +22,7 @@ pub mod runner_cellgov;
 #[cfg(feature = "rpcs3-runner")]
 pub mod runner_rpcs3;
 pub mod summary;
+pub mod sync_primitive_scan;
 
 #[cfg(test)]
 mod test_support;
