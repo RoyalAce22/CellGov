@@ -257,6 +257,7 @@ impl TitleManifest {
             developer: file.title.developer,
             engine: file.title.engine,
             distribution,
+            rap_filename: file.title.rap_filename,
             checkpoint,
             source,
             rsx_mirror,

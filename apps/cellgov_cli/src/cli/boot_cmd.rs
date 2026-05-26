@@ -77,6 +77,14 @@ fn resolve_firmware_dir(args: &[String]) -> Option<String> {
 struct BootInputs {
     title: game::manifest::TitleManifest,
     elf_path: String,
+    /// Pre-loaded plaintext ELF bytes. Populated either by the
+    /// candidate-walking loader (when no explicit ELF path was
+    /// given) or by the explicit-path loader (when one was). Passed
+    /// through to `prepare()` so the decrypt happens exactly once,
+    /// and so a stale or unsupported first candidate does not
+    /// block a later one that boots cleanly (the latent bug C.4
+    /// closes).
+    elf_data: Vec<u8>,
 }
 
 /// Resolve the title manifest plus the ELF path the boot will run. A
@@ -94,19 +102,38 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
             ));
         }
     }
-    let elf_path = match explicit {
-        Some(p) => p,
-        None => match title.resolve_eboot(&vfs_root) {
-            Ok(p) => p.to_str().map(|s| s.replace('\\', "/")).unwrap_or_else(|| {
-                die(&format!(
-                    "{subcmd}: resolved EBOOT path is not valid UTF-8: {}",
-                    p.display()
-                ))
-            }),
-            Err(e) => die(&format!("{subcmd}: {e}")),
-        },
+    let (elf_path, elf_data) = match explicit {
+        Some(p) => {
+            // Operator named an explicit path on the CLI; no
+            // candidate fallthrough, single try with the typed
+            // SceError surface from load_ppu_image_with_title_or_die.
+            let bytes = crate::cli::exit::load_ppu_image_with_title_or_die(&p, &title, &vfs_root);
+            (p, bytes)
+        }
+        None => {
+            // Title-driven boot: walk eboot_candidates, fall through
+            // on per-candidate decrypt failure, return both the
+            // resolved path and the plaintext ELF so prepare() does
+            // not redo the load.
+            let (bytes, path) =
+                crate::cli::exit::load_ppu_image_walk_candidates_or_die(&title, &vfs_root);
+            let path_str = path
+                .to_str()
+                .map(|s| s.replace('\\', "/"))
+                .unwrap_or_else(|| {
+                    die(&format!(
+                        "{subcmd}: resolved EBOOT path is not valid UTF-8: {}",
+                        path.display()
+                    ))
+                });
+            (path_str, bytes)
+        }
     };
-    BootInputs { title, elf_path }
+    BootInputs {
+        title,
+        elf_path,
+        elf_data,
+    }
 }
 
 pub(crate) fn run_game(args: &[String]) {
@@ -140,6 +167,7 @@ pub(crate) fn run_game(args: &[String]) {
     let result = game::run_game(game::RunGameOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
+        elf_data: inputs.elf_data,
         max_steps,
         trace,
         profile,
@@ -290,15 +318,18 @@ pub(crate) fn bench_boot_once(args: &[String]) {
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot-once");
     let budget_override: Option<Budget> =
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
-    game::bench_boot_one_run(game::BenchOptions {
-        title: &inputs.title,
-        elf_path: &inputs.elf_path,
-        max_steps,
-        firmware_dir: firmware_dir.as_deref(),
-        strict_reserved,
-        checkpoint_override,
-        budget_override,
-    });
+    game::bench_boot_one_run(
+        game::BenchOptions {
+            title: &inputs.title,
+            elf_path: &inputs.elf_path,
+            max_steps,
+            firmware_dir: firmware_dir.as_deref(),
+            strict_reserved,
+            checkpoint_override,
+            budget_override,
+        },
+        inputs.elf_data,
+    );
 }
 
 pub(crate) fn bench_boot(args: &[String]) {

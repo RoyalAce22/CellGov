@@ -105,10 +105,11 @@ pub struct BenchPairOutcome {
 /// `--checkpoint pc=ADDR` override on a title whose manifest declares
 /// `FirstRsxWrite` keeps the GCM-checkpoint init path so the boot
 /// trajectory matches the manifest's wired-in expectations.
-pub fn bench_boot(opts: BenchOptions<'_>) -> BenchBootResult {
+pub fn bench_boot(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult {
     let prepared = boot::prepare(boot::PrepareOptions {
         title: opts.title,
         elf_path: opts.elf_path,
+        elf_data,
         firmware_dir: opts.firmware_dir,
         strict_reserved: opts.strict_reserved,
         dump_at_pc: None,
@@ -145,8 +146,8 @@ pub fn bench_boot(opts: BenchOptions<'_>) -> BenchBootResult {
 /// Each measurement runs in its own subprocess: in-process back-to-back
 /// runs drift ~60 percent in wall time on Windows due to 1 GB
 /// guest-memory page-commit reuse.
-pub fn bench_boot_one_run(opts: BenchOptions<'_>) -> BenchBootResult {
-    let r = bench_boot(opts);
+pub fn bench_boot_one_run(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult {
+    let r = bench_boot(opts, elf_data);
     println!(
         "BENCH_RESULT steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
         r.steps,

@@ -54,3 +54,55 @@ pub const SCEPKG_ERK: [u8; 0x20] = [
 pub const SCEPKG_RIV: [u8; 0x10] = [
     0x4A, 0xCE, 0xF0, 0x12, 0x24, 0xFB, 0xEE, 0xDF, 0x82, 0x45, 0xF8, 0xFF, 0x10, 0x21, 0x1E, 0x6E,
 ];
+
+/// `supplemental_header.type == 3` marks the NPDRM (NPD) header in
+/// an NPDRM-wrapped SELF; presence selects the NPDRM decrypt prefix
+/// over the APP-keyed one.
+pub const SCE_SUPPLEMENTAL_KIND_NPDRM: u32 = 3;
+
+/// AES-128 key applied (ECB) to the RAP-derived intermediate value to
+/// produce the NPDRM layer key that decrypts the metadata-info
+/// envelope. Mirrors `NP_KLIC_KEY` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:107-109`.
+pub const NP_KLIC_KEY: [u8; 0x10] = [
+    0xF2, 0xFB, 0xCA, 0x7A, 0x75, 0xB0, 0x4E, 0xDC, 0x13, 0x90, 0x63, 0x8C, 0xCD, 0xFD, 0xD1, 0xEE,
+];
+
+/// Default klicensee for free-license (license == 3) NPDRM titles
+/// when no RAP is supplied; RPCS3 substitutes this for the
+/// `rap_to_rif` output. Mirrors `NP_KLIC_FREE` in
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:95-97`.
+pub const NP_KLIC_FREE: [u8; 0x10] = [
+    0x72, 0xF9, 0x90, 0x78, 0x8F, 0x9C, 0xFF, 0x74, 0x57, 0x25, 0xF0, 0x8E, 0x4C, 0x12, 0x83, 0x87,
+];
+
+/// AES-128 key for the first ECB stage of `rap_to_rif`. The 16 RAP
+/// bytes are ECB-decrypted with this key before the 5-round
+/// PBOX/E1/E2 dance. Mirrors `RAP_KEY` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:129-131`.
+pub const RAP_KEY: [u8; 0x10] = [
+    0x86, 0x9F, 0x77, 0x45, 0xC1, 0x3F, 0xD8, 0x90, 0xCC, 0xF2, 0x91, 0x88, 0xE3, 0xCC, 0x3E, 0xDF,
+];
+
+/// Byte-permutation indices applied per round of the
+/// `rap_to_rif` post-ECB stage. Index `i` of the round output is
+/// pulled from index `RAP_PBOX[i]` of the round input. Mirrors
+/// `RAP_PBOX` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:133-135`.
+pub const RAP_PBOX: [u8; 0x10] = [
+    0x0C, 0x03, 0x06, 0x04, 0x01, 0x0B, 0x0F, 0x08, 0x02, 0x07, 0x00, 0x05, 0x0A, 0x0E, 0x0D, 0x09,
+];
+
+/// First per-round substitution table consumed by the `rap_to_rif`
+/// loop. Mirrors `RAP_E1` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:137-139`.
+pub const RAP_E1: [u8; 0x10] = [
+    0xA9, 0x3E, 0x1F, 0xD6, 0x7C, 0x55, 0xA3, 0x29, 0xB7, 0x5F, 0xDD, 0xA6, 0x2A, 0x95, 0xC7, 0xA5,
+];
+
+/// Second per-round substitution table consumed by the
+/// `rap_to_rif` loop. Mirrors `RAP_E2` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:141-143`.
+pub const RAP_E2: [u8; 0x10] = [
+    0x67, 0xD4, 0x5D, 0xA3, 0x29, 0x6D, 0x00, 0x6A, 0x4E, 0x7C, 0x53, 0x7B, 0xF5, 0x53, 0x8C, 0x74,
+];

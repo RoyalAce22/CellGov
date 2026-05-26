@@ -273,6 +273,139 @@ pub fn app_key_for_revision(revision: u16) -> Option<SelfKey> {
         .map(|(_, k)| *k)
 }
 
+/// NPDRM SELF keys, mirroring `KeyVault::LoadSelfNPDRMKeys` in
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.cpp:434-533`. Selected by
+/// the SELF's revision tag for NPDRM-wrapped binaries; the APP table
+/// above does NOT apply to NPDRM SELFs (RPCS3's `FindSelfKey`
+/// dispatches on `program_type` to either `GetSelfAPPKey` or
+/// `GetSelfNPDRMKey`, and the two arrays carry distinct ERK/RIV per
+/// revision).
+const NPDRM_KEYS: &[(u16, SelfKey)] = &[
+    (
+        0x0001,
+        key(
+            "F9EDD0301F770FABBA8863D9897F0FEA6551B09431F61312654E28F43533EA6B",
+            "A551CCB4A42C37A734A2B4F9657D5540",
+        ),
+    ),
+    (
+        0x0002,
+        key(
+            "8E737230C80E66AD0162EDDD32F1F774EE5E4E187449F19079437A508FCF9C86",
+            "7AAECC60AD12AED90C348D8C11D2BED5",
+        ),
+    ),
+    (
+        0x0003,
+        key(
+            "1B715B0C3E8DC4C1A5772EBA9C5D34F7CCFE5B82025D453F3167566497239664",
+            "E31E206FBB8AEA27FAB0D9A2FFB6B62F",
+        ),
+    ),
+    (
+        0x0004,
+        key(
+            "BB4DBF66B744A33934172D9F8379A7A5EA74CB0F559BB95D0E7AECE91702B706",
+            "ADF7B207A15AC601110E61DDFC210AF6",
+        ),
+    ),
+    (
+        0x0006,
+        key(
+            "8B4C52849765D2B5FA3D5628AFB17644D52B9FFEE235B4C0DB72A62867EAA020",
+            "05719DF1B1D0306C03910ADDCE4AF887",
+        ),
+    ),
+    (
+        0x0007,
+        key(
+            "3946DFAA141718C7BE339A0D6C26301C76B568AEBC5CD52652F2E2E0297437C3",
+            "E4897BE553AE025CDCBF2B15D1C9234E",
+        ),
+    ),
+    (
+        0x0009,
+        key(
+            "0786F4B0CA5937F515BDCE188F569B2EF3109A4DA0780A7AA07BD89C3350810A",
+            "04AD3C2F122A3B35E804850CAD142C6D",
+        ),
+    ),
+    (
+        0x000A,
+        key(
+            "03C21AD78FBB6A3D425E9AAB1298F9FD70E29FD4E6E3A3C151205DA50C413DE4",
+            "0A99D4D4F8301A88052D714AD2FB565E",
+        ),
+    ),
+    (
+        0x000C,
+        key(
+            "357EBBEA265FAEC271182D571C6CD2F62CFA04D325588F213DB6B2E0ED166D92",
+            "D26E6DD2B74CD78E866E742E5571B84F",
+        ),
+    ),
+    (
+        0x000D,
+        key(
+            "337A51416105B56E40D7CAF1B954CDAF4E7645F28379904F35F27E81CA7B6957",
+            "8405C88E042280DBD794EC7E22B74002",
+        ),
+    ),
+    (
+        0x000F,
+        key(
+            "135C098CBE6A3E037EBE9F2BB9B30218DDE8D68217346F9AD33203352FBB3291",
+            "4070C898C2EAAD1634A288AA547A35A8",
+        ),
+    ),
+    (
+        0x0010,
+        key(
+            "4B3CD10F6A6AA7D99F9B3A660C35ADE08EF01C2C336B9E46D1BB5678B4261A61",
+            "C0F2AB86E6E0457552DB50D7219371C5",
+        ),
+    ),
+    (
+        0x0013,
+        key(
+            "265C93CF48562EC5D18773BEB7689B8AD10C5EB6D21421455DEBC4FB128CBF46",
+            "8DEA5FF959682A9B98B688CEA1EF4A1D",
+        ),
+    ),
+    (
+        0x0016,
+        key(
+            "7910340483E419E55F0D33E4EA5410EEEC3AF47814667ECA2AA9D75602B14D4B",
+            "4AD981431B98DFD39B6388EDAD742A8E",
+        ),
+    ),
+    (
+        0x0019,
+        key(
+            "FBDA75963FE690CFF35B7AA7B408CF631744EDEF5F7931A04D58FD6A921FFDB3",
+            "F72C1D80FFDA2E3BF085F4133E6D2805",
+        ),
+    ),
+    (
+        0x001C,
+        key(
+            "8103EA9DB790578219C4CEDF0592B43064A7D98B601B6C7BC45108C4047AA80F",
+            "246F4B8328BE6A2D394EDE20479247C5",
+        ),
+    ),
+];
+
+/// Look up the NPDRM SELF key for a revision tag. Returns `None` for
+/// revisions that have no NPDRM entry (notably 0x0000, 0x0005, 0x0008,
+/// 0x000B, 0x000E, 0x0011, 0x0012, 0x0014, 0x0015, 0x0017, 0x0018,
+/// 0x001A, 0x001B, and any revision past 0x001C).
+pub fn npdrm_key_for_revision(revision: u16) -> Option<SelfKey> {
+    NPDRM_KEYS
+        .iter()
+        .find(|(rev, _)| *rev == revision)
+        .map(|(_, k)| *k)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

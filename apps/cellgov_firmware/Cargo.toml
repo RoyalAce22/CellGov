@@ -26,5 +26,15 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 thiserror = "2"
 
+[features]
+# Enable the npdrm oracle vector tests that include_bytes!() the
+# operator-supplied RAP files under
+# tools/rpcs3/dev_hdd0/home/00000001/exdata/. Off by default so a
+# fresh checkout without those license files compiles cleanly; CI
+# enables it on the host that carries the RAPs to run the
+# 16-byte-boundary regression anchors. The rap_to_klic_is_pure
+# test (no fixture dependency) stays unconditional.
+npdrm-oracle-vectors = []
+
 [lints]
 workspace = true

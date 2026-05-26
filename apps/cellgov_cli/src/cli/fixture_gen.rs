@@ -133,13 +133,16 @@ pub(crate) fn run(args: &[String]) {
     let eboot_path = manifest
         .resolve_eboot(&vfs_root)
         .unwrap_or_else(|e| die(&format!("fixture-gen: resolve EBOOT: {e}")));
-    let eboot_bytes =
-        crate::cli::exit::load_ppu_image_or_die(eboot_path.to_str().unwrap_or_else(|| {
+    let eboot_bytes = crate::cli::exit::load_ppu_image_with_title_or_die(
+        eboot_path.to_str().unwrap_or_else(|| {
             die(&format!(
                 "fixture-gen: EBOOT path {} has invalid UTF-8",
                 eboot_path.display()
             ))
-        }));
+        }),
+        &manifest,
+        &vfs_root,
+    );
 
     let cellgov: Observation = serde_json::from_slice(&load_file_or_die(&cellgov_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: parse {cellgov_path}: {e}")));

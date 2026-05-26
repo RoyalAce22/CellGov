@@ -243,6 +243,7 @@ mod tests {
             developer: developer.to_string(),
             engine: "test-engine".to_string(),
             distribution: Distribution::PsnHdd,
+            rap_filename: None,
             checkpoint: CheckpointTrigger::ProcessExit,
             source: GameSource::Hdd,
             rsx_mirror: false,
