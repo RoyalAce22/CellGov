@@ -19,6 +19,7 @@ mod fs;
 mod lv2_host;
 mod lwmutex;
 mod memory;
+mod mmapper;
 mod mutex;
 mod ppu_thread;
 mod process;

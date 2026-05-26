@@ -313,6 +313,47 @@ impl GuestMemory {
         })
     }
 
+    /// Insert a fresh zero-filled ReadWrite region at `base` with the
+    /// given size and page granule. Returns
+    /// [`MemError::OverlappingRegions`] if the new range overlaps any
+    /// existing region.
+    ///
+    /// Used by the mmapper handle-backing path (`sys_mmapper_map_shared_memory`):
+    /// the syscall mints a region per-handle so the title's later writes
+    /// land in real bytes. The cached state hash is invalidated; any
+    /// consumer holding a stale hash must re-read.
+    pub fn install_region(
+        &mut self,
+        base: u64,
+        size: usize,
+        label: &'static str,
+        page_size: PageSize,
+    ) -> Result<(), MemError> {
+        let new_end = (base as u128) + (size as u128);
+        // u64 end-overflow is overlap-with-nothing-real; reject as
+        // overlap rather than carving a special error variant.
+        if new_end > u64::MAX as u128 {
+            return Err(MemError::OverlappingRegions);
+        }
+        let insertion = self.regions.partition_point(|r| r.base() <= base);
+        if insertion > 0 {
+            let prev = &self.regions[insertion - 1];
+            if prev.end() > base {
+                return Err(MemError::OverlappingRegions);
+            }
+        }
+        if insertion < self.regions.len() {
+            let next = &self.regions[insertion];
+            if new_end > next.base() as u128 {
+                return Err(MemError::OverlappingRegions);
+            }
+        }
+        self.regions
+            .insert(insertion, Region::new(base, size, label, page_size));
+        self.cached_hash.set(None);
+        Ok(())
+    }
+
     /// Reads that have hit a `ReservedZeroReadable` region. Persists across
     /// `clone()`; only construction resets the counter.
     #[inline]

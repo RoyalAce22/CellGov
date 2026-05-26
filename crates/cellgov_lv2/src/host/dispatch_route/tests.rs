@@ -440,13 +440,11 @@ fn syscall_334_backed_target_returns_ok_no_effects() {
 }
 
 #[test]
-fn syscall_334_unbacked_target_returns_enosys_and_logs_break() {
-    // A 334 call targeting an address outside any backed region
-    // (e.g. the mmapper handout window WipEout hits) returns
-    // CELL_ENOSYS with a logged invariant break: the honest
-    // statement is "CellGov does not model backing here," not
-    // "the system is out of memory" (which would impersonate a
-    // real LV2 condition that isn't occurring).
+fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
+    // 334 against an unbacked addr with a mem_id that 332 / 362 never
+    // produced returns CELL_ESRCH plus a `dispatch.mmapper_map_unknown_mem_id`
+    // break: the honest "handle does not exist" path, matching RPCS3's
+    // `idm::get` failure return at sys_mmapper.cpp:662.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let breaks_before = host.invariant_break_count();
@@ -458,8 +456,177 @@ fn syscall_334_unbacked_target_returns_enosys_and_logs_break() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ESRCH.into()));
     assert_eq!(host.invariant_break_count() - breaks_before, 1);
+}
+
+#[test]
+fn syscall_332_then_334_records_pending_region_install() {
+    // The firmware-set boot path: 332 mints a handle with size + align,
+    // 334 looks the handle up by mem_id and queues a region install of
+    // the handle's size at the target addr. The runtime drains the
+    // queue post-dispatch and applies it to GuestMemory.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let mut mem_id_buf = [0u8; 4];
+    let result_332 = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 332,
+            args: [
+                0xffff_0000_0000_0000,
+                0x0400_0000,
+                0x400,
+                0x9000,
+                0,
+                0,
+                0,
+                0,
+            ],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result_332 else {
+        panic!("332 must succeed");
+    };
+    assert_eq!(effects.len(), 1);
+    let Effect::SharedWriteIntent { bytes, .. } = &effects[0] else {
+        panic!("332 must emit a SharedWriteIntent for the mem_id");
+    };
+    mem_id_buf.copy_from_slice(bytes.bytes());
+    let mem_id = u32::from_be_bytes(mem_id_buf);
+
+    let result_334 = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0x5000_0000, u64::from(mem_id), 0x40000, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(result_334, Lv2Dispatch::immediate(errno::CELL_OK.into()));
+    let installs: Vec<_> = host.drain_pending_region_installs().collect();
+    assert_eq!(installs, vec![(0x5000_0000_u64, 0x0400_0000_usize)]);
+}
+
+#[test]
+fn syscall_334_misaligned_returns_ealign() {
+    // 332 records align=0x100000 (SYS_MEMORY_PAGE_SIZE_1M from
+    // flags=0x400); 334 with an addr that is not 1 MiB aligned must
+    // return CELL_EALIGN per sys_mmapper.cpp:635.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result_332 = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 332,
+            args: [
+                0xffff_0000_0000_0000,
+                0x0100_0000,
+                0x400,
+                0x9000,
+                0,
+                0,
+                0,
+                0,
+            ],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { effects, .. } = result_332 else {
+        panic!("332 must succeed");
+    };
+    let Effect::SharedWriteIntent { bytes, .. } = &effects[0] else {
+        panic!();
+    };
+    let mut buf = [0u8; 4];
+    buf.copy_from_slice(bytes.bytes());
+    let mem_id = u32::from_be_bytes(buf);
+
+    let result_334 = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0x5000_0007, u64::from(mem_id), 0x40000, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result_334,
+        Lv2Dispatch::immediate(errno::CELL_EALIGN.into())
+    );
+}
+
+#[test]
+fn syscall_334_addr_out_of_range_returns_einval() {
+    // Per sys_mmapper.cpp:621, 334 rejects addr < 0x2000_0000 or
+    // >= 0xC000_0000 before consulting the handle table. The fast-path
+    // writable spot-check at the top of the handler short-circuits for
+    // addr=0x1000 (FakeRuntime backs [0, 0x10000) as RW) -- that path
+    // is the synthetic-ELF flat-backing test fixture and stays. The
+    // EINVAL gate fires on out-of-range unbacked addrs.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0xD000_0000, 0x4000_0001, 0x40000, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+}
+
+#[test]
+fn syscall_362_records_handle_keyed_on_mem_id() {
+    // 362 = sys_mmapper_allocate_shared_memory_from_container; same
+    // shape as 332 but with the cid in args[2] and the mem_id OUT
+    // pointer in args[4]. WipEout's libgcm calls 362 for its second
+    // shm allocation (the 10 MiB cluster following the 78 MiB cluster
+    // from 332).
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 362,
+            args: [
+                0xffff_0000_0000_0000, // ipc_key
+                0x00a0_0000,           // size
+                0x4000_0015,           // cid
+                0x400,                 // flags (SYS_MEMORY_PAGE_SIZE_1M)
+                0x9000,                // mem_id_ptr
+                0,
+                0,
+                0,
+            ],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result else {
+        panic!("362 must succeed");
+    };
+    assert_eq!(effects.len(), 1);
+    let Effect::SharedWriteIntent { bytes, .. } = &effects[0] else {
+        panic!("362 must emit a SharedWriteIntent for the mem_id");
+    };
+    let mut buf = [0u8; 4];
+    buf.copy_from_slice(bytes.bytes());
+    let mem_id = u32::from_be_bytes(buf);
+
+    // The 362-minted handle is now usable as 334's mem_id arg.
+    let result_334 = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0x5400_0000, u64::from(mem_id), 0x40000, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(result_334, Lv2Dispatch::immediate(errno::CELL_OK.into()));
+    let installs: Vec<_> = host.drain_pending_region_installs().collect();
+    assert_eq!(installs, vec![(0x5400_0000_u64, 0x00a0_0000_usize)]);
 }
 
 #[test]

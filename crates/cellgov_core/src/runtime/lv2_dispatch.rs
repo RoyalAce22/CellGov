@@ -137,6 +137,22 @@ impl Runtime {
                 });
             }
         }
+        // Apply shm region-install requests before the dispatch's effects
+        // commit: a 334 that mints a fresh region and an effect targeting
+        // that region in the same dispatch would otherwise hit
+        // `CommitError::OutOfRange` at pre-validation. Collect into a
+        // local so the borrow on `self.lv2_host` releases before
+        // touching `self.memory`.
+        let region_installs: Vec<(u64, usize)> =
+            self.lv2_host.drain_pending_region_installs().collect();
+        for (addr, size) in region_installs {
+            self.memory
+                .install_region(addr, size, "shm", cellgov_mem::PageSize::Page64K)
+                .expect(
+                    "mmapper handle table guarantees disjointness against the existing layout; \
+                     overlap here means 334 dispatch let a contradiction through",
+                );
+        }
         match dispatch {
             Lv2Dispatch::Immediate { code, effects } => {
                 if is_process_exit {

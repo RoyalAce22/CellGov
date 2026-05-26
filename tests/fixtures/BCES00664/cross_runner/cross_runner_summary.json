@@ -1,22 +1,460 @@
 {
   "convergence": {
-    "kind": "no",
-    "reason": {
-      "kind": "outcome_mismatch",
-      "cellgov": "Fault",
-      "rpcs3": "Completed"
-    }
+    "kind": "yes"
   },
   "byte_parity": {
-    "kind": "diverge",
-    "reason": {
-      "kind": "outcome_mismatch",
-      "cellgov": "Fault",
-      "rpcs3": "Completed"
-    }
+    "kind": "pending",
+    "non_semantic_bytes": 965,
+    "unclassified_bytes": 200
   },
-  "per_class_bytes": {},
-  "unclassified_bytes": 0,
-  "unclassified_runs": [],
-  "lowest_offset_class": null
+  "per_class_bytes": {
+    "hle_opd_slot": 965,
+    "unclassified": 200
+  },
+  "unclassified_bytes": 200,
+  "unclassified_runs": [
+    {
+      "region_name": "code",
+      "offset": 8687107,
+      "length": 5
+    },
+    {
+      "region_name": "code",
+      "offset": 8687114,
+      "length": 1
+    },
+    {
+      "region_name": "code",
+      "offset": 8687117,
+      "length": 1
+    },
+    {
+      "region_name": "code",
+      "offset": 8687119,
+      "length": 1
+    },
+    {
+      "region_name": "code",
+      "offset": 8687122,
+      "length": 2
+    },
+    {
+      "region_name": "code",
+      "offset": 8687125,
+      "length": 1
+    },
+    {
+      "region_name": "code",
+      "offset": 8687129,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 397584,
+      "length": 12
+    },
+    {
+      "region_name": "data",
+      "offset": 399532,
+      "length": 8
+    },
+    {
+      "region_name": "data",
+      "offset": 400236,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 400244,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 403949,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 407003,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 786076,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 786184,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 786186,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790480,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790484,
+      "length": 4
+    },
+    {
+      "region_name": "data",
+      "offset": 790492,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790544,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790548,
+      "length": 10
+    },
+    {
+      "region_name": "data",
+      "offset": 790608,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790612,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790616,
+      "length": 6
+    },
+    {
+      "region_name": "data",
+      "offset": 790672,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790676,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790680,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790684,
+      "length": 4
+    },
+    {
+      "region_name": "data",
+      "offset": 790736,
+      "length": 6
+    },
+    {
+      "region_name": "data",
+      "offset": 790744,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790748,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790809,
+      "length": 3
+    },
+    {
+      "region_name": "data",
+      "offset": 790822,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 790834,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790845,
+      "length": 3
+    },
+    {
+      "region_name": "data",
+      "offset": 790858,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790869,
+      "length": 3
+    },
+    {
+      "region_name": "data",
+      "offset": 790906,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790918,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 790930,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790942,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790954,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790966,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790978,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 790990,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791002,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791013,
+      "length": 3
+    },
+    {
+      "region_name": "data",
+      "offset": 791025,
+      "length": 3
+    },
+    {
+      "region_name": "data",
+      "offset": 791061,
+      "length": 3
+    },
+    {
+      "region_name": "data",
+      "offset": 791074,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 791086,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791098,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791122,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791146,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 791158,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791170,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791182,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791194,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791206,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791278,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791290,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 791302,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791326,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791337,
+      "length": 3
+    },
+    {
+      "region_name": "data",
+      "offset": 791349,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791374,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 791386,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791398,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791410,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 791422,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791434,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791446,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791458,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791470,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791482,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 791494,
+      "length": 2
+    },
+    {
+      "region_name": "data",
+      "offset": 807936,
+      "length": 4
+    },
+    {
+      "region_name": "data",
+      "offset": 807947,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 807955,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 807963,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 807976,
+      "length": 4
+    },
+    {
+      "region_name": "data",
+      "offset": 807987,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 807995,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 808003,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 816253,
+      "length": 3
+    },
+    {
+      "region_name": "data",
+      "offset": 816920,
+      "length": 1
+    },
+    {
+      "region_name": "data",
+      "offset": 816922,
+      "length": 2
+    }
+  ],
+  "lowest_offset_class": [
+    "unclassified",
+    {
+      "name": "code",
+      "addr": 65536
+    },
+    8687107
+  ]
 }

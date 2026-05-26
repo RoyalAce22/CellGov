@@ -38,6 +38,18 @@ impl Lv2Host {
         self.pending_invariant_breaks.drain(..)
     }
 
+    /// Drain pending shared-memory region-install requests emitted by
+    /// `sys_mmapper_map_shared_memory` (334). Each item is the
+    /// `(addr, size)` pair the runtime applies via
+    /// `GuestMemory::install_region` before the dispatch's effects
+    /// commit, so subsequent guest writes through `addr` land in
+    /// backed memory rather than tripping `CommitError::OutOfRange`.
+    pub fn drain_pending_region_installs(&mut self) -> impl Iterator<Item = (u64, usize)> + '_ {
+        self.pending_region_installs
+            .drain(..)
+            .map(|p| (p.addr, p.size))
+    }
+
     /// Debug-panic + log-once for a host-invariant break. Delegates
     /// to `log_invariant_break` for the buffer push.
     pub(super) fn record_invariant_break(

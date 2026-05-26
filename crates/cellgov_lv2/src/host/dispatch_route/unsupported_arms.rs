@@ -6,9 +6,11 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::sys_memory::page_size;
 
 use crate::dispatch::Lv2Dispatch;
 
+use crate::host::mmapper::{MmapperHandle, PendingRegionInstall};
 use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
@@ -139,11 +141,24 @@ impl Lv2Host {
         args: [u64; 8],
         requester: UnitId,
     ) -> Lv2Dispatch {
+        let size = args[1];
+        let flags = args[2];
         let mem_id_ptr = args[3] as u32;
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
             return d;
         }
+        let Ok(size_u32) = u32::try_from(size) else {
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+        };
+        let align = page_size::granule_from_flags(flags);
         let mem_id = self.alloc_id();
+        self.mmapper_handles.insert(
+            mem_id,
+            MmapperHandle {
+                size: size_u32,
+                align,
+            },
+        );
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(mem_id_ptr, 4),
             bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),
@@ -157,46 +172,74 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_mmapper_map_shared_memory` (334). The flat-backing
-    /// "logical no-op" CELL_OK is honest only when the target
-    /// `addr` lies in a ReadWrite region; for an unbacked `addr`
-    /// (e.g. the mmapper handout window `[0x5000_0000, 0xC000_0000)`
-    /// that no boot region covers) returning CELL_OK would be a
-    /// fabricated success the guest later consumes as truth, then
-    /// faults on at the first write through the mapped address.
+    /// `sys_mmapper_map_shared_memory` (334). Looks the caller's
+    /// `mem_id` up in the handle table populated by 332 / 362, validates
+    /// `addr` against the handle's recorded page granule, and pushes a
+    /// pending region-install request the runtime drains after dispatch.
+    ///
+    /// Oracle: `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:613-686`.
+    /// RPCS3 bounds `addr` to `[0x2000_0000, 0xC000_0000)`, looks the
+    /// shm handle up via `idm::get`, checks `addr % page_alignment`, then
+    /// `vm::falloc`s the pages.
     ///
     /// # Errors
     ///
-    /// `CELL_ENOSYS` with a `dispatch.mmapper_map_shared_memory_unbacked`
-    /// invariant break when `addr` is not in any ReadWrite region.
-    /// ENOSYS rather than ENOMEM is the honest answer: the truth is
-    /// "CellGov does not model backing for this region," not "the
-    /// system is out of memory" -- the latter would impersonate a
-    /// real LV2 runtime condition that is not occurring. Real
-    /// per-handle page backing is a successor-phase surface.
+    /// - `CELL_EINVAL` for `addr < 0x2000_0000 || addr >= 0xC000_0000`.
+    /// - `CELL_ESRCH` (plus a `dispatch.mmapper_map_unknown_mem_id`
+    ///   invariant break) when `mem_id` is not in the handle table.
+    /// - `CELL_EALIGN` when `addr % handle.align != 0`.
+    /// - `CELL_EBUSY` (plus `dispatch.mmapper_map_overlap` break) when
+    ///   the requested range overlaps an existing region.
+    ///
+    /// The Phase-37 "writable spot-check" fast path stays: if `addr`
+    /// already lies in a backed region (genuine main / iomap / stack
+    /// target, e.g. a synthetic-ELF harness's 334 against a flat backing)
+    /// the call returns CELL_OK without recording state. This preserves
+    /// existing test fixtures while letting the handle path do the
+    /// real work for firmware-set boots.
     pub(super) fn dispatch_mmapper_map_shared_memory(
         &mut self,
         args: [u64; 8],
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         let addr = args[0];
-        // Spot-check the first byte of the target. The shm's full
-        // size lives in the (unmodeled) shm table; the unbacked-vs-
-        // backed distinction we need here is whether `addr` is in
-        // any RW region at all -- a one-byte writable probe is
-        // enough to discriminate the handout-window case from
-        // genuinely-mapped main / iomap / stack targets.
+        let mem_id = args[1] as u32;
+        // Flat-backing fast path: an already-backed `addr` short-circuits
+        // to CELL_OK regardless of `mem_id`. Used by synthetic ELFs that
+        // 334 against pre-mapped main memory; firmware-set boots take
+        // the handle-keyed path below.
         if rt.writable(addr, 1) {
             return Lv2Dispatch::immediate(errno::CELL_OK.into());
         }
-        self.log_invariant_break(
-            "dispatch.mmapper_map_shared_memory_unbacked",
-            format_args!(
-                "sys_mmapper_map_shared_memory addr={addr:#x} is not in any ReadWrite \
-                 region; returning CELL_ENOSYS (CellGov does not model backing here)"
-            ),
-        );
-        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
+        if !(0x2000_0000..0xC000_0000).contains(&addr) {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        let Some(handle) = self.mmapper_handles.get(mem_id) else {
+            self.log_invariant_break(
+                "dispatch.mmapper_map_unknown_mem_id",
+                format_args!(
+                    "sys_mmapper_map_shared_memory mem_id={mem_id:#x} not in handle table; \
+                     332 / 362 must precede 334"
+                ),
+            );
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        };
+        if !addr.is_multiple_of(u64::from(handle.align)) {
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
+        }
+        // Bound the install at u32 so overflow-into-MMIO is rejected
+        // here rather than at the runtime's install_region check.
+        let Some(end) = addr.checked_add(u64::from(handle.size)) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        if end > 0xC000_0000 {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        self.pending_region_installs.push(PendingRegionInstall {
+            addr,
+            size: handle.size as usize,
+        });
+        Lv2Dispatch::immediate(errno::CELL_OK.into())
     }
 
     /// `sys_mmapper_search_and_map` (337). Oracle:
@@ -240,11 +283,24 @@ impl Lv2Host {
         args: [u64; 8],
         requester: UnitId,
     ) -> Lv2Dispatch {
+        let size = args[1];
+        let flags = args[3];
         let mem_id_ptr = args[4] as u32;
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
             return d;
         }
+        let Ok(size_u32) = u32::try_from(size) else {
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+        };
+        let align = page_size::granule_from_flags(flags);
         let mem_id = self.alloc_id();
+        self.mmapper_handles.insert(
+            mem_id,
+            MmapperHandle {
+                size: size_u32,
+                align,
+            },
+        );
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(mem_id_ptr, 4),
             bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),

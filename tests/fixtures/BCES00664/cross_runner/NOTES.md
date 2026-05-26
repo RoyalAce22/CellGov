@@ -6,48 +6,40 @@ developer: Sony Liverpool
 engine: Studio Liverpool proprietary
 distribution: Disc ISO
 checkpoint: FirstRsxWrite
-steps: 43066
-convergence: No (outcome: Fault vs Completed)
+steps: 43156
+convergence: No (outcome: RsxWriteCheckpoint vs Completed)
 byte_parity: --
 ---
 
-Does not converge with RPCS3 at FirstRsxWrite: CellGov faults
-at step 43,066 with `COMMIT_FAULT: OutOfRange { effect_index: 0 }`;
-RPCS3 completes the checkpoint. Byte parity undefined until
-convergence.
+Reaches the `FirstRsxWrite` checkpoint at step 43,156 with
+outcome `RsxWriteCheckpoint`. RPCS3 boots end-to-end through
+the same checkpoint and continues to gameplay; the
+cross-runner pair still records `convergence: No` because the
+operator-declared checkpoint maps to distinct outcomes
+(`RsxWriteCheckpoint` vs `Completed`). Byte parity remains
+undefined; a future phase that backs the put-target as
+ReadWrite (per the manifest's `[rsx] mirror = true` opt-in)
+will let both runners reach `Completed` and unblock the byte
+walk.
 
-The step count moved 43,137 -> 43,066 between Phase 36.7 and
-Phase 37 because the 670 / 675 / 672 modeling routed the boot
-through the real libgcm init path (which reaches an earlier
-structural blocker) instead of the broken NULL-callback path
-(which faulted later, on a function pointer libgcm never got
-to populate). The lower step count is forward progress in
-capability: WipEout now executes `_cellGcmInitBody`'s real
-allocation and mapping sequence rather than dying on an
-unwritten OPD.
+The step count moved 43,066 -> 43,156 between Phase 37 and
+Phase 38 because the mmapper handle-table + region-install
+work (38B.1 / B.2 / B.3) lets libgcm's `_cellGcmInitBody`
+proceed past the unbacked-handout fault. The +90 step delta
+is forward progress: WipEout now executes the FIFO command
+buffer setup that follows the shared-memory mappings and
+issues the put-pointer write at `0xC0000040` (libgcm vaddr
+`0x79a0` per Phase 37's Stage A.2), which trips the
+FirstRsxWrite checkpoint.
 
-Post-Phase-37 fault root cause: libgcm's init calls
-`sys_mmapper_map_shared_memory` (LV2 syscall 334) to map a
-shared-memory handle into an `sys_mmapper_allocate_address`-
-returned virtual at `0x5000_0000`. CellGov has no page
-backing for the mmapper handout window
-`[0x5000_0000, 0xC000_0000)`, so 334 returns CELL_ENOSYS
-with a `dispatch.mmapper_map_shared_memory_unbacked`
-invariant break naming the unbacked address. WipEout's title
-does not check 334's return (verified at title vaddrs
-`0x003e155c-0x003e1568`: post-syscall epilogue discards r3
-without inspection), proceeds with the handout address in
-its global state, and the first guest write through it
-(`Stw r11, 72(r5)` at title vaddr `0x01565af0`, `r5=0x500000a4`)
-trips OutOfRange at step 43,066.
-
-The 4 host invariant breaks during this run are all honest:
-two `dispatch.mmapper_map_shared_memory_unbacked` entries
-(one per 334 call libgcm issues during init), plus the
-existing `dispatch.memory_free_noop` and one
-`dispatch.unsupported_stub` ENOSYS for an RSX-init syscall.
-The fault is downstream of an honestly-attributed gap, not a
-fabricated success.
+The 3 host invariant breaks during this run are all honest:
+the previously-firing
+`dispatch.mmapper_map_shared_memory_unbacked` entries are
+gone (now backed); the residual breaks are
+`dispatch.memory_free_noop` (sys_memory_free against the
+bump allocator) plus other unmodeled-no-op handler logs the
+boot exercises post-Phase-37. No contaminating fake-success
+returns; every CELL_OK comes with real backing.
 
 RPCS3 corpus state (Stage E):
   outcome: Completed
@@ -58,12 +50,17 @@ RPCS3 corpus state (Stage E):
 
 ## Next step
 
-A successor phase backs the mmapper handout window with real
-page allocation (page allocator + virtual-to-physical map),
-turning the honest `dispatch.mmapper_map_shared_memory_unbacked`
-gap into actual mapped memory. With backing in place, the
-title's writes through the handout succeed and libgcm
-proceeds to the put-pointer write that fires FirstRsxWrite.
+Two open paths. (1) Enable `[rsx] mirror = true` in
+[docs/titles/BCES00664.toml](../../../docs/titles/BCES00664.toml)
+so the put-write at `0xC0000040` lands in a ReadWrite shadow
+rather than tripping FirstRsxWrite; the boot then proceeds
+into the FIFO method-decoder path and eventually reaches the
+spin-poll at libgcm vaddr `0x7a08` (the rendering-side wall
+documented in Phase 36.7's
+`wipeout_commit_fault_step_43066.md`). (2) Model
+`NV406E_SET_REFERENCE` so the spin-poll's `ctrl.ref` read
+gets a guest-visible write -- a successor named in Phase 37
+and Phase 38's Required-successor lists.
 
 ## Structural pre-analysis (pending convergence)
 
