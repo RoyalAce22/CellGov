@@ -25,7 +25,7 @@ outcome = "completed"
 
 # CellGov title manifest. Consumed by `cellgov_cli run-game
 # --title-manifest <this file>`. Same schema shape as the
-# per-title files under docs/titles/, but nested under [cellgov]
+# per-title files under docs/title_manifests/, but nested under [cellgov]
 # so one file carries both the RPCS3 harness config (above) and
 # the CellGov run-game config (below).
 #

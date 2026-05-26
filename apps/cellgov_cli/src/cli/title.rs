@@ -5,7 +5,7 @@ use super::args::find_flag_value;
 use super::exit::die;
 use crate::game;
 
-const DEFAULT_TITLE_REGISTRY_DIR: &str = "docs/titles";
+const DEFAULT_TITLE_REGISTRY_DIR: &str = "docs/title_manifests";
 
 /// Resolve the active [`game::manifest::TitleManifest`] for a
 /// subcommand, in priority order: `--title-manifest <path>`,

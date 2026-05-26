@@ -1,0 +1,29 @@
+[title]
+content_id = "NPUA80001"
+short_name = "flow"
+display_name = "flOw"
+eboot_candidates = ["EBOOT.BIN", "EBOOT.elf"]
+year = 2007
+developer = "thatgamecompany"
+engine = "PhyreEngine"
+distribution = "psn-hdd"
+
+[checkpoint]
+kind = "process-exit"
+
+[rsx]
+mirror = true
+
+[content]
+base = "boot_content/NPUA80001"
+override_base_env = "CELLGOV_NPUA80001_CONTENT_DIR"
+files = [
+    { guest_path = "/app_home/Data/Resources/first.xml", host_path = "Data/Resources/first.xml" },
+    { guest_path = "/app_home/Data/Local/Localization.xml", host_path = "Data/Local/Localization.xml" },
+    { guest_path = "/app_home/Data/Classes/Classes.xml", host_path = "Data/Classes/Classes.xml" },
+]
+
+[[fs.mounts]]
+prefix = "/app_home"
+host = "boot_content/NPUA80001"
+override_env = "CELLGOV_NPUA80001_CONTENT_DIR"

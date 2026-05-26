@@ -1,4 +1,4 @@
-//! Title registry driven by TOML manifests under `docs/titles/`.
+//! Title registry driven by TOML manifests under `docs/title_manifests/`.
 //!
 //! One TOML file per title. Title metadata lives only in `cellgov_cli`.
 

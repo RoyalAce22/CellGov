@@ -2,7 +2,7 @@
 content_id: <PSN content id, e.g. NPUA80068>
 title: <display name>
 year: <first release year>
-developer: <developer credit, matches docs/titles/<id>.toml>
+developer: <developer credit, matches docs/title_manifests/<id>.toml>
 engine: <engine name, e.g. PhyreEngine / Unreal 3 / "<studio> proprietary">
 distribution: <PSN HDD | Retail HDD | Disc ISO>
 checkpoint: <ProcessExit | FirstRsxWrite | Pc=0x...>
@@ -69,7 +69,7 @@ new structurally-grounded DivergenceClass, etc.>
 
 ## Notes on each section
 
-- **Frontmatter** mirrors fields already in `docs/titles/<id>.toml`
+- **Frontmatter** mirrors fields already in `docs/title_manifests/<id>.toml`
   + `cellgov/boot_summary.json` + `cross_runner_summary.json`.
   Duplicates the headline so a reader scanning multiple NOTES.md
   files gets the title at a glance without opening the generated

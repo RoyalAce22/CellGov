@@ -14,7 +14,7 @@ over those JSONs.
 
 ```bash
 cargo run --release -p cellgov_cli -- run-game \
-  --title-manifest docs/titles/BCES00664.toml \
+  --title-manifest docs/title_manifests/BCES00664.toml \
   --save-observation tests/fixtures/BCES00664/cellgov/observation.json \
   --observation-manifest tests/fixtures/BCES00664/checkpoint.toml
 ```
@@ -54,7 +54,7 @@ the code-region base.
 
 ```bash
 cargo run --release -p cellgov_cli -- fixture-gen \
-  --manifest docs/titles/BCES00664.toml \
+  --manifest docs/title_manifests/BCES00664.toml \
   --cellgov tests/fixtures/BCES00664/cellgov/observation.json \
   --rpcs3 tests/fixtures/BCES00664/rpcs3/observation.json \
   --output-dir tests/fixtures/BCES00664/cross_runner

@@ -51,7 +51,7 @@ RPCS3 corpus state (Stage E):
 ## Next step
 
 Two open paths. (1) Enable `[rsx] mirror = true` in
-[docs/titles/BCES00664.toml](../../../docs/titles/BCES00664.toml)
+[docs/title_manifests/BCES00664.toml](../../../docs/title_manifests/BCES00664.toml)
 so the put-write at `0xC0000040` lands in a ReadWrite shadow
 rather than tripping FirstRsxWrite; the boot then proceeds
 into the FIFO method-decoder path and eventually reaches the

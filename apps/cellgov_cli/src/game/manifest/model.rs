@@ -105,7 +105,7 @@ mod distribution_tests {
     }
 }
 
-/// One title's manifest as loaded from `docs/titles/<content-id>.toml`.
+/// One title's manifest as loaded from `docs/title_manifests/<content-id>.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TitleManifest {
     /// PSN content id; primary lookup key and the directory name
