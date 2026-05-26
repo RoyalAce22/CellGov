@@ -71,7 +71,7 @@ Column definitions:
 
 | Serial | Title | Year | Developer | Engine | Format | Checkpoint | Steps | Insns | Convergence | Byte parity |
 | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
-| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | FirstRsxWrite -> RsxWriteCheckpoint | 43,156 | 11,047,936 | Yes | 965 non-semantic + 200 pending |
+| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | FirstRsxWrite -> RsxWriteCheckpoint | 43,156 | 11,047,936 | Yes | 1055 non-semantic + 110 pending |
 | NPUA80001 | flOw | 2007 | thatgamecompany | PhyreEngine | PSN HDD | ProcessExit -> ProcessExit | 11,271 | 2,885,376 | No (outcome: ProcessExit vs Completed) | -- |
 | NPUA80068 | Super Stardust HD | 2007 | Housemarque | Housemarque proprietary | PSN HDD | FirstRsxWrite -> Fault | 14,341,833 | 3,671,509,248 | No (outcome: Fault vs Completed) | -- |
 

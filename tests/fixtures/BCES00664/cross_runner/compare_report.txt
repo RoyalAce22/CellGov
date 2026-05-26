@@ -1,11 +1,11 @@
 Convergence: Yes
-Byte parity: 965 non-semantic + 200 pending
+Byte parity: 1055 non-semantic + 110 pending
 
-Classified non-semantic bytes: 965
-Pending bytes: 200 across 87 run(s)
+Classified non-semantic bytes: 1055
+Pending bytes: 110 across 42 run(s)
 Per-class breakdown:
-  HleOpdSlot: 965 bytes
-  Unclassified: 200 bytes
+  HleOpdSlot: 1055 bytes
+  Unclassified: 110 bytes
 Lowest-offset divergence: Unclassified in region code@0x10000 at offset 0x848e03
 
 Unclassified runs:
@@ -40,51 +40,6 @@ Unclassified runs:
   data@0xc10d0+6: cellgov=3f3ababb3f80 rpcs3=000000000000
   data@0xc10d8+2: cellgov=3f80 rpcs3=0000
   data@0xc10dc+2: cellgov=3f80 rpcs3=0000
-  data@0xc1119+3: cellgov=ad8a00 rpcs3=aeeb80
-  data@0xc1126+1: cellgov=c1 rpcs3=eb
-  data@0xc1132+2: cellgov=d7c0 rpcs3=eb80
-  data@0xc113d+3: cellgov=ad74c0 rpcs3=aeeb80
-  data@0xc114a+2: cellgov=ecc0 rpcs3=eb80
-  data@0xc1155+3: cellgov=ad8840 rpcs3=aeeb80
-  data@0xc117a+2: cellgov=c800 rpcs3=eb80
-  data@0xc1186+1: cellgov=b1 rpcs3=eb
-  data@0xc1192+2: cellgov=e340 rpcs3=eb80
-  data@0xc119e+2: cellgov=e640 rpcs3=eb80
-  data@0xc11aa+2: cellgov=e840 rpcs3=eb80
-  data@0xc11b6+2: cellgov=b2c0 rpcs3=eb80
-  data@0xc11c2+2: cellgov=b000 rpcs3=eb80
-  data@0xc11ce+2: cellgov=ae00 rpcs3=eb80
-  data@0xc11da+2: cellgov=c300 rpcs3=eb80
-  data@0xc11e5+3: cellgov=ad78c0 rpcs3=aeeb80
-  data@0xc11f1+3: cellgov=ad71c0 rpcs3=aeeb80
-  data@0xc1215+3: cellgov=ad8d40 rpcs3=aeeb80
-  data@0xc1222+1: cellgov=d6 rpcs3=eb
-  data@0xc122e+2: cellgov=a800 rpcs3=eb80
-  data@0xc123a+2: cellgov=9a40 rpcs3=eb80
-  data@0xc1252+2: cellgov=9e00 rpcs3=eb80
-  data@0xc126a+1: cellgov=9f rpcs3=eb
-  data@0xc1276+2: cellgov=acc0 rpcs3=eb80
-  data@0xc1282+2: cellgov=e740 rpcs3=eb80
-  data@0xc128e+2: cellgov=a400 rpcs3=eb80
-  data@0xc129a+2: cellgov=c940 rpcs3=eb80
-  data@0xc12a6+2: cellgov=c6c0 rpcs3=eb80
-  data@0xc12ee+2: cellgov=dcc0 rpcs3=eb80
-  data@0xc12fa+1: cellgov=e0 rpcs3=eb
-  data@0xc1306+2: cellgov=c540 rpcs3=eb80
-  data@0xc131e+2: cellgov=d900 rpcs3=eb80
-  data@0xc1329+3: cellgov=ad8340 rpcs3=aeeb80
-  data@0xc1335+2: cellgov=ad86 rpcs3=aeeb
-  data@0xc134e+1: cellgov=db rpcs3=eb
-  data@0xc135a+2: cellgov=a9c0 rpcs3=eb80
-  data@0xc1366+2: cellgov=ab40 rpcs3=eb80
-  data@0xc1372+1: cellgov=a5 rpcs3=eb
-  data@0xc137e+2: cellgov=ef40 rpcs3=eb80
-  data@0xc138a+2: cellgov=ee00 rpcs3=eb80
-  data@0xc1396+2: cellgov=e440 rpcs3=eb80
-  data@0xc13a2+2: cellgov=e540 rpcs3=eb80
-  data@0xc13ae+2: cellgov=a2c0 rpcs3=eb80
-  data@0xc13ba+2: cellgov=a6c0 rpcs3=eb80
-  data@0xc13c6+2: cellgov=a140 rpcs3=eb80
   data@0xc5400+4: cellgov=ffffffff rpcs3=00000000
   data@0xc540b+1: cellgov=22 rpcs3=00
   data@0xc5413+1: cellgov=12 rpcs3=00
