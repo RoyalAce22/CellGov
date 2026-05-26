@@ -1,6 +1,4 @@
-//! TOML -> [`TitleManifest`] translation. Owns [`ManifestError`] and
-//! the second `impl TitleManifest` block carrying `load_from_path` /
-//! `load_from_text`.
+//! TOML -> [`TitleManifest`] translation.
 
 use std::path::{Path, PathBuf};
 
@@ -25,7 +23,6 @@ pub enum ManifestError {
         path.display()
     )]
     UnknownCheckpointKind { path: PathBuf, kind: String },
-    /// `kind = "pc"` without a value, or with a malformed value.
     #[error("{}: {detail}", path.display())]
     BadCheckpointPc { path: PathBuf, detail: String },
     #[error(
@@ -78,8 +75,6 @@ impl TitleManifest {
             path: origin.to_path_buf(),
             message: e.to_string(),
         })?;
-        // A `cellgov` key selects the nested layout; scalar/array
-        // forms or root-level tables alongside `[cellgov.*]` are errors.
         let file_value = if let Some(nested) = raw.get("cellgov") {
             if !nested.is_table() {
                 return Err(ManifestError::Parse {
@@ -189,9 +184,7 @@ impl TitleManifest {
                 override_env: m.override_env,
             })
             .collect();
-        // Validate prefix shape at load time so the error carries
-        // the manifest path (FsMountTable::add catches dup at boot
-        // but without the source path).
+        // Validate at load time so the error carries the manifest path.
         let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
         for m in &mounts {
             if !m.prefix.starts_with('/') {
@@ -220,14 +213,8 @@ impl TitleManifest {
                 ),
             }
         })?;
-        // EBOOT.BIN is the SCE-wrapped canonical source; EBOOT.elf is
-        // an in-tree decrypt that can drift relative to the on-disk
-        // SELF when a stale copy lingers (the bytes ship to disk via
-        // tools that have evolved across phases). Force the canonical
-        // candidate to be probed first so the decrypted bytes always
-        // come from the runtime-decrypted SELF, not from a cached
-        // .elf that might disagree by 24 bytes. Synthetic-ELF test
-        // harnesses without SCE wrappers may list only EBOOT.elf.
+        // A stale plaintext EBOOT.elf can drift from the on-disk SELF; force
+        // the SCE-wrapped EBOOT.BIN ahead of EBOOT.elf when both are listed.
         if let (Some(elf_pos), Some(bin_pos)) = (
             file.title
                 .eboot_candidates
@@ -291,11 +278,6 @@ mod tests {
 
     #[test]
     fn rejects_eboot_candidates_with_elf_before_bin() {
-        // EBOOT.BIN must be probed first so a stale cached .elf cannot
-        // shadow the runtime SCE decryption. The loader gate is the
-        // tripwire that catches a regression in any future manifest
-        // edit; a stale .elf was the actual cause of Phase 38's
-        // Cluster 1 + 2 pending bytes.
         let bad = r#"
 [title]
 content_id = "X"
@@ -323,8 +305,6 @@ kind = "process-exit"
 
     #[test]
     fn elf_only_candidates_list_is_accepted() {
-        // Synthetic test fixtures without an SCE wrapper list only
-        // EBOOT.elf; the gate only fires when both are listed.
         let ok = r#"
 [title]
 content_id = "X"

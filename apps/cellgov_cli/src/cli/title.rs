@@ -83,7 +83,7 @@ mod tests {
     }
 
     /// RAII env-var scrubber: snapshots the current value, unsets it,
-    /// and restores on drop (including during unwinding).
+    /// restores on drop.
     struct EnvGuard {
         key: &'static str,
         prev: Option<String>,

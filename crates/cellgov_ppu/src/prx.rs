@@ -45,8 +45,7 @@ pub struct ImportedFunction {
 
 /// One imported variable: VNID and the address of the slot the
 /// binder patches to point at the exporter's storage. Mirrors
-/// RPCS3's variable-import handling at
-/// `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:1029-1049`.
+/// RPCS3's variable-import handling in its `PPUModule.cpp`.
 #[derive(Debug, Clone, Copy)]
 pub struct ImportedVariable {
     /// Variable NID (hashed name).
@@ -191,9 +190,6 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
 
         let entry_size_byte = data[foff + PRX_IMPORT_SIZE_OFFSET];
         if entry_size_byte < PRX_IMPORT_ENTRY_MIN_SIZE {
-            // RPCS3 falls back to `sizeof(...)` on a zero-size entry
-            // and keeps walking; CellGov rejects so corruption can't
-            // shift the cursor mid-table.
             return Err(ImportParseError::EntryTooSmall {
                 declared: entry_size_byte,
             });
@@ -432,7 +428,7 @@ fn locate_imports_via_prx_param(
 /// `(start, end)` v-addrs of the table on success, or `None` when
 /// either no segments are present or segment 0's `p_paddr` is zero
 /// (the "no library info" signal). Matches RPCS3's firmware-PRX
-/// path in `PPUModule.cpp:1836-1860`.
+/// path in `PPUModule.cpp`.
 fn locate_imports_via_library_info(
     data: &[u8],
     phoff: usize,
@@ -660,11 +656,6 @@ mod tests {
         }
     }
 
-    /// Retail-fixture tests require `tools/rpcs3/dev_hdd0/...` to be
-    /// populated locally. `#[ignore]` keeps `cargo test` clean on
-    /// hosts without the fixtures, and the env-gated runner promotes
-    /// the absent fixture into a hard failure when set
-    /// (`CELLGOV_RETAIL_FIXTURES=1 cargo test -- --ignored`).
     #[test]
     #[ignore = "requires tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf; \
                 run with CELLGOV_RETAIL_FIXTURES=1 cargo test -- --ignored"]
@@ -696,8 +687,7 @@ mod tests {
     }
 
     /// Minimal ELF with PT_LOAD mapped 1:1 (vaddr == file offset) and
-    /// one import module of one function. The GOT slot at
-    /// `STUB_TABLE_OFF` is the `stub_addr` the parser reports.
+    /// one import module of one function.
     fn build_synthetic_prx_elf(nid: u32) -> Vec<u8> {
         const TOTAL_SIZE: usize = 320;
         const PARAM_OFF: usize = 176;
@@ -876,8 +866,8 @@ mod tests {
 
     #[test]
     fn parse_rejects_name_missing_nul_within_cap() {
-        // Name region is shorter than PRX_NAME_MAX_LEN, so the
-        // segment end (320, == TOTAL_SIZE) is the binding cap.
+        // Name region shorter than PRX_NAME_MAX_LEN, so segment end
+        // (320 == TOTAL_SIZE) is the binding cap.
         let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
         let name_off = 252;
         for byte in &mut data[name_off..320] {
@@ -951,13 +941,6 @@ mod tests {
         );
     }
 
-    // -- ppu_prx_library_info path (firmware-PRX layout) --
-    //
-    // Layout: one PT_LOAD covering the whole file with identity
-    // vaddr -> file_offset mapping, no PT_PRX_PARAM. Segment 0's
-    // `p_paddr` points at a `ppu_prx_library_info` struct whose
-    // `imports_start/end` enclose one PrxImportEntry.
-    //
     // File map (all hex):
     //   0x000..0x040  ELF header (phoff=0x40, phentsize=56, phnum=1)
     //   0x040..0x078  Phdr 0    (PT_LOAD; p_paddr = LIB_INFO_OFF)

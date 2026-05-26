@@ -1,20 +1,13 @@
 //! PS3 LV2 `CellError` code database.
 //!
 //! Symbols, hex codes, and descriptions mirror RPCS3's
-//! `Emu/Cell/ErrorCodes.h:104-166` byte-for-byte. `CELL_OK` lives in
-//! the header's `CellNotAnError : s32` enum and is excluded from
-//! [`ENTRIES`]. These are cross-cutting LV2 errnos consumed by every
-//! syscall surface, hence their home in the leaf rather than any
-//! per-module file.
+//! `ErrorCodes.h` byte-for-byte. `CELL_OK` lives in the header's
+//! `CellNotAnError : s32` enum and is excluded from [`ENTRIES`].
 
 /// A PS3 LV2 error code with its symbol and header description.
 ///
-/// This is a value-catalogue entry (errno code + symbol + description),
-/// not a Rust-level error type. It is never returned as the `E` of any
-/// `Result`; only its `code` flows to guest code via
-/// `impl From<Lv2ErrCode> for u64`. The name avoids the "Error" suffix
-/// to keep the workspace's error-handling style contract clean
-/// (`docs/dev/error_handling_style.md`).
+/// Value-catalogue entry, not a Rust-level error type: only `code`
+/// flows to guest code via `impl From<Lv2ErrCode> for u64`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lv2ErrCode {
     /// Numeric code.
@@ -25,9 +18,6 @@ pub struct Lv2ErrCode {
     pub description: &'static str,
 }
 
-/// Widens to the `u64` shape the dispatch pipeline uses for syscall
-/// return codes; `errno::CELL_XXX.into()` keeps `errno::` in the path
-/// so every errno-emitting site is greppable.
 impl From<Lv2ErrCode> for u64 {
     fn from(err: Lv2ErrCode) -> u64 {
         err.code as u64
@@ -41,8 +31,6 @@ pub const CELL_OK: Lv2ErrCode = Lv2ErrCode {
     description: "",
 };
 
-// Binding `symbol` to `stringify!($name)` makes a typo between the
-// ident and the string structurally impossible.
 macro_rules! errno_table {
     ( $( $name:ident = $code:literal , $desc:literal ; )* ) => {
         $(

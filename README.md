@@ -97,7 +97,7 @@ Pre-Alpha. What works today:
   response via the null backend. Unresolved imports surface
   as named diagnostics via a guest-resident trampoline.
 - Sync primitives (lwmutex, event flag, semaphore, mutex, cond), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`).
-- Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`; 15 SPRX modules decrypt bit-identically to RPCS3's output.
+- Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`.
 - ps3autotests cross-runner harness present.
 - Workspace test suite green in debug and release; zero
   `unsafe` (`unsafe_code = forbid`); strict clippy gate.

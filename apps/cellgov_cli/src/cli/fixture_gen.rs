@@ -51,8 +51,7 @@ pub(crate) enum ElfHeaderParseError {
     },
 }
 
-/// Errors `fixture-gen` raises before the report writers; `run()` is
-/// the boundary between typed errors and the process-exit `die()`.
+/// Errors `fixture-gen` raises before the report writers.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FixtureGenError {
     #[error("{context}: {source}")]
@@ -70,14 +69,10 @@ pub(crate) enum FixtureGenError {
     ElfHeaderParse(#[from] ElfHeaderParseError),
     #[error("parse imports: {0}")]
     ImportParse(#[from] cellgov_ppu::prx::ImportParseError),
-    /// `r.addr + phdr_end` would overflow `u64`. fixture-gen reads
-    /// user-provided observation JSON, so `addr` near `u64::MAX` is
-    /// reachable input even though a well-formed PS3 EBOOT never
-    /// approaches it.
+    /// `r.addr + phdr_end` would overflow `u64`. Reachable from
+    /// user-provided observation JSON with `addr` near `u64::MAX`.
     #[error("code region addr 0x{addr:016x} + PHDR-table end 0x{phdr_end:016x} overflows u64")]
     CodeRegionAddrOverflow { addr: u64, phdr_end: u64 },
-    /// Same rationale as [`Self::CodeRegionAddrOverflow`], applied
-    /// to `guest_addr + struct_size` in the sys_proc_param scan.
     #[error("sys_process_param addr 0x{addr:016x} + struct_size {struct_size} overflows u64")]
     SysProcParamAddrOverflow { addr: u64, struct_size: u64 },
 }
@@ -149,8 +144,8 @@ pub(crate) fn run(args: &[String]) {
     let rpcs3: Observation = serde_json::from_slice(&load_file_or_die(&rpcs3_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: parse {rpcs3_path}: {e}")));
 
-    // A zero-region non-Timeout observation lets the comparator emit a
-    // confident verdict against empty data; reject before that happens.
+    // A zero-region non-Timeout observation would let the comparator
+    // emit a confident verdict against empty data.
     if cellgov.memory_regions.is_empty() && !matches!(cellgov.outcome, ObservedOutcome::Timeout) {
         die(&format!(
             "fixture-gen: CellGov observation at {cellgov_path} has zero \
@@ -254,10 +249,9 @@ pub(crate) fn build_classifier_context(
 
     let hle_opd_ranges = compute_hle_opd_ranges(eboot_bytes)?;
 
-    // sys_lwmutex_t handle-slot scan: each match contributes the
-    // 4-byte sleep_queue field range. Operates on CG's runtime data
-    // snapshot, not the EBOOT, because the lwmutex_free sentinel and
-    // attribute field are only populated post-init.
+    // sys_lwmutex_t handle-slot scan runs on the runtime data snapshot
+    // (not the EBOOT) because the lwmutex_free sentinel and attribute
+    // field are only populated post-init.
     let sync_primitive_id_ranges = observation
         .memory_regions
         .iter()
@@ -278,11 +272,7 @@ pub(crate) fn build_classifier_context(
 }
 
 /// One-past-the-end of the loaded ELF header + PHDR table in guest
-/// memory. PS3 EBOOTs map both via a PT_LOAD at `p_offset=0`, so the
-/// PHDR bytes live inside the title's `code` region alongside the
-/// 64-byte header and share its non-semantic-reconstruction class.
-///
-/// Returns at least [`ELF_HEADER_SIZE`].
+/// memory. Returns at least [`ELF_HEADER_SIZE`].
 ///
 /// # Errors
 ///
@@ -338,9 +328,7 @@ fn elf_header_plus_phdr_table_end(eboot_bytes: &[u8]) -> Result<u64, ElfHeaderPa
 
 /// HLE-OPD-class slot ranges in the title's binary: one merged
 /// range per maximal run of adjacent function-stub addresses, plus
-/// one 4-byte range per variable-import `vref_addr`. The function
-/// stubs may or may not pack densely; the merge pass produces the
-/// same shape under either layout without claiming density.
+/// one 4-byte range per variable-import `vref_addr`.
 ///
 /// # Errors
 ///
@@ -373,12 +361,9 @@ fn compute_hle_opd_ranges(eboot_bytes: &[u8]) -> Result<Vec<Range<u64>>, Fixture
         ranges.push(addr as u64..addr as u64 + 4);
     }
 
-    // Secondary OPD tables. The PRX-link CRT0 walker patches these
-    // tables with HLE OPDs from the same address space as the
-    // primary import-stub table; the classifier rule is identical
-    // (`HleOpdSlot` on containment). Adjacent tables collapse into
-    // one Range; non-adjacent stay separate. See
-    // `cellgov_ppu::loader::find_secondary_opd_tables` for the scan.
+    // Secondary OPD tables: adjacent tables collapse into one Range,
+    // non-adjacent stay separate. Scan in
+    // `cellgov_ppu::loader::find_secondary_opd_tables`.
     let secondary: Vec<Range<u64>> = cellgov_ppu::loader::find_secondary_opd_tables(eboot_bytes)
         .into_iter()
         .map(|t| t.guest_addr..t.guest_addr + t.size)
@@ -398,11 +383,10 @@ fn compute_hle_opd_ranges(eboot_bytes: &[u8]) -> Result<Vec<Range<u64>>, Fixture
         ranges.push(r);
     }
 
-    // Indirect OPD tables (12-byte (id, ptr, opd_slot) rows). Each
+    // Indirect OPD tables (12-byte (id, ptr, opd_slot) rows): each
     // table contributes its OPD slot at row offset
-    // INDIRECT_OPD_TABLE_SLOT_OFFSET; classifier rule is the same
-    // `HleOpdSlot` per-slot. See
-    // `cellgov_ppu::loader::find_indirect_opd_tables` for the scan.
+    // INDIRECT_OPD_TABLE_SLOT_OFFSET. Scan in
+    // `cellgov_ppu::loader::find_indirect_opd_tables`.
     for table in cellgov_ppu::loader::find_indirect_opd_tables(eboot_bytes) {
         let row_count = table.size / cellgov_ppu::loader::INDIRECT_OPD_TABLE_STRIDE;
         for row in 0..row_count {
@@ -445,10 +429,7 @@ fn merge_adjacent_stub_ranges(stubs: &mut Vec<u32>) -> Vec<Range<u64>> {
 /// in flatten order over regions and bytes-within-region.
 ///
 /// `cellgov` must be the observation that seeded `ctx` via
-/// [`build_classifier_context`]. Each `ByteDivergence` pair's `addr`
-/// equals the cellgov region's `addr` by `compare_observations`
-/// construction (addrs disagree only via `IdentityMismatch`, which
-/// this fn skips).
+/// [`build_classifier_context`].
 pub(crate) fn classify_all(
     result: &ObservationCompareResult,
     cellgov: &Observation,
@@ -577,8 +558,6 @@ fn render_summary_tail(out: &mut String, summary: &CrossRunnerSummary) {
 
 /// One line per unclassified run, locator `<region>@0x<offset>+<length>`
 /// followed by inline bytes (short runs) or head + tail + count.
-/// Region-missing cases name which side lacked the region so the
-/// cross-runner asymmetry is visible in the fixture.
 fn render_unclassified_run(
     run: &UnclassifiedRun,
     cellgov: &Observation,
@@ -700,9 +679,6 @@ mod tests {
         }
     }
 
-    /// Synthetic 64-byte ELF64 BE PPC header (passes the parser's
-    /// magic / class / endian gate; `phoff` / `phentsize` / `phnum`
-    /// caller-supplied so tests can drive the PHDR-table end).
     fn synthetic_elf64_be(phoff: u64, phentsize: u16, phnum: u16) -> Vec<u8> {
         let mut eboot = vec![0u8; 64];
         eboot[0..4].copy_from_slice(b"\x7fELF");
@@ -934,8 +910,7 @@ mod tests {
     }
 
     /// Synthetic EBOOT with a single PT_LOAD covering a
-    /// sys_proc_param magic struct at file offset 0x100. Caller
-    /// supplies `p_vaddr` and `struct_size`.
+    /// sys_proc_param magic struct at file offset 0x100.
     fn synthetic_eboot_with_sys_proc_param_at(p_vaddr: u64, struct_size: u32) -> Vec<u8> {
         use cellgov_ps3_abi::elf::{PT_LOAD, SYS_PROCESS_PARAM_MAGIC};
         let phoff: usize = 64;
@@ -989,9 +964,6 @@ mod tests {
             ObservedOutcome::Completed,
             vec![region("code", 0x10000, vec![0u8; 4])],
         );
-        // Hand-built: compare_observations cannot legitimately emit an
-        // addr-disagreeing pair, so the debug_assert can only be reached
-        // by constructing the shape directly.
         let result = ObservationCompareResult {
             outcome_match: true,
             a_outcome: ObservedOutcome::Completed,
@@ -1056,10 +1028,6 @@ mod tests {
         assert_eq!(classes, vec![DivergenceClass::Unclassified]);
     }
 
-    // `DivergenceClass` Display strings are pinned upstream by
-    // `divergence_class_display_strings_are_stable` in
-    // crates/cellgov_compare/src/classify.rs; the consumer-side
-    // `contains` checks below double-pin them.
     #[test]
     fn render_summary_section_non_semantic_lists_per_class_and_lowest_offset() {
         let a = obs(

@@ -77,12 +77,8 @@ impl StartupTimings {
 pub(super) struct PrepareOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
-    /// Already-decrypted ELF bytes. The caller is responsible for
-    /// running the candidate-walking decrypt (or single-shot with
-    /// the title-aware entry) before invoking `prepare`; `prepare`
-    /// itself never touches disk for the ELF. This is the seam
-    /// where C.4's per-candidate fallthrough lives -- by the time
-    /// we get here, the right candidate has already been chosen.
+    /// Already-decrypted ELF bytes. `prepare` never touches disk for
+    /// the ELF; the caller runs the decrypt before invoking.
     pub elf_data: Vec<u8>,
     pub firmware_dir: Option<&'a str>,
     pub strict_reserved: bool,
@@ -97,10 +93,8 @@ pub(super) struct PrepareOptions<'a> {
     pub patch_bytes: &'a [(u64, u8)],
     pub dump_mem_boot_addrs: &'a [u64],
     pub budget_override: Option<Budget>,
-    /// When true, switch runtime mode from `FaultDriven` to
-    /// `DeterminismCheck` so per-step `PpuStateHash` records land in
-    /// the runtime's trace buffer. The caller writes the buffer to
-    /// disk; `prepare` only flips the mode.
+    /// When true, switch runtime mode to `DeterminismCheck` so
+    /// per-step `PpuStateHash` records land in the trace buffer.
     pub capture_state_trace: bool,
 }
 
@@ -215,8 +209,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         u32_or_die("tramp_base", rounded as u64)
     };
 
-    // Parse imports so the firmware PRX loader can resolve game-side
-    // OPD stubs to firmware exports.
     let modules = cellgov_ppu::prx::parse_imports(&elf_data)
         .unwrap_or_else(|e| die(&format!("imports: parse failed: {e:?}")));
     if opts.print_banner {
@@ -233,9 +225,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     }
     let t_hle_bind = t_start.elapsed();
 
-    // Code floor used to clear the now-deleted HLE trampoline region;
-    // with the binder gone, only the ELF PT_LOAD ranges and firmware
-    // PRX load region matter.
     let code_floor = tramp_base;
 
     let mut prx_modules =
@@ -245,9 +234,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         eprintln!("prx: firmware directory was supplied but no PRX was loaded");
     }
     if prx_modules.is_empty() {
-        // No firmware was loaded: every game import is unresolved.
-        // Install trampolines so the first call through one produces
-        // a structured fault instead of control-flow corruption.
+        // No firmware loaded: install trampolines so calls through
+        // unresolved imports produce a structured fault.
         if let Some(info) =
             super::prx::install_unresolved_trampolines_only(&modules, &mut mem, code_floor as u64)
         {
@@ -323,11 +311,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let proc_param = cellgov_ppu::loader::find_sys_process_param(&elf_data);
     let malloc_pagesize = proc_param.map(|p| p.malloc_pagesize).unwrap_or(0x100000);
     state.gpr[12] = malloc_pagesize as u64;
-    // r13 is the PS3 PPC64 ABI TLS pointer. Real PS3 LV2 sets it
-    // at process creation (RPCS3 mirrors this at PPUThread.cpp:2443
-    // -- `gpr[13] = param.tls_addr;`); the firmware sys_initialize_tls
-    // does not touch r13, so the primary thread must be seeded here
-    // to keep CRT0's first TLS-relative load on a valid pointer.
+    // r13 is the PS3 PPC64 ABI TLS pointer; LV2 seeds it at process
+    // creation and sys_initialize_tls does not touch it.
     state.gpr[13] = super::prx::TLS_BASE + 0x7030;
 
     let mode = if opts.capture_state_trace {
@@ -339,7 +324,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         let b = opts
             .budget_override
             .unwrap_or_else(|| default_budget_for_mode(mode));
-        // Floor at 1: a zero budget exits the step loop before any work.
         if b.is_exhausted() {
             Budget::new(1)
         } else {
@@ -347,8 +331,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     };
     let step_budget_usize = (step_budget.raw() as usize).max(1);
-    // Refuse silent floor-to-1: a max_steps lower than the budget runs
-    // up to `budget` instructions, not the user's chosen cap.
     if opts.runtime_max_steps < step_budget_usize {
         die(&format!(
             "max_steps={} below budget={step_budget}; raise --max-steps or lower --budget",
@@ -357,17 +339,13 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     }
     let adjusted_max_steps = opts.runtime_max_steps / step_budget_usize;
 
-    // Primary-thread attributes from sys_proc_param: silent fallback
-    // values diverge from RPCS3's reading of the same block.
     let primary_prio: u32 = match proc_param.map(|p| p.primary_prio) {
         Some(p) => {
             u32::try_from(p).unwrap_or_else(|_| die(&format!("primary_prio={p} is negative")))
         }
         None => DEFAULT_PRIMARY_PRIO,
     };
-    // `primary_stacksize == 0` reads as "use kernel
-    // default", so it falls through to PS3_PRIMARY_STACK_SIZE rather
-    // than seeding a zero-sized stack that faults on the first frame.
+    // `primary_stacksize == 0` reads as "use kernel default".
     let primary_stack_size: u32 = match proc_param.map(|p| p.primary_stacksize) {
         Some(want) if (want as usize) > PS3_PRIMARY_STACK_SIZE => die(&format!(
             "primary_stacksize=0x{want:x} exceeds reserved stack region 0x{:x}; raise PS3_PRIMARY_STACK_SIZE",
@@ -409,9 +387,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         println!();
     }
 
-    // Determinism contract: a patch that fails on this host produces a
-    // boot the user did not request. Surface every failure as a hard
-    // exit instead of letting two hosts diverge silently.
+    // Determinism contract: a patch failure on this host would
+    // produce a boot the user did not request.
     for &(addr, val) in opts.patch_bytes {
         let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1)
             .unwrap_or_else(|| die(&format!("patch: byte 0x{addr:x}: invalid address range")));
@@ -445,14 +422,9 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    // Bound the predecode shadow to the upper end of executable code
-    // (`alloc_floor` = max of PT_LOAD vaddr end, HLE trampoline/OPD
-    // end, and PRX placement end). Anything above this address is
-    // either uncommitted zeros or non-executable data; the shadow
-    // would decode every 32-bit word as an instruction anyway and
-    // pay O(region size). The runtime fetch path's `None` branch
-    // falls back to live decode + `refresh`, so an out-of-bounds PC
-    // is still handled correctly -- it just doesn't cache.
+    // Bound the predecode shadow to executable code: anything above
+    // `alloc_floor` is uncommitted or non-executable data. The
+    // runtime fetch path's `None` branch falls back to live decode.
     let shadow_extent = (alloc_floor as usize).min(mem.as_bytes().len());
     let t_shadow_start = std::time::Instant::now();
     let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, &mem.as_bytes()[..shadow_extent]);
@@ -470,13 +442,11 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
     // Cross-module contract: firmware-side `_sys_prx_load_module(path)`
     // resolves the guest path against this registry to recover the
-    // kernel id; an empty stem leaves the module unreachable from
-    // libsysmodule's load worker, which usually means a corrupted
-    // header upstream.
+    // kernel id; an empty stem makes the module unreachable from
+    // libsysmodule's load worker.
     for info in &prx_modules {
         // The synthetic unresolved-import trampoline pseudo-module
-        // has no firmware identity; it is not a real PRX and must
-        // not be reachable from libsysmodule's load worker.
+        // has no firmware identity.
         if info.module_start.is_none() && info.module_stop.is_none() && info.stem.is_empty() {
             continue;
         }
@@ -519,8 +489,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
         unit
     });
-    // Without this seed entry the primary's sync calls fall back to ESRCH:
-    // sync primitives resolve PpuThreadId from UnitId via this table.
+    // Sync primitives resolve PpuThreadId from UnitId via this table;
+    // without the seed the primary's sync calls fall back to ESRCH.
     rt.lv2_host_mut().seed_primary_ppu_thread(
         primary_unit_id,
         cellgov_lv2::PpuThreadAttrs {
@@ -559,12 +529,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     });
 
     // Cell BE convention: args 0..3 map to r3..r6 (arg0 -> r3, etc.).
-    //
-    // # Panics
-    //
-    // The `.expect` on `load_spu_elf` below panics on a malformed
-    // title-provided ELF: this closure runs at SPU-thread-create
-    // time, after `sys_spu_image_open` has already accepted the
+    // The `load_spu_elf` `.expect` panics on a malformed title ELF;
+    // this closure runs after `sys_spu_image_open` has accepted the
     // bytes, so there is no error path back to the caller.
     rt.set_spu_factory(|id, init| {
         use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
@@ -573,8 +539,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             .expect("game boot: load_spu_elf on title-provided ELF; failure indicates a bad LV2 thread init");
         unit.state_mut().pc = init.entry_pc;
         unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
-        // SPU preferred-slot args are 32-bit per Cell BE; the `as u32`
-        // narrow is correct.
         unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
         unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
         unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
@@ -582,8 +546,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         Box::new(unit)
     });
 
-    // Resolve `sysSpuImageOpen("/app_home/spu_main.elf")` against an
-    // EBOOT sibling.
+    // Resolves `sysSpuImageOpen("/app_home/spu_main.elf")` against
+    // an EBOOT sibling.
     if let Some(parent) = std::path::Path::new(opts.elf_path).parent() {
         let spu_candidate = parent.join("spu_main.elf");
         if spu_candidate.exists() {
@@ -631,8 +595,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    // Mount registration follows content so the FsStore path-existence
-    // check wins over mount resolution for blobs registered above.
+    // Mount registration follows content so the FsStore
+    // path-existence check wins over mount resolution.
     if !opts.title.mounts.is_empty() {
         let workspace_root = std::env::current_dir()
             .unwrap_or_else(|e| die(&format!("cannot read CWD for mount path resolution: {e}")));

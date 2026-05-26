@@ -5,8 +5,8 @@
 //! hex risks silent transcription errors on the order-of-magnitude
 //! nibble: `O_CREAT = 0o100 = 0x40`, NOT `0x4`).
 
-/// `lv2_fs_object::id_base` (per `rpcs3/Emu/Cell/lv2/sys_fs.h`):
-/// the starting fd value the kernel hands out for file/dir opens.
+/// `lv2_fs_object::id_base` (per RPCS3's `sys_fs.h`): the starting
+/// fd value the kernel hands out for file/dir opens.
 /// File fds are small ints in `[3, 255)` on real PS3. Titles encode
 /// the fd into narrow struct fields and load it with `lbz`/`lhz`/
 /// `lwz` semantics that truncate high bits; returning fds in the

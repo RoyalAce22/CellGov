@@ -1,6 +1,5 @@
 //! Dispatch for the boot-family subcommands: `run-game`,
-//! `bench-boot-once`, and `bench-boot`. The guest-side pipeline
-//! lives in the sibling `game` module.
+//! `bench-boot-once`, and `bench-boot`.
 
 use cellgov_compare::BootOutcome;
 use cellgov_time::Budget;
@@ -77,13 +76,9 @@ fn resolve_firmware_dir(args: &[String]) -> Option<String> {
 struct BootInputs {
     title: game::manifest::TitleManifest,
     elf_path: String,
-    /// Pre-loaded plaintext ELF bytes. Populated either by the
-    /// candidate-walking loader (when no explicit ELF path was
-    /// given) or by the explicit-path loader (when one was). Passed
-    /// through to `prepare()` so the decrypt happens exactly once,
-    /// and so a stale or unsupported first candidate does not
-    /// block a later one that boots cleanly (the latent bug C.4
-    /// closes).
+    /// Pre-loaded plaintext ELF bytes from the loader (explicit
+    /// path or candidate walk). Passed to `prepare()` so the
+    /// decrypt happens exactly once.
     elf_data: Vec<u8>,
 }
 
@@ -104,17 +99,10 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
     }
     let (elf_path, elf_data) = match explicit {
         Some(p) => {
-            // Operator named an explicit path on the CLI; no
-            // candidate fallthrough, single try with the typed
-            // SceError surface from load_ppu_image_with_title_or_die.
             let bytes = crate::cli::exit::load_ppu_image_with_title_or_die(&p, &title, &vfs_root);
             (p, bytes)
         }
         None => {
-            // Title-driven boot: walk eboot_candidates, fall through
-            // on per-candidate decrypt failure, return both the
-            // resolved path and the plaintext ELF so prepare() does
-            // not redo the load.
             let (bytes, path) =
                 crate::cli::exit::load_ppu_image_walk_candidates_or_die(&title, &vfs_root);
             let path_str = path
@@ -199,8 +187,7 @@ pub(crate) fn run_game(args: &[String]) {
 }
 
 /// Map a [`game::RunSummary`] to a process exit code. A critical
-/// anomaly (lost syscall-wake response) overrides a clean outcome so
-/// determinism-contract violations cannot exit 0.
+/// anomaly (lost syscall-wake response) overrides a clean outcome.
 fn classify_run_game_exit(summary: &game::RunSummary) -> i32 {
     let outcome_code = match summary.outcome {
         BootOutcome::ProcessExit | BootOutcome::RsxWriteCheckpoint | BootOutcome::PcReached(_) => 0,

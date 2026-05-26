@@ -18,10 +18,9 @@ const _: () = assert!(
 impl Lv2Host {
     /// `sys_rsx_device_map` (675). Idempotent: every `dev_id == 8`
     /// call returns [`device_map::ADDR`] in `dev_addr` OUT (8-byte BE
-    /// u64) with `CELL_OK`. `a2` is documented "Unused"
-    /// (`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:927`) and
-    /// left untouched so the post-syscall memory image matches
-    /// RPCS3 byte-for-byte.
+    /// u64) with `CELL_OK`. `a2` is documented "Unused" (RPCS3's
+    /// `sys_rsx.cpp`) and left untouched so the post-syscall memory
+    /// image matches RPCS3 byte-for-byte.
     ///
     /// # Errors
     ///
@@ -171,7 +170,7 @@ mod tests {
 
     #[test]
     fn rsx_device_addr_value_is_within_rpcs3_documented_range() {
-        // RPCS3 sys_rsx.cpp:926 documents dev_addr in
+        // RPCS3's sys_rsx.cpp documents dev_addr in
         // 0x40000000..0xB0000000; this anchor catches a future
         // change that moves it out of the range libgcm expects.
         assert_ne!(device_map::ADDR, 0);

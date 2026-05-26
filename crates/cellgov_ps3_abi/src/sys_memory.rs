@@ -9,8 +9,7 @@
 pub const USER_MEMORY_TOTAL: u32 = 0x0D50_0000;
 
 /// `flags` bits selecting the page granule for shared-memory and
-/// mmapper-allocated regions. Source:
-/// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_memory.h:30-31`.
+/// mmapper-allocated regions. Cross-reference: RPCS3's `sys_memory.h`.
 pub mod page_size {
     /// `SYS_MEMORY_PAGE_SIZE_64K` -- 64 KiB pages.
     pub const FLAG_64K: u64 = 0x200;
@@ -26,8 +25,7 @@ pub mod page_size {
 
     /// Resolve `flags` to the byte granule that `sys_mmapper_map_shared_memory`
     /// will enforce. Matches the `flags & SYS_MEMORY_PAGE_SIZE_64K ?
-    /// 0x10000 : 0x100000` branch RPCS3 uses at
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:232`.
+    /// 0x10000 : 0x100000` branch RPCS3 uses in its mmapper handler.
     #[must_use]
     pub const fn granule_from_flags(flags: u64) -> u32 {
         if flags & FLAG_64K != 0 {

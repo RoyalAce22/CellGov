@@ -254,39 +254,27 @@ pub enum SceError {
     /// Decrypted package contained no usable section.
     #[error("SCE: no usable section found in decrypted package")]
     NoUsableSection,
-    /// The SELF is NPDRM-wrapped but no klicensee was supplied. Use
-    /// [`crate::npdrm::decrypt_self_to_elf_npdrm`] (or `_auto`) to
-    /// supply the klicensee; the bare-bytes
-    /// [`decrypt_self_to_elf`] cannot reach a key.
+    /// SELF is NPDRM-wrapped but no klicensee was supplied. Callers
+    /// should use [`crate::npdrm::decrypt_self_to_elf_npdrm`] (or `_auto`).
     #[error("SCE: SELF is NPDRM-wrapped (content_id={content_id}); needs a klicensee")]
     NeedsNpdrmKlic {
-        /// `content_id` extracted from the NPD supplemental header.
+        /// `content_id` from the NPD supplemental header.
         content_id: String,
     },
-    /// `decrypt_self_to_elf_auto`'s klicensee lookup returned `None`
-    /// for an NPDRM title. The caller's resolver did not find a RAP
-    /// at the expected path.
+    /// NPDRM klicensee lookup returned `None` for the named title.
     #[error("SCE: no RAP/klicensee for NPDRM title {content_id}")]
     NoRapForNpdrmTitle {
-        /// `content_id` extracted from the NPD supplemental header.
+        /// `content_id` from the NPD supplemental header.
         content_id: String,
     },
-    /// The NPDRM supplemental header declares an unknown license value.
-    /// Valid NPDRM license types are 1 (network), 2 (local), and
-    /// 3 (free).
+    /// NPDRM license value is not 1, 2, or 3.
     #[error("SCE: NPDRM license value {got} is not 1, 2, or 3")]
     NpdrmBadLicense {
-        /// Raw `license` field read from the NPD header (u32 BE on
-        /// the wire, so a malformed header with the top bit set
-        /// prints as a large positive value, not a negative one).
+        /// Raw `license` field (u32 BE on the wire).
         got: u32,
     },
-    /// The SELF carries the debug/fself flag (high bit of
-    /// `revision_flags`). Debug SELFs are unencrypted and have no
-    /// envelope to peel; running AES over their plaintext bytes
-    /// would produce silent garbage. The NPDRM decrypt path
-    /// rejects them explicitly rather than relying on a downstream
-    /// padding check to catch it.
+    /// SELF carries the debug/fself flag (high bit of `revision_flags`);
+    /// the NPDRM decrypt path does not handle unencrypted SELFs.
     #[error("SCE: SELF is flagged debug/fself (revision_flags=0x{revision_flags:04x}); unencrypted SELFs are not in scope for the NPDRM decrypt path")]
     DebugSelfUnsupported {
         /// Raw `revision_flags` field from the SCE container header.
@@ -294,21 +282,13 @@ pub enum SceError {
     },
 }
 
-/// NPDRM control information extracted from the type-3 supplemental
-/// header of an NPDRM-wrapped SELF.
-///
-/// Decoded by [`find_npd_header_info`]; consumed by the NPDRM prefix
-/// decrypt in [`crate::npdrm`].
+/// NPDRM control info extracted from a type-3 supplemental header.
 #[derive(Debug, Clone)]
 pub struct NpdHeaderInfo {
-    /// Title `content_id` (zero-terminated, up to 48 bytes). Used by
-    /// the boot path's klicensee resolver to find the matching RAP.
+    /// Title `content_id` (up to 48 bytes, NUL-trimmed).
     pub content_id: String,
-    /// License type: 1 = network, 2 = local, 3 = free. Network and
-    /// local require a RAP-derived klicensee; free uses
-    /// `NP_KLIC_FREE`. Stored unsigned (`u32`) to match the on-wire
-    /// big-endian word; any value outside {1, 2, 3} surfaces as
-    /// [`SceError::NpdrmBadLicense`].
+    /// License type: 1 = network, 2 = local, 3 = free. Anything else
+    /// surfaces as [`SceError::NpdrmBadLicense`].
     pub license: u32,
 }
 
@@ -356,28 +336,25 @@ pub fn find_npd_header_info(data: &[u8]) -> Result<Option<NpdHeaderInfo>, SceErr
         }
         let kind = read_be_u32(data, cursor);
         let record_size = read_be_u32(data, cursor + 4) as usize;
-        // The third u64 is `next`; not needed to drive the walk
-        // (record_size already says how far to skip).
         if record_size < 0x10 || cursor + record_size > supplemental_end {
             return Err(SceError::HeaderOffsetOutOfRange {
                 what: "SELF supplemental header record body",
             });
         }
         if kind == SCE_SUPPLEMENTAL_KIND_NPDRM {
-            // type 3 body is the 0x80-byte NPD_HEADER starting at +0x10.
+            // Type-3 body is the 0x80-byte NPD_HEADER at +0x10:
+            // content_id is 48 bytes at NPD+0x10 (NUL-trimmed),
+            // license is u32 BE at NPD+0x08.
             let npd_off = cursor + 0x10;
             if npd_off + 0x80 > supplemental_end {
                 return Err(SceError::HeaderOffsetOutOfRange {
                     what: "NPDRM supplemental NPD body",
                 });
             }
-            // content_id is 48 bytes at +0x10 within the NPD header
-            // (file offset = npd_off + 0x10). Trim at first NUL.
             let cid_off = npd_off + 0x10;
             let cid_bytes = &data[cid_off..cid_off + 0x30];
             let cid_end = cid_bytes.iter().position(|&b| b == 0).unwrap_or(0x30);
             let content_id = String::from_utf8_lossy(&cid_bytes[..cid_end]).into_owned();
-            // license is u32 BE at +0x08 within the NPD header.
             let license = u32::from_be_bytes(
                 data[npd_off + 0x08..npd_off + 0x0C]
                     .try_into()
@@ -442,21 +419,15 @@ pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, SceError> {
     assemble_elf_from_sections(data, &sections)
 }
 
-/// Reassemble a plaintext ELF from decrypted SCE sections. Shared
-/// between the APP-keyed path ([`decrypt_self_to_elf`]) and the
-/// NPDRM-keyed path
-/// ([`crate::npdrm::decrypt_self_to_elf_npdrm`]) -- the section
-/// material is identical post-decrypt, only the envelope path
-/// differs.
+/// Reassemble a plaintext ELF from decrypted SCE sections.
 ///
-/// Mirrors RPCS3's `SELFDecrypter::WriteElf<Elf64>` template at
-/// `tools/rpcs3-src/rpcs3/Crypto/unself.h:487`: writes the ehdr
-/// as-is, the program headers immediately after it, then each
-/// program segment at its declared `p_offset` (PHDR-kind sections
-/// only), then -- if the SELF's `shdr_offset` is non-zero --
-/// copies the original section-header table to the ELF's
-/// declared `e_shoff`. The result is intended to be byte-identical
-/// to RPCS3's `decrypt-self` output for the same input.
+/// Layout: ehdr as-is, program headers packed immediately after,
+/// each PHDR-kind section copied to its declared `p_offset`, then
+/// -- if the SELF's `shdr_offset` is non-zero -- the original
+/// section-header table copied to the ELF's declared `e_shoff`.
+/// Shared by [`decrypt_self_to_elf`] (APP-keyed) and
+/// [`crate::npdrm::decrypt_self_to_elf_npdrm`] (NPDRM-keyed); only
+/// the envelope path upstream differs.
 pub(crate) fn assemble_elf_from_sections(
     data: &[u8],
     sections: &[(EncryptedSectionDescriptor, Vec<u8>)],
@@ -477,8 +448,7 @@ pub(crate) fn assemble_elf_from_sections(
             what: "SELF ELF header",
         });
     }
-    // Field offsets below assume ELFCLASS64. EI_CLASS == 2 is the
-    // only value PS3 SELFs use.
+    // Field offsets below assume ELFCLASS64 (the only value PS3 SELFs use).
     let ei_class = data[ehdr_offset + 4];
     if ei_class != 2 {
         return Err(SceError::BadElfClass { got: ei_class });
@@ -521,10 +491,8 @@ pub(crate) fn assemble_elf_from_sections(
     let phdr_dst = 0x40usize;
     elf[phdr_dst..phdr_dst + e_phnum * e_phentsize]
         .copy_from_slice(&data[phdr_offset..phdr_offset + e_phnum * e_phentsize]);
-    // Rewrite e_phoff to point at the packed phdr position. RPCS3
-    // writes the ehdr verbatim; we adjust e_phoff because the inner
-    // ELF's original e_phoff may be 0x40 already (typical for PS3
-    // SELFs) but we cannot assume that without parsing it.
+    // Rewrite e_phoff to the packed phdr position; the inner ELF's
+    // original value may differ from 0x40.
     elf[0x20..0x28].copy_from_slice(&(phdr_dst as u64).to_be_bytes());
 
     if shdr_offset_in_self != 0 && e_shnum > 0 {
@@ -573,11 +541,9 @@ pub(crate) fn assemble_elf_from_sections(
     Ok(elf)
 }
 
-/// Zero the section-header fields CellGov used to omit but now
-/// preserves to match RPCS3. The helper still exists so existing
-/// callers (third-party parity tests where the reference comes from
-/// a tool that strips section headers) can normalize before
-/// byte-comparison.
+/// Zero `e_shoff`, `e_shnum`, and `e_shstrndx` so a reconstructed
+/// ELF can be byte-compared against a reference that strips
+/// section-header fields.
 pub fn mask_non_semantic_elf_bytes(elf: &mut [u8]) {
     if elf.len() < 0x40 {
         return;
@@ -626,10 +592,9 @@ fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8
 /// (and zlib-decompressed where applicable) payload.
 ///
 /// APP-keyed path: extracts the [`MetadataKeyEnvelope`] via AES-256-CBC
-/// against ERK/RIV, then hands off to
-/// [`decrypt_sections_from_envelope`]. The NPDRM path produces the
-/// envelope differently (see [`crate::npdrm`]) but consumes the same
-/// downstream helper.
+/// against ERK/RIV, then hands off to a shared section-decrypt helper.
+/// The NPDRM path produces the envelope differently (see
+/// [`crate::npdrm`]) but consumes the same downstream helper.
 pub fn decrypt_sce_sections(
     data: &[u8],
     erk: &[u8; 0x20],
@@ -656,16 +621,10 @@ pub(crate) fn decrypt_envelope_app_keyed(
 /// Decrypt the 0x40-byte [`MetadataKeyEnvelope`], optionally peeling
 /// an NPDRM layer first.
 ///
-/// For NPDRM SELFs, RPCS3 chains two decrypts in `LoadMetadata`
-/// (`tools/rpcs3-src/rpcs3/Crypto/unself.cpp:1085-1135`): the
-/// envelope is first AES-128-CBC-decrypted with the klicensee-
-/// derived layer key (NPDRM peel, IV = zeros), THEN AES-256-CBC-
-/// decrypted with the APP-keyed ERK/RIV pair (same APP peel as
-/// retail). For non-NPDRM SELFs, `npdrm_layer_key` is `None` and
-/// only the APP peel runs.
-///
-/// Padding regions ([0x10..0x20] and [0x30..0x40]) must decrypt to
-/// zero; non-zero indicates a wrong key.
+/// When `npdrm_layer_key` is `Some`, AES-128-CBC peel (IV = zeros)
+/// runs before the AES-256-CBC APP peel; `None` skips straight to
+/// the APP peel. Padding regions `[0x10..0x20]` and `[0x30..0x40]`
+/// must decrypt to zero; non-zero indicates a wrong key.
 pub(crate) fn decrypt_envelope(
     data: &[u8],
     hdr: &SceContainerHeader,
@@ -687,8 +646,7 @@ pub(crate) fn decrypt_envelope(
 
     let is_debug = (hdr.revision_flags & 0x8000) != 0;
     if !is_debug {
-        // Step 1 (NPDRM only): peel the AES-128-CBC NPDRM layer with
-        // the klicensee-derived layer key, IV = zeros.
+        // NPDRM peel runs first when present, then the APP peel.
         if let Some(layer_key) = npdrm_layer_key {
             type Aes128CbcDec = cbc::Decryptor<aes::Aes128>;
             let cbc_iv = [0u8; 16];
@@ -701,7 +659,6 @@ pub(crate) fn decrypt_envelope(
                 .map_err(|_| SceError::AesCbcDecryptFailed)?;
         }
 
-        // Step 2 (always): peel the AES-256-CBC APP layer.
         let decryptor = Aes256CbcDec::new(
             aes::cipher::generic_array::GenericArray::from_slice(erk),
             aes::cipher::generic_array::GenericArray::from_slice(riv),

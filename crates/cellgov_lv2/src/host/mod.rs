@@ -4,11 +4,9 @@
 //!
 //! The runtime calls [`Lv2Host::dispatch`] once per PPU syscall yield,
 //! synchronously inside the same `step()` that observed the yield.
-//! During the call the host reads guest memory through the
-//! [`Lv2Runtime`] trait and returns an [`crate::dispatch::Lv2Dispatch`] telling the
-//! runtime what guest-visible work to perform. The host never writes
-//! guest memory directly; every write travels back to the runtime as
-//! an `Effect` so the commit pipeline orders it.
+//! The host reads guest memory through [`Lv2Runtime`] and returns an
+//! [`crate::dispatch::Lv2Dispatch`]; every guest-visible write travels
+//! back to the runtime as an `Effect` so the commit pipeline orders it.
 
 mod cond;
 pub mod diagnostics;

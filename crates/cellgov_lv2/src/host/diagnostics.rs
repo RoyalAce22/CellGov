@@ -1,12 +1,13 @@
 //! Invariant-break observability for [`Lv2Host`].
 //!
-//! Submodules call `record_invariant_break` (debug-panic + log-once)
-//! or `log_invariant_break` (log-once only, for guest-reachable
-//! degraded paths). Both push onto `pending_invariant_breaks` and
-//! bump `invariant_break_count`; the runtime drains the buffer and
-//! emits `TraceRecord::HostInvariantBreak` per reason via the
-//! bridge in `cellgov_core::runtime::trace_bridge` (the lv2 crate
-//! does not depend on `cellgov_trace`).
+//! # Cross-module contract
+//!
+//! Both `record_invariant_break` and `log_invariant_break` push onto
+//! `pending_invariant_breaks` and bump `invariant_break_count`. The
+//! runtime drains the buffer and emits one
+//! `TraceRecord::HostInvariantBreak` per reason via the bridge in
+//! `cellgov_core::runtime::trace_bridge`; the lv2 crate does not
+//! depend on `cellgov_trace`.
 
 use cellgov_event::UnitId;
 
@@ -14,9 +15,10 @@ use crate::ppu_thread::PpuThreadId;
 
 use super::Lv2Host;
 
-/// Category of a host-side invariant break. Mirrored by
-/// `TracedInvariantBreakReason` in `cellgov_trace` via the bridge in
-/// `cellgov_core::runtime::trace_bridge`; variant order must match.
+/// Category of a host-side invariant break.
+///
+/// Variant order must match `TracedInvariantBreakReason` in
+/// `cellgov_trace` (bridged via `cellgov_core::runtime::trace_bridge`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InvariantBreakReason {
     /// Catch-all placeholder; every push currently uses this variant.
@@ -30,28 +32,27 @@ impl Lv2Host {
         self.invariant_break_count
     }
 
-    /// Drain pending [`InvariantBreakReason`] events. The runtime
-    /// calls this after `Lv2Host::dispatch` and emits one
-    /// `TraceRecord::HostInvariantBreak` per drained reason when
-    /// trace mode is enabled.
+    /// Drain pending [`InvariantBreakReason`] events.
     pub fn drain_pending_invariant_breaks(&mut self) -> std::vec::Drain<'_, InvariantBreakReason> {
         self.pending_invariant_breaks.drain(..)
     }
 
     /// Drain pending shared-memory region-install requests emitted by
-    /// `sys_mmapper_map_shared_memory` (334). Each item is the
-    /// `(addr, size)` pair the runtime applies via
+    /// `sys_mmapper_map_shared_memory` (334).
+    ///
+    /// # Cross-module contract
+    ///
+    /// Each `(addr, size)` must be applied via
     /// `GuestMemory::install_region` before the dispatch's effects
-    /// commit, so subsequent guest writes through `addr` land in
-    /// backed memory rather than tripping `CommitError::OutOfRange`.
+    /// commit; otherwise subsequent guest writes through `addr` trip
+    /// `CommitError::OutOfRange`.
     pub fn drain_pending_region_installs(&mut self) -> impl Iterator<Item = (u64, usize)> + '_ {
         self.pending_region_installs
             .drain(..)
             .map(|p| (p.addr, p.size))
     }
 
-    /// Debug-panic + log-once for a host-invariant break. Delegates
-    /// to `log_invariant_break` for the buffer push.
+    /// Debug-panic + log-once for a host-invariant break.
     pub(super) fn record_invariant_break(
         &mut self,
         site: &'static str,
@@ -63,9 +64,7 @@ impl Lv2Host {
 
     /// Log-once without `debug_assert!`, for paths reachable by
     /// guest input during normal operation (e.g. `Unsupported`
-    /// syscalls during real boots). Pushes one
-    /// [`InvariantBreakReason::Unspecified`] and bumps
-    /// `invariant_break_count`.
+    /// syscalls during real boots).
     pub(super) fn log_invariant_break(
         &mut self,
         site: &'static str,
@@ -85,9 +84,9 @@ impl Lv2Host {
         self.invariant_break_count = self.invariant_break_count.saturating_add(1);
     }
 
-    /// `None` means the thread table and the primitive diverged;
-    /// the divergence is logged as an invariant break so the caller
-    /// can skip the wake and leave surviving waiters intact.
+    /// `None` means the thread table and the primitive diverged; the
+    /// divergence is logged as an invariant break and the caller must
+    /// skip the wake to leave surviving waiters intact.
     pub(super) fn resolve_wake_thread(
         &mut self,
         thread: PpuThreadId,

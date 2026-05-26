@@ -192,7 +192,7 @@ fn time_get_current_time_and_timebase_frequency_are_coherent() {
     let as_nsec_from_time_syscall = sec * 1_000_000_000 + nsec;
     let us_from_tb = tb * 1_000_000 / cellgov_time::CELL_PPU_TIMEBASE_HZ;
     let nsec_from_tb = us_from_tb * 1_000;
-    // TB granularity is ~12.5 ns; require agreement under 1 us.
+    // TB granularity ~12.5 ns; require agreement under 1 us.
     let diff = as_nsec_from_time_syscall.abs_diff(nsec_from_tb);
     assert!(
         diff < 1_000,
@@ -214,8 +214,7 @@ fn time_get_timebase_frequency_returns_cell_ppu_timebase_hz() {
 
 #[test]
 fn cell_ps3_user_memory_total_is_213_mib() {
-    // 213 MiB == 0x0D50_0000 == 223,346,688 bytes (PS3 game-mode
-    // user-memory cap).
+    // 213 MiB == 0x0D50_0000 == 223,346,688.
     assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 0x0D50_0000);
     assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 223_346_688);
 }
@@ -279,9 +278,6 @@ fn unsupported_dispatch_returns_cell_enosys() {
 
 #[test]
 fn unresolved_import_dispatch_returns_cell_einval() {
-    // Trampoline fires with a known NID; dispatcher emits the
-    // structured diagnostic and returns CELL_EINVAL so the
-    // caller sees a real errno rather than control-flow corruption.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let req = Lv2Request::UnresolvedImport {
@@ -296,8 +292,6 @@ fn unresolved_import_dispatch_returns_cell_einval() {
 
 #[test]
 fn unresolved_import_dispatch_handles_unknown_nid() {
-    // A NID outside the database still produces a clean
-    // CELL_EINVAL fault, just without a name in the diagnostic.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let req = Lv2Request::UnresolvedImport { nid: 0xdead_beef };
@@ -422,10 +416,8 @@ fn syscall_324_writes_fresh_cid_to_out_ptr() {
 
 #[test]
 fn syscall_334_backed_target_returns_ok_no_effects() {
-    // FakeRuntime::new(0x10000) backs [0, 0x10000). A 334 call
-    // targeting an address inside that range is a genuine honest
-    // no-op: the flat backing aliases real bytes, so the map
-    // succeeds without any per-handle work.
+    // FakeRuntime::new(0x10000) backs [0, 0x10000); a 334 inside that
+    // range hits the flat-backing fast path.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -441,10 +433,6 @@ fn syscall_334_backed_target_returns_ok_no_effects() {
 
 #[test]
 fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
-    // 334 against an unbacked addr with a mem_id that 332 / 362 never
-    // produced returns CELL_ESRCH plus a `dispatch.mmapper_map_unknown_mem_id`
-    // break: the honest "handle does not exist" path, matching RPCS3's
-    // `idm::get` failure return at sys_mmapper.cpp:662.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let breaks_before = host.invariant_break_count();
@@ -462,10 +450,8 @@ fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
 
 #[test]
 fn syscall_332_then_334_records_pending_region_install() {
-    // The firmware-set boot path: 332 mints a handle with size + align,
-    // 334 looks the handle up by mem_id and queues a region install of
-    // the handle's size at the target addr. The runtime drains the
-    // queue post-dispatch and applies it to GuestMemory.
+    // Firmware-set boot path: 332 mints a handle, 334 queues a region
+    // install of that handle's size at the target addr.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let mut mem_id_buf = [0u8; 4];
@@ -511,9 +497,7 @@ fn syscall_332_then_334_records_pending_region_install() {
 
 #[test]
 fn syscall_334_misaligned_returns_ealign() {
-    // 332 records align=0x100000 (SYS_MEMORY_PAGE_SIZE_1M from
-    // flags=0x400); 334 with an addr that is not 1 MiB aligned must
-    // return CELL_EALIGN per sys_mmapper.cpp:635.
+    // 332 records align=0x100000 (SYS_MEMORY_PAGE_SIZE_1M from flags=0x400).
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result_332 = host.dispatch(
@@ -559,12 +543,7 @@ fn syscall_334_misaligned_returns_ealign() {
 
 #[test]
 fn syscall_334_addr_out_of_range_returns_einval() {
-    // Per sys_mmapper.cpp:621, 334 rejects addr < 0x2000_0000 or
-    // >= 0xC000_0000 before consulting the handle table. The fast-path
-    // writable spot-check at the top of the handler short-circuits for
-    // addr=0x1000 (FakeRuntime backs [0, 0x10000) as RW) -- that path
-    // is the synthetic-ELF flat-backing test fixture and stays. The
-    // EINVAL gate fires on out-of-range unbacked addrs.
+    // 334 rejects addr < 0x2000_0000 or >= 0xC000_0000 (RPCS3 bounds).
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -580,11 +559,8 @@ fn syscall_334_addr_out_of_range_returns_einval() {
 
 #[test]
 fn syscall_362_records_handle_keyed_on_mem_id() {
-    // 362 = sys_mmapper_allocate_shared_memory_from_container; same
-    // shape as 332 but with the cid in args[2] and the mem_id OUT
-    // pointer in args[4]. WipEout's libgcm calls 362 for its second
-    // shm allocation (the 10 MiB cluster following the 78 MiB cluster
-    // from 332).
+    // 362 = sys_mmapper_allocate_shared_memory_from_container: cid in
+    // args[2], mem_id OUT pointer in args[4].
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -631,10 +607,6 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
 
 #[test]
 fn syscall_337_writes_start_addr_to_alloc_addr_ptr() {
-    // sys_mmapper_search_and_map: a start_addr inside the valid
-    // VM range yields CELL_OK and writes start_addr verbatim to
-    // *alloc_addr_ptr (flat backing: the search collapses to
-    // "place the shm at start_addr").
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -739,13 +711,8 @@ fn syscall_330_writes_monotonic_256mib_aligned_address() {
 
 #[test]
 fn syscall_330_returns_enomem_when_cursor_would_cross_mmio_region() {
-    // mmapper_alloc bumps a 256 MiB-aligned cursor starting at
-    // MMAPPER_REGION_START (0x5000_0000) and refuses grants that
-    // would cross MMAPPER_REGION_END (0xC000_0000) into the RSX
-    // dma_control MMIO region. The window holds seven 256 MiB
-    // grants; the eighth must surface CELL_ENOMEM. The 256 MiB
-    // gap below MMAPPER_REGION_START is reserved for the
-    // rsx_context window holding RSX_DEVICE_ADDR.
+    // Cursor at MMAPPER_REGION_START (0x5000_0000), refuses crossing
+    // MMAPPER_REGION_END (0xC000_0000): 7 grants fit, the 8th fails.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let req = || Lv2Request::Unsupported {
@@ -815,11 +782,6 @@ fn syscall_494_flags_with_bit2_writes_zero_count_at_offset_0x10() {
 
 #[test]
 fn syscall_136_event_port_connect_local_returns_enosys() {
-    // sys_event_port_connect_local is a divergent honest gap: RPCS3
-    // persists the port -> queue binding and returns CELL_OK
-    // (tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_event.cpp:666-694);
-    // CellGov does not model the binding, so the honest response is
-    // CELL_ENOSYS.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -913,9 +875,6 @@ fn syscall_332_writes_fresh_mem_id_to_mem_id_ptr() {
 
 #[test]
 fn syscall_480_returns_registered_kernel_id_for_known_stem() {
-    // _sys_prx_load_module with a path whose stem matches a
-    // registered PRX returns the registry's kernel id, not the
-    // path-pointer fallback.
     let mut host = Lv2Host::new();
     let expected_id = host.prx_registry_mut().register(
         "libaudio".into(),
@@ -1222,9 +1181,8 @@ fn syscall_494_rejects_null_p_info_with_efault() {
 
 #[test]
 fn syscall_494_idlist_order_is_independent_of_registration_order() {
-    // Registry uses BTreeMap-keyed kernel ids; ordering must
-    // depend on allocation order, not insertion order. Two hosts
-    // register A-then-B vs B-then-A: assert idlist bytes match.
+    // Registry walks BTreeMap keys by allocation order; A-then-B and
+    // B-then-A must produce identical idlist bytes.
     fn idlist_bytes(register: impl FnOnce(&mut Lv2Host)) -> Vec<u8> {
         let mut host = Lv2Host::new();
         register(&mut host);
@@ -1495,10 +1453,6 @@ fn ppu_thread_start_returns_ok_because_auto_started_at_create() {
 
 #[test]
 fn process_is_stack_returns_real_answer_from_tracked_thread_ranges() {
-    // Regression pin: `sys_process_is_stack` now reads the real
-    // per-thread stack ranges from the thread table and returns a
-    // computed answer, rather than the prior unconditional 0
-    // (which fabricated "not on stack" without checking).
     use crate::ppu_thread::PpuThreadAttrs;
     let mut host = Lv2Host::new();
     host.seed_primary_ppu_thread(
@@ -1514,7 +1468,6 @@ fn process_is_stack_returns_real_answer_from_tracked_thread_ranges() {
     );
     let rt = FakeRuntime::new(0x10000);
 
-    // Address inside [stack_base, stack_base + stack_size) -> 1
     let on_stack = host.dispatch(
         Lv2Request::ProcessIsStack { addr: 0xD000_0500 },
         UnitId::new(0),
@@ -1522,7 +1475,6 @@ fn process_is_stack_returns_real_answer_from_tracked_thread_ranges() {
     );
     assert_eq!(on_stack, Lv2Dispatch::immediate(1));
 
-    // Address below stack_base -> 0
     let below = host.dispatch(
         Lv2Request::ProcessIsStack { addr: 0xCFFF_FFFF },
         UnitId::new(0),
@@ -1530,7 +1482,7 @@ fn process_is_stack_returns_real_answer_from_tracked_thread_ranges() {
     );
     assert_eq!(below, Lv2Dispatch::immediate(0));
 
-    // Address at exact end (stack_base + stack_size) -> 0 (half-open)
+    // Half-open: stack_base + stack_size is not on stack.
     let at_end = host.dispatch(
         Lv2Request::ProcessIsStack { addr: 0xD001_0000 },
         UnitId::new(0),
@@ -1604,7 +1556,7 @@ fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
             arg: 0,
             priority: 1000,
             stacksize: 0x4000,
-            flags: 0x1, // JOINABLE -- unmodeled, must surface
+            flags: 0x1, // JOINABLE -- unmodeled
         },
         UnitId::new(0),
         &rt,
@@ -1799,8 +1751,6 @@ fn spu_thread_group_destroy_created_group_returns_ok() {
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
-    // Subsequent destroy of the same id must report CELL_ESRCH because
-    // the table entry has been withdrawn.
     let second = host.dispatch(
         Lv2Request::SpuThreadGroupDestroy { id: group_id },
         UnitId::new(0),

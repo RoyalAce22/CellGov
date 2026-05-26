@@ -1,4 +1,4 @@
-//! Integration tests for the PS3 LV2 errno database.
+//! PS3 LV2 errno database tests.
 
 #![allow(
     clippy::unwrap_used,
@@ -55,7 +55,6 @@ fn lookup_hits_known_code_and_misses_unknown() {
 
 #[test]
 fn spot_check_three_canaries_against_rpcs3_header() {
-    // Pinned to rpcs3/Emu/Cell/ErrorCodes.h:104-133.
     assert_eq!(CELL_EINVAL.code, 0x8001_0002);
     assert_eq!(CELL_EPERM.code, 0x8001_0009);
     assert_eq!(CELL_EFAULT.code, 0x8001_000D);

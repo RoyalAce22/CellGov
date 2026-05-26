@@ -92,13 +92,9 @@ impl DirtyPages {
 ///
 /// `bytes` is `Arc<Vec<u8>>`: clone is a refcount bump,
 /// [`GuestMemory::apply_commit`] forks via [`Arc::make_mut`].
-/// Without COW, `Runtime::snapshot` would clone the full memory
-/// per branching point.
 ///
 /// `dirty_pages` records 4 KiB-page-granular writes since the most
 /// recent [`Region::reset_for_reuse`] (or since construction).
-/// Cloned along with the region; live snapshots inherit it but do
-/// not interact with the reset path.
 #[derive(Debug, Clone)]
 pub struct Region {
     base: u64,
@@ -316,12 +312,7 @@ impl GuestMemory {
     /// Insert a fresh zero-filled ReadWrite region at `base` with the
     /// given size and page granule. Returns
     /// [`MemError::OverlappingRegions`] if the new range overlaps any
-    /// existing region.
-    ///
-    /// Used by the mmapper handle-backing path (`sys_mmapper_map_shared_memory`):
-    /// the syscall mints a region per-handle so the title's later writes
-    /// land in real bytes. The cached state hash is invalidated; any
-    /// consumer holding a stale hash must re-read.
+    /// existing region. The cached state hash is invalidated.
     pub fn install_region(
         &mut self,
         base: u64,
@@ -330,8 +321,6 @@ impl GuestMemory {
         page_size: PageSize,
     ) -> Result<(), MemError> {
         let new_end = (base as u128) + (size as u128);
-        // u64 end-overflow is overlap-with-nothing-real; reject as
-        // overlap rather than carving a special error variant.
         if new_end > u64::MAX as u128 {
             return Err(MemError::OverlappingRegions);
         }
@@ -459,10 +448,7 @@ impl GuestMemory {
 
     /// Apply a committed write to `range` from `bytes`. Invalidates the
     /// cached content hash on success; errors leave both memory and the
-    /// cache untouched.
-    ///
-    /// This is the commit pipeline's entry point; execution units must not
-    /// call it directly. The rule is architectural, not language-enforced.
+    /// cache untouched. Commit-pipeline entry point.
     ///
     /// # Errors
     ///
@@ -519,8 +505,7 @@ impl GuestMemory {
 
     /// Force the next [`content_hash`](Self::content_hash) call to
     /// re-walk dirty pages instead of returning the cached digest.
-    /// `apply_commit` already invalidates the cache; this hook exists
-    /// so benchmarks and determinism tests can measure the uncached
+    /// Lets benchmarks and determinism tests measure the uncached
     /// walk without going through a write.
     #[doc(hidden)]
     pub fn invalidate_content_hash(&self) {
@@ -666,8 +651,6 @@ mod tests {
         );
     }
 
-    /// Mirror of [`write_to_original_does_not_leak_into_clone`];
-    /// catches a one-direction-only COW.
     #[test]
     fn write_to_clone_does_not_leak_into_original() {
         let (original, mut clone) = make_seeded_cow_pair();
@@ -706,9 +689,6 @@ mod tests {
         );
     }
 
-    /// Mirror of [`clone_hash_remains_valid_after_original_writes`];
-    /// catches cache-state aliasing from the clone back into the
-    /// original.
     #[test]
     fn original_hash_remains_valid_after_clone_writes() {
         let (original, mut clone) = make_seeded_cow_pair();

@@ -11,13 +11,12 @@ use crate::host::Lv2Host;
 
 use super::state::RsxDisplayBuffer;
 
-/// CellGov-internal package id for registering the flip-handler callback.
-///
-/// High bit is set to keep it disjoint from guest-visible package ids.
+/// CellGov-internal package id for the flip-handler callback. High
+/// bit set to keep it disjoint from guest-visible package ids.
 pub const PACKAGE_CELLGOV_SET_FLIP_HANDLER: u32 = 0x8000_0108;
-/// CellGov-internal package id for registering the vblank-handler callback.
+/// CellGov-internal package id for the vblank-handler callback.
 pub const PACKAGE_CELLGOV_SET_VBLANK_HANDLER: u32 = 0x8000_010C;
-/// CellGov-internal package id for registering the user-handler callback.
+/// CellGov-internal package id for the user-handler callback.
 pub const PACKAGE_CELLGOV_SET_USER_HANDLER: u32 = 0x8000_010D;
 
 impl Lv2Host {
@@ -99,8 +98,7 @@ impl Lv2Host {
     }
 
     /// Fallback for unknown `sys_rsx_context_attribute` package_ids;
-    /// returns CELL_EINVAL per RPCS3 default-arm
-    /// (`rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:917-918`).
+    /// returns CELL_EINVAL per RPCS3's `sys_rsx.cpp` default-arm.
     fn sys_rsx_attribute_unknown(&mut self, package_id: u32) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.sys_rsx_context_attribute_unknown_package",
