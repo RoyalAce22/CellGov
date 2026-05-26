@@ -18,6 +18,7 @@ use crate::sync_primitives::{
 };
 use crate::thread_group::ThreadGroupTable;
 
+use super::mmapper::{MmapperHandleTable, PendingRegionInstall};
 use super::process;
 use super::rsx::SysRsxContext;
 
@@ -43,6 +44,16 @@ pub struct Lv2Host {
     pub(super) rsx_mem_alloc_ptr: u32,
     pub(super) rsx_mem_handle_counter: u32,
     pub(super) rsx_context: SysRsxContext,
+    /// Shared-memory handle table populated by `sys_mmapper_allocate_shared_memory`
+    /// (332) and `sys_mmapper_allocate_shared_memory_from_container`
+    /// (362), consumed by `sys_mmapper_map_shared_memory` (334).
+    pub(super) mmapper_handles: MmapperHandleTable,
+    /// Pending region-install requests emitted by 334. Drained by the
+    /// runtime post-dispatch and applied to `GuestMemory` before the
+    /// dispatch's effects commit (so effects can target the new region).
+    /// Not folded into [`Self::state_hash`]; the handle table itself
+    /// carries the hashable state.
+    pub(super) pending_region_installs: Vec<PendingRegionInstall>,
     pub(super) lwmutexes: LwMutexTable,
     pub(super) mutexes: MutexTable,
     pub(super) semaphores: SemaphoreTable,
@@ -170,6 +181,8 @@ impl Lv2Host {
             rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
             rsx_mem_handle_counter: 1,
             rsx_context: SysRsxContext::new(),
+            mmapper_handles: MmapperHandleTable::new(),
+            pending_region_installs: Vec::new(),
             lwmutexes: LwMutexTable::new(),
             mutexes: MutexTable::new(),
             semaphores: SemaphoreTable::new(),
