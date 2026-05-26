@@ -380,6 +380,21 @@ fn compute_hle_opd_ranges(eboot_bytes: &[u8]) -> Result<Vec<Range<u64>>, Fixture
         ranges.push(r);
     }
 
+    // Indirect OPD tables (12-byte (id, ptr, opd_slot) rows). Each
+    // table contributes its OPD slot at row offset
+    // INDIRECT_OPD_TABLE_SLOT_OFFSET; classifier rule is the same
+    // `HleOpdSlot` per-slot. See
+    // `cellgov_ppu::loader::find_indirect_opd_tables` for the scan.
+    for table in cellgov_ppu::loader::find_indirect_opd_tables(eboot_bytes) {
+        let row_count = table.size / cellgov_ppu::loader::INDIRECT_OPD_TABLE_STRIDE;
+        for row in 0..row_count {
+            let slot_start = table.guest_addr
+                + row * cellgov_ppu::loader::INDIRECT_OPD_TABLE_STRIDE
+                + cellgov_ppu::loader::INDIRECT_OPD_TABLE_SLOT_OFFSET;
+            ranges.push(slot_start..slot_start + 4);
+        }
+    }
+
     Ok(ranges)
 }
 

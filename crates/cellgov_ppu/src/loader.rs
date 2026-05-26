@@ -616,6 +616,100 @@ pub fn find_secondary_opd_tables(data: &[u8]) -> Vec<SecondaryOpdTable> {
     out
 }
 
+/// One contiguous (id, ptr, opd_slot) triple-table observed in EBOOT
+/// data. Field layout per row (4 bytes each):
+///
+/// - Bytes 0..4: caller-side identifier (counter, opcode, etc.).
+/// - Bytes 4..8: pointer into the title's executable text segment.
+/// - Bytes 8..12: OPD pointer slot. The CRT0 / PRX-link walker
+///   rewrites this with an HLE OPD address at runtime; per-runner
+///   addresses differ but the resolved function is equivalent.
+///
+/// Found by [`find_indirect_opd_tables`]: a run of consecutive
+/// 12-byte rows where column 1 sits inside the executable PT_LOAD
+/// range. WipEout's table at `data@0xc1110` is the post-Phase-38
+/// driving observation; SSHD-shaped titles may have a sibling table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IndirectOpdTable {
+    /// Guest virtual address of the table's first row's first byte.
+    pub guest_addr: u64,
+    /// Total table size in bytes (= `count * INDIRECT_OPD_TABLE_STRIDE`).
+    pub size: u64,
+}
+
+/// Per-row stride of an indirect OPD table.
+pub const INDIRECT_OPD_TABLE_STRIDE: u64 = 12;
+
+/// Byte offset of the OPD pointer slot within one row.
+pub const INDIRECT_OPD_TABLE_SLOT_OFFSET: u64 = 8;
+
+/// Minimum consecutive rows required to claim an indirect-OPD-table
+/// extent. Four rows is enough to suppress two-pointer coincidences
+/// (a 16-byte block of identical structure) while still catching small
+/// tables. WipEout's table is ~60 rows; far above threshold.
+const INDIRECT_OPD_TABLE_MIN_ROWS: usize = 4;
+
+/// Locate every indirect-OPD table in `data` by scanning for runs of
+/// 12-byte rows whose column-1 (bytes 4..8) is a pointer into the
+/// title's executable PT_LOAD range. Each detected run with at least
+/// [`INDIRECT_OPD_TABLE_MIN_ROWS`] rows is emitted as a single
+/// [`IndirectOpdTable`]; callers derive the per-row OPD slot positions
+/// at offset [`INDIRECT_OPD_TABLE_SLOT_OFFSET`].
+///
+/// The scan is 4-byte aligned and rejects matches outside any PT_LOAD
+/// file range so stray byte sequences cannot masquerade as real tables.
+/// False positives in non-table data are bounded by the row-count
+/// threshold; false negatives on tables with fewer than four rows are
+/// preferred to misclassifying random pointer pairs.
+pub fn find_indirect_opd_tables(data: &[u8]) -> Vec<IndirectOpdTable> {
+    let mut out = Vec::new();
+    let Ok(segs) = pt_load_segments(data) else {
+        return out;
+    };
+    let exec_ranges: Vec<std::ops::Range<u64>> = segs
+        .iter()
+        .filter(|s| s.executable)
+        .map(|s| s.vaddr..s.vaddr.saturating_add(s.memsz))
+        .collect();
+    if exec_ranges.is_empty() {
+        return out;
+    }
+    let is_code_ptr = |p: u32| -> bool {
+        let p = u64::from(p);
+        exec_ranges.iter().any(|r| r.contains(&p))
+    };
+    let stride = INDIRECT_OPD_TABLE_STRIDE as usize;
+
+    let mut i = 0usize;
+    while i + stride <= data.len() {
+        let col1 = read_u32(data, i + 4);
+        if !is_code_ptr(col1) {
+            i += 4;
+            continue;
+        }
+        let Some(start_addr) = pt_load_file_to_guest(data, i) else {
+            i += 4;
+            continue;
+        };
+        let mut rows = 1usize;
+        let mut j = i + stride;
+        while j + stride <= data.len() && is_code_ptr(read_u32(data, j + 4)) {
+            rows += 1;
+            j += stride;
+        }
+        if rows >= INDIRECT_OPD_TABLE_MIN_ROWS {
+            out.push(IndirectOpdTable {
+                guest_addr: start_addr,
+                size: (rows as u64) * INDIRECT_OPD_TABLE_STRIDE,
+            });
+            i = j;
+            continue;
+        }
+        i += stride;
+    }
+    out
+}
+
 use cellgov_ps3_abi::elf::{SHT_DYNSYM, SHT_SYMTAB};
 
 /// Symbol address by name, or `None` if not found or the ELF has no
@@ -1407,5 +1501,132 @@ mod tests {
         );
         assert_eq!(tables[0].guest_addr, 0x925008);
         assert_eq!(tables[1].guest_addr, 0x925070);
+    }
+
+    /// Build a 2-PT_LOAD ELF: exec segment at `[exec_off, +exec_sz)` /
+    /// `exec_vaddr`, plus a non-executable segment at `[data_off, +data_sz)` /
+    /// `data_vaddr` for the caller to plant a table into.
+    fn mk_elf_with_exec_and_data_pt_loads(
+        exec_off: usize,
+        exec_sz: usize,
+        exec_vaddr: u64,
+        data_off: usize,
+        data_sz: usize,
+        data_vaddr: u64,
+    ) -> Vec<u8> {
+        let last = exec_off + exec_sz;
+        let last = last.max(data_off + data_sz);
+        let mut data = vec![0u8; last + 16];
+        data[0..4].copy_from_slice(&ELF_MAGIC);
+        data[4] = 2;
+        data[5] = 2;
+        data[32..40].copy_from_slice(&64u64.to_be_bytes());
+        data[54..56].copy_from_slice(&56u16.to_be_bytes());
+        data[56..58].copy_from_slice(&2u16.to_be_bytes());
+        // Exec PT_LOAD (PF_X=1).
+        let ph0 = 64;
+        data[ph0..ph0 + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+        data[ph0 + 4..ph0 + 8].copy_from_slice(&1u32.to_be_bytes());
+        data[ph0 + 8..ph0 + 16].copy_from_slice(&(exec_off as u64).to_be_bytes());
+        data[ph0 + 16..ph0 + 24].copy_from_slice(&exec_vaddr.to_be_bytes());
+        data[ph0 + 32..ph0 + 40].copy_from_slice(&(exec_sz as u64).to_be_bytes());
+        data[ph0 + 40..ph0 + 48].copy_from_slice(&(exec_sz as u64).to_be_bytes());
+        // Data PT_LOAD (PF_W=1, PF_R=1).
+        let ph1 = 64 + 56;
+        data[ph1..ph1 + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+        data[ph1 + 4..ph1 + 8].copy_from_slice(&6u32.to_be_bytes());
+        data[ph1 + 8..ph1 + 16].copy_from_slice(&(data_off as u64).to_be_bytes());
+        data[ph1 + 16..ph1 + 24].copy_from_slice(&data_vaddr.to_be_bytes());
+        data[ph1 + 32..ph1 + 40].copy_from_slice(&(data_sz as u64).to_be_bytes());
+        data[ph1 + 40..ph1 + 48].copy_from_slice(&(data_sz as u64).to_be_bytes());
+        data
+    }
+
+    /// Plant an (id, ptr, opd_slot) row at `file_off` with the given
+    /// code pointer in column 1.
+    fn plant_indirect_row(data: &mut [u8], file_off: usize, id: u32, code_ptr: u32, opd: u32) {
+        data[file_off..file_off + 4].copy_from_slice(&id.to_be_bytes());
+        data[file_off + 4..file_off + 8].copy_from_slice(&code_ptr.to_be_bytes());
+        data[file_off + 8..file_off + 12].copy_from_slice(&opd.to_be_bytes());
+    }
+
+    #[test]
+    fn find_indirect_opd_tables_finds_a_4_row_run() {
+        let exec_off = 0x200usize;
+        let exec_sz = 0x200usize;
+        let exec_vaddr = 0x1_0000u64;
+        let data_off = 0x600usize;
+        let data_sz = 0x100usize;
+        let data_vaddr = 0x86_0000u64;
+        let mut data = mk_elf_with_exec_and_data_pt_loads(
+            exec_off, exec_sz, exec_vaddr, data_off, data_sz, data_vaddr,
+        );
+        // Plant four 12-byte rows where column 1 points into the exec segment.
+        let table_off = data_off + 0x40;
+        for i in 0..4 {
+            plant_indirect_row(
+                &mut data,
+                table_off + i * 12,
+                i as u32 + 1,
+                exec_vaddr as u32 + (i as u32) * 8,
+                0x00ae_eb80,
+            );
+        }
+        let tables = find_indirect_opd_tables(&data);
+        assert_eq!(tables.len(), 1, "exactly one table; got {tables:?}");
+        assert_eq!(tables[0].guest_addr, data_vaddr + 0x40);
+        assert_eq!(tables[0].size, 4 * INDIRECT_OPD_TABLE_STRIDE);
+    }
+
+    #[test]
+    fn find_indirect_opd_tables_rejects_short_run() {
+        let exec_off = 0x200usize;
+        let exec_sz = 0x200usize;
+        let exec_vaddr = 0x1_0000u64;
+        let data_off = 0x600usize;
+        let data_sz = 0x100usize;
+        let data_vaddr = 0x86_0000u64;
+        let mut data = mk_elf_with_exec_and_data_pt_loads(
+            exec_off, exec_sz, exec_vaddr, data_off, data_sz, data_vaddr,
+        );
+        // Plant three rows; below MIN_ROWS threshold of 4. Random data
+        // sometimes contains two consecutive pointer-shaped quads; the
+        // 4-row minimum suppresses that class of false positive.
+        let table_off = data_off + 0x40;
+        for i in 0..3 {
+            plant_indirect_row(
+                &mut data,
+                table_off + i * 12,
+                i as u32 + 1,
+                exec_vaddr as u32 + (i as u32) * 8,
+                0,
+            );
+        }
+        let tables = find_indirect_opd_tables(&data);
+        assert!(tables.is_empty(), "3-row run is below threshold");
+    }
+
+    #[test]
+    fn find_indirect_opd_tables_on_real_wipeout_elf() {
+        let path = std::path::PathBuf::from(
+            "../../tools/rpcs3/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.elf",
+        );
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        let tables = find_indirect_opd_tables(&data);
+        // Stage A.0 trace identified one indirect-OPD table at WipEout's
+        // data offset 0xc1110 (guest 0x921110). The exact row count is
+        // a function of WipEout's import count; assert it covers at
+        // least the byte range Stage D's pending-bytes investigation
+        // observed.
+        let covering = tables
+            .iter()
+            .find(|t| t.guest_addr <= 0x921110 && t.guest_addr + t.size > 0x9213c8);
+        assert!(
+            covering.is_some(),
+            "WipEout's indirect-OPD table at 0x921110 must be found; got {tables:?}",
+        );
     }
 }
