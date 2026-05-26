@@ -637,7 +637,7 @@ order, so subsequent reads are deterministic across host file
 system order.
 
 Per-title content lands in the store at boot via the manifest
-schema in `docs/titles/<content-id>.toml`:
+schema in `docs/title_manifests/<content-id>.toml`:
 
 ```toml
 [content]
@@ -1113,7 +1113,7 @@ scripting.
 ## Title harness (`cellgov_cli`)
 
 Title-specific configuration lives in TOML manifests under
-`docs/titles/<content-id>.toml`; no library crate below
+`docs/title_manifests/<content-id>.toml`; no library crate below
 `cellgov_cli` knows that titles exist. `cellgov_cli` scans the
 directory at startup, building a registry that the CLI looks up
 by short name (`--title sshd`), content id (`--content-id
@@ -1142,7 +1142,7 @@ Per-title status (boot checkpoint reached, cross-runner observation
 match) is tracked in [titles.md](titles.md).
 
 Adding a new title is a single-file TOML commit under
-`docs/titles/`; no Rust change is needed as long as the title
+`docs/title_manifests/`; no Rust change is needed as long as the title
 fits the existing checkpoint kinds (`process-exit`,
 `first-rsx-write`, `pc`) and the standard PS3 VFS layout. The
 `--checkpoint <kind>` flag overrides the manifest default per

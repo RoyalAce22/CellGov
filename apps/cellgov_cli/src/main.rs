@@ -53,7 +53,7 @@ cellgov_cli fixture-gen --manifest <path> --cellgov <path> --rpcs3 <path> --outp
 \t\t[--vfs-root PATH] (defaults: CELLGOV_PS3_VFS_ROOT env, then tools/rpcs3/dev_hdd0)";
 const USAGE_TITLES_GEN: &str = "\
 cellgov_cli titles-gen [--registry DIR] [--fixtures-dir DIR] [--output PATH]
-\t\t(defaults: docs/titles, tests/fixtures, docs/titles.md)";
+\t\t(defaults: docs/title_manifests, tests/fixtures, docs/titles.md)";
 
 /// Top-level dispatcher routes. Adding a variant produces an
 /// exhaustiveness error in [`Subcommand::tokens`], [`Subcommand::usage`],

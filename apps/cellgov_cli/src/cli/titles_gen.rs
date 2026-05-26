@@ -15,7 +15,7 @@ use crate::game::manifest::{TitleManifest, TitleRegistry};
 
 const TITLES_TEMPLATE: &str = include_str!("templates/titles.md.template");
 
-const DEFAULT_REGISTRY_DIR: &str = "docs/titles";
+const DEFAULT_REGISTRY_DIR: &str = "docs/title_manifests";
 const DEFAULT_FIXTURES_DIR: &str = "tests/fixtures";
 const DEFAULT_OUTPUT: &str = "docs/titles.md";
 
