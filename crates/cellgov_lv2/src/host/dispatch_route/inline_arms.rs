@@ -1,8 +1,6 @@
-//! Per-arm dispatch helpers extracted from the typed-variant match
-//! arms in [`super::Lv2Host::dispatch`]. Each method handles one
-//! [`Lv2Request`] variant (or the catch-all `Unsupported` /
-//! `Malformed` / `Hypercall` arms); the dispatch match in
-//! `mod.rs` reduces to a one-line delegation per arm.
+//! Per-arm dispatch helpers for [`super::Lv2Host::dispatch`]'s typed
+//! [`Lv2Request`] variants plus the `Unsupported` / `Malformed` /
+//! `Hypercall` catch-alls.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -31,18 +29,9 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
-    /// `sys_memory_free`: no dealloc tracking. The honest answer
-    /// depends on whether the caller's `start_addr` is a valid prior
-    /// allocation -- real LV2 returns CELL_OK on a valid free,
-    /// CELL_EINVAL on a bad pointer, CELL_ESRCH on an unknown id.
-    /// CellGov's bump allocator does not track per-allocation state,
-    /// so it cannot distinguish the cases; a blanket ENOSYS would
-    /// itself be a lie (allocation works). The interim is to log
-    /// every free as a known model gap: the no-op-with-trace is a
-    /// convergent honest gap as long as no title in the corpus
-    /// frees, re-allocates expecting reuse, and observes the
-    /// difference. A proper fix requires per-allocation lifecycle
-    /// tracking.
+    /// `sys_memory_free`: bump allocator does not track per-allocation
+    /// state, so a valid-free vs bad-pointer vs unknown-id distinction
+    /// cannot be made; logged as a known gap and returns CELL_OK.
     pub(super) fn dispatch_memory_free_noop(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.memory_free_noop",
@@ -54,12 +43,7 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0u64)
     }
 
-    /// Mints a kernel id and writes it through `*cid_ptr`. The
-    /// matching `Unsupported { number: 324 }` arm carries the same
-    /// shape -- see also [`Lv2Host::immediate_write_u32`] for the
-    /// null-pointer guard. No ProcessCounts increment:
-    /// `SYS_MEMORY_CONTAINER_OBJECT` has no `count_for_class` arm,
-    /// so an inc here would be unobserved dead state.
+    /// Mints a kernel id and writes it through `*cid_ptr`.
     pub(super) fn dispatch_memory_container_create(
         &mut self,
         cid_ptr: u32,
@@ -69,27 +53,19 @@ impl Lv2Host {
         self.immediate_write_u32(id, cid_ptr, requester)
     }
 
-    /// The round-robin walk advances on the syscall yield itself,
-    /// so the host has nothing further to do.
+    /// `sys_ppu_thread_yield`: round-robin advance happens on the
+    /// syscall itself, so the host returns CELL_OK with no effects.
     pub(super) fn dispatch_ppu_thread_yield(&self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `sys_ppu_thread_start`: no-op returning CELL_OK because
-    /// [`Self::dispatch_ppu_thread_create`] schedules the new unit
-    /// atomically; the thread is already running.
-    ///
-    /// # Known model gap (create/start ordering)
-    ///
-    /// Real LV2 creates threads SUSPENDED and transitions them to
-    /// RUNNING here; CellGov collapses both into create. A title
-    /// that observes the create-to-start interval would see a
-    /// different ordering than real LV2 produces.
+    /// `sys_ppu_thread_start`: no-op CELL_OK; create already schedules
+    /// the unit. Known gap: real LV2 creates threads SUSPENDED and
+    /// transitions them here -- CellGov collapses both into create.
     pub(super) fn dispatch_ppu_thread_start(&self, _target: u64) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0)
     }
 
-    /// Returns `CELL_PPU_TIMEBASE_HZ` as the syscall code.
     pub(super) fn dispatch_time_get_timebase_frequency(&self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(cellgov_time::CELL_PPU_TIMEBASE_HZ)
     }
@@ -164,7 +140,6 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[sec_ptr, nsec_ptr]) {
             return d;
         }
-        // Match the on-entry snapshot every other inline arm uses.
         let (sec, nsec) = cellgov_time::ticks_to_sec_nsec(self.current_tick.raw());
         let sec_write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(sec_ptr, 8),
@@ -186,11 +161,8 @@ impl Lv2Host {
         }
     }
 
-    /// Wraps the inner `dispatch_ppu_thread_create` (in
-    /// `host/ppu_thread.rs`) with an invariant-break log for any
-    /// nonzero `flags` bits: `SYS_PPU_THREAD_CREATE_{JOINABLE,INTERRUPT}`
-    /// are not modeled in the thread-table state, so the log
-    /// surfaces a regression instead of dropping the field silently.
+    /// Wraps `dispatch_ppu_thread_create` with a log on nonzero `flags`;
+    /// `SYS_PPU_THREAD_CREATE_{JOINABLE,INTERRUPT}` are not modeled.
     #[allow(clippy::too_many_arguments, reason = "mirrors the Lv2Request variant")]
     pub(super) fn dispatch_ppu_thread_create_with_flag_log(
         &mut self,
@@ -211,23 +183,18 @@ impl Lv2Host {
                 ),
             );
         }
-        // Valid LV2 priority range is 0..=3071; the downstream storage
-        // is u32. A negative value reaches here only if the guest
-        // passed garbage past the s!() sign-extension check, in which
-        // case it casts to a large u32 and the scheduler ignores it
-        // (the round-robin does not consult priority).
+        // LV2 priority range 0..=3071; downstream storage is u32.
         let priority = priority as u32;
         self.dispatch_ppu_thread_create(id_ptr, param_ptr, arg, priority, stacksize, rt)
     }
 
-    /// `sys_ss_access_control_engine`. Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_ss.cpp:157-201`. `pkg_id` 1/3 require
-    /// debug-or-root and return ENOSYS for user-perm callers.
-    /// `pkg_id == 2` writes the SELF program-authority-id
-    /// (`PAID_44 = bdj.self`, from `rpcs3/Crypto/key_vault.h`) to
-    /// `*a2`; matches cellSysmodule's recognised-caller branch in
-    /// module_start. Any other `pkg_id` is SS-domain status
-    /// `0x8001_051D`.
+    /// `sys_ss_access_control_engine`. Oracle: RPCS3's `sys_ss.cpp`.
+    /// `pkg_id` 1/3 require debug-or-root and return ENOSYS for
+    /// user-perm callers. `pkg_id == 2` writes the SELF
+    /// program-authority-id (`PAID_44 = bdj.self`, from RPCS3's
+    /// `key_vault.h`) to `*a2`; matches cellSysmodule's
+    /// recognised-caller branch in module_start. Any other `pkg_id`
+    /// is SS-domain status `0x8001_051D`.
     pub(super) fn dispatch_ss_access_control_engine(
         &self,
         pkg_id: u64,
@@ -307,8 +274,7 @@ impl Lv2Host {
     }
 
     /// PS3 usermode never issues `sc` with LEV != 0; reject with
-    /// CELL_EINVAL rather than letting the call fall through to
-    /// LV2. Guest-reachable -> `log_invariant_break`.
+    /// CELL_EINVAL and log.
     pub(super) fn dispatch_hypercall_rejection(
         &mut self,
         lev: u8,
@@ -327,8 +293,7 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 
-    /// `Unsupported` catch-all: logs once and returns
-    /// CELL_ENOSYS.
+    /// `Unsupported` catch-all: log and return CELL_ENOSYS.
     pub(super) fn dispatch_unsupported_default(
         &mut self,
         number: u64,
@@ -345,8 +310,8 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
-    /// `Malformed` rejection: classifier failed to bind the request
-    /// fields. Guest-reachable; log + EINVAL.
+    /// `Malformed` rejection: classifier failed to bind request fields;
+    /// log and return CELL_EINVAL.
     pub(super) fn dispatch_malformed_rejection(
         &mut self,
         number: u64,
@@ -364,10 +329,8 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 
-    /// `UnresolvedImport` dispatch: the trampoline planted in an
-    /// unpatched GOT slot fired. Log the NID + resolved name (if
-    /// known) and return CELL_EINVAL so the title gets a real
-    /// errno rather than control-flow corruption.
+    /// `UnresolvedImport`: trampoline in an unpatched GOT slot fired;
+    /// log NID + name (if in the db) and return CELL_EINVAL.
     pub(super) fn dispatch_unresolved_import(
         &mut self,
         nid: u32,

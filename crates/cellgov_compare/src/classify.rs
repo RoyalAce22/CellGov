@@ -1,7 +1,5 @@
 //! Divergence classifier: maps each [`ByteDivergence`] to a known
-//! non-semantic class or `Unclassified`. Each class names a
-//! structural mechanism; bytes that do not fit a named mechanism
-//! stay `Unclassified`.
+//! non-semantic class or `Unclassified`.
 
 use std::ops::Range;
 
@@ -47,20 +45,17 @@ pub enum DivergenceClass {
     #[error("HleOpdSlot")]
     HleOpdSlot,
     /// Bytes inside an LV2 sync-primitive user-side handle slot
-    /// (e.g. `sys_lwmutex_t::sleep_queue`). Non-semantic on a
-    /// different warrant than `HleOpdSlot`: the field carries an
+    /// (e.g. `sys_lwmutex_t::sleep_queue`). The field carries an
     /// ABI-opaque kernel-allocated id consumed only through
     /// sync-primitive syscalls (`_sys_lwmutex_lock`,
     /// `sys_lwmutex_unlock`, etc.), which look the id up in the
-    /// runner-local id table. The per-runner id values differ
-    /// because the two kernels run independent allocators, but
-    /// every read of the field flows back to its owning kernel
-    /// and resolves to the same logical sync object. The warrant
-    /// is ABI-contract (handle is opaque to user code), not
-    /// structural-impossibility -- a title that stored a sync id
-    /// in non-handle data the title itself reads would be
-    /// misclassified, so the populator must key only on slots
-    /// whose layout proves the field is a kernel handle.
+    /// runner-local id table. Per-runner id values differ because
+    /// the two kernels run independent allocators; every read of
+    /// the field flows back to its owning kernel and resolves to
+    /// the same logical sync object. The warrant is ABI-contract
+    /// (handle is opaque to user code), so the populator must key
+    /// only on slots whose layout proves the field is a kernel
+    /// handle.
     #[error("SyncPrimitiveId")]
     SyncPrimitiveId,
     /// No populated context range contained this divergence run.
@@ -145,9 +140,8 @@ pub enum ClassifierContextError {
 
 impl ClassifierContext {
     /// Build a context with only `elf_header_range` populated from
-    /// the observation's `"code"` region. Real boots build the
-    /// fuller context from EBOOT bytes; this path is for synthetic
-    /// fixtures.
+    /// the observation's `"code"` region; the fuller context is
+    /// built from EBOOT bytes by real boots.
     ///
     /// # Errors
     ///
@@ -272,9 +266,6 @@ mod tests {
     use crate::observation::{NamedMemoryRegion, ObservationMetadata, ObservedOutcome};
     use strum::VariantArray;
 
-    /// Trip-wire: iterates `Self::VARIANTS` so a new variant must
-    /// keep its label distinct; [`crate::summary`] emits these as
-    /// JSON keys.
     #[test]
     fn divergence_class_variants_are_distinct_and_labels_are_unique() {
         let labels: std::collections::BTreeSet<String> = DivergenceClass::VARIANTS

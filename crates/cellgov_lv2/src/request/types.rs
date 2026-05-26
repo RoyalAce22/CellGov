@@ -677,11 +677,10 @@ pub enum Lv2Request {
         context_id: u32,
     },
     /// `sys_rsx_context_iomap`. Records the IO -> EA mapping in
-    /// `SysRsxContext`. RPCS3's validation set lives at
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:398-453`:
-    /// `context_id` must be `0x5555_5555`, `io` / `ea` / `size`
-    /// must be non-zero and 1 MiB aligned, and `size` must fit in
-    /// the backed iomap region (see
+    /// `SysRsxContext`. RPCS3's validation set lives in its
+    /// `sys_rsx.cpp`: `context_id` must be `0x5555_5555`, `io` /
+    /// `ea` / `size` must be non-zero and 1 MiB aligned, and `size`
+    /// must fit in the backed iomap region (see
     /// `cellgov_ps3_abi::process_address_space::PS3_RSX_IOMAP_SIZE`).
     SysRsxContextIomap {
         /// In: RSX context id (must be `0x5555_5555`).
@@ -699,7 +698,7 @@ pub enum Lv2Request {
     /// `dev_addr` OUT (low 32 bits of an 8-byte BE u64 store);
     /// libgcm's gate at the call site reads the value only when the
     /// syscall returns `CELL_OK`. `a2` OUT is documented "Unused"
-    /// (RPCS3 `sys_rsx.cpp:927`) and observed unread by libgcm.
+    /// (RPCS3's `sys_rsx.cpp`) and observed unread by libgcm.
     SysRsxDeviceMap {
         /// Out: dev_addr (8-byte BE u64; libgcm reads low 32 bits).
         dev_addr_ptr: u32,

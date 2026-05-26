@@ -15,8 +15,7 @@ use super::step_loop::bench_step_loop;
 /// of the faster run.
 pub const BENCH_AGREEMENT_GATE_PCT: f64 = 5.0;
 
-/// Inputs common to every bench-boot entry point. Mirrors
-/// `boot::PrepareOptions` for the bench-specific subset.
+/// Inputs common to every bench-boot entry point.
 #[derive(Debug, Clone, Copy)]
 pub struct BenchOptions<'a> {
     pub title: &'a TitleManifest,
@@ -29,8 +28,7 @@ pub struct BenchOptions<'a> {
 }
 
 impl BenchOptions<'_> {
-    /// Append the CLI argument form of this struct onto `cmd` for
-    /// re-invocation as `bench-boot-once`.
+    /// Append the `bench-boot-once` CLI form of this struct onto `cmd`.
     fn encode_to_command(&self, cmd: &mut std::process::Command) {
         cmd.arg("bench-boot-once")
             .arg("--title")
@@ -49,7 +47,6 @@ impl BenchOptions<'_> {
         if let Some(b) = self.budget_override {
             cmd.arg("--budget").arg(b.raw().to_string());
         }
-        // ELF path omitted; bench-boot-once resolves it via the title.
     }
 }
 
@@ -99,12 +96,10 @@ pub struct BenchPairOutcome {
 /// Run one boot with the minimum step-loop bookkeeping needed to
 /// detect termination.
 ///
-/// RSX-init coupling: the runtime's `set_gcm_rsx_checkpoint` /
-/// `set_rsx_mirror_writes` toggles are driven by the *manifest's*
-/// declared checkpoint, not the runtime-overridable `checkpoint`. A
-/// `--checkpoint pc=ADDR` override on a title whose manifest declares
-/// `FirstRsxWrite` keeps the GCM-checkpoint init path so the boot
-/// trajectory matches the manifest's wired-in expectations.
+/// RSX-init coupling: `set_rsx_mirror_writes` is driven by the
+/// manifest's declared checkpoint, not the runtime-overridable
+/// `checkpoint`, so a `--checkpoint pc=ADDR` override does not change
+/// the boot trajectory's init path.
 pub fn bench_boot(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult {
     let prepared = boot::prepare(boot::PrepareOptions {
         title: opts.title,
@@ -161,18 +156,14 @@ pub fn bench_boot_one_run(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBoo
 /// Subprocess invocation failure surfaced by [`spawn_one_run`].
 #[derive(Debug, thiserror::Error)]
 pub enum SpawnError {
-    /// `Command::output` itself returned an I/O error.
     #[error("subprocess spawn failed: {0}")]
     Io(#[source] std::io::Error),
-    /// The subprocess exited with a nonzero status.
     #[error("subprocess exited nonzero (status={status:?})")]
     SubprocessNonzero {
         status: Option<i32>,
         stdout: String,
         stderr: String,
     },
-    /// The subprocess exited cleanly but its stdout could not be
-    /// parsed into a `BenchBootResult`.
     #[error("BENCH_RESULT parse failed: {error}")]
     ParseFailed {
         #[source]
@@ -183,7 +174,6 @@ pub enum SpawnError {
 }
 
 impl SpawnError {
-    /// Captured stdout, if any was attached to the failure.
     pub fn captured_stdout(&self) -> &str {
         match self {
             Self::Io(_) => "",
@@ -191,7 +181,6 @@ impl SpawnError {
         }
     }
 
-    /// Captured stderr, if any was attached to the failure.
     pub fn captured_stderr(&self) -> &str {
         match self {
             Self::Io(_) => "",
@@ -304,28 +293,20 @@ fn classify_pair(r1: &BenchBootResult, r2: &BenchBootResult, drift_pct: Option<f
 /// stdout.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ParseBenchError {
-    /// No line starting with `BENCH_RESULT ` was present.
     #[error("no BENCH_RESULT line")]
     NoResultLine,
-    /// More than one `BENCH_RESULT` line was present.
     #[error("more than one BENCH_RESULT line")]
     DuplicateResultLine,
-    /// The line was present but the `steps=` field was missing.
     #[error("BENCH_RESULT: missing steps= field")]
     MissingSteps,
-    /// The `steps=` field was present but could not parse as `usize`.
     #[error("BENCH_RESULT: malformed steps={0:?}")]
     MalformedSteps(String),
-    /// The line was present but the `wall_ms=` field was missing.
     #[error("BENCH_RESULT: missing wall_ms= field")]
     MissingWallMs,
-    /// The `wall_ms=` field was present but could not parse as `u64`.
     #[error("BENCH_RESULT: malformed wall_ms={0:?}")]
     MalformedWallMs(String),
-    /// The line was present but the `outcome=` field was missing.
     #[error("BENCH_RESULT: missing outcome= field")]
     MissingOutcome,
-    /// The `outcome=` field could not parse as a [`BootOutcome`].
     #[error("BENCH_RESULT: malformed outcome={token:?}: {source}")]
     UnparseableOutcome {
         token: String,
@@ -382,9 +363,8 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
         wall,
         outcome,
     };
-    // `steps_per_sec` is a redundant projection of (steps, wall_ms);
-    // a drift beyond rounding tolerance means the formatter and the
-    // recomputation have gone out of sync.
+    // Drift beyond rounding tolerance means the formatter and the
+    // recomputation of (steps, wall_ms) have gone out of sync.
     if let Some(reported) = reported_sps {
         let computed = result.steps_per_sec();
         let tolerance = (computed * 0.01).max(1.0);
@@ -411,8 +391,6 @@ pub(crate) fn wall_disagreement_percent(
     }
     let min = aa.min(bb);
     let max = aa.max(bb);
-    // `min > 0` and both inputs come from `Duration::as_secs_f64`,
-    // so the division is finite without a separate `is_finite` check.
     Some(100.0 * (max - min) / min)
 }
 

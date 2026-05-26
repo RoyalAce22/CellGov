@@ -24,8 +24,8 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// Per `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:398-453`,
-    /// `CELL_EINVAL` for: `context_id != 0x5555_5555`, `size == 0`,
+    /// Per RPCS3's `sys_rsx.cpp` iomap handler, `CELL_EINVAL` for:
+    /// `context_id != 0x5555_5555`, `size == 0`,
     /// any of `io`/`ea`/`size` not 1 MiB-aligned, `ea + size`
     /// crossing into [`PS3_RSX_BASE`] (RPCS3's `local_mem_base`),
     /// or `io + size` exceeding the baked iomap region. Only the
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn iomap_before_allocate_keys_only_on_context_id() {
-        // RPCS3 sys_rsx.cpp:398-453 does not gate on host-side
+        // RPCS3's sys_rsx.cpp does not gate on host-side
         // context-allocate state; CONTEXT_ID is the only handshake.
         let mut host = Lv2Host::new();
         let d = iomap(&mut host, iomap::CONTEXT_ID, 0, 0x0010_0000, 0x0010_0000);

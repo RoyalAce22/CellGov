@@ -3,13 +3,9 @@
 //!
 //! Behaviour (the decrypter pipeline, the PUP unpacker) lives in
 //! `cellgov_firmware::{sce,pup,crypto}`; this module is data only.
-//!
-//! Per-revision SELF APP keys plus the `SelfKey` struct and the
-//! `app_key_for_revision` lookup helper currently live in
-//! `cellgov_firmware::crypto`; they stay there because the APP_KEYS
-//! table is tightly coupled with the const-fn helpers that construct
-//! it. Move the standalone scalar keys here so dump-imports and the
-//! decrypter share a single declaration.
+//! Per-revision SELF APP keys and the `app_key_for_revision` lookup
+//! live in `cellgov_firmware::crypto` alongside the const-fn
+//! constructors that build the APP_KEYS table.
 
 /// SCE container magic bytes (`"SCE\0"`) at offset 0 of every
 /// signed PS3 file.
@@ -36,7 +32,7 @@ pub const SCE_COMP_KIND_NONE: u32 = 1;
 pub const SCE_COMP_KIND_ZLIB: u32 = 2;
 
 /// AES-256 key for PUP package payloads (PS3 firmware update files).
-/// Mirrors the value in RPCS3's `tools/rpcs3-src/rpcs3/Crypto/key_vault.cpp`.
+/// Mirrors the value in RPCS3's `key_vault.cpp` table.
 pub const PUP_KEY: [u8; 0x40] = [
     CELLGOV-REDACTED-KEY
     0xED, 0xED, 0xBE, 0x6B, 0xE5, 0x13, 0x72, 0x4D, 0xD8, 0xF7, 0xB6, 0x91, 0xE8, 0x8A, 0x38, 0xF4,
@@ -62,24 +58,22 @@ pub const SCE_SUPPLEMENTAL_KIND_NPDRM: u32 = 3;
 
 /// AES-128 key applied (ECB) to the RAP-derived intermediate value to
 /// produce the NPDRM layer key that decrypts the metadata-info
-/// envelope. Mirrors `NP_KLIC_KEY` in RPCS3
-/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:107-109`.
+/// envelope. Mirrors `NP_KLIC_KEY` in RPCS3's `key_vault.h`.
 pub const NP_KLIC_KEY: [u8; 0x10] = [
     CELLGOV-REDACTED-KEY,
 ];
 
 /// Default klicensee for free-license (license == 3) NPDRM titles
 /// when no RAP is supplied; RPCS3 substitutes this for the
-/// `rap_to_rif` output. Mirrors `NP_KLIC_FREE` in
-/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:95-97`.
+/// `rap_to_rif` output. Mirrors `NP_KLIC_FREE` in RPCS3's
+/// `key_vault.h`.
 pub const NP_KLIC_FREE: [u8; 0x10] = [
     CELLGOV-REDACTED-KEY,
 ];
 
 /// AES-128 key for the first ECB stage of `rap_to_rif`. The 16 RAP
 /// bytes are ECB-decrypted with this key before the 5-round
-/// PBOX/E1/E2 dance. Mirrors `RAP_KEY` in RPCS3
-/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:129-131`.
+/// PBOX/E1/E2 dance. Mirrors `RAP_KEY` in RPCS3's `key_vault.h`.
 pub const RAP_KEY: [u8; 0x10] = [
     CELLGOV-REDACTED-KEY,
 ];
@@ -87,22 +81,19 @@ pub const RAP_KEY: [u8; 0x10] = [
 /// Byte-permutation indices applied per round of the
 /// `rap_to_rif` post-ECB stage. Index `i` of the round output is
 /// pulled from index `RAP_PBOX[i]` of the round input. Mirrors
-/// `RAP_PBOX` in RPCS3
-/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:133-135`.
+/// `RAP_PBOX` in RPCS3's `key_vault.h`.
 pub const RAP_PBOX: [u8; 0x10] = [
     CELLGOV-REDACTED-KEY,
 ];
 
 /// First per-round substitution table consumed by the `rap_to_rif`
-/// loop. Mirrors `RAP_E1` in RPCS3
-/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:137-139`.
+/// loop. Mirrors `RAP_E1` in RPCS3's `key_vault.h`.
 pub const RAP_E1: [u8; 0x10] = [
     CELLGOV-REDACTED-KEY,
 ];
 
 /// Second per-round substitution table consumed by the
-/// `rap_to_rif` loop. Mirrors `RAP_E2` in RPCS3
-/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:141-143`.
+/// `rap_to_rif` loop. Mirrors `RAP_E2` in RPCS3's `key_vault.h`.
 pub const RAP_E2: [u8; 0x10] = [
     CELLGOV-REDACTED-KEY,
 ];

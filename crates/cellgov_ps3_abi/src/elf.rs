@@ -2,12 +2,9 @@
 //!
 //! Behaviour (the loader, the PRX import binder, the relocation
 //! applicator) lives in `cellgov_ppu::loader` and `cellgov_ppu::sprx`;
-//! this module is data only.
-//!
-//! Mixes general ELF values (PT_LOAD, R_PPC64_*) with PS3-specific
-//! types (ET_PRX, PT_PRX_RELOC, NID_MODULE_*, SYS_PROCESS_PARAM_MAGIC).
-//! CellGov only handles PS3 binaries, so co-locating them under the
-//! PS3 ABI leaf is correct.
+//! this module is data only. Mixes general ELF values (PT_LOAD,
+//! R_PPC64_*) with PS3-specific types (ET_PRX, PT_PRX_RELOC,
+//! NID_MODULE_*, SYS_PROCESS_PARAM_MAGIC).
 
 /// `\x7FELF` magic bytes at offset 0 of every ELF file.
 pub const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
@@ -172,8 +169,7 @@ pub const PRX_PARAM_IMPORTS_END_OFFSET: usize = 28;
 /// bytes.
 pub const PRX_PARAM_HEADER_MIN_SIZE: u32 = 32;
 
-// `PrxImportEntry` mirrors RPCS3's `ppu_prx_module_info`
-// (`tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:667`).
+// `PrxImportEntry` mirrors RPCS3's `ppu_prx_module_info` struct.
 
 /// Offset of the `size` byte (declared entry size) in
 /// `PrxImportEntry`.
@@ -183,8 +179,7 @@ pub const PRX_IMPORT_SIZE_OFFSET: usize = 0;
 pub const PRX_IMPORT_NUM_FUNC_OFFSET: usize = 6;
 
 /// Offset of the `num_var` u16 field (variable imports) in
-/// `PrxImportEntry`. Mirrors RPCS3's `ppu_prx_module_info.num_var`
-/// at `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:674`.
+/// `PrxImportEntry`. Mirrors RPCS3's `ppu_prx_module_info.num_var`.
 pub const PRX_IMPORT_NUM_VAR_OFFSET: usize = 8;
 
 /// Offset of the `name_ptr` u32 field in `PrxImportEntry`.
@@ -199,16 +194,14 @@ pub const PRX_IMPORT_NIDS_PTR_OFFSET: usize = 20;
 pub const PRX_IMPORT_STUB_PTR_OFFSET: usize = 24;
 
 /// Offset of the `vnids_ptr` u32 field (imported VNIDs) in
-/// `PrxImportEntry`. Mirrors RPCS3's `ppu_prx_module_info.vnids` at
-/// `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:682`. Only present
-/// when the declared entry size is at least 32 bytes.
+/// `PrxImportEntry`. Mirrors RPCS3's `ppu_prx_module_info.vnids`.
+/// Only present when the declared entry size is at least 32 bytes.
 pub const PRX_IMPORT_VNIDS_PTR_OFFSET: usize = 28;
 
 /// Offset of the `vstubs_ptr` u32 field (variable slot table the
 /// binder patches at boot) in `PrxImportEntry`. Mirrors RPCS3's
-/// `ppu_prx_module_info.vstubs` at
-/// `tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:683`. Only present
-/// when the declared entry size is at least 36 bytes.
+/// `ppu_prx_module_info.vstubs`. Only present when the declared
+/// entry size is at least 36 bytes.
 pub const PRX_IMPORT_VSTUBS_PTR_OFFSET: usize = 32;
 
 /// Minimum declared entry size for variable-import parsing to be
@@ -227,9 +220,8 @@ pub const PRX_IMPORT_ENTRY_MIN_SIZE: u8 = 0x1C;
 /// malformed rather than copied into an `ImportedModule`.
 pub const PRX_NAME_MAX_LEN: usize = 256;
 
-// `ppu_prx_library_info` mirrors RPCS3's struct of the same name
-// (`tools/rpcs3-src/rpcs3/Emu/Cell/PPUModule.cpp:1838`). Firmware
-// PRXs locate it via segment 0's `p_paddr` instead of a
+// `ppu_prx_library_info` mirrors RPCS3's struct of the same name.
+// Firmware PRXs locate it via segment 0's `p_paddr` instead of a
 // `PT_PRX_PARAM` segment.
 
 /// Offset of the `imports_start` u32 field in `ppu_prx_library_info`.

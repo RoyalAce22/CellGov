@@ -27,12 +27,11 @@ pub mod region {
 
 /// `sys_rsx_device_map` (675) OUT-pointer value and the kernel
 /// reservation it lives in. RPCS3 documents the address range
-/// `0x40000000..0xB0000000` at
-/// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:925-926` and
-/// allocates inside it via `vm::reserve_map(vm::rsx_context, 0,
-/// 0x10000000, 0x403)` -- the `0x10000000` size is the PS3 ABI
-/// reservation; the address itself is a deterministic pick from
-/// the documented range.
+/// `0x40000000..0xB0000000` in its `sys_rsx.cpp` and allocates
+/// inside it via `vm::reserve_map(vm::rsx_context, 0, 0x10000000,
+/// 0x403)` -- the `0x10000000` size is the PS3 ABI reservation; the
+/// address itself is a deterministic pick from the documented
+/// range.
 pub mod device_map {
     /// Device-map address `sys_rsx_device_map (675)` returns in
     /// its `dev_addr` OUT for `dev_id == 8`.
@@ -46,7 +45,7 @@ pub mod device_map {
 }
 
 /// `sys_rsx_context_iomap` (672) argument-validation constants per
-/// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:398-453`.
+/// RPCS3's `sys_rsx.cpp` IO-map handler.
 pub mod iomap {
     /// `context_id` value the kernel pins for the single allocated
     /// RSX context.
@@ -63,7 +62,7 @@ pub mod iomap {
 /// addresses. Libgcm receives [`control_register::DMA_CONTROL_BASE`]
 /// from `sys_rsx_context_allocate` (670) as the dma_control OUT and
 /// adds `+0x40` internally to derive the put-pointer write target --
-/// see `tools/rpcs3-src/rpcs3/Emu/Cell/Modules/cellGcmSys.cpp:450,465`.
+/// see RPCS3's `cellGcmSys.cpp` for the same derivation.
 pub mod control_register {
     /// Guest address of the RSX dma_control region base.
     /// `sys_rsx_context_allocate` (670) returns this in its

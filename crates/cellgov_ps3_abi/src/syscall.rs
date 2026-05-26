@@ -2,13 +2,9 @@
 //!
 //! Names mirror RPCS3's `syscall_table_t` entries. Behaviour
 //! (the dispatch match in `cellgov_lv2::request::classify`) lives in
-//! `cellgov_lv2`; this module is data only.
-//!
-//! All public `u64` syscall constants are emitted by the
-//! `lv2_syscalls!` macro from a single declarative source: a docstring,
-//! a name, and a number. The macro emits the per-syscall `pub const`,
-//! the public number array, and a `#[cfg(test)]` named array used by
-//! the collision tests.
+//! `cellgov_lv2`; this module is data only. All `pub const` syscall
+//! numbers are emitted by the `lv2_syscalls!` macro from a single
+//! declarative source.
 
 /// Emit a group of LV2 syscall `pub const`s plus a derived number
 /// array and a test-only named array, from a single declarative list.
@@ -80,8 +76,7 @@ lv2_syscalls! {
 
     /// `sys_process_is_spu_lock_line_reservation_address` -- check
     /// whether `addr` falls in the SPU lock-line reservation range.
-    /// Behavioural oracle:
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_process.cpp:263`.
+    /// Behavioural oracle: RPCS3's `sys_process.cpp`.
     PROCESS_IS_SPU_LOCK_LINE_RESERVATION_ADDRESS = 14;
 
     /// `sys_process_getppid`.
@@ -223,14 +218,13 @@ lv2_syscalls! {
     SPU_IMAGE_IMPORT = 158;
     /// `sys_spu_initialize` -- announce per-process SPU resource
     /// limits (max usable / max raw SPUs). Behavioural oracle:
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_spu.cpp:455`.
+    /// RPCS3's `sys_spu.cpp`.
     SPU_INITIALIZE = 169;
     /// `sys_spu_thread_group_create`.
     SPU_THREAD_GROUP_CREATE = 170;
     /// `sys_spu_thread_group_destroy` -- destroy a non-running thread
     /// group. Returns CELL_ESRCH on unknown id, CELL_EBUSY when the
-    /// group is still running. Behavioural oracle:
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_spu.cpp:1118`.
+    /// group is still running. Behavioural oracle: RPCS3's `sys_spu.cpp`.
     SPU_THREAD_GROUP_DESTROY = 171;
     /// `sys_spu_thread_initialize`.
     SPU_THREAD_INITIALIZE = 172;
@@ -309,8 +303,7 @@ lv2_syscalls! {
 
     /// `sys_ss_access_control_engine` -- privileged authority/identity
     /// gate used during user-PRX init to query the caller's SELF
-    /// program-authority-id. Behavioral oracle:
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_ss.cpp`.
+    /// program-authority-id. Behavioral oracle: RPCS3's `sys_ss.cpp`.
     SS_ACCESS_CONTROL_ENGINE = 871;
 }
 
@@ -348,8 +341,7 @@ lv2_syscalls! {
     ALL_LV2_UNSUPPORTED_ROUTED_NUMBERS;
     ALL_LV2_UNSUPPORTED_ROUTED_NAMED;
 
-    /// `sys_prx_load_module` -- behavioral oracle:
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_prx.cpp`.
+    /// `sys_prx_load_module` -- behavioral oracle: RPCS3's `sys_prx.cpp`.
     SYS_PRX_LOAD_MODULE = 480;
     /// `sys_prx_load_module_on_memcontainer`.
     SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER = 497;
@@ -409,13 +401,6 @@ mod tests {
         );
     }
 
-    /// The unsupported-routed syscall constants must NOT collide
-    /// with any number in `ALL_LV2_NUMBERS` (the typed-arm set).
-    /// The dispatcher routes typed numbers to typed variants and
-    /// unsupported-routed numbers to the `Lv2Request::Unsupported`
-    /// arms; a collision means the same number is claimed by both
-    /// routing paths and the classifier's behavior depends on arm
-    /// ordering rather than identity.
     #[test]
     fn unsupported_routed_syscall_numbers_do_not_collide_with_typed_arms() {
         let typed: BTreeSet<u64> = ALL_LV2_NUMBERS.iter().copied().collect();
@@ -435,8 +420,6 @@ mod tests {
                 "{name} duplicates another unsupported-routed syscall number ({n})",
             );
         }
-        // Macro emits both arrays from the same source list, so
-        // their lengths must agree by construction.
         assert_eq!(
             ALL_LV2_UNSUPPORTED_ROUTED_NAMED.len(),
             ALL_LV2_UNSUPPORTED_ROUTED_NUMBERS.len(),

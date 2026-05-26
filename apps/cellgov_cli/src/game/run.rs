@@ -1,5 +1,4 @@
-//! `run-game` entry point and its supporting option / summary / error
-//! types. Public surface re-exported from [`super`].
+//! `run-game` entry point and its option / summary / error types.
 
 use std::time::Instant;
 
@@ -41,8 +40,7 @@ pub struct RunGameOptions<'a> {
     pub budget_override: Option<Budget>,
 }
 
-/// Terminal-state summary from [`run_game`], shaped for the CLI's
-/// exit-code gate.
+/// Terminal-state summary from [`run_game`].
 pub struct RunSummary {
     pub outcome: BootOutcome,
     pub had_critical_anomaly: bool,
@@ -56,7 +54,6 @@ pub enum RunError {
     SaveBootSummary(#[source] observation::ObservationSaveError),
 }
 
-/// Apply the manifest-driven RSX init toggles.
 pub(in crate::game) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &TitleManifest) {
     if title.rsx_mirror() {
         rt.set_rsx_mirror_writes(true);
@@ -91,8 +88,6 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         profile_pairs,
         budget_override,
     } = opts;
-    // The CLI parser enforces these; the asserts catch direct
-    // `RunGameOptions` construction that bypasses parsing.
     for (i, &(addr, len)) in dump_mem_fault_ranges.iter().enumerate() {
         debug_assert!(
             len > 0,

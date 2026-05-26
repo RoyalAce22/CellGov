@@ -1,7 +1,5 @@
-//! Title-manifest data model: the structures held in memory after a
-//! TOML file has been parsed, plus filesystem-probe behaviour. Wire
-//! format lives in [`super::schema`]; TOML -> model translation lives
-//! in [`super::loader`].
+//! In-memory data model for a parsed title manifest. Wire format lives in
+//! [`super::schema`]; TOML -> model translation lives in [`super::loader`].
 
 use std::path::{Path, PathBuf};
 
@@ -18,18 +16,13 @@ pub enum GameSource {
     Disc,
 }
 
-/// Distribution channel for the `titles.md` Format column. Display
-/// only; runtime mount semantics live on [`GameSource`].
-///
-/// Two wire forms: kebab-case (`"psn-hdd"`) in TOML; title-case with
-/// spaces (`"PSN HDD"`) in the matrix emitter.
+/// Distribution channel for the `titles.md` Format column. Display only;
+/// runtime mount semantics live on [`GameSource`]. Two wire forms:
+/// kebab-case (`"psn-hdd"`) in TOML, title-case (`"PSN HDD"`) in the matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
 pub enum Distribution {
-    /// Digital PSN download installed under `/dev_hdd0/game/`.
     PsnHdd,
-    /// Retail disc installed to `/dev_hdd0/game/`.
     RetailHdd,
-    /// BD-ROM disc image mounted under `/dev_bdvd/`.
     DiscIso,
 }
 
@@ -44,8 +37,7 @@ impl Distribution {
         }
     }
 
-    /// Kebab-case wire form used in TOML `distribution = "..."`
-    /// fields. Single source of truth for the TOML parser.
+    /// Kebab-case wire form used in TOML `distribution = "..."` fields.
     pub fn kebab_label(self) -> &'static str {
         match self {
             Self::PsnHdd => "psn-hdd",
@@ -54,8 +46,7 @@ impl Distribution {
         }
     }
 
-    /// Inverse of [`Self::kebab_label`]. `Err` carries the unknown
-    /// token for the parser's diagnostic.
+    /// Inverse of [`Self::kebab_label`].
     pub fn from_kebab(s: &str) -> Option<Self> {
         use strum::VariantArray;
         Self::VARIANTS
@@ -339,7 +330,7 @@ mod tests {
 
     #[test]
     fn resolve_eboot_disc_without_parent_returns_misconfigured() {
-        // "dev_hdd0" has `parent() == Some("")`; "/" and "" return None.
+        // "dev_hdd0".parent() == Some(""); "/" and "" return None.
         let mut m = hdd_manifest("NPAA00001", "disc-t", &["EBOOT.BIN"]);
         m.source = GameSource::Disc;
         for bad in ["dev_hdd0", "/", ""] {

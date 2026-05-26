@@ -193,7 +193,6 @@ impl Runtime {
                 );
             }
             Lv2Dispatch::PpuThreadCreate { .. } => {
-                // Fresh Runnable thread: rotate scheduler off creator.
                 self.step_woke_others = true;
                 self.handle_ppu_thread_create(source, dispatch);
             }
@@ -404,11 +403,10 @@ impl Runtime {
     ///
     /// Cross-module contract: when the caller is a callback worker,
     /// `Lv2Host::dispatch_callback_return` has already transitioned
-    /// its `PpuThread` to `Finished` (the trampoline `sc 0` is the
-    /// worker's terminal action). `is_ppu_thread_finished_for_unit`
+    /// its `PpuThread` to `Finished`. `is_ppu_thread_finished_for_unit`
     /// mirrors that into `UnitStatus::Finished` so the PPU loop does
-    /// not fetch the next instruction past the trampoline (which
-    /// lands on OPD bytes and decode-faults).
+    /// not fetch past the trampoline (which lands on OPD bytes and
+    /// decode-faults).
     fn handle_wake_and_return(
         &mut self,
         source: UnitId,

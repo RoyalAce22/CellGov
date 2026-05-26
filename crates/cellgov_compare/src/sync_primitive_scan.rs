@@ -5,20 +5,20 @@
 //! +0x10 that the firmware sysPrxForUser wrapper fills with the
 //! kernel-allocated lwmutex id after `_sys_lwmutex_create` returns.
 //! Two runners' id allocators produce different bytes for the same
-//! logical object -- a non-semantic divergence, equivalence-up-to-
-//! kernel-id-allocator. See [`crate::classify::DivergenceClass::SyncPrimitiveId`]
-//! for the inertness warrant.
+//! logical object. See
+//! [`crate::classify::DivergenceClass::SyncPrimitiveId`] for the
+//! inertness warrant.
 //!
 //! The scanner walks a runtime data segment for the `sys_lwmutex_t`
 //! preamble and yields the 4-byte `sleep_queue` range per match.
-//! It runs against CG's snapshot, not the EBOOT, because the
-//! preamble's `lwmutex_free` sentinel and `attribute` value are only
-//! present after the title's user-space init has run.
+//! It runs against CG's snapshot, not the EBOOT: the preamble's
+//! `lwmutex_free` sentinel and `attribute` value are only present
+//! after the title's user-space init has run.
 
 use std::ops::Range;
 
 /// Byte offset of the `sleep_queue` field within `sys_lwmutex_t`.
-/// Matches `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_lwmutex.h:50`.
+/// Matches RPCS3's `sys_lwmutex.h` struct layout.
 pub const SLEEP_QUEUE_OFFSET: usize = 0x10;
 
 /// Total size of `sys_lwmutex_t` (lock_var + attribute + recursive +
@@ -27,10 +27,9 @@ pub const SYS_LWMUTEX_T_SIZE: usize = 0x20;
 
 /// `lwmutex_free` sentinel: written to `lock_var.owner` by the
 /// user-space `sys_lwmutex_create` wrapper before the kernel handle
-/// is stored. Matches `sys_lwmutex.h:21`.
+/// is stored. Matches RPCS3's `sys_lwmutex.h` constant.
 const LWMUTEX_FREE: u32 = 0xffff_ffff;
 
-/// Read a big-endian u32 from a slice at the given byte offset.
 fn read_u32_be(data: &[u8], off: usize) -> u32 {
     u32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
 }
@@ -45,11 +44,9 @@ fn is_valid_lwmutex_attribute(attr: u32) -> bool {
     matches!(recursive, 0x10 | 0x20) && matches!(protocol, 1..=4)
 }
 
-/// Upper bound on the `sleep_queue` field's plausible value when scanning
-/// a CG snapshot. CG's monotonic id allocator starts at 1; titles create
-/// well under 10,000 sync primitives during boot. A loose cap keeps the
-/// signature strict enough to reject random data while not depending on
-/// a tight bound.
+/// Upper bound on the `sleep_queue` field's plausible value in a CG
+/// snapshot. CG's monotonic id allocator starts at 1; titles create
+/// well under 10,000 sync primitives during boot.
 const SLEEP_QUEUE_MAX_PLAUSIBLE: u32 = 0x0001_0000;
 
 /// Walk `data` for `sys_lwmutex_t` instances and return the guest-
@@ -69,10 +66,10 @@ const SLEEP_QUEUE_MAX_PLAUSIBLE: u32 = 0x0001_0000;
 /// ```
 ///
 /// The sleep_queue field is validated to be 0 (uninitialized) or
-/// less than [`SLEEP_QUEUE_MAX_PLAUSIBLE`]. Pad at +0x14 must be
-/// zero. Together these constraints make false positives on random
-/// data vanishingly unlikely while admitting every well-formed
-/// lwmutex slot the title initializes.
+/// below an internal plausibility cap, and the pad at +0x14 must
+/// be zero. Together these constraints make false positives on
+/// random data vanishingly unlikely while admitting every
+/// well-formed lwmutex slot the title initializes.
 pub fn find_sys_lwmutex_handle_slots(data: &[u8], data_base: u64) -> Vec<Range<u64>> {
     let mut out = Vec::new();
     if data.len() < SYS_LWMUTEX_T_SIZE {

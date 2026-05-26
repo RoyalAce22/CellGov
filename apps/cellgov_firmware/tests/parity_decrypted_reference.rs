@@ -96,9 +96,8 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path) {
     let mut decrypted = cellgov_firmware::sce::decrypt_self_to_elf(&encrypted_bytes)
         .unwrap_or_else(|e| panic!("{stem}: decrypt failed: {e}"));
     let mut reference = std::fs::read(&prx_path).unwrap();
-    // Pinned before the mask so dropping the zeroing in
-    // decrypt_self_to_elf can't be papered over by re-masking both
-    // sides on read.
+    // Asserted pre-mask so a dropped zeroing in decrypt_self_to_elf
+    // cannot be hidden by re-masking both sides.
     assert_eq!(
         &decrypted[0x28..0x30],
         &[0u8; 8],
@@ -147,27 +146,9 @@ fn min_viable_prx_decrypt_matches_pre_decrypted_reference() {
     }
 }
 
-// ============================================================================
-// Game-title SELF byte-identity (Phase A.5 C.2 gate).
-//
-// flOw + SSHD: NPDRM-wrapped EBOOT.BIN, decrypt via
-// `decrypt_self_to_elf_npdrm` with a klicensee derived from the
-// on-disk RAP. The expected SHA-256 hashes are committed below; they
-// were captured 2026-05-24 (the day Phase A landed) from the cached
-// RPCS3-decrypted .elf files that lived next to each EBOOT.BIN. The
-// .elfs themselves are external artifacts produced by RPCS3 (or a
-// third-party SELF decryptor) before CellGov had NPDRM support; once
-// this gate is green, those cached files become deletable since the
-// hash is the durable RPCS3-derived oracle.
-//
-// WipEout: APP-keyed disc-title EBOOT.BIN, decrypt via the existing
-// `decrypt_self_to_elf`. The commit captures CellGov's own current
-// output as the refactor-invariance baseline (the SCE-reassembly
-// refactor in this phase changed APP-keyed output to preserve
-// section headers; the new output is faithful to RPCS3's reassembly
-// shape but no RPCS3 oracle for WipEout was captured this phase --
-// follow-up). The check guards regressions against this baseline.
-// ============================================================================
+// Game-title SELF byte-identity gates: flOw + SSHD against
+// RPCS3-derived SHA-256 oracles; WipEout against a CellGov-derived
+// refactor-invariance baseline.
 
 use sha2::{Digest, Sha256};
 
@@ -176,10 +157,6 @@ fn workspace_root() -> PathBuf {
 }
 
 /// flOw (NPUA80001) RPCS3-decrypted EBOOT.elf SHA-256, unmasked.
-/// Source: `tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf`,
-/// captured 2026-05-24 before that file became deletable. Re-deriving
-/// requires re-running RPCS3's decrypt on the same EBOOT.BIN with the
-/// same RAP -- the algorithm is closed, so the value never moves.
 const FLOW_ELF_SHA256_UNMASKED: [u8; 32] = [
     0x19, 0xf6, 0x11, 0xa3, 0x28, 0x8c, 0x08, 0x81, 0xd4, 0xf3, 0x8a, 0xf0, 0x13, 0xc2, 0x12, 0xf0,
     0x8f, 0x82, 0x82, 0x2a, 0xd6, 0x77, 0xca, 0x58, 0x4f, 0x48, 0xbd, 0x88, 0xe6, 0x75, 0xce, 0xb2,
@@ -205,11 +182,7 @@ const SSHD_ELF_SHA256_MASKED: [u8; 32] = [
 ];
 
 /// WipEout (BCES00664) CellGov-decrypted EBOOT.BIN SHA-256, unmasked.
-/// Captured 2026-05-24 from CellGov's APP-keyed decrypt path after
-/// the section-header-preservation refactor that landed alongside
-/// NPDRM. This is a CellGov-derived baseline (no RPCS3 oracle for
-/// WipEout this phase), so the check is **refactor invariance**,
-/// not a true byte-identity-to-RPCS3 gate.
+/// CellGov-derived refactor-invariance baseline, not an RPCS3 oracle.
 const WIPEOUT_ELF_SHA256_UNMASKED: [u8; 32] = [
     0x46, 0xb1, 0x4e, 0xba, 0x7c, 0x85, 0x22, 0x29, 0x82, 0x19, 0xf7, 0x3a, 0x79, 0x91, 0xea, 0x5b,
     0x5e, 0x56, 0xe9, 0x9c, 0xef, 0x34, 0x8c, 0xa2, 0x14, 0xfb, 0x1f, 0x90, 0x1d, 0xb7, 0x63, 0x1a,
@@ -320,11 +293,8 @@ fn wipeout_eboot_refactor_invariance() {
     assert_eq!(
         got,
         WIPEOUT_ELF_SHA256_UNMASKED,
-        "WipEout APP decrypt no longer matches the committed \
-         refactor-invariance baseline. If this triggered after a \
-         deliberate change to the reassembly path, update the \
-         WIPEOUT_ELF_SHA256_UNMASKED constant. If unintentional, \
-         the SCE decrypt regressed -- got {} != expected {}",
+        "WipEout APP decrypt diverges from refactor-invariance \
+         baseline: got {} != expected {}",
         hex_str(&got),
         hex_str(&WIPEOUT_ELF_SHA256_UNMASKED),
     );

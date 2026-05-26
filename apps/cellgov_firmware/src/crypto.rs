@@ -2,8 +2,7 @@
 //!
 //! PUP / SCEPKG scalar keys live in [`cellgov_ps3_abi::sce`] and are
 //! re-exported here for backward compatibility. APP keys mirror
-//! `KeyVault::LoadSelfAPPKeys` in
-//! `tools/rpcs3-src/rpcs3/Crypto/key_vault.cpp`. Revisions 0x0012 and
+//! RPCS3's `KeyVault::LoadSelfAPPKeys` table. Revisions 0x0012 and
 //! 0x0015 have no entry in either source.
 
 pub use cellgov_ps3_abi::sce::{PUP_KEY, SCEPKG_ERK, SCEPKG_RIV};
@@ -63,7 +62,7 @@ const fn key(erk_hex: &str, riv_hex: &str) -> SelfKey {
     }
 }
 
-/// Sorted by revision. Gaps at 0x0012 and 0x0015.
+/// APP-key table, sorted by revision. Gaps at 0x0012 and 0x0015.
 const APP_KEYS: &[(u16, SelfKey)] = &[
     (
         0x0000,
@@ -273,13 +272,9 @@ pub fn app_key_for_revision(revision: u16) -> Option<SelfKey> {
         .map(|(_, k)| *k)
 }
 
-/// NPDRM SELF keys, mirroring `KeyVault::LoadSelfNPDRMKeys` in
-/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.cpp:434-533`. Selected by
-/// the SELF's revision tag for NPDRM-wrapped binaries; the APP table
-/// above does NOT apply to NPDRM SELFs (RPCS3's `FindSelfKey`
-/// dispatches on `program_type` to either `GetSelfAPPKey` or
-/// `GetSelfNPDRMKey`, and the two arrays carry distinct ERK/RIV per
-/// revision).
+/// NPDRM SELF keys, selected by revision tag for NPDRM-wrapped
+/// binaries. The APP table does not apply: each revision carries
+/// distinct ERK/RIV for the two paths.
 const NPDRM_KEYS: &[(u16, SelfKey)] = &[
     (
         0x0001,
@@ -429,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn revision_001c_key_matches_rpcs3() {
+    fn revision_001c_key_matches_reference() {
         let k = app_key_for_revision(0x001C).expect("revision 0x001C present");
         assert_eq!(k.erk[0], 0xCF);
         assert_eq!(k.erk[1], 0xF0);

@@ -452,7 +452,7 @@ Classified into typed `Lv2Request` variants:
 
 | Syscall                           | Number           | Behavior                                                                                               |
 | --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------ |
-| `sys_process_is_spu_lock_line_reservation_address` | 14   | Returns 0 (SUCCESS) for any address; the deterministic-oracle does not partition guest memory into SPU-reservable vs. not. Behavioural oracle: `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_process.cpp:263`. |
+| `sys_process_is_spu_lock_line_reservation_address` | 14   | Returns 0 (SUCCESS) for any address; the deterministic-oracle does not partition guest memory into SPU-reservable vs. not. Behavioural oracle: RPCS3's `sys_process.cpp`. |
 | `sys_process_exit`                | 22               | Cascades Finished to all units in the process.                                                         |
 | `sys_ppu_thread_exit`             | 41               | Finishes the calling unit; wakes joiners with the exit value.                                          |
 | `sys_ppu_thread_yield`            | 43               | No-op scheduling hint; round-robin picks the next runnable unit.                                       |
@@ -472,7 +472,7 @@ Classified into typed `Lv2Request` variants:
 | `sys_spu_thread_group_destroy`    | 171              | Withdraws the group from the table, scrubs unit / thread maps, returns CELL_OK. CELL_ESRCH on unknown id, CELL_EBUSY if any SPU in the group is still Running. |
 | `sys_spu_thread_initialize`       | 172              | Records image handle and args (copied at init time) per slot.                                          |
 | `sys_spu_thread_group_start`      | 173              | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
-| `sys_spu_thread_group_terminate`  | 177              | Not modeled; returns CELL_ENOSYS via the null backend (logged as invariant break). Split from join so dispatch cannot conflate the two ABI shapes. RPCS3 reference: `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_spu.cpp:1476`. |
+| `sys_spu_thread_group_terminate`  | 177              | Not modeled; returns CELL_ENOSYS via the null backend (logged as invariant break). Split from join so dispatch cannot conflate the two ABI shapes. RPCS3 reference: its `sys_spu.cpp` terminate handler. |
 | `sys_spu_thread_group_join`       | 178              | Blocks caller; wakes when all SPUs in the group finish.                                                |
 | `sys_spu_thread_write_spu_mb`     | 190              | Deposits a value into the target SPU's inbound mailbox.                                                |
 | `sys_memory_container_create`     | 341              | Allocates a monotonic container id, writes it to guest pointer.                                        |
@@ -577,8 +577,7 @@ returns `CELL_ENOSYS` and emits a
 the syscall number; specific arms with a known RPCS3-divergent
 contract return the matching errno instead (e.g.
 `sys_rsx_context_attribute`'s unknown-package fallback
-returns `CELL_EINVAL` per RPCS3
-`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_rsx.cpp:917-918`).
+returns `CELL_EINVAL` per RPCS3's `sys_rsx.cpp` default arm).
 The runtime never returns a blanket `CELL_OK` for a path it
 did not execute; a fabricated success would let an unmodeled
 syscall contaminate downstream guest state with a result the
@@ -952,7 +951,7 @@ zeroed notify and report tables).
 | 669     | `SysRsxMemoryFree`         | Noop-safe (returns CELL_OK); bump allocator does not free.          |
 | 670     | `SysRsxContextAllocate`    | Emit reports / driver-info / dma_control init + event queue. lpar_dma_control_ptr OUT receives `0xC000_0000` (libgcm derives the put-pointer at `+0x40`). |
 | 671     | `SysRsxContextFree`        | Noop-safe (returns CELL_OK); single-context model.                  |
-| 672     | `SysRsxContextIomap`       | Records the IO->EA mapping on the live context. Validates per RPCS3 `sys_rsx.cpp:398-453` (context_id, 1 MiB alignment, `ea+size` below `PS3_RSX_BASE`, `io+size` within baked iomap region using u64 arithmetic). |
+| 672     | `SysRsxContextIomap`       | Records the IO->EA mapping on the live context. Validates per RPCS3's `sys_rsx.cpp` iomap handler (context_id, 1 MiB alignment, `ea+size` below `PS3_RSX_BASE`, `io+size` within baked iomap region using u64 arithmetic). |
 | 674     | `SysRsxContextAttribute`   | Sub-command dispatch: FLIP_BUFFER, FLIP_MODE, SET_DISPLAY_BUFFER, handler register. |
 | 675     | `SysRsxDeviceMap`          | Idempotent: every `dev_id == 8` call returns `sys_rsx::device_map::ADDR` (`0x4000_0000`) in the OUT slot (CELL_OK); other dev_ids return CELL_EINVAL with a recorded invariant break. |
 
@@ -1120,23 +1119,27 @@ by short name (`--title sshd`), content id (`--content-id
 NPUA80068`), or explicit manifest path (`--title-manifest
 <file>`). The harness is currently wired for three titles:
 
-- **flOw** (NPUA80001): PSN HDD. Manifest declares the
-  `process-exit` checkpoint kind and enables `[rsx] mirror = true`
+- **flOw** (NPUA80001): PSN HDD, NPDRM-keyed. Manifest declares
+  the `process-exit` checkpoint kind and enables `[rsx] mirror = true`
   so the title's GCM put-pointer stores land in the FIFO cursor.
-  The manifest also declares a `[content]` block of read-only
-  blobs (`first.xml`, `Localization.xml`, `Classes.xml`)
-  registered into `Lv2Host::fs_store` at boot via the boot-time
-  content provider in `apps/cellgov_cli/src/game/content.rs`.
-- **Super Stardust HD** (NPUA80068): PSN HDD, checkpoint is
+  The manifest's `rap_filename` names the operator-supplied RAP
+  file that drives the in-memory NPDRM decrypt at boot. The
+  manifest also declares a `[content]` block of read-only blobs
+  (`first.xml`, `Localization.xml`, `Classes.xml`) registered
+  into `Lv2Host::fs_store` at boot via the boot-time content
+  provider in `apps/cellgov_cli/src/game/content.rs`.
+- **Super Stardust HD** (NPUA80068): PSN HDD, NPDRM-keyed (same
+  RAP-driven decrypt path as flOw). Checkpoint is
   `first-rsx-write` -- SSHD's attract-mode loop never exits, so
   the harness treats the first PPU write into the `rsx` reserved
   region as a checkpoint hit.
-- **WipEout HD Fury** (BCES00664): disc ISO, same `first-rsx-write`
-  checkpoint kind as SSHD. Disc titles add a `[source] kind = "disc"`
-  block to the manifest; `resolve_eboot` then looks under
-  `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead of
-  the PSN HDD layout. The encrypted `EBOOT.BIN` is decrypted once
-  via `cellgov_firmware decrypt-self`.
+- **WipEout HD Fury** (BCES00664): disc ISO, APP-keyed (no RAP).
+  Same `first-rsx-write` checkpoint kind as SSHD. Disc titles
+  add a `[source] kind = "disc"` block to the manifest;
+  `resolve_eboot` then looks under
+  `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead
+  of the PSN HDD layout. The encrypted `EBOOT.BIN` is decrypted
+  in memory at boot through `cellgov_firmware::sce::decrypt_self_to_elf`.
 
 Per-title status (boot checkpoint reached, cross-runner observation
 match) is tracked in [titles.md](titles.md).
@@ -1151,12 +1154,15 @@ for step-count-aligned A/B measurements).
 
 EBOOT resolution walks
 `<vfs-root>/game/<content-id>/USRDIR/<candidate>` in the order the
-manifest's `eboot_candidates` declares, preferring a decrypted
-`EBOOT.elf` over the encrypted `EBOOT.BIN`. Every real retail PS3
-EBOOT is a SELF and must be decrypted once via
-`rpcs3.exe --decrypt` before CellGov can load it; `<vfs-root>`
-defaults to `tools/rpcs3/dev_hdd0` and can be overridden by
-`--vfs-root` or `$CELLGOV_PS3_VFS_ROOT`.
+manifest's `eboot_candidates` declares; the canonical layout is
+`EBOOT.BIN`-first so the encrypted SCE source is the source of
+truth and a stale operator-decrypted `EBOOT.elf` cannot shadow
+it. CellGov decrypts retail SELFs in memory at boot time:
+APP-keyed for disc titles and RAP-keyed NPDRM for PSN-HDD
+titles (the RAP file is declared in the manifest's
+`rap_filename` field and read from `<vfs-root>/home/00000001/exdata/`).
+`<vfs-root>` defaults to `tools/rpcs3/dev_hdd0` and can be
+overridden by `--vfs-root` or `$CELLGOV_PS3_VFS_ROOT`.
 
 The diagnostic surface is:
 
@@ -1273,9 +1279,9 @@ residual `host_invariant_breaks` are all honest: two
 `dispatch.ppu_thread_create_unmodeled_flags` (flags=0x10000)
 firings (a convergent honest gap -- RPCS3's
 `_sys_ppu_thread_create` implementation only consults
-`flags & 3` for joinable/interrupt bits per
-`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_ppu_thread.cpp:492`,
-silently ignoring bit `0x10000`; CellGov matches), plus one
+`flags & 3` for joinable/interrupt bits per RPCS3's
+`sys_ppu_thread.cpp`, silently ignoring bit `0x10000`;
+CellGov matches), plus one
 no-op-with-trace log the boot triggers in an unmodeled
 handler.
 

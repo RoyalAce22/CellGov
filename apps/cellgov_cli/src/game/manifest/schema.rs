@@ -1,5 +1,5 @@
-//! On-disk TOML schema. Private wire format consumed by the loader
-//! and translated into the [`super::model`] data model.
+//! On-disk TOML wire format consumed by the loader and translated into
+//! [`super::model`].
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

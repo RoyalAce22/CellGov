@@ -34,25 +34,17 @@ pub struct Lv2Host {
     /// event-flag / cond. `lwmutexes` has its own allocator from 1.
     pub(super) next_kernel_id: u32,
     pub(super) mem_alloc_ptr: u32,
-    /// Bump cursor for `sys_mmapper_allocate_address`. Separate
-    /// from `mem_alloc_ptr` because mmapper grants 256 MiB+ chunks
-    /// while `sys_memory_allocate` deals in 64K-aligned <=1 MiB
-    /// slices.
+    /// Bump cursor for `sys_mmapper_allocate_address` (256 MiB+ chunks).
     pub(super) mmapper_addr_cursor: u32,
-    /// Separate bump cursor so the RSX-visible region cannot collide
-    /// with PPU allocations.
     pub(super) rsx_mem_alloc_ptr: u32,
     pub(super) rsx_mem_handle_counter: u32,
     pub(super) rsx_context: SysRsxContext,
-    /// Shared-memory handle table populated by `sys_mmapper_allocate_shared_memory`
-    /// (332) and `sys_mmapper_allocate_shared_memory_from_container`
-    /// (362), consumed by `sys_mmapper_map_shared_memory` (334).
+    /// Populated by 332 / 362, consumed by 334.
     pub(super) mmapper_handles: MmapperHandleTable,
     /// Pending region-install requests emitted by 334. Drained by the
     /// runtime post-dispatch and applied to `GuestMemory` before the
-    /// dispatch's effects commit (so effects can target the new region).
-    /// Not folded into [`Self::state_hash`]; the handle table itself
-    /// carries the hashable state.
+    /// dispatch's effects commit. Not folded into [`Self::state_hash`];
+    /// the handle table itself carries the hashable state.
     pub(super) pending_region_installs: Vec<PendingRegionInstall>,
     pub(super) lwmutexes: LwMutexTable,
     pub(super) mutexes: MutexTable,
@@ -62,55 +54,43 @@ pub struct Lv2Host {
     pub(super) conds: CondTable,
     /// Dispatch-local scratch; not folded into [`Self::state_hash`].
     pub(super) current_tick: GuestTicks,
-    /// Running count of host-invariant breaks. Non-zero means at
-    /// least one wake or table update fell back to a degraded
-    /// response. Not hashed.
+    /// Running count of host-invariant breaks. Not hashed.
     pub(super) invariant_break_count: usize,
-    /// Pending invariant-break events drained after each
-    /// `Lv2Host::dispatch` by the runtime and emitted as
-    /// `TraceRecord::HostInvariantBreak` records via the cross-crate
-    /// bridge in `cellgov_core::runtime::trace_bridge`. Not folded
-    /// into [`Self::state_hash`].
+    /// Drained after each `Lv2Host::dispatch` by the runtime. Not
+    /// folded into [`Self::state_hash`].
     pub(super) pending_invariant_breaks: Vec<super::diagnostics::InvariantBreakReason>,
-    /// Captured `sys_tty_write` byte stream in dispatch order.
-    /// Observation channel; not folded into [`Self::state_hash`].
+    /// Captured `sys_tty_write` byte stream. Not folded into
+    /// [`Self::state_hash`].
     pub(super) tty_log: Vec<u8>,
-    /// Live-object counters for primitives stubbed as ID allocators
-    /// only; feed `sys_process_get_number_of_object`. Not folded
-    /// into [`Self::state_hash`].
+    /// Feeds `sys_process_get_number_of_object`. Not folded into
+    /// [`Self::state_hash`].
     pub(super) process_counts: process::ProcessCounts,
     pub(super) fs_store: FsStore,
     /// Consulted by the dispatch layer when a guest path is not
     /// pre-registered in [`Self::fs_store`]. Boot populates from the
     /// title manifest; immutable thereafter.
     pub(super) fs_mounts: FsMountTable,
-    /// Minimum viable PRX set loaded at boot. Looked up by
-    /// `_sys_prx_load_module` (path -> kernel id) and walked by
-    /// `_sys_prx_get_module_list`. Empty when no firmware-dir was
-    /// configured (e.g. synthetic-ELF harnesses).
+    /// Minimum viable PRX set loaded at boot. Empty when no
+    /// firmware-dir was configured.
     pub(super) prx_registry: LoadedPrxRegistry,
     /// Per-thread count of distinct lwmutexes held. Recursive
     /// re-acquires of the same lwmutex do not bump the count; only
     /// first-acquire (FREE -> me) and kernel-side transfer
-    /// (LwMutexWake) do. Read by the runtime to drive
-    /// critical-section-aware scheduler stickiness.
+    /// (LwMutexWake) do.
     pub(super) lwmutex_holds: BTreeMap<PpuThreadId, u32>,
-    /// Firmware identity from `firmware.toml`. Folded into
-    /// [`Self::state_hash`] when set.
+    /// Folded into [`Self::state_hash`] when set.
     pub(super) firmware_identity: Option<FirmwareIdentity>,
 }
 
-/// Captured at boot via the verified `firmware.toml` manifest. The
-/// `image_version` hash and `pup_sha256` together identify the PUP
-/// the install came from; both fold into `Lv2Host::state_hash`.
+/// Captured at boot via the verified `firmware.toml` manifest.
+///
+/// `image_version_hash` and `pup_sha256_bytes` together identify the
+/// PUP the install came from; both fold into `Lv2Host::state_hash`.
 #[derive(Debug, Clone)]
 pub struct FirmwareIdentity {
-    /// FNV-1a hash of the verified `image_version` string from
-    /// `firmware.toml`. Pairs with `pup_sha256_bytes` to uniquely
-    /// identify the PUP this install was decrypted from.
+    /// FNV-1a hash of the verified `image_version` string.
     pub image_version_hash: u64,
-    /// Raw SHA-256 of the originating PUP file, copied verbatim
-    /// from `firmware.toml`.
+    /// Raw SHA-256 of the originating PUP file.
     pub pup_sha256_bytes: [u8; 32],
 }
 
@@ -121,31 +101,22 @@ impl Default for Lv2Host {
 }
 
 impl Lv2Host {
-    /// Guest base of the 256 MB RSX-visible window. Sits above the
-    /// user-memory bumper and below `MEM_ALLOC_REGION_END` so the
-    /// two allocators cannot collide.
+    /// Guest base of the 256 MB RSX-visible window.
     pub const SYS_RSX_MEM_BASE: u32 = 0x3000_0000;
 
     /// Upper bound (exclusive) of the sys_rsx memory region.
     pub const SYS_RSX_MEM_END: u32 = Self::SYS_RSX_MEM_BASE + 0x1000_0000;
 
     /// Lower bound (inclusive) of the `sys_mmapper_allocate_address`
-    /// handout window. Set to `0x5000_0000` -- 256 MiB above
-    /// `SYS_RSX_MEM_END` -- so the reserved
-    /// `[0x4000_0000, 0x5000_0000)` rsx_context window (covering
-    /// `sys_rsx::device::RSX_DEVICE_ADDR` and any future
-    /// per-context allocations placed in the same window) cannot
-    /// alias an mmapper handout. RPCS3 achieves the same disjoint
-    /// guarantee via `vm::reserve_map(vm::rsx_context, 0,
-    /// 0x10000000, 0x403)` before either 670 or 675 allocates
-    /// inside it.
+    /// handout window. Set 256 MiB above `SYS_RSX_MEM_END` so the
+    /// reserved `[0x4000_0000, 0x5000_0000)` rsx_context window
+    /// (covering `sys_rsx::device::RSX_DEVICE_ADDR`) cannot alias an
+    /// mmapper handout.
     pub const MMAPPER_REGION_START: u32 = 0x5000_0000;
 
     /// Upper bound (exclusive) of the `sys_mmapper_allocate_address`
-    /// region. Capped at `0xC000_0000` so the mmapper allocator
-    /// cannot hand out an address that aliases the RSX dma_control
-    /// MMIO region at `control_register::DMA_CONTROL_BASE`. Beyond
-    /// the MMIO region sits the kernel-reserved PPU stack region.
+    /// region. Capped below the RSX dma_control MMIO region at
+    /// `control_register::DMA_CONTROL_BASE`.
     pub const MMAPPER_REGION_END: u32 = 0xC000_0000;
 
     /// Construct an empty host with default tables and id allocators.
@@ -173,10 +144,6 @@ impl Lv2Host {
             stack_allocator: ThreadStackAllocator::new(),
             next_kernel_id: 0x4000_0001, // non-zero to catch uninitialized use
             mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
-            // Sits immediately above the sys_rsx-visible window so
-            // mmapper grants and sys_rsx-region addresses never
-            // alias. Capped at MMAPPER_REGION_END (0xD000_0000) so
-            // mmapper grants cannot walk into the PPU stack region.
             mmapper_addr_cursor: Self::MMAPPER_REGION_START,
             rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
             rsx_mem_handle_counter: 1,
@@ -202,10 +169,8 @@ impl Lv2Host {
         }
     }
 
-    /// Record the verified-firmware identity from the CLI boot path.
-    /// `image_version` is FNV-1a-hashed; `pup_sha256_bytes` is the
-    /// 32-byte SHA-256 digest. Boot is one-shot; the no-overwrite
-    /// invariant is asserted.
+    /// Record the verified-firmware identity. Boot is one-shot; a
+    /// second call panics in debug builds.
     pub fn set_firmware_identity(&mut self, image_version: &str, pup_sha256_bytes: [u8; 32]) {
         debug_assert!(
             self.firmware_identity.is_none(),
@@ -219,7 +184,7 @@ impl Lv2Host {
         });
     }
 
-    /// Captured firmware identity, or `None` before boot recorded one.
+    /// `None` until boot records one.
     pub fn firmware_identity(&self) -> Option<&FirmwareIdentity> {
         self.firmware_identity.as_ref()
     }
@@ -234,12 +199,12 @@ impl Lv2Host {
         &mut self.fs_store
     }
 
-    /// Mount table mapping guest paths to host paths.
+    /// Guest-path to host-path mount table.
     pub fn fs_mounts(&self) -> &FsMountTable {
         &self.fs_mounts
     }
 
-    /// Mutable view of [`Self::fs_mounts`]; written by boot only.
+    /// Mutable view; written by boot only.
     pub fn fs_mounts_mut(&mut self) -> &mut FsMountTable {
         &mut self.fs_mounts
     }
@@ -249,22 +214,18 @@ impl Lv2Host {
         self.lwmutex_holds.get(&tid).copied().unwrap_or(0)
     }
 
-    /// # Contract
-    ///
     /// Bumps the count for a first-acquire (FREE -> tid) or a
     /// kernel-side transfer. Recursive re-acquires (tid already
     /// the owner) are tracked elsewhere and must not pass through
-    /// this entry. Overflow at `u32::MAX` is physically impossible
-    /// from legitimate guest behaviour, so the upper bound is
-    /// asserted rather than saturated.
+    /// this entry.
     pub fn lwmutex_holds_inc(&mut self, tid: PpuThreadId) {
         let slot = self.lwmutex_holds.entry(tid).or_insert(0);
         debug_assert!(*slot < u32::MAX, "lwmutex hold count overflow on {tid:?}",);
         *slot += 1;
     }
 
-    /// Debug-asserts that the count is non-zero; release builds
-    /// saturate at 0 so a leak does not corrupt downstream counters.
+    /// Release builds saturate at 0 so a leak does not corrupt
+    /// downstream counters.
     pub fn lwmutex_holds_dec(&mut self, tid: PpuThreadId) {
         if let Some(slot) = self.lwmutex_holds.get_mut(&tid) {
             debug_assert!(*slot > 0, "lwmutex hold count underflow on {tid:?}",);
@@ -280,8 +241,8 @@ impl Lv2Host {
         }
     }
 
-    /// Drop any tracked count for `tid`; used at thread-exit and
-    /// stale-owner recovery so a dead thread's count does not leak.
+    /// Used at thread-exit and stale-owner recovery so a dead
+    /// thread's count does not leak.
     pub fn lwmutex_holds_clear(&mut self, tid: PpuThreadId) {
         self.lwmutex_holds.remove(&tid);
     }
@@ -294,8 +255,8 @@ impl Lv2Host {
         }
     }
 
-    /// Forwarder onto [`process::ProcessCounts::fs_fd_inc`]; see
-    /// that method for the no-decrement contract.
+    /// See [`process::ProcessCounts::fs_fd_inc`] for the no-decrement
+    /// contract.
     pub(super) fn fs_fd_count_inc(&mut self) {
         self.process_counts.fs_fd_inc();
     }
@@ -305,12 +266,12 @@ impl Lv2Host {
         self.process_counts.lwcond_inc();
     }
 
-    /// Decrement the live `sys_lwcond` object count, saturating at 0.
+    /// Decrement the live `sys_lwcond` count; saturates at 0.
     pub fn lwcond_count_dec(&mut self) {
         self.process_counts.lwcond_dec();
     }
 
-    /// Captured `sys_tty_write` byte stream in dispatch order.
+    /// `sys_tty_write` byte stream in dispatch order.
     #[inline]
     pub fn tty_log(&self) -> &[u8] {
         &self.tty_log
@@ -318,8 +279,7 @@ impl Lv2Host {
 
     /// Callers that load a real ELF must set this to the
     /// 64KB-aligned address above the ELF's highest PT_LOAD end;
-    /// the default (`0x0001_0000`) assumes no ELF is loaded and
-    /// will overwrite the image otherwise.
+    /// the default (`0x0001_0000`) overwrites the image otherwise.
     pub fn set_mem_alloc_base(&mut self, base: u32) {
         debug_assert!(
             base & 0xFFFF == 0,
@@ -353,12 +313,11 @@ impl Lv2Host {
     }
 
     /// Bump the mmapper VM cursor by `size` rounded up to the
-    /// 256 MiB sys_mmapper_allocate_address granule and return the
-    /// pre-bump cursor as the allocation address. Returns `None`
-    /// for `size == 0` (LV2 returns EINVAL there), when the bump
-    /// would overflow `u32`, or when the resulting range would
-    /// cross [`Self::MMAPPER_REGION_END`] into the kernel-reserved
-    /// PPU stack region.
+    /// 256 MiB granule and return the pre-bump cursor.
+    ///
+    /// Returns `None` for `size == 0`, when the bump would overflow
+    /// `u32`, or when the resulting range would cross
+    /// [`Self::MMAPPER_REGION_END`].
     pub(super) fn mmapper_alloc(&mut self, size: u32) -> Option<u32> {
         if size == 0 {
             return None;
@@ -389,8 +348,7 @@ impl Lv2Host {
         &self.prx_registry
     }
 
-    /// Boot uses this to register the minimum viable PRX set after
-    /// `load_firmware_set` returns.
+    /// Mutable view of [`Self::prx_registry`].
     pub fn prx_registry_mut(&mut self) -> &mut LoadedPrxRegistry {
         &mut self.prx_registry
     }
@@ -420,19 +378,17 @@ impl Lv2Host {
         self.ppu_threads.insert_primary(unit_id, attrs);
     }
 
-    /// Look up the PPU thread record bound to `unit_id`, if any.
+    /// PPU thread record bound to `unit_id`, if any.
     pub fn ppu_thread_for_unit(&self, unit_id: UnitId) -> Option<&PpuThread> {
         self.ppu_threads.get_by_unit(unit_id)
     }
 
-    /// Look up the PPU thread id bound to `unit_id`, if any.
+    /// PPU thread id bound to `unit_id`, if any.
     pub fn ppu_thread_id_for_unit(&self, unit_id: UnitId) -> Option<PpuThreadId> {
         self.ppu_threads.thread_id_for_unit(unit_id)
     }
 
-    /// `true` only when `unit_id` maps to a `PpuThread` whose state
-    /// is [`crate::ppu_thread::PpuThreadState::Finished`]. A unit with
-    /// no PPU mapping returns `false`.
+    /// `false` when `unit_id` has no PPU mapping.
     pub fn is_ppu_thread_finished_for_unit(&self, unit_id: UnitId) -> bool {
         match self.ppu_threads.get_by_unit(unit_id) {
             Some(thread) => thread.state.is_finished(),
@@ -515,7 +471,7 @@ impl Lv2Host {
         self.stack_allocator.allocate(size, align)
     }
 
-    /// Bind an SPU `unit_id` to `(group_id, slot)` in the group table.
+    /// Bind an SPU `unit_id` to `(group_id, slot)`.
     pub fn record_spu(
         &mut self,
         unit_id: cellgov_event::UnitId,
@@ -525,8 +481,8 @@ impl Lv2Host {
         self.groups.record_spu(unit_id, group_id, slot)
     }
 
-    /// Returns `Ok(Some(group_id))` when this notify drove the
-    /// group to `Finished`.
+    /// `Ok(Some(group_id))` when this notify drove the group to
+    /// `Finished`.
     pub fn notify_spu_finished(
         &mut self,
         unit_id: cellgov_event::UnitId,
@@ -563,10 +519,6 @@ mod tests {
         );
     }
 
-    // Not gated on `cfg(debug_assertions)`: the underlying check in
-    // `PpuThreadTable::insert_primary` is `assert!`, not
-    // `debug_assert!`, so the panic fires in both debug and release
-    // builds.
     #[test]
     #[should_panic(expected = "primary thread already inserted")]
     fn seeding_primary_twice_panics() {

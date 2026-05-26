@@ -25,9 +25,9 @@ Post-re-anchor: zero unresolved-import breaks; closure walk
 closes. The 3 remaining host invariant breaks are all honest:
 two `dispatch.ppu_thread_create_unmodeled_flags` firings for
 `flags=0x10000` (a convergent honest gap -- RPCS3's
-`_sys_ppu_thread_create` only consults `flags & 3` per
-`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_ppu_thread.cpp:492`,
-silently ignoring bit `0x10000`; CellGov matches), plus one
+`_sys_ppu_thread_create` only consults `flags & 3` per its
+`sys_ppu_thread.cpp`, silently ignoring bit `0x10000`;
+CellGov matches), plus one
 log from one of the unmodeled-no-op handlers (memory_free,
 spu_initialize, RSX free, event-port-connect-local ENOSYS, or
 similar) the boot exercises. The downstream fault is not

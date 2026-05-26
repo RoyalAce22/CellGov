@@ -2,13 +2,12 @@
 //! the patched build (`bridges/rpcs3-patch/0002-cellgov-hle-trace.patch`)
 //! and answer "which HLE call wrote this guest address?"
 //!
-//! Trace format pinned in `tools/rpcs3-src/rpcs3/Emu/Cell/cellgov_hle_trace.h`.
+//! Trace format pinned in the patch's `cellgov_hle_trace.h` header.
 //! Records are emitted at every BIND_FUNC entry+exit pair; each record
 //! lists the writes the call made to any `CELLGOV_HLE_WATCH` region
-//! (diff against the entry-time snapshot). Nested calls emit at every
-//! level so the deepest-touching frame is the precise attribution.
+//! (diff against the entry-time snapshot).
 //!
-//! Typical investigation flow:
+//! # Examples
 //!
 //! ```text
 //! CELLGOV_HLE_TRACE_PATH=flow.htrc \
@@ -17,9 +16,6 @@
 //!
 //! cellgov_cli rpcs3-attribute --trace flow.htrc --addr 0x101e3cb8
 //! ```
-//!
-//! That replaces an open-ended Ghidra hunt with a single deterministic
-//! answer per fault address.
 
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -85,12 +81,6 @@ impl ParseError {
     /// Whether this error is fatal (no resync possible). Streaming
     /// parsers abort on fatal errors; non-fatal errors trigger
     /// byte-by-byte resync to the next valid record magic.
-    ///
-    /// Exhaustive: every variant must declare its fatal-ness. A new
-    /// fatal-shape variant (e.g., `CorruptHeader`, `VersionMismatch`,
-    /// `OutOfMemory`) defaulting to non-fatal is silently resync-
-    /// skipped, throwing away the trace stream while the diagnostic
-    /// eprintln reports only a cosmetic `resyncs` count.
     pub fn is_fatal(&self) -> bool {
         match self {
             ParseError::Io(_) => true,
@@ -103,9 +93,8 @@ impl ParseError {
     }
 }
 
-/// Parse the entire trace file into a `Vec<CallRecord>`. Only used
-/// by tests; production callers stream via [`parse_streaming`] so
-/// multi-GB traces stay in bounded memory.
+/// Parse the entire trace file into a `Vec<CallRecord>`. Production
+/// callers stream via [`parse_streaming`] for bounded memory.
 #[cfg(test)]
 pub fn parse(path: &Path) -> Result<Vec<CallRecord>, ParseError> {
     let mut records = Vec::new();
@@ -136,10 +125,9 @@ where
     }
 
     let mut resyncs = 0usize;
-    // Sliding 4-byte magic window. We read exactly 4 bytes at every
-    // attempt (read_exact-style) so a BufReader buffer boundary can
-    // never short-circuit us into thinking we hit EOF. On a real
-    // EOF the first read() returns 0; only THEN do we exit cleanly.
+    // Sliding 4-byte magic window. Read up to 4 bytes per attempt so
+    // a BufReader buffer boundary cannot short-circuit EOF detection;
+    // a real EOF returns 0 from the first read.
     let mut window: [u8; 4] = [0; 4];
     let mut have_window = false;
     loop {
@@ -262,10 +250,8 @@ fn read_u64<R: Read>(r: &mut R, field: &'static str) -> Result<u64, ParseError> 
     Ok(u64::from_le_bytes(buf))
 }
 
-/// Records whose write set covers any byte of `[addr, addr+len)`.
-/// Returns matches in input order (callers feed records in
-/// chronological emit order; the parser preserves that and so does
-/// this filter). The earliest write is therefore the first hit.
+/// Records whose write set covers any byte of `[addr, addr+len)`,
+/// returned in input order.
 #[cfg(test)]
 pub fn filter_addr_range(records: &[CallRecord], addr: u64, len: u64) -> Vec<&CallRecord> {
     let end = addr.saturating_add(len);
@@ -280,15 +266,8 @@ pub fn filter_addr_range(records: &[CallRecord], addr: u64, len: u64) -> Vec<&Ca
         .collect()
 }
 
-/// Top-level entry point. Parses CLI args and runs one of the query
-/// modes:
-///
-///   --addr 0xADDR [--len N]    show calls writing into [addr, addr+len)
-///   --list                     dump every record (verbose)
-///   --ranked                   group by name, show write counts
-///
-/// All modes stream the trace; memory cost is bounded by the result
-/// set rather than the trace size, so multi-GB traces are fine.
+/// Parse CLI args and run one of the query modes (`--addr`,
+/// `--list`, `--ranked`, `--name`). All modes stream the trace.
 pub fn run(args: &[String]) {
     let trace_path = find_flag_value(args, "--trace")
         .unwrap_or_else(|| die("usage: cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR] [--len N] [--list] [--ranked] [--name SUBSTR]"));
@@ -376,8 +355,6 @@ pub fn run(args: &[String]) {
                 addr.saturating_add(len),
             );
         } else {
-            // `parse_streaming` yields records in chronological emit order;
-            // `step` is the PPU CIA at HLE entry, not a timestamp.
             println!(
                 "{} record(s) wrote into [0x{addr:016x}, 0x{:016x}) in chronological order:",
                 hits.len(),
@@ -442,7 +419,6 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    /// Build a minimal trace blob in the on-disk format.
     fn build_trace(records: &[CallRecord]) -> Vec<u8> {
         let mut buf = Vec::new();
         buf.write_all(&HEADER_MAGIC.to_le_bytes()).unwrap();
@@ -563,7 +539,6 @@ mod tests {
 
     #[test]
     fn filter_addr_range_handles_partial_overlap() {
-        // Watch on a single byte that sits inside a multi-byte write.
         let records = vec![fixture_record(
             "partial_overlap",
             0x100,

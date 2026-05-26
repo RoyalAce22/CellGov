@@ -15,9 +15,8 @@ mod game;
 use cli::exit::die;
 use cli::scenarios::{report, run_scenario, SCENARIOS};
 
-/// Usage lines for the fixed-arity subcommands. Both the per-arm
-/// `die` on wrong arity and the [`Subcommand::usage`] table reference
-/// these consts so the two cannot drift.
+/// Usage lines for the fixed-arity subcommands. Referenced both by
+/// the per-arm `die` on wrong arity and the [`Subcommand::usage`] table.
 const USAGE_COMPARE_OBSERVATIONS: &str =
     "cellgov_cli compare-observations <a.json> <b.json> [--format human|json]";
 const USAGE_DIVERGE: &str = "cellgov_cli diverge <a.state> <b.state>";
@@ -57,7 +56,7 @@ cellgov_cli titles-gen [--registry DIR] [--fixtures-dir DIR] [--output PATH]
 
 /// Top-level dispatcher routes. Adding a variant produces an
 /// exhaustiveness error in [`Subcommand::tokens`], [`Subcommand::usage`],
-/// and the `main` dispatch match, so the wiring stays in sync.
+/// and the `main` dispatch match.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Subcommand {
     Help,
@@ -131,10 +130,8 @@ impl Subcommand {
     }
 }
 
-/// Canonical iteration order. Drives [`print_usage`] layout and the
-/// unknown-token diagnostic. The `subcommands_const_is_exhaustive`
-/// test pins this list against the [`Subcommand`] variants so a
-/// newly-added variant cannot be silently absent.
+/// Canonical iteration order driving [`print_usage`] layout and the
+/// unknown-token diagnostic.
 const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand::Help,
     Subcommand::Version,
@@ -243,8 +240,7 @@ fn parse_step_count(s: &str) -> Result<u64, std::num::ParseIntError> {
 }
 
 /// Every dispatcher-recognized token across all subcommands, in
-/// `SUBCOMMANDS` order. Backs the unknown-token diagnostic so the
-/// list mirrors whatever the dispatcher will actually accept.
+/// `SUBCOMMANDS` order.
 fn all_subcommand_tokens() -> Vec<&'static str> {
     SUBCOMMANDS
         .iter()

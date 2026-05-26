@@ -7,7 +7,7 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 /// `(addr, size)` pair describing where a segment would have been
 /// placed. Shared by [`LoadError::SegmentOutOfRange`] (ELF PT_LOAD)
 /// and [`crate::sprx::PrxLoadError::SegmentOutOfRange`] (PRX
-/// text / data) so the two failure shapes diagnose identically.
+/// text / data).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SegmentPlacement {
     /// Guest address at which the segment would have started.
@@ -627,8 +627,8 @@ pub fn find_secondary_opd_tables(data: &[u8]) -> Vec<SecondaryOpdTable> {
 ///
 /// Found by [`find_indirect_opd_tables`]: a run of consecutive
 /// 12-byte rows where column 1 sits inside the executable PT_LOAD
-/// range. WipEout's table at `data@0xc1110` is the post-Phase-38
-/// driving observation; SSHD-shaped titles may have a sibling table.
+/// range. WipEout's table at `data@0xc1110` is the driving
+/// observation; SSHD-shaped titles may have a sibling table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IndirectOpdTable {
     /// Guest virtual address of the table's first row's first byte.
@@ -651,8 +651,8 @@ const INDIRECT_OPD_TABLE_MIN_ROWS: usize = 4;
 
 /// Locate every indirect-OPD table in `data` by scanning for runs of
 /// 12-byte rows whose column-1 (bytes 4..8) is a pointer into the
-/// title's executable PT_LOAD range. Each detected run with at least
-/// [`INDIRECT_OPD_TABLE_MIN_ROWS`] rows is emitted as a single
+/// title's executable PT_LOAD range. Each detected run that meets the
+/// internal row-count threshold is emitted as a single
 /// [`IndirectOpdTable`]; callers derive the per-row OPD slot positions
 /// at offset [`INDIRECT_OPD_TABLE_SLOT_OFFSET`].
 ///
@@ -1119,11 +1119,9 @@ mod tests {
 
     #[test]
     fn rejects_segment_with_vaddr_memsz_overflow() {
-        // Crafted PT_LOAD: p_vaddr near u64::MAX so p_vaddr + p_memsz wraps.
-        // Wrapping `p_vaddr + p_memsz` instead of using checked_add
-        // can pass a post-bounds check on the wrapped value and
-        // route an OOB write through apply_commit. Pins checked
-        // arithmetic on segment-end computation.
+        // p_vaddr near u64::MAX so p_vaddr + p_memsz wraps; without
+        // checked arithmetic the wrapped value passes a post-bounds
+        // check and routes an OOB write through apply_commit.
         let mut data = mk_elf_header(1);
         let p_vaddr = u64::MAX - 0xFF;
         let p_memsz = 0x200u64;
@@ -1147,10 +1145,8 @@ mod tests {
 
     #[test]
     fn rejects_segment_above_ps3_ea_ceiling() {
-        // PS3 effective addresses are 32-bit. A segment ending above 4 GiB
-        // must be rejected even on 64-bit hosts where the arithmetic does
-        // not overflow, so guest memory is never sized for an EA the
-        // architecture cannot represent.
+        // PS3 EAs are 32-bit; a segment ending above 4 GiB must be
+        // rejected even when host arithmetic does not overflow.
         let mut data = mk_elf_header(1);
         let p_vaddr = 0x1_0000_0000u64;
         let p_memsz = 0x10u64;
@@ -1174,9 +1170,8 @@ mod tests {
 
     #[test]
     fn find_tls_rejects_non_64bit_elf() {
-        // A 32-bit ELF has different program-header field offsets. Without
-        // the arch check, find_tls_segment would parse u64 fields against
-        // the wrong layout and return garbage.
+        // 32-bit ELF program-header field offsets differ; without the
+        // arch check the u64 reads land on the wrong fields.
         let mut data = vec![0u8; 256];
         data[0..4].copy_from_slice(&ELF_MAGIC);
         data[4] = 1; // 32-bit
@@ -1197,11 +1192,8 @@ mod tests {
 
     #[test]
     fn find_sys_process_param_rejects_magic_outside_pt_load() {
-        // Build an ELF whose PT_LOAD covers a small file range that does
-        // NOT contain the magic, and place the magic + plausible struct
-        // bytes outside that range. A magic-scanner that walks raw
-        // file bytes without filtering by PT_LOAD coverage would
-        // match the magic and return false-positive struct fields.
+        // Magic planted outside any PT_LOAD must not match: a raw-byte
+        // scanner without the PT_LOAD filter would emit a false positive.
         let payload_offset = 0x200usize;
         let pt_load_offset = 0x100usize;
         let pt_load_size = 0x40usize; // does not cover payload_offset
@@ -1229,9 +1221,6 @@ mod tests {
 
     #[test]
     fn find_sys_process_param_accepts_magic_inside_pt_load() {
-        // Symmetric counterpart: a magic match inside the PT_LOAD file
-        // range still parses as a real struct. Locks the positive path
-        // so the PT_LOAD filter does not over-reject valid binaries.
         let payload_offset = 0x140usize;
         let pt_load_offset = 0x100usize;
         let pt_load_size = 0x80usize; // covers payload_offset
@@ -1393,9 +1382,6 @@ mod tests {
 
     #[test]
     fn find_secondary_opd_tables_rejects_header_outside_pt_load() {
-        // Plant the header at a file offset OUTSIDE any PT_LOAD range.
-        // A scanner without the PT_LOAD filter would emit a phantom
-        // table inside ELF padding / metadata.
         let pt_off = 0x200usize;
         let pt_sz = 0x40usize;
         let pt_vaddr = 0x82_0000u64;
@@ -1424,12 +1410,6 @@ mod tests {
 
     #[test]
     fn find_secondary_opd_tables_rejects_unaligned_or_mismatched_seq() {
-        // Two adversarial cases:
-        //   1. Header at a non-4-byte-aligned offset (scan strides
-        //      by 4 from offset 0, so an unaligned plant is invisible).
-        //   2. Header where the sequence byte in word 0 disagrees
-        //      with the sequence byte in word 1 (e.g., `04 02 01 00
-        //      00 02 00 00`). The match condition requires equality.
         let pt_off = 0x200usize;
         let pt_sz = 0x200usize;
         let pt_vaddr = 0x82_0000u64;

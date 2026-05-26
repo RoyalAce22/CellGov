@@ -214,8 +214,8 @@ mod tests {
             }
         }
         let declared: BTreeSet<&str> = KNOWN_FLAGS.iter().copied().collect();
-        // Strip placeholders the grep can hit in doc comments; a real
-        // flag is `--` plus lowercase letters / hyphens only.
+        // A real flag is `--` plus lowercase letters / hyphens only;
+        // strip doc-comment placeholders that the grep can hit.
         let used: BTreeSet<&str> = used
             .into_iter()
             .filter(|s| {

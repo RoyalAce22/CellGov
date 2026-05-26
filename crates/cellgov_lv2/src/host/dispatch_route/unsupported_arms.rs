@@ -1,6 +1,5 @@
-//! Per-syscall dispatch helpers for the specific `Lv2Request::Unsupported
-//! { number: N }` arms. Each method handles one syscall number; the
-//! match in `mod.rs` reduces to a one-line delegation per number.
+//! Per-syscall dispatch helpers for the `Lv2Request::Unsupported
+//! { number: N }` arms; one method per syscall number.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -14,12 +13,10 @@ use crate::host::mmapper::{MmapperHandle, PendingRegionInstall};
 use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
-    /// `sys_ppu_thread_get_priority` (48). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_ppu_thread.cpp:365` writes the
-    /// target thread's priority (s32) to `*priop`. Unknown thread
-    /// ids fall back to 1001, the boot-seed primary thread priority,
-    /// so firmware-side callers that read back the value see a
-    /// self-consistent answer.
+    /// `sys_ppu_thread_get_priority` (48). Oracle: RPCS3's
+    /// `sys_ppu_thread.cpp` writes the target thread's priority (s32)
+    /// to `*priop`. Unknown thread ids fall back to 1001 (boot-seed
+    /// primary priority) for a self-consistent read-back.
     pub(super) fn dispatch_ppu_thread_get_priority(
         &self,
         args: [u64; 8],
@@ -49,12 +46,8 @@ impl Lv2Host {
     }
 
     /// `sys_event_port_connect_local` (136). Port -> queue binding is
-    /// not modeled. RPCS3 implements the binding and returns CELL_OK
-    /// after persisting it
-    /// (`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_event.cpp:666-694`);
-    /// returning CELL_OK without the binding would let the guest
-    /// proceed believing sends will deliver when they would silently
-    /// vanish. CELL_ENOSYS is the honest divergent gap.
+    /// not modeled; honest gap reports CELL_ENOSYS rather than RPCS3's
+    /// CELL_OK without a persisted binding.
     pub(super) fn dispatch_event_port_connect_local(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.event_port_connect_local_unmodeled",
@@ -66,13 +59,9 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
-    /// `sys_memory_container_create` (324). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_memory.cpp:375` mints an
-    /// `lv2_memory_container` id and writes it to `*cid`. The oracle
-    /// does not track physical-memory budgets. Suffix `_324`
-    /// disambiguates this Unsupported{N} arm from the typed
-    /// `MemoryContainerCreate` variant handled by
-    /// [`Lv2Host::dispatch_memory_container_create`].
+    /// `sys_memory_container_create` (324). Oracle: RPCS3's
+    /// `sys_memory.cpp` mints an `lv2_memory_container` id and writes
+    /// it to `*cid`. Physical-memory budgets are not tracked.
     pub(super) fn dispatch_memory_container_create_324(
         &mut self,
         args: [u64; 8],
@@ -82,8 +71,6 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[cid_ptr]) {
             return d;
         }
-        // SYS_MEMORY_CONTAINER_OBJECT has no `count_for_class`
-        // arm, so an inc here would be unobserved dead state.
         let cid = self.alloc_id();
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(cid_ptr, 4),
@@ -98,9 +85,9 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_mmapper_allocate_address` (330). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:130` validates size as a
-    /// 256 MiB multiple, defaults alignment 0 to 256 MiB, and writes
+    /// `sys_mmapper_allocate_address` (330). Oracle: RPCS3's
+    /// `sys_mmapper.cpp` validates size as a 256 MiB multiple,
+    /// defaults alignment 0 to 256 MiB, and writes
     /// a free VM-area base to `*alloc_addr`. The oracle bumps a
     /// monotonic 256 MiB-aligned cursor; overflow returns CELL_ENOMEM.
     pub(super) fn dispatch_mmapper_allocate_address(
@@ -131,9 +118,9 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_mmapper_allocate_shared_memory` (332). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:190` creates an `lv2_memory`
-    /// shm object and writes the u32 id to `*mem_id_ptr`. The oracle
+    /// `sys_mmapper_allocate_shared_memory` (332). Oracle: RPCS3's
+    /// `sys_mmapper.cpp` creates an `lv2_memory` shm object and
+    /// writes the u32 id to `*mem_id_ptr`. The oracle
     /// mints a monotonic id; the map / search-and-map calls that
     /// follow are no-ops at the oracle layer.
     pub(super) fn dispatch_mmapper_allocate_shared_memory(
@@ -177,10 +164,10 @@ impl Lv2Host {
     /// `addr` against the handle's recorded page granule, and pushes a
     /// pending region-install request the runtime drains after dispatch.
     ///
-    /// Oracle: `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:613-686`.
-    /// RPCS3 bounds `addr` to `[0x2000_0000, 0xC000_0000)`, looks the
-    /// shm handle up via `idm::get`, checks `addr % page_alignment`, then
-    /// `vm::falloc`s the pages.
+    /// Oracle: RPCS3's `sys_mmapper.cpp` map handler. It bounds `addr`
+    /// to `[0x2000_0000, 0xC000_0000)`, looks the shm handle up via
+    /// `idm::get`, checks `addr % page_alignment`, then `vm::falloc`s
+    /// the pages.
     ///
     /// # Errors
     ///
@@ -191,12 +178,12 @@ impl Lv2Host {
     /// - `CELL_EBUSY` (plus `dispatch.mmapper_map_overlap` break) when
     ///   the requested range overlaps an existing region.
     ///
-    /// The Phase-37 "writable spot-check" fast path stays: if `addr`
-    /// already lies in a backed region (genuine main / iomap / stack
-    /// target, e.g. a synthetic-ELF harness's 334 against a flat backing)
-    /// the call returns CELL_OK without recording state. This preserves
-    /// existing test fixtures while letting the handle path do the
-    /// real work for firmware-set boots.
+    /// A "writable spot-check" fast path runs before the handle table:
+    /// if `addr` already lies in a backed region (genuine main / iomap
+    /// / stack target, e.g. a synthetic-ELF harness's 334 against a
+    /// flat backing) the call returns CELL_OK without recording state.
+    /// This preserves existing test fixtures while letting the handle
+    /// path do the real work for firmware-set boots.
     pub(super) fn dispatch_mmapper_map_shared_memory(
         &mut self,
         args: [u64; 8],
@@ -204,10 +191,9 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let addr = args[0];
         let mem_id = args[1] as u32;
-        // Flat-backing fast path: an already-backed `addr` short-circuits
-        // to CELL_OK regardless of `mem_id`. Used by synthetic ELFs that
-        // 334 against pre-mapped main memory; firmware-set boots take
-        // the handle-keyed path below.
+        // Flat-backing fast path for synthetic ELFs that 334 against
+        // pre-mapped main memory: already-backed `addr` short-circuits
+        // to CELL_OK regardless of `mem_id`.
         if rt.writable(addr, 1) {
             return Lv2Dispatch::immediate(errno::CELL_OK.into());
         }
@@ -227,8 +213,8 @@ impl Lv2Host {
         if !addr.is_multiple_of(u64::from(handle.align)) {
             return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
-        // Bound the install at u32 so overflow-into-MMIO is rejected
-        // here rather than at the runtime's install_region check.
+        // Reject overflow-into-MMIO here so the runtime's install_region
+        // check never sees an out-of-range request.
         let Some(end) = addr.checked_add(u64::from(handle.size)) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
@@ -242,8 +228,8 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_OK.into())
     }
 
-    /// `sys_mmapper_search_and_map` (337). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:688` validates `start_addr`
+    /// `sys_mmapper_search_and_map` (337). Oracle: RPCS3's
+    /// `sys_mmapper.cpp` search-and-map handler validates `start_addr`
     /// within `[0x2000_0000, 0xC000_0000)` and writes the placement
     /// to `*alloc_addr_ptr`. The oracle's flat backing collapses the
     /// search to "place at start_addr"; out-of-range `start_addr`
@@ -275,9 +261,9 @@ impl Lv2Host {
     }
 
     /// `sys_mmapper_allocate_shared_memory_from_container` (362).
-    /// Oracle: `rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:242`. Same shape
-    /// as syscall 332 with a caller-supplied container; the
-    /// out-pointer for the fresh mem_id is at r7.
+    /// Oracle: RPCS3's `sys_mmapper.cpp` shm-from-container handler;
+    /// same shape as syscall 332 with a caller-supplied container;
+    /// the out-pointer for the fresh mem_id is at r7.
     pub(super) fn dispatch_mmapper_allocate_shared_memory_from_container(
         &mut self,
         args: [u64; 8],
@@ -320,21 +306,19 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_EIO.into())
     }
 
-    /// DEX-only slot (462). `uns_func` in
-    /// `rpcs3/Emu/Cell/lv2/lv2.cpp:511`; retail liblv2 expects ENOSYS
-    /// to take its fallback path.
+    /// DEX-only slot (462). `uns_func` in RPCS3's `lv2.cpp` dispatch
+    /// table; retail liblv2 expects ENOSYS to take its fallback path.
     pub(super) fn dispatch_uns_func_462(&self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
-    /// `_sys_prx_start_module` (481). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_prx.cpp:590` writes
-    /// `pOpt->entry = prx->start ? prx->start.addr() : ~0` before
-    /// returning CELL_OK. Struct layout per
-    /// `rpcs3/Emu/Cell/lv2/sys_prx.h:107` puts `entry` at offset 16.
-    /// `~0` is the kernel sentinel for "no start function".
-    /// `if (!id || !pOpt || pOpt->size < 0x20) return CELL_EINVAL;`
-    /// is honored for id and pOpt; the size check is deferred.
+    /// `_sys_prx_start_module` (481). Oracle: RPCS3's `sys_prx.cpp`
+    /// writes `pOpt->entry = prx->start ? prx->start.addr() : ~0`
+    /// before returning CELL_OK. Struct layout per RPCS3's
+    /// `sys_prx.h` puts `entry` at offset 16. `~0` is the kernel
+    /// sentinel for "no start function". `if (!id || !pOpt ||
+    /// pOpt->size < 0x20) return CELL_EINVAL;` is honored for id and
+    /// pOpt; the size check is deferred.
     pub(super) fn dispatch_prx_start_module(
         &self,
         args: [u64; 8],
@@ -360,28 +344,26 @@ impl Lv2Host {
         }
     }
 
-    /// `_sys_prx_register_module` (484). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_prx.cpp:860` returns
-    /// CELL_PRX_ERROR_ELF_IS_REGISTERED for non-VSH callers (wrapped
-    /// in `not_an_error`).
+    /// `_sys_prx_register_module` (484). Oracle: RPCS3's `sys_prx.cpp`
+    /// returns CELL_PRX_ERROR_ELF_IS_REGISTERED for non-VSH callers
+    /// (wrapped in `not_an_error`).
     pub(super) fn dispatch_prx_register_module(&self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0x8001_1910)
     }
 
-    /// `_sys_prx_register_library` (486). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_prx.cpp:875` walks every PRX's export
-    /// table for a match. With no firmware-side import resolution
-    /// modeled, CELL_OK matches the kernel's "no match" success path.
+    /// `_sys_prx_register_library` (486). Oracle: RPCS3's `sys_prx.cpp`
+    /// walks every PRX's export table for a match. With no
+    /// firmware-side import resolution modeled, CELL_OK matches the
+    /// kernel's "no match" success path.
     pub(super) fn dispatch_prx_register_library(&self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `_sys_prx_get_module_list` (494). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_prx.cpp:954`. `flags & 0x2 == 0`
-    /// short-circuits to CELL_OK; otherwise the kernel walks every
-    /// loaded lv2_prx (filtering liblv2.sprx) and fills
-    /// `pInfo->idlist` up to `pInfo->max`, then writes `pInfo->count`.
-    /// Struct layout per `rpcs3/Emu/Cell/lv2/sys_prx.h:129`:
+    /// `_sys_prx_get_module_list` (494). Oracle: RPCS3's `sys_prx.cpp`.
+    /// `flags & 0x2 == 0` short-circuits to CELL_OK; otherwise the
+    /// kernel walks every loaded lv2_prx (filtering liblv2.sprx) and
+    /// fills `pInfo->idlist` up to `pInfo->max`, then writes
+    /// `pInfo->count`. Struct layout per RPCS3's `sys_prx.h`:
     /// `size@0, pad@8, max@0xC, count@0x10, idlist@0x14, unk@0x1C`.
     /// CELL_EFAULT on null `pInfo` when bit 2 is set.
     pub(super) fn dispatch_prx_get_module_list(
@@ -416,9 +398,8 @@ impl Lv2Host {
             .map(|e| e.kernel_id());
         let mut count: u32 = 0;
         if idlist_ptr != 0 {
-            // `prx_registry.ids()` iterates `BTreeMap` keys in
-            // monotonic kernel-id order; idlist bytes are therefore
-            // independent of registry insertion order.
+            // `ids()` walks `BTreeMap` keys in monotonic id order, so
+            // idlist bytes are independent of insertion order.
             for kid in self.prx_registry.ids() {
                 if Some(kid) == liblv2_id {
                     continue;
@@ -448,19 +429,14 @@ impl Lv2Host {
     }
 
     /// `sys_hid_manager_is_process_permission_root` (512). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_hid.cpp:140` returns the caller's
-    /// root bit. Retail titles run unprivileged (false).
+    /// RPCS3's `sys_hid.cpp` returns the caller's root bit. Retail
+    /// titles run unprivileged (false).
     pub(super) fn dispatch_hid_is_root(&self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0)
     }
 
     /// `sys_gamepad_ycon_if` (621). Convergent honest gap: RPCS3's
-    /// implementation is also a stub -- every packet_id sub-handler
-    /// logs `todo()` and returns CELL_OK; the unknown-packet
-    /// default also returns CELL_OK
-    /// (`tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_gamepad.cpp:7-98`).
-    /// CellGov matches that shape; the diagnostic fires so the
-    /// stub is traced.
+    /// `sys_gamepad.cpp` is also a CELL_OK stub for every packet_id.
     pub(super) fn dispatch_gamepad_ycon_if(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.gamepad_ycon_if_stub",
@@ -472,9 +448,8 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `sys_rsx_attribute` (677). Oracle:
-    /// `rpcs3/Emu/Cell/lv2/sys_rsx.cpp:983` logs and returns CELL_OK
-    /// without state change.
+    /// `sys_rsx_attribute` (677). Oracle: RPCS3's `sys_rsx.cpp` logs
+    /// and returns CELL_OK without state change.
     pub(super) fn dispatch_rsx_attribute(&self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0)
     }
