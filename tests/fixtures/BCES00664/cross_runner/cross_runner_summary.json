@@ -4,184 +4,20 @@
   },
   "byte_parity": {
     "kind": "pending",
-    "non_semantic_bytes": 1055,
-    "unclassified_bytes": 86
+    "non_semantic_bytes": 975,
+    "unclassified_bytes": 1
   },
   "per_class_bytes": {
-    "hle_opd_slot": 1055,
-    "unclassified": 86
+    "hle_opd_slot": 963,
+    "sync_primitive_id": 12,
+    "unclassified": 1
   },
-  "unclassified_bytes": 86,
+  "unclassified_bytes": 1,
   "unclassified_runs": [
-    {
-      "region_name": "data",
-      "offset": 399532,
-      "length": 8
-    },
-    {
-      "region_name": "data",
-      "offset": 400236,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 400244,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 403949,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 407003,
-      "length": 1
-    },
     {
       "region_name": "data",
       "offset": 786076,
       "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 786184,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 786186,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790480,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790484,
-      "length": 4
-    },
-    {
-      "region_name": "data",
-      "offset": 790492,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790544,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790548,
-      "length": 10
-    },
-    {
-      "region_name": "data",
-      "offset": 790608,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790612,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790616,
-      "length": 6
-    },
-    {
-      "region_name": "data",
-      "offset": 790672,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790676,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790680,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790684,
-      "length": 4
-    },
-    {
-      "region_name": "data",
-      "offset": 790736,
-      "length": 6
-    },
-    {
-      "region_name": "data",
-      "offset": 790744,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 790748,
-      "length": 2
-    },
-    {
-      "region_name": "data",
-      "offset": 807936,
-      "length": 4
-    },
-    {
-      "region_name": "data",
-      "offset": 807947,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 807955,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 807963,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 807976,
-      "length": 4
-    },
-    {
-      "region_name": "data",
-      "offset": 807987,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 807995,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 808003,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 816253,
-      "length": 3
-    },
-    {
-      "region_name": "data",
-      "offset": 816920,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 816922,
-      "length": 2
     }
   ],
   "lowest_offset_class": [

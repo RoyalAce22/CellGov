@@ -133,12 +133,13 @@ pub(crate) fn run(args: &[String]) {
     let eboot_path = manifest
         .resolve_eboot(&vfs_root)
         .unwrap_or_else(|e| die(&format!("fixture-gen: resolve EBOOT: {e}")));
-    let eboot_bytes = std::fs::read(&eboot_path).unwrap_or_else(|e| {
-        die(&format!(
-            "fixture-gen: read EBOOT {}: {e}",
-            eboot_path.display()
-        ))
-    });
+    let eboot_bytes =
+        crate::cli::exit::load_ppu_image_or_die(eboot_path.to_str().unwrap_or_else(|| {
+            die(&format!(
+                "fixture-gen: EBOOT path {} has invalid UTF-8",
+                eboot_path.display()
+            ))
+        }));
 
     let cellgov: Observation = serde_json::from_slice(&load_file_or_die(&cellgov_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: parse {cellgov_path}: {e}")));
@@ -250,10 +251,24 @@ pub(crate) fn build_classifier_context(
 
     let hle_opd_ranges = compute_hle_opd_ranges(eboot_bytes)?;
 
+    // sys_lwmutex_t handle-slot scan: each match contributes the
+    // 4-byte sleep_queue field range. Operates on CG's runtime data
+    // snapshot, not the EBOOT, because the lwmutex_free sentinel and
+    // attribute field are only populated post-init.
+    let sync_primitive_id_ranges = observation
+        .memory_regions
+        .iter()
+        .find(|r| r.name == "data")
+        .map(|r| {
+            cellgov_compare::sync_primitive_scan::find_sys_lwmutex_handle_slots(&r.data, r.addr)
+        })
+        .unwrap_or_default();
+
     let ctx = ClassifierContext {
         elf_header_range,
         sys_proc_param_range,
         hle_opd_ranges,
+        sync_primitive_id_ranges,
     };
     ctx.debug_assert_disjoint();
     Ok(ctx)
@@ -896,6 +911,7 @@ mod tests {
             elf_header_range: Some(0x1000..0x2000),
             sys_proc_param_range: Some(0x1500..0x2500),
             hle_opd_ranges: Vec::new(),
+            sync_primitive_id_ranges: Vec::new(),
         };
         ctx.debug_assert_disjoint();
     }

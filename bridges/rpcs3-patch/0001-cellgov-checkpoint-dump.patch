@@ -1,125 +1,75 @@
 From: CellGov <noreply@cellgov.local>
-Subject: [PATCH] cellgov: env-var-gated memory dump at _sys_process_exit
+Subject: [PATCH] cellgov: env-var-gated memory dump at process exit and first RSX put-write
 
-Adds an opt-in checkpoint dump that writes configured guest-memory
-regions to a binary file when _sys_process_exit is reached. Controlled
-by two environment variables; no effect when unset.
+Adds opt-in checkpoint dumps that write configured guest-memory
+regions to host files. Up to three triggers per process, all gated
+on env vars; no behavior change when none are set.
 
-Environment variables:
+Triggers and env vars:
 
-  CELLGOV_DUMP_PATH     Path to output dump file. When unset the hook
-                        is a no-op. The file is overwritten on each
-                        run.
+  CELLGOV_DUMP_PATH       ProcessExit dump (fires inside
+                          _sys_process_exit on the PPU thread).
+                          Backward-compatible with prior versions
+                          of this patch.
 
-  CELLGOV_DUMP_REGIONS  Comma-separated list of `addr:size` pairs in
-                        hex (e.g. 0x10000:0x800000,0x10000000:0x400000).
-                        Each region is appended to the dump file
-                        contiguously in declaration order.
+  CELLGOV_DUMP_PATH_RSX   FirstRsxWrite dump (fires inside the RSX
+                          thread's cpu_task loop, on the first
+                          observed change to the GCM put register
+                          from its initial value).
 
-The CellGov side consumes the dump via `tools/rpcs3-to-observation/`,
-which packages it into a standard Observation JSON using a region
-manifest that must list the same regions in the same order.
+  CELLGOV_DUMP_PATH_RSX2  Second FirstRsxWrite dump (fires on the
+                          very next cpu_task iteration after the
+                          RSX trigger). Diff against the RSX1 dump
+                          bounds the torn-read noise floor.
 
-This hook is read-only with respect to guest state: it calls
-vm::base() + memcpy to the host output file and returns. It runs on
-the PPU thread that issued the exit, before RPCS3's normal exit
-teardown.
+  CELLGOV_DUMP_REGIONS    Comma-separated `addr:size` hex pairs,
+                          shared by all triggers. Each region is
+                          appended contiguously in declaration
+                          order. See bridges/rpcs3-patch/README.md
+                          in the CellGov repo for the manifest
+                          contract.
 
-Target file: rpcs3/Emu/Cell/lv2/sys_process.cpp
+Skews documented in the header and at the trigger:
+
+  1. Poll-observation skew on the RSX trigger: RPCS3's put register
+     is plain VM memory with no synchronous store handler, so the
+     RSX thread notices put != initial via polling rather than via
+     a store hook. The dump fires from the RSX poll loop a few
+     microseconds after the guest PPU store.
+
+  2. Torn-read skew on the RSX trigger: the PPU is NOT halted while
+     the RSX-thread dump walks 880 KiB of guest memory page-by-page.
+     The RSX1-vs-RSX2 diff bounds this empirically; the regions of
+     interest (data segment) are expected static at FirstRsxWrite,
+     so the bound is expected small.
+
+Read-only with respect to guest state: vm::base() + memcpy to host
+file, no scheduler perturbation, no guest memory modification.
+
+Target files: rpcs3/Emu/Cell/lv2/sys_process.cpp,
+              rpcs3/Emu/RSX/RSXThread.cpp,
+              rpcs3/emucore.vcxproj.
+
+The dump body lives in a new header:
+  rpcs3/Emu/Cell/cellgov_checkpoint_dump.h
+Copy it from bridges/rpcs3-patch/files/Emu/Cell/ before applying
+this patch (mirrors the 0002 workflow).
 
 ---
 
 diff --git a/rpcs3/Emu/Cell/lv2/sys_process.cpp b/rpcs3/Emu/Cell/lv2/sys_process.cpp
 --- a/rpcs3/Emu/Cell/lv2/sys_process.cpp
 +++ b/rpcs3/Emu/Cell/lv2/sys_process.cpp
-@@ -1,6 +1,9 @@
- #include "stdafx.h"
- #include "sys_process.h"
-+#include <cstdio>
-+#include <cstdlib>
-+#include <cstring>
-+#include <string>
+@@ -342,12 +342,31 @@ error_code sys_process_detach_child(u64 unk)
 
- #include "Emu/Memory/vm.h"
- #include "Emu/System.h"
-@@ -343,12 +346,80 @@ extern void signal_system_cache_can_stay();
+ extern void signal_system_cache_can_stay();
 
-+// CellGov checkpoint-dump hook. Writes guest memory regions to a file
-+// when CELLGOV_DUMP_PATH is set. See tools/rpcs3-patch/README.md in
-+// the CellGov repo.
-+static void cellgov_checkpoint_dump()
-+{
-+	const char* path = std::getenv("CELLGOV_DUMP_PATH");
-+	if (!path || !*path)
-+	{
-+		return;
-+	}
-+
-+	const char* regions_env = std::getenv("CELLGOV_DUMP_REGIONS");
-+	if (!regions_env || !*regions_env)
-+	{
-+		std::fprintf(stderr, "[cellgov] CELLGOV_DUMP_PATH set but CELLGOV_DUMP_REGIONS empty; skipping dump\n");
-+		return;
-+	}
-+
-+	std::FILE* f = std::fopen(path, "wb");
-+	if (!f)
-+	{
-+		std::fprintf(stderr, "[cellgov] failed to open dump path: %s\n", path);
-+		return;
-+	}
-+
-+	// Parse "addr:size,addr:size,..." in hex. Each region is appended
-+	// contiguously in declaration order; the CellGov side recovers
-+	// boundaries from the region manifest, not from the file.
-+	std::string s(regions_env);
-+	std::size_t cursor = 0;
-+	while (cursor < s.size())
-+	{
-+		std::size_t comma = s.find(',', cursor);
-+		std::string pair = s.substr(cursor, comma == std::string::npos ? std::string::npos : comma - cursor);
-+		cursor = comma == std::string::npos ? s.size() : comma + 1;
-+
-+		std::size_t colon = pair.find(':');
-+		if (colon == std::string::npos) continue;
-+
-+		unsigned long long addr = std::strtoull(pair.substr(0, colon).c_str(), nullptr, 16);
-+		unsigned long long size = std::strtoull(pair.substr(colon + 1).c_str(), nullptr, 16);
-+		if (size == 0) continue;
-+
-+		// Page-aware write: walk the requested range in 4 KiB pages,
-+		// fwriting committed pages and writing zeros for unmapped pages
-+		// so the file offsets stay aligned with the requested region
-+		// boundaries (the CellGov side decodes by manifest offset).
-+		const u32 page_sz = 4096;
-+		u32 cur = static_cast<u32>(addr);
-+		const u32 end = static_cast<u32>(addr + size);
-+		u32 wrote = 0;
-+		u32 zeroed = 0;
-+		static const u8 zeros[page_sz] = {0};
-+		while (cur < end)
-+		{
-+			u32 chunk = page_sz - (cur % page_sz);
-+			if (chunk > end - cur) chunk = end - cur;
-+			if (vm::check_addr(cur, vm::page_readable, chunk))
-+			{
-+				std::fwrite(vm::base(cur), 1, chunk, f);
-+				wrote++;
-+			}
-+			else
-+			{
-+				std::fwrite(zeros, 1, chunk, f);
-+				zeroed++;
-+			}
-+			cur += chunk;
-+		}
-+		std::fprintf(stderr, "[cellgov] region 0x%llx:0x%llx wrote %u chunks, %u zero-filled\n",
-+			addr, size, wrote, zeroed);
-+	}
-+
-+	std::fclose(f);
-+	std::fprintf(stderr, "[cellgov] checkpoint dump written to %s\n", path);
-+}
++// CellGov checkpoint-dump hook. The body lives in
++// Emu/Cell/cellgov_checkpoint_dump.h so the same function can fire
++// from this _sys_process_exit hook and from the RSX-thread cpu_task
++// loop without code duplication. See bridges/rpcs3-patch/README.md
++// in the CellGov repo for the env-var contract.
++#include "Emu/Cell/cellgov_checkpoint_dump.h"
 +
  void _sys_process_exit(ppu_thread& ppu, s32 status, u32 arg2, u32 arg3)
  {
@@ -127,8 +77,88 @@ diff --git a/rpcs3/Emu/Cell/lv2/sys_process.cpp b/rpcs3/Emu/Cell/lv2/sys_process
 
  	sys_process.warning("_sys_process_exit(status=%d, arg2=0x%x, arg3=0x%x)", status, arg2, arg3);
 
-+	cellgov_checkpoint_dump();
++	// One-shot guard. _sys_process_exit fires once per process under
++	// normal LV2 semantics, so this is belt-and-suspenders; kept for
++	// symmetry with the RSX-thread trigger and to make the hook
++	// re-entry-safe under any future LV2 path that loops back here.
++	{
++		static std::atomic_flag cellgov_process_exit_fired{};
++		if (!cellgov_process_exit_fired.test_and_set())
++		{
++			cellgov::cellgov_checkpoint_dump("CELLGOV_DUMP_PATH");
++		}
++	}
 +
  	Emu.CallFromMainThread([]()
  	{
  		sys_process.success("Process finished");
+diff --git a/rpcs3/Emu/RSX/RSXThread.cpp b/rpcs3/Emu/RSX/RSXThread.cpp
+--- a/rpcs3/Emu/RSX/RSXThread.cpp
++++ b/rpcs3/Emu/RSX/RSXThread.cpp
+@@ -1,6 +1,9 @@
+ #include "stdafx.h"
+ #include "RSXThread.h"
+
++// CellGov FirstRsxWrite dump hook. See bridges/rpcs3-patch/README.md.
++#include "Emu/Cell/cellgov_checkpoint_dump.h"
++
+ #include "Capture/rsx_capture.h"
+ #include "Common/surface_store.h"
+ #include "Core/RSXReservationLock.hpp"
+@@ -1122,6 +1125,44 @@ namespace rsx
+
+ 		while (!test_stopped())
+ 		{
++			// CellGov FirstRsxWrite checkpoint dump. Fires up to twice
++			// per process: once when ctrl->put first differs from its
++			// initial value (the guest's first put-register write),
++			// and again on the very next cpu_task iteration. The diff
++			// between the two output files bounds the torn-read noise
++			// floor from sampling 880 KiB of guest memory while the
++			// PPU keeps executing. See README in
++			// bridges/rpcs3-patch/ for the env-var contract and the
++			// two skews documented at the trigger.
++			{
++				static std::atomic_flag cellgov_rsx1_fired{};
++				static std::atomic_flag cellgov_rsx2_fired{};
++				static u32 cellgov_initial_put = 0xFFFFFFFFu;
++				if (ctrl && !cellgov_rsx2_fired.test(std::memory_order_relaxed))
++				{
++					const u32 cur_put = static_cast<u32>(ctrl->put.load());
++					if (cellgov_initial_put == 0xFFFFFFFFu)
++					{
++						cellgov_initial_put = cur_put;
++					}
++					else if (cur_put != cellgov_initial_put)
++					{
++						const u32 cur_get = static_cast<u32>(ctrl->get.load());
++						if (!cellgov_rsx1_fired.test_and_set())
++						{
++							std::fprintf(stderr, "[cellgov] RSX1 trigger: put=0x%x initial=0x%x get=0x%x\n",
++								cur_put, cellgov_initial_put, cur_get);
++							cellgov::cellgov_checkpoint_dump("CELLGOV_DUMP_PATH_RSX");
++						}
++						else if (!cellgov_rsx2_fired.test_and_set())
++						{
++							std::fprintf(stderr, "[cellgov] RSX2 trigger: put=0x%x initial=0x%x get=0x%x\n",
++								cur_put, cellgov_initial_put, cur_get);
++							cellgov::cellgov_checkpoint_dump("CELLGOV_DUMP_PATH_RSX2");
++						}
++					}
++				}
++			}
++
+ 			// Wait for external pause events
+ 			if (external_interrupt_lock)
+ 			{
+diff --git a/rpcs3/emucore.vcxproj b/rpcs3/emucore.vcxproj
+--- a/rpcs3/emucore.vcxproj
++++ b/rpcs3/emucore.vcxproj
+@@ -971,6 +971,7 @@
+     <ClInclude Include="Emu\Cell\PPUCallback.h" />
+     <ClInclude Include="Emu\Cell\PPUDisAsm.h" />
+     <ClInclude Include="Emu\Cell\PPUFunction.h" />
++    <ClInclude Include="Emu\Cell\cellgov_checkpoint_dump.h" />
+     <ClInclude Include="Emu\Cell\PPUInterpreter.h" />
+     <ClInclude Include="Emu\Cell\PPUOpcodes.h" />
+     <ClInclude Include="Emu\Cell\PPUThread.h" />

@@ -12,7 +12,8 @@ Apply both:
 
 ```bash
 cd tools/rpcs3-src
-# 0001 is a self-contained unified diff.
+# 0001 has a new header file plus a unified diff against existing files.
+cp ../../bridges/rpcs3-patch/files/Emu/Cell/cellgov_checkpoint_dump.h rpcs3/Emu/Cell/
 git apply ../../bridges/rpcs3-patch/0001-cellgov-checkpoint-dump.patch
 # 0002 has new files plus a unified diff against existing files.
 cp ../../bridges/rpcs3-patch/files/Emu/Cell/cellgov_hle_trace.h   rpcs3/Emu/Cell/
@@ -34,38 +35,111 @@ when editing the trace hook.
 
 ## What it does
 
-Adds a hook in `rpcs3/Emu/Cell/lv2/sys_process.cpp` (the
-`_sys_process_exit` syscall) that writes configured guest-memory
-regions to a binary file. The hook is a no-op unless both
-`CELLGOV_DUMP_PATH` and `CELLGOV_DUMP_REGIONS` environment variables
-are set. No behavior change when unset.
+Adds three opt-in dump triggers that write configured guest-memory
+regions to a host file:
+
+1. **ProcessExit** -- in `_sys_process_exit` (PPU thread, guest
+   memory frozen by LV2 semantics). Fires when
+   `CELLGOV_DUMP_PATH` is set.
+2. **FirstRsxWrite (RSX1)** -- in the RSX thread's cpu_task loop,
+   on the first observed change of `ctrl->put` from its initial
+   value. The guest's first put-register write. Fires when
+   `CELLGOV_DUMP_PATH_RSX` is set.
+3. **FirstRsxWrite + 1 iter (RSX2)** -- the very next cpu_task
+   iteration after RSX1. Diff against RSX1 bounds the torn-read
+   noise floor (see below). Fires when `CELLGOV_DUMP_PATH_RSX2` is
+   set.
+
+All three triggers share the same `CELLGOV_DUMP_REGIONS` env var
+(comma-separated `addr:size` hex pairs) and the same dump body
+(`bridges/rpcs3-patch/files/Emu/Cell/cellgov_checkpoint_dump.h`).
+Each fires at most once per process; one-shot guard is a per-site
+`std::atomic_flag`. All triggers are no-ops when their path env
+var is unset.
 
 ## Applying the patch
 
 ```bash
 cd tools/rpcs3-src
-git apply ../rpcs3-patch/0001-cellgov-checkpoint-dump.patch
+cp ../../bridges/rpcs3-patch/files/Emu/Cell/cellgov_checkpoint_dump.h rpcs3/Emu/Cell/
+git apply ../../bridges/rpcs3-patch/0001-cellgov-checkpoint-dump.patch
 ```
 
 Rebuild RPCS3 per its normal build instructions.
 
 ## Running with the hook active
 
-RPCS3 must be configured in oracle mode before the dump is
+RPCS3 must be configured in oracle mode before any dump is
 comparable. The canonical settings are checked in at
 `oracle_mode_config.yml`; `rpcs3-to-observation` refuses dumps
 whose `--config-hash` does not match the hash of that file.
 
+Single ProcessExit dump (backward-compatible with prior versions):
+
 ```bash
-export CELLGOV_DUMP_PATH=/tmp/flow_rpcs3.dump
-export CELLGOV_DUMP_REGIONS=0x10000:0x800000,0x10000000:0x400000
+export CELLGOV_DUMP_PATH=/tmp/wipeout_processexit.dump
+export CELLGOV_DUMP_REGIONS=0x10000:0x800000,0x860000:0xd7000
+./rpcs3 path/to/EBOOT.elf
+```
+
+Triple dump (ProcessExit + RSX1 + RSX2) in one boot:
+
+```bash
+export CELLGOV_DUMP_PATH=/tmp/wipeout_processexit.dump
+export CELLGOV_DUMP_PATH_RSX=/tmp/wipeout_rsx1.dump
+export CELLGOV_DUMP_PATH_RSX2=/tmp/wipeout_rsx2.dump
+export CELLGOV_DUMP_REGIONS=0x10000:0x800000,0x860000:0xd7000
 ./rpcs3 path/to/EBOOT.elf
 ```
 
 Each region is written contiguously in declaration order. The region
 manifest passed to `rpcs3-to-observation` must list the same regions
-in the same order -- the dump file has no internal structure beyond
-that contract.
+in the same order; the dump file has no internal structure beyond
+that contract. Each of the three output files uses the same
+region manifest.
+
+## Skews and the tearing noise floor
+
+The RSX1/RSX2 triggers are asynchronous to the PPU and produce
+three distinct skews that ProcessExit does not:
+
+1. **Poll-observation skew**: RPCS3's put register is plain VM
+   memory with no synchronous store handler available short of
+   page-protection trapping. The RSX thread notices
+   `put != initial_put` via polling, so the dump fires from the
+   poll loop a few microseconds after the guest's PPU store.
+
+2. **Torn-read skew**: the PPU is not halted during the RSX-thread
+   dump. While the dump walks 880 KiB+ of guest memory
+   page-by-page, the PPU may concurrently mutate pages, producing
+   an internally-torn snapshot. CG's `FirstRsxWrite` checkpoint
+   halts everything via `MemError::ReservedWrite`, so the two
+   sides are not bit-comparable without this characterization.
+
+3. **FIFO-drain skew**: by the time the RSX poll observes
+   `put != initial_put`, the RSX thread has already executed the
+   queued FIFO methods (the trigger fires with `put == get`, not
+   on the bare write). CG traps on the guest store itself, before
+   any method runs. For the standard region manifest (code +
+   data main-memory ranges) this is nil: NV40 method execution
+   targets RSX state and VRAM, not the main-memory regions we
+   sample. The exception is methods that write guest memory --
+   `SET_SEMAPHORE`, `NOTIFY`, `SET_REFERENCE` -- which would
+   produce a guest-side write inside the gap. Once Phase 39
+   models `NV406E_SET_REFERENCE` (the `ctrl.ref` writeback the
+   spin-poll consumes), this skew becomes non-theoretical for
+   any title whose first batch carries one.
+
+The RSX1-vs-RSX2 diff bounds the torn-read skew empirically:
+RSX2 fires one cpu_task iteration after RSX1, so the diff between
+their two dump files captures the bytes the PPU mutated in that
+interval. If the diff is near-zero in the region of interest, the
+torn-read skew is negligible. If it is not, that diff is the noise
+floor and any RSX1-vs-ProcessExit conclusions must be filtered for
+it.
+
+The ProcessExit trigger has neither skew. CG-vs-RPCS3-at-ProcessExit
+comparisons are bit-exact aside from honestly-classified bytes.
 
 To convert the dump, ask the bridge for the expected config hash
 and pass it alongside the dump:

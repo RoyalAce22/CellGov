@@ -34,7 +34,9 @@ baselines/**/*.tty
 # reproduced from tests/fixtures/<id>/cross_runner/REPRODUCTION.md).
 # Per-runner observations live under tests/fixtures/<id>/<runner>/.
 tests/fixtures/*/cellgov/observation.json
+tests/fixtures/*/cellgov/observation_*.json
 tests/fixtures/*/rpcs3/observation.json
+tests/fixtures/*/rpcs3/observation_*.json
 tests/fixtures/*/rpcs3/*.dump
 
 # Firmware install destination. cellgov_firmware install extracts a
