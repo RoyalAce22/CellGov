@@ -5,54 +5,14 @@
   "byte_parity": {
     "kind": "pending",
     "non_semantic_bytes": 1055,
-    "unclassified_bytes": 110
+    "unclassified_bytes": 86
   },
   "per_class_bytes": {
     "hle_opd_slot": 1055,
-    "unclassified": 110
+    "unclassified": 86
   },
-  "unclassified_bytes": 110,
+  "unclassified_bytes": 86,
   "unclassified_runs": [
-    {
-      "region_name": "code",
-      "offset": 8687107,
-      "length": 5
-    },
-    {
-      "region_name": "code",
-      "offset": 8687114,
-      "length": 1
-    },
-    {
-      "region_name": "code",
-      "offset": 8687117,
-      "length": 1
-    },
-    {
-      "region_name": "code",
-      "offset": 8687119,
-      "length": 1
-    },
-    {
-      "region_name": "code",
-      "offset": 8687122,
-      "length": 2
-    },
-    {
-      "region_name": "code",
-      "offset": 8687125,
-      "length": 1
-    },
-    {
-      "region_name": "code",
-      "offset": 8687129,
-      "length": 1
-    },
-    {
-      "region_name": "data",
-      "offset": 397584,
-      "length": 12
-    },
     {
       "region_name": "data",
       "offset": 399532,
@@ -225,11 +185,11 @@
     }
   ],
   "lowest_offset_class": [
-    "unclassified",
+    "hle_opd_slot",
     {
-      "name": "code",
-      "addr": 65536
+      "name": "data",
+      "addr": 8781824
     },
-    8687107
+    65517
   ]
 }

@@ -2,7 +2,7 @@
 content_id = "NPUA80068"
 short_name = "sshd"
 display_name = "Super Stardust HD"
-eboot_candidates = ["EBOOT.elf", "EBOOT.BIN"]
+eboot_candidates = ["EBOOT.BIN", "EBOOT.elf"]
 year = 2007
 developer = "Housemarque"
 engine = "Housemarque proprietary"

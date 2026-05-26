@@ -8,7 +8,7 @@ distribution: Disc ISO
 checkpoint: FirstRsxWrite
 steps: 43156
 convergence: Yes
-byte_parity: 1055 non-semantic + 110 pending
+byte_parity: 1055 non-semantic + 86 pending
 ---
 
 Reaches the `FirstRsxWrite` checkpoint at step 43,156 with
