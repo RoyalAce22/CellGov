@@ -69,6 +69,12 @@ pub(super) struct ManifestTitle {
     pub(super) engine: String,
     /// One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`.
     pub(super) distribution: String,
+    /// Operator-supplied RAP filename for NPDRM titles, resolved at
+    /// boot under `<vfs_root>/home/00000001/exdata/`. Required for
+    /// PSN-HDD NPDRM titles whose `EBOOT.BIN` is NPDRM-wrapped
+    /// (license type 1 / 2). Omit for disc / APP-keyed titles.
+    #[serde(default)]
+    pub(super) rap_filename: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]

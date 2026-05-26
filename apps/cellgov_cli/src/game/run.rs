@@ -21,6 +21,8 @@ use crate::game::step_loop::{
 pub struct RunGameOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
+    /// Pre-loaded plaintext ELF bytes (post-candidate-walk decrypt).
+    pub elf_data: Vec<u8>,
     pub max_steps: usize,
     pub trace: bool,
     pub profile: bool,
@@ -71,6 +73,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     let RunGameOptions {
         title,
         elf_path,
+        elf_data,
         max_steps,
         trace,
         profile,
@@ -110,6 +113,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     let prepared = boot::prepare(boot::PrepareOptions {
         title,
         elf_path,
+        elf_data,
         firmware_dir,
         strict_reserved,
         dump_at_pc,

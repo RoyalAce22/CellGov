@@ -7,6 +7,7 @@ year = 2007
 developer = "Housemarque"
 engine = "Housemarque proprietary"
 distribution = "psn-hdd"
+rap_filename = "UP9000-NPUA80068_00-STARDUSTFULL0001.rap"
 
 [checkpoint]
 kind = "first-rsx-write"

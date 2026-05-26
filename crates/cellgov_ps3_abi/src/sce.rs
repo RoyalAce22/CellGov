@@ -54,3 +54,55 @@ pub const SCEPKG_ERK: [u8; 0x20] = [
 pub const SCEPKG_RIV: [u8; 0x10] = [
     CELLGOV-REDACTED-KEY,
 ];
+
+/// `supplemental_header.type == 3` marks the NPDRM (NPD) header in
+/// an NPDRM-wrapped SELF; presence selects the NPDRM decrypt prefix
+/// over the APP-keyed one.
+pub const SCE_SUPPLEMENTAL_KIND_NPDRM: u32 = 3;
+
+/// AES-128 key applied (ECB) to the RAP-derived intermediate value to
+/// produce the NPDRM layer key that decrypts the metadata-info
+/// envelope. Mirrors `NP_KLIC_KEY` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:107-109`.
+pub const NP_KLIC_KEY: [u8; 0x10] = [
+    CELLGOV-REDACTED-KEY,
+];
+
+/// Default klicensee for free-license (license == 3) NPDRM titles
+/// when no RAP is supplied; RPCS3 substitutes this for the
+/// `rap_to_rif` output. Mirrors `NP_KLIC_FREE` in
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:95-97`.
+pub const NP_KLIC_FREE: [u8; 0x10] = [
+    CELLGOV-REDACTED-KEY,
+];
+
+/// AES-128 key for the first ECB stage of `rap_to_rif`. The 16 RAP
+/// bytes are ECB-decrypted with this key before the 5-round
+/// PBOX/E1/E2 dance. Mirrors `RAP_KEY` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:129-131`.
+pub const RAP_KEY: [u8; 0x10] = [
+    CELLGOV-REDACTED-KEY,
+];
+
+/// Byte-permutation indices applied per round of the
+/// `rap_to_rif` post-ECB stage. Index `i` of the round output is
+/// pulled from index `RAP_PBOX[i]` of the round input. Mirrors
+/// `RAP_PBOX` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:133-135`.
+pub const RAP_PBOX: [u8; 0x10] = [
+    CELLGOV-REDACTED-KEY,
+];
+
+/// First per-round substitution table consumed by the `rap_to_rif`
+/// loop. Mirrors `RAP_E1` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:137-139`.
+pub const RAP_E1: [u8; 0x10] = [
+    CELLGOV-REDACTED-KEY,
+];
+
+/// Second per-round substitution table consumed by the
+/// `rap_to_rif` loop. Mirrors `RAP_E2` in RPCS3
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.h:141-143`.
+pub const RAP_E2: [u8; 0x10] = [
+    CELLGOV-REDACTED-KEY,
+];

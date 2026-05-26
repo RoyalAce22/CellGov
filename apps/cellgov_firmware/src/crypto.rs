@@ -273,6 +273,139 @@ pub fn app_key_for_revision(revision: u16) -> Option<SelfKey> {
         .map(|(_, k)| *k)
 }
 
+/// NPDRM SELF keys, mirroring `KeyVault::LoadSelfNPDRMKeys` in
+/// `tools/rpcs3-src/rpcs3/Crypto/key_vault.cpp:434-533`. Selected by
+/// the SELF's revision tag for NPDRM-wrapped binaries; the APP table
+/// above does NOT apply to NPDRM SELFs (RPCS3's `FindSelfKey`
+/// dispatches on `program_type` to either `GetSelfAPPKey` or
+/// `GetSelfNPDRMKey`, and the two arrays carry distinct ERK/RIV per
+/// revision).
+const NPDRM_KEYS: &[(u16, SelfKey)] = &[
+    (
+        0x0001,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0002,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0003,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0004,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0006,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0007,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0009,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x000A,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x000C,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x000D,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x000F,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0010,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0013,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0016,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x0019,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+    (
+        0x001C,
+        key(
+            "CELLGOV-REDACTED-KEY",
+            "CELLGOV-REDACTED-KEY",
+        ),
+    ),
+];
+
+/// Look up the NPDRM SELF key for a revision tag. Returns `None` for
+/// revisions that have no NPDRM entry (notably 0x0000, 0x0005, 0x0008,
+/// 0x000B, 0x000E, 0x0011, 0x0012, 0x0014, 0x0015, 0x0017, 0x0018,
+/// 0x001A, 0x001B, and any revision past 0x001C).
+pub fn npdrm_key_for_revision(revision: u16) -> Option<SelfKey> {
+    NPDRM_KEYS
+        .iter()
+        .find(|(rev, _)| *rev == revision)
+        .map(|(_, k)| *k)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

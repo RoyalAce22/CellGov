@@ -146,3 +146,186 @@ fn min_viable_prx_decrypt_matches_pre_decrypted_reference() {
         decrypt_and_compare(stem, &encrypted_dir, &reference_dir);
     }
 }
+
+// ============================================================================
+// Game-title SELF byte-identity (Phase A.5 C.2 gate).
+//
+// flOw + SSHD: NPDRM-wrapped EBOOT.BIN, decrypt via
+// `decrypt_self_to_elf_npdrm` with a klicensee derived from the
+// on-disk RAP. The expected SHA-256 hashes are committed below; they
+// were captured 2026-05-24 (the day Phase A landed) from the cached
+// RPCS3-decrypted .elf files that lived next to each EBOOT.BIN. The
+// .elfs themselves are external artifacts produced by RPCS3 (or a
+// third-party SELF decryptor) before CellGov had NPDRM support; once
+// this gate is green, those cached files become deletable since the
+// hash is the durable RPCS3-derived oracle.
+//
+// WipEout: APP-keyed disc-title EBOOT.BIN, decrypt via the existing
+// `decrypt_self_to_elf`. The commit captures CellGov's own current
+// output as the refactor-invariance baseline (the SCE-reassembly
+// refactor in this phase changed APP-keyed output to preserve
+// section headers; the new output is faithful to RPCS3's reassembly
+// shape but no RPCS3 oracle for WipEout was captured this phase --
+// follow-up). The check guards regressions against this baseline.
+// ============================================================================
+
+use sha2::{Digest, Sha256};
+
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// flOw (NPUA80001) RPCS3-decrypted EBOOT.elf SHA-256, unmasked.
+/// Source: `tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf`,
+/// captured 2026-05-24 before that file became deletable. Re-deriving
+/// requires re-running RPCS3's decrypt on the same EBOOT.BIN with the
+/// same RAP -- the algorithm is closed, so the value never moves.
+const FLOW_ELF_SHA256_UNMASKED: [u8; 32] = [
+    0x19, 0xf6, 0x11, 0xa3, 0x28, 0x8c, 0x08, 0x81, 0xd4, 0xf3, 0x8a, 0xf0, 0x13, 0xc2, 0x12, 0xf0,
+    0x8f, 0x82, 0x82, 0x2a, 0xd6, 0x77, 0xca, 0x58, 0x4f, 0x48, 0xbd, 0x88, 0xe6, 0x75, 0xce, 0xb2,
+];
+
+/// flOw RPCS3-decrypted EBOOT.elf SHA-256, after applying
+/// `mask_non_semantic_elf_bytes` (zeroes e_shoff/e_shnum/e_shstrndx).
+const FLOW_ELF_SHA256_MASKED: [u8; 32] = [
+    0xce, 0x97, 0x49, 0x54, 0x23, 0x4b, 0xfd, 0x8d, 0xa7, 0x0c, 0x9c, 0xc5, 0x0f, 0xb1, 0x47, 0x28,
+    0xdb, 0x51, 0x33, 0x99, 0xa4, 0xc0, 0x16, 0x59, 0x44, 0xdd, 0x85, 0x99, 0x23, 0x9c, 0xd3, 0x60,
+];
+
+/// SSHD (NPUA80068) RPCS3-decrypted EBOOT.elf SHA-256, unmasked.
+const SSHD_ELF_SHA256_UNMASKED: [u8; 32] = [
+    0x8a, 0xe5, 0xc5, 0xd6, 0xdf, 0x35, 0xe4, 0x48, 0x93, 0xab, 0xa8, 0x86, 0x23, 0xa1, 0xac, 0x86,
+    0x66, 0xf2, 0xda, 0xde, 0x11, 0x86, 0xbe, 0x4e, 0x44, 0x1c, 0x17, 0x0f, 0xc2, 0x4a, 0x5e, 0x19,
+];
+
+/// SSHD RPCS3-decrypted EBOOT.elf SHA-256, masked form.
+const SSHD_ELF_SHA256_MASKED: [u8; 32] = [
+    0xc2, 0xe5, 0x85, 0xc3, 0xfe, 0xdc, 0x76, 0xb4, 0xe2, 0x9f, 0x80, 0x26, 0x2f, 0x62, 0x5c, 0x8d,
+    0xad, 0xf7, 0x30, 0x4e, 0x31, 0x2a, 0x9b, 0x7b, 0x90, 0x34, 0x51, 0xa9, 0x83, 0xb6, 0x99, 0x42,
+];
+
+/// WipEout (BCES00664) CellGov-decrypted EBOOT.BIN SHA-256, unmasked.
+/// Captured 2026-05-24 from CellGov's APP-keyed decrypt path after
+/// the section-header-preservation refactor that landed alongside
+/// NPDRM. This is a CellGov-derived baseline (no RPCS3 oracle for
+/// WipEout this phase), so the check is **refactor invariance**,
+/// not a true byte-identity-to-RPCS3 gate.
+const WIPEOUT_ELF_SHA256_UNMASKED: [u8; 32] = [
+    0x46, 0xb1, 0x4e, 0xba, 0x7c, 0x85, 0x22, 0x29, 0x82, 0x19, 0xf7, 0x3a, 0x79, 0x91, 0xea, 0x5b,
+    0x5e, 0x56, 0xe9, 0x9c, 0xef, 0x34, 0x8c, 0xa2, 0x14, 0xfb, 0x1f, 0x90, 0x1d, 0xb7, 0x63, 0x1a,
+];
+
+const FLOW_BIN_RELATIVE: &str = "tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN";
+const FLOW_RAP_RELATIVE: &str =
+    "tools/rpcs3/dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap";
+const SSHD_BIN_RELATIVE: &str = "tools/rpcs3/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.BIN";
+const SSHD_RAP_RELATIVE: &str =
+    "tools/rpcs3/dev_hdd0/home/00000001/exdata/UP9000-NPUA80068_00-STARDUSTFULL0001.rap";
+const WIPEOUT_BIN_RELATIVE: &str = "tools/rpcs3/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.BIN";
+
+/// Decrypt an NPDRM-wrapped EBOOT.BIN via CellGov + RAP-derived klic,
+/// then assert against the unmasked and masked oracle hashes via the
+/// C.2 decision tree. Skips silently if the operator-supplied
+/// fixtures are absent from this checkout.
+fn npdrm_byte_identity(
+    title: &str,
+    bin_rel: &str,
+    rap_rel: &str,
+    expected_unmasked: &[u8; 32],
+    expected_masked: &[u8; 32],
+) {
+    let ws = workspace_root();
+    let bin_path = ws.join(bin_rel);
+    let rap_path = ws.join(rap_rel);
+    if !bin_path.is_file() || !rap_path.is_file() {
+        eprintln!(
+            "cellgov_firmware C.2 ({title}): skipping; missing {} or {}",
+            bin_path.display(),
+            rap_path.display(),
+        );
+        return;
+    }
+    let bin = std::fs::read(&bin_path).unwrap();
+    let rap = std::fs::read(&rap_path).unwrap();
+    let rap_arr: [u8; 16] = rap.as_slice().try_into().expect("RAP must be 16 bytes");
+    let klic = cellgov_firmware::npdrm::rap_to_klic(&rap_arr);
+    let mut elf = cellgov_firmware::npdrm::decrypt_self_to_elf_npdrm(&bin, &klic)
+        .unwrap_or_else(|e| panic!("{title}: NPDRM decrypt failed: {e}"));
+
+    let got_unmasked: [u8; 32] = Sha256::digest(&elf).into();
+    if &got_unmasked == expected_unmasked {
+        eprintln!("{title}: byte-identical to RPCS3 oracle (unmasked)");
+        return;
+    }
+    cellgov_firmware::sce::mask_non_semantic_elf_bytes(&mut elf);
+    let got_masked: [u8; 32] = Sha256::digest(&elf).into();
+    if &got_masked == expected_masked {
+        eprintln!(
+            "{title}: identical to RPCS3 oracle after masking \
+             section-header fields (non-semantic divergence)"
+        );
+        return;
+    }
+    panic!(
+        "{title}: CellGov decrypt diverges from RPCS3 oracle:\n  \
+         got unmasked = {}\n  exp unmasked = {}\n  got masked   = {}\n  exp masked   = {}",
+        hex_str(&got_unmasked),
+        hex_str(expected_unmasked),
+        hex_str(&got_masked),
+        hex_str(expected_masked),
+    );
+}
+
+fn hex_str(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[test]
+fn flow_eboot_byte_identity_against_rpcs3_oracle() {
+    npdrm_byte_identity(
+        "flOw",
+        FLOW_BIN_RELATIVE,
+        FLOW_RAP_RELATIVE,
+        &FLOW_ELF_SHA256_UNMASKED,
+        &FLOW_ELF_SHA256_MASKED,
+    );
+}
+
+#[test]
+fn sshd_eboot_byte_identity_against_rpcs3_oracle() {
+    npdrm_byte_identity(
+        "SSHD",
+        SSHD_BIN_RELATIVE,
+        SSHD_RAP_RELATIVE,
+        &SSHD_ELF_SHA256_UNMASKED,
+        &SSHD_ELF_SHA256_MASKED,
+    );
+}
+
+#[test]
+fn wipeout_eboot_refactor_invariance() {
+    let ws = workspace_root();
+    let bin_path = ws.join(WIPEOUT_BIN_RELATIVE);
+    if !bin_path.is_file() {
+        eprintln!(
+            "cellgov_firmware C.2 (WipEout): skipping; missing {}",
+            bin_path.display()
+        );
+        return;
+    }
+    let bin = std::fs::read(&bin_path).unwrap();
+    let elf = cellgov_firmware::sce::decrypt_self_to_elf(&bin)
+        .unwrap_or_else(|e| panic!("WipEout: APP decrypt failed: {e}"));
+    let got: [u8; 32] = Sha256::digest(&elf).into();
+    assert_eq!(
+        got,
+        WIPEOUT_ELF_SHA256_UNMASKED,
+        "WipEout APP decrypt no longer matches the committed \
+         refactor-invariance baseline. If this triggered after a \
+         deliberate change to the reassembly path, update the \
+         WIPEOUT_ELF_SHA256_UNMASKED constant. If unintentional, \
+         the SCE decrypt regressed -- got {} != expected {}",
+        hex_str(&got),
+        hex_str(&WIPEOUT_ELF_SHA256_UNMASKED),
+    );
+}

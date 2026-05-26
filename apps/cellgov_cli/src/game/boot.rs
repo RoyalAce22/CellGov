@@ -15,7 +15,7 @@ use cellgov_ps3_abi::process_address_space::{
 use super::manifest::TitleManifest;
 use super::prx::{load_firmware_set_bound, pre_init_tls, run_module_start};
 use crate::cli::env::parse_env_bool;
-use crate::cli::exit::{die, load_ppu_image_or_die};
+use crate::cli::exit::die;
 
 /// Default primary-thread priority when the title's `sys_proc_param`
 /// block is absent.
@@ -77,6 +77,13 @@ impl StartupTimings {
 pub(super) struct PrepareOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
+    /// Already-decrypted ELF bytes. The caller is responsible for
+    /// running the candidate-walking decrypt (or single-shot with
+    /// the title-aware entry) before invoking `prepare`; `prepare`
+    /// itself never touches disk for the ELF. This is the seam
+    /// where C.4's per-candidate fallthrough lives -- by the time
+    /// we get here, the right candidate has already been chosen.
+    pub elf_data: Vec<u8>,
     pub firmware_dir: Option<&'a str>,
     pub strict_reserved: bool,
     pub dump_at_pc: Option<u64>,
@@ -109,7 +116,7 @@ struct BootDebugOptions {
 
 pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let t_start = Instant::now();
-    let elf_data = load_ppu_image_or_die(opts.elf_path);
+    let elf_data = opts.elf_data;
 
     let required_size = cellgov_ppu::loader::required_memory_size(&elf_data)
         .unwrap_or_else(|e| die(&format!("failed to parse ELF: {e:?}")));

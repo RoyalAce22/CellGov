@@ -122,6 +122,11 @@ pub struct TitleManifest {
     pub engine: String,
     /// Distribution channel for the matrix's Format column.
     pub distribution: Distribution,
+    /// RAP filename under `<vfs_root>/home/00000001/exdata/` for
+    /// NPDRM titles. Required when `EBOOT.BIN` is NPDRM-wrapped
+    /// (license 1/2); omitted for APP-keyed disc titles and free
+    /// (license 3) NPDRM titles that use `NP_KLIC_FREE`.
+    pub rap_filename: Option<String>,
     /// Built-in boot checkpoint; CLI `--checkpoint` overrides.
     pub checkpoint: CheckpointTrigger,
     pub source: GameSource,
@@ -274,6 +279,7 @@ pub(super) fn hdd_manifest(content_id: &str, short: &str, candidates: &[&str]) -
         developer: "test-developer".to_string(),
         engine: "test-engine".to_string(),
         distribution: Distribution::PsnHdd,
+        rap_filename: None,
         checkpoint: CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,

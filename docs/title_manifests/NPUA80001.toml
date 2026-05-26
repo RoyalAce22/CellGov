@@ -7,6 +7,7 @@ year = 2007
 developer = "thatgamecompany"
 engine = "PhyreEngine"
 distribution = "psn-hdd"
+rap_filename = "UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap"
 
 [checkpoint]
 kind = "process-exit"
