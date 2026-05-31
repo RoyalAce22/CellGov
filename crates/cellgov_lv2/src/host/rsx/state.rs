@@ -1,10 +1,10 @@
-//! Per-context bookkeeping: [`SysRsxContext`], its per-slot
+//! Per-context bookkeeping for `sys_rsx`: [`SysRsxContext`], its per-slot
 //! [`RsxDisplayBuffer`] payload, and the [`RSX_CONTEXT_ID`] sentinel.
 
 use cellgov_ps3_abi::sys_rsx::display_buffer;
 
 /// Fixed `context_id` returned from `sys_rsx_context_allocate`. CellGov
-/// sentinel value (the PS3 spec does not pin this).
+/// sentinel; the PS3 ABI does not pin a value.
 pub const RSX_CONTEXT_ID: u32 = 0x5555_5555;
 
 /// Per-slot display buffer metadata decoded from a `SET_DISPLAY_BUFFER` payload.
@@ -20,19 +20,17 @@ pub struct RsxDisplayBuffer {
     pub height: u32,
 }
 
-/// Per-context bookkeeping.
-///
-/// Single-instance per [`crate::host::Lv2Host`]; multi-context support
-/// would require keying by `context_id`.
+/// Per-context bookkeeping. Single-instance per [`crate::host::Lv2Host`];
+/// multi-context support would require keying by `context_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SysRsxContext {
-    /// Whether `sys_rsx_context_allocate` has fired.
+    /// True once `sys_rsx_context_allocate` has fired.
     pub allocated: bool,
-    /// Context id returned to the guest (0x5555_5555 when set).
+    /// Context id returned to the guest ([`RSX_CONTEXT_ID`] when set).
     pub context_id: u32,
     /// DMA control region guest address.
     pub dma_control_addr: u32,
-    /// Driver info region guest address.
+    /// Driver-info region guest address.
     pub driver_info_addr: u32,
     /// Reports region guest address.
     pub reports_addr: u32,
@@ -59,18 +57,21 @@ pub struct SysRsxContext {
     pub display_buffers_count: u32,
     /// Flip mode flag (1 = hsync, 2 = vsync). 0 until FLIP_MODE fires.
     pub flip_mode: u32,
-    /// Most recent `sys_rsx_context_iomap` mapping. `io_size == 0`
-    /// means no mapping has been recorded.
+    /// Most recent `sys_rsx_context_iomap` mapping; `iomap_size == 0` means
+    /// no mapping has been recorded.
     pub iomap_io: u32,
-    /// EA the most-recent iomap call mapped to (see [`Self::iomap_io`]).
+    /// EA the most recent iomap call mapped to (see [`Self::iomap_io`]).
     pub iomap_ea: u32,
-    /// Size of the most-recent iomap mapping in bytes. Zero means
-    /// no mapping recorded.
+    /// Size in bytes of the most recent iomap mapping; see [`Self::iomap_io`].
     pub iomap_size: u32,
+    /// FIFO GET pointer; zero until `sys_rsx_context_attribute(FIFO_SETUP)` fires.
+    pub fifo_get: u32,
+    /// FIFO PUT pointer; zero until `sys_rsx_context_attribute(FIFO_SETUP)` fires.
+    pub fifo_put: u32,
 }
 
 impl SysRsxContext {
-    /// Pristine state.
+    /// Zero-initialized context (`allocated == false`).
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -98,6 +99,8 @@ impl SysRsxContext {
             iomap_io: 0,
             iomap_ea: 0,
             iomap_size: 0,
+            fifo_get: 0,
+            fifo_put: 0,
         }
     }
 
@@ -123,6 +126,8 @@ impl SysRsxContext {
             iomap_io,
             iomap_ea,
             iomap_size,
+            fifo_get,
+            fifo_put,
         } = *self;
         let mut h = cellgov_mem::Fnv1aHasher::new();
         h.write(&[u8::from(allocated)]);
@@ -143,6 +148,8 @@ impl SysRsxContext {
         h.write(&iomap_io.to_le_bytes());
         h.write(&iomap_ea.to_le_bytes());
         h.write(&iomap_size.to_le_bytes());
+        h.write(&fifo_get.to_le_bytes());
+        h.write(&fifo_put.to_le_bytes());
         for buf in display_buffers.iter() {
             h.write(&buf.offset.to_le_bytes());
             h.write(&buf.pitch.to_le_bytes());

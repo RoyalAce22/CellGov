@@ -13,9 +13,9 @@ impl Runtime {
     /// Drive the commit pipeline for a previously-returned step result.
     ///
     /// Epoch advances on every commit boundary including validation
-    /// failures: the step's effect set is closed either way, so an `Err`
-    /// return still mutates `self.epoch`. Fault rule and atomic-batch
-    /// semantics are inherited from [`crate::commit::CommitPipeline::process`].
+    /// failures, so an `Err` return still mutates `self.epoch`. Fault rule
+    /// and atomic-batch semantics are inherited from
+    /// [`crate::commit::CommitPipeline::process`].
     pub fn commit_step(
         &mut self,
         result: &ExecutionStepResult,
@@ -112,8 +112,15 @@ impl Runtime {
         // (atomic-batch contract); cursor mutations land in THIS batch's
         // state-hash checkpoint.
         if self.rsx_cursor.get() != self.rsx_cursor.put() {
+            let rsx_ctx = self.lv2_host.sys_rsx_context();
+            let iomap = crate::rsx::IoMap {
+                ea: rsx_ctx.iomap_ea,
+                io: rsx_ctx.iomap_io,
+                size: rsx_ctx.iomap_size,
+            };
             crate::rsx::advance::rsx_advance(
                 &self.memory,
+                &iomap,
                 &mut self.rsx_cursor,
                 &mut self.rsx_sem_offset,
                 &self.rsx_methods,
@@ -153,14 +160,12 @@ impl Runtime {
 
     /// Mirror committed writes to `0xC000_0040..0xC000_004C` into
     /// [`Self::rsx_cursor`]. Reads from committed memory rather than the
-    /// effect payload: partial-overlap writes may cross slots and the
-    /// authoritative value is what the pipeline applied. Only full 4-byte
-    /// slot coverage mirrors; sub-word stores still apply to memory but
-    /// leave the cursor alone.
+    /// effect payload so partial-overlap writes resolve to the value the
+    /// pipeline applied. Only full 4-byte slot coverage mirrors; sub-word
+    /// stores still apply to memory but leave the cursor alone.
     ///
-    /// Called from `commit_step` after the batch applies and before the
-    /// FIFO advance pass, so the drain sees the new put / ref in the
-    /// same batch.
+    /// Runs after the batch applies and before the FIFO advance pass, so
+    /// the drain sees the new put / ref in the same batch.
     fn mirror_rsx_control_register_writes(&mut self, effects: &[Effect]) {
         use crate::rsx::{RSX_CONTROL_GET_ADDR, RSX_CONTROL_PUT_ADDR, RSX_CONTROL_REF_ADDR};
         enum Slot {

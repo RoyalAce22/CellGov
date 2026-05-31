@@ -5,34 +5,35 @@ year: 2007
 developer: Housemarque
 engine: Housemarque proprietary
 distribution: PSN HDD
-checkpoint: FirstRsxWrite
-steps: 14341833
-convergence: No (outcome: Fault vs Completed)
+checkpoint: FirstRsxWrite (requested; not reached)
+steps: 390625
+convergence: No (outcome: Timeout vs Completed)
 byte_parity: --
 ---
 
-Does not converge with RPCS3 at FirstRsxWrite: CellGov faults
-at step 14,341,833; RPCS3 completes the checkpoint. Byte
-parity undefined until convergence. Re-anchored under the
-complete firmware-set boot: the prior fault at step
-14,342,058 was measured under
-contamination from `dispatch.unresolved_import` (the
-`cellVideoOutGetScreenSize` NID required by SSHD was the
-lone outlier the closure walk surfaced -- exported by
-`libsysutil_avconf_ext`, now in MIN_VIABLE_PRX_STEMS).
+Does not converge with RPCS3 at FirstRsxWrite: CellGov
+times out at `MaxSteps` (390,625 under default budget) before
+reaching the first RSX put-pointer write; RPCS3 completes
+the checkpoint. Byte parity undefined until convergence.
 
-Post-re-anchor: zero unresolved-import breaks; closure walk
-closes. The 3 remaining host invariant breaks are all honest:
-two `dispatch.ppu_thread_create_unmodeled_flags` firings for
-`flags=0x10000` (a convergent honest gap -- RPCS3's
-`_sys_ppu_thread_create` only consults `flags & 3` per its
-`sys_ppu_thread.cpp`, silently ignoring bit `0x10000`;
-CellGov matches), plus one
-log from one of the unmodeled-no-op handlers (memory_free,
-spu_initialize, RSX free, event-port-connect-local ENOSYS, or
-similar) the boot exercises. The downstream fault is not
-derived from these honest gaps; it is a separate RSX-init
-divergence the RSX-init progression work owns.
+Phase 39's BE-FIFO decode + IO->EA translation correctness
+fixes plus the `sys_rsx_context_attribute` FIFO_SETUP arm
+advanced SSHD past its prior `14,341,833 / Fault` at the
+RSX device-enumeration codepath; the Fault no longer fires.
+SSHD now caps at the same `MaxSteps` budget flOw hits at
+the shared firmware libgcm spin-poll on `dma.ref` at
+`0x7a08`. Under `--budget 1` SSHD runs through 50M+ steps
+without re-hitting any Fault, confirming the prior fault
+path is downstream of one of the corrected boot stages.
+Zero residual host invariant breaks at the new anchor
+(390,625 steps clean).
+
+The prior `14,341,833 / Fault` with three honest residual
+`host_invariant_breaks` (two
+`dispatch.ppu_thread_create_unmodeled_flags` for the
+`flags=0x10000` convergent gap, one no-op-with-trace) is
+preserved as a documented downstream code path that does
+not re-fire under the new trajectory.
 
 RPCS3 corpus state (Stage E):
   outcome: Completed

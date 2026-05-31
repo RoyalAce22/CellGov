@@ -28,35 +28,34 @@ and no per-title compatibility hacks. RPCS3 is the right tool to play
 a game. CellGov is the right tool to ask, byte-for-byte, what a PS3
 game would produce under any legal schedule.
 
-## The fidelity ethos
+## The null backend
 
-Every LV2 syscall any loaded firmware PRX makes is modeled to
-RPCS3-faithful behavior; the **null backend** makes each
-unmodeled syscall an honest, traced, named not-implemented
-response (`CELL_ENOSYS` and similar -- never a blanket
-`CELL_OK`). The consequence: every cross-runner divergence is
-**an implementation target the oracle named, not a failure of
-the oracle**. The titles matrix is a frontier map of the
-unimplemented syscall surface, not a pass/fail scoreboard;
-each `No` row identifies the specific firmware path whose
-modeling closes the divergence. See
+CellGov loads the firmware PRXes a title needs and models
+their LV2 syscalls to RPCS3-faithful behavior. The set of
+syscalls a loaded PRX exercises is large; not all of them are
+modeled yet. The policy for the unmodeled gap is the **null
+backend**: every syscall a loaded PRX makes that CellGov has
+not modeled yet returns an ABI-honest, per-syscall, traced
+"not implemented" response (`CELL_ENOSYS` and similar --
+never a blanket `CELL_OK`). The consequence: every
+cross-runner divergence is an implementation target the
+oracle named, not a failure of the oracle.
+
+The titles matrix is a frontier map of the unimplemented
+syscall surface, not a pass/fail scoreboard; each `No` row
+identifies the specific firmware path whose modeling closes
+the divergence. A title transitions from "boots-with-
+honest-gaps" to "boots-clean (converges)" when the
+divergent-gap count for its PRX closure reaches zero. The
+current "minimum PRX set" is scaffolding and not the final goal -- it
+dissolves title-by-title as syscall coverage grows, and
+loading a title's full transitive PRX closure becomes safe
+to attempt precisely because the null backend makes a
+premature load fail honestly (named divergence) instead of
+silently (fabricated success). See
 [docs/concepts.md](docs/concepts.md) for the honest /
 contaminating / convergent / divergent vocabulary the matrix
 uses.
-
-The path forward: CellGov loads the firmware PRXes a title
-needs; those PRXes amplify the title's handful of direct
-calls into a much larger LV2 syscall traffic; unmodeled
-syscalls surface as honest divergences via the null backend;
-each subsequent phase models a family of them; a title
-transitions from "boots-with-honest-gaps" to "boots-clean
-(converges)" when the divergent-gap count for its PRX closure
-reaches zero. The current "minimum PRX set" is scaffolding,
-not a goal -- it dissolves title-by-title as syscall coverage
-grows, and loading a title's full transitive PRX closure
-becomes safe to attempt precisely because the null backend
-makes a premature load fail honestly (named divergence)
-instead of silently (fabricated success).
 
 ## Why determinism matters for static recomp
 
@@ -77,13 +76,14 @@ CellGov answers that question:
 
 Pre-Alpha. What works today:
 
-- 3 titles boot to deterministic checkpoints (flOw at
-  `ProcessExit`; Super Stardust HD and WipEout HD Fury halt at
-  named faults on the path to `FirstRsxWrite` -- see
+- 3 titles boot to deterministic checkpoints (WipEout HD
+  Fury reaches `FirstRsxWrite`; flOw and Super Stardust HD
+  advance to named MaxSteps walls inside the firmware
+  libgcm spin-poll on `dma.ref` at `0x7a08` -- see
   [docs/titles.md](docs/titles.md)). All three currently
   diverge from RPCS3 at the checkpoint; each divergence names
   the specific set of unmodeled syscalls as the next
-  implementation target (see "The fidelity ethos" above).
+  implementation target (see "The null backend" above).
 - PPU and SPU interpreters: complete decode for the PPC64 and
   SPU ABI surfaces titles in the current corpus exercise;
   coverage grows per phase (see

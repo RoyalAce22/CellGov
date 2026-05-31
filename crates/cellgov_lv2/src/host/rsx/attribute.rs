@@ -1,6 +1,4 @@
-//! `sys_rsx_context_attribute` (674) dispatch and its package-id
-//! sub-handlers, plus the three CellGov-internal package ids used to
-//! register flip / vblank / user handlers.
+//! `sys_rsx_context_attribute` (674) dispatch and package-id sub-handlers.
 
 use cellgov_effects::Effect;
 use cellgov_ps3_abi::cell_errors as errno;
@@ -11,12 +9,12 @@ use crate::host::Lv2Host;
 
 use super::state::RsxDisplayBuffer;
 
-/// CellGov-internal package id for the flip-handler callback. High
-/// bit set to keep it disjoint from guest-visible package ids.
+/// CellGov-internal package id for the flip-handler callback. High bit set to
+/// keep CellGov-internal ids disjoint from guest-visible PS3 package ids.
 pub const PACKAGE_CELLGOV_SET_FLIP_HANDLER: u32 = 0x8000_0108;
-/// CellGov-internal package id for the vblank-handler callback.
+/// CellGov-internal package id for the vblank-handler callback. See [`PACKAGE_CELLGOV_SET_FLIP_HANDLER`].
 pub const PACKAGE_CELLGOV_SET_VBLANK_HANDLER: u32 = 0x8000_010C;
-/// CellGov-internal package id for the user-handler callback.
+/// CellGov-internal package id for the user-handler callback. See [`PACKAGE_CELLGOV_SET_FLIP_HANDLER`].
 pub const PACKAGE_CELLGOV_SET_USER_HANDLER: u32 = 0x8000_010D;
 
 impl Lv2Host {
@@ -34,6 +32,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         match package_id {
+            package::FIFO_SETUP => self.sys_rsx_attribute_fifo_setup(_a3, _a4),
             package::FLIP_MODE => {
                 self.rsx_context.flip_mode = _a4 as u32;
                 Lv2Dispatch::immediate(0)
@@ -56,7 +55,15 @@ impl Lv2Host {
         }
     }
 
-    /// 0x104 SET_DISPLAY_BUFFER: records a slot and advances
+    /// FIFO_SETUP (0x001): records the initial FIFO get / put pointers libgcm
+    /// seeds during `cellGcmInit`.
+    fn sys_rsx_attribute_fifo_setup(&mut self, a3: u64, a4: u64) -> Lv2Dispatch {
+        self.rsx_context.fifo_get = a3 as u32;
+        self.rsx_context.fifo_put = a4 as u32;
+        Lv2Dispatch::immediate(0)
+    }
+
+    /// SET_DISPLAY_BUFFER (0x104): records slot `id` and advances
     /// `display_buffers_count` monotonically to `id + 1`.
     fn sys_rsx_attribute_set_display_buffer(&mut self, a3: u64, a4: u64, a5: u64) -> Lv2Dispatch {
         let id = (a3 & 0xFF) as usize;
@@ -80,12 +87,11 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// 0x102 FLIP_BUFFER: emits an [`Effect::RsxFlipRequest`] so the
-    /// commit pipeline drives WAITING -> DONE on the flip-status state machine.
+    /// FLIP_BUFFER (0x102): emits an [`Effect::RsxFlipRequest`] so the commit
+    /// pipeline drives WAITING -> DONE on the flip-status state machine.
     fn sys_rsx_attribute_flip(&self, _head: u64, flip_target: u64) -> Lv2Dispatch {
-        // Queued path (high bit set): low 4 bits are the buffer index.
-        // Direct path: record 0; the flip-status state machine keys on
-        // pending/done transitions, not the index.
+        // Queued path (high bit set): low 4 bits carry the buffer index.
+        // Direct path: state machine keys on pending/done, not the index.
         let buffer_index: u8 = if (flip_target & 0x8000_0000) != 0 {
             (flip_target & 0x0F) as u8
         } else {
@@ -97,8 +103,8 @@ impl Lv2Host {
         }
     }
 
-    /// Fallback for unknown `sys_rsx_context_attribute` package_ids;
-    /// returns CELL_EINVAL per RPCS3's `sys_rsx.cpp` default-arm.
+    /// Fallback for unknown `package_id`: logs an invariant break and returns
+    /// CELL_EINVAL (matches RPCS3's default-arm errno).
     fn sys_rsx_attribute_unknown(&mut self, package_id: u32) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.sys_rsx_context_attribute_unknown_package",
@@ -137,7 +143,6 @@ mod tests {
         allocate_context(&mut host, source);
 
         let rt = FakeRuntime::new(0x1_0000);
-        // Queued path: high bit set, low nibble = 3.
         let d = host.dispatch(
             Lv2Request::SysRsxContextAttribute {
                 context_id: RSX_CONTEXT_ID,
@@ -302,7 +307,7 @@ mod tests {
                 context_id: RSX_CONTEXT_ID,
                 package_id: package::FLIP_MODE,
                 a3: 0,
-                a4: 2, // vsync
+                a4: 2,
                 a5: 0,
                 a6: 0,
             },
@@ -351,7 +356,7 @@ mod tests {
             Lv2Request::SysRsxContextAttribute {
                 context_id: RSX_CONTEXT_ID,
                 package_id: package::SET_DISPLAY_BUFFER,
-                a3: 8, // invalid
+                a3: 8,
                 a4: 0,
                 a5: 0,
                 a6: 0,
@@ -411,6 +416,31 @@ mod tests {
             d,
             Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
         ));
+    }
+
+    #[test]
+    fn sys_rsx_context_attribute_fifo_setup_records_get_and_put() {
+        let mut host = Lv2Host::new();
+        let source = UnitId::new(0);
+        allocate_context(&mut host, source);
+
+        let rt = FakeRuntime::new(0x1_0000);
+        let d = host.dispatch(
+            Lv2Request::SysRsxContextAttribute {
+                context_id: RSX_CONTEXT_ID,
+                package_id: package::FIFO_SETUP,
+                a3: 0x1000,
+                a4: 0x2000,
+                a5: 0,
+                a6: 0,
+            },
+            source,
+            &rt,
+        );
+        assert!(matches!(d, Lv2Dispatch::Immediate { code: 0, .. }));
+        let ctx = host.sys_rsx_context();
+        assert_eq!(ctx.fifo_get, 0x1000);
+        assert_eq!(ctx.fifo_put, 0x2000);
     }
 
     #[test]
