@@ -25,6 +25,30 @@ pub fn execute(
     effects: &mut Vec<Effect>,
     store_buf: &mut StoreBuffer,
 ) -> ExecuteVerdict {
+    cellgov_mem::store_watch::set_last_ppu_cia(state.pc as u32);
+    crate::hle_watch::on_dispatch(state.pc as u32, &state.gpr, state.lr);
+    match *insn {
+        PpuInstruction::Sc { .. } => crate::hle_watch::on_syscall(state.pc as u32, &state.gpr),
+        PpuInstruction::B {
+            offset,
+            aa,
+            link: true,
+        } => {
+            let target = if aa {
+                offset as u32
+            } else {
+                (state.pc as i32).wrapping_add(offset) as u32
+            };
+            crate::hle_watch::on_branch_link(state.pc as u32, &state.gpr, target);
+        }
+        PpuInstruction::Bcctr { link: true, .. } => {
+            crate::hle_watch::on_branch_link(state.pc as u32, &state.gpr, state.ctr as u32);
+        }
+        PpuInstruction::Bclr { link: true, .. } => {
+            crate::hle_watch::on_branch_link(state.pc as u32, &state.gpr, state.lr as u32);
+        }
+        _ => {}
+    }
     match *insn {
         PpuInstruction::Lwz { .. }
         | PpuInstruction::Lbz { .. }
@@ -83,7 +107,6 @@ pub fn execute(
         | PpuInstruction::Bclr { .. }
         | PpuInstruction::Bcctr { .. } => branch::execute(insn, state),
 
-        // CR-logical (XL-form opcode 19).
         PpuInstruction::Mcrf { .. }
         | PpuInstruction::Crand { .. }
         | PpuInstruction::Crandc { .. }
@@ -172,8 +195,6 @@ pub fn execute(
             state.vr[vt as usize] = va ^ vb;
             ExecuteVerdict::Continue
         }
-        // `lvx` (Vx xo=103) is a memory load encoded under the Vx
-        // form; route to mem so vector loads share the forwarding path.
         // [AltiVec-PEM p:6-21] lvx EA = (rA|0)+rB masked with ~0xF; loads 16 bytes.
         PpuInstruction::Vx {
             xo: 103,

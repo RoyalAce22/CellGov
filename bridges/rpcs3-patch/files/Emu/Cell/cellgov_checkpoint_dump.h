@@ -151,3 +151,9 @@ namespace cellgov
 		std::fprintf(stderr, "[cellgov] checkpoint dump (%s) written to %s\n", path_env, path);
 	}
 }
+
+// CellGov store-watch hook (patch 0003 surface) lives in
+// `Emu/Memory/cellgov_store_watch.h` so vm.h can include it without
+// a circular dependency through this checkpoint-dump header (which
+// itself needs vm::base / vm::check_addr). The split is a build-order
+// detail; the two surfaces are otherwise unrelated.
