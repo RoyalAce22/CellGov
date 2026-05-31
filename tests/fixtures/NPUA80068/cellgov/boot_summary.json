@@ -2,8 +2,8 @@
   "checkpoint": {
     "kind": "first_rsx_write"
   },
-  "outcome": "Fault",
-  "steps": 14341833,
+  "outcome": "MaxSteps",
+  "steps": 390625,
   "budget": 256,
-  "host_invariant_breaks": 3
+  "host_invariant_breaks": 0
 }

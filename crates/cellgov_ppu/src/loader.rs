@@ -1596,11 +1596,10 @@ mod tests {
         }
         let data = std::fs::read(path).unwrap();
         let tables = find_indirect_opd_tables(&data);
-        // Stage A.0 trace identified one indirect-OPD table at WipEout's
-        // data offset 0xc1110 (guest 0x921110). The exact row count is
-        // a function of WipEout's import count; assert it covers at
-        // least the byte range Stage D's pending-bytes investigation
-        // observed.
+        // WipEout's binary carries one indirect-OPD table at data
+        // offset 0xc1110 (guest 0x921110). Row count is a function of
+        // import count; assert the table covers the byte range the
+        // cross-runner pending-bytes investigation observed.
         let covering = tables
             .iter()
             .find(|t| t.guest_addr <= 0x921110 && t.guest_addr + t.size > 0x9213c8);

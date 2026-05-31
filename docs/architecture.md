@@ -952,7 +952,7 @@ zeroed notify and report tables).
 | 670     | `SysRsxContextAllocate`    | Emit reports / driver-info / dma_control init + event queue. lpar_dma_control_ptr OUT receives `0xC000_0000` (libgcm derives the put-pointer at `+0x40`). |
 | 671     | `SysRsxContextFree`        | Noop-safe (returns CELL_OK); single-context model.                  |
 | 672     | `SysRsxContextIomap`       | Records the IO->EA mapping on the live context. Validates per RPCS3's `sys_rsx.cpp` iomap handler (context_id, 1 MiB alignment, `ea+size` below `PS3_RSX_BASE`, `io+size` within baked iomap region using u64 arithmetic). |
-| 674     | `SysRsxContextAttribute`   | Sub-command dispatch: FLIP_BUFFER, FLIP_MODE, SET_DISPLAY_BUFFER, handler register. |
+| 674     | `SysRsxContextAttribute`   | Sub-command dispatch: FIFO_SETUP, FLIP_BUFFER, FLIP_MODE, SET_DISPLAY_BUFFER, handler register. FIFO_SETUP records initial get / put pointers on the context. |
 | 675     | `SysRsxDeviceMap`          | Idempotent: every `dev_id == 8` call returns `sys_rsx::device_map::ADDR` (`0x4000_0000`) in the OUT slot (CELL_OK); other dev_ids return CELL_EINVAL with a recorded invariant break. |
 
 **MMIO sentinel checkpoint.** Titles whose harness expects the
@@ -1251,57 +1251,59 @@ current frontier per title.
 
 **flOw (NPUA80001).** The title's manifest enables `[rsx] mirror
 = true` so its put-pointer store at `0xC0000040` lands in the
-FIFO cursor. Under firmware-set boot, flOw reaches step
-11,271 and exits via its own `sys_process_exit(1)`. With
-`sys_rsx_device_map` (675) and `sys_rsx_context_iomap` (672)
-now modeled, libgcm's `cellGcmInit()` proceeds further into
-`_cellGcmInitBody` than before; the next honest gap is the
-mmapper handout window `[0x5000_0000, 0xC000_0000)` having
-no page backing (`sys_mmapper_map_shared_memory` returns
-CELL_ENOSYS via the null backend with a
-`dispatch.mmapper_map_shared_memory_unbacked` invariant
-break). libgcm reports "cellGcmInit() failed" and flOw's
-CRT0 runs its abort sequence
-(`sys_spu_thread_group_join` -> CELL_ESRCH because no group
-was created -> `abort()` -> `sys_process_exit`). The 42
-residual `host_invariant_breaks` are all honest: ENOSYS
-returns for unmodeled syscalls the abort path exercises,
-mmapper-unbacked logs for the handout window, plus
-no-op-with-trace logs for handlers like memory_free against
-the bump allocator. No contaminating fake-success returns
-remain on the boot path.
+FIFO cursor. Under firmware-set boot, flOw now advances
+through cellGcmInit and the early FIFO submission into a
+deterministic spin-poll inside firmware libgcm at offset
+`0x7a08` -- the title polls `dma.ref` (RSX control register
+mirror at `0xC0000048`) waiting for a completion token CellGov
+does not yet publish, and the runtime caps at the default
+`MaxSteps` budget (390,625 steps under default bench-boot
+flags). The prior `11,271 / ProcessExit` line (CRT0 abort
+after `cellGcmInit() failed`) is preserved as a documented
+downstream-of-`0x7a08` code path that no longer fires under
+the new boot trajectory: with FIFO command words now decoded
+big-endian and IO offsets translated through the
+sys_rsx_context iomap, libgcm's init proceeds far enough that
+the abort sequence never re-enters. Residual
+`host_invariant_breaks=43`; all honest. Walls past `0x7a08`
+are uncharacterized -- they depend on a honest FIFO-completion
+consumer landing.
 
 **Super Stardust HD (NPUA80068).** The harness uses a
 `FirstRsxWrite` checkpoint because the attract-mode loop never
-calls `sys_process_exit`. Under firmware-set boot, SSHD
-reaches step 14,341,833 then faults during RSX setup. The 3
-residual `host_invariant_breaks` are all honest: two
-`dispatch.ppu_thread_create_unmodeled_flags` (flags=0x10000)
-firings (a convergent honest gap -- RPCS3's
-`_sys_ppu_thread_create` implementation only consults
-`flags & 3` for joinable/interrupt bits per RPCS3's
-`sys_ppu_thread.cpp`, silently ignoring bit `0x10000`;
-CellGov matches), plus one
-no-op-with-trace log the boot triggers in an unmodeled
-handler.
+calls `sys_process_exit`. Phase 39's FIFO BE-decode + IoMap
+fixes also advanced SSHD past its prior `14,341,833 / Fault`
+at the RSX device-enumeration code path; the Fault no longer
+fires, and SSHD now caps at `MaxSteps` (390,625 under default
+budget; 50M+ at `--budget 1` without re-hitting a Fault).
+The prior `14,341,833 / Fault` with three honest residual
+`host_invariant_breaks` (two
+`dispatch.ppu_thread_create_unmodeled_flags` for the
+`flags=0x10000` convergent gap, one no-op-with-trace) is
+preserved as a downstream code path that does not re-fire
+under the new trajectory. New walls past the prior fault are
+uncharacterized; SSHD is held under the "wait for forcing
+function" discipline.
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_firmware decrypt-self`. Under
-firmware-set boot, WipEout reaches step 43,066 then faults
-with `COMMIT_FAULT: OutOfRange { effect_index: 0 }` -- libgcm's
-`_cellGcmInitBody` calls `sys_mmapper_map_shared_memory`
-(LV2 syscall 334) to map a shared-memory handle into the
-mmapper handout window, CellGov honestly returns
-`CELL_ENOSYS` because that virtual range has no page backing,
-the title does not check the syscall's return, and the first
-guest write through the handout address trips OutOfRange.
-The 4 residual `host_invariant_breaks` are all honest: two
-`dispatch.mmapper_map_shared_memory_unbacked` entries (one
-per 334 call libgcm issues), one
+firmware-set boot, WipEout now reaches the `FirstRsxWrite`
+checkpoint at step `43,083` -- libgcm's `_cellGcmInitBody`
+completes through the mmapper page-backing surface (added in
+phase 38) and the FIFO_SETUP arm of
+`sys_rsx_context_attribute` (added in phase 39), and the
+first guest write to the put-pointer at `0xC0000040`
+deterministically trips the checkpoint. The prior
+`43,066 / COMMIT_FAULT: OutOfRange` line (libgcm writing
+through the unbacked mmapper handout window) is preserved as
+a code path that no longer fires under the trajectory; the
+mmapper handout window is now page-backed.
+Residual `host_invariant_breaks=2` are honest: one
 `dispatch.unsupported_stub` ENOSYS for an unmodeled RSX
-syscall, and one `dispatch.memory_free_noop` from sys_memory_free
-against the bump allocator. See
+syscall and one `dispatch.memory_free_noop` from
+`sys_memory_free` against the bump allocator. Cross-runner
+byte parity holds at `975 non-semantic + 1 pending`. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
 
 ## Microtest corpus

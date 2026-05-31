@@ -2,44 +2,34 @@
 //!
 //! Drains from `cursor.get` up to `cursor.put`, dispatching through
 //! the [`NvMethodTable`] and pushing emissions into a caller-owned
-//! `Vec<Effect>`. The caller forwards them into batch N+1; the
-//! advance pass cannot observe its own emissions within the same
-//! batch.
-//!
-//! Contract summary (details on [`rsx_advance`]):
-//!
-//! - Requires `cursor.get <= cursor.put` at entry; `get > put`
-//!   returns [`RsxAdvanceStop::WrappedCursor`] without mutating.
-//! - Control-flow and Malformed headers stop the drain cleanly
-//!   with the cursor parked on the offending header.
-//! - Unknown methods advance past their args and continue.
+//! `Vec<Effect>` that the caller forwards into batch N+1; the advance
+//! pass cannot observe its own emissions within the same batch.
 
 use crate::rsx::method::{decode_header, NvCommandKind, NvDispatchContext, NvMethodTable};
-use crate::rsx::RsxFifoCursor;
+use crate::rsx::{IoMap, RsxFifoCursor};
 use cellgov_effects::Effect;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_time::GuestTicks;
 
 /// Terminal condition of a single advance-pass call.
 ///
-/// Every non-`Reached` variant parks `cursor.get` at the offending
-/// header (or leaves it unchanged for the entry-condition
-/// failures), so a caller can re-enter safely once the condition
-/// is resolved.
+/// Every non-`Reached` variant parks `cursor.get` at the offending header
+/// (or leaves it unchanged on entry-condition failures) so a caller can
+/// re-enter safely once the condition is resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RsxAdvanceStop {
     /// Drain reached `cursor.put` cleanly.
     Reached,
-    /// Stopped at a control-flow header; control-flow dispatch is not implemented.
+    /// Stopped at a control-flow header; dispatch is not implemented.
     ControlFlow,
-    /// Stopped at a header the decoder classified as malformed.
+    /// Decoder rejected the header.
     Malformed {
-        /// The raw 32-bit header word.
+        /// Raw 32-bit header word.
         raw: u32,
     },
-    /// Header read at `cursor.get` fell in unmapped memory; `get` unchanged.
+    /// Header read fell in unmapped memory; `get` unchanged.
     HeaderOutOfRange,
-    /// An argument-word read fell in unmapped memory; `get` parked at the header.
+    /// Argument-word read fell in unmapped memory; `get` parked at the header.
     ArgOutOfRange,
     /// Declared arg count would advance past `cursor.put`.
     TruncatedMethod,
@@ -54,12 +44,9 @@ pub enum RsxAdvanceStop {
 pub struct RsxAdvanceOutcome {
     /// Dispatches that hit a registered handler.
     pub methods_dispatched: u32,
-    /// Dispatch attempts that fell through to the unknown-method fallback.
-    ///
-    /// Counted in **dispatch attempts**, not headers: an Increment
-    /// header with `count = N` and no matching handler contributes
-    /// `N`; a NonIncrement header contributes `1` regardless of
-    /// `count`.
+    /// Counted in **dispatch attempts**, not headers: an Increment header
+    /// with `count = N` and no matching handler contributes `N`; a
+    /// NonIncrement header contributes `1` regardless of `count`.
     pub methods_unknown: u32,
     /// Terminal condition.
     pub stop: RsxAdvanceStop,
@@ -73,10 +60,11 @@ impl RsxAdvanceOutcome {
     }
 }
 
-fn read_fifo_word(memory: &GuestMemory, addr: u32) -> Option<u32> {
-    let range = ByteRange::new(GuestAddr::new(addr as u64), 4)?;
+fn read_fifo_word(memory: &GuestMemory, iomap: &IoMap, io_offset: u32) -> Option<u32> {
+    let ea = iomap.translate(io_offset)?;
+    let range = ByteRange::new(GuestAddr::new(ea as u64), 4)?;
     let bytes = memory.read(range)?;
-    let word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    let word = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     Some(word)
 }
 
@@ -100,21 +88,14 @@ fn dispatch_method(
 
 /// Drain the FIFO from `cursor.get()` up to `cursor.put()`.
 ///
-/// Advances `cursor.get`, updates `sem_offset` via the semaphore
-/// handlers, and appends emissions to `emitted` in FIFO address
-/// order. FIFO bytes are interpreted as little-endian u32.
-///
-/// Entry requires `cursor.get() <= cursor.put()`. `get == put`
-/// returns immediately with `stop = Reached`; `get > put` returns
-/// [`RsxAdvanceStop::WrappedCursor`] without mutation.
-///
-/// Increment headers dispatch once per arg against `method + 4*i`.
-/// NonIncrement headers dispatch once with the full slice.
-/// Zero-count NonIncrement still dispatches once with an empty
-/// slice, so every handler must index via `args.first()` / `get`;
-/// direct indexing will panic.
+/// FIFO bytes are interpreted as big-endian u32 (PS3 ABI). Emissions
+/// are appended to `emitted` in FIFO address order. Increment headers
+/// dispatch once per arg against `method + 4*i`; NonIncrement headers
+/// dispatch once with the full slice (including the empty slice for
+/// `count == 0`), so handlers must index via `args.first()` / `get`.
 pub fn rsx_advance(
     memory: &GuestMemory,
+    iomap: &IoMap,
     cursor: &mut RsxFifoCursor,
     sem_offset: &mut u32,
     table: &NvMethodTable,
@@ -135,7 +116,7 @@ pub fn rsx_advance(
     }
     while cursor.get() < cursor.put() {
         let get = cursor.get();
-        let header_word = match read_fifo_word(memory, get) {
+        let header_word = match read_fifo_word(memory, iomap, get) {
             Some(w) => w,
             None => {
                 outcome.stop = RsxAdvanceStop::HeaderOutOfRange;
@@ -159,16 +140,11 @@ pub fn rsx_advance(
                     outcome.stop = RsxAdvanceStop::TruncatedMethod;
                     return outcome;
                 }
-                // wrapping_add below is equivalent to `+` here: the
-                // checked_add/checked_mul above proved next_get fits
-                // in u32. Using wrapping_add means a future refactor
-                // that reorders the bounds check fails the nearest
-                // overflow test rather than reading low memory.
                 let args_start = get.wrapping_add(4);
                 let mut args: Vec<u32> = Vec::with_capacity(count as usize);
                 for i in 0..count {
                     let arg_addr = args_start.wrapping_add(i.wrapping_mul(4));
-                    match read_fifo_word(memory, arg_addr) {
+                    match read_fifo_word(memory, iomap, arg_addr) {
                         Some(w) => args.push(w),
                         None => {
                             outcome.stop = RsxAdvanceStop::ArgOutOfRange;
@@ -242,7 +218,7 @@ mod tests {
         let range = ByteRange::new(GuestAddr::new(base as u64), len).unwrap();
         let mut bytes = Vec::with_capacity(words.len() * 4);
         for &w in words {
-            bytes.extend_from_slice(&w.to_le_bytes());
+            bytes.extend_from_slice(&w.to_be_bytes());
         }
         memory.apply_commit(range, &bytes).unwrap();
     }
@@ -263,6 +239,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -303,6 +280,7 @@ mod tests {
 
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -347,6 +325,7 @@ mod tests {
             let mut emitted: Vec<Effect> = Vec::new();
             rsx_advance(
                 &memory,
+                &IoMap::IDENTITY,
                 &mut cursor,
                 &mut sem_offset,
                 &table,
@@ -383,6 +362,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -429,6 +409,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -472,6 +453,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -504,6 +486,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -523,7 +506,7 @@ mod tests {
         memory
             .apply_commit(
                 ByteRange::new(GuestAddr::new(header_addr as u64), 4).unwrap(),
-                &header.to_le_bytes(),
+                &header.to_be_bytes(),
             )
             .unwrap();
         let mut cursor = RsxFifoCursor::new();
@@ -534,6 +517,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -562,6 +546,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -593,7 +578,7 @@ mod tests {
         memory
             .apply_commit(
                 ByteRange::new(GuestAddr::new(header_addr as u64), 4).unwrap(),
-                &header.to_le_bytes(),
+                &header.to_be_bytes(),
             )
             .unwrap();
         let mut cursor = RsxFifoCursor::new();
@@ -604,6 +589,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -634,6 +620,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -658,6 +645,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -693,6 +681,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -739,6 +728,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -769,6 +759,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -797,6 +788,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,
@@ -832,6 +824,7 @@ mod tests {
         let mut emitted: Vec<Effect> = Vec::new();
         let outcome = rsx_advance(
             &memory,
+            &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
             &table,

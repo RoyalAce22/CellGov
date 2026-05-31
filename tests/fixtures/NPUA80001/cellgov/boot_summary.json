@@ -2,8 +2,8 @@
   "checkpoint": {
     "kind": "process_exit"
   },
-  "outcome": "ProcessExit",
-  "steps": 11271,
+  "outcome": "MaxSteps",
+  "steps": 390625,
   "budget": 256,
-  "host_invariant_breaks": 42
+  "host_invariant_breaks": 2
 }

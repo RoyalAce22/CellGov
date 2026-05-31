@@ -5,26 +5,30 @@ year: 2007
 developer: thatgamecompany
 engine: PhyreEngine
 distribution: PSN HDD
-checkpoint: ProcessExit
-steps: 11271
-convergence: No (outcome: ProcessExit vs Completed)
+checkpoint: ProcessExit (requested; not reached)
+steps: 390625
+convergence: No (outcome: Timeout vs Completed)
 byte_parity: --
 ---
 
 Does not converge with RPCS3 at the manifest's `process-exit`
 checkpoint: outcomes are distinct.
 
-CellGov terminates with `ProcessExit` at step 11,271 (+15
-from the Phase 36.7 anchor of 11,256). The +15 step advance
-comes from Phase 37's 675 modeling: `sys_rsx_device_map`
-now returns CELL_OK with a non-zero device address, so
-libgcm proceeds slightly further into `cellGcmInit` before
-the next gap surfaces. flOw still ends up in its abort path
-because libgcm's later setup still hits unmodeled state
-(the unbacked mmapper handout window is one such gap; see
-WipEout NOTES for the structural blocker the next phase
-addresses). flOw's CRT0 invokes
-`sys_process_exit(1)` cleanly on the abort path.
+CellGov advances 390,625 steps under the default budget (256)
+and times out at `MaxSteps` -- the requested `process-exit`
+checkpoint is no longer reached because phase 39's BE-FIFO
+decode + IO->EA translation correctness fixes plus the
+`sys_rsx_context_attribute` FIFO_SETUP arm let `cellGcmInit`
+complete far enough to enter the firmware libgcm spin-poll
+on `dma.ref` at `0x7a08`. The title is now waiting for an
+RSX completion token that CellGov does not yet publish; an
+honest FIFO-completion consumer (designed during phase 39,
+landing alongside phase 40) is the next clearing step.
+
+The prior `11,271 / ProcessExit` line (CRT0 abort after
+`cellGcmInit() failed`) is preserved as a documented
+downstream-of-`0x7a08` code path that no longer fires
+under the new boot trajectory.
 
 The 42 host invariant breaks during this run are honest:
 ENOSYS / no-op-with-trace returns for the unmodeled syscalls

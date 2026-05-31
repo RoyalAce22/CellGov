@@ -1,82 +1,55 @@
-//! sys_rsx PS3 ABI: region offsets, struct sizes, driver-info init
-//! values, package ids, display-buffer limit.
-//!
-//! Behaviour (the syscall handlers, the `RsxReports` / `RsxDriverInfo`
-//! struct definitions, the `SysRsxContext` state machine, the init
-//! sentinels CellGov picks) lives in `cellgov_lv2::host::rsx` and
-//! `cellgov_core::rsx`; this module is data only.
-//!
-//! CellGov-internal sentinels (`RSX_CONTEXT_ID = 0x5555_5555`,
-//! `SEMAPHORE_INIT_PATTERN`, `PACKAGE_CELLGOV_*`) are NOT PS3 ABI and
-//! stay in `cellgov_lv2::host::rsx`.
+//! sys_rsx PS3 ABI constants: region offsets, struct sizes, driver-info init
+//! values, package ids, display-buffer limit. Data only -- behaviour lives in
+//! `cellgov_lv2::host::rsx` and `cellgov_core::rsx`.
 
-/// Offsets from the sys_rsx context base to the RAM-backed
-/// substructures (`driver_info`, `reports`). The DMA control
-/// registers live in the MMIO region at
-/// [`control_register::DMA_CONTROL_BASE`] and are not allocated
-/// from the rsx-region base.
+/// Offsets from the sys_rsx context base to the RAM-backed substructures.
+/// DMA control registers live separately in MMIO at
+/// [`control_register::DMA_CONTROL_BASE`].
 pub mod region {
-    /// Offset to the driver-info region.
+    /// Driver-info region offset from the context base.
     pub const DRIVER_INFO_OFFSET: u32 = 0x0010_0000;
-    /// Offset to the reports region.
+    /// Reports region offset from the context base.
     pub const REPORTS_OFFSET: u32 = 0x0020_0000;
-    /// Bytes reserved per sys_rsx context (covers driver_info,
-    /// reports, plus padding).
+    /// Bytes reserved per sys_rsx context (covers driver_info, reports, padding).
     pub const CONTEXT_RESERVATION: u32 = 0x0030_0000;
 }
 
-/// `sys_rsx_device_map` (675) OUT-pointer value and the kernel
-/// reservation it lives in. RPCS3 documents the address range
-/// `0x40000000..0xB0000000` in its `sys_rsx.cpp` and allocates
-/// inside it via `vm::reserve_map(vm::rsx_context, 0, 0x10000000,
-/// 0x403)` -- the `0x10000000` size is the PS3 ABI reservation; the
-/// address itself is a deterministic pick from the documented
-/// range.
+/// `sys_rsx_device_map` (675) OUT-pointer value and its kernel reservation.
+/// `RESERVATION_SIZE` is the PS3 ABI reservation; `ADDR` is a deterministic
+/// pick from the documented `0x40000000..0xB0000000` range.
 pub mod device_map {
-    /// Device-map address `sys_rsx_device_map (675)` returns in
-    /// its `dev_addr` OUT for `dev_id == 8`.
+    /// `dev_addr` OUT for `dev_id == 8`.
     pub const ADDR: u32 = 0x4000_0000;
 
-    /// Size of the kernel `rsx_context` reservation that holds
-    /// [`ADDR`]. The host's mmapper allocator skips
-    /// `[ADDR, ADDR + RESERVATION_SIZE)` so device-map and mmapper
-    /// allocations never alias.
+    /// Size of the kernel `rsx_context` reservation holding [`ADDR`]; the
+    /// mmapper allocator skips `[ADDR, ADDR + RESERVATION_SIZE)` to avoid alias.
     pub const RESERVATION_SIZE: u32 = 0x1000_0000;
 }
 
-/// `sys_rsx_context_iomap` (672) argument-validation constants per
-/// RPCS3's `sys_rsx.cpp` IO-map handler.
+/// `sys_rsx_context_iomap` (672) argument-validation constants.
 pub mod iomap {
-    /// `context_id` value the kernel pins for the single allocated
-    /// RSX context.
+    /// `context_id` the kernel pins for the single allocated RSX context.
     pub const CONTEXT_ID: u32 = 0x5555_5555;
 
-    /// 1 MiB alignment mask. `io`, `ea`, and `size` must all be
-    /// 1 MiB aligned; non-zero `value & ALIGN_MASK` is `CELL_EINVAL`.
+    /// 1 MiB alignment mask. `io`, `ea`, and `size` must all be 1 MiB
+    /// aligned; non-zero `value & ALIGN_MASK` is `CELL_EINVAL`.
     pub const ALIGN_MASK: u32 = 0x000F_FFFF;
 }
 
-/// Fixed-address RSX command-FIFO control register slots inside the
-/// MMIO region. The guest reads / writes these to drive the RSX
-/// FIFO; both real PS3 and CellGov surface them at the same absolute
-/// addresses. Libgcm receives [`control_register::DMA_CONTROL_BASE`]
-/// from `sys_rsx_context_allocate` (670) as the dma_control OUT and
-/// adds `+0x40` internally to derive the put-pointer write target --
-/// see RPCS3's `cellGcmSys.cpp` for the same derivation.
+/// Fixed-address RSX command-FIFO control register slots in MMIO. Libgcm
+/// receives [`control_register::DMA_CONTROL_BASE`] from
+/// `sys_rsx_context_allocate` (670) and derives the put/get/ref slots by
+/// adding `+0x40 / +0x44 / +0x48`.
 pub mod control_register {
-    /// Guest address of the RSX dma_control region base.
-    /// `sys_rsx_context_allocate` (670) returns this in its
-    /// `lpar_dma_control` OUT.
+    /// RSX dma_control region base; `sys_rsx_context_allocate` (670) returns
+    /// this in `lpar_dma_control`.
     pub const DMA_CONTROL_BASE: u32 = 0xC000_0000;
 
-    /// Guest address of the RSX control register's `put` slot
-    /// (`DMA_CONTROL_BASE + 0x40`).
+    /// RSX control register `put` slot (`DMA_CONTROL_BASE + 0x40`).
     pub const PUT_ADDR: u32 = 0xC000_0040;
-
-    /// Guest address of the RSX control register's `get` slot.
+    /// RSX control register `get` slot (`DMA_CONTROL_BASE + 0x44`).
     pub const GET_ADDR: u32 = 0xC000_0044;
-
-    /// Guest address of the RSX control register's `reference` slot.
+    /// RSX control register `reference` slot (`DMA_CONTROL_BASE + 0x48`).
     pub const REF_ADDR: u32 = 0xC000_0048;
 }
 
@@ -95,8 +68,8 @@ pub mod driver_info {
     pub const HANDLER_QUEUE_OFFSET: usize = 0x12D0;
 }
 
-/// Values `sys_rsx_context_allocate` stamps into the driver-info
-/// region during init.
+/// Values `sys_rsx_context_allocate` stamps into the driver-info region
+/// during init.
 pub mod driver_info_init {
     /// Driver version word.
     pub const VERSION_DRIVER: u32 = 0x211;
@@ -120,12 +93,14 @@ pub mod driver_info_init {
 
 /// Default event-queue parameters for the RSX handler queue.
 pub mod event_queue {
-    /// Queue depth.
+    /// RSX handler queue depth.
     pub const SIZE: u32 = 0x20;
 }
 
 /// `sys_rsx_context_attribute` package ids (the `package_id` argument).
 pub mod package {
+    /// FIFO setup. a3 = initial GET pointer, a4 = initial PUT pointer.
+    pub const FIFO_SETUP: u32 = 0x001;
     /// Set flip mode (vsync / hsync).
     pub const FLIP_MODE: u32 = 0x101;
     /// Trigger a flip buffer.

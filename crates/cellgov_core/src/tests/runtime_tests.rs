@@ -9,8 +9,6 @@ use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 use cellgov_trace::TraceWriter;
 use std::cell::Cell;
 
-// cellgov_testkit depends on cellgov_core; doubles live here to avoid the cycle.
-
 #[derive(Clone)]
 
 struct CountingUnit {
@@ -1482,8 +1480,8 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
         self.steps.set(1);
         let header: u32 = (1u32 << NV_COUNT_SHIFT) | (GCM_FLIP_COMMAND as u32);
         let mut fifo_bytes: Vec<u8> = Vec::with_capacity(8);
-        fifo_bytes.extend_from_slice(&header.to_le_bytes());
-        fifo_bytes.extend_from_slice(&self.buffer_index.to_le_bytes());
+        fifo_bytes.extend_from_slice(&header.to_be_bytes());
+        fifo_bytes.extend_from_slice(&self.buffer_index.to_be_bytes());
         effects.push(Effect::SharedWriteIntent {
             range: ByteRange::new(GuestAddr::new(self.fifo_base as u64), 8).unwrap(),
             bytes: WritePayload::new(fifo_bytes),
@@ -1889,7 +1887,7 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
                 ];
                 let mut fifo_bytes: Vec<u8> = Vec::with_capacity(16);
                 for w in words {
-                    fifo_bytes.extend_from_slice(&w.to_le_bytes());
+                    fifo_bytes.extend_from_slice(&w.to_be_bytes());
                 }
                 effects.push(Effect::SharedWriteIntent {
                     range: ByteRange::new(GuestAddr::new(self.fifo_base as u64), 16).unwrap(),
