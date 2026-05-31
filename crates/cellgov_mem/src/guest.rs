@@ -3,10 +3,6 @@
 //! Mutation entry point is [`GuestMemory::apply_commit`], invoked by the
 //! commit pipeline in `cellgov_core` after it validates a batch of
 //! `SharedWriteIntent` effects. Execution units must not call it directly.
-//!
-//! Backing: a `Vec<Region>` sorted by base address; lookups use
-//! `partition_point`. Region counts stay single-digit, so the linear scan
-//! is faster than a `BTreeMap` walk.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -17,11 +13,11 @@ use crate::range::ByteRange;
 /// is enforced by the region map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageSize {
-    /// 4 KB pages.
+    /// 4 KiB.
     Page4K,
-    /// 64 KB pages. Default for PS3 LV2 user memory.
+    /// 64 KiB; default for PS3 LV2 user memory.
     Page64K,
-    /// 1 MB pages.
+    /// 1 MiB.
     Page1M,
 }
 
@@ -39,15 +35,10 @@ pub enum RegionAccess {
     ReservedStrict,
 }
 
-/// 4 KiB tracking page used by [`Region::reset_for_reuse`].
 const RESET_PAGE_BITS: u32 = 12;
 const RESET_PAGE_SIZE: usize = 1 << RESET_PAGE_BITS;
 
 /// Bitmap of touched [`RESET_PAGE_SIZE`]-byte pages within a region.
-///
-/// Maintained by [`GuestMemory::apply_commit`] so
-/// [`Region::reset_for_reuse`] can zero only the pages a previous test
-/// case wrote, instead of memset-ing the whole region.
 #[derive(Debug, Clone, Default)]
 struct DirtyPages {
     bits: Vec<u64>,
@@ -92,9 +83,6 @@ impl DirtyPages {
 ///
 /// `bytes` is `Arc<Vec<u8>>`: clone is a refcount bump,
 /// [`GuestMemory::apply_commit`] forks via [`Arc::make_mut`].
-///
-/// `dirty_pages` records 4 KiB-page-granular writes since the most
-/// recent [`Region::reset_for_reuse`] (or since construction).
 #[derive(Debug, Clone)]
 pub struct Region {
     base: u64,
@@ -106,7 +94,7 @@ pub struct Region {
 }
 
 impl Region {
-    /// Construct a zero-filled read-write region.
+    /// Construct a zero-filled `ReadWrite` region.
     #[inline]
     pub fn new(base: u64, size: usize, label: &'static str, page_size: PageSize) -> Self {
         Self::with_access(base, size, label, page_size, RegionAccess::ReadWrite)
@@ -132,15 +120,12 @@ impl Region {
         }
     }
 
-    /// Zero every 4 KiB page that has been written since the most
-    /// recent reset (or construction). O(touched pages), not
-    /// O(region size). Clears the dirty-set so the region is ready
-    /// to reuse.
+    /// Zero every 4 KiB page written since the most recent reset (or
+    /// construction). O(touched pages), not O(region size).
     ///
     /// # Panics
     ///
-    /// Panics if the region's backing `Arc<Vec<u8>>` is not
-    /// uniquely owned.
+    /// Panics if the region's backing `Arc<Vec<u8>>` is not uniquely owned.
     pub fn reset_for_reuse(&mut self) {
         let bytes = Arc::get_mut(&mut self.bytes).expect(
             "Region::reset_for_reuse requires unique ownership; an outstanding snapshot is \
@@ -155,37 +140,37 @@ impl Region {
         self.dirty_pages.clear();
     }
 
-    /// Access mode of the region.
+    /// Access mode.
     #[inline]
     pub fn access(&self) -> RegionAccess {
         self.access
     }
 
-    /// Base guest address of the region.
+    /// Base guest address.
     #[inline]
     pub fn base(&self) -> u64 {
         self.base
     }
 
-    /// Size of the region in bytes.
+    /// Size in bytes.
     #[inline]
     pub fn size(&self) -> u64 {
         self.bytes.len() as u64
     }
 
-    /// Diagnostic label for the region (e.g. `"flat"`, `"user_heap"`, `"stack"`).
+    /// Diagnostic label (e.g. `"flat"`, `"user_heap"`, `"stack"`).
     #[inline]
     pub fn label(&self) -> &'static str {
         self.label
     }
 
-    /// Page-size class of the region.
+    /// Page-size class.
     #[inline]
     pub fn page_size(&self) -> PageSize {
         self.page_size
     }
 
-    /// Byte slice covering the region's full backing store.
+    /// Backing store as a byte slice.
     #[inline]
     pub fn bytes(&self) -> &[u8] {
         self.bytes.as_slice()
@@ -197,7 +182,6 @@ impl Region {
         self.base.saturating_add(self.size())
     }
 
-    /// Whether `[addr, addr + length)` is entirely within this region.
     #[inline]
     fn contains(&self, addr: u64, length: u64) -> bool {
         match addr.checked_add(length) {
@@ -215,13 +199,12 @@ impl Region {
 #[derive(Debug, Clone)]
 pub struct GuestMemory {
     regions: Vec<Region>,
-    /// Cached FNV-1a digest; `None` iff a successful commit has happened
-    /// since the last computation. Errors leave `cached_hash` untouched.
-    /// `Cell` lets [`GuestMemory::content_hash`] take `&self`.
+    /// `None` iff a successful commit has happened since the last
+    /// computation. Errors leave it untouched.
     cached_hash: Cell<Option<u64>>,
-    /// Monotonic count of reads that hit a [`RegionAccess::ReservedZeroReadable`]
-    /// region. Diagnostics surface silent zero-reads via this counter.
-    /// Inherited by `clone()`; reset only by constructing a new `GuestMemory`.
+    /// Count of reads that hit a [`RegionAccess::ReservedZeroReadable`]
+    /// region. Inherited by `clone()`; reset only by constructing a new
+    /// `GuestMemory`.
     provisional_read_count: Cell<u64>,
 }
 
@@ -231,7 +214,7 @@ pub struct GuestMemory {
 /// "between `user_heap` and `rsx`" rather than just "out of bounds".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FaultContext {
-    /// Guest address that faulted.
+    /// Faulting guest address.
     pub addr: u64,
     /// Label of the nearest mapped region whose end is `<= addr`, if any.
     pub nearest_below: Option<&'static str>,
@@ -254,10 +237,10 @@ impl std::fmt::Display for FaultContext {
 /// Why a `GuestMemory` operation failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum MemError {
-    /// Supplied byte buffer's length differs from the range's length.
+    /// Byte buffer's length disagrees with the range's length.
     #[error("byte buffer length disagrees with range length")]
     LengthMismatch,
-    /// `from_regions` received overlapping address ranges.
+    /// Two regions' address ranges overlap.
     #[error("overlapping address ranges")]
     OverlappingRegions,
     /// Range is not entirely contained within any single mapped region.
@@ -266,17 +249,17 @@ pub enum MemError {
     /// Write targeted a non-`ReadWrite` region.
     #[error("write into reserved region {region} at 0x{addr:016x}")]
     ReservedWrite {
-        /// Guest address of the faulting write.
+        /// Faulting guest address.
         addr: u64,
-        /// Label of the reserved region the write targeted.
+        /// Reserved region's label.
         region: &'static str,
     },
     /// Read targeted a `ReservedStrict` region.
     #[error("read of reserved-strict region {region} at 0x{addr:016x}")]
     ReservedStrictRead {
-        /// Guest address of the faulting read.
+        /// Faulting guest address.
         addr: u64,
-        /// Label of the reserved region the read targeted.
+        /// Reserved region's label.
         region: &'static str,
     },
 }
@@ -289,8 +272,6 @@ impl GuestMemory {
             .expect("single region at base 0 is always non-overlapping")
     }
 
-    /// Construct `GuestMemory` from a set of regions.
-    ///
     /// # Errors
     ///
     /// Returns [`MemError::OverlappingRegions`] if any two regions' address
@@ -309,10 +290,12 @@ impl GuestMemory {
         })
     }
 
-    /// Insert a fresh zero-filled ReadWrite region at `base` with the
-    /// given size and page granule. Returns
-    /// [`MemError::OverlappingRegions`] if the new range overlaps any
-    /// existing region. The cached state hash is invalidated.
+    /// Insert a fresh zero-filled ReadWrite region.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemError::OverlappingRegions`] if the new range overlaps any
+    /// existing region.
     pub fn install_region(
         &mut self,
         base: u64,
@@ -350,10 +333,8 @@ impl GuestMemory {
         self.provisional_read_count.get()
     }
 
-    /// Number of 4 KiB pages currently marked dirty across every
-    /// region. O(bitmap words), not O(pages); useful for profile
-    /// instrumentation that wants to correlate page-touch volume with
-    /// per-case cost.
+    /// Number of 4 KiB pages currently marked dirty across every region.
+    /// O(bitmap words), not O(pages).
     pub fn dirty_page_count(&self) -> u64 {
         self.regions
             .iter()
@@ -373,7 +354,7 @@ impl GuestMemory {
         self.regions.iter().map(|r| r.size()).sum()
     }
 
-    /// All regions in address order.
+    /// Iterate every region in base-address order.
     pub fn regions(&self) -> impl Iterator<Item = &Region> {
         self.regions.iter()
     }
@@ -391,13 +372,10 @@ impl GuestMemory {
         }
     }
 
-    /// Resolve a read against the region map, applying the access-mode
-    /// dispatch (`ReservedZeroReadable` bumps the provisional counter,
-    /// `ReservedStrict` faults). The single source of truth shared by
-    /// [`GuestMemory::read`] and [`GuestMemory::read_checked`] so the two
-    /// cannot drift on access semantics. `ByteRange::new` validated
-    /// `start + length` does not overflow `u64`, so no overflow check
-    /// is needed here.
+    /// Shared resolver behind [`GuestMemory::read`] and
+    /// [`GuestMemory::read_checked`]: applies access-mode dispatch
+    /// (`ReservedZeroReadable` bumps the provisional counter,
+    /// `ReservedStrict` faults).
     fn resolve_read(&self, range: ByteRange) -> Result<&[u8], MemError> {
         let start = range.start().raw();
         let length = range.length();
@@ -417,25 +395,19 @@ impl GuestMemory {
                 });
             }
         }
-        // `region.contains(start, length)` already guaranteed offset and end
-        // fit inside `region.bytes`, whose length is `usize` by construction.
         let offset = (start - region.base()) as usize;
         let end = offset + length as usize;
         Ok(&region.bytes[offset..end])
     }
 
-    /// Read the bytes covered by `range`, or `None` if no region contains
-    /// it or the target region is `ReservedStrict`.
-    ///
-    /// A read from a `ReservedZeroReadable` region bumps
-    /// [`GuestMemory::provisional_read_count`]. For diagnostic-rich failure
-    /// information, use [`GuestMemory::read_checked`].
+    /// Returns `None` if no region contains the range or the target region
+    /// is `ReservedStrict`. A read from a `ReservedZeroReadable` region
+    /// bumps [`GuestMemory::provisional_read_count`]. Use
+    /// [`GuestMemory::read_checked`] for typed errors.
     pub fn read(&self, range: ByteRange) -> Option<&[u8]> {
         self.resolve_read(range).ok()
     }
 
-    /// Read the bytes covered by `range`, returning a typed error on failure.
-    ///
     /// # Errors
     ///
     /// - [`MemError::Unmapped`] with a [`FaultContext`] when no region
@@ -446,9 +418,8 @@ impl GuestMemory {
         self.resolve_read(range)
     }
 
-    /// Apply a committed write to `range` from `bytes`. Invalidates the
-    /// cached content hash on success; errors leave both memory and the
-    /// cache untouched. Commit-pipeline entry point.
+    /// Commit-pipeline entry point. Errors leave both memory and the
+    /// cached hash untouched.
     ///
     /// # Errors
     ///
@@ -461,7 +432,6 @@ impl GuestMemory {
         }
         let start = range.start().raw();
         let length = range.length();
-        // `ByteRange::new` validated `start + length` fits u64.
         let fault = self.fault_context(start);
         let region = self
             .containing_region_mut(start, length)
@@ -474,8 +444,6 @@ impl GuestMemory {
         }
         let offset = (start - region.base()) as usize;
         let end = offset + length as usize;
-        // make_mut forks the Vec only when the Arc is shared with a
-        // live snapshot; unique-ref writes pay no copy.
         Arc::make_mut(&mut region.bytes)[offset..end].copy_from_slice(bytes);
         if length > 0 {
             let first_page = offset >> RESET_PAGE_BITS;
@@ -483,13 +451,12 @@ impl GuestMemory {
             region.dirty_pages.mark_range(first_page, last_page);
         }
         self.cached_hash.set(None);
+        crate::store_watch::emit(0, start, bytes);
         Ok(())
     }
 
-    /// Zero every page that has been written since the most recent
-    /// reset (or construction), across every region. Reuses the
-    /// existing `Arc<Vec<u8>>` backing stores in place: no
-    /// reallocation, O(touched pages) work.
+    /// Zero every dirty page across every region in place. O(touched
+    /// pages), no reallocation.
     ///
     /// # Panics
     ///
@@ -503,26 +470,20 @@ impl GuestMemory {
         self.provisional_read_count.set(0);
     }
 
-    /// Force the next [`content_hash`](Self::content_hash) call to
-    /// re-walk dirty pages instead of returning the cached digest.
-    /// Lets benchmarks and determinism tests measure the uncached
-    /// walk without going through a write.
+    /// Force the next [`content_hash`](Self::content_hash) call to re-walk
+    /// dirty pages instead of returning the cached digest.
     #[doc(hidden)]
     pub fn invalidate_content_hash(&self) {
         self.cached_hash.set(None);
     }
 
-    /// True if the content-hash cache currently holds a value.
-    /// Diagnostic and invariant-checking hook; not on any hot path.
     #[doc(hidden)]
     pub fn is_content_hash_cached(&self) -> bool {
         self.cached_hash.get().is_some()
     }
 
-    /// 64-bit FNV-1a digest of the byte content + region map.
-    /// All-zero pages are skipped (fresh and reset regions skip the
-    /// walk entirely). Cached; [`GuestMemory::apply_commit`]
-    /// invalidates the cache. First call is `O(dirty pages)`.
+    /// 64-bit FNV-1a digest of the byte content + region map. All-zero
+    /// pages are skipped. Cached; first call is `O(dirty pages)`.
     pub fn content_hash(&self) -> u64 {
         if let Some(h) = self.cached_hash.get() {
             return h;
@@ -547,7 +508,7 @@ impl GuestMemory {
         h
     }
 
-    /// Locate the region that entirely contains `[addr, addr+length)`.
+    /// Region that entirely contains `[addr, addr+length)`.
     pub fn containing_region(&self, addr: u64, length: u64) -> Option<&Region> {
         let idx = self.regions.partition_point(|r| r.base() <= addr);
         if idx == 0 {
@@ -561,9 +522,6 @@ impl GuestMemory {
         }
     }
 
-    /// Mutable counterpart to [`GuestMemory::containing_region`]. Used by
-    /// [`GuestMemory::apply_commit`] to locate the write target in a single
-    /// pass instead of resolving the region twice.
     fn containing_region_mut(&mut self, addr: u64, length: u64) -> Option<&mut Region> {
         let idx = self.regions.partition_point(|r| r.base() <= addr);
         if idx == 0 {

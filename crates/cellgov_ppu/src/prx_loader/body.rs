@@ -388,6 +388,12 @@ pub fn load_firmware_set(
 
     let export_table = FirmwareExportTable::build(&loaded, &dep_graph.order)?;
 
+    // Resolve any env-gated CELLGOV_HLE_RETURN_WATCH NIDs against the
+    // freshly built firmware export table. No-op when the env var is
+    // unset; otherwise registers (nid, entry_pc) so the per-instruction
+    // dispatch hook can match.
+    resolve_hle_watch_nids(&export_table, memory);
+
     for id in &dep_graph.order {
         let Some(imports) = imports_by_id.get(id) else {
             continue;
@@ -418,6 +424,46 @@ pub fn load_firmware_set(
         topological_order: dep_graph.order,
         imports_by_id: import_targets_by_id,
     })
+}
+
+/// Resolve env-gated [`crate::hle_watch`] NIDs to OPD entry PCs and
+/// register them with the per-instruction dispatch hook; silent
+/// no-op when the watch instrument is inactive.
+#[allow(clippy::print_stderr)]
+fn resolve_hle_watch_nids(export_table: &FirmwareExportTable, memory: &cellgov_mem::GuestMemory) {
+    if !crate::hle_watch::is_active() {
+        return;
+    }
+    for nid in crate::hle_watch::watched_nids() {
+        let Some(opd_addr) = export_table.get(nid) else {
+            eprintln!(
+                "[cellgov] hle-return-watch: NID 0x{nid:08x} not present in firmware export table"
+            );
+            continue;
+        };
+        let range = match cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(opd_addr), 4) {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "[cellgov] hle-return-watch: NID 0x{nid:08x} OPD addr 0x{opd_addr:x} out of representable range"
+                );
+                continue;
+            }
+        };
+        let entry_pc = match memory.read(range) {
+            Some(bytes) => u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            None => {
+                eprintln!(
+                    "[cellgov] hle-return-watch: NID 0x{nid:08x} OPD at 0x{opd_addr:x} not mapped"
+                );
+                continue;
+            }
+        };
+        let name = cellgov_ps3_abi::nid::lookup(nid)
+            .map(|(_, fname)| fname)
+            .unwrap_or("<unknown>");
+        crate::hle_watch::register_nid_resolution(nid, name, entry_pc);
+    }
 }
 
 /// Patch the game ELF's import GOT slots against
@@ -453,7 +499,7 @@ fn patch_imports_against(
 ) -> Result<(), PrxLoaderError> {
     // Phase 1: resolve every (nid, stub_addr) without touching
     // memory or staging. Any failure here returns early with no
-    // side effects -- crucial for the atomic-batch contract.
+    // side effects.
     let mut resolved: Vec<(cellgov_mem::ByteRange, [u8; 4])> = Vec::new();
     for imp in imports {
         for f in &imp.functions {
@@ -497,13 +543,8 @@ fn patch_imports_against(
     match staging.drain_into(memory) {
         Ok(_) => Ok(()),
         Err(source) => {
-            // drain_into rejects the batch as a whole; buffer and
-            // memory are both unchanged. Clear the buffer so the
-            // Drop debug-assert does not fire, then surface the
-            // batch-level error with the underlying MemError
-            // preserved -- item-level attribution does not exist at
-            // this layer, so reporting a synthetic stub_addr/nid
-            // would be a lie.
+            // Clear so the Drop debug-assert does not fire on the
+            // rejected (unmutated) batch.
             staging.clear();
             Err(PrxLoaderError::GotBatchPatchFailed { count, source })
         }

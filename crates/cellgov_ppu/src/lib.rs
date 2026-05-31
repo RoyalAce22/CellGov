@@ -8,6 +8,7 @@
 pub mod decode;
 pub mod exec;
 mod fp;
+pub mod hle_watch;
 pub mod instruction;
 pub mod loader;
 pub mod prx;
@@ -41,10 +42,6 @@ pub const FAULT_DEBUG_BREAK: u32 = 0x0108_0000;
 pub const FAULT_UNIMPLEMENTED_INSN: u32 = 0x0109_0000;
 
 /// True when `code` belongs to the [`FAULT_DECODE_ERROR`] class.
-///
-/// Hides the `0xNNNN_0000` class-bit layout from callers so the LR=0
-/// sentinel check in module_start does not silently miss if the fault-
-/// code shape is ever refactored.
 #[inline]
 pub fn is_decode_error(code: u32) -> bool {
     (code & 0xFFFF_0000) == FAULT_DECODE_ERROR
@@ -74,7 +71,7 @@ mod fault_class_tests {
 // [PPC-Book1 p:18 s:2.3 Branch Processor Registers] CR is 32 bits in eight 4-bit fields; LR and CTR are 64-bit branch registers.
 #[derive(Debug, Clone)]
 pub struct PpuSnapshot {
-    /// General-purpose registers r0..r31.
+    /// General-purpose registers.
     pub gpr: [u64; 32],
     /// Raw f64 bit patterns, matching `PpuState`.
     pub fpr: [u64; 32],
@@ -82,7 +79,7 @@ pub struct PpuSnapshot {
     pub vr: [u128; 32],
     /// Program counter.
     pub pc: u64,
-    /// Condition register (8 nibble fields).
+    /// 8 nibble fields.
     pub cr: u32,
     /// Link register.
     pub lr: u64,
@@ -90,8 +87,8 @@ pub struct PpuSnapshot {
     pub ctr: u64,
     /// Fixed-point exception register.
     pub xer: u64,
-    /// Time-base register.
     // [PPC-Book2 p:29 s:Chapter 4. Time Base] TB is a 64-bit unsigned counter incremented monotonically.
+    /// Time base register.
     pub tb: u64,
     /// Canonical reservation-line address, or `None` when no reservation is held.
     pub reservation_line: Option<u64>,
@@ -130,7 +127,7 @@ pub struct PpuExecutionUnit {
 }
 
 impl PpuExecutionUnit {
-    /// Builds a fresh PPU unit with the given id and zeroed architectural state.
+    /// Fresh PPU unit with the given id and zeroed architectural state.
     pub fn new(id: UnitId) -> Self {
         Self {
             id,
@@ -154,12 +151,12 @@ impl PpuExecutionUnit {
         }
     }
 
-    /// Sets the inclusive `[lo, hi]` retirement-index window for full-state capture.
+    /// Set the inclusive `[lo, hi]` retirement-index window for full-state capture.
     pub fn set_full_state_window(&mut self, window: Option<(u64, u64)>) {
         self.full_state_window = window;
     }
 
-    /// Returns the configured full-state capture window, if any.
+    /// Returns the current full-state-capture retirement-index window.
     pub fn full_state_window(&self) -> Option<(u64, u64)> {
         self.full_state_window
     }
@@ -170,27 +167,27 @@ impl PpuExecutionUnit {
         self.break_skip = skip;
     }
 
-    /// Enables or disables per-instruction profiling.
+    /// Toggle per-instruction profile accumulation.
     pub fn set_profile_mode(&mut self, on: bool) {
         self.profile_mode = on;
     }
 
-    /// Returns the per-variant retirement counts collected while profiling.
+    /// Returns the accumulated per-instruction execution counts.
     pub fn profile_insns(&self) -> &std::collections::BTreeMap<&'static str, u64> {
         &self.profile_insns
     }
 
-    /// Returns the per-(prev, curr) variant pair counts collected while profiling.
+    /// Returns the accumulated adjacent-instruction-pair execution counts.
     pub fn profile_pairs(&self) -> &std::collections::BTreeMap<(&'static str, &'static str), u64> {
         &self.profile_pairs
     }
 
-    /// Returns a mutable reference to the underlying architectural state.
+    /// Mutable access to architectural state.
     pub fn state_mut(&mut self) -> &mut state::PpuState {
         &mut self.state
     }
 
-    /// Returns a shared reference to the underlying architectural state.
+    /// Shared access to architectural state.
     pub fn state(&self) -> &state::PpuState {
         &self.state
     }

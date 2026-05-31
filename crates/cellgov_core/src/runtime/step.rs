@@ -50,8 +50,6 @@ impl Runtime {
             }
         };
 
-        // Clear runtime-side status override so the unit's own status
-        // logic resumes for this step.
         self.registry.clear_status_override(unit_id);
 
         if self.mode == RuntimeMode::FullTrace {
@@ -144,6 +142,13 @@ impl Runtime {
         self.time = time_after;
         self.steps_taken += 1;
         self.last_scheduled_unit = Some(unit_id);
+
+        if let Some((addr, width)) = cellgov_mem::value_sample::pending(self.steps_taken as u64) {
+            let bytes =
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), u64::from(width))
+                    .and_then(|range| self.memory.read(range));
+            cellgov_mem::value_sample::emit(self.steps_taken as u64, bytes);
+        }
 
         if self.mode == RuntimeMode::FullTrace {
             self.trace.record(&TraceRecord::StepCompleted {
