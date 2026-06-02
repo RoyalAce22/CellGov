@@ -53,7 +53,7 @@ fn klicensee_resolver(
             Err(e) => die(&format!(
                 "failed to read RAP for NPDRM title {} (license {}) at {}: {}",
                 npd.content_id,
-                npd.license,
+                npd.license as u32,
                 rap_path.display(),
                 e,
             )),

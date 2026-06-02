@@ -122,6 +122,22 @@ fn read_be_u16(data: &[u8], offset: usize) -> u16 {
     )
 }
 
+/// Checked addition routed to [`SceError::HeaderOffsetOutOfRange`].
+/// Used on file-derived offsets / sizes where overflow would
+/// wrap the bounds check and let downstream indexing panic.
+fn checked_add_oob(a: usize, b: usize, what: &'static str) -> Result<usize, SceError> {
+    a.checked_add(b)
+        .ok_or(SceError::HeaderOffsetOutOfRange { what })
+}
+
+/// Checked multiplication routed to [`SceError::HeaderOffsetOutOfRange`].
+/// Used on counts-times-element-size products derived from file
+/// bytes (e.g. `e_phnum * e_phentsize`, `section_count * 0x30`).
+fn checked_mul_oob(a: usize, b: usize, what: &'static str) -> Result<usize, SceError> {
+    a.checked_mul(b)
+        .ok_or(SceError::HeaderOffsetOutOfRange { what })
+}
+
 /// Why SCE/SELF parsing or decryption failed.
 #[derive(Debug, thiserror::Error)]
 pub enum SceError {
@@ -153,11 +169,30 @@ pub enum SceError {
         /// Name of the SELF sub-header whose offset escaped the buffer.
         what: &'static str,
     },
+    /// Inner ELF header magic word is not `\x7fELF`.
+    #[error("SCE: inner ELF header has bad magic 0x{got:08x}")]
+    InnerElfBadMagic {
+        /// Magic word read at the inner ELF header offset.
+        got: u32,
+    },
     /// ELF EI_CLASS is not ELFCLASS64.
     #[error("SCE: SELF ELF header is not ELFCLASS64 (EI_CLASS=0x{got:02x})")]
     BadElfClass {
         /// `EI_CLASS` byte read from the inner ELF header.
         got: u8,
+    },
+    /// ELF64 header field size disagrees with the architectural constant.
+    /// `e_phentsize` must be 0x38 (size of `Elf64_Phdr`); `e_shentsize`
+    /// must be 0x40 (size of `Elf64_Shdr`).
+    #[error("SCE: inner ELF {what} = 0x{got:04x}, expected 0x{expected:04x}")]
+    BadElfEntSize {
+        /// Name of the entsize field that disagreed (`e_phentsize` /
+        /// `e_shentsize`).
+        what: &'static str,
+        /// Value read from the inner ELF header.
+        got: u16,
+        /// Architectural constant for ELF64.
+        expected: u16,
     },
     /// AES-256-CBC key-envelope decrypt failed.
     #[error("SCE: AES-256-CBC decrypt failed")]
@@ -282,14 +317,49 @@ pub enum SceError {
     },
 }
 
+/// Validated NPDRM license type. Wire field is u32 BE; only 1 /
+/// 2 / 3 are accepted, with any other wire value surfacing as
+/// [`SceError::NpdrmBadLicense`] at the parse site. Discriminants
+/// match the wire encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum NpdLicense {
+    /// License type 1: network license, klicensee derived from a
+    /// per-account RAP file.
+    Network = 1,
+    /// License type 2: local license, klicensee derived from a
+    /// per-account RAP file.
+    Local = 2,
+    /// License type 3: free license; klicensee defaults to
+    /// `NP_KLIC_FREE` when no RAP is supplied.
+    Free = 3,
+}
+
+// Hand-rolled so the error path lands directly on
+// `SceError::NpdrmBadLicense { got }` without a `From` wrapper for
+// `num_enum::TryFromPrimitiveError`.
+impl TryFrom<u32> for NpdLicense {
+    type Error = SceError;
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(NpdLicense::Network),
+            2 => Ok(NpdLicense::Local),
+            3 => Ok(NpdLicense::Free),
+            got => Err(SceError::NpdrmBadLicense { got }),
+        }
+    }
+}
+
 /// NPDRM control info extracted from a type-3 supplemental header.
 #[derive(Debug, Clone)]
 pub struct NpdHeaderInfo {
     /// Title `content_id` (up to 48 bytes, NUL-trimmed).
     pub content_id: String,
-    /// License type: 1 = network, 2 = local, 3 = free. Anything else
-    /// surfaces as [`SceError::NpdrmBadLicense`].
-    pub license: u32,
+    /// Validated license type. Out-of-range wire values are
+    /// rejected by [`find_npd_header_info`] with
+    /// [`SceError::NpdrmBadLicense`]; consumers receive a value
+    /// already in the 1 / 2 / 3 set.
+    pub license: NpdLicense,
 }
 
 /// Walk an SELF's supplemental-header chain and return the NPDRM
@@ -329,14 +399,17 @@ pub fn find_npd_header_info(data: &[u8]) -> Result<Option<NpdHeaderInfo>, SceErr
 
     let mut cursor = supplemental_offset;
     while cursor < supplemental_end {
-        if cursor + 0x10 > supplemental_end {
+        let record_header_end = checked_add_oob(cursor, 0x10, "SELF supplemental header record")?;
+        if record_header_end > supplemental_end {
             return Err(SceError::HeaderOffsetOutOfRange {
                 what: "SELF supplemental header record",
             });
         }
         let kind = read_be_u32(data, cursor);
         let record_size = read_be_u32(data, cursor + 4) as usize;
-        if record_size < 0x10 || cursor + record_size > supplemental_end {
+        let record_end =
+            checked_add_oob(cursor, record_size, "SELF supplemental header record body")?;
+        if record_size < 0x10 || record_end > supplemental_end {
             return Err(SceError::HeaderOffsetOutOfRange {
                 what: "SELF supplemental header record body",
             });
@@ -345,8 +418,9 @@ pub fn find_npd_header_info(data: &[u8]) -> Result<Option<NpdHeaderInfo>, SceErr
             // Type-3 body is the 0x80-byte NPD_HEADER at +0x10:
             // content_id is 48 bytes at NPD+0x10 (NUL-trimmed),
             // license is u32 BE at NPD+0x08.
-            let npd_off = cursor + 0x10;
-            if npd_off + 0x80 > supplemental_end {
+            let npd_off = checked_add_oob(cursor, 0x10, "NPDRM supplemental NPD body")?;
+            let npd_end = checked_add_oob(npd_off, 0x80, "NPDRM supplemental NPD body")?;
+            if npd_end > supplemental_end {
                 return Err(SceError::HeaderOffsetOutOfRange {
                     what: "NPDRM supplemental NPD body",
                 });
@@ -355,17 +429,18 @@ pub fn find_npd_header_info(data: &[u8]) -> Result<Option<NpdHeaderInfo>, SceErr
             let cid_bytes = &data[cid_off..cid_off + 0x30];
             let cid_end = cid_bytes.iter().position(|&b| b == 0).unwrap_or(0x30);
             let content_id = String::from_utf8_lossy(&cid_bytes[..cid_end]).into_owned();
-            let license = u32::from_be_bytes(
+            let license_raw = u32::from_be_bytes(
                 data[npd_off + 0x08..npd_off + 0x0C]
                     .try_into()
                     .expect("invariant: fixed 4-byte slice always converts to [u8; 4]"),
             );
+            let license = NpdLicense::try_from(license_raw)?;
             return Ok(Some(NpdHeaderInfo {
                 content_id,
                 license,
             }));
         }
-        cursor += record_size;
+        cursor = checked_add_oob(cursor, record_size, "SELF supplemental header walk")?;
     }
     Ok(None)
 }
@@ -443,10 +518,15 @@ pub(crate) fn assemble_elf_from_sections(
     let phdr_offset = read_be_u64(data, 0x38) as usize;
     let shdr_offset_in_self = read_be_u64(data, 0x40) as usize;
 
-    if ehdr_offset + 0x40 > data.len() {
+    let ehdr_end = checked_add_oob(ehdr_offset, 0x40, "SELF ELF header")?;
+    if ehdr_end > data.len() {
         return Err(SceError::HeaderOffsetOutOfRange {
             what: "SELF ELF header",
         });
+    }
+    let inner_magic = read_be_u32(data, ehdr_offset);
+    if inner_magic != 0x7F45_4C46 {
+        return Err(SceError::InnerElfBadMagic { got: inner_magic });
     }
     // Field offsets below assume ELFCLASS64 (the only value PS3 SELFs use).
     let ei_class = data[ehdr_offset + 4];
@@ -456,30 +536,60 @@ pub(crate) fn assemble_elf_from_sections(
     let e_shoff = read_be_u64(data, ehdr_offset + 0x28) as usize;
     let e_phnum = read_be_u16(data, ehdr_offset + 0x38) as usize;
     let e_shnum = read_be_u16(data, ehdr_offset + 0x3C) as usize;
-    let e_phentsize = read_be_u16(data, ehdr_offset + 0x36) as usize;
-    let e_shentsize = read_be_u16(data, ehdr_offset + 0x3A) as usize;
-    if phdr_offset + e_phnum * e_phentsize > data.len() {
+    let e_phentsize_raw = read_be_u16(data, ehdr_offset + 0x36);
+    let e_shentsize_raw = read_be_u16(data, ehdr_offset + 0x3A);
+    // Per ELF, entsize is "size of one entry" and only meaningful
+    // when there are entries. Firmware SPRXes ship with e_shnum = 0
+    // and e_shentsize = 0; only validate when the count is non-zero,
+    // matching the architectural constants for ELF64
+    // (Elf64_Phdr = 0x38, Elf64_Shdr = 0x40).
+    if e_phnum > 0 && e_phentsize_raw != 0x38 {
+        return Err(SceError::BadElfEntSize {
+            what: "e_phentsize",
+            got: e_phentsize_raw,
+            expected: 0x38,
+        });
+    }
+    if e_shnum > 0 && e_shentsize_raw != 0x40 {
+        return Err(SceError::BadElfEntSize {
+            what: "e_shentsize",
+            got: e_shentsize_raw,
+            expected: 0x40,
+        });
+    }
+    let e_phentsize = e_phentsize_raw as usize;
+    let e_shentsize = e_shentsize_raw as usize;
+    let phdr_table_bytes = checked_mul_oob(e_phnum, e_phentsize, "SELF program headers")?;
+    let phdr_end = checked_add_oob(phdr_offset, phdr_table_bytes, "SELF program headers")?;
+    if phdr_end > data.len() {
         return Err(SceError::HeaderOffsetOutOfRange {
             what: "SELF program headers",
         });
     }
 
-    let mut elf_size: usize = 0x40 + e_phnum * e_phentsize;
+    let mut elf_size: usize = checked_add_oob(0x40, phdr_table_bytes, "reconstructed ELF size")?;
     for i in 0..e_phnum {
-        let ph_off = phdr_offset + i * e_phentsize;
+        let row_off = checked_mul_oob(i, e_phentsize, "SELF program header row")?;
+        let ph_off = checked_add_oob(phdr_offset, row_off, "SELF program header row")?;
         let p_offset = read_be_u64(data, ph_off + 0x08) as usize;
         let p_filesz = read_be_u64(data, ph_off + 0x20) as usize;
-        let end = p_offset + p_filesz;
+        let end = checked_add_oob(p_offset, p_filesz, "SELF program segment extent")?;
         if end > elf_size {
             elf_size = end;
         }
     }
+    let shdr_table_bytes = checked_mul_oob(e_shnum, e_shentsize, "SELF section headers")?;
     if shdr_offset_in_self != 0 && e_shnum > 0 {
-        let shdr_end = e_shoff + e_shnum * e_shentsize;
+        let shdr_end = checked_add_oob(e_shoff, shdr_table_bytes, "SELF section headers")?;
         if shdr_end > elf_size {
             elf_size = shdr_end;
         }
-        if shdr_offset_in_self + e_shnum * e_shentsize > data.len() {
+        let shdr_end_in_self = checked_add_oob(
+            shdr_offset_in_self,
+            shdr_table_bytes,
+            "SELF section headers",
+        )?;
+        if shdr_end_in_self > data.len() {
             return Err(SceError::HeaderOffsetOutOfRange {
                 what: "SELF section headers",
             });
@@ -489,16 +599,15 @@ pub(crate) fn assemble_elf_from_sections(
     let mut elf = vec![0u8; elf_size];
     elf[..0x40].copy_from_slice(&data[ehdr_offset..ehdr_offset + 0x40]);
     let phdr_dst = 0x40usize;
-    elf[phdr_dst..phdr_dst + e_phnum * e_phentsize]
-        .copy_from_slice(&data[phdr_offset..phdr_offset + e_phnum * e_phentsize]);
+    elf[phdr_dst..phdr_dst + phdr_table_bytes]
+        .copy_from_slice(&data[phdr_offset..phdr_offset + phdr_table_bytes]);
     // Rewrite e_phoff to the packed phdr position; the inner ELF's
     // original value may differ from 0x40.
     elf[0x20..0x28].copy_from_slice(&(phdr_dst as u64).to_be_bytes());
 
     if shdr_offset_in_self != 0 && e_shnum > 0 {
-        let shdr_bytes = e_shnum * e_shentsize;
-        elf[e_shoff..e_shoff + shdr_bytes]
-            .copy_from_slice(&data[shdr_offset_in_self..shdr_offset_in_self + shdr_bytes]);
+        elf[e_shoff..e_shoff + shdr_table_bytes]
+            .copy_from_slice(&data[shdr_offset_in_self..shdr_offset_in_self + shdr_table_bytes]);
     }
 
     for (sec, sec_data) in sections {
@@ -512,7 +621,8 @@ pub(crate) fn assemble_elf_from_sections(
         if prog_idx >= e_phnum {
             return Err(SceError::SectionProgramIndexOutOfRange { prog_idx, e_phnum });
         }
-        let ph_off = phdr_offset + prog_idx * e_phentsize;
+        let row_off = checked_mul_oob(prog_idx, e_phentsize, "SELF program header row")?;
+        let ph_off = checked_add_oob(phdr_offset, row_off, "SELF program header row")?;
         let p_offset = read_be_u64(data, ph_off + 0x08) as usize;
         let p_filesz = read_be_u64(data, ph_off + 0x20) as usize;
         if sec_data.len() != p_filesz {
@@ -522,7 +632,16 @@ pub(crate) fn assemble_elf_from_sections(
                 expected: p_filesz,
             });
         }
-        if p_offset + p_filesz > elf.len() {
+        let write_end =
+            p_offset
+                .checked_add(p_filesz)
+                .ok_or(SceError::SectionPastReconstructedElf {
+                    prog_idx,
+                    offset: p_offset,
+                    size: p_filesz,
+                    elf_size: elf.len(),
+                })?;
+        if write_end > elf.len() {
             return Err(SceError::SectionPastReconstructedElf {
                 prog_idx,
                 offset: p_offset,
@@ -530,7 +649,7 @@ pub(crate) fn assemble_elf_from_sections(
                 elf_size: elf.len(),
             });
         }
-        elf[p_offset..p_offset + p_filesz].copy_from_slice(sec_data);
+        elf[p_offset..write_end].copy_from_slice(sec_data);
     }
 
     let magic = u32::from_be_bytes([elf[0], elf[1], elf[2], elf[3]]);
@@ -542,8 +661,20 @@ pub(crate) fn assemble_elf_from_sections(
 }
 
 /// Zero `e_shoff`, `e_shnum`, and `e_shstrndx` so a reconstructed
-/// ELF can be byte-compared against a reference that strips
-/// section-header fields.
+/// ELF can be byte-compared modulo section-header layout.
+///
+/// The contract is "identical run image," not "identical ELF
+/// file": `e_shoff` / `e_shnum` / `e_shstrndx` describe the
+/// section / link view, not part of the run image. `e_phoff` and
+/// the program-header table describe the segment / execution
+/// view, which the loader consumes to build the run image, and
+/// stay unmasked.
+///
+/// The three-field set is empirically sufficient for the current
+/// title corpus (flOw / SSHD / WipEout plus the firmware-PRX
+/// parity gate); not proven-minimal against arbitrary PS3 SELFs.
+/// Widen when a corpus addition surfaces a fourth non-semantic
+/// ELF64 header field.
 pub fn mask_non_semantic_elf_bytes(elf: &mut [u8]) {
     if elf.len() < 0x40 {
         return;
@@ -632,17 +763,19 @@ pub(crate) fn decrypt_envelope(
     riv: &[u8; 0x10],
     npdrm_layer_key: Option<&[u8; 0x10]>,
 ) -> Result<[u8; 0x40], SceError> {
-    let key_envelope_offset = hdr.metadata_offset as usize + 0x20;
-    if key_envelope_offset + 0x40 > data.len() {
+    let key_envelope_offset =
+        checked_add_oob(hdr.metadata_offset as usize, 0x20, "SCE metadata info")?;
+    let key_envelope_end = checked_add_oob(key_envelope_offset, 0x40, "SCE metadata info")?;
+    if key_envelope_end > data.len() {
         return Err(SceError::TooSmall {
             what: "SCE metadata info",
             got: data.len(),
-            need: key_envelope_offset + 0x40,
+            need: key_envelope_end,
         });
     }
 
     let mut envelope = [0u8; 0x40];
-    envelope.copy_from_slice(&data[key_envelope_offset..key_envelope_offset + 0x40]);
+    envelope.copy_from_slice(&data[key_envelope_offset..key_envelope_end]);
 
     let is_debug = (hdr.revision_flags & 0x8000) != 0;
     if !is_debug {
@@ -693,7 +826,8 @@ pub(crate) fn decrypt_sections_from_envelope(
     hdr: &SceContainerHeader,
     envelope: &[u8; 0x40],
 ) -> Result<Vec<(EncryptedSectionDescriptor, Vec<u8>)>, SceError> {
-    let key_envelope_offset = hdr.metadata_offset as usize + 0x20;
+    let key_envelope_offset =
+        checked_add_oob(hdr.metadata_offset as usize, 0x20, "SCE metadata info")?;
 
     let aes_key: [u8; 16] = envelope[0..16]
         .try_into()
@@ -702,7 +836,7 @@ pub(crate) fn decrypt_sections_from_envelope(
         .try_into()
         .expect("invariant: fixed-length 16-byte slice always converts to [u8; 16]");
 
-    let directory_offset = key_envelope_offset + 0x40;
+    let directory_offset = checked_add_oob(key_envelope_offset, 0x40, "SCE metadata directory")?;
     let directory_end = hdr.header_size as usize;
     if directory_end > data.len() || directory_offset >= directory_end {
         return Err(SceError::TooSmall {
@@ -727,8 +861,10 @@ pub(crate) fn decrypt_sections_from_envelope(
     let key_count = read_be_u32(&directory_buf, 0x10) as usize;
 
     let sections_start = 0x20usize;
-    let keys_start = sections_start + section_count * 0x30;
-    let keys_end = keys_start + key_count * 0x10;
+    let sections_bytes = checked_mul_oob(section_count, 0x30, "SCE metadata sections")?;
+    let keys_start = checked_add_oob(sections_start, sections_bytes, "SCE metadata sections")?;
+    let keys_bytes = checked_mul_oob(key_count, 0x10, "SCE metadata keys")?;
+    let keys_end = checked_add_oob(keys_start, keys_bytes, "SCE metadata keys")?;
 
     if keys_end > directory_buf.len() {
         return Err(SceError::MetadataHeadersTruncated {
@@ -742,7 +878,8 @@ pub(crate) fn decrypt_sections_from_envelope(
     let mut sections: Vec<(EncryptedSectionDescriptor, Vec<u8>)> = Vec::new();
 
     for i in 0..section_count {
-        let off = sections_start + i * 0x30;
+        let row_off = checked_mul_oob(i, 0x30, "SCE section descriptor row")?;
+        let off = checked_add_oob(sections_start, row_off, "SCE section descriptor row")?;
         let sec = EncryptedSectionDescriptor {
             payload_offset: read_be_u64(&directory_buf, off),
             payload_size: read_be_u64(&directory_buf, off + 8),
@@ -757,7 +894,9 @@ pub(crate) fn decrypt_sections_from_envelope(
         };
 
         let sec_start = sec.payload_offset as usize;
-        let sec_end = sec_start + sec.payload_size as usize;
+        let sec_end = sec_start
+            .checked_add(sec.payload_size as usize)
+            .ok_or(SceError::SectionPastFile { index: i })?;
         if sec_end > data.len() {
             return Err(SceError::SectionPastFile { index: i });
         }
@@ -767,9 +906,19 @@ pub(crate) fn decrypt_sections_from_envelope(
         match sec.encryption_kind {
             ENC_KIND_PLAIN => {}
             ENC_KIND_AES128_CTR => {
-                let k_off = sec.key_slot as usize * 0x10;
-                let iv_off = sec.iv_slot as usize * 0x10;
-                if k_off + 0x10 > data_keys.len() || iv_off + 0x10 > data_keys.len() {
+                let k_off = (sec.key_slot as usize)
+                    .checked_mul(0x10)
+                    .ok_or(SceError::SectionKeyIvIndexOutOfRange { index: i })?;
+                let iv_off = (sec.iv_slot as usize)
+                    .checked_mul(0x10)
+                    .ok_or(SceError::SectionKeyIvIndexOutOfRange { index: i })?;
+                let k_end = k_off
+                    .checked_add(0x10)
+                    .ok_or(SceError::SectionKeyIvIndexOutOfRange { index: i })?;
+                let iv_end = iv_off
+                    .checked_add(0x10)
+                    .ok_or(SceError::SectionKeyIvIndexOutOfRange { index: i })?;
+                if k_end > data_keys.len() || iv_end > data_keys.len() {
                     return Err(SceError::SectionKeyIvIndexOutOfRange { index: i });
                 }
                 let sec_key: [u8; 16] = data_keys[k_off..k_off + 0x10]
@@ -855,16 +1004,271 @@ mod tests {
     }
 
     #[test]
-    fn mask_non_semantic_elf_bytes_zeroes_section_header_fields() {
-        let mut elf = vec![0u8; 0x80];
+    fn mask_non_semantic_elf_bytes_zeroes_section_header_fields_and_moves_nothing_else() {
+        // The {e_shoff, e_shnum, e_shstrndx} set is empirically
+        // sufficient for the current title corpus (flOw / SSHD /
+        // WipEout + the firmware-PRX byte parity). Not proven-minimal
+        // against arbitrary PS3 SELFs; widen only when a corpus
+        // addition surfaces a fourth non-semantic ELF64 header field.
+        let mut elf: Vec<u8> = (0u8..=0xFFu8).cycle().take(0x80).collect();
         elf[0x28..0x30].copy_from_slice(&0xDEADBEEFCAFEBABEu64.to_be_bytes());
         elf[0x3C..0x3E].copy_from_slice(&0x4242u16.to_be_bytes());
         elf[0x3E..0x40].copy_from_slice(&0x1234u16.to_be_bytes());
+        let before = elf.clone();
 
         mask_non_semantic_elf_bytes(&mut elf);
 
         assert_eq!(&elf[0x28..0x30], &[0u8; 8], "e_shoff");
         assert_eq!(&elf[0x3C..0x3E], &[0u8; 2], "e_shnum");
         assert_eq!(&elf[0x3E..0x40], &[0u8; 2], "e_shstrndx");
+
+        // Nothing-else-moved: every byte outside the three masked
+        // ranges must equal its pre-mask value.
+        for (i, (b_before, b_after)) in before.iter().zip(elf.iter()).enumerate() {
+            let in_shoff = (0x28..0x30).contains(&i);
+            let in_shnum = (0x3C..0x3E).contains(&i);
+            let in_shstrndx = (0x3E..0x40).contains(&i);
+            if in_shoff || in_shnum || in_shstrndx {
+                continue;
+            }
+            assert_eq!(
+                b_before, b_after,
+                "byte at 0x{i:02x} changed: 0x{b_before:02x} -> 0x{b_after:02x}",
+            );
+        }
+    }
+
+    #[test]
+    fn mask_non_semantic_elf_bytes_is_noop_on_short_input() {
+        let mut elf = vec![0xABu8; 0x3F];
+        let before = elf.clone();
+        mask_non_semantic_elf_bytes(&mut elf);
+        assert_eq!(elf, before);
+    }
+
+    /// Craft a minimal SELF buffer that satisfies the early
+    /// fixed-position bounds checks in `assemble_elf_from_sections`:
+    /// ehdr at 0x100 with valid magic + ELFCLASS64 + ELF64 entsize
+    /// values, phdr at 0x200, no section-header table. Per-field
+    /// perturbations on top of this are the per-overflow tests below.
+    fn build_synthetic_self() -> Vec<u8> {
+        let mut data = vec![0u8; 0x400];
+        let ehdr_offset: u64 = 0x100;
+        let phdr_offset: u64 = 0x200;
+        data[0x30..0x38].copy_from_slice(&ehdr_offset.to_be_bytes());
+        data[0x38..0x40].copy_from_slice(&phdr_offset.to_be_bytes());
+        data[0x40..0x48].copy_from_slice(&0u64.to_be_bytes());
+        // Inner ELF64 header at ehdr_offset.
+        data[0x100..0x104].copy_from_slice(&0x7F45_4C46u32.to_be_bytes());
+        data[0x104] = 2;
+        // e_phentsize at +0x36, e_phnum at +0x38, e_shentsize at +0x3A, e_shnum at +0x3C.
+        data[0x136..0x138].copy_from_slice(&0x38u16.to_be_bytes());
+        data[0x138..0x13A].copy_from_slice(&0u16.to_be_bytes());
+        data[0x13A..0x13C].copy_from_slice(&0x40u16.to_be_bytes());
+        data[0x13C..0x13E].copy_from_slice(&0u16.to_be_bytes());
+        data
+    }
+
+    #[test]
+    fn assemble_ehdr_offset_overflow_returns_typed_error() {
+        let mut data = vec![0u8; 0x100];
+        data[0x30..0x38].copy_from_slice(&(u64::MAX).to_be_bytes());
+        let err = assemble_elf_from_sections(&data, &[]).unwrap_err();
+        assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
+    }
+
+    #[test]
+    fn assemble_phdr_table_extent_overflow_returns_typed_error() {
+        let mut data = build_synthetic_self();
+        // Push phdr_offset to near usize::MAX so phdr_offset + 0x38 wraps.
+        data[0x38..0x40].copy_from_slice(&u64::MAX.to_be_bytes());
+        // e_phnum = 1 with entsize 0x38: addition wraps.
+        data[0x138..0x13A].copy_from_slice(&1u16.to_be_bytes());
+        let err = assemble_elf_from_sections(&data, &[]).unwrap_err();
+        assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
+    }
+
+    #[test]
+    fn assemble_inner_elf_bad_magic_returns_typed_error() {
+        let mut data = build_synthetic_self();
+        data[0x100..0x104].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
+        let err = assemble_elf_from_sections(&data, &[]).unwrap_err();
+        assert!(matches!(
+            err,
+            SceError::InnerElfBadMagic { got: 0xDEAD_BEEF }
+        ));
+    }
+
+    #[test]
+    fn assemble_bad_phentsize_returns_typed_error() {
+        let mut data = build_synthetic_self();
+        // e_phnum > 0 so the entsize validation fires; e_phentsize = 0
+        // would otherwise be permissible when no program headers exist.
+        data[0x138..0x13A].copy_from_slice(&1u16.to_be_bytes());
+        data[0x136..0x138].copy_from_slice(&0u16.to_be_bytes());
+        let err = assemble_elf_from_sections(&data, &[]).unwrap_err();
+        assert!(matches!(
+            err,
+            SceError::BadElfEntSize {
+                what: "e_phentsize",
+                got: 0,
+                expected: 0x38,
+            }
+        ));
+    }
+
+    #[test]
+    fn assemble_bad_shentsize_returns_typed_error() {
+        let mut data = build_synthetic_self();
+        // e_shnum > 0 + shdr_offset_in_self > 0 so the entsize and
+        // section-table extent checks both engage.
+        data[0x40..0x48].copy_from_slice(&0x40u64.to_be_bytes());
+        data[0x13C..0x13E].copy_from_slice(&1u16.to_be_bytes());
+        data[0x13A..0x13C].copy_from_slice(&0x80u16.to_be_bytes());
+        let err = assemble_elf_from_sections(&data, &[]).unwrap_err();
+        assert!(matches!(
+            err,
+            SceError::BadElfEntSize {
+                what: "e_shentsize",
+                got: 0x80,
+                expected: 0x40,
+            }
+        ));
+    }
+
+    #[test]
+    fn assemble_zero_phnum_with_zero_phentsize_is_accepted() {
+        // SPRX shape: e_phnum = e_shnum = 0, entsize fields zero.
+        // Must clear the entsize gate; downstream failures are
+        // out of scope for this assertion.
+        let data = build_synthetic_self();
+        let result = assemble_elf_from_sections(&data, &[]);
+        if let Err(SceError::BadElfEntSize { .. }) = result {
+            panic!("unexpected BadElfEntSize for SPRX-shape input");
+        }
+    }
+
+    /// Build a minimal supplemental-header chain at offset 0x68.
+    /// Returns the data buffer; caller perturbs records in-place.
+    fn build_synthetic_supplemental_chain(records_bytes: &[u8]) -> Vec<u8> {
+        let mut data = vec![0u8; 0x200];
+        let supp_off: u64 = 0x68;
+        let supp_size: u64 = records_bytes.len() as u64;
+        data[0x58..0x60].copy_from_slice(&supp_off.to_be_bytes());
+        data[0x60..0x68].copy_from_slice(&supp_size.to_be_bytes());
+        let start = supp_off as usize;
+        let end = start + records_bytes.len();
+        data[start..end].copy_from_slice(records_bytes);
+        data
+    }
+
+    #[test]
+    fn find_npd_no_npdrm_record_returns_ok_none() {
+        // Two non-NPDRM records, both well-formed at the minimum 0x10
+        // size. The disc / APP-keyed path takes this branch.
+        let mut records = vec![0u8; 0x20];
+        records[0..4].copy_from_slice(&1u32.to_be_bytes());
+        records[4..8].copy_from_slice(&0x10u32.to_be_bytes());
+        records[0x10..0x14].copy_from_slice(&2u32.to_be_bytes());
+        records[0x14..0x18].copy_from_slice(&0x10u32.to_be_bytes());
+        let data = build_synthetic_supplemental_chain(&records);
+        assert!(find_npd_header_info(&data).unwrap().is_none());
+    }
+
+    #[test]
+    fn find_npd_empty_supplemental_returns_ok_none() {
+        let mut data = vec![0u8; 0x80];
+        data[0x58..0x60].copy_from_slice(&0u64.to_be_bytes());
+        data[0x60..0x68].copy_from_slice(&0u64.to_be_bytes());
+        assert!(find_npd_header_info(&data).unwrap().is_none());
+    }
+
+    #[test]
+    fn find_npd_record_size_under_minimum_returns_typed_error() {
+        let mut records = vec![0u8; 0x10];
+        records[0..4].copy_from_slice(&1u32.to_be_bytes());
+        records[4..8].copy_from_slice(&0x0Fu32.to_be_bytes());
+        let data = build_synthetic_supplemental_chain(&records);
+        let err = find_npd_header_info(&data).unwrap_err();
+        assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
+    }
+
+    #[test]
+    fn find_npd_record_size_overflow_returns_typed_error() {
+        let mut records = vec![0u8; 0x10];
+        records[0..4].copy_from_slice(&1u32.to_be_bytes());
+        records[4..8].copy_from_slice(&u32::MAX.to_be_bytes());
+        let data = build_synthetic_supplemental_chain(&records);
+        let err = find_npd_header_info(&data).unwrap_err();
+        assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
+    }
+
+    #[test]
+    fn find_npd_npd_body_overflow_returns_typed_error() {
+        // Record with kind=NPDRM and size=0x10 (just the record header,
+        // no body). NPD body needs 0x80 bytes past cursor+0x10, but
+        // supplemental_size = 0x10 means npd_end > supplemental_end.
+        let mut records = vec![0u8; 0x10];
+        records[0..4].copy_from_slice(&SCE_SUPPLEMENTAL_KIND_NPDRM.to_be_bytes());
+        records[4..8].copy_from_slice(&0x10u32.to_be_bytes());
+        let data = build_synthetic_supplemental_chain(&records);
+        let err = find_npd_header_info(&data).unwrap_err();
+        assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
+    }
+
+    /// Build a single NPDRM record of size 0x90 (record header +
+    /// 0x80 NPD body), license set, content_id filled with `cid_fill`.
+    /// Returned buffer is ready for `find_npd_header_info`.
+    fn build_synthetic_npdrm_record(license_wire: u32, cid_fill: u8) -> Vec<u8> {
+        let mut records = vec![0u8; 0x90];
+        records[0..4].copy_from_slice(&SCE_SUPPLEMENTAL_KIND_NPDRM.to_be_bytes());
+        records[4..8].copy_from_slice(&0x90u32.to_be_bytes());
+        // NPD body at +0x10; license at NPD+0x08 = record offset 0x18.
+        records[0x18..0x1C].copy_from_slice(&license_wire.to_be_bytes());
+        // content_id at NPD+0x10 = record offset 0x20, 0x30 bytes.
+        records[0x20..0x50].fill(cid_fill);
+        build_synthetic_supplemental_chain(&records)
+    }
+
+    #[test]
+    fn find_npd_content_id_no_nul_returns_full_48_bytes() {
+        let data = build_synthetic_npdrm_record(1, b'X');
+        let info = find_npd_header_info(&data).unwrap().unwrap();
+        assert_eq!(info.content_id.len(), 0x30);
+        assert!(info.content_id.chars().all(|c| c == 'X'));
+    }
+
+    #[test]
+    fn find_npd_valid_license_values_parse_to_enum_variants() {
+        for (wire, expected) in [
+            (1u32, NpdLicense::Network),
+            (2u32, NpdLicense::Local),
+            (3u32, NpdLicense::Free),
+        ] {
+            let data = build_synthetic_npdrm_record(wire, 0);
+            let info = find_npd_header_info(&data).unwrap().unwrap();
+            assert_eq!(info.license, expected, "wire value 0x{wire:x}");
+        }
+    }
+
+    #[test]
+    fn find_npd_license_zero_returns_npdrm_bad_license() {
+        let data = build_synthetic_npdrm_record(0, 0);
+        let err = find_npd_header_info(&data).unwrap_err();
+        assert!(matches!(err, SceError::NpdrmBadLicense { got: 0 }));
+    }
+
+    #[test]
+    fn find_npd_license_four_returns_npdrm_bad_license() {
+        let data = build_synthetic_npdrm_record(4, 0);
+        let err = find_npd_header_info(&data).unwrap_err();
+        assert!(matches!(err, SceError::NpdrmBadLicense { got: 4 }));
+    }
+
+    #[test]
+    fn find_npd_license_u32_max_returns_npdrm_bad_license() {
+        let data = build_synthetic_npdrm_record(u32::MAX, 0);
+        let err = find_npd_header_info(&data).unwrap_err();
+        assert!(matches!(err, SceError::NpdrmBadLicense { got: u32::MAX }));
     }
 }

@@ -52,3 +52,8 @@ CLAUDE.local.md
 .venv/
 .chroma_db/
 scripts/
+
+# Local investigation dumps: hle_watch / value_sample / store_watch
+# binary captures + ad-hoc parse helpers. Regenerable via the
+# env-gated diagnostics; never vendored.
+scratch/

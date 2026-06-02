@@ -24,7 +24,7 @@ use cellgov_ps3_abi::sce::{NP_KLIC_FREE, NP_KLIC_KEY, RAP_E1, RAP_E2, RAP_KEY, R
 
 use crate::sce::{
     assemble_elf_from_sections, decrypt_envelope, decrypt_sections_from_envelope,
-    find_npd_header_info, parse_sce_header, NpdHeaderInfo, SceError,
+    find_npd_header_info, parse_sce_header, NpdHeaderInfo, NpdLicense, SceError,
 };
 
 /// Derive the 16-byte intermediate klicensee (RIF key) from a 16-byte RAP.
@@ -139,21 +139,25 @@ pub fn decrypt_self_to_elf_auto(
 
 /// Resolve the klicensee bytes for an NPDRM SELF given its NPD header.
 ///
-/// License 1 (network) and 2 (local) both resolve from RAP material
-/// via the lookup; `None` surfaces as [`SceError::NoRapForNpdrmTitle`].
-/// License 3 (free) falls back to `NP_KLIC_FREE` when the lookup
-/// returns `None`, but honours a supplied klic if one is returned.
-/// Any other license value is [`SceError::NpdrmBadLicense`].
+/// `NpdLicense::Network` and `NpdLicense::Local` both resolve from
+/// RAP material via the lookup; `None` surfaces as
+/// [`SceError::NoRapForNpdrmTitle`]. `NpdLicense::Free` falls back
+/// to `NP_KLIC_FREE` when the lookup returns `None`, but honours a
+/// supplied klic if one is returned. Out-of-range wire values are
+/// rejected upstream at the parse site
+/// ([`find_npd_header_info`]); the match here is exhaustive over
+/// the validated enum.
 fn resolve_npdrm_klicensee(
     npd: &NpdHeaderInfo,
     klicensee_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<[u8; 16]>,
 ) -> Result<[u8; 16], SceError> {
     match npd.license {
-        1 | 2 => klicensee_lookup(npd).ok_or_else(|| SceError::NoRapForNpdrmTitle {
-            content_id: npd.content_id.clone(),
-        }),
-        3 => Ok(klicensee_lookup(npd).unwrap_or(NP_KLIC_FREE)),
-        other => Err(SceError::NpdrmBadLicense { got: other }),
+        NpdLicense::Network | NpdLicense::Local => {
+            klicensee_lookup(npd).ok_or_else(|| SceError::NoRapForNpdrmTitle {
+                content_id: npd.content_id.clone(),
+            })
+        }
+        NpdLicense::Free => Ok(klicensee_lookup(npd).unwrap_or(NP_KLIC_FREE)),
     }
 }
 
@@ -169,7 +173,7 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    fn npd(license: u32, content_id: &str) -> NpdHeaderInfo {
+    fn npd(license: NpdLicense, content_id: &str) -> NpdHeaderInfo {
         NpdHeaderInfo {
             license,
             content_id: content_id.to_string(),
@@ -179,20 +183,23 @@ mod tests {
     #[test]
     fn resolve_klicensee_license_network_with_rap_returns_klic() {
         let want = [0xABu8; 16];
-        let got = resolve_npdrm_klicensee(&npd(1, "NPUA80001"), |_| Some(want)).unwrap();
+        let got = resolve_npdrm_klicensee(&npd(NpdLicense::Network, "NPUA80001"), |_| Some(want))
+            .unwrap();
         assert_eq!(got, want);
     }
 
     #[test]
     fn resolve_klicensee_license_local_with_rap_returns_klic() {
         let want = [0xCDu8; 16];
-        let got = resolve_npdrm_klicensee(&npd(2, "NPUA80068"), |_| Some(want)).unwrap();
+        let got =
+            resolve_npdrm_klicensee(&npd(NpdLicense::Local, "NPUA80068"), |_| Some(want)).unwrap();
         assert_eq!(got, want);
     }
 
     #[test]
     fn resolve_klicensee_license_network_without_rap_errors_with_content_id() {
-        let err = resolve_npdrm_klicensee(&npd(1, "NPUA80001"), |_| None).unwrap_err();
+        let err =
+            resolve_npdrm_klicensee(&npd(NpdLicense::Network, "NPUA80001"), |_| None).unwrap_err();
         match err {
             SceError::NoRapForNpdrmTitle { content_id } => {
                 assert_eq!(content_id, "NPUA80001");
@@ -203,7 +210,8 @@ mod tests {
 
     #[test]
     fn resolve_klicensee_license_local_without_rap_errors_with_content_id() {
-        let err = resolve_npdrm_klicensee(&npd(2, "NPUA80068"), |_| None).unwrap_err();
+        let err =
+            resolve_npdrm_klicensee(&npd(NpdLicense::Local, "NPUA80068"), |_| None).unwrap_err();
         match err {
             SceError::NoRapForNpdrmTitle { content_id } => {
                 assert_eq!(content_id, "NPUA80068");
@@ -214,43 +222,24 @@ mod tests {
 
     #[test]
     fn resolve_klicensee_license_free_without_rap_returns_np_klic_free() {
-        let got = resolve_npdrm_klicensee(&npd(3, "NPEA00000"), |_| None).unwrap();
+        let got = resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| None).unwrap();
         assert_eq!(got, NP_KLIC_FREE);
     }
 
     #[test]
     fn resolve_klicensee_license_free_with_rap_returns_supplied_klic() {
         let want = [0x77u8; 16];
-        let got = resolve_npdrm_klicensee(&npd(3, "NPEA00000"), |_| Some(want)).unwrap();
+        let got =
+            resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| Some(want)).unwrap();
         assert_eq!(got, want);
     }
 
-    #[test]
-    fn resolve_klicensee_license_zero_errors_npdrm_bad_license() {
-        let err = resolve_npdrm_klicensee(&npd(0, "X"), |_| None).unwrap_err();
-        assert!(matches!(err, SceError::NpdrmBadLicense { got: 0 }));
-    }
-
-    #[test]
-    fn resolve_klicensee_license_four_errors_npdrm_bad_license() {
-        let err = resolve_npdrm_klicensee(&npd(4, "X"), |_| None).unwrap_err();
-        assert!(matches!(err, SceError::NpdrmBadLicense { got: 4 }));
-    }
-
-    #[test]
-    fn resolve_klicensee_license_top_bit_set_errors_npdrm_bad_license() {
-        let err = resolve_npdrm_klicensee(&npd(0x8000_0000, "X"), |_| None).unwrap_err();
-        assert!(matches!(
-            err,
-            SceError::NpdrmBadLicense { got: 0x8000_0000 }
-        ));
-    }
-
-    #[test]
-    fn resolve_klicensee_license_u32_max_errors_npdrm_bad_license() {
-        let err = resolve_npdrm_klicensee(&npd(u32::MAX, "X"), |_| None).unwrap_err();
-        assert!(matches!(err, SceError::NpdrmBadLicense { got: u32::MAX }));
-    }
+    // The "bad license" branch is no longer reachable from this
+    // function: `NpdHeaderInfo.license` is now `NpdLicense`, validated
+    // at extraction. The four prior `license_{zero,four,top_bit,u32_max}`
+    // regression tests moved upstream to
+    // `crate::sce::tests::find_npd_license_*` where the validation
+    // actually fires.
 
     /// Minimal SCE header (0x20 bytes) carrying the given
     /// `revision_flags`. Satisfies `parse_sce_header`'s magic check
