@@ -1413,17 +1413,9 @@ fn syscall_494_unreadable_idlist_field_returns_efault_and_logs_break() {
 
 #[test]
 fn syscall_494_emits_slot_and_count_in_one_effects_batch() {
-    // Pins the dispatch-layer co-emission shape: syscall 494 produces
-    // the idlist slot writes and the trailing count write in a single
-    // Lv2Dispatch::Immediate effects Vec, slot before count. Guards
-    // against a future refactor splitting the count into a separate
-    // dispatch stage.
-    //
-    // Rollback enforcement (all-or-none on the SharedWriteIntent
-    // subset) lives in the runtime's LV2 apply path
-    // (cellgov_core::runtime::lv2_dispatch::apply_lv2_effects) and is
-    // covered by its own test there. This test does NOT exercise
-    // commit-pass validation.
+    // Pins dispatch-layer co-emission only. Rollback enforcement
+    // is in cellgov_core::runtime::lv2_dispatch::apply_lv2_effects
+    // and tested there.
     let mut host = Lv2Host::new();
     host.prx_registry_mut().register(
         "libaudio".into(),

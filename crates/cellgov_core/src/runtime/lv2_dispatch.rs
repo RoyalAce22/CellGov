@@ -9,6 +9,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus};
 use cellgov_lv2::{Lv2Dispatch, PendingResponse, SpuInitState};
+use cellgov_mem::{MemError, RegionAccess};
 use cellgov_trace::TraceRecord;
 
 use super::types::RuntimeMode;
@@ -18,14 +19,55 @@ use super::{
 };
 
 impl Runtime {
-    /// Mailbox sends wake any unit Blocked on the matching `UnitId`;
-    /// RSX flip requests transition WAITING -> DONE on the next
-    /// `commit_step` boundary.
+    /// Apply an `Lv2Dispatch` effects batch: `SharedWriteIntent`s
+    /// commit all-or-none after a `containing_region` pre-pass;
+    /// non-memory effects (`MailboxSend`, `RsxFlipRequest`) apply
+    /// piecewise in emission order. On memory-subset failure no
+    /// `SharedWriteIntent` lands and a `dispatch.lv2_effect_apply_failed`
+    /// invariant break carries the first failing address, length, and
+    /// `MemError`.
+    ///
+    /// # Cross-module contract
+    ///
+    /// LV2 handlers must not emit a non-memory effect whose semantics
+    /// depend on a co-batched `SharedWriteIntent` having committed; a
+    /// `debug_assert!` traps that condition. Mailbox sends wake any
+    /// unit Blocked on the matching `UnitId`; RSX flip requests
+    /// transition WAITING -> DONE on the next `commit_step` boundary.
     pub(super) fn apply_lv2_effects(&mut self, effects: &[Effect]) {
+        let memory_failure = self.validate_lv2_memory_subset(effects);
+        debug_assert!(
+            !(memory_failure.is_some()
+                && effects
+                    .iter()
+                    .any(|e| !matches!(e, Effect::SharedWriteIntent { .. }))),
+            "LV2 handler co-emitted a SharedWriteIntent that failed validation alongside \
+             a non-memory effect; non-memory effects land unconditionally, leaving the \
+             batch in a forbidden partial state. failure={:?}",
+            memory_failure,
+        );
+        if let Some((range, err)) = memory_failure {
+            let addr = range.start().raw();
+            let length = range.length();
+            self.lv2_host.log_invariant_break(
+                "dispatch.lv2_effect_apply_failed",
+                format_args!(
+                    "LV2 SharedWriteIntent validation failed at addr=0x{addr:016x} \
+                     length={length}: {err}; memory subset rolled back, non-memory \
+                     effects still applied",
+                ),
+            );
+        }
         for effect in effects {
             match effect {
                 Effect::SharedWriteIntent { range, bytes, .. } => {
-                    let _ = self.memory.apply_commit(*range, bytes.bytes());
+                    if memory_failure.is_some() {
+                        continue;
+                    }
+                    self.memory.apply_commit(*range, bytes.bytes()).expect(
+                        "validate_lv2_memory_subset proved every SharedWriteIntent target \
+                         is mapped and writable",
+                    );
                 }
                 Effect::MailboxSend {
                     mailbox, message, ..
@@ -47,6 +89,44 @@ impl Runtime {
                 _ => {}
             }
         }
+    }
+
+    /// Pre-validate the `SharedWriteIntent` subset of `effects`;
+    /// returns the first failing intent or `None`. A `None` result
+    /// guarantees `GuestMemory::apply_commit` will succeed for every
+    /// `SharedWriteIntent` in the batch.
+    fn validate_lv2_memory_subset(
+        &self,
+        effects: &[Effect],
+    ) -> Option<(cellgov_mem::ByteRange, MemError)> {
+        for effect in effects {
+            if let Effect::SharedWriteIntent { range, bytes, .. } = effect {
+                if bytes.len() as u64 != range.length() {
+                    return Some((*range, MemError::LengthMismatch));
+                }
+                let start = range.start().raw();
+                let length = range.length();
+                match self.memory.containing_region(start, length) {
+                    None => {
+                        return Some((
+                            *range,
+                            MemError::Unmapped(self.memory.fault_context(start)),
+                        ));
+                    }
+                    Some(region) if region.access() != RegionAccess::ReadWrite => {
+                        return Some((
+                            *range,
+                            MemError::ReservedWrite {
+                                addr: start,
+                                region: region.label(),
+                            },
+                        ));
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        None
     }
 
     pub(super) fn dispatch_syscall(&mut self, result: &ExecutionStepResult, source: UnitId) {
