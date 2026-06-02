@@ -95,6 +95,7 @@ pub struct RuntimeSnapshot {
     pub(super) last_scheduled_unit: Option<UnitId>,
     pub(super) step_woke_others: bool,
     pub(super) per_step_index: u64,
+    pub(super) pending_tag_completions: std::collections::BTreeMap<UnitId, u32>,
 
     /// Asserted unchanged in [`Runtime::restore_into`], not restored.
     #[cfg(debug_assertions)]
@@ -142,6 +143,7 @@ impl Runtime {
             last_scheduled_unit: self.last_scheduled_unit,
             step_woke_others: self.step_woke_others,
             per_step_index: self.per_step_index,
+            pending_tag_completions: self.pending_tag_completions.clone(),
 
             #[cfg(debug_assertions)]
             captured_budget_per_step: self.budget_per_step,
@@ -197,6 +199,7 @@ impl Runtime {
         self.last_scheduled_unit = snap.last_scheduled_unit;
         self.step_woke_others = snap.step_woke_others;
         self.per_step_index = snap.per_step_index;
+        self.pending_tag_completions = snap.pending_tag_completions.clone();
         // clear() not clone(): preserves allocator capacity across
         // repeated restores.
         self.effects_buf.clear();

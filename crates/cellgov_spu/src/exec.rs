@@ -504,9 +504,9 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             let src =
                 ByteRange::new(GuestAddr::new(lsa as u64), size as u64).expect("valid LS range");
             let dst = ByteRange::new(GuestAddr::new(ea), size as u64).expect("valid EA range");
-            let request =
-                DmaRequest::new(DmaDirection::Put, src, dst, unit_id).expect("matching sizes");
-            state.channels.tag_status |= 1 << state.channels.mfc_tag_id;
+            let request = DmaRequest::new(DmaDirection::Put, src, dst, unit_id)
+                .expect("matching sizes")
+                .with_tag_id(state.channels.mfc_tag_id as u8);
             // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
             // Same-unit self-invalidation: PUT overlapping the reserved
             // line drops the local reservation (Cell BE ABI).
@@ -525,8 +525,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         }
         // [CBEA p:60 s:7. MFC Commands sub:7.5 Get Commands (Main Storage to Local Storage)] get: copy main-storage bytes into LS.
         spu_channels::MFC_GET => {
-            state.channels.tag_status |= 1 << state.channels.mfc_tag_id;
-            state.channels.pending_get = Some((ea, lsa, size));
+            state.channels.pending_get = Some((ea, lsa, size, state.channels.mfc_tag_id as u8));
             SpuStepOutcome::Yield {
                 effects: vec![],
                 reason: YieldReason::DmaSubmitted,

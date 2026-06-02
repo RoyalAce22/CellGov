@@ -30,6 +30,7 @@ pub struct DmaRequest {
     source: ByteRange,
     destination: ByteRange,
     issuer: UnitId,
+    tag_id: Option<u8>,
 }
 
 impl DmaRequest {
@@ -54,7 +55,22 @@ impl DmaRequest {
             source,
             destination,
             issuer,
+            tag_id: None,
         })
+    }
+
+    /// Attach the MFC tag-id the SPU issued under. Completion publishes
+    /// `1 << tag_id` to the issuer's tag-status channel.
+    #[inline]
+    pub const fn with_tag_id(mut self, tag_id: u8) -> Self {
+        self.tag_id = Some(tag_id);
+        self
+    }
+
+    /// MFC tag-id the SPU issued under; `None` for PPU/host-initiated DMA.
+    #[inline]
+    pub const fn tag_id(self) -> Option<u8> {
+        self.tag_id
     }
 
     /// Direction of the transfer.

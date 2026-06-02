@@ -32,6 +32,26 @@ fn u32_or_die(label: &str, value: u64) -> u32 {
         .unwrap_or_else(|_| die(&format!("{label}: 0x{value:x} does not fit in u32")))
 }
 
+/// Reject `--strict-reserved` combined with a title manifest's
+/// `rsx_mirror = true`: the former forces the RSX region
+/// `ReservedStrict` (rejects all writes), the latter asks the
+/// runtime to project flip-status bytes into that same region.
+/// The combination is unsatisfiable by construction.
+pub(super) fn check_strict_reserved_vs_rsx_mirror(
+    strict_reserved: bool,
+    rsx_mirror: bool,
+) -> Result<(), String> {
+    if strict_reserved && rsx_mirror {
+        return Err(
+            "boot: --strict-reserved conflicts with title manifest rsx_mirror=true; \
+             rsx_mirror requires a writable RSX region but --strict-reserved forces \
+             it ReservedStrict. Drop one of the two."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn content_source_label(
     source: &super::content::ContentBaseSource,
     manifest_base: &str,
@@ -137,6 +157,11 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         );
     }
     let mut state = cellgov_ppu::state::PpuState::new();
+    if let Err(msg) =
+        check_strict_reserved_vs_rsx_mirror(opts.strict_reserved, opts.title.rsx_mirror())
+    {
+        die(&msg);
+    }
     let reserved_access = if opts.strict_reserved {
         cellgov_mem::RegionAccess::ReservedStrict
     } else {
@@ -624,5 +649,32 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             prx_load: t_prx_load - t_hle_bind,
         },
         step_budget,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_strict_reserved_vs_rsx_mirror;
+
+    #[test]
+    fn rejects_strict_reserved_with_rsx_mirror() {
+        let err = check_strict_reserved_vs_rsx_mirror(true, true).unwrap_err();
+        assert!(err.contains("--strict-reserved"));
+        assert!(err.contains("rsx_mirror"));
+    }
+
+    #[test]
+    fn accepts_strict_reserved_alone() {
+        assert!(check_strict_reserved_vs_rsx_mirror(true, false).is_ok());
+    }
+
+    #[test]
+    fn accepts_rsx_mirror_alone() {
+        assert!(check_strict_reserved_vs_rsx_mirror(false, true).is_ok());
+    }
+
+    #[test]
+    fn accepts_neither() {
+        assert!(check_strict_reserved_vs_rsx_mirror(false, false).is_ok());
     }
 }

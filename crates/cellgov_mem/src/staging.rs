@@ -77,34 +77,13 @@ impl StagingMemory {
         self.pending.clear();
     }
 
-    /// Validate every pending write against `target`'s region map without
-    /// mutating either. Returns the same [`MemError`] set
-    /// [`GuestMemory::apply_commit`] produces, in stage order; this
-    /// structural agreement is what lets [`Self::drain_into`] apply with
-    /// an infallible `expect` after a successful validation pass.
-    ///
-    /// Validation takes `&GuestMemory` even though the apply pass takes
-    /// `&mut GuestMemory`; the borrow checker prevents any other
-    /// mutation between validation and apply, so the validation result
-    /// stays accurate.
+    /// Validate every pending write against `target` via
+    /// [`GuestMemory::validate_write`] -- the predicate `apply_commit`
+    /// itself uses -- and return on the first failure. Mutates neither
+    /// the staging buffer nor `target`.
     fn validate_pending(&self, target: &GuestMemory) -> Result<(), MemError> {
         for w in &self.pending {
-            if w.bytes.len() as u64 != w.range.length() {
-                return Err(MemError::LengthMismatch);
-            }
-            let start = w.range.start().raw();
-            let length = w.range.length();
-            // `ByteRange::new` validated `start + length` fits u64.
-            match target.containing_region(start, length) {
-                None => return Err(MemError::Unmapped(target.fault_context(start))),
-                Some(r) if r.access() != crate::RegionAccess::ReadWrite => {
-                    return Err(MemError::ReservedWrite {
-                        addr: start,
-                        region: r.label(),
-                    });
-                }
-                Some(_) => {}
-            }
+            target.validate_write(w.range, w.bytes.len())?;
         }
         Ok(())
     }
@@ -137,14 +116,9 @@ impl StagingMemory {
         self.validate_pending(target)?;
         let count = self.pending.len();
         for w in self.pending.drain(..) {
-            // `validate_pending` ruled out LengthMismatch, Unmapped, and
-            // ReservedWrite for every entry above. The `&mut GuestMemory`
-            // exclusive borrow guarantees no intervening mutation could
-            // invalidate that result. Any panic here means the structural
-            // agreement between `validate_pending` and `apply_commit` has
-            // drifted and the contract on this module is broken.
             target.apply_commit(w.range, &w.bytes).expect(
-                "drain_into invariant: validate_pending must agree with apply_commit's error set",
+                "validate_pending called validate_write; apply_commit calls the same predicate, \
+                 so this Err path is structurally unreachable",
             );
         }
         Ok(count)

@@ -96,7 +96,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             self.state.pc += 4;
         }
 
-        if let Some((ea, lsa, size)) = self.state.channels.pending_get.take() {
+        if let Some((ea, lsa, size, tag_id)) = self.state.channels.pending_get.take() {
             let src_start = ea as usize;
             let src_end = src_start + size as usize;
             let mem = ctx.memory().as_bytes();
@@ -107,7 +107,9 @@ impl ExecutionUnit for SpuExecutionUnit {
                     self.state.ls[dst_start..dst_end].copy_from_slice(&mem[src_start..src_end]);
                 }
             }
+            self.state.channels.tag_status |= 1u32 << tag_id;
         }
+        self.state.channels.tag_status |= ctx.completed_dma_tags();
 
         // Mirror cross-unit invalidation of the atomic reservation
         // from the committed table. The context view is frozen for

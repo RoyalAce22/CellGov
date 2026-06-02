@@ -90,6 +90,8 @@ pub enum TracedBlockReason {
     WaitOnEvent = 0,
     /// Unit blocked because its mailbox was empty.
     MailboxEmpty = 1,
+    /// SPU blocked on `MFC_RD_TAG_STAT` until a pending DMA completes.
+    DmaWait = 2,
 }
 
 /// Why a unit was woken, as the trace records it.

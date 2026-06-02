@@ -77,6 +77,7 @@ impl Runtime {
             per_step_index: 0,
             zoom_trace: TraceWriter::new(),
             scheduler_dirty_after_restore: false,
+            pending_tag_completions: std::collections::BTreeMap::new(),
         }
     }
 }

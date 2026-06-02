@@ -37,16 +37,29 @@ impl Runtime {
         let unit_id = match self.scheduler.select_next(&self.registry) {
             Some(id) => id,
             None => {
-                // Distinguish terminal stall from soft-stall: parked units
-                // could still wake from a future signal.
+                // All units blocked: time-warp to the next pending DMA
+                // completion if the queue has one. fire_dma_completions
+                // wakes the issuer via set_status_override(Runnable), so
+                // the retry below can schedule it.
                 let any_blocked = self.registry.ids().any(|id| {
                     self.registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Blocked)
                 });
-                return Err(if any_blocked {
-                    StepError::AllBlocked
-                } else {
-                    StepError::NoRunnableUnit
-                });
+                if !any_blocked {
+                    return Err(StepError::NoRunnableUnit);
+                }
+                let next_time = self.dma_queue.peek().map(|c| c.completion_time());
+                let Some(next_time) = next_time else {
+                    return Err(StepError::AllBlocked);
+                };
+                if next_time > self.time {
+                    self.time = next_time;
+                }
+                let due = self.fire_dma_completions();
+                self.emit_time_warp_trace(&due);
+                match self.scheduler.select_next(&self.registry) {
+                    Some(id) => id,
+                    None => return Err(StepError::AllBlocked),
+                }
             }
         };
 
@@ -84,10 +97,12 @@ impl Runtime {
             } else {
                 ExecutionContext::with_received(&self.memory, &received)
             };
+            let completed_tags = self.pending_tag_completions.remove(&unit_id).unwrap_or(0);
             let ctx = ctx
                 .with_reservations(&self.reservations)
                 .with_current_tick(self.time)
-                .with_trace_per_step(self.mode != RuntimeMode::FaultDriven);
+                .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
+                .with_completed_dma_tags(completed_tags);
             let unit = self
                 .registry
                 .get_mut(unit_id)

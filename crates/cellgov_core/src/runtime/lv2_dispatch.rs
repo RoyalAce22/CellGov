@@ -9,7 +9,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus};
 use cellgov_lv2::{Lv2Dispatch, PendingResponse, SpuInitState};
-use cellgov_mem::{MemError, RegionAccess};
+use cellgov_mem::MemError;
 use cellgov_trace::TraceRecord;
 
 use super::types::RuntimeMode;
@@ -65,8 +65,9 @@ impl Runtime {
                         continue;
                     }
                     self.memory.apply_commit(*range, bytes.bytes()).expect(
-                        "validate_lv2_memory_subset proved every SharedWriteIntent target \
-                         is mapped and writable",
+                        "validate_lv2_memory_subset called GuestMemory::validate_write -- \
+                         the same predicate apply_commit uses internally -- so this Err \
+                         path is structurally unreachable",
                     );
                 }
                 Effect::MailboxSend {
@@ -91,38 +92,17 @@ impl Runtime {
         }
     }
 
-    /// Pre-validate the `SharedWriteIntent` subset of `effects`;
-    /// returns the first failing intent or `None`. A `None` result
-    /// guarantees `GuestMemory::apply_commit` will succeed for every
-    /// `SharedWriteIntent` in the batch.
+    /// Pre-validate the `SharedWriteIntent` subset of `effects` via
+    /// `GuestMemory::validate_write` (the predicate `apply_commit`
+    /// itself calls). Returns the first failing intent or `None`.
     fn validate_lv2_memory_subset(
         &self,
         effects: &[Effect],
     ) -> Option<(cellgov_mem::ByteRange, MemError)> {
         for effect in effects {
             if let Effect::SharedWriteIntent { range, bytes, .. } = effect {
-                if bytes.len() as u64 != range.length() {
-                    return Some((*range, MemError::LengthMismatch));
-                }
-                let start = range.start().raw();
-                let length = range.length();
-                match self.memory.containing_region(start, length) {
-                    None => {
-                        return Some((
-                            *range,
-                            MemError::Unmapped(self.memory.fault_context(start)),
-                        ));
-                    }
-                    Some(region) if region.access() != RegionAccess::ReadWrite => {
-                        return Some((
-                            *range,
-                            MemError::ReservedWrite {
-                                addr: start,
-                                region: region.label(),
-                            },
-                        ));
-                    }
-                    Some(_) => {}
+                if let Err(err) = self.memory.validate_write(*range, bytes.len()) {
+                    return Some((*range, err));
                 }
             }
         }

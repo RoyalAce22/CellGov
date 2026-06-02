@@ -427,21 +427,12 @@ impl GuestMemory {
     /// - [`MemError::Unmapped`] if no region contains the range.
     /// - [`MemError::ReservedWrite`] if the target region is not `ReadWrite`.
     pub fn apply_commit(&mut self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
-        if bytes.len() as u64 != range.length() {
-            return Err(MemError::LengthMismatch);
-        }
+        self.validate_write(range, bytes.len())?;
         let start = range.start().raw();
         let length = range.length();
-        let fault = self.fault_context(start);
         let region = self
             .containing_region_mut(start, length)
-            .ok_or(MemError::Unmapped(fault))?;
-        if region.access != RegionAccess::ReadWrite {
-            return Err(MemError::ReservedWrite {
-                addr: start,
-                region: region.label(),
-            });
-        }
+            .expect("validate_write proved the range lies in a ReadWrite region");
         let offset = (start - region.base()) as usize;
         let end = offset + length as usize;
         Arc::make_mut(&mut region.bytes)[offset..end].copy_from_slice(bytes);
@@ -452,6 +443,34 @@ impl GuestMemory {
         }
         self.cached_hash.set(None);
         crate::store_watch::emit(0, start, bytes);
+        Ok(())
+    }
+
+    /// Validate that a `byte_len`-byte write at `range` would succeed
+    /// via `apply_commit`, without mutating. The single source of
+    /// truth for write-validity; `apply_commit` calls it as its first
+    /// step.
+    ///
+    /// # Errors
+    ///
+    /// - [`MemError::LengthMismatch`] if `byte_len as u64 != range.length()`.
+    /// - [`MemError::Unmapped`] if no region contains the range.
+    /// - [`MemError::ReservedWrite`] if the target region is not `ReadWrite`.
+    pub fn validate_write(&self, range: ByteRange, byte_len: usize) -> Result<(), MemError> {
+        if byte_len as u64 != range.length() {
+            return Err(MemError::LengthMismatch);
+        }
+        let start = range.start().raw();
+        let length = range.length();
+        let region = self
+            .containing_region(start, length)
+            .ok_or_else(|| MemError::Unmapped(self.fault_context(start)))?;
+        if region.access() != RegionAccess::ReadWrite {
+            return Err(MemError::ReservedWrite {
+                addr: start,
+                region: region.label(),
+            });
+        }
         Ok(())
     }
 

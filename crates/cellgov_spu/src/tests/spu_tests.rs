@@ -359,6 +359,16 @@ fn run_spu_fixed_value_binary() {
             YieldReason::Finished => break,
             YieldReason::DmaSubmitted => continue,
             YieldReason::BudgetExhausted => continue,
+            YieldReason::DmaWait => {
+                // Direct-loop test has no Runtime / DMA queue; simulate
+                // the completion publish by ORing the issued tag bit.
+                // The yield must be observed first -- this proves the
+                // SPU genuinely parked on the unset bit and isn't just
+                // straight-lining through an eager-set state.
+                let tag_id = unit.state().channels.mfc_tag_id as u8;
+                unit.state_mut().channels.tag_status |= 1u32 << tag_id;
+                continue;
+            }
             YieldReason::Fault => {
                 panic!(
                     "SPU faulted at PC=0x{:04X}, fault={:?}",
@@ -844,6 +854,14 @@ fn dma_completion_payloads_are_correct() {
         match result.yield_reason {
             YieldReason::Finished => break,
             YieldReason::DmaSubmitted | YieldReason::BudgetExhausted => continue,
+            YieldReason::DmaWait => {
+                // Direct-loop test has no Runtime / DMA queue; simulate
+                // the completion publish by ORing the issued tag bit.
+                // The yield must be observed first.
+                let tag_id = unit.state().channels.mfc_tag_id as u8;
+                unit.state_mut().channels.tag_status |= 1u32 << tag_id;
+                continue;
+            }
             other => panic!("unexpected: {:?}", other),
         }
     }
