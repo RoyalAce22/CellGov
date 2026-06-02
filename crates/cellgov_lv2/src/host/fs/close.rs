@@ -1,6 +1,6 @@
 //! `sys_fs_close` host dispatch.
 
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::fs_store::FsError;
@@ -14,7 +14,7 @@ impl Lv2Host {
     pub(in crate::host) fn dispatch_fs_close(&mut self, fd: u32) -> Lv2Dispatch {
         match self.fs_store_mut().close_fd(fd) {
             Ok(()) => Lv2Dispatch::immediate(0),
-            Err(FsError::UnknownFd) => Lv2Dispatch::immediate(errno::CELL_EBADF.into()),
+            Err(FsError::UnknownFd) => Lv2Dispatch::immediate(cell_errors::CELL_EBADF.into()),
             Err(other) => {
                 // close_fd's contract: only Ok or UnknownFd.
                 // Anything else means FsError grew without dispatch
@@ -27,7 +27,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
             }
         }
     }

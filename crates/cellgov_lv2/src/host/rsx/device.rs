@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_rsx::device_map;
 
 use crate::dispatch::Lv2Dispatch;
@@ -43,7 +43,7 @@ impl Lv2Host {
                      (cellGcmInitPerfMon uses 7/9/10/11/12); returning CELL_EINVAL"
                 ),
             );
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         // dev_addr_ptr == 0 would write guest addr 0 (readable main
         // region, no EFAULT path); no real caller passes null.
@@ -60,7 +60,7 @@ impl Lv2Host {
             source_time: self.current_tick,
         };
         Lv2Dispatch::Immediate {
-            code: errno::CELL_OK.into(),
+            code: cell_errors::CELL_OK.into(),
             effects: vec![dev_addr_write],
         }
     }
@@ -98,7 +98,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, effects } = d else {
             panic!("expected Immediate, got {d:?}");
         };
-        assert_eq!(code, u64::from(errno::CELL_OK));
+        assert_eq!(code, u64::from(cell_errors::CELL_OK));
         assert_eq!(effects.len(), 1);
         assert_eq!(extract_write_u64(&effects[0]), u64::from(device_map::ADDR));
     }
@@ -147,7 +147,7 @@ mod tests {
             let Lv2Dispatch::Immediate { code, effects } = d else {
                 panic!("expected Immediate, got {d:?}");
             };
-            assert_eq!(code, u64::from(errno::CELL_OK));
+            assert_eq!(code, u64::from(cell_errors::CELL_OK));
             assert_eq!(effects.len(), 1);
             assert_eq!(extract_write_u64(&effects[0]), u64::from(device_map::ADDR));
         }
@@ -162,7 +162,11 @@ mod tests {
             let Lv2Dispatch::Immediate { code, effects } = &d else {
                 panic!("dev_id {bad_dev_id}: expected Immediate, got {d:?}");
             };
-            assert_eq!(*code, u64::from(errno::CELL_EINVAL), "dev_id {bad_dev_id}");
+            assert_eq!(
+                *code,
+                u64::from(cell_errors::CELL_EINVAL),
+                "dev_id {bad_dev_id}"
+            );
             assert!(effects.is_empty(), "dev_id {bad_dev_id}");
         }
         assert_eq!(host.invariant_break_count() - breaks_before, 6);

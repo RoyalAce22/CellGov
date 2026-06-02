@@ -1,4 +1,4 @@
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::fs_store::FsMount;
 use crate::host::Lv2Host;
@@ -11,7 +11,7 @@ fn fd_out_ptr_unmapped_returns_efault_no_effects() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0xFFFF_FF00)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -22,7 +22,7 @@ fn fd_out_ptr_misaligned_returns_efault() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0x20001)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -33,7 +33,7 @@ fn fd_out_ptr_null_returns_efault() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -44,7 +44,7 @@ fn unmounted_path_returns_enoent_no_effects() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/dev_hdd0/Data\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0x20000)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }
@@ -59,7 +59,7 @@ fn missing_host_directory_returns_enoent() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/missing_subdir\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0x20000)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }
@@ -75,7 +75,7 @@ fn host_path_is_a_file_returns_enotdir() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/level.xml\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0x20000)),
-        errno::CELL_ENOTDIR.code,
+        cell_errors::CELL_ENOTDIR.code,
         0,
     );
 }
@@ -91,7 +91,7 @@ fn dotdot_traversal_returns_eaccess() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data/../../etc\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0x20000)),
-        errno::CELL_EACCES.code,
+        cell_errors::CELL_EACCES.code,
         0,
     );
 }
@@ -133,7 +133,7 @@ fn non_utf8_path_returns_enoent() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"\xFF/Data\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0x20000)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }

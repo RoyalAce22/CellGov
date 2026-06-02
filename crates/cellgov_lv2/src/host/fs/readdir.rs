@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_fs::{
     CELL_FS_DIRENT_SIZE, CELL_FS_MAX_FS_FILE_NAME_LENGTH, CELL_FS_TYPE_DIRECTORY,
     CELL_FS_TYPE_REGULAR,
@@ -41,19 +41,19 @@ impl Lv2Host {
         // nread is a u64 (PS3 sys_fs_readdir signature: `u64 *nread`);
         // 8-byte alignment.
         if !out_ptr_writable(rt, nread_out_ptr, 8, 8) {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
         // CellFsDirent has no required alignment > 1 (its leading
         // field is u8); the only bound is the 258-byte writable
         // span at the supplied pointer.
         if !out_ptr_writable(rt, dirent_out_ptr, CELL_FS_DIRENT_SIZE as usize, 1) {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
 
         let entry = match self.fs_store_mut().read_dir_entry(fd) {
             Ok(e) => e,
             Err(FsError::UnknownDir) => {
-                return Lv2Dispatch::immediate(errno::CELL_EBADF.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EBADF.into());
             }
             Err(other) => {
                 self.record_invariant_break(
@@ -63,7 +63,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
             }
         };
 

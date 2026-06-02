@@ -8,7 +8,7 @@
 //! with no parked waiter is lost.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::{CondMutexKind, Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
@@ -22,7 +22,7 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         if self.mutexes.lookup(mutex_id).is_none() {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         }
         let id = self.alloc_id();
         if self
@@ -30,17 +30,17 @@ impl Lv2Host {
             .create_with_id(id, mutex_id, CondMutexKind::Mutex)
             .is_err()
         {
-            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
         self.immediate_write_u32(id, id_ptr, requester)
     }
 
     pub(super) fn dispatch_cond_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.conds.lookup(id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if !entry.waiters().is_empty() {
-            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
         self.conds.destroy(id);
         Lv2Dispatch::immediate(0)
@@ -48,10 +48,10 @@ impl Lv2Host {
 
     pub(super) fn dispatch_cond_wait(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let Some(entry) = self.conds.lookup(id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let mutex_id = entry.mutex_id();
         let mutex_kind = entry.mutex_kind();
@@ -63,15 +63,15 @@ impl Lv2Host {
             CondMutexKind::LwMutex => {
                 // sys_cond is heavy-only; lwmutex binding would
                 // need sys_lwcond routing.
-                return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
             }
         };
         match release {
             crate::sync_primitives::MutexRelease::Unknown => {
-                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }
             crate::sync_primitives::MutexRelease::NotOwner => {
-                Lv2Dispatch::immediate(errno::CELL_EPERM.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into())
             }
             crate::sync_primitives::MutexRelease::Freed => {
                 // DuplicateWaiter is a host-invariant break: a
@@ -79,14 +79,14 @@ impl Lv2Host {
                 match self.conds.enqueue_waiter(id, caller) {
                     Ok(()) => {}
                     Err(crate::sync_primitives::CondEnqueueError::UnknownId) => {
-                        return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+                        return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
                     }
                     Err(crate::sync_primitives::CondEnqueueError::DuplicateWaiter) => {
                         self.record_invariant_break(
                             "cond_wait.Freed.DuplicateWaiter",
                             format_args!("cond {id}: caller {caller:?} already on waiter list"),
                         );
-                        return Lv2Dispatch::immediate(errno::CELL_EDEADLK.into());
+                        return Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into());
                     }
                 }
                 Lv2Dispatch::Block {
@@ -108,14 +108,14 @@ impl Lv2Host {
                 match self.conds.enqueue_waiter(id, caller) {
                     Ok(()) => {}
                     Err(crate::sync_primitives::CondEnqueueError::UnknownId) => {
-                        return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+                        return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
                     }
                     Err(crate::sync_primitives::CondEnqueueError::DuplicateWaiter) => {
                         self.record_invariant_break(
                             "cond_wait.Transferred.DuplicateWaiter",
                             format_args!("cond {id}: caller {caller:?} already on waiter list"),
                         );
-                        return Lv2Dispatch::immediate(errno::CELL_EDEADLK.into());
+                        return Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into());
                     }
                 }
                 let woken_unit_ids =
@@ -143,12 +143,12 @@ impl Lv2Host {
 
     pub(super) fn dispatch_cond_signal_all(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.conds.lookup(id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let mutex_id = entry.mutex_id();
         let mutex_kind = entry.mutex_kind();
         if !matches!(mutex_kind, CondMutexKind::Mutex) {
-            return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
         }
         let wakers = self
             .conds
@@ -189,7 +189,7 @@ impl Lv2Host {
                             );
                             wake_with(
                                 unit,
-                                errno::CELL_ESRCH.into(),
+                                cell_errors::CELL_ESRCH.into(),
                                 &mut woken_unit_ids,
                                 &mut response_updates,
                             );
@@ -206,7 +206,7 @@ impl Lv2Host {
                     );
                     wake_with(
                         unit,
-                        errno::CELL_ESRCH.into(),
+                        cell_errors::CELL_ESRCH.into(),
                         &mut woken_unit_ids,
                         &mut response_updates,
                     );
@@ -223,12 +223,12 @@ impl Lv2Host {
 
     pub(super) fn dispatch_cond_signal_to(&mut self, id: u32, target_thread: u32) -> Lv2Dispatch {
         let Some(entry) = self.conds.lookup(id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let mutex_id = entry.mutex_id();
         let mutex_kind = entry.mutex_kind();
         if !matches!(mutex_kind, CondMutexKind::Mutex) {
-            return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
         }
         let target = PpuThreadId::new(target_thread as u64);
         // Unknown cond is ESRCH; target-not-parked is EPERM.
@@ -237,10 +237,10 @@ impl Lv2Host {
         match self.conds.signal_to(id, target) {
             Ok(()) => {}
             Err(crate::sync_primitives::CondSignalToError::UnknownId) => {
-                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
             }
             Err(crate::sync_primitives::CondSignalToError::TargetNotWaiting) => {
-                return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
             }
         }
         self.cond_reacquire_wake(target, mutex_id, false)
@@ -248,7 +248,7 @@ impl Lv2Host {
 
     pub(super) fn dispatch_cond_signal(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.conds.lookup(id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let mutex_id = entry.mutex_id();
         let mutex_kind = entry.mutex_kind();
@@ -258,7 +258,7 @@ impl Lv2Host {
         };
         match mutex_kind {
             CondMutexKind::Mutex => self.cond_reacquire_wake(waker, mutex_id, false),
-            CondMutexKind::LwMutex => Lv2Dispatch::immediate(errno::CELL_EPERM.into()),
+            CondMutexKind::LwMutex => Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into()),
         }
     }
 
@@ -293,7 +293,7 @@ impl Lv2Host {
                              {err:?}; waking with ESRCH to avoid stranding"
                         ),
                     );
-                    return cond_wake_dispatch(waker_unit, errno::CELL_ESRCH.into(), true);
+                    return cond_wake_dispatch(waker_unit, cell_errors::CELL_ESRCH.into(), true);
                 }
                 cond_wake_dispatch(waker_unit, 0u64, false)
             }
@@ -305,7 +305,7 @@ impl Lv2Host {
                     "cond_reacquire_wake.DestroyedMutex",
                     format_args!("cond waiter {waker:?} references destroyed mutex {mutex_id}"),
                 );
-                cond_wake_dispatch(waker_unit, errno::CELL_ESRCH.into(), true)
+                cond_wake_dispatch(waker_unit, cell_errors::CELL_ESRCH.into(), true)
             }
         }
     }
@@ -390,7 +390,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_ESRCH.into());
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
         assert!(host.conds().is_empty());
     }
 
@@ -435,7 +435,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_ESRCH.into());
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
     }
 
     #[test]
@@ -640,7 +640,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_EPERM.into());
+        assert_eq!(code, cell_errors::CELL_EPERM.into());
         assert_eq!(
             host.mutexes().lookup(mutex_id).unwrap().owner(),
             Some(PpuThreadId::PRIMARY),
@@ -665,7 +665,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_ESRCH.into());
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
     }
 
     #[test]
@@ -709,7 +709,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_ESRCH.into());
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
     }
 
     #[test]
@@ -1169,7 +1169,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_ESRCH.into());
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
     }
 
     #[test]
@@ -1230,7 +1230,7 @@ mod tests {
                 assert_eq!(response_updates[0].0, waker_unit);
                 assert!(matches!(
                     response_updates[0].1,
-                    PendingResponse::ReturnCode { code } if code == errno::CELL_ESRCH.into()
+                    PendingResponse::ReturnCode { code } if code == cell_errors::CELL_ESRCH.into()
                 ));
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
@@ -1403,7 +1403,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_EPERM.into());
+        assert_eq!(code, cell_errors::CELL_EPERM.into());
         assert_eq!(
             host.conds()
                 .lookup(cond_id)
@@ -1432,7 +1432,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_ESRCH.into());
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
     }
 
     #[test]
@@ -1601,7 +1601,7 @@ mod tests {
                     };
                     assert_eq!(
                         code,
-                        errno::CELL_EPERM.into(),
+                        cell_errors::CELL_EPERM.into(),
                         "{variant}: signal_to on target-not-parked must EPERM",
                     );
                 }
@@ -1767,6 +1767,6 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_EBUSY.into());
+        assert_eq!(code, cell_errors::CELL_EBUSY.into());
     }
 }

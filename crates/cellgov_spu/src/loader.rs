@@ -2,9 +2,7 @@
 //! binaries (ELF32, big-endian, PT_LOAD segments only).
 
 use crate::state::SpuState;
-use cellgov_ps3_abi::elf::{
-    ELF32_HEADER_SIZE as ELF_HEADER_SIZE, ELF32_PHDR_SIZE as PHDR_SIZE, ELF_MAGIC, PT_LOAD,
-};
+use cellgov_ps3_abi::elf::{ELF32_HEADER_SIZE, ELF32_PHDR_SIZE, ELF_MAGIC, PT_LOAD};
 
 /// Load failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -42,7 +40,7 @@ pub enum LoadError {
 ///
 /// Returns [`LoadError`] on any header or segment validation failure.
 pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> {
-    if data.len() < ELF_HEADER_SIZE {
+    if data.len() < ELF32_HEADER_SIZE {
         return Err(LoadError::TooSmall);
     }
 
@@ -67,7 +65,7 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
 
     for i in 0..phnum {
         let base = phoff + i * phentsize;
-        if base + PHDR_SIZE > data.len() {
+        if base + ELF32_PHDR_SIZE > data.len() {
             return Err(LoadError::TooSmall);
         }
 

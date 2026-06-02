@@ -8,10 +8,8 @@
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
 use cellgov_ps3_abi::sce::{
-    SCEPKG_ERK, SCEPKG_RIV, SCE_COMP_KIND_NONE as COMP_KIND_NONE,
-    SCE_COMP_KIND_ZLIB as COMP_KIND_ZLIB, SCE_ENC_KIND_AES128_CTR as ENC_KIND_AES128_CTR,
-    SCE_ENC_KIND_PLAIN as ENC_KIND_PLAIN, SCE_SECTION_KIND_PHDR as SECTION_KIND_PHDR,
-    SCE_SUPPLEMENTAL_KIND_NPDRM,
+    SCEPKG_ERK, SCEPKG_RIV, SCE_COMP_KIND_NONE, SCE_COMP_KIND_ZLIB, SCE_ENC_KIND_AES128_CTR,
+    SCE_ENC_KIND_PLAIN, SCE_SECTION_KIND_PHDR, SCE_SUPPLEMENTAL_KIND_NPDRM,
 };
 
 /// Outer SCE container header at file offset 0 (big-endian, 0x20 bytes).
@@ -611,7 +609,7 @@ pub(crate) fn assemble_elf_from_sections(
     }
 
     for (sec, sec_data) in sections {
-        if sec.section_kind != SECTION_KIND_PHDR {
+        if sec.section_kind != SCE_SECTION_KIND_PHDR {
             continue;
         }
         if sec_data.is_empty() {
@@ -904,8 +902,8 @@ pub(crate) fn decrypt_sections_from_envelope(
         let mut sec_data = data[sec_start..sec_end].to_vec();
 
         match sec.encryption_kind {
-            ENC_KIND_PLAIN => {}
-            ENC_KIND_AES128_CTR => {
+            SCE_ENC_KIND_PLAIN => {}
+            SCE_ENC_KIND_AES128_CTR => {
                 let k_off = (sec.key_slot as usize)
                     .checked_mul(0x10)
                     .ok_or(SceError::SectionKeyIvIndexOutOfRange { index: i })?;
@@ -944,8 +942,8 @@ pub(crate) fn decrypt_sections_from_envelope(
         }
 
         match sec.compression_kind {
-            COMP_KIND_NONE => {}
-            COMP_KIND_ZLIB => {
+            SCE_COMP_KIND_NONE => {}
+            SCE_COMP_KIND_ZLIB => {
                 use flate2::read::ZlibDecoder;
                 use std::io::Read;
                 let mut decoder = ZlibDecoder::new(sec_data.as_slice());

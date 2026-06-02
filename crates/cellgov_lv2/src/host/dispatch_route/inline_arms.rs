@@ -5,7 +5,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 
@@ -26,7 +26,7 @@ impl Lv2Host {
                  not implemented; returning CELL_ENOSYS"
             ),
         );
-        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
     }
 
     /// `sys_memory_free`: bump allocator does not track per-allocation
@@ -202,10 +202,10 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         match pkg_id {
-            1 | 3 => Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()),
+            1 | 3 => Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into()),
             2 => match u32::try_from(a2) {
-                Err(_) => Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
-                Ok(0) => Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
+                Err(_) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+                Ok(0) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
                 Ok(addr) => {
                     const PROGRAM_AUTHORITY_ID: u64 = 0x1070_0000_3A00_0001;
                     let authid_be = PROGRAM_AUTHORITY_ID.to_be_bytes();
@@ -290,7 +290,7 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     }
 
     /// `Unsupported` catch-all: log and return CELL_ENOSYS.
@@ -307,7 +307,7 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
     }
 
     /// `Malformed` rejection: classifier failed to bind request fields;
@@ -326,7 +326,7 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     }
 
     /// `UnresolvedImport`: trampoline in an unpatched GOT slot fired;
@@ -361,6 +361,6 @@ impl Lv2Host {
                 );
             }
         }
-        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     }
 }

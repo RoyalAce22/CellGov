@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -40,13 +40,13 @@ impl Lv2Host {
         // nread is a u64 (PS3 sys_fs_read signature: `u64 *nread`);
         // enforce 8-byte alignment and writability.
         if !out_ptr_writable(rt, nread_out_ptr, 8, 8) {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
 
         // Peek fd validity without advancing the offset; fstat is
         // read-only and returns UnknownFd for an unknown fd.
         if self.fs_store().fstat(fd).is_err() {
-            return Lv2Dispatch::immediate(errno::CELL_EBADF.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EBADF.into());
         }
 
         let nbytes_usize = usize::try_from(nbytes).unwrap_or(usize::MAX);
@@ -57,7 +57,7 @@ impl Lv2Host {
         // after read_at would advance the offset and then return
         // EFAULT, which is a semantic break.
         if nbytes > 0 && !rt.writable(buf_ptr as u64, nbytes_usize) {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
 
         // fstat said the fd is valid, so read_at must not surface
@@ -75,7 +75,7 @@ impl Lv2Host {
                          (fstat said valid); contract violated"
                     ),
                 );
-                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
             }
         };
 

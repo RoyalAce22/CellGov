@@ -1,4 +1,4 @@
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::host::Lv2Host;
 
@@ -13,7 +13,7 @@ fn path_without_null_terminator_returns_einval() {
 
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        errno::CELL_EINVAL.code,
+        cell_errors::CELL_EINVAL.code,
         0,
     );
 }
@@ -24,7 +24,7 @@ fn out_of_range_path_ptr_returns_efault() {
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
         run(&mut host, &rt, fs_open(0xFFFF_FF00, 0x20000, 0, 0)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -38,7 +38,7 @@ fn path_at_region_end_succeeds() {
     let rt = PathRuntime::empty(0x40000).write(path_ptr, b"/foo\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(path_ptr, 0x20000, 0, 0)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }
@@ -56,7 +56,7 @@ fn path_crossing_unmapped_returns_efault_not_einval() {
         .reserve(0x30000, 0x31000);
     assert_immediate(
         run(&mut host, &rt, fs_open(path_ptr, 0x20000, 0, 0)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -67,7 +67,7 @@ fn high_bit_bytes_in_path_succeed() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/foo\xe6\x97\xa5\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }
@@ -78,7 +78,7 @@ fn empty_path_returns_enoent() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }
@@ -93,7 +93,7 @@ fn max_length_path_succeeds() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, &payload);
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }
@@ -104,7 +104,7 @@ fn first_null_terminator_wins() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/foo\0/bar\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }

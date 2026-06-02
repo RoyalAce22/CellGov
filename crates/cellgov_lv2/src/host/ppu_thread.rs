@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -18,7 +18,7 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let target_id = PpuThreadId::new(target);
         let Some(target_thread) = self.ppu_threads.get(target_id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if target_thread.state.is_finished() {
             let exit_value = target_thread.exit_value.unwrap_or(0);
@@ -35,7 +35,7 @@ impl Lv2Host {
             };
         }
         let Some(caller_thread_id) = self.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         match self
             .ppu_threads
@@ -49,8 +49,8 @@ impl Lv2Host {
                 },
                 effects: vec![],
             },
-            AddJoinWaiter::SelfJoin => Lv2Dispatch::immediate(errno::CELL_EDEADLK.into()),
-            AddJoinWaiter::TargetDetached => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+            AddJoinWaiter::SelfJoin => Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into()),
+            AddJoinWaiter::TargetDetached => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             // Pre-checks above eliminate both variants; reaching here
             // means the table mutated mid-call.
             AddJoinWaiter::UnknownTarget | AddJoinWaiter::TargetAlreadyFinished => {
@@ -61,7 +61,7 @@ impl Lv2Host {
                          for target {target_id:?}"
                     ),
                 );
-                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }
         }
     }
@@ -88,7 +88,7 @@ impl Lv2Host {
         {
             Some(arr) => arr,
             None => {
-                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
             }
         };
         let entry_opd_ptr = u32::from_be_bytes([
@@ -113,7 +113,7 @@ impl Lv2Host {
         {
             Some(arr) => arr,
             None => {
-                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
             }
         };
         let entry_code =
@@ -126,7 +126,7 @@ impl Lv2Host {
         let stack = match self.allocate_child_stack(size, 0x10) {
             Some(s) => s,
             None => {
-                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
             }
         };
 
@@ -141,7 +141,7 @@ impl Lv2Host {
 
         // Non-empty TLS at guest 0 would alias the empty-template sentinel.
         if !tls_bytes.is_empty() && tls_base == 0 {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
 
         Lv2Dispatch::PpuThreadCreate {
@@ -421,7 +421,7 @@ mod tests {
         );
         match result {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, errno::CELL_ESRCH.into());
+                assert_eq!(code, cell_errors::CELL_ESRCH.into());
                 assert!(effects.is_empty());
             }
             other => panic!("expected Immediate with ESRCH, got {other:?}"),
@@ -545,7 +545,10 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+        assert_eq!(
+            result,
+            Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        );
     }
 
     #[test]
@@ -574,7 +577,10 @@ mod tests {
             UnitId::new(0),
             &rt,
         );
-        assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+        assert_eq!(
+            result,
+            Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        );
     }
 
     #[test]

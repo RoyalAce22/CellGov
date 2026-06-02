@@ -1,4 +1,4 @@
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::host::Lv2Host;
 
@@ -47,7 +47,7 @@ fn fstat_unknown_fd_returns_ebadf_with_no_effects() {
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
         run(&mut host, &rt, fs_fstat(0xCAFE_BABE, 0x40000)),
-        errno::CELL_EBADF.code,
+        cell_errors::CELL_EBADF.code,
         0,
     );
 }
@@ -63,7 +63,7 @@ fn fstat_after_close_returns_ebadf() {
     assert_immediate(run(&mut host, &rt, fs_close(fd)), 0, 0);
     assert_immediate(
         run(&mut host, &rt, fs_fstat(fd, 0x40000)),
-        errno::CELL_EBADF.code,
+        cell_errors::CELL_EBADF.code,
         0,
     );
 }
@@ -77,7 +77,7 @@ fn fstat_misaligned_stat_out_ptr_returns_efault() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_fstat(fd, 0x40001)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -91,7 +91,7 @@ fn fstat_unmapped_stat_out_ptr_returns_efault() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_fstat(fd, 0xFFFF_FF00)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -116,7 +116,7 @@ fn stat_unknown_path_returns_enoent_with_no_effects() {
     let rt = PathRuntime::empty(0x100000).write(0x10000, b"/missing\0");
     assert_immediate(
         run(&mut host, &rt, fs_stat(0x10000, 0x40000)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }
@@ -127,7 +127,7 @@ fn stat_bad_path_pointer_returns_efault() {
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
         run(&mut host, &rt, fs_stat(0xFFFF_FF00, 0x40000)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -138,7 +138,7 @@ fn stat_path_without_null_terminator_returns_einval() {
     let rt = PathRuntime::empty(0x100000).write(0x10000, &vec![b'A'; CELL_FS_MAX_PATH_LENGTH]);
     assert_immediate(
         run(&mut host, &rt, fs_stat(0x10000, 0x40000)),
-        errno::CELL_EINVAL.code,
+        cell_errors::CELL_EINVAL.code,
         0,
     );
 }
@@ -151,7 +151,7 @@ fn stat_misaligned_stat_out_ptr_returns_efault_before_path_check() {
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
         run(&mut host, &rt, fs_stat(0xFFFF_FF00, 0x40001)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -165,7 +165,7 @@ fn stat_path_at_region_end_succeeds() {
     let rt = PathRuntime::empty(0x100000).write(path_ptr, b"/foo\0");
     assert_immediate(
         run(&mut host, &rt, fs_stat(path_ptr, 0x60000)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }
@@ -198,7 +198,7 @@ fn fs_stat_mounted_missing_returns_enoent() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/nope.bin\0");
     assert_immediate(
         run(&mut host, &rt, fs_stat(0x10000, 0x20000)),
-        errno::CELL_ENOENT.code,
+        cell_errors::CELL_ENOENT.code,
         0,
     );
 }

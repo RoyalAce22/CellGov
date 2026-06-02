@@ -5,7 +5,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -73,19 +73,19 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let known_bits = SYS_MEMORY_ACCESS_RIGHT_SPU_THR | SYS_MEMORY_ACCESS_RIGHT_RAW_SPU;
         if flags == 0 || (flags & !known_bits) != 0 {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let code = match addr >> 28 {
             0x0 | 0x1 | 0x2 | 0xc | 0xe => 0u64,
             0xf => {
                 if flags & SYS_MEMORY_ACCESS_RIGHT_RAW_SPU != 0 {
-                    errno::CELL_EPERM.into()
+                    cell_errors::CELL_EPERM.into()
                 } else {
                     0
                 }
             }
-            0xd => errno::CELL_EPERM.into(),
-            _ => errno::CELL_EINVAL.into(),
+            0xd => cell_errors::CELL_EPERM.into(),
+            _ => cell_errors::CELL_EINVAL.into(),
         };
         Lv2Dispatch::Immediate {
             code,
@@ -108,7 +108,7 @@ impl Lv2Host {
         max_raw_spu: u32,
     ) -> Lv2Dispatch {
         if max_raw_spu > 5 {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         self.log_invariant_break(
             "dispatch.spu_initialize_limits_unpersisted",

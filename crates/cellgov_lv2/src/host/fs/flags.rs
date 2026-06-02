@@ -6,7 +6,7 @@
 //! paths whose write-flag opens succeed because the dispatcher
 //! routes their writes to the host TTY log.
 
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_fs::{
     CELL_FS_O_ACCMODE, CELL_FS_O_APPEND, CELL_FS_O_CREAT, CELL_FS_O_RDWR, CELL_FS_O_TRUNC,
     CELL_FS_O_WRONLY,
@@ -37,10 +37,10 @@ pub(super) fn validate_open_flags(
     }
     let access = flags & CELL_FS_O_ACCMODE;
     if access == CELL_FS_O_WRONLY || access == CELL_FS_O_RDWR {
-        return Some(errno::CELL_EROFS);
+        return Some(cell_errors::CELL_EROFS);
     }
     if flags & (CELL_FS_O_CREAT | CELL_FS_O_TRUNC | CELL_FS_O_APPEND) != 0 {
-        return Some(errno::CELL_EROFS);
+        return Some(cell_errors::CELL_EROFS);
     }
     None
 }

@@ -1472,8 +1472,8 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
         _ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
+        use crate::rsx::control_register;
         use crate::rsx::method::{GCM_FLIP_COMMAND, NV_COUNT_SHIFT};
-        use crate::rsx::RSX_CONTROL_PUT_ADDR;
         use cellgov_effects::WritePayload;
         use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
@@ -1490,7 +1490,7 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
             source_time: GuestTicks::ZERO,
         });
         effects.push(Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(RSX_CONTROL_PUT_ADDR as u64), 4).unwrap(),
+            range: ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap(),
             bytes: WritePayload::new((self.fifo_base + 8).to_be_bytes().to_vec()),
             ordering: PriorityClass::Normal,
             source: self.id,
@@ -1760,12 +1760,12 @@ fn rsx_mirror_writes_disabled_by_default() {
 
 #[test]
 fn rsx_mirror_writes_off_leaves_cursor_unchanged() {
-    use crate::rsx::RSX_CONTROL_PUT_ADDR;
+    use crate::rsx::control_register;
     let mut rt = build_with_rsx_writable();
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: RSX_CONTROL_PUT_ADDR as u64,
+        slot_addr: control_register::PUT_ADDR as u64,
         value: 0x1234,
     });
     let s = rt.step().unwrap();
@@ -1775,13 +1775,13 @@ fn rsx_mirror_writes_off_leaves_cursor_unchanged() {
 
 #[test]
 fn rsx_mirror_writes_on_routes_put_to_cursor() {
-    use crate::rsx::RSX_CONTROL_PUT_ADDR;
+    use crate::rsx::control_register;
     let mut rt = build_with_rsx_writable();
     rt.set_rsx_mirror_writes(true);
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: RSX_CONTROL_PUT_ADDR as u64,
+        slot_addr: control_register::PUT_ADDR as u64,
         value: 0x0000_1000,
     });
     let s = rt.step().unwrap();
@@ -1790,20 +1790,20 @@ fn rsx_mirror_writes_on_routes_put_to_cursor() {
     use cellgov_mem::{ByteRange, GuestAddr};
     let mem_bytes = rt
         .memory()
-        .read(ByteRange::new(GuestAddr::new(RSX_CONTROL_PUT_ADDR as u64), 4).unwrap())
+        .read(ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap())
         .unwrap();
     assert_eq!(mem_bytes, &0x0000_1000u32.to_be_bytes());
 }
 
 #[test]
 fn rsx_mirror_writes_on_routes_get_to_cursor() {
-    use crate::rsx::RSX_CONTROL_GET_ADDR;
+    use crate::rsx::control_register;
     let mut rt = build_with_rsx_writable();
     rt.set_rsx_mirror_writes(true);
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: RSX_CONTROL_GET_ADDR as u64,
+        slot_addr: control_register::GET_ADDR as u64,
         value: 0x0000_2000,
     });
     let s = rt.step().unwrap();
@@ -1813,13 +1813,13 @@ fn rsx_mirror_writes_on_routes_get_to_cursor() {
 
 #[test]
 fn rsx_mirror_writes_on_routes_reference_to_cursor() {
-    use crate::rsx::RSX_CONTROL_REF_ADDR;
+    use crate::rsx::control_register;
     let mut rt = build_with_rsx_writable();
     rt.set_rsx_mirror_writes(true);
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: RSX_CONTROL_REF_ADDR as u64,
+        slot_addr: control_register::REF_ADDR as u64,
         value: 0xCAFE_BABE,
     });
     let s = rt.step().unwrap();
@@ -1859,10 +1859,10 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
         _ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
+        use crate::rsx::control_register;
         use crate::rsx::method::{
             NV406E_SEMAPHORE_OFFSET, NV406E_SEMAPHORE_RELEASE, NV_COUNT_SHIFT,
         };
-        use crate::rsx::RSX_CONTROL_PUT_ADDR;
         use cellgov_effects::WritePayload;
         use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
@@ -1897,7 +1897,8 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
                     source_time: GuestTicks::ZERO,
                 });
                 effects.push(Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(RSX_CONTROL_PUT_ADDR as u64), 4).unwrap(),
+                    range: ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4)
+                        .unwrap(),
                     bytes: WritePayload::new(self.put_target.to_be_bytes().to_vec()),
                     ordering: PriorityClass::Normal,
                     source: self.id,
@@ -2048,13 +2049,13 @@ fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
 #[test]
 fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
     // Invariant: mirror runs before rsx_advance within the same commit_step.
-    use crate::rsx::RSX_CONTROL_PUT_ADDR;
+    use crate::rsx::control_register;
     let mut rt = build_with_rsx_writable();
     rt.set_rsx_mirror_writes(true);
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: RSX_CONTROL_PUT_ADDR as u64,
+        slot_addr: control_register::PUT_ADDR as u64,
         value: 0x40,
     });
     let s = rt.step().unwrap();
