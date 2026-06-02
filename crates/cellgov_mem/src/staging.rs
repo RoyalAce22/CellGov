@@ -51,8 +51,7 @@ impl StagingMemory {
         self.pending.push(write);
     }
 
-    /// View all pending writes in stage order. Test-only: production
-    /// callers do not inspect the buffer; they stage, drain, or clear.
+    /// View all pending writes in stage order. Test-only.
     #[cfg(test)]
     #[inline]
     pub fn pending(&self) -> &[StagedWrite] {
@@ -99,14 +98,8 @@ impl StagingMemory {
     /// Successful drain commits bytes to main memory but does **not**
     /// fire the reservation clear-sweep. Every caller must clear any
     /// `ReservationTable` entries that overlap the committed ranges
-    /// (per [PPC-Book2 p:23 s:3.3.2] lock-line reservation semantics) or
-    /// cross-unit `LL/SC` will silently lose the snoop. The commit
-    /// pipeline at `cellgov_core::commit` does this per-effect-type
-    /// because some effects (e.g. `ConditionalStore`) need the
-    /// emitter's own reservation removed in addition to the covering
-    /// sweep -- nuance a flat "ranges committed" report would lose.
-    /// New callers replicating the drain pattern must re-implement
-    /// the per-effect sweep at their call site.
+    /// (per [PPC-Book2 p:23 s:3.3.2] lock-line reservation semantics)
+    /// or cross-unit `LL/SC` will silently lose the snoop.
     ///
     /// # Errors
     ///
@@ -127,11 +120,7 @@ impl StagingMemory {
 
 impl Drop for StagingMemory {
     fn drop(&mut self) {
-        // Defense-in-depth: a non-empty drop means the commit pipeline
-        // forgot to drain on success or clear on fault. Catching it
-        // here turns a silent intent leak into a debug-build panic at
-        // the boundary where the contract applies. Skip during an
-        // active unwind so a double-panic does not abort.
+        // Skip during an active unwind so a double-panic does not abort.
         if std::thread::panicking() {
             return;
         }
@@ -228,9 +217,7 @@ mod tests {
     fn drain_into_length_mismatch_rejects_whole_batch_with_neighbors_intact() {
         let mut mem = GuestMemory::new(12);
         let mut s = StagingMemory::new();
-        // (good, bad, good): all three must remain pending and memory
-        // untouched. Asserts that the validator stops on the first
-        // offender without partially applying anything before it.
+        // good, bad, good: validator must stop on the first offender.
         s.stage(staged(0, &[1, 1, 1, 1]));
         s.stage(StagedWrite {
             range: range(4, 4),
@@ -385,8 +372,6 @@ mod tests {
 
     #[test]
     fn drop_with_pending_writes_panics_in_debug() {
-        // Sanity check on the Drop debug_assert: a leak of staged writes
-        // panics in debug builds. Release builds skip the assert.
         if cfg!(debug_assertions) {
             let result = std::panic::catch_unwind(|| {
                 let mut s = StagingMemory::new();

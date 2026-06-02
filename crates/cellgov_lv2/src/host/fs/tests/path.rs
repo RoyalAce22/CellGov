@@ -31,8 +31,6 @@ fn out_of_range_path_ptr_returns_efault() {
 
 #[test]
 fn path_at_region_end_succeeds() {
-    // Regression: pre-region-aware reads EFAULTed here because
-    // a fixed 1024-byte window spilled past the buffer.
     let mut host = Lv2Host::new();
     let path_ptr: u32 = 0x40000 - 5;
     let rt = PathRuntime::empty(0x40000).write(path_ptr, b"/foo\0");
@@ -45,10 +43,6 @@ fn path_at_region_end_succeeds() {
 
 #[test]
 fn path_crossing_unmapped_returns_efault_not_einval() {
-    // Regression: real PS3 page-faults during the kernel scan
-    // (-> EFAULT). The historical 1-byte probe at `path_ptr`
-    // returned EINVAL ("first byte mapped, no NUL within
-    // max_len") -- that is the bug this regression pins.
     let mut host = Lv2Host::new();
     let path_ptr: u32 = 0x30000 - 32;
     let rt = PathRuntime::empty(0x40000)
@@ -85,8 +79,6 @@ fn empty_path_returns_enoent() {
 
 #[test]
 fn max_length_path_succeeds() {
-    // NUL at index CELL_FS_MAX_PATH_LENGTH - 1 is the inclusive
-    // boundary the scan window must reach.
     let mut host = Lv2Host::new();
     let mut payload = vec![b'A'; CELL_FS_MAX_PATH_LENGTH - 1];
     payload.push(0);

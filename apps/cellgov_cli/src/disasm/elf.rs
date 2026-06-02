@@ -1,3 +1,13 @@
+//! ELF64-BE program-header parser for the `disasm` subcommand.
+//!
+//! Owns the producer-side validation that lets [`super::stream::disassemble`]
+//! skip per-byte bounds checks in its hot loop: PT_LOAD `[p_offset,
+//! p_offset + p_filesz)` lies inside the file, and `p_vaddr + p_memsz`
+//! fits in `u64`. Rejects non-PPC64 / non-ELFCLASS64 / non-big-endian
+//! inputs at the entry point so downstream code can assume PS3 PPE
+//! shape.
+
+/// Reason an ELF failed to parse.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub(super) enum ElfError {
     #[error("not an ELF (file is {len} bytes; need >= 64)")]
@@ -74,11 +84,11 @@ pub(super) struct PtLoad {
 
 /// Parse all PT_LOAD program headers out of an ELF64-BE blob.
 ///
-/// Validates EI_CLASS and EI_DATA, the program-header table extent,
-/// `e_phentsize`, `e_phnum != PN_XNUM`, and that each PT_LOAD's
-/// `[p_offset, p_offset + p_filesz)` lies entirely inside the file.
-/// `disassemble` relies on those checks to skip per-byte bounds
-/// validation in the hot loop.
+/// Cross-module contract: `disassemble` relies on the validation here
+/// (table extent, `e_phentsize`, `e_phnum != PN_XNUM`, every PT_LOAD's
+/// `[p_offset, p_offset + p_filesz)` inside the file, and
+/// `p_vaddr + p_memsz` not overflowing u64) to skip per-byte bounds
+/// checks in its hot loop.
 pub(super) fn parse_pt_loads(data: &[u8]) -> Result<Vec<PtLoad>, ElfError> {
     if data.len() < 64 {
         return Err(ElfError::TooSmall { len: data.len() });
@@ -173,10 +183,9 @@ pub(super) fn parse_pt_loads(data: &[u8]) -> Result<Vec<PtLoad>, ElfError> {
                 p_memsz,
             });
         }
-        // Producer-side vaddr-range overflow check: select_segment and
-        // the disassemble loop assume p_vaddr + p_filesz (and p_memsz)
-        // fit in u64. Rejecting here lets the hot loop drop
-        // saturating_add for plain +.
+        // `select_segment` and the disassemble loop assume p_vaddr +
+        // p_filesz (and p_memsz) fit in u64; rejecting here lets the
+        // hot loop drop saturating_add.
         if p_vaddr.checked_add(p_filesz).is_none() || p_vaddr.checked_add(p_memsz).is_none() {
             return Err(ElfError::SegmentVaddrOverflow {
                 idx: i,

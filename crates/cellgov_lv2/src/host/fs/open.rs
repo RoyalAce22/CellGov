@@ -17,18 +17,15 @@ impl Lv2Host {
     /// pre-registered manifest blob or a path resolved through the
     /// mount table.
     ///
-    /// # Error precedence
+    /// # Errors
     ///
-    /// In order:
+    /// In precedence order:
     /// 1. `fd_out_ptr` NULL / misaligned / unwritable -> CELL_EFAULT.
-    /// 2. `path_ptr` unmapped, scan crosses unmapped, or no NUL
-    ///    within `CELL_FS_MAX_PATH_LENGTH` -> CELL_EFAULT or CELL_EINVAL.
-    /// 3. Path exists (manifest blob OR mount-resolvable to a
-    ///    regular file) AND open flags request write semantics
-    ///    (O_WRONLY, O_RDWR, O_CREAT, O_TRUNC, O_APPEND) -> CELL_EROFS.
-    /// 4. Path exists, open flags OK -> CELL_OK with one fd-write
-    ///    effect.
-    /// 5. Path missing or non-UTF-8 -> CELL_ENOENT, no effects.
+    /// 2. `path_ptr` unmapped / no NUL within `CELL_FS_MAX_PATH_LENGTH`
+    ///    -> CELL_EFAULT or CELL_EINVAL.
+    /// 3. Path exists AND flags request write semantics -> CELL_EROFS.
+    /// 4. Path exists, flags OK -> CELL_OK with one fd-write effect.
+    /// 5. Path missing or non-UTF-8 -> CELL_ENOENT.
     pub(in crate::host) fn dispatch_fs_open(
         &mut self,
         path_ptr: u32,
@@ -49,21 +46,14 @@ impl Lv2Host {
             }
         };
 
-        // Non-UTF-8 guest paths (e.g. Shift-JIS save-data names from
-        // Japanese titles) cannot name a UTF-8 manifest key by
-        // construction; treat as ENOENT after the structural checks
-        // above. A future manifest schema with non-UTF-8 keys
-        // replaces the from_utf8 gate with the chosen decode policy.
         let Ok(p) = std::str::from_utf8(&path_bytes_owned) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
         };
 
         let flag_err = validate_open_flags(flags, p);
 
-        // Existence-then-flag precedence: a write-flag combo wins
-        // only when the path actually exists. The two existence
-        // sources are the manifest (in-memory blob) and the mount
-        // table (lazy disk-to-blob cache). Probe in that order.
+        // Existence-then-flag: a write-flag error wins only when the
+        // path exists. Probe manifest before mount-table cache.
         if self.fs_store().has_path(p) {
             if let Some(err) = flag_err {
                 return Lv2Dispatch::immediate(err.into());
@@ -84,19 +74,12 @@ impl Lv2Host {
     }
 
     /// Allocate an fd against a path that was just confirmed to
-    /// exist in [`Self::fs_store`] (either a manifest blob or a
-    /// freshly-cached mount entry).
+    /// exist in [`Self::fs_store`].
     ///
-    /// # Contract (post-`has_path == true`)
-    ///
-    /// `open_fd(path)` may return only `Ok(fd)` or
-    /// `Err(FsError::FdExhausted)`. `UnknownPath` is excluded by
-    /// `has_path`, and any other variant means FsStore's path
-    /// table and fd allocator disagree about the same path -- a
-    /// genuine internal-state-drift bug, not guest input. Such
-    /// drift is surfaced as `record_invariant_break` + EFAULT
-    /// rather than fail-soft ENOENT so cross-runner compare picks
-    /// it up immediately.
+    /// Caller invariant: `has_path(path)` returned true, so
+    /// `open_fd` may return only `Ok(fd)` or `FdExhausted`; any
+    /// other variant is internal-state drift and surfaces as an
+    /// invariant break + EFAULT.
     fn open_existing_blob(
         &mut self,
         path: &str,

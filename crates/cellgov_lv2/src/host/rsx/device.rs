@@ -16,18 +16,13 @@ const _: () = assert!(
 );
 
 impl Lv2Host {
-    /// `sys_rsx_device_map` (675). Idempotent: every `dev_id == 8`
-    /// call returns [`device_map::ADDR`] in `dev_addr` OUT (8-byte BE
-    /// u64) with `CELL_OK`. `a2` is documented "Unused" (RPCS3's
-    /// `sys_rsx.cpp`) and left untouched so the post-syscall memory
-    /// image matches RPCS3 byte-for-byte.
+    /// `sys_rsx_device_map` (675): write [`device_map::ADDR`] as 8-byte BE u64
+    /// into `dev_addr` OUT for `dev_id == 8`. `a2` is documented unused and
+    /// left untouched. Idempotent across repeated calls.
     ///
     /// # Errors
     ///
-    /// `CELL_EINVAL` for any `dev_id` other than `8`. The
-    /// `dispatch.sys_rsx_device_map_unsupported_dev_id` invariant
-    /// break is recorded via [`Self::log_invariant_break`] (see its
-    /// stderr-dedup semantics).
+    /// `CELL_EINVAL` for any `dev_id` other than `8`.
     pub(in crate::host) fn dispatch_sys_rsx_device_map(
         &mut self,
         dev_addr_ptr: u32,
@@ -45,8 +40,8 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        // dev_addr_ptr == 0 would write guest addr 0 (readable main
-        // region, no EFAULT path); no real caller passes null.
+        // No real caller passes null; addr 0 is in the readable main
+        // region and would silently overwrite without an EFAULT path.
         debug_assert!(
             dev_addr_ptr != 0,
             "sys_rsx_device_map dev_addr OUT pointer is null"

@@ -192,7 +192,6 @@ fn time_get_current_time_and_timebase_frequency_are_coherent() {
     let as_nsec_from_time_syscall = sec * 1_000_000_000 + nsec;
     let us_from_tb = tb * 1_000_000 / cellgov_time::CELL_PPU_TIMEBASE_HZ;
     let nsec_from_tb = us_from_tb * 1_000;
-    // TB granularity ~12.5 ns; require agreement under 1 us.
     let diff = as_nsec_from_time_syscall.abs_diff(nsec_from_tb);
     assert!(
         diff < 1_000,
@@ -214,7 +213,6 @@ fn time_get_timebase_frequency_returns_cell_ppu_timebase_hz() {
 
 #[test]
 fn cell_ps3_user_memory_total_is_213_mib() {
-    // 213 MiB == 0x0D50_0000 == 223,346,688.
     assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 0x0D50_0000);
     assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 223_346_688);
 }
@@ -439,8 +437,6 @@ fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
 
 #[test]
 fn syscall_332_then_334_records_pending_region_install() {
-    // Firmware-set boot path: 332 mints a handle, 334 queues a region
-    // install of that handle's size at the target addr.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let mut mem_id_buf = [0u8; 4];
@@ -489,7 +485,6 @@ fn syscall_332_then_334_records_pending_region_install() {
 
 #[test]
 fn syscall_334_misaligned_returns_ealign() {
-    // 332 records align=0x100000 (SYS_MEMORY_PAGE_SIZE_1M from flags=0x400).
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result_332 = host.dispatch(
@@ -535,7 +530,6 @@ fn syscall_334_misaligned_returns_ealign() {
 
 #[test]
 fn syscall_334_addr_out_of_range_returns_einval() {
-    // 334 rejects addr < 0x2000_0000 or >= 0xC000_0000 (RPCS3 bounds).
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -554,8 +548,6 @@ fn syscall_334_addr_out_of_range_returns_einval() {
 
 #[test]
 fn syscall_362_records_handle_keyed_on_mem_id() {
-    // 362 = sys_mmapper_allocate_shared_memory_from_container: cid in
-    // args[2], mem_id OUT pointer in args[4].
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -586,7 +578,6 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
     buf.copy_from_slice(bytes.bytes());
     let mem_id = u32::from_be_bytes(buf);
 
-    // The 362-minted handle is now usable as 334's mem_id arg.
     let result_334 = host.dispatch(
         Lv2Request::Unsupported {
             number: 334,
@@ -715,8 +706,6 @@ fn syscall_330_writes_monotonic_256mib_aligned_address() {
 
 #[test]
 fn syscall_330_returns_enomem_when_cursor_would_cross_mmio_region() {
-    // Cursor at MMAPPER_REGION_START (0x5000_0000), refuses crossing
-    // MMAPPER_REGION_END (0xC000_0000): 7 grants fit, the 8th fails.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let req = || Lv2Request::Unsupported {
@@ -882,8 +871,6 @@ fn syscall_332_writes_fresh_mem_id_to_mem_id_ptr() {
 
 #[test]
 fn syscall_332_size_not_multiple_of_64k_granule_returns_ealign() {
-    // flags=0x200 (FLAG_64K) -> granule 0x10000. size=0x1_8000 leaves
-    // an 0x8000 remainder.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -902,8 +889,6 @@ fn syscall_332_size_not_multiple_of_64k_granule_returns_ealign() {
 
 #[test]
 fn syscall_332_size_not_multiple_of_1m_granule_returns_ealign() {
-    // flags=0x400 (FLAG_1M) -> granule 0x100000. size=0x10_0001 has a
-    // 1-byte remainder.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -922,8 +907,6 @@ fn syscall_332_size_not_multiple_of_1m_granule_returns_ealign() {
 
 #[test]
 fn syscall_362_size_not_multiple_of_granule_returns_ealign() {
-    // 362 reads flags from args[3] (r6), not args[2] (r5 = container).
-    // A 1-byte misaligned size against a 1M granule must fault.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -951,12 +934,6 @@ fn syscall_362_size_not_multiple_of_granule_returns_ealign() {
 
 #[test]
 fn syscall_362_reads_flags_from_args3_not_args2() {
-    // Regression guard against transposing 362's flag-arg index.
-    // args[2] = 0x200 (would imply 64K granule and accept the size).
-    // args[3] = 0x400 (real flags: 1M granule, rejects the size).
-    // If the dispatch wrongly reads args[2], the call returns CELL_OK
-    // and writes a mem_id. The correct dispatch reads args[3] and
-    // returns CELL_EALIGN.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -1117,7 +1094,6 @@ fn syscall_494_walks_registry_writing_ids_and_count() {
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
             assert_eq!(code, 0);
-            // One entry (audio; liblv2 filtered) + count write = 2 effects.
             assert_eq!(effects.len(), 2);
             if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
                 assert_eq!(range.start().raw(), 0x4040);
@@ -1205,7 +1181,6 @@ fn prx_start_module_writes_no_start_sentinel_to_p_opt_entry() {
     let p_opt: u32 = 0x4000;
     let mut mem = cellgov_mem::GuestMemory::new(0x10000);
     let mut p_opt_buf = [0u8; 0x20];
-    // size field at offset 0 -- paired with the handler's read_committed(p_opt, 4).
     p_opt_buf[0..4].copy_from_slice(&0x20u32.to_be_bytes());
     mem.apply_commit(
         ByteRange::new(
@@ -1366,11 +1341,6 @@ fn syscall_494_rejects_null_p_info_with_efault() {
 
 #[test]
 fn syscall_494_unreadable_max_field_returns_efault_and_logs_break() {
-    // p_info=0xF000 places the max field at 0xF00C and idlist field at
-    // 0xF014. FakeRuntime::new(0x10000) backs [0, 0x10000), so a
-    // p_info one byte short of the limit makes the max-field read fall
-    // off the end: a 4-byte read starting at 0xFFFD (p_info=0xFFF1)
-    // crosses 0x10000 and returns None.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let breaks_before = host.invariant_break_count();
@@ -1391,8 +1361,6 @@ fn syscall_494_unreadable_max_field_returns_efault_and_logs_break() {
 
 #[test]
 fn syscall_494_unreadable_idlist_field_returns_efault_and_logs_break() {
-    // p_info=0xFFEC places the max field at 0xFFF8 (in range, returns
-    // 0) and the idlist field at 0x10000 (out of range, fault).
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let breaks_before = host.invariant_break_count();
@@ -1413,9 +1381,6 @@ fn syscall_494_unreadable_idlist_field_returns_efault_and_logs_break() {
 
 #[test]
 fn syscall_494_emits_slot_and_count_in_one_effects_batch() {
-    // Pins dispatch-layer co-emission only. Rollback enforcement
-    // is in cellgov_core::runtime::lv2_dispatch::apply_lv2_effects
-    // and tested there.
     let mut host = Lv2Host::new();
     host.prx_registry_mut().register(
         "libaudio".into(),
@@ -1479,8 +1444,6 @@ fn syscall_494_emits_slot_and_count_in_one_effects_batch() {
 
 #[test]
 fn syscall_494_idlist_order_is_independent_of_registration_order() {
-    // Registry walks BTreeMap keys by allocation order; A-then-B and
-    // B-then-A must produce identical idlist bytes.
     fn idlist_bytes(register: impl FnOnce(&mut Lv2Host)) -> Vec<u8> {
         let mut host = Lv2Host::new();
         register(&mut host);

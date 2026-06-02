@@ -13,8 +13,8 @@ impl Runtime {
     /// Drive the commit pipeline for a previously-returned step result.
     ///
     /// Epoch advances on every commit boundary including validation
-    /// failures, so an `Err` return still mutates `self.epoch`. Fault rule
-    /// and atomic-batch semantics are inherited from
+    /// failures, so an `Err` return still mutates `self.epoch`. Fault
+    /// and atomic-batch semantics: see
     /// [`crate::commit::CommitPipeline::process`].
     pub fn commit_step(
         &mut self,
@@ -76,8 +76,7 @@ impl Runtime {
         };
         let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
 
-        // Invalidate predecoded caches overlapping committed writes;
-        // required for self-modifying code and runtime relocations.
+        // Invalidate predecoded caches overlapping committed writes.
         if outcome.is_ok() {
             for effect in effects {
                 if let cellgov_effects::Effect::SharedWriteIntent { range, .. } = effect {

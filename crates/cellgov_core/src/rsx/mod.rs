@@ -1,7 +1,5 @@
-//! RSX CPU-side completion state.
-//!
-//! Owns the pure-data committed state for the FIFO cursor and the
-//! submodules covering methods, flip, and reports.
+//! RSX CPU-side completion state: FIFO cursor plus method, flip, and
+//! reports submodules.
 
 pub mod advance;
 pub mod cursor;

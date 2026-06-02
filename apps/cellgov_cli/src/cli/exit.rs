@@ -19,8 +19,6 @@ pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| die(&format!("failed to read {path}: {e}")))
 }
 
-/// Why one specific candidate failed to load. The candidate-walking
-/// loop preserves the typed cause per candidate.
 #[derive(Debug, thiserror::Error)]
 enum LoadCandidateError {
     #[error("read failed: {0}")]
@@ -31,17 +29,14 @@ enum LoadCandidateError {
     NotElf,
 }
 
-/// Build the NPDRM klicensee resolver from a title manifest's
-/// `rap_filename` field. RAP path layout is
-/// `<vfs_root>/home/00000001/exdata/<rap>`.
+/// RAP path layout is `<vfs_root>/home/00000001/exdata/<rap>`.
 fn klicensee_resolver(
     title: &TitleManifest,
     vfs_root: PathBuf,
 ) -> impl Fn(&NpdHeaderInfo) -> Option<[u8; 16]> {
     let rap_filename = title.rap_filename.clone();
     move |npd: &NpdHeaderInfo| -> Option<[u8; 16]> {
-        // license 3 (free) substitutes NP_KLIC_FREE inside
-        // decrypt_self_to_elf_auto if the resolver returns None.
+        // license 3 (free) falls back to NP_KLIC_FREE downstream when None.
         let rap_filename = rap_filename.as_ref()?;
         let rap_path = vfs_root
             .join("home")
@@ -70,8 +65,7 @@ fn klicensee_resolver(
 }
 
 /// Read a PPU image at an explicit path, resolving the klicensee for
-/// NPDRM titles from the manifest's `rap_filename`. Dies with a
-/// context-rich error on read or decrypt failure.
+/// NPDRM titles from the manifest's `rap_filename`.
 pub(crate) fn load_ppu_image_with_title_or_die(
     path: &str,
     title: &TitleManifest,
@@ -87,8 +81,8 @@ pub(crate) fn load_ppu_image_with_title_or_die(
 }
 
 /// Walk `eboot_candidates` in declaration order, returning the first
-/// plaintext ELF that loads. Dies only if every candidate fails; the
-/// final message enumerates each candidate with its own typed cause.
+/// plaintext ELF that loads. The die-message enumerates each
+/// candidate's typed cause when every candidate fails.
 pub(crate) fn load_ppu_image_walk_candidates_or_die(
     title: &TitleManifest,
     vfs_root: &Path,

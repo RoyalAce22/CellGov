@@ -15,19 +15,15 @@ use crate::request::Lv2Request;
 use crate::thread_group::{DestroyGroupError, GroupState, MAX_SLOTS_PER_GROUP};
 
 impl Lv2Host {
-    /// `sys_spu_image_import` -- register `size` bytes at `img_ptr`
-    /// in [`crate::image::ContentStore`] under a synthetic path and
-    /// write the resulting handle into the SPU image struct at
-    /// `handle_out`.
+    /// `sys_spu_image_import`: register `size` bytes at `img_ptr` in
+    /// [`crate::image::ContentStore`] under a synthetic path and write the
+    /// handle into the SPU image struct at `handle_out`.
     ///
     /// # Error precedence
     ///
-    /// 1. `img_ptr` / `size` out of guest bounds -> CELL_EINVAL,
-    ///    no effects.
-    /// 2. `handle_out` not writable for 16 bytes -> CELL_EFAULT,
-    ///    no effects.
-    /// 3. Otherwise CELL_OK with one effect: the SPU image struct
-    ///    write.
+    /// 1. `img_ptr` / `size` out of guest bounds -> CELL_EINVAL, no effects.
+    /// 2. `handle_out` not writable for 16 bytes -> CELL_EFAULT, no effects.
+    /// 3. Otherwise CELL_OK with one effect (the image struct write).
     pub(super) fn dispatch_image_import(
         &mut self,
         handle_out: u32,
@@ -37,9 +33,8 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // SPU local store is 256 KiB; a > usize image cannot satisfy
-        // a read and is rejected as CELL_EINVAL alongside the
-        // out-of-bounds branch.
+        // > usize image cannot satisfy a read; reject as CELL_EINVAL
+        // alongside the out-of-bounds branch.
         let Ok(size) = usize::try_from(size) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         };
@@ -52,9 +47,8 @@ impl Lv2Host {
         if !rt.writable(u64::from(handle_out), 16) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
-        // Synthetic path makes every (type_id, img_ptr) pair a
-        // distinct entry. The image's body is opaque here; SPU ELF
-        // parsing happens later at sys_spu_thread_initialize.
+        // Synthetic path keys every (type_id, img_ptr) pair to a distinct
+        // entry; ELF parsing is deferred to sys_spu_thread_initialize.
         let path = format!("/:import:{type_id:#x}:{img_ptr:#x}");
         let handle = self
             .content_store_mut()
@@ -89,7 +83,7 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
             }
         };
-        // Missing NUL: EINVAL (malformed), not ENOENT (not found).
+        // Missing NUL is malformed (EINVAL), distinct from not-found (ENOENT).
         let path_len = match path_bytes.iter().position(|&b| b == 0) {
             Some(n) => n,
             None => {
@@ -135,14 +129,12 @@ impl Lv2Host {
         num_threads: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Enforce the thread-id packing limit up front.
         if num_threads > MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let group_id = match self.groups.create(num_threads) {
             Some(id) => id,
             None => {
-                // u32 id space exhausted; EAGAIN so retries terminate.
                 return Lv2Dispatch::immediate(cell_errors::CELL_EAGAIN.into());
             }
         };
@@ -185,9 +177,8 @@ impl Lv2Host {
             }
         };
 
-        // Two-pass: validate every handle, then build `inits`. The
-        // second pass's `expect` relies on `ContentStore::lookup_by_handle`
-        // being a pure read.
+        // Two-pass: validate every handle, then build `inits`. The second
+        // pass's `expect` requires `lookup_by_handle` to be a pure read.
         let slot_entries: Vec<_> = group.slots.iter().map(|(&k, v)| (k, v.clone())).collect();
         for (_slot_idx, slot) in &slot_entries {
             if self.content.lookup_by_handle(slot.image_handle).is_none() {
@@ -249,7 +240,6 @@ impl Lv2Host {
             }
         };
 
-        // Short read surfaces as EFAULT rather than panicking.
         let image_handle = match rt.read_committed(img_ptr as u64, 4) {
             Some(bytes) if bytes.len() >= 4 => {
                 let fixed: [u8; 4] = bytes[0..4].try_into().expect("slice length checked above");
@@ -260,10 +250,9 @@ impl Lv2Host {
             }
         };
 
-        // Snapshot args here rather than at group_start: the PPU may reuse
-        // the same stack variable across initialize calls. `arg_ptr == 0`
-        // is an explicit opt-out; a non-zero pointer whose read fails is
-        // EFAULT, not silently zeroed.
+        // Args snapshot at initialize time, not at group_start: the PPU
+        // may reuse the same stack variable across calls. `arg_ptr == 0`
+        // opts out; a non-zero pointer that fails to read is EFAULT.
         let args = if arg_ptr == 0 {
             [0u64; 4]
         } else {
@@ -286,7 +275,7 @@ impl Lv2Host {
         if thread_num >= MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        // Surface a wrap near u32::MAX as EINVAL, not a silent collision.
+        // Wrap near u32::MAX surfaces as EINVAL, not a silent collision.
         let thread_id = match group_id
             .checked_mul(MAX_SLOTS_PER_GROUP)
             .and_then(|base| base.checked_add(thread_num))
@@ -297,8 +286,7 @@ impl Lv2Host {
             }
         };
 
-        // ContentStore never allocates handle 0; a guest-supplied 0 is
-        // an invalid reference, surfaced as ESRCH.
+        // ContentStore never allocates handle 0; guest-supplied 0 -> ESRCH.
         let Some(handle) = crate::image::SpuImageHandle::new(image_handle) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
@@ -399,8 +387,7 @@ impl Lv2Host {
         value: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Non-running target: ESRCH; silently dropping the message would
-        // lose mailbox data on a dead thread.
+        // Non-running target: ESRCH. Silent drop would lose mailbox data.
         let target_uid = match self.groups.running_unit_for_thread(thread_id) {
             Some(uid) => uid,
             None => {

@@ -497,9 +497,6 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
     );
 }
 
-/// Correctness gate for real getllar/putllc contention: without it,
-/// always-succeed putllc would drop updates and the counter would
-/// fall below 2 * INCREMENTS_PER_THREAD.
 #[test]
 fn spu_atomic_cross_spu_counter_is_exactly_2n() {
     const INCREMENTS_PER_THREAD: u32 = 32;

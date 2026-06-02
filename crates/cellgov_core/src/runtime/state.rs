@@ -27,7 +27,7 @@ pub struct Runtime {
     /// straddle drains and the later RELEASE must read the earlier OFFSET.
     pub(super) rsx_sem_offset: u32,
     /// Host must make the RSX region writable before enabling; otherwise
-    /// every put-pointer store reserved-writes and the mirror never runs.
+    /// every put-pointer store reserved-writes.
     pub(super) rsx_mirror_writes: bool,
     pub(super) rsx_flip: crate::rsx::flip::RsxFlipState,
     pub(super) rsx_methods: crate::rsx::method::NvMethodTable,

@@ -15,12 +15,11 @@ impl Lv2Host {
     /// `sys_fs_fstat` -- populate a `CellFsStat` (56 bytes) for an
     /// open fd's backing blob.
     ///
-    /// # Error precedence
+    /// # Errors
     ///
-    /// 1. `stat_out_ptr` misaligned / unwritable for 56 bytes ->
-    ///    CELL_EFAULT, no effects.
-    /// 2. Unknown `fd` -> CELL_EBADF, no effects.
-    /// 3. Otherwise CELL_OK with a single 56-byte struct write.
+    /// In precedence order:
+    /// 1. `stat_out_ptr` misaligned / unwritable for 56 bytes -> CELL_EFAULT.
+    /// 2. Unknown `fd` -> CELL_EBADF.
     pub(in crate::host) fn dispatch_fs_fstat(
         &mut self,
         fd: u32,
@@ -60,16 +59,13 @@ impl Lv2Host {
 
     /// `sys_fs_stat` -- path-keyed variant of `sys_fs_fstat`.
     ///
-    /// # Error precedence
+    /// # Errors
     ///
-    /// 1. `stat_out_ptr` misaligned / unwritable for 56 bytes ->
-    ///    CELL_EFAULT, no effects.
-    /// 2. `path_ptr` unmapped or no NUL within `CELL_FS_MAX_PATH_LENGTH` ->
-    ///    CELL_EFAULT or CELL_EINVAL, no effects (mirrors
-    ///    `dispatch_fs_open`).
-    /// 3. Path not registered in the FS layer -> CELL_ENOENT, no
-    ///    effects.
-    /// 4. Otherwise CELL_OK with a single 56-byte struct write.
+    /// In precedence order:
+    /// 1. `stat_out_ptr` misaligned / unwritable for 56 bytes -> CELL_EFAULT.
+    /// 2. `path_ptr` unmapped or no NUL within `CELL_FS_MAX_PATH_LENGTH`
+    ///    -> CELL_EFAULT or CELL_EINVAL.
+    /// 3. Path not registered -> CELL_ENOENT.
     pub(in crate::host) fn dispatch_fs_stat(
         &mut self,
         path_ptr: u32,
@@ -86,9 +82,6 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(err.into());
             }
         };
-        // Non-UTF-8 paths can never match a manifest blob (manifest
-        // keys are UTF-8); short-circuit to ENOENT before touching
-        // FsStore.
         let path_str = match std::str::from_utf8(&path_bytes_owned) {
             Ok(s) => s,
             Err(_) => {

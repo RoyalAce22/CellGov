@@ -1,10 +1,9 @@
 //! LV2 dispatch for event queues.
 //!
-//! Waiters are FIFO. Receive parks with `payload = None`; the
-//! send-side dispatch installs `Some(payload)` through
-//! response_updates at wake time. The wake path panics on `None`
-//! so a missing update surfaces rather than delivering four zero
-//! u64s indistinguishable from a real event.
+//! Waiters are FIFO. Receive parks with `payload = None`; send
+//! installs `Some(payload)` through response_updates at wake time.
+//! The wake path panics on `None` so a missing update surfaces
+//! rather than delivering four zero u64s.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -22,8 +21,7 @@ impl Lv2Host {
         size: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // size == 0 defaults to EQUEUE_MAX_RECV_EVENT (127) per
-        // the permissive ABI.
+        // size == 0 defaults to EQUEUE_MAX_RECV_EVENT (127).
         let effective_size = if size == 0 { 127 } else { size };
         let id = self.alloc_id();
         if !self.event_queues.create_with_id(id, effective_size) {
@@ -103,10 +101,8 @@ impl Lv2Host {
         count_out: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // try_receive_batch drains destructively, so every
-        // output ByteRange must be validated up front or a bad
-        // address could silently discard events while count_out
-        // still claims them.
+        // try_receive_batch drains destructively; every output
+        // ByteRange is validated up front.
         if ByteRange::new(GuestAddr::new(count_out as u64), 4).is_none() {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
@@ -158,7 +154,7 @@ impl Lv2Host {
         data2: u64,
         data3: u64,
     ) -> Lv2Dispatch {
-        // Port id == queue id (1:1 binding).
+        // port_id == queue_id (1:1 binding).
         let payload = EventPayload {
             source: port_id as u64,
             data1,
@@ -177,25 +173,21 @@ impl Lv2Host {
                 new_owner,
                 out_ptr,
                 payload,
-            } => {
-                // Missing thread entry is a host-invariant break;
-                // payload is lost rather than delivered blind.
-                match self.resolve_wake_thread(new_owner, "event_port_send.Woke") {
-                    Some(unit) => Lv2Dispatch::WakeAndReturn {
-                        code: 0,
-                        woken_unit_ids: vec![unit],
-                        response_updates: vec![(
-                            unit,
-                            PendingResponse::EventQueueReceive {
-                                out_ptr,
-                                payload: Some(payload),
-                            },
-                        )],
-                        effects: vec![],
-                    },
-                    None => Lv2Dispatch::immediate(0),
-                }
-            }
+            } => match self.resolve_wake_thread(new_owner, "event_port_send.Woke") {
+                Some(unit) => Lv2Dispatch::WakeAndReturn {
+                    code: 0,
+                    woken_unit_ids: vec![unit],
+                    response_updates: vec![(
+                        unit,
+                        PendingResponse::EventQueueReceive {
+                            out_ptr,
+                            payload: Some(payload),
+                        },
+                    )],
+                    effects: vec![],
+                },
+                None => Lv2Dispatch::immediate(0),
+            },
         }
     }
 }
@@ -492,8 +484,6 @@ mod tests {
             }
             other => panic!("expected WakeAndReturn, got {other:?}"),
         }
-        // Fast-path handoff: queue storage unchanged, waiter list
-        // drained.
         assert!(host.event_queues().lookup(id).unwrap().is_empty());
         assert!(host.event_queues().lookup(id).unwrap().waiters().is_empty());
     }
@@ -547,7 +537,6 @@ mod tests {
                 code: 0,
                 effects: e,
             } => {
-                // Two payload writes plus the count_out write.
                 assert_eq!(e.len(), 3);
             }
             other => panic!("expected Immediate(0), got {other:?}"),

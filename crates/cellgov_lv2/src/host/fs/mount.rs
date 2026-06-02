@@ -7,54 +7,36 @@ use cellgov_ps3_abi::cell_errors;
 use crate::fs_store::{DirEntry, FsError};
 use crate::host::Lv2Host;
 
-/// Outcome of a host-side mount-table lookup for a regular-file
-/// path. The dispatch layer uses this to choose between
-/// re-querying the in-memory FS (because the bytes were just
-/// cached), surfacing an errno (mount matched but the host file
-/// was missing or unreadable), or falling through to legacy
-/// behavior (no mount matched the guest path).
+/// Outcome of a host-side mount-table lookup for a regular-file path.
 pub(super) enum MountResolution {
-    /// No mount prefix matched. Caller should run its existing
-    /// fallback path (whitelist, ENOENT, etc.).
+    /// No mount prefix matched.
     Unmounted,
     /// Bytes were read from the host file and registered as a blob
-    /// under the original guest path. Caller should re-query the
+    /// under the original guest path; caller should re-query the
     /// in-memory FS.
     Cached,
-    /// Mount matched but the host-side lookup failed. Caller should
-    /// surface `code` to the guest with no out-pointer write.
+    /// Mount matched but the host-side lookup failed.
     Failed(cellgov_ps3_abi::cell_errors::Lv2ErrCode),
 }
 
-/// Outcome of a host-side mount-table lookup for a directory
-/// path. Directory enumeration does not pre-cache anything in
-/// `FsStore`; each `sys_fs_opendir` snapshots the host directory
-/// fresh and stores the entries on the directory fd.
+/// Outcome of a host-side mount-table lookup for a directory path.
+///
+/// Each `sys_fs_opendir` snapshots the host directory fresh; nothing
+/// is pre-cached in `FsStore`.
 pub(super) enum DirMountResolution {
-    /// No mount prefix matched.
     Unmounted,
-    /// Mount matched and the host directory enumerated cleanly.
-    /// Entries are sorted lexicographically and filtered to
-    /// regular files / directories (symlinks and special files
-    /// dropped per anti-scope).
+    /// Entries sorted lexicographically; symlinks, special files, and
+    /// non-UTF-8 names dropped.
     Snapshot(Vec<DirEntry>),
-    /// Mount matched but the host-side lookup failed (missing,
-    /// not-a-directory, IO error). Caller surfaces `code` to the
-    /// guest.
     Failed(cellgov_ps3_abi::cell_errors::Lv2ErrCode),
 }
 
 impl Lv2Host {
-    /// Try to satisfy a guest path via the mount table. On a
-    /// successful resolve the host file is read once and cached in
-    /// [`Self::fs_store`] so subsequent opens hit the in-memory
-    /// blob (the determinism contract: single-read caching, no
-    /// host time, content immutable thereafter).
+    /// Try to satisfy a guest path via the mount table, caching the
+    /// host file's bytes as a blob keyed on the guest path.
     ///
-    /// `path` is the UTF-8 guest path, already null-trimmed by the
-    /// caller. The cache key is the same guest path so the next
-    /// `open_fd` / `stat_path` for the same string hits the cache
-    /// without re-resolving.
+    /// Determinism contract: a single host read per guest path; the
+    /// cached content is immutable thereafter.
     pub(super) fn try_mount_resolve_and_cache(&mut self, path: &str) -> MountResolution {
         let host_path = match resolve_path(self, path) {
             Ok(p) => p,
@@ -62,8 +44,6 @@ impl Lv2Host {
             Err(MountResolveErr::Failed(code)) => return MountResolution::Failed(code),
         };
 
-        // is_file() rejects directories; directory consumers go
-        // through [`Self::try_mount_resolve_dir`] instead.
         match std::fs::metadata(&host_path) {
             Ok(md) if md.is_file() => {}
             Ok(_) => return MountResolution::Failed(cell_errors::CELL_ENOENT),
@@ -78,12 +58,6 @@ impl Lv2Host {
         match self.fs_store_mut().register_blob(path.to_string(), bytes) {
             Ok(()) => MountResolution::Cached,
             Err(FsError::PathAlreadyRegistered) => {
-                // We only enter this branch after open_fd /
-                // stat_path returned UnknownPath, so the blob was
-                // not registered under this path moments ago.
-                // Single-threaded LV2 dispatch means no race could
-                // have populated it. Surface as an invariant break
-                // rather than a silent success.
                 self.record_invariant_break(
                     "dispatch.fs.mount_register_double",
                     format_args!(
@@ -106,19 +80,10 @@ impl Lv2Host {
     }
 
     /// Try to satisfy a guest directory path via the mount table.
-    /// Returns the snapshotted entries on success; the caller is
-    /// expected to allocate a directory fd against them via
-    /// [`crate::fs_store::FsStore::open_dir`].
     ///
     /// Determinism contract:
     /// - Entries sorted by `name` in lexicographic byte order.
-    /// - Symlinks and special files are dropped (the oracle does
-    ///   not surface symlink content; titles that need them are
-    ///   anti-scope).
-    /// - Non-UTF-8 host filenames are dropped (cannot be written
-    ///   into the guest's UTF-8 / Shift-JIS path strings without
-    ///   ambiguity); the determinism contract requires every
-    ///   surfaced entry name be a stable, encoder-clean string.
+    /// - Symlinks, special files, and non-UTF-8 names are dropped.
     pub(super) fn try_mount_resolve_dir(&mut self, path: &str) -> DirMountResolution {
         let host_path = match resolve_path(self, path) {
             Ok(p) => p,
@@ -143,14 +108,10 @@ impl Lv2Host {
                 Ok(e) => e,
                 Err(_) => return DirMountResolution::Failed(cell_errors::CELL_EIO),
             };
-            // file_type() does not follow symlinks; metadata() would.
             let file_type = match entry.file_type() {
                 Ok(ft) => ft,
                 Err(_) => return DirMountResolution::Failed(cell_errors::CELL_EIO),
             };
-            // Anti-scope: symlinks and special files are not
-            // enumerated. The oracle surfaces only regular files
-            // and directories.
             let is_directory = if file_type.is_dir() {
                 true
             } else if file_type.is_file() {
@@ -158,25 +119,19 @@ impl Lv2Host {
             } else {
                 continue;
             };
-            // Non-UTF-8 host names cannot be re-encoded into the
-            // guest's path string deterministically; drop them
-            // rather than guess an encoding.
             let name = match entry.file_name().into_string() {
                 Ok(s) => s,
                 Err(_) => continue,
             };
             entries.push(DirEntry { name, is_directory });
         }
-        // Lexicographic byte order on the name. read_dir yields
-        // entries in raw filesystem order which is host-FS-specific
-        // and a determinism vector; sorting collapses that.
+        // Determinism: read_dir yields host-FS-specific order; sort
+        // collapses that to lexicographic byte order.
         entries.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
         DirMountResolution::Snapshot(entries)
     }
 }
 
-/// Inner error of `resolve_path`: either no mount matched or the
-/// resolve itself failed (path traversal, internal contract drift).
 #[derive(Debug, thiserror::Error)]
 enum MountResolveErr {
     #[error("no mount matched")]
@@ -185,8 +140,7 @@ enum MountResolveErr {
     Failed(cellgov_ps3_abi::cell_errors::Lv2ErrCode),
 }
 
-/// Shared prefix-resolution step for the file and directory
-/// surfaces, including `..` rejection and invariant-break wiring.
+/// Shared prefix-resolution step for the file and directory surfaces.
 fn resolve_path(host: &mut Lv2Host, path: &str) -> Result<PathBuf, MountResolveErr> {
     match host.fs_mounts().resolve(path) {
         Ok(Some(p)) => Ok(p),

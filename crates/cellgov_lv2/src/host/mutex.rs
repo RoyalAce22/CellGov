@@ -1,9 +1,8 @@
 //! LV2 dispatch for heavy mutexes.
 //!
-//! `acquire_or_enqueue` is atomic: recursive-lock-by-owner
-//! (EDEADLK) and contention (park on FIFO waiter list) are
-//! distinguished in one call. Splitting into try-then-enqueue
-//! would race with a concurrent unlock.
+//! `acquire_or_enqueue` is atomic: recursive-lock-by-owner (EDEADLK)
+//! and contention (park on FIFO waiter list) are distinguished in
+//! one call.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::cell_errors;
@@ -20,9 +19,8 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // `sys_mutex_attribute_t`: first three big-endian u32s
-        // carry protocol, recursive flag, and pshared. Remaining
-        // fields (adaptive, name) are not surfaced here.
+        // `sys_mutex_attribute_t`: protocol@0 u32, recursive@4 u32,
+        // pshared@8 u32 (BE). Other fields are not surfaced.
         let attrs = if attr_ptr == 0 {
             MutexAttrs::default()
         } else if let Some(bytes) = rt.read_committed(attr_ptr as u64, 12) {
@@ -38,8 +36,6 @@ impl Lv2Host {
         };
         let id = self.alloc_id();
         if self.mutexes.create_with_id(id, attrs).is_err() {
-            // IdCollision is a host-invariant break; surface
-            // ENOMEM so the guest cannot use the bad id.
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
         self.immediate_write_u32(id, id_ptr, requester)
@@ -102,9 +98,6 @@ impl Lv2Host {
             }
             crate::sync_primitives::MutexRelease::Freed => Lv2Dispatch::immediate(0),
             crate::sync_primitives::MutexRelease::Transferred { new_owner } => {
-                // Ownership has already transferred; missing
-                // thread-table entry leaves the mutex naming an
-                // owner the runtime cannot wake.
                 match self.resolve_wake_thread(new_owner, "mutex_unlock.Transferred") {
                     Some(unit) => Lv2Dispatch::WakeAndReturn {
                         code: 0,
@@ -342,9 +335,9 @@ mod tests {
     fn mutex_create_decodes_attr_ptr() {
         let mut mem = cellgov_mem::GuestMemory::new(0x10000);
         let attr_bytes = [
-            0x00, 0x00, 0x00, 0x20, // protocol = 0x20 (PRIORITY_INHERIT)
-            0x00, 0x00, 0x00, 0x11, // recursive = 0x11 (RECURSIVE)
-            0x00, 0x00, 0x00, 0x00, // pshared (ignored)
+            0x00, 0x00, 0x00, 0x20, // protocol = 0x20
+            0x00, 0x00, 0x00, 0x11, // recursive
+            0x00, 0x00, 0x00, 0x00, // pshared
         ];
         mem.apply_commit(
             cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x200), 12).unwrap(),

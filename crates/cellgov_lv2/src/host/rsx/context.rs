@@ -15,14 +15,10 @@ use super::init::{write_rsx_driver_info_init, write_rsx_reports_init};
 use super::state::{SysRsxContext, RSX_CONTEXT_ID};
 
 impl Lv2Host {
-    /// sys_rsx_context_allocate (670). Reserves a 0x300000-byte slice
-    /// for the driver-info and reports sub-regions, emits init effects
-    /// for both, creates the handler event-queue / port pair, and
-    /// returns the fixed MMIO dma_control base
-    /// (`control_register::DMA_CONTROL_BASE = 0xC0000000`) in the
-    /// `lpar_dma_control` OUT. Libgcm adds `+0x40` internally to
-    /// derive the put-pointer write target at
-    /// `control_register::PUT_ADDR = 0xC0000040`.
+    /// `sys_rsx_context_allocate` (670): reserve driver-info / reports region,
+    /// create the handler event-queue/port pair, and write the fixed MMIO
+    /// dma_control base into `lpar_dma_control` (libgcm derives PUT_ADDR =
+    /// base + 0x40).
     ///
     /// # Errors
     ///
@@ -58,17 +54,12 @@ impl Lv2Host {
             self.rsx_mem_alloc_ptr = end;
             start
         };
-        // dma_control_addr is the MMIO base 0xC0000000; libgcm
-        // adds the +0x40 offset internally to derive the
-        // put-pointer write target at 0xC0000040 (PUT_ADDR).
-        // driver_info and reports are RAM-backed and live inside
-        // the rsx region.
         let dma_control_addr = control_register::DMA_CONTROL_BASE;
         let driver_info_addr = base + region::DRIVER_INFO_OFFSET;
         let reports_addr = base + region::REPORTS_OFFSET;
 
-        // port_id == queue_id: the event model uses a single kernel id
-        // for the 1:1 port/queue binding driver_info.handler_queue exposes.
+        // port_id == queue_id: single kernel id for the 1:1 port/queue
+        // binding driver_info.handler_queue exposes.
         let queue_id = self.alloc_id();
         let queue_created = self
             .event_queues
@@ -145,13 +136,8 @@ impl Lv2Host {
         }
     }
 
-    /// sys_rsx_context_free (671). No-op: the single-context model
-    /// does not tear down state, and a subsequent allocate is still
-    /// rejected. Logs an invariant-break so a caller that frees and
-    /// then re-allocates expecting a fresh context will be visible
-    /// in the trace; until that case is observed in the title
-    /// corpus, the no-op-with-trace is treated as a convergent
-    /// honest gap.
+    /// `sys_rsx_context_free` (671): no-op in the single-context model;
+    /// logs an invariant break so a free-then-realloc caller is traceable.
     pub(in crate::host) fn dispatch_sys_rsx_context_free_noop(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.sys_rsx_context_free_noop",
@@ -184,9 +170,6 @@ mod tests {
         };
         assert_eq!(effects.len(), 6);
         assert_eq!(extract_write_u32(&effects[0]), RSX_CONTEXT_ID);
-        // lpar_dma_control_ptr receives the fixed MMIO base
-        // 0xC0000000; libgcm adds +0x40 internally to derive the
-        // put-pointer write target at PUT_ADDR = 0xC0000040.
         assert_eq!(
             extract_write_u64(&effects[1]),
             u64::from(control_register::DMA_CONTROL_BASE)

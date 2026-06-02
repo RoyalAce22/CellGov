@@ -1,9 +1,8 @@
 //! LV2 dispatch for event flags.
 //!
-//! Waiters are FIFO. `set` delivers the observed bit pattern back
-//! through each woken waiter's recorded `result_ptr`, so a missing
-//! thread-table entry discards its wake without merging into a
-//! parked response.
+//! Waiters are FIFO. `set` delivers the observed bit pattern through
+//! each woken waiter's recorded `result_ptr`; a missing thread-table
+//! entry discards its wake.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -48,19 +47,11 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // NULL-pointer checks come first: real LV2 returns EFAULT
-        // before inspecting any attribute fields.
         if id_ptr == 0 || attr_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
-        // sys_event_flag_attribute_t layout:
-        //   +0  u32 protocol
-        //   +4  u32 pshared
-        //   +8  u64 ipc_key
-        //   +16 s32 flags
-        //   +20 s32 type
-        // Both protocol and type must be valid sync constants;
-        // memset-zero attrs are rejected with EINVAL on real LV2.
+        // sys_event_flag_attribute_t: protocol@0 u32, pshared@4 u32,
+        // ipc_key@8 u64, flags@16 s32, type@20 s32.
         let Some(attr_bytes) = rt.read_committed(attr_ptr as u64, 24) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         };
@@ -130,9 +121,8 @@ impl Lv2Host {
                 }
             }
             Some(crate::sync_primitives::EventFlagWait::NoMatch) => {
-                // Finite timeout, no peer that could set/clear the
-                // bits: trip ETIMEDOUT immediately. With peers
-                // alive, block and let the upcoming set wake us.
+                // Finite timeout with no peer that could set/clear:
+                // ETIMEDOUT immediately.
                 if timeout != 0 && !self.ppu_threads.has_other_alive_thread(caller) {
                     return Lv2Dispatch::immediate(cell_errors::CELL_ETIMEDOUT.into());
                 }
@@ -148,10 +138,6 @@ impl Lv2Host {
                         return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
                     }
                 }
-                // set-side replaces this with an EventFlagWake
-                // carrying the observed bits; the result_ptr
-                // recorded on the waiter entry makes that wake
-                // complete without reading the parked response.
                 Lv2Dispatch::Block {
                     reason: crate::dispatch::Lv2BlockReason::EventFlag { id },
                     pending: PendingResponse::EventFlagWake {
@@ -238,8 +224,6 @@ impl Lv2Host {
         num_ptr: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Real LV2 wakes every parked waiter with `CELL_ECANCELED`
-        // and writes the count to `num_ptr`.
         let Some(waiters) = self.event_flags.cancel_waiters(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
@@ -284,10 +268,6 @@ impl Lv2Host {
         flags_ptr: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Real LV2 (matching RPCS3 sys_event_flag_get): unknown id ->
-        // ESRCH (and writes 0 through `flags_ptr` if non-NULL); known
-        // id + NULL `flags_ptr` -> EFAULT; otherwise writes the
-        // current pattern and returns OK.
         let Some(entry) = self.event_flags.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
@@ -360,11 +340,7 @@ mod tests {
 
     #[test]
     fn event_flag_create_zeroed_attr_returns_einval() {
-        // Memset-zero attr (protocol=0, type=0): real LV2 rejects
-        // with EINVAL because protocol must be FIFO or PRIORITY.
         let mut host = Lv2Host::new();
-        // FakeRuntime::new gives zero memory at the attr_ptr; that's
-        // the in-memory shape of `memset(&attr, 0, ...)`.
         let rt = FakeRuntime::new(0x10000);
         let r = host.dispatch(
             Lv2Request::EventFlagCreate {
@@ -428,7 +404,6 @@ mod tests {
             } => extract_write_u32(&e[0]),
             other => panic!("expected Immediate(0), got {other:?}"),
         };
-        // mode 0x01 = AND + NO-CLEAR.
         let w = host.dispatch(
             Lv2Request::EventFlagWait {
                 id,
@@ -578,7 +553,6 @@ mod tests {
             u2,
             &rt,
         );
-        // u3 waits on 0b1000; the set below won't match it.
         host.dispatch(
             Lv2Request::EventFlagWait {
                 id,
@@ -652,8 +626,7 @@ mod tests {
                 effects: _,
             }
         ));
-        // sys_event_flag_clear masks AND: bits in the mask survive,
-        // bits outside drop. 0b1111 & 0b0101 -> 0b0101.
+        // sys_event_flag_clear masks AND: 0b1111 & 0b0101 -> 0b0101.
         assert_eq!(host.event_flags().lookup(id).unwrap().bits(), 0b0101);
     }
 

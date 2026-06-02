@@ -85,7 +85,7 @@ fn read_with_zero_nbytes_returns_ok_with_only_nread_write() {
     );
     assert_eq!(n, 0);
     assert!(b.is_none());
-    // Invariant: zero-byte read must not advance the offset.
+    // Invariant: zero-byte read does not advance the offset.
     let (n2, b2) = extract_read(
         run(&mut host, &rt, fs_read(fd, 0x30000, 3, 0x30100)),
         0x30000,
@@ -122,7 +122,7 @@ fn read_bad_buffer_pointer_returns_efault_and_does_not_advance_offset() {
         cell_errors::CELL_EFAULT.code,
         0,
     );
-    // Invariant: an EFAULT read must not advance the offset.
+    // Invariant: EFAULT must not advance the offset.
     let (n, b) = extract_read(
         run(&mut host, &rt, fs_read(fd, 0x40010, 6, 0x40000)),
         0x40010,
@@ -162,9 +162,6 @@ fn read_unmapped_nread_pointer_returns_efault() {
 
 #[test]
 fn read_unknown_fd_takes_precedence_over_bad_buffer() {
-    // Precedence invariant: an unknown fd surfaces as EBADF
-    // before buffer validation, so no buffer-write attempt is
-    // emitted on an invalid fd.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x100000).reserve(0x30000, 0x31000);
     assert_immediate(
@@ -176,7 +173,6 @@ fn read_unknown_fd_takes_precedence_over_bad_buffer() {
 
 #[test]
 fn read_after_close_returns_ebadf() {
-    // Invariant: closed fds are not reusable for reads.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"abc".to_vec())
@@ -192,9 +188,6 @@ fn read_after_close_returns_ebadf() {
 
 #[test]
 fn read_zero_nbytes_with_bad_buf_ptr_returns_ok_with_only_nread_write() {
-    // Invariant: nbytes == 0 skips buf_ptr writability check
-    // (POSIX-permitted). A future refactor that flips && to ||
-    // would silently break this.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"abc".to_vec())
@@ -213,8 +206,6 @@ fn read_zero_nbytes_with_bad_buf_ptr_returns_ok_with_only_nread_write() {
 
 #[test]
 fn lseek_past_eof_then_read_returns_zero_bytes() {
-    // Invariant: a cursor past EOF reads 0 bytes (EOF
-    // semantics), not EINVAL.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"abcdef".to_vec())

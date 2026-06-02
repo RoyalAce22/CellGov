@@ -7,14 +7,6 @@
 //! post-envelope flow rejoins [`crate::sce::decrypt_self_to_elf`]'s
 //! shared CTR path.
 //!
-//! Correctness is anchored on format self-certification (envelope
-//! padding zeros, CTR-decrypted directory parses, output is a valid
-//! PS3 ELF), not on byte-agreement with any external implementation.
-//! The end-to-end test in
-//! `apps/cellgov_firmware/tests/parity_decrypted_reference.rs` is the
-//! correctness gate; the smaller oracle vectors in this file's test
-//! module are localization aids for triaging a break.
-//!
 //! Fixture-dependent tests (`include_bytes!` of operator-supplied
 //! RAP and EBOOT files under `tools/rpcs3/dev_hdd0/`) live behind
 //! the `npdrm-oracle-vectors` feature.
@@ -29,14 +21,10 @@ use crate::sce::{
 
 /// Derive the 16-byte intermediate klicensee (RIF key) from a 16-byte RAP.
 ///
-/// Pure function of `rap` alone -- no console identity, no act.dat,
-/// no IDPS. One AES-128-ECB-decrypt with `RAP_KEY`, then five rounds
-/// of PBOX permutation + E1 XOR + descending cascade + E2
-/// borrow-subtraction. The envelope-peel step further ECB-decrypts
-/// the output with `NP_KLIC_KEY` to produce the layer key.
+/// The envelope-peel step further ECB-decrypts the output with
+/// `NP_KLIC_KEY` to produce the layer key.
 #[must_use]
 pub fn rap_to_klic(rap: &[u8; 16]) -> [u8; 16] {
-    // Single 16-byte block with IV=0: CBC-decrypt equals ECB-decrypt.
     let cipher = aes::Aes128::new_from_slice(&RAP_KEY).expect("RAP_KEY is 16 bytes");
     let mut key = [0u8; 16];
     key.copy_from_slice(rap);
@@ -85,12 +73,6 @@ fn klicensee_to_layer_key(klicensee: &[u8; 16]) -> [u8; 16] {
 /// Decrypt an NPDRM-wrapped SELF using the supplied 16-byte klicensee
 /// and reconstruct the plaintext ELF.
 ///
-/// Chain: reject debug SELFs, derive the NPDRM layer key, AES-128-CBC
-/// peel, AES-256-CBC APP peel, then shared CTR section decrypt + ELF
-/// reassembly. The klicensee comes from [`rap_to_klic`] (license 1/2)
-/// or `NP_KLIC_FREE` (license 3); [`decrypt_self_to_elf_auto`] handles
-/// the dispatch.
-///
 /// # Errors
 ///
 /// Returns [`SceError::AesCbcDecryptFailed`] or
@@ -98,9 +80,7 @@ fn klicensee_to_layer_key(klicensee: &[u8; 16]) -> [u8; 16] {
 /// envelope zero-padding self-certifies a correct decrypt.
 pub fn decrypt_self_to_elf_npdrm(data: &[u8], klicensee: &[u8; 16]) -> Result<Vec<u8>, SceError> {
     let hdr = parse_sce_header(data)?;
-    // High bit of revision_flags marks an unencrypted debug SELF;
-    // reject at the format level so non-envelope bytes don't reach
-    // downstream stages.
+    // High bit of revision_flags marks an unencrypted debug SELF.
     if hdr.revision_flags & 0x8000 != 0 {
         return Err(SceError::DebugSelfUnsupported {
             revision_flags: hdr.revision_flags,
@@ -143,10 +123,7 @@ pub fn decrypt_self_to_elf_auto(
 /// RAP material via the lookup; `None` surfaces as
 /// [`SceError::NoRapForNpdrmTitle`]. `NpdLicense::Free` falls back
 /// to `NP_KLIC_FREE` when the lookup returns `None`, but honours a
-/// supplied klic if one is returned. Out-of-range wire values are
-/// rejected upstream at the parse site
-/// ([`find_npd_header_info`]); the match here is exhaustive over
-/// the validated enum.
+/// supplied klic if one is returned.
 fn resolve_npdrm_klicensee(
     npd: &NpdHeaderInfo,
     klicensee_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<[u8; 16]>,
@@ -233,13 +210,6 @@ mod tests {
             resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| Some(want)).unwrap();
         assert_eq!(got, want);
     }
-
-    // The "bad license" branch is no longer reachable from this
-    // function: `NpdHeaderInfo.license` is now `NpdLicense`, validated
-    // at extraction. The four prior `license_{zero,four,top_bit,u32_max}`
-    // regression tests moved upstream to
-    // `crate::sce::tests::find_npd_license_*` where the validation
-    // actually fires.
 
     /// Minimal SCE header (0x20 bytes) carrying the given
     /// `revision_flags`. Satisfies `parse_sce_header`'s magic check

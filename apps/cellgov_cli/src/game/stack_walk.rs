@@ -1,29 +1,12 @@
 //! Stack-frame walker for `outcome: FAULT` diagnostics.
 //!
 //! ABI back-chain walk per [CBE-Handbook p:398 s:14.3.1.3 Figure 14-3
-//! PPE 64-Bit Standard Stack Frame] and [AltiVec-PIM p:34 s:3 ABI
-//! prologue example] (`stw r0, 4(sp) # in caller's frame` for 32-bit;
-//! the 64-bit analogue is `std r0, 16(r1)`):
-//!
-//! - SP+0 holds the back-chain pointer (caller's SP).
-//! - The function's own saved LR lives at the **caller's** SP+16 -- the
-//!   prologue runs `mflr r0; std r0, 16(r1)` BEFORE `stdu r1,
-//!   -frame_size(r1)`, so the store hits OLD_r1+16 = caller's frame
-//!   top + 16. After stdu, that slot is at `back_chain + 16`.
-//! - SP+16 of the *current* frame is reserved for THIS function's
-//!   callees to populate (their own LR-save). Reading it gets stale
-//!   data for the most recent callee that returned.
-//!
-//! The walker reads each frame's saved LR at `next_sp + 16` where
-//! `next_sp = *(sp+0)` is the back-chain. Frame 0 (the leaf at fault
-//! time) reports its caller's return address; the function the fault
-//! occurred *in* lives in the LR register, which the surrounding
-//! `format_fault` register dump already shows.
-//!
-//! Walks terminate on NULL back chain (the initial frame), unmapped
-//! read, an implausible back-chain pointer (non-increasing or
-//! below-floor -- monotonic-SP also subsumes cycle detection), or
-//! `MAX_BACK_CHAIN_FRAMES`.
+//! PPE 64-Bit Standard Stack Frame] and [AltiVec-PIM p:34 s:3]:
+//! SP+0 holds the back-chain pointer (caller's SP), and the function's
+//! own saved LR lives at the **caller's** SP+16 -- the prologue runs
+//! `mflr r0; std r0, 16(r1)` BEFORE `stdu r1, -frame_size(r1)`, so the
+//! walker reads saved LR at `next_sp + 16` where
+//! `next_sp = *(sp+0)`.
 
 use cellgov_core::Runtime;
 use cellgov_exec::FaultRegisterDump;
@@ -124,11 +107,7 @@ struct BackChainFrame {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Termination {
     NullBackChain,
-    /// Back-chain pointer is below `PS3_USER_TEXT_FLOOR`, equal to or
-    /// below the current SP (the chain must climb), or otherwise
-    /// outside the stack region. The monotonic-SP rule subsumes cycle
-    /// detection: a revisit can only happen if the chain went
-    /// backwards.
+    /// Monotonic-SP rule subsumes cycle detection.
     InvalidBackChain,
     UnmappedRead,
     MaxFrames,
@@ -155,10 +134,7 @@ struct BackChainWalk {
     last_sp_visited: Option<u64>,
 }
 
-/// Walk PPC64 ELFv1 back-chain anchored at `r1` per
-/// [CBE-Handbook p:398 s:14.3.1.3 Figure 14-3] and [AltiVec-PIM p:34 s:3].
-/// Each frame's saved LR lives at its caller's SP+16 (not its own), so the walk reads
-/// `read_u64(next_sp + 16)` after following the back-chain. The initial frame
+/// Walk PPC64 ELFv1 back-chain anchored at `r1`; the initial frame
 /// (NULL back-chain) is pushed with `saved_lr = 0` / `call_kind = None`.
 fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
     let mut frames: Vec<BackChainFrame> = Vec::new();
@@ -192,7 +168,6 @@ fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
             };
         }
 
-        // Saved LR at next_sp + 16 (caller's r1 + 16): where THIS frame's prologue stored it.
         let Some(saved_lr_addr) = next_sp.checked_add(16) else {
             return BackChainWalk {
                 frames,
@@ -209,7 +184,7 @@ fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
         };
 
         let call_kind = saved_lr_call_kind(rt, saved_lr_raw);
-        // Store raw u64 so corrupt high bits print in full; `via not-a-call` flags them.
+        // Raw u64 so corrupt high bits print in full; `via not-a-call` flags them.
         frames.push(BackChainFrame {
             sp,
             saved_lr: saved_lr_raw,

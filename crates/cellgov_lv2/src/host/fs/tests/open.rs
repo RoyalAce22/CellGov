@@ -11,10 +11,6 @@ use super::common::{assert_immediate, extract_fd, fs_open, run, PathRuntime, Tem
 
 #[test]
 fn unknown_path_returns_enoent_with_no_effects() {
-    // Invariant: fd_out_ptr is undefined on error and real PS3
-    // does not write it on ENOENT. Existence wins over write
-    // flags, so the O_TRUNC | O_CREAT | O_WRONLY combo still
-    // ENOENTs.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/dev_hdd0/game/foo/USRDIR/bar.dat\0");
 
@@ -62,10 +58,6 @@ fn fd_out_ptr_in_reserved_region_returns_efault() {
 
 #[test]
 fn fd_out_ptr_null_returns_efault() {
-    // NULL passes the alignment check (`0 & 3 == 0`); the
-    // out_ptr_writable helper carries the explicit non-zero
-    // guard so a buggy guest passing fd_out_ptr=0 cannot skate
-    // through.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/foo\0");
     assert_immediate(
@@ -77,8 +69,6 @@ fn fd_out_ptr_null_returns_efault() {
 
 #[test]
 fn fs_open_bad_fd_out_ptr_takes_precedence_over_bad_path() {
-    // Precedence invariant: dispatch checks fd_out_ptr before
-    // path scan (cheaper).
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
@@ -90,11 +80,6 @@ fn fs_open_bad_fd_out_ptr_takes_precedence_over_bad_path() {
 
 #[test]
 fn o_creat_for_missing_path_returns_enoent_no_effects() {
-    // Existence wins over flag-error: the kernel checks
-    // existence before write semantics. No effects on the
-    // error path -- real PS3 does not write fd_out_ptr on
-    // ENOENT, so a synthetic zero would diverge in
-    // cross-runner compare.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/save\0");
     assert_immediate(
@@ -156,8 +141,7 @@ fn unknown_path_still_enoents_when_other_paths_are_registered() {
         cell_errors::CELL_ENOENT.code,
         0,
     );
-    // Invariant: a failed FS lookup must not burn a host-side
-    // fd id.
+    // Invariant: failed lookup must not burn an fd id.
     assert_eq!(host.fs_store().open_fd_count(), 0);
 }
 
@@ -182,9 +166,6 @@ fn two_opens_of_same_registered_path_return_distinct_fds() {
 
 #[test]
 fn synthetic_param_sfo_blob_pre_registered() {
-    // PSL1GHT-test ELFs probe `/app_home/PARAM.SFO` for
-    // existence before a real boot. `Lv2Host::new()` registers
-    // it as a zero-byte blob so the open routes through FsStore.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/PARAM.SFO\0");
     let fd = extract_fd(
@@ -197,9 +178,6 @@ fn synthetic_param_sfo_blob_pre_registered() {
 
 #[test]
 fn synthetic_output_txt_blob_pre_registered() {
-    // Sister of PARAM.SFO: PSL1GHT tests fopen + fwrite +
-    // fclose to output.txt. Pre-registered so the
-    // probe-for-existence open succeeds with a real FsStore fd.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/output.txt\0");
     let fd = extract_fd(
@@ -234,10 +212,7 @@ fn fs_open_resolves_via_mount_and_caches_blob() {
         other => panic!("expected SharedWriteIntent, got {other:?}"),
     }
 
-    // Second open re-uses the cache (asserted via FsStore
-    // state rather than by deleting the host file -- avoids a
-    // host-fs side channel that could behave differently on
-    // Windows sharing-violation rules).
+    // Invariant: second open re-uses the cache; no second blob.
     assert_eq!(host.fs_store().blob_count(), baseline_blobs + 1);
     assert!(host.fs_store().has_path("/app_home/Data/level.xml"));
     let effects2 = assert_immediate(run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)), 0, 1);
@@ -281,10 +256,6 @@ fn fs_open_mount_path_traversal_returns_eacces() {
 
 #[test]
 fn fs_open_mounted_directory_returns_enoent_in_slice3() {
-    // fs_open targets regular files only; directories surface
-    // ENOENT so titles do not see a synthetic fd with no
-    // readable bytes behind it. Directory access flows through
-    // fs_opendir/fs_readdir.
     let dir = TempMountDir::new("open_dir");
     std::fs::create_dir_all(dir.path.join("savedir")).expect("subdir");
     let mut host = Lv2Host::new();
@@ -307,8 +278,6 @@ fn fs_open_o_creat_under_mount_returns_erofs() {
     host.fs_mounts_mut()
         .add(crate::fs_store::FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
-    // Caching happens before the EROFS check so a subsequent
-    // read-only open succeeds without re-reading the host file.
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/scratch.bin\0");
     assert_immediate(
         run(
@@ -343,10 +312,6 @@ fn fs_open_with_o_wronly_on_existing_blob_returns_erofs() {
 
 #[test]
 fn fs_open_output_txt_with_write_flags_succeeds() {
-    // fopen("/app_home/output.txt", "w") decodes to
-    // O_WRONLY | O_CREAT | O_TRUNC. The tty-sink whitelist
-    // exempts output.txt from the EROFS branch so fs_write can
-    // redirect bytes to tty_log.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/output.txt\0");
     let flags = CELL_FS_O_WRONLY | CELL_FS_O_CREAT | CELL_FS_O_TRUNC;

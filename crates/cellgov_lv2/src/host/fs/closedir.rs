@@ -8,9 +8,10 @@ use crate::host::Lv2Host;
 
 impl Lv2Host {
     /// `sys_fs_closedir` -- release a directory fd allocated via
-    /// [`Self::dispatch_fs_opendir`]. Returns CELL_EBADF for an
-    /// unknown directory fd OR for a value that names a regular
-    /// file fd; the file and directory fd stores are distinct.
+    /// [`Self::dispatch_fs_opendir`].
+    ///
+    /// The file and directory fd stores are distinct, so a regular-file
+    /// fd passed here surfaces CELL_EBADF.
     pub(in crate::host) fn dispatch_fs_closedir(&mut self, fd: u32) -> Lv2Dispatch {
         match self.fs_store_mut().close_dir(fd) {
             Ok(()) => Lv2Dispatch::immediate(0),

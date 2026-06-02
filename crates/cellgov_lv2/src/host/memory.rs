@@ -1,7 +1,4 @@
 //! `sys_memory_allocate` bump-allocator dispatch.
-//!
-//! The rest of the `sys_memory_*` family is inlined at the dispatch
-//! match because each is a single arithmetic expression.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::cell_errors;
@@ -9,10 +6,8 @@ use cellgov_ps3_abi::cell_errors;
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
 
-/// End (exclusive) of the PS3 `main` region the LV2 allocator may
-/// hand out from. Shared with ELF PT_LOAD, TLS, and the HLE bump
-/// arena; the bound catches runaways before they walk into unmapped
-/// space.
+/// Exclusive upper bound of the PS3 `main` region the LV2 allocator
+/// may hand out from.
 const MEM_ALLOC_REGION_END: u32 = 0x4000_0000;
 
 impl Lv2Host {
@@ -22,11 +17,8 @@ impl Lv2Host {
         alloc_addr_ptr: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // 64KB alignment, every arithmetic step checked: a
-        // u32-truncating size, an alignment wrap, or a cursor past
-        // MEM_ALLOC_REGION_END all return CELL_ENOMEM with the
-        // cursor unchanged. Silent wrap would hand out addresses
-        // outside user memory.
+        // Every arithmetic step checked; the cursor is left unchanged
+        // on ENOMEM.
         const ALIGN: u32 = 0x1_0000;
         let Ok(size) = u32::try_from(size) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
@@ -133,8 +125,6 @@ mod tests {
 
     #[test]
     fn memory_get_user_memory_size_writes_info_struct() {
-        // sys_memory_info_t layout: total_user_memory,
-        // available_user_memory (both big-endian u32).
         let mut host = Lv2Host::new();
         let rt = FakeRuntime::new(0x10000);
         let source = UnitId::new(0);

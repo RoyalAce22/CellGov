@@ -38,9 +38,9 @@ impl Runtime {
             Some(id) => id,
             None => {
                 // All units blocked: time-warp to the next pending DMA
-                // completion if the queue has one. fire_dma_completions
-                // wakes the issuer via set_status_override(Runnable), so
-                // the retry below can schedule it.
+                // completion. fire_dma_completions wakes the issuer via
+                // set_status_override(Runnable) so the retry can
+                // schedule it.
                 let any_blocked = self.registry.ids().any(|id| {
                     self.registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Blocked)
                 });
@@ -108,8 +108,6 @@ impl Runtime {
                 .get_mut(unit_id)
                 .expect("scheduler returned an id that is not in the registry");
             let res = unit.run_until_yield(self.budget_per_step, &ctx, &mut effects_buf);
-            // FaultDriven has no consumer for fingerprints / snapshots;
-            // skip both vtable dispatches.
             let (retired_hashes, retired_full) = if self.mode == RuntimeMode::FaultDriven {
                 (Vec::new(), Vec::new())
             } else {
@@ -123,7 +121,6 @@ impl Runtime {
 
         // PpuStateHash and PpuStateFull pair by step index so the diff
         // printer matches a hash divergence with its full-state snapshot.
-        // Step indices are monotonic and independent of `steps_taken`.
         let hash_base = self.per_step_index;
         for (pc, hash) in retired_hashes {
             self.trace.record(&TraceRecord::PpuStateHash {
@@ -134,9 +131,8 @@ impl Runtime {
             self.per_step_index += 1;
         }
         // `hash_base + i` aligns `step` with the hash stream when the
-        // window starts at the unit's first retired instruction. Mid-run
-        // windows carry correct PCs but not step parity -- the diff
-        // printer matches by PC in that case.
+        // window starts at the unit's first retired instruction;
+        // mid-run windows match by PC instead.
         for (i, (pc, gpr, lr, ctr, xer, cr)) in retired_full.into_iter().enumerate() {
             self.zoom_trace.record(&TraceRecord::PpuStateFull {
                 step: hash_base + i as u64,
@@ -185,8 +181,8 @@ impl Runtime {
             }
         }
 
-        // Hand `effects_buf` off to `RuntimeStep`; the fresh empty Vec
-        // avoids allocating in the common zero-effects FaultDriven case.
+        // Fresh empty Vec avoids allocating in the common zero-effects
+        // FaultDriven case.
         self.effects_buf = Vec::new();
         Ok(RuntimeStep {
             unit: unit_id,

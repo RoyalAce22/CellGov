@@ -32,22 +32,25 @@ fn u32_or_die(label: &str, value: u64) -> u32 {
         .unwrap_or_else(|_| die(&format!("{label}: 0x{value:x} does not fit in u32")))
 }
 
-/// Reject `--strict-reserved` combined with a title manifest's
-/// `rsx_mirror = true`: the former forces the RSX region
-/// `ReservedStrict` (rejects all writes), the latter asks the
-/// runtime to project flip-status bytes into that same region.
-/// The combination is unsatisfiable by construction.
+/// `--strict-reserved` plus `rsx_mirror = true` is unsatisfiable:
+/// strict-reserved forces RSX `ReservedStrict` (rejects all writes),
+/// rsx_mirror projects flip-status bytes into that same region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(super) enum StrictReservedConflict {
+    #[error(
+        "boot: --strict-reserved conflicts with title manifest rsx_mirror=true; \
+         rsx_mirror requires a writable RSX region but --strict-reserved forces \
+         it ReservedStrict. Drop one of the two."
+    )]
+    RsxMirror,
+}
+
 pub(super) fn check_strict_reserved_vs_rsx_mirror(
     strict_reserved: bool,
     rsx_mirror: bool,
-) -> Result<(), String> {
+) -> Result<(), StrictReservedConflict> {
     if strict_reserved && rsx_mirror {
-        return Err(
-            "boot: --strict-reserved conflicts with title manifest rsx_mirror=true; \
-             rsx_mirror requires a writable RSX region but --strict-reserved forces \
-             it ReservedStrict. Drop one of the two."
-                .to_string(),
-        );
+        return Err(StrictReservedConflict::RsxMirror);
     }
     Ok(())
 }
@@ -97,8 +100,7 @@ impl StartupTimings {
 pub(super) struct PrepareOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
-    /// Already-decrypted ELF bytes. `prepare` never touches disk for
-    /// the ELF; the caller runs the decrypt before invoking.
+    /// Already-decrypted ELF bytes.
     pub elf_data: Vec<u8>,
     pub firmware_dir: Option<&'a str>,
     pub strict_reserved: bool,
@@ -157,10 +159,10 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         );
     }
     let mut state = cellgov_ppu::state::PpuState::new();
-    if let Err(msg) =
+    if let Err(err) =
         check_strict_reserved_vs_rsx_mirror(opts.strict_reserved, opts.title.rsx_mirror())
     {
-        die(&msg);
+        die(&err.to_string());
     }
     let reserved_access = if opts.strict_reserved {
         cellgov_mem::RegionAccess::ReservedStrict
@@ -554,9 +556,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     });
 
     // Cell BE convention: args 0..3 map to r3..r6 (arg0 -> r3, etc.).
-    // The `load_spu_elf` `.expect` panics on a malformed title ELF;
-    // this closure runs after `sys_spu_image_open` has accepted the
-    // bytes, so there is no error path back to the caller.
     rt.set_spu_factory(|id, init| {
         use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
         let mut unit = SpuExecutionUnit::new(id);
@@ -659,8 +658,10 @@ mod tests {
     #[test]
     fn rejects_strict_reserved_with_rsx_mirror() {
         let err = check_strict_reserved_vs_rsx_mirror(true, true).unwrap_err();
-        assert!(err.contains("--strict-reserved"));
-        assert!(err.contains("rsx_mirror"));
+        assert_eq!(err, super::StrictReservedConflict::RsxMirror);
+        let msg = err.to_string();
+        assert!(msg.contains("--strict-reserved"));
+        assert!(msg.contains("rsx_mirror"));
     }
 
     #[test]
