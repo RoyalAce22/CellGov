@@ -65,11 +65,7 @@ impl Lv2Host {
     /// Log-once without `debug_assert!`, for paths reachable by
     /// guest input during normal operation (e.g. `Unsupported`
     /// syscalls during real boots).
-    pub(super) fn log_invariant_break(
-        &mut self,
-        site: &'static str,
-        details: std::fmt::Arguments<'_>,
-    ) {
+    pub fn log_invariant_break(&mut self, site: &'static str, details: std::fmt::Arguments<'_>) {
         if self.invariant_break_count == 0 {
             #[allow(
                 clippy::print_stderr,

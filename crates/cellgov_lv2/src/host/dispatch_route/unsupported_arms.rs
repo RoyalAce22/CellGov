@@ -354,14 +354,9 @@ impl Lv2Host {
         if size < 0x20 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        // The 8-byte entry write spans `[p_opt+16, p_opt+24)`. The
-        // `size >= 0x20` check above proves the guest declared at
-        // least 32 bytes at `p_opt`, so the entry slot is in-struct
-        // by guest contract; a wrap here means the guest lied or
-        // we miscomputed.
         debug_assert!(
             p_opt.checked_add(24).is_some(),
-            "_sys_prx_start_module entry write wraps u32: p_opt={p_opt:#010x}",
+            "_sys_prx_start_module 8-byte entry write at p_opt+16 wraps u32: p_opt={p_opt:#010x}",
         );
         let entry_addr = p_opt.wrapping_add(16);
         let no_start = u64::MAX.to_be_bytes();
@@ -401,14 +396,11 @@ impl Lv2Host {
     /// `size@0, pad@8, max@0xC, count@0x10, idlist@0x14, unk@0x1C`.
     /// CELL_EFAULT on null `pInfo` when bit 2 is set.
     ///
-    /// The idlist slot writes and the trailing count write are emitted
-    /// in a single `Lv2Dispatch::Immediate` batch. RPCS3's handler
-    /// writes count AFTER the fill loop completes, and both stores go
-    /// through the same `vm::ptr<>` access path; an unwritable idlist
-    /// page would trap during the loop and prevent the post-loop count
-    /// store. The atomic-commit contract enforces the same outcome
-    /// here: if any slot intent fails validation, the whole batch
-    /// rolls back and count cannot land independently.
+    /// Idlist slot writes and the trailing count write are co-emitted
+    /// in one `Lv2Dispatch::Immediate` batch; `apply_lv2_effects`
+    /// commits the `SharedWriteIntent` subset all-or-none, so a
+    /// failing slot rolls the count write back and emits
+    /// `dispatch.lv2_effect_apply_failed`.
     pub(super) fn dispatch_prx_get_module_list(
         &mut self,
         args: [u64; 8],
@@ -423,13 +415,10 @@ impl Lv2Host {
         if p_info == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
-        // The struct fields span `[p_info, p_info+0x18)`. A wrap here
-        // would silently retarget the field reads / writes elsewhere
-        // in low memory; an in-range read failure is the recoverable
-        // path (handled below), a u32 wrap is not.
         debug_assert!(
             p_info.checked_add(0x18).is_some(),
-            "sys_prx_get_module_list pInfo struct wraps u32: pInfo={p_info:#010x}",
+            "sys_prx_get_module_list pInfo struct [p_info, p_info+0x18) wraps u32: \
+             pInfo={p_info:#010x}",
         );
         let mut effects = Vec::new();
         let max_addr = p_info.wrapping_add(0x0C);
@@ -477,17 +466,14 @@ impl Lv2Host {
                 if count >= max {
                     break;
                 }
-                // Each slot is a 4-byte write at `idlist_ptr + count*4`;
-                // the highest address touched is `slot + 3`. A wrap
-                // would retarget the write to low memory unnoticed.
                 debug_assert!(
                     count
                         .checked_mul(4)
                         .and_then(|off| idlist_ptr.checked_add(off))
                         .and_then(|s| s.checked_add(4))
                         .is_some(),
-                    "sys_prx_get_module_list idlist slot wraps u32: \
-                     idlist_ptr={idlist_ptr:#010x} count={count}",
+                    "sys_prx_get_module_list 4-byte slot write at idlist_ptr+count*4 \
+                     wraps u32: idlist_ptr={idlist_ptr:#010x} count={count}",
                 );
                 let slot = idlist_ptr.wrapping_add(count.wrapping_mul(4));
                 effects.push(Effect::SharedWriteIntent {

@@ -2374,6 +2374,65 @@ fn conditional_store_through_runtime_clears_own_and_overlapping() {
     assert!(!rt.reservations().is_held_by(UnitId::new(1)));
 }
 
+#[test]
+fn lv2_apply_rolls_back_count_when_idlist_target_is_unmapped() {
+    // Count slot is pre-filled with a non-zero sentinel: asserting
+    // against 0 wouldn't distinguish rollback from "the write
+    // committed a value of 0."
+    let mut rt = build(0x10000, 1, 100);
+    let source = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+
+    let mut p_info = [0u8; 0x20];
+    p_info[0..8].copy_from_slice(&0x20u64.to_be_bytes());
+    p_info[0x0C..0x10].copy_from_slice(&4u32.to_be_bytes());
+    p_info[0x10..0x14].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
+    p_info[0x14..0x18].copy_from_slice(&0x0002_0000u32.to_be_bytes());
+    rt.memory_mut()
+        .apply_commit(
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x4000), p_info.len() as u64)
+                .unwrap(),
+            &p_info,
+        )
+        .unwrap();
+
+    rt.lv2_host_mut().prx_registry_mut().register(
+        "libaudio".into(),
+        "cellAudio_Library".into(),
+        0x0147_0000,
+        0x0148_0000,
+        0x0147_da30,
+        None,
+        None,
+    );
+
+    let breaks_before = rt.lv2_host().invariant_break_count();
+    rt.dispatch_lv2_request(
+        cellgov_lv2::Lv2Request::Unsupported {
+            number: 494,
+            args: [0x2, 0x4000, 0, 0, 0, 0, 0, 0],
+        },
+        source,
+    );
+
+    assert_eq!(
+        rt.lv2_host().invariant_break_count() - breaks_before,
+        1,
+        "expected one dispatch.lv2_effect_apply_failed break for the unmapped idlist target"
+    );
+
+    let count_bytes = rt
+        .memory()
+        .read(cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x4010), 4).unwrap())
+        .expect("pInfo+0x10 is in the backed region");
+    assert_eq!(
+        count_bytes,
+        &0xDEAD_BEEFu32.to_be_bytes(),
+        "count write must NOT land when a co-batched slot fails memory-subset validation"
+    );
+}
+
 #[derive(Clone)]
 
 struct RsxFlipSpinnerUnit {
