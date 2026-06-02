@@ -1,0 +1,38 @@
+# Game-title SELF byte-identity oracle hashes for
+# `parity_decrypted_reference.rs`. One row per title.
+#
+# `key = "npdrm"` titles carry both unmasked and masked SHA-256
+# hashes (RPCS3-derived), plus the RAP basename under
+# `tools/rpcs3/dev_hdd0/home/00000001/exdata/`. The unmasked hash
+# is checked first; the masked branch is the documented
+# non-semantic fallback per the C.2 decision tree.
+#
+# `key = "app"` titles carry only an unmasked SHA-256
+# (CellGov-derived refactor-invariance baseline, not an RPCS3
+# oracle). The masked branch does not apply. Replace with an
+# RPCS3-derived oracle once a bridge run lands.
+#
+# Adding a title: add one `[[title]]` block. Bin/RAP paths are
+# derived from `content_id` plus the embedded `rap_filename`.
+
+[[title]]
+content_id = "NPUA80001"
+display = "flOw"
+key = "npdrm"
+rap_filename = "UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap"
+unmasked_sha256 = "19f611a3288c0881d4f38af013c212f08f82822ad677ca584f48bd88e675ceb2"
+masked_sha256 = "ce974954234bfd8da70c9cc50fb14728db513399a4c0165944dd8599239cd360"
+
+[[title]]
+content_id = "NPUA80068"
+display = "SSHD"
+key = "npdrm"
+rap_filename = "UP9000-NPUA80068_00-STARDUSTFULL0001.rap"
+unmasked_sha256 = "8ae5c5d6df35e44893aba88623a1ac8666f2dade1186be4e441c170fc24a5e19"
+masked_sha256 = "c2e585c3fedc76b4e29f80262f625c8dadf7304e312a9b7b903451a983b69942"
+
+[[title]]
+content_id = "BCES00664"
+display = "WipEout HD Fury"
+key = "app"
+unmasked_sha256 = "46b14eba7c8522298219f73a7991ea5b5e56e99cef348ca214fb1f901db7631a"

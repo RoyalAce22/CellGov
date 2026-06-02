@@ -51,13 +51,17 @@ fn dir_from_env_or_default(env_key: &str, default: &str) -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(default))
 }
 
+fn require_fixtures() -> bool {
+    std::env::var_os(ENV_REQUIRE_FIXTURES).is_some()
+}
+
 /// Returns `None` when either fixture dir is absent;
 /// `CELLGOV_REQUIRE_PARITY_FIXTURES=1` promotes that to a panic.
 fn locate_fixtures() -> Option<(PathBuf, PathBuf)> {
     let encrypted = dir_from_env_or_default(ENV_FIRMWARE_DIR, DEFAULT_FIRMWARE_DIR);
     let reference = dir_from_env_or_default(ENV_DECRYPTED_REF_DIR, DEFAULT_REF_DIR);
     if !encrypted.is_dir() || !reference.is_dir() {
-        if std::env::var_os(ENV_REQUIRE_FIXTURES).is_some() {
+        if require_fixtures() {
             panic!(
                 "{ENV_REQUIRE_FIXTURES} set but fixtures missing: \
                  encrypted={} (exists={}), reference={} (exists={})",
@@ -79,10 +83,20 @@ fn locate_fixtures() -> Option<(PathBuf, PathBuf)> {
     Some((encrypted, reference))
 }
 
-fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path) {
+fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path, require: bool) {
     let sprx_path = encrypted_dir.join(format!("{stem}.sprx"));
     let prx_path = reference_dir.join(format!("{stem}.prx"));
     if !sprx_path.is_file() || !prx_path.is_file() {
+        if require {
+            panic!(
+                "{ENV_REQUIRE_FIXTURES} set but ({stem}) fixture half missing: \
+                 sprx={} exists={}, prx={} exists={}",
+                sprx_path.display(),
+                sprx_path.is_file(),
+                prx_path.display(),
+                prx_path.is_file(),
+            );
+        }
         eprintln!(
             "cellgov_firmware parity ({stem}): skipping (sprx={} exists={}, prx={} exists={})",
             sprx_path.display(),
@@ -95,30 +109,41 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path) {
     let encrypted_bytes = std::fs::read(&sprx_path).unwrap();
     let mut decrypted = cellgov_firmware::sce::decrypt_self_to_elf(&encrypted_bytes)
         .unwrap_or_else(|e| panic!("{stem}: decrypt failed: {e}"));
+    assert!(
+        decrypted.len() >= 0x40,
+        "{stem}: decrypt produced {} bytes, < ELF64 header",
+        decrypted.len()
+    );
     let mut reference = std::fs::read(&prx_path).unwrap();
-    // Asserted pre-mask so a dropped zeroing in decrypt_self_to_elf
-    // cannot be hidden by re-masking both sides.
+    // Shape-check on the SPRX input, not the decrypt path. The
+    // firmware SPRXes in this corpus ship with e_shoff = 0 in
+    // their inner ELF header, and `decrypt_self_to_elf` copies
+    // that header verbatim via `assemble_elf_from_sections`. A
+    // future SPRX with non-zero section headers is well-formed
+    // (RPCS3's `unself.cpp` accepts both shapes); this assert
+    // would then need widening, but the masked downstream compare
+    // would still catch a real decrypt divergence.
     assert_eq!(
         &decrypted[0x28..0x30],
         &[0u8; 8],
-        "{stem}: e_shoff not zeroed by decrypt_self_to_elf"
+        "{stem}: SPRX inner ELF unexpectedly carries non-zero e_shoff"
     );
     assert_eq!(
         &decrypted[0x3C..0x3E],
         &[0u8; 2],
-        "{stem}: e_shnum not zeroed by decrypt_self_to_elf"
+        "{stem}: SPRX inner ELF unexpectedly carries non-zero e_shnum"
     );
     assert_eq!(
         &decrypted[0x3E..0x40],
         &[0u8; 2],
-        "{stem}: e_shstrndx not zeroed by decrypt_self_to_elf"
+        "{stem}: SPRX inner ELF unexpectedly carries non-zero e_shstrndx"
     );
     cellgov_firmware::sce::mask_non_semantic_elf_bytes(&mut decrypted);
     cellgov_firmware::sce::mask_non_semantic_elf_bytes(&mut reference);
     assert_eq!(
         decrypted.len(),
         reference.len(),
-        "{stem}: decrypted length {} != reference length {}",
+        "{stem}: decrypt-length mismatch (decrypt produced {} bytes, reference is {} bytes)",
         decrypted.len(),
         reference.len(),
     );
@@ -127,7 +152,7 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path) {
             .iter()
             .zip(reference.iter())
             .position(|(a, b)| a != b)
-            .unwrap_or(0);
+            .expect("buffers differ but no differing byte found");
         panic!(
             "{stem}: byte mismatch at offset 0x{first_diff:x} \
              (decrypted=0x{:02x}, reference=0x{:02x})",
@@ -141,75 +166,95 @@ fn min_viable_prx_decrypt_matches_pre_decrypted_reference() {
     let Some((encrypted_dir, reference_dir)) = locate_fixtures() else {
         return;
     };
+    let require = require_fixtures();
     for stem in MODULES {
-        decrypt_and_compare(stem, &encrypted_dir, &reference_dir);
+        decrypt_and_compare(stem, &encrypted_dir, &reference_dir, require);
     }
 }
 
-// Game-title SELF byte-identity gates: flOw + SSHD against
-// RPCS3-derived SHA-256 oracles; WipEout against a CellGov-derived
-// refactor-invariance baseline.
+// Game-title SELF byte-identity gates. Oracles live in
+// `tests/parity_oracles.toml`; one row per content_id. NPDRM rows
+// (flOw / SSHD) carry RPCS3-derived unmasked + masked SHA-256
+// hashes; APP rows (WipEout) carry a CellGov-derived
+// refactor-invariance baseline (unmasked only).
 
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// flOw (NPUA80001) RPCS3-decrypted EBOOT.elf SHA-256, unmasked.
-const FLOW_ELF_SHA256_UNMASKED: [u8; 32] = [
-    0x19, 0xf6, 0x11, 0xa3, 0x28, 0x8c, 0x08, 0x81, 0xd4, 0xf3, 0x8a, 0xf0, 0x13, 0xc2, 0x12, 0xf0,
-    0x8f, 0x82, 0x82, 0x2a, 0xd6, 0x77, 0xca, 0x58, 0x4f, 0x48, 0xbd, 0x88, 0xe6, 0x75, 0xce, 0xb2,
-];
+#[derive(Deserialize)]
+struct OracleManifest {
+    title: Vec<Oracle>,
+}
 
-/// flOw RPCS3-decrypted EBOOT.elf SHA-256, after applying
-/// `mask_non_semantic_elf_bytes` (zeroes e_shoff/e_shnum/e_shstrndx).
-const FLOW_ELF_SHA256_MASKED: [u8; 32] = [
-    0xce, 0x97, 0x49, 0x54, 0x23, 0x4b, 0xfd, 0x8d, 0xa7, 0x0c, 0x9c, 0xc5, 0x0f, 0xb1, 0x47, 0x28,
-    0xdb, 0x51, 0x33, 0x99, 0xa4, 0xc0, 0x16, 0x59, 0x44, 0xdd, 0x85, 0x99, 0x23, 0x9c, 0xd3, 0x60,
-];
+#[derive(Deserialize)]
+struct Oracle {
+    content_id: String,
+    display: String,
+    key: String,
+    rap_filename: Option<String>,
+    unmasked_sha256: String,
+    masked_sha256: Option<String>,
+}
 
-/// SSHD (NPUA80068) RPCS3-decrypted EBOOT.elf SHA-256, unmasked.
-const SSHD_ELF_SHA256_UNMASKED: [u8; 32] = [
-    0x8a, 0xe5, 0xc5, 0xd6, 0xdf, 0x35, 0xe4, 0x48, 0x93, 0xab, 0xa8, 0x86, 0x23, 0xa1, 0xac, 0x86,
-    0x66, 0xf2, 0xda, 0xde, 0x11, 0x86, 0xbe, 0x4e, 0x44, 0x1c, 0x17, 0x0f, 0xc2, 0x4a, 0x5e, 0x19,
-];
+fn load_oracles() -> Vec<Oracle> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parity_oracles.toml");
+    let s =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let parsed: OracleManifest =
+        toml::from_str(&s).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+    parsed.title
+}
 
-/// SSHD RPCS3-decrypted EBOOT.elf SHA-256, masked form.
-const SSHD_ELF_SHA256_MASKED: [u8; 32] = [
-    0xc2, 0xe5, 0x85, 0xc3, 0xfe, 0xdc, 0x76, 0xb4, 0xe2, 0x9f, 0x80, 0x26, 0x2f, 0x62, 0x5c, 0x8d,
-    0xad, 0xf7, 0x30, 0x4e, 0x31, 0x2a, 0x9b, 0x7b, 0x90, 0x34, 0x51, 0xa9, 0x83, 0xb6, 0x99, 0x42,
-];
+fn hex_to_bytes32(s: &str, ctx: &str) -> [u8; 32] {
+    assert_eq!(s.len(), 64, "{ctx}: hex must be 64 chars, got {}", s.len());
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        out[i] = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
+            .unwrap_or_else(|_| panic!("{ctx}: invalid hex byte at index {i} in {s:?}"));
+    }
+    out
+}
 
-/// WipEout (BCES00664) CellGov-decrypted EBOOT.BIN SHA-256, unmasked.
-/// CellGov-derived refactor-invariance baseline, not an RPCS3 oracle.
-const WIPEOUT_ELF_SHA256_UNMASKED: [u8; 32] = [
-    0x46, 0xb1, 0x4e, 0xba, 0x7c, 0x85, 0x22, 0x29, 0x82, 0x19, 0xf7, 0x3a, 0x79, 0x91, 0xea, 0x5b,
-    0x5e, 0x56, 0xe9, 0x9c, 0xef, 0x34, 0x8c, 0xa2, 0x14, 0xfb, 0x1f, 0x90, 0x1d, 0xb7, 0x63, 0x1a,
-];
-
-const FLOW_BIN_RELATIVE: &str = "tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN";
-const FLOW_RAP_RELATIVE: &str =
-    "tools/rpcs3/dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap";
-const SSHD_BIN_RELATIVE: &str = "tools/rpcs3/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.BIN";
-const SSHD_RAP_RELATIVE: &str =
-    "tools/rpcs3/dev_hdd0/home/00000001/exdata/UP9000-NPUA80068_00-STARDUSTFULL0001.rap";
-const WIPEOUT_BIN_RELATIVE: &str = "tools/rpcs3/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.BIN";
-
-/// Decrypt an NPDRM-wrapped EBOOT.BIN via CellGov + RAP-derived klic,
-/// then assert against the unmasked and masked oracle hashes via the
-/// C.2 decision tree. Skips silently if the operator-supplied
-/// fixtures are absent from this checkout.
-fn npdrm_byte_identity(
-    title: &str,
-    bin_rel: &str,
-    rap_rel: &str,
-    expected_unmasked: &[u8; 32],
-    expected_masked: &[u8; 32],
-) {
+fn bin_path_for(content_id: &str, key: &str) -> PathBuf {
     let ws = workspace_root();
-    let bin_path = ws.join(bin_rel);
-    let rap_path = ws.join(rap_rel);
+    match key {
+        "npdrm" => ws
+            .join("tools/rpcs3/dev_hdd0/game")
+            .join(content_id)
+            .join("USRDIR/EBOOT.BIN"),
+        "app" => ws
+            .join("tools/rpcs3/dev_bdvd")
+            .join(content_id)
+            .join("PS3_GAME/USRDIR/EBOOT.BIN"),
+        other => panic!("{content_id}: unknown key {other:?}"),
+    }
+}
+
+fn rap_path_for(rap_filename: &str) -> PathBuf {
+    workspace_root()
+        .join("tools/rpcs3/dev_hdd0/home/00000001/exdata")
+        .join(rap_filename)
+}
+
+/// NPDRM byte-identity gate; masked-identity is the contract.
+///
+/// Section-header layout (`e_shoff` / `e_shnum` / `e_shstrndx`) is
+/// non-semantic, so the masked hash is the byte-identity check;
+/// the unmasked hash is a strict-superset fast path that also
+/// requires the section tables to coincide. See
+/// [`cellgov_firmware::sce::mask_non_semantic_elf_bytes`] for the
+/// section-vs-segment split.
+fn run_npdrm_oracle(oracle: &Oracle) {
+    let title = &oracle.display;
+    let bin_path = bin_path_for(&oracle.content_id, &oracle.key);
+    let rap_filename = oracle.rap_filename.as_ref().unwrap_or_else(|| {
+        panic!("{title}: npdrm oracle requires rap_filename in parity_oracles.toml")
+    });
+    let rap_path = rap_path_for(rap_filename);
     if !bin_path.is_file() || !rap_path.is_file() {
         eprintln!(
             "cellgov_firmware C.2 ({title}): skipping; missing {} or {}",
@@ -218,24 +263,41 @@ fn npdrm_byte_identity(
         );
         return;
     }
+    let expected_unmasked = hex_to_bytes32(&oracle.unmasked_sha256, &format!("{title} unmasked"));
+    let expected_masked_hex = oracle.masked_sha256.as_ref().unwrap_or_else(|| {
+        panic!("{title}: npdrm oracle requires masked_sha256 in parity_oracles.toml")
+    });
+    let expected_masked = hex_to_bytes32(expected_masked_hex, &format!("{title} masked"));
+
     let bin = std::fs::read(&bin_path).unwrap();
     let rap = std::fs::read(&rap_path).unwrap();
-    let rap_arr: [u8; 16] = rap.as_slice().try_into().expect("RAP must be 16 bytes");
+    let rap_arr: [u8; 16] = rap.as_slice().try_into().unwrap_or_else(|_| {
+        panic!(
+            "{title}: RAP {} is {} bytes, expected 16",
+            rap_path.display(),
+            rap.len()
+        )
+    });
     let klic = cellgov_firmware::npdrm::rap_to_klic(&rap_arr);
     let mut elf = cellgov_firmware::npdrm::decrypt_self_to_elf_npdrm(&bin, &klic)
         .unwrap_or_else(|e| panic!("{title}: NPDRM decrypt failed: {e}"));
+    assert!(
+        elf.len() >= 0x40,
+        "{title}: NPDRM decrypt produced {} bytes, < ELF64 header",
+        elf.len()
+    );
 
     let got_unmasked: [u8; 32] = Sha256::digest(&elf).into();
-    if &got_unmasked == expected_unmasked {
+    if got_unmasked == expected_unmasked {
         eprintln!("{title}: byte-identical to RPCS3 oracle (unmasked)");
         return;
     }
     cellgov_firmware::sce::mask_non_semantic_elf_bytes(&mut elf);
     let got_masked: [u8; 32] = Sha256::digest(&elf).into();
-    if &got_masked == expected_masked {
+    if got_masked == expected_masked {
         eprintln!(
-            "{title}: identical to RPCS3 oracle after masking \
-             section-header fields (non-semantic divergence)"
+            "{title}: byte-identical to RPCS3 oracle (masked; \
+             section-header layout is non-semantic)"
         );
         return;
     }
@@ -243,9 +305,39 @@ fn npdrm_byte_identity(
         "{title}: CellGov decrypt diverges from RPCS3 oracle:\n  \
          got unmasked = {}\n  exp unmasked = {}\n  got masked   = {}\n  exp masked   = {}",
         hex_str(&got_unmasked),
-        hex_str(expected_unmasked),
+        hex_str(&expected_unmasked),
         hex_str(&got_masked),
-        hex_str(expected_masked),
+        hex_str(&expected_masked),
+    );
+}
+
+fn run_app_oracle(oracle: &Oracle) {
+    let title = &oracle.display;
+    let bin_path = bin_path_for(&oracle.content_id, &oracle.key);
+    if !bin_path.is_file() {
+        eprintln!(
+            "cellgov_firmware C.2 ({title}): skipping; missing {}",
+            bin_path.display()
+        );
+        return;
+    }
+    let expected = hex_to_bytes32(&oracle.unmasked_sha256, &format!("{title} unmasked"));
+    let bin = std::fs::read(&bin_path).unwrap();
+    let elf = cellgov_firmware::sce::decrypt_self_to_elf(&bin)
+        .unwrap_or_else(|e| panic!("{title}: APP decrypt failed: {e}"));
+    assert!(
+        elf.len() >= 0x40,
+        "{title}: APP decrypt produced {} bytes, < ELF64 header",
+        elf.len()
+    );
+    let got: [u8; 32] = Sha256::digest(&elf).into();
+    assert_eq!(
+        got,
+        expected,
+        "{title} APP decrypt diverges from refactor-invariance \
+         baseline: got {} != expected {}",
+        hex_str(&got),
+        hex_str(&expected),
     );
 }
 
@@ -254,48 +346,20 @@ fn hex_str(bytes: &[u8]) -> String {
 }
 
 #[test]
-fn flow_eboot_byte_identity_against_rpcs3_oracle() {
-    npdrm_byte_identity(
-        "flOw",
-        FLOW_BIN_RELATIVE,
-        FLOW_RAP_RELATIVE,
-        &FLOW_ELF_SHA256_UNMASKED,
-        &FLOW_ELF_SHA256_MASKED,
+fn eboot_byte_identity_against_oracles() {
+    let oracles = load_oracles();
+    assert!(
+        !oracles.is_empty(),
+        "parity_oracles.toml must declare at least one [[title]] entry"
     );
-}
-
-#[test]
-fn sshd_eboot_byte_identity_against_rpcs3_oracle() {
-    npdrm_byte_identity(
-        "SSHD",
-        SSHD_BIN_RELATIVE,
-        SSHD_RAP_RELATIVE,
-        &SSHD_ELF_SHA256_UNMASKED,
-        &SSHD_ELF_SHA256_MASKED,
-    );
-}
-
-#[test]
-fn wipeout_eboot_refactor_invariance() {
-    let ws = workspace_root();
-    let bin_path = ws.join(WIPEOUT_BIN_RELATIVE);
-    if !bin_path.is_file() {
-        eprintln!(
-            "cellgov_firmware C.2 (WipEout): skipping; missing {}",
-            bin_path.display()
-        );
-        return;
+    for oracle in &oracles {
+        match oracle.key.as_str() {
+            "npdrm" => run_npdrm_oracle(oracle),
+            "app" => run_app_oracle(oracle),
+            other => panic!(
+                "{}: unknown key {:?} in parity_oracles.toml",
+                oracle.content_id, other
+            ),
+        }
     }
-    let bin = std::fs::read(&bin_path).unwrap();
-    let elf = cellgov_firmware::sce::decrypt_self_to_elf(&bin)
-        .unwrap_or_else(|e| panic!("WipEout: APP decrypt failed: {e}"));
-    let got: [u8; 32] = Sha256::digest(&elf).into();
-    assert_eq!(
-        got,
-        WIPEOUT_ELF_SHA256_UNMASKED,
-        "WipEout APP decrypt diverges from refactor-invariance \
-         baseline: got {} != expected {}",
-        hex_str(&got),
-        hex_str(&WIPEOUT_ELF_SHA256_UNMASKED),
-    );
 }
