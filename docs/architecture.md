@@ -277,7 +277,12 @@ nine-step deterministic loop:
 7. Advance the commit epoch, then fire any DMA completions whose
    ready tick has arrived; resolve join wakes if the unit finished;
    run the RSX FIFO advance pass (its emitted effects queue for the
-   next batch under the atomic-batch contract).
+   next batch under the atomic-batch contract). DMA completions
+   publish per-tag completion bits to the issuing SPU's
+   tag-status channel at fire time (not at enqueue); an SPU that
+   yields `DmaWait` is parked `Blocked` before completions fire,
+   so a same-commit completion's `Runnable` override overwrites
+   the just-set `Blocked` and the wake fires in the same batch.
 8. Emit commit trace records for the batch and notify the scheduler
    of the yield, passing whether other units were woken and whether
    the source still holds an lwmutex.
@@ -294,6 +299,13 @@ occurs mid-batch (after some instructions have retired), the PPU
 restores a state snapshot taken at step entry and re-executes at
 Budget=1 so that pre-fault instructions commit individually and
 the faulting instruction is isolated.
+
+A `DmaEnqueue` whose destination fails `validate_write` at
+step 4 (reserved or out-of-range) additionally marks the
+issuing unit `Faulted` before returning the `CommitError`. This
+prevents the SPU from rolling forward into a tag-poll that can
+never wake -- the unit terminates on the rejecting step, the
+host-visible `CommitError` carries the addr/region.
 
 **Trivial-step fast path (FaultDriven only).** When the effects
 vec is empty, `fault` is `None`, `yield_reason` is neither

@@ -30,9 +30,8 @@ impl Runtime {
             return;
         }
 
-        // One CommitApplied per commit boundary. On validation failure
-        // the batch is closed but empty: fault_discarded = true with
-        // zero counts.
+        // One CommitApplied per commit boundary; validation failure
+        // closes the batch as `fault_discarded = true` with zero counts.
         let record = match outcome {
             Ok(o) => TraceRecord::CommitApplied {
                 unit: source,

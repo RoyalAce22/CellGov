@@ -362,10 +362,9 @@ fn multi_primitive_determinism_canary() {
     assert!(run_a.len() >= 15);
 }
 
-// lwmutex, mutex, semaphore, event queue, and event flag remember a
-// release issued before the corresponding wait. Cond does not (see
-// `cond_signal_before_wait_does_not_wake_subsequent_waiter` in
-// `src/host/cond.rs`).
+// Cross-primitive invariant: lwmutex, mutex, semaphore, event queue, and
+// event flag remember a release issued before the matching wait. Cond does
+// not (see `cond_signal_before_wait_does_not_wake_subsequent_waiter`).
 
 #[test]
 fn lost_wake_lwmutex_unlock_before_lock_does_not_park_waiter() {

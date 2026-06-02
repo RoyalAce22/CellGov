@@ -1,10 +1,4 @@
 //! Open-flag validation and the TTY-sink path allowlist.
-//!
-//! The `CELL_FS_O_*` constants live in [`cellgov_ps3_abi::sys_fs`]
-//! since they are PS3 ABI values, not CellGov policy. This module
-//! holds the validator and the (CellGov-internal) allowlist of
-//! paths whose write-flag opens succeed because the dispatcher
-//! routes their writes to the host TTY log.
 
 use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_fs::{
@@ -25,9 +19,8 @@ use cellgov_ps3_abi::sys_fs::{
 pub(super) const FS_TTY_SINK_PATHS: &[&str] = &["/app_home/output.txt"];
 
 /// Returns `Some(errno)` if the open-flag combination is unsupportable
-/// against a read-only blob store, `None` if it is OK to proceed with
-/// open-for-read. `path` lets the validator skip flag checks for
-/// known write-sink fixtures.
+/// against a read-only blob store, `None` otherwise. Paths in
+/// [`FS_TTY_SINK_PATHS`] bypass the flag check.
 pub(super) fn validate_open_flags(
     flags: u32,
     path: &str,

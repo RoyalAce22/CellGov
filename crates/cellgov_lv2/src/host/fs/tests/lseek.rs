@@ -105,8 +105,6 @@ fn lseek_negative_past_zero_returns_einval() {
 
 #[test]
 fn lseek_failed_seek_does_not_advance_offset() {
-    // Invariant: a CELL_EINVAL seek must leave the fd's offset
-    // alone so a subsequent read still returns from where it was.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"abc".to_vec())
@@ -157,8 +155,6 @@ fn lseek_unmapped_pos_out_ptr_returns_efault() {
 
 #[test]
 fn lseek_bad_pos_out_ptr_takes_precedence_over_bad_whence_and_fd() {
-    // Precedence invariant: EFAULT on pos_out_ptr is checked
-    // before whence-decode and fd lookup.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
@@ -170,8 +166,6 @@ fn lseek_bad_pos_out_ptr_takes_precedence_over_bad_whence_and_fd() {
 
 #[test]
 fn lseek_bad_whence_takes_precedence_over_bad_fd() {
-    // Precedence invariant: EINVAL on whence is checked before
-    // fd lookup.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(

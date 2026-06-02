@@ -51,7 +51,7 @@ pub struct SpuExecutionUnit {
 }
 
 impl SpuExecutionUnit {
-    /// Create a new SPU execution unit with zeroed state.
+    /// Construct a runnable SPU with zeroed architectural state.
     pub fn new(id: UnitId) -> Self {
         Self {
             id,
@@ -60,12 +60,12 @@ impl SpuExecutionUnit {
         }
     }
 
-    /// Mutable access to the SPU's architectural state.
+    /// Mutable access to architectural state.
     pub fn state_mut(&mut self) -> &mut state::SpuState {
         &mut self.state
     }
 
-    /// Read access to the SPU's architectural state.
+    /// Read access to architectural state.
     pub fn state(&self) -> &state::SpuState {
         &self.state
     }
@@ -88,8 +88,8 @@ impl ExecutionUnit for SpuExecutionUnit {
         ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
-        // Mailbox yield leaves PC at the rdch so retry is possible when
-        // the mailbox was empty; on message delivery we advance past it.
+        // Re-entry after a mailbox park: a yielded rdch leaves PC on the
+        // instruction; resume by writing the message and stepping past it.
         if let Some(&msg) = ctx.received_messages().first() {
             let rt = self.state.channels.pending_mbox_rt.take().unwrap_or(2);
             self.state.set_reg_word_splat(rt, msg);
@@ -111,9 +111,8 @@ impl ExecutionUnit for SpuExecutionUnit {
         }
         self.state.channels.tag_status |= ctx.completed_dma_tags();
 
-        // Mirror cross-unit invalidation of the atomic reservation
-        // from the committed table. The context view is frozen for
-        // this step, so one check at entry suffices.
+        // Mirror cross-unit reservation invalidation. The context view is
+        // frozen for the step, so a single entry-time check suffices.
         if self.state.reservation.is_some() && !ctx.reservation_held(self.id) {
             self.state.reservation = None;
         }
@@ -163,10 +162,10 @@ impl ExecutionUnit for SpuExecutionUnit {
                     effects.extend(step_effects);
                     if reason == YieldReason::Finished {
                         self.status = UnitStatus::Finished;
-                    } else if reason == YieldReason::MailboxAccess {
-                        // PC stays on the rdch; advance occurs at the
-                        // top of run_until_yield on message delivery.
-                    } else {
+                    } else if reason != YieldReason::MailboxAccess {
+                        // Mailbox path keeps PC on the rdch for retry; the
+                        // re-entry block at the top of run_until_yield
+                        // advances PC once a message lands.
                         self.state.pc += 4;
                     }
                     return ExecutionStepResult {
@@ -194,8 +193,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                                 .copy_from_slice(&mem[src_start..src_end]);
                         }
                     }
-                    // MFC_GETLLAR additionally installs the unit's
-                    // entry in the reservation table.
+                    // MFC_GETLLAR also installs the unit's reservation entry.
                     if let Some(line_addr) = acquire_line {
                         effects.push(Effect::ReservationAcquire {
                             line_addr,

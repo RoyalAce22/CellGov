@@ -84,8 +84,6 @@ fn empty_directory_eofs_immediately() {
 #[test]
 fn readdir_walks_entries_lexicographically() {
     let dir = TempMountDir::new("readdir_lex");
-    // Non-alphabetical insert order so the snapshot's sort
-    // step has to do work; the host FS may yield in any order.
     dir.write("zzz.xml", b"z");
     dir.write("a.xml", b"a");
     dir.write("middle.xml", b"m");
@@ -176,8 +174,7 @@ fn readdir_eof_then_close_clean() {
         0x21000,
     );
     assert_eq!(nread, 0);
-    // Invariant: the snapshot stays drained across repeated
-    // post-EOF reads.
+    // Invariant: snapshot stays drained across repeated post-EOF reads.
     let rt = PathRuntime::empty(0x40000);
     let (_blob, nread) = extract_readdir(
         run(&mut host, &rt, fs_readdir(fd, 0x20000, 0x21000)),

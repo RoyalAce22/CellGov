@@ -1,7 +1,5 @@
-//! SPU instruction execution.
-//!
-//! Translates decoded instructions into `SpuState` mutations and
-//! `Effect` packets. The only layer that couples state to Effects.
+//! SPU instruction execution: translates decoded instructions into
+//! `SpuState` mutations and `Effect` packets.
 
 use crate::instruction::SpuInstruction;
 use crate::state::SpuState;
@@ -29,10 +27,9 @@ pub enum SpuStepOutcome {
     },
     /// Memory read the caller must service from the committed snapshot.
     ///
-    /// The execute layer does not hold the `ExecutionContext`;
-    /// `run_until_yield` copies `size` bytes from `ea` into LS at `lsa`.
-    /// When `acquire_line` is set (MFC_GETLLAR), the caller also
-    /// emits an `Effect::ReservationAcquire` for that line.
+    /// The caller copies `size` bytes from `ea` into LS at `lsa`; when
+    /// `acquire_line` is set (MFC_GETLLAR) it also emits an
+    /// `Effect::ReservationAcquire` for that line.
     MemoryRead {
         /// Guest effective address to read from.
         ea: u64,
@@ -508,8 +505,6 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 .expect("matching sizes")
                 .with_tag_id(state.channels.mfc_tag_id as u8);
             // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
-            // Same-unit self-invalidation: PUT overlapping the reserved
-            // line drops the local reservation (Cell BE ABI).
             if let Some(line) = state.reservation {
                 if line.overlaps_range(ea, size as u64) {
                     state.reservation = None;
@@ -545,10 +540,6 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         }
         // [CBEA p:66 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] putllc: conditional store that succeeds only if the local reservation is still held for this line.
         spu_channels::MFC_PUTLLC => {
-            // Succeeds when the local reservation holds and its line
-            // matches the PUTLLC target. Cross-unit invalidation is
-            // mirrored at step entry; self-invalidation happens in
-            // MFC_PUT when it overlaps the reserved line.
             let line = cellgov_sync::ReservedLine::containing(ea);
             let success = match state.reservation {
                 Some(l) => l.addr() == line.addr(),
@@ -571,7 +562,6 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                     reason: YieldReason::DmaSubmitted,
                 }
             } else {
-                // atomic_status = 1 signals PUTLLC failure.
                 state.channels.atomic_status = 1;
                 SpuStepOutcome::Continue
             }

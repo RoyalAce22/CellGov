@@ -16,22 +16,16 @@ impl Lv2Host {
     /// position under SEEK_SET / SEEK_CUR / SEEK_END semantics and
     /// write that position to `pos_out_ptr`.
     ///
-    /// # Error precedence
+    /// # Errors
     ///
-    /// In order:
-    /// 1. `pos_out_ptr` misaligned / unwritable -> CELL_EFAULT, no
-    ///    effects. We bail before touching the fd table because no
-    ///    other error can be reported (the new position would have
-    ///    nowhere to land).
-    /// 2. `whence` not in `{0, 1, 2}` -> CELL_EINVAL, no effects.
-    ///    Cheap argument check before fd lookup.
-    /// 3. Unknown `fd` -> CELL_EBADF, no effects.
-    /// 4. Seek lands outside `[0, u64::MAX]` (negative-past-zero or
-    ///    positive overflow) -> CELL_EINVAL, no effects. The fd's
-    ///    offset is unchanged on this path; FsStore::seek validates
-    ///    before mutating.
-    /// 5. Otherwise CELL_OK with one effect: the new position
-    ///    written as a big-endian u64 at `pos_out_ptr`.
+    /// In precedence order:
+    /// 1. `pos_out_ptr` misaligned / unwritable -> CELL_EFAULT.
+    /// 2. `whence` not in `{0, 1, 2}` -> CELL_EINVAL.
+    /// 3. Unknown `fd` -> CELL_EBADF.
+    /// 4. Seek lands outside `[0, u64::MAX]` -> CELL_EINVAL; the fd's
+    ///    offset is unchanged.
+    /// 5. Otherwise CELL_OK with one effect writing the new position
+    ///    as a big-endian u64 at `pos_out_ptr`.
     pub(in crate::host) fn dispatch_fs_lseek(
         &mut self,
         fd: u32,
@@ -41,16 +35,10 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // pos is a u64 (PS3 sys_fs_lseek signature: `u64 *pos`);
-        // enforce 8-byte alignment and writability before any fd touch.
         if !out_ptr_writable(rt, pos_out_ptr, 8, 8) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
 
-        // Decode whence; out-of-range is CELL_EINVAL with no
-        // out-pointer write. Done before fd lookup so a probe with
-        // garbage whence does not need a valid fd to surface
-        // EINVAL.
         let whence = match SeekWhence::from_guest(whence) {
             Some(w) => w,
             None => {
@@ -67,11 +55,6 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
             }
             Err(other) => {
-                // seek's contract: only UnknownFd / SeekOutOfRange
-                // / UnknownPath. UnknownPath would mean the blob
-                // disappeared from under an open fd -- single-write
-                // registration forbids that. Anything else is
-                // FsError surface drift.
                 self.record_invariant_break(
                     "dispatch.fs_lseek.unexpected_fs_error",
                     format_args!(
@@ -85,7 +68,6 @@ impl Lv2Host {
 
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(pos_out_ptr, 8),
-            // PS3 is big-endian; guest reads via `ld`.
             bytes: WritePayload::from_slice(&new_pos.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,

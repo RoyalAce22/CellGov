@@ -8,30 +8,21 @@ use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
 
 impl Lv2Host {
-    /// Records the io -> ea mapping on the live `SysRsxContext`.
+    /// Record the io -> ea mapping on the live `SysRsxContext`.
     ///
     /// # Cross-module contract
     ///
-    /// The kernel-backed iomap region of [`PS3_RSX_IOMAP_SIZE`]
-    /// bytes is composed by the boot pipeline; the title's later
-    /// writes through the mapping land in writable guest memory.
-    ///
-    /// Only the most recent mapping is retained -- a second call
-    /// overwrites the first. RPCS3 keys per-1 MiB-page in
-    /// `iomap_table`; CellGov's single triple covers every
-    /// modeled title (each issues one window through
-    /// `_cellGcmInitBody`).
+    /// Only the most recent mapping is retained; a second call overwrites
+    /// the first. A single triple covers every modeled title (each issues
+    /// one window through `_cellGcmInitBody`).
     ///
     /// # Errors
     ///
-    /// Per RPCS3's `sys_rsx.cpp` iomap handler, `CELL_EINVAL` for:
-    /// `context_id != 0x5555_5555`, `size == 0`,
-    /// any of `io`/`ea`/`size` not 1 MiB-aligned, `ea + size`
-    /// crossing into [`PS3_RSX_BASE`] (RPCS3's `local_mem_base`),
-    /// or `io + size` exceeding the baked iomap region. Only the
-    /// io-over-cap path logs `dispatch.sys_rsx_context_iomap_oversized`;
-    /// the ea-range rejection is a plain EINVAL, matching RPCS3's
-    /// undifferentiated gate.
+    /// `CELL_EINVAL` for: `context_id != 0x5555_5555`, `size == 0`, any of
+    /// `io`/`ea`/`size` not 1 MiB-aligned, `ea + size` crossing into
+    /// [`PS3_RSX_BASE`], or `io + size` exceeding the baked iomap region.
+    /// Only the io-over-cap path logs
+    /// `dispatch.sys_rsx_context_iomap_oversized`.
     pub(in crate::host) fn dispatch_sys_rsx_context_iomap(
         &mut self,
         context_id: u32,

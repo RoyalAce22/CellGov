@@ -16,20 +16,17 @@ impl Lv2Host {
     /// allocate a directory fd over the lexicographically-sorted
     /// entries.
     ///
-    /// # Error precedence
+    /// # Errors
     ///
-    /// In order:
-    /// 1. `fd_out_ptr` NULL / misaligned / unwritable -> CELL_EFAULT,
-    ///    no effects.
-    /// 2. `path_ptr` unmapped, scan crosses unmapped, or no NUL
-    ///    within `CELL_FS_MAX_PATH_LENGTH` -> CELL_EFAULT or CELL_EINVAL,
-    ///    no effects.
-    /// 3. Path is not a UTF-8 string -> CELL_ENOENT (no UTF-8 mount
-    ///    can name a non-UTF-8 path).
-    /// 4. Mount table has no matching prefix -> CELL_ENOENT.
-    /// 5. Mount matches but host path is not a directory ->
-    ///    CELL_ENOTDIR; missing -> CELL_ENOENT; IO error ->
-    ///    CELL_EIO; `..` traversal -> CELL_EACCES.
+    /// In precedence order:
+    /// 1. `fd_out_ptr` NULL / misaligned / unwritable -> CELL_EFAULT.
+    /// 2. `path_ptr` unmapped / no NUL within `CELL_FS_MAX_PATH_LENGTH`
+    ///    -> CELL_EFAULT or CELL_EINVAL.
+    /// 3. Non-UTF-8 path -> CELL_ENOENT.
+    /// 4. No matching mount prefix -> CELL_ENOENT.
+    /// 5. Host path not-a-directory -> CELL_ENOTDIR; missing ->
+    ///    CELL_ENOENT; IO error -> CELL_EIO; `..` traversal ->
+    ///    CELL_EACCES.
     /// 6. Otherwise CELL_OK with one fd-write effect.
     pub(in crate::host) fn dispatch_fs_opendir(
         &mut self,

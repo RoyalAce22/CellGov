@@ -1,3 +1,14 @@
+//! Instruction-stream emitter for the `disasm` subcommand.
+//!
+//! Owns vaddr-to-file-offset resolution (`select_segment`) over the
+//! validated `PtLoad` list and the per-instruction print loop
+//! (`disassemble`). Real instruction lines go to stdout; past-segment
+//! markers, decode-error notes, and the data-not-code heuristic go to
+//! stderr so a downstream tool can pipe stdout cleanly. Caller
+//! supplies the segment list from [`super::elf::parse_pt_loads`];
+//! this module trusts that producer-side validation and skips
+//! per-byte bounds checks in the hot loop.
+
 use std::io::{self, Write};
 
 use super::args::MAX_COUNT;
@@ -8,10 +19,6 @@ use super::elf::PtLoad;
 /// note per run.
 const CONSECUTIVE_DECODE_NOTE_THRESHOLD: usize = 8;
 
-/// Failure modes for `disassemble`. `BadVaddr` is a usage error (the
-/// caller pointed us at an address not file-backed by any PT_LOAD).
-/// `Io` is a downstream-writer error -- the canonical case is a closed
-/// pipe (`| head`), which `run` treats as graceful early termination.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum StreamError {
     #[error("disasm: {0}")]
@@ -22,16 +29,11 @@ pub(super) enum StreamError {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DisasmStats {
-    /// Total lines written to the instruction stream, including the
-    /// terminal `<past segment end>` / `<BSS / zero-fill>` markers.
     /// Real instruction lines are `lines_written - markers_written`.
     pub(super) lines_written: usize,
-    /// Boundary marker lines (BSS or past-segment-end) written. At
-    /// most one per run.
+    /// At most one per run.
     pub(super) markers_written: usize,
-    /// Number of `decode` failures encountered.
     pub(super) decode_errors: usize,
-    /// True if the consecutive-failure heuristic note fired.
     pub(super) data_warning_emitted: bool,
 }
 
@@ -66,18 +68,12 @@ fn render_vaddr_not_in_pt_load(vaddr: u64, segments: &[PtLoad]) -> String {
 }
 
 /// Pick the PT_LOAD that file-backs `vaddr`. With overlapping
-/// segments (legal but unusual; firmware modules occasionally emit
-/// them), pick the smallest containing segment; ties break on lowest
-/// `p_offset`, then lowest `p_vaddr`. Two PT_LOADs with identical
-/// `(filesz, offset, vaddr)` are indistinguishable by file content,
-/// so picking either is correct -- the triple-key sort makes the
-/// choice fully a function of the segment data, not phdr order.
-/// Emits a stderr note when more than one segment matches.
+/// segments, pick the smallest containing segment; ties break on
+/// lowest `p_offset`, then lowest `p_vaddr`. Emits a stderr note
+/// when more than one segment matches.
 fn select_segment(segments: &[PtLoad], vaddr: u64) -> Result<PtLoad, DisasmError> {
-    // parse_pt_loads rejects PtLoads whose vaddr range overflows u64,
-    // but this function is also reachable from tests that hand-roll
-    // PtLoads with extreme vaddrs. Keep saturating_add as a defensive
-    // floor; an overflowing range would otherwise wrap silently.
+    // saturating_add guards against hand-rolled test PtLoads whose
+    // vaddr range overflows u64; parse_pt_loads rejects those upstream.
     let mut candidates: Vec<PtLoad> = segments
         .iter()
         .copied()
@@ -109,10 +105,9 @@ fn select_segment(segments: &[PtLoad], vaddr: u64) -> Result<PtLoad, DisasmError
 /// Read `count` aligned 32-bit words starting at `vaddr`, decoding
 /// each and writing one line per word into `out`.
 ///
-/// Caller is responsible for `vaddr % 4 == 0` and `count > 0`
-/// (`parse_args` enforces both). `parse_pt_loads` guarantees that any
-/// `seg.offset + off_in_seg + 4 <= elf_bytes.len()` whenever the
-/// per-iteration filesz check passes, so the hot loop indexes
+/// Cross-module contract: `parse_pt_loads` must have validated the
+/// segments. `seg.offset + off_in_seg + 4 <= elf_bytes.len()` whenever
+/// the per-iteration filesz check passes, so the hot loop indexes
 /// `elf_bytes` without further bounds checks.
 pub(super) fn disassemble<W: Write>(
     elf_bytes: &[u8],
@@ -383,11 +378,6 @@ mod tests {
 
     #[test]
     fn unsupported_word_constant_is_actually_unsupported() {
-        // If `cellgov_ppu::decode` ever adds an arm covering primary
-        // opcode 1, the heuristic tests below silently flip from
-        // "exercises the failure path" to "exercises the success
-        // path." Fail loudly here so the maintainer picks a new
-        // sentinel rather than letting the heuristic tests go vacuous.
         let raw = u32::from_be_bytes(UNSUPPORTED_WORD);
         assert!(
             cellgov_ppu::decode::decode(raw).is_err(),
@@ -453,9 +443,6 @@ mod tests {
 
     #[test]
     fn disassemble_propagates_broken_pipe() {
-        // Stream of nops; pipe breaks after 2 successful writes. The
-        // loop must stop with StreamError::Io(BrokenPipe), not silently
-        // burn through the remaining count.
         let mut bytes = Vec::new();
         for _ in 0..16 {
             bytes.extend_from_slice(&PPC_NOP_BYTES);
@@ -471,8 +458,6 @@ mod tests {
             matches!(&err, StreamError::Io(e) if e.kind() == std::io::ErrorKind::BrokenPipe),
             "expected Io(BrokenPipe), got {err:?}"
         );
-        // The third write is where the pipe breaks; the loop must
-        // bail immediately, not keep decoding the remaining 13 words.
         assert_eq!(
             out.writes_attempted, 3,
             "loop kept writing after BrokenPipe"
@@ -481,12 +466,9 @@ mod tests {
 
     #[test]
     fn disassemble_address_overflow_marker_is_consistent() {
-        // Hand-roll a PtLoad at the top of the u64 vaddr range. The
-        // first iteration decodes one word at u64::MAX-3, the second
-        // tries vaddr+4 = u64::MAX+1 -> address-overflow marker fires.
-        // parse_pt_loads would reject this geometry (vaddr+filesz
-        // overflows), but disassemble is given a PtLoad directly here
-        // to exercise the defensive marker path.
+        // Non-obvious invariant: parse_pt_loads rejects this geometry
+        // (vaddr+filesz overflows); hand-rolled here to reach the
+        // defensive marker path.
         let bytes = PPC_NOP_BYTES.to_vec();
         let seg = PtLoad {
             vaddr: u64::MAX - 3,
@@ -501,7 +483,6 @@ mod tests {
             text.contains("<address overflow"),
             "stream missing address-overflow marker:\n{text}"
         );
-        // One real decoded line + one overflow marker.
         assert_eq!(stats.lines_written, 2);
         assert_eq!(stats.markers_written, 1);
         assert!(

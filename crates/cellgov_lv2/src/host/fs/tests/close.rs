@@ -53,9 +53,6 @@ fn double_close_returns_ebadf_on_second_call() {
 
 #[test]
 fn close_param_sfo_fd_returns_ok() {
-    // Real PS3 leaves the kernel-side fs_fd_count untouched on
-    // close; the sys_process ps3autotest pins this. fs_fd_count
-    // stays at 1 after close.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/PARAM.SFO\0");
     let fd = extract_fd(
@@ -69,8 +66,6 @@ fn close_param_sfo_fd_returns_ok() {
 
 #[test]
 fn close_does_not_decrement_fs_fd_count() {
-    // Real PS3 leaves fs_fd_count untouched across sys_fs_close;
-    // the sys_process ps3autotest pins this.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/PARAM.SFO\0");
     let fd = extract_fd(

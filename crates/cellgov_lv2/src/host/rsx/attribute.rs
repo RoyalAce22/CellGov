@@ -9,16 +9,16 @@ use crate::host::Lv2Host;
 
 use super::state::RsxDisplayBuffer;
 
-/// CellGov-internal package id for the flip-handler callback. High bit set to
-/// keep CellGov-internal ids disjoint from guest-visible PS3 package ids.
+/// CellGov-internal package id for the flip-handler callback. High bit set so
+/// CellGov-internal ids stay disjoint from guest-visible PS3 package ids.
 pub const PACKAGE_CELLGOV_SET_FLIP_HANDLER: u32 = 0x8000_0108;
-/// CellGov-internal package id for the vblank-handler callback. See [`PACKAGE_CELLGOV_SET_FLIP_HANDLER`].
+/// CellGov-internal package id for the vblank-handler callback.
 pub const PACKAGE_CELLGOV_SET_VBLANK_HANDLER: u32 = 0x8000_010C;
-/// CellGov-internal package id for the user-handler callback. See [`PACKAGE_CELLGOV_SET_FLIP_HANDLER`].
+/// CellGov-internal package id for the user-handler callback.
 pub const PACKAGE_CELLGOV_SET_USER_HANDLER: u32 = 0x8000_010D;
 
 impl Lv2Host {
-    /// `sys_rsx_context_attribute` (674). Dispatches on `package_id`.
+    /// `sys_rsx_context_attribute` (674): dispatches on `package_id`.
     pub(in crate::host) fn dispatch_sys_rsx_context_attribute(
         &mut self,
         context_id: u32,
@@ -55,16 +55,15 @@ impl Lv2Host {
         }
     }
 
-    /// FIFO_SETUP (0x001): records the initial FIFO get / put pointers libgcm
-    /// seeds during `cellGcmInit`.
+    /// FIFO_SETUP (0x001): records the initial FIFO get / put pointers.
     fn sys_rsx_attribute_fifo_setup(&mut self, a3: u64, a4: u64) -> Lv2Dispatch {
         self.rsx_context.fifo_get = a3 as u32;
         self.rsx_context.fifo_put = a4 as u32;
         Lv2Dispatch::immediate(0)
     }
 
-    /// SET_DISPLAY_BUFFER (0x104): records slot `id` and advances
-    /// `display_buffers_count` monotonically to `id + 1`.
+    /// SET_DISPLAY_BUFFER (0x104): records slot `id`; `display_buffers_count`
+    /// only advances (monotonic to `id + 1`).
     fn sys_rsx_attribute_set_display_buffer(&mut self, a3: u64, a4: u64, a5: u64) -> Lv2Dispatch {
         let id = (a3 & 0xFF) as usize;
         if id >= display_buffer::COUNT_MAX {
@@ -87,7 +86,7 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// FLIP_BUFFER (0x102): emits an [`Effect::RsxFlipRequest`] so the commit
+    /// FLIP_BUFFER (0x102): emits [`Effect::RsxFlipRequest`]; the commit
     /// pipeline drives WAITING -> DONE on the flip-status state machine.
     fn sys_rsx_attribute_flip(&self, _head: u64, flip_target: u64) -> Lv2Dispatch {
         // Queued path (high bit set): low 4 bits carry the buffer index.
@@ -103,8 +102,7 @@ impl Lv2Host {
         }
     }
 
-    /// Fallback for unknown `package_id`: logs an invariant break and returns
-    /// CELL_EINVAL (matches RPCS3's default-arm errno).
+    /// Fallback for unknown `package_id`: logs an invariant break, returns CELL_EINVAL.
     fn sys_rsx_attribute_unknown(&mut self, package_id: u32) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.sys_rsx_context_attribute_unknown_package",

@@ -133,10 +133,8 @@ pub struct CommitOutcome {
     /// Number of `ConditionalStore` effects committed.
     pub conditional_stores_committed: usize,
     /// `ConditionalStore`s that reached apply without a prior reservation
-    /// for the emitter. Zero for correct real emitters (PPU, SPU); non-zero
-    /// indicates a synthetic test unit skipping the LL/SC pre-check or an
-    /// emitter-side ordering bug. Whole-scenario CI asserts zero for real
-    /// emitters.
+    /// for the emitter. Non-zero indicates an emitter-side LL/SC pre-check
+    /// skip or ordering bug.
     pub conditional_stores_without_prior_reservation: usize,
     /// Reservation-table entries dropped during this commit.
     ///
@@ -175,8 +173,8 @@ pub enum BlockReason {
     /// `WaitOnEvent` effect.
     WaitOnEvent,
     /// SPU `MFC_RD_TAG_STAT` yielded with the masked tags not yet
-    /// complete; runtime parks the unit until
-    /// [`Runtime::fire_dma_completions`] publishes the missing tag bit.
+    /// complete; runtime parks the unit until a DMA completion
+    /// publishes the missing tag bit and wakes the issuer.
     DmaWait,
 }
 
@@ -321,18 +319,11 @@ impl CommitPipeline {
                     }
                     Effect::DmaEnqueue { request, .. } => {
                         let dst = request.destination();
-                        // No separate payload buffer at enqueue, so the
-                        // byte_len argument is `dst.length()` and
-                        // `validate_write`'s LengthMismatch check cannot
-                        // fire on this caller.
                         if let Err(err) = ctx.memory.validate_write(dst, dst.length() as usize) {
-                            // Mark the issuing unit terminal before the batch is
-                            // rejected. Without this, the SPU returns to Runnable,
-                            // polls MFC_RD_TAG_STAT for a tag bit that never arrives,
-                            // parks Blocked on DmaWait, and `step` time-warps to an
-                            // empty queue -> `StepError::AllBlocked`. RPCS3
-                            // dbg_pauses the SPU on the same fault class; `Faulted`
-                            // is the non-interactive analog.
+                            // Marking the issuer Faulted prevents the SPU
+                            // from polling MFC_RD_TAG_STAT for a tag bit
+                            // that never arrives and time-warping to an
+                            // empty queue -> StepError::AllBlocked.
                             ctx.units
                                 .set_status_override(request.issuer(), UnitStatus::Faulted);
                             return Err(match err {
@@ -408,9 +399,9 @@ impl CommitPipeline {
                     }
                     Effect::RsxLabelWrite { offset, value } => {
                         // 0..0x1000 is the semaphore region; 0x1000+ is
-                        // notify/report space under sys_rsx -- a guest bug
-                        // surfaced at the commit boundary instead of as
-                        // silent notify corruption.
+                        // notify/report space. Asserting here surfaces a
+                        // guest bug at the boundary instead of as silent
+                        // notify corruption.
                         debug_assert!(
                             *offset < 0x1000,
                             "RsxLabelWrite offset {:#x} past semaphore region (guest bug? \
@@ -449,15 +440,12 @@ impl CommitPipeline {
             return Err(e);
         }
 
-        // Atomicity invariant: `drain_into` is the only fallible op in
-        // the apply pass. Every op below (mailbox send, signal OR, DMA
-        // enqueue, reservation mutations, payload clone) is infallible
-        // absent host OOM; a new fallible op here would need rollback
-        // machinery to preserve the atomic-batch contract.
+        // `drain_into` is the only fallible op in the apply pass; a
+        // new fallible op below would need rollback machinery to
+        // preserve the atomic-batch contract.
         //
         // `drain_into` leaves the staging buffer populated on
         // validation failure; clear it so `StagingMemory`'s Drop guard
-        // ("caller must call drain_into() or clear() before release")
         // is honored on both pre_validate and drain failure paths.
         if let Err(e) = staging.drain_into(ctx.memory) {
             staging.clear();
@@ -469,11 +457,7 @@ impl CommitPipeline {
                     mailbox, message, ..
                 } => {
                     // force_send: PPE-overrun semantics
-                    // [CBE-Handbook p:541 s:19.6.6.2]. The SPU
-                    // outbound write-blocking path is not modelled
-                    // here yet; until SPU exec issues MailboxSend
-                    // and yields on full, every commit-pipeline
-                    // send must succeed.
+                    // [CBE-Handbook p:541 s:19.6.6.2].
                     ctx.mailboxes
                         .get_mut(*mailbox)
                         .expect("pre-validated mailbox id")
@@ -518,11 +502,9 @@ impl CommitPipeline {
                     blocked_units.push((*source, BlockReason::WaitOnEvent));
                 }
                 Effect::SharedWriteIntent { range, source, .. } => {
-                    // Cross-unit reservation invalidation; emission order
-                    // determines which writer wins concurrent LL/SC races.
-                    // The emitter's own reservation is preserved: the PPC
-                    // spec only invalidates on stores from another
-                    // processor [PPC-Book2 p:10 s:1.7.3.1].
+                    // Emitter's own reservation preserved: PPC invalidates
+                    // only on stores from another processor
+                    // [PPC-Book2 p:10 s:1.7.3.1].
                     reservations_cleared += ctx.reservations.clear_covering(
                         range.start().raw(),
                         range.length(),
@@ -531,9 +513,8 @@ impl CommitPipeline {
                 }
                 Effect::ReservationAcquire { line_addr, source } => {
                     // Canonicalize to 128-byte line at insert; callers may
-                    // pass a raw EA. A prior entry on the same unit is
-                    // clobbered (LL/SC re-reservation) and counted as cleared
-                    // so `reservations_cleared` stays consistent across paths.
+                    // pass a raw EA. A clobbered prior entry on the same
+                    // unit is counted as cleared.
                     let prior = ctx
                         .reservations
                         .insert_or_replace(*source, ReservedLine::containing(*line_addr));
@@ -544,19 +525,14 @@ impl CommitPipeline {
                 }
                 Effect::ConditionalStore { range, source, .. } => {
                     // Drop the emitter's own entry first so the cross-unit
-                    // sweep below cannot double-count it. The pipeline does
-                    // not re-check that the emitter still holds a covering
-                    // reservation; the emitter is responsible for the LL/SC
-                    // pre-check, and a missing prior entry here flags an
-                    // emitter-side bug via
+                    // sweep below cannot double-count it. A missing prior
+                    // entry here flags an emitter-side bug via
                     // `conditional_stores_without_prior_reservation`.
                     if ctx.reservations.remove_if_present(*source).is_some() {
                         reservations_cleared += 1;
                     } else {
                         conditional_stores_without_prior_reservation += 1;
                     }
-                    // Emitter's entry was already removed above, so
-                    // the writer-exclusion arg is unused on this path.
                     reservations_cleared +=
                         ctx.reservations
                             .clear_covering(range.start().raw(), range.length(), None);

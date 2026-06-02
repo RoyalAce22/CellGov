@@ -59,9 +59,10 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `sys_ppu_thread_start`: no-op CELL_OK; create already schedules
-    /// the unit. Known gap: real LV2 creates threads SUSPENDED and
-    /// transitions them here -- CellGov collapses both into create.
+    /// `sys_ppu_thread_start`: no-op CELL_OK.
+    ///
+    /// Known gap: real LV2 creates threads SUSPENDED and transitions
+    /// them here; CellGov collapses both into create.
     pub(super) fn dispatch_ppu_thread_start(&self, _target: u64) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0)
     }
@@ -183,7 +184,6 @@ impl Lv2Host {
                 ),
             );
         }
-        // LV2 priority range 0..=3071; downstream storage is u32.
         let priority = priority as u32;
         self.dispatch_ppu_thread_create(id_ptr, param_ptr, arg, priority, stacksize, rt)
     }

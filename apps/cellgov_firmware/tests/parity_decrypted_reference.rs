@@ -115,14 +115,8 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path, r
         decrypted.len()
     );
     let mut reference = std::fs::read(&prx_path).unwrap();
-    // Shape-check on the SPRX input, not the decrypt path. The
-    // firmware SPRXes in this corpus ship with e_shoff = 0 in
-    // their inner ELF header, and `decrypt_self_to_elf` copies
-    // that header verbatim via `assemble_elf_from_sections`. A
-    // future SPRX with non-zero section headers is well-formed
-    // (RPCS3's `unself.cpp` accepts both shapes); this assert
-    // would then need widening, but the masked downstream compare
-    // would still catch a real decrypt divergence.
+    // Shape-check the SPRX inner ELF: this corpus ships with
+    // e_shoff = 0 and `decrypt_self_to_elf` copies it verbatim.
     assert_eq!(
         &decrypted[0x28..0x30],
         &[0u8; 8],

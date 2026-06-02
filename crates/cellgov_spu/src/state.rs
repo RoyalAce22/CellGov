@@ -125,11 +125,9 @@ pub struct ChannelState {
     /// by `run_until_yield` on message delivery.
     // [CBEA p:117 s:9] SPU_RdInMbox channel x'1D': PPE-to-SPU mailbox read.
     pub pending_mbox_rt: Option<u8>,
-    /// Pending DMA Get (ea, lsa, size, tag_id); serviced at the start
-    /// of the next `run_until_yield` from the committed memory snapshot.
-    /// The tag bit is published to `tag_status` after the memory copy
-    /// lands, mirroring the completion-time publish that PUT goes
-    /// through (via [`cellgov_core::Runtime::pending_tag_completions`]).
+    /// Pending DMA Get (ea, lsa, size, tag_id); serviced at the start of
+    /// the next `run_until_yield` from the committed memory snapshot, with
+    /// the tag bit published to `tag_status` after the copy lands.
     pub pending_get: Option<(u64, u32, u32, u8)>,
 }
 

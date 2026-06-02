@@ -26,10 +26,8 @@ fn fstat_returns_size_mode_and_blksize() {
 
 #[test]
 fn fstat_pads_and_zeros_deterministic_fields() {
-    // Determinism invariant: every CellFsStat byte that is not
-    // size / mode / blksize is zero so two stats of the same
-    // blob hash bit-identical. Layout: uid 4..8, gid 8..12,
-    // pad 12..16, atime 16..24, mtime 24..32, ctime 32..40.
+    // Determinism invariant: every non-(size/mode/blksize) byte is
+    // zero so two stats of the same blob hash bit-identical.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"x".to_vec())
@@ -54,7 +52,6 @@ fn fstat_unknown_fd_returns_ebadf_with_no_effects() {
 
 #[test]
 fn fstat_after_close_returns_ebadf() {
-    // Invariant: a closed fd is unusable for fstat.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"x".to_vec())
@@ -145,8 +142,6 @@ fn stat_path_without_null_terminator_returns_einval() {
 
 #[test]
 fn stat_misaligned_stat_out_ptr_returns_efault_before_path_check() {
-    // Precedence invariant: bad stat_out_ptr is checked before
-    // path validation.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
@@ -158,8 +153,6 @@ fn stat_misaligned_stat_out_ptr_returns_efault_before_path_check() {
 
 #[test]
 fn stat_path_at_region_end_succeeds() {
-    // Invariant: the path-scan window in `dispatch_fs_stat`
-    // reaches the inclusive last byte of the mapped region.
     let mut host = Lv2Host::new();
     let path_ptr: u32 = 0x40000 - 5;
     let rt = PathRuntime::empty(0x100000).write(path_ptr, b"/foo\0");

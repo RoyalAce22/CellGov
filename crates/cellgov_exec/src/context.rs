@@ -1,12 +1,9 @@
 //! The readonly view exposed to a running execution unit.
 //!
-//! The shared memory view is frozen for the entire duration of a
-//! single `run_until_yield` call. A unit cannot observe commits made
-//! by other units mid-step; new commits become visible only on the
-//! unit's next scheduled invocation. The freeze is enforced
-//! structurally by the borrow checker: `ExecutionContext` holds an
-//! immutable borrow of `GuestMemory`, and `run_until_yield` takes
-//! `&ExecutionContext`.
+//! The shared memory view is frozen for the duration of a single
+//! `run_until_yield` call; new commits become visible only on the
+//! unit's next scheduled invocation. Enforced structurally via the
+//! immutable borrow of `GuestMemory` held by `ExecutionContext`.
 
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
@@ -17,9 +14,6 @@ use cellgov_time::GuestTicks;
 ///
 /// Units publish changes only by emitting `Effect` packets in their
 /// step result; there is no mutable access through the context.
-/// Constructors are named (`new`, `with_received`, `with_syscall_return`,
-/// `with_syscall_return_and_regs`, `with_reservations`) so that
-/// adding a borrowed field is a non-breaking change.
 #[derive(Debug, Clone, Copy)]
 pub struct ExecutionContext<'a> {
     memory: &'a GuestMemory,
@@ -31,9 +25,7 @@ pub struct ExecutionContext<'a> {
     /// When `true`, units that support per-instruction state
     /// fingerprinting MUST capture `(pc, state_hash)` on every
     /// retired instruction so the runtime can drain them via
-    /// `drain_retired_state_hashes`. The runtime sets this from its
-    /// own `mode`; default is `false` so the FaultDriven hot path
-    /// pays no hashing cost.
+    /// `drain_retired_state_hashes`.
     trace_per_step: bool,
     completed_dma_tags: u32,
 }
@@ -111,10 +103,7 @@ impl<'a> ExecutionContext<'a> {
     }
 
     /// Attach the runtime's current guest-tick count, replacing any
-    /// prior value. Default is `GuestTicks::ZERO`; the runtime sets
-    /// this to `Runtime::time()` before each step so PPU code paths
-    /// that read the TB register see a monotonic counter coherent
-    /// with `sys_time_get_current_time`.
+    /// prior value.
     #[inline]
     pub const fn with_current_tick(self, current_tick: GuestTicks) -> Self {
         Self {
@@ -124,7 +113,7 @@ impl<'a> ExecutionContext<'a> {
     }
 
     /// Attach the committed reservation table, replacing any prior
-    /// reservation view. Chainable because `ExecutionContext` is `Copy`.
+    /// reservation view.
     #[inline]
     pub const fn with_reservations(self, table: &'a ReservationTable) -> Self {
         Self {
@@ -133,11 +122,7 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Set the per-instruction trace flag. Units that fingerprint
-    /// state read this from the context every step, so the runtime's
-    /// mode (`FullTrace` / `DeterminismCheck`) is the single source
-    /// of truth and unit registration / mode flips do not need to
-    /// resync any per-unit flag.
+    /// Set the per-instruction trace flag.
     #[inline]
     pub const fn with_trace_per_step(self, on: bool) -> Self {
         Self {

@@ -1,6 +1,4 @@
-//! `R_PPC64_REL24` applier: patch the 24-bit branch-immediate field of
-//! a PowerPC branch instruction with `(S + A - P) & 0x03FFFFFC`. The
-//! low two bits (`AA` / `LK`) and the opcode (top 6 bits) stay intact.
+//! `R_PPC64_REL24` applier tests.
 
 #![allow(
     clippy::unwrap_used,

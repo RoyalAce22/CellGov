@@ -1,9 +1,7 @@
 //! LV2 dispatch for counting semaphores.
 //!
-//! `post_and_wake` preserves the count invariant: a post with a
-//! parked waiter hands off directly (no increment), otherwise the
-//! count grows up to `max`. Over-max post with no waiter is EINVAL,
-//! so the count can never exceed `max`.
+//! Invariant: count never exceeds `max`. A post with a parked waiter hands
+//! off directly without incrementing; over-max post with no waiter is EBUSY.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::cell_errors;
@@ -21,14 +19,12 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // NULL-pointer checks come before bounds checks: real LV2
-        // returns EFAULT for NULL id/attr regardless of initial/max.
+        // EFAULT for NULL id/attr precedes bounds checks (real LV2 order).
         if id_ptr == 0 || attr_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
-        // sys_semaphore_attribute_t shares the layout used by
-        // event_flag/mutex/cond: protocol u32 at +0, type s32 at +20.
-        // A memset-zero attr fails protocol validation with EINVAL.
+        // sys_semaphore_attribute_t: protocol u32 at +0, type s32 at +20
+        // (shared with event_flag/mutex/cond). Memset-zero fails validation.
         let Some(attr_bytes) = rt.read_committed(attr_ptr as u64, 24) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         };
@@ -38,8 +34,7 @@ impl Lv2Host {
         if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        // Bounds checks. `max == 0` is invalid: a semaphore that can
-        // never be acquired is not useful and real LV2 rejects it.
+        // `max == 0` is invalid (real LV2 rejects an unacquirable semaphore).
         if max <= 0 || initial < 0 || initial > max {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
@@ -47,9 +42,8 @@ impl Lv2Host {
         match self.semaphores.create_with_id(id, initial, max) {
             Ok(()) => {}
             Err(crate::sync_primitives::SemaphoreCreateError::IdCollision(_)) => {
-                // Host-invariant break; ENOMEM is a best-effort
-                // errno since no Cell OS code maps to "allocator
-                // handed me a live id".
+                // Host-invariant break; ENOMEM is the best-effort errno
+                // (no Cell OS code maps to "allocator handed me a live id").
                 return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
             }
             Err(crate::sync_primitives::SemaphoreCreateError::InvalidBounds) => {
@@ -83,22 +77,18 @@ impl Lv2Host {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::SemaphoreWait::Empty) => {
-                // Finite timeout, no peer that could post: trip
-                // ETIMEDOUT immediately. CellGov has no guest
-                // clock, so blocking the only live thread would
-                // stall the schedule with no path forward. If
-                // peers exist, block normally and let a future
-                // post wake the waiter.
+                // Finite timeout with no peer that could post: ETIMEDOUT
+                // now, since CellGov has no guest clock and blocking the
+                // only live thread would stall the schedule.
                 if timeout != 0 && !self.ppu_threads.has_other_alive_thread(caller) {
                     return Lv2Dispatch::immediate(cell_errors::CELL_ETIMEDOUT.into());
                 }
                 match self.semaphores.enqueue_waiter(id, caller) {
                     Ok(()) => {}
-                    // Both errors are host-invariant breaks here
-                    // (try_wait just confirmed the id; a blocked
-                    // caller cannot re-enter wait). Real
-                    // sys_semaphore_wait never returns EDEADLK,
-                    // so ESRCH is the safest surface.
+                    // Both branches are host-invariant breaks (try_wait
+                    // confirmed the id; a blocked caller cannot re-enter
+                    // wait). ESRCH because real sys_semaphore_wait never
+                    // returns EDEADLK.
                     Err(
                         crate::sync_primitives::SemaphoreEnqueueError::UnknownId
                         | crate::sync_primitives::SemaphoreEnqueueError::DuplicateWaiter,
@@ -131,8 +121,7 @@ impl Lv2Host {
         out_ptr: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Real LV2 returns EFAULT for a NULL out pointer before
-        // looking up the semaphore id.
+        // EFAULT for NULL out precedes the id lookup (real LV2 order).
         if out_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
@@ -144,11 +133,10 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_semaphore_post(&mut self, id: u32, val: i32) -> Lv2Dispatch {
-        // Real LV2 (matching RPCS3 sys_semaphore_post) orders error
-        // checks: id lookup -> count<=0 -> overflow-vs-max. The
-        // overflow check folds in waiters: post(N) wakes up to N
-        // waiters (each consuming one slot) and only the leftover
-        // counts toward the max.
+        // Error order (real LV2 / RPCS3 sys_semaphore_post): id lookup,
+        // then val<=0, then overflow-vs-max. The overflow check folds in
+        // waiters: post(N) wakes up to N waiters and only the leftover
+        // counts toward `max`.
         let Some(entry) = self.semaphores.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
@@ -537,8 +525,6 @@ mod tests {
 
     #[test]
     fn semaphore_post_multi_increments_count_when_room() {
-        // Multi-post with available headroom should land all `val`
-        // slots into the count without EINVAL or EBUSY.
         let mut host = Lv2Host::new();
         let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let src = UnitId::new(0);
@@ -570,9 +556,7 @@ mod tests {
 
     #[test]
     fn semaphore_post_unknown_id_returns_esrch_even_for_invalid_val() {
-        // Real LV2 looks up id before validating val, so a post
-        // against a destroyed id with any val returns ESRCH, not
-        // EINVAL.
+        // Pins error order: id lookup precedes val validation.
         let mut host = Lv2Host::new();
         let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let r = host.dispatch(

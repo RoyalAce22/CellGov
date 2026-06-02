@@ -1,15 +1,6 @@
 //! Pins the per-unit predecoded shadow non-aliasing invariant for
-//! `Runtime::snapshot`. `PredecodedShadow` carries `slots`, `stale`,
-//! and `block_len` `Vec`s that `invalidate_range` mutates in place
-//! (SMC, CRT0 relocations, HLE trampoline planting); a switch to
-//! `Arc`-shared storage in any of them would let branch A's
-//! invalidate corrupt branch B's snapshot.
-//!
-//! Lives in `cellgov_ppu` because `cellgov_core` cannot depend on
-//! `cellgov_ppu` (DAG rule). The end-to-end registry path is
-//! mechanical glue and pinned indirectly by the snapshot tests in
-//! `cellgov_core::runtime::snapshot`, which catch any `clone_box`
-//! aliasing via post-snapshot mutation.
+//! `Runtime::snapshot`: a switch to `Arc`-shared `slots`/`stale`/`block_len`
+//! storage would let branch A's `invalidate_range` corrupt branch B.
 
 #![allow(
     clippy::unwrap_used,
@@ -23,8 +14,8 @@ use cellgov_ps3_abi::ppc_isa::{PPC_ADDI_R3_R3_1, PPC_BLR};
 
 const SHADOW_BASE: u64 = 0x1000;
 
-/// Two `addi` followed by `blr`: yields `block_len = [3, 2, 1]`
-/// so the block-length aliasing assertion has signal.
+/// Two `addi` followed by `blr` -- yields `block_len = [3, 2, 1]` so the
+/// block-length aliasing assertion has signal.
 fn shadow_bytes() -> [u8; 12] {
     let mut bytes = [0u8; 12];
     bytes[0..4].copy_from_slice(&PPC_ADDI_R3_R3_1.to_be_bytes());
@@ -53,9 +44,8 @@ fn build_shadow_pair() -> (PredecodedShadow, PredecodedShadow) {
     (original, clone)
 }
 
-/// Without this guard, a typo in `PPC_ADDI_R3_R3_1` or `PPC_BLR` could
-/// silently decode to a different valid PPC64 instruction and the
-/// aliasing tests would vouch for the wrong invariant.
+/// Guards the aliasing tests against silent drift in the test fixture
+/// encodings into a different valid PPC64 instruction.
 #[test]
 fn encoding_decodes_to_expected() {
     match decode(PPC_ADDI_R3_R3_1) {

@@ -1,14 +1,4 @@
 //! Effect-building primitives shared across the dispatch_route arms.
-//!
-//! - `dispatch_tty_write` is the buffer-append + nwritten-write fast
-//!   path reached from both `TtyWrite` and `FsWrite`.
-//! - `immediate_write_u32` is the create-style "alloc id + write to
-//!   ptr" shape; visible to every host submodule so create-style
-//!   dispatch helpers in `event_queue`, `cond`, `mutex`, etc. can
-//!   share the EFAULT-on-null guard.
-//! - `resolve_prx_load` is the path-lookup back-end for syscalls
-//!   480 / 497.
-//! - `efault_if_null` is the null-pointer EFAULT short-circuit.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -21,8 +11,10 @@ use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
     /// Append the TTY buffer into [`Self::tty_log`] and write
-    /// `nwritten` back. An unmapped buffer skips the append and
-    /// still reports `len` written.
+    /// `nwritten` back.
+    ///
+    /// An unmapped buffer skips the append and still reports `len`
+    /// written.
     pub(super) fn dispatch_tty_write(
         &mut self,
         buf_ptr: u32,
@@ -40,16 +32,14 @@ impl Lv2Host {
     }
 
     /// Resolve the path at `path_ptr` against [`Self::prx_registry`]
-    /// for syscalls 480 / 497. Returns the registered kernel id on
-    /// match; on miss returns the path pointer as a synthetic id so
-    /// modules outside the minimum viable PRX set still see a
-    /// distinct non-zero value.
+    /// for syscalls 480 / 497.
+    ///
+    /// On miss, returns the path pointer as a synthetic id so modules
+    /// outside the minimum viable PRX set still get a distinct
+    /// non-zero value.
     pub(super) fn resolve_prx_load(&self, path_ptr: u64, rt: &dyn Lv2Runtime) -> Lv2Dispatch {
         const PATH_CAP: usize = 256;
         let bytes = rt.read_committed_until(path_ptr, PATH_CAP, 0);
-        // Per [`Lv2Runtime::read_committed_until`]: a `Some` return
-        // has `len < max_len` (terminator stripped). A max-sized
-        // slice means the contract drifted.
         debug_assert!(
             bytes.is_none_or(|b| b.len() < PATH_CAP),
             "resolve_prx_load: read_committed_until returned a {PATH_CAP}-byte slice"
@@ -68,10 +58,8 @@ impl Lv2Host {
         }
     }
 
-    /// Build an immediate dispatch that writes `value` (BE u32) to
-    /// `ptr` and returns CELL_OK; shared by create-style syscalls
-    /// that emit a freshly allocated id through an out-pointer.
-    /// Routes `ptr == 0` to `CELL_EFAULT` via [`Self::efault_if_null`].
+    /// Immediate dispatch writing `value` (BE u32) to `ptr` with
+    /// `CELL_EFAULT` on null `ptr`.
     pub(in crate::host) fn immediate_write_u32(
         &self,
         value: u32,
@@ -94,10 +82,7 @@ impl Lv2Host {
         }
     }
 
-    /// Pre-formed `CELL_EFAULT` dispatch when any pointer is null;
-    /// short-circuits the spec'd EFAULT path before staging a
-    /// write the commit pipeline would have rejected anyway, so
-    /// the unit sees the documented errno instead of a commit fault.
+    /// Returns a `CELL_EFAULT` dispatch when any of `ptrs` is null.
     pub(super) fn efault_if_null(&self, ptrs: &[u32]) -> Option<Lv2Dispatch> {
         if ptrs.contains(&0) {
             Some(Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()))

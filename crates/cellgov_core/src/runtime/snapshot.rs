@@ -200,8 +200,6 @@ impl Runtime {
         self.step_woke_others = snap.step_woke_others;
         self.per_step_index = snap.per_step_index;
         self.pending_tag_completions = snap.pending_tag_completions.clone();
-        // clear() not clone(): preserves allocator capacity across
-        // repeated restores.
         self.effects_buf.clear();
         self.trace.clear();
         self.zoom_trace.clear();
@@ -254,9 +252,6 @@ mod tests {
         }
     }
 
-    /// Catches init-time-only fields missing from `RuntimeSnapshot`.
-    /// Drift-during-execution coverage:
-    /// [`snapshot_after_execution_restores_byte_identical_state`].
     #[test]
     fn snapshot_then_restore_replays_to_same_terminal_state() {
         let mut rt = make_runtime_with_two_writers();
@@ -277,10 +272,6 @@ mod tests {
         );
     }
 
-    /// Catches counter-style fields that drift during execution
-    /// being missed from `RuntimeSnapshot` -- the construction-time
-    /// replay test above re-derives such fields from a shared
-    /// starting point and cannot see them.
     #[test]
     fn snapshot_after_execution_restores_byte_identical_state() {
         let mut rt = make_runtime_with_two_writers();
@@ -320,8 +311,6 @@ mod tests {
         );
     }
 
-    /// Per-unit predecoded shadow non-aliasing is pinned in
-    /// `crates/cellgov_ppu/tests/snapshot_shadow_independence.rs`.
     #[test]
     fn snapshot_memory_is_independent_of_post_snapshot_mutation() {
         let mut rt = make_runtime_with_two_writers();
@@ -342,9 +331,6 @@ mod tests {
         );
     }
 
-    /// Pins that `restore_into` clears `effects_buf` rather than
-    /// cloning-and-replacing, so repeated restores don't churn
-    /// the allocator.
     #[test]
     fn repeated_restore_preserves_effects_buf_capacity() {
         let mut rt = make_runtime_with_two_writers();
@@ -383,8 +369,6 @@ mod tests {
         let _ = rt.step();
     }
 
-    /// Without the clear, post-restore records would collide with
-    /// pre-snapshot records on the same `per_step_index`.
     #[test]
     fn restore_into_clears_trace_writers() {
         let mut rt = make_runtime_with_two_writers();

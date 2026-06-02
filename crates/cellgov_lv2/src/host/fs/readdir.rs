@@ -20,16 +20,15 @@ impl Lv2Host {
     /// 258-byte `CellFsDirent` and write the byte count to
     /// `nread_out_ptr`.
     ///
-    /// # Error precedence
+    /// At EOF the dirent is all zeros and nread = 0; on a real entry,
+    /// nread = 258.
     ///
-    /// 1. `nread_out_ptr` NULL / misaligned / unwritable for u64 ->
-    ///    CELL_EFAULT, no effects.
-    /// 2. `dirent_out_ptr` NULL / unwritable for 258 bytes ->
-    ///    CELL_EFAULT, no effects.
-    /// 3. Unknown directory `fd` -> CELL_EBADF, no effects.
-    /// 4. Otherwise CELL_OK with two effects: the dirent buffer
-    ///    write and the nread write. At EOF the dirent is all
-    ///    zeros and nread = 0; on a real entry, nread = 258.
+    /// # Errors
+    ///
+    /// In precedence order:
+    /// 1. `nread_out_ptr` NULL / misaligned / unwritable -> CELL_EFAULT.
+    /// 2. `dirent_out_ptr` NULL / unwritable for 258 bytes -> CELL_EFAULT.
+    /// 3. Unknown directory `fd` -> CELL_EBADF.
     pub(in crate::host) fn dispatch_fs_readdir(
         &mut self,
         fd: u32,
@@ -38,14 +37,10 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // nread is a u64 (PS3 sys_fs_readdir signature: `u64 *nread`);
-        // 8-byte alignment.
         if !out_ptr_writable(rt, nread_out_ptr, 8, 8) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
-        // CellFsDirent has no required alignment > 1 (its leading
-        // field is u8); the only bound is the 258-byte writable
-        // span at the supplied pointer.
+        // CellFsDirent's leading field is u8-> 1-byte alignment.
         if !out_ptr_writable(rt, dirent_out_ptr, CELL_FS_DIRENT_SIZE as usize, 1) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
@@ -82,7 +77,6 @@ impl Lv2Host {
         };
         let nread_write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(nread_out_ptr, 8),
-            // PS3 is big-endian; guest reads via `ld`.
             bytes: WritePayload::from_slice(&nread.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
@@ -95,11 +89,11 @@ impl Lv2Host {
     }
 }
 
-/// Build the 258-byte `CellFsDirent` payload for `entry`. Names
-/// longer than [`CELL_FS_MAX_FS_FILE_NAME_LENGTH`] are truncated to
-/// that length AT BYTE BOUNDARIES (not codepoint boundaries) and
-/// `d_namlen` reports the truncated length. `d_name` is then
-/// NUL-terminated and zero-padded out to 256 bytes.
+/// Build the 258-byte `CellFsDirent` payload for `entry`.
+///
+/// Names longer than [`CELL_FS_MAX_FS_FILE_NAME_LENGTH`] are truncated
+/// at BYTE boundaries (not codepoint boundaries); `d_namlen` reports
+/// the truncated length and `d_name` is zero-padded out to 256 bytes.
 fn build_dirent(entry: &DirEntry) -> Vec<u8> {
     let mut buf = vec![0u8; CELL_FS_DIRENT_SIZE as usize];
     let d_type = if entry.is_directory {

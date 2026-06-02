@@ -1,3 +1,10 @@
+//! CLI flag parsing for the `disasm` subcommand.
+//!
+//! Owns the positional + `--vaddr` + `--count` parse, the typed
+//! [`ArgError`] surface, and the `MAX_COUNT` ceiling. Enforces
+//! 4-byte vaddr alignment and the 1..=65536 count range so
+//! downstream callers can treat their inputs as already validated.
+
 /// Hard cap on `--count`. PPC instructions are 4 bytes, so 1<<16 lines
 /// covers a 256 KB code region -- larger than any function-sized
 /// investigation this tool exists to support.

@@ -16,11 +16,8 @@ pub const STATE_HASH_FORMAT_VERSION: u8 = 1;
 ///   restore).
 /// - `get <= put` modulo the ring size known to the advance pass.
 ///
-/// Mutators accept any `u32`; the state hash captures raw stored
-/// values so that two observably-different guest writes never
-/// collapse into the same committed state. Field mutators have no
-/// cross-field side effects, which is what makes savestate restore
-/// order-independent.
+/// Field mutators have no cross-field side effects; the state hash
+/// captures raw stored values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RsxFifoCursor {
     put: u32,
@@ -29,7 +26,7 @@ pub struct RsxFifoCursor {
 }
 
 impl RsxFifoCursor {
-    /// Pristine cursor: put, get, and reference all zero.
+    /// Pristine cursor with all fields zero.
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -58,18 +55,12 @@ impl RsxFifoCursor {
     }
 
     /// Store a new put value verbatim.
-    ///
-    /// Legitimate caller: the RSX IO region writeback path.
     #[inline]
     pub fn set_put(&mut self, put: u32) {
         self.put = put;
     }
 
     /// Store a new get value verbatim.
-    ///
-    /// Legitimate callers: the FIFO advance pass and savestate
-    /// restore. Other callers break the "get is only
-    /// advance-written" invariant.
     #[inline]
     pub fn set_get(&mut self, get: u32) {
         self.get = get;
@@ -229,8 +220,6 @@ mod tests {
 
     #[test]
     fn empty_cursor_hash_golden() {
-        // All-zero fields are symmetric under field-order swaps;
-        // `populated_cursor_hash_golden` covers reorder.
         const EXPECTED: u64 = 0xeca4_bd25_1670_946c;
         let actual = RsxFifoCursor::new().state_hash();
         assert_eq!(

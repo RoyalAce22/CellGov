@@ -15,19 +15,16 @@ impl Lv2Host {
     /// offset into `buf_ptr`, advance the offset by the actual count
     /// returned, and write that count to `nread_out_ptr`.
     ///
-    /// # Error precedence
+    /// # Errors
     ///
-    /// In order:
-    /// 1. `nread_out_ptr` misaligned / unwritable -> CELL_EFAULT, no
-    ///    effects.
-    /// 2. Unknown `fd` -> CELL_EBADF, no effects (no out-pointer
-    ///    write so the guest cannot mistake stale memory for nread).
-    /// 3. `nbytes > 0` and `buf_ptr` unwritable for that span ->
-    ///    CELL_EFAULT, no effects. Crucially, this happens BEFORE
-    ///    the FS layer advances the offset; per POSIX, a failed
-    ///    read must not change the file position.
-    /// 4. Otherwise CELL_OK with up to two effects: the buffer
-    ///    write (only if bytes were returned) and the nread write.
+    /// In precedence order:
+    /// 1. `nread_out_ptr` misaligned / unwritable -> CELL_EFAULT.
+    /// 2. Unknown `fd` -> CELL_EBADF.
+    /// 3. `nbytes > 0` and `buf_ptr` unwritable -> CELL_EFAULT. Checked
+    ///    BEFORE the FS layer advances the offset (POSIX: a failed
+    ///    read leaves the file position unchanged).
+    /// 4. Otherwise CELL_OK with up to two effects (buffer write only
+    ///    if bytes were returned, plus the nread write).
     pub(in crate::host) fn dispatch_fs_read(
         &mut self,
         fd: u32,
@@ -37,34 +34,23 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // nread is a u64 (PS3 sys_fs_read signature: `u64 *nread`);
-        // enforce 8-byte alignment and writability.
         if !out_ptr_writable(rt, nread_out_ptr, 8, 8) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
 
-        // Peek fd validity without advancing the offset; fstat is
-        // read-only and returns UnknownFd for an unknown fd.
+        // Peek fd validity (offset unchanged) before any buffer check.
         if self.fs_store().fstat(fd).is_err() {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBADF.into());
         }
 
         let nbytes_usize = usize::try_from(nbytes).unwrap_or(usize::MAX);
 
-        // Validate the destination buffer BEFORE the FS layer
-        // advances the offset. POSIX requires a failed read leave
-        // the file position unchanged; doing the writable check
-        // after read_at would advance the offset and then return
-        // EFAULT, which is a semantic break.
+        // POSIX: a failed read must leave the file position unchanged,
+        // so the buffer check runs before read_at advances the offset.
         if nbytes > 0 && !rt.writable(buf_ptr as u64, nbytes_usize) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
 
-        // fstat said the fd is valid, so read_at must not surface
-        // UnknownFd here. UnknownPath would mean the blob was
-        // removed from under an open fd -- single-write
-        // registration forbids that. Anything else is contract
-        // drift in FsStore.
         let bytes_read = match self.fs_store_mut().read_at(fd, nbytes_usize) {
             Ok(b) => b,
             Err(other) => {
@@ -94,7 +80,6 @@ impl Lv2Host {
         }
         effects.push(Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(nread_out_ptr, 8),
-            // PS3 is big-endian; guest reads via `ld`.
             bytes: WritePayload::from_slice(&nread.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,

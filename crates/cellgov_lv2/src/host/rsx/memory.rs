@@ -9,9 +9,8 @@ use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
 
 impl Lv2Host {
-    /// sys_rsx_memory_allocate (665). Bump-allocates `size` bytes
-    /// and writes `mem_handle` (u32 BE) and `mem_addr` (u64 BE) into
-    /// the guest out-pointers.
+    /// `sys_rsx_memory_allocate` (665): bump-allocate `size` bytes and write
+    /// `mem_handle` (u32 BE) and `mem_addr` (u64 BE) to the OUT pointers.
     ///
     /// # Errors
     ///
@@ -38,8 +37,8 @@ impl Lv2Host {
         let addr = self.rsx_mem_alloc_ptr;
         self.rsx_mem_alloc_ptr = end;
         self.rsx_mem_handle_counter = handle.wrapping_add(1);
-        // Reserved slice a subsequent sys_rsx_context_allocate will consume
-        // instead of bumping the cursor a second time.
+        // Subsequent sys_rsx_context_allocate consumes this reservation
+        // instead of bumping the cursor again.
         self.rsx_context.pending_mem_addr = addr;
 
         let handle_write = Effect::SharedWriteIntent {
@@ -63,12 +62,8 @@ impl Lv2Host {
         }
     }
 
-    /// sys_rsx_memory_free (669). No-op: the bump allocator never
-    /// reclaims. Logs an invariant-break so a caller that frees and
-    /// then re-allocates expecting the slot reused will be visible
-    /// in the trace; until that case is observed in the title
-    /// corpus, the no-op-with-trace is treated as a convergent
-    /// honest gap.
+    /// `sys_rsx_memory_free` (669): no-op against the bump allocator; logs an
+    /// invariant break so a free-then-realloc caller is traceable.
     pub(in crate::host) fn dispatch_sys_rsx_memory_free_noop(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.sys_rsx_memory_free_noop",

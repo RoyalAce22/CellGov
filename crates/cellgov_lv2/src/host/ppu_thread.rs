@@ -51,8 +51,6 @@ impl Lv2Host {
             },
             AddJoinWaiter::SelfJoin => Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into()),
             AddJoinWaiter::TargetDetached => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
-            // Pre-checks above eliminate both variants; reaching here
-            // means the table mutated mid-call.
             AddJoinWaiter::UnknownTarget | AddJoinWaiter::TargetAlreadyFinished => {
                 self.record_invariant_break(
                     "ppu_thread_join.add_join_waiter_unreachable",
@@ -75,13 +73,9 @@ impl Lv2Host {
         stacksize: u64,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // syscall 52 (`_sys_ppu_thread_create`) takes a
-        // `ppu_thread_param_t *` in r4 (here `param_ptr`), NOT an OPD
-        // pointer. Layout: `{ u32 entry_opd_ptr; u32 tls; }`. First
-        // deref gives the OPD address; the OPD itself is the standard
-        // 8-byte PS3 `{ u32 code; u32 toc; }` (not PowerOpen 24).
-        // Either deref failing routes to CELL_EFAULT before any side
-        // effects (stack alloc, TLS commit).
+        // r4 is a `ppu_thread_param_t *`: `{ u32 entry_opd_ptr; u32
+        // tls; }`. The OPD it points to is `{ u32 code; u32 toc; }`
+        // (8 bytes, not PowerOpen 24).
         let param_bytes: [u8; 8] = match rt
             .read_committed(param_ptr as u64, 8)
             .and_then(|bytes| bytes.first_chunk::<8>().copied())
@@ -97,9 +91,6 @@ impl Lv2Host {
             param_bytes[2],
             param_bytes[3],
         ]);
-        // `param->tls` is a guest TLS-template pointer; not yet
-        // routed into PpuThreadInitState (the host's own template
-        // path covers per-thread init).
         let _param_tls = u32::from_be_bytes([
             param_bytes[4],
             param_bytes[5],
@@ -130,16 +121,14 @@ impl Lv2Host {
             }
         };
 
-        // Empty template encodes "no TLS, r13 = 0"; non-empty places
-        // the slot 16-aligned above the stack.
         let tls_bytes = self.tls_template.instantiate();
+        // Empty template encodes "no TLS, r13 = 0".
         let tls_base = if tls_bytes.is_empty() {
             0
         } else {
             (stack.end() + 0xF) & !0xF
         };
 
-        // Non-empty TLS at guest 0 would alias the empty-template sentinel.
         if !tls_bytes.is_empty() && tls_base == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
@@ -153,8 +142,8 @@ impl Lv2Host {
                 extra_args: [0; 7],
                 stack_top: stack.initial_sp(),
                 tls_base,
-                // Guests exit via sys_ppu_thread_exit; LR=0 traps a
-                // fallthrough return.
+                // LR=0 traps a fallthrough return; guests exit via
+                // sys_ppu_thread_exit.
                 lr_sentinel: 0,
             },
             stack_base: stack.base,
@@ -170,15 +159,13 @@ impl Lv2Host {
         exit_value: u64,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Abnormal exit (or any path that skips the HLE unlock wrapper)
-        // would otherwise leak the hold count forever.
+        // Abnormal exit paths skip the HLE unlock wrapper, so clear
+        // the hold count here.
         if let Some(tid) = self.ppu_threads.thread_id_for_unit(requester) {
             self.lwmutex_holds_clear(tid);
         }
         let waiters_unit_ids = match self.ppu_threads.thread_id_for_unit(requester) {
             Some(tid) => {
-                // resolve_wake_thread filters waiters whose table
-                // entry vanished between join and wake.
                 let waiter_thread_ids = self.ppu_threads.mark_finished(tid, exit_value);
                 waiter_thread_ids
                     .into_iter()
@@ -186,8 +173,9 @@ impl Lv2Host {
                     .collect()
             }
             None => {
-                // Empty table is a legitimate pre-seed (testkit);
-                // non-empty + absent caller would strand joiners.
+                // Empty table is a legitimate testkit pre-seed; a
+                // non-empty table with no caller entry would strand
+                // joiners.
                 if !self.ppu_threads.is_empty() {
                     self.record_invariant_break(
                         "ppu_thread_exit.unknown_caller",
@@ -212,10 +200,9 @@ impl Lv2Host {
 
     /// Transfer one waiter from each non-empty kernel lwmutex queue.
     ///
-    /// Kernel lwmutex entries carry no owner record, so on thread
-    /// exit we cannot identify the held set; we wake one waiter per
-    /// non-empty queue and rely on each `LwMutexWake` pending
-    /// response to fix up user-space owner / waiter / recursive_count.
+    /// Kernel lwmutex entries carry no owner record; each woken thread
+    /// fixes up user-space owner / waiter / recursive_count via its
+    /// `LwMutexWake` pending response.
     fn release_held_lwmutexes_on_exit(&mut self) -> Vec<UnitId> {
         let ids: Vec<u32> = self
             .lwmutexes
@@ -553,9 +540,6 @@ mod tests {
 
     #[test]
     fn ppu_thread_create_bad_opd_via_param_returns_efault() {
-        // First deref succeeds (param sits in bounds) but the
-        // entry_opd_ptr it carries is unmapped, so the second
-        // deref must surface CELL_EFAULT.
         let mut mem = cellgov_mem::GuestMemory::new(0x1_0000);
         let mut param_bytes = [0u8; 8];
         param_bytes[0..4].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());

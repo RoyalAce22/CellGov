@@ -1,15 +1,8 @@
 //! Top-level dispatch routing for [`Lv2Host`].
 //!
-//! Every arm is a one-line delegation: typed `Lv2Request` variants
-//! route into the matching `dispatch_*` method (mostly defined in
-//! sibling submodules), and `Unsupported { number: N }` arms route
-//! into per-syscall methods in [`super::unsupported_arms`]. The match
-//! itself stays here as the routing surface; the per-arm shape and
-//! oracle citations live with the extracted methods.
-//!
-//! Helpers that several arms share (TTY-write fast path,
-//! id-out-pointer write shape, null-pointer EFAULT short-circuit,
-//! PRX path resolver) live in [`super::helpers`].
+//! Each arm is a one-line delegation to a `dispatch_*` method.
+//! Per-arm shape and oracle citations live with the extracted
+//! methods; shared helpers live in [`super::helpers`].
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::syscall;
@@ -26,11 +19,10 @@ impl Lv2Host {
     ///
     /// Called once per PPU syscall yield, synchronously inside the
     /// runtime's `step()`. The returned [`Lv2Dispatch`] is the
-    /// host's complete response: any guest-memory writes ride as
-    /// `Effect`s the runtime feeds into the commit pipeline. The
-    /// host snapshots `rt.current_tick()` on entry so every effect
-    /// it builds is stamped at the triggering syscall's tick rather
-    /// than tick 0.
+    /// host's complete response; guest-memory writes ride as
+    /// `Effect`s the runtime feeds into the commit pipeline.
+    /// `rt.current_tick()` is snapshotted on entry so every effect
+    /// is stamped at the triggering syscall's tick.
     pub fn dispatch(
         &mut self,
         request: Lv2Request,
@@ -126,9 +118,6 @@ impl Lv2Host {
                 nwrite_ptr,
                 ..
             } => {
-                // Shared with TtyWrite which carries len as u32;
-                // sys_fs_write's u64 size is clamped here. Real
-                // tty-append writes are well under 4 GiB.
                 let len = u32::try_from(size).unwrap_or(u32::MAX);
                 self.dispatch_tty_write(buf_ptr, len, nwrite_ptr, requester, rt)
             }
@@ -406,8 +395,6 @@ impl Lv2Host {
             Lv2Request::ProcessGetParamsfo { buf_ptr } => {
                 self.dispatch_process_get_paramsfo(buf_ptr, requester)
             }
-            // ID-allocator stubs for primitives whose only test-level
-            // exercise is create/destroy plus the live-count probe.
             Lv2Request::TimerCreate { id_ptr } => self.dispatch_timer_create(id_ptr, requester),
             Lv2Request::TimerDestroy { .. } => self.dispatch_timer_destroy(),
             Lv2Request::RwlockCreate { id_ptr, .. } => {
