@@ -273,6 +273,16 @@ fn fixed_sizes_match_documentation() {
     }
     .encode(&mut buf);
     assert_eq!(buf.len(), 25);
+
+    buf.clear();
+    TraceRecord::SyscallEntered {
+        unit: UnitId::new(0),
+        num: 0,
+        args: [0u64; 8],
+        disposition: crate::record::TracedSyscallDisposition::Implemented,
+    }
+    .encode(&mut buf);
+    assert_eq!(buf.len(), 82);
 }
 
 #[test]
@@ -526,4 +536,95 @@ fn host_invariant_break_level_is_scheduling() {
         reason: TracedInvariantBreakReason::Unspecified,
     };
     assert_eq!(r.level(), TraceLevel::Scheduling);
+}
+
+#[test]
+fn syscall_entered_roundtrip_each_disposition() {
+    use crate::record::TracedSyscallDisposition;
+    use strum::VariantArray;
+    for d in TracedSyscallDisposition::VARIANTS {
+        roundtrip(TraceRecord::SyscallEntered {
+            unit: UnitId::new(7),
+            num: 0xDEAD_BEEF_CAFE_F00D,
+            args: [0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80],
+            disposition: *d,
+        });
+    }
+}
+
+/// Pins the tag byte for `SyscallEntered` at `0x0a` and the wire size
+/// at 82 bytes. New variants must use strictly greater tags.
+#[test]
+fn syscall_entered_tag_is_0x0a() {
+    use crate::record::TracedSyscallDisposition;
+    let r = TraceRecord::SyscallEntered {
+        unit: UnitId::new(0),
+        num: 0,
+        args: [0u64; 8],
+        disposition: TracedSyscallDisposition::Implemented,
+    };
+    let mut buf = Vec::new();
+    r.encode(&mut buf);
+    assert_eq!(buf[0], 0x0a);
+    assert_eq!(
+        buf.len(),
+        82,
+        "documented wire size: 1 tag + 8 unit + 8 num + 8*8 args + 1 disposition = 82"
+    );
+}
+
+#[test]
+fn syscall_entered_disposition_discriminants_locked() {
+    use crate::record::TracedSyscallDisposition;
+    assert_eq!(TracedSyscallDisposition::Implemented as u8, 0);
+    assert_eq!(TracedSyscallDisposition::Unsupported as u8, 1);
+    assert_eq!(TracedSyscallDisposition::UnresolvedImport as u8, 2);
+    assert_eq!(TracedSyscallDisposition::Malformed as u8, 3);
+    assert_eq!(TracedSyscallDisposition::Hypercall as u8, 4);
+    assert_eq!(TracedSyscallDisposition::TimerFastPath as u8, 5);
+}
+
+#[test]
+fn syscall_entered_level_is_scheduling() {
+    use crate::record::TracedSyscallDisposition;
+    let r = TraceRecord::SyscallEntered {
+        unit: UnitId::new(0),
+        num: 0,
+        args: [0u64; 8],
+        disposition: TracedSyscallDisposition::Implemented,
+    };
+    assert_eq!(r.level(), TraceLevel::Scheduling);
+}
+
+#[test]
+fn unknown_syscall_disposition_returns_error() {
+    let mut buf = vec![TAG_SYSCALL_ENTERED];
+    // unit + num + args = 8 + 8 + 64 = 80 zero bytes
+    buf.extend(std::iter::repeat_n(0u8, 80));
+    buf.push(99);
+    assert_eq!(
+        TraceRecord::decode(&buf),
+        Err(DecodeError::UnknownSyscallDisposition(99))
+    );
+}
+
+#[test]
+fn syscall_entered_truncated_input_is_rejected() {
+    use crate::record::TracedSyscallDisposition;
+    let mut buf = Vec::new();
+    TraceRecord::SyscallEntered {
+        unit: UnitId::new(1),
+        num: 0x10,
+        args: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88],
+        disposition: TracedSyscallDisposition::Implemented,
+    }
+    .encode(&mut buf);
+    for drop in 1..buf.len() {
+        let truncated = &buf[..buf.len() - drop];
+        assert_eq!(
+            TraceRecord::decode(truncated),
+            Err(DecodeError::Truncated),
+            "expected Truncated after dropping {drop} byte(s)"
+        );
+    }
 }

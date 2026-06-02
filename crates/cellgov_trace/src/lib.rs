@@ -16,6 +16,6 @@ pub use level::TraceLevel;
 pub use reader::TraceReader;
 pub use record::{
     DecodeError, HashCheckpointKind, TraceRecord, TracedBlockReason, TracedEffectKind,
-    TracedInvariantBreakReason, TracedWakeReason, TracedYieldReason,
+    TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason, TracedYieldReason,
 };
 pub use writer::TraceWriter;

@@ -22,7 +22,8 @@ pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
 
 fn dump_trace(result: &ScenarioResult) {
     use cellgov_trace::{
-        TraceRecord, TracedBlockReason, TracedInvariantBreakReason, TracedWakeReason,
+        TraceRecord, TracedBlockReason, TracedInvariantBreakReason, TracedSyscallDisposition,
+        TracedWakeReason,
     };
 
     let mut count = 0usize;
@@ -131,6 +132,34 @@ fn dump_trace(result: &ScenarioResult) {
                     TracedInvariantBreakReason::Unspecified => "Unspecified",
                 };
                 println!("{i:4}  HostInvariantBreak reason={reason_str}");
+            }
+            TraceRecord::SyscallEntered {
+                unit,
+                num,
+                args,
+                disposition,
+            } => {
+                let disposition_str = match disposition {
+                    TracedSyscallDisposition::Implemented => "Implemented",
+                    TracedSyscallDisposition::Unsupported => "Unsupported",
+                    TracedSyscallDisposition::UnresolvedImport => "UnresolvedImport",
+                    TracedSyscallDisposition::Malformed => "Malformed",
+                    TracedSyscallDisposition::Hypercall => "Hypercall",
+                    TracedSyscallDisposition::TimerFastPath => "TimerFastPath",
+                };
+                println!(
+                    "{i:4}  SyscallEntered     unit={} num=0x{num:x} disposition={disposition_str} \
+                     args=[0x{:x},0x{:x},0x{:x},0x{:x},0x{:x},0x{:x},0x{:x},0x{:x}]",
+                    unit.raw(),
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3],
+                    args[4],
+                    args[5],
+                    args[6],
+                    args[7],
+                );
             }
         }
     }
