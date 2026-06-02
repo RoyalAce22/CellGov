@@ -123,6 +123,12 @@ impl Lv2Host {
     /// writes the u32 id to `*mem_id_ptr`. The oracle
     /// mints a monotonic id; the map / search-and-map calls that
     /// follow are no-ops at the oracle layer.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EFAULT` when `mem_id_ptr` is null.
+    /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
+    /// - `CELL_EALIGN` when `size % granule_from_flags(flags) != 0`.
     pub(super) fn dispatch_mmapper_allocate_shared_memory(
         &mut self,
         args: [u64; 8],
@@ -138,6 +144,9 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
         let align = page_size::granule_from_flags(flags);
+        if !size_u32.is_multiple_of(align) {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+        }
         let mem_id = self.alloc_id();
         self.mmapper_handles.insert(
             mem_id,
@@ -171,32 +180,20 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` for `addr < 0x2000_0000 || addr >= 0xC000_0000`.
+    /// - `CELL_EINVAL` for `addr < 0x2000_0000 || addr >= 0xC000_0000`
+    ///   or for `addr + handle.size` past `0xC000_0000`.
     /// - `CELL_ESRCH` (plus a `dispatch.mmapper_map_unknown_mem_id`
     ///   invariant break) when `mem_id` is not in the handle table.
     /// - `CELL_EALIGN` when `addr % handle.align != 0`.
-    /// - `CELL_EBUSY` (plus `dispatch.mmapper_map_overlap` break) when
-    ///   the requested range overlaps an existing region.
     ///
-    /// A "writable spot-check" fast path runs before the handle table:
-    /// if `addr` already lies in a backed region (genuine main / iomap
-    /// / stack target, e.g. a synthetic-ELF harness's 334 against a
-    /// flat backing) the call returns CELL_OK without recording state.
-    /// This preserves existing test fixtures while letting the handle
-    /// path do the real work for firmware-set boots.
-    pub(super) fn dispatch_mmapper_map_shared_memory(
-        &mut self,
-        args: [u64; 8],
-        rt: &dyn Lv2Runtime,
-    ) -> Lv2Dispatch {
+    /// Overlap with an existing region is not detected here. The
+    /// runtime's `install_region` drain rejects an overlapping
+    /// `PendingRegionInstall`, which surfaces as a dispatch panic
+    /// rather than a per-call errno -- the handle-table state is the
+    /// invariant the dispatch path must maintain.
+    pub(super) fn dispatch_mmapper_map_shared_memory(&mut self, args: [u64; 8]) -> Lv2Dispatch {
         let addr = args[0];
         let mem_id = args[1] as u32;
-        // Flat-backing fast path for synthetic ELFs that 334 against
-        // pre-mapped main memory: already-backed `addr` short-circuits
-        // to CELL_OK regardless of `mem_id`.
-        if rt.writable(addr, 1) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_OK.into());
-        }
         if !(0x2000_0000..0xC000_0000).contains(&addr) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
@@ -263,7 +260,15 @@ impl Lv2Host {
     /// `sys_mmapper_allocate_shared_memory_from_container` (362).
     /// Oracle: RPCS3's `sys_mmapper.cpp` shm-from-container handler;
     /// same shape as syscall 332 with a caller-supplied container;
-    /// the out-pointer for the fresh mem_id is at r7.
+    /// the out-pointer for the fresh mem_id is at r7. Flags are at r6
+    /// (`args[3]`), one slot deeper than 332's r5, because r5 carries
+    /// the container id.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EFAULT` when `mem_id_ptr` is null.
+    /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
+    /// - `CELL_EALIGN` when `size % granule_from_flags(flags) != 0`.
     pub(super) fn dispatch_mmapper_allocate_shared_memory_from_container(
         &mut self,
         args: [u64; 8],
@@ -279,6 +284,9 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
         let align = page_size::granule_from_flags(flags);
+        if !size_u32.is_multiple_of(align) {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+        }
         let mem_id = self.alloc_id();
         self.mmapper_handles.insert(
             mem_id,
@@ -315,20 +323,46 @@ impl Lv2Host {
     /// `_sys_prx_start_module` (481). Oracle: RPCS3's `sys_prx.cpp`
     /// writes `pOpt->entry = prx->start ? prx->start.addr() : ~0`
     /// before returning CELL_OK. Struct layout per RPCS3's
-    /// `sys_prx.h` puts `entry` at offset 16. `~0` is the kernel
-    /// sentinel for "no start function". `if (!id || !pOpt ||
-    /// pOpt->size < 0x20) return CELL_EINVAL;` is honored for id and
-    /// pOpt; the size check is deferred.
+    /// `sys_prx.h` puts `size` at offset 0 and `entry` at offset 16.
+    /// `~0` is the kernel sentinel for "no start function". RPCS3's
+    /// `if (!id || !pOpt || pOpt->size < 0x20) return CELL_EINVAL;`
+    /// is honored in full: an unreadable `pOpt->size` faults with
+    /// CELL_EFAULT plus a `dispatch.prx_start_module_size_unreadable`
+    /// break, and `size < 0x20` returns CELL_EINVAL.
     pub(super) fn dispatch_prx_start_module(
-        &self,
+        &mut self,
         args: [u64; 8],
         requester: UnitId,
+        rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         let id = args[0] as u32;
         let p_opt = args[2] as u32;
         if id == 0 || p_opt == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
+        let Some(size_bytes) = rt.read_committed(u64::from(p_opt), 4) else {
+            self.log_invariant_break(
+                "dispatch.prx_start_module_size_unreadable",
+                format_args!(
+                    "_sys_prx_start_module pOpt={p_opt:#010x} size field unreadable; \
+                     returning CELL_EFAULT"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        };
+        let size = u32::from_be_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]]);
+        if size < 0x20 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+        // The 8-byte entry write spans `[p_opt+16, p_opt+24)`. The
+        // `size >= 0x20` check above proves the guest declared at
+        // least 32 bytes at `p_opt`, so the entry slot is in-struct
+        // by guest contract; a wrap here means the guest lied or
+        // we miscomputed.
+        debug_assert!(
+            p_opt.checked_add(24).is_some(),
+            "_sys_prx_start_module entry write wraps u32: p_opt={p_opt:#010x}",
+        );
         let entry_addr = p_opt.wrapping_add(16);
         let no_start = u64::MAX.to_be_bytes();
         let entry_write = Effect::SharedWriteIntent {
@@ -366,8 +400,17 @@ impl Lv2Host {
     /// `pInfo->count`. Struct layout per RPCS3's `sys_prx.h`:
     /// `size@0, pad@8, max@0xC, count@0x10, idlist@0x14, unk@0x1C`.
     /// CELL_EFAULT on null `pInfo` when bit 2 is set.
+    ///
+    /// The idlist slot writes and the trailing count write are emitted
+    /// in a single `Lv2Dispatch::Immediate` batch. RPCS3's handler
+    /// writes count AFTER the fill loop completes, and both stores go
+    /// through the same `vm::ptr<>` access path; an unwritable idlist
+    /// page would trap during the loop and prevent the post-loop count
+    /// store. The atomic-commit contract enforces the same outcome
+    /// here: if any slot intent fails validation, the whole batch
+    /// rolls back and count cannot land independently.
     pub(super) fn dispatch_prx_get_module_list(
-        &self,
+        &mut self,
         args: [u64; 8],
         requester: UnitId,
         rt: &dyn Lv2Runtime,
@@ -380,18 +423,45 @@ impl Lv2Host {
         if p_info == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
+        // The struct fields span `[p_info, p_info+0x18)`. A wrap here
+        // would silently retarget the field reads / writes elsewhere
+        // in low memory; an in-range read failure is the recoverable
+        // path (handled below), a u32 wrap is not.
+        debug_assert!(
+            p_info.checked_add(0x18).is_some(),
+            "sys_prx_get_module_list pInfo struct wraps u32: pInfo={p_info:#010x}",
+        );
         let mut effects = Vec::new();
         let max_addr = p_info.wrapping_add(0x0C);
         let count_addr = p_info.wrapping_add(0x10);
         let idlist_ptr_addr = p_info.wrapping_add(0x14);
-        let max = rt
-            .read_committed(u64::from(max_addr), 4)
-            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-            .unwrap_or(0);
-        let idlist_ptr = rt
-            .read_committed(u64::from(idlist_ptr_addr), 4)
-            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-            .unwrap_or(0);
+        let Some(max_bytes) = rt.read_committed(u64::from(max_addr), 4) else {
+            self.log_invariant_break(
+                "dispatch.prx_module_list_unreadable_pinfo",
+                format_args!(
+                    "sys_prx_get_module_list pInfo={p_info:#010x} max field at \
+                     {max_addr:#010x} unreadable; returning CELL_EFAULT"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        };
+        let max = u32::from_be_bytes([max_bytes[0], max_bytes[1], max_bytes[2], max_bytes[3]]);
+        let Some(idlist_bytes) = rt.read_committed(u64::from(idlist_ptr_addr), 4) else {
+            self.log_invariant_break(
+                "dispatch.prx_module_list_unreadable_pinfo",
+                format_args!(
+                    "sys_prx_get_module_list pInfo={p_info:#010x} idlist field at \
+                     {idlist_ptr_addr:#010x} unreadable; returning CELL_EFAULT"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        };
+        let idlist_ptr = u32::from_be_bytes([
+            idlist_bytes[0],
+            idlist_bytes[1],
+            idlist_bytes[2],
+            idlist_bytes[3],
+        ]);
         let liblv2_id = self
             .prx_registry
             .lookup_by_path("liblv2.sprx")
@@ -407,6 +477,18 @@ impl Lv2Host {
                 if count >= max {
                     break;
                 }
+                // Each slot is a 4-byte write at `idlist_ptr + count*4`;
+                // the highest address touched is `slot + 3`. A wrap
+                // would retarget the write to low memory unnoticed.
+                debug_assert!(
+                    count
+                        .checked_mul(4)
+                        .and_then(|off| idlist_ptr.checked_add(off))
+                        .and_then(|s| s.checked_add(4))
+                        .is_some(),
+                    "sys_prx_get_module_list idlist slot wraps u32: \
+                     idlist_ptr={idlist_ptr:#010x} count={count}",
+                );
                 let slot = idlist_ptr.wrapping_add(count.wrapping_mul(4));
                 effects.push(Effect::SharedWriteIntent {
                     range: ByteRange::contiguous_u32(slot, 4),

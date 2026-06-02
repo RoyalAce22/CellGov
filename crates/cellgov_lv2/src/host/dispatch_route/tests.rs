@@ -418,23 +418,6 @@ fn syscall_324_writes_fresh_cid_to_out_ptr() {
 }
 
 #[test]
-fn syscall_334_backed_target_returns_ok_no_effects() {
-    // FakeRuntime::new(0x10000) backs [0, 0x10000); a 334 inside that
-    // range hits the flat-backing fast path.
-    let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
-    let result = host.dispatch(
-        Lv2Request::Unsupported {
-            number: 334,
-            args: [0x1000, 0x4000_0007, 0x40000, 0, 0, 0, 0, 0],
-        },
-        UnitId::new(0),
-        &rt,
-    );
-    assert_eq!(result, Lv2Dispatch::immediate(0));
-}
-
-#[test]
 fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
@@ -898,6 +881,108 @@ fn syscall_332_writes_fresh_mem_id_to_mem_id_ptr() {
 }
 
 #[test]
+fn syscall_332_size_not_multiple_of_64k_granule_returns_ealign() {
+    // flags=0x200 (FLAG_64K) -> granule 0x10000. size=0x1_8000 leaves
+    // an 0x8000 remainder.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 332,
+            args: [0x8006_0100_0000_0010, 0x1_8000, 0x200, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
+    );
+}
+
+#[test]
+fn syscall_332_size_not_multiple_of_1m_granule_returns_ealign() {
+    // flags=0x400 (FLAG_1M) -> granule 0x100000. size=0x10_0001 has a
+    // 1-byte remainder.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 332,
+            args: [0x8006_0100_0000_0010, 0x10_0001, 0x400, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
+    );
+}
+
+#[test]
+fn syscall_362_size_not_multiple_of_granule_returns_ealign() {
+    // 362 reads flags from args[3] (r6), not args[2] (r5 = container).
+    // A 1-byte misaligned size against a 1M granule must fault.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 362,
+            args: [
+                0xffff_0000_0000_0000, // ipc_key
+                0x10_0001,             // size (1-byte misaligned)
+                0x4000_0015,           // cid (must be ignored for alignment)
+                0x400,                 // flags (FLAG_1M -> granule 0x100000)
+                0x9000,                // mem_id_ptr
+                0,
+                0,
+                0,
+            ],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
+    );
+}
+
+#[test]
+fn syscall_362_reads_flags_from_args3_not_args2() {
+    // Regression guard against transposing 362's flag-arg index.
+    // args[2] = 0x200 (would imply 64K granule and accept the size).
+    // args[3] = 0x400 (real flags: 1M granule, rejects the size).
+    // If the dispatch wrongly reads args[2], the call returns CELL_OK
+    // and writes a mem_id. The correct dispatch reads args[3] and
+    // returns CELL_EALIGN.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 362,
+            args: [
+                0xffff_0000_0000_0000,
+                0x1_0000, // size = 64K (aligned only for 64K granule)
+                0x200,    // args[2]: container-id slot, must be ignored for alignment
+                0x400,    // args[3]: real flags -> 1M granule
+                0x9000,
+                0,
+                0,
+                0,
+            ],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
+    );
+}
+
+#[test]
 fn syscall_480_returns_registered_kernel_id_for_known_stem() {
     let mut host = Lv2Host::new();
     let expected_id = host.prx_registry_mut().register(
@@ -1117,11 +1202,24 @@ fn tty_read_returns_eio() {
 #[test]
 fn prx_start_module_writes_no_start_sentinel_to_p_opt_entry() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(256);
-    let p_opt: u64 = 0x4000_1000;
+    let p_opt: u32 = 0x4000;
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    let mut p_opt_buf = [0u8; 0x20];
+    // size field at offset 0 -- paired with the handler's read_committed(p_opt, 4).
+    p_opt_buf[0..4].copy_from_slice(&0x20u32.to_be_bytes());
+    mem.apply_commit(
+        ByteRange::new(
+            cellgov_mem::GuestAddr::new(u64::from(p_opt)),
+            p_opt_buf.len() as u64,
+        )
+        .unwrap(),
+        &p_opt_buf,
+    )
+    .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
     let mut args = [0u64; 8];
     args[0] = 0x1234;
-    args[2] = p_opt;
+    args[2] = u64::from(p_opt);
     let result = host.dispatch(
         Lv2Request::Unsupported { number: 481, args },
         UnitId::new(0),
@@ -1134,12 +1232,63 @@ fn prx_start_module_writes_no_start_sentinel_to_p_opt_entry() {
     assert_eq!(effects.len(), 1, "expected exactly one write effect");
     match &effects[0] {
         Effect::SharedWriteIntent { range, bytes, .. } => {
-            assert_eq!(range.start().raw(), (p_opt + 16));
+            assert_eq!(range.start().raw(), u64::from(p_opt + 16));
             assert_eq!(range.length(), 8);
             assert_eq!(bytes.bytes(), &u64::MAX.to_be_bytes());
         }
         other => panic!("expected SharedWriteIntent, got {other:?}"),
     }
+}
+
+#[test]
+fn syscall_481_rejects_size_below_0x20_with_einval() {
+    let mut host = Lv2Host::new();
+    let p_opt: u32 = 0x4000;
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    let mut p_opt_buf = [0u8; 0x20];
+    p_opt_buf[0..4].copy_from_slice(&0x1Fu32.to_be_bytes());
+    mem.apply_commit(
+        ByteRange::new(
+            cellgov_mem::GuestAddr::new(u64::from(p_opt)),
+            p_opt_buf.len() as u64,
+        )
+        .unwrap(),
+        &p_opt_buf,
+    )
+    .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+    let mut args = [0u64; 8];
+    args[0] = 0x1234;
+    args[2] = u64::from(p_opt);
+    let result = host.dispatch(
+        Lv2Request::Unsupported { number: 481, args },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
+}
+
+#[test]
+fn syscall_481_unreadable_p_opt_returns_efault_and_logs_break() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x1000);
+    let breaks_before = host.invariant_break_count();
+    let mut args = [0u64; 8];
+    args[0] = 0x1234;
+    args[2] = 0x4000_1000;
+    let result = host.dispatch(
+        Lv2Request::Unsupported { number: 481, args },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
 }
 
 #[test]
@@ -1213,6 +1362,127 @@ fn syscall_494_rejects_null_p_info_with_efault() {
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
     );
+}
+
+#[test]
+fn syscall_494_unreadable_max_field_returns_efault_and_logs_break() {
+    // p_info=0xF000 places the max field at 0xF00C and idlist field at
+    // 0xF014. FakeRuntime::new(0x10000) backs [0, 0x10000), so a
+    // p_info one byte short of the limit makes the max-field read fall
+    // off the end: a 4-byte read starting at 0xFFFD (p_info=0xFFF1)
+    // crosses 0x10000 and returns None.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let breaks_before = host.invariant_break_count();
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 494,
+            args: [0x2, 0xFFF1, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+}
+
+#[test]
+fn syscall_494_unreadable_idlist_field_returns_efault_and_logs_break() {
+    // p_info=0xFFEC places the max field at 0xFFF8 (in range, returns
+    // 0) and the idlist field at 0x10000 (out of range, fault).
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let breaks_before = host.invariant_break_count();
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 494,
+            args: [0x2, 0xFFEC, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+}
+
+#[test]
+fn syscall_494_emits_slot_and_count_in_one_effects_batch() {
+    // Pins the dispatch-layer co-emission shape: syscall 494 produces
+    // the idlist slot writes and the trailing count write in a single
+    // Lv2Dispatch::Immediate effects Vec, slot before count. Guards
+    // against a future refactor splitting the count into a separate
+    // dispatch stage.
+    //
+    // Rollback enforcement (all-or-none on the SharedWriteIntent
+    // subset) lives in the runtime's LV2 apply path
+    // (cellgov_core::runtime::lv2_dispatch::apply_lv2_effects) and is
+    // covered by its own test there. This test does NOT exercise
+    // commit-pass validation.
+    let mut host = Lv2Host::new();
+    host.prx_registry_mut().register(
+        "libaudio".into(),
+        "cellAudio_Library".into(),
+        0x0147_0000,
+        0x0148_0000,
+        0x0147_da30,
+        None,
+        None,
+    );
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    let mut p_info = [0u8; 0x20];
+    p_info[0..8].copy_from_slice(&0x20u64.to_be_bytes());
+    p_info[0x0C..0x10].copy_from_slice(&4u32.to_be_bytes());
+    p_info[0x14..0x18].copy_from_slice(&0x4040u32.to_be_bytes());
+    mem.apply_commit(
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x4000), p_info.len() as u64)
+            .unwrap(),
+        &p_info,
+    )
+    .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 494,
+            args: [0x2, 0x4000, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let effects = match result {
+        Lv2Dispatch::Immediate { code: 0, effects } => effects,
+        other => panic!("expected Immediate{{code:0}}, got {other:?}"),
+    };
+    assert_eq!(
+        effects.len(),
+        2,
+        "expected one slot write + one count write in a single batch"
+    );
+    match &effects[0] {
+        Effect::SharedWriteIntent { range, .. } => {
+            assert_eq!(
+                range.start().raw(),
+                0x4040,
+                "effects[0] is the slot write at idlist_ptr"
+            );
+        }
+        other => panic!("expected SharedWriteIntent for slot, got {other:?}"),
+    }
+    match &effects[1] {
+        Effect::SharedWriteIntent { range, .. } => {
+            assert_eq!(
+                range.start().raw(),
+                0x4010,
+                "effects[1] is the count write at pInfo+0x10, after the slot"
+            );
+        }
+        other => panic!("expected SharedWriteIntent for count, got {other:?}"),
+    }
 }
 
 #[test]

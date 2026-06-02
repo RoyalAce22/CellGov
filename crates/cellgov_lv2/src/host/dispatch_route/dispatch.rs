@@ -319,7 +319,7 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_START_MODULE,
                 args,
-            } => self.dispatch_prx_start_module(args, requester),
+            } => self.dispatch_prx_start_module(args, requester, rt),
             Lv2Request::Unsupported {
                 number: syscall::TTY_READ,
                 ..
@@ -371,7 +371,7 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_MAP_SHARED_MEMORY,
                 args,
-            } => self.dispatch_mmapper_map_shared_memory(args, rt),
+            } => self.dispatch_mmapper_map_shared_memory(args),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_SEARCH_AND_MAP,
                 args,
