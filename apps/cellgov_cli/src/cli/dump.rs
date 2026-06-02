@@ -98,6 +98,7 @@ fn dump_trace(result: &ScenarioResult) {
                 let reason_str = match reason {
                     TracedBlockReason::WaitOnEvent => "WaitOnEvent",
                     TracedBlockReason::MailboxEmpty => "MailboxEmpty",
+                    TracedBlockReason::DmaWait => "DmaWait",
                 };
                 println!(
                     "{i:4}  UnitBlocked        unit={} reason={}",

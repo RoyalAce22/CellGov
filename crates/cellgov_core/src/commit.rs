@@ -83,6 +83,19 @@ pub enum CommitError {
         /// Index of the offending effect within the batch.
         effect_index: usize,
     },
+    /// A `DmaEnqueue` destination range lies in a non-`ReadWrite` region.
+    #[error(
+        "effect[{effect_index}]: DMA destination at 0x{addr:016x} lies in \
+         reserved region {region}"
+    )]
+    DmaDestinationReserved {
+        /// Index of the offending effect within the batch.
+        effect_index: usize,
+        /// Faulting guest address (start of destination range).
+        addr: u64,
+        /// Reserved region's label.
+        region: &'static str,
+    },
     /// The memory layer rejected the drain (permissions, or a
     /// pre-validation/drain disagreement on containment).
     #[error("memory: {0}")]
@@ -161,6 +174,10 @@ pub enum BlockReason {
     MailboxEmpty,
     /// `WaitOnEvent` effect.
     WaitOnEvent,
+    /// SPU `MFC_RD_TAG_STAT` yielded with the masked tags not yet
+    /// complete; runtime parks the unit until
+    /// [`Runtime::fire_dma_completions`] publishes the missing tag bit.
+    DmaWait,
 }
 
 /// Mutable references to every subsystem the commit pipeline touches.
@@ -304,13 +321,32 @@ impl CommitPipeline {
                     }
                     Effect::DmaEnqueue { request, .. } => {
                         let dst = request.destination();
-                        let start = dst.start().raw();
-                        let length = dst.length();
-                        if start.checked_add(length).is_none()
-                            || ctx.memory.containing_region(start, length).is_none()
-                        {
-                            return Err(CommitError::DmaDestinationOutOfRange {
-                                effect_index: idx,
+                        // No separate payload buffer at enqueue, so the
+                        // byte_len argument is `dst.length()` and
+                        // `validate_write`'s LengthMismatch check cannot
+                        // fire on this caller.
+                        if let Err(err) = ctx.memory.validate_write(dst, dst.length() as usize) {
+                            // Mark the issuing unit terminal before the batch is
+                            // rejected. Without this, the SPU returns to Runnable,
+                            // polls MFC_RD_TAG_STAT for a tag bit that never arrives,
+                            // parks Blocked on DmaWait, and `step` time-warps to an
+                            // empty queue -> `StepError::AllBlocked`. RPCS3
+                            // dbg_pauses the SPU on the same fault class; `Faulted`
+                            // is the non-interactive analog.
+                            ctx.units
+                                .set_status_override(request.issuer(), UnitStatus::Faulted);
+                            return Err(match err {
+                                MemError::Unmapped(_) | MemError::LengthMismatch => {
+                                    CommitError::DmaDestinationOutOfRange { effect_index: idx }
+                                }
+                                MemError::ReservedWrite { addr, region } => {
+                                    CommitError::DmaDestinationReserved {
+                                        effect_index: idx,
+                                        addr,
+                                        region,
+                                    }
+                                }
+                                other => CommitError::Memory(other),
                             });
                         }
                         dma_count += 1;
@@ -418,9 +454,15 @@ impl CommitPipeline {
         // enqueue, reservation mutations, payload clone) is infallible
         // absent host OOM; a new fallible op here would need rollback
         // machinery to preserve the atomic-batch contract.
-        staging
-            .drain_into(ctx.memory)
-            .map_err(CommitError::Memory)?;
+        //
+        // `drain_into` leaves the staging buffer populated on
+        // validation failure; clear it so `StagingMemory`'s Drop guard
+        // ("caller must call drain_into() or clear() before release")
+        // is honored on both pre_validate and drain failure paths.
+        if let Err(e) = staging.drain_into(ctx.memory) {
+            staging.clear();
+            return Err(CommitError::Memory(e));
+        }
         for effect in effects {
             match effect {
                 Effect::MailboxSend {

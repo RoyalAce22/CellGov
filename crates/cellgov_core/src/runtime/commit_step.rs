@@ -4,9 +4,9 @@
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionStepResult, YieldReason};
+use cellgov_exec::{ExecutionStepResult, UnitStatus, YieldReason};
 
-use crate::commit::{CommitContext, CommitError, CommitOutcome};
+use crate::commit::{BlockReason, CommitContext, CommitError, CommitOutcome};
 use crate::runtime::state::Runtime;
 
 impl Runtime {
@@ -96,6 +96,18 @@ impl Runtime {
         if result.yield_reason == YieldReason::Syscall {
             self.dispatch_syscall(result, source);
         }
+        // Park before firing completions: fire_dma_completions sets the
+        // wake override (Runnable) for any issuer whose completion just
+        // landed, which overwrites this Blocked override iff a tag bit
+        // got published. Reverse order would leave the SPU Blocked even
+        // when its wake just fired.
+        if result.yield_reason == YieldReason::DmaWait {
+            self.registry
+                .set_status_override(source, UnitStatus::Blocked);
+            if let Ok(ref mut o) = outcome {
+                o.blocked_units.push((source, BlockReason::DmaWait));
+            }
+        }
         self.epoch.advance();
         let due = self.fire_dma_completions();
         if let Ok(ref mut o) = outcome {
@@ -133,9 +145,12 @@ impl Runtime {
             self.rsx_flip.complete_pending_flip();
         }
 
-        // Flip-status memory mirror; gated on rsx_mirror_writes because
-        // the default reserved RSX layout would reserved-fault. No-change
-        // skip keeps the memory hash stable across idle batches.
+        // Flip-status memory mirror. `rsx_flip` is the authoritative
+        // model; the mirror at `RSX_FLIP_STATUS_MIRROR_ADDR` is a
+        // best-effort projection for titles that poll the address.
+        // On failure the projection is dropped (typed invariant break)
+        // but the model advance stands -- rolling `rsx_flip` back to
+        // match a failed projection would corrupt the source of truth.
         if self.rsx_mirror_writes {
             let flip_status_now = self.rsx_flip.status();
             if flip_status_now != flip_status_at_entry {
@@ -144,7 +159,17 @@ impl Runtime {
                     cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 4)
                 {
                     let value = flip_status_now as u32;
-                    let _ = self.memory.apply_commit(range, &value.to_be_bytes());
+                    if let Err(err) = self.memory.apply_commit(range, &value.to_be_bytes()) {
+                        self.lv2_host.log_invariant_break(
+                            "dispatch.rsx_flip_status_mirror_failed",
+                            format_args!(
+                                "RSX flip-status mirror write failed at \
+                                 addr=0x{addr:016x} length=4: {err}; \
+                                 rsx_flip model advance retained, guest-visible \
+                                 mirror byte stale",
+                            ),
+                        );
+                    }
                 }
             }
         }

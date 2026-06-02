@@ -56,6 +56,7 @@ impl Runtime {
                 let traced_reason = match reason {
                     BlockReason::MailboxEmpty => TracedBlockReason::MailboxEmpty,
                     BlockReason::WaitOnEvent => TracedBlockReason::WaitOnEvent,
+                    BlockReason::DmaWait => TracedBlockReason::DmaWait,
                 };
                 self.trace.record(&TraceRecord::UnitBlocked {
                     unit,
@@ -97,5 +98,21 @@ impl Runtime {
             kind: HashCheckpointKind::SyncState,
             hash: sync_hash,
         });
+    }
+
+    /// Trace records for completions fired by [`Runtime::step`]'s
+    /// no-runnable-unit time-warp. Same UnitWoken records as the
+    /// commit-boundary path; no CommitApplied or state-hash checkpoints
+    /// because no step ran.
+    pub(super) fn emit_time_warp_trace(&mut self, due: &[(DmaCompletion, Option<Vec<u8>>)]) {
+        if self.mode == RuntimeMode::FaultDriven {
+            return;
+        }
+        for (c, _) in due {
+            self.trace.record(&TraceRecord::UnitWoken {
+                unit: c.issuer(),
+                reason: TracedWakeReason::DmaCompletion,
+            });
+        }
     }
 }

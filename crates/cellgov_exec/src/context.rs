@@ -35,6 +35,7 @@ pub struct ExecutionContext<'a> {
     /// own `mode`; default is `false` so the FaultDriven hot path
     /// pays no hashing cost.
     trace_per_step: bool,
+    completed_dma_tags: u32,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -49,6 +50,7 @@ impl<'a> ExecutionContext<'a> {
             reservations: None,
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
+            completed_dma_tags: 0,
         }
     }
 
@@ -64,6 +66,7 @@ impl<'a> ExecutionContext<'a> {
             reservations: None,
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
+            completed_dma_tags: 0,
         }
     }
 
@@ -81,6 +84,7 @@ impl<'a> ExecutionContext<'a> {
             reservations: None,
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
+            completed_dma_tags: 0,
         }
     }
 
@@ -102,6 +106,7 @@ impl<'a> ExecutionContext<'a> {
             reservations: None,
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
+            completed_dma_tags: 0,
         }
     }
 
@@ -139,6 +144,25 @@ impl<'a> ExecutionContext<'a> {
             trace_per_step: on,
             ..self
         }
+    }
+
+    /// Tag-status bitmap the runtime drained for this unit since its
+    /// last step: completed-DMA tag bits ready to OR into the unit's
+    /// own `tag_status` channel at step entry. SPU `MFC_RD_TAG_STAT`
+    /// reads `tag_status` after this OR, so the bit becomes visible
+    /// on the step that consumes it.
+    #[inline]
+    pub const fn with_completed_dma_tags(self, bits: u32) -> Self {
+        Self {
+            completed_dma_tags: bits,
+            ..self
+        }
+    }
+
+    /// Completed-DMA-tag bitmap for this step.
+    #[inline]
+    pub const fn completed_dma_tags(&self) -> u32 {
+        self.completed_dma_tags
     }
 
     /// Committed memory view, borrowed for the step's lifetime.
