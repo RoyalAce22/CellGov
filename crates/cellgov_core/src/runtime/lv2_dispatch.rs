@@ -10,7 +10,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus};
 use cellgov_lv2::{Lv2Dispatch, PendingResponse, SpuInitState};
 use cellgov_mem::MemError;
-use cellgov_trace::TraceRecord;
+use cellgov_trace::{TraceRecord, TracedSyscallDisposition};
 
 use super::types::RuntimeMode;
 use super::{
@@ -110,54 +110,74 @@ impl Runtime {
     }
 
     pub(super) fn dispatch_syscall(&mut self, result: &ExecutionStepResult, source: UnitId) {
-        let Some(args) = &result.syscall_args else {
+        let Some(raw_args) = &result.syscall_args else {
             return;
         };
         // Synthetic / fake-ISA callers do not populate LEV.
         let lev = result.local_diagnostics.syscall_lev.unwrap_or(0);
+        let num = raw_args[0];
+        let args8: [u64; 8] = [
+            raw_args[1],
+            raw_args[2],
+            raw_args[3],
+            raw_args[4],
+            raw_args[5],
+            raw_args[6],
+            raw_args[7],
+            raw_args[8],
+        ];
 
-        // Hypercall (LEV >= 1): PS3 usermode never issues these; the
-        // host rejects with CELL_EINVAL.
-        if lev != 0 {
-            let request = cellgov_lv2::request::classify_with_lev(
-                lev,
-                args[0],
-                &[
-                    args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
-                ],
-            );
+        use cellgov_ps3_abi::syscall::{TIMER_SLEEP, TIMER_USLEEP};
+        let is_timer_fast_path = lev == 0 && (num == TIMER_USLEEP || num == TIMER_SLEEP);
+
+        // Classify upfront so the entry record can carry the
+        // disposition byte. Timer fast-path skips classify (the
+        // disposition is known by shape and the path bypasses
+        // `Lv2Host::dispatch` entirely).
+        let (disposition, request) = if is_timer_fast_path {
+            (TracedSyscallDisposition::TimerFastPath, None)
+        } else {
+            let req = cellgov_lv2::request::classify_with_lev(lev, num, &args8);
+            let d = if lev != 0 {
+                TracedSyscallDisposition::Hypercall
+            } else {
+                disposition_from_request(&req)
+            };
+            (d, Some(req))
+        };
+
+        // Emit the entry record before any state mutation; FaultDriven
+        // suppresses trace writes per the existing convention.
+        if self.mode != RuntimeMode::FaultDriven {
+            self.trace.record(&TraceRecord::SyscallEntered {
+                unit: source,
+                num,
+                args: args8,
+                disposition,
+            });
+        }
+
+        if let Some(request) = request {
             self.dispatch_lv2_request(request, source);
             return;
         }
 
-        // Timer syscalls advance the simulated clock without yielding;
-        // other PPU threads observe the new time on their next read.
-        use cellgov_ps3_abi::syscall::{TIMER_SLEEP, TIMER_USLEEP};
-        match args[0] {
+        // Timer fast-path: advance simulated clock without yielding
+        // through `Lv2Host::dispatch`. Other PPU threads observe the
+        // new time on their next read.
+        match num {
             TIMER_USLEEP => {
-                let usec = args[1];
+                let usec = args8[0];
                 self.advance_guest_time_by_us(usec);
-                self.registry.set_syscall_return(source, 0);
-                return;
             }
             TIMER_SLEEP => {
-                let seconds = args[1];
+                let seconds = args8[0];
                 let usec = seconds.saturating_mul(1_000_000);
                 self.advance_guest_time_by_us(usec);
-                self.registry.set_syscall_return(source, 0);
-                return;
             }
-            _ => {}
+            _ => unreachable!("is_timer_fast_path implies num is TIMER_USLEEP or TIMER_SLEEP"),
         }
-
-        let request = cellgov_lv2::request::classify_with_lev(
-            lev,
-            args[0],
-            &[
-                args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
-            ],
-        );
-        self.dispatch_lv2_request(request, source);
+        self.registry.set_syscall_return(source, 0);
     }
 
     /// Saturates at `u64::MAX` ticks.
@@ -542,6 +562,23 @@ impl Runtime {
             woken_unit_ids,
             response_updates,
         );
+    }
+}
+
+/// Map a classified `Lv2Request` to its [`TracedSyscallDisposition`].
+///
+/// `Hypercall` is set by the caller (it knows LEV); `TimerFastPath` is
+/// set by the caller (the timer bypass skips classify entirely). Every
+/// other variant routes through this helper.
+fn disposition_from_request(request: &cellgov_lv2::Lv2Request) -> TracedSyscallDisposition {
+    match request {
+        cellgov_lv2::Lv2Request::Unsupported { .. } => TracedSyscallDisposition::Unsupported,
+        cellgov_lv2::Lv2Request::UnresolvedImport { .. } => {
+            TracedSyscallDisposition::UnresolvedImport
+        }
+        cellgov_lv2::Lv2Request::Malformed { .. } => TracedSyscallDisposition::Malformed,
+        cellgov_lv2::Lv2Request::Hypercall { .. } => TracedSyscallDisposition::Hypercall,
+        _ => TracedSyscallDisposition::Implemented,
     }
 }
 

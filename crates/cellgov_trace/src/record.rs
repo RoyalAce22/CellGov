@@ -22,6 +22,7 @@
 //! | `0x07` | `PpuStateHash`        | 1 + 8 + 8 + 8 = 25                     |
 //! | `0x08` | `PpuStateFull`        | 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 = 301 |
 //! | `0x09` | `HostInvariantBreak`  | 1 + 1 = 2                              |
+//! | `0x0a` | `SyscallEntered`      | 1 + 8 + 8 + 8*8 + 1 = 82               |
 
 use crate::hash::StateHash;
 use crate::level::TraceLevel;
@@ -159,6 +160,35 @@ pub enum TracedInvariantBreakReason {
     Unspecified = 0,
 }
 
+/// Which dispatch arm a [`TraceRecord::SyscallEntered`] record was
+/// classified into. Pure function of `(lev, num, args)`; derived by
+/// the runtime before `Lv2Host::dispatch` runs.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
+#[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_syscall_disposition))]
+pub enum TracedSyscallDisposition {
+    /// Typed `Lv2Request::*` variant other than the catch-alls; a
+    /// modeled syscall.
+    Implemented = 0,
+    /// `Lv2Request::Unsupported`: classifier recognized the number but
+    /// no handler is wired; routes to `dispatch_unsupported_default`.
+    Unsupported = 1,
+    /// `Lv2Request::UnresolvedImport`: HLE trampoline fired for a NID
+    /// the workspace has not bound.
+    UnresolvedImport = 2,
+    /// `Lv2Request::Malformed`: classifier rejected the request shape
+    /// (bad argument-register read, narrowing, etc.).
+    Malformed = 3,
+    /// `Lv2Request::Hypercall`: LEV >= 1; PS3 usermode never issues
+    /// these.
+    Hypercall = 4,
+    /// `TIMER_USLEEP` or `TIMER_SLEEP` short-circuit: bypasses
+    /// `Lv2Host::dispatch` entirely and advances guest time directly.
+    TimerFastPath = 5,
+}
+
 /// Why decoding a trace record stream failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
@@ -189,6 +219,9 @@ pub enum DecodeError {
     /// Invariant-break-reason byte is not a known variant.
     #[error("unknown invariant break reason 0x{0:02x}")]
     UnknownInvariantBreakReason(u8),
+    /// Syscall-disposition byte is not a known variant.
+    #[error("unknown syscall disposition 0x{0:02x}")]
+    UnknownSyscallDisposition(u8),
 }
 
 impl DecodeError {
@@ -214,6 +247,10 @@ impl DecodeError {
 
     fn unknown_invariant_break_reason(v: u8) -> Self {
         Self::UnknownInvariantBreakReason(v)
+    }
+
+    fn unknown_syscall_disposition(v: u8) -> Self {
+        Self::UnknownSyscallDisposition(v)
     }
 }
 
@@ -331,6 +368,21 @@ pub enum TraceRecord {
         /// Category of the break.
         reason: TracedInvariantBreakReason,
     },
+    /// One record per syscall entry, emitted by the runtime BEFORE
+    /// `Lv2Host::dispatch` runs (or, for the `TIMER_USLEEP` /
+    /// `TIMER_SLEEP` fast-path, before guest-time advance).
+    SyscallEntered {
+        /// Requester unit id (the PPU that issued `sc`).
+        unit: UnitId,
+        /// Raw value the dispatcher saw at `result.syscall_args[0]`:
+        /// LV2 syscall number, hypercall number, or the synthetic
+        /// `UNRESOLVED_IMPORT` sentinel for HLE trampolines.
+        num: u64,
+        /// Argument registers GPR 3..=10 in declaration order.
+        args: [u64; 8],
+        /// Classified dispatch arm; pure over `(lev, num, args)`.
+        disposition: TracedSyscallDisposition,
+    },
 }
 
 const TAG_UNIT_SCHEDULED: u8 = 0x00;
@@ -343,6 +395,7 @@ const TAG_UNIT_WOKEN: u8 = 0x06;
 const TAG_PPU_STATE_HASH: u8 = 0x07;
 const TAG_PPU_STATE_FULL: u8 = 0x08;
 const TAG_HOST_INVARIANT_BREAK: u8 = 0x09;
+const TAG_SYSCALL_ENTERED: u8 = 0x0a;
 
 impl TraceRecord {
     /// Trace level this record belongs to.
@@ -358,6 +411,7 @@ impl TraceRecord {
             | TraceRecord::PpuStateFull { .. } => TraceLevel::Hashes,
             TraceRecord::EffectEmitted { .. } => TraceLevel::Effects,
             TraceRecord::HostInvariantBreak { .. } => TraceLevel::Scheduling,
+            TraceRecord::SyscallEntered { .. } => TraceLevel::Scheduling,
         }
     }
 
@@ -456,6 +510,20 @@ impl TraceRecord {
             TraceRecord::HostInvariantBreak { reason } => {
                 buf.push(TAG_HOST_INVARIANT_BREAK);
                 buf.push(u8::from(*reason));
+            }
+            TraceRecord::SyscallEntered {
+                unit,
+                num,
+                args,
+                disposition,
+            } => {
+                buf.push(TAG_SYSCALL_ENTERED);
+                write_u64(buf, unit.raw());
+                write_u64(buf, *num);
+                for a in args.iter() {
+                    write_u64(buf, *a);
+                }
+                buf.push(u8::from(*disposition));
             }
         }
     }
@@ -569,6 +637,22 @@ impl TraceRecord {
                 let reason_byte = read_u8(bytes, &mut pos)?;
                 let reason = TracedInvariantBreakReason::try_from(reason_byte)?;
                 TraceRecord::HostInvariantBreak { reason }
+            }
+            TAG_SYSCALL_ENTERED => {
+                let unit = UnitId::new(read_u64(bytes, &mut pos)?);
+                let num = read_u64(bytes, &mut pos)?;
+                let mut args = [0u64; 8];
+                for a in args.iter_mut() {
+                    *a = read_u64(bytes, &mut pos)?;
+                }
+                let disposition_byte = read_u8(bytes, &mut pos)?;
+                let disposition = TracedSyscallDisposition::try_from(disposition_byte)?;
+                TraceRecord::SyscallEntered {
+                    unit,
+                    num,
+                    args,
+                    disposition,
+                }
             }
             other => return Err(DecodeError::UnknownTag(other)),
         };
