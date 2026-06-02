@@ -1,6 +1,6 @@
 //! `sys_rsx_context_iomap` (672) dispatch.
 
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::process_address_space::{PS3_RSX_BASE, PS3_RSX_IOMAP_SIZE};
 use cellgov_ps3_abi::sys_rsx::iomap;
 
@@ -41,18 +41,18 @@ impl Lv2Host {
         _flags: u64,
     ) -> Lv2Dispatch {
         if context_id != iomap::CONTEXT_ID {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         if size == 0
             || (io & iomap::ALIGN_MASK) != 0
             || (ea & iomap::ALIGN_MASK) != 0
             || (size & iomap::ALIGN_MASK) != 0
         {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         // u64 catches u32 wrap; PS3_RSX_BASE is RPCS3's local_mem_base.
         if u64::from(ea) + u64::from(size) > PS3_RSX_BASE {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         // u64 catches u32 wrap (e.g. io=0xFFF0_0000+size=0x10_0000
         // wraps to 0).
@@ -65,12 +65,12 @@ impl Lv2Host {
                      region {BAKED_IOMAP_SIZE:#x}; returning CELL_EINVAL"
                 ),
             );
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         self.rsx_context.iomap_io = io;
         self.rsx_context.iomap_ea = ea;
         self.rsx_context.iomap_size = size;
-        Lv2Dispatch::immediate(errno::CELL_OK.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
     }
 }
 
@@ -114,7 +114,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, effects } = d else {
             panic!("expected Immediate, got {d:?}");
         };
-        assert_eq!(code, u64::from(errno::CELL_OK));
+        assert_eq!(code, u64::from(cell_errors::CELL_OK));
         assert!(effects.is_empty(), "iomap is purely state-recording");
         let ctx = host.sys_rsx_context();
         assert_eq!(ctx.iomap_io, 0);
@@ -133,7 +133,7 @@ mod tests {
             0x0020_0000,
             0x0010_0000,
         );
-        assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_OK.into()));
+        assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_OK.into()));
         assert_eq!(host.sys_rsx_context().iomap_io, 0x0010_0000);
     }
 
@@ -142,7 +142,7 @@ mod tests {
         let mut host = Lv2Host::new();
         allocate_context(&mut host);
         let d = iomap(&mut host, 0xDEAD_BEEF, 0, 0x0010_0000, 0x0010_0000);
-        assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+        assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
     }
 
     #[test]
@@ -151,7 +151,7 @@ mod tests {
         // context-allocate state; CONTEXT_ID is the only handshake.
         let mut host = Lv2Host::new();
         let d = iomap(&mut host, iomap::CONTEXT_ID, 0, 0x0010_0000, 0x0010_0000);
-        assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_OK.into()));
+        assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_OK.into()));
     }
 
     #[test]
@@ -159,7 +159,7 @@ mod tests {
         let mut host = Lv2Host::new();
         allocate_context(&mut host);
         let d = iomap(&mut host, iomap::CONTEXT_ID, 0, 0x0010_0000, 0);
-        assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+        assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
     }
 
     #[test]
@@ -174,7 +174,7 @@ mod tests {
             let d = iomap(&mut host, iomap::CONTEXT_ID, io, ea, size);
             assert_eq!(
                 d,
-                Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+                Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
                 "misaligned {label} must reject",
             );
         }
@@ -188,7 +188,7 @@ mod tests {
         allocate_context(&mut host);
         let before = host.invariant_break_count();
         let d = iomap(&mut host, iomap::CONTEXT_ID, 0xFFF0_0000, 0, 0x0010_0000);
-        assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+        assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
         assert_eq!(host.invariant_break_count() - before, 1);
     }
 
@@ -204,7 +204,7 @@ mod tests {
             0,
             0x0010_0000,
         );
-        assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_OK.into()));
+        assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_OK.into()));
     }
 
     #[test]
@@ -214,7 +214,7 @@ mod tests {
         let breaks_before = host.invariant_break_count();
         let too_big = u32::try_from(PS3_RSX_IOMAP_SIZE).unwrap() + 0x0010_0000;
         let d = iomap(&mut host, iomap::CONTEXT_ID, 0, 0x0010_0000, too_big);
-        assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+        assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
         assert_eq!(host.invariant_break_count() - breaks_before, 1);
     }
 
@@ -227,7 +227,7 @@ mod tests {
         let before = host.invariant_break_count();
         let local_mem_base = u32::try_from(PS3_RSX_BASE).unwrap();
         let d = iomap(&mut host, iomap::CONTEXT_ID, 0, local_mem_base, 0x0010_0000);
-        assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+        assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
         assert_eq!(host.invariant_break_count(), before);
     }
 

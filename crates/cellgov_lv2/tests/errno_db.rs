@@ -6,7 +6,7 @@
 )]
 
 use cellgov_ps3_abi::cell_errors::{
-    self as errno, Lv2ErrCode, CELL_EFAULT, CELL_EINVAL, CELL_EPERM, ENTRIES,
+    self, Lv2ErrCode, CELL_EFAULT, CELL_EINVAL, CELL_EPERM, ENTRIES,
 };
 
 #[test]
@@ -47,10 +47,10 @@ fn every_symbol_matches_its_constant_name() {
 
 #[test]
 fn lookup_hits_known_code_and_misses_unknown() {
-    assert_eq!(errno::lookup(0x8001_0009), Some(&CELL_EPERM));
-    assert!(errno::lookup(0xDEAD_BEEF).is_none());
+    assert_eq!(cell_errors::lookup(0x8001_0009), Some(&CELL_EPERM));
+    assert!(cell_errors::lookup(0xDEAD_BEEF).is_none());
     // CELL_OK belongs to CellNotAnError, not CellError.
-    assert!(errno::lookup(0).is_none());
+    assert!(cell_errors::lookup(0).is_none());
 }
 
 #[test]

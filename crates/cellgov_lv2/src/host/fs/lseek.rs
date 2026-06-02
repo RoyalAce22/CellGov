@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::fs_store::{FsError, SeekWhence};
@@ -44,7 +44,7 @@ impl Lv2Host {
         // pos is a u64 (PS3 sys_fs_lseek signature: `u64 *pos`);
         // enforce 8-byte alignment and writability before any fd touch.
         if !out_ptr_writable(rt, pos_out_ptr, 8, 8) {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
 
         // Decode whence; out-of-range is CELL_EINVAL with no
@@ -54,17 +54,17 @@ impl Lv2Host {
         let whence = match SeekWhence::from_guest(whence) {
             Some(w) => w,
             None => {
-                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
             }
         };
 
         let new_pos = match self.fs_store_mut().seek(fd, offset, whence) {
             Ok(p) => p,
             Err(FsError::UnknownFd) => {
-                return Lv2Dispatch::immediate(errno::CELL_EBADF.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EBADF.into());
             }
             Err(FsError::SeekOutOfRange) => {
-                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
             }
             Err(other) => {
                 // seek's contract: only UnknownFd / SeekOutOfRange
@@ -79,7 +79,7 @@ impl Lv2Host {
                          offset={offset} whence={whence:?}; contract violated"
                     ),
                 );
-                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
             }
         };
 

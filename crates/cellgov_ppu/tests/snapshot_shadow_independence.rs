@@ -19,7 +19,7 @@
 use cellgov_ppu::decode::decode;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::shadow::PredecodedShadow;
-use cellgov_ps3_abi::ppc_isa::{PPC_ADDI_R3_R3_1 as ADDI_R3_R3_1, PPC_BLR as BLR};
+use cellgov_ps3_abi::ppc_isa::{PPC_ADDI_R3_R3_1, PPC_BLR};
 
 const SHADOW_BASE: u64 = 0x1000;
 
@@ -27,9 +27,9 @@ const SHADOW_BASE: u64 = 0x1000;
 /// so the block-length aliasing assertion has signal.
 fn shadow_bytes() -> [u8; 12] {
     let mut bytes = [0u8; 12];
-    bytes[0..4].copy_from_slice(&ADDI_R3_R3_1.to_be_bytes());
-    bytes[4..8].copy_from_slice(&ADDI_R3_R3_1.to_be_bytes());
-    bytes[8..12].copy_from_slice(&BLR.to_be_bytes());
+    bytes[0..4].copy_from_slice(&PPC_ADDI_R3_R3_1.to_be_bytes());
+    bytes[4..8].copy_from_slice(&PPC_ADDI_R3_R3_1.to_be_bytes());
+    bytes[8..12].copy_from_slice(&PPC_BLR.to_be_bytes());
     bytes
 }
 
@@ -53,32 +53,32 @@ fn build_shadow_pair() -> (PredecodedShadow, PredecodedShadow) {
     (original, clone)
 }
 
-/// Without this guard, a typo in `ADDI_R3_R3_1` or `BLR` could
+/// Without this guard, a typo in `PPC_ADDI_R3_R3_1` or `PPC_BLR` could
 /// silently decode to a different valid PPC64 instruction and the
 /// aliasing tests would vouch for the wrong invariant.
 #[test]
 fn encoding_decodes_to_expected() {
-    match decode(ADDI_R3_R3_1) {
+    match decode(PPC_ADDI_R3_R3_1) {
         Ok(PpuInstruction::Addi { rt, ra, imm }) => {
             assert_eq!(
                 (rt, ra, imm),
                 (3, 3, 1),
-                "ADDI_R3_R3_1 field encoding drifted"
+                "PPC_ADDI_R3_R3_1 field encoding drifted"
             );
         }
-        Ok(other) => panic!("ADDI_R3_R3_1 decoded to {other:?}, expected Addi"),
-        Err(e) => panic!("ADDI_R3_R3_1 failed to decode: {e:?}"),
+        Ok(other) => panic!("PPC_ADDI_R3_R3_1 decoded to {other:?}, expected Addi"),
+        Err(e) => panic!("PPC_ADDI_R3_R3_1 failed to decode: {e:?}"),
     }
-    match decode(BLR) {
+    match decode(PPC_BLR) {
         Ok(PpuInstruction::Bclr { bo, bi, link }) => {
             assert_eq!(
                 (bo, bi, link),
                 (20, 0, false),
-                "BLR field encoding drifted -- expected unconditional bo=20, bi=0, link=false",
+                "PPC_BLR field encoding drifted -- expected unconditional bo=20, bi=0, link=false",
             );
         }
-        Ok(other) => panic!("BLR decoded to {other:?}, expected Bclr"),
-        Err(e) => panic!("BLR failed to decode: {e:?}"),
+        Ok(other) => panic!("PPC_BLR decoded to {other:?}, expected Bclr"),
+        Err(e) => panic!("PPC_BLR failed to decode: {e:?}"),
     }
 }
 

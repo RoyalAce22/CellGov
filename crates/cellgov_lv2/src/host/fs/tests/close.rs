@@ -1,5 +1,5 @@
 use cellgov_effects::Effect;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -31,7 +31,7 @@ fn close_truly_unknown_fd_returns_ebadf() {
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
         run(&mut host, &rt, fs_close(0xDEAD_BEEF)),
-        errno::CELL_EBADF.code,
+        cell_errors::CELL_EBADF.code,
         0,
     );
 }
@@ -44,7 +44,11 @@ fn double_close_returns_ebadf_on_second_call() {
         .unwrap();
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(run(&mut host, &rt, fs_close(fd)), 0, 0);
-    assert_immediate(run(&mut host, &rt, fs_close(fd)), errno::CELL_EBADF.code, 0);
+    assert_immediate(
+        run(&mut host, &rt, fs_close(fd)),
+        cell_errors::CELL_EBADF.code,
+        0,
+    );
 }
 
 #[test]
@@ -112,7 +116,7 @@ fn fd_exhaustion_returns_emfile() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/hot\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        errno::CELL_EMFILE.code,
+        cell_errors::CELL_EMFILE.code,
         0,
     );
 }

@@ -167,16 +167,16 @@ impl Runtime {
     /// Runs after the batch applies and before the FIFO advance pass, so
     /// the drain sees the new put / ref in the same batch.
     fn mirror_rsx_control_register_writes(&mut self, effects: &[Effect]) {
-        use crate::rsx::{RSX_CONTROL_GET_ADDR, RSX_CONTROL_PUT_ADDR, RSX_CONTROL_REF_ADDR};
+        use crate::rsx::control_register;
         enum Slot {
             Put,
             Get,
             Ref,
         }
         const SLOTS: [(u32, Slot); 3] = [
-            (RSX_CONTROL_PUT_ADDR, Slot::Put),
-            (RSX_CONTROL_GET_ADDR, Slot::Get),
-            (RSX_CONTROL_REF_ADDR, Slot::Ref),
+            (control_register::PUT_ADDR, Slot::Put),
+            (control_register::GET_ADDR, Slot::Get),
+            (control_register::REF_ADDR, Slot::Ref),
         ];
         for effect in effects {
             let Effect::SharedWriteIntent { range, .. } = effect else {

@@ -72,17 +72,15 @@ impl Runtime {
 
         // Timer syscalls advance the simulated clock without yielding;
         // other PPU threads observe the new time on their next read.
-        use cellgov_ps3_abi::syscall::{
-            TIMER_SLEEP as SYS_TIMER_SLEEP, TIMER_USLEEP as SYS_TIMER_USLEEP,
-        };
+        use cellgov_ps3_abi::syscall::{TIMER_SLEEP, TIMER_USLEEP};
         match args[0] {
-            SYS_TIMER_USLEEP => {
+            TIMER_USLEEP => {
                 let usec = args[1];
                 self.advance_guest_time_by_us(usec);
                 self.registry.set_syscall_return(source, 0);
                 return;
             }
-            SYS_TIMER_SLEEP => {
+            TIMER_SLEEP => {
                 let seconds = args[1];
                 let usec = seconds.saturating_mul(1_000_000);
                 self.advance_guest_time_by_us(usec);

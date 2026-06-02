@@ -203,9 +203,9 @@ mod tests {
     fn nop_elf() -> (Vec<u8>, Vec<PtLoad>) {
         let mut bytes = Vec::new();
         for _ in 0..4 {
-            bytes.extend_from_slice(&NOP);
+            bytes.extend_from_slice(&PPC_NOP_BYTES);
         }
-        bytes.extend_from_slice(&BLR);
+        bytes.extend_from_slice(&PPC_BLR_BYTES);
         let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
         let segs = parse_pt_loads(&data).unwrap();
         (data, segs)
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn disassemble_distinguishes_bss_from_outside_segment() {
-        let mut spec = SegSpec::pt_load(0x200, 0x10000, NOP.to_vec());
+        let mut spec = SegSpec::pt_load(0x200, 0x10000, PPC_NOP_BYTES.to_vec());
         spec.p_memsz = 12;
         let data = build_elf64_be(&[spec]);
         let segs = parse_pt_loads(&data).unwrap();
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn disassemble_marks_bss_when_iterating_into_zero_fill() {
-        let mut spec = SegSpec::pt_load(0x200, 0x10000, NOP.to_vec());
+        let mut spec = SegSpec::pt_load(0x200, 0x10000, PPC_NOP_BYTES.to_vec());
         spec.p_memsz = 12;
         let data = build_elf64_be(&[spec]);
         let segs = parse_pt_loads(&data).unwrap();
@@ -326,7 +326,7 @@ mod tests {
             bytes.extend_from_slice(&UNSUPPORTED_WORD);
         }
         for _ in 0..4 {
-            bytes.extend_from_slice(&NOP);
+            bytes.extend_from_slice(&PPC_NOP_BYTES);
         }
         for _ in 0..4 {
             bytes.extend_from_slice(&UNSUPPORTED_WORD);
@@ -398,8 +398,8 @@ mod tests {
     #[test]
     fn disassemble_decodes_last_word_in_segment() {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&NOP);
-        bytes.extend_from_slice(&BLR);
+        bytes.extend_from_slice(&PPC_NOP_BYTES);
+        bytes.extend_from_slice(&PPC_BLR_BYTES);
         let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
         let segs = parse_pt_loads(&data).unwrap();
         let mut out = Vec::new();
@@ -419,7 +419,7 @@ mod tests {
     fn select_segment_rejects_vaddr_at_exclusive_upper_bound() {
         let mut bytes = Vec::new();
         for _ in 0..4 {
-            bytes.extend_from_slice(&NOP);
+            bytes.extend_from_slice(&PPC_NOP_BYTES);
         }
         let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
         let segs = parse_pt_loads(&data).unwrap();
@@ -458,7 +458,7 @@ mod tests {
         // burn through the remaining count.
         let mut bytes = Vec::new();
         for _ in 0..16 {
-            bytes.extend_from_slice(&NOP);
+            bytes.extend_from_slice(&PPC_NOP_BYTES);
         }
         let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
         let segs = parse_pt_loads(&data).unwrap();
@@ -487,7 +487,7 @@ mod tests {
         // parse_pt_loads would reject this geometry (vaddr+filesz
         // overflows), but disassemble is given a PtLoad directly here
         // to exercise the defensive marker path.
-        let bytes = NOP.to_vec();
+        let bytes = PPC_NOP_BYTES.to_vec();
         let seg = PtLoad {
             vaddr: u64::MAX - 3,
             offset: 0,
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn select_segment_at_exclusive_filesz_upper_bound_with_bigger_memsz_is_bss() {
-        let mut spec = SegSpec::pt_load(0x200, 0x10000, NOP.to_vec());
+        let mut spec = SegSpec::pt_load(0x200, 0x10000, PPC_NOP_BYTES.to_vec());
         spec.p_memsz = 16;
         let data = build_elf64_be(&[spec]);
         let segs = parse_pt_loads(&data).unwrap();

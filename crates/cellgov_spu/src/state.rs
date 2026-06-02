@@ -2,14 +2,14 @@
 
 use cellgov_sync::ReservedLine;
 
-pub use cellgov_ps3_abi::hardware::{SPU_LS_SIZE as LS_SIZE, SPU_REG_COUNT as REG_COUNT};
+pub use cellgov_ps3_abi::hardware::{SPU_LS_SIZE, SPU_REG_COUNT};
 
 /// Full SPU architectural state.
 #[derive(Clone)]
 pub struct SpuState {
     /// 128 x 128-bit GPRs; each register is 16 bytes, byte 0 is MSB.
     // [SPU-ISA p:28 s:2.2] All GPRs are 128 bits wide; leftmost word (bytes 0-3) is preferred slot.
-    pub regs: [[u8; 16]; REG_COUNT],
+    pub regs: [[u8; 16]; SPU_REG_COUNT],
     /// 256 KB local store.
     pub ls: Vec<u8>,
     /// Program counter.
@@ -28,8 +28,8 @@ impl SpuState {
     /// Create a new SPU state with zeroed registers, zeroed LS, PC at 0.
     pub fn new() -> Self {
         Self {
-            regs: [[0u8; 16]; REG_COUNT],
-            ls: vec![0u8; LS_SIZE],
+            regs: [[0u8; 16]; SPU_REG_COUNT],
+            ls: vec![0u8; SPU_LS_SIZE],
             pc: 0,
             channels: ChannelState::new(),
             reservation: None,
@@ -145,7 +145,7 @@ mod tests {
     fn new_state_is_zeroed() {
         let s = SpuState::new();
         assert_eq!(s.pc, 0);
-        assert_eq!(s.ls.len(), LS_SIZE);
+        assert_eq!(s.ls.len(), SPU_LS_SIZE);
         assert!(s.ls.iter().all(|&b| b == 0));
         assert!(s.regs.iter().all(|r| r.iter().all(|&b| b == 0)));
         assert!(s.reservation.is_none());
@@ -195,7 +195,7 @@ mod tests {
     fn fetch_out_of_range() {
         let s = SpuState::new();
         let mut s2 = s;
-        s2.pc = LS_SIZE as u32;
+        s2.pc = SPU_LS_SIZE as u32;
         assert_eq!(s2.fetch(), None);
     }
 }

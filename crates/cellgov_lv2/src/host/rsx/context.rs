@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_rsx::{
     control_register, driver_info, driver_info_init, event_queue, region, reports,
 };
@@ -40,7 +40,7 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         if self.rsx_context.allocated {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let base = if self.rsx_context.pending_mem_addr != 0 {
             self.rsx_context.pending_mem_addr
@@ -49,10 +49,10 @@ impl Lv2Host {
                 .rsx_mem_alloc_ptr
                 .checked_add(region::CONTEXT_RESERVATION)
             else {
-                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
             };
             if end > Self::SYS_RSX_MEM_END {
-                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+                return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
             }
             let start = self.rsx_mem_alloc_ptr;
             self.rsx_mem_alloc_ptr = end;
@@ -286,7 +286,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, effects } if code == u64::from(errno::CELL_EINVAL) && effects.is_empty()
+            Lv2Dispatch::Immediate { code, effects } if code == u64::from(cell_errors::CELL_EINVAL) && effects.is_empty()
         ));
     }
 

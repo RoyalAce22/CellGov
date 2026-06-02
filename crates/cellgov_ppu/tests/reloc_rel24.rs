@@ -13,7 +13,7 @@ use cellgov_ppu::sprx::{
     load_prx, ParsedPrx, PrxLoadError, PrxRelocation, PrxSegment, RelocMisalignedKind,
     R_PPC64_REL24,
 };
-use cellgov_ps3_abi::ppc_isa::PPC_BL_OPCODE_LK as BL_OPCODE_LK;
+use cellgov_ps3_abi::ppc_isa::PPC_BL_OPCODE_LK;
 
 const TEXT_VADDR: u64 = 0x0000;
 const DATA_VADDR: u64 = 0x1_0000;
@@ -77,11 +77,11 @@ fn read_u32(mem: &GuestMemory, addr: u64) -> u32 {
 fn rel24_positive_offset_within_text() {
     let mut mem = fresh_memory();
     // Patch site at text+0x100, target at text+0x200, so delta = +0x100.
-    let parsed = parsed_with_rel24(0x100, 0x200, 0, 0, BL_OPCODE_LK);
+    let parsed = parsed_with_rel24(0x100, 0x200, 0, 0, PPC_BL_OPCODE_LK);
     let _ = load_prx(&parsed, &mut mem, BASE).expect("load");
     let patched = read_u32(&mem, BASE + TEXT_VADDR + 0x100);
     // Opcode + LK preserved; LI field carries the delta.
-    assert_eq!(patched & !0x03FF_FFFC, BL_OPCODE_LK & !0x03FF_FFFC);
+    assert_eq!(patched & !0x03FF_FFFC, PPC_BL_OPCODE_LK & !0x03FF_FFFC);
     assert_eq!(patched & 0x03FF_FFFC, 0x100);
 }
 
@@ -89,7 +89,7 @@ fn rel24_positive_offset_within_text() {
 fn rel24_negative_offset_backward_branch() {
     let mut mem = fresh_memory();
     // Patch site at text+0x300, target at text+0x100 -> delta = -0x200.
-    let parsed = parsed_with_rel24(0x300, 0x100, 0, 0, BL_OPCODE_LK);
+    let parsed = parsed_with_rel24(0x300, 0x100, 0, 0, PPC_BL_OPCODE_LK);
     let _ = load_prx(&parsed, &mut mem, BASE).expect("load");
     let patched = read_u32(&mem, BASE + TEXT_VADDR + 0x300);
     // Sign-extended negative delta sits in the LI field with 1-bits in
@@ -97,14 +97,14 @@ fn rel24_negative_offset_backward_branch() {
     let delta: i32 = -0x200;
     assert_eq!(patched & 0x03FF_FFFC, (delta as u32) & 0x03FF_FFFC);
     // Opcode + LK still intact.
-    assert_eq!(patched & 0xFC00_0003, BL_OPCODE_LK & 0xFC00_0003);
+    assert_eq!(patched & 0xFC00_0003, PPC_BL_OPCODE_LK & 0xFC00_0003);
 }
 
 #[test]
 fn rel24_at_max_positive_range_succeeds() {
     let mut mem = fresh_memory();
     // delta = +0x01FF_FFFC (largest representable; +0x0200_0000 overflows).
-    let parsed = parsed_with_rel24(0, 0x01FF_FFFC, 0, 0, BL_OPCODE_LK);
+    let parsed = parsed_with_rel24(0, 0x01FF_FFFC, 0, 0, PPC_BL_OPCODE_LK);
     let _ = load_prx(&parsed, &mut mem, BASE).expect("load");
     let patched = read_u32(&mem, BASE + TEXT_VADDR);
     assert_eq!(patched & 0x03FF_FFFC, 0x01FF_FFFC);
@@ -116,7 +116,7 @@ fn rel24_overflow_returns_error_with_exact_delta() {
     // delta = +0x0200_0000 trips the signed-26-bit clamp; the
     // exact-delta assert guards against an inverted-sign or
     // value-instead-of-displacement report.
-    let parsed = parsed_with_rel24(0, 0x0200_0000, 0, 0, BL_OPCODE_LK);
+    let parsed = parsed_with_rel24(0, 0x0200_0000, 0, 0, PPC_BL_OPCODE_LK);
     let err = load_prx(&parsed, &mut mem, BASE).unwrap_err();
     assert_eq!(
         err,
@@ -133,7 +133,7 @@ fn rel24_at_max_negative_range_succeeds() {
     // displacement). Place the patch at offset 0x100 with addend
     // chosen so value - target = -0x0200_0000.
     let mut mem = fresh_memory();
-    let parsed = parsed_with_rel24(0x100, -0x01FF_FF00, 0, 0, BL_OPCODE_LK);
+    let parsed = parsed_with_rel24(0x100, -0x01FF_FF00, 0, 0, PPC_BL_OPCODE_LK);
     let _ = load_prx(&parsed, &mut mem, BASE).expect("load");
     let patched = read_u32(&mem, BASE + TEXT_VADDR + 0x100);
     // LI = -2^23 = 0x0080_0000; encoded as 0x0200_0000 in the
@@ -146,7 +146,7 @@ fn rel24_just_below_min_overflows_with_exact_delta() {
     // delta = -0x0200_0004 -- one step past the inclusive lower
     // bound of the signed-26-bit range, so RelocOverflow fires.
     let mut mem = fresh_memory();
-    let parsed = parsed_with_rel24(0x100, -0x01FF_FF04, 0, 0, BL_OPCODE_LK);
+    let parsed = parsed_with_rel24(0x100, -0x01FF_FF04, 0, 0, PPC_BL_OPCODE_LK);
     let err = load_prx(&parsed, &mut mem, BASE).unwrap_err();
     assert_eq!(
         err,
@@ -164,7 +164,7 @@ fn rel24_misaligned_delta_rejected() {
     // field can't represent a misaligned target; the applier
     // rejects rather than silently truncating.
     let mut mem = fresh_memory();
-    let parsed = parsed_with_rel24(0x100, 0x101, 0, 0, BL_OPCODE_LK);
+    let parsed = parsed_with_rel24(0x100, 0x101, 0, 0, PPC_BL_OPCODE_LK);
     let err = load_prx(&parsed, &mut mem, BASE).unwrap_err();
     assert_eq!(
         err,
@@ -184,7 +184,7 @@ fn rel24_cross_segment_target_text_value_data_resolves_delta() {
     // at 0x1_0000, an offset 0x100 patch site branching to data
     // vaddr 0 with addend 0 yields delta = 0x1_0000 - 0x100 = 0xFF00.
     let mut mem = fresh_memory();
-    let parsed = parsed_with_rel24(0x100, 0, 0, 1, BL_OPCODE_LK);
+    let parsed = parsed_with_rel24(0x100, 0, 0, 1, PPC_BL_OPCODE_LK);
     let _ = load_prx(&parsed, &mut mem, BASE).expect("load");
     let patched = read_u32(&mem, BASE + TEXT_VADDR + 0x100);
     assert_eq!(patched & 0x03FF_FFFC, 0xFF00);

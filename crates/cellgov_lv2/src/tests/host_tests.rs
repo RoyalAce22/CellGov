@@ -607,7 +607,7 @@ fn lost_wake_event_flag_set_before_wait_is_immediately_matched() {
 mod ss_access_control_engine {
     use super::*;
     use cellgov_effects::Effect;
-    use cellgov_ps3_abi::cell_errors as errno;
+    use cellgov_ps3_abi::cell_errors;
 
     fn dispatch_ss(
         host: &mut Lv2Host,
@@ -636,7 +636,7 @@ mod ss_access_control_engine {
         );
         match r {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, u64::from(errno::CELL_ENOSYS));
+                assert_eq!(code, u64::from(cell_errors::CELL_ENOSYS));
                 assert!(effects.is_empty(), "pkg_id=1 must not stage any write");
             }
             other => panic!("expected Immediate, got {other:?}"),
@@ -696,7 +696,7 @@ mod ss_access_control_engine {
         );
         match r {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, u64::from(errno::CELL_EFAULT));
+                assert_eq!(code, u64::from(cell_errors::CELL_EFAULT));
                 assert!(effects.is_empty());
             }
             other => panic!("expected Immediate, got {other:?}"),
@@ -721,7 +721,7 @@ mod ss_access_control_engine {
         );
         match r {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, u64::from(errno::CELL_ENOSYS));
+                assert_eq!(code, u64::from(cell_errors::CELL_ENOSYS));
                 assert!(effects.is_empty());
             }
             other => panic!("expected Immediate, got {other:?}"),

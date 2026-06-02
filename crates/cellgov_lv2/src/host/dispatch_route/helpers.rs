@@ -13,7 +13,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 
@@ -79,7 +79,7 @@ impl Lv2Host {
         source: UnitId,
     ) -> Lv2Dispatch {
         if ptr == 0 {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(ptr, 4),
@@ -100,7 +100,7 @@ impl Lv2Host {
     /// the unit sees the documented errno instead of a commit fault.
     pub(super) fn efault_if_null(&self, ptrs: &[u32]) -> Option<Lv2Dispatch> {
         if ptrs.contains(&0) {
-            Some(Lv2Dispatch::immediate(errno::CELL_EFAULT.into()))
+            Some(Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()))
         } else {
             None
         }

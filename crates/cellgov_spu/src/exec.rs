@@ -10,7 +10,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_ps3_abi::spu_channels as channels;
+use cellgov_ps3_abi::spu_channels;
 use cellgov_time::GuestTicks;
 
 /// Outcome of executing a single SPU instruction.
@@ -409,41 +409,41 @@ fn execute_wrch(channel: u8, rt: u8, state: &mut SpuState, unit_id: UnitId) -> S
     let val = state.reg_word(rt);
     match channel {
         // [CBE-Handbook p:453 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] MFC_LSA stores the local-store address for the MFC command being formed.
-        channels::MFC_LSA => {
+        spu_channels::MFC_LSA => {
             state.channels.mfc_lsa = val;
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:454 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] MFC_EAH holds the high 32 bits of the 64-bit effective address.
-        channels::MFC_EAH => {
+        spu_channels::MFC_EAH => {
             state.channels.mfc_eah = val;
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:455 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] MFC_EAL holds the low 32 bits of the effective address; alignment depends on transfer size.
-        channels::MFC_EAL => {
+        spu_channels::MFC_EAL => {
             state.channels.mfc_eal = val;
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:455 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] MFC_Size sets the transfer size in bytes (max 16 KB).
-        channels::MFC_SIZE => {
+        spu_channels::MFC_SIZE => {
             state.channels.mfc_size = val;
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] MFC_TagID assigns a 0..31 tag value to the command being formed.
-        channels::MFC_TAG_ID => {
+        spu_channels::MFC_TAG_ID => {
             state.channels.mfc_tag_id = val;
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:457 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] Writing the Class ID and MFC Command Opcode enqueues the command into the SPU MFC command queue.
-        channels::MFC_CMD => execute_mfc_cmd(val, state, unit_id),
+        spu_channels::MFC_CMD => execute_mfc_cmd(val, state, unit_id),
         // [CBE-Handbook p:458 s:17. SPE Channel and Related MMIO Interface sub:17.10 MFC Tag-Group Management Channels] MFC_WrTagMask selects the tag groups included in subsequent tag-status queries.
-        channels::MFC_WR_TAG_MASK => {
+        spu_channels::MFC_WR_TAG_MASK => {
             state.channels.tag_mask = val;
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:459 s:17. SPE Channel and Related MMIO Interface sub:17.10 MFC Tag-Group Management Channels] MFC_WrTagUpdate triggers when MFC_RdTagStat refreshes; immediate completion in this model.
-        channels::MFC_WR_TAG_UPDATE => SpuStepOutcome::Continue,
+        spu_channels::MFC_WR_TAG_UPDATE => SpuStepOutcome::Continue,
         // [CBE-Handbook p:463 s:17. SPE Channel and Related MMIO Interface sub:17.12 SPU Mailbox Channels] SPU Write Outbound Mailbox sends a 32-bit message to the PPE; values are discarded here.
-        channels::SPU_WR_OUT_MBOX => SpuStepOutcome::Continue,
+        spu_channels::SPU_WR_OUT_MBOX => SpuStepOutcome::Continue,
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
             channel,
             is_write: true,
@@ -454,7 +454,7 @@ fn execute_wrch(channel: u8, rt: u8, state: &mut SpuState, unit_id: UnitId) -> S
 fn execute_rdch(rt: u8, channel: u8, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match channel {
         // [CBE-Handbook p:460 s:17. SPE Channel and Related MMIO Interface sub:17.10 MFC Tag-Group Management Channels] Read Tag-Group Status Channel: returns tag-status word; blocks until masked tags complete.
-        channels::MFC_RD_TAG_STAT => {
+        spu_channels::MFC_RD_TAG_STAT => {
             let masked = state.channels.tag_status & state.channels.tag_mask;
             if masked == state.channels.tag_mask {
                 state.set_reg_word_splat(rt, state.channels.tag_status);
@@ -467,7 +467,7 @@ fn execute_rdch(rt: u8, channel: u8, state: &mut SpuState, unit_id: UnitId) -> S
             }
         }
         // [CBE-Handbook p:543 s:19. DMA Transfers and Interprocessor Communication sub:19.6 Mailboxes] SPU Read Inbound Mailbox is read-blocking when the mailbox is empty.
-        channels::SPU_RD_IN_MBOX => {
+        spu_channels::SPU_RD_IN_MBOX => {
             state.channels.pending_mbox_rt = Some(rt);
             SpuStepOutcome::Yield {
                 effects: vec![Effect::MailboxReceiveAttempt {
@@ -478,7 +478,7 @@ fn execute_rdch(rt: u8, channel: u8, state: &mut SpuState, unit_id: UnitId) -> S
             }
         }
         // [CBE-Handbook p:462 s:17. SPE Channel and Related MMIO Interface sub:17.11 MFC Read Atomic Command Status Channel] Reports success/failure status for the most recent atomic command (e.g. putllc).
-        channels::MFC_RD_ATOMIC_STAT => {
+        spu_channels::MFC_RD_ATOMIC_STAT => {
             state.set_reg_word_splat(rt, state.channels.atomic_status);
             SpuStepOutcome::Continue
         }
@@ -496,7 +496,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
 
     match cmd {
         // [CBEA p:61 s:7. MFC Commands sub:7.6 Put Commands (Local Storage to Main Storage)] put: copy LS bytes to main storage.
-        channels::MFC_PUT => {
+        spu_channels::MFC_PUT => {
             let lsa_usize = lsa as usize;
             let size_usize = size as usize;
             let ls_bytes = state.ls[lsa_usize..lsa_usize + size_usize].to_vec();
@@ -524,7 +524,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             }
         }
         // [CBEA p:60 s:7. MFC Commands sub:7.5 Get Commands (Main Storage to Local Storage)] get: copy main-storage bytes into LS.
-        channels::MFC_GET => {
+        spu_channels::MFC_GET => {
             state.channels.tag_status |= 1 << state.channels.mfc_tag_id;
             state.channels.pending_get = Some((ea, lsa, size));
             SpuStepOutcome::Yield {
@@ -533,7 +533,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             }
         }
         // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] getllar: load 128B cache line and acquire reservation on it.
-        channels::MFC_GETLLAR => {
+        spu_channels::MFC_GETLLAR => {
             state.channels.atomic_status = 0;
             let line = cellgov_sync::ReservedLine::containing(ea);
             state.reservation = Some(line);
@@ -545,7 +545,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             }
         }
         // [CBEA p:66 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] putllc: conditional store that succeeds only if the local reservation is still held for this line.
-        channels::MFC_PUTLLC => {
+        spu_channels::MFC_PUTLLC => {
             // Succeeds when the local reservation holds and its line
             // matches the PUTLLC target. Cross-unit invalidation is
             // mirrored at step entry; self-invalidation happens in

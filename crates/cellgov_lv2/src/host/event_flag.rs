@@ -8,7 +8,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -51,7 +51,7 @@ impl Lv2Host {
         // NULL-pointer checks come first: real LV2 returns EFAULT
         // before inspecting any attribute fields.
         if id_ptr == 0 || attr_ptr == 0 {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
         // sys_event_flag_attribute_t layout:
         //   +0  u32 protocol
@@ -62,7 +62,7 @@ impl Lv2Host {
         // Both protocol and type must be valid sync constants;
         // memset-zero attrs are rejected with EINVAL on real LV2.
         let Some(attr_bytes) = rt.read_committed(attr_ptr as u64, 24) else {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         };
         let protocol =
             u32::from_be_bytes([attr_bytes[0], attr_bytes[1], attr_bytes[2], attr_bytes[3]]);
@@ -76,24 +76,24 @@ impl Lv2Host {
             SYS_SYNC_FIFO, SYS_SYNC_PRIORITY, SYS_SYNC_WAITER_MULTIPLE, SYS_SYNC_WAITER_SINGLE,
         };
         if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         if kind != SYS_SYNC_WAITER_SINGLE && kind != SYS_SYNC_WAITER_MULTIPLE {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let id = self.alloc_id();
         if self.event_flags.create_with_id(id, init).is_err() {
-            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
         self.immediate_write_u32(id, id_ptr, requester)
     }
 
     pub(super) fn dispatch_event_flag_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.event_flags.lookup(id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if !entry.waiters().is_empty() {
-            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
         self.event_flags.destroy(id);
         Lv2Dispatch::immediate(0)
@@ -109,13 +109,13 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         };
         match self.event_flags.try_wait(id, bits, mode) {
-            None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
                 let write = Effect::SharedWriteIntent {
                     range: ByteRange::contiguous_u32(result_ptr, 8),
@@ -134,7 +134,7 @@ impl Lv2Host {
                 // bits: trip ETIMEDOUT immediately. With peers
                 // alive, block and let the upcoming set wake us.
                 if timeout != 0 && !self.ppu_threads.has_other_alive_thread(caller) {
-                    return Lv2Dispatch::immediate(errno::CELL_ETIMEDOUT.into());
+                    return Lv2Dispatch::immediate(cell_errors::CELL_ETIMEDOUT.into());
                 }
                 match self
                     .event_flags
@@ -142,10 +142,10 @@ impl Lv2Host {
                 {
                     Ok(()) => {}
                     Err(crate::sync_primitives::EventFlagEnqueueError::UnknownId) => {
-                        return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+                        return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
                     }
                     Err(crate::sync_primitives::EventFlagEnqueueError::DuplicateWaiter) => {
-                        return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+                        return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
                     }
                 }
                 // set-side replaces this with an EventFlagWake
@@ -173,10 +173,10 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         };
         match self.event_flags.try_wait(id, bits, mode) {
-            None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
                 let write = Effect::SharedWriteIntent {
                     range: ByteRange::contiguous_u32(result_ptr, 8),
@@ -191,14 +191,14 @@ impl Lv2Host {
                 }
             }
             Some(crate::sync_primitives::EventFlagWait::NoMatch) => {
-                Lv2Dispatch::immediate(errno::CELL_EBUSY.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
             }
         }
     }
 
     pub(super) fn dispatch_event_flag_set(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
         let Some(woken) = self.event_flags.set_and_wake(id, bits) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if woken.is_empty() {
             return Lv2Dispatch::immediate(0);
@@ -227,7 +227,7 @@ impl Lv2Host {
 
     pub(super) fn dispatch_event_flag_clear(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
         if !self.event_flags.clear_bits(id, bits) {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         }
         Lv2Dispatch::immediate(0)
     }
@@ -241,7 +241,7 @@ impl Lv2Host {
         // Real LV2 wakes every parked waiter with `CELL_ECANCELED`
         // and writes the count to `num_ptr`.
         let Some(waiters) = self.event_flags.cancel_waiters(id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let count = waiters.len() as u32;
         let mut unit_ids: Vec<UnitId> = Vec::new();
@@ -252,7 +252,7 @@ impl Lv2Host {
                 updates.push((
                     unit,
                     PendingResponse::ReturnCode {
-                        code: errno::CELL_ECANCELED.into(),
+                        code: cell_errors::CELL_ECANCELED.into(),
                     },
                 ));
             }
@@ -289,10 +289,10 @@ impl Lv2Host {
         // id + NULL `flags_ptr` -> EFAULT; otherwise writes the
         // current pattern and returns OK.
         let Some(entry) = self.event_flags.lookup(id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if flags_ptr == 0 {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
         let bits = entry.bits();
         let write = Effect::SharedWriteIntent {
@@ -335,7 +335,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_EFAULT.into());
+        assert_eq!(code, cell_errors::CELL_EFAULT.into());
         assert!(host.event_flags().is_empty());
     }
 
@@ -355,7 +355,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_EFAULT.into());
+        assert_eq!(code, cell_errors::CELL_EFAULT.into());
     }
 
     #[test]
@@ -378,7 +378,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_EINVAL.into());
+        assert_eq!(code, cell_errors::CELL_EINVAL.into());
     }
 
     #[test]
@@ -692,6 +692,6 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = w else {
             panic!("expected Immediate, got {w:?}");
         };
-        assert_eq!(code, errno::CELL_EBUSY.into());
+        assert_eq!(code, cell_errors::CELL_EBUSY.into());
     }
 }

@@ -4,7 +4,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_memory::page_size;
 
 use crate::dispatch::Lv2Dispatch;
@@ -56,7 +56,7 @@ impl Lv2Host {
                  returning CELL_ENOSYS"
             ),
         );
-        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
     }
 
     /// `sys_memory_container_create` (324). Oracle: RPCS3's
@@ -114,7 +114,7 @@ impl Lv2Host {
                     effects: vec![write],
                 }
             }
-            None => Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
+            None => Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()),
         }
     }
 
@@ -135,7 +135,7 @@ impl Lv2Host {
             return d;
         }
         let Ok(size_u32) = u32::try_from(size) else {
-            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
         let align = page_size::granule_from_flags(flags);
         let mem_id = self.alloc_id();
@@ -195,10 +195,10 @@ impl Lv2Host {
         // pre-mapped main memory: already-backed `addr` short-circuits
         // to CELL_OK regardless of `mem_id`.
         if rt.writable(addr, 1) {
-            return Lv2Dispatch::immediate(errno::CELL_OK.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_OK.into());
         }
         if !(0x2000_0000..0xC000_0000).contains(&addr) {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let Some(handle) = self.mmapper_handles.get(mem_id) else {
             self.log_invariant_break(
@@ -208,24 +208,24 @@ impl Lv2Host {
                      332 / 362 must precede 334"
                 ),
             );
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if !addr.is_multiple_of(u64::from(handle.align)) {
-            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
         }
         // Reject overflow-into-MMIO here so the runtime's install_region
         // check never sees an out-of-range request.
         let Some(end) = addr.checked_add(u64::from(handle.size)) else {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         };
         if end > 0xC000_0000 {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         self.pending_region_installs.push(PendingRegionInstall {
             addr,
             size: handle.size as usize,
         });
-        Lv2Dispatch::immediate(errno::CELL_OK.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
     }
 
     /// `sys_mmapper_search_and_map` (337). Oracle: RPCS3's
@@ -245,7 +245,7 @@ impl Lv2Host {
             return d;
         }
         if !(0x2000_0000..0xC000_0000).contains(&start_addr) {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(alloc_addr_ptr, 4),
@@ -276,7 +276,7 @@ impl Lv2Host {
             return d;
         }
         let Ok(size_u32) = u32::try_from(size) else {
-            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
         let align = page_size::granule_from_flags(flags);
         let mem_id = self.alloc_id();
@@ -303,13 +303,13 @@ impl Lv2Host {
     /// `sys_tty_read` (402): CELL_OK spins CRT input loops forever;
     /// real LV2 returns EIO outside debug console mode.
     pub(super) fn dispatch_tty_read(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(errno::CELL_EIO.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_EIO.into())
     }
 
     /// DEX-only slot (462). `uns_func` in RPCS3's `lv2.cpp` dispatch
     /// table; retail liblv2 expects ENOSYS to take its fallback path.
     pub(super) fn dispatch_uns_func_462(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
     }
 
     /// `_sys_prx_start_module` (481). Oracle: RPCS3's `sys_prx.cpp`
@@ -327,7 +327,7 @@ impl Lv2Host {
         let id = args[0] as u32;
         let p_opt = args[2] as u32;
         if id == 0 || p_opt == 0 {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let entry_addr = p_opt.wrapping_add(16);
         let no_start = u64::MAX.to_be_bytes();
@@ -378,7 +378,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(0);
         }
         if p_info == 0 {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
         let mut effects = Vec::new();
         let max_addr = p_info.wrapping_add(0x0C);

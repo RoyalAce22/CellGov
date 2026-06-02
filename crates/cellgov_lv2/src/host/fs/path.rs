@@ -1,6 +1,6 @@
 //! Guest-path scanning and disambiguation.
 
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_fs::CELL_FS_MAX_PATH_LENGTH;
 
 use crate::host::Lv2Runtime;
@@ -32,7 +32,7 @@ pub(super) fn read_path_bytes(
     //   (c) The first byte is mapped, NUL not seen before the mapping
     //       runs out -> EFAULT (real PS3 page-faults during the scan).
     if rt.read_committed(path_ptr as u64, 1).is_none() {
-        return Err(errno::CELL_EFAULT);
+        return Err(cell_errors::CELL_EFAULT);
     }
     if rt
         .read_committed(path_ptr as u64, CELL_FS_MAX_PATH_LENGTH)
@@ -40,9 +40,9 @@ pub(super) fn read_path_bytes(
     {
         // Whole window mapped; the scan failed because no NUL
         // appeared within CELL_FS_MAX_PATH_LENGTH bytes.
-        return Err(errno::CELL_EINVAL);
+        return Err(cell_errors::CELL_EINVAL);
     }
     // First byte mapped but full window is not -- the scan crossed
     // an unmapped region.
-    Err(errno::CELL_EFAULT)
+    Err(cell_errors::CELL_EFAULT)
 }

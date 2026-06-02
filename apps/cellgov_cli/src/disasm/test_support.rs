@@ -87,4 +87,4 @@ pub(super) fn build_elf64_be(segs: &[SegSpec]) -> Vec<u8> {
 
 /// Re-exports of the PPC ISA byte-encoded instructions shared across
 /// disasm tests.
-pub(super) use cellgov_ps3_abi::ppc_isa::{PPC_BLR_BYTES as BLR, PPC_NOP_BYTES as NOP};
+pub(super) use cellgov_ps3_abi::ppc_isa::{PPC_BLR_BYTES, PPC_NOP_BYTES};

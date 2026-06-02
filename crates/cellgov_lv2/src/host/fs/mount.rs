@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::fs_store::{DirEntry, FsError};
 use crate::host::Lv2Host;
@@ -66,13 +66,13 @@ impl Lv2Host {
         // through [`Self::try_mount_resolve_dir`] instead.
         match std::fs::metadata(&host_path) {
             Ok(md) if md.is_file() => {}
-            Ok(_) => return MountResolution::Failed(errno::CELL_ENOENT),
-            Err(_) => return MountResolution::Failed(errno::CELL_ENOENT),
+            Ok(_) => return MountResolution::Failed(cell_errors::CELL_ENOENT),
+            Err(_) => return MountResolution::Failed(cell_errors::CELL_ENOENT),
         }
 
         let bytes = match std::fs::read(&host_path) {
             Ok(b) => b,
-            Err(_) => return MountResolution::Failed(errno::CELL_EIO),
+            Err(_) => return MountResolution::Failed(cell_errors::CELL_EIO),
         };
 
         match self.fs_store_mut().register_blob(path.to_string(), bytes) {
@@ -91,7 +91,7 @@ impl Lv2Host {
                          after UnknownPath; contract violated"
                     ),
                 );
-                MountResolution::Failed(errno::CELL_EFAULT)
+                MountResolution::Failed(cell_errors::CELL_EFAULT)
             }
             Err(other) => {
                 self.record_invariant_break(
@@ -100,7 +100,7 @@ impl Lv2Host {
                         "register_blob returned {other:?} for {path:?}; contract violated"
                     ),
                 );
-                MountResolution::Failed(errno::CELL_EFAULT)
+                MountResolution::Failed(cell_errors::CELL_EFAULT)
             }
         }
     }
@@ -128,25 +128,25 @@ impl Lv2Host {
 
         match std::fs::metadata(&host_path) {
             Ok(md) if md.is_dir() => {}
-            Ok(_) => return DirMountResolution::Failed(errno::CELL_ENOTDIR),
-            Err(_) => return DirMountResolution::Failed(errno::CELL_ENOENT),
+            Ok(_) => return DirMountResolution::Failed(cell_errors::CELL_ENOTDIR),
+            Err(_) => return DirMountResolution::Failed(cell_errors::CELL_ENOENT),
         }
 
         let read_dir = match std::fs::read_dir(&host_path) {
             Ok(rd) => rd,
-            Err(_) => return DirMountResolution::Failed(errno::CELL_EIO),
+            Err(_) => return DirMountResolution::Failed(cell_errors::CELL_EIO),
         };
 
         let mut entries: Vec<DirEntry> = Vec::new();
         for entry in read_dir {
             let entry = match entry {
                 Ok(e) => e,
-                Err(_) => return DirMountResolution::Failed(errno::CELL_EIO),
+                Err(_) => return DirMountResolution::Failed(cell_errors::CELL_EIO),
             };
             // file_type() does not follow symlinks; metadata() would.
             let file_type = match entry.file_type() {
                 Ok(ft) => ft,
-                Err(_) => return DirMountResolution::Failed(errno::CELL_EIO),
+                Err(_) => return DirMountResolution::Failed(cell_errors::CELL_EIO),
             };
             // Anti-scope: symlinks and special files are not
             // enumerated. The oracle surfaces only regular files
@@ -191,7 +191,7 @@ fn resolve_path(host: &mut Lv2Host, path: &str) -> Result<PathBuf, MountResolveE
     match host.fs_mounts().resolve(path) {
         Ok(Some(p)) => Ok(p),
         Ok(None) => Err(MountResolveErr::Unmounted),
-        Err(FsError::PathTraversal) => Err(MountResolveErr::Failed(errno::CELL_EACCES)),
+        Err(FsError::PathTraversal) => Err(MountResolveErr::Failed(cell_errors::CELL_EACCES)),
         Err(other) => {
             host.record_invariant_break(
                 "dispatch.fs.mount_resolve_unexpected",
@@ -199,7 +199,7 @@ fn resolve_path(host: &mut Lv2Host, path: &str) -> Result<PathBuf, MountResolveE
                     "FsMountTable::resolve returned {other:?} for {path:?}; contract violated"
                 ),
             );
-            Err(MountResolveErr::Failed(errno::CELL_EFAULT))
+            Err(MountResolveErr::Failed(cell_errors::CELL_EFAULT))
         }
     }
 }

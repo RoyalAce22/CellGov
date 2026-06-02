@@ -29,7 +29,7 @@ use cellgov_core::Runtime;
 use cellgov_exec::FaultRegisterDump;
 use cellgov_ppu::decode;
 use cellgov_ppu::instruction::PpuInstruction;
-use cellgov_ps3_abi::ppc_isa::PPC_BO_BIT2 as BO_BIT2;
+use cellgov_ps3_abi::ppc_isa::PPC_BO_BIT2;
 use cellgov_ps3_abi::process_address_space::PS3_USER_TEXT_FLOOR;
 
 const MAX_BACK_CHAIN_FRAMES: usize = 32;
@@ -265,7 +265,9 @@ fn classify_call_at(rt: &Runtime, addr: u64) -> Option<CallKind> {
         PpuInstruction::B { link: true, .. } => Some(CallKind::Bl),
         PpuInstruction::Bc { link: true, .. } => Some(CallKind::Bcl),
         // [PPC-Book1 p:25 s:Branch Conditional to Count Register] BO2=0 is invalid for bcctr.
-        PpuInstruction::Bcctr { bo, link: true, .. } if bo & BO_BIT2 != 0 => Some(CallKind::Bcctrl),
+        PpuInstruction::Bcctr { bo, link: true, .. } if bo & PPC_BO_BIT2 != 0 => {
+            Some(CallKind::Bcctrl)
+        }
         PpuInstruction::Bclr { link: true, .. } => Some(CallKind::Bclrl),
         _ => None,
     }
@@ -275,7 +277,7 @@ fn classify_call_at(rt: &Runtime, addr: u64) -> Option<CallKind> {
 mod tests {
     use super::*;
     use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
-    use cellgov_ps3_abi::ppc_isa::{PPC_BCCTR_XO as BCCTR_XO, PPC_BCLR_XO as BCLR_XO};
+    use cellgov_ps3_abi::ppc_isa::{PPC_BCCTR_XO, PPC_BCLR_XO};
     use cellgov_time::Budget;
 
     fn rt_with_layout() -> Runtime {
@@ -309,13 +311,13 @@ mod tests {
     fn encode_bcctrl(bo: u8, bi: u8) -> u32 {
         debug_assert!(bo < 32);
         debug_assert!(bi < 32);
-        (19u32 << 26) | ((bo as u32) << 21) | ((bi as u32) << 16) | (BCCTR_XO << 1) | 1
+        (19u32 << 26) | ((bo as u32) << 21) | ((bi as u32) << 16) | (PPC_BCCTR_XO << 1) | 1
     }
 
     /// Encode `blrl` per [PPC-Book1 p:25 s:Branch Conditional to Link
     /// Register]: opcode 19, BO=20 (branch always), BI=0, XO=16, LK=1.
     fn encode_blrl() -> u32 {
-        (19u32 << 26) | (20u32 << 21) | (BCLR_XO << 1) | 1
+        (19u32 << 26) | (20u32 << 21) | (PPC_BCLR_XO << 1) | 1
     }
 
     fn encode_b_nolink(offset: i32) -> u32 {

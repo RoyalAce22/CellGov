@@ -1,4 +1,4 @@
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -101,7 +101,7 @@ fn read_unknown_fd_returns_ebadf_with_no_effects() {
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
         run(&mut host, &rt, fs_read(0xCAFE_BABE, 0x30000, 8, 0x30100)),
-        errno::CELL_EBADF.code,
+        cell_errors::CELL_EBADF.code,
         0,
     );
 }
@@ -119,7 +119,7 @@ fn read_bad_buffer_pointer_returns_efault_and_does_not_advance_offset() {
     let _ = rt_with_path;
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30100, 3, 0x40000)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
     // Invariant: an EFAULT read must not advance the offset.
@@ -141,7 +141,7 @@ fn read_misaligned_nread_pointer_returns_efault() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30000, 1, 0x30001)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -155,7 +155,7 @@ fn read_unmapped_nread_pointer_returns_efault() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30000, 1, 0xFFFF_FF00)),
-        errno::CELL_EFAULT.code,
+        cell_errors::CELL_EFAULT.code,
         0,
     );
 }
@@ -169,7 +169,7 @@ fn read_unknown_fd_takes_precedence_over_bad_buffer() {
     let rt = PathRuntime::empty(0x100000).reserve(0x30000, 0x31000);
     assert_immediate(
         run(&mut host, &rt, fs_read(0xDEAD_BEEF, 0x30100, 4, 0x40000)),
-        errno::CELL_EBADF.code,
+        cell_errors::CELL_EBADF.code,
         0,
     );
 }
@@ -185,7 +185,7 @@ fn read_after_close_returns_ebadf() {
     assert_immediate(run(&mut host, &rt, fs_close(fd)), 0, 0);
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30000, 3, 0x30100)),
-        errno::CELL_EBADF.code,
+        cell_errors::CELL_EBADF.code,
         0,
     );
 }

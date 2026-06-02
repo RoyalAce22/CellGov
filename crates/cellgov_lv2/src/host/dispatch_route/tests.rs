@@ -1,7 +1,7 @@
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::test_support::FakeRuntime;
@@ -273,7 +273,10 @@ fn unsupported_dispatch_returns_cell_enosys() {
         args: [0; 8],
     };
     let result = host.dispatch(req, UnitId::new(0), &rt);
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
+    );
 }
 
 #[test]
@@ -444,7 +447,10 @@ fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ESRCH.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+    );
     assert_eq!(host.invariant_break_count() - breaks_before, 1);
 }
 
@@ -490,7 +496,10 @@ fn syscall_332_then_334_records_pending_region_install() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result_334, Lv2Dispatch::immediate(errno::CELL_OK.into()));
+    assert_eq!(
+        result_334,
+        Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
+    );
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
     assert_eq!(installs, vec![(0x5000_0000_u64, 0x0400_0000_usize)]);
 }
@@ -537,7 +546,7 @@ fn syscall_334_misaligned_returns_ealign() {
     );
     assert_eq!(
         result_334,
-        Lv2Dispatch::immediate(errno::CELL_EALIGN.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
     );
 }
 
@@ -554,7 +563,10 @@ fn syscall_334_addr_out_of_range_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
 }
 
 #[test]
@@ -600,7 +612,10 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result_334, Lv2Dispatch::immediate(errno::CELL_OK.into()));
+    assert_eq!(
+        result_334,
+        Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
+    );
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
     assert_eq!(installs, vec![(0x5400_0000_u64, 0x00a0_0000_usize)]);
 }
@@ -645,7 +660,10 @@ fn syscall_337_rejects_out_of_range_start_addr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(below, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+    assert_eq!(
+        below,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
     let above = host.dispatch(
         Lv2Request::Unsupported {
             number: 337,
@@ -654,7 +672,10 @@ fn syscall_337_rejects_out_of_range_start_addr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(above, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+    assert_eq!(
+        above,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
 }
 
 #[test]
@@ -732,7 +753,7 @@ fn syscall_330_returns_enomem_when_cursor_would_cross_mmio_region() {
     let exhausted = host.dispatch(req(), UnitId::new(0), &rt);
     assert_eq!(
         exhausted,
-        Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()),
         "the 8th 256 MiB allocation must cap-fail and surface CELL_ENOMEM"
     );
 }
@@ -792,7 +813,10 @@ fn syscall_136_event_port_connect_local_returns_enosys() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
+    );
 }
 
 #[test]
@@ -1069,7 +1093,10 @@ fn syscall_462_returns_enosys() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
+    );
 }
 
 #[test]
@@ -1084,7 +1111,7 @@ fn tty_read_returns_eio() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EIO.into()));
+    assert_eq!(result, Lv2Dispatch::immediate(cell_errors::CELL_EIO.into()));
 }
 
 #[test]
@@ -1146,7 +1173,10 @@ fn syscall_481_rejects_zero_id_with_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
 }
 
 #[test]
@@ -1161,7 +1191,10 @@ fn syscall_481_rejects_zero_p_opt_with_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
 }
 
 #[test]
@@ -1176,7 +1209,10 @@ fn syscall_494_rejects_null_p_info_with_efault() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
 }
 
 #[test]
@@ -1278,7 +1314,10 @@ fn ss_access_control_engine_pkg_id_1_returns_enosys() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
+    );
 }
 
 #[test]
@@ -1324,7 +1363,10 @@ fn ss_access_control_engine_pkg_id_2_efault_on_zero_a2() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
 }
 
 #[test]
@@ -1340,7 +1382,10 @@ fn ss_access_control_engine_pkg_id_2_efault_when_a2_overflows_u32() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
 }
 
 #[test]
@@ -1398,7 +1443,10 @@ fn memory_get_user_memory_size_efault_on_null_ptr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
 }
 
 #[test]
@@ -1413,14 +1461,20 @@ fn time_get_timezone_efault_on_null_ptr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
 }
 
 #[test]
 fn immediate_write_u32_efault_on_null_ptr() {
     let host = Lv2Host::new();
     let result = host.immediate_write_u32(0xCAFE, 0, UnitId::new(0));
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
 }
 
 #[test]
@@ -1505,7 +1559,10 @@ fn malformed_request_records_invariant_break_and_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
     assert!(host.invariant_break_count() > before);
 }
 
@@ -1523,7 +1580,10 @@ fn hypercall_records_invariant_break_and_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
     assert!(host.invariant_break_count() > before);
 }
 
@@ -1540,7 +1600,10 @@ fn spu_thread_group_terminate_logs_invariant_break_and_returns_enosys() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
+    );
     assert!(host.invariant_break_count() > before);
 }
 
@@ -1582,7 +1645,7 @@ fn process_is_spu_lock_line_reservation_address_zero_flags_is_einval() {
     let result = dispatch_lock_line(0xE000_0000, 0);
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, errno::CELL_EINVAL.into());
+            assert_eq!(code, cell_errors::CELL_EINVAL.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -1594,7 +1657,7 @@ fn process_is_spu_lock_line_reservation_address_unknown_flag_bit_is_einval() {
     let result = dispatch_lock_line(0xE000_0000, 0x4);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, errno::CELL_EINVAL.into());
+            assert_eq!(code, cell_errors::CELL_EINVAL.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -1617,7 +1680,7 @@ fn process_is_spu_lock_line_reservation_address_private_spu_rejects_raw_flag() {
     let result = dispatch_lock_line(0xF000_0000, 0x1);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, errno::CELL_EPERM.into());
+            assert_eq!(code, cell_errors::CELL_EPERM.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -1637,7 +1700,7 @@ fn process_is_spu_lock_line_reservation_address_ppu_stack_is_eperm() {
     let result = dispatch_lock_line(0xD000_0000, 0x2);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, errno::CELL_EPERM.into());
+            assert_eq!(code, cell_errors::CELL_EPERM.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -1648,7 +1711,7 @@ fn process_is_spu_lock_line_reservation_address_unknown_region_is_einval() {
     let result = dispatch_lock_line(0x3000_0000, 0x2);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, errno::CELL_EINVAL.into());
+            assert_eq!(code, cell_errors::CELL_EINVAL.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -1684,7 +1747,7 @@ fn spu_initialize_rejects_max_raw_above_five() {
     let result = dispatch_spu_init(6, 6);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, errno::CELL_EINVAL.into());
+            assert_eq!(code, cell_errors::CELL_EINVAL.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -1709,7 +1772,7 @@ fn spu_thread_group_destroy_unknown_id_is_esrch() {
         &rt,
     );
     match result {
-        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, errno::CELL_ESRCH.into()),
+        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, cell_errors::CELL_ESRCH.into()),
         other => panic!("expected Immediate, got {other:?}"),
     }
 }
@@ -1757,7 +1820,7 @@ fn spu_thread_group_destroy_created_group_returns_ok() {
         &rt,
     );
     match second {
-        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, errno::CELL_ESRCH.into()),
+        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, cell_errors::CELL_ESRCH.into()),
         other => panic!("expected Immediate, got {other:?}"),
     }
 }

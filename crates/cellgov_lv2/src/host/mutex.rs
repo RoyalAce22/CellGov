@@ -6,7 +6,7 @@
 //! would race with a concurrent unlock.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -40,17 +40,17 @@ impl Lv2Host {
         if self.mutexes.create_with_id(id, attrs).is_err() {
             // IdCollision is a host-invariant break; surface
             // ENOMEM so the guest cannot use the bad id.
-            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
         self.immediate_write_u32(id, id_ptr, requester)
     }
 
     pub(super) fn dispatch_mutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.mutexes.lookup(id) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if entry.owner().is_some() || !entry.waiters().is_empty() {
-            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
         self.mutexes.destroy(id);
         Lv2Dispatch::immediate(0)
@@ -58,15 +58,15 @@ impl Lv2Host {
 
     pub(super) fn dispatch_mutex_lock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         match self.mutexes.acquire_or_enqueue(id, caller) {
             crate::sync_primitives::MutexAcquireOrEnqueue::Unknown => {
-                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }
             crate::sync_primitives::MutexAcquireOrEnqueue::Acquired => Lv2Dispatch::immediate(0),
             crate::sync_primitives::MutexAcquireOrEnqueue::WouldDeadlock => {
-                Lv2Dispatch::immediate(errno::CELL_EDEADLK.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into())
             }
             crate::sync_primitives::MutexAcquireOrEnqueue::Enqueued => Lv2Dispatch::Block {
                 reason: crate::dispatch::Lv2BlockReason::Mutex { id },
@@ -78,27 +78,27 @@ impl Lv2Host {
 
     pub(super) fn dispatch_mutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         match self.mutexes.try_acquire(id, caller) {
-            None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::MutexAcquire::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::MutexAcquire::Contended) => {
-                Lv2Dispatch::immediate(errno::CELL_EBUSY.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
             }
         }
     }
 
     pub(super) fn dispatch_mutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         match self.mutexes.release_and_wake_next(id, caller) {
             crate::sync_primitives::MutexRelease::Unknown => {
-                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }
             crate::sync_primitives::MutexRelease::NotOwner => {
-                Lv2Dispatch::immediate(errno::CELL_EPERM.into())
+                Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into())
             }
             crate::sync_primitives::MutexRelease::Freed => Lv2Dispatch::immediate(0),
             crate::sync_primitives::MutexRelease::Transferred { new_owner } => {
@@ -183,7 +183,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_ESRCH.into());
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
     }
 
     #[test]
@@ -458,7 +458,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_EBUSY.into());
+        assert_eq!(code, cell_errors::CELL_EBUSY.into());
         assert_eq!(
             host.mutexes().lookup(id).unwrap().owner(),
             Some(PpuThreadId::PRIMARY),
@@ -476,7 +476,7 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_ESRCH.into());
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
     }
 
     #[test]
@@ -526,6 +526,6 @@ mod tests {
         let Lv2Dispatch::Immediate { code, .. } = r else {
             panic!("expected Immediate, got {r:?}");
         };
-        assert_eq!(code, errno::CELL_EPERM.into());
+        assert_eq!(code, cell_errors::CELL_EPERM.into());
     }
 }

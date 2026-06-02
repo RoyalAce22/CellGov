@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -25,13 +25,13 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         if size == 0 {
-            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
         let Some(end) = self.rsx_mem_alloc_ptr.checked_add(size) else {
-            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
         if end > Self::SYS_RSX_MEM_END {
-            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
 
         let handle = self.rsx_mem_handle_counter;
@@ -142,7 +142,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_ENOMEM)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_ENOMEM)
         ));
     }
 
@@ -165,7 +165,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_ENOMEM)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_ENOMEM)
         ));
     }
 

@@ -1,7 +1,7 @@
 //! `sys_rsx_context_attribute` (674) dispatch and package-id sub-handlers.
 
 use cellgov_effects::Effect;
-use cellgov_ps3_abi::cell_errors as errno;
+use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_rsx::{display_buffer, package};
 
 use crate::dispatch::Lv2Dispatch;
@@ -29,7 +29,7 @@ impl Lv2Host {
         _a6: u64,
     ) -> Lv2Dispatch {
         if !self.rsx_context.allocated || context_id != self.rsx_context.context_id {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         match package_id {
             package::FIFO_SETUP => self.sys_rsx_attribute_fifo_setup(_a3, _a4),
@@ -68,7 +68,7 @@ impl Lv2Host {
     fn sys_rsx_attribute_set_display_buffer(&mut self, a3: u64, a4: u64, a5: u64) -> Lv2Dispatch {
         let id = (a3 & 0xFF) as usize;
         if id >= display_buffer::COUNT_MAX {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let width = (a4 >> 32) as u32;
         let height = a4 as u32;
@@ -113,7 +113,7 @@ impl Lv2Host {
                  returning CELL_EINVAL (matches RPCS3 default-arm errno)"
             ),
         );
-        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     }
 }
 
@@ -366,7 +366,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_EINVAL)
         ));
     }
 
@@ -389,7 +389,7 @@ mod tests {
             source,
             &rt,
         );
-        let expected = u64::from(errno::CELL_EINVAL);
+        let expected = u64::from(cell_errors::CELL_EINVAL);
         assert!(matches!(
             d,
             Lv2Dispatch::Immediate { code, effects } if code == expected && effects.is_empty()
@@ -414,7 +414,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_EINVAL)
         ));
     }
 
@@ -464,7 +464,7 @@ mod tests {
         );
         assert!(matches!(
             d,
-            Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
+            Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_EINVAL)
         ));
     }
 }
