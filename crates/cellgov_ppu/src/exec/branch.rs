@@ -460,6 +460,71 @@ mod tests {
     }
 
     #[test]
+    fn bc_lk_zero_leaves_lr_untouched() {
+        // LK=0 must not write LR even when the branch is taken.
+        let mut s = PpuState::new();
+        s.pc = 0x1000;
+        s.lr = 0xDEAD;
+        s.set_cr_field(0, 0b0010); // EQ -> branch taken
+        let result = exec_no_mem(
+            &PpuInstruction::Bc {
+                bo: 0x0C,
+                bi: 2,
+                offset: 8,
+                aa: false,
+                link: false,
+            },
+            &mut s,
+        );
+        assert!(matches!(result, ExecuteVerdict::Branch));
+        assert_eq!(s.lr, 0xDEAD, "LR untouched when LK=0");
+    }
+
+    #[test]
+    fn bc_ctr_decrement_happens_when_bo2_clear() {
+        // BO=0x08 has BO_2 (0x04) clear -> CTR decrements regardless of
+        // taken/not-taken. BO_0=0 enables CR test, BO_1=1 requires
+        // CR_BI=1 to branch; with the CR bit clear the branch is not
+        // taken, but CTR must still decrement.
+        let mut s = PpuState::new();
+        s.pc = 0x1000;
+        s.ctr = 7;
+        s.set_cr_field(0, 0b0100); // GT only; EQ bit (bi=2) is 0
+        let result = exec_no_mem(
+            &PpuInstruction::Bc {
+                bo: 0x08, // BO_2=0 decrement; require CR_BI=1, which it isn't
+                bi: 2,
+                offset: 8,
+                aa: false,
+                link: false,
+            },
+            &mut s,
+        );
+        assert!(matches!(result, ExecuteVerdict::Continue));
+        assert_eq!(s.ctr, 6, "CTR decremented before condition check");
+    }
+
+    #[test]
+    fn bc_ctr_no_decrement_when_bo2_set() {
+        // BO=0x14: BO_2 (0x04) set -> CTR untouched.
+        let mut s = PpuState::new();
+        s.pc = 0x1000;
+        s.ctr = 5;
+        let result = exec_no_mem(
+            &PpuInstruction::Bc {
+                bo: 0x14,
+                bi: 0,
+                offset: 8,
+                aa: false,
+                link: false,
+            },
+            &mut s,
+        );
+        assert!(matches!(result, ExecuteVerdict::Branch));
+        assert_eq!(s.ctr, 5, "CTR unchanged when BO_2=1");
+    }
+
+    #[test]
     fn bclr_reads_cr_bit_in_cr1_field() {
         // BI >= 4 selects fields beyond CR0; cr_bit indexing must
         // honor the full BI range.

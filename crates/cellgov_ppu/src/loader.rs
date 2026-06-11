@@ -4,6 +4,8 @@
 use crate::state::PpuState;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 
+pub(crate) use cellgov_mem::be::{read_u16, read_u32, read_u64};
+
 /// `(addr, size)` pair describing where a segment would have been
 /// placed. Shared by [`LoadError::SegmentOutOfRange`] (ELF PT_LOAD)
 /// and [`crate::sprx::PrxLoadError::SegmentOutOfRange`] (PRX
@@ -269,37 +271,17 @@ pub fn load_ppu_elf(
     })
 }
 
-pub(crate) fn read_u64(data: &[u8], offset: usize) -> u64 {
-    u64::from_be_bytes([
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-        data[offset + 4],
-        data[offset + 5],
-        data[offset + 6],
-        data[offset + 7],
-    ])
-}
-
-pub(crate) fn read_u32(data: &[u8], offset: usize) -> u32 {
-    u32::from_be_bytes([
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-    ])
-}
-
-pub(crate) fn read_u16(data: &[u8], offset: usize) -> u16 {
-    u16::from_be_bytes([data[offset], data[offset + 1]])
-}
-
 /// A PT_LOAD segment's address range and permission bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoadSegment {
     /// Index of the program header within the ELF.
     pub index: usize,
+    /// `p_offset`: file-relative byte position where the segment's
+    /// initialized bytes begin. The loader has already bounds-checked
+    /// the program-header slot the value was read from; callers that
+    /// want a `[file_offset, file_offset + filesz)` range still need
+    /// to validate the sum against the file length.
+    pub file_offset: u64,
     /// Guest virtual address of the segment start.
     pub vaddr: u64,
     /// Bytes read from the ELF file (<= memsz).
@@ -345,6 +327,7 @@ pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
         }
         out.push(LoadSegment {
             index: i,
+            file_offset: read_u64(data, base + 8),
             vaddr: read_u64(data, base + 16),
             filesz: read_u64(data, base + 32),
             memsz,

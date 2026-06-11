@@ -29,6 +29,41 @@ pub struct PpuState {
     /// Fixed-point exception register.
     // [PPC-Book1 p:42 s:3.2.2] XER is a 64-bit register.
     pub xer: u64,
+    /// AltiVec VR-usage mask (SPR 256). Excluded from
+    /// [`Self::state_hash`]; divergences surface via the GPR holding
+    /// the `mfvrsave` result. Exclusion is sound only while VRSAVE is
+    /// write-only-then-read-back -- enforced by the `Mfvrsave` arm's
+    /// `debug_assert!` with [`Self::mfvrsave_executed`] as liveness
+    /// witness.
+    // [AltiVec-PEM p:48 s:2.3.2] VRSAVE is SPR 256, 32 bits.
+    pub vrsave: u32,
+    /// Instrument flag (hash-excluded): set by `mtvrsave`. Guards the
+    /// read-before-write tripwire in `Mfvrsave`.
+    pub vrsave_written: bool,
+    /// Instrument counter (hash-excluded): `mfvrsave` execution
+    /// witness; non-zero proves the tripwire's silence is non-vacuous.
+    pub mfvrsave_executed: u64,
+    /// Instrument counter (hash-excluded): `ldarx` execution witness
+    /// for its EA-alignment `debug_assert!`.
+    pub ldarx_executed: u64,
+    /// Instrument counter (hash-excluded): `stdcx` execution witness.
+    pub stdcx_executed: u64,
+    /// Instrument counter (hash-excluded): `lwarx` execution witness.
+    pub lwarx_executed: u64,
+    /// Instrument counter (hash-excluded): `stwcx` execution witness.
+    pub stwcx_executed: u64,
+    /// Instrument counter (hash-excluded): every entry to the
+    /// `ExecuteVerdict::MemFault` arm. Paired with
+    /// [`Self::mem_fault_unmapped_routed`] to witness the catch-all
+    /// `debug_assert!` in `lib.rs` (`arm_entries == unmapped_routed`
+    /// proves the catch-all stayed silent).
+    pub mem_fault_arm_entries: u64,
+    /// Instrument counter (hash-excluded): `MemError::Unmapped`
+    /// discriminator, the path the catch-all `debug_assert!` protects.
+    pub mem_fault_unmapped_routed: u64,
+    /// Instrument counter (hash-excluded): `dcbz` execution witness
+    /// for the RSX-MMIO-window `debug_assert!`.
+    pub dcbz_executed: u64,
     /// Time base register.
     // [PPC-Book2 p:37 s:4] Time Base (TB) is a 64-bit register, increments periodically.
     pub tb: u64,
@@ -50,6 +85,16 @@ impl PpuState {
             lr: 0,
             ctr: 0,
             xer: 0,
+            vrsave: 0,
+            vrsave_written: false,
+            mfvrsave_executed: 0,
+            ldarx_executed: 0,
+            stdcx_executed: 0,
+            lwarx_executed: 0,
+            stwcx_executed: 0,
+            mem_fault_arm_entries: 0,
+            mem_fault_unmapped_routed: 0,
+            dcbz_executed: 0,
             tb: 0,
             reservation: None,
         }
@@ -92,8 +137,7 @@ impl PpuState {
         (self.xer >> 29) & 1 != 0
     }
 
-    /// XER sticky-overflow bit (PPC bit 32 = Rust bit 31). Dot-form
-    /// CR0 updates copy this into the LSB of the CR field.
+    /// XER sticky-overflow bit (PPC bit 32 = Rust bit 31).
     // [PPC-Book1 p:42 s:3.2.2] XER bit 32 is Summary Overflow (SO), sticky.
     pub fn xer_so(&self) -> bool {
         (self.xer >> 31) & 1 != 0
@@ -109,7 +153,6 @@ impl PpuState {
     }
 
     /// Write OV (Rust bit 30) and OR into sticky SO (Rust bit 31).
-    /// SO is never cleared here; only `mtxer` clears it.
     // [PPC-Book1 p:42 s:3.2.2] XER bit 33 is Overflow (OV); SO is sticky and OR'd from OV.
     pub fn set_xer_ov(&mut self, overflow: bool) {
         if overflow {
@@ -119,8 +162,13 @@ impl PpuState {
         }
     }
 
-    /// Set CR0 LT/GT/EQ from `result as i64`, then OR in XER's SO bit.
-    /// 64-bit mode only; 32-bit mode would compare sign-extended low 32 bits.
+    /// XER transfer byte count (PPC bits 57..63), used by `lswx` / `stswx`.
+    // [PPC-Book1 p:42 s:3.2.2] XER bits 57..63 hold the byte count for load-/store-string indexed.
+    pub fn xer_tbc(&self) -> u8 {
+        (self.xer & 0x7F) as u8
+    }
+
+    /// Set CR0 LT/GT/EQ from `result as i64` plus XER's SO; 64-bit mode.
     // [PPC-Book1 p:28 s:2.3.1] CR0 = c || XER[SO] for fixed-point Rc=1 instructions.
     pub fn set_cr0_from_result(&mut self, result: u64) {
         let signed = result as i64;
@@ -137,25 +185,21 @@ impl PpuState {
         self.set_cr_field(0, nib);
     }
 
-    /// D-form effective address `(ra|0) + sign_extend(imm)`; `ra == 0`
-    /// selects a literal zero base, not `GPR[0]`.
+    /// D-form effective address `(ra|0) + sign_extend(imm)`.
     pub fn ea_d_form(&self, ra: u8, imm: i16) -> u64 {
         let base = if ra == 0 { 0 } else { self.gpr[ra as usize] };
         base.wrapping_add(imm as i64 as u64)
     }
 
-    /// X-form effective address `(ra|0) + rb`; `ra == 0` selects a
-    /// literal zero base, not `GPR[0]`.
+    /// X-form effective address `(ra|0) + rb`.
     pub fn ea_x_form(&self, ra: u8, rb: u8) -> u64 {
         let base = if ra == 0 { 0 } else { self.gpr[ra as usize] };
         base.wrapping_add(self.gpr[rb as usize])
     }
 
-    /// FNV-1a over GPR[0..32], LR, CTR, XER, CR, and the reservation
-    /// register. PC, FPR, VR, and TB are excluded: PC is paired with
-    /// the hash at the trace level, and FP/VR/TB divergences surface
-    /// downstream through GPR/CR. Encoding is little-endian in the
-    /// listed order, then a 1-byte reservation tag and line address.
+    /// FNV-1a over GPR, LR, CTR, XER, CR, and the reservation. PC, FPR,
+    /// VR, TB excluded (PC is paired at the trace level; FP/VR/TB
+    /// divergences surface through GPR/CR).
     pub fn state_hash(&self) -> u64 {
         let mut h = cellgov_mem::Fnv1aHasher::new();
         for r in &self.gpr {
@@ -182,11 +226,7 @@ impl Default for PpuState {
     }
 }
 
-/// PS3 LV2 syscall-args layout for
-/// [`cellgov_exec::ExecutionStepResult::syscall_args`]:
-/// `args[0] = r11` (syscall number), `args[1..=8] = r3..=r10`.
-/// Syscall responses flow through the runtime's response table, not
-/// by mutating this array.
+/// PS3 LV2 syscall-args layout: `args[0] = r11`, `args[1..=8] = r3..=r10`.
 #[inline]
 pub fn ppu_syscall_args(state: &PpuState) -> [u64; 9] {
     [
@@ -361,6 +401,88 @@ mod tests {
         let mut s = base.clone();
         s.vr[0] = u128::MAX;
         assert_eq!(s.state_hash(), baseline, "VR is excluded");
+    }
+
+    #[test]
+    fn state_hash_ignores_instrument_counters() {
+        let base = PpuState::new();
+        let baseline = base.state_hash();
+
+        let mut s = base.clone();
+        s.vrsave = 0xffff_ffff;
+        assert_eq!(s.state_hash(), baseline, "VRSAVE is excluded");
+
+        let mut s = base.clone();
+        s.vrsave_written = true;
+        assert_eq!(
+            s.state_hash(),
+            baseline,
+            "vrsave_written instrument flag is excluded"
+        );
+
+        let mut s = base.clone();
+        s.mfvrsave_executed = 1;
+        assert_eq!(
+            s.state_hash(),
+            baseline,
+            "mfvrsave_executed counter is excluded"
+        );
+
+        let mut s = base.clone();
+        s.ldarx_executed = 1;
+        assert_eq!(
+            s.state_hash(),
+            baseline,
+            "ldarx_executed counter is excluded"
+        );
+
+        let mut s = base.clone();
+        s.stdcx_executed = 1;
+        assert_eq!(
+            s.state_hash(),
+            baseline,
+            "stdcx_executed counter is excluded"
+        );
+
+        let mut s = base.clone();
+        s.lwarx_executed = 1;
+        assert_eq!(
+            s.state_hash(),
+            baseline,
+            "lwarx_executed counter is excluded"
+        );
+
+        let mut s = base.clone();
+        s.stwcx_executed = 1;
+        assert_eq!(
+            s.state_hash(),
+            baseline,
+            "stwcx_executed counter is excluded"
+        );
+
+        let mut s = base.clone();
+        s.mem_fault_arm_entries = 1;
+        assert_eq!(
+            s.state_hash(),
+            baseline,
+            "mem_fault_arm_entries counter is excluded"
+        );
+
+        let mut s = base.clone();
+        s.mem_fault_unmapped_routed = 1;
+        assert_eq!(
+            s.state_hash(),
+            baseline,
+            "mem_fault_unmapped_routed counter is excluded"
+        );
+
+        let mut s = base.clone();
+        s.dcbz_executed = 1;
+        assert_eq!(
+            s.state_hash(),
+            baseline,
+            "dcbz_executed counter is excluded"
+        );
     }
 
     #[test]

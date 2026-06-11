@@ -40,6 +40,21 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
+    /// Load halfword algebraic with update. Requires `ra != 0 && ra != rt`.
+    // [PPC-Book1 p:36 s:3.3 Fixed-Point Load Instructions] lhau D-form.
+    Lhau {
+        rt: u8,
+        ra: u8,
+        imm: i16,
+    },
+    /// Load multiple word. Loads `32 - rt` words starting at EA into
+    /// `gpr[rt..=31]`, each zero-extended into 64 bits.
+    // [PPC-Book1 p:54 s:3.3 Fixed-Point Load Multiple Instruction] lmw D-form; EA word-aligned.
+    Lmw {
+        rt: u8,
+        ra: u8,
+        imm: i16,
+    },
     /// Load word zero with update. Requires `ra != 0 && ra != rt`.
     Lwzu {
         rt: u8,
@@ -112,6 +127,14 @@ pub enum PpuInstruction {
     },
     /// Store byte with update. Requires `ra != 0`.
     Stbu {
+        rs: u8,
+        ra: u8,
+        imm: i16,
+    },
+    /// Store multiple word. Stores the low 32 bits of
+    /// `gpr[rs..=31]` into successive words at EA.
+    // [PPC-Book1 p:54 s:3.3 Fixed-Point Store Multiple Instruction] stmw D-form; EA word-aligned.
+    Stmw {
         rs: u8,
         ra: u8,
         imm: i16,
@@ -268,6 +291,30 @@ pub enum PpuInstruction {
         oe: bool,
         rc: bool,
     },
+    /// Subtract from zero extended: `RT = ~RA + CA`. Sets CA out.
+    // [PPC-Book1 p:55 s:3.3.8] subfze XO-form.
+    Subfze {
+        rt: u8,
+        ra: u8,
+        oe: bool,
+        rc: bool,
+    },
+    /// Subtract from minus one extended: `RT = ~RA + CA + (-1)`.
+    // [PPC-Book1 p:55 s:3.3.8] subfme XO-form.
+    Subfme {
+        rt: u8,
+        ra: u8,
+        oe: bool,
+        rc: bool,
+    },
+    /// Add to minus one extended: `RT = RA + CA + (-1)`.
+    // [PPC-Book1 p:55 s:3.3.8] addme XO-form.
+    Addme {
+        rt: u8,
+        ra: u8,
+        oe: bool,
+        rc: bool,
+    },
     Mulld {
         rt: u8,
         ra: u8,
@@ -369,6 +416,22 @@ pub enum PpuInstruction {
         rb: u8,
         rc: bool,
     },
+    /// Equivalent (XNOR): `RA = ~(RS XOR RB)`.
+    // [PPC-Book1 p:65 s:3.3.13 Fixed-Point Logical Instructions] eqv X-form.
+    Eqv {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        rc: bool,
+    },
+    /// NAND: `RA = ~(RS & RB)`.
+    // [PPC-Book1 p:65 s:3.3.13 Fixed-Point Logical Instructions] nand X-form.
+    Nand {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        rc: bool,
+    },
     // [PPC-Book1 p:65 s:3.3.13 Fixed-Point Logical Instructions] andi. / andis. D-form (always record).
     AndiDot {
         ra: u8,
@@ -445,6 +508,38 @@ pub enum PpuInstruction {
         ra: u8,
         rs: u8,
         rc: bool,
+    },
+    // [PPC-Book1 p:70 s:3.3.13 Fixed-Point Logical Instructions] popcntb X-form, primary 31 XO 122; no Rc.
+    /// Population Count Bytes. For each of the 8 bytes of RS,
+    /// count the number of 1-bits and place the count
+    /// (0..=8) into the corresponding byte of RA.
+    Popcntb {
+        ra: u8,
+        rs: u8,
+    },
+    // [PPC-Book1 p:64 s:3.3.10 Fixed-Point Trap Instructions] tw / td X-form, primary 31 XO 4 / 68; TO field selects up to five conditions.
+    /// Trap Word. Compares `RA[32:63]` against `RB[32:63]` as
+    /// signed 32-bit values; invokes the trap handler if any
+    /// TO-selected condition holds, otherwise advances.
+    Tw {
+        to: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Trap Doubleword. Same semantics as [`PpuInstruction::Tw`]
+    /// but on the full 64-bit register contents.
+    Td {
+        to: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [PPC-Book1 p:135 s:6.1 Move To Condition Register from XER] mcrxr X-form, primary 31 XO 512; phased out of the architecture.
+    /// Move to Condition Register from XER. Copies `XER[32:35]`
+    /// (SO, OV, CA, reserved) into CR field `BF`, then zeroes
+    /// `XER[32:35]`. Phased out in later ISAs but defined for
+    /// PPC v2.02 (Cell PPU).
+    Mcrxr {
+        bf: u8,
     },
     // [PPC-Book1 p:68 s:3.3.13 Fixed-Point Logical Instructions] orc / nand / equivalent X-form.
     Orc {
@@ -656,6 +751,156 @@ pub enum PpuInstruction {
         rb: u8,
     },
 
+    // -- Indexed loads with update (X-form) --
+    // [PPC-Book1 p:34 s:3.3.1 Fixed-Point Load Instructions]
+    // Update forms write EA back to RA; require RA != 0 and RA != RT.
+    /// Load word zero indexed with update.
+    Lwzux {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Load byte zero indexed with update.
+    Lbzux {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Load halfword zero indexed with update.
+    Lhzux {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Load doubleword indexed with update.
+    Ldux {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Load halfword algebraic indexed; sign-extends to RT.
+    Lhax {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Load halfword algebraic indexed with update.
+    Lhaux {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Load word algebraic indexed; sign-extends to RT.
+    Lwax {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Load word algebraic indexed with update.
+    Lwaux {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+
+    // -- Indexed stores (X-form) --
+    // [PPC-Book1 p:42 s:3.3.3 Fixed-Point Store Instructions] sthx p:41; sthux p:41; stwux p:42; stbux p:40.
+    /// Store halfword indexed.
+    Sthx {
+        rs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Store halfword indexed with update.
+    Sthux {
+        rs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Store word indexed with update.
+    Stwux {
+        rs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Store byte indexed with update.
+    Stbux {
+        rs: u8,
+        ra: u8,
+        rb: u8,
+    },
+
+    // -- Load / store string (X-form, primary 31) --
+    // [PPC-Book1 p:55 s:3.3.5 Fixed-Point Load and Store String Instructions]
+    // String moves transfer N bytes between memory and an aligned
+    // sequence of GPRs, packed left-justified four bytes per
+    // register and wrapping at r31 -> r0.
+    /// Load String Word Immediate. `nb` is 1..32 with 0 encoding 32.
+    Lswi {
+        rt: u8,
+        ra: u8,
+        nb: u8,
+    },
+    /// Load String Word Indexed. Byte count comes from `xer[57:63]`.
+    Lswx {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Store String Word Immediate. `nb` is 1..32 with 0 encoding 32.
+    Stswi {
+        rs: u8,
+        ra: u8,
+        nb: u8,
+    },
+    /// Store String Word Indexed. Byte count comes from `xer[57:63]`.
+    Stswx {
+        rs: u8,
+        ra: u8,
+        rb: u8,
+    },
+
+    // -- Byte-reverse indexed loads and stores --
+    // [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] ldbrx X-form: little-endian 8-byte load to RT.
+    Ldbrx {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [PPC-Book1 p:50 s:3.3.4 Byte-Reverse Instructions] lwbrx X-form: little-endian 4-byte load, zero-extended to RT.
+    Lwbrx {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [PPC-Book1 p:50 s:3.3.4 Byte-Reverse Instructions] lhbrx X-form: little-endian 2-byte load, zero-extended to RT.
+    Lhbrx {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [CBE-Handbook p:734 s:A.2.1] sdbrx (Cell PPE name; the spec also writes `stdbrx`): little-endian 8-byte store from RS low 64.
+    /// Store Doubleword Byte Reverse Indexed. The Handbook's
+    /// definition page uses the `sdbrx` spelling; the same encoding
+    /// is also spelled `stdbrx` elsewhere in upstream PPC literature.
+    Sdbrx {
+        rs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] stwbrx X-form: little-endian 4-byte store from RS low 32.
+    Stwbrx {
+        rs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] sthbrx X-form: little-endian 2-byte store from RS low 16.
+    Sthbrx {
+        rs: u8,
+        ra: u8,
+        rb: u8,
+    },
+
     // -- Special-purpose register moves --
     // [PPC-Book2 p:30 s:6.2 Reading the Time Base] mftb XFX-form; SPR encoding TBR=268 (TB), 269 (TBU).
     /// Move-from-time-base. The model advances TB by 1 per read.
@@ -674,6 +919,24 @@ pub enum PpuInstruction {
         rs: u8,
         crm: u8,
     },
+    // [CBE-Handbook p:738 s:A.2.3.1 Book I Optional Instructions Implemented] mfocrf / mtocrf share XOs 19 / 144 with mfcr / mtcrf; bit 11 = 1 selects the one-field form. Cell PPE implements both.
+    /// Move From One Condition Register Field. `crm` is one-hot; the
+    /// set bit selects which CR field gets copied into the
+    /// corresponding 4 bits of RT (other bits boundedly undefined per
+    /// spec; CellGov produces the same nibble layout as mfcr for the
+    /// selected field and zero elsewhere).
+    Mfocrf {
+        rt: u8,
+        crm: u8,
+    },
+    /// Move To One Condition Register Field. `crm` is one-hot; the
+    /// set bit selects which CR field gets RS[32+4*field..+4] copied
+    /// in. Non-one-hot `crm` is boundedly undefined per spec; CellGov
+    /// applies the mtcrf semantic (mask-each-set-bit) for that case.
+    Mtocrf {
+        rs: u8,
+        crm: u8,
+    },
     // [PPC-Book1 p:81 s:3.3.16 Move To/From System Register Instructions] mtspr (mtlr/mtctr extended); mfspr (mflr/mfctr) at p:82.
     Mflr {
         rt: u8,
@@ -685,6 +948,24 @@ pub enum PpuInstruction {
         rt: u8,
     },
     Mtctr {
+        rs: u8,
+    },
+    // [PPC-Book1 p:42 s:3.2.2 Fixed-Point Exception Register] XER is SPR 1, problem-state read/write via mfspr/mtspr.
+    /// Move From XER (`mfspr rT, 1`).
+    Mfxer {
+        rt: u8,
+    },
+    /// Move To XER (`mtspr 1, rS`).
+    Mtxer {
+        rs: u8,
+    },
+    // [AltiVec-PEM p:48 s:2.3.2 VRSAVE Register] VRSAVE is SPR 256, 32-bit, problem-state read/write via mfspr/mtspr.
+    /// Move From VRSAVE (`mfspr rT, 256`).
+    Mfvrsave {
+        rt: u8,
+    },
+    /// Move To VRSAVE (`mtspr 256, rS`).
+    Mtvrsave {
         rs: u8,
     },
 
@@ -749,6 +1030,26 @@ pub enum PpuInstruction {
         mb: u8,
         rc: bool,
     },
+    /// Rotate left doubleword by RB (low 6 bits) then clear left of
+    /// `mb`. MDS-form.
+    // [PPC-Book1 p:75 s:3.3.12 Fixed-Point Rotate and Shift Instructions] rldcl MDS-form.
+    Rldcl {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        mb: u8,
+        rc: bool,
+    },
+    /// Rotate left doubleword by RB (low 6 bits) then clear right of
+    /// `me`. MDS-form.
+    // [PPC-Book1 p:75 s:3.3.12 Fixed-Point Rotate and Shift Instructions] rldcr MDS-form.
+    Rldcr {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        me: u8,
+        rc: bool,
+    },
 
     // -- Vector (AltiVec / VMX) --
     // [AltiVec-PEM p:2] AltiVec architectural overview; VX/VA-form encoding under primary opcode 4.
@@ -794,10 +1095,147 @@ pub enum PpuInstruction {
         ra: u8,
         rb: u8,
     },
+    /// Load Vector Left Indexed Last. Architecturally identical to
+    /// [`PpuInstruction::Lvlx`]; the "Last" hint is a cache LRU
+    /// directive only and CellGov has no cache model.
+    // [CBE-Handbook p:744 s:A.3.3] lvlxl Cell-specific VXU misaligned vector load with LRU hint.
+    Lvlxl {
+        vt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Load Vector Right Indexed Last. Architecturally identical to
+    /// [`PpuInstruction::Lvrx`].
+    // [CBE-Handbook p:744 s:A.3.3] lvrxl Cell-specific VXU misaligned vector load with LRU hint.
+    Lvrxl {
+        vt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Store Vector Left Indexed. Partial vector store; bytes
+    /// `[0..16-EA_mod16]` of `vr[vs]` are written to `MEM(EA, 16-m)`.
+    // [CBE-Handbook p:744 s:A.3.3] stvlx Cell-specific VXU misaligned vector store.
+    Stvlx {
+        vs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Store Vector Right Indexed. Partial vector store; bytes
+    /// `[16-m..16]` of `vr[vs]` are written to `MEM(aligned, m)`.
+    // [CBE-Handbook p:744 s:A.3.3] stvrx Cell-specific VXU misaligned vector store.
+    Stvrx {
+        vs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Store Vector Left Indexed Last. Architecturally identical to
+    /// [`PpuInstruction::Stvlx`].
+    // [CBE-Handbook p:744 s:A.3.3] stvlxl with LRU hint.
+    Stvlxl {
+        vs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    /// Store Vector Right Indexed Last. Architecturally identical to
+    /// [`PpuInstruction::Stvrx`].
+    // [CBE-Handbook p:744 s:A.3.3] stvrxl with LRU hint.
+    Stvrxl {
+        vs: u8,
+        ra: u8,
+        rb: u8,
+    },
+
+    // -- AltiVec-memory family (X-form, primary 31) --
+    // [AltiVec-PEM p:6-21 s:6.2] lvsl XO=6: shift-left permute control vector from EA low 4 bits.
+    /// Load Vector for Shift Left. Builds a 16-byte permute-control
+    /// vector from the low 4 bits of EA = (RA|0) + RB.
+    Lvsl {
+        vt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-15 s:6.2] lvebx XO=7: single-byte element load to byte EA mod 16 of vT.
+    /// Load Vector Element Byte Indexed.
+    Lvebx {
+        vt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-22 s:6.2] lvsr XO=38: shift-right permute control vector from EA low 4 bits.
+    /// Load Vector for Shift Right. Builds a 16-byte permute-control
+    /// vector from the low 4 bits of EA = (RA|0) + RB.
+    Lvsr {
+        vt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-16 s:6.2] lvehx XO=39: halfword element load to halfword EA mod 16 of vT.
+    /// Load Vector Element Halfword Indexed. EA is aligned down to a
+    /// 2-byte boundary before the load.
+    Lvehx {
+        vt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-17 s:6.2] lvewx XO=71: word element load to word EA mod 16 of vT.
+    /// Load Vector Element Word Indexed. EA is aligned down to a
+    /// 4-byte boundary before the load.
+    Lvewx {
+        vt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-21 s:6.2] lvx XO=103: 16-byte aligned vector load (EA & ~0xF).
+    /// Load Vector Indexed. EA is aligned down to a 16-byte boundary
+    /// before the load.
+    Lvx {
+        vt: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-29 s:6.2] stvebx XO=135: single-byte element store from byte EA mod 16 of vS.
+    /// Store Vector Element Byte Indexed.
+    Stvebx {
+        vs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-30 s:6.2] stvehx XO=167: halfword element store from halfword EA mod 16 of vS.
+    /// Store Vector Element Halfword Indexed. EA is aligned down to
+    /// a 2-byte boundary before the store.
+    Stvehx {
+        vs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-31 s:6.2] stvewx XO=199: word element store from word EA mod 16 of vS.
+    /// Store Vector Element Word Indexed. EA is aligned down to a
+    /// 4-byte boundary before the store.
+    Stvewx {
+        vs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-23 s:6.2] lvxl XO=359: lvx with cache-locality "last use" hint.
+    /// Load Vector Indexed Last. Same semantics as `Lvx`; the LRU
+    /// hint is architecturally a cache directive only.
+    Lvxl {
+        vt: u8,
+        ra: u8,
+        rb: u8,
+    },
     // [AltiVec-PEM p:6-28 s:6.2 AltiVec Instruction Set] stvx X-form (EA aligned down to 16-byte boundary).
     /// Store-vector-indexed. The effective address is aligned down to
     /// a 16-byte boundary before the store.
     Stvx {
+        vs: u8,
+        ra: u8,
+        rb: u8,
+    },
+    // [AltiVec-PEM p:6-33 s:6.2] stvxl XO=487: stvx with cache-locality "last use" hint.
+    /// Store Vector Indexed Last. Same semantics as `Stvx`; the LRU
+    /// hint is architecturally a cache directive only.
+    Stvxl {
         vs: u8,
         ra: u8,
         rb: u8,
@@ -810,7 +1248,22 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
+    /// Load floating-point single with update. Converts the loaded
+    /// single to double in `fpr[frt]`. Requires `ra != 0`.
+    // [PPC-Book1 p:104 s:4.6.2 Floating-Point Load Instructions] lfsu D-form.
+    Lfsu {
+        frt: u8,
+        ra: u8,
+        imm: i16,
+    },
     Lfd {
+        frt: u8,
+        ra: u8,
+        imm: i16,
+    },
+    /// Load floating-point double with update. Requires `ra != 0`.
+    // [PPC-Book1 p:105 s:4.6.2 Floating-Point Load Instructions] lfdu D-form.
+    Lfdu {
         frt: u8,
         ra: u8,
         imm: i16,
@@ -1078,6 +1531,8 @@ impl PpuInstruction {
             | PpuInstruction::Lbz { .. }
             | PpuInstruction::Lhz { .. }
             | PpuInstruction::Lha { .. }
+            | PpuInstruction::Lhau { .. }
+            | PpuInstruction::Lmw { .. }
             | PpuInstruction::Lwzu { .. }
             | PpuInstruction::Lbzu { .. }
             | PpuInstruction::Lhzu { .. }
@@ -1089,6 +1544,7 @@ impl PpuInstruction {
             | PpuInstruction::Stdu { .. }
             | PpuInstruction::Stb { .. }
             | PpuInstruction::Stbu { .. }
+            | PpuInstruction::Stmw { .. }
             | PpuInstruction::Sth { .. }
             | PpuInstruction::Sthu { .. }
             | PpuInstruction::Std { .. }
@@ -1111,6 +1567,9 @@ impl PpuInstruction {
             | PpuInstruction::Mulhd { .. }
             | PpuInstruction::Adde { .. }
             | PpuInstruction::Addze { .. }
+            | PpuInstruction::Subfze { .. }
+            | PpuInstruction::Subfme { .. }
+            | PpuInstruction::Addme { .. }
             | PpuInstruction::Mulld { .. }
             | PpuInstruction::Ldarx { .. }
             | PpuInstruction::Stdcx { .. }
@@ -1126,6 +1585,8 @@ impl PpuInstruction {
             | PpuInstruction::Andc { .. }
             | PpuInstruction::Nor { .. }
             | PpuInstruction::Xor { .. }
+            | PpuInstruction::Eqv { .. }
+            | PpuInstruction::Nand { .. }
             | PpuInstruction::AndiDot { .. }
             | PpuInstruction::AndisDot { .. }
             | PpuInstruction::Slw { .. }
@@ -1138,6 +1599,10 @@ impl PpuInstruction {
             | PpuInstruction::Srd { .. }
             | PpuInstruction::Cntlzw { .. }
             | PpuInstruction::Cntlzd { .. }
+            | PpuInstruction::Popcntb { .. }
+            | PpuInstruction::Tw { .. }
+            | PpuInstruction::Td { .. }
+            | PpuInstruction::Mcrxr { .. }
             | PpuInstruction::Orc { .. }
             | PpuInstruction::Extsh { .. }
             | PpuInstruction::Extsb { .. }
@@ -1173,14 +1638,42 @@ impl PpuInstruction {
             | PpuInstruction::Stdx { .. }
             | PpuInstruction::Stdux { .. }
             | PpuInstruction::Stbx { .. }
+            | PpuInstruction::Lwzux { .. }
+            | PpuInstruction::Lbzux { .. }
+            | PpuInstruction::Lhzux { .. }
+            | PpuInstruction::Ldux { .. }
+            | PpuInstruction::Lhax { .. }
+            | PpuInstruction::Lhaux { .. }
+            | PpuInstruction::Lwax { .. }
+            | PpuInstruction::Lwaux { .. }
+            | PpuInstruction::Sthx { .. }
+            | PpuInstruction::Sthux { .. }
+            | PpuInstruction::Stwux { .. }
+            | PpuInstruction::Stbux { .. }
+            | PpuInstruction::Lswi { .. }
+            | PpuInstruction::Lswx { .. }
+            | PpuInstruction::Stswi { .. }
+            | PpuInstruction::Stswx { .. }
+            | PpuInstruction::Ldbrx { .. }
+            | PpuInstruction::Lwbrx { .. }
+            | PpuInstruction::Lhbrx { .. }
+            | PpuInstruction::Sdbrx { .. }
+            | PpuInstruction::Stwbrx { .. }
+            | PpuInstruction::Sthbrx { .. }
             | PpuInstruction::Mftb { .. }
             | PpuInstruction::Mftbu { .. }
             | PpuInstruction::Mfcr { .. }
             | PpuInstruction::Mtcrf { .. }
+            | PpuInstruction::Mfocrf { .. }
+            | PpuInstruction::Mtocrf { .. }
             | PpuInstruction::Mflr { .. }
             | PpuInstruction::Mtlr { .. }
             | PpuInstruction::Mfctr { .. }
             | PpuInstruction::Mtctr { .. }
+            | PpuInstruction::Mfxer { .. }
+            | PpuInstruction::Mtxer { .. }
+            | PpuInstruction::Mfvrsave { .. }
+            | PpuInstruction::Mtvrsave { .. }
             | PpuInstruction::Rlwinm { .. }
             | PpuInstruction::Rlwimi { .. }
             | PpuInstruction::Rlwnm { .. }
@@ -1188,15 +1681,36 @@ impl PpuInstruction {
             | PpuInstruction::Rldicr { .. }
             | PpuInstruction::Rldic { .. }
             | PpuInstruction::Rldimi { .. }
+            | PpuInstruction::Rldcl { .. }
+            | PpuInstruction::Rldcr { .. }
             | PpuInstruction::Vx { .. }
             | PpuInstruction::Va { .. }
             | PpuInstruction::Vxor { .. }
             | PpuInstruction::Vsldoi { .. }
             | PpuInstruction::Lvlx { .. }
             | PpuInstruction::Lvrx { .. }
+            | PpuInstruction::Lvlxl { .. }
+            | PpuInstruction::Lvrxl { .. }
+            | PpuInstruction::Stvlx { .. }
+            | PpuInstruction::Stvrx { .. }
+            | PpuInstruction::Stvlxl { .. }
+            | PpuInstruction::Stvrxl { .. }
+            | PpuInstruction::Lvsl { .. }
+            | PpuInstruction::Lvebx { .. }
+            | PpuInstruction::Lvsr { .. }
+            | PpuInstruction::Lvehx { .. }
+            | PpuInstruction::Lvewx { .. }
+            | PpuInstruction::Lvx { .. }
+            | PpuInstruction::Stvebx { .. }
+            | PpuInstruction::Stvehx { .. }
+            | PpuInstruction::Stvewx { .. }
+            | PpuInstruction::Lvxl { .. }
             | PpuInstruction::Stvx { .. }
+            | PpuInstruction::Stvxl { .. }
             | PpuInstruction::Lfs { .. }
+            | PpuInstruction::Lfsu { .. }
             | PpuInstruction::Lfd { .. }
+            | PpuInstruction::Lfdu { .. }
             | PpuInstruction::Stfs { .. }
             | PpuInstruction::Stfd { .. }
             | PpuInstruction::Stfsu { .. }
@@ -1228,6 +1742,27 @@ impl PpuInstruction {
         }
     }
 
+    /// Whether this variant is a decode-only stub: the decoder
+    /// produced it (so the scan counts it as "accepted") but the
+    /// executor will fault via `UnimplementedInstruction` for at
+    /// least some sub-opcodes. New typed variants are NOT stubs by
+    /// default; the predicate names the catch-all family-dispatch
+    /// variants explicitly.
+    ///
+    /// Used by the prescan to keep stubs out of `words_accepted` --
+    /// counting a "decodes but doesn't execute" word as accepted
+    /// under-reports the gap surface. See
+    /// [`crate::prescan::PrescanReport::words_stubbed`].
+    pub fn is_stub_variant(&self) -> bool {
+        matches!(
+            self,
+            PpuInstruction::Vx { .. }
+                | PpuInstruction::Va { .. }
+                | PpuInstruction::Fp59 { .. }
+                | PpuInstruction::Fp63 { .. }
+        )
+    }
+
     /// Whether this instruction ends a basic block (control-flow
     /// transfer or syscall). Used by the shadow builder to compute
     /// per-slot block lengths.
@@ -1250,6 +1785,8 @@ impl PpuInstruction {
             | PpuInstruction::Lbz { .. }
             | PpuInstruction::Lhz { .. }
             | PpuInstruction::Lha { .. }
+            | PpuInstruction::Lhau { .. }
+            | PpuInstruction::Lmw { .. }
             | PpuInstruction::Lwzu { .. }
             | PpuInstruction::Lbzu { .. }
             | PpuInstruction::Lhzu { .. }
@@ -1261,6 +1798,7 @@ impl PpuInstruction {
             | PpuInstruction::Stdu { .. }
             | PpuInstruction::Stb { .. }
             | PpuInstruction::Stbu { .. }
+            | PpuInstruction::Stmw { .. }
             | PpuInstruction::Sth { .. }
             | PpuInstruction::Sthu { .. }
             | PpuInstruction::Std { .. }
@@ -1283,6 +1821,9 @@ impl PpuInstruction {
             | PpuInstruction::Mulhd { .. }
             | PpuInstruction::Adde { .. }
             | PpuInstruction::Addze { .. }
+            | PpuInstruction::Subfze { .. }
+            | PpuInstruction::Subfme { .. }
+            | PpuInstruction::Addme { .. }
             | PpuInstruction::Mulld { .. }
             | PpuInstruction::Ldarx { .. }
             | PpuInstruction::Stdcx { .. }
@@ -1298,6 +1839,8 @@ impl PpuInstruction {
             | PpuInstruction::Andc { .. }
             | PpuInstruction::Nor { .. }
             | PpuInstruction::Xor { .. }
+            | PpuInstruction::Eqv { .. }
+            | PpuInstruction::Nand { .. }
             | PpuInstruction::AndiDot { .. }
             | PpuInstruction::AndisDot { .. }
             | PpuInstruction::Slw { .. }
@@ -1310,6 +1853,10 @@ impl PpuInstruction {
             | PpuInstruction::Srd { .. }
             | PpuInstruction::Cntlzw { .. }
             | PpuInstruction::Cntlzd { .. }
+            | PpuInstruction::Popcntb { .. }
+            | PpuInstruction::Tw { .. }
+            | PpuInstruction::Td { .. }
+            | PpuInstruction::Mcrxr { .. }
             | PpuInstruction::Orc { .. }
             | PpuInstruction::Extsh { .. }
             | PpuInstruction::Extsb { .. }
@@ -1341,14 +1888,42 @@ impl PpuInstruction {
             | PpuInstruction::Stdx { .. }
             | PpuInstruction::Stdux { .. }
             | PpuInstruction::Stbx { .. }
+            | PpuInstruction::Lwzux { .. }
+            | PpuInstruction::Lbzux { .. }
+            | PpuInstruction::Lhzux { .. }
+            | PpuInstruction::Ldux { .. }
+            | PpuInstruction::Lhax { .. }
+            | PpuInstruction::Lhaux { .. }
+            | PpuInstruction::Lwax { .. }
+            | PpuInstruction::Lwaux { .. }
+            | PpuInstruction::Sthx { .. }
+            | PpuInstruction::Sthux { .. }
+            | PpuInstruction::Stwux { .. }
+            | PpuInstruction::Stbux { .. }
+            | PpuInstruction::Lswi { .. }
+            | PpuInstruction::Lswx { .. }
+            | PpuInstruction::Stswi { .. }
+            | PpuInstruction::Stswx { .. }
+            | PpuInstruction::Ldbrx { .. }
+            | PpuInstruction::Lwbrx { .. }
+            | PpuInstruction::Lhbrx { .. }
+            | PpuInstruction::Sdbrx { .. }
+            | PpuInstruction::Stwbrx { .. }
+            | PpuInstruction::Sthbrx { .. }
             | PpuInstruction::Mftb { .. }
             | PpuInstruction::Mftbu { .. }
             | PpuInstruction::Mfcr { .. }
             | PpuInstruction::Mtcrf { .. }
+            | PpuInstruction::Mfocrf { .. }
+            | PpuInstruction::Mtocrf { .. }
             | PpuInstruction::Mflr { .. }
             | PpuInstruction::Mtlr { .. }
             | PpuInstruction::Mfctr { .. }
             | PpuInstruction::Mtctr { .. }
+            | PpuInstruction::Mfxer { .. }
+            | PpuInstruction::Mtxer { .. }
+            | PpuInstruction::Mfvrsave { .. }
+            | PpuInstruction::Mtvrsave { .. }
             | PpuInstruction::Rlwinm { .. }
             | PpuInstruction::Rlwimi { .. }
             | PpuInstruction::Rlwnm { .. }
@@ -1356,15 +1931,36 @@ impl PpuInstruction {
             | PpuInstruction::Rldicr { .. }
             | PpuInstruction::Rldic { .. }
             | PpuInstruction::Rldimi { .. }
+            | PpuInstruction::Rldcl { .. }
+            | PpuInstruction::Rldcr { .. }
             | PpuInstruction::Vx { .. }
             | PpuInstruction::Va { .. }
             | PpuInstruction::Vxor { .. }
             | PpuInstruction::Vsldoi { .. }
             | PpuInstruction::Lvlx { .. }
             | PpuInstruction::Lvrx { .. }
+            | PpuInstruction::Lvlxl { .. }
+            | PpuInstruction::Lvrxl { .. }
+            | PpuInstruction::Stvlx { .. }
+            | PpuInstruction::Stvrx { .. }
+            | PpuInstruction::Stvlxl { .. }
+            | PpuInstruction::Stvrxl { .. }
+            | PpuInstruction::Lvsl { .. }
+            | PpuInstruction::Lvebx { .. }
+            | PpuInstruction::Lvsr { .. }
+            | PpuInstruction::Lvehx { .. }
+            | PpuInstruction::Lvewx { .. }
+            | PpuInstruction::Lvx { .. }
+            | PpuInstruction::Stvebx { .. }
+            | PpuInstruction::Stvehx { .. }
+            | PpuInstruction::Stvewx { .. }
+            | PpuInstruction::Lvxl { .. }
             | PpuInstruction::Stvx { .. }
+            | PpuInstruction::Stvxl { .. }
             | PpuInstruction::Lfs { .. }
+            | PpuInstruction::Lfsu { .. }
             | PpuInstruction::Lfd { .. }
+            | PpuInstruction::Lfdu { .. }
             | PpuInstruction::Stfs { .. }
             | PpuInstruction::Stfd { .. }
             | PpuInstruction::Stfsu { .. }
