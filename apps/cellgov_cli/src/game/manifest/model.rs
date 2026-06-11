@@ -124,6 +124,9 @@ pub struct TitleManifest {
     /// Mutually exclusive with `CheckpointTrigger::FirstRsxWrite`:
     /// a writable region cannot fault on the put-pointer store.
     pub rsx_mirror: bool,
+    /// 40F honest FIFO consumer opt-in. Requires `rsx_mirror = true`;
+    /// `consume = true, mirror = false` is rejected at load time.
+    pub rsx_consume: bool,
     pub content: Option<ContentManifest>,
     /// Mount-table registration order matches declaration order;
     /// the dispatch layer consults mounts in that order on a miss.
@@ -215,6 +218,11 @@ impl TitleManifest {
         self.rsx_mirror
     }
 
+    /// 40F honest FIFO consumer opt-in; see field doc.
+    pub fn rsx_consume(&self) -> bool {
+        self.rsx_consume
+    }
+
     /// Return the first [`TitleManifest::eboot_candidates`] filename
     /// that exists as a regular file under the title's USRDIR.
     ///
@@ -274,6 +282,7 @@ pub(super) fn hdd_manifest(content_id: &str, short: &str, candidates: &[&str]) -
         checkpoint: CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,
+        rsx_consume: false,
         content: None,
         mounts: Vec::new(),
     }

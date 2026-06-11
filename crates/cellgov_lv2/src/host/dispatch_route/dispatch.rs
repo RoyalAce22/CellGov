@@ -113,14 +113,11 @@ impl Lv2Host {
             } => self.dispatch_fs_readdir(fd, dirent_out_ptr, nread_out_ptr, requester, rt),
             Lv2Request::FsClosedir { fd } => self.dispatch_fs_closedir(fd),
             Lv2Request::FsWrite {
+                fd,
                 buf_ptr,
                 size,
                 nwrite_ptr,
-                ..
-            } => {
-                let len = u32::try_from(size).unwrap_or(u32::MAX);
-                self.dispatch_tty_write(buf_ptr, len, nwrite_ptr, requester, rt)
-            }
+            } => self.dispatch_fs_write(fd, buf_ptr, size, nwrite_ptr, requester),
             Lv2Request::MutexCreate { id_ptr, attr_ptr } => {
                 self.dispatch_mutex_create(id_ptr, attr_ptr, requester, rt)
             }
@@ -281,7 +278,9 @@ impl Lv2Host {
                 a4,
                 a5,
                 a6,
-            } => self.dispatch_sys_rsx_context_attribute(context_id, package_id, a3, a4, a5, a6),
+            } => {
+                self.dispatch_sys_rsx_context_attribute(context_id, package_id, a3, a4, a5, a6, rt)
+            }
             Lv2Request::SysRsxContextIomap {
                 context_id,
                 io,
@@ -297,6 +296,9 @@ impl Lv2Host {
             Lv2Request::SsAccessControlEngine { pkg_id, a2, .. } => {
                 self.dispatch_ss_access_control_engine(pkg_id, a2, requester)
             }
+            // Both signatures place `path` at arg 0: RPCS3
+            // sys_prx.cpp:506 `_sys_prx_load_module(path, flags, pOpt)`,
+            // sys_prx.cpp:497 `_sys_prx_load_module_on_memcontainer(path, mem_ct, flags, pOpt)`.
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_LOAD_MODULE,
                 args,

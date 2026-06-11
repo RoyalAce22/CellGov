@@ -38,6 +38,9 @@ pub struct RunGameOptions<'a> {
     pub strict_reserved: bool,
     pub profile_pairs: bool,
     pub budget_override: Option<Budget>,
+    /// When true, scan the title ELF for unimplemented PPU
+    /// encodings before execution and print the gap report.
+    pub prescan: bool,
 }
 
 /// Terminal-state summary from [`run_game`].
@@ -57,6 +60,9 @@ pub enum RunError {
 pub(in crate::game) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &TitleManifest) {
     if title.rsx_mirror() {
         rt.set_rsx_mirror_writes(true);
+    }
+    if title.rsx_consume() {
+        rt.set_rsx_consume_fifo(true);
     }
 }
 
@@ -87,6 +93,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         strict_reserved,
         profile_pairs,
         budget_override,
+        prescan,
     } = opts;
     for (i, &(addr, len)) in dump_mem_fault_ranges.iter().enumerate() {
         debug_assert!(
@@ -113,7 +120,6 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         strict_reserved,
         dump_at_pc,
         dump_skip,
-        module_start_max_steps: max_steps,
         print_banner: true,
         runtime_max_steps: max_steps,
         patch_bytes,
@@ -121,6 +127,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         profile_pairs,
         budget_override,
         capture_state_trace: save_state_trace.is_some(),
+        prescan,
     });
     let t_after_prepare = Instant::now();
     let boot::PreparedBoot {

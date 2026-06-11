@@ -384,11 +384,16 @@ fn first_diff_offset(a: &[u8], b: &[u8]) -> String {
 }
 
 #[test]
-#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
-            trampoline does not currently route to direct LV2 syscalls; the harness \
-            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
-            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
-            syscalls or the harness loads firmware for synthetic boots."]
+#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
+            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
+            identified by name in cellgov_ps3_abi::nid but no HLE module in \
+            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
+            and patch_got_atomic therefore does not bind their GOT slots. The harness \
+            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
+            gap either, and guest calls land at dispatch.unresolved_import returning \
+            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
+            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
+            synthetic boots."]
 fn cpu_basic() {
     run_case(&Case {
         rel_dir: "cpu/basic",
@@ -399,11 +404,16 @@ fn cpu_basic() {
 }
 
 #[test]
-#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
-            trampoline does not currently route to direct LV2 syscalls; the harness \
-            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
-            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
-            syscalls or the harness loads firmware for synthetic boots."]
+#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
+            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
+            identified by name in cellgov_ps3_abi::nid but no HLE module in \
+            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
+            and patch_got_atomic therefore does not bind their GOT slots. The harness \
+            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
+            gap either, and guest calls land at dispatch.unresolved_import returning \
+            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
+            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
+            synthetic boots."]
 fn cpu_ppu_branch() {
     run_case(&Case {
         rel_dir: "cpu/ppu_branch",
@@ -414,11 +424,16 @@ fn cpu_ppu_branch() {
 }
 
 #[test]
-#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
-            trampoline does not currently route to direct LV2 syscalls; the harness \
-            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
-            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
-            syscalls or the harness loads firmware for synthetic boots."]
+#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
+            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
+            identified by name in cellgov_ps3_abi::nid but no HLE module in \
+            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
+            and patch_got_atomic therefore does not bind their GOT slots. The harness \
+            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
+            gap either, and guest calls land at dispatch.unresolved_import returning \
+            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
+            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
+            synthetic boots."]
 fn lv2_sys_event_flag() {
     run_case(&Case {
         rel_dir: "lv2/sys_event_flag",
@@ -429,11 +444,16 @@ fn lv2_sys_event_flag() {
 }
 
 #[test]
-#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
-            trampoline does not currently route to direct LV2 syscalls; the harness \
-            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
-            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
-            syscalls or the harness loads firmware for synthetic boots."]
+#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
+            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
+            identified by name in cellgov_ps3_abi::nid but no HLE module in \
+            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
+            and patch_got_atomic therefore does not bind their GOT slots. The harness \
+            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
+            gap either, and guest calls land at dispatch.unresolved_import returning \
+            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
+            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
+            synthetic boots."]
 fn lv2_sys_process() {
     run_case(&Case {
         rel_dir: "lv2/sys_process",
@@ -444,11 +464,16 @@ fn lv2_sys_process() {
 }
 
 #[test]
-#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
-            trampoline does not currently route to direct LV2 syscalls; the harness \
-            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
-            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
-            syscalls or the harness loads firmware for synthetic boots."]
+#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
+            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
+            identified by name in cellgov_ps3_abi::nid but no HLE module in \
+            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
+            and patch_got_atomic therefore does not bind their GOT slots. The harness \
+            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
+            gap either, and guest calls land at dispatch.unresolved_import returning \
+            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
+            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
+            synthetic boots."]
 fn lv2_sys_semaphore() {
     run_case(&Case {
         rel_dir: "lv2/sys_semaphore",
@@ -460,11 +485,16 @@ fn lv2_sys_semaphore() {
 
 /// Determinism canary across two reruns of the same scenario.
 #[test]
-#[ignore = "Synthetic ELFs need sysPrxForUser/sys_fs NIDs that the unresolved-import \
-            trampoline does not currently route to direct LV2 syscalls; the harness \
-            runs with no firmware loaded (CELLGOV_NO_FIRMWARE_DIR=1) so those NIDs \
-            stay unresolved. Un-ignore once the missing NIDs route to direct LV2 \
-            syscalls or the harness loads firmware for synthetic boots."]
+#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
+            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
+            identified by name in cellgov_ps3_abi::nid but no HLE module in \
+            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
+            and patch_got_atomic therefore does not bind their GOT slots. The harness \
+            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
+            gap either, and guest calls land at dispatch.unresolved_import returning \
+            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
+            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
+            synthetic boots."]
 fn determinism_double_run_cpu_basic() {
     let case = Case {
         rel_dir: "cpu/basic",

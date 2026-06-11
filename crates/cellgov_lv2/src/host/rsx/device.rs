@@ -40,12 +40,17 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        // No real caller passes null; addr 0 is in the readable main
-        // region and would silently overwrite without an EFAULT path.
-        debug_assert!(
-            dev_addr_ptr != 0,
-            "sys_rsx_device_map dev_addr OUT pointer is null"
-        );
+        if dev_addr_ptr == 0 {
+            self.log_invariant_break(
+                "dispatch.sys_rsx_device_map_null_dev_addr",
+                format_args!(
+                    "sys_rsx_device_map dev_addr OUT pointer is null; the 8-byte \
+                     device address write at addr 0 would silently clobber the readable \
+                     main region. Returning CELL_EFAULT (vm::ptr<u64> rejects null in RPCS3)."
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        }
         let device_addr = u64::from(device_map::ADDR);
         let dev_addr_write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(dev_addr_ptr, 8),
@@ -177,10 +182,28 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "dev_addr OUT pointer is null")]
-    fn sys_rsx_device_map_null_dev_addr_ptr_debug_asserts() {
+    fn sys_rsx_device_map_null_dev_addr_returns_efault_and_emits_no_writes() {
         let mut host = Lv2Host::new();
-        let _ = dispatch_device_map(&mut host, 0, 0x1008, 8);
+        let breaks_before = host.invariant_break_count();
+        let d = dispatch_device_map(&mut host, 0, 0x1008, 8);
+        let Lv2Dispatch::Immediate { code, effects } = d else {
+            panic!("expected Immediate, got {d:?}");
+        };
+        assert_eq!(
+            code,
+            u64::from(cell_errors::CELL_EFAULT),
+            "null dev_addr_ptr must yield CELL_EFAULT, not CELL_OK"
+        );
+        assert!(
+            effects.is_empty(),
+            "no SharedWriteIntent may be emitted on the null-pointer EFAULT path; \
+             got effects: {effects:?}"
+        );
+        assert_eq!(
+            host.invariant_break_count() - breaks_before,
+            1,
+            "the null-pointer EFAULT path must log_invariant_break exactly once \
+             so release builds surface the case the prior debug_assert hid"
+        );
     }
 }

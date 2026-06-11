@@ -2,6 +2,7 @@
 //! binaries (ELF32, big-endian, PT_LOAD segments only).
 
 use crate::state::SpuState;
+use cellgov_mem::be::{read_u16, read_u32};
 use cellgov_ps3_abi::elf::{ELF32_HEADER_SIZE, ELF32_PHDR_SIZE, ELF_MAGIC, PT_LOAD};
 
 /// Load failure.
@@ -106,19 +107,6 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
     // [CBE-Handbook p:421 s:14.6.3.3] SPE loader transfers control to entry parameter (e_entry).
     state.pc = entry;
     Ok(())
-}
-
-fn read_u32(data: &[u8], offset: usize) -> u32 {
-    u32::from_be_bytes([
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-    ])
-}
-
-fn read_u16(data: &[u8], offset: usize) -> u16 {
-    u16::from_be_bytes([data[offset], data[offset + 1]])
 }
 
 #[cfg(test)]

@@ -152,6 +152,7 @@ pub(crate) fn run_game(args: &[String]) {
     let profile_pairs = args.iter().any(|a| a == "--profile-pairs");
     let budget_override: Option<Budget> =
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
+    let prescan = args.iter().any(|a| a == "--prescan");
     let result = game::run_game(game::RunGameOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
@@ -172,6 +173,7 @@ pub(crate) fn run_game(args: &[String]) {
         strict_reserved,
         profile_pairs,
         budget_override,
+        prescan,
     });
     let summary = match result {
         Ok(s) => s,
@@ -305,6 +307,7 @@ pub(crate) fn bench_boot_once(args: &[String]) {
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot-once");
     let budget_override: Option<Budget> =
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
+    let prescan = args.iter().any(|a| a == "--prescan");
     game::bench_boot_one_run(
         game::BenchOptions {
             title: &inputs.title,
@@ -314,6 +317,7 @@ pub(crate) fn bench_boot_once(args: &[String]) {
             strict_reserved,
             checkpoint_override,
             budget_override,
+            prescan,
         },
         inputs.elf_data,
     );
@@ -327,6 +331,7 @@ pub(crate) fn bench_boot(args: &[String]) {
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot");
     let budget_override: Option<Budget> =
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
+    let prescan = args.iter().any(|a| a == "--prescan");
     let outcome = match game::bench_boot_pair(game::BenchOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
@@ -335,6 +340,7 @@ pub(crate) fn bench_boot(args: &[String]) {
         strict_reserved,
         checkpoint_override,
         budget_override,
+        prescan,
     }) {
         Ok(o) => o,
         Err(e) => {

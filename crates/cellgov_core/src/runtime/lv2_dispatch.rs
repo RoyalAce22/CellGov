@@ -19,21 +19,86 @@ use super::{
 };
 
 impl Runtime {
-    /// Apply an `Lv2Dispatch` effects batch: `SharedWriteIntent`s
-    /// commit all-or-none after a `containing_region` pre-pass;
-    /// non-memory effects (`MailboxSend`, `RsxFlipRequest`) apply
-    /// piecewise in emission order. On memory-subset failure no
-    /// `SharedWriteIntent` lands and a `dispatch.lv2_effect_apply_failed`
-    /// invariant break carries the first failing address, length, and
-    /// `MemError`.
+    /// Apply an `Lv2Dispatch` effects batch by **direct commit**,
+    /// bypassing the commit pipeline's [`StagingMemory`]. The
+    /// variants this function handles each take their own
+    /// dedicated path:
+    ///
+    /// - `SharedWriteIntent` -> [`GuestMemory::apply_commit`] after a
+    ///   `containing_region` pre-pass over the full memory subset.
+    ///   The whole memory subset commits all-or-none against
+    ///   validation; on memory-subset failure no `SharedWriteIntent`
+    ///   lands and a `dispatch.lv2_effect_apply_failed` invariant
+    ///   break carries the first failing address, length, and
+    ///   `MemError`.
+    /// - `MailboxSend` -> `MailboxRegistry::get_mut(..).force_send`
+    ///   plus a `set_status_override(Blocked -> Runnable)` on any
+    ///   unit Blocked on the matching `UnitId`.
+    /// - `RsxFlipRequest` -> [`crate::rsx::flip::RsxFlipState::request_flip`]
+    ///   (the same method `commit_pipeline.process` calls from the
+    ///   FIFO-advance path; both provenances share the destination).
+    /// - Every other `Effect` variant falls through the `_ => {}`
+    ///   catch-all and is silently dropped. LV2 dispatch handlers
+    ///   are responsible for not emitting effects the LV2 surface
+    ///   cannot apply (e.g. `RsxLabelWrite`, `DmaEnqueue`,
+    ///   `ReservationAcquire`, `ConditionalStore`); these belong to
+    ///   the unit-effect / FIFO-advance path through
+    ///   `commit_pipeline.process`.
+    ///
+    /// [`StagingMemory`]: cellgov_mem::StagingMemory
+    /// [`GuestMemory::apply_commit`]: cellgov_mem::GuestMemory::apply_commit
+    ///
+    /// # Atomic-batch discard semantics (committed-on-dispatch)
+    ///
+    /// These effects DO NOT participate in atomic-batch
+    /// discard-on-fault. If the containing `commit_step`'s
+    /// unit-staged effects fail `validate_write` and the batch is
+    /// discarded, the mutations this function applied have already
+    /// landed and are NOT rolled back. This is the documented
+    /// dispatcher-state-vs-staged-effect contract: a syscall has
+    /// returned its result to the guest by the time the batch
+    /// finalizes, so syscall-side state must persist independently
+    /// of the staged-effect batch's fate. The two consumer-side
+    /// docstrings in `cellgov_lv2::host::rsx::attribute` cite this
+    /// function for the same contract.
+    ///
+    /// # Intra-`commit_step` ordering against unit `SharedWriteIntent`s
+    ///
+    /// `Runtime::commit_step` runs the staged unit-effect drain
+    /// (inside `commit_pipeline.process`) FIRST and `dispatch_syscall`
+    /// (which calls this function) SECOND. So an LV2
+    /// `SharedWriteIntent` to a given range deterministically lands
+    /// AFTER any same-batch unit store to the same range. This
+    /// ordering is structural (the call order in `commit_step`), not
+    /// a `(PriorityClass, source_time, source)` tiebreak through the
+    /// staging buffer. The triple on these effects is currently
+    /// INERT on the direct-commit path -- not consulted at all -- so
+    /// LV2 emit sites that set `source: UnitId::new(0)` /
+    /// `source_time: current_tick` carry that triple as a
+    /// well-formedness invariant, not as an ordering signal.
     ///
     /// # Cross-module contract
     ///
     /// LV2 handlers must not emit a non-memory effect whose semantics
     /// depend on a co-batched `SharedWriteIntent` having committed; a
-    /// `debug_assert!` traps that condition. Mailbox sends wake any
-    /// unit Blocked on the matching `UnitId`; RSX flip requests
-    /// transition WAITING -> DONE on the next `commit_step` boundary.
+    /// `debug_assert!` below traps that condition. Mailbox sends wake
+    /// any unit Blocked on the matching `UnitId`; RSX flip requests
+    /// transition WAITING -> DONE on the next `commit_step` boundary
+    /// via `RsxFlipState::complete_pending_flip`, NOT during the
+    /// dispatching batch.
+    ///
+    /// # Refactor tripwire
+    ///
+    /// If a future refactor routes these effects through
+    /// `StagingMemory::stage` instead of `apply_commit`, the
+    /// same-range collision against a same-tick unit store becomes
+    /// governed by the staging ordering comparator and the
+    /// currently-inert `(source, source_time)` triple becomes live.
+    /// The `lv2_direct_committed_writes` counter in `Runtime` is
+    /// witnessed by the unit test
+    /// `apply_lv2_effects_direct_commits_shared_write_intents` so a
+    /// regression that drops the direct-commit path drops the
+    /// counter to zero and the test fails red.
     pub(super) fn apply_lv2_effects(&mut self, effects: &[Effect]) {
         let memory_failure = self.validate_lv2_memory_subset(effects);
         debug_assert!(
@@ -59,6 +124,13 @@ impl Runtime {
             );
         }
         for effect in effects {
+            // Exhaustive match with no wildcard: a new variant on
+            // cellgov_effects::Effect must add an arm here (compile
+            // error otherwise). This is the "classify, never silently
+            // drop" discipline applied to effect application -- a
+            // future LV2 handler that emits an unmodeled variant
+            // surfaces loudly via the unsupported-arm log_invariant_break
+            // rather than vanishing through a `_ => {}` catch-all.
             match effect {
                 Effect::SharedWriteIntent { range, bytes, .. } => {
                     if memory_failure.is_some() {
@@ -69,6 +141,12 @@ impl Runtime {
                          the same predicate apply_commit uses internally -- so this Err \
                          path is structurally unreachable",
                     );
+                    // Tripwire witness: a future refactor that routes
+                    // this through StagingMemory drops the increment;
+                    // the integration test below asserts this stays
+                    // nonzero on a real FIFO_SETUP commit_step.
+                    self.lv2_direct_committed_writes =
+                        self.lv2_direct_committed_writes.wrapping_add(1);
                 }
                 Effect::MailboxSend {
                     mailbox, message, ..
@@ -87,7 +165,109 @@ impl Runtime {
                 Effect::RsxFlipRequest { buffer_index } => {
                     self.rsx_flip.request_flip(*buffer_index);
                 }
-                _ => {}
+                // Unsupported-from-LV2 variants. Each names the
+                // expected origin so a reader can disambiguate "LV2
+                // handler emitted by mistake" from "execution-unit
+                // path leaked through". All route through
+                // log_invariant_break under the
+                // `runtime.apply_lv2_effects_unsupported_*` tag prefix
+                // for grep-separability from genuine internal-invariant
+                // failures (matches the cellgov_lv2 `_unsupported_`
+                // convention for honest not-implemented arms).
+                Effect::MailboxReceiveAttempt { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_mailbox_receive_attempt",
+                        format_args!(
+                            "LV2 dispatch emitted MailboxReceiveAttempt; this variant is \
+                             PPU/SPU-side receiver semantics and has no LV2 producer. \
+                             Effect dropped."
+                        ),
+                    );
+                }
+                Effect::DmaEnqueue { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_dma_enqueue",
+                        format_args!(
+                            "LV2 dispatch emitted DmaEnqueue; this variant originates \
+                             from SPU MFC issue. Effect dropped."
+                        ),
+                    );
+                }
+                Effect::WaitOnEvent { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_wait_on_event",
+                        format_args!(
+                            "LV2 dispatch emitted WaitOnEvent; LV2 block semantics use \
+                             Lv2Dispatch::Block / PendingResponse, not this variant. \
+                             Effect dropped."
+                        ),
+                    );
+                }
+                Effect::WakeUnit { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_wake_unit",
+                        format_args!(
+                            "LV2 dispatch emitted WakeUnit; LV2 wake semantics use the \
+                             `woken_unit_ids` field on Lv2Dispatch::WakeAndReturn, not \
+                             this variant. Effect dropped."
+                        ),
+                    );
+                }
+                Effect::SignalUpdate { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_signal_update",
+                        format_args!(
+                            "LV2 dispatch emitted SignalUpdate; this variant originates \
+                             from PPU/SPU signal-write paths. Effect dropped."
+                        ),
+                    );
+                }
+                Effect::FaultRaised { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_fault_raised",
+                        format_args!(
+                            "LV2 dispatch emitted FaultRaised; faults originate from \
+                             execution units, not LV2 syscall handlers. Effect dropped."
+                        ),
+                    );
+                }
+                Effect::TraceMarker { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_trace_marker",
+                        format_args!(
+                            "LV2 dispatch emitted TraceMarker; this is an execution-unit \
+                             breadcrumb variant. Effect dropped."
+                        ),
+                    );
+                }
+                Effect::ReservationAcquire { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_reservation_acquire",
+                        format_args!(
+                            "LV2 dispatch emitted ReservationAcquire; LL/SC paths run in \
+                             execution units, not LV2 syscalls. Effect dropped."
+                        ),
+                    );
+                }
+                Effect::ConditionalStore { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_conditional_store",
+                        format_args!(
+                            "LV2 dispatch emitted ConditionalStore; stwcx./stdcx. paths \
+                             run in execution units, not LV2 syscalls. Effect dropped."
+                        ),
+                    );
+                }
+                Effect::RsxLabelWrite { .. } => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.apply_lv2_effects_unsupported_rsx_label_write",
+                        format_args!(
+                            "LV2 dispatch emitted RsxLabelWrite; this variant flows from \
+                             the FIFO advance pass via pending_rsx_effects into the next \
+                             batch's commit_pipeline, not through LV2 dispatch. Effect dropped."
+                        ),
+                    );
+                }
             }
         }
     }

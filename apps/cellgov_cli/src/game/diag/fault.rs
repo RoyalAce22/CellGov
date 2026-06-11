@@ -23,7 +23,7 @@ pub(in crate::game) fn format_fault(
         .unwrap_or_else(|| "?".to_string());
     use cellgov_ppu::{
         FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR, FAULT_INVALID_ADDRESS, FAULT_PC_OUT_OF_RANGE,
-        FAULT_UNIMPLEMENTED_INSN, FAULT_UNSUPPORTED_SYSCALL,
+        FAULT_PROGRAM_TRAP, FAULT_UNIMPLEMENTED_INSN, FAULT_UNSUPPORTED_SYSCALL,
     };
     let detail = match fault {
         cellgov_effects::FaultKind::Guest(code) => {
@@ -57,6 +57,10 @@ pub(in crate::game) fn format_fault(
                 FAULT_UNIMPLEMENTED_INSN => {
                     let xo = code & 0x0000_FFFF;
                     format!("UNIMPLEMENTED_INSN (xo=0x{xo:x}) at PC={pc_str}")
+                }
+                FAULT_PROGRAM_TRAP => {
+                    let to = code & 0x0000_FFFF;
+                    format!("PROGRAM_TRAP (TO=0x{to:02x}) at PC={pc_str}")
                 }
                 FAULT_DEBUG_BREAK => format!("DEBUG_BREAK at PC={pc_str}"),
                 _ => format!("Guest(0x{code:08x}) at PC={pc_str}"),

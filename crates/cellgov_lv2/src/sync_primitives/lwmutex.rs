@@ -140,12 +140,39 @@ impl LwMutexIdAllocator {
 pub struct LwMutexTable {
     entries: BTreeMap<u32, LwMutexEntry>,
     ids: LwMutexIdAllocator,
+    /// Audit C-6a witness: cumulative count of calls to
+    /// `acquire_or_enqueue` and `enqueue_waiter`. The catch-all
+    /// `debug_assert!`s at lines 234 and 254 of this file guard
+    /// internal contains/duplicate-enqueue invariants; silence is
+    /// non-vacuous only when the functions actually ran. Not
+    /// state-hashed (instrument-only).
+    acquires_count: u64,
+    /// Audit C-6b witness: cumulative count of
+    /// `release_and_wake_next` calls. Pairs with `acquires_count`
+    /// on the release side. Not state-hashed.
+    releases_count: u64,
 }
 
 impl LwMutexTable {
     /// Construct an empty table.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Audit C-6a witness: cumulative count of
+    /// `acquire_or_enqueue` and `enqueue_waiter` calls. See the
+    /// `acquires_count` field doc.
+    #[inline]
+    pub fn acquires_count(&self) -> u64 {
+        self.acquires_count
+    }
+
+    /// Audit C-6b witness: cumulative count of
+    /// `release_and_wake_next` calls. See the `releases_count`
+    /// field doc.
+    #[inline]
+    pub fn releases_count(&self) -> u64 {
+        self.releases_count
     }
 
     /// Allocate a fresh id and create the entry; `None` if the
@@ -220,6 +247,7 @@ impl LwMutexTable {
     ///
     /// O(n) scan over the waiter list on the already-parked check.
     pub fn acquire_or_enqueue(&mut self, id: u32, caller: PpuThreadId) -> LwMutexAcquireOrEnqueue {
+        self.acquires_count = self.acquires_count.wrapping_add(1);
         let Some(entry) = self.entries.get_mut(&id) else {
             return LwMutexAcquireOrEnqueue::Unknown;
         };
@@ -246,6 +274,7 @@ impl LwMutexTable {
         id: u32,
         waiter: PpuThreadId,
     ) -> Result<(), LwMutexEnqueueError> {
+        self.acquires_count = self.acquires_count.wrapping_add(1);
         let entry = self
             .entries
             .get_mut(&id)
@@ -267,6 +296,7 @@ impl LwMutexTable {
     /// (`Signaled`). The kernel does not validate `_caller`; the
     /// user-space wrapper verifies the owner before invoking unlock.
     pub fn release_and_wake_next(&mut self, id: u32, _caller: PpuThreadId) -> LwMutexRelease {
+        self.releases_count = self.releases_count.wrapping_add(1);
         let Some(entry) = self.entries.get_mut(&id) else {
             return LwMutexRelease::Unknown;
         };

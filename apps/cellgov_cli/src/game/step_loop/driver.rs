@@ -191,6 +191,14 @@ pub(in crate::game) fn step_loop(
                 append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
                 break (diag, BootOutcome::TimeOverflow);
             }
+            Err(StepError::SchedulerNotReinstalled) => {
+                // The boot driver does not call Runtime::restore_into.
+                unreachable!(
+                    "boot driver does not call Runtime::restore_into; \
+                     reaching this arm means a new caller added a \
+                     restore path without rethinking the dispatch."
+                );
+            }
         }
     }
 }

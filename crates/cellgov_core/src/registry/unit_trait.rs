@@ -1,10 +1,9 @@
 //! Object-safe view of [`ExecutionUnit`] for the runtime registry.
-//!
-//! [`ExecutionUnit`] has an associated `Snapshot` type so `dyn ExecutionUnit`
-//! is not object-safe; [`RegisteredUnit`] mirrors the runtime-visible
-//! methods and is blanket-impl'd for every `U: ExecutionUnit + Clone + 'static`.
-//! Snapshots live outside this trait so concrete unit types pick their
-//! own representation.
+//! [`ExecutionUnit`] has an associated `Snapshot` so it is not
+//! object-safe; [`RegisteredUnit`] mirrors the runtime-visible methods
+//! and is blanket-impl'd for every `U: ExecutionUnit + Clone + 'static`.
+
+use core::any::Any;
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -64,6 +63,10 @@ pub trait RegisteredUnit: 'static {
     /// Current register snapshot for diagnostic dumps. See
     /// [`ExecutionUnit::register_dump`].
     fn register_dump(&self) -> Option<FaultRegisterDump>;
+
+    /// Upcast for callers that need to downcast to a concrete unit
+    /// type to inspect state the trait does not expose.
+    fn as_any(&self) -> &dyn Any;
 }
 
 impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
@@ -125,5 +128,10 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn register_dump(&self) -> Option<FaultRegisterDump> {
         ExecutionUnit::register_dump(self)
+    }
+
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

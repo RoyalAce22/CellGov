@@ -3,6 +3,13 @@
 //! (SCE-wrapped) inputs. `--at` matches `ImportedFunction::stub_addr`
 //! by exact equality against the file-relative vaddr at parse time
 //! (this tool does not run relocations).
+//!
+//! `--save-elf <path>` writes the decrypted plaintext ELF (the same
+//! bytes the parser consumes) to `path`. The output is byte-identical
+//! to RPCS3's `unself` for the same input. Useful when the firmware
+//! PRX of interest (`libsysutil_avconf_ext`, `libsre`, `libfiber`)
+//! isn't pre-staged under `tools/rpcs3/dev_flash_decrypted/` and you
+//! need an ELF to pass to `cellgov_cli disasm`.
 
 const NAME_COLUMN_WIDTH: usize = 49;
 
@@ -20,6 +27,7 @@ struct Args {
     path: std::path::PathBuf,
     filter_addr: Option<u32>,
     filter_module: Option<String>,
+    save_elf: Option<std::path::PathBuf>,
 }
 
 /// Parse argv into [`Args`]; `Err` is a usage-format string ready
@@ -33,6 +41,7 @@ fn try_parse_args(args: &[String]) -> Result<Args, String> {
     let mut path: Option<std::path::PathBuf> = None;
     let mut filter_addr: Option<u32> = None;
     let mut filter_module: Option<String> = None;
+    let mut save_elf: Option<std::path::PathBuf> = None;
 
     let mut i = 2;
     while i < args.len() {
@@ -63,6 +72,16 @@ fn try_parse_args(args: &[String]) -> Result<Args, String> {
                 filter_module = Some(v.clone());
                 i += 2;
             }
+            "--save-elf" => {
+                if save_elf.is_some() {
+                    return Err("dump-prx-imports: --save-elf specified more than once".to_string());
+                }
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--save-elf requires an output path".to_string())?;
+                save_elf = Some(std::path::PathBuf::from(v));
+                i += 2;
+            }
             other if other.starts_with("--") => {
                 return Err(format!("dump-prx-imports: unknown flag {other}"));
             }
@@ -80,7 +99,8 @@ fn try_parse_args(args: &[String]) -> Result<Args, String> {
     }
 
     let path = path.ok_or_else(|| {
-        "usage: cellgov_cli dump-prx-imports <path-to-prx-or-sprx> [--at 0xADDR] [--module NAME]"
+        "usage: cellgov_cli dump-prx-imports <path-to-prx-or-sprx> \
+         [--at 0xADDR] [--module NAME] [--save-elf <path>]"
             .to_string()
     })?;
 
@@ -88,6 +108,7 @@ fn try_parse_args(args: &[String]) -> Result<Args, String> {
         path,
         filter_addr,
         filter_module,
+        save_elf,
     })
 }
 
@@ -169,6 +190,20 @@ fn classify_source(raw: &[u8]) -> Result<SourceKind, LoadError> {
 pub(crate) fn run(args: &[String]) {
     let parsed = try_parse_args(args).unwrap_or_else(|msg| crate::cli::exit::die(&msg));
     let (elf_bytes, source_kind) = load_elf_bytes(&parsed.path);
+
+    if let Some(out) = &parsed.save_elf {
+        std::fs::write(out, &elf_bytes).unwrap_or_else(|e| {
+            crate::cli::exit::die(&format!(
+                "dump-prx-imports: --save-elf write {}: {e}",
+                out.display()
+            ))
+        });
+        println!(
+            "dump-prx-imports: wrote {} byte(s) of plaintext ELF to {}",
+            elf_bytes.len(),
+            out.display()
+        );
+    }
 
     // Best-effort: game EBOOTs / partial fixtures parse imports
     // but not the full PRX; degrade by omitting module identity.
@@ -401,6 +436,53 @@ mod tests {
         let p = try_parse_args(&a).unwrap();
         assert_eq!(p.filter_module.as_deref(), Some("sys_fs"));
         assert!(p.filter_addr.is_none());
+    }
+
+    #[test]
+    fn try_parse_args_accepts_save_elf_path() {
+        let a = argv(&["libsysutil.sprx", "--save-elf", "/tmp/out.elf"]);
+        let p = try_parse_args(&a).unwrap();
+        assert_eq!(
+            p.save_elf.as_deref().and_then(|p| p.to_str()),
+            Some("/tmp/out.elf")
+        );
+        assert!(p.filter_addr.is_none());
+        assert!(p.filter_module.is_none());
+    }
+
+    #[test]
+    fn try_parse_args_rejects_save_elf_without_value() {
+        let a = argv(&["libsysutil.sprx", "--save-elf"]);
+        let err = try_parse_args(&a).unwrap_err();
+        assert!(err.contains("--save-elf"), "got: {err}");
+    }
+
+    #[test]
+    fn try_parse_args_rejects_duplicate_save_elf() {
+        let a = argv(&["libsysutil.sprx", "--save-elf", "/a", "--save-elf", "/b"]);
+        let err = try_parse_args(&a).unwrap_err();
+        assert!(err.contains("--save-elf"), "got: {err}");
+        assert!(err.contains("more than once"), "got: {err}");
+    }
+
+    #[test]
+    fn try_parse_args_save_elf_composes_with_at_and_module() {
+        let a = argv(&[
+            "libsysutil.sprx",
+            "--at",
+            "0x9bff10",
+            "--module",
+            "sys_fs",
+            "--save-elf",
+            "/tmp/out.elf",
+        ]);
+        let p = try_parse_args(&a).unwrap();
+        assert_eq!(p.filter_addr, Some(0x009b_ff10));
+        assert_eq!(p.filter_module.as_deref(), Some("sys_fs"));
+        assert_eq!(
+            p.save_elf.as_deref().and_then(|p| p.to_str()),
+            Some("/tmp/out.elf")
+        );
     }
 
     #[test]

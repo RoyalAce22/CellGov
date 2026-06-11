@@ -34,13 +34,6 @@ fn workspace_root() -> PathBuf {
 
 use cellgov_ppu::prx_loader::MIN_VIABLE_PRX_STEMS;
 
-/// Expected count of minimum-viable PRXes filtered by
-/// `MultiSegmentRelocations` on the current firmware install. Drift
-/// in either direction is the test signal: a regression that
-/// suddenly rejects more modules trips, and a hand-rolled exception
-/// that smuggles a multi-segment module through silently also trips.
-const MULTI_SEG_EXPECTED: usize = 0;
-
 fn locate_firmware_dir() -> Option<PathBuf> {
     let dir = match std::env::var("CELLGOV_FIRMWARE_DIR") {
         Ok(s) => PathBuf::from(s),
@@ -118,14 +111,25 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
             .to_string();
         bytes_by_path.insert(path_str, elf);
     }
-    assert_eq!(
-        multi_seg_skipped, MULTI_SEG_EXPECTED,
-        "multi_seg_skipped diverged from the calibrated MULTI_SEG_EXPECTED; either a regression changed the loadable subset or the constant needs recalibration"
-    );
+    // Mechanism check: every stem in the input set is accounted for
+    // -- either loaded into bytes_by_path or filtered as
+    // multi-segment. A new failure mode in `check_loadable` that
+    // bypasses both buckets would trip here.
+    //
+    // The previous shape ('multi_seg_skipped == MULTI_SEG_EXPECTED')
+    // baked the current corpus snapshot's filter count into the
+    // test; a re-decrypted firmware where the loader picked up
+    // single-segment relocs in a previously-multi-segment module
+    // would break the test without any guard actually regressing,
+    // so the constant was anchor residue per the bucket-B audit
+    // criterion. Dropped.
     assert_eq!(
         bytes_by_path.len() + multi_seg_skipped,
         MIN_VIABLE_PRX_STEMS.len(),
-        "missing modules unaccounted for"
+        "stem accounting broken: loaded={} + multi_seg_skipped={} != input={}",
+        bytes_by_path.len(),
+        multi_seg_skipped,
+        MIN_VIABLE_PRX_STEMS.len()
     );
     eprintln!(
         "firmware_set_load: prepared {} minimum-viable PRX modules ({multi_seg_skipped} multi-segment-skipped)",
@@ -249,70 +253,20 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     );
 }
 
-/// Static counterpart to the runtime `host_invariant_breaks`
-/// reading: union of the 15-stem set's export namespaces must
-/// contain every namespace any title in the corpus imports via
-/// the unresolved-trampoline path.
-#[test]
-fn min_viable_prx_set_exports_required_namespaces() {
-    let Some(dir) = locate_firmware_dir() else {
-        return;
-    };
-
-    let mut namespaces: BTreeSet<String> = BTreeSet::new();
-    let mut missing_stems: Vec<&str> = Vec::new();
-    for stem in MIN_VIABLE_PRX_STEMS {
-        let path = dir.join(format!("{stem}.sprx"));
-        if !path.is_file() {
-            missing_stems.push(*stem);
-            continue;
-        }
-        let raw = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let elf = cellgov_firmware::sce::decrypt_self_to_elf(&raw)
-            .unwrap_or_else(|e| panic!("decrypt {}: {e}", path.display()));
-        let parsed = cellgov_ppu::sprx::parse_prx(&elf)
-            .unwrap_or_else(|e| panic!("parse_prx {}: {e:?}", path.display()));
-        for lib in &parsed.exports {
-            namespaces.insert(lib.name.clone());
-        }
-    }
-    if !missing_stems.is_empty() {
-        if std::env::var_os("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD").is_some() {
-            panic!("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD set but stems missing: {missing_stems:?}");
-        }
-        eprintln!(
-            "min_viable_prx_set_exports_required_namespaces: namespace union built from \
-             {}/{} stems (missing: {missing_stems:?})",
-            MIN_VIABLE_PRX_STEMS.len() - missing_stems.len(),
-            MIN_VIABLE_PRX_STEMS.len(),
-        );
-    }
-
-    // Namespaces titles in the corpus import via the
-    // unresolved-trampoline path; every one must be exported by
-    // some stem in the loaded set.
-    const REQUIRED: &[&str] = &[
-        "cellSysmodule",
-        "cellSysutil",
-        "cellGcmSys",
-        "cellSpurs",
-        "sys_io",
-        "cellSysutilAvconfExt",
-    ];
-    for ns in REQUIRED {
-        assert!(
-            namespaces.contains(*ns),
-            "{ns}: namespace identified as a contamination source by the \
-             closure investigation is not exported by the {n}-stem firmware set; \
-             closure-walk regression",
-            n = MIN_VIABLE_PRX_STEMS.len()
-        );
-    }
-    eprintln!(
-        "min_viable_prx_set_exports_required_namespaces: {} namespaces exported by {}-stem set, \
-         all {} required namespaces present",
-        namespaces.len(),
-        MIN_VIABLE_PRX_STEMS.len(),
-        REQUIRED.len()
-    );
-}
+// `min_viable_prx_set_exports_required_namespaces` previously
+// asserted a frozen `REQUIRED` namespace list (cellSysmodule,
+// cellSysutil, cellGcmSys, cellSpurs, sys_io, cellSysutilAvconfExt)
+// against the firmware corpus. That list was per-corpus
+// compatibility state from the closure investigation, not a
+// guard-liveness witness: a title-set churn that added or removed
+// a stem from the closure walk would break this test without any
+// loader / closure mechanism actually regressing. Per the bucket-B
+// audit criterion (correctness-improving trajectory shifts must
+// not break a liveness test), the assertion does not belong here.
+//
+// Deleted from this audit suite. The "every title in the corpus
+// can resolve every namespace it imports" property belongs in the
+// titles/compat suite where the inputs are titles + their imports
+// rather than a hand-frozen list, so the assertion can derive its
+// expectation from the same corpus state it validates. No
+// relocation has been performed in this commit; this is a marker.

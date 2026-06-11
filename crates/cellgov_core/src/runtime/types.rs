@@ -42,6 +42,15 @@ pub enum StepError {
     /// Consumed budget would push guest time past `u64::MAX`.
     #[error("guest time would overflow u64")]
     TimeOverflow,
+    /// `Runtime::restore_into` ran without a subsequent
+    /// `Runtime::set_scheduler`. Presence is mechanically checked;
+    /// internal-state consistency with `snap` is the caller's
+    /// obligation.
+    #[error(
+        "Runtime::step called between restore_into and set_scheduler; \
+         install a fresh scheduler after every restore_into"
+    )]
+    SchedulerNotReinstalled,
 }
 
 /// Constructs an SPU unit when `Lv2Dispatch::RegisterSpu` fires.
@@ -52,16 +61,6 @@ pub type PpuFactory = Box<dyn Fn(UnitId, PpuThreadInitState) -> Box<dyn Register
 
 /// Controls which trace records emit and whether per-instruction
 /// state-hash fingerprints are captured.
-///
-/// Two orthogonal axes:
-///
-/// 1. *Per-yield* records (`UnitScheduled`, `StepCompleted`,
-///    `EffectEmitted`, commit-boundary state-hash checkpoints).
-/// 2. *Per-instruction* `PpuStateHash` fingerprints, gated by
-///    `ExecutionContext::trace_per_step`. The unit's per-step hash
-///    buffer accumulates one `(pc, hash)` per retirement at any
-///    budget size, so trace fidelity is independent of slice
-///    granularity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeMode {
     /// No trace records, no per-instruction hashes.
@@ -73,9 +72,8 @@ pub enum RuntimeMode {
 }
 
 /// All current modes return 256 (the throughput batch size). The
-/// exhaustive match without an `_` arm is a trip-wire: a new
-/// `RuntimeMode` variant breaks compilation here and forces the
-/// author to pick its budget rather than silently inheriting 256.
+/// exhaustive match (no `_` arm) forces a new `RuntimeMode` variant
+/// to pick its budget explicitly.
 pub fn default_budget_for_mode(mode: RuntimeMode) -> Budget {
     match mode {
         RuntimeMode::FullTrace | RuntimeMode::FaultDriven | RuntimeMode::DeterminismCheck => {

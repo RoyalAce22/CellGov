@@ -46,6 +46,14 @@ pub struct ContentStore {
     by_path: BTreeMap<Vec<u8>, SpuImageRecord>,
     by_handle: BTreeMap<SpuImageHandle, Vec<u8>>,
     next_handle: u32,
+    /// Cumulative count of [`Self::register`] invocations. Audit
+    /// C-5a witness: the path-shape `debug_assert!`s in `register`
+    /// (lines 74/79, 107/112/128 of this file) are conditional on
+    /// register being called; this counter makes their silence
+    /// non-vacuous. Increments per call regardless of whether the
+    /// registration was novel or matched an existing path. Not
+    /// snapshot/restore-captured: instrument state only.
+    register_invocations: u64,
 }
 
 impl Default for ContentStore {
@@ -61,7 +69,15 @@ impl ContentStore {
             by_path: BTreeMap::new(),
             by_handle: BTreeMap::new(),
             next_handle: 1,
+            register_invocations: 0,
         }
+    }
+
+    /// Audit C-5a witness: cumulative count of `register` calls.
+    /// See the field doc on `register_invocations`.
+    #[inline]
+    pub fn register_invocations(&self) -> u64 {
+        self.register_invocations
     }
 
     /// Register an SPU image under `path`. Idempotent for identical
@@ -71,6 +87,7 @@ impl ContentStore {
     /// - `path` is already registered with different `elf_bytes`.
     /// - The monotonic handle counter wraps past `u32::MAX`.
     pub fn register(&mut self, path: &[u8], elf_bytes: Vec<u8>) -> SpuImageHandle {
+        self.register_invocations = self.register_invocations.wrapping_add(1);
         debug_assert!(
             path.starts_with(b"/"),
             "ContentStore::register: path {:?} is not absolute",
@@ -167,6 +184,7 @@ impl ContentStore {
             by_path: BTreeMap::new(),
             by_handle: BTreeMap::new(),
             next_handle,
+            register_invocations: 0,
         }
     }
 }
@@ -196,6 +214,24 @@ mod tests {
         let s = ContentStore::new();
         assert!(s.is_empty());
         assert_eq!(s.len(), 0);
+    }
+
+    #[test]
+    fn register_invocations_counter_increments_per_call() {
+        // C-5a audit witness: register_invocations counts every
+        // register() call, regardless of whether the registration
+        // was novel or matched an existing path. Proves the path-
+        // shape debug_assert!s' silence is non-vacuous when > 0.
+        let mut s = ContentStore::new();
+        assert_eq!(s.register_invocations(), 0);
+        s.register(b"/spu_a.elf", vec![1]);
+        assert_eq!(s.register_invocations(), 1);
+        // Idempotent registration still counts as a register call --
+        // the guards still ran on the path-shape check.
+        s.register(b"/spu_a.elf", vec![1]);
+        assert_eq!(s.register_invocations(), 2);
+        s.register(b"/spu_b.elf", vec![2]);
+        assert_eq!(s.register_invocations(), 3);
     }
 
     #[test]

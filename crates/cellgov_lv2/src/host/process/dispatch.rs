@@ -120,14 +120,23 @@ impl Lv2Host {
         self.immediate_write_u32(count, count_out_ptr, source)
     }
 
-    /// `sys_process_get_sdk_version`: writes `0xFFFFFFFF` (real PS3's
-    /// response for PSL1GHT homebrew with no SDK version recorded).
+    /// `sys_process_get_sdk_version`: writes the title's recorded
+    /// SDK version. The value is read from the title ELF's
+    /// `process_param_t` at boot
+    /// (`cellgov_ppu::loader::find_sys_process_param`) and plumbed
+    /// through via [`Lv2Host::set_sdk_version`]. Callers that never
+    /// invoke the setter retain `0xFFFFFFFF`
+    /// (`SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN`) -- the PS3
+    /// absent-case sentinel for PSL1GHT homebrew. RPCS3 mirrors the
+    /// same field at `sys_process.cpp`
+    /// (`g_ps3_process_info.sdk_ver`, populated from the LOOS+1
+    /// program header at `PPUModule.cpp`).
     pub(in crate::host) fn dispatch_process_get_sdk_version(
         &self,
         version_out_ptr: u32,
         source: UnitId,
     ) -> Lv2Dispatch {
-        let version: u32 = 0xFFFF_FFFF;
+        let version: u32 = self.sdk_version();
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(version_out_ptr, 4),
             bytes: WritePayload::from_slice(&version.to_be_bytes()),
@@ -166,5 +175,62 @@ impl Lv2Host {
             code: 0,
             effects: vec![write],
         }
+    }
+}
+
+#[cfg(test)]
+mod sdk_version_tests {
+    use super::*;
+    use cellgov_event::UnitId;
+    use cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN;
+
+    fn captured_version(host: &Lv2Host) -> u32 {
+        match host.dispatch_process_get_sdk_version(0x1000, UnitId::new(0)) {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0, "sc 25 must return code 0");
+                assert_eq!(effects.len(), 1, "sc 25 emits one shared write");
+                let Effect::SharedWriteIntent { bytes, .. } = &effects[0] else {
+                    panic!("expected SharedWriteIntent, got {:?}", effects[0]);
+                };
+                let payload = bytes.bytes();
+                assert_eq!(payload.len(), 4, "SDK version is u32");
+                u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn default_is_psl1ght_sentinel() {
+        let host = Lv2Host::new();
+        assert_eq!(
+            captured_version(&host),
+            SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN
+        );
+    }
+
+    #[test]
+    fn set_sdk_version_propagates_to_dispatch() {
+        let mut host = Lv2Host::new();
+        host.set_sdk_version(0x0019_0004);
+        assert_eq!(captured_version(&host), 0x0019_0004);
+    }
+
+    /// Non-vacuous proof: this test FAILS if the dispatch arm
+    /// regresses to the unconditional sentinel. It is the
+    /// adversarial-revert tripwire for the sc-25 fix.
+    #[test]
+    fn dispatch_does_not_hardcode_the_sentinel() {
+        let mut host = Lv2Host::new();
+        host.set_sdk_version(0x0016_0008);
+        let got = captured_version(&host);
+        assert_ne!(
+            got, SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
+            "dispatch_process_get_sdk_version regressed to hardcoded \
+             0xFFFFFFFF instead of plumbing through the field set by \
+             Lv2Host::set_sdk_version. See \
+             docs/dev/bug_investigations/cellsysutil_allblocked_43.md"
+        );
+        assert_eq!(got, 0x0016_0008);
     }
 }

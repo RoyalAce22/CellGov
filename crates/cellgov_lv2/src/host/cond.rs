@@ -244,6 +244,7 @@ impl Lv2Host {
         mutex_id: u32,
         use_lwmutex: bool,
     ) -> Lv2Dispatch {
+        self.cond_reacquire_wake_calls = self.cond_reacquire_wake_calls.wrapping_add(1);
         debug_assert!(!use_lwmutex, "lwmutex cond re-acquire not wired");
         let Some(waker_unit) = self.resolve_wake_thread(waker, "cond_reacquire_wake") else {
             return Lv2Dispatch::immediate(0u64);

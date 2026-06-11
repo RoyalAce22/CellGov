@@ -387,6 +387,24 @@ impl NvMethodTable {
     pub fn is_empty(&self) -> bool {
         self.handlers.is_empty()
     }
+
+    /// Table populated with the default workspace handler roster.
+    /// `register_*` calls only fail on address collision; a fresh
+    /// table cannot collide.
+    pub fn with_default_handlers() -> Self {
+        let mut t = Self::new();
+        register_nv406e_label_handlers(&mut t)
+            .expect("fresh NvMethodTable cannot collide on NV406E label pair");
+        register_nv406e_reference_handler(&mut t)
+            .expect("fresh NvMethodTable cannot collide on NV406E_SET_REFERENCE");
+        register_nv4097_flip_handler(&mut t)
+            .expect("fresh NvMethodTable cannot collide on GCM_FLIP_COMMAND");
+        register_nv4097_report_handler(&mut t)
+            .expect("fresh NvMethodTable cannot collide on NV4097_GET_REPORT");
+        register_nv4097_back_end_semaphore_handlers(&mut t)
+            .expect("fresh NvMethodTable cannot collide on NV4097 back-end semaphore pair");
+        t
+    }
 }
 
 #[cfg(test)]
@@ -1196,5 +1214,32 @@ mod tests {
         assert_eq!(NV_FLAG_CALL, 0x0000_0002);
         assert_eq!(NV_FLAG_RETURN, 0x0002_0000);
         assert_eq!(NV_COUNT_SHIFT, 18);
+    }
+
+    #[test]
+    fn with_default_handlers_registers_exactly_the_expected_method_ids() {
+        let expected = [
+            NV406E_SEMAPHORE_OFFSET,
+            NV406E_SEMAPHORE_RELEASE,
+            NV406E_SET_REFERENCE,
+            GCM_FLIP_COMMAND,
+            NV4097_GET_REPORT,
+            NV4097_SET_SEMAPHORE_OFFSET,
+            NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE,
+        ];
+        let table = NvMethodTable::with_default_handlers();
+        assert_eq!(
+            table.len(),
+            expected.len(),
+            "roster size shifted: expected {} handlers, found {}",
+            expected.len(),
+            table.len(),
+        );
+        for method in expected {
+            assert!(
+                table.lookup(method).is_some(),
+                "expected method 0x{method:04x} missing from with_default_handlers roster",
+            );
+        }
     }
 }

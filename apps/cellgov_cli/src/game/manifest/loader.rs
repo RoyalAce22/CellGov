@@ -150,7 +150,11 @@ impl TitleManifest {
             }
             None => GameSource::Hdd,
         };
-        let rsx_mirror = file.rsx.map(|r| r.mirror).unwrap_or(false);
+        let (rsx_mirror, rsx_consume) = file
+            .rsx
+            .as_ref()
+            .map(|r| (r.mirror, r.consume))
+            .unwrap_or((false, false));
         if rsx_mirror && matches!(checkpoint, CheckpointTrigger::FirstRsxWrite) {
             return Err(ManifestError::Parse {
                 path: origin.to_path_buf(),
@@ -158,6 +162,16 @@ impl TitleManifest {
                           `checkpoint.kind = \"first-rsx-write\"`: the mirror \
                           makes the RSX region writable, so the put-pointer \
                           write that FirstRsxWrite watches for cannot fault."
+                    .to_string(),
+            });
+        }
+        if rsx_consume && !rsx_mirror {
+            return Err(ManifestError::Parse {
+                path: origin.to_path_buf(),
+                message: "`[rsx] consume = true` requires `[rsx] mirror = true`: \
+                          without the mirror the cursor never observes the guest's \
+                          put-pointer stores, so the 40F honest consumer has nothing \
+                          to walk. Enable mirror or remove consume."
                     .to_string(),
             });
         }
@@ -248,6 +262,7 @@ impl TitleManifest {
             checkpoint,
             source,
             rsx_mirror,
+            rsx_consume,
             content,
             mounts,
         })

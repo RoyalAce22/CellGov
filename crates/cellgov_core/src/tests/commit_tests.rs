@@ -42,6 +42,7 @@ impl CommitTestBed {
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
         let mut flip = crate::rsx::flip::RsxFlipState::new();
+        let mut label_writes = 0u64;
         let mut ctx = CommitContext {
             memory: &mut self.mem,
             units: &mut self.units,
@@ -53,6 +54,7 @@ impl CommitTestBed {
             reservations: &mut self.reservations,
             rsx_label_base: 0,
             rsx_flip: &mut flip,
+            rsx_label_writes_committed: &mut label_writes,
         };
         self.pipeline.process(result, effects, &mut ctx)
     }

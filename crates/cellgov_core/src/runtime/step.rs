@@ -24,12 +24,9 @@ impl Runtime {
     /// Emitted effects are returned verbatim in [`RuntimeStep::result`];
     /// [`Runtime::commit_step`] drives the commit pipeline over them.
     pub fn step(&mut self) -> Result<RuntimeStep, StepError> {
-        debug_assert!(
-            !self.scheduler_dirty_after_restore,
-            "Runtime::step called between restore_into and set_scheduler; the snapshotted \
-             last_scheduled_unit / step_woke_others would diverge from the scheduler's stale \
-             internal sticky-streak counter. Install a fresh scheduler after every restore_into."
-        );
+        if self.scheduler_dirty_after_restore {
+            return Err(StepError::SchedulerNotReinstalled);
+        }
         if self.steps_taken >= self.max_steps {
             return Err(StepError::MaxStepsExceeded);
         }
