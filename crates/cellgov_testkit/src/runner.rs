@@ -103,9 +103,23 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
             }
             Err(StepError::MaxStepsExceeded) => break ScenarioOutcome::MaxStepsExceeded,
             Err(StepError::TimeOverflow) => {
-                // Invariant violation; surface as stall so the trace and
-                // hashes are still available for inspection.
+                // Invariant violation; surface as stall so the trace
+                // and hashes are still available for inspection.
                 break ScenarioOutcome::Stalled;
+            }
+            Err(StepError::SchedulerNotReinstalled) => {
+                // Programming error, not a guest/terminal condition.
+                // The testkit runner builds a fresh runtime and never
+                // calls restore_into, so this arm is provably
+                // unreachable. Folding it into ScenarioOutcome::Stalled
+                // would silently truncate the run with no diagnostic
+                // naming the wiring mistake; panic instead so the
+                // misuse is loud at the site that introduced it.
+                unreachable!(
+                    "testkit runner does not call Runtime::restore_into; \
+                     reaching this arm means a new caller added a \
+                     restore path without rethinking the dispatch."
+                );
             }
         }
     };

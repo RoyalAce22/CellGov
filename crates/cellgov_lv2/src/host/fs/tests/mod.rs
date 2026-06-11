@@ -12,3 +12,4 @@ mod path;
 mod read;
 mod readdir;
 mod stat;
+mod write;

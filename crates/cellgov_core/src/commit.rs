@@ -201,6 +201,14 @@ pub struct CommitContext<'a> {
     pub rsx_label_base: u32,
     /// Write-only from this pipeline.
     pub rsx_flip: &'a mut crate::rsx::flip::RsxFlipState,
+    /// Audit C-2 witness, incremented adjacent to the semaphore-region
+    /// `debug_assert!` per `RsxLabelWrite` seen during `process()`.
+    /// Co-locating the counter with the guard makes it impossible for
+    /// the witness to be vacuous: a future filter in `process()` that
+    /// dropped an effect before the assert would also stop the
+    /// increment, so a nonzero count provably means the guard fired
+    /// the same number of times.
+    pub rsx_label_writes_committed: &'a mut u64,
 }
 
 /// The commit pipeline.
@@ -408,6 +416,8 @@ impl CommitPipeline {
                          0..0x1000 is semaphore, 0x1000+ is notify/report)",
                             *offset
                         );
+                        *ctx.rsx_label_writes_committed =
+                            ctx.rsx_label_writes_committed.wrapping_add(1);
                         // Two u32s widened to u64: the sum cannot wrap.
                         let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
                         let Some(_end) = start.checked_add(4) else {

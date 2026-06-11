@@ -12,6 +12,12 @@ use crate::request::Lv2Request;
 pub(super) struct FakeRuntime {
     memory: GuestMemory,
     tick: GuestTicks,
+    /// `Some(b)` forces `writable()` to return `b` regardless of
+    /// the addr/len bounds check.
+    writable_override: Option<bool>,
+    /// Per-address `writable()` override; takes precedence over
+    /// `writable_override`.
+    writable_at: std::collections::BTreeMap<u64, bool>,
 }
 
 impl FakeRuntime {
@@ -19,6 +25,8 @@ impl FakeRuntime {
         Self {
             memory: GuestMemory::new(size),
             tick: GuestTicks::ZERO,
+            writable_override: None,
+            writable_at: std::collections::BTreeMap::new(),
         }
     }
 
@@ -26,11 +34,27 @@ impl FakeRuntime {
         Self {
             memory,
             tick: GuestTicks::ZERO,
+            writable_override: None,
+            writable_at: std::collections::BTreeMap::new(),
         }
     }
 
     pub(super) fn with_tick(mut self, tick: GuestTicks) -> Self {
         self.tick = tick;
+        self
+    }
+
+    /// Override `writable()` to return `value` for every query.
+    pub(super) fn with_writable_override(mut self, value: bool) -> Self {
+        self.writable_override = Some(value);
+        self
+    }
+
+    /// Register a per-address writability override. Queries to `addr`
+    /// return `value`; other addresses fall through to
+    /// `writable_override` or the default bounds check.
+    pub(super) fn with_writable_at(mut self, addr: u64, value: bool) -> Self {
+        self.writable_at.insert(addr, value);
         self
     }
 }
@@ -64,6 +88,12 @@ impl Lv2Runtime for FakeRuntime {
     }
 
     fn writable(&self, addr: u64, len: usize) -> bool {
+        if let Some(&per_addr) = self.writable_at.get(&addr) {
+            return per_addr;
+        }
+        if let Some(forced) = self.writable_override {
+            return forced;
+        }
         let Some(end) = (addr).checked_add(len as u64) else {
             return false;
         };
@@ -100,7 +130,7 @@ pub(super) fn seed_primary_ppu(host: &mut Lv2Host, unit_id: UnitId) {
 }
 
 /// Address where [`fake_runtime_with_valid_sync_attr`] seeds a
-/// fully-initialized 8-byte sync-attribute header so creation
+/// fully-initialized 24-byte `sys_*_attribute_t` header so creation
 /// dispatches accept the pointer.
 pub(super) const VALID_SYNC_ATTR_PTR: u32 = 0x800;
 
@@ -136,10 +166,22 @@ pub(super) fn primary_attrs() -> PpuThreadAttrs {
 /// Lay out the two-step indirection that `_sys_ppu_thread_create`
 /// expects in guest memory: a `ppu_thread_param_t` at `param_addr`
 /// whose first u32 points at an OPD planted 8 bytes after it, and
-/// that OPD's `{ code, toc }` pair.
-pub(super) fn opd_runtime(param_addr: u32, entry_code: u64, entry_toc: u64) -> FakeRuntime {
+/// that OPD's `{ code, toc }` pair as 4-byte BE u32s each.
+///
+/// # Panics
+///
+/// Panics if `param_addr + 8` overflows `u32` or if `param_addr +
+/// 16` exceeds the 0x1_0000-byte arena.
+pub(super) fn opd_runtime(param_addr: u32, entry_code: u32, entry_toc: u32) -> FakeRuntime {
     let mut mem = GuestMemory::new(0x1_0000);
-    let opd_addr = param_addr + 8;
+    let opd_addr = param_addr
+        .checked_add(8)
+        .expect("opd_runtime: param_addr + 8 must fit in u32");
+    assert!(
+        opd_addr.checked_add(8).is_some_and(|end| end <= 0x1_0000),
+        "opd_runtime: OPD region [{opd_addr:#x}, {opd_addr:#x}+8) must stay within the \
+         0x1_0000-byte arena; pick a smaller param_addr"
+    );
 
     let mut param_bytes = [0u8; 8];
     param_bytes[0..4].copy_from_slice(&opd_addr.to_be_bytes());
@@ -147,8 +189,8 @@ pub(super) fn opd_runtime(param_addr: u32, entry_code: u64, entry_toc: u64) -> F
     mem.apply_commit(param_range, &param_bytes).unwrap();
 
     let mut opd_bytes = [0u8; 8];
-    opd_bytes[0..4].copy_from_slice(&(entry_code as u32).to_be_bytes());
-    opd_bytes[4..8].copy_from_slice(&(entry_toc as u32).to_be_bytes());
+    opd_bytes[0..4].copy_from_slice(&entry_code.to_be_bytes());
+    opd_bytes[4..8].copy_from_slice(&entry_toc.to_be_bytes());
     let opd_range = ByteRange::new(GuestAddr::new(opd_addr as u64), 8).unwrap();
     mem.apply_commit(opd_range, &opd_bytes).unwrap();
 
@@ -184,5 +226,70 @@ mod tests {
         assert!(rt.read_committed(252, 4).is_some());
         assert!(rt.read_committed(253, 4).is_none());
         assert!(rt.read_committed(0, 0).is_some());
+    }
+
+    #[test]
+    fn read_committed_until_terminator_at_first_byte_returns_empty_prefix() {
+        let mut mem = GuestMemory::new(16);
+        mem.apply_commit(ByteRange::new(GuestAddr::new(0), 1).unwrap(), &[0u8])
+            .unwrap();
+        let rt = FakeRuntime::with_memory(mem);
+        assert_eq!(rt.read_committed_until(0, 8, 0), Some(&[][..]));
+    }
+
+    #[test]
+    fn read_committed_until_no_terminator_within_max_len_returns_none() {
+        let mut mem = GuestMemory::new(16);
+        mem.apply_commit(ByteRange::new(GuestAddr::new(0), 4).unwrap(), b"abcd")
+            .unwrap();
+        let rt = FakeRuntime::with_memory(mem);
+        assert_eq!(rt.read_committed_until(0, 4, 0), None);
+    }
+
+    #[test]
+    fn read_committed_until_max_len_past_end_clamps_and_returns_none_when_terminator_absent() {
+        let rt = FakeRuntime::new(16);
+        assert_eq!(rt.read_committed_until(0, 100, 0xFF), None);
+    }
+
+    #[test]
+    fn read_committed_until_start_at_end_returns_none() {
+        let rt = FakeRuntime::new(16);
+        assert_eq!(rt.read_committed_until(16, 4, 0), None);
+    }
+
+    #[test]
+    fn writable_at_takes_precedence_over_writable_override() {
+        let rt = FakeRuntime::new(256)
+            .with_writable_override(true)
+            .with_writable_at(0x40, false);
+        assert!(!rt.writable(0x40, 4), "per-addr override must beat global");
+        assert!(
+            rt.writable(0x80, 4),
+            "addresses with no per-addr entry must fall through to writable_override"
+        );
+    }
+
+    #[test]
+    fn writable_at_miss_with_override_some_returns_override() {
+        let rt = FakeRuntime::new(256).with_writable_override(false);
+        assert!(
+            !rt.writable(0x40, 4),
+            "writable_override=false beats the otherwise-valid bounds check"
+        );
+    }
+
+    #[test]
+    fn writable_no_override_falls_through_to_bounds_check() {
+        let rt = FakeRuntime::new(256);
+        assert!(rt.writable(0, 4), "in-bounds + no override -> writable");
+        assert!(
+            !rt.writable(254, 4),
+            "out-of-bounds + no override -> unwritable"
+        );
+        assert!(
+            !rt.writable(u64::MAX, 4),
+            "addr+len overflow + no override -> unwritable"
+        );
     }
 }

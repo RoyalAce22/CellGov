@@ -8,6 +8,25 @@ use crate::host::test_support::FakeRuntime;
 use crate::host::Lv2Host;
 use crate::request::Lv2Request;
 
+/// Mint an mmapper handle via sc 332 and return the assigned `mem_id`.
+fn mint_mmapper_handle(host: &mut Lv2Host, rt: &FakeRuntime, size: u64, flags: u64) -> u32 {
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 332,
+            args: [0xffff_0000_0000_0000, size, flags, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result else {
+        panic!("332 must succeed when minting helper, got {result:?}");
+    };
+    let Effect::SharedWriteIntent { bytes, .. } = &effects[0] else {
+        panic!("332 must emit a SharedWriteIntent");
+    };
+    u32::from_be_bytes(bytes.bytes().try_into().unwrap())
+}
+
 #[test]
 fn tty_write_writes_nwritten_and_returns_ok() {
     let mut host = Lv2Host::new();
@@ -594,42 +613,108 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
     assert_eq!(installs, vec![(0x5400_0000_u64, 0x00a0_0000_usize)]);
 }
 
+/// sc 332 then sc 337: the search lands on the hint when the window
+/// is empty, the ledger records the install, and the runtime sees a
+/// `PendingRegionInstall` covering the written-back address.
 #[test]
-fn syscall_337_writes_start_addr_to_alloc_addr_ptr() {
+fn syscall_332_then_337_searches_installs_and_writes_back_found_addr() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    let result = host.dispatch(
+    let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
+    let result_337 = host.dispatch(
         Lv2Request::Unsupported {
             number: 337,
-            args: [0x3000_0000, 0x4000_0008, 0x200, 0x9000, 0, 0, 0, 0],
+            args: [0x5000_0000, u64::from(mem_id), 0x40000, 0x9100, 0, 0, 0, 0],
         },
         UnitId::new(0),
         &rt,
     );
-    match result {
-        Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, 0);
-            assert_eq!(effects.len(), 1);
-            if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
-                assert_eq!(range.start().raw(), 0x9000);
-                assert_eq!(range.length(), 4);
-                assert_eq!(bytes.bytes(), &0x3000_0000u32.to_be_bytes());
-            } else {
-                panic!("expected SharedWriteIntent");
-            }
-        }
-        other => panic!("expected Immediate, got {other:?}"),
-    }
+    let Lv2Dispatch::Immediate { code: 0, effects } = result_337 else {
+        panic!("337 must succeed, got {result_337:?}");
+    };
+    let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] else {
+        panic!("337 must emit a SharedWriteIntent");
+    };
+    assert_eq!(range.start().raw(), 0x9100);
+    assert_eq!(range.length(), 4);
+    assert_eq!(
+        u32::from_be_bytes(bytes.bytes().try_into().unwrap()),
+        0x5000_0000,
+        "empty window -> search returns the hint as the found address",
+    );
+    let installs: Vec<_> = host.drain_pending_region_installs().collect();
+    assert_eq!(installs, vec![(0x5000_0000_u64, 0x0010_0000_usize)]);
+}
+
+/// sc 337 with a hint that collides with a prior install: the search
+/// must walk forward and the write-back must report the found
+/// (post-collision) address, not the hint.
+#[test]
+fn syscall_337_search_walks_past_existing_install() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let first = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
+    let second = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
+    // First 337 fills [0x5000_0000, 0x5010_0000).
+    host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [0x5000_0000, u64::from(first), 0x40000, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    // Second 337 with same hint: search must walk past the prior
+    // install, return 0x5010_0000.
+    let r = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [0x5000_0000, u64::from(second), 0x40000, 0x9100, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = r else {
+        panic!("337 must succeed, got {r:?}");
+    };
+    let Effect::SharedWriteIntent { bytes, .. } = &effects[0] else {
+        panic!("expected SharedWriteIntent");
+    };
+    assert_eq!(
+        u32::from_be_bytes(bytes.bytes().try_into().unwrap()),
+        0x5010_0000,
+        "second 337 must NOT return the hint -- the prior install occupies it",
+    );
+}
+
+/// sc 337 with a `mem_id` the handle table does not know.
+#[test]
+fn syscall_337_unknown_mem_id_returns_esrch_and_logs_break() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let breaks_before = host.invariant_break_count();
+    let r = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [0x5000_0000, 0xdead_beef, 0x40000, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()));
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
 }
 
 #[test]
 fn syscall_337_rejects_out_of_range_start_addr() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
+    // Below MMAPPER_REGION_START.
     let below = host.dispatch(
         Lv2Request::Unsupported {
             number: 337,
-            args: [0x1000_0000, 0x4000_0008, 0x200, 0x9000, 0, 0, 0, 0],
+            args: [0x1000_0000, u64::from(mem_id), 0x40000, 0x9000, 0, 0, 0, 0],
         },
         UnitId::new(0),
         &rt,
@@ -638,10 +723,11 @@ fn syscall_337_rejects_out_of_range_start_addr() {
         below,
         Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     );
+    // At MMAPPER_REGION_END (exclusive).
     let above = host.dispatch(
         Lv2Request::Unsupported {
             number: 337,
-            args: [0xC000_0000, 0x4000_0008, 0x200, 0x9000, 0, 0, 0, 0],
+            args: [0xC000_0000, u64::from(mem_id), 0x40000, 0x9000, 0, 0, 0, 0],
         },
         UnitId::new(0),
         &rt,
@@ -649,6 +735,66 @@ fn syscall_337_rejects_out_of_range_start_addr() {
     assert_eq!(
         above,
         Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
+}
+
+#[test]
+fn syscall_337_null_alloc_addr_returns_efault() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
+    let r = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [0x5000_0000, u64::from(mem_id), 0x40000, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()));
+}
+
+#[test]
+fn syscall_337_exhausted_window_returns_enomem() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    // Fill the entire mmapper window in the ledger (direct insert; we
+    // don't go through the dispatch arm here -- just the ledger
+    // state the search will consult).
+    let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
+    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, window);
+    let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
+    let r = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [0x5000_0000, u64::from(mem_id), 0x40000, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()));
+}
+
+/// Non-vacuous coverage for the sc 337 / sc 334 coherence witness.
+/// The dispatch's `debug_assert!` body is reconstructed here in
+/// isolation against a state that violates the invariant
+/// (ledger has an entry, but `pending_region_installs` is empty --
+/// exactly the pre-fix fabricated-success shape). The panic message
+/// must match the dispatch's so a future refactor that drops or
+/// renames the witness will surface here.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "sc 337 coherence")]
+fn mmapper_coherence_witness_panic_message_matches_dispatch() {
+    let host = Lv2Host::new();
+    let pretend_found_addr: u32 = 0x5000_0000;
+    let pretend_size: u32 = 0x0010_0000;
+    // pending_region_installs is empty; the witness predicate fails.
+    debug_assert!(
+        host.drain_pending_region_installs_inspect()
+            .iter()
+            .any(|i| i.addr == u64::from(pretend_found_addr) && i.size == pretend_size as usize),
+        "sc 337 coherence: pending_region_installs missing entry for {pretend_found_addr:#x}",
     );
 }
 
@@ -2048,4 +2194,119 @@ fn spu_thread_group_destroy_created_group_returns_ok() {
         Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, cell_errors::CELL_ESRCH.into()),
         other => panic!("expected Immediate, got {other:?}"),
     }
+}
+
+// Witnesses for the debug_assert-only-guard sweep (findings #6, #7).
+// Each prior debug_assert! was the only guard against a wrapping
+// u32 pointer producing a wrong-address SharedWriteIntent + lying
+// CELL_OK in release. The fix replaces both with runtime EFAULT
+// returns; these tests pin that contract.
+
+#[test]
+fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
+    use crate::host::Lv2Runtime;
+    use cellgov_time::GuestTicks;
+    struct WrapMock {
+        size_be: [u8; 4],
+    }
+    impl Lv2Runtime for WrapMock {
+        fn read_committed(&self, _addr: u64, len: usize) -> Option<&[u8]> {
+            (len == 4).then_some(&self.size_be[..])
+        }
+        fn current_tick(&self) -> GuestTicks {
+            GuestTicks::ZERO
+        }
+        fn read_committed_until(
+            &self,
+            _addr: u64,
+            _max_len: usize,
+            _terminator: u8,
+        ) -> Option<&[u8]> {
+            None
+        }
+        fn writable(&self, _addr: u64, _len: usize) -> bool {
+            true
+        }
+    }
+    let mut host = Lv2Host::new();
+    let breaks_before = host.invariant_break_count();
+    let rt = WrapMock {
+        size_be: 0x20u32.to_be_bytes(),
+    };
+    // p_opt+24 wraps u32: 0xFFFF_FFFF - 23 = 0xFFFF_FFE8 is the
+    // smallest wrapping p_opt. Use 0xFFFF_FFF0 (entry at p_opt+16
+    // would wrap to 0x0000_0000).
+    let mut args = [0u64; 8];
+    args[0] = 0x1234;
+    args[2] = 0xFFFF_FFF0_u64;
+    let result = host.dispatch(
+        Lv2Request::Unsupported { number: 481, args },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+        "p_opt+24 wraps u32; must return CELL_EFAULT, not CELL_OK with a wrong-address write"
+    );
+    assert_eq!(
+        host.invariant_break_count() - breaks_before,
+        1,
+        "wrap path must log_invariant_break exactly once"
+    );
+}
+
+#[test]
+fn prx_get_module_list_wrapping_p_info_returns_efault_and_emits_no_writes() {
+    use crate::host::Lv2Runtime;
+    use cellgov_time::GuestTicks;
+    // Returns 4 zero bytes for every read so the post-wrap-check
+    // path would reach the count-write at count_addr = pInfo+0x10
+    // (which wraps to addr 0). Without the wrap check, the
+    // adversarial revert produces a SharedWriteIntent at addr 0
+    // with the dispatch returning CELL_OK, not a quiet EFAULT --
+    // the witness distinguishes the adversarial state from the fix.
+    struct ZeroReadMock {
+        zeros: [u8; 4],
+    }
+    impl Lv2Runtime for ZeroReadMock {
+        fn read_committed(&self, _addr: u64, len: usize) -> Option<&[u8]> {
+            (len == 4).then_some(&self.zeros[..])
+        }
+        fn current_tick(&self) -> GuestTicks {
+            GuestTicks::ZERO
+        }
+        fn read_committed_until(
+            &self,
+            _addr: u64,
+            _max_len: usize,
+            _terminator: u8,
+        ) -> Option<&[u8]> {
+            None
+        }
+        fn writable(&self, _addr: u64, _len: usize) -> bool {
+            true
+        }
+    }
+    let mut host = Lv2Host::new();
+    let breaks_before = host.invariant_break_count();
+    let rt = ZeroReadMock { zeros: [0; 4] };
+    let mut args = [0u64; 8];
+    args[0] = 0x2; // flags & 2 must be set, else short-circuit OK
+    args[1] = 0xFFFF_FFF0_u64;
+    let result = host.dispatch(
+        Lv2Request::Unsupported { number: 494, args },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+        "pInfo+0x18 wraps u32; must return CELL_EFAULT, not silent slot writes at wrong addresses"
+    );
+    assert_eq!(
+        host.invariant_break_count() - breaks_before,
+        1,
+        "wrap path must log_invariant_break exactly once"
+    );
 }

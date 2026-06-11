@@ -83,4 +83,19 @@ pub struct Runtime {
     /// [`ExecutionContext::with_completed_dma_tags`]. Co-captured by
     /// [`Runtime::snapshot`].
     pub(super) pending_tag_completions: std::collections::BTreeMap<UnitId, u32>,
+    /// Cumulative count of `Effect::RsxLabelWrite` entries
+    /// submitted to the commit pipeline. Not snapshot-captured.
+    pub(super) rsx_label_writes_committed: u64,
+    /// Cumulative count of `NV406E_SET_REFERENCE` dispatches across
+    /// every `rsx_advance` invocation. Not snapshot-captured.
+    pub(super) rsx_set_reference_dispatches: u64,
+    /// 40F FIFO consumer return-address stack; snapshot-captured.
+    pub(super) rsx_call_stack: crate::rsx::RsxCallStack,
+    /// Manifest gate for the FIFO consumer's cursor->MMIO
+    /// writeback. Default `false`.
+    pub(super) rsx_consume_fifo: bool,
+    /// Cumulative count of `Effect::SharedWriteIntent`s applied via
+    /// the `apply_lv2_effects` direct-commit path. Not
+    /// snapshot-captured.
+    pub(super) lv2_direct_committed_writes: u64,
 }

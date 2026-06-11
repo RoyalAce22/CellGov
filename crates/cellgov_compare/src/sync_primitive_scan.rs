@@ -15,6 +15,7 @@
 //! `lwmutex_free` sentinel and `attribute` value are only present
 //! after the title's user-space init has run.
 
+use cellgov_mem::be::read_u32;
 use std::ops::Range;
 
 /// Byte offset of the `sleep_queue` field within `sys_lwmutex_t`.
@@ -29,10 +30,6 @@ pub const SYS_LWMUTEX_T_SIZE: usize = 0x20;
 /// user-space `sys_lwmutex_create` wrapper before the kernel handle
 /// is stored. Matches RPCS3's `sys_lwmutex.h` constant.
 const LWMUTEX_FREE: u32 = 0xffff_ffff;
-
-fn read_u32_be(data: &[u8], off: usize) -> u32 {
-    u32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
-}
 
 /// Validate that `attr` is a plausible `sys_lwmutex_attribute_t::recursive | protocol`.
 /// `recursive` is one of 0x10 (SYS_SYNC_RECURSIVE) / 0x20 (SYS_SYNC_NOT_RECURSIVE);
@@ -77,13 +74,13 @@ pub fn find_sys_lwmutex_handle_slots(data: &[u8], data_base: u64) -> Vec<Range<u
     }
     let mut i = 0usize;
     while i + SYS_LWMUTEX_T_SIZE <= data.len() {
-        let w0 = read_u32_be(data, i);
+        let w0 = read_u32(data, i);
         if w0 == LWMUTEX_FREE {
-            let w1 = read_u32_be(data, i + 0x04);
-            let w2 = read_u32_be(data, i + 0x08);
-            let w3 = read_u32_be(data, i + 0x0c);
-            let w4 = read_u32_be(data, i + 0x10);
-            let w5 = read_u32_be(data, i + 0x14);
+            let w1 = read_u32(data, i + 0x04);
+            let w2 = read_u32(data, i + 0x08);
+            let w3 = read_u32(data, i + 0x0c);
+            let w4 = read_u32(data, i + 0x10);
+            let w5 = read_u32(data, i + 0x14);
             let preamble_match = w1 == 0
                 && is_valid_lwmutex_attribute(w2)
                 && w3 == 0

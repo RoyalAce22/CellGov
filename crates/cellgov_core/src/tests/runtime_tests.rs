@@ -1584,7 +1584,7 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
         });
         effects.push(Effect::SharedWriteIntent {
             range: ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap(),
-            bytes: WritePayload::new((self.fifo_base + 8).to_be_bytes().to_vec()),
+            bytes: WritePayload::from_slice(&(self.fifo_base + 8).to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: self.id,
             source_time: GuestTicks::ZERO,
@@ -1896,7 +1896,7 @@ impl ExecutionUnit for RsxControlWriterUnit {
         let range = ByteRange::new(GuestAddr::new(self.slot_addr), 4).unwrap();
         effects.push(Effect::SharedWriteIntent {
             range,
-            bytes: WritePayload::new(self.value.to_be_bytes().to_vec()),
+            bytes: WritePayload::from_slice(&self.value.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: self.id,
             source_time: GuestTicks::ZERO,
@@ -1922,7 +1922,13 @@ fn build_with_rsx_writable() -> Runtime {
         Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
     ];
     let mem = GuestMemory::from_regions(regions).expect("regions non-overlapping");
-    Runtime::new(mem, Budget::new(1), 100)
+    let mut rt = Runtime::new(mem, Budget::new(1), 100);
+    // Seed identity iomap covering the flat region; mirrors the
+    // build_with_rsx_and_label_region helper. Required after
+    // IoMap::translate stopped identity-passing un-iomapped offsets
+    // to match the RPCS3 oracle.
+    rt.lv2_host_mut().seed_rsx_iomap(0, 0, 0x1000);
+    rt
 }
 
 #[test]
@@ -1969,10 +1975,19 @@ fn rsx_mirror_writes_on_routes_put_to_cursor() {
 }
 
 #[test]
-fn rsx_mirror_writes_on_routes_get_to_cursor() {
+fn rsx_mirror_writes_does_not_route_get_to_cursor() {
+    // Spec: `get` is engine-side state advanced only by the
+    // method-advance pass. RPCS3's m_ctrl->get is written exclusively
+    // by the walker (`.release(...)` in Emu/RSX/RSXFIFO.cpp), never
+    // by the CPU. The mirror must NOT pull a guest SharedWriteIntent
+    // to GET_ADDR into rsx_cursor; doing so would let the guest
+    // desynchronize the walker (the advance pass reads `get` as its
+    // start cursor). The memory write still applies; the cursor stays
+    // at whatever the walker last set it to.
     use crate::rsx::control_register;
     let mut rt = build_with_rsx_writable();
     rt.set_rsx_mirror_writes(true);
+    let cursor_get_before = rt.rsx_cursor().get();
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
@@ -1981,7 +1996,11 @@ fn rsx_mirror_writes_on_routes_get_to_cursor() {
     });
     let s = rt.step().unwrap();
     rt.commit_step(&s.result, &s.effects).unwrap();
-    assert_eq!(rt.rsx_cursor().get(), 0x0000_2000);
+    assert_eq!(
+        rt.rsx_cursor().get(),
+        cursor_get_before,
+        "guest writes to GET_ADDR must not desynchronize the walker's cursor",
+    );
 }
 
 #[test]
@@ -2072,7 +2091,7 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
                 effects.push(Effect::SharedWriteIntent {
                     range: ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4)
                         .unwrap(),
-                    bytes: WritePayload::new(self.put_target.to_be_bytes().to_vec()),
+                    bytes: WritePayload::from_slice(&self.put_target.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: self.id,
                     source_time: GuestTicks::ZERO,
@@ -2103,7 +2122,16 @@ fn build_with_rsx_and_label_region(label_base: u32) -> Runtime {
     ];
     let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
     let mut rt = Runtime::new(mem, Budget::new(1), 100);
-    rt.set_rsx_label_base(label_base);
+    rt.set_rsx_label_base(cellgov_mem::GuestAddr::new(label_base as u64));
+    // Seed an identity iomap covering the flat region so the FIFO
+    // advance pass can translate IO offsets back to EAs without
+    // going through 672. Production code records this via
+    // dispatch_sys_rsx_context_iomap; tests bypass the syscall and
+    // record it directly. Required since IoMap::translate now
+    // returns None for size == 0 (matching RPCS3's umax-on-miss),
+    // so a runtime built without an iomap would surface
+    // HeaderOutOfRange as soon as the consumer touches the FIFO.
+    rt.lv2_host_mut().seed_rsx_iomap(0, 0, 0x10000);
     rt
 }
 
@@ -2194,8 +2222,9 @@ fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
         ];
         let mem = GuestMemory::from_regions(regions).unwrap();
         let mut rt = Runtime::new(mem, Budget::new(budget), 100);
-        rt.set_rsx_label_base(LABEL_BASE);
+        rt.set_rsx_label_base(cellgov_mem::GuestAddr::new(LABEL_BASE as u64));
         rt.set_rsx_mirror_writes(true);
+        rt.lv2_host_mut().seed_rsx_iomap(0, 0, 0x10000);
         rt.registry_mut()
             .register_with(|id| RsxOffsetReleaseDriverUnit {
                 id,
@@ -2220,6 +2249,41 @@ fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
 }
 
 #[test]
+fn rsx_label_writes_committed_counter_increments_on_label_write() {
+    // Audit C-2 witness: the rsx_label_writes_committed counter
+    // on Runtime increments per Effect::RsxLabelWrite submitted
+    // to the commit pipeline. This proves the semaphore-region
+    // debug_assert in commit.rs has its silence witnessed when
+    // the counter is > 0.
+    const FIFO_BASE: u32 = 0x200;
+    const LABEL_BASE: u32 = 0x4000;
+    const SEM_OFFSET: u32 = 0x40;
+    const RELEASE_VALUE: u32 = 0xCAFE_BABE;
+    let mut rt = build_with_rsx_and_label_region(LABEL_BASE);
+    rt.set_rsx_mirror_writes(true);
+    rt.registry_mut()
+        .register_with(|id| RsxOffsetReleaseDriverUnit {
+            id,
+            steps: Cell::new(0),
+            fifo_base: FIFO_BASE,
+            put_target: FIFO_BASE + 16,
+            sem_offset: SEM_OFFSET,
+            release_value: RELEASE_VALUE,
+        });
+    assert_eq!(rt.rsx_label_writes_committed(), 0);
+    for _ in 0..2 {
+        let s = rt.step().unwrap();
+        rt.commit_step(&s.result, &s.effects).unwrap();
+    }
+    assert!(
+        rt.rsx_label_writes_committed() >= 1,
+        "rsx_label_writes_committed must increment when a label-release \
+         driver runs; got {}",
+        rt.rsx_label_writes_committed()
+    );
+}
+
+#[test]
 fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
     // Invariant: mirror runs before rsx_advance within the same commit_step.
     use crate::rsx::control_register;
@@ -2238,6 +2302,185 @@ fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
         rt.rsx_cursor().get(),
         0x40,
         "advance pass must have drained after the mirror updated put"
+    );
+}
+
+/// Test fixture: emits a single ExecutionStepResult with
+/// YieldReason::Syscall and caller-supplied syscall_args, then
+/// reports Finished. Used by the apply_lv2_effects bypass tripwire
+/// test below.
+#[derive(Clone)]
+struct Lv2SyscallEmitterUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    syscall_args: [u64; 9],
+}
+
+impl ExecutionUnit for Lv2SyscallEmitterUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 1 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        _effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        self.steps.set(1);
+        ExecutionStepResult {
+            yield_reason: YieldReason::Syscall,
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: LocalDiagnostics::with_pc(0x1000),
+            fault: None,
+            syscall_args: Some(self.syscall_args),
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+#[test]
+fn apply_lv2_effects_direct_commits_shared_write_intents() {
+    // Tripwire for the LV2-effects-bypass-StagingMemory contract
+    // documented on Runtime::apply_lv2_effects. The integration:
+    //
+    // 1. Build a runtime where the RSX MMIO control-register slots
+    //    are writable (the 0xC000_0000 region, set up by
+    //    build_with_rsx_writable).
+    // 2. Seed Lv2Host so the sys_rsx context reads as allocated
+    //    under RSX_CONTEXT_ID, skipping the 670 OUT-pointer
+    //    plumbing that would otherwise be required.
+    // 3. Register a unit that emits a Syscall step result whose
+    //    args classify as sys_rsx_context_attribute(FIFO_SETUP,
+    //    fifo_get, fifo_put).
+    // 4. step + commit_step. dispatch_syscall fires
+    //    sys_rsx_attribute_fifo_setup which emits two
+    //    SharedWriteIntents (PUT_ADDR <- a4, GET_ADDR <- a3) on
+    //    Lv2Dispatch::Immediate.effects. The runtime's
+    //    apply_lv2_effects consumes them.
+    //
+    // Assertion: lv2_direct_committed_writes >= 2 (non-vacuous --
+    // the apply_commit path actually fired), AND the two memory
+    // slots show the expected big-endian values (the writes
+    // actually landed). A future refactor that routes
+    // apply_lv2_effects's SharedWriteIntents through
+    // StagingMemory::stage drops lv2_direct_committed_writes to 0
+    // and trips the first assertion red.
+    use crate::rsx::control_register;
+    use cellgov_mem::{ByteRange, GuestAddr};
+    use cellgov_ps3_abi::sys_rsx::package;
+    use cellgov_ps3_abi::syscall::SYS_RSX_CONTEXT_ATTRIBUTE;
+
+    const RSX_CONTEXT_ID: u32 = 0x5555_5555;
+    const FIFO_GET: u32 = 0x1100;
+    const FIFO_PUT: u32 = 0x2200;
+
+    let mut rt = build_with_rsx_writable();
+    rt.lv2_host_mut().seed_rsx_context_allocated(RSX_CONTEXT_ID);
+
+    let mut syscall_args = [0u64; 9];
+    syscall_args[0] = SYS_RSX_CONTEXT_ATTRIBUTE;
+    syscall_args[1] = RSX_CONTEXT_ID as u64;
+    syscall_args[2] = u64::from(package::FIFO_SETUP);
+    syscall_args[3] = FIFO_GET as u64;
+    syscall_args[4] = FIFO_PUT as u64;
+
+    rt.registry_mut().register_with(|id| Lv2SyscallEmitterUnit {
+        id,
+        steps: Cell::new(0),
+        syscall_args,
+    });
+
+    assert_eq!(
+        rt.lv2_direct_committed_writes(),
+        0,
+        "pre-step: counter must start at 0",
+    );
+
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+
+    assert!(
+        rt.lv2_direct_committed_writes() >= 2,
+        "post-commit: apply_lv2_effects direct-commit path must have \
+         fired for at least the PUT and GET writes from FIFO_SETUP; got {}. \
+         A counter of 0 here means the LV2 SharedWriteIntents were not \
+         applied via Runtime::apply_lv2_effects -- most likely a future \
+         refactor routed them through StagingMemory::stage instead, \
+         which would expose them to atomic-batch discard-on-fault and \
+         introduce same-tick same-range ordering nondeterminism against \
+         unit SharedWriteIntents.",
+        rt.lv2_direct_committed_writes(),
+    );
+
+    // Witness that the writes actually landed in memory at the
+    // expected slots with the expected big-endian values. This
+    // proves the direct-commit path is end-to-end, not just
+    // counter-incrementing.
+    let put_bytes = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap())
+        .expect("PUT_ADDR is in a registered region");
+    assert_eq!(
+        u32::from_be_bytes([put_bytes[0], put_bytes[1], put_bytes[2], put_bytes[3]]),
+        FIFO_PUT,
+        "PUT_ADDR slot must carry the FIFO_PUT value the syscall set",
+    );
+    let get_bytes = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new(control_register::GET_ADDR as u64), 4).unwrap())
+        .expect("GET_ADDR is in a registered region");
+    assert_eq!(
+        u32::from_be_bytes([get_bytes[0], get_bytes[1], get_bytes[2], get_bytes[3]]),
+        FIFO_GET,
+        "GET_ADDR slot must carry the FIFO_GET value the syscall set",
+    );
+}
+
+#[test]
+fn apply_lv2_effects_loud_rejects_unsupported_effect_variant() {
+    // The compile-forcing exhaustive match in apply_lv2_effects is
+    // the primary guarantee that no Effect variant is silently
+    // dropped: adding a new variant to cellgov_effects::Effect
+    // breaks the build here until classified. This test
+    // corroborates the runtime side: one of the loud-reject arms
+    // (TraceMarker -- a PPU/SPU execution-unit breadcrumb that no
+    // LV2 handler should emit) is reachable when the unhandled
+    // variant arrives, AND its log_invariant_break fires.
+    //
+    // TraceMarker chosen because it carries the minimum payload
+    // (a u32 marker + UnitId source) so the test fixture is
+    // simplest. Any of the 10 reject arms would work; the assertion
+    // generalizes via the compiler-witness (all 10 are structurally
+    // identical reject paths).
+    let mut rt = build(4096, 1, 100);
+    let pre_breaks = rt.lv2_host().invariant_break_count();
+
+    let marker = Effect::TraceMarker {
+        marker: 0xDEAD_BEEF,
+        source: UnitId::new(0),
+    };
+    rt.apply_lv2_effects(&[marker]);
+
+    assert_eq!(
+        rt.lv2_host().invariant_break_count(),
+        pre_breaks + 1,
+        "unsupported-variant arm must increment invariant_break_count; a count of \
+         {pre_breaks} (unchanged) means the variant slipped through silently -- \
+         exactly the `_ => {{}}` regression the exhaustive match closed.",
     );
 }
 
@@ -3370,6 +3613,32 @@ fn resolve_sync_wakes_with_missing_pending_response_debug_panics() {
         .set_status_override(waiter, UnitStatus::Blocked);
     // No insert into syscall_responses: park-side missed recording.
     rt.resolve_sync_wakes_for_test(&[waiter]);
+}
+
+/// Release-build counterpart to the debug-panic test above. In
+/// release the `debug_assert!(false)` compiles out, but
+/// `log_invariant_break` is release-active and must surface the
+/// dangerous "unit transitions Runnable without an r3 write" path
+/// loudly. Without this witness, a future revert that drops the
+/// log line would silently restore the live-wrong-value failure
+/// mode in release builds with no test catching it.
+#[cfg(not(debug_assertions))]
+#[test]
+fn resolve_sync_wakes_with_missing_pending_response_logs_in_release() {
+    let mut rt = build(16, 1, 100);
+    let waiter = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    rt.registry_mut()
+        .set_status_override(waiter, UnitStatus::Blocked);
+    let pre_breaks = rt.lv2_host().invariant_break_count();
+    rt.resolve_sync_wakes_for_test(&[waiter]);
+    assert!(
+        rt.lv2_host().invariant_break_count() > pre_breaks,
+        "release: log_invariant_break must fire on no-pending-response wake; \
+         a counter of {pre_breaks} (unchanged) means the path silently \
+         absorbed the bug, exactly the regression this guard catches",
+    );
 }
 
 #[test]

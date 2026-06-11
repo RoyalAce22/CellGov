@@ -78,6 +78,43 @@ impl PpuThreadTable {
         Some(id)
     }
 
+    /// Insert an explicit `unit_id -> existing_thread_id` alias.
+    ///
+    /// Cross-module contract: the bootstrap loop runs each PRX's
+    /// module_start on a transient PPU unit that has no thread
+    /// record of its own; real LV2 attributes those syscalls to
+    /// the calling (primary) thread (see RPCS3
+    /// `_sys_prx_start_module(ppu_thread&, ...)`,
+    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_prx.cpp:515`).
+    /// Aliasing the transient unit to the primary thread here
+    /// gives sync-syscall dispatch sites a real PpuThreadId for
+    /// the caller without weakening the strict lookup elsewhere.
+    ///
+    /// # Errors
+    /// Returns `false` if `existing` is not a known thread or
+    /// `unit_id` is already mapped (the caller is responsible
+    /// for not double-aliasing).
+    pub fn alias_unit(&mut self, unit_id: UnitId, existing: PpuThreadId) -> bool {
+        if !self.threads.contains_key(&existing) {
+            return false;
+        }
+        if self.unit_to_thread.contains_key(&unit_id) {
+            return false;
+        }
+        self.unit_to_thread.insert(unit_id, existing);
+        true
+    }
+
+    /// Remove an alias previously installed via [`Self::alias_unit`].
+    ///
+    /// Has no effect on the underlying `PpuThread`. The bootstrap
+    /// loop drops aliases after the title primary takes over so
+    /// post-boot lookups against the retired transient `UnitId`s
+    /// fall through to the strict ESRCH path.
+    pub fn drop_alias(&mut self, unit_id: UnitId) -> bool {
+        self.unit_to_thread.remove(&unit_id).is_some()
+    }
+
     /// Look up a thread by id.
     pub fn get(&self, id: PpuThreadId) -> Option<&PpuThread> {
         self.threads.get(&id)
@@ -609,6 +646,45 @@ mod tests {
         b.add_join_waiter(b_child1, PpuThreadId::new(0x42));
         b.add_join_waiter(b_child2, PpuThreadId::new(0x43));
         assert_ne!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
+    fn alias_unit_routes_unit_id_to_existing_primary() {
+        let mut t = PpuThreadTable::new();
+        t.insert_primary(UnitId::new(0), dummy_attrs());
+        assert!(t.alias_unit(UnitId::new(7), PpuThreadId::PRIMARY));
+        assert_eq!(
+            t.thread_id_for_unit(UnitId::new(7)),
+            Some(PpuThreadId::PRIMARY),
+        );
+        // Underlying thread record is unchanged.
+        let p = t.get(PpuThreadId::PRIMARY).unwrap();
+        assert_eq!(p.unit_id, UnitId::new(0));
+    }
+
+    #[test]
+    fn alias_unit_rejects_unknown_target_thread() {
+        let mut t = PpuThreadTable::new();
+        assert!(!t.alias_unit(UnitId::new(7), PpuThreadId::PRIMARY));
+        assert!(t.thread_id_for_unit(UnitId::new(7)).is_none());
+    }
+
+    #[test]
+    fn alias_unit_rejects_already_mapped_unit() {
+        let mut t = PpuThreadTable::new();
+        t.insert_primary(UnitId::new(0), dummy_attrs());
+        assert!(!t.alias_unit(UnitId::new(0), PpuThreadId::PRIMARY));
+    }
+
+    #[test]
+    fn drop_alias_restores_strict_esrch_for_unit() {
+        let mut t = PpuThreadTable::new();
+        t.insert_primary(UnitId::new(0), dummy_attrs());
+        assert!(t.alias_unit(UnitId::new(7), PpuThreadId::PRIMARY));
+        assert!(t.drop_alias(UnitId::new(7)));
+        assert!(t.thread_id_for_unit(UnitId::new(7)).is_none());
+        // Drop is idempotent at the no-op shape: second call returns false.
+        assert!(!t.drop_alias(UnitId::new(7)));
     }
 
     #[test]

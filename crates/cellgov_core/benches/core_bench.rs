@@ -54,6 +54,7 @@ fn bench_commit_0_effects(c: &mut Criterion) {
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
         let mut flip = cellgov_core::rsx::flip::RsxFlipState::new();
+        let mut label_writes = 0u64;
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -66,6 +67,7 @@ fn bench_commit_0_effects(c: &mut Criterion) {
                 reservations: &mut reservations,
                 rsx_label_base: 0,
                 rsx_flip: &mut flip,
+                rsx_label_writes_committed: &mut label_writes,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -88,6 +90,7 @@ fn bench_commit_1_effect(c: &mut Criterion) {
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
         let mut flip = cellgov_core::rsx::flip::RsxFlipState::new();
+        let mut label_writes = 0u64;
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -100,6 +103,7 @@ fn bench_commit_1_effect(c: &mut Criterion) {
                 reservations: &mut reservations,
                 rsx_label_base: 0,
                 rsx_flip: &mut flip,
+                rsx_label_writes_committed: &mut label_writes,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -124,6 +128,7 @@ fn bench_commit_10_effects(c: &mut Criterion) {
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
         let mut flip = cellgov_core::rsx::flip::RsxFlipState::new();
+        let mut label_writes = 0u64;
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -136,6 +141,7 @@ fn bench_commit_10_effects(c: &mut Criterion) {
                 reservations: &mut reservations,
                 rsx_label_base: 0,
                 rsx_flip: &mut flip,
+                rsx_label_writes_committed: &mut label_writes,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -166,6 +172,7 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
         let mut dma = DmaQueue::new();
         let mut reservations = ReservationTable::new();
         let mut flip = cellgov_core::rsx::flip::RsxFlipState::new();
+        let mut label_writes = 0u64;
         b.iter(|| {
             let mut ctx = CommitContext {
                 memory: &mut mem,
@@ -178,6 +185,7 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
                 reservations: &mut reservations,
                 rsx_label_base: 0,
                 rsx_flip: &mut flip,
+                rsx_label_writes_committed: &mut label_writes,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)

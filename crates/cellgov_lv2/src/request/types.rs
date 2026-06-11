@@ -562,17 +562,17 @@ pub enum Lv2Request {
         /// In: directory fd to close.
         fd: u32,
     },
-    /// `fd` is unused; bytes are appended to the host's unified
-    /// `tty_log` so the ps3autotests harness can match either printf
-    /// or fprintf output against `<test>.expected`.
+    /// `sys_fs_write` request. The FS model is read-side only, so
+    /// the dispatcher mirrors RPCS3 sys_fs.cpp:1219 and returns
+    /// `CELL_EBADF` for any non-zero write. All four fields ride
+    /// to the dispatcher intact (no truncation at classification).
     FsWrite {
-        /// In: fd (unused).
+        /// In: fd.
         fd: u32,
         /// In: buffer pointer.
         buf_ptr: u32,
-        /// In: byte count. `sys_fs_write` takes `uint64_t size`,
-        /// so the full u64 is preserved at classification; the
-        /// dispatcher narrows for its tty-append fast path.
+        /// In: byte count. `sys_fs_write` takes `uint64_t size`;
+        /// the full u64 is preserved end-to-end (no clamp).
         size: u64,
         /// Out: bytes written.
         nwrite_ptr: u32,

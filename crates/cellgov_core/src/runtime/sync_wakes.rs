@@ -104,6 +104,19 @@ impl Runtime {
                     );
                 }
                 None => {
+                    // Missing pending response is a bug (release-side
+                    // double-wake or park-side missing record). Without
+                    // the release log, the unit would still transition
+                    // Runnable below and leave guest r3 stale.
+                    self.lv2_host.log_invariant_break(
+                        "runtime.resolve_sync_wakes_no_pending_response",
+                        format_args!(
+                            "resolve_sync_wakes: {waiter:?} on the wake list with no pending \
+                             response (release-side double-wake or park-side missing record); \
+                             unit will transition Runnable regardless, so a missing-record \
+                             cause leaves the guest's r3 stale on syscall return"
+                        ),
+                    );
                     debug_assert!(
                         false,
                         "resolve_sync_wakes: {waiter:?} on the wake list with no pending \

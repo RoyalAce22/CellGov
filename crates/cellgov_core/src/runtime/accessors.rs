@@ -1,15 +1,15 @@
 //! Pure getters, setters, and field-shaped accessors over [`Runtime`].
 //!
 //! No business logic -- entries here are field plumbing only. Methods
-//! that compute over multiple fields (e.g. `sync_state_hash`) stay in
-//! `mod.rs` next to the struct definition.
+//! that compute over multiple fields (e.g. `sync_state_hash`) live in
+//! sibling submodules (`state_hash`, `step`, `commit_step`, etc.).
 
 use cellgov_dma::DmaQueue;
 #[cfg(test)]
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_lv2::{Lv2Host, PpuThreadInitState, SpuInitState};
-use cellgov_mem::GuestMemory;
+use cellgov_mem::{GuestAddr, GuestMemory};
 use cellgov_sync::{MailboxRegistry, SignalRegistry};
 use cellgov_time::{Budget, Epoch, GuestTicks};
 use cellgov_trace::TraceWriter;
@@ -92,6 +92,27 @@ impl Runtime {
     #[inline]
     pub fn lv2_host_mut(&mut self) -> &mut Lv2Host {
         &mut self.lv2_host
+    }
+
+    /// Cumulative count of `Effect::RsxLabelWrite` entries submitted
+    /// to the commit pipeline.
+    #[inline]
+    pub fn rsx_label_writes_committed(&self) -> u64 {
+        self.rsx_label_writes_committed
+    }
+
+    /// Cumulative count of `NV406E_SET_REFERENCE` dispatches across
+    /// every `rsx_advance` invocation.
+    #[inline]
+    pub fn rsx_set_reference_dispatches(&self) -> u64 {
+        self.rsx_set_reference_dispatches
+    }
+
+    /// Cumulative count of `Effect::SharedWriteIntent`s applied via
+    /// the `apply_lv2_effects` direct-commit path.
+    #[inline]
+    pub fn lv2_direct_committed_writes(&self) -> u64 {
+        self.lv2_direct_committed_writes
     }
 
     /// Invoked when `Lv2Dispatch::RegisterSpu` fires during `commit_step`.
@@ -189,12 +210,18 @@ impl Runtime {
 
     // -- RSX --
 
-    /// Sets the base address used by `RsxLabelWrite` effects when
-    /// computing the commit-side guest address. Synthetic test
-    /// scenarios call this to wire up label memory without booting
-    /// the firmware-set RSX init path.
-    pub fn set_rsx_label_base(&mut self, addr: u32) {
-        self.rsx_label_base = addr;
+    /// Set the base address used by `RsxLabelWrite` effects to
+    /// compute the commit-side guest address. Narrowed to u32 at
+    /// this boundary; `debug_assert` traps a 64-bit address whose
+    /// upper bits are nonzero.
+    pub fn set_rsx_label_base(&mut self, addr: GuestAddr) {
+        debug_assert!(
+            addr.raw() <= u32::MAX as u64,
+            "set_rsx_label_base: addr=0x{:016x} exceeds u32 storage width; \
+             RSX label base lives in the 32-bit MMIO window",
+            addr.raw(),
+        );
+        self.rsx_label_base = addr.raw() as u32;
     }
 
     /// Immutable view of the RSX FIFO cursor.
@@ -209,18 +236,6 @@ impl Runtime {
         &mut self.rsx_cursor
     }
 
-    /// Last parsed RSX semaphore-write offset.
-    #[inline]
-    pub fn rsx_sem_offset(&self) -> u32 {
-        self.rsx_sem_offset
-    }
-
-    /// Mutable reference to the RSX semaphore-write offset.
-    #[inline]
-    pub fn rsx_sem_offset_mut(&mut self) -> &mut u32 {
-        &mut self.rsx_sem_offset
-    }
-
     /// Host must have made the RSX region writable before enabling;
     /// otherwise every put-pointer store reserved-writes and the mirror
     /// never runs.
@@ -232,6 +247,26 @@ impl Runtime {
     #[inline]
     pub fn rsx_mirror_writes_enabled(&self) -> bool {
         self.rsx_mirror_writes
+    }
+
+    /// 40F honest FIFO consumer opt-in: when enabled, the cursor
+    /// projects into MMIO `dma.ref`/`dma.get` after `rsx_advance`
+    /// reaches the FIFO tail. Driven by the manifest
+    /// `[rsx] consume` flag.
+    pub fn set_rsx_consume_fifo(&mut self, enabled: bool) {
+        self.rsx_consume_fifo = enabled;
+    }
+
+    /// True when the 40F consumer's MMIO side effects are armed.
+    #[inline]
+    pub fn rsx_consume_fifo_enabled(&self) -> bool {
+        self.rsx_consume_fifo
+    }
+
+    /// Immutable view of the RSX FIFO call stack (40F).
+    #[inline]
+    pub fn rsx_call_stack(&self) -> &rsx::RsxCallStack {
+        &self.rsx_call_stack
     }
 
     /// Immutable view of the RSX flip state.
@@ -248,9 +283,7 @@ impl Runtime {
 
     // -- lifecycle --
 
-    /// Consume the runtime and return its guest memory. Chains execution
-    /// stages: run one runtime, extract the initialized memory, seed a
-    /// fresh runtime for the next stage.
+    /// Drops all runtime state except [`GuestMemory`].
     pub fn into_memory(self) -> GuestMemory {
         self.memory
     }

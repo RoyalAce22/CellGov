@@ -49,6 +49,8 @@ pub(super) struct ManifestContentFile {
 pub(super) struct ManifestRsx {
     #[serde(default)]
     pub(super) mirror: bool,
+    #[serde(default)]
+    pub(super) consume: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]

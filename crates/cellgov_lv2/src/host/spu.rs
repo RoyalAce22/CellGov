@@ -19,11 +19,10 @@ impl Lv2Host {
     /// [`crate::image::ContentStore`] under a synthetic path and write the
     /// handle into the SPU image struct at `handle_out`.
     ///
-    /// # Error precedence
+    /// # Errors
     ///
-    /// 1. `img_ptr` / `size` out of guest bounds -> CELL_EINVAL, no effects.
-    /// 2. `handle_out` not writable for 16 bytes -> CELL_EFAULT, no effects.
-    /// 3. Otherwise CELL_OK with one effect (the image struct write).
+    /// - `CELL_EINVAL` when `img_ptr` / `size` are out of guest bounds.
+    /// - `CELL_EFAULT` when `handle_out` is not writable for 16 bytes.
     pub(super) fn dispatch_image_import(
         &mut self,
         handle_out: u32,
@@ -59,7 +58,7 @@ impl Lv2Host {
         let range = ByteRange::contiguous_u32(handle_out, 16);
         let effect = Effect::SharedWriteIntent {
             range,
-            bytes: WritePayload::new(img_struct.to_vec()),
+            bytes: WritePayload::from_slice(&img_struct),
             ordering: PriorityClass::Normal,
             source: requester,
             source_time: self.current_tick,
@@ -111,7 +110,7 @@ impl Lv2Host {
         let range = ByteRange::contiguous_u32(img_ptr, 16);
         let effect = Effect::SharedWriteIntent {
             range,
-            bytes: WritePayload::new(img_struct.to_vec()),
+            bytes: WritePayload::from_slice(&img_struct),
             ordering: PriorityClass::Normal,
             source: requester,
             source_time: self.current_tick,
@@ -142,7 +141,7 @@ impl Lv2Host {
         let range = ByteRange::contiguous_u32(id_ptr, 4);
         let effect = Effect::SharedWriteIntent {
             range,
-            bytes: WritePayload::new(group_id.to_be_bytes().to_vec()),
+            bytes: WritePayload::from_slice(&group_id.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
             source_time: self.current_tick,
@@ -222,6 +221,8 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
+        self.spu_thread_initialize_dispatches =
+            self.spu_thread_initialize_dispatches.wrapping_add(1);
         let (thread_ptr, group_id, thread_num, img_ptr, arg_ptr) = match req {
             Lv2Request::SpuThreadInitialize {
                 thread_ptr,
@@ -309,7 +310,7 @@ impl Lv2Host {
         let range = ByteRange::contiguous_u32(thread_ptr, 4);
         let effect = Effect::SharedWriteIntent {
             range,
-            bytes: WritePayload::new(thread_id.to_be_bytes().to_vec()),
+            bytes: WritePayload::from_slice(&thread_id.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
             source_time: self.current_tick,
@@ -358,8 +359,8 @@ impl Lv2Host {
                     let range = ByteRange::contiguous_u32(cause_ptr, 4);
                     effects.push(Effect::SharedWriteIntent {
                         range,
-                        bytes: WritePayload::new(
-                            sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes().to_vec(),
+                        bytes: WritePayload::from_slice(
+                            &sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes(),
                         ),
                         ordering: PriorityClass::Normal,
                         source: requester,
@@ -370,7 +371,7 @@ impl Lv2Host {
                     let range = ByteRange::contiguous_u32(status_ptr, 4);
                     effects.push(Effect::SharedWriteIntent {
                         range,
-                        bytes: WritePayload::new(0u32.to_be_bytes().to_vec()),
+                        bytes: WritePayload::from_slice(&0u32.to_be_bytes()),
                         ordering: PriorityClass::Normal,
                         source: requester,
                         source_time: self.current_tick,
@@ -575,7 +576,7 @@ mod tests {
                 effects[0].clone(),
                 Effect::SharedWriteIntent {
                     range: ByteRange::new(GuestAddr::new(0x100), 4).unwrap(),
-                    bytes: WritePayload::new(1u32.to_be_bytes().to_vec()),
+                    bytes: WritePayload::from_slice(&1u32.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: UnitId::new(0),
                     source_time: GuestTicks::ZERO,
@@ -587,7 +588,7 @@ mod tests {
                 effects[0].clone(),
                 Effect::SharedWriteIntent {
                     range: ByteRange::new(GuestAddr::new(0x200), 4).unwrap(),
-                    bytes: WritePayload::new(2u32.to_be_bytes().to_vec()),
+                    bytes: WritePayload::from_slice(&2u32.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: UnitId::new(0),
                     source_time: GuestTicks::ZERO,

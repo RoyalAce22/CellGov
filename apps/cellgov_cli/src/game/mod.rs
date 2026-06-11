@@ -7,6 +7,7 @@ mod diag;
 pub mod manifest;
 mod mounts;
 mod observation;
+mod prescan_format;
 mod prx;
 mod run;
 mod stack_walk;

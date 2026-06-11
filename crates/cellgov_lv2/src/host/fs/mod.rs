@@ -21,6 +21,7 @@ mod read;
 mod readdir;
 mod stat;
 mod stat_layout;
+mod write;
 
 #[cfg(test)]
 mod tests;

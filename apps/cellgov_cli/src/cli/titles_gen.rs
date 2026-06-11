@@ -247,6 +247,7 @@ mod tests {
             checkpoint: CheckpointTrigger::ProcessExit,
             source: GameSource::Hdd,
             rsx_mirror: false,
+            rsx_consume: false,
             content: None,
             mounts: Vec::new(),
         }

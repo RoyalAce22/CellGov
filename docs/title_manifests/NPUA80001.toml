@@ -14,6 +14,7 @@ kind = "process-exit"
 
 [rsx]
 mirror = true
+consume = true
 
 [content]
 base = "boot_content/NPUA80001"

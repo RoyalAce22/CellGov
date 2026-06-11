@@ -100,6 +100,7 @@ graph BT
   trace --> rpcs3obs
 
   ppu ~~~ spu
+  firmware --> cli
   firmware ~~~ mkelf
 ```
 
@@ -130,28 +131,28 @@ Everything else is workspace-internal. The workspace compiles under
 
 ## Per-crate responsibilities
 
-| Crate                          | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cellgov_ps3_abi`              | PS3 ABI source-of-truth leaf: NIDs (with `nid_const!` SHA-1 verification), the global NID lookup table and `stub_classification`, LV2 errno database, LV2 syscall numbers, ELF / PRX / SPRX layout, CBE PPU hardware constants, and RSX hardware constants under `rsx_nv_hardware.rs`. Data only; no behaviour. Zero workspace dependencies.                                                                                                                                                |
-| `cellgov_time`                 | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time.                                                                                                                                                                                                                                                                                                                                            |
-| `cellgov_event`                | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary.                                                                                                                                                                                                                                                                                                                                                              |
-| `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`, and `StagingMemory` / `StagedWrite` for batched pending writes.                                                                                                                                                                                                            |
-| `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier ids, and the atomic reservation table.                                                                                                                                                                                                                                                                                                                                                                  |
-| `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `cellgov_effects`              | The 13-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                                                                                                                                                                      |
-| `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The boundary between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                                                                                                                                                                          |
-| `cellgov_trace`                | Binary trace format: 9 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace).                                                                                                                                                                                                                                                                                               |
-| `cellgov_lv2`                  | LV2 model: image / content registry, thread-group table, PPU thread table, in-memory filesystem store, LV2 sync primitives (mutex, cond, semaphore, lwmutex, event-flag, event-queue), syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                              |
-| `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                         |
-| `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, and the PRX loader's dependency-ordered multi-module import resolution. The NID lookup database itself lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                         |
-| `cellgov_spu`                  | SPU interpreter and SPU ELF loader. The MFC / SPU channel-number constants live in `cellgov_ps3_abi::spu_channels`.                                                                                                                                                                                                                                                                                                                                       |
-| `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace.                                                                                                                                                                                                                                                                                                                                                                                     |
-| `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                                                                                                                                                                             |
-| `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                |
-| `cellgov_cli`                  | The user-facing binary: `run-game`, `bench-boot`, `bench-boot-once`, `dump`, `dump-imports`, `disasm`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`.                                                                                                                                                                                                                                                                                  |
-| `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                                                                                                                                                                     |
+| Crate                          | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cellgov_ps3_abi`              | PS3 ABI source-of-truth leaf: NIDs (with `nid_const!` SHA-1 verification), the global NID lookup table and `stub_classification`, LV2 errno database, LV2 syscall numbers, ELF / PRX / SPRX layout, CBE PPU hardware constants, and RSX hardware constants under `rsx_nv_hardware.rs`. Data only; no behaviour. Zero workspace dependencies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `cellgov_time`                 | `GuestTicks`, `Budget`, `Epoch` -- distinct numeric types so guest time never accidentally becomes wall time.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `cellgov_event`                | `UnitId`, `EventId`, `MailboxId`, `PriorityClass` -- identifier types and event vocabulary.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `cellgov_mem`                  | `GuestMemory` (sorted `Vec<Region>` matching the PS3 LV2 VA layout), `Region` with `RegionAccess` modes, `ByteRange`, `GuestAddr`, FNV-1a hashing with cached `content_hash`, and `StagingMemory` / `StagedWrite` for batched pending writes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `cellgov_sync`                 | Mailbox FIFO, signal-register OR-merge, barrier ids, and the atomic reservation table.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `cellgov_effects`              | The 13-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The boundary between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `cellgov_trace`                | Binary trace format: 11 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace + `HostInvariantBreak` side-channel + `SyscallEntered` syscall-entry record).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `cellgov_lv2`                  | LV2 model: image / content registry, loaded-PRX registry, thread-group table, PPU thread table, in-memory filesystem store, LV2 sync primitives (mutex, cond, semaphore, lwmutex, event-flag, event-queue), syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, and the PRX loader's dependency-ordered multi-module import resolution. The NID lookup database itself lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `cellgov_spu`                  | SPU interpreter and SPU ELF loader. The MFC / SPU channel-number constants live in `cellgov_ps3_abi::spu_channels`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `cellgov_cli`                  | The user-facing binary: `run-game`, `bench-boot`, `bench-boot-once`, `dump`, `dump-prx-imports`, `disasm`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`, `rpcs3-attribute`, `fixture-gen`, `titles-gen`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cellgov_firmware`             | PS3 firmware and SELF decrypter. Lib + bin. The binary's `install` subcommand peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` and writes per-module SELFs to `firmware/` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). The `decrypt-self` subcommand decrypts one SELF at a time. The library's `sce::decrypt_self_to_elf` is also called by `cellgov_cli`'s boot path to peel encrypted SELFs at load time. APP keys cover firmware revisions 0x0000-0x001D, mirroring RPCS3's `KeyVault::LoadSelfAPPKeys`. The fourteen-module minimum viable PRX set from the user's PUP decrypts bit-identically to the output of RPCS3's decrypter run on the same PUP (the user supplies the PUP; neither RPCS3 nor CellGov ships firmware). No RPCS3 dependency at runtime. |
-| `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                  |
+| `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ## Guest memory layout
 
@@ -163,16 +164,17 @@ binary search), which returns the region entirely containing the
 range or `None` if the access straddles a boundary or falls in an
 unmapped gap.
 
-The `run-game` driver builds five regions matching the canonical PS3
+The `run-game` driver builds six regions matching the canonical PS3
 LV2 virtual-address layout:
 
-| Guest VA              | Size   | Label          | Access                           | Purpose                                                                  |
-| --------------------- | ------ | -------------- | -------------------------------- | ------------------------------------------------------------------------ |
-| 0x00000000-0x3FFFFFFF | 1 GB   | `main`         | `ReadWrite`                      | User memory: EBOOT PT_LOAD segments, TLS, firmware PRX images, allocator pool |
-| 0xC0000000-0xCFFFFFFF | 256 MB | `rsx`          | `ReservedZeroReadable` (default) | Video / RSX local memory -- placeholder, reads zero and are counted      |
-| 0xD0000000-0xD00FFFFF | 1 MB   | `stack`        | `ReadWrite`                      | Primary-thread stack (page-4K); matches `PROC_PARAM.primary_stacksize` typical for retail titles |
-| 0xD0100000-0xD0FFFFFF | 15 MB  | `child_stacks` | `ReadWrite`                      | Stack pool for PPU threads spawned by `sys_ppu_thread_create`            |
-| 0xE0000000-0xFFFFFFFF | 512 MB | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX                    |
+| Guest VA                   | Size       | Label          | Access                           | Purpose                                                                                                                                                                  |
+| -------------------------- | ---------- | -------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0x00000000-(<= 0x3FFFFFFF) | up to 1 GB | `main`         | `ReadWrite`                      | User memory: EBOOT PT_LOAD segments, TLS, firmware PRX images, allocator pool. Size is `max(ELF footprint + 2 MiB PRX headroom, 1 GiB)`, capped by `PS3_RSX_IOMAP_BASE`. |
+| 0x40000000-0x454FFFFF      | 85 MB      | `rsx_iomap`    | `ReadWrite`                      | Backing for `sys_rsx_context_iomap` (672); libgcm FIFO command-buffer allocations land here                                                                              |
+| 0xC0000000-0xCFFFFFFF      | 256 MB     | `rsx`          | `ReservedZeroReadable` (default) | Video / RSX local memory -- placeholder, reads zero and are counted                                                                                                      |
+| 0xD0000000-0xD00FFFFF      | 1 MB       | `stack`        | `ReadWrite`                      | Primary-thread stack (page-4K); matches `PROC_PARAM.primary_stacksize` typical for retail titles                                                                         |
+| 0xD0100000-0xD0FFFFFF      | 15 MB      | `child_stacks` | `ReadWrite`                      | Stack pool for PPU threads spawned by `sys_ppu_thread_create`                                                                                                            |
+| 0xE0000000-0xFFFFFFFF      | 512 MB     | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX                                                                                                                    |
 
 The `main` region's internal sub-layout is not tracked by the region
 map (it stays flat within that region): `sys_memory_allocate` starts
@@ -222,7 +224,7 @@ a stack-allocated region-view table built at the top of
 of every region's base and bytes, sliced to the active region count
 per dispatch. Linear scan wins over `BTreeMap` lookup
 because the region count stays single-digit under the current PS3
-layout (main, stack, child_stacks, rsx, spu_reserved); if many more mappings are
+layout (main, rsx_iomap, stack, child_stacks, rsx, spu_reserved); if many more mappings are
 later added, a two-tier fast-path is the natural next
 step. Stores go through `Effect::SharedWriteIntent`
 effects -- the commit pipeline's `apply_commit` is region-aware, so
@@ -286,9 +288,9 @@ nine-step deterministic loop:
 8. Emit commit trace records for the batch and notify the scheduler
    of the yield, passing whether other units were woken and whether
    the source still holds an lwmutex.
-9. Guest time itself advances inside step 3 (`Runtime::step`) by
-   the unit's consumed budget; `commit_step` only advances the
-   epoch.
+
+(Guest time itself advances inside step 3 (`Runtime::step`) by the
+unit's consumed budget; `commit_step` only advances the epoch.)
 
 Steps 4-5 are atomic. A fault (`YieldReason::Fault` checked at
 step 4 entry, or a validation rejection mid-step 4) discards the
@@ -327,9 +329,10 @@ originates or observes the async event.
 
 The PPU maintains a `PredecodedShadow` covering the main text
 region. Every 4-byte-aligned instruction word is decoded once at
-ELF load time and stored in a flat `Vec<PpuInstruction>` indexed
-by `(pc - base) / 4`. The hot-path fetch becomes a bounds check
-plus an array index instead of a raw-memory read plus decode.
+ELF load time and stored in a flat `Vec<Option<PpuInstruction>>`
+indexed by `(pc - base) / 4` (the `None` arm is the decode-failure
+sentinel). The hot-path fetch becomes a bounds check plus an
+array index instead of a raw-memory read plus decode.
 
 Three optimization passes run at shadow build time:
 
@@ -357,9 +360,13 @@ Three optimization passes run at shadow build time:
    runtime uses this to size the inner loop's iteration count.
 
 Guest-visible code writes (self-modifying code, CRT0 relocations,
-GOT slot patching during PRX import binding) invalidate the
-affected slots. The next fetch re-decodes from committed memory
-and re-applies quickening.
+GOT slot patching during PRX import binding) mark the affected
+slots stale via `invalidate_range` (super-pair partners are widened
+in so both halves transition together). The runtime falls back to
+raw fetch + decode until `refresh(pc, raw)` repopulates a slot,
+which re-applies quickening but not super-pairing; fusable pairs
+that refresh after invalidation run as separate dispatches until
+the next full shadow rebuild.
 
 ## Effects and trace records
 
@@ -370,13 +377,14 @@ The full vocabulary of guest-visible operations:
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
   `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
   `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`.
-- **10 trace record variants** in `cellgov_trace::TraceRecord` --
+- **11 trace record variants** in `cellgov_trace::TraceRecord` --
   seven decision-level (`UnitScheduled`, `StepCompleted`,
   `CommitApplied`, `StateHashCheckpoint`, `EffectEmitted`,
   `UnitBlocked`, `UnitWoken`), two per-step variants for the
-  divergence trace (`PpuStateHash`, `PpuStateFull`), and one
+  divergence trace (`PpuStateHash`, `PpuStateFull`), one
   diagnostic side-channel for host-side invariant breaks
-  (`HostInvariantBreak`).
+  (`HostInvariantBreak`), and one syscall-entry record
+  (`SyscallEntered`) emitted before `Lv2Host::dispatch` runs.
 
 Trace emission is gated by `RuntimeMode` (`FaultDriven` /
 `DeterminismCheck` / `FullTrace`). Fault-driven boot pays no trace
@@ -406,22 +414,28 @@ test in the hot loop).
 
 **PPU (`cellgov_ppu`)**: PPC64 interpreter with 32 GPRs, 32 FPRs, PC,
 CR, LR, CTR, XER (carry tracked), TB, and 32 vector registers.
-**160 `PpuInstruction` variants** today, covering integer arithmetic
+**221 `PpuInstruction` variants** today, covering integer arithmetic
 and logic, D-form / DS-form / indexed loads/stores with and without
-update (including DS-form `lwa`), conditional branches with
-LR/CTR/AA variants, 64-bit multiply and divide families, signed and
-unsigned multiply-high, rotate and mask families (`rlwinm`, `rlwnm`,
-`rldicl`, `rldicr`, `rldimi`), floating-point arithmetic and
-conversion (`fmadd`, `fmul`, `fdiv`, `fcmp`, `fsel`, `frsp`,
-`fctiwz`, `fcfid`), VMX (25+ VX-form and VA-form vector ops), SPR/CR
-moves, atomic load-reserve / store-conditional pairs, and
-record-form variants (`addic.`, `andis.`). The variant count
-includes the shadow's quickening rewrites (`Mr`, `Li`,
-`Slwi`/`Srwi`/`Sldi`/`Srdi`, `Clrlwi`/`Clrldi`, `Nop`, `CmpwZero`)
-and super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`,
-`LiStw`, `CmpwiBc`, `CmpwBc`, `LdMtlr`, `StdStd`) plus the
-`Consumed` placeholder; the architectural-instruction subset is
-~141 of the 160.
+update (including DS-form `lwa` and the full indexed-with-update
+family), byte-reversed indexed loads/stores (`ldbrx`, `lwbrx`,
+`lhbrx`, `sdbrx`, `stwbrx`, `sthbrx`), string moves (`lswi`, `lswx`,
+`stswi`, `stswx`), trap (`tw`, `td`), `dcbz`, `sc`, the VMX
+unaligned and element-indexed load/store family (`lvlx`, `lvrx`,
+`stvlx`, `stvrx`, `lvebx`/`lvehx`/`lvewx`, `stvebx`/`stvehx`/
+`stvewx`, `lvxl`, `stvxl`, `lvsl`, `lvsr`), conditional branches
+with LR/CTR/AA variants, 64-bit multiply and divide families,
+signed and unsigned multiply-high, rotate and mask families
+(`rlwinm`, `rlwnm`, `rldicl`, `rldicr`, `rldic`, `rldcl`, `rldcr`,
+`rldimi`), floating-point arithmetic and conversion (`fmadd`,
+`fmul`, `fdiv`, `fcmp`, `fsel`, `frsp`, `fctiwz`, `fcfid`), VMX
+VX-form and VA-form vector ops, SPR/CR moves (including `mcrxr`),
+atomic load-reserve / store-conditional pairs, count-leading-zero
+(`cntlzd`), popcount (`popcntb`), and record-form variants
+(`addic.`, `andis.`). The variant count includes the shadow's
+quickening rewrites (`Mr`, `Li`, `Slwi`/`Srwi`/`Sldi`/`Srdi`,
+`Clrlwi`/`Clrldi`, `Nop`, `CmpwZero`) and super-pair fusions
+(`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`, `LiStw`, `CmpwiBc`,
+`CmpwBc`, `LdMtlr`, `StdStd`) plus the `Consumed` placeholder.
 
 The PPU side also owns the loaders: PPU ELF64 with PT_LOAD and PT_TLS
 segment handling, SPRX parser for decrypted PS3 firmware modules with
@@ -462,46 +476,46 @@ classification, syscall dispatch.
 
 Classified into typed `Lv2Request` variants:
 
-| Syscall                           | Number           | Behavior                                                                                               |
-| --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------ |
-| `sys_process_is_spu_lock_line_reservation_address` | 14   | Returns 0 (SUCCESS) for any address; the deterministic-oracle does not partition guest memory into SPU-reservable vs. not. Behavioural oracle: RPCS3's `sys_process.cpp`. |
-| `sys_process_exit`                | 22               | Cascades Finished to all units in the process.                                                         |
-| `sys_ppu_thread_exit`             | 41               | Finishes the calling unit; wakes joiners with the exit value.                                          |
-| `sys_ppu_thread_yield`            | 43               | No-op scheduling hint; round-robin picks the next runnable unit.                                       |
-| `sys_ppu_thread_join`             | 44               | Either returns exit value immediately or blocks caller on target.                                      |
-| `sys_ppu_thread_create`           | 52               | Allocates stack + TLS, seeds child `PpuState`, registers a new PPU unit mid-run via `PpuFactory`.      |
-| `sys_event_flag_*`                | 82, 83, 85, 86, 87, 118 | Create / destroy / wait / trywait / set / clear. AND/OR match with CLEAR/NO-CLEAR wake policy. Slot 84 is `_sys_interrupt_thread_establish`; slot 118 is the firmware-era home of `sys_event_flag_clear`. |
-| `sys_semaphore_*`                 | 90-94, 114       | Create / destroy / wait / trywait / post / get_value. Wake-or-increment on post.                       |
-| `sys_lwmutex_*`                   | 95-99            | Create / destroy / lock / unlock / trylock. FIFO waiter list, ownership tracked, EDEADLK on re-enter.  |
-| `sys_mutex_*`                     | 100, 102-104     | Create / lock / unlock / trylock. Heavy-mutex variant of lwmutex with attribute capture.               |
-| `sys_cond_*`                      | 105-110          | Create / destroy / wait / signal / signal_all / signal_to. Two-hop drop-and-reacquire mutex protocol.  |
-| `sys_event_queue_*`               | 128-131, 138     | Create / destroy / receive / tryreceive / port_send. Bounded FIFO with 4-u64 payloads.                 |
-| `sys_time_get_timezone`           | 144              | Writes zero through both out-pointers (UTC, no DST). CellGov has no host-time dependency.              |
-| `sys_spu_image_open`              | 156              | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                    |
-| `sys_spu_image_import`            | 158              | Registers `size` bytes at the guest pointer into the `ContentStore` and writes a `sys_spu_image_t` referring to the registered blob. |
-| `sys_spu_initialize`              | 169              | Returns CELL_OK; the deterministic-oracle does not partition the SPU pool into "usable" vs "raw" slots. `max_usable_spu` / `max_raw_spu` captured for tracing. |
-| `sys_spu_thread_group_create`     | 170              | Allocates a monotonic group id, writes it to guest pointer.                                            |
-| `sys_spu_thread_group_destroy`    | 171              | Withdraws the group from the table, scrubs unit / thread maps, returns CELL_OK. CELL_ESRCH on unknown id, CELL_EBUSY if any SPU in the group is still Running. |
-| `sys_spu_thread_initialize`       | 172              | Records image handle and args (copied at init time) per slot.                                          |
-| `sys_spu_thread_group_start`      | 173              | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                  |
-| `sys_spu_thread_group_terminate`  | 177              | Not modeled; returns CELL_ENOSYS via the null backend (logged as invariant break). Split from join so dispatch cannot conflate the two ABI shapes. RPCS3 reference: its `sys_spu.cpp` terminate handler. |
-| `sys_spu_thread_group_join`       | 178              | Blocks caller; wakes when all SPUs in the group finish.                                                |
-| `sys_spu_thread_write_spu_mb`     | 190              | Deposits a value into the target SPU's inbound mailbox.                                                |
-| `sys_memory_container_create`     | 341              | Allocates a monotonic container id, writes it to guest pointer.                                        |
-| `sys_memory_allocate`             | 348              | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF). |
-| `sys_memory_free`                 | 349              | Stub: no-op (CellGov does not track deallocation).                                                     |
-| `sys_memory_get_user_memory_size` | 352              | Writes `sys_memory_info_t` (total / available, 0x0D500000 each) to guest pointer.                      |
-| `sys_tty_write`                   | 403              | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing.                                   |
-| `sys_fs_open`                     | 801              | Routes through the in-memory FS layer (see "In-memory filesystem" below). Manifest-registered paths get a fresh fd from `FsStore`; legacy whitelist paths (`PARAM.SFO`, `output.txt`) get an `alloc_id` synthetic fd; everything else returns `CELL_FS_ENOENT`. CELL_EFAULT on unmapped path / fd out-pointer; CELL_EINVAL on no-NUL within `CELL_FS_MAX_PATH_LENGTH`; CELL_EMFILE when the FsStore allocator is exhausted. |
-| `sys_fs_read`                     | 802              | Reads up to `nbytes` from `fd`'s offset into the guest buffer; advances the offset by the actual count returned and writes that count (u64 BE) to `nread_out_ptr`. Error precedence: bad nread out-pointer (8-byte aligned + writable) -> CELL_EFAULT; unknown fd -> CELL_EBADF; bad buffer (when nbytes > 0) -> CELL_EFAULT BEFORE the offset advances (POSIX semantics). |
-| `sys_fs_close`                    | 804              | FsStore-tracked fds are removed from the open-fd table so subsequent reads / fstats return EBADF. Unknown fds return CELL_OK to preserve legacy whitelist `fclose` behaviour; this is a deliberate divergence pending whitelist retirement. `fs_fd_count` is left unchanged across close (real-PS3 invariant pinned by ps3autotests `sys_process`). |
-| `sys_fs_lseek`                    | 818              | SEEK_SET / CUR / END semantics via `FsStore::seek`. Errors: CELL_EFAULT (bad pos out-pointer), CELL_EINVAL (whence out of `{0,1,2}` or seek out of `[0, u64::MAX]`), CELL_EBADF (unknown fd). Failed seek leaves the offset unchanged. |
-| `sys_fs_opendir`                  | 805              | Snapshots the manifest- or mount-resolved directory entries into a per-fd `BTreeMap<u32, DirEntry>`, sorted lexicographically by byte order. Returns a fresh dir-fd via `FsStore::open_dir`. CELL_FS_ENOENT for unknown paths (including mount-resolve misses). |
-| `sys_fs_readdir`                  | 806              | Yields the next `CellFsDirent` (258 bytes) at the dir-fd's cursor; writes the entry size to the caller's out-pointer (0 on end-of-directory). CELL_EBADF on unknown fd. |
-| `sys_fs_closedir`                 | 807              | Drops the dir-fd's snapshot and entry table. CELL_EBADF on unknown fd. |
-| `sys_fs_stat`                     | 808              | Path-keyed variant of `sys_fs_fstat`; manifest miss probes the mount table before returning CELL_FS_ENOENT. Same struct shape. |
-| `sys_fs_fstat`                    | 809              | Writes a 56-byte `CellFsStat` to `stat_out_ptr` (8-byte aligned). `mode = S_IFREG \| 0o444`, `size` from the backing blob, `blksize = 4096`, all timestamp fields zero (oracle has no host time). CELL_EBADF on unknown fd. |
-| `UnresolvedImport`                | (trampoline)     | Issued by the guest-resident unresolved-import trampoline when CRT0 calls through a GOT slot whose NID had no matching firmware export. The PRX loader patches such slots to point at a trampoline OPD that loads the NID into r4 and fires this syscall. Dispatcher prints a named diagnostic (`dispatch.unresolved_import: NID 0x... in namespace X`) and returns CELL_EINVAL so the next observable effect is a structured fault, not control-flow corruption into junk PCs. |
+| Syscall                                            | Number                  | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sys_process_is_spu_lock_line_reservation_address` | 14                      | Returns 0 (SUCCESS) for any address; the deterministic-oracle does not partition guest memory into SPU-reservable vs. not. Behavioural oracle: RPCS3's `sys_process.cpp`.                                                                                                                                                                                                                                                                                                       |
+| `sys_process_exit`                                 | 22                      | Cascades Finished to all units in the process.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `sys_ppu_thread_exit`                              | 41                      | Finishes the calling unit; wakes joiners with the exit value.                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `sys_ppu_thread_yield`                             | 43                      | No-op scheduling hint; round-robin picks the next runnable unit.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `sys_ppu_thread_join`                              | 44                      | Either returns exit value immediately or blocks caller on target.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `sys_ppu_thread_create`                            | 52                      | Allocates stack + TLS, seeds child `PpuState`, registers a new PPU unit mid-run via `PpuFactory`.                                                                                                                                                                                                                                                                                                                                                                               |
+| `sys_event_flag_*`                                 | 82, 83, 85, 86, 87, 118 | Create / destroy / wait / trywait / set / clear. AND/OR match with CLEAR/NO-CLEAR wake policy. Slot 84 is `_sys_interrupt_thread_establish`; slot 118 is the firmware-era home of `sys_event_flag_clear`.                                                                                                                                                                                                                                                                       |
+| `sys_semaphore_*`                                  | 90-94, 114              | Create / destroy / wait / trywait / post / get_value. Wake-or-increment on post.                                                                                                                                                                                                                                                                                                                                                                                                |
+| `sys_lwmutex_*`                                    | 95-99                   | Create / destroy / lock / unlock / trylock. FIFO waiter list, ownership tracked, EDEADLK on re-enter.                                                                                                                                                                                                                                                                                                                                                                           |
+| `sys_mutex_*`                                      | 100, 102-104            | Create / lock / unlock / trylock. Heavy-mutex variant of lwmutex with attribute capture.                                                                                                                                                                                                                                                                                                                                                                                        |
+| `sys_cond_*`                                       | 105-110                 | Create / destroy / wait / signal / signal_all / signal_to. Two-hop drop-and-reacquire mutex protocol.                                                                                                                                                                                                                                                                                                                                                                           |
+| `sys_event_queue_*`                                | 128-131, 138            | Create / destroy / receive / tryreceive / port_send. Bounded FIFO with 4-u64 payloads.                                                                                                                                                                                                                                                                                                                                                                                          |
+| `sys_time_get_timezone`                            | 144                     | Writes zero through both out-pointers (UTC, no DST). CellGov has no host-time dependency.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `sys_spu_image_open`                               | 156                     | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `sys_spu_image_import`                             | 158                     | Registers `size` bytes at the guest pointer into the `ContentStore` and writes a `sys_spu_image_t` referring to the registered blob.                                                                                                                                                                                                                                                                                                                                            |
+| `sys_spu_initialize`                               | 169                     | Returns CELL_OK; the deterministic-oracle does not partition the SPU pool into "usable" vs "raw" slots. `max_usable_spu` / `max_raw_spu` captured for tracing.                                                                                                                                                                                                                                                                                                                  |
+| `sys_spu_thread_group_create`                      | 170                     | Allocates a monotonic group id, writes it to guest pointer.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `sys_spu_thread_group_destroy`                     | 171                     | Withdraws the group from the table, scrubs unit / thread maps, returns CELL_OK. CELL_ESRCH on unknown id, CELL_EBUSY if any SPU in the group is still Running.                                                                                                                                                                                                                                                                                                                  |
+| `sys_spu_thread_initialize`                        | 172                     | Records image handle and args (copied at init time) per slot.                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `sys_spu_thread_group_start`                       | 173                     | Returns `RegisterSpu` with init state per slot; runtime creates SPUs.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `sys_spu_thread_group_terminate`                   | 177                     | Not modeled; typed-variant arm logs an invariant break and returns CELL_ENOSYS. Split from join so dispatch cannot conflate the two ABI shapes. RPCS3 reference: its `sys_spu.cpp` terminate handler.                                                                                                                                                                                                                                                                           |
+| `sys_spu_thread_group_join`                        | 178                     | Blocks caller; wakes when all SPUs in the group finish.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `sys_spu_thread_write_spu_mb`                      | 190                     | Deposits a value into the target SPU's inbound mailbox.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `sys_memory_container_create`                      | 341                     | Allocates a monotonic container id, writes it to guest pointer.                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `sys_memory_allocate`                              | 348                     | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF).                                                                                                                                                                                                                                                                                                                                                                          |
+| `sys_memory_free`                                  | 349                     | Stub: no-op (CellGov does not track deallocation).                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `sys_memory_get_user_memory_size`                  | 352                     | Writes `sys_memory_info_t` (total / available, 0x0D500000 each) to guest pointer.                                                                                                                                                                                                                                                                                                                                                                                               |
+| `sys_tty_write`                                    | 403                     | Returns CELL_OK; fd / len / buf carried in `Lv2Request` for tracing.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `sys_fs_open`                                      | 801                     | Routes through the in-memory FS layer (see "In-memory filesystem" below). Manifest-registered paths get a fresh fd from `FsStore`; legacy whitelist paths (`PARAM.SFO`, `output.txt`) get an `alloc_id` synthetic fd; everything else returns `CELL_FS_ENOENT`. CELL_EFAULT on unmapped path / fd out-pointer; CELL_EINVAL on no-NUL within `CELL_FS_MAX_PATH_LENGTH`; CELL_EMFILE when the FsStore allocator is exhausted.                                                     |
+| `sys_fs_read`                                      | 802                     | Reads up to `nbytes` from `fd`'s offset into the guest buffer; advances the offset by the actual count returned and writes that count (u64 BE) to `nread_out_ptr`. Error precedence: bad nread out-pointer (8-byte aligned + writable) -> CELL_EFAULT; unknown fd -> CELL_EBADF; bad buffer (when nbytes > 0) -> CELL_EFAULT BEFORE the offset advances (POSIX semantics).                                                                                                      |
+| `sys_fs_close`                                     | 804                     | FsStore-tracked fds are removed from the open-fd table so subsequent reads / fstats return EBADF. Unknown fds return CELL_OK to preserve legacy whitelist `fclose` behaviour; this is a deliberate divergence pending whitelist retirement. `fs_fd_count` is left unchanged across close (real-PS3 invariant pinned by ps3autotests `sys_process`).                                                                                                                             |
+| `sys_fs_lseek`                                     | 818                     | SEEK_SET / CUR / END semantics via `FsStore::seek`. Errors: CELL_EFAULT (bad pos out-pointer), CELL_EINVAL (whence out of `{0,1,2}` or seek out of `[0, u64::MAX]`), CELL_EBADF (unknown fd). Failed seek leaves the offset unchanged.                                                                                                                                                                                                                                          |
+| `sys_fs_opendir`                                   | 805                     | Snapshots the manifest- or mount-resolved directory entries into a per-fd `BTreeMap<u32, DirEntry>`, sorted lexicographically by byte order. Returns a fresh dir-fd via `FsStore::open_dir`. CELL_FS_ENOENT for unknown paths (including mount-resolve misses).                                                                                                                                                                                                                 |
+| `sys_fs_readdir`                                   | 806                     | Yields the next `CellFsDirent` (258 bytes) at the dir-fd's cursor; writes the entry size to the caller's out-pointer (0 on end-of-directory). CELL_EBADF on unknown fd.                                                                                                                                                                                                                                                                                                         |
+| `sys_fs_closedir`                                  | 807                     | Drops the dir-fd's snapshot and entry table. CELL_EBADF on unknown fd.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `sys_fs_stat`                                      | 808                     | Path-keyed variant of `sys_fs_fstat`; manifest miss probes the mount table before returning CELL_FS_ENOENT. Same struct shape.                                                                                                                                                                                                                                                                                                                                                  |
+| `sys_fs_fstat`                                     | 809                     | Writes a 56-byte `CellFsStat` to `stat_out_ptr` (8-byte aligned). `mode = S_IFREG \| 0o444`, `size` from the backing blob, `blksize = 4096`, all timestamp fields zero (oracle has no host time). CELL_EBADF on unknown fd.                                                                                                                                                                                                                                                     |
+| `UnresolvedImport`                                 | (trampoline)            | Issued by the guest-resident unresolved-import trampoline when CRT0 calls through a GOT slot whose NID had no matching firmware export. The PRX loader patches such slots to point at a trampoline OPD that loads the NID into r4 and fires this syscall. Dispatcher prints a named diagnostic (`dispatch.unresolved_import: NID 0x... in namespace X`) and returns CELL_EINVAL so the next observable effect is a structured fault, not control-flow corruption into junk PCs. |
 
 ### PPU thread lifecycle
 
@@ -514,7 +528,9 @@ range, priority, TLS base), the exit value (set on
 `sys_ppu_thread_exit`), and a join-waiters list.
 
 State machine: `Runnable -> Blocked(GuestBlockReason)
--> Runnable` (on wake), or `Runnable -> Finished` (on exit). The
+-> Runnable` (on wake), `Runnable -> Finished` (on exit), or
+`Runnable | Blocked -> Detached` (via `PpuThreadTable::detach`; no
+syscall arm currently triggers this transition). The
 guest-facing `GuestBlockReason` lives next to the thread table;
 the scheduler sees only the opaque `UnitStatus::Blocked`.
 Variants cover every LV2 primitive that parks a caller:
@@ -550,29 +566,29 @@ Syscalls without a typed-variant arm route through the null
 backend (see "Null backend for unmodeled syscalls" below) and
 return `CELL_ENOSYS` with a traced diagnostic.
 
-| Syscall / Request                                      | Number | Behavior                                                                                                                                                                                                                |
-| ------------------------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sys_ppu_thread_get_priority`                          | 48     | Writes target priority (s32) to `*priop`; unknown thread id falls back to 1001 (boot-seed primary priority). CELL_EFAULT on null `priop`.                                                                               |
-| `sys_tty_read`                                         | 402    | CELL_EIO (debug console off in retail).                                                                                                                                                                                 |
-| DEX-only unused slot                                   | 462    | CELL_ENOSYS so retail liblv2 takes its fallback path.                                                                                                                                                                   |
-| `sys_memory_container_create`                          | 324    | Mints kernel id, writes to `*cid_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                     |
-| `sys_mmapper_allocate_address`                         | 330    | Bumps a 256 MiB-aligned cursor from `0x4000_0000` (immediately above the sys_rsx window) toward `MMAPPER_REGION_END = 0xD000_0000` (start of the PPU stack region), writes base to `*alloc_addr_ptr`. CELL_ENOMEM on `size == 0`, u32 overflow, or cap-exceeded. CELL_EFAULT on null pointer.                                                                          |
-| `sys_mmapper_allocate_shared_memory`                   | 332    | Mints mem_id, writes to `*mem_id_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                     |
-| `sys_mmapper_search_and_map`                           | 337    | Writes `start_addr` verbatim to `*alloc_addr_ptr` (flat backing collapses the search). CELL_EINVAL when `start_addr` falls outside `[0x2000_0000, 0xC000_0000)`. CELL_EFAULT on null `alloc_addr_ptr`.                  |
-| `sys_mmapper_allocate_shared_memory_from_container`    | 362    | Same shape as 332 with `*mem_id_ptr` at r7.                                                                                                                                                                             |
-| `_sys_prx_load_module`                                 | 480    | Resolves path at r3 against the PRX registry; returns the registered kernel id on match, otherwise echoes the path pointer as a synthetic non-zero id.                                                                  |
-| `_sys_prx_start_module`                                | 481    | CELL_EINVAL when `id == 0` or `pOpt == 0`. Otherwise writes `~0` (no-start sentinel) to `pOpt->entry` and returns CELL_OK.                                                                                              |
-| `_sys_prx_register_module`                             | 484    | CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`) for non-VSH callers.                                                                                                                                                   |
-| `_sys_prx_get_module_list`                             | 494    | `flags & 0x2 == 0` -> CELL_OK no-op. With bit 2 set: CELL_EFAULT on null `pInfo`, otherwise walks the PRX registry (filtering liblv2.sprx) writing kernel ids to the `idlist` slot and the count to `pInfo->count`. Iteration is BTreeMap-keyed so the byte output is independent of registration order. |
-| `_sys_prx_load_module_on_memcontainer`                 | 497    | Same resolver as 480.                                                                                                                                                                                                   |
-| `SsAccessControlEngine` (`sys_ss_access_control_engine`) | --     | `pkg_id == 1` or `3` -> CELL_ENOSYS (debug/root only). `pkg_id == 2` writes the program-authority id (`0x1070_0000_3A00_0001`) to `*a2`; CELL_EFAULT when `a2 == 0` or does not fit `u32`. Other `pkg_id` values return SS-domain status `0x8001_051D`. |
-| `TimeGetTimezone`                                      | --     | Writes 0 to `*timezone_ptr` and `*summer_time_ptr` (UTC). CELL_EFAULT on any null pointer.                                                                                                                              |
-| `TimeGetCurrentTime`                                   | --     | Writes `(sec, nsec)` derived from the dispatch-entry tick snapshot. CELL_EFAULT on any null pointer.                                                                                                                    |
-| `TimeGetTimebaseFrequency`                             | --     | Returns `CELL_PPU_TIMEBASE_HZ` as the syscall code (no effects).                                                                                                                                                        |
-| `MemoryGetUserMemorySize`                              | --     | Writes `(total, available)` = `(0x0D50_0000, 0x0D50_0000)` (PS3 game-mode user-memory cap). CELL_EFAULT on null pointer.                                                                                                |
-| `MemoryContainerCreate`                                | --     | Mints kernel id, writes to `*cid_ptr` (same payload shape as syscall 324).                                                                                                                                              |
-| `Hypercall`                                            | --     | CELL_EINVAL + invariant-break log (PS3 usermode must not issue `sc` with `LEV != 0`).                                                                                                                                   |
-| `Malformed`                                            | --     | CELL_EINVAL + invariant-break log.                                                                                                                                                                                      |
+| Syscall / Request                                        | Number | Behavior                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sys_ppu_thread_get_priority`                            | 48     | Writes target priority (s32) to `*priop`; unknown thread id falls back to 1001 (boot-seed primary priority). CELL_EFAULT on null `priop`.                                                                                                                                                                |
+| `sys_tty_read`                                           | 402    | CELL_EIO (debug console off in retail).                                                                                                                                                                                                                                                                  |
+| DEX-only unused slot                                     | 462    | CELL_ENOSYS so retail liblv2 takes its fallback path.                                                                                                                                                                                                                                                    |
+| `sys_memory_container_create`                            | 324    | Mints kernel id, writes to `*cid_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                                                                                                      |
+| `sys_mmapper_allocate_address`                           | 330    | Bumps a 256 MiB-aligned cursor from `0x4000_0000` (immediately above the sys_rsx window) toward `MMAPPER_REGION_END = 0xD000_0000` (start of the PPU stack region), writes base to `*alloc_addr_ptr`. CELL_ENOMEM on `size == 0`, u32 overflow, or cap-exceeded. CELL_EFAULT on null pointer.            |
+| `sys_mmapper_allocate_shared_memory`                     | 332    | Mints mem_id, writes to `*mem_id_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                                                                                                      |
+| `sys_mmapper_search_and_map`                             | 337    | Writes `start_addr` verbatim to `*alloc_addr_ptr` (flat backing collapses the search). CELL_EINVAL when `start_addr` falls outside `[0x2000_0000, 0xC000_0000)`. CELL_EFAULT on null `alloc_addr_ptr`.                                                                                                   |
+| `sys_mmapper_allocate_shared_memory_from_container`      | 362    | Same shape as 332 with `*mem_id_ptr` at r7.                                                                                                                                                                                                                                                              |
+| `_sys_prx_load_module`                                   | 480    | Resolves path at r3 against the PRX registry; returns the registered kernel id on match, otherwise echoes the path pointer as a synthetic non-zero id.                                                                                                                                                   |
+| `_sys_prx_start_module`                                  | 481    | CELL_EINVAL when `id == 0` or `pOpt == 0`. Otherwise writes `~0` (no-start sentinel) to `pOpt->entry` and returns CELL_OK.                                                                                                                                                                               |
+| `_sys_prx_register_module`                               | 484    | CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`) for non-VSH callers.                                                                                                                                                                                                                                    |
+| `_sys_prx_get_module_list`                               | 494    | `flags & 0x2 == 0` -> CELL_OK no-op. With bit 2 set: CELL_EFAULT on null `pInfo`, otherwise walks the PRX registry (filtering liblv2.sprx) writing kernel ids to the `idlist` slot and the count to `pInfo->count`. Iteration is BTreeMap-keyed so the byte output is independent of registration order. |
+| `_sys_prx_load_module_on_memcontainer`                   | 497    | Same resolver as 480.                                                                                                                                                                                                                                                                                    |
+| `SsAccessControlEngine` (`sys_ss_access_control_engine`) | --     | `pkg_id == 1` or `3` -> CELL_ENOSYS (debug/root only). `pkg_id == 2` writes the program-authority id (`0x1070_0000_3A00_0001`) to `*a2`; CELL_EFAULT when `a2 == 0` or does not fit `u32`. Other `pkg_id` values return SS-domain status `0x8001_051D`.                                                  |
+| `TimeGetTimezone`                                        | --     | Writes 0 to `*timezone_ptr` and `*summer_time_ptr` (UTC). CELL_EFAULT on any null pointer.                                                                                                                                                                                                               |
+| `TimeGetCurrentTime`                                     | --     | Writes `(sec, nsec)` derived from the dispatch-entry tick snapshot. CELL_EFAULT on any null pointer.                                                                                                                                                                                                     |
+| `TimeGetTimebaseFrequency`                               | --     | Returns `CELL_PPU_TIMEBASE_HZ` as the syscall code (no effects).                                                                                                                                                                                                                                         |
+| `MemoryGetUserMemorySize`                                | --     | Writes `(total, available)` = `(0x0D50_0000, 0x0D50_0000)` (PS3 game-mode user-memory cap). CELL_EFAULT on null pointer.                                                                                                                                                                                 |
+| `MemoryContainerCreate`                                  | --     | Mints kernel id, writes to `*cid_ptr` (same payload shape as syscall 324).                                                                                                                                                                                                                               |
+| `Hypercall`                                              | --     | CELL_EINVAL + invariant-break log (PS3 usermode must not issue `sc` with `LEV != 0`).                                                                                                                                                                                                                    |
+| `Malformed`                                              | --     | CELL_EINVAL + invariant-break log.                                                                                                                                                                                                                                                                       |
 
 `PpuThreadCreate` is decoded as a typed variant, not an `Unsupported`
 arm; nonzero `SYS_PPU_THREAD_CREATE_{JOINABLE,INTERRUPT}` flag bits
@@ -634,8 +650,12 @@ assertions. Single-write blob registration: a second
 an open fd.
 
 Path resolution beyond the manifest goes through `FsMountTable`:
-per-title mounts (default `/app_home`) carry a host-side root and
-a read-only flag. `dispatch_fs_open` / `dispatch_fs_stat` first
+per-title mounts (typically `/app_home`, populated from the title
+manifest at boot; no default mount is auto-registered) each carry
+a guest-path prefix and a host-side root. Read-only enforcement is
+global in the dispatch layer -- writes / mkdir / unlink return
+`CELL_EROFS` regardless of host-side permissions -- not a per-mount
+flag. `dispatch_fs_open` / `dispatch_fs_stat` first
 probe the manifest blob set; on a miss, they call
 `try_mount_resolve_and_cache`, which resolves the guest path
 against the mount's host root, reads the bytes on demand, and
@@ -812,7 +832,7 @@ local register alone.
   the unit's entry. Emitted by `lwarx` / `ldarx` (PPU) and
   `MFC_GETLLAR` (SPU).
 - `ConditionalStore { range, bytes, source, ordering,
-  source_time }` commits the success path of `stwcx.` / `stdcx.`
+source_time }` commits the success path of `stwcx.` / `stdcx.`
   / `MFC_PUTLLC`. The commit pipeline applies the bytes through
   the normal staging / drain path, drops the emitter's own
   reservation entry, and runs the clear sweep against all other
@@ -867,28 +887,40 @@ is only ever set by guest writes to the control register;
 `get <= put` modulo the FIFO size.
 
 **NV method decoder.** A narrow decoder parses the 32-bit
-Fermi / NV4097 method header (6-bit subchannel, 11-bit method
-address, 11-bit argument count, 4-bit flags), then walks the
-argument list from the FIFO. Five handlers are registered:
+Fermi / NV4097 method header (Increment, NonIncrement, Call,
+Return, Jump, NewJump kinds plus a Malformed sentinel), then walks
+the argument list from the FIFO. Seven handlers are registered:
 `NV406E_SEMAPHORE_OFFSET`, `NV406E_SEMAPHORE_RELEASE`,
-`NV406E_SET_REFERENCE`, `NV4097_SET_REPORT`,
-`NV4097_FLIP_BUFFER`. Unknown methods take the fallback:
-increment `get` past the declared argument count, tick
-`methods_unknown`, emit a one-shot warning. Malformed headers
-(out-of-range reads, address overflow, wrapped cursors) stop
-the advance cleanly with a typed stop reason rather than
-desynchronizing.
+`NV406E_SET_REFERENCE`, `NV4097_GET_REPORT`,
+`GCM_FLIP_COMMAND` (Sony extension 0xFEAC),
+`NV4097_SET_SEMAPHORE_OFFSET`,
+`NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE`. Unknown methods take
+the fallback: increment `get` past the declared argument count,
+tick `methods_unknown`, emit a one-shot warning. Call / Return
+push and pop frames on an `RsxCallStack` (bounded to
+CALL_STACK_DEPTH frames); Jump / NewJump redirect `get` to the
+target address. Malformed headers (out-of-range reads, address
+overflow, wrapped cursors) stop the advance cleanly with a typed
+stop reason rather than desynchronizing. A self-jump terminator
+`RSX_ADVANCE_ITERATION_CAP` (1_000_000) guards against runaway
+FIFOs; on trip, the pass emits a synthetic raw stop word
+(`CALL_STACK_OVERFLOW_RAW`, `RSX_ADVANCE_UNDERFLOW_RAW`, or
+`RSX_ADVANCE_ITERATION_CAP_RAW`).
 
-**Method-advance pass.** Runs at every commit boundary after
-the reservation clear-sweep, before the next scheduling
-decision. No-op when `get == put`. Otherwise walks the FIFO
-from `get` to `put`, decoding headers and invoking handlers
-in address order. Effects produced by handlers
-(`RsxLabelWrite`, `RsxFlipRequest`) are emitted into the
-NEXT commit batch -- a one-batch delay that preserves
-atomic-batch semantics. FIFO memory is frozen at batch start,
-so reads during the pass cannot observe writes committed in
-the same batch.
+**Method-advance pass.** Gated on the `rsx_consume_fifo` runtime
+flag (per-title opt-in via the manifest `[rsx] consume = true`).
+When enabled, runs at every commit boundary after the reservation
+clear-sweep: (1) catch GET up to the MMIO control-register GET
+slot (monotonic; never pulls cursor backward), (2) drain from
+`get` to `put`, decoding headers and invoking handlers in address
+order, (3) on clean reach of PUT, project `(current_reference, get)`
+back to MMIO at `0xC000_0048` / `0xC000_0044` so libgcm's
+`cellGcmGetCurrentReference` poll clears. No-op when `get == put`
+and the call stack is empty. Effects produced by handlers
+(`RsxLabelWrite`, `RsxFlipRequest`) are emitted into the NEXT
+commit batch -- a one-batch delay that preserves atomic-batch
+semantics. FIFO memory is frozen at batch start, so reads during
+the pass cannot observe writes committed in the same batch.
 
 **Effect variants.** `RsxLabelWrite { offset, value }` wraps
 a 32-bit big-endian write to the RSX label area through the
@@ -913,13 +945,14 @@ step between the two boundaries. Multiple
 (last-writer-wins on `buffer_index`, single
 WAITING-to-DONE transition).
 
-**State-hash contribution.** The RSX committed state folds
-22 bytes of little-endian scalars into `sync_state_hash` at
-every commit boundary: `put / get / current_reference`
-(12 bytes), `flip.status / handler / pending` (6 bytes), and
-the transient `sem_offset` (4 bytes, used to carry the
-offset between an `NV406E_SEMAPHORE_OFFSET` parse and its
-paired `NV406E_SEMAPHORE_RELEASE`).
+**State-hash contribution.** The RSX committed state folds three
+sub-hashes into `sync_state_hash` at every commit boundary:
+`RsxFifoCursor::state_hash` (put / get / current_reference),
+`RsxFlipState::state_hash` (status / handler / pending /
+buffer_index), and the transient `sem_offset` as a u64 (used to
+carry the offset between an `NV406E_SEMAPHORE_OFFSET` parse and
+its paired `NV406E_SEMAPHORE_RELEASE`). Each `state_hash` carries
+its own `STATE_HASH_FORMAT_VERSION` byte.
 
 **Scope boundary.** What the model does NOT do: no RSX
 rasterisation (no pixel produced); no vertex or fragment
@@ -930,12 +963,15 @@ recorded, PPU dispatch into it is deferred); no
 performance-monitor method coverage. The only fidelity claim
 is "the value the CPU polls is the deterministic CPU-visible
 completion value CellGov defines for the equivalent commit-
-boundary model." When the title-manifest opts into the RSX
-mirror (`[rsx] mirror = true`) the region is mapped
-ReadWrite and the runtime's writeback mirror participates in
-the method-driven path; without that flag the RSX region
-stays `ReservedZeroReadable` and put-pointer writes fault as
-the `FirstRsxWrite` checkpoint.
+boundary model." Two independent manifest flags gate participation.
+`[rsx] mirror = true` maps the region ReadWrite and enables the
+flip-status / cursor MMIO mirror; without it the region stays
+`ReservedZeroReadable` and put-pointer writes fault as
+`FirstRsxWrite`. `[rsx] consume = true` (requires `mirror`)
+additionally enables the FIFO consumer: GET catch-up, method-advance
+drain, and `(current_reference, get)` writeback to `0xC000_0048` /
+`0xC000_0044`. flOw opts into both; SSHD and WipEout currently
+take the mirror-only path.
 
 ### LV2 sys_rsx syscall surface
 
@@ -957,15 +993,15 @@ follow the same patterns as the real LV2 (semaphore sentinel
 0x1337C0D3 at index 1020, companion sentinels at 1021--1023,
 zeroed notify and report tables).
 
-| Syscall | Request                    | Behaviour                                                           |
-| ------- | -------------------------- | ------------------------------------------------------------------- |
-| 668     | `SysRsxMemoryAllocate`     | Bump a 3 MB `mem_handle` from the RSX reservation range.            |
-| 669     | `SysRsxMemoryFree`         | Noop-safe (returns CELL_OK); bump allocator does not free.          |
-| 670     | `SysRsxContextAllocate`    | Emit reports / driver-info / dma_control init + event queue. lpar_dma_control_ptr OUT receives `0xC000_0000` (libgcm derives the put-pointer at `+0x40`). |
-| 671     | `SysRsxContextFree`        | Noop-safe (returns CELL_OK); single-context model.                  |
-| 672     | `SysRsxContextIomap`       | Records the IO->EA mapping on the live context. Validates per RPCS3's `sys_rsx.cpp` iomap handler (context_id, 1 MiB alignment, `ea+size` below `PS3_RSX_BASE`, `io+size` within baked iomap region using u64 arithmetic). |
-| 674     | `SysRsxContextAttribute`   | Sub-command dispatch: FIFO_SETUP, FLIP_BUFFER, FLIP_MODE, SET_DISPLAY_BUFFER, handler register. FIFO_SETUP records initial get / put pointers on the context. |
-| 675     | `SysRsxDeviceMap`          | Idempotent: every `dev_id == 8` call returns `sys_rsx::device_map::ADDR` (`0x4000_0000`) in the OUT slot (CELL_OK); other dev_ids return CELL_EINVAL with a recorded invariant break. |
+| Syscall | Request                  | Behaviour                                                                                                                                                                                                                                                                                                                                                                            |
+| ------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 668     | `SysRsxMemoryAllocate`   | Bump a 3 MB `mem_handle` from the RSX reservation range.                                                                                                                                                                                                                                                                                                                             |
+| 669     | `SysRsxMemoryFree`       | Noop-safe (returns CELL_OK); bump allocator does not free.                                                                                                                                                                                                                                                                                                                           |
+| 670     | `SysRsxContextAllocate`  | Emit reports / driver-info / dma_control init + event queue. lpar_dma_control_ptr OUT receives `0xC000_0000` (libgcm derives the put-pointer at `+0x40`).                                                                                                                                                                                                                            |
+| 671     | `SysRsxContextFree`      | Noop-safe (returns CELL_OK); single-context model.                                                                                                                                                                                                                                                                                                                                   |
+| 672     | `SysRsxContextIomap`     | Records the IO->EA mapping on the live context. Validates per RPCS3's `sys_rsx.cpp` iomap handler (context_id, 1 MiB alignment, `ea+size` below `PS3_RSX_BASE`, `io+size` within baked iomap region using u64 arithmetic).                                                                                                                                                           |
+| 674     | `SysRsxContextAttribute` | Sub-command dispatch: FIFO_SETUP, FLIP_MODE, FLIP_BUFFER, SET_DISPLAY_BUFFER, and three CellGov-internal handler-register packages (SET_FLIP_HANDLER 0x8000_0108, SET_VBLANK_HANDLER 0x8000_010C, SET_USER_HANDLER 0x8000_010D). FIFO_SETUP records initial get / put pointers on the context and, when the RSX mirror is enabled, writes them through to the MMIO control register. |
+| 675     | `SysRsxDeviceMap`        | Idempotent: every `dev_id == 8` call returns `sys_rsx::device_map::ADDR` (`0x4000_0000`) in the OUT slot (CELL_OK); other dev_ids return CELL_EINVAL, and a null OUT pointer returns CELL_EFAULT (matching RPCS3's `vm::ptr<u64>` null rejection); both paths record an invariant break.                                                                                             |
 
 **MMIO sentinel checkpoint.** Titles whose harness expects the
 `FirstRsxWrite` checkpoint hit the pre-sys_rsx MMIO sentinel at
@@ -1072,9 +1108,11 @@ reports:
   under 300 ms.
 - `cellgov_compare::zoom_lookup(a_zoom, b_zoom, step)` consumes
   separate zoom-trace files (`PpuStateFull` records emitted only
-  inside the unit's window) and returns either `Found { diffs }`
-  with per-field `RegDiff { field, a, b }` entries or
-  `MissingStep`. An empty `diffs` is the false-collision case
+  inside the unit's window) and returns either
+  `Found { step, a_pc, b_pc, diffs }` with per-field
+  `RegDiff { field, a, b }` entries or
+  `MissingStep { step, a_missing, b_missing }`. An empty `diffs`
+  is the false-collision case
   (`PpuStateHash` reported a divergence but `PpuStateFull` shows
   byte-equal state) and tells the outer scanner it can resume from
   the next step. Surfaced via `cellgov_cli zoom <a> <b> <step>`.
@@ -1117,9 +1155,8 @@ adapter computes an FNV-1a hash of that YAML at build time and
 requires matching `--config-hash` on every invocation. Dumps
 produced under a different RPCS3 config are rejected at adapter
 entry rather than silently feeding a wrong-config observation into
-the comparator. `cellgov_cli rpcs3_to_observation
---print-expected-config-hash` prints the current expected hash for
-scripting.
+the comparator. `rpcs3_to_observation --print-expected-config-hash`
+prints the current expected hash for scripting.
 
 ## Title harness (`cellgov_cli`)
 
@@ -1236,7 +1273,7 @@ Common boot sequence (per-title numbers below):
    reloc applier), apply relocations, surface exports.
 3. Resolve every game GOT slot against the firmware export
    table. NIDs without a matching export are patched to a
-   guest-resident *unresolved-import trampoline* (one OPD per
+   guest-resident _unresolved-import trampoline_ (one OPD per
    NID, body issues `Lv2Request::UnresolvedImport { nid }`),
    so a call through such a slot becomes a structured
    diagnostic fault instead of a control-flow jump into
@@ -1258,81 +1295,80 @@ not implemented surface as a `dispatch.unsupported_stub` log
 line at first occurrence and return `CELL_ENOSYS` (the honest
 "not implemented" errno); guests see a detectable failure
 rather than a fabricated success. Each fault driver is a named
-NID or syscall number; the per-title narratives below name the
-current frontier per title.
+NID or syscall number. All three foundation titles currently
+converge on the same diagnosed frontier -- `cellSysutil_Library`
+`module_start` stalls at `NoRunnableUnit/AllBlocked` (flOw step
+45, SSHD/WipEout step 43); diagnosis lives in
+`docs/dev/bug_investigations/cellsysutil_allblocked_43.md`.
+Per-title paragraphs below carry the trajectory each title
+traces to reach that wall.
 
-**flOw (NPUA80001).** The title's manifest enables `[rsx] mirror
-= true` so its put-pointer store at `0xC0000040` lands in the
-FIFO cursor. Under firmware-set boot, flOw now advances
-through cellGcmInit and the early FIFO submission into a
-deterministic spin-poll inside firmware libgcm at offset
-`0x7a08` -- the title polls `dma.ref` (RSX control register
-mirror at `0xC0000048`) waiting for a completion token CellGov
-does not yet publish, and the runtime caps at the default
-`MaxSteps` budget (390,625 steps under default bench-boot
-flags). The prior `11,271 / ProcessExit` line (CRT0 abort
-after `cellGcmInit() failed`) is preserved as a documented
-downstream-of-`0x7a08` code path that no longer fires under
-the new boot trajectory: with FIFO command words now decoded
-big-endian and IO offsets translated through the
-sys_rsx_context iomap, libgcm's init proceeds far enough that
-the abort sequence never re-enters. Residual
-`host_invariant_breaks=43`; all honest. Walls past `0x7a08`
-are uncharacterized -- they depend on a honest FIFO-completion
-consumer landing.
+**flOw (NPUA80001).** The title's manifest opts into both
+`[rsx] mirror = true` and `[rsx] consume = true` so its
+put-pointer store at `0xC0000040` lands in the FIFO cursor and
+the FIFO consumer (GET catch-up + SET_REFERENCE writeback)
+clears the libgcm REF spin at offset `0x7a08` that the title
+previously sat in. With the consumer publishing the completion
+token, flOw advances past the spin and reaches the
+`cellSysutil_Library` `module_start` entry path, where it
+stalls at step 45 with `NoRunnableUnit/AllBlocked`. The wall is
+the producer side of a cond-variable seed. The prior
+`0x7a08` REF spin and the older `11,271 / ProcessExit` CRT0
+abort are preserved as code paths that no longer fire under the
+post-FIFO-consumer trajectory.
 
-**Super Stardust HD (NPUA80068).** The harness uses a
-`FirstRsxWrite` checkpoint because the attract-mode loop never
-calls `sys_process_exit`. Phase 39's FIFO BE-decode + IoMap
-fixes also advanced SSHD past its prior `14,341,833 / Fault`
-at the RSX device-enumeration code path; the Fault no longer
-fires, and SSHD now caps at `MaxSteps` (390,625 under default
-budget; 50M+ at `--budget 1` without re-hitting a Fault).
-The prior `14,341,833 / Fault` with three honest residual
-`host_invariant_breaks` (two
-`dispatch.ppu_thread_create_unmodeled_flags` for the
-`flags=0x10000` convergent gap, one no-op-with-trace) is
-preserved as a downstream code path that does not re-fire
-under the new trajectory. New walls past the prior fault are
-uncharacterized; SSHD is held under the "wait for forcing
-function" discipline.
+**Super Stardust HD (NPUA80068).** The harness used a
+`FirstRsxWrite` checkpoint historically (the attract-mode loop
+never calls `sys_process_exit`). Under firmware-set boot with
+the mmapper write-back surface in place, SSHD now stalls at
+step 43 inside `cellSysutil_Library` `module_start`
+(`NoRunnableUnit/AllBlocked`), the same diagnosed wall flOw
+hits two steps later via a different cellSysutil entry path.
+The prior `14,341,833 / Fault` and the `MaxSteps`-cap
+dispositions are preserved as code paths that no longer re-fire
+under the new trajectory.
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_firmware decrypt-self`. Under
-firmware-set boot, WipEout now reaches the `FirstRsxWrite`
-checkpoint at step `43,083` -- libgcm's `_cellGcmInitBody`
-completes through the mmapper page-backing surface (added in
-phase 38) and the FIFO_SETUP arm of
-`sys_rsx_context_attribute` (added in phase 39), and the
-first guest write to the put-pointer at `0xC0000040`
-deterministically trips the checkpoint. The prior
-`43,066 / COMMIT_FAULT: OutOfRange` line (libgcm writing
-through the unbacked mmapper handout window) is preserved as
-a code path that no longer fires under the trajectory; the
-mmapper handout window is now page-backed.
-Residual `host_invariant_breaks=2` are honest: one
-`dispatch.unsupported_stub` ENOSYS for an unmodeled RSX
-syscall and one `dispatch.memory_free_noop` from
-`sys_memory_free` against the bump allocator. Cross-runner
-byte parity holds at `975 non-semantic + 1 pending`. See
+firmware-set boot with the mmapper write-back surface
+(`sys_mmapper_search_and_map`), WipEout now stalls at step 43
+inside `cellSysutil_Library` `module_start`
+(`NoRunnableUnit/AllBlocked`), the same diagnosed wall SSHD
+hits. The prior `43,066 / COMMIT_FAULT: OutOfRange` and the
+`FirstRsxWrite @ 43,083` anchors are preserved as code paths
+that no longer re-fire under the new trajectory. Cross-runner
+byte parity at the historical fixture anchor holds at
+`975 non-semantic + 1 pending`. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
 
 ## Microtest corpus
 
-Six PSL1GHT-compiled C microtests. Each runs end-to-end as an
-LV2-driven scenario: the PPU's own compiled code drives the full SPU
-lifecycle through syscalls. No harness pre-registration of SPU
-execution units.
+PSL1GHT-compiled C microtests under `tests/micro/<name>/`, each
+with its own `manifest.toml` and `build.sh`. Each runs end-to-end
+as an LV2-driven scenario from the PPU's own compiled code;
+SPU-bearing tests drive the full SPU lifecycle through syscalls
+with no harness pre-registration of SPU execution units.
+PPU-only (`ppu_*`) and RSX-focused (`rsx_*`) microtests exercise
+the corresponding subsystems without SPU threads. A representative
+selection:
 
-| Test               | What it proves                                                 |
-| ------------------ | -------------------------------------------------------------- |
-| spu_fixed_value    | SPU writes a known value via DMA put.                          |
-| mailbox_roundtrip  | PPU-to-SPU mailbox send, SPU transforms and DMA puts result.   |
-| dma_completion     | 128-byte DMA put with tag wait, status header.                 |
-| atomic_reservation | SPU `getllar` / `putllc` (load-linked, store-conditional).     |
-| ls_to_shared       | Dependent LS store-to-load chain published via DMA.            |
-| barrier_wakeup     | Two SPU threads, inter-SPU ordering via shared memory polling. |
+| Test                   | What it proves                                                 |
+| ---------------------- | -------------------------------------------------------------- |
+| spu_fixed_value        | SPU writes a known value via DMA put.                          |
+| mailbox_roundtrip      | PPU-to-SPU mailbox send, SPU transforms and DMA puts result.   |
+| dma_completion         | 128-byte DMA put with tag wait, status header.                 |
+| atomic_reservation     | SPU `getllar` / `putllc` (load-linked, store-conditional).     |
+| ls_to_shared           | Dependent LS store-to-load chain published via DMA.            |
+| barrier_wakeup         | Two SPU threads, inter-SPU ordering via shared memory polling. |
+| ppu_atomic_spinlock    | PPU `lwarx`/`stwcx.` spin acquire under contention.            |
+| ppu_cond_prodcons      | sys_cond producer-consumer with mutex two-hop reacquire.       |
+| ppu_event_flag_wakeall | sys_event_flag bitmask AND/OR wake fan-out.                    |
+| ppu_lwmutex_counter    | lwmutex contention on a shared counter.                        |
+| rsx_label_write_poll   | RSX label byte transition observed via PPU spin-poll.          |
+| rsx_semaphore_post     | NV4097 semaphore release polled by PPU.                        |
+
+See `tests/micro/` for the full set.
 
 Each test has interpreter and LLVM RPCS3 baselines (oracle settled --
 both decoders agree). CellGov runs each through

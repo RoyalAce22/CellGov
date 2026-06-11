@@ -100,7 +100,7 @@ pub(in crate::game) fn pre_init_tls(elf_data: &[u8], mem: &mut GuestMemory) {
 /// Write a `{code, toc}` OPD whose body is a single `blr` and return
 /// its address. liblv2's entry expects kernel-side function OPDs in
 /// r11 / r12; the synthetic OPD lets those calls return cleanly.
-pub(super) fn install_kernel_context_opd(mem: &mut GuestMemory) -> u64 {
+pub(in crate::game) fn install_kernel_context_opd(mem: &mut GuestMemory) -> u64 {
     let opd_addr = KERNEL_CTX_OPD_ADDR;
     let blr_addr = (opd_addr as u32) + 8;
     let mut bytes = [0u8; 16];

@@ -37,6 +37,14 @@ pub(in crate::game) fn bench_step_loop(
             }
             Err(StepError::MaxStepsExceeded) => return BootOutcome::MaxSteps,
             Err(StepError::TimeOverflow) => return BootOutcome::TimeOverflow,
+            Err(StepError::SchedulerNotReinstalled) => {
+                // bench-boot does not call Runtime::restore_into.
+                unreachable!(
+                    "bench-boot does not call Runtime::restore_into; \
+                     reaching this arm means a new caller added a \
+                     restore path without rethinking the dispatch."
+                );
+            }
         }
     }
 }

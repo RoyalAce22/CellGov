@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN;
 use cellgov_time::GuestTicks;
 
 use crate::fs_store::{FsMountTable, FsStore};
@@ -39,13 +40,25 @@ pub struct Lv2Host {
     pub(super) rsx_mem_alloc_ptr: u32,
     pub(super) rsx_mem_handle_counter: u32,
     pub(super) rsx_context: SysRsxContext,
-    /// Populated by 332 / 362, consumed by 334.
+    /// Populated by 332 / 362, consumed by 334 / 337.
     pub(super) mmapper_handles: MmapperHandleTable,
-    /// Pending region-install requests emitted by 334. Drained by the
-    /// runtime post-dispatch and applied to `GuestMemory` before the
-    /// dispatch's effects commit. Not folded into [`Self::state_hash`];
-    /// the handle table itself carries the hashable state.
+    /// Pending region-install requests emitted by 334 / 337. Drained
+    /// by the runtime post-dispatch and applied to `GuestMemory`
+    /// before the dispatch's effects commit. Not folded into
+    /// [`Self::state_hash`]; the handle table itself carries the
+    /// hashable state.
     pub(super) pending_region_installs: Vec<PendingRegionInstall>,
+    /// Authoritative ledger of every mmapper-window range this host
+    /// has handed out via 334 / 337 (and not yet released). The
+    /// search in 337 consults this to find a free aligned range
+    /// at-or-after the caller's hint. Recorded as
+    /// `(start_addr -> size)` keyed in BTreeMap order so the
+    /// nearest-below lookup is `O(log n)`. Not folded into
+    /// [`Self::state_hash`] -- the install side-effect is what
+    /// settles via `GuestMemory`; this ledger is the host's local
+    /// witness of what was minted, used to keep the search and the
+    /// install coherent.
+    pub(super) mmapper_install_ledger: BTreeMap<u32, u32>,
     pub(super) lwmutexes: LwMutexTable,
     pub(super) mutexes: MutexTable,
     pub(super) semaphores: SemaphoreTable,
@@ -80,6 +93,29 @@ pub struct Lv2Host {
     pub(super) lwmutex_holds: BTreeMap<PpuThreadId, u32>,
     /// Folded into [`Self::state_hash`] when set.
     pub(super) firmware_identity: Option<FirmwareIdentity>,
+    /// Audit C-5b witness: count of `dispatch_thread_initialize`
+    /// invocations. The catch-all `debug_assert!` at
+    /// `host/spu.rs:235` guards against being called with the
+    /// wrong request variant; silence is non-vacuous only when
+    /// the dispatch actually ran. Not folded into
+    /// [`Self::state_hash`] (instrument-only).
+    pub(super) spu_thread_initialize_dispatches: u64,
+    /// Audit C-6c witness: count of `cond_reacquire_wake` calls.
+    /// The `debug_assert!(!use_lwmutex, ...)` at `host/cond.rs:247`
+    /// guards against an unimplemented lwmutex-cond re-acquire
+    /// path; silence is non-vacuous only when the function ran.
+    /// Not folded into [`Self::state_hash`].
+    pub(super) cond_reacquire_wake_calls: u64,
+    /// `sys_process_get_sdk_version` return value. Read from the
+    /// title ELF's `sys_proc_param` segment at boot (see
+    /// `cellgov_ppu::loader::find_sys_process_param`). RPCS3 mirror:
+    /// `g_ps3_process_info.sdk_ver` set from the LOOS+1 program
+    /// header's `process_param_t.sdk_version`
+    /// (rpcs3 PPUModule.cpp). The PS3 sentinel for
+    /// absent param segment is `0xFFFFFFFF` (the same one PSL1GHT
+    /// homebrew sees); this default matches that contract for
+    /// callers that never invoke `set_sdk_version`.
+    pub(super) sdk_version: u32,
 }
 
 /// Captured at boot via the verified `firmware.toml` manifest.
@@ -150,6 +186,7 @@ impl Lv2Host {
             rsx_context: SysRsxContext::new(),
             mmapper_handles: MmapperHandleTable::new(),
             pending_region_installs: Vec::new(),
+            mmapper_install_ledger: BTreeMap::new(),
             lwmutexes: LwMutexTable::new(),
             mutexes: MutexTable::new(),
             semaphores: SemaphoreTable::new(),
@@ -166,7 +203,41 @@ impl Lv2Host {
             prx_registry: LoadedPrxRegistry::new(),
             lwmutex_holds: BTreeMap::new(),
             firmware_identity: None,
+            spu_thread_initialize_dispatches: 0,
+            cond_reacquire_wake_calls: 0,
+            sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
         }
+    }
+
+    /// Set the title's recorded SDK version (the value read from the
+    /// title ELF's `process_param_t`). Boot reads it via
+    /// `cellgov_ppu::loader::find_sys_process_param` and plumbs the
+    /// parsed `sdk_version` through. Callers that omit this leave the
+    /// PS3 absent-case sentinel `0xFFFFFFFF` in place.
+    pub fn set_sdk_version(&mut self, sdk_version: u32) {
+        self.sdk_version = sdk_version;
+    }
+
+    /// The value `sys_process_get_sdk_version` will write into the
+    /// caller's `version_out_ptr`.
+    #[inline]
+    pub fn sdk_version(&self) -> u32 {
+        self.sdk_version
+    }
+
+    /// Audit C-5b witness: count of `dispatch_thread_initialize`
+    /// invocations. See the field doc on
+    /// `spu_thread_initialize_dispatches`.
+    #[inline]
+    pub fn spu_thread_initialize_dispatches(&self) -> u64 {
+        self.spu_thread_initialize_dispatches
+    }
+
+    /// Audit C-6c witness: count of `cond_reacquire_wake` calls.
+    /// See the field doc on `cond_reacquire_wake_calls`.
+    #[inline]
+    pub fn cond_reacquire_wake_calls(&self) -> u64 {
+        self.cond_reacquire_wake_calls
     }
 
     /// Record the verified-firmware identity. Boot is one-shot; a
@@ -303,6 +374,30 @@ impl Lv2Host {
         &self.rsx_context
     }
 
+    /// Record an iomap mapping without going through 672. Synthetic
+    /// test scenarios use this to wire up the IO -> EA translation
+    /// the FIFO advance pass needs without booting the firmware-set
+    /// `sys_rsx_context_iomap` path. Matches the
+    /// `seed_primary_ppu_thread` pattern; production code calls
+    /// `dispatch_sys_rsx_context_iomap` which validates against the
+    /// 672 contract.
+    pub fn seed_rsx_iomap(&mut self, io: u32, ea: u32, size: u32) {
+        self.rsx_context.iomap_io = io;
+        self.rsx_context.iomap_ea = ea;
+        self.rsx_context.iomap_size = size;
+    }
+
+    /// Mark the sys_rsx context as allocated under `context_id`
+    /// without going through 670. Synthetic test scenarios use this
+    /// to satisfy the `allocated && matching id` guard at the top of
+    /// `sys_rsx_context_attribute` (674) without the OUT-pointer
+    /// memory plumbing 670 requires. Matches `seed_rsx_iomap`'s
+    /// shape; production code calls `dispatch_sys_rsx_context_allocate`.
+    pub fn seed_rsx_context_allocated(&mut self, context_id: u32) {
+        self.rsx_context.allocated = true;
+        self.rsx_context.context_id = context_id;
+    }
+
     pub(super) fn alloc_id(&mut self) -> u32 {
         let id = self.next_kernel_id;
         self.next_kernel_id = self
@@ -331,6 +426,81 @@ impl Lv2Host {
         }
         self.mmapper_addr_cursor = next;
         Some(base)
+    }
+
+    /// Search for the first free, `align`-aligned range of `size`
+    /// bytes inside `[MMAPPER_REGION_START, MMAPPER_REGION_END)` at
+    /// or after `hint`, skipping over every range currently recorded
+    /// in [`Self::mmapper_install_ledger`].
+    ///
+    /// `hint` is rounded UP to `align`; misaligned hints do not
+    /// fail. RPCS3's `area->alloc` does the same (the
+    /// `start_addr != area->addr` check at
+    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:696` is
+    /// area selection, not in-area alignment).
+    ///
+    /// Returns `None` on exhaustion (matches RPCS3's `CELL_ENOMEM`
+    /// path at `sys_mmapper.cpp:753`).
+    pub(super) fn mmapper_search_free_range(
+        &self,
+        hint: u32,
+        size: u32,
+        align: u32,
+    ) -> Option<u32> {
+        debug_assert!(
+            align.is_power_of_two(),
+            "mmapper align must be a power of two"
+        );
+        debug_assert!(align != 0, "mmapper align must be non-zero");
+        if size == 0 {
+            return None;
+        }
+        let align_mask = align - 1;
+        let hint_clamped = hint.max(Self::MMAPPER_REGION_START);
+        let mut candidate = hint_clamped.checked_add(align_mask)? & !align_mask;
+        loop {
+            let end = candidate.checked_add(size)?;
+            if end > Self::MMAPPER_REGION_END {
+                return None;
+            }
+            // Find the closest ledger entry whose start is < end. If
+            // its [start, start+len) overlaps [candidate, end), advance.
+            let prior = self
+                .mmapper_install_ledger
+                .range(..end)
+                .next_back()
+                .map(|(&start, &len)| (start, len));
+            match prior {
+                Some((start, len)) => {
+                    let prior_end = start.checked_add(len)?;
+                    if prior_end > candidate {
+                        // Overlap: advance past prior_end, re-align.
+                        candidate = prior_end.checked_add(align_mask)? & !align_mask;
+                        continue;
+                    }
+                    return Some(candidate);
+                }
+                None => return Some(candidate),
+            }
+        }
+    }
+
+    /// Record an mmapper-window install in the host ledger. Paired
+    /// with a `PendingRegionInstall` push by the same dispatch.
+    pub(super) fn mmapper_ledger_insert(&mut self, addr: u32, size: u32) {
+        let prior = self.mmapper_install_ledger.insert(addr, size);
+        debug_assert!(
+            prior.is_none(),
+            "mmapper ledger: addr {addr:#x} already recorded (size {prior:?})",
+        );
+    }
+
+    /// Read-only `pending_region_installs` snapshot used by sibling
+    /// dispatch-arm tests. Not a drain; the runtime is still the
+    /// authoritative drain consumer.
+    #[cfg(all(test, debug_assertions))]
+    pub(super) fn drain_pending_region_installs_inspect(&self) -> &[PendingRegionInstall] {
+        &self.pending_region_installs
     }
 
     /// Per-title content manifest store.
@@ -376,6 +546,20 @@ impl Lv2Host {
     /// Call exactly once after the primary PPU unit is registered.
     pub fn seed_primary_ppu_thread(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) {
         self.ppu_threads.insert_primary(unit_id, attrs);
+    }
+
+    /// Alias a transient unit (e.g. a per-module module_start unit)
+    /// to the primary thread so sync-syscall dispatch resolves the
+    /// caller. Mirrors real LV2's "module_start runs on the calling
+    /// thread" contract. See
+    /// [`PpuThreadTable::alias_unit`][crate::ppu_thread::PpuThreadTable::alias_unit].
+    pub fn alias_unit_to_primary(&mut self, unit_id: UnitId) -> bool {
+        self.ppu_threads.alias_unit(unit_id, PpuThreadId::PRIMARY)
+    }
+
+    /// Drop an alias previously installed via [`Self::alias_unit_to_primary`].
+    pub fn drop_ppu_thread_alias(&mut self, unit_id: UnitId) -> bool {
+        self.ppu_threads.drop_alias(unit_id)
     }
 
     /// PPU thread record bound to `unit_id`, if any.
@@ -724,6 +908,83 @@ mod tests {
         // The 8th grant would walk into the RSX dma_control MMIO
         // region at 0xC000_0000.
         assert_eq!(host.mmapper_alloc(0x1), None);
+    }
+
+    #[test]
+    fn mmapper_search_free_range_returns_hint_when_window_is_empty() {
+        let host = Lv2Host::new();
+        let addr = host
+            .mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0x10000, 0x10000)
+            .expect("first search succeeds");
+        assert_eq!(addr, Lv2Host::MMAPPER_REGION_START);
+    }
+
+    #[test]
+    fn mmapper_search_free_range_rounds_misaligned_hint_up() {
+        let host = Lv2Host::new();
+        let hint = Lv2Host::MMAPPER_REGION_START + 0x12345;
+        let addr = host
+            .mmapper_search_free_range(hint, 0x1000, 0x10000)
+            .expect("aligned candidate available");
+        assert_eq!(
+            addr,
+            Lv2Host::MMAPPER_REGION_START + 0x20000,
+            "misaligned hint must round UP to alignment, not be rejected",
+        );
+    }
+
+    #[test]
+    fn mmapper_search_free_range_advances_past_existing_install() {
+        let mut host = Lv2Host::new();
+        host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x10000);
+        let addr = host
+            .mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0x10000, 0x10000)
+            .expect("next aligned slot available");
+        assert_eq!(addr, Lv2Host::MMAPPER_REGION_START + 0x10000);
+    }
+
+    #[test]
+    fn mmapper_search_free_range_returns_none_on_window_exhaustion() {
+        let mut host = Lv2Host::new();
+        // Fill the entire 0x7000_0000-byte window with one install.
+        let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
+        host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, window);
+        assert_eq!(
+            host.mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0x10000, 0x10000),
+            None,
+        );
+    }
+
+    #[test]
+    fn mmapper_search_free_range_rejects_zero_size() {
+        let host = Lv2Host::new();
+        assert_eq!(
+            host.mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0, 0x10000),
+            None,
+        );
+    }
+
+    #[test]
+    fn mmapper_search_free_range_walks_through_multiple_holes() {
+        // Layout: [start..start+0x10000)=installed, [start+0x10000..+0x20000)=free,
+        //         [start+0x20000..+0x30000)=installed. A hinted 0x10000 search
+        //         must land on the middle free slot.
+        let mut host = Lv2Host::new();
+        host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x10000);
+        host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START + 0x20000, 0x10000);
+        let addr = host
+            .mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0x10000, 0x10000)
+            .expect("middle hole is free");
+        assert_eq!(addr, Lv2Host::MMAPPER_REGION_START + 0x10000);
+    }
+
+    #[test]
+    fn mmapper_search_free_range_clamps_hint_below_region_start_up_to_start() {
+        let host = Lv2Host::new();
+        let addr = host
+            .mmapper_search_free_range(0, 0x10000, 0x10000)
+            .expect("hint below region clamps to start");
+        assert_eq!(addr, Lv2Host::MMAPPER_REGION_START);
     }
 
     #[test]

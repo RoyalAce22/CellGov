@@ -210,30 +210,97 @@ impl Lv2Host {
             addr,
             size: handle.size as usize,
         });
+        // Record in the host ledger so sc 337's search sees this
+        // range as occupied. `addr` is in `[0x2000_0000, 0xC000_0000)`
+        // per the range check above, so the u32 narrow is lossless.
+        self.mmapper_ledger_insert(addr as u32, handle.size);
+        // Coherence witness: same property as sc 337. See
+        // `docs/dev/bug_investigations/cellsysutil_mmapper_oob.md`.
+        debug_assert!(
+            self.pending_region_installs
+                .iter()
+                .any(|i| i.addr == addr && i.size == handle.size as usize),
+            "sc 334 coherence: pending_region_installs missing entry for {addr:#x}",
+        );
+        debug_assert!(
+            self.mmapper_install_ledger.contains_key(&(addr as u32)),
+            "sc 334 coherence: mmapper_install_ledger missing entry for {addr:#x}",
+        );
         Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
     }
 
-    /// `sys_mmapper_search_and_map` (337): writes `start_addr` to
-    /// `*alloc_addr_ptr`.
+    /// `sys_mmapper_search_and_map` (337): search for the first free
+    /// aligned range of `handle.size` at or after `start_addr`
+    /// inside the mmapper window, push a `PendingRegionInstall`,
+    /// write the actual mapped address back to `*alloc_addr_ptr`.
     ///
-    /// `start_addr` outside `[0x2000_0000, 0xC000_0000)` returns
-    /// CELL_EINVAL. Oracle: RPCS3's `sys_mmapper.cpp`.
+    /// Oracle: RPCS3
+    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:688-762`.
+    /// RPCS3 calls `area->alloc(...)` which searches the area; the
+    /// out-pointer receives the actually mapped address, not the
+    /// caller's hint (line 760).
+    ///
+    /// # Errors
+    /// - `CELL_EFAULT` when `alloc_addr_ptr` is null.
+    /// - `CELL_EINVAL` when `start_addr` is outside the mmapper
+    ///   window `[MMAPPER_REGION_START, MMAPPER_REGION_END)`.
+    /// - `CELL_ESRCH` when `mem_id` is not in the handle table
+    ///   (parallel to sc 334's `mmapper_map_unknown_mem_id` shape;
+    ///   logs `dispatch.mmapper_search_and_map_unknown_mem_id`).
+    /// - `CELL_ENOMEM` when the search exhausts the mmapper window.
     pub(super) fn dispatch_mmapper_search_and_map(
-        &self,
+        &mut self,
         args: [u64; 8],
         requester: UnitId,
     ) -> Lv2Dispatch {
         let start_addr = args[0] as u32;
+        let mem_id = args[1] as u32;
         let alloc_addr_ptr = args[3] as u32;
         if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
             return d;
         }
-        if !(0x2000_0000..0xC000_0000).contains(&start_addr) {
+        if !(Lv2Host::MMAPPER_REGION_START..Lv2Host::MMAPPER_REGION_END).contains(&start_addr) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
+        let Some(handle) = self.mmapper_handles.get(mem_id) else {
+            self.log_invariant_break(
+                "dispatch.mmapper_search_and_map_unknown_mem_id",
+                format_args!(
+                    "sys_mmapper_search_and_map mem_id={mem_id:#x} not in handle table; \
+                     332 / 362 must precede 337"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+        };
+        let Some(found_addr) =
+            self.mmapper_search_free_range(start_addr, handle.size, handle.align)
+        else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+        };
+        self.pending_region_installs.push(PendingRegionInstall {
+            addr: u64::from(found_addr),
+            size: handle.size as usize,
+        });
+        self.mmapper_ledger_insert(found_addr, handle.size);
+        // Coherence witness: on success, the install must be pending
+        // AND the ledger must contain the address we are writing
+        // back. Catches a future change that drops one half of the
+        // pair (write-back without install, install without ledger
+        // record, etc.). See
+        // `docs/dev/bug_investigations/cellsysutil_mmapper_oob.md`.
+        debug_assert!(
+            self.pending_region_installs
+                .iter()
+                .any(|i| i.addr == u64::from(found_addr) && i.size == handle.size as usize),
+            "sc 337 coherence: pending_region_installs missing entry for {found_addr:#x}",
+        );
+        debug_assert!(
+            self.mmapper_install_ledger.contains_key(&found_addr),
+            "sc 337 coherence: mmapper_install_ledger missing entry for {found_addr:#x}",
+        );
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(alloc_addr_ptr, 4),
-            bytes: WritePayload::from_slice(&start_addr.to_be_bytes()),
+            bytes: WritePayload::from_slice(&found_addr.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
             source_time: self.current_tick,
@@ -337,10 +404,17 @@ impl Lv2Host {
         if size < 0x20 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        debug_assert!(
-            p_opt.checked_add(24).is_some(),
-            "_sys_prx_start_module 8-byte entry write at p_opt+16 wraps u32: p_opt={p_opt:#010x}",
-        );
+        if p_opt.checked_add(24).is_none() {
+            self.log_invariant_break(
+                "dispatch.prx_start_module_p_opt_wraps",
+                format_args!(
+                    "_sys_prx_start_module 8-byte entry write at p_opt+16 wraps u32: \
+                     p_opt={p_opt:#010x}; returning CELL_EFAULT (struct does not fit in \
+                     32-bit guest address space)"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        }
         let entry_addr = p_opt.wrapping_add(16);
         let no_start = u64::MAX.to_be_bytes();
         let entry_write = Effect::SharedWriteIntent {
@@ -394,11 +468,17 @@ impl Lv2Host {
         if p_info == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
-        debug_assert!(
-            p_info.checked_add(0x18).is_some(),
-            "sys_prx_get_module_list pInfo struct [p_info, p_info+0x18) wraps u32: \
-             pInfo={p_info:#010x}",
-        );
+        if p_info.checked_add(0x18).is_none() {
+            self.log_invariant_break(
+                "dispatch.prx_module_list_p_info_wraps",
+                format_args!(
+                    "sys_prx_get_module_list pInfo struct [p_info, p_info+0x18) wraps u32: \
+                     pInfo={p_info:#010x}; returning CELL_EFAULT (struct does not fit in \
+                     32-bit guest address space)"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        }
         let mut effects = Vec::new();
         let max_addr = p_info.wrapping_add(0x0C);
         let count_addr = p_info.wrapping_add(0x10);

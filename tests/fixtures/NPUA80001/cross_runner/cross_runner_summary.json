@@ -3,7 +3,7 @@
     "kind": "no",
     "reason": {
       "kind": "outcome_mismatch",
-      "cellgov": "Timeout",
+      "cellgov": "ProcessExit",
       "rpcs3": "Completed"
     }
   },
@@ -11,7 +11,7 @@
     "kind": "diverge",
     "reason": {
       "kind": "outcome_mismatch",
-      "cellgov": "Timeout",
+      "cellgov": "ProcessExit",
       "rpcs3": "Completed"
     }
   },

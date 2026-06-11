@@ -5,40 +5,41 @@ year: 2007
 developer: thatgamecompany
 engine: PhyreEngine
 distribution: PSN HDD
-checkpoint: ProcessExit (requested; not reached)
-steps: 390625
-convergence: No (outcome: Timeout vs Completed)
+checkpoint: ProcessExit
+steps: 11299
+convergence: No (outcome: ProcessExit vs Completed)
 byte_parity: --
 ---
 
 Does not converge with RPCS3 at the manifest's `process-exit`
 checkpoint: outcomes are distinct.
 
-CellGov advances 390,625 steps under the default budget (256)
-and times out at `MaxSteps` -- the requested `process-exit`
-checkpoint is no longer reached because phase 39's BE-FIFO
-decode + IO->EA translation correctness fixes plus the
-`sys_rsx_context_attribute` FIFO_SETUP arm let `cellGcmInit`
-complete far enough to enter the firmware libgcm spin-poll
-on `dma.ref` at `0x7a08`. The title is now waiting for an
-RSX completion token that CellGov does not yet publish; an
-honest FIFO-completion consumer (designed during phase 39,
-landing alongside phase 40) is the next clearing step.
+CellGov reaches `process-exit` at step 11,299 (cumulative
+2,892,544 instructions at the default budget of 256 per step).
+The boot trajectory is an EARLY ABORT: the title calls
+`sys_process_exit(CELL_EABORT)` at step 5910, then runs a 5,389-
+step atexit / cleanup sequence (which generates 43 host-invariant
+breaks: 1 SPU initialize, 1 PPU thread create with unmodeled
+flag, 2 RSX `cellGcmResetFlipStatus`, 39 `_sys_prx_stop_module`
+across 13 module IDs x 3 stacks), then calls
+`sys_process_exit(1)` at step 11,299. The runtime detects
+`NoRunnableUnit` and reports `outcome=ProcessExit`.
 
-The prior `11,271 / ProcessExit` line (CRT0 abort after
-`cellGcmInit() failed`) is preserved as a documented
-downstream-of-`0x7a08` code path that no longer fires
-under the new boot trajectory.
+Why the abort: zero host-invariant breaks fire in `[0, 5910)`,
+so the title's pre-abort fatal condition came back through a
+normal syscall return (a wrong-value path) or a guest-side read
+of zeroed engine state. Named candidates: the 528 silently-no-
+op'd NV4097 methods in the bring-up FIFO; the absent SPURS SPU
+thread spawn (BENCH_SPU_THREAD_INIT_WITNESS: count=0); the
+unwired `sys_rsx_context_attribute(package_id=0x10A)` arm
+returning CELL_EINVAL. Pinning the specific trigger is the
+entry point for a future ISA-coverage / SPURS-bringup phase.
 
-The 42 host invariant breaks during this run are honest:
-ENOSYS / no-op-with-trace returns for the unmodeled syscalls
-libgcm and the abort path exercise -- `dispatch.unsupported_stub`
-for the RSX syscalls Phase 37 did not model, the
-`dispatch.mmapper_map_shared_memory_unbacked` entries for
-the new honest mmapper gap, and one
-`dispatch.memory_free_noop` from the boot's first call to
-sys_memory_free against the bump allocator. No contaminating
-falsehoods.
+The 43 host-invariant breaks are all expected-benign per
+`docs/dev/bug_investigations/flow_post_40f_libgcm_ref_addr_spin.md`
+("Pre-close verification" section): the SPU + PPU init / thread
+warnings are pre-existing; the RSX attribute and PRX stop_module
+arms are honest not-implemented ENOSYS/EINVAL returns.
 
 RPCS3 corpus state (Stage E):
   outcome: Completed
@@ -53,8 +54,12 @@ the outcomes differ.
 
 ## Next step
 
-A successor phase backs the mmapper handout window so
-libgcm's `_cellGcmInitBody` succeeds end-to-end, the abort
-path no longer fires, and flOw proceeds to its gameplay loop.
-The two runners can then converge at the manifest's
-ProcessExit checkpoint.
+The next-phase entry point per the closed REF_ADDR finding is
+the small load-bearing subset of NV4097 / SPURS / RSX-attribute
+methods the pre-abort init path actually depends on -- not the
+whole NV4097 table. Probe each pre-step-5910 title-side read
+against the zero-state surface, identify the FIRST unexpected
+value, trace backward to the producing method. Implement only
+the methods the abort actually reads. After that load-bearing
+subset lands, flOw's pre-abort init can proceed and the two
+runners can converge at the manifest's ProcessExit checkpoint.

@@ -13,7 +13,10 @@ use cellgov_ps3_abi::process_address_space::{
 };
 
 use super::manifest::TitleManifest;
-use super::prx::{load_firmware_set_bound, pre_init_tls, run_module_start};
+use super::prx::{
+    install_kernel_context_opd, load_firmware_set_bound, pre_init_tls, run_module_start,
+    ModuleStartOutcome,
+};
 use crate::cli::env::parse_env_bool;
 use crate::cli::exit::die;
 
@@ -53,6 +56,22 @@ pub(super) fn check_strict_reserved_vs_rsx_mirror(
         return Err(StrictReservedConflict::RsxMirror);
     }
     Ok(())
+}
+
+/// Walk the title ELF's executable PT_LOAD segments through the
+/// PPU decoder and print the gap report. Firmware PRX text is out
+/// of scope; gaps there surface at execution time.
+fn emit_prescan_report(elf_data: &[u8], elf_path: &str) {
+    let (report, coverage) = match cellgov_ppu::prescan::scan_elf_text(elf_data) {
+        Ok(pair) => pair,
+        Err(e) => {
+            eprintln!("prescan: skipped, {e} in {elf_path}");
+            return;
+        }
+    };
+    for line in super::prescan_format::format_prescan_report(&report, &coverage, elf_path) {
+        eprintln!("{line}");
+    }
 }
 
 fn content_source_label(
@@ -106,18 +125,21 @@ pub(super) struct PrepareOptions<'a> {
     pub strict_reserved: bool,
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,
-    /// Cap for `run_module_start`; independent of the caller's step-loop cap.
-    pub module_start_max_steps: usize,
     pub print_banner: bool,
     pub profile_pairs: bool,
     pub runtime_max_steps: usize,
-    /// Applied after `module_start`, before `Runtime` construction.
+    /// Applied after every `module_start` has completed, before the
+    /// title's primary unit registers.
     pub patch_bytes: &'a [(u64, u8)],
     pub dump_mem_boot_addrs: &'a [u64],
     pub budget_override: Option<Budget>,
     /// When true, switch runtime mode to `DeterminismCheck` so
     /// per-step `PpuStateHash` records land in the trace buffer.
     pub capture_state_trace: bool,
+    /// When true, walk the title ELF's executable PT_LOAD segments
+    /// through the PPU decoder before execution and print the gap
+    /// report to stderr.
+    pub prescan: bool,
 }
 
 /// Debug toggles captured by both the primary-thread `register_with`
@@ -227,6 +249,10 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         .unwrap_or_else(|e| die(&format!("failed to load ELF: {e:?}")));
     let t_elf_load = t_start.elapsed();
 
+    if opts.prescan {
+        emit_prescan_report(&elf_data, opts.elf_path);
+    }
+
     let tramp_base = {
         let rounded = required_size.checked_add(0xFFF).unwrap_or_else(|| {
             die(&format!(
@@ -292,26 +318,10 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         u32_or_die("alloc_base", rounded.max(0x0001_0000) as u64)
     };
 
-    let skip_ms = parse_env_bool("CELLGOV_SKIP_MODULE_START");
-    match (prx_modules.is_empty(), skip_ms) {
-        (false, false) => {
-            for info in &prx_modules {
-                mem = run_module_start(mem, info, opts.module_start_max_steps, alloc_base);
-            }
-        }
-        (false, true) => {
-            eprintln!("module_start: skipped (CELLGOV_SKIP_MODULE_START set)");
-        }
-        (true, true) => {
-            eprintln!(
-                "module_start: CELLGOV_SKIP_MODULE_START set, but no PRX was loaded -- flag has no effect"
-            );
-        }
-        (true, false) => {}
-    }
-
-    state.gpr[1] = PS3_PRIMARY_STACK_TOP;
-    state.lr = 0;
+    // The kernel-context OPD lives in the TLS reservation and is
+    // consumed by every PRX's module_start entry (r11/r12). Install
+    // once before the module_start loop.
+    let kctx_opd = install_kernel_context_opd(&mut mem);
 
     let tls_info = cellgov_ppu::loader::find_tls_segment(&elf_data);
     let tls_template = cellgov_ppu::loader::extract_tls_template_bytes(&elf_data);
@@ -326,21 +336,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         ),
         _ => {}
     }
-    state.gpr[3] = 0;
-    state.gpr[4] = 0;
-    state.gpr[5] = 0;
-    state.gpr[6] = 0;
-    state.gpr[7] = 0x0100_0000;
-    state.gpr[8] = tls_info.map(|t| t.vaddr).unwrap_or(0);
-    state.gpr[9] = tls_info.map(|t| t.filesz).unwrap_or(0);
-    state.gpr[10] = tls_info.map(|t| t.memsz).unwrap_or(0);
-    state.gpr[11] = load_result.entry;
     let proc_param = cellgov_ppu::loader::find_sys_process_param(&elf_data);
     let malloc_pagesize = proc_param.map(|p| p.malloc_pagesize).unwrap_or(0x100000);
-    state.gpr[12] = malloc_pagesize as u64;
-    // r13 is the PS3 PPC64 ABI TLS pointer; LV2 seeds it at process
-    // creation and sys_initialize_tls does not touch it.
-    state.gpr[13] = super::prx::TLS_BASE + 0x7030;
 
     let mode = if opts.capture_state_trace {
         RuntimeMode::DeterminismCheck
@@ -414,59 +411,30 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         println!();
     }
 
-    // Determinism contract: a patch failure on this host would
-    // produce a boot the user did not request.
-    for &(addr, val) in opts.patch_bytes {
-        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1)
-            .unwrap_or_else(|| die(&format!("patch: byte 0x{addr:x}: invalid address range")));
-        mem.apply_commit(range, &[val]).unwrap_or_else(|e| {
-            die(&format!(
-                "patch: byte 0x{addr:x} = 0x{val:02x} FAILED ({e:?}); target not committed"
-            ))
-        });
-        if opts.print_banner {
-            println!("patch: byte 0x{addr:x} = 0x{val:02x}");
-        }
-    }
-
-    for &addr in opts.dump_mem_boot_addrs {
-        match cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 32) {
-            None => println!("mem[0x{addr:x}]: invalid address range"),
-            Some(r) => match mem.read(r) {
-                Some(slice) => {
-                    let label = mem
-                        .containing_region(addr, 32)
-                        .map(|r| r.label())
-                        .unwrap_or("<unmapped>");
-                    print!("mem[0x{addr:x}] ({label}):");
-                    for b in slice {
-                        print!(" {b:02x}");
-                    }
-                    println!();
-                }
-                None => println!("mem[0x{addr:x}]: unmapped"),
-            },
-        }
-    }
-
-    // Bound the predecode shadow to executable code: anything above
-    // `alloc_floor` is uncommitted or non-executable data. The
-    // runtime fetch path's `None` branch falls back to live decode.
-    let shadow_extent = (alloc_floor as usize).min(mem.as_bytes().len());
-    let t_shadow_start = std::time::Instant::now();
-    let shadow = cellgov_ppu::shadow::PredecodedShadow::build(0, &mem.as_bytes()[..shadow_extent]);
-    if parse_env_bool("CELLGOV_RUNGAME_PROFILE") {
-        eprintln!(
-            "rungame_profile_shadow: PredecodedShadow::build over {shadow_extent} bytes took {:.2}ms \
-             (alloc_floor=0x{alloc_floor:08x} user_region_end=0x{user_region_end:08x} \
-             code_floor=0x{code_floor:08x} prx_region_end=0x{prx_region_end:08x})",
-            t_shadow_start.elapsed().as_secs_f64() * 1000.0
-        );
-    }
-
+    // Runtime / LV2 host setup happens BEFORE module_start so every
+    // PRX's init runs in the same host the title later runs against.
     let mut rt = Runtime::new(mem, step_budget, adjusted_max_steps);
     rt.set_mode(mode);
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
+    // Plumb the title's recorded SDK version into the LV2 host so
+    // `sys_process_get_sdk_version` reports the value cellSysutil's
+    // SDK-keyed init dispatcher gates on. Absent param segment leaves
+    // the PSL1GHT homebrew sentinel in place; see
+    // `docs/dev/bug_investigations/cellsysutil_allblocked_43.md`.
+    if let Some(p) = proc_param {
+        rt.lv2_host_mut().set_sdk_version(p.sdk_version);
+    }
+    println!(
+        "process_param: sdk_version=0x{:08x} ({})",
+        proc_param
+            .map(|p| p.sdk_version)
+            .unwrap_or(cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN),
+        if proc_param.is_some() {
+            "from sys_proc_param segment"
+        } else {
+            "absent -- PSL1GHT homebrew sentinel"
+        },
+    );
     // Cross-module contract: firmware-side `_sys_prx_load_module(path)`
     // resolves the guest path against this registry to recover the
     // kernel id; an empty stem makes the module unreachable from
@@ -504,34 +472,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         dump_skip: opts.dump_skip,
         profile_pairs: opts.profile_pairs,
     };
-    let primary_unit_id = rt.registry_mut().register_with(|id| {
-        let mut unit = PpuExecutionUnit::new(id);
-        *unit.state_mut() = state;
-        unit.set_instruction_shadow(shadow);
-        if let Some(pc) = debug_opts.dump_at_pc {
-            unit.set_break_pc(pc, debug_opts.dump_skip);
-        }
-        if debug_opts.profile_pairs {
-            unit.set_profile_mode(true);
-        }
-        unit
-    });
-    // Sync primitives resolve PpuThreadId from UnitId via this table;
-    // without the seed the primary's sync calls fall back to ESRCH.
-    rt.lv2_host_mut().seed_primary_ppu_thread(
-        primary_unit_id,
-        cellgov_lv2::PpuThreadAttrs {
-            entry: load_result.entry,
-            arg: 0,
-            stack_base: u32_or_die("PS3_PRIMARY_STACK_BASE", PS3_PRIMARY_STACK_BASE),
-            stack_size: primary_stack_size,
-            priority: primary_prio,
-            tls_base: tls_info
-                .map(|t| u32_or_die("tls vaddr", t.vaddr))
-                .unwrap_or(0),
-        },
-    );
-
     rt.set_ppu_factory(move |id, init| {
         let mut unit = PpuExecutionUnit::new(id);
         {
@@ -554,7 +494,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
         Box::new(unit)
     });
-
     // Cell BE convention: args 0..3 map to r3..r6 (arg0 -> r3, etc.).
     rt.set_spu_factory(|id, init| {
         use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
@@ -638,6 +577,193 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
+    // Title primary entry state. r1 = stack top, r3..r10 = PS3 LV2
+    // process-start convention args. r11 holds the OPD entry,
+    // r12 the malloc pagesize, r13 the TLS pointer. Stamped BEFORE
+    // the primary unit is registered so module_start aliases bind
+    // to the real entry state.
+    state.gpr[1] = PS3_PRIMARY_STACK_TOP;
+    state.lr = 0;
+    state.gpr[3] = 0;
+    state.gpr[4] = 0;
+    state.gpr[5] = 0;
+    state.gpr[6] = 0;
+    state.gpr[7] = 0x0100_0000;
+    state.gpr[8] = tls_info.map(|t| t.vaddr).unwrap_or(0);
+    state.gpr[9] = tls_info.map(|t| t.filesz).unwrap_or(0);
+    state.gpr[10] = tls_info.map(|t| t.memsz).unwrap_or(0);
+    state.gpr[11] = load_result.entry;
+    state.gpr[12] = malloc_pagesize as u64;
+    // r13 is the PS3 PPC64 ABI TLS pointer; LV2 seeds it at process
+    // creation and sys_initialize_tls does not touch it.
+    state.gpr[13] = super::prx::TLS_BASE + 0x7030;
+
+    // Bound the predecode shadow to executable code; built BEFORE
+    // module_start so the primary unit registers with it. PRX
+    // module_starts only mutate data segments (mutex tables,
+    // allocator state) so a pre-module-start shadow over the
+    // text-segment ranges is correct for the title's first
+    // instruction. Transient module_start units decode on demand.
+    let shadow_extent = (alloc_floor as usize).min(rt.memory().as_bytes().len());
+    let t_shadow_start = std::time::Instant::now();
+    let shadow =
+        cellgov_ppu::shadow::PredecodedShadow::build(0, &rt.memory().as_bytes()[..shadow_extent]);
+    if parse_env_bool("CELLGOV_RUNGAME_PROFILE") {
+        eprintln!(
+            "rungame_profile_shadow: PredecodedShadow::build over {shadow_extent} bytes took {:.2}ms \
+             (alloc_floor=0x{alloc_floor:08x} user_region_end=0x{user_region_end:08x} \
+             code_floor=0x{code_floor:08x} prx_region_end=0x{prx_region_end:08x})",
+            t_shadow_start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+
+    // Register the title primary unit and seed its PpuThreadId BEFORE
+    // module_starts run. Real LV2 attributes module_start syscalls to
+    // the calling (primary) PPU thread; transient module_start units
+    // alias to this PpuThreadId for caller resolution. The primary is
+    // marked non-runnable via the registry status override so the
+    // scheduler skips it while module_start units execute.
+    let primary_unit_id = rt.registry_mut().register_with(|id| {
+        let mut unit = PpuExecutionUnit::new(id);
+        *unit.state_mut() = state;
+        unit.set_instruction_shadow(shadow);
+        if let Some(pc) = debug_opts.dump_at_pc {
+            unit.set_break_pc(pc, debug_opts.dump_skip);
+        }
+        if debug_opts.profile_pairs {
+            unit.set_profile_mode(true);
+        }
+        unit
+    });
+    rt.registry_mut()
+        .set_status_override(primary_unit_id, cellgov_exec::UnitStatus::Blocked);
+    rt.lv2_host_mut().seed_primary_ppu_thread(
+        primary_unit_id,
+        cellgov_lv2::PpuThreadAttrs {
+            entry: load_result.entry,
+            arg: 0,
+            stack_base: u32_or_die("PS3_PRIMARY_STACK_BASE", PS3_PRIMARY_STACK_BASE),
+            stack_size: primary_stack_size,
+            priority: primary_prio,
+            tls_base: tls_info
+                .map(|t| u32_or_die("tls vaddr", t.vaddr))
+                .unwrap_or(0),
+        },
+    );
+    // Sync-syscall dispatch from aliased transient module_start
+    // units resolves via the primary thread record.
+    debug_assert!(
+        rt.lv2_host()
+            .ppu_thread_id_for_unit(primary_unit_id)
+            .is_some(),
+        "primary PPU thread record missing pre-module-start; alias targets would not resolve",
+    );
+
+    // Each PRX's module_start runs on a transient PPU unit aliased
+    // to the primary's PpuThreadId. The transient unit Faults at the
+    // LR=0 return sentinel; the alias is dropped immediately so the
+    // retired UnitId no longer resolves to a thread record.
+    let modules_total = prx_modules
+        .iter()
+        .filter(|p| p.module_start.is_some())
+        .count();
+    let skip_ms = parse_env_bool("CELLGOV_SKIP_MODULE_START");
+    let modules_started = match (prx_modules.is_empty(), skip_ms) {
+        (false, false) => {
+            let mut completed: usize = 0;
+            for info in &prx_modules {
+                let runnable_before = rt.registry().runnable_ids().count();
+                match run_module_start(&mut rt, info, kctx_opd) {
+                    Ok(ModuleStartOutcome::Completed { .. }) => completed += 1,
+                    Ok(ModuleStartOutcome::Skipped) => {}
+                    Err(e) => die(&format!("{e}")),
+                }
+                // Each module_start either Skipped (no unit registered,
+                // count unchanged) or Completed (transient unit ended
+                // Faulted, count unchanged). The primary's blocked
+                // override holds, so the count never grew during the
+                // module's sub-loop.
+                debug_assert_eq!(
+                    rt.registry().runnable_ids().count(),
+                    runnable_before,
+                    "module_start {} left a runnable unit in the registry",
+                    info.name,
+                );
+            }
+            completed
+        }
+        (false, true) => {
+            eprintln!("module_start: skipped (CELLGOV_SKIP_MODULE_START set)");
+            0
+        }
+        (true, true) => {
+            eprintln!(
+                "module_start: CELLGOV_SKIP_MODULE_START set, but no PRX was loaded -- flag has no effect"
+            );
+            0
+        }
+        (true, false) => 0,
+    };
+
+    // Override holds for the duration of the module_start loop: the
+    // unit's own status is still Runnable, but effective_status must
+    // read Blocked.
+    debug_assert_eq!(
+        rt.registry().effective_status(primary_unit_id),
+        Some(cellgov_exec::UnitStatus::Blocked),
+        "primary unit effective_status changed during module_start loop",
+    );
+
+    // Patches and dump-mem land AFTER module_start so they observe
+    // (or override) the same memory the title sees.
+    for &(addr, val) in opts.patch_bytes {
+        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1)
+            .unwrap_or_else(|| die(&format!("patch: byte 0x{addr:x}: invalid address range")));
+        rt.memory_mut()
+            .apply_commit(range, &[val])
+            .unwrap_or_else(|e| {
+                die(&format!(
+                    "patch: byte 0x{addr:x} = 0x{val:02x} FAILED ({e:?}); target not committed"
+                ))
+            });
+        if opts.print_banner {
+            println!("patch: byte 0x{addr:x} = 0x{val:02x}");
+        }
+    }
+    for &addr in opts.dump_mem_boot_addrs {
+        match cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 32) {
+            None => println!("mem[0x{addr:x}]: invalid address range"),
+            Some(r) => match rt.memory().read(r) {
+                Some(slice) => {
+                    let label = rt
+                        .memory()
+                        .containing_region(addr, 32)
+                        .map(|r| r.label())
+                        .unwrap_or("<unmapped>");
+                    print!("mem[0x{addr:x}] ({label}):");
+                    for b in slice {
+                        print!(" {b:02x}");
+                    }
+                    println!();
+                }
+                None => println!("mem[0x{addr:x}]: unmapped"),
+            },
+        }
+    }
+
+    // After module_starts complete, the four-byte mutex id at
+    // `*LIBLV2_ONCE_MUTEX_SLOT` must either be zero or reference
+    // an id present in the LV2 host's mutex table.
+    assert_gating_state_coherent_with_host(&rt, !prx_modules.is_empty());
+    debug_assert_eq!(
+        modules_started, modules_total,
+        "module_start: completed {modules_started} of {modules_total} modules",
+    );
+
+    // Clear the runtime override so the scheduler can pick the primary
+    // on the first `rt.step()` of the title loop.
+    rt.registry_mut().clear_status_override(primary_unit_id);
+
     PreparedBoot {
         rt,
         elf_data,
@@ -649,6 +775,33 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         },
         step_budget,
     }
+}
+
+/// Liblv2's once-mutex slot.
+const LIBLV2_ONCE_MUTEX_SLOT: u64 = 0x103a49d8;
+
+/// If memory holds a non-zero once-mutex id, that id must exist in
+/// the LV2 host's mutex table.
+fn assert_gating_state_coherent_with_host(rt: &Runtime, modules_were_loaded: bool) {
+    if !modules_were_loaded {
+        return;
+    }
+    let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(LIBLV2_ONCE_MUTEX_SLOT), 4)
+        .expect("static address range");
+    let Some(bytes) = rt.memory().read(range) else {
+        return;
+    };
+    let mutex_id = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    if mutex_id == 0 {
+        return;
+    }
+    debug_assert!(
+        rt.lv2_host().mutexes().lookup(mutex_id).is_some(),
+        "lv2 host handoff witness: liblv2's once-mutex slot at 0x{:016x} references \
+         mutex id 0x{:08x} but the host has no such entry",
+        LIBLV2_ONCE_MUTEX_SLOT,
+        mutex_id,
+    );
 }
 
 #[cfg(test)]
@@ -677,5 +830,66 @@ mod tests {
     #[test]
     fn accepts_neither() {
         assert!(check_strict_reserved_vs_rsx_mirror(false, false).is_ok());
+    }
+
+    use super::{assert_gating_state_coherent_with_host, LIBLV2_ONCE_MUTEX_SLOT};
+    use cellgov_core::Runtime;
+    use cellgov_time::Budget;
+
+    fn build_witness_test_rt() -> Runtime {
+        // 0x103a49d8 sits inside the main region; 0x10500000 is
+        // ample headroom past liblv2's load base.
+        let mem = cellgov_mem::GuestMemory::from_regions(vec![cellgov_mem::Region::new(
+            0,
+            0x1050_0000,
+            "main",
+            cellgov_mem::PageSize::Page64K,
+        )])
+        .expect("witness test mem layout");
+        Runtime::new(mem, Budget::new(1), 1)
+    }
+
+    fn stamp_mutex_id(rt: &mut Runtime, id: u32) {
+        let range =
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(LIBLV2_ONCE_MUTEX_SLOT), 4)
+                .expect("range");
+        rt.memory_mut()
+            .apply_commit(range, &id.to_be_bytes())
+            .expect("stamp once-mutex id");
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "lv2 host handoff witness")]
+    fn lv2_host_handoff_witness_fires_red_on_stale_id() {
+        let mut rt = build_witness_test_rt();
+        stamp_mutex_id(&mut rt, 0x4000_0005);
+        assert_gating_state_coherent_with_host(&rt, true);
+    }
+
+    #[test]
+    fn witness_passes_when_id_is_zero() {
+        let rt = build_witness_test_rt();
+        assert_gating_state_coherent_with_host(&rt, true);
+    }
+
+    #[test]
+    fn witness_skipped_when_no_modules_loaded() {
+        let mut rt = build_witness_test_rt();
+        stamp_mutex_id(&mut rt, 0x4000_0005);
+        assert_gating_state_coherent_with_host(&rt, false);
+    }
+
+    #[test]
+    fn witness_passes_when_id_lives_in_host() {
+        use cellgov_lv2::sync_primitives::MutexAttrs;
+        let mut rt = build_witness_test_rt();
+        let id: u32 = 0x4000_0007;
+        rt.lv2_host_mut()
+            .mutexes_mut()
+            .create_with_id(id, MutexAttrs::default())
+            .expect("create witness mutex");
+        stamp_mutex_id(&mut rt, id);
+        assert_gating_state_coherent_with_host(&rt, true);
     }
 }

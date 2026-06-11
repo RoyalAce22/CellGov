@@ -521,4 +521,110 @@ mod tests {
         };
         assert_eq!(code, cell_errors::CELL_EPERM.into());
     }
+
+    // Alias-path coverage for the (1c) module_start fix
+    // (`docs/dev/bug_investigations/fix_walk_runtime_lv2_host_asymmetry.md`).
+    // Pair: a transient unit WITHOUT an alias entry must still ESRCH
+    // on sync syscall (strict lookup preserved); an aliased transient
+    // unit's lock acquires against a host-known mutex (alias works).
+
+    #[test]
+    fn mutex_lock_from_transient_unit_without_alias_returns_esrch() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let primary = UnitId::new(0);
+        seed_primary_ppu(&mut host, primary);
+        let created = host.dispatch(
+            Lv2Request::MutexCreate {
+                id_ptr: 0x100,
+                attr_ptr: 0,
+            },
+            primary,
+            &rt,
+        );
+        let id = match &created {
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: e,
+            } => extract_write_u32(&e[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+        // Transient UnitId not in ppu_threads -> strict ESRCH.
+        let transient = UnitId::new(99);
+        let r = host.dispatch(
+            Lv2Request::MutexLock {
+                mutex_id: id,
+                timeout: 0,
+            },
+            transient,
+            &rt,
+        );
+        let Lv2Dispatch::Immediate { code, .. } = r else {
+            panic!("expected Immediate ESRCH, got {r:?}");
+        };
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    }
+
+    #[test]
+    fn mutex_lock_from_aliased_transient_unit_acquires_as_primary() {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(256);
+        let primary = UnitId::new(0);
+        seed_primary_ppu(&mut host, primary);
+        let created = host.dispatch(
+            Lv2Request::MutexCreate {
+                id_ptr: 0x100,
+                attr_ptr: 0,
+            },
+            primary,
+            &rt,
+        );
+        let id = match &created {
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: e,
+            } => extract_write_u32(&e[0]),
+            other => panic!("expected Immediate(0), got {other:?}"),
+        };
+        let transient = UnitId::new(99);
+        assert!(host.alias_unit_to_primary(transient));
+        let r = host.dispatch(
+            Lv2Request::MutexLock {
+                mutex_id: id,
+                timeout: 0,
+            },
+            transient,
+            &rt,
+        );
+        assert!(matches!(
+            r,
+            Lv2Dispatch::Immediate {
+                code: 0,
+                effects: _,
+            }
+        ));
+        // Acquired against the PRIMARY id (alias target), not against
+        // a fabricated thread for the transient unit.
+        assert_eq!(
+            host.mutexes().lookup(id).unwrap().owner(),
+            Some(PpuThreadId::PRIMARY),
+        );
+        // Dropping the alias restores the strict ESRCH path for the
+        // retired UnitId.
+        let other_transient = UnitId::new(100);
+        assert!(host.alias_unit_to_primary(other_transient));
+        assert!(host.drop_ppu_thread_alias(other_transient));
+        let after_drop = host.dispatch(
+            Lv2Request::MutexLock {
+                mutex_id: id,
+                timeout: 0,
+            },
+            other_transient,
+            &rt,
+        );
+        let Lv2Dispatch::Immediate { code, .. } = after_drop else {
+            panic!("expected Immediate ESRCH, got {after_drop:?}");
+        };
+        assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    }
 }

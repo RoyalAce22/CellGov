@@ -25,6 +25,9 @@ pub struct BenchOptions<'a> {
     pub strict_reserved: bool,
     pub checkpoint_override: Option<manifest::CheckpointTrigger>,
     pub budget_override: Option<Budget>,
+    /// When true, scan the title ELF for unimplemented PPU
+    /// encodings before execution and print the gap report.
+    pub prescan: bool,
 }
 
 impl BenchOptions<'_> {
@@ -46,6 +49,9 @@ impl BenchOptions<'_> {
         }
         if let Some(b) = self.budget_override {
             cmd.arg("--budget").arg(b.raw().to_string());
+        }
+        if self.prescan {
+            cmd.arg("--prescan");
         }
     }
 }
@@ -109,7 +115,6 @@ pub fn bench_boot(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult 
         strict_reserved: opts.strict_reserved,
         dump_at_pc: None,
         dump_skip: 0,
-        module_start_max_steps: opts.max_steps,
         print_banner: false,
         runtime_max_steps: opts.max_steps,
         patch_bytes: &[],
@@ -117,6 +122,7 @@ pub fn bench_boot(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult 
         profile_pairs: false,
         budget_override: opts.budget_override,
         capture_state_trace: false,
+        prescan: opts.prescan,
     });
     let mut rt = prepared.rt;
     let active_checkpoint = opts
@@ -128,6 +134,115 @@ pub fn bench_boot(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult 
     let t0 = Instant::now();
     let outcome = bench_step_loop(&mut rt, active_checkpoint, &mut steps);
     let wall = t0.elapsed();
+
+    // VRSAVE liveness witness: sum mfvrsave_executed across every
+    // PPU unit so the integration gate can scrape it from stderr.
+    let mut total_mfvrsave_executed: u64 = 0;
+    let mut any_vrsave_written = false;
+    for (_id, unit) in rt.registry().iter() {
+        if let Some(ppu) = unit
+            .as_any()
+            .downcast_ref::<cellgov_ppu::PpuExecutionUnit>()
+        {
+            total_mfvrsave_executed =
+                total_mfvrsave_executed.wrapping_add(ppu.state().mfvrsave_executed);
+            if ppu.state().vrsave_written {
+                any_vrsave_written = true;
+            }
+        }
+    }
+    eprintln!(
+        "BENCH_VRSAVE_WITNESS: mfvrsave_executed={total_mfvrsave_executed} vrsave_written={any_vrsave_written}"
+    );
+
+    // Host-side invariant-break witness: total
+    // `Lv2Host::log_invariant_break` calls retired during the boot.
+    let host_invariant_breaks = rt.lv2_host().invariant_break_count() as u64;
+    eprintln!("BENCH_HOST_INVARIANT_BREAKS: count={host_invariant_breaks}");
+
+    // Atomic-alignment witness: per-mnemonic execution counts for
+    // ldarx/stdcx/lwarx/stwcx. Per-mnemonic so word-width and
+    // doubleword paths report independently.
+    let mut ldarx_total: u64 = 0;
+    let mut stdcx_total: u64 = 0;
+    let mut lwarx_total: u64 = 0;
+    let mut stwcx_total: u64 = 0;
+    for (_id, unit) in rt.registry().iter() {
+        if let Some(ppu) = unit
+            .as_any()
+            .downcast_ref::<cellgov_ppu::PpuExecutionUnit>()
+        {
+            ldarx_total = ldarx_total.wrapping_add(ppu.state().ldarx_executed);
+            stdcx_total = stdcx_total.wrapping_add(ppu.state().stdcx_executed);
+            lwarx_total = lwarx_total.wrapping_add(ppu.state().lwarx_executed);
+            stwcx_total = stwcx_total.wrapping_add(ppu.state().stwcx_executed);
+        }
+    }
+    eprintln!(
+        "BENCH_ATOMIC_WITNESS: ldarx={ldarx_total} stdcx={stdcx_total} lwarx={lwarx_total} stwcx={stwcx_total}"
+    );
+
+    // MemFault witness: arm_entries counts entries to
+    // ExecuteVerdict::MemFault; unmapped_routed increments only
+    // inside the MemError::Unmapped arm.
+    let mut mem_fault_arm_entries: u64 = 0;
+    let mut mem_fault_unmapped_routed: u64 = 0;
+    for (_id, unit) in rt.registry().iter() {
+        if let Some(ppu) = unit
+            .as_any()
+            .downcast_ref::<cellgov_ppu::PpuExecutionUnit>()
+        {
+            mem_fault_arm_entries =
+                mem_fault_arm_entries.wrapping_add(ppu.state().mem_fault_arm_entries);
+            mem_fault_unmapped_routed =
+                mem_fault_unmapped_routed.wrapping_add(ppu.state().mem_fault_unmapped_routed);
+        }
+    }
+    eprintln!(
+        "BENCH_MEM_FAULT_WITNESS: arm_entries={mem_fault_arm_entries} unmapped_routed={mem_fault_unmapped_routed}"
+    );
+
+    // RSX label-write witness: total Effect::RsxLabelWrite
+    // submitted to the commit pipeline.
+    let rsx_label_writes_committed = rt.rsx_label_writes_committed();
+    eprintln!("BENCH_RSX_LABEL_WRITES_WITNESS: count={rsx_label_writes_committed}");
+
+    // RSX SET_REFERENCE-dispatch witness: total
+    // `NV406E_SET_REFERENCE` dispatches the walker fired.
+    let rsx_set_reference_dispatches = rt.rsx_set_reference_dispatches();
+    eprintln!("BENCH_RSX_SET_REFERENCE_WITNESS: count={rsx_set_reference_dispatches}");
+
+    // dcbz witness: total Dcbz executor-arm entries across PPU
+    // units.
+    let mut dcbz_total: u64 = 0;
+    for (_id, unit) in rt.registry().iter() {
+        if let Some(ppu) = unit
+            .as_any()
+            .downcast_ref::<cellgov_ppu::PpuExecutionUnit>()
+        {
+            dcbz_total = dcbz_total.wrapping_add(ppu.state().dcbz_executed);
+        }
+    }
+    eprintln!("BENCH_DCBZ_WITNESS: count={dcbz_total}");
+
+    // SPU-image-register witness: total ContentStore::register
+    // invocations across this runtime's lifetime.
+    let spu_image_registers = rt.lv2_host().content_store().register_invocations();
+    eprintln!("BENCH_SPU_IMAGE_REGISTER_WITNESS: count={spu_image_registers}");
+
+    // SPU thread-initialize dispatch witness: total
+    // `Lv2HostDispatcher::dispatch_thread_initialize` invocations.
+    let spu_thread_init_dispatches = rt.lv2_host().spu_thread_initialize_dispatches();
+    eprintln!("BENCH_SPU_THREAD_INIT_WITNESS: count={spu_thread_init_dispatches}");
+
+    // lwmutex / cond witnesses: acquire / release / reacquire
+    // counters.
+    let lwmutex_acquires = rt.lv2_host().lwmutexes().acquires_count();
+    let lwmutex_releases = rt.lv2_host().lwmutexes().releases_count();
+    let cond_reacquires = rt.lv2_host().cond_reacquire_wake_calls();
+    eprintln!(
+        "BENCH_LWMUTEX_COND_WITNESS: lwmutex_acquires={lwmutex_acquires} lwmutex_releases={lwmutex_releases} cond_reacquires={cond_reacquires}"
+    );
 
     BenchBootResult {
         steps,
