@@ -1,11 +1,10 @@
-//! [`ExecuteVerdict`] -- outcome of a single
-//! [`super::execute`](super::execute) call.
+//! Outcome of a single [`super::execute`](super::execute) call.
 
 use crate::exec::fault::PpuFault;
 
 /// Outcome of a single `execute` call.
 // [PPC-Book1 p:5 s:1.5] non-branching insns set NIA=CIA+4; branches assign NIA explicitly.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecuteVerdict {
     /// Advance PC by 4.
     Continue,
@@ -32,17 +31,11 @@ pub enum ExecuteVerdict {
 }
 
 impl ExecuteVerdict {
-    /// Whether this verdict represents "the instruction succeeded
-    /// enough to perform its side-effect," in the context of
-    /// store-with-update RA writeback and fused store-pair
-    /// second-half execution. Only `Continue` triggers the writeback;
-    /// every other verdict skips it.
+    /// Whether the verdict permits a store-with-update RA writeback or
+    /// fused store-pair second-half execution. Only `Continue` does.
     ///
-    /// Exhaustive: every variant must declare its writeback verdict.
-    /// A new "deferred success" verdict (`Stalled`, `RetryNextStep`)
-    /// defaulting to allow-writeback corrupts the guest RA. A new
-    /// failure variant defaulting to allow-writeback writes back on
-    /// a logically-failed store.
+    /// Exhaustive: a new variant must explicitly declare its policy or
+    /// risk corrupting RA on deferred-success / failure paths.
     pub fn allows_writeback(&self) -> bool {
         match self {
             ExecuteVerdict::Continue => true,

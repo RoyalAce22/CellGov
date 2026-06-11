@@ -85,6 +85,69 @@ pub const SHT_SYMTAB: u32 = 2;
 /// `sh_type` for the dynamic symbol table section.
 pub const SHT_DYNSYM: u32 = 11;
 
+/// `sh_type` for sections holding program bits (code, rodata, data).
+pub const SHT_PROGBITS: u32 = 1;
+
+/// `sh_flags` bit: section occupies a runtime memory range.
+pub const SHF_ALLOC: u64 = 0x2;
+
+/// `sh_flags` bit: section contains machine instructions.
+pub const SHF_EXECINSTR: u64 = 0x4;
+
+/// ELF64 section-header-entry size (`e_shentsize`).
+pub const ELF64_SHENT_SIZE: usize = 64;
+
+/// Byte offset of `e_shoff` inside the ELF64 header.
+pub const ELF64_E_SHOFF: usize = 40;
+
+/// Byte offset of `e_shentsize` inside the ELF64 header.
+pub const ELF64_E_SHENTSIZE: usize = 58;
+
+/// Byte offset of `e_shnum` inside the ELF64 header.
+pub const ELF64_E_SHNUM: usize = 60;
+
+/// Byte offset of `e_shstrndx` (`u16`, section-header index of
+/// `.shstrtab`) inside the ELF64 header.
+pub const ELF64_E_SHSTRNDX: usize = 62;
+
+/// Byte offsets of the ELF64 section-header fields within one
+/// section-header-table entry. See ELF64 spec Figure 1-9.
+pub const ELF64_SH_TYPE: usize = 4;
+/// Byte offset of `sh_name` (u32, strtab index) within an ELF64
+/// section-header entry.
+pub const ELF64_SH_NAME: usize = 0;
+/// Byte offset of `sh_flags` within an ELF64 section-header entry.
+pub const ELF64_SH_FLAGS: usize = 8;
+/// Byte offset of `sh_offset` within an ELF64 section-header entry.
+pub const ELF64_SH_OFFSET: usize = 24;
+/// Byte offset of `sh_size` within an ELF64 section-header entry.
+pub const ELF64_SH_SIZE: usize = 32;
+
+/// `e_shstrndx` value indicating "no section name string table".
+pub const SHN_UNDEF: u16 = 0;
+
+/// `sh_type` for the string-table section (`.shstrtab`, `.strtab`).
+pub const SHT_STRTAB: u32 = 3;
+
+// Compile-time coupling checks between the byte-offset / width
+// constants and the container sizes they live in. Readers in
+// downstream crates (e.g. `cellgov_ppu::prescan::sections`) rely on
+// the fact that every `ELF64_*` field fits inside its container, so
+// a runtime bounds check on the container size (`elf_data.len() >=
+// ELF_HEADER_SIZE` or `shentsize >= ELF64_SHENT_SIZE`) implies every
+// per-field read is in range. If a future edit to these constants
+// breaks the coupling, compilation fails here rather than crashing
+// at runtime on malformed input.
+const _: () = assert!(ELF64_E_SHOFF + 8 <= ELF_HEADER_SIZE);
+const _: () = assert!(ELF64_E_SHENTSIZE + 2 <= ELF_HEADER_SIZE);
+const _: () = assert!(ELF64_E_SHNUM + 2 <= ELF_HEADER_SIZE);
+const _: () = assert!(ELF64_E_SHSTRNDX + 2 <= ELF_HEADER_SIZE);
+const _: () = assert!(ELF64_SH_NAME + 4 <= ELF64_SHENT_SIZE);
+const _: () = assert!(ELF64_SH_TYPE + 4 <= ELF64_SHENT_SIZE);
+const _: () = assert!(ELF64_SH_FLAGS + 8 <= ELF64_SHENT_SIZE);
+const _: () = assert!(ELF64_SH_OFFSET + 8 <= ELF64_SHENT_SIZE);
+const _: () = assert!(ELF64_SH_SIZE + 8 <= ELF64_SHENT_SIZE);
+
 /// `r_type` for `R_PPC64_ADDR32` (32-bit absolute).
 pub const R_PPC64_ADDR32: u32 = 1;
 
@@ -123,6 +186,15 @@ pub const EXPORT_ATTR_SYSTEM: u16 = 0x8000;
 /// the loader looks up via the `.sys_proc_param` section. Every PS3
 /// title's process-param block starts with this 32-bit BE word.
 pub const SYS_PROCESS_PARAM_MAGIC: u32 = 0x13bc_c5f6;
+
+/// Sentinel `sys_process_get_sdk_version` returns when no
+/// `sys_process_param_t` segment is present (PSL1GHT homebrew with
+/// no recorded SDK build). RPCS3 mirrors this default at
+/// `PPUModule.cpp`. Retail titles always carry a real value
+/// here; cellSysutil's SDK-keyed init dispatcher gates on it via an
+/// unsigned-greater comparison at runtime PC `0x1048537c`, so the
+/// sentinel must NOT leak into a retail boot.
+pub const SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN: u32 = 0xFFFF_FFFF;
 
 /// `e_phoff` field offset in the ELF64 header.
 pub const ELF_PHOFF_OFFSET: usize = 32;

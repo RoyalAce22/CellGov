@@ -7,6 +7,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod addr;
+pub mod be;
 pub mod guest;
 pub mod hash;
 pub mod range;

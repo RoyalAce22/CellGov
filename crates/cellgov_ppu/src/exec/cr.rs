@@ -288,6 +288,174 @@ mod tests {
         assert_eq!(s.lr, 0xDEADBEEF);
     }
 
+    /// Build a non-trivial 32-bit CR pattern so other-bit preservation
+    /// tests can isolate which single bit the handler touched.
+    fn alternating_cr_pattern() -> u32 {
+        0xA5A5_A5A5
+    }
+
+    fn assert_only_bit_changed(before: u32, after: u32, bt: u8) {
+        let mask = 1u32 << (31 - bt);
+        assert_eq!(
+            before & !mask,
+            after & !mask,
+            "bits other than BT={} must be preserved",
+            bt
+        );
+    }
+
+    #[test]
+    fn crand_preserves_other_cr_bits() {
+        let mut s = fresh();
+        s.cr = alternating_cr_pattern();
+        s.set_cr_bit(10, true);
+        s.set_cr_bit(11, true);
+        let before = s.cr;
+        run(
+            PpuInstruction::Crand {
+                bt: 5,
+                ba: 10,
+                bb: 11,
+            },
+            &mut s,
+        );
+        assert!(s.cr_bit(5));
+        assert_only_bit_changed(before, s.cr, 5);
+    }
+
+    #[test]
+    fn cror_preserves_other_cr_bits() {
+        let mut s = fresh();
+        s.cr = alternating_cr_pattern();
+        s.set_cr_bit(10, false);
+        s.set_cr_bit(11, true);
+        let before = s.cr;
+        run(
+            PpuInstruction::Cror {
+                bt: 5,
+                ba: 10,
+                bb: 11,
+            },
+            &mut s,
+        );
+        assert!(s.cr_bit(5));
+        assert_only_bit_changed(before, s.cr, 5);
+    }
+
+    #[test]
+    fn crxor_preserves_other_cr_bits() {
+        let mut s = fresh();
+        s.cr = alternating_cr_pattern();
+        s.set_cr_bit(10, true);
+        s.set_cr_bit(11, false);
+        let before = s.cr;
+        run(
+            PpuInstruction::Crxor {
+                bt: 5,
+                ba: 10,
+                bb: 11,
+            },
+            &mut s,
+        );
+        assert!(s.cr_bit(5));
+        assert_only_bit_changed(before, s.cr, 5);
+    }
+
+    #[test]
+    fn crnand_preserves_other_cr_bits() {
+        let mut s = fresh();
+        s.cr = alternating_cr_pattern();
+        s.set_cr_bit(10, true);
+        s.set_cr_bit(11, true);
+        let before = s.cr;
+        run(
+            PpuInstruction::Crnand {
+                bt: 5,
+                ba: 10,
+                bb: 11,
+            },
+            &mut s,
+        );
+        assert!(!s.cr_bit(5));
+        assert_only_bit_changed(before, s.cr, 5);
+    }
+
+    #[test]
+    fn crnor_preserves_other_cr_bits() {
+        let mut s = fresh();
+        s.cr = alternating_cr_pattern();
+        s.set_cr_bit(10, false);
+        s.set_cr_bit(11, false);
+        let before = s.cr;
+        run(
+            PpuInstruction::Crnor {
+                bt: 5,
+                ba: 10,
+                bb: 11,
+            },
+            &mut s,
+        );
+        assert!(s.cr_bit(5));
+        assert_only_bit_changed(before, s.cr, 5);
+    }
+
+    #[test]
+    fn creqv_preserves_other_cr_bits() {
+        let mut s = fresh();
+        s.cr = alternating_cr_pattern();
+        s.set_cr_bit(10, true);
+        s.set_cr_bit(11, true);
+        let before = s.cr;
+        run(
+            PpuInstruction::Creqv {
+                bt: 5,
+                ba: 10,
+                bb: 11,
+            },
+            &mut s,
+        );
+        assert!(s.cr_bit(5));
+        assert_only_bit_changed(before, s.cr, 5);
+    }
+
+    #[test]
+    fn crandc_preserves_other_cr_bits() {
+        let mut s = fresh();
+        s.cr = alternating_cr_pattern();
+        s.set_cr_bit(10, true);
+        s.set_cr_bit(11, false);
+        let before = s.cr;
+        run(
+            PpuInstruction::Crandc {
+                bt: 5,
+                ba: 10,
+                bb: 11,
+            },
+            &mut s,
+        );
+        assert!(s.cr_bit(5));
+        assert_only_bit_changed(before, s.cr, 5);
+    }
+
+    #[test]
+    fn crorc_preserves_other_cr_bits() {
+        let mut s = fresh();
+        s.cr = alternating_cr_pattern();
+        s.set_cr_bit(10, false);
+        s.set_cr_bit(11, false);
+        let before = s.cr;
+        run(
+            PpuInstruction::Crorc {
+                bt: 5,
+                ba: 10,
+                bb: 11,
+            },
+            &mut s,
+        );
+        assert!(s.cr_bit(5));
+        assert_only_bit_changed(before, s.cr, 5);
+    }
+
     #[test]
     fn mcrf_does_not_touch_other_fields() {
         let mut s = fresh();

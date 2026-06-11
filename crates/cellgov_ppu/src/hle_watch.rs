@@ -1,52 +1,26 @@
 //! Env-gated per-call HLE return watch on guest PPU function entries.
 //!
-//! Configured by env var with a set of NIDs the firmware exports.
-//! After PRX load, [`register_nid_resolution`] resolves each watched
-//! NID to its OPD entry PC and records the resolution in the output
-//! file. The PPU dispatch then calls [`on_dispatch`] per instruction;
-//! when `state.pc` matches a watched entry PC, an "entry" record is
-//! written carrying `r3..r10` and the link register at entry. A
-//! per-thread in-flight stack tracks each call's return PC (snapshot
-//! of `lr` at entry); when a later instruction's `state.pc` matches
-//! the top of stack, an "exit" record is written carrying `r3` (the
-//! return value).
+//! Configured by env var with NIDs the firmware exports. After PRX
+//! load, [`register_nid_resolution`] resolves each NID to its OPD
+//! entry PC. The PPU dispatch calls [`on_dispatch`] per instruction;
+//! `state.pc` matches drive entry/exit records via a per-thread
+//! in-flight stack of return PCs (snapshot of `lr` at entry).
 //!
-//! Coverage and liveness:
+//! Caller contract: invoke [`is_active`] (or any state-touching API)
+//! before the first dispatch so the [`OnceLock`] initializes and the
+//! first watched instruction is not missed.
 //!
-//! - Hook fires at the **firmware-PRX function body's first
-//!   instruction**, reached after the title's import stub
-//!   trampolines through the OPD. Misses any path that does not go
-//!   through that entry PC (e.g. an inlined PRX implementation,
-//!   which does not exist in the shipped firmware PRX layout but is
-//!   listed here for completeness).
-//! - "No entry record for NID X" means the hook did not see PC reach
-//!   the resolved entry PC. It does **not** mean the title did not
-//!   call NID X. A reader analyzing the output must demonstrate the
-//!   hook fired at least once on a known-live NID before reading any
-//!   "zero records" row as signal -- the silent-failure trap is
-//!   identical to the patch-0003 store_watch caveat.
-//! - "NID X did not resolve" (no resolution record in the output
-//!   file) means the export table did not contain NID X. Possible
-//!   causes: NID is not exported by any loaded firmware PRX, NID hex
-//!   was mistyped on the env var, or the dependency graph did not
-//!   load the exporting PRX. Distinct from "resolved but not seen."
+//! [`totals`] surfaces `dropped_body_events` -- non-zero proves the
+//! hook reached instruction dispatch even when no watched entry PC
+//! was hit, distinguishing "hook never fired" from "hook fired but
+//! never inside a watched scope."
 //!
 //! Env vars:
 //!
-//!   CELLGOV_HLE_RETURN_WATCH       Comma-separated hex NIDs
-//!                                  (e.g. `0x32267a31,0x15bae46b`).
-//!   CELLGOV_HLE_RETURN_WATCH_PCS   Comma-separated raw entry PCs
-//!                                  with names, in `pc=name`
-//!                                  form (e.g.
-//!                                  `0x10432bc8=libsysmodule_module_start`).
-//!                                  For per-PRX entry points
-//!                                  (`module_start` / `module_stop`)
-//!                                  whose NID is reused across PRXes
-//!                                  and so does not key uniquely in
-//!                                  the merged export table. PCs are
-//!                                  registered immediately at watch
-//!                                  init; PRX-load resolution does
-//!                                  not touch them.
+//!   CELLGOV_HLE_RETURN_WATCH       Comma-separated hex NIDs.
+//!   CELLGOV_HLE_RETURN_WATCH_PCS   Comma-separated `pc=name` for
+//!                                  per-PRX entries whose NID is not
+//!                                  unique across PRXes.
 //!   CELLGOV_HLE_RETURN_WATCH_PATH  Output file path.
 //!
 //! File format (little-endian, no padding inside records):
@@ -55,9 +29,11 @@
 //!     magic     "CGHW"
 //!     version   u32 = 1
 //!     num_nids  u32 = N
-//!     nid_i     u32, i in 0..N
+//!     nid_i     u32, i in 0..N    (real NIDs followed by raw-PC
+//!                                  synthetic IDs `pc | 0x80000000`)
 //!
-//!   [Resolution record], emitted once per watched NID at PRX load:
+//!   [Resolution record], emitted once per watched ID at PRX load
+//!   (raw-PC entries emitted at watch init):
 //!     kind      u8 = 3
 //!     nid       u32
 //!     entry_pc  u32
@@ -93,27 +69,42 @@ use std::sync::{Mutex, OnceLock};
 const KIND_ENTRY: u8 = 1;
 const KIND_EXIT: u8 = 2;
 const KIND_RESOLUTION: u8 = 3;
-/// Body event: syscall (`sc`) executed while inside a watched
-/// function. Carries syscall number (r11) and arg regs (r3..r10).
+/// Body-event `sc` inside a watched function (r11 + r3..r10).
 const KIND_BODY_SYSCALL: u8 = 4;
-/// Body event: syscall return point reached. Carries the syscall
-/// return value (r3) and the paired syscall-entry record number.
+/// Paired syscall-return point (r3 + entry record number).
 const KIND_BODY_SYSCALL_RETURN: u8 = 5;
-/// Body event: branch-with-link (`bl` / `bctrl` / `blrl`) executed
-/// while inside a watched function. Carries the target PC (if
-/// statically known from the encoding) and arg regs (r3..r10).
+/// Body-event `bl` / `bctrl` / `blrl` inside a watched function.
 const KIND_BODY_CALL: u8 = 6;
 
+/// In-memory key for the resolved-entries map; Raw-PC and NID
+/// keyspaces are disjoint.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum WatchKey {
+    Nid(u32),
+    RawPc(u32),
+}
+
+/// File-side state guarded by a single mutex so counter assignment
+/// and the file append are atomic, and [`totals`] returns a
+/// self-consistent snapshot.
+struct WriterState {
+    writer: BufWriter<File>,
+    record_counter: u64,
+    entry_total: u64,
+    exit_total: u64,
+    /// Body events executed outside any watched scope. Non-zero
+    /// proves the hook reached dispatch even when `entry_total == 0`.
+    dropped_body_events: u64,
+}
+
 struct WatchState {
-    watched: Vec<u32>,
-    resolved: Mutex<BTreeMap<u32, ResolvedEntry>>,
-    writer: Mutex<BufWriter<File>>,
-    record_counter: Mutex<u64>,
-    entry_total: Mutex<u64>,
-    exit_total: Mutex<u64>,
+    watched_nids: Vec<u32>,
+    resolved: Mutex<BTreeMap<WatchKey, ResolvedEntry>>,
+    writer: Mutex<WriterState>,
 }
 
 struct ResolvedEntry {
+    on_wire_nid: u32,
     entry_pc: u32,
     #[allow(dead_code)]
     name: String,
@@ -121,7 +112,7 @@ struct ResolvedEntry {
 
 #[derive(Clone, Copy)]
 struct InFlightCall {
-    nid: u32,
+    on_wire_nid: u32,
     return_pc: u32,
     entry_record_no: u64,
 }
@@ -130,7 +121,7 @@ struct InFlightCall {
 struct PendingSyscallReturn {
     return_pc: u32,
     syscall_num: u32,
-    in_flight_nid: u32,
+    in_flight_on_wire_nid: u32,
     entry_record_no: u64,
 }
 
@@ -152,7 +143,7 @@ fn init() -> Option<WatchState> {
     let pcs_spec = env::var("CELLGOV_HLE_RETURN_WATCH_PCS")
         .ok()
         .unwrap_or_default();
-    let mut watched: Vec<u32> = Vec::new();
+    let mut watched_nids: Vec<u32> = Vec::new();
     for tok in spec.split(',') {
         let trimmed = tok.trim();
         if trimmed.is_empty() {
@@ -160,14 +151,13 @@ fn init() -> Option<WatchState> {
         }
         let body = trimmed.trim_start_matches("0x").trim_start_matches("0X");
         match u32::from_str_radix(body, 16) {
-            Ok(n) => watched.push(n),
+            Ok(n) => watched_nids.push(n),
             Err(e) => {
                 eprintln!("[cellgov] CELLGOV_HLE_RETURN_WATCH: cannot parse {trimmed:?}: {e}");
                 return None;
             }
         }
     }
-    // Raw-PC entries become resolutions keyed by synthetic NID `pc | 0x80000000`.
     let mut raw_pc_watches: Vec<(u32, String)> = Vec::new();
     for tok in pcs_spec.split(',') {
         let trimmed = tok.trim();
@@ -188,66 +178,97 @@ fn init() -> Option<WatchState> {
                 return None;
             }
         };
+        let synthetic_on_wire = pc | 0x8000_0000;
+        debug_assert!(
+            !watched_nids.contains(&synthetic_on_wire),
+            "raw-PC synthetic on-wire ID 0x{synthetic_on_wire:08x} collides with a watched real NID; very rare but real on-wire ambiguity -- pick a different PC or drop the colliding NID"
+        );
         raw_pc_watches.push((pc, name_s.to_string()));
-        let synthetic_nid = pc | 0x8000_0000;
-        if !watched.contains(&synthetic_nid) {
-            watched.push(synthetic_nid);
-        }
     }
-    if watched.is_empty() {
+    if watched_nids.is_empty() && raw_pc_watches.is_empty() {
         eprintln!("[cellgov] hle-return-watch: no NIDs or raw PCs configured");
         return None;
     }
-    let file = File::create(&path).ok()?;
-    let mut writer = BufWriter::new(file);
-    writer.write_all(b"CGHW").ok()?;
-    writer.write_all(&1u32.to_le_bytes()).ok()?;
-    writer
-        .write_all(&(watched.len() as u32).to_le_bytes())
-        .ok()?;
-    for nid in &watched {
-        writer.write_all(&nid.to_le_bytes()).ok()?;
+
+    // On-wire ID list: real NIDs first, then raw-PC synthetic IDs.
+    let mut on_wire_ids: Vec<u32> = watched_nids.clone();
+    for (pc, _) in &raw_pc_watches {
+        on_wire_ids.push(*pc | 0x8000_0000);
     }
-    writer.flush().ok()?;
+
+    // Build header in one buffer so `write_all` is the atomic
+    // boundary against a torn header.
+    let mut header: Vec<u8> = Vec::with_capacity(16 + 4 * on_wire_ids.len());
+    header.extend_from_slice(b"CGHW");
+    header.extend_from_slice(&1u32.to_le_bytes());
+    header.extend_from_slice(&(on_wire_ids.len() as u32).to_le_bytes());
+    for nid in &on_wire_ids {
+        header.extend_from_slice(&nid.to_le_bytes());
+    }
+
+    let file = match File::create(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[cellgov] hle-return-watch: cannot create {path}: {e}");
+            return None;
+        }
+    };
+    let mut writer = BufWriter::new(file);
+    if let Err(e) = writer.write_all(&header) {
+        eprintln!("[cellgov] hle-return-watch: header write to {path} failed: {e}");
+        return None;
+    }
+
     eprintln!(
         "[cellgov] hle-return-watch active: {} entries path={}",
-        watched.len(),
+        on_wire_ids.len(),
         path,
     );
-    for nid in &watched {
+    for nid in &on_wire_ids {
         eprintln!("[cellgov] hle-return-watch watching NID 0x{nid:08x}");
     }
-    let mut resolved: BTreeMap<u32, ResolvedEntry> = BTreeMap::new();
+    let mut resolved: BTreeMap<WatchKey, ResolvedEntry> = BTreeMap::new();
     for (pc, name) in &raw_pc_watches {
-        let synthetic_nid = *pc | 0x8000_0000;
+        let on_wire = *pc | 0x8000_0000;
         resolved.insert(
-            synthetic_nid,
+            WatchKey::RawPc(*pc),
             ResolvedEntry {
+                on_wire_nid: on_wire,
                 entry_pc: *pc,
                 name: name.clone(),
             },
         );
         eprintln!(
-            "[cellgov] hle-return-watch raw-PC entry registered: 0x{pc:08x} ({name}) synthetic_nid=0x{synthetic_nid:08x}"
+            "[cellgov] hle-return-watch raw-PC entry registered: 0x{pc:08x} ({name}) on_wire=0x{on_wire:08x}"
         );
-        let _ = writer.write_all(&[KIND_RESOLUTION]);
-        let _ = writer.write_all(&synthetic_nid.to_le_bytes());
-        let _ = writer.write_all(&pc.to_le_bytes());
         let name_bytes = name.as_bytes();
         let name_len = name_bytes.len().min(255) as u8;
-        let _ = writer.write_all(&[name_len]);
-        let _ = writer.write_all(&name_bytes[..usize::from(name_len)]);
+        let mut rec: Vec<u8> = Vec::with_capacity(1 + 4 + 4 + 1 + usize::from(name_len));
+        rec.push(KIND_RESOLUTION);
+        rec.extend_from_slice(&on_wire.to_le_bytes());
+        rec.extend_from_slice(&pc.to_le_bytes());
+        rec.push(name_len);
+        rec.extend_from_slice(&name_bytes[..usize::from(name_len)]);
+        if let Err(e) = writer.write_all(&rec) {
+            eprintln!("[cellgov] hle-return-watch: raw-PC resolution write to {path} failed: {e}");
+            return None;
+        }
     }
-    if !raw_pc_watches.is_empty() {
-        let _ = writer.flush();
+    if let Err(e) = writer.flush() {
+        eprintln!("[cellgov] hle-return-watch: init flush to {path} failed: {e}");
+        return None;
     }
+
     Some(WatchState {
-        watched,
+        watched_nids,
         resolved: Mutex::new(resolved),
-        writer: Mutex::new(writer),
-        record_counter: Mutex::new(0),
-        entry_total: Mutex::new(0),
-        exit_total: Mutex::new(0),
+        writer: Mutex::new(WriterState {
+            writer,
+            record_counter: 0,
+            entry_total: 0,
+            exit_total: 0,
+            dropped_body_events: 0,
+        }),
     })
 }
 
@@ -260,25 +281,30 @@ pub fn is_active() -> bool {
     state().is_some()
 }
 
-/// NID list the instrument is watching; empty when inactive.
+/// Real NIDs the instrument is watching; empty when inactive.
+/// Raw-PC watches are pre-resolved at init and are NOT included
+/// here -- the caller (firmware PRX-load resolution) should not
+/// look them up in the export table.
 pub fn watched_nids() -> Vec<u32> {
-    state().map(|s| s.watched.clone()).unwrap_or_default()
+    state().map(|s| s.watched_nids.clone()).unwrap_or_default()
 }
 
 /// Register an entry-PC resolution for a watched NID; writes one
 /// resolution record on the first call for a given NID.
 pub fn register_nid_resolution(nid: u32, name: &str, entry_pc: u32) {
     let Some(s) = state() else { return };
-    if !s.watched.contains(&nid) {
+    if !s.watched_nids.contains(&nid) {
         return;
     }
+    let key = WatchKey::Nid(nid);
     let mut map = s.resolved.lock().expect("hle_watch resolved mutex");
-    if map.contains_key(&nid) {
+    if map.contains_key(&key) {
         return;
     }
     map.insert(
-        nid,
+        key,
         ResolvedEntry {
+            on_wire_nid: nid,
             entry_pc,
             name: name.to_string(),
         },
@@ -287,15 +313,15 @@ pub fn register_nid_resolution(nid: u32, name: &str, entry_pc: u32) {
     eprintln!(
         "[cellgov] hle-return-watch resolved NID 0x{nid:08x} ({name}) entry_pc=0x{entry_pc:08x}"
     );
-    let mut writer = s.writer.lock().expect("hle_watch writer mutex");
-    let _ = writer.write_all(&[KIND_RESOLUTION]);
-    let _ = writer.write_all(&nid.to_le_bytes());
-    let _ = writer.write_all(&entry_pc.to_le_bytes());
+    let mut w = s.writer.lock().expect("hle_watch writer");
+    let _ = w.writer.write_all(&[KIND_RESOLUTION]);
+    let _ = w.writer.write_all(&nid.to_le_bytes());
+    let _ = w.writer.write_all(&entry_pc.to_le_bytes());
     let name_bytes = name.as_bytes();
     let name_len = name_bytes.len().min(255) as u8;
-    let _ = writer.write_all(&[name_len]);
-    let _ = writer.write_all(&name_bytes[..usize::from(name_len)]);
-    let _ = writer.flush();
+    let _ = w.writer.write_all(&[name_len]);
+    let _ = w.writer.write_all(&name_bytes[..usize::from(name_len)]);
+    let _ = w.writer.flush();
 }
 
 /// Per-instruction hook; fast-paths to a no-op when inactive.
@@ -310,98 +336,107 @@ pub fn on_dispatch(pc: u32, gpr: &[u64; 32], lr: u64) {
 #[inline(never)]
 fn on_dispatch_slow(pc: u32, gpr: &[u64; 32], lr: u64) {
     let Some(s) = state() else { return };
+
+    // Process exit before entry so a degenerate PC where outer
+    // return_pc == new entry pops the outer frame first.
+    //
+    // PC-equality limitation: when `lr == entry_pc`, the return
+    // visit pops then matches entry at the same PC, emitting a
+    // phantom entry. Analyzers should treat back-to-back entries
+    // with no body events as suspect on PCs that host this pattern.
+    let exit_match: Option<InFlightCall> = IN_FLIGHT.with(|stack| {
+        let st = stack.borrow();
+        st.last().filter(|c| c.return_pc == pc).copied()
+    });
     let entry_match: Option<(u32, u32)> = {
         let map = s.resolved.lock().expect("hle_watch resolved mutex");
         if map.is_empty() {
             None
         } else {
-            map.iter()
-                .find(|(_, r)| r.entry_pc == pc)
-                .map(|(nid, r)| (*nid, r.entry_pc))
+            map.values()
+                .find(|r| r.entry_pc == pc)
+                .map(|r| (r.on_wire_nid, r.entry_pc))
         }
     };
-    let exit_match: Option<InFlightCall> = IN_FLIGHT.with(|stack| {
-        let st = stack.borrow();
-        st.last().filter(|c| c.return_pc == pc).copied()
-    });
-    if let Some((nid, entry_pc)) = entry_match {
+
+    if let Some(call) = exit_match {
+        let mut w = s.writer.lock().expect("hle_watch writer");
+        let record_no = w.record_counter;
+        w.record_counter = w.record_counter.wrapping_add(1);
+        w.exit_total = w.exit_total.wrapping_add(1);
+        let _ = w.writer.write_all(&[KIND_EXIT]);
+        let _ = w.writer.write_all(&record_no.to_le_bytes());
+        let _ = w.writer.write_all(&call.on_wire_nid.to_le_bytes());
+        let _ = w.writer.write_all(&call.entry_record_no.to_le_bytes());
+        let _ = w.writer.write_all(&pc.to_le_bytes());
+        let _ = w.writer.write_all(&gpr[3].to_le_bytes());
+        let _ = w.writer.flush();
+        drop(w);
+        IN_FLIGHT.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+
+    if let Some((on_wire_nid, entry_pc)) = entry_match {
+        // PS3 guest addresses fit in u32; lr is 64-bit. The on-wire
+        // format narrows to u32, so guard the cast here.
+        debug_assert!(
+            lr >> 32 == 0,
+            "PPU lr 0x{lr:016x} exceeds 32-bit; instrument's on-wire format is u32"
+        );
         let lr32 = lr as u32;
-        let mut counter = s.record_counter.lock().expect("hle_watch counter");
-        let record_no = *counter;
-        *counter = counter.wrapping_add(1);
-        drop(counter);
-        let mut writer = s.writer.lock().expect("hle_watch writer mutex");
-        let _ = writer.write_all(&[KIND_ENTRY]);
-        let _ = writer.write_all(&record_no.to_le_bytes());
-        let _ = writer.write_all(&nid.to_le_bytes());
-        let _ = writer.write_all(&entry_pc.to_le_bytes());
-        let _ = writer.write_all(&pc.to_le_bytes());
-        let _ = writer.write_all(&lr32.to_le_bytes());
+        let mut w = s.writer.lock().expect("hle_watch writer");
+        let record_no = w.record_counter;
+        w.record_counter = w.record_counter.wrapping_add(1);
+        w.entry_total = w.entry_total.wrapping_add(1);
+        let _ = w.writer.write_all(&[KIND_ENTRY]);
+        let _ = w.writer.write_all(&record_no.to_le_bytes());
+        let _ = w.writer.write_all(&on_wire_nid.to_le_bytes());
+        let _ = w.writer.write_all(&entry_pc.to_le_bytes());
+        let _ = w.writer.write_all(&pc.to_le_bytes());
+        let _ = w.writer.write_all(&lr32.to_le_bytes());
         for r in &gpr[3..=10] {
-            let _ = writer.write_all(&r.to_le_bytes());
+            let _ = w.writer.write_all(&r.to_le_bytes());
         }
-        let _ = writer.flush();
-        drop(writer);
-        let mut tot = s.entry_total.lock().expect("hle_watch entry_total");
-        *tot = tot.wrapping_add(1);
-        drop(tot);
+        let _ = w.writer.flush();
+        drop(w);
         IN_FLIGHT.with(|stack| {
             stack.borrow_mut().push(InFlightCall {
-                nid,
+                on_wire_nid,
                 return_pc: lr32,
                 entry_record_no: record_no,
             });
         });
     }
-    if let Some(call) = exit_match {
-        let mut counter = s.record_counter.lock().expect("hle_watch counter");
-        let record_no = *counter;
-        *counter = counter.wrapping_add(1);
-        drop(counter);
-        let mut writer = s.writer.lock().expect("hle_watch writer mutex");
-        let _ = writer.write_all(&[KIND_EXIT]);
-        let _ = writer.write_all(&record_no.to_le_bytes());
-        let _ = writer.write_all(&call.nid.to_le_bytes());
-        let _ = writer.write_all(&call.entry_record_no.to_le_bytes());
-        let _ = writer.write_all(&pc.to_le_bytes());
-        let _ = writer.write_all(&gpr[3].to_le_bytes());
-        let _ = writer.flush();
-        drop(writer);
-        let mut tot = s.exit_total.lock().expect("hle_watch exit_total");
-        *tot = tot.wrapping_add(1);
-        drop(tot);
-        IN_FLIGHT.with(|stack| {
-            stack.borrow_mut().pop();
-        });
-    }
+
     let pending_return = PENDING_SYSCALL_RETURNS.with(|stack| {
         let st = stack.borrow();
         st.last().filter(|p| p.return_pc == pc).copied()
     });
     if let Some(pending) = pending_return {
-        let mut counter = s.record_counter.lock().expect("hle_watch counter");
-        let record_no = *counter;
-        *counter = counter.wrapping_add(1);
-        drop(counter);
-        let mut writer = s.writer.lock().expect("hle_watch writer mutex");
-        let _ = writer.write_all(&[KIND_BODY_SYSCALL_RETURN]);
-        let _ = writer.write_all(&record_no.to_le_bytes());
-        let _ = writer.write_all(&pending.in_flight_nid.to_le_bytes());
-        let _ = writer.write_all(&pending.entry_record_no.to_le_bytes());
-        let _ = writer.write_all(&pending.syscall_num.to_le_bytes());
-        let _ = writer.write_all(&pc.to_le_bytes());
-        let _ = writer.write_all(&gpr[3].to_le_bytes());
-        let _ = writer.flush();
-        drop(writer);
+        let mut w = s.writer.lock().expect("hle_watch writer");
+        let record_no = w.record_counter;
+        w.record_counter = w.record_counter.wrapping_add(1);
+        let _ = w.writer.write_all(&[KIND_BODY_SYSCALL_RETURN]);
+        let _ = w.writer.write_all(&record_no.to_le_bytes());
+        let _ = w
+            .writer
+            .write_all(&pending.in_flight_on_wire_nid.to_le_bytes());
+        let _ = w.writer.write_all(&pending.entry_record_no.to_le_bytes());
+        let _ = w.writer.write_all(&pending.syscall_num.to_le_bytes());
+        let _ = w.writer.write_all(&pc.to_le_bytes());
+        let _ = w.writer.write_all(&gpr[3].to_le_bytes());
+        let _ = w.writer.flush();
+        drop(w);
         PENDING_SYSCALL_RETURNS.with(|stack| {
             stack.borrow_mut().pop();
         });
     }
 }
 
-/// Body event hook for `sc`; records a body-syscall entry when a
-/// watched function is in flight and queues a return record for
-/// `pc + 4`.
+/// Body event hook for `sc`. Records a body-syscall entry and queues
+/// a return for `pc + 4` when a watched function is in flight; else
+/// increments `dropped_body_events`.
 #[inline]
 pub fn on_syscall(pc: u32, gpr: &[u64; 32]) {
     if STATE.get().is_none_or(Option::is_none) {
@@ -414,36 +449,38 @@ pub fn on_syscall(pc: u32, gpr: &[u64; 32]) {
 fn on_syscall_slow(pc: u32, gpr: &[u64; 32]) {
     let Some(s) = state() else { return };
     let innermost = IN_FLIGHT.with(|stack| stack.borrow().last().copied());
-    let Some(call) = innermost else { return };
+    let Some(call) = innermost else {
+        let mut w = s.writer.lock().expect("hle_watch writer");
+        w.dropped_body_events = w.dropped_body_events.wrapping_add(1);
+        return;
+    };
     let syscall_num = gpr[11] as u32;
-    let mut counter = s.record_counter.lock().expect("hle_watch counter");
-    let record_no = *counter;
-    *counter = counter.wrapping_add(1);
-    drop(counter);
-    let mut writer = s.writer.lock().expect("hle_watch writer mutex");
-    let _ = writer.write_all(&[KIND_BODY_SYSCALL]);
-    let _ = writer.write_all(&record_no.to_le_bytes());
-    let _ = writer.write_all(&call.nid.to_le_bytes());
-    let _ = writer.write_all(&call.entry_record_no.to_le_bytes());
-    let _ = writer.write_all(&syscall_num.to_le_bytes());
-    let _ = writer.write_all(&pc.to_le_bytes());
+    let mut w = s.writer.lock().expect("hle_watch writer");
+    let record_no = w.record_counter;
+    w.record_counter = w.record_counter.wrapping_add(1);
+    let _ = w.writer.write_all(&[KIND_BODY_SYSCALL]);
+    let _ = w.writer.write_all(&record_no.to_le_bytes());
+    let _ = w.writer.write_all(&call.on_wire_nid.to_le_bytes());
+    let _ = w.writer.write_all(&call.entry_record_no.to_le_bytes());
+    let _ = w.writer.write_all(&syscall_num.to_le_bytes());
+    let _ = w.writer.write_all(&pc.to_le_bytes());
     for r in &gpr[3..=10] {
-        let _ = writer.write_all(&r.to_le_bytes());
+        let _ = w.writer.write_all(&r.to_le_bytes());
     }
-    let _ = writer.flush();
-    drop(writer);
+    let _ = w.writer.flush();
+    drop(w);
     PENDING_SYSCALL_RETURNS.with(|stack| {
         stack.borrow_mut().push(PendingSyscallReturn {
             return_pc: pc.wrapping_add(4),
             syscall_num,
-            in_flight_nid: call.nid,
+            in_flight_on_wire_nid: call.on_wire_nid,
             entry_record_no: call.entry_record_no,
         });
     });
 }
 
-/// Body event hook for `bl` / `bctrl` / `blrl`; caller passes the
-/// resolved target (CTR for `bctrl`, LR for `blrl`).
+/// Body event hook for `bl` / `bctrl` / `blrl`. Caller passes the
+/// resolved target. Same drop accounting as [`on_syscall`].
 #[inline]
 pub fn on_branch_link(pc: u32, gpr: &[u64; 32], target: u32) {
     if STATE.get().is_none_or(Option::is_none) {
@@ -456,30 +493,30 @@ pub fn on_branch_link(pc: u32, gpr: &[u64; 32], target: u32) {
 fn on_branch_link_slow(pc: u32, gpr: &[u64; 32], target: u32) {
     let Some(s) = state() else { return };
     let innermost = IN_FLIGHT.with(|stack| stack.borrow().last().copied());
-    let Some(call) = innermost else { return };
-    let mut counter = s.record_counter.lock().expect("hle_watch counter");
-    let record_no = *counter;
-    *counter = counter.wrapping_add(1);
-    drop(counter);
-    let mut writer = s.writer.lock().expect("hle_watch writer mutex");
-    let _ = writer.write_all(&[KIND_BODY_CALL]);
-    let _ = writer.write_all(&record_no.to_le_bytes());
-    let _ = writer.write_all(&call.nid.to_le_bytes());
-    let _ = writer.write_all(&call.entry_record_no.to_le_bytes());
-    let _ = writer.write_all(&pc.to_le_bytes());
-    let _ = writer.write_all(&target.to_le_bytes());
+    let Some(call) = innermost else {
+        let mut w = s.writer.lock().expect("hle_watch writer");
+        w.dropped_body_events = w.dropped_body_events.wrapping_add(1);
+        return;
+    };
+    let mut w = s.writer.lock().expect("hle_watch writer");
+    let record_no = w.record_counter;
+    w.record_counter = w.record_counter.wrapping_add(1);
+    let _ = w.writer.write_all(&[KIND_BODY_CALL]);
+    let _ = w.writer.write_all(&record_no.to_le_bytes());
+    let _ = w.writer.write_all(&call.on_wire_nid.to_le_bytes());
+    let _ = w.writer.write_all(&call.entry_record_no.to_le_bytes());
+    let _ = w.writer.write_all(&pc.to_le_bytes());
+    let _ = w.writer.write_all(&target.to_le_bytes());
     for r in &gpr[3..=10] {
-        let _ = writer.write_all(&r.to_le_bytes());
+        let _ = w.writer.write_all(&r.to_le_bytes());
     }
-    let _ = writer.flush();
+    let _ = w.writer.flush();
 }
 
-/// End-of-run `(entry_total, exit_total)`; `None` when inactive.
-/// Lets the analyzer gate "zero records for NID X" on the hook
-/// having fired at least once on some resolved NID.
-pub fn totals() -> Option<(u64, u64)> {
+/// End-of-run `(entry_total, exit_total, dropped_body_events)`; `None`
+/// when inactive.
+pub fn totals() -> Option<(u64, u64, u64)> {
     let s = state()?;
-    let e = *s.entry_total.lock().expect("hle_watch entry_total");
-    let x = *s.exit_total.lock().expect("hle_watch exit_total");
-    Some((e, x))
+    let w = s.writer.lock().expect("hle_watch writer");
+    Some((w.entry_total, w.exit_total, w.dropped_body_events))
 }

@@ -1,0 +1,58 @@
+diff --git a/rpcs3/Emu/CMakeLists.txt b/rpcs3/Emu/CMakeLists.txt
+--- a/rpcs3/Emu/CMakeLists.txt
++++ b/rpcs3/Emu/CMakeLists.txt
+@@ -171,6 +171,7 @@ target_sources(rpcs3_emu PRIVATE
+     Cell/PPUDisAsm.cpp
+     Cell/PPUFunction.cpp
+     Cell/cellgov_hle_trace.cpp
++    Cell/cellgov_ppu_trace.cpp
+     Cell/PPUInterpreter.cpp
+     Cell/PPUModule.cpp
+     Cell/PPUThread.cpp
+diff --git a/rpcs3/Emu/Cell/PPUThread.cpp b/rpcs3/Emu/Cell/PPUThread.cpp
+index f5d91cc..98a1ef7 100644
+--- a/rpcs3/Emu/Cell/PPUThread.cpp
++++ b/rpcs3/Emu/Cell/PPUThread.cpp
+@@ -20,6 +20,7 @@
+ #include "PPUAnalyser.h"
+ #include "PPUModule.h"
+ #include "PPUDisAsm.h"
++#include "cellgov_ppu_trace.h"
+ #include "SPURecompiler.h"
+ #include "timers.hpp"
+ #include "lv2/sys_sync.h"
+@@ -2380,6 +2381,34 @@ void ppu_thread::cpu_wait(bs_t<cpu_flag> old)
+ 
+ void ppu_thread::exec_task()
+ {
++	// CellGov per-instruction trace (Stage 40D.2). Opt-in via
++	// CELLGOV_PPU_TRACE_PATH. When active, run the static
++	// interpreter with `&ppu_ret` as next_fn so every instruction
++	// returns to our loop body (vs the upstream chained-dispatch
++	// and recompiler paths that tail-call into the next interpreter
++	// function or jump into native code). Trace mode trades
++	// throughput for per-instruction visibility, and overrides the
++	// configured ppu_decoder so the loop runs even when LLVM /
++	// fast-interpreter modes are selected.
++	cellgov_ppu_trace::ensure_initialized();
++	if (cellgov_ppu_trace::is_active()) [[unlikely]]
++	{
++		const auto& cellgov_table = g_fxo->get<ppu_interpreter_rt>();
++		while (true)
++		{
++			if (test_stopped()) [[unlikely]]
++			{
++				return;
++			}
++			gv_zeroupper();
++			const u32 pre_cia = cia;
++			const u32 op = vm::read32(pre_cia);
++			cellgov_ppu_trace::on_pre_dispatch(*this, pre_cia, op);
++			cellgov_table.decode(op)(*this, {op}, vm::_ptr<u32>(pre_cia), &ppu_ret);
++			cellgov_ppu_trace::emit_record(*this);
++		}
++	}
++
+ 	if (g_cfg.core.ppu_decoder != ppu_decoder_type::_static)
+ 	{
+ 		// HVContext push to allow recursion. This happens with guest callback invocations.

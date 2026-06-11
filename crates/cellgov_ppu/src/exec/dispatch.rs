@@ -1,6 +1,4 @@
-//! [`execute`] -- typed-variant dispatch for one decoded
-//! [`PpuInstruction`]. Each form routes to the matching sibling
-//! submodule (`alu`, `branch`, `cr`, `mem`, `super_insn`, `vec`).
+//! Typed-variant dispatch for one decoded [`PpuInstruction`].
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -14,9 +12,8 @@ use crate::store_buffer::StoreBuffer;
 
 /// Execute one decoded PPU instruction.
 ///
-/// Caller flushes `store_buf` at block boundaries; on
-/// [`ExecuteVerdict::BufferFull`] the same instruction must be
-/// retried after a flush.
+/// On [`ExecuteVerdict::BufferFull`] the caller must flush `store_buf`
+/// and retry the same instruction.
 pub fn execute(
     insn: &PpuInstruction,
     state: &mut PpuState,
@@ -54,6 +51,8 @@ pub fn execute(
         | PpuInstruction::Lbz { .. }
         | PpuInstruction::Lhz { .. }
         | PpuInstruction::Lha { .. }
+        | PpuInstruction::Lhau { .. }
+        | PpuInstruction::Lmw { .. }
         | PpuInstruction::Lwzu { .. }
         | PpuInstruction::Lbzu { .. }
         | PpuInstruction::Lhzu { .. }
@@ -67,6 +66,7 @@ pub fn execute(
         | PpuInstruction::Stw { .. }
         | PpuInstruction::Stb { .. }
         | PpuInstruction::Stbu { .. }
+        | PpuInstruction::Stmw { .. }
         | PpuInstruction::Sth { .. }
         | PpuInstruction::Sthu { .. }
         | PpuInstruction::Std { .. }
@@ -76,15 +76,56 @@ pub fn execute(
         | PpuInstruction::Stdx { .. }
         | PpuInstruction::Stdux { .. }
         | PpuInstruction::Stbx { .. }
+        | PpuInstruction::Lwzux { .. }
+        | PpuInstruction::Lbzux { .. }
+        | PpuInstruction::Lhzux { .. }
+        | PpuInstruction::Ldux { .. }
+        | PpuInstruction::Lhax { .. }
+        | PpuInstruction::Lhaux { .. }
+        | PpuInstruction::Lwax { .. }
+        | PpuInstruction::Lwaux { .. }
+        | PpuInstruction::Sthx { .. }
+        | PpuInstruction::Sthux { .. }
+        | PpuInstruction::Stwux { .. }
+        | PpuInstruction::Stbux { .. }
+        | PpuInstruction::Lswi { .. }
+        | PpuInstruction::Lswx { .. }
+        | PpuInstruction::Stswi { .. }
+        | PpuInstruction::Stswx { .. }
+        | PpuInstruction::Ldbrx { .. }
+        | PpuInstruction::Lwbrx { .. }
+        | PpuInstruction::Lhbrx { .. }
+        | PpuInstruction::Sdbrx { .. }
+        | PpuInstruction::Stwbrx { .. }
+        | PpuInstruction::Sthbrx { .. }
         | PpuInstruction::Ldarx { .. }
         | PpuInstruction::Stdcx { .. }
         | PpuInstruction::Lwarx { .. }
         | PpuInstruction::Stwcx { .. }
         | PpuInstruction::Lvlx { .. }
         | PpuInstruction::Lvrx { .. }
+        | PpuInstruction::Lvlxl { .. }
+        | PpuInstruction::Lvrxl { .. }
+        | PpuInstruction::Lvsl { .. }
+        | PpuInstruction::Lvebx { .. }
+        | PpuInstruction::Lvsr { .. }
+        | PpuInstruction::Lvehx { .. }
+        | PpuInstruction::Lvewx { .. }
+        | PpuInstruction::Lvx { .. }
+        | PpuInstruction::Lvxl { .. }
+        | PpuInstruction::Stvebx { .. }
+        | PpuInstruction::Stvehx { .. }
+        | PpuInstruction::Stvewx { .. }
+        | PpuInstruction::Stvlx { .. }
+        | PpuInstruction::Stvrx { .. }
+        | PpuInstruction::Stvlxl { .. }
+        | PpuInstruction::Stvrxl { .. }
         | PpuInstruction::Stvx { .. }
+        | PpuInstruction::Stvxl { .. }
         | PpuInstruction::Lfs { .. }
+        | PpuInstruction::Lfsu { .. }
         | PpuInstruction::Lfd { .. }
+        | PpuInstruction::Lfdu { .. }
         | PpuInstruction::Stfs { .. }
         | PpuInstruction::Stfd { .. }
         | PpuInstruction::Stfsu { .. }
@@ -135,6 +176,9 @@ pub fn execute(
         | PpuInstruction::Mulhd { .. }
         | PpuInstruction::Adde { .. }
         | PpuInstruction::Addze { .. }
+        | PpuInstruction::Subfze { .. }
+        | PpuInstruction::Subfme { .. }
+        | PpuInstruction::Addme { .. }
         | PpuInstruction::Divw { .. }
         | PpuInstruction::Divwu { .. }
         | PpuInstruction::Divd { .. }
@@ -146,6 +190,8 @@ pub fn execute(
         | PpuInstruction::Nor { .. }
         | PpuInstruction::Andc { .. }
         | PpuInstruction::Xor { .. }
+        | PpuInstruction::Eqv { .. }
+        | PpuInstruction::Nand { .. }
         | PpuInstruction::AndiDot { .. }
         | PpuInstruction::AndisDot { .. }
         | PpuInstruction::Slw { .. }
@@ -158,6 +204,10 @@ pub fn execute(
         | PpuInstruction::Srd { .. }
         | PpuInstruction::Cntlzw { .. }
         | PpuInstruction::Cntlzd { .. }
+        | PpuInstruction::Popcntb { .. }
+        | PpuInstruction::Tw { .. }
+        | PpuInstruction::Td { .. }
+        | PpuInstruction::Mcrxr { .. }
         | PpuInstruction::Extsh { .. }
         | PpuInstruction::Extsb { .. }
         | PpuInstruction::Extsw { .. }
@@ -177,31 +227,30 @@ pub fn execute(
         | PpuInstruction::Mftbu { .. }
         | PpuInstruction::Mfcr { .. }
         | PpuInstruction::Mtcrf { .. }
+        | PpuInstruction::Mfocrf { .. }
+        | PpuInstruction::Mtocrf { .. }
         | PpuInstruction::Mflr { .. }
         | PpuInstruction::Mtlr { .. }
         | PpuInstruction::Mfctr { .. }
         | PpuInstruction::Mtctr { .. }
+        | PpuInstruction::Mfxer { .. }
+        | PpuInstruction::Mtxer { .. }
+        | PpuInstruction::Mfvrsave { .. }
+        | PpuInstruction::Mtvrsave { .. }
         | PpuInstruction::Rlwinm { .. }
         | PpuInstruction::Rlwimi { .. }
         | PpuInstruction::Rlwnm { .. }
         | PpuInstruction::Rldicl { .. }
         | PpuInstruction::Rldicr { .. }
         | PpuInstruction::Rldic { .. }
-        | PpuInstruction::Rldimi { .. } => alu::execute(insn, state),
+        | PpuInstruction::Rldimi { .. }
+        | PpuInstruction::Rldcl { .. }
+        | PpuInstruction::Rldcr { .. } => alu::execute(insn, state),
 
-        PpuInstruction::Vxor { vt, va, vb } => {
-            let va = state.vr[va as usize];
-            let vb = state.vr[vb as usize];
-            state.vr[vt as usize] = va ^ vb;
-            ExecuteVerdict::Continue
-        }
-        // [AltiVec-PEM p:6-21] lvx EA = (rA|0)+rB masked with ~0xF; loads 16 bytes.
-        PpuInstruction::Vx {
-            xo: 103,
-            vt,
-            va,
-            vb,
-        } => mem::execute_lvx(state, vt, va, vb, region_views, store_buf),
+        // [AltiVec-PEM p:6-177 s:6.2] vxor routes through the canonical
+        // VX-form path under XO 0x4c4 so vector-pipeline hooks reach it
+        // alongside the generic `Vx { xo }` family.
+        PpuInstruction::Vxor { vt, va, vb } => vec::execute_vx(state, 0x4c4, vt, va, vb),
         PpuInstruction::Vx { xo, vt, va, vb } => vec::execute_vx(state, xo, vt, va, vb),
         PpuInstruction::Va { xo, vt, va, vb, vc } => vec::execute_va(state, xo, vt, va, vb, vc),
         PpuInstruction::Vsldoi { vt, va, vb, shb } => vec::execute_vsldoi(state, vt, va, vb, shb),

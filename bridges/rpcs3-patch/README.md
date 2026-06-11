@@ -1,12 +1,13 @@
 # RPCS3 CellGov Patches
 
 Opt-in hooks the patched RPCS3 build exposes for cross-runner
-investigation. There are currently two:
+investigation. There are currently three:
 
-| Patch | Purpose |
-| --- | --- |
-| `0001-cellgov-checkpoint-dump.patch` | Memory dump at `_sys_process_exit` for observation comparison. |
-| `0002-cellgov-hle-trace.patch` | Per-HLE-call trace stream with watch-address diff. Lets `cellgov_cli rpcs3-attribute` answer "which HLE call wrote this guest address?" in one run. |
+| Patch                                | Purpose                                                                                                                                                                                            |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0001-cellgov-checkpoint-dump.patch` | Memory dump at `_sys_process_exit` for observation comparison.                                                                                                                                     |
+| `0002-cellgov-hle-trace.patch`       | Per-HLE-call trace stream with watch-address diff. Lets `cellgov_cli rpcs3-attribute` answer "which HLE call wrote this guest address?" in one run.                                                |
+| `0003-cellgov-ppu-trace.patch`       | Per-PPU-instruction trace stream for the differential harness. Captures (pre_state, instruction, post_state, mem_diff) tuples that `cellgov_ppu::differential` replays against CellGov's executor. |
 
 Apply both:
 
@@ -19,6 +20,10 @@ git apply ../../bridges/rpcs3-patch/0001-cellgov-checkpoint-dump.patch
 cp ../../bridges/rpcs3-patch/files/Emu/Cell/cellgov_hle_trace.h   rpcs3/Emu/Cell/
 cp ../../bridges/rpcs3-patch/files/Emu/Cell/cellgov_hle_trace.cpp rpcs3/Emu/Cell/
 git apply ../../bridges/rpcs3-patch/0002-cellgov-hle-trace.patch
+# 0003 has the C++ sources plus a unified diff into PPUThread.cpp + CMakeLists.
+cp ../../bridges/rpcs3-patch/files/Emu/Cell/cellgov_ppu_trace.h   rpcs3/Emu/Cell/
+cp ../../bridges/rpcs3-patch/files/Emu/Cell/cellgov_ppu_trace.cpp rpcs3/Emu/Cell/
+git apply ../../bridges/rpcs3-patch/0003-cellgov-ppu-trace.patch
 ```
 
 Then rebuild per RPCS3's normal instructions. The build artifact
@@ -236,9 +241,10 @@ but NOT raw LV2 syscalls, which dispatch through a different path
 syscall-level attribution, the same hook shape transplants there.
 
 Read-only with respect to guest state: snapshots use `vm::base()`
-+ memcpy to a host buffer, never write guest memory back. No
-scheduler perturbation: hooks run on the calling PPU thread, do
-no sleeps, and do not change `ppu.state`.
+
+- memcpy to a host buffer, never write guest memory back. No
+  scheduler perturbation: hooks run on the calling PPU thread, do
+  no sleeps, and do not change `ppu.state`.
 
 The trace file format is little-endian and self-describing
 (magic + version). Format pinned in
@@ -250,3 +256,132 @@ Not upstream-quality as written. Same gaps as 0001 (raw `FILE*`,
 no `sys_log`, env-var parse on first use rather than at emulator
 start). Acceptable for in-tree investigation; gets cleaned up
 together with 0001 if either ever goes upstream.
+
+# 0003: PPU instruction trace (Stage 40D.2)
+
+## What it does
+
+Per-instruction trace for the CellGov differential harness. For
+every PPU instruction whose PC / primary opcode passes a configurable
+filter, the patched RPCS3 dumps a record carrying:
+
+- PC, raw instruction word, RPCS3 PPU thread id
+- Full pre-state register file (32 GPR + 32 FPR + 32 VR + CR + LR
+  - CTR + XER)
+- Full post-state register file
+- The touched memory window (bytes before and after the instruction)
+
+The Rust side ingests the dump via
+[crates/cellgov_ppu/src/differential/rpcs3_capture.rs](../../crates/cellgov_ppu/src/differential/rpcs3_capture.rs)
+and converts each record into a
+`differential::InstructionCase` tagged
+`OracleSource::Rpcs3Capture { capture_id }`. The harness then
+replays each case through CellGov's decoder + executor and asserts
+bit-equality against the captured post-state -- the per-instruction
+differential against RPCS3 ground truth.
+
+## Sources
+
+The C++ side lives in tracked files under
+[files/Emu/Cell/](files/Emu/Cell/):
+
+- `cellgov_ppu_trace.h` -- header with the binary format spec,
+  env-var contract, and public API (`ensure_initialized`,
+  `is_active`, `on_pre_dispatch`, `emit_record`).
+- `cellgov_ppu_trace.cpp` -- writer impl. Env-var-gated, filterable
+  by PC range or primary-opcode list, with optional record-count
+  and byte-count caps so a runaway trace does not fill the host
+  disk.
+
+## Hookup
+
+`0003-cellgov-ppu-trace.patch` carries the dispatch-side injection:
+two changes to `rpcs3/Emu/Cell/PPUThread.cpp` add a
+`cellgov_ppu_trace::ensure_initialized()` call at the head of
+`exec_task` and a per-instruction interpreter loop guarded by
+`cellgov_ppu_trace::is_active()`. The loop uses `&ppu_ret` as
+`next_fn` so every dispatched interpreter function returns to the
+loop body rather than tail-calling into the next instruction --
+which is what makes per-instruction `on_pre_dispatch` /
+`emit_record` visible. The branch fires before the normal
+decoder-type check so the trace also works when
+`Core::PPU Decoder` is set to `Recompiler (LLVM)`, the default
+oracle-mode setting.
+
+Performance: trace mode breaks the chained-dispatch fast path, so
+the trace loop is substantially slower than the normal interpreter
+or the LLVM recompiler. The `CELLGOV_PPU_TRACE_MAX_RECORDS` and
+`CELLGOV_PPU_TRACE_PRIMARY` filters are the practical way to keep
+captures small. 500 records of primary=14 (addi) on flOw's boot
+took under 25 seconds end-to-end during 40D.2 validation.
+
+For now `emit_record` always passes `mem_len = 0`; memory diffs
+for loads and stores are a natural extension, and the dump format
+already carries the window slot (the Rust reader parses it). Per-
+class memory-window resolvers can be added in a follow-on slice
+without changing the on-disk format.
+
+## End-to-end smoke
+
+Two Rust-side example binaries exercise the trace path.
+`parse_rpcs3_trace` parses a dump and prints record counts;
+`replay_rpcs3_trace` walks every record, runs it through CellGov's
+decoder + executor, and asserts byte-equality against the captured
+post-state -- the actual per-instruction differential against RPCS3
+ground truth.
+
+```bash
+# 1. Apply the patches and rebuild RPCS3 per the steps above.
+# 2. Capture a small slice:
+CELLGOV_PPU_TRACE_PATH=/tmp/cellgov_trace.bin \
+CELLGOV_PPU_TRACE_MAX_RECORDS=1000 \
+CELLGOV_PPU_TRACE_PRIMARY=31 \
+  scripts/rpcs3-launch.sh --headless \
+    /d/cellgov/tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN
+
+# 3a. Spot-check the dump parses:
+cargo run --release -p cellgov_ppu --example parse_rpcs3_trace \
+  -- /tmp/cellgov_trace.bin
+
+# 3b. Replay through the differential harness:
+cargo run --release -p cellgov_ppu --example replay_rpcs3_trace \
+  -- /tmp/cellgov_trace.bin flow_p31_$(date +%Y_%m_%d)
+```
+
+`parse_rpcs3_trace` confirms the capture path is healthy.
+`replay_rpcs3_trace` exits 0 when every record matches CellGov's
+executor and 1 otherwise; the first 10 failing records are
+printed with their full diff diagnostics so divergences surface
+as actionable executor bugs rather than opaque rejects.
+
+A first 1000-record capture of primary=31 from flOw's boot
+landed 988 / 1000 passing in 40D.2 validation, with the residual
+12 being legitimate semantic divergences (`stwcx.` / `stdcx.`
+CR0, `mftb` time-base read) that the harness now surfaces.
+
+## Environment variables
+
+```
+CELLGOV_PPU_TRACE_PATH         path to output binary trace
+CELLGOV_PPU_TRACE_PC_RANGE     hex `lo-hi` (inclusive)
+CELLGOV_PPU_TRACE_PRIMARY      comma-separated primary opcodes (decimal)
+CELLGOV_PPU_TRACE_MAX_RECORDS  decimal record cap
+CELLGOV_PPU_TRACE_MAX_BYTES    decimal byte cap
+```
+
+Filters AND-combine. The byte / record caps keep a long capture
+from filling the disk; both are unlimited when unset.
+
+## File format
+
+See the format spec in
+[files/Emu/Cell/cellgov_ppu_trace.h](files/Emu/Cell/cellgov_ppu_trace.h)
+(authoritative). Little-endian, no padding, one header followed by
+zero or more fixed-size records (plus a variable-length memory
+window per record). Magic constants 0xC0E60003 (header) and
+0xC0E60004 (record) match Rust constants in
+`cellgov_ppu::differential::rpcs3_capture::{HEADER_MAGIC,
+RECORD_MAGIC}`. Format version is pinned at `FORMAT_VERSION = 1`;
+bumping requires a coordinated change to the C++ header, the Rust
+reader, and any existing captured dumps the operator wants to
+keep readable.

@@ -1,5 +1,4 @@
-//! PPU execution-unit tests: decode, dispatch, yield reasons, fault rollback,
-//! shadow invalidation, and microtest/baseline harnesses.
+//! PPU execution-unit tests.
 
 use super::*;
 use cellgov_exec::ExecutionContext;
@@ -8,8 +7,7 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use std::cell::RefCell;
 
 // One `GuestMemory` of the LV2-driven microtest size (~256 MiB)
-// per test thread; LV2-driven scenarios pay one fresh calloc per
-// thread and reuse via `reset_for_reuse`.
+// per test thread; reused via `reset_for_reuse`.
 thread_local! {
     static LV2_DRIVEN_POOL: RefCell<cellgov_testkit::runner::MemoryPool> =
         RefCell::new(cellgov_testkit::runner::MemoryPool::new());
@@ -257,6 +255,104 @@ fn load_out_of_range_faults() {
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
     assert_eq!(result.fault, Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)));
+}
+
+#[test]
+fn mem_fault_increments_arm_entries_and_unmapped_routed() {
+    let mut mem = GuestMemory::new(256);
+    let lwz: u32 = (32 << 26) | (3 << 21) | (1 << 16);
+    place_insn(&mut mem, 0, lwz);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    assert_eq!(unit.state().mem_fault_arm_entries, 0);
+    assert_eq!(unit.state().mem_fault_unmapped_routed, 0);
+    unit.state_mut().gpr[1] = 0x0000_0000_1000_0000;
+    let ctx = ExecutionContext::new(&mem);
+    let _ = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
+    assert_eq!(unit.state().mem_fault_arm_entries, 1);
+    assert_eq!(unit.state().mem_fault_unmapped_routed, 1);
+    assert_eq!(
+        unit.state().mem_fault_arm_entries,
+        unit.state().mem_fault_unmapped_routed,
+        "C-1 invariant: arm_entries == unmapped_routed iff catch-all stayed silent"
+    );
+}
+
+// [PPC-Book2 p:24 s:3.3] lwarx/ldarx: EA must be a multiple of operand size.
+// [PPC-Book2 p:25 s:3.3] stwcx./stdcx.: same alignment contract.
+
+fn run_reservation_alignment_witness(
+    insn: u32,
+    misaligned_ea: u64,
+) -> (ExecutionStepResult, Vec<Effect>) {
+    let mut mem = GuestMemory::new(256);
+    place_insn(&mut mem, 0, insn);
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().gpr[1] = misaligned_ea;
+    unit.state_mut().gpr[3] = 0xDEAD_BEEF_DEAD_BEEF; // r[rt] sentinel
+    assert!(
+        unit.state().reservation.is_none(),
+        "precondition: no reservation"
+    );
+    let ctx = ExecutionContext::new(&mem);
+    let mut effects = Vec::new();
+    let result = unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
+    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert_eq!(unit.status(), UnitStatus::Faulted);
+    assert_eq!(
+        result.fault,
+        Some(FaultKind::Guest(FAULT_ALIGNMENT_INTERRUPT)),
+        "misaligned reservation EA must fault with FAULT_ALIGNMENT_INTERRUPT"
+    );
+    assert_eq!(
+        unit.state().gpr[3],
+        0xDEAD_BEEF_DEAD_BEEF,
+        "r[rt] must NOT be written on a misaligned reservation fault"
+    );
+    assert!(
+        unit.state().reservation.is_none(),
+        "state.reservation must NOT be acquired on a misaligned reservation fault"
+    );
+    assert!(
+        !effects.iter().any(|e| matches!(
+            e,
+            Effect::ReservationAcquire { .. } | Effect::ConditionalStore { .. }
+        )),
+        "no ReservationAcquire / ConditionalStore Effect may be emitted on a \
+         misaligned reservation fault; got effects: {:?}",
+        effects
+    );
+    (result, effects)
+}
+
+#[test]
+fn lwarx_misaligned_ea_faults_with_alignment_interrupt() {
+    // lwarx r3, 0, r1: opcd=31, rt=3, ra=0, rb=1, xo=20
+    let lwarx: u32 = (31 << 26) | (3 << 21) | (1 << 11) | (20 << 1);
+    // EA = 0x1: misaligned for 4-byte lwarx.
+    let _ = run_reservation_alignment_witness(lwarx, 0x1);
+}
+
+#[test]
+fn ldarx_misaligned_ea_faults_with_alignment_interrupt() {
+    // ldarx r3, 0, r1: opcd=31, rt=3, ra=0, rb=1, xo=84
+    let ldarx: u32 = (31 << 26) | (3 << 21) | (1 << 11) | (84 << 1);
+    // EA = 0x4: 4-byte aligned but misaligned for 8-byte ldarx.
+    let _ = run_reservation_alignment_witness(ldarx, 0x4);
+}
+
+#[test]
+fn stwcx_misaligned_ea_faults_with_alignment_interrupt() {
+    // stwcx. r3, 0, r1: opcd=31, rs=3, ra=0, rb=1, xo=150, Rc=1
+    let stwcx: u32 = (31 << 26) | (3 << 21) | (1 << 11) | (150 << 1) | 1;
+    let _ = run_reservation_alignment_witness(stwcx, 0x2);
+}
+
+#[test]
+fn stdcx_misaligned_ea_faults_with_alignment_interrupt() {
+    // stdcx. r3, 0, r1: opcd=31, rs=3, ra=0, rb=1, xo=214, Rc=1
+    let stdcx: u32 = (31 << 26) | (3 << 21) | (1 << 11) | (214 << 1) | 1;
+    let _ = run_reservation_alignment_witness(stdcx, 0x4);
 }
 
 /// Stub address that `blr r0 == 0` lands on when LR is loaded as 0 from an
@@ -555,9 +651,8 @@ fn snapshot_captures_fpr_vr_xer_tb() {
 
 #[test]
 fn consumed_slot_records_per_step_hash_and_full_state() {
-    // Invariant: a Consumed placeholder counts as a retirement for both
-    // per-step trace and full-state-window, keeping retirement_counter
-    // aligned with consumed_cost across super-pair fusion.
+    // Invariant: a Consumed placeholder counts as a retirement for
+    // both per-step trace and full-state-window.
     let mut mem = GuestMemory::new(256);
     let lwz: u32 = (32 << 26) | (3 << 21) | 128;
     let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
@@ -586,8 +681,6 @@ fn consumed_slot_records_per_step_hash_and_full_state() {
 
 #[test]
 fn profile_mode_attributes_to_dispatched_variant_not_raw_decode() {
-    // Invariant: profile attributes to the dispatched variant
-    // (LwzCmpwi + Consumed), not the raw Lwz/Cmpwi the bytes decode to.
     let mut mem = GuestMemory::new(256);
     let lwz: u32 = (32 << 26) | (3 << 21) | 128;
     let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
@@ -655,62 +748,17 @@ fn spu_fixed_value_image_open_writes_handle_to_guest_memory() {
     assert!(found, "sys_spu_image_t handle (0x00000001) not in memory");
 }
 
-#[test]
-fn spu_fixed_value_lv2_driven_factory_fires_and_completes() {
-    let ppu_path =
-        std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
-    let spu_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
-    if skip_if_missing(ppu_path) || skip_if_missing(spu_path) {
-        return;
-    }
-    let ppu_elf = std::fs::read(ppu_path).unwrap();
-    let spu_elf = std::fs::read(spu_path).unwrap();
-
-    let fixture = build_lv2_driven_fixture(ppu_elf, spu_elf, Budget::new(100_000), 10_000);
-    let result = run_pooled_lv2_driven(fixture);
-    assert_eq!(
-        result.outcome,
-        cellgov_testkit::runner::ScenarioOutcome::Stalled,
-    );
-    assert!(result.steps_taken > 5, "got {}", result.steps_taken);
-
-    let expected = [0x00, 0x00, 0x00, 0x00, 0x13, 0x37, 0xBA, 0xAD];
-    let mem = &result.final_memory;
-    assert!(mem.windows(8).any(|w| w == expected));
-}
-
-/// Run an LV2-driven microtest and return the final memory for payload checks.
-fn run_lv2_driven_microtest(name: &str) -> Option<Vec<u8>> {
-    let ppu_path =
-        std::path::PathBuf::from(format!("../../tests/micro/{}/build/{}.elf", name, name));
-    let spu_path =
-        std::path::PathBuf::from(format!("../../tests/micro/{}/build/spu_main.elf", name));
-    if skip_if_missing(&ppu_path) || skip_if_missing(&spu_path) {
-        return None;
-    }
-    let ppu_elf = std::fs::read(&ppu_path).unwrap();
-    let spu_elf = std::fs::read(&spu_path).unwrap();
-    let fixture = build_lv2_driven_fixture(ppu_elf, spu_elf, Budget::new(100_000), 10_000);
-    let result = run_pooled_lv2_driven(fixture);
-    assert_eq!(
-        result.outcome,
-        cellgov_testkit::runner::ScenarioOutcome::Stalled,
-        "LV2-driven {} did not complete",
-        name
-    );
-    assert!(
-        result.steps_taken > 5,
-        "{}: expected more than 5 steps, got {}",
-        name,
-        result.steps_taken
-    );
-    Some(result.final_memory)
-}
-
-/// Compare an LV2-driven microtest against RPCS3 baselines via
-/// `observe_with_determinism_check`. `region_defs` are
-/// (name, offset_from_symbol, size). Skips if ELFs or baselines are missing.
-fn run_lv2_driven_baseline_check(microtest: &str, symbol: &str, region_defs: &[(&str, u64, u64)]) {
+/// Compare an LV2-driven microtest against RPCS3 baselines and
+/// assert expected marker patterns appear within their named
+/// regions. `region_defs` are (name, offset_from_symbol, size);
+/// `markers` are (region_name, expected_bytes). Skips if ELFs or
+/// baselines are missing.
+fn run_lv2_driven_baseline_check(
+    microtest: &str,
+    symbol: &str,
+    region_defs: &[(&str, u64, u64)],
+    markers: &[(&str, &[u8])],
+) {
     let ppu_path = std::path::PathBuf::from(format!(
         "../../tests/micro/{}/build/{}.elf",
         microtest, microtest
@@ -769,11 +817,39 @@ fn run_lv2_driven_baseline_check(microtest: &str, symbol: &str, region_defs: &[(
         microtest,
         result.cellgov_result
     );
+
+    for (region_name, expected_bytes) in markers {
+        let region = regions
+            .iter()
+            .find(|r| r.name == *region_name)
+            .unwrap_or_else(|| {
+                panic!("{microtest}: marker references region '{region_name}' not in region_defs")
+            });
+        let start = region.addr as usize;
+        let end = start + region.size as usize;
+        let slice = &scenario_result.final_memory[start..end];
+        assert!(
+            slice
+                .windows(expected_bytes.len())
+                .any(|w| w == *expected_bytes),
+            "{microtest}: expected marker {:02X?} in region '{region_name}' \
+             (addr=0x{:x}..0x{:x}); region bytes: {:02X?}",
+            expected_bytes,
+            start,
+            end,
+            slice,
+        );
+    }
 }
 
 #[test]
 fn spu_fixed_value_lv2_baseline() {
-    run_lv2_driven_baseline_check("spu_fixed_value", "result", &[("result", 0, 8)]);
+    run_lv2_driven_baseline_check(
+        "spu_fixed_value",
+        "result",
+        &[("result", 0, 8)],
+        &[("result", &[0x00, 0x00, 0x00, 0x00, 0x13, 0x37, 0xBA, 0xAD])],
+    );
 }
 
 #[test]
@@ -782,6 +858,7 @@ fn dma_completion_lv2_baseline() {
         "dma_completion",
         "result_buf",
         &[("header", 0, 8), ("pattern", 16, 128)],
+        &[("pattern", &[0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF])],
     );
 }
 
@@ -791,6 +868,7 @@ fn ls_to_shared_lv2_baseline() {
         "ls_to_shared",
         "result_buf",
         &[("header", 0, 8), ("data", 16, 128)],
+        &[("data", &[0xC0, 0xDE, 0x00, 0x00])],
     );
 }
 
@@ -800,12 +878,18 @@ fn atomic_reservation_lv2_baseline() {
         "atomic_reservation",
         "buf",
         &[("header", 0, 8), ("data", 16, 128)],
+        &[("data", &[0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB])],
     );
 }
 
 #[test]
 fn mailbox_roundtrip_lv2_baseline() {
-    run_lv2_driven_baseline_check("mailbox_roundtrip", "result", &[("result", 0, 8)]);
+    run_lv2_driven_baseline_check(
+        "mailbox_roundtrip",
+        "result",
+        &[("result", 0, 8)],
+        &[("result", &[0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xBD])],
+    );
 }
 
 #[test]
@@ -814,79 +898,13 @@ fn barrier_wakeup_lv2_baseline() {
         "barrier_wakeup",
         "buf",
         &[("spu0_result", 0, 8), ("spu1_result", 16, 8)],
+        &[
+            ("spu0_result", &[0xAA, 0xAA, 0x00, 0x00]),
+            ("spu1_result", &[0xBB, 0xBB, 0x00, 0x01]),
+        ],
     );
 }
 
-#[test]
-fn dma_completion_lv2_driven() {
-    let mem = match run_lv2_driven_microtest("dma_completion") {
-        Some(m) => m,
-        None => return,
-    };
-    let marker = [0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF];
-    assert!(
-        mem.windows(8).any(|w| w == marker),
-        "expected 0xDEADBEEF pattern in committed memory"
-    );
-}
-
-#[test]
-fn ls_to_shared_lv2_driven() {
-    let mem = match run_lv2_driven_microtest("ls_to_shared") {
-        Some(m) => m,
-        None => return,
-    };
-    let marker = [0xC0, 0xDE, 0x00, 0x00];
-    assert!(
-        mem.windows(4).any(|w| w == marker),
-        "expected 0xC0DE0000 pattern in committed memory"
-    );
-}
-
-#[test]
-fn atomic_reservation_lv2_driven() {
-    let mem = match run_lv2_driven_microtest("atomic_reservation") {
-        Some(m) => m,
-        None => return,
-    };
-    let marker = [0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB];
-    assert!(
-        mem.windows(8).any(|w| w == marker),
-        "expected 0xBBBBBBBB data in committed memory"
-    );
-}
-
-#[test]
-fn barrier_wakeup_lv2_driven() {
-    let mem = match run_lv2_driven_microtest("barrier_wakeup") {
-        Some(m) => m,
-        None => return,
-    };
-    let spu0 = [0xAA, 0xAA, 0x00, 0x00];
-    let spu1 = [0xBB, 0xBB, 0x00, 0x01];
-    assert!(
-        mem.windows(4).any(|w| w == spu0),
-        "expected SPU 0 marker 0xAAAA0000 in committed memory"
-    );
-    assert!(
-        mem.windows(4).any(|w| w == spu1),
-        "expected SPU 1 marker 0xBBBB0001 in committed memory"
-    );
-}
-
-#[test]
-fn mailbox_roundtrip_lv2_driven() {
-    let mem = match run_lv2_driven_microtest("mailbox_roundtrip") {
-        Some(m) => m,
-        None => return,
-    };
-    // 0x42 XOR 0xFFFFFFFF == 0xFFFFFFBD.
-    let expected = [0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xBD];
-    assert!(mem.windows(8).any(|w| w == expected));
-}
-
-/// Canonical engine-determinism check for the LV2-driven scenario
-/// shape.
 #[test]
 fn lv2_driven_dma_completion_is_deterministic() {
     let ppu_path =
@@ -939,8 +957,6 @@ fn lv2_driven_dma_completion_is_deterministic() {
 
 #[test]
 fn retail_eboot_loads_into_guest_memory() {
-    // NPUA80001 EBOOT; highest PT_LOAD at 0x10000000. Entry descriptor
-    // at 0x846ae0 resolves to code 0x10230, TOC 0x8969a8.
     let path =
         std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
     if skip_if_missing(&path) {
@@ -1027,8 +1043,6 @@ fn retail_boot_progress() {
         }
     }
 
-    // Asserting on consumed budget (retired instructions), not steps
-    // (blocks): `steps >= 1` would admit a fault on the first insn.
     assert!(
         total_consumed >= 10,
         "consumed={total_consumed} across {steps} step(s)"
@@ -1081,8 +1095,6 @@ fn lha_sign_extends_negative_halfword() {
 
 #[test]
 fn lha_sign_extends_positive_halfword_full_64_bit_width() {
-    // Pre-dirty catches a truncate-only impl: zero- and sign-extend
-    // both produce 0x0000 in the high half for non-negative inputs.
     let mut mem = GuestMemory::new(64);
     let pos_range = ByteRange::new(GuestAddr::new(8), 2).unwrap();
     mem.apply_commit(pos_range, &0x1234u16.to_be_bytes())
@@ -1338,9 +1350,7 @@ fn non_fault_step_has_no_register_dump() {
 }
 
 // Shadow-invalidation suite: each test stores a result register to
-// scratch 0x80 via `stw` and reads committed memory; this avoids
-// `dyn RegisteredUnit` register access and must pass with or without
-// the predecoded shadow active.
+// scratch 0x80 via `stw` and reads committed memory.
 
 mod insn_encode {
     pub fn li(rd: u32, simm: i16) -> u32 {
@@ -1520,12 +1530,9 @@ fn mid_block_fault_rolls_back_and_propagates_directly() {
 
 #[test]
 fn mid_block_fault_rolls_back_lr_ctr_cr_xer() {
-    // Each pre-fault insn mutates exactly one of LR/CTR/CR/XER so each
-    // restored register is observable independently:
-    //   mtlr r5         -- LR
-    //   mtctr r6        -- CTR
-    //   addic. r7,r7,1  -- CR0 (record form) and XER[CA]
-    //   lwz r4, 0(r1)   -- faults (r1 = 0xFFFF_0000)
+    // Each pre-fault insn mutates exactly one of LR/CTR/CR/XER so
+    // each restored register is observable independently:
+    //   mtlr r5; mtctr r6; addic. r7,r7,1; lwz r4,0(r1) -- faults.
     let mut mem = GuestMemory::new(256);
     let mtlr: u32 = (31 << 26) | (5 << 21) | (8 << 16) | (467 << 1);
     let mtctr: u32 = (31 << 26) | (6 << 21) | (9 << 16) | (467 << 1);
@@ -1561,8 +1568,6 @@ fn mid_block_fault_rolls_back_lr_ctr_cr_xer() {
 
 #[test]
 fn mid_block_fault_discards_buffered_stores_from_pre_fault_instructions() {
-    // Pre-fault `stw` would emit SharedWriteIntent at flush; the fault
-    // rule must drop every buffered effect, not just register writes.
     let mut mem = GuestMemory::new(256);
     let stw: u32 = (36 << 26) | (3 << 21) | 0x80;
     let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16);
@@ -1628,8 +1633,8 @@ fn profile_mode_counts_raw_instructions() {
         .any(|((a, b), count)| *a == "Addi" && *b == "Addi" && *count == 1));
 }
 
-/// PPU CAS loop and SPU atomic loop contend on a shared 128-byte line.
-/// Counter must equal PPU_N + SPU_N under any interleaving / any Budget.
+/// PPU CAS loop and SPU atomic loop contend on a shared 128-byte
+/// line; counter must equal PPU_N + SPU_N under any interleaving.
 #[test]
 fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
     use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
@@ -1729,10 +1734,8 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
         ])
     }
 
-    // Budget sweep exercises different PPU/SPU interleaving granularities:
-    // 1 forces interleave per retire; primes 2/3/7 and 15 land CAS attempts
-    // mid-block where the reservation can be cleared cross-unit before the
-    // stwcx; 256 batches the whole retry into one block.
+    // Budget sweep exercises different PPU/SPU interleaving
+    // granularities; CAS retry must land the same total either way.
     let expected = PPU_N + SPU_N;
     for &b in &[1u64, 2, 3, 7, 15, 256] {
         let counter = run_at_budget(
@@ -1746,9 +1749,9 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
     }
 }
 
-/// Build a 2-slot shadow over `mem[0..8]` and confirm the pairing
-/// pass produced the expected fusion. Returns the unit with the
-/// shadow attached and its initial PC at 0.
+/// Build a 2-slot shadow over `mem[0..8]` and assert the pair fused
+/// into a super-pair. Returns the unit with the shadow attached and
+/// initial PC at 0.
 fn unit_with_shadow_for_pair(mem: &GuestMemory, raw0: u32, raw1: u32) -> PpuExecutionUnit {
     let mut shadow_bytes = [0u8; 8];
     shadow_bytes[0..4].copy_from_slice(&raw0.to_be_bytes());
@@ -1770,8 +1773,7 @@ fn unit_with_shadow_for_pair(mem: &GuestMemory, raw0: u32, raw1: u32) -> PpuExec
 
 #[test]
 fn fetch_loop_advances_past_consumed_after_super_pair() {
-    // After running a super-pair at slot 0, the fetch loop must skip
-    // the Consumed placeholder at slot 1 (PC ends at 8, not 4).
+    // Fetch loop must skip the Consumed placeholder; PC ends at 8.
     let mut mem = GuestMemory::new(256);
     let lwz: u32 = (32 << 26) | (3 << 21) | 128;
     let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
@@ -1794,9 +1796,8 @@ fn fetch_loop_advances_past_consumed_after_super_pair() {
 
 #[test]
 fn fetch_loop_super_pair_taken_branch_uses_target_not_consumed_skip() {
-    // CmpwiBc super-pair with branch taken: PC must land at the branch
-    // target (super_pc + 4 + 20 = 24), not super_pc + 8 (which is the
-    // Continue arm's "+4 then skip Consumed" path).
+    // CmpwiBc super-pair with branch taken: PC must land at the
+    // branch target (super_pc + 4 + 20 = 24).
     let mut mem = GuestMemory::new(256);
     let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
     let bc: u32 = (16 << 26) | (12 << 21) | (2 << 16) | (20u16 as u32);
