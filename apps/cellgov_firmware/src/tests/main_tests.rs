@@ -96,3 +96,25 @@ fn check_output_dir_nonempty_with_force_is_ok() {
     assert!(check_output_dir(&dir, true).is_ok());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn install_exclusion_prunes_emulators_and_dollar_entries() {
+    // Emulator subtrees are pruned, with or without the dev_flash/
+    // packaging prefix.
+    assert!(is_install_excluded("dev_flash/ps1emu/ps1_emu.self"));
+    assert!(is_install_excluded("dev_flash/ps2emu/ps2_emu.self"));
+    assert!(is_install_excluded("dev_flash/pspemu/flash0/font/x.pgf"));
+    assert!(is_install_excluded("ps2emu/ps2_netemu.self"));
+    // Fullwidth-dollar (U+FF04) dead-entry marker is dropped.
+    assert!(is_install_excluded("dev_flash/vsh/\u{ff04}dead.self"));
+}
+
+#[test]
+fn install_exclusion_keeps_real_firmware_paths() {
+    assert!(!is_install_excluded("dev_flash/sys/external/liblv2.sprx"));
+    assert!(!is_install_excluded("dev_flash/vsh/module/mcore_tk.self"));
+    // A plain ASCII '$' must not trip the fullwidth-dollar gate.
+    assert!(!is_install_excluded("dev_flash/vsh/resource/a$b.txt"));
+    // "pspemu" matches only as a leading path component, not a substring.
+    assert!(!is_install_excluded("dev_flash/data/pspemu_notes.txt"));
+}
