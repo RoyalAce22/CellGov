@@ -5,7 +5,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_memory::page_size;
+use cellgov_ps3_abi::sys_memory::{page_size, SYS_MMAPPER_NO_SHM_KEY};
 
 use crate::dispatch::Lv2Dispatch;
 
@@ -123,6 +123,13 @@ impl Lv2Host {
     /// `sys_mmapper_allocate_shared_memory` (332): mints a monotonic
     /// shm id and writes it to `*mem_id_ptr`.
     ///
+    /// A non-sentinel, non-zero `ipc_key` (`args[0]`) routes through
+    /// [`Lv2Host::mmapper_ipc`]: a registered key returns the
+    /// existing `mem_id` with `size` / `flags` ignored, an
+    /// unregistered key mints and registers. Oracle: RPCS3's
+    /// `create_lv2_shm` SYS_SYNC_NOT_CARE path
+    /// (`sys_mmapper.cpp:103-128`).
+    ///
     /// # Errors
     ///
     /// - `CELL_EFAULT` when `mem_id_ptr` is null.
@@ -133,6 +140,7 @@ impl Lv2Host {
         args: [u64; 8],
         requester: UnitId,
     ) -> Lv2Dispatch {
+        let ipc_key = args[0];
         let size = args[1];
         let flags = args[2];
         let mem_id_ptr = args[3] as u32;
@@ -146,14 +154,24 @@ impl Lv2Host {
         if !size_u32.is_multiple_of(align) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
         }
-        let mem_id = self.alloc_id();
-        self.mmapper_handles.insert(
-            mem_id,
-            MmapperHandle {
-                size: size_u32,
-                align,
-            },
-        );
+        let keyed = ipc_key != 0 && ipc_key != SYS_MMAPPER_NO_SHM_KEY;
+        let mem_id = match self.mmapper_ipc.get(&ipc_key) {
+            Some(&existing) if keyed => existing,
+            _ => {
+                let mem_id = self.alloc_id();
+                self.mmapper_handles.insert(
+                    mem_id,
+                    MmapperHandle {
+                        size: size_u32,
+                        align,
+                    },
+                );
+                if keyed {
+                    self.mmapper_ipc.insert(ipc_key, mem_id);
+                }
+                mem_id
+            }
+        };
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(mem_id_ptr, 4),
             bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),
@@ -165,6 +183,66 @@ impl Lv2Host {
             code: 0,
             effects: vec![write],
         }
+    }
+
+    /// Seed effects for the first map of an ipc-keyed shm with a
+    /// registered [`crate::SystemStateSeed`]; empty for keyless shms,
+    /// unseeded keys, and already-applied seeds.
+    ///
+    /// # Cross-module contract
+    ///
+    /// The caller (334 / 337) must co-emit these in the same
+    /// `Lv2Dispatch::Immediate` as its own writes so the commit
+    /// pipeline applies the seed atomically with the map: the shm is
+    /// guest-observable from that dispatch's return forward, so the
+    /// seed must be present by then.
+    fn system_seed_effects(
+        &mut self,
+        mem_id: u32,
+        base_addr: u32,
+        requester: UnitId,
+    ) -> Vec<Effect> {
+        let Some(&ipc_key) = self
+            .mmapper_ipc
+            .iter()
+            .find(|&(_, &id)| id == mem_id)
+            .map(|(k, _)| k)
+        else {
+            return Vec::new();
+        };
+        if self.system_seeds_applied.contains(&ipc_key) {
+            return Vec::new();
+        }
+        let Some(seed) = self.system_state_seeds.get(&ipc_key) else {
+            return Vec::new();
+        };
+        self.system_seeds_applied.insert(ipc_key);
+        self.system_seed_bases.insert(ipc_key, base_addr);
+        let handle_size = self
+            .mmapper_handles
+            .get(mem_id)
+            .map(|h| h.size)
+            .unwrap_or(0);
+        seed.writes
+            .iter()
+            .map(|(offset, bytes)| {
+                debug_assert!(
+                    u64::from(*offset) + bytes.len() as u64 <= u64::from(handle_size),
+                    "seed write at +{offset:#x} ({} bytes) exceeds shm size {handle_size:#x}",
+                    bytes.len(),
+                );
+                Effect::SharedWriteIntent {
+                    range: ByteRange::contiguous_u32(
+                        base_addr.wrapping_add(*offset),
+                        bytes.len() as u32,
+                    ),
+                    bytes: WritePayload::from_slice(bytes),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: self.current_tick,
+                }
+            })
+            .collect()
     }
 
     /// `sys_mmapper_map_shared_memory` (334): validates `addr`
@@ -181,7 +259,11 @@ impl Lv2Host {
     /// - `CELL_ESRCH` (plus a `dispatch.mmapper_map_unknown_mem_id`
     ///   invariant break) when `mem_id` is not in the handle table.
     /// - `CELL_EALIGN` when `addr % handle.align != 0`.
-    pub(super) fn dispatch_mmapper_map_shared_memory(&mut self, args: [u64; 8]) -> Lv2Dispatch {
+    pub(super) fn dispatch_mmapper_map_shared_memory(
+        &mut self,
+        args: [u64; 8],
+        requester: UnitId,
+    ) -> Lv2Dispatch {
         let addr = args[0];
         let mem_id = args[1] as u32;
         if !(0x2000_0000..0xC000_0000).contains(&addr) {
@@ -226,7 +308,8 @@ impl Lv2Host {
             self.mmapper_install_ledger.contains_key(&(addr as u32)),
             "sc 334 coherence: mmapper_install_ledger missing entry for {addr:#x}",
         );
-        Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
+        let effects = self.system_seed_effects(mem_id, addr as u32, requester);
+        Lv2Dispatch::Immediate { code: 0, effects }
     }
 
     /// `sys_mmapper_search_and_map` (337): search for the first free
@@ -298,17 +381,15 @@ impl Lv2Host {
             self.mmapper_install_ledger.contains_key(&found_addr),
             "sc 337 coherence: mmapper_install_ledger missing entry for {found_addr:#x}",
         );
-        let write = Effect::SharedWriteIntent {
+        let mut effects = self.system_seed_effects(mem_id, found_addr, requester);
+        effects.push(Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(alloc_addr_ptr, 4),
             bytes: WritePayload::from_slice(&found_addr.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
             source_time: self.current_tick,
-        };
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![write],
-        }
+        });
+        Lv2Dispatch::Immediate { code: 0, effects }
     }
 
     /// `sys_mmapper_allocate_shared_memory_from_container` (362):

@@ -1418,3 +1418,285 @@ fn cond_destroy_with_waiter_returns_ebusy() {
     };
     assert_eq!(code, cell_errors::CELL_EBUSY.into());
 }
+
+/// `FakeRuntime` whose memory carries a `sys_cond_attribute_t` at
+/// 0x800 (`pshared` at +0, `ipc_key` at +8) plus optional extra
+/// `(addr, u32)` stamps.
+fn runtime_with_cond_attr(pshared: u32, ipc_key: u64, stamps: &[(u64, u32)]) -> FakeRuntime {
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    let commit = |mem: &mut cellgov_mem::GuestMemory, addr: u64, bytes: &[u8]| {
+        let range =
+            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), bytes.len() as u64)
+                .unwrap();
+        mem.apply_commit(range, bytes).unwrap();
+    };
+    commit(&mut mem, 0x800, &pshared.to_be_bytes());
+    commit(&mut mem, 0x808, &ipc_key.to_be_bytes());
+    for &(addr, value) in stamps {
+        commit(&mut mem, addr, &value.to_be_bytes());
+    }
+    FakeRuntime::with_memory(mem)
+}
+
+fn create_cond_with_attr(host: &mut Lv2Host, src: UnitId, rt: &FakeRuntime, mutex_id: u32) -> u32 {
+    let created = host.dispatch(
+        Lv2Request::CondCreate {
+            id_ptr: 0x200,
+            mutex_id,
+            attr_ptr: 0x800,
+        },
+        src,
+        rt,
+    );
+    match &created {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    }
+}
+
+#[test]
+fn cond_create_with_pshared_attr_captures_ipc_key() {
+    let mut host = Lv2Host::new();
+    let rt = runtime_with_cond_attr(0x100, 0x8006_0100_0000_0030, &[]);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
+    assert_eq!(
+        host.cond_ipc_keys.get(&cond_id),
+        Some(&0x8006_0100_0000_0030)
+    );
+}
+
+#[test]
+fn cond_create_without_pshared_stays_keyless() {
+    let mut host = Lv2Host::new();
+    let rt = runtime_with_cond_attr(0x200, 0x8006_0100_0000_0030, &[]);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
+    assert!(!host.cond_ipc_keys.contains_key(&cond_id));
+}
+
+#[test]
+fn cond_destroy_drops_captured_ipc_key() {
+    let mut host = Lv2Host::new();
+    let rt = runtime_with_cond_attr(0x100, 0x8006_0100_0000_0030, &[]);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
+    host.dispatch(Lv2Request::CondDestroy { id: cond_id }, src, &rt);
+    assert!(!host.cond_ipc_keys.contains_key(&cond_id));
+}
+
+/// Mark the cellSysutil seed applied at `base` so the ring-check arm
+/// reads slot state from the test runtime's memory.
+fn mark_seed_applied_at(host: &mut Lv2Host, base: u32) {
+    let key = cellgov_ps3_abi::system_ipc::CELLSYSUTIL_SHM_IPC_KEY;
+    host.system_seeds_applied.insert(key);
+    host.system_seed_bases.insert(key, base);
+}
+
+#[test]
+fn cond_wait_ring_wake_fires_for_cond1_when_slot_ring_has_unconsumed_data() {
+    let mut host = Lv2Host::new();
+    // cond[1] of slot 0; slot 0 at base 0x2000: cursor 0 < limit 256.
+    let rt = runtime_with_cond_attr(0x100, 0x8006_0100_0000_0040, &[(0x2004, 256), (0x2010, 0)]);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    host.dispatch(
+        Lv2Request::MutexLock {
+            mutex_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
+    mark_seed_applied_at(&mut host, 0x2000);
+    let r = host.dispatch(
+        Lv2Request::CondWait {
+            id: cond_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    assert!(
+        matches!(r, Lv2Dispatch::Immediate { code: 0, .. }),
+        "ring-check arm must satisfy the wait immediately, got {r:?}",
+    );
+    assert_eq!(host.cond_ring_wakes(), 1);
+    assert_eq!(host.cond0_producer_waits(), 0);
+    let entry = host.conds().lookup(cond_id).unwrap();
+    assert!(entry.waiters().is_empty(), "caller must not park");
+}
+
+#[test]
+fn cond_wait_slot1_cond1_reads_slot1_ring() {
+    let mut host = Lv2Host::new();
+    // cond[1] of slot 1; slot 0 depleted, slot 1 (base+0x8000) has data.
+    let rt = runtime_with_cond_attr(
+        0x100,
+        0x8006_0100_0000_0041,
+        &[(0x2004, 256), (0x2010, 256), (0xa004, 256), (0xa010, 0)],
+    );
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    host.dispatch(
+        Lv2Request::MutexLock {
+            mutex_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
+    mark_seed_applied_at(&mut host, 0x2000);
+    let r = host.dispatch(
+        Lv2Request::CondWait {
+            id: cond_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    assert!(matches!(r, Lv2Dispatch::Immediate { code: 0, .. }));
+    assert_eq!(host.cond_ring_wakes(), 1);
+}
+
+#[test]
+fn cond_wait_cond1_depleted_ring_parks_without_witness() {
+    let mut host = Lv2Host::new();
+    // cond[1] of slot 0 with its ring depleted: cursor == limit.
+    let rt = runtime_with_cond_attr(
+        0x100,
+        0x8006_0100_0000_0040,
+        &[(0x2004, 256), (0x2010, 256)],
+    );
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    host.dispatch(
+        Lv2Request::MutexLock {
+            mutex_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
+    mark_seed_applied_at(&mut host, 0x2000);
+    let r = host.dispatch(
+        Lv2Request::CondWait {
+            id: cond_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    assert!(
+        matches!(r, Lv2Dispatch::Block { .. }),
+        "depleted ring must park the caller, got {r:?}",
+    );
+    assert_eq!(host.cond_ring_wakes(), 0);
+    assert_eq!(host.cond0_producer_waits(), 0);
+}
+
+#[test]
+fn cond_wait_cond0_parks_even_with_ring_data_and_counts_producer_wait() {
+    let mut host = Lv2Host::new();
+    // cond[0] of slot 0; ring HAS data -- the record-finish wait is
+    // producer-fed and must not be satisfied by ring state.
+    let rt = runtime_with_cond_attr(0x100, 0x8006_0100_0000_0030, &[(0x2004, 256), (0x2010, 0)]);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    host.dispatch(
+        Lv2Request::MutexLock {
+            mutex_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
+    mark_seed_applied_at(&mut host, 0x2000);
+    let r = host.dispatch(
+        Lv2Request::CondWait {
+            id: cond_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    assert!(
+        matches!(r, Lv2Dispatch::Block { .. }),
+        "cond[0] must park; its wake is producer-fed, got {r:?}",
+    );
+    assert_eq!(host.cond_ring_wakes(), 0);
+    assert_eq!(host.cond0_producer_waits(), 1);
+}
+
+#[test]
+fn cond_wait_keyless_cond_never_consults_the_ring() {
+    let mut host = Lv2Host::new();
+    // Ring would say "data available" -- but the cond is keyless.
+    let rt = runtime_with_cond_attr(0x200, 0, &[(0x2004, 256), (0x2010, 0)]);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    host.dispatch(
+        Lv2Request::MutexLock {
+            mutex_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
+    mark_seed_applied_at(&mut host, 0x2000);
+    let r = host.dispatch(
+        Lv2Request::CondWait {
+            id: cond_id,
+            timeout: 0,
+        },
+        src,
+        &rt,
+    );
+    assert!(matches!(r, Lv2Dispatch::Block { .. }));
+    assert_eq!(host.cond_ring_wakes(), 0);
+}
+
+#[test]
+fn cond_signal_dispatches_witness_counts_invocations() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let created = host.dispatch(
+        Lv2Request::CondCreate {
+            id_ptr: 0x200,
+            mutex_id,
+            attr_ptr: 0,
+        },
+        src,
+        &rt,
+    );
+    let cond_id = match &created {
+        Lv2Dispatch::Immediate { effects: e, .. } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate, got {other:?}"),
+    };
+    assert_eq!(host.cond_signal_dispatches(), 0);
+    host.dispatch(Lv2Request::CondSignal { id: cond_id }, src, &rt);
+    host.dispatch(Lv2Request::CondSignal { id: cond_id }, src, &rt);
+    assert_eq!(host.cond_signal_dispatches(), 2);
+}

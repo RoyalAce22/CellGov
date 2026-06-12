@@ -19,7 +19,7 @@ use crate::sync_primitives::{
 };
 use crate::thread_group::ThreadGroupTable;
 
-use super::mmapper::{MmapperHandleTable, PendingRegionInstall};
+use super::mmapper::{MmapperHandleTable, PendingRegionInstall, SystemStateSeed};
 use super::process;
 use super::rsx::SysRsxContext;
 
@@ -42,6 +42,48 @@ pub struct Lv2Host {
     pub(super) rsx_context: SysRsxContext,
     /// Populated by 332 / 362, consumed by 334 / 337.
     pub(super) mmapper_handles: MmapperHandleTable,
+    /// `ipc_key -> mem_id` for process-shared mmapper allocations.
+    /// A keyed 332 with a registered key returns the existing
+    /// `mem_id` (RPCS3's SYS_SYNC_NOT_CARE path,
+    /// `sys_mmapper.cpp:103-128`); an unregistered key mints and
+    /// registers. Not folded into [`Self::state_hash`]: the mint path
+    /// advances `next_kernel_id` (hashed) and the found path mutates
+    /// nothing.
+    pub(super) mmapper_ipc: BTreeMap<u64, u32>,
+    /// Boot-registered seeds keyed by `shm_ipc_key`; immutable after
+    /// boot. Applied at most once, on the first 334 / 337 map of the
+    /// matching shm. Not folded into [`Self::state_hash`]: the seed
+    /// writes settle via `GuestMemory` (hashed there).
+    pub(super) system_state_seeds: BTreeMap<u64, SystemStateSeed>,
+    /// Keys whose seed has been applied. Not folded into
+    /// [`Self::state_hash`] (the applied writes are; this set only
+    /// suppresses re-application on a re-map).
+    pub(super) system_seeds_applied: std::collections::BTreeSet<u64>,
+    /// `shm_ipc_key -> mapped guest base` recorded when a seed is
+    /// applied. The cond ring-check wake reads slot state through
+    /// this base. Not hashed (derived from the hashed map effects).
+    pub(super) system_seed_bases: BTreeMap<u64, u32>,
+    /// `cond id -> create-time ipc_key` for process-shared conds
+    /// (key 0 entries are not stored). Not hashed: create-time
+    /// config mirrored from guest memory.
+    pub(super) cond_ipc_keys: BTreeMap<u32, u64>,
+    /// Witness: times the cond\[1\] ring-check arm satisfied a wait
+    /// immediately. Expected 0 under the V256 seed; a non-zero
+    /// value means a refill wait observed a non-depleted ring.
+    /// Not hashed (instrument-only).
+    pub(super) cond_ring_wakes: u64,
+    /// Witness: parks on a cellSysutil cond\[0\] -- the producer-fed
+    /// record-finish waits CellGov has no producer for -- keyed by
+    /// slot index. Not hashed (instrument-only).
+    pub(super) cond0_producer_waits_by_slot: BTreeMap<u64, u64>,
+    /// Witness: `sys_cond_signal` dispatch count (drain witness for
+    /// the seeded-ring consumer). Not hashed (instrument-only).
+    pub(super) cond_signal_dispatches: u64,
+    /// Witness: `sys_cond_signal` dispatches keyed by the target
+    /// cond's create-time ipc_key (keyed conds only). Per-slot /
+    /// per-facility drain attribution for the seeded-ring consumer.
+    /// Not hashed (instrument-only).
+    pub(super) cond_keyed_signal_counts: BTreeMap<u64, u64>,
     /// Pending region-install requests emitted by 334 / 337. Drained
     /// by the runtime post-dispatch and applied to `GuestMemory`
     /// before the dispatch's effects commit. Not folded into
@@ -185,6 +227,15 @@ impl Lv2Host {
             rsx_mem_handle_counter: 1,
             rsx_context: SysRsxContext::new(),
             mmapper_handles: MmapperHandleTable::new(),
+            mmapper_ipc: BTreeMap::new(),
+            system_state_seeds: BTreeMap::new(),
+            system_seeds_applied: std::collections::BTreeSet::new(),
+            system_seed_bases: BTreeMap::new(),
+            cond_ipc_keys: BTreeMap::new(),
+            cond_ring_wakes: 0,
+            cond0_producer_waits_by_slot: BTreeMap::new(),
+            cond_signal_dispatches: 0,
+            cond_keyed_signal_counts: BTreeMap::new(),
             pending_region_installs: Vec::new(),
             mmapper_install_ledger: BTreeMap::new(),
             lwmutexes: LwMutexTable::new(),
@@ -493,6 +544,64 @@ impl Lv2Host {
             prior.is_none(),
             "mmapper ledger: addr {addr:#x} already recorded (size {prior:?})",
         );
+    }
+
+    /// `ipc_key -> mem_id` registrations made by keyed 332 calls.
+    pub fn mmapper_ipc(&self) -> &BTreeMap<u64, u32> {
+        &self.mmapper_ipc
+    }
+
+    /// Register a boot-state seed; a duplicate `shm_ipc_key` replaces
+    /// the prior entry (last-write-wins). Boot-only: registering
+    /// after the matching shm has been mapped has no effect.
+    pub fn register_system_seed(&mut self, seed: SystemStateSeed) {
+        self.system_state_seeds.insert(seed.shm_ipc_key, seed);
+    }
+
+    /// Boot-registered seeds keyed by `shm_ipc_key`.
+    pub fn system_state_seeds(&self) -> &BTreeMap<u64, SystemStateSeed> {
+        &self.system_state_seeds
+    }
+
+    /// `true` once the seed registered under `shm_ipc_key` has been
+    /// applied by a 334 / 337 map.
+    pub fn system_seed_applied(&self, shm_ipc_key: u64) -> bool {
+        self.system_seeds_applied.contains(&shm_ipc_key)
+    }
+
+    /// Mapped guest base of the seeded shm, once applied.
+    pub fn system_seed_base(&self, shm_ipc_key: u64) -> Option<u32> {
+        self.system_seed_bases.get(&shm_ipc_key).copied()
+    }
+
+    /// Witness: times the cond\[1\] ring-check arm satisfied a wait
+    /// immediately.
+    #[inline]
+    pub fn cond_ring_wakes(&self) -> u64 {
+        self.cond_ring_wakes
+    }
+
+    /// Witness: parks on a cellSysutil cond\[0\] record-finish wait,
+    /// summed over slots.
+    pub fn cond0_producer_waits(&self) -> u64 {
+        self.cond0_producer_waits_by_slot.values().sum()
+    }
+
+    /// Witness: cond\[0\] producer-wait parks keyed by slot index.
+    pub fn cond0_producer_waits_by_slot(&self) -> &BTreeMap<u64, u64> {
+        &self.cond0_producer_waits_by_slot
+    }
+
+    /// Witness: `sys_cond_signal` dispatch count.
+    #[inline]
+    pub fn cond_signal_dispatches(&self) -> u64 {
+        self.cond_signal_dispatches
+    }
+
+    /// Witness: `sys_cond_signal` dispatches keyed by the target
+    /// cond's create-time ipc_key.
+    pub fn cond_keyed_signal_counts(&self) -> &BTreeMap<u64, u64> {
+        &self.cond_keyed_signal_counts
     }
 
     /// Read-only `pending_region_installs` snapshot used by sibling

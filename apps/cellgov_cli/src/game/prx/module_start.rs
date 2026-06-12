@@ -28,7 +28,25 @@ pub(in crate::game) enum ModuleStartOutcome {
     /// `module_start` returned via the LR=0 decode-error sentinel after
     /// `steps` `rt.step()` calls.
     Completed { steps: usize },
+    /// `module_start` is in [`HLE_STUBBED_MODULE_STARTS`]; treated as
+    /// CELL_OK without running.
+    HleStubbed,
 }
+
+/// module_start entries HLE-stubbed to CELL_OK -- declared LLE
+/// divergences.
+///
+/// `cellSysutil_Library`: its init dispatcher drains serialized
+/// records from a producer-fed shared-memory ring and terminally
+/// waits on cond[0] for the next record. The producer lives outside
+/// cellSysutil in real PS3 firmware and CellGov has no equivalent;
+/// satisfying the wait would mean inventing the producer's contract
+/// (STATE_FIELD, cursor advance, record bytes). The honest pieces
+/// (IPC-key registration, first-record seed, cond[1] ring-check arm)
+/// advance the consumer through one record then stall AllBlocked --
+/// witnessed by `cond0_producer_waits` in production state. See
+/// `docs/dev/phases/design/phases_41-50/phase_41.md`.
+const HLE_STUBBED_MODULE_STARTS: &[&str] = &["cellSysutil_Library"];
 
 /// Why a module_start failed to complete.
 #[derive(Debug, thiserror::Error)]
@@ -90,6 +108,23 @@ pub(in crate::game) fn run_module_start(
             return Ok(ModuleStartOutcome::Skipped);
         }
     };
+
+    if HLE_STUBBED_MODULE_STARTS.contains(&prx_info.name.as_str()) {
+        if crate::cli::env::parse_env_bool("CELLGOV_DISABLE_MODULE_START_HLE_STUBS") {
+            println!(
+                "module_start: {} HLE-stub DISABLED via env; running the honest \
+                 LLE path (expected to stall at the producer-fed wait)",
+                prx_info.name,
+            );
+        } else {
+            println!(
+                "module_start: {} HLE-stubbed to CELL_OK (declared LLE divergence: \
+                 init waits on a producer-fed ring with no producer in CellGov)",
+                prx_info.name,
+            );
+            return Ok(ModuleStartOutcome::HleStubbed);
+        }
+    }
 
     println!(
         "module_start: {} at pc=0x{:x} toc=0x{:x}",
@@ -293,6 +328,36 @@ pub(in crate::game) fn run_module_start(
         sorted.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
         for (num, count) in sorted.iter().take(10) {
             println!("    {count:>8}x  syscall {num}");
+        }
+    }
+    // Seeded-ring stall witnesses; the producer-fed waits these count
+    // are the declared cellSysutil module_start wall.
+    let host = rt.lv2_host();
+    if host.system_seed_applied(cellgov_ps3_abi::system_ipc::CELLSYSUTIL_SHM_IPC_KEY) {
+        println!(
+            "  module_start seed witnesses: ring_wakes={} cond0_producer_waits={} cond_signals={}",
+            host.cond_ring_wakes(),
+            host.cond0_producer_waits(),
+            host.cond_signal_dispatches(),
+        );
+        let by_slot: Vec<String> = host
+            .cond0_producer_waits_by_slot()
+            .iter()
+            .map(|(slot, n)| format!("slot{slot}={n}"))
+            .collect();
+        if !by_slot.is_empty() {
+            println!(
+                "  module_start cond0 producer waits by slot: {}",
+                by_slot.join(" "),
+            );
+        }
+        let keyed: Vec<String> = host
+            .cond_keyed_signal_counts()
+            .iter()
+            .map(|(key, n)| format!("{key:#018x}={n}"))
+            .collect();
+        if !keyed.is_empty() {
+            println!("  module_start keyed cond signals: {}", keyed.join(" "));
         }
     }
 

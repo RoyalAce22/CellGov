@@ -24,6 +24,55 @@ use crate::cli::exit::die;
 /// block is absent.
 const DEFAULT_PRIMARY_PRIO: u32 = 1001;
 
+/// Seeded ring size per slot. V256 shape: the dispatcher's six
+/// non-zero field budgets (56+8+76+4+22+10 = 176) drain inside the
+/// 256-byte limit, so module_start's terminal stall is the
+/// producer-fed cond[0] record-finish wait, not a mid-record
+/// depleted-ring symptom. See
+/// `docs/dev/phases/design/phases_41-50/phase_41.md`.
+const CELLSYSUTIL_RING_LIMIT: u32 = 256;
+
+/// Boot-state seed for the cellSysutil slot-state shm.
+///
+/// Models the first producer record an external firmware producer
+/// would have delivered before the title ran. Field consumers are
+/// the wait-fn guard reads decoded in the phase doc: state@+20
+/// (`!= 2` falls through), cursor@+16 vs limit@+4 (`<` enters the
+/// drain), read_pos@+8 / write_pos@+12 / data_offset@+0 drive the
+/// per-record memcpy, predicate@+30 (`0` avoids the early-exit
+/// error path).
+pub(super) fn cellsysutil_system_seed() -> cellgov_lv2::SystemStateSeed {
+    use cellgov_ps3_abi::system_ipc::{
+        CELLSYSUTIL_SHM_IPC_KEY, CELLSYSUTIL_SLOT_COUNT, CELLSYSUTIL_SLOT_CURSOR_OFFSET,
+        CELLSYSUTIL_SLOT_DATA_OFFSET, CELLSYSUTIL_SLOT_LIMIT_OFFSET, CELLSYSUTIL_SLOT_STRIDE,
+    };
+    let mut writes = Vec::new();
+    for slot in 0..CELLSYSUTIL_SLOT_COUNT {
+        let base = slot * CELLSYSUTIL_SLOT_STRIDE;
+        writes.push((base, CELLSYSUTIL_SLOT_DATA_OFFSET.to_be_bytes().to_vec()));
+        writes.push((
+            base + CELLSYSUTIL_SLOT_LIMIT_OFFSET,
+            CELLSYSUTIL_RING_LIMIT.to_be_bytes().to_vec(),
+        ));
+        writes.push((base + 8, 0u32.to_be_bytes().to_vec()));
+        writes.push((base + 12, CELLSYSUTIL_RING_LIMIT.to_be_bytes().to_vec()));
+        writes.push((
+            base + CELLSYSUTIL_SLOT_CURSOR_OFFSET,
+            0u32.to_be_bytes().to_vec(),
+        ));
+        writes.push((base + 20, 1u32.to_be_bytes().to_vec()));
+        writes.push((base + 30, vec![0u8]));
+        writes.push((
+            base + CELLSYSUTIL_SLOT_DATA_OFFSET,
+            vec![0u8; CELLSYSUTIL_RING_LIMIT as usize],
+        ));
+    }
+    cellgov_lv2::SystemStateSeed {
+        shm_ipc_key: CELLSYSUTIL_SHM_IPC_KEY,
+        writes,
+    }
+}
+
 /// Bump-arena base for HLE-side allocations, above the TLS scratch
 /// at `0x10400000`.
 pub const HLE_HEAP_BASE: u32 = 0x10410000;
@@ -424,6 +473,11 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     if let Some(p) = proc_param {
         rt.lv2_host_mut().set_sdk_version(p.sdk_version);
     }
+    // Pre-game system state: the cellSysutil slot-state shm arrives
+    // seeded with one producer record per slot, applied when the
+    // keyed shm is first mapped (sc 337).
+    rt.lv2_host_mut()
+        .register_system_seed(cellsysutil_system_seed());
     println!(
         "process_param: sdk_version=0x{:08x} ({})",
         proc_param
@@ -674,7 +728,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             for info in &prx_modules {
                 let runnable_before = rt.registry().runnable_ids().count();
                 match run_module_start(&mut rt, info, kctx_opd) {
-                    Ok(ModuleStartOutcome::Completed { .. }) => completed += 1,
+                    Ok(ModuleStartOutcome::Completed { .. })
+                    | Ok(ModuleStartOutcome::HleStubbed) => completed += 1,
                     Ok(ModuleStartOutcome::Skipped) => {}
                     Err(e) => die(&format!("{e}")),
                 }

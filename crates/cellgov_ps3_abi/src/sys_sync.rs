@@ -16,6 +16,10 @@ pub const SYS_SYNC_FIFO: u32 = 0x1;
 /// priority-first order.
 pub const SYS_SYNC_PRIORITY: u32 = 0x2;
 
+/// `pshared = SYS_SYNC_PROCESS_SHARED`: the primitive is visible
+/// across processes; the attribute's `ipc_key` is meaningful.
+pub const SYS_SYNC_PROCESS_SHARED: u32 = 0x100;
+
 /// `type = SYS_SYNC_WAITER_SINGLE`: at most one thread may park on
 /// the primitive at once. Dispatch rejects a second parker.
 pub const SYS_SYNC_WAITER_SINGLE: u32 = 0x10000;

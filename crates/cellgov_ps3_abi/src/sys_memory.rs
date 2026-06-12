@@ -8,6 +8,12 @@
 /// `sys_memory_get_user_memory_size`.
 pub const USER_MEMORY_TOTAL: u32 = 0x0D50_0000;
 
+/// `ipc_key` sentinel meaning "not process-shared" for
+/// `sys_mmapper_allocate_shared_memory` (332 / 362). Cross-reference:
+/// RPCS3's `sys_mmapper.h` (`SYS_MMAPPER_NO_SHM_KEY`, unofficial
+/// name); liblv2 passes it on the keyless allocation path.
+pub const SYS_MMAPPER_NO_SHM_KEY: u64 = 0xffff_0000_0000_0000;
+
 /// `flags` bits selecting the page granule for shared-memory and
 /// mmapper-allocated regions. Cross-reference: RPCS3's `sys_memory.h`.
 pub mod page_size {
