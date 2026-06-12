@@ -87,11 +87,8 @@ macro_rules! nid_module {
         /// test `nid::tests::every_classified_nid_has_explicit_arm`
         /// walks every module's slice to enforce the contract.
         ///
-        /// Diagnostic role only: this is what `cellgov_cli
-        /// dump-prx-imports` consults indirectly when classifying
-        /// unresolved-or-zero-bound PRX imports. NOT an HLE dispatch
-        /// table -- the project does not substitute Rust handlers
-        /// for PRX libraries.
+        /// Consulted by `cellgov_cli dump-prx-imports` when
+        /// classifying unresolved-or-zero-bound PRX imports.
         pub const CLASSIFIED_NIDS: &[u32] = &[ $( $cname ),* ];
     };
 }

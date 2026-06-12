@@ -56,6 +56,15 @@ pub const SCEPKG_RIV: [u8; 0x10] = [
 /// over the APP-keyed one.
 pub const SCE_SUPPLEMENTAL_KIND_NPDRM: u32 = 3;
 
+/// Program authority id carried by retail application SELFs (disc and
+/// NPDRM alike); the boot-identity fallback for a raw ELF with no SELF
+/// identification header.
+pub const RETAIL_APP_PROGRAM_AUTHORITY_ID: u64 = 0x1010_0000_0100_0003;
+
+/// Program authority id of the bdj.self (BD-J / system-process) SELF.
+/// Mirrors the PAID_44 value in RPCS3's `unself.h`.
+pub const BDJ_SELF_PROGRAM_AUTHORITY_ID: u64 = 0x1070_0000_3A00_0001;
+
 /// AES-128 key applied (ECB) to the RAP-derived intermediate value to
 /// produce the NPDRM layer key that decrypts the metadata-info
 /// envelope. Mirrors `NP_KLIC_KEY` in RPCS3's `key_vault.h`.

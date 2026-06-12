@@ -6,7 +6,7 @@ developer: thatgamecompany
 engine: PhyreEngine
 distribution: PSN HDD
 checkpoint: ProcessExit
-steps: 11299
+steps: 11224
 convergence: No (outcome: ProcessExit vs Completed)
 byte_parity: --
 ---

@@ -5,5 +5,5 @@
   "outcome": "RsxWriteCheckpoint",
   "steps": 43083,
   "budget": 256,
-  "host_invariant_breaks": 2
+  "host_invariant_breaks": 3
 }

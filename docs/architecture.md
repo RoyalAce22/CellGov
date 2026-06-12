@@ -573,15 +573,15 @@ return `CELL_ENOSYS` with a traced diagnostic.
 | DEX-only unused slot                                     | 462    | CELL_ENOSYS so retail liblv2 takes its fallback path.                                                                                                                                                                                                                                                    |
 | `sys_memory_container_create`                            | 324    | Mints kernel id, writes to `*cid_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                                                                                                      |
 | `sys_mmapper_allocate_address`                           | 330    | Bumps a 256 MiB-aligned cursor from `0x4000_0000` (immediately above the sys_rsx window) toward `MMAPPER_REGION_END = 0xD000_0000` (start of the PPU stack region), writes base to `*alloc_addr_ptr`. CELL_ENOMEM on `size == 0`, u32 overflow, or cap-exceeded. CELL_EFAULT on null pointer.            |
-| `sys_mmapper_allocate_shared_memory`                     | 332    | Mints mem_id, writes to `*mem_id_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                                                                                                      |
-| `sys_mmapper_search_and_map`                             | 337    | Writes `start_addr` verbatim to `*alloc_addr_ptr` (flat backing collapses the search). CELL_EINVAL when `start_addr` falls outside `[0x2000_0000, 0xC000_0000)`. CELL_EFAULT on null `alloc_addr_ptr`.                                                                                                   |
+| `sys_mmapper_allocate_shared_memory`                     | 332    | Mints a monotonic mem_id, writes to `*mem_id_ptr`. A non-zero `ipc_key` routes through the process-shared IPC registry: a registered key returns the existing mem_id (size / flags ignored), an unregistered key mints and registers. CELL_EFAULT on null `mem_id_ptr`; CELL_ENOMEM when size exceeds u32; CELL_EALIGN when size is not a multiple of the flag-selected granule. |
+| `sys_mmapper_search_and_map`                             | 337    | Searches the install ledger for the first free aligned range of the handle's size at or after `start_addr`, records the install, and writes the actual mapped address back to `*alloc_addr_ptr` (not the caller's hint). CELL_EFAULT on null `alloc_addr_ptr`; CELL_EINVAL when `start_addr` is outside the mmapper window; CELL_ESRCH when `mem_id` is not in the handle table (332 / 362 must precede 337); CELL_ENOMEM when the search exhausts the window.                                                   |
 | `sys_mmapper_allocate_shared_memory_from_container`      | 362    | Same shape as 332 with `*mem_id_ptr` at r7.                                                                                                                                                                                                                                                              |
 | `_sys_prx_load_module`                                   | 480    | Resolves path at r3 against the PRX registry; returns the registered kernel id on match, otherwise echoes the path pointer as a synthetic non-zero id.                                                                                                                                                   |
 | `_sys_prx_start_module`                                  | 481    | CELL_EINVAL when `id == 0` or `pOpt == 0`. Otherwise writes `~0` (no-start sentinel) to `pOpt->entry` and returns CELL_OK.                                                                                                                                                                               |
 | `_sys_prx_register_module`                               | 484    | CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`) for non-VSH callers.                                                                                                                                                                                                                                    |
 | `_sys_prx_get_module_list`                               | 494    | `flags & 0x2 == 0` -> CELL_OK no-op. With bit 2 set: CELL_EFAULT on null `pInfo`, otherwise walks the PRX registry (filtering liblv2.sprx) writing kernel ids to the `idlist` slot and the count to `pInfo->count`. Iteration is BTreeMap-keyed so the byte output is independent of registration order. |
 | `_sys_prx_load_module_on_memcontainer`                   | 497    | Same resolver as 480.                                                                                                                                                                                                                                                                                    |
-| `SsAccessControlEngine` (`sys_ss_access_control_engine`) | --     | `pkg_id == 1` or `3` -> CELL_ENOSYS (debug/root only). `pkg_id == 2` writes the program-authority id (`0x1070_0000_3A00_0001`) to `*a2`; CELL_EFAULT when `a2 == 0` or does not fit `u32`. Other `pkg_id` values return SS-domain status `0x8001_051D`.                                                  |
+| `SsAccessControlEngine` (`sys_ss_access_control_engine`) | --     | `pkg_id == 1` or `3` -> CELL_ENOSYS (debug/root only). `pkg_id == 2` writes the boot title's program-authority id to `*a2` -- the id parsed from the SELF identification header, or the retail-application fallback (`0x1010_0000_0100_0003`) for a raw-ELF input; CELL_EFAULT when `a2 == 0` or does not fit `u32`. Other `pkg_id` values return SS-domain status `0x8001_051D`.                                                  |
 | `TimeGetTimezone`                                        | --     | Writes 0 to `*timezone_ptr` and `*summer_time_ptr` (UTC). CELL_EFAULT on any null pointer.                                                                                                                                                                                                               |
 | `TimeGetCurrentTime`                                     | --     | Writes `(sec, nsec)` derived from the dispatch-entry tick snapshot. CELL_EFAULT on any null pointer.                                                                                                                                                                                                     |
 | `TimeGetTimebaseFrequency`                               | --     | Returns `CELL_PPU_TIMEBASE_HZ` as the syscall code (no effects).                                                                                                                                                                                                                                         |
@@ -1059,6 +1059,22 @@ the CPU-side surface for the byte-for-byte register reads. The
 `FirstRsxWrite` checkpoint fires on the first guest write to the
 control register.
 
+`cellSysutil_Library`'s `module_start` is the one firmware init
+treated as a declared high-level divergence rather than run to
+completion. It is the consumer side of a process-shared
+producer-consumer ring whose producer runs in the system/VSH
+process, which CellGov does not model. CellGov seeds the first
+producer record into the keyed slot-state shared memory
+(registered when the keyed `sys_mmapper_allocate_shared_memory`
+create runs, applied on the first map of that key) and arms a
+ring-state-aware wake for the system-namespace condition
+variables, then returns `CELL_OK` from the `module_start`
+without executing the producer-fed wait. Every other firmware
+`module_start` runs in full. The
+`CELLGOV_DISABLE_MODULE_START_HLE_STUBS` env knob forces the
+honest low-level path, which then stalls `AllBlocked` at the
+producer-fed wait.
+
 ## Schedule exploration
 
 `cellgov_explore` enumerates legal alternate schedules without
@@ -1295,13 +1311,23 @@ not implemented surface as a `dispatch.unsupported_stub` log
 line at first occurrence and return `CELL_ENOSYS` (the honest
 "not implemented" errno); guests see a detectable failure
 rather than a fabricated success. Each fault driver is a named
-NID or syscall number. All three foundation titles currently
-converge on the same diagnosed frontier -- `cellSysutil_Library`
-`module_start` stalls at `NoRunnableUnit/AllBlocked` (flOw step
-45, SSHD/WipEout step 43); diagnosis lives in
-`docs/dev/bug_investigations/cellsysutil_allblocked_43.md`.
-Per-title paragraphs below carry the trajectory each title
-traces to reach that wall.
+NID or syscall number. `cellSysutil_Library`'s `module_start` is
+the consumer side of a process-shared producer-consumer ring
+whose producer runs in the system/VSH process CellGov does not
+model. Rather than stall the boot forever on a record no external
+producer will deliver, CellGov seeds the first producer record
+into the slot-state shared memory (registered by ipc key when the
+keyed `sys_mmapper_allocate_shared_memory` create runs, applied on
+the first map of that key), arms a ring-state-aware wake for the
+system-namespace condition variables, and treats this one
+`module_start` as a declared high-level divergence -- it returns
+`CELL_OK` without executing the producer-fed wait. With that wall
+cleared and the per-title program-authority id served from
+`sys_ss_access_control_engine` (so `libsysmodule` creates its load
+lock instead of skipping it), all three foundation titles now
+advance past the former `cellSysutil_Library` stall to distinct
+deeper frontiers. Per-title paragraphs below carry each
+trajectory.
 
 **flOw (NPUA80001).** The title's manifest opts into both
 `[rsx] mirror = true` and `[rsx] consume = true` so its
@@ -1309,37 +1335,38 @@ put-pointer store at `0xC0000040` lands in the FIFO cursor and
 the FIFO consumer (GET catch-up + SET_REFERENCE writeback)
 clears the libgcm REF spin at offset `0x7a08` that the title
 previously sat in. With the consumer publishing the completion
-token, flOw advances past the spin and reaches the
-`cellSysutil_Library` `module_start` entry path, where it
-stalls at step 45 with `NoRunnableUnit/AllBlocked`. The wall is
-the producer side of a cond-variable seed. The prior
-`0x7a08` REF spin and the older `11,271 / ProcessExit` CRT0
-abort are preserved as code paths that no longer fire under the
-post-FIFO-consumer trajectory.
+token, flOw advances past the spin, past the seeded
+`cellSysutil_Library` `module_start`, and runs the full
+firmware-set boot to `sys_process_exit` at step 11,224. CellGov
+reports `ProcessExit` where RPCS3 continues executing, so the
+cross-runner verdict is `No (outcome: ProcessExit vs Completed)`.
+One unmodeled syscall (`sys_prx` 483, module unload) surfaces as
+a `dispatch.unsupported_stub` / `CELL_ENOSYS` break on the way.
+The prior `0x7a08` REF spin and the older `11,271 / ProcessExit`
+CRT0 abort are preserved as code paths that no longer fire under
+the post-FIFO-consumer trajectory.
 
 **Super Stardust HD (NPUA80068).** The harness used a
 `FirstRsxWrite` checkpoint historically (the attract-mode loop
-never calls `sys_process_exit`). Under firmware-set boot with
-the mmapper write-back surface in place, SSHD now stalls at
-step 43 inside `cellSysutil_Library` `module_start`
-(`NoRunnableUnit/AllBlocked`), the same diagnosed wall flOw
-hits two steps later via a different cellSysutil entry path.
-The prior `14,341,833 / Fault` and the `MaxSteps`-cap
-dispositions are preserved as code paths that no longer re-fire
-under the new trajectory.
+never calls `sys_process_exit`). Past the seeded
+`cellSysutil_Library` `module_start`, SSHD now runs to the
+`MaxSteps` budget cap at step 390,433 without reaching its first
+RSX put-pointer write, so the cross-runner verdict is
+`No (outcome: Timeout vs Completed)`. One unmodeled syscall (465)
+returns `CELL_ENOSYS` along the way. The prior `14,341,833 /
+Fault` and the earlier cellSysutil stall are preserved as code
+paths that no longer re-fire under the new trajectory.
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
-SELF decryption via `cellgov_firmware decrypt-self`. Under
-firmware-set boot with the mmapper write-back surface
-(`sys_mmapper_search_and_map`), WipEout now stalls at step 43
-inside `cellSysutil_Library` `module_start`
-(`NoRunnableUnit/AllBlocked`), the same diagnosed wall SSHD
-hits. The prior `43,066 / COMMIT_FAULT: OutOfRange` and the
-`FirstRsxWrite @ 43,083` anchors are preserved as code paths
-that no longer re-fire under the new trajectory. Cross-runner
-byte parity at the historical fixture anchor holds at
-`975 non-semantic + 1 pending`. See
+SELF decryption via `cellgov_firmware decrypt-self`. Past the
+seeded `cellSysutil_Library` `module_start`, WipEout reaches its
+`FirstRsxWrite` checkpoint at step 43,083 -- the one foundation
+title that converges with RPCS3 at its checkpoint (`Yes`), with
+cross-runner byte parity at `975 non-semantic + 1 pending`. The
+prior `43,066 / COMMIT_FAULT: OutOfRange` and the earlier
+cellSysutil stall are preserved as code paths that no longer
+re-fire under the new trajectory. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
 
 ## Microtest corpus

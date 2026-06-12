@@ -106,11 +106,16 @@ pub struct BenchPairOutcome {
 /// manifest's declared checkpoint, not the runtime-overridable
 /// `checkpoint`, so a `--checkpoint pc=ADDR` override does not change
 /// the boot trajectory's init path.
-pub fn bench_boot(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult {
+pub fn bench_boot(
+    opts: BenchOptions<'_>,
+    elf_data: Vec<u8>,
+    authority_id: Option<u64>,
+) -> BenchBootResult {
     let prepared = boot::prepare(boot::PrepareOptions {
         title: opts.title,
         elf_path: opts.elf_path,
         elf_data,
+        authority_id,
         firmware_dir: opts.firmware_dir,
         strict_reserved: opts.strict_reserved,
         dump_at_pc: None,
@@ -244,6 +249,16 @@ pub fn bench_boot(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult 
         "BENCH_LWMUTEX_COND_WITNESS: lwmutex_acquires={lwmutex_acquires} lwmutex_releases={lwmutex_releases} cond_reacquires={cond_reacquires}"
     );
 
+    // Authority-id witness: served program-authority-id and the
+    // count of `sys_lwmutex_lock` calls rejected for an unknown id
+    // (the cellSysmodule LoadModule-failure signature, which a wrong
+    // system authid reintroduces).
+    let program_authority_id = rt.lv2_host().program_authority_id();
+    let lwmutex_unknown_locks = rt.lv2_host().lwmutex_unknown_lock_count();
+    eprintln!(
+        "BENCH_AUTHORITY_ID_WITNESS: program_authority_id=0x{program_authority_id:016x} lwmutex_unknown_locks={lwmutex_unknown_locks}"
+    );
+
     BenchBootResult {
         steps,
         wall,
@@ -256,8 +271,12 @@ pub fn bench_boot(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult 
 /// Each measurement runs in its own subprocess: in-process back-to-back
 /// runs drift ~60 percent in wall time on Windows due to 1 GB
 /// guest-memory page-commit reuse.
-pub fn bench_boot_one_run(opts: BenchOptions<'_>, elf_data: Vec<u8>) -> BenchBootResult {
-    let r = bench_boot(opts, elf_data);
+pub fn bench_boot_one_run(
+    opts: BenchOptions<'_>,
+    elf_data: Vec<u8>,
+    authority_id: Option<u64>,
+) -> BenchBootResult {
+    let r = bench_boot(opts, elf_data, authority_id);
     println!(
         "BENCH_RESULT steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
         r.steps,

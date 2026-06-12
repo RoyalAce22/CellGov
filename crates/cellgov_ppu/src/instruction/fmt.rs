@@ -12,7 +12,7 @@
 //! explicit rendering.
 //!
 //! Extended mnemonics follow the PPC v2.02 Book I assembler
-//! appendix; the [`simplify`] table is consulted before canonical
+//! appendix; the `simplify` table is consulted before canonical
 //! rendering, and each rewrite has an exact structural gate. Branch
 //! `at`-hint bits are dropped (no `+`/`-` suffix is rendered).
 // [PPC-Book1 p:154 s:B.2.4] at-bit prediction suffixes; assemblers

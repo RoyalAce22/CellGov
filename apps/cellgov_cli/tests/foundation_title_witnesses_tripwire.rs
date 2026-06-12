@@ -1,31 +1,12 @@
 //! Consolidated foundation-title witness tripwire.
 //!
-//! Replaces 9 per-witness tripwire binaries (vrsave, atomic_alignment,
-//! dcbz, host_invariant_breaks, lwmutex_cond, mem_fault,
-//! rsx_label_writes, spu_image_register, spu_thread_init) that each
-//! spawned the same `cellgov_cli bench-boot-once` for the same three
-//! foundation titles (flow=10M, sshd=100M, wipeout=200M). They emitted
-//! ALL witness lines on every boot but each only parsed and asserted
-//! on its own -- running the same boots 9 times in serial test
-//! binaries. Wall-clock cost was ~9 x 28s = ~250s of duplicate work.
-//!
-//! This binary boots each title ONCE and asserts every witness against
-//! its per-title declared expectation in one pass. Per-witness
-//! semantics, status enums, and expected-value tables are preserved
-//! verbatim from the original tripwires; the only thing that changed
-//! is the boot is shared.
-//!
-//! Wipeout's 200M-step boot is the longest single contribution and is
-//! gated behind `CELLGOV_INCLUDE_WIPEOUT_TRIPWIRE=1` -- skipped by
-//! default for routine local test runs, opted in for CI / audit-run
-//! contexts. flow and sshd boots run unconditionally (gated only by
-//! the manifests-dir presence shared by all tripwires).
+//! Boots each foundation title (flOw / SSHD / WipEout) once via
+//! `cellgov_cli bench-boot-once` and asserts every BENCH_* witness
+//! against its per-title declared expectation in one pass.
 //!
 //! Silent skip when fixtures (gitignored EBOOTs + firmware) are
 //! absent; `CELLGOV_REQUIRE_FOUNDATION_TITLE_WITNESSES=1` promotes
-//! that to a hard failure (CI knob). Same shape as the prior
-//! per-tripwire knobs; one knob now covers the whole consolidated
-//! gate.
+//! that to a hard failure (CI knob).
 
 #![allow(
     clippy::print_stderr,
@@ -37,7 +18,7 @@
 )]
 #![allow(
     clippy::too_many_lines,
-    reason = "consolidates 9 per-witness tripwires into one binary; per-witness assertion blocks are co-located deliberately"
+    reason = "consolidates 9 per-witness tripwires into one binary; per-witness assertion blocks are co-located"
 )]
 
 use std::path::PathBuf;
@@ -63,7 +44,6 @@ fn manifests_dir_present() -> bool {
 }
 
 const REQUIRE_KNOB: &str = "CELLGOV_REQUIRE_FOUNDATION_TITLE_WITNESSES";
-const WIPEOUT_INCLUDE_KNOB: &str = "CELLGOV_INCLUDE_WIPEOUT_TRIPWIRE";
 
 // === All witnesses parsed from one bench-boot-once stderr. ===
 
@@ -197,9 +177,7 @@ const BOOT_STARTED_SENTINEL: &str = "boot: --firmware-dir defaulted";
 /// sentinel present, a non-zero exit means the boot ran and failed,
 /// which is a real witness signal -- `panic!` with the captured
 /// stderr so the test is RED-when-broken rather than silently green
-/// against a dead anchor. Prior shape (silent skip on any non-zero)
-/// is the vacuous-witness pattern this binary suspended for the
-/// flow / sshd / wipeout cases in commit `4972d2b2`.
+/// against a dead anchor.
 fn boot_title_once(title: &str, max_steps: u64) -> Option<AllWitnesses> {
     let cli_bin = env!("CARGO_BIN_EXE_cellgov_cli");
     let output = Command::new(cli_bin)
@@ -249,7 +227,6 @@ fn boot_title_once(title: &str, max_steps: u64) -> Option<AllWitnesses> {
 
 // =========================================================================
 // Per-witness status enums + assertion helpers.
-// Semantics preserved verbatim from the original tripwire binaries.
 // =========================================================================
 
 // ---- VRSAVE (was vrsave_tripwire.rs) ----
@@ -292,9 +269,6 @@ fn assert_vrsave(title: &str, w: &AllWitnesses, status: VrsaveStatus, reason: &s
 }
 
 // ---- Generic Reached / UnreachedAtBootCheckpoint counter helper ----
-// Used by atomic_alignment, dcbz, spu_image_register, spu_thread_init,
-// rsx_label_writes, lwmutex_cond. Same semantic shape; collapsed into
-// one helper to avoid duplicating the assert prose 4x per tripwire.
 
 #[derive(Debug, Clone, Copy)]
 enum CountStatus {
@@ -404,6 +378,12 @@ fn assert_mem_fault(title: &str, w: &AllWitnesses, status: MemFaultStatus, reaso
 #[derive(Debug, Clone, Copy)]
 enum HostInvariantBreaksStatus {
     ExactAtAnchor(u64),
+    #[allow(
+        dead_code,
+        reason = "all three titles now reach their first break post-authority-id-fix, so no \
+                  title currently declares this. Retained for the future title whose boot \
+                  truncates before its first break; same future-proofing as MemFaultStatus."
+    )]
     BelowFirstBreakAtTruncation,
 }
 
@@ -457,7 +437,6 @@ fn flow_all_witnesses() {
         return;
     };
 
-    // vrsave: Free (prescan reports zero SPR-256 sites in flow's EBOOT)
     assert_vrsave(
         "flow",
         &w,
@@ -465,7 +444,6 @@ fn flow_all_witnesses() {
         "prescan reports zero SPR-256 sites in flow's EBOOT (commit 054f09a)",
     );
 
-    // atomic alignment: all four primitives reached
     assert_count(
         "flow",
         "ldarx",
@@ -503,7 +481,6 @@ fn flow_all_witnesses() {
         "same as ldarx above",
     );
 
-    // mem fault: unreached at boot checkpoint
     assert_mem_fault(
         "flow",
         &w,
@@ -511,14 +488,13 @@ fn flow_all_witnesses() {
         "boot truncates at MaxSteps with no MemFault arm entry (measured 2026-06-04)",
     );
 
-    // rsx label writes: unreached
     assert_count(
         "flow", "rsx_label_writes", w.rsx_label_writes_count,
         CountStatus::UnreachedAtBootCheckpoint,
         "boot truncates at MaxSteps before any RSX FIFO advance retires label-write effects (measured 2026-06-04)",
     );
 
-    // SET_REFERENCE dispatches: reached. The C-6 tripwire for the
+    // The C-6 tripwire for the
     // cursor->MMIO REF writeback. libgcm stages
     // SET_REFERENCE(0xFFFFFFFF) in its bring-up FIFO at PUT-8;
     // the walker dispatches it once `cursor.get` is aligned with
@@ -538,7 +514,6 @@ fn flow_all_witnesses() {
          or stale cursor)",
     );
 
-    // dcbz: reached (28+)
     assert_count(
         "flow",
         "dcbz",
@@ -549,7 +524,6 @@ fn flow_all_witnesses() {
         "boot exercises dcbz 28 times within 39062 step units (measured 2026-06-04)",
     );
 
-    // spu image register: unreached
     assert_count(
         "flow",
         "spu_image_register",
@@ -558,7 +532,6 @@ fn flow_all_witnesses() {
         "no SPU candidate auto-register within reach (measured 2026-06-04)",
     );
 
-    // spu thread init: unreached
     assert_count(
         "flow",
         "spu_thread_init",
@@ -567,7 +540,6 @@ fn flow_all_witnesses() {
         "boot truncates before any SPU thread init dispatch (measured 2026-06-04)",
     );
 
-    // lwmutex + cond: acquires/releases reached, cond unreached
     assert_count(
         "flow", "lwmutex_acquires", w.lwmutex_acquires,
         CountStatus::Reached { expected_at_least: 643 },
@@ -590,13 +562,19 @@ fn flow_all_witnesses() {
         "same as lwmutex_acquires",
     );
 
-    // host invariant breaks: ExactAtAnchor(43). flOw reaches
-    // ProcessExit at step 11,275 with 43 honest breaks along the way
-    // (re-measured after the cellSysutil module_start HLE-stub).
+    // flOw reaches
+    // ProcessExit at step 11,224 with 44 honest breaks. The +1 vs
+    // the prior anchor is the `_sys_prx_unload_module` (syscall 483)
+    // CELL_ENOSYS break that cellSysmodule's module_start issues
+    // during its full-init arm -- now reached because the per-title
+    // program-authority-id fix makes module_start run full init
+    // instead of early-exiting. (The 39 `_sys_prx_stop_module`,
+    // syscall 482, ENOSYS breaks in flOw's atexit cleanup are
+    // pre-existing, not the new one.)
     assert_host_invariant_breaks(
         "flow", &w,
-        HostInvariantBreaksStatus::ExactAtAnchor(43),
-        "boot completes to ProcessExit; 43 honest breaks observed at the anchor (re-measured post-cellSysutil-stub)",
+        HostInvariantBreaksStatus::ExactAtAnchor(44),
+        "boot completes to ProcessExit; 44 honest breaks observed at the anchor (re-measured post-authority-id-fix)",
     );
 }
 
@@ -720,24 +698,22 @@ fn sshd_all_witnesses() {
         "same as lwmutex_acquires",
     );
 
+    // SSHD's first break
+    // is now reached -- the `_sys_prx_unload_module` (syscall 483)
+    // CELL_ENOSYS break that cellSysmodule's module_start issues in
+    // its full-init arm, once the per-title authority-id fix makes
+    // module_start run full init. The pre-fix anchor was
+    // BelowFirstBreakAtTruncation (count 0).
     assert_host_invariant_breaks(
         "sshd",
         &w,
-        HostInvariantBreaksStatus::BelowFirstBreakAtTruncation,
-        "boot truncates at MaxSteps before the first SSHD break fires",
+        HostInvariantBreaksStatus::ExactAtAnchor(1),
+        "boot truncates at MaxSteps; 1 honest break (sys_prx unload_module ENOSYS in cellSysmodule module_start) observed (re-measured post-authority-id-fix)",
     );
 }
 
 #[test]
 fn wipeout_all_witnesses() {
-    if std::env::var_os(WIPEOUT_INCLUDE_KNOB).is_none() {
-        eprintln!(
-            "foundation_title_witnesses wipeout: skipping (set {WIPEOUT_INCLUDE_KNOB}=1 \
-             to opt in; ~7s wall-clock 200M-step boot, off by default for routine local \
-             test runs)"
-        );
-        return;
-    }
     if !manifests_dir_present() {
         if std::env::var_os(REQUIRE_KNOB).is_some() {
             panic!(
@@ -859,12 +835,20 @@ fn wipeout_all_witnesses() {
         "same as lwmutex_acquires",
     );
 
+    // The +1 vs the prior
+    // anchor is the `_sys_prx_unload_module` (syscall 483)
+    // CELL_ENOSYS break cellSysmodule's module_start issues in its
+    // full-init arm, reached once the per-title authority-id fix
+    // makes module_start run full init. The RsxWriteCheckpoint step
+    // (43,083) is unchanged because module_start runs in the boot
+    // prepare phase, outside the counted step loop -- the break
+    // costs zero step-loop steps.
     assert_host_invariant_breaks(
         "wipeout",
         &w,
-        HostInvariantBreaksStatus::ExactAtAnchor(2),
-        "boot reaches RsxWriteCheckpoint; 2 honest breaks observed at the anchor \
-         (re-measured post-cellSysutil-stub)",
+        HostInvariantBreaksStatus::ExactAtAnchor(3),
+        "boot reaches RsxWriteCheckpoint; 3 honest breaks observed at the anchor \
+         (re-measured post-authority-id-fix)",
     );
 }
 

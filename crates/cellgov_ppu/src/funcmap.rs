@@ -41,7 +41,7 @@ const MAX_FUNCTIONS: usize = 1 << 20;
 pub struct FunctionMap {
     /// Sorted by `start`; spans never overlap.
     pub functions: Vec<FunctionSpan>,
-    /// True when discovery stopped at [`MAX_FUNCTIONS`]; the map is
+    /// True when discovery stopped at `MAX_FUNCTIONS`; the map is
     /// then a prefix, not the full set.
     pub truncated: bool,
 }

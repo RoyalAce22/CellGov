@@ -67,13 +67,8 @@ impl Lv2Host {
     /// (mid-record refill) waits: a wait on a cond whose create-time
     /// ipc_key is `CELLSYSUTIL_COND1_IPC_KEY_BASE + slot` returns
     /// CELL_OK immediately when that slot's seeded ring still has
-    /// unconsumed data (cursor < limit). A consumer only refill-waits
-    /// after observing a depleted ring, so this arm is expected to
-    /// never fire; [`Lv2Host::cond_ring_wakes`] proves it either way.
-    /// The cond\[0\] record-finish waits are producer-fed and NOT
-    /// synthesized -- CellGov has no producer contract to invent;
-    /// waking them without mutating slot state re-enters the same
-    /// guard and live-locks the consumer.
+    /// unconsumed data (cursor < limit). cond\[0\] record-finish waits
+    /// are producer-fed and not synthesized here.
     fn cond_ring_wake_check(&mut self, id: u32, rt: &dyn Lv2Runtime) -> bool {
         let Some(&ipc_key) = self.cond_ipc_keys.get(&id) else {
             return false;

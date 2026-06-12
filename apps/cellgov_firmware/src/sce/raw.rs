@@ -151,6 +151,46 @@ pub fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, SceError> {
     })
 }
 
+/// Program authority id from a SELF's plaintext program
+/// identification header.
+///
+/// The extended header at file offset 0x20 carries
+/// `program_identification_hdr_offset` (u64 BE at offset 0x28); the
+/// authority id is the first u64 of that header. Field layout per
+/// RPCS3 `unself.h` / `unself.cpp`. Both
+/// headers are plaintext -- no decryption is involved, so the id is
+/// readable from NPDRM-wrapped SELFs without RAP material.
+///
+/// # Errors
+///
+/// [`SceError::BadMagic`] / [`SceError::TooSmall`] for non-SCE input
+/// (callers with possibly-raw-ELF bytes treat that as "no authority
+/// id"), [`SceError::HeaderOffsetOutOfRange`] when the recorded
+/// offset escapes the buffer.
+pub fn parse_program_authority_id(data: &[u8]) -> Result<u64, SceError> {
+    parse_sce_header(data)?;
+    if data.len() < 0x30 {
+        return Err(SceError::TooSmall {
+            what: "SELF extended header",
+            got: data.len(),
+            need: 0x30,
+        });
+    }
+    let pid_off = read_be_u64(data, 0x28);
+    let Ok(pid_off) = usize::try_from(pid_off) else {
+        return Err(SceError::HeaderOffsetOutOfRange {
+            what: "program identification header",
+        });
+    };
+    let end = checked_add_oob(pid_off, 8, "program identification header")?;
+    if end > data.len() {
+        return Err(SceError::HeaderOffsetOutOfRange {
+            what: "program identification header",
+        });
+    }
+    Ok(read_be_u64(data, pid_off))
+}
+
 /// Walk an SELF's supplemental-header chain and return the body of
 /// the first record of `kind`, if present.
 ///
