@@ -221,6 +221,29 @@ fn cmd_decrypt_self(args: &[String]) {
     );
 }
 
+/// dev_flash subtrees CellGov never loads and prunes at install
+/// time. The PS1 / PS2 / PSP backward-compat emulators are pure dead
+/// weight for a CBE execution oracle. This is a deliberate divergence
+/// from a stock RPCS3 dev_flash, which keeps them.
+const PRUNED_DEV_FLASH_DIRS: [&str; 3] = ["ps1emu/", "ps2emu/", "pspemu/"];
+
+/// Whether an inner dev_flash entry is dropped at install time.
+///
+/// Two reasons: RPCS3's fullwidth-dollar (`U+FF04`) backwards-compat
+/// dead-entry marker (never written to disk, matching
+/// `tar_object::extract`), and CellGov's emulator prune
+/// ([`PRUNED_DEV_FLASH_DIRS`]).
+fn is_install_excluded(entry_name: &str) -> bool {
+    if entry_name.contains('\u{ff04}') {
+        return true;
+    }
+    let rel = entry_name
+        .trim_start_matches('/')
+        .strip_prefix("dev_flash/")
+        .unwrap_or(entry_name);
+    PRUNED_DEV_FLASH_DIRS.iter().any(|d| rel.starts_with(d))
+}
+
 fn cmd_install(args: &[String]) {
     let install_args = parse_install_args(args).unwrap_or_else(|e| {
         eprintln!("{e}");
@@ -281,9 +304,13 @@ fn cmd_install(args: &[String]) {
         eprintln!("PUP outer TAR parse failed: {e}");
         std::process::exit(1);
     });
+    // Match RPCS3: only packages whose name contains `dev_flash_`
+    // (with the trailing underscore) are firmware payload. This drops
+    // the `dev_flash3_*` revocation-list package RPCS3 also skips; a
+    // bare `dev_flash` substring would wrongly keep it.
     let dev_flash_entries: Vec<_> = outer_tar
         .iter()
-        .filter(|e| e.name.contains("dev_flash"))
+        .filter(|e| e.name.contains("dev_flash_"))
         .collect();
 
     println!(
@@ -302,6 +329,10 @@ fn cmd_install(args: &[String]) {
         match sce::decrypt_package(&entry.data) {
             Ok(inner_tar_data) => match tar::parse(&inner_tar_data) {
                 Ok(inner_files) => {
+                    let inner_files: Vec<tar::TarEntry> = inner_files
+                        .into_iter()
+                        .filter(|f| !is_install_excluded(&f.name))
+                        .collect();
                     if inner_files.is_empty() {
                         println!(" empty");
                         continue;

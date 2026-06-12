@@ -158,3 +158,34 @@ fn parse_minimal_tar_entry() {
     assert_eq!(entries[0].name, "hello.txt");
     assert_eq!(entries[0].data, b"hello");
 }
+
+#[test]
+fn parse_keeps_zero_byte_regular_file() {
+    // PS3 firmware ships empty placeholder files (e.g. vsh dummy.txt);
+    // a 0-byte regular entry must survive parse with empty data.
+    let header = ustar_header("empty.txt", "", 0, b'0');
+    let entries = parse(&header).expect("parse");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "empty.txt");
+    assert!(entries[0].data.is_empty());
+}
+
+#[test]
+fn extract_writes_zero_byte_file() {
+    let dir = std::env::temp_dir().join("cellgov_tar_empty_31c1");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let entries = vec![TarEntry {
+        name: "dev_flash/vsh/resource/silk/lib/Plugins/dummy.txt".into(),
+        data: Vec::new(),
+    }];
+    let report = extract_to_disk(&entries, &dir);
+    assert_eq!(report.written, 1);
+    assert!(report.errors.is_empty());
+    let dest = dir.join("vsh/resource/silk/lib/Plugins/dummy.txt");
+    assert!(dest.is_file());
+    assert_eq!(std::fs::metadata(&dest).unwrap().len(), 0);
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}

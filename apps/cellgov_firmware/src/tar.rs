@@ -123,7 +123,9 @@ fn octal_to_u64(s: &[u8]) -> Option<u64> {
 /// Parse a USTAR archive into its regular-file entries.
 ///
 /// Non-regular records (symlinks, directories, device nodes, etc.) are
-/// silently skipped. A pair of all-zero 512-byte blocks terminates the
+/// silently skipped. Zero-byte regular files ARE returned (with empty
+/// `data`): PS3 firmware ships empty placeholder files the install
+/// must reproduce. A pair of all-zero 512-byte blocks terminates the
 /// archive; trailing padding past that is ignored.
 pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
     let mut entries = Vec::new();
@@ -165,7 +167,7 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
 
         offset += 512;
 
-        if (filetype == b'0' || filetype == 0) && size > 0 {
+        if filetype == b'0' || filetype == 0 {
             if offset + size > data.len() {
                 return Err(TarParseError::PayloadPastArchive {
                     name: full_name,
@@ -203,7 +205,9 @@ fn is_safe_relative(clean: &str) -> bool {
 pub fn extract_to_disk(entries: &[TarEntry], base: &Path) -> ExtractReport {
     let mut report = ExtractReport::default();
     for entry in entries {
-        if entry.name.is_empty() || entry.data.is_empty() {
+        // Empty `data` is still written (PS3 firmware ships 0-byte
+        // placeholder files); only a nameless entry is unrepresentable.
+        if entry.name.is_empty() {
             continue;
         }
         let clean = entry.name.trim_start_matches('/');
