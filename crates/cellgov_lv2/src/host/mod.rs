@@ -37,6 +37,7 @@ mod tests;
 
 pub use diagnostics::InvariantBreakReason;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
+pub use mmapper::SystemStateSeed;
 pub use rsx::{
     SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,
     PACKAGE_CELLGOV_SET_VBLANK_HANDLER,

@@ -53,3 +53,19 @@ pub(crate) struct PendingRegionInstall {
     pub addr: u64,
     pub size: usize,
 }
+
+/// Deterministic boot-state writes applied when the shm registered
+/// under `shm_ipc_key` is first mapped into guest memory (334 / 337).
+///
+/// Models system state an external firmware producer would have
+/// established before the title ran; CellGov encodes it as data, not
+/// as cross-process communication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemStateSeed {
+    /// Must match a key later passed to a keyed 332.
+    pub shm_ipc_key: u64,
+    /// `(offset, bytes)` big-endian writes relative to the mapped
+    /// base. Every write must land inside the registered handle's
+    /// size.
+    pub writes: Vec<(u32, Vec<u8>)>,
+}

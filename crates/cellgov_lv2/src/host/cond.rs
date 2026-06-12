@@ -8,9 +8,15 @@
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::sys_sync::SYS_SYNC_PROCESS_SHARED;
+use cellgov_ps3_abi::system_ipc::{
+    CELLSYSUTIL_COND0_IPC_KEY_BASE, CELLSYSUTIL_COND1_IPC_KEY_BASE, CELLSYSUTIL_SHM_IPC_KEY,
+    CELLSYSUTIL_SLOT_COUNT, CELLSYSUTIL_SLOT_CURSOR_OFFSET, CELLSYSUTIL_SLOT_LIMIT_OFFSET,
+    CELLSYSUTIL_SLOT_STRIDE,
+};
 
 use crate::dispatch::{CondMutexKind, Lv2Dispatch, PendingResponse};
-use crate::host::Lv2Host;
+use crate::host::{Lv2Host, Lv2Runtime};
 use crate::ppu_thread::PpuThreadId;
 
 impl Lv2Host {
@@ -18,7 +24,9 @@ impl Lv2Host {
         &mut self,
         id_ptr: u32,
         mutex_id: u32,
+        attr_ptr: u32,
         requester: UnitId,
+        rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         if self.mutexes.lookup(mutex_id).is_none() {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
@@ -31,6 +39,15 @@ impl Lv2Host {
         {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
+        // Effective ipc_key is the attr's key iff pshared ==
+        // SYS_SYNC_PROCESS_SHARED, else 0. Oracle: RPCS3's
+        // `lv2_obj::get_key` (`sys_sync.h:308`). An unreadable attr
+        // stays keyless; attr validation is otherwise unchanged.
+        if let Some(ipc_key) = cond_attr_ipc_key(attr_ptr, rt) {
+            if ipc_key != 0 {
+                self.cond_ipc_keys.insert(id, ipc_key);
+            }
+        }
         self.immediate_write_u32(id, id_ptr, requester)
     }
 
@@ -42,16 +59,83 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
         self.conds.destroy(id);
+        self.cond_ipc_keys.remove(&id);
         Lv2Dispatch::immediate(0)
     }
 
-    pub(super) fn dispatch_cond_wait(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
+    /// Ring-state-aware wake for the cellSysutil cond\[1\]
+    /// (mid-record refill) waits: a wait on a cond whose create-time
+    /// ipc_key is `CELLSYSUTIL_COND1_IPC_KEY_BASE + slot` returns
+    /// CELL_OK immediately when that slot's seeded ring still has
+    /// unconsumed data (cursor < limit). A consumer only refill-waits
+    /// after observing a depleted ring, so this arm is expected to
+    /// never fire; [`Lv2Host::cond_ring_wakes`] proves it either way.
+    /// The cond\[0\] record-finish waits are producer-fed and NOT
+    /// synthesized -- CellGov has no producer contract to invent;
+    /// waking them without mutating slot state re-enters the same
+    /// guard and live-locks the consumer.
+    fn cond_ring_wake_check(&mut self, id: u32, rt: &dyn Lv2Runtime) -> bool {
+        let Some(&ipc_key) = self.cond_ipc_keys.get(&id) else {
+            return false;
+        };
+        let Some(slot) = ipc_key.checked_sub(CELLSYSUTIL_COND1_IPC_KEY_BASE) else {
+            return false;
+        };
+        if slot >= u64::from(CELLSYSUTIL_SLOT_COUNT) {
+            return false;
+        }
+        let Some(&base) = self.system_seed_bases.get(&CELLSYSUTIL_SHM_IPC_KEY) else {
+            return false;
+        };
+        let read_u32 = |addr: u32| -> Option<u32> {
+            let bytes = rt.read_committed(u64::from(addr), 4)?;
+            Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        };
+        let slot_base = base.wrapping_add(slot as u32 * CELLSYSUTIL_SLOT_STRIDE);
+        let cursor = read_u32(slot_base.wrapping_add(CELLSYSUTIL_SLOT_CURSOR_OFFSET));
+        let limit = read_u32(slot_base.wrapping_add(CELLSYSUTIL_SLOT_LIMIT_OFFSET));
+        if let (Some(cursor), Some(limit)) = (cursor, limit) {
+            if cursor < limit {
+                self.cond_ring_wakes = self.cond_ring_wakes.wrapping_add(1);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Bump the producer-wait witness when a park lands on a
+    /// cellSysutil cond\[0\] (record-finish wait for the next
+    /// producer record).
+    fn note_cond_park_after_seed(&mut self, id: u32) {
+        let Some(&ipc_key) = self.cond_ipc_keys.get(&id) else {
+            return;
+        };
+        if let Some(slot) = ipc_key.checked_sub(CELLSYSUTIL_COND0_IPC_KEY_BASE) {
+            if slot < u64::from(CELLSYSUTIL_SLOT_COUNT) {
+                *self.cond0_producer_waits_by_slot.entry(slot).or_insert(0) += 1;
+            }
+        }
+    }
+
+    pub(super) fn dispatch_cond_wait(
+        &mut self,
+        id: u32,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
         let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        let Some(entry) = self.conds.lookup(id) else {
+        if self.conds.lookup(id).is_none() {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
-        };
+        }
+        if self.cond_ring_wake_check(id, rt) {
+            return Lv2Dispatch::immediate(0);
+        }
+        let entry = self
+            .conds
+            .lookup(id)
+            .expect("cond presence checked just above");
         let mutex_id = entry.mutex_id();
         let mutex_kind = entry.mutex_kind();
         let release = match mutex_kind {
@@ -81,6 +165,7 @@ impl Lv2Host {
                         return Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into());
                     }
                 }
+                self.note_cond_park_after_seed(id);
                 Lv2Dispatch::Block {
                     reason: crate::dispatch::Lv2BlockReason::Cond {
                         id,
@@ -108,6 +193,7 @@ impl Lv2Host {
                         return Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into());
                     }
                 }
+                self.note_cond_park_after_seed(id);
                 let woken_unit_ids =
                     match self.resolve_wake_thread(new_owner, "cond_wait.Transferred.new_owner") {
                         Some(unit) => vec![unit],
@@ -223,6 +309,10 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_cond_signal(&mut self, id: u32) -> Lv2Dispatch {
+        self.cond_signal_dispatches = self.cond_signal_dispatches.wrapping_add(1);
+        if let Some(&ipc_key) = self.cond_ipc_keys.get(&id) {
+            *self.cond_keyed_signal_counts.entry(ipc_key).or_insert(0) += 1;
+        }
         let Some(entry) = self.conds.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
@@ -275,6 +365,33 @@ impl Lv2Host {
             }
         }
     }
+}
+
+/// Effective ipc_key from a `sys_cond_attribute_t`: the key at +8
+/// iff `pshared` at +0 equals SYS_SYNC_PROCESS_SHARED, else 0.
+/// `None` when the attr struct is unreadable.
+fn cond_attr_ipc_key(attr_ptr: u32, rt: &dyn Lv2Runtime) -> Option<u64> {
+    let pshared_bytes = rt.read_committed(u64::from(attr_ptr), 4)?;
+    let pshared = u32::from_be_bytes([
+        pshared_bytes[0],
+        pshared_bytes[1],
+        pshared_bytes[2],
+        pshared_bytes[3],
+    ]);
+    if pshared != SYS_SYNC_PROCESS_SHARED {
+        return Some(0);
+    }
+    let key_bytes = rt.read_committed(u64::from(attr_ptr) + 8, 8)?;
+    Some(u64::from_be_bytes([
+        key_bytes[0],
+        key_bytes[1],
+        key_bytes[2],
+        key_bytes[3],
+        key_bytes[4],
+        key_bytes[5],
+        key_bytes[6],
+        key_bytes[7],
+    ]))
 }
 
 fn wake_with(

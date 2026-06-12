@@ -197,10 +197,12 @@ impl Lv2Host {
                 self.dispatch_event_flag_get(id, flags_ptr, requester)
             }
             Lv2Request::CondCreate {
-                id_ptr, mutex_id, ..
-            } => self.dispatch_cond_create(id_ptr, mutex_id, requester),
+                id_ptr,
+                mutex_id,
+                attr_ptr,
+            } => self.dispatch_cond_create(id_ptr, mutex_id, attr_ptr, requester, rt),
             Lv2Request::CondDestroy { id } => self.dispatch_cond_destroy(id),
-            Lv2Request::CondWait { id, .. } => self.dispatch_cond_wait(id, requester),
+            Lv2Request::CondWait { id, .. } => self.dispatch_cond_wait(id, requester, rt),
             Lv2Request::CondSignal { id } => self.dispatch_cond_signal(id),
             Lv2Request::CondSignalAll { id } => self.dispatch_cond_signal_all(id),
             Lv2Request::CondSignalTo { id, target_thread } => {
@@ -362,7 +364,7 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_MAP_SHARED_MEMORY,
                 args,
-            } => self.dispatch_mmapper_map_shared_memory(args),
+            } => self.dispatch_mmapper_map_shared_memory(args, requester),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_SEARCH_AND_MAP,
                 args,

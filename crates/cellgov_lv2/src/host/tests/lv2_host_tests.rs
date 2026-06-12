@@ -420,3 +420,32 @@ fn set_mem_alloc_base_accepts_aligned_base_within_user_region() {
     let mut host = Lv2Host::new();
     host.set_mem_alloc_base(0x0100_0000);
 }
+
+#[test]
+fn register_system_seed_inserts_and_duplicate_key_replaces() {
+    let mut host = Lv2Host::new();
+    host.register_system_seed(crate::SystemStateSeed {
+        shm_ipc_key: 0x8006_0100_0000_0010,
+        writes: vec![(0, vec![1])],
+    });
+    host.register_system_seed(crate::SystemStateSeed {
+        shm_ipc_key: 0x8006_0100_0000_0010,
+        writes: vec![(4, vec![2, 3])],
+    });
+    assert_eq!(host.system_state_seeds().len(), 1);
+    let seed = &host.system_state_seeds()[&0x8006_0100_0000_0010];
+    assert_eq!(seed.writes, vec![(4, vec![2, 3])]);
+}
+
+#[test]
+fn system_state_seeds_iterate_in_key_order() {
+    let mut host = Lv2Host::new();
+    for key in [0x8006_0100_0000_0030u64, 0x8006_0100_0000_0010] {
+        host.register_system_seed(crate::SystemStateSeed {
+            shm_ipc_key: key,
+            writes: Vec::new(),
+        });
+    }
+    let keys: Vec<u64> = host.system_state_seeds().keys().copied().collect();
+    assert_eq!(keys, vec![0x8006_0100_0000_0010, 0x8006_0100_0000_0030]);
+}

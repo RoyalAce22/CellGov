@@ -543,7 +543,7 @@ fn syscall_332_writes_fresh_mem_id_to_mem_id_ptr() {
     let first_call = host.dispatch(
         Lv2Request::Unsupported {
             number: 332,
-            args: [0x8006_0100_0000_0010, 0x10000, 0x200, 0x9000, 0, 0, 0, 0],
+            args: [0xffff_0000_0000_0000, 0x10000, 0x200, 0x9000, 0, 0, 0, 0],
         },
         UnitId::new(0),
         &rt,
@@ -565,7 +565,7 @@ fn syscall_332_writes_fresh_mem_id_to_mem_id_ptr() {
     let second_call = host.dispatch(
         Lv2Request::Unsupported {
             number: 332,
-            args: [0x8006_0100_0000_0010, 0x10000, 0x200, 0x9100, 0, 0, 0, 0],
+            args: [0xffff_0000_0000_0000, 0x10000, 0x200, 0x9100, 0, 0, 0, 0],
         },
         UnitId::new(0),
         &rt,
@@ -582,8 +582,202 @@ fn syscall_332_writes_fresh_mem_id_to_mem_id_ptr() {
     };
     assert!(
         second_id > first_id,
-        "successive mem_ids must be monotonic: first=0x{first_id:x} second=0x{second_id:x}"
+        "successive keyless mem_ids must be monotonic: first=0x{first_id:x} second=0x{second_id:x}"
     );
+}
+
+/// Run sc 332 with `ipc_key` and return the mem_id written to `*0x9000`.
+fn dispatch_332_keyed(host: &mut Lv2Host, rt: &FakeRuntime, ipc_key: u64, size: u64) -> u32 {
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 332,
+            args: [ipc_key, size, 0x200, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result else {
+        panic!("332 must succeed, got {result:?}");
+    };
+    let Effect::SharedWriteIntent { bytes, .. } = &effects[0] else {
+        panic!("332 must emit a SharedWriteIntent");
+    };
+    u32::from_be_bytes(bytes.bytes().try_into().unwrap())
+}
+
+#[test]
+fn syscall_332_keyed_create_registers_ipc_entry() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let mem_id = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0010, 0x10000);
+    assert_eq!(
+        host.mmapper_ipc().get(&0x8006_0100_0000_0010),
+        Some(&mem_id)
+    );
+}
+
+#[test]
+fn syscall_332_same_ipc_key_returns_existing_mem_id() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let first = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0010, 0x10000);
+    // NOT_CARE: size differs but the existing handle is returned with
+    // its original size intact.
+    let second = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0010, 0x20000);
+    assert_eq!(first, second);
+    assert_eq!(host.mmapper_ipc().len(), 1);
+    let handle = host.mmapper_handles.get(first).expect("handle must exist");
+    assert_eq!(handle.size, 0x10000);
+}
+
+#[test]
+fn syscall_332_distinct_ipc_keys_mint_distinct_mem_ids() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let first = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0010, 0x10000);
+    let second = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0020, 0x10000);
+    assert_ne!(first, second);
+    assert_eq!(host.mmapper_ipc().len(), 2);
+}
+
+#[test]
+fn syscall_337_applies_registered_seed_on_first_map_of_keyed_shm() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    host.register_system_seed(crate::SystemStateSeed {
+        shm_ipc_key: 0x8006_0100_0000_0010,
+        writes: vec![(0, vec![0xAA; 4]), (0x8000, vec![0xBB])],
+    });
+    let mem_id = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0010, 0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [0x5000_0000, u64::from(mem_id), 0, 0x9100, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result else {
+        panic!("337 must succeed, got {result:?}");
+    };
+    assert_eq!(effects.len(), 3, "two seed writes + alloc_addr write-back");
+    let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] else {
+        panic!("seed write must be a SharedWriteIntent");
+    };
+    assert_eq!(range.start().raw(), 0x5000_0000);
+    assert_eq!(bytes.bytes(), [0xAA; 4]);
+    let Effect::SharedWriteIntent { range, bytes, .. } = &effects[1] else {
+        panic!("seed write must be a SharedWriteIntent");
+    };
+    assert_eq!(range.start().raw(), 0x5000_8000);
+    assert_eq!(bytes.bytes(), [0xBB]);
+    let Effect::SharedWriteIntent { range, .. } = &effects[2] else {
+        panic!("alloc_addr write-back must be a SharedWriteIntent");
+    };
+    assert_eq!(range.start().raw(), 0x9100);
+    assert!(host.system_seed_applied(0x8006_0100_0000_0010));
+}
+
+#[test]
+fn syscall_337_second_map_does_not_reapply_seed() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    host.register_system_seed(crate::SystemStateSeed {
+        shm_ipc_key: 0x8006_0100_0000_0010,
+        writes: vec![(0, vec![0xAA; 4])],
+    });
+    let mem_id = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0010, 0x10000);
+    for _ in 0..2 {
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 337,
+                args: [0x5000_0000, u64::from(mem_id), 0, 0x9100, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        );
+    }
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [0x5000_0000, u64::from(mem_id), 0, 0x9100, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result else {
+        panic!("337 must succeed, got {result:?}");
+    };
+    assert_eq!(effects.len(), 1, "re-map must emit only the write-back");
+}
+
+#[test]
+fn syscall_334_applies_registered_seed_at_fixed_addr() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    host.register_system_seed(crate::SystemStateSeed {
+        shm_ipc_key: 0x8006_0100_0000_0010,
+        writes: vec![(0x40, vec![0xCC; 8])],
+    });
+    let mem_id = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0010, 0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0x5000_0000, u64::from(mem_id), 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result else {
+        panic!("334 must succeed, got {result:?}");
+    };
+    assert_eq!(effects.len(), 1);
+    let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] else {
+        panic!("seed write must be a SharedWriteIntent");
+    };
+    assert_eq!(range.start().raw(), 0x5000_0040);
+    assert_eq!(bytes.bytes(), [0xCC; 8]);
+}
+
+#[test]
+fn syscall_337_keyless_shm_ignores_registered_seeds() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    host.register_system_seed(crate::SystemStateSeed {
+        shm_ipc_key: 0x8006_0100_0000_0010,
+        writes: vec![(0, vec![0xAA; 4])],
+    });
+    let mem_id = dispatch_332_keyed(&mut host, &rt, 0xffff_0000_0000_0000, 0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [0x5000_0000, u64::from(mem_id), 0, 0x9100, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result else {
+        panic!("337 must succeed, got {result:?}");
+    };
+    assert_eq!(
+        effects.len(),
+        1,
+        "keyless shm must emit only the write-back"
+    );
+    assert!(!host.system_seed_applied(0x8006_0100_0000_0010));
+}
+
+#[test]
+fn syscall_332_sentinel_and_zero_keys_bypass_registration() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let sentinel_a = dispatch_332_keyed(&mut host, &rt, 0xffff_0000_0000_0000, 0x10000);
+    let sentinel_b = dispatch_332_keyed(&mut host, &rt, 0xffff_0000_0000_0000, 0x10000);
+    let zero_a = dispatch_332_keyed(&mut host, &rt, 0, 0x10000);
+    let zero_b = dispatch_332_keyed(&mut host, &rt, 0, 0x10000);
+    assert_ne!(sentinel_a, sentinel_b);
+    assert_ne!(zero_a, zero_b);
+    assert!(host.mmapper_ipc().is_empty());
 }
 
 #[test]

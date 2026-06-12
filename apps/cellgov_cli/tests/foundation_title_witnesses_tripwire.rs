@@ -442,18 +442,7 @@ fn assert_host_invariant_breaks(
 // per-witness assertion against the parsed AllWitnesses.
 // =========================================================================
 
-// Suspended: `boot_title_once` silently returns `None` on bench-boot-once
-// exit-non-zero, which collapses the assertion block to a no-op. The
-// post-(1c) tree's foundation-title boots die at cellSysutil module_start
-// step 12 with `commit_step OutOfRange { effect_index: 1 }` (pending the
-// investigation in `docs/dev/bug_investigations/cellsysutil_mmapper_oob.md`),
-// so every anchor below is a false witness until boot reaches title `_start`
-// again. Re-enable by removing the `#[ignore]` once cellsysutil_mmapper_oob
-// is closed and the anchors are re-measured.
 #[test]
-#[ignore = "anchor invalid: boot reaches cellSysutil module_start step 43 \
-            (NoRunnableUnit/AllBlocked) after the sc 337 fix landed in 672258b9; \
-            next investigation pending. Re-anchors when boot reaches title _start"]
 fn flow_all_witnesses() {
     if !manifests_dir_present() {
         if std::env::var_os(REQUIRE_KNOB).is_some() {
@@ -601,22 +590,17 @@ fn flow_all_witnesses() {
         "same as lwmutex_acquires",
     );
 
-    // host invariant breaks: ExactAtAnchor(43). Post-cursor-catch-up,
-    // flOw reaches ProcessExit at step 11,299 with 43 honest breaks
-    // along the way. The pre-fix anchor (2 breaks at MaxSteps=390,625)
-    // was the truncated mid-spin count; the post-fix trajectory
-    // exercises substantially more of the title's bring-up.
+    // host invariant breaks: ExactAtAnchor(43). flOw reaches
+    // ProcessExit at step 11,275 with 43 honest breaks along the way
+    // (re-measured after the cellSysutil module_start HLE-stub).
     assert_host_invariant_breaks(
         "flow", &w,
         HostInvariantBreaksStatus::ExactAtAnchor(43),
-        "boot completes to ProcessExit; 43 honest breaks observed at the anchor (measured post-cursor-catch-up)",
+        "boot completes to ProcessExit; 43 honest breaks observed at the anchor (re-measured post-cellSysutil-stub)",
     );
 }
 
 #[test]
-#[ignore = "anchor invalid: boot reaches cellSysutil module_start step 43 \
-            (NoRunnableUnit/AllBlocked) after the sc 337 fix landed in 672258b9; \
-            next investigation pending. Re-anchors when boot reaches title _start"]
 fn sshd_all_witnesses() {
     if !manifests_dir_present() {
         if std::env::var_os(REQUIRE_KNOB).is_some() {
@@ -635,7 +619,7 @@ fn sshd_all_witnesses() {
         "sshd",
         &w,
         VrsaveStatus::UnreachedAtBootCheckpoint,
-        "prescan reports 2 SPR-256 sites; boot terminates at Fault anchor before reaching them",
+        "prescan reports 2 SPR-256 sites; boot truncates at MaxSteps before reaching them",
     );
 
     assert_count(
@@ -745,9 +729,6 @@ fn sshd_all_witnesses() {
 }
 
 #[test]
-#[ignore = "anchor invalid: boot reaches cellSysutil module_start step 43 \
-            (NoRunnableUnit/AllBlocked) after the sc 337 fix landed in 672258b9; \
-            next investigation pending. Re-anchors when boot reaches title _start"]
 fn wipeout_all_witnesses() {
     if std::env::var_os(WIPEOUT_INCLUDE_KNOB).is_none() {
         eprintln!(
@@ -882,7 +863,8 @@ fn wipeout_all_witnesses() {
         "wipeout",
         &w,
         HostInvariantBreaksStatus::ExactAtAnchor(2),
-        "boot completes to Fault; 2 honest breaks observed at the anchor (measured 2026-06-04)",
+        "boot reaches RsxWriteCheckpoint; 2 honest breaks observed at the anchor \
+         (re-measured post-cellSysutil-stub)",
     );
 }
 

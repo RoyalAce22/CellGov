@@ -20,6 +20,7 @@ pub mod sys_spu;
 pub mod sys_sync;
 pub mod syscall;
 pub mod syscall_namespace;
+pub mod system_ipc;
 pub mod trampoline_codegen;
 
 pub mod rsx_nv_hardware;
