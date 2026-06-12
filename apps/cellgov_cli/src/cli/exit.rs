@@ -20,6 +20,43 @@ pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| die(&format!("failed to read {path}: {e}")))
 }
 
+/// Plaintext-ize a PPU image: pass non-SCE bytes (plaintext ELF /
+/// PRX) through unchanged, and decrypt an SCE/SELF wrapper.
+///
+/// NPDRM titles resolve their klicensee from the RAP at
+/// `<vfs_root>/home/00000001/exdata/<content_id>.rap` -- the same
+/// exdata layout RPCS3 reads on boot, so a once-installed RAP is
+/// found by content id with no per-invocation `--rap` or `--title`.
+/// An absent RAP returns `None`: license-3 (free) titles fall back
+/// to `NP_KLIC_FREE`, Network / Local titles surface
+/// `NoRapForNpdrmTitle`. `path` is used only in diagnostics.
+pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path) -> Vec<u8> {
+    if !(bytes.len() >= 4 && bytes[..4] == SCE_MAGIC) {
+        return bytes.to_vec();
+    }
+    let exdata = vfs_root.join("home").join("00000001").join("exdata");
+    let resolver = |npd: &NpdHeaderInfo| -> Option<[u8; 16]> {
+        let rap_path = exdata.join(format!("{}.rap", npd.content_id));
+        let rap_bytes = std::fs::read(&rap_path).ok()?;
+        let rap_arr: [u8; 16] = rap_bytes.as_slice().try_into().unwrap_or_else(|_| {
+            die(&format!(
+                "RAP file {} is {} bytes; expected exactly 16",
+                rap_path.display(),
+                rap_bytes.len(),
+            ))
+        });
+        Some(cellgov_firmware::npdrm::rap_to_klic(&rap_arr))
+    };
+    match cellgov_firmware::npdrm::decrypt_self_to_elf_auto(bytes, resolver) {
+        Ok(elf) => elf,
+        Err(e @ SceError::NoRapForNpdrmTitle { .. }) => die(&format!(
+            "{e}; expected its RAP at {}/<content_id>.rap",
+            exdata.display()
+        )),
+        Err(e) => die(&format!("failed to decrypt SELF {path}: {e}")),
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum LoadCandidateError {
     #[error("read failed: {0}")]
@@ -137,3 +174,7 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
         title.name(),
     ))
 }
+
+#[cfg(test)]
+#[path = "tests/exit_tests.rs"]
+mod tests;
