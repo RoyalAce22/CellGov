@@ -82,6 +82,14 @@ fn try_parse_args(args: &[String]) -> Result<Args, String> {
                 save_elf = Some(std::path::PathBuf::from(v));
                 i += 2;
             }
+            // Consumed so it is not rejected as unknown; re-read by
+            // `resolve_ps3_vfs_root` for NPDRM RAP resolution.
+            "--vfs-root" => {
+                if args.get(i + 1).is_none() {
+                    return Err("--vfs-root requires a path".to_string());
+                }
+                i += 2;
+            }
             other if other.starts_with("--") => {
                 return Err(format!("dump-prx-imports: unknown flag {other}"));
             }
@@ -139,20 +147,20 @@ enum LoadError {
 }
 
 /// Read `path` and return its plaintext ELF bytes plus the source
-/// kind. Auto-detects SCE wrappers by magic and decrypts them.
-fn load_elf_bytes(path: &std::path::Path) -> (Vec<u8>, SourceKind) {
+/// kind. Auto-detects SCE wrappers by magic and decrypts them; NPDRM
+/// SELFs resolve their RAP from `vfs_root`'s exdata directory.
+fn load_elf_bytes(path: &std::path::Path, vfs_root: &std::path::Path) -> (Vec<u8>, SourceKind) {
     let raw = std::fs::read(path).unwrap_or_else(|e| {
         crate::cli::exit::die(&format!("dump-prx-imports: read {}: {e}", path.display()))
     });
     match classify_source(&raw) {
         Ok(SourceKind::Elf) => (raw, SourceKind::Elf),
         Ok(SourceKind::SceWrapped) => {
-            let elf = cellgov_firmware::sce::decrypt_self_to_elf(&raw).unwrap_or_else(|e| {
-                crate::cli::exit::die(&format!(
-                    "dump-prx-imports: SCE decrypt of {} failed: {e}",
-                    path.display()
-                ))
-            });
+            let elf = crate::cli::exit::decrypt_ppu_self_or_die(
+                &raw,
+                &path.display().to_string(),
+                vfs_root,
+            );
             (elf, SourceKind::SceWrapped)
         }
         Err(LoadError::TooSmall { len }) => crate::cli::exit::die(&format!(
@@ -189,7 +197,8 @@ fn classify_source(raw: &[u8]) -> Result<SourceKind, LoadError> {
 
 pub(crate) fn run(args: &[String]) {
     let parsed = try_parse_args(args).unwrap_or_else(|msg| crate::cli::exit::die(&msg));
-    let (elf_bytes, source_kind) = load_elf_bytes(&parsed.path);
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(args);
+    let (elf_bytes, source_kind) = load_elf_bytes(&parsed.path, &vfs_root);
 
     if let Some(out) = &parsed.save_elf {
         std::fs::write(out, &elf_bytes).unwrap_or_else(|e| {

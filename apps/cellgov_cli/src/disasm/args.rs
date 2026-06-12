@@ -11,10 +11,11 @@
 pub(super) const MAX_COUNT: usize = 1 << 16;
 
 pub(super) fn usage() -> &'static str {
-    "usage: cellgov_cli disasm <elf-path> --vaddr <hex> [--count N] [--symbolize]\n\
+    "usage: cellgov_cli disasm <elf-path> --vaddr <hex> [--count N] [--symbolize] [--vfs-root PATH]\n\
      \t--vaddr      hex address (with or without 0x prefix); must be 4-byte aligned\n\
      \t--count      decimal instruction count, 1..=65536, default 16\n\
-     \t--symbolize  build the OPD function map and annotate branch targets"
+     \t--symbolize  build the OPD function map and annotate branch targets\n\
+     \t--vfs-root   PS3 vfs root for NPDRM RAP lookup (default: tools/rpcs3/dev_hdd0)"
 }
 
 #[derive(Debug)]
@@ -63,6 +64,14 @@ pub(super) fn parse_args(args: &[String]) -> Result<DisasmArgs<'_>, ArgError> {
             "--symbolize" => {
                 symbolize = true;
                 i += 1;
+            }
+            // Consumed so it is not rejected as unknown; the value is
+            // re-read by `resolve_ps3_vfs_root` for RAP resolution.
+            "--vfs-root" => {
+                if args.get(i + 1).is_none() {
+                    return Err(ArgError::MissingValueFor("--vfs-root"));
+                }
+                i += 2;
             }
             "--vaddr" => {
                 let v = args

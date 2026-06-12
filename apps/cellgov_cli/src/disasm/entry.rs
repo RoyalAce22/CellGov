@@ -22,8 +22,11 @@ const BROKEN_PIPE_EXIT_CODE: i32 = 141;
 
 pub(crate) fn run(args: &[String]) {
     let parsed = args::parse_args(args).unwrap_or_else(|e| die(&e.message()));
-    let elf_bytes = std::fs::read(parsed.elf_path)
-        .unwrap_or_else(|e| die(&format!("read elf {}: {e}", parsed.elf_path)));
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(args);
+    let raw = crate::cli::exit::load_file_or_die(parsed.elf_path);
+    // Transparently decrypt an SCE/SELF wrapper (including NPDRM
+    // EBOOTs); plaintext ELF input passes through unchanged.
+    let elf_bytes = crate::cli::exit::decrypt_ppu_self_or_die(&raw, parsed.elf_path, &vfs_root);
     let segments = elf::parse_pt_loads(&elf_bytes).unwrap_or_else(|e| die(&e.message()));
 
     let symbols = parsed.symbolize.then(|| {

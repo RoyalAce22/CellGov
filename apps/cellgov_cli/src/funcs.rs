@@ -2,17 +2,20 @@
 //! main ELF or PRX.
 //!
 //! Accepts the same input forms as `dump-prx-imports`: a plaintext
-//! ELF / PRX, or an SCE-wrapped SELF/SPRX decrypted via
-//! `cellgov_firmware`. Human output is one row per function; `--json`
-//! emits the map for tooling.
+//! ELF / PRX, an APP-keyed SCE wrapper, or an NPDRM SELF (retail
+//! EBOOT). NPDRM titles resolve their RAP from the standard vfs
+//! exdata directory by content id; see [`decrypt_ppu_self_or_die`].
+//! Human output is one row per function; `--json` emits the map for
+//! tooling.
 
 use cellgov_ppu::funcmap::{self, FunctionMap, FunctionName};
-use cellgov_ps3_abi::elf::ELF_MAGIC;
-use cellgov_ps3_abi::sce::SCE_MAGIC;
 
-use crate::cli::exit::die;
+use crate::cli::exit::{decrypt_ppu_self_or_die, die, load_file_or_die};
+use crate::cli::title::resolve_ps3_vfs_root;
 
-const USAGE: &str = "cellgov_cli funcs <elf-path> [--json]";
+const USAGE: &str = "cellgov_cli funcs <elf-path> [--json] [--vfs-root PATH]\n\
+     \t(NPDRM EBOOTs resolve their RAP from <vfs-root>/home/00000001/exdata/;\n\
+     \t vfs-root defaults to CELLGOV_PS3_VFS_ROOT, then tools/rpcs3/dev_hdd0)";
 
 #[derive(Debug)]
 struct FuncsArgs<'a> {
@@ -23,9 +26,21 @@ struct FuncsArgs<'a> {
 fn parse_args(args: &[String]) -> Result<FuncsArgs<'_>, String> {
     let mut path: Option<&str> = None;
     let mut json = false;
-    for arg in &args[2..] {
-        match arg.as_str() {
-            "--json" => json = true,
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => {
+                json = true;
+                i += 1;
+            }
+            // Consumed here so it is not rejected as unknown; the
+            // value is re-read by `resolve_ps3_vfs_root`.
+            "--vfs-root" => {
+                if args.get(i + 1).is_none() {
+                    return Err(format!("funcs: --vfs-root requires a path\n{USAGE}"));
+                }
+                i += 2;
+            }
             flag if flag.starts_with("--") => {
                 return Err(format!("funcs: unknown flag {flag}\n{USAGE}"));
             }
@@ -33,6 +48,7 @@ fn parse_args(args: &[String]) -> Result<FuncsArgs<'_>, String> {
                 if path.replace(positional).is_some() {
                     return Err(format!("funcs: more than one path argument\n{USAGE}"));
                 }
+                i += 1;
             }
         }
     }
@@ -42,10 +58,11 @@ fn parse_args(args: &[String]) -> Result<FuncsArgs<'_>, String> {
 
 pub(crate) fn run(args: &[String]) {
     let parsed = parse_args(args).unwrap_or_else(|msg| die(&msg));
-    let path = std::path::Path::new(parsed.path);
-    let elf = load_elf_bytes(path);
+    let vfs_root = resolve_ps3_vfs_root(args);
+    let raw = load_file_or_die(parsed.path);
+    let elf = decrypt_ppu_self_or_die(&raw, parsed.path, &vfs_root);
     let mut map =
-        funcmap::build(&elf).unwrap_or_else(|e| die(&format!("funcs: {}: {e}", path.display())));
+        funcmap::build(&elf).unwrap_or_else(|e| die(&format!("funcs: {}: {e}", parsed.path)));
     resolve_nids(&mut map);
     if let Some(note) = truncation_note(&map) {
         eprintln!("{note}");
@@ -77,27 +94,6 @@ pub(crate) fn resolve_nids(map: &mut FunctionMap) {
             }
         }
     }
-}
-
-/// Read `path` as plaintext ELF bytes, decrypting SCE wrappers.
-fn load_elf_bytes(path: &std::path::Path) -> Vec<u8> {
-    let raw = std::fs::read(path)
-        .unwrap_or_else(|e| die(&format!("funcs: read {}: {e}", path.display())));
-    if raw.len() >= 4 && raw[0..4] == SCE_MAGIC {
-        return cellgov_firmware::sce::decrypt_self_to_elf(&raw).unwrap_or_else(|e| {
-            die(&format!(
-                "funcs: SCE decrypt of {} failed: {e}",
-                path.display()
-            ))
-        });
-    }
-    if raw.len() >= 4 && raw[0..4] == ELF_MAGIC {
-        return raw;
-    }
-    die(&format!(
-        "funcs: {} has neither ELF nor SCE magic",
-        path.display()
-    ))
 }
 
 fn render_human(map: &FunctionMap) -> String {
