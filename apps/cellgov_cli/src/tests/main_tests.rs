@@ -48,6 +48,7 @@ fn subcommands_const_is_exhaustive() {
         Subcommand::Dump,
         Subcommand::DumpPrxImports,
         Subcommand::Disasm,
+        Subcommand::Funcs,
         Subcommand::Rpcs3Attribute,
         Subcommand::FixtureGen,
         Subcommand::TitlesGen,

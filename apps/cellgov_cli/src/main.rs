@@ -10,6 +10,7 @@
 mod cli;
 mod disasm;
 mod dump_prx_imports;
+mod funcs;
 mod game;
 
 use cli::exit::die;
@@ -44,7 +45,8 @@ cellgov_cli bench-boot-once <--title NAME|--content-id ID|--title-manifest PATH>
 const USAGE_DUMP: &str = "cellgov_cli dump <scenario>";
 const USAGE_DUMP_PRX_IMPORTS: &str =
     "cellgov_cli dump-prx-imports <path-to-prx-or-sprx> [--at 0xADDR] [--module NAME]";
-const USAGE_DISASM: &str = "cellgov_cli disasm <elf-path> --vaddr <hex> [--count N]";
+const USAGE_DISASM: &str = "cellgov_cli disasm <elf-path> --vaddr <hex> [--count N] [--symbolize]";
+const USAGE_FUNCS: &str = "cellgov_cli funcs <elf-path> [--json]";
 const USAGE_RPCS3_ATTRIBUTE: &str =
     "cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR [--len N]] [--list] [--ranked]";
 const USAGE_FIXTURE_GEN: &str = "\
@@ -72,6 +74,7 @@ enum Subcommand {
     Dump,
     DumpPrxImports,
     Disasm,
+    Funcs,
     Rpcs3Attribute,
     FixtureGen,
     TitlesGen,
@@ -93,6 +96,7 @@ impl Subcommand {
             Self::Dump => &["dump"],
             Self::DumpPrxImports => &["dump-prx-imports"],
             Self::Disasm => &["disasm"],
+            Self::Funcs => &["funcs"],
             Self::Rpcs3Attribute => &["rpcs3-attribute"],
             Self::FixtureGen => &["fixture-gen"],
             Self::TitlesGen => &["titles-gen"],
@@ -116,6 +120,7 @@ impl Subcommand {
             Self::Dump => Some(USAGE_DUMP),
             Self::DumpPrxImports => Some(USAGE_DUMP_PRX_IMPORTS),
             Self::Disasm => Some(USAGE_DISASM),
+            Self::Funcs => Some(USAGE_FUNCS),
             Self::Rpcs3Attribute => Some(USAGE_RPCS3_ATTRIBUTE),
             Self::FixtureGen => Some(USAGE_FIXTURE_GEN),
             Self::TitlesGen => Some(USAGE_TITLES_GEN),
@@ -146,6 +151,7 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand::Dump,
     Subcommand::DumpPrxImports,
     Subcommand::Disasm,
+    Subcommand::Funcs,
     Subcommand::Rpcs3Attribute,
     Subcommand::FixtureGen,
     Subcommand::TitlesGen,
@@ -198,6 +204,7 @@ fn main() {
         Some(Subcommand::Dump) => cli::dump::run(&args, SCENARIOS),
         Some(Subcommand::DumpPrxImports) => dump_prx_imports::run(&args),
         Some(Subcommand::Disasm) => disasm::run(&args),
+        Some(Subcommand::Funcs) => funcs::run(&args),
         Some(Subcommand::Rpcs3Attribute) => cli::rpcs3_attribute::run(&args),
         Some(Subcommand::FixtureGen) => cli::fixture_gen::run(&args),
         Some(Subcommand::TitlesGen) => cli::titles_gen::run(&args),

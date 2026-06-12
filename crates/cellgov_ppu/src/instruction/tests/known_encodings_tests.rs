@@ -35,55 +35,6 @@ fn spr_gap_sub_tables_sorted_for_binary_search() {
 }
 
 #[test]
-fn known_va_xos_sorted_for_binary_search() {
-    for window in KNOWN_VA_XOS.windows(2) {
-        assert!(
-            window[0] < window[1],
-            "KNOWN_VA_XOS must be sorted ascending; offenders: {} >= {}",
-            window[0],
-            window[1]
-        );
-    }
-}
-
-#[test]
-fn known_vx_xos_sorted_for_binary_search() {
-    for window in KNOWN_VX_XOS.windows(2) {
-        assert!(
-            window[0] < window[1],
-            "KNOWN_VX_XOS must be sorted ascending; offenders: {} >= {}",
-            window[0],
-            window[1]
-        );
-    }
-}
-
-#[test]
-fn known_va_directory_covers_vsldoi_and_vsel() {
-    // Spot-check anchors: vsldoi (XO 44, the only typed VA arm)
-    // and vsel (XO 42, a representative VA stub).
-    assert!(is_known_va(44));
-    assert!(is_known_va(42));
-    // 35 and 45 are reserved within 0x20..=0x2F and must not appear.
-    assert!(!is_known_va(35));
-    assert!(!is_known_va(45));
-}
-
-#[test]
-fn known_vx_directory_covers_typed_and_stub_anchors() {
-    // Vxor (typed) at 1220; vmaxub (stub) at 2; vcmpequb VXR
-    // Rc=0 at 6, Rc=1 at 1030.
-    assert!(is_known_vx(1220));
-    assert!(is_known_vx(2));
-    assert!(is_known_vx(6));
-    assert!(is_known_vx(1030));
-    // 1 / 3 / 5 / 7 / 9 / 11 / 13 / 15 are odd VX positions not
-    // assigned to any AltiVec-PEM instruction.
-    assert!(!is_known_vx(1));
-    assert!(!is_known_vx(3));
-}
-
-#[test]
 fn altivec_memory_family_no_longer_in_directory() {
     // Stage 40E landed Lvsl / Lvebx / Lvsr / Lvehx / Lvewx /
     // Stvebx / Stvehx / Stvewx / Lvxl / Stvxl as PpuInstruction

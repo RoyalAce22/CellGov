@@ -19,7 +19,7 @@ fn nop_elf() -> (Vec<u8>, Vec<PtLoad>) {
 fn disassemble_decodes_aligned_words() {
     let (data, segs) = nop_elf();
     let mut out = Vec::new();
-    let stats = disassemble(&data, &segs, 0x10000, 5, &mut out).unwrap();
+    let stats = disassemble(&data, &segs, 0x10000, 5, None, &mut out).unwrap();
     assert_eq!(stats.decode_errors, 0);
     assert_eq!(stats.lines_written, 5);
     assert_eq!(stats.markers_written, 0);
@@ -36,7 +36,7 @@ fn disassemble_decodes_aligned_words() {
 fn disassemble_address_column_uses_16_hex_digits() {
     let (data, segs) = nop_elf();
     let mut out = Vec::new();
-    disassemble(&data, &segs, 0x10000, 1, &mut out).unwrap();
+    disassemble(&data, &segs, 0x10000, 1, None, &mut out).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert!(
         text.starts_with("0x0000000000010000"),
@@ -48,7 +48,7 @@ fn disassemble_address_column_uses_16_hex_digits() {
 fn disassemble_rejects_vaddr_outside_pt_load() {
     let (data, segs) = nop_elf();
     let mut out = Vec::new();
-    let err = disassemble(&data, &segs, 0x90000, 1, &mut out).unwrap_err();
+    let err = disassemble(&data, &segs, 0x90000, 1, None, &mut out).unwrap_err();
     match err {
         StreamError::BadVaddr(DisasmError::VaddrNotInPtLoad { vaddr: 0x90000, .. }) => {}
         other => panic!("expected BadVaddr/VaddrNotInPtLoad, got {other:?}"),
@@ -62,7 +62,7 @@ fn disassemble_distinguishes_bss_from_outside_segment() {
     let data = build_elf64_be(&[spec]);
     let segs = parse_pt_loads(&data).unwrap();
     let mut out = Vec::new();
-    let err = disassemble(&data, &segs, 0x10004, 1, &mut out).unwrap_err();
+    let err = disassemble(&data, &segs, 0x10004, 1, None, &mut out).unwrap_err();
     match err {
         StreamError::BadVaddr(DisasmError::VaddrInBssOnly { vaddr: 0x10004, .. }) => {}
         other => panic!("expected BadVaddr/VaddrInBssOnly, got {other:?}"),
@@ -76,7 +76,7 @@ fn disassemble_marks_bss_when_iterating_into_zero_fill() {
     let data = build_elf64_be(&[spec]);
     let segs = parse_pt_loads(&data).unwrap();
     let mut out = Vec::new();
-    let stats = disassemble(&data, &segs, 0x10000, 4, &mut out).unwrap();
+    let stats = disassemble(&data, &segs, 0x10000, 4, None, &mut out).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert!(text.contains("BSS / zero-fill"), "stream:\n{text}");
     assert_eq!(stats.lines_written, 2);
@@ -92,7 +92,7 @@ fn disassemble_marks_bss_when_iterating_into_zero_fill() {
 fn disassemble_marks_past_segment_end_when_outside_memsz_too() {
     let (data, segs) = nop_elf();
     let mut out = Vec::new();
-    let stats = disassemble(&data, &segs, 0x10000, 8, &mut out).unwrap();
+    let stats = disassemble(&data, &segs, 0x10000, 8, None, &mut out).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert!(text.contains("past segment end"), "stream:\n{text}");
     assert_eq!(stats.lines_written, 6);
@@ -118,7 +118,7 @@ fn disassemble_consecutive_decode_failures_emit_warning() {
     let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
     let segs = parse_pt_loads(&data).unwrap();
     let mut out = Vec::new();
-    let stats = disassemble(&data, &segs, 0x10000, 16, &mut out).unwrap();
+    let stats = disassemble(&data, &segs, 0x10000, 16, None, &mut out).unwrap();
     assert_eq!(stats.decode_errors, 16);
     assert!(stats.data_warning_emitted);
 }
@@ -138,7 +138,7 @@ fn disassemble_resets_consecutive_counter_on_success() {
     let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
     let segs = parse_pt_loads(&data).unwrap();
     let mut out = Vec::new();
-    let stats = disassemble(&data, &segs, 0x10000, 12, &mut out).unwrap();
+    let stats = disassemble(&data, &segs, 0x10000, 12, None, &mut out).unwrap();
     assert_eq!(stats.decode_errors, 8);
     assert!(!stats.data_warning_emitted);
 }
@@ -186,6 +186,75 @@ fn select_segment_breaks_filesz_ties_by_offset_then_vaddr() {
 }
 
 #[test]
+fn disassemble_renders_assembly_text_and_word_fallback() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&PPC_BLR_BYTES);
+    bytes.extend_from_slice(&UNSUPPORTED_WORD);
+    let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
+    let segs = parse_pt_loads(&data).unwrap();
+    let mut out = Vec::new();
+    disassemble(&data, &segs, 0x10000, 2, None, &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("bclr") || text.contains("blr"),
+        "missing branch mnemonic:\n{text}"
+    );
+    assert!(
+        text.contains(".word 0x04000000"),
+        "missing .word fallback:\n{text}"
+    );
+    assert!(
+        !text.contains('{'),
+        "Debug-derive leakage in stream output:\n{text}"
+    );
+}
+
+#[test]
+fn disassemble_symbolize_emits_separators_and_target_suffixes() {
+    use cellgov_ppu::funcmap::{FunctionMap, FunctionName, FunctionOrigin, FunctionSpan};
+    // bl +0x10 at 0x10000, then nops crossing into a second span.
+    let bl: u32 = (18 << 26) | 0x10 | 1;
+    let mut bytes = bl.to_be_bytes().to_vec();
+    for _ in 0..4 {
+        bytes.extend_from_slice(&PPC_NOP_BYTES);
+    }
+    let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
+    let segs = parse_pt_loads(&data).unwrap();
+    let map = FunctionMap {
+        functions: vec![
+            FunctionSpan {
+                start: 0x10000,
+                end: 0x10010,
+                name: FunctionName::Known("entry"),
+                origin: FunctionOrigin::EntryOpd,
+            },
+            FunctionSpan {
+                start: 0x10010,
+                end: 0x10014,
+                name: FunctionName::Synthetic,
+                origin: FunctionOrigin::OpdScan,
+            },
+        ],
+        truncated: false,
+    };
+    let mut out = Vec::new();
+    disassemble(&data, &segs, 0x10000, 5, Some(&map), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("; -- function entry (entry-opd) --"),
+        "missing entry separator:\n{text}"
+    );
+    assert!(
+        text.contains("; -- function sub_00010010 (opd-scan) --"),
+        "missing scan separator:\n{text}"
+    );
+    assert!(
+        text.contains("bl         0x10010 <sub_00010010>"),
+        "missing symbolized branch target:\n{text}"
+    );
+}
+
+#[test]
 fn unsupported_word_constant_is_actually_unsupported() {
     let raw = u32::from_be_bytes(UNSUPPORTED_WORD);
     assert!(
@@ -202,7 +271,7 @@ fn disassemble_decodes_last_word_in_segment() {
     let data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, bytes)]);
     let segs = parse_pt_loads(&data).unwrap();
     let mut out = Vec::new();
-    let stats = disassemble(&data, &segs, 0x10004, 1, &mut out).unwrap();
+    let stats = disassemble(&data, &segs, 0x10004, 1, None, &mut out).unwrap();
     assert_eq!(stats.lines_written, 1);
     assert_eq!(stats.markers_written, 0);
     assert!(
@@ -262,7 +331,7 @@ fn disassemble_propagates_broken_pipe() {
         successes_before_break: 2,
         writes_attempted: 0,
     };
-    let err = disassemble(&data, &segs, 0x10000, 16, &mut out).unwrap_err();
+    let err = disassemble(&data, &segs, 0x10000, 16, None, &mut out).unwrap_err();
     assert!(
         matches!(&err, StreamError::Io(e) if e.kind() == std::io::ErrorKind::BrokenPipe),
         "expected Io(BrokenPipe), got {err:?}"
@@ -286,7 +355,7 @@ fn disassemble_address_overflow_marker_is_consistent() {
         memsz: 4,
     };
     let mut out = Vec::new();
-    let stats = disassemble(&bytes, &[seg], u64::MAX - 3, 2, &mut out).unwrap();
+    let stats = disassemble(&bytes, &[seg], u64::MAX - 3, 2, None, &mut out).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert!(
         text.contains("<address overflow"),

@@ -315,23 +315,26 @@ fn encode(insn: &PpuInstruction) -> Option<u32> {
         // dcbz: X-form, no fields beyond RA/RB.
         PpuInstruction::Dcbz { ra: a, rb: b } => p(31) | ra(a) | rb(b) | xo_10_rc(1014, false),
 
-        // FP (Rc preserved, not yet honored).
+        // FP (Rc preserved, not yet honored). A-form ops store the
+        // 5-bit XO (FRC re-encodes separately); X-form ops store the
+        // full 10-bit XO, whose top 5 bits coincide with the decoded
+        // frc field, so the OR is idempotent either way.
         PpuInstruction::Fp63 {
-            xo,
+            op,
             frt,
             fra,
             frb,
             frc: c,
             rc,
-        } => p(63) | rt(frt) | ra(fra) | rb(frb) | frc(c) | ((xo as u32) << 1) | (rc as u32),
+        } => p(63) | rt(frt) | ra(fra) | rb(frb) | frc(c) | ((op as u32) << 1) | (rc as u32),
         PpuInstruction::Fp59 {
-            xo,
+            op,
             frt,
             fra,
             frb,
             frc: c,
             rc,
-        } => p(59) | rt(frt) | ra(fra) | rb(frb) | frc(c) | ((xo as u32) << 1) | (rc as u32),
+        } => p(59) | rt(frt) | ra(fra) | rb(frb) | frc(c) | ((op as u32) << 1) | (rc as u32),
 
         _ => return None,
     })

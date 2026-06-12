@@ -12,6 +12,7 @@
 // [PPC-Book1 p:7 s:1.7 Instruction formats] OPCD at bits 0:5; XO is form-dependent.
 
 use crate::instruction::known_encodings::{self, SprDirection};
+use crate::instruction::ops::{Fp59Op, Fp63Op, VaOp, VxOp};
 use crate::instruction::{Locator, PpuDecodeError, PpuInstruction};
 
 /// Construct the appropriate `PpuDecodeError` for a `(primary, xo)`
@@ -399,23 +400,29 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let xo = ((raw >> 1) & 0x3FF) as u16;
             let rc = raw & 1 != 0;
             if primary == 63 {
-                Ok(PpuInstruction::Fp63 {
-                    xo,
-                    frt,
-                    fra,
-                    frb,
-                    frc,
-                    rc,
-                })
+                match Fp63Op::from_xo(xo) {
+                    Some(op) => Ok(PpuInstruction::Fp63 {
+                        op,
+                        frt,
+                        fra,
+                        frb,
+                        frc,
+                        rc,
+                    }),
+                    None => Err(reject_opcode(raw, 63, xo)),
+                }
             } else {
-                Ok(PpuInstruction::Fp59 {
-                    xo,
-                    frt,
-                    fra,
-                    frb,
-                    frc,
-                    rc,
-                })
+                match Fp59Op::from_xo(xo) {
+                    Some(op) => Ok(PpuInstruction::Fp59 {
+                        op,
+                        frt,
+                        fra,
+                        frb,
+                        frc,
+                        rc,
+                    }),
+                    None => Err(reject_opcode(raw, 59, xo)),
+                }
             }
         }
 
@@ -443,11 +450,10 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 /// Decode primary opcode 4: VA-form (XO bits 0..5 in 0x20..=0x2f) or
 /// VX-form (XO bits 21..31, four register operands).
 ///
-/// Unknown encodings reject via [`reject_opcode`] -- the catch-all
-/// `Ok(Vx { xo })` / `Ok(Va { xo })` is gated by the
-/// `KNOWN_VX_XOS` / `KNOWN_VA_XOS` directories so a primary-4 word
-/// whose XO is not documented in AltiVec-PEM cannot silently
-/// fabricate an opaque stub variant.
+/// Unknown encodings reject via [`reject_opcode`] -- the
+/// [`VxOp`] / [`VaOp`] directories gate the family variants so a
+/// primary-4 word whose XO is not documented in AltiVec-PEM cannot
+/// silently fabricate an opaque stub variant.
 fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let vt = ((raw >> 21) & 0x1F) as u8;
     let va = ((raw >> 16) & 0x1F) as u8;
@@ -468,14 +474,8 @@ fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                 shb: vc & 0xF,
             });
         }
-        if known_encodings::is_known_va(xo_6) {
-            return Ok(PpuInstruction::Va {
-                xo: xo_6,
-                vt,
-                va,
-                vb,
-                vc,
-            });
+        if let Some(op) = VaOp::from_repr(xo_6) {
+            return Ok(PpuInstruction::Va { op, vt, va, vb, vc });
         }
         return Err(reject_opcode(raw, 4, xo_6 as u16));
     }
@@ -483,8 +483,10 @@ fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     // [AltiVec-PEM p:A-21 s:A.5 Table A-6 VX-Form] OPCD vD vA vB XO(21:31).
     match xo_11 {
         0x4c4 => Ok(PpuInstruction::Vxor { vt, va, vb }),
-        xo if known_encodings::is_known_vx(xo) => Ok(PpuInstruction::Vx { xo, vt, va, vb }),
-        _ => Err(reject_opcode(raw, 4, xo_11)),
+        xo => match VxOp::decode(xo) {
+            Some((op, rc)) => Ok(PpuInstruction::Vx { op, rc, vt, va, vb }),
+            None => Err(reject_opcode(raw, 4, xo)),
+        },
     }
 }
 

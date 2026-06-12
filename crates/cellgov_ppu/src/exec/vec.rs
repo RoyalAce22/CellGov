@@ -3,94 +3,208 @@
 //! that order. Memory-touching vector ops live in [`mem`](super::mem).
 
 use crate::exec::{ExecuteVerdict, PpuFault};
+use crate::instruction::ops::{VaOp, VxOp};
 use crate::state::PpuState;
 
-/// Execute a VX-form VMX instruction (primary=4, 11-bit sub-opcode, 3 registers).
-pub(crate) fn execute_vx(state: &mut PpuState, xo: u16, vt: u8, va: u8, vb: u8) -> ExecuteVerdict {
+/// Execute a VX-form VMX instruction. `rc` is the VXR record bit;
+/// recording compare forms are not implemented yet and fault.
+///
+/// Exhaustive over [`VxOp`]: adding an op fails compilation here
+/// until its execution (or explicit fault) is decided.
+pub(crate) fn execute_vx(
+    state: &mut PpuState,
+    op: VxOp,
+    rc: bool,
+    vt: u8,
+    va: u8,
+    vb: u8,
+) -> ExecuteVerdict {
     let a = state.vr[va as usize];
     let b = state.vr[vb as usize];
 
-    let result = match xo {
+    if rc {
+        // Rc=1 compare forms also update CR6; not modelled yet.
+        return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(op as u64 + 1024));
+    }
+
+    let result = match op {
         // -- Integer add/sub --
         // [AltiVec-PEM p:6-35 s:6.2] vaddubm: Vector Add Unsigned Byte Modulo
-        0x000 => vadd_bytes(a, b),
+        VxOp::Vaddubm => vadd_bytes(a, b),
         // [AltiVec-PEM p:6-37 s:6.2] vadduhm: Vector Add Unsigned Halfword Modulo
-        0x040 => vadd_halfs(a, b),
+        VxOp::Vadduhm => vadd_halfs(a, b),
         // [AltiVec-PEM p:6-39 s:6.2] vadduwm: Vector Add Unsigned Word Modulo
-        0x080 => vadd_words(a, b),
+        VxOp::Vadduwm => vadd_words(a, b),
 
         // -- Integer compare --
         // [AltiVec-PEM p:6-56 s:6.2] vcmpequw: Vector Compare Equal-to Unsigned Word
-        0x086 => vcmpequw(a, b),
+        VxOp::Vcmpequw => vcmpequw(a, b),
 
-        // -- Logical -- (XOs per AltiVec-PEM Appendix A.5 Table A-6)
-        // [AltiVec-PEM p:6-41 s:6.2] vand: VX-form XO=1028=0x404
-        0x404 => a & b,
-        // [AltiVec-PEM p:6-111 s:6.2] vor: VX-form XO=1284=0x504
-        0x504 => a | b,
-        // [AltiVec-PEM p:6-177 s:6.2] vxor: VX-form XO=1220=0x4C4
-        0x4c4 => a ^ b,
-        // [AltiVec-PEM p:6-42 s:6.2] vandc: VX-form XO=1092=0x444
-        0x444 => a & !b,
-        // [AltiVec-PEM p:6-110 s:6.2] vnor: VX-form XO=1156=0x484
-        0x484 => !(a | b),
+        // -- Logical --
+        // [AltiVec-PEM p:6-41 s:6.2] vand
+        VxOp::Vand => a & b,
+        // [AltiVec-PEM p:6-111 s:6.2] vor
+        VxOp::Vor => a | b,
+        // [AltiVec-PEM p:6-177 s:6.2] vxor
+        VxOp::Vxor => a ^ b,
+        // [AltiVec-PEM p:6-42 s:6.2] vandc
+        VxOp::Vandc => a & !b,
+        // [AltiVec-PEM p:6-110 s:6.2] vnor
+        VxOp::Vnor => !(a | b),
 
-        // -- Shift -- (XOs per AltiVec-PEM Appendix A.5 Table A-6)
-        // [AltiVec-PEM p:6-139 s:6.2] vslw: VX-form XO=388=0x184
-        0x184 => vslw(a, b),
-        // [AltiVec-PEM p:6-154 s:6.2] vsrw: VX-form XO=644=0x284
-        0x284 => vsrw(a, b),
-        // [AltiVec-PEM p:6-150 s:6.2] vsraw: VX-form XO=900=0x384
-        0x384 => vsraw(a, b),
-        // [AltiVec-PEM p:6-149 s:6.2] vsrah: VX-form XO=836=0x344
-        0x344 => vsrah(a, b),
-        // [AltiVec-PEM p:6-148 s:6.2] vsrab: VX-form XO=772=0x304
-        0x304 => vsrab(a, b),
+        // -- Shift --
+        // [AltiVec-PEM p:6-139 s:6.2] vslw
+        VxOp::Vslw => vslw(a, b),
+        // [AltiVec-PEM p:6-154 s:6.2] vsrw
+        VxOp::Vsrw => vsrw(a, b),
+        // [AltiVec-PEM p:6-150 s:6.2] vsraw
+        VxOp::Vsraw => vsraw(a, b),
+        // [AltiVec-PEM p:6-149 s:6.2] vsrah
+        VxOp::Vsrah => vsrah(a, b),
+        // [AltiVec-PEM p:6-148 s:6.2] vsrab
+        VxOp::Vsrab => vsrab(a, b),
 
-        // -- Splat (PPC AltiVec ISA XO values) --
-        // [AltiVec-PEM p:6-140 s:6.2] vspltb: Vector Splat Byte (va is byte index)
-        0x20c => vspltb(b, va),
-        // [AltiVec-PEM p:6-141 s:6.2] vsplth: Vector Splat Half Word (va is halfword index)
-        0x24c => vsplth(b, va),
-        // [AltiVec-PEM p:6-145 s:6.2] vspltw: Vector Splat Word (va is word index)
-        0x28c => vspltw(b, va),
-        // [AltiVec-PEM p:6-142 s:6.2] vspltisb: Vector Splat Immediate Signed Byte (sign-extended 5-bit imm)
-        0x30c => vspltisb(va),
-        // [AltiVec-PEM p:6-143 s:6.2] vspltish: Vector Splat Immediate Signed Half Word
-        0x34c => vspltish(va),
-        // [AltiVec-PEM p:6-144 s:6.2] vspltisw: Vector Splat Immediate Signed Word
-        0x38c => vspltisw(va),
+        // -- Splat --
+        // [AltiVec-PEM p:6-140 s:6.2] vspltb (va is byte index)
+        VxOp::Vspltb => vspltb(b, va),
+        // [AltiVec-PEM p:6-141 s:6.2] vsplth (va is halfword index)
+        VxOp::Vsplth => vsplth(b, va),
+        // [AltiVec-PEM p:6-145 s:6.2] vspltw (va is word index)
+        VxOp::Vspltw => vspltw(b, va),
+        // [AltiVec-PEM p:6-142 s:6.2] vspltisb (sign-extended 5-bit imm)
+        VxOp::Vspltisb => vspltisb(va),
+        // [AltiVec-PEM p:6-143 s:6.2] vspltish
+        VxOp::Vspltish => vspltish(va),
+        // [AltiVec-PEM p:6-144 s:6.2] vspltisw
+        VxOp::Vspltisw => vspltisw(va),
 
         // -- Merge --
-        // [AltiVec-PEM p:6-89 s:6.2] vmrghb: Vector Merge High Byte
-        0x00c => vmrghb(a, b),
-        // [AltiVec-PEM p:6-90 s:6.2] vmrghh: Vector Merge High Half Word
-        0x04c => vmrghh(a, b),
-        // [AltiVec-PEM p:6-91 s:6.2] vmrghw: Vector Merge High Word
-        0x08c => vmrghw(a, b),
-        // [AltiVec-PEM p:6-92 s:6.2] vmrglb: VX-form XO=268=0x10C
-        0x10c => vmrglb(a, b),
-        // [AltiVec-PEM p:6-93 s:6.2] vmrglh: VX-form XO=332=0x14C
-        0x14c => vmrglh(a, b),
-        // [AltiVec-PEM p:6-94 s:6.2] vmrglw: VX-form XO=396=0x18C
-        0x18c => vmrglw(a, b),
+        // [AltiVec-PEM p:6-89 s:6.2] vmrghb
+        VxOp::Vmrghb => vmrghb(a, b),
+        // [AltiVec-PEM p:6-90 s:6.2] vmrghh
+        VxOp::Vmrghh => vmrghh(a, b),
+        // [AltiVec-PEM p:6-91 s:6.2] vmrghw
+        VxOp::Vmrghw => vmrghw(a, b),
+        // [AltiVec-PEM p:6-92 s:6.2] vmrglb
+        VxOp::Vmrglb => vmrglb(a, b),
+        // [AltiVec-PEM p:6-93 s:6.2] vmrglh
+        VxOp::Vmrglh => vmrglh(a, b),
+        // [AltiVec-PEM p:6-94 s:6.2] vmrglw
+        VxOp::Vmrglw => vmrglw(a, b),
 
         // -- Multiply --
-        // [AltiVec-PEM p:6-108 s:6.2] vmulouh: Vector Multiply Odd Unsigned Half Word
-        0x048 => vmulouh(a, b),
+        // [AltiVec-PEM p:6-108 s:6.2] vmulouh
+        VxOp::Vmulouh => vmulouh(a, b),
 
         // -- Subtract --
-        // [AltiVec-PEM p:6-161 s:6.2] vsububs: Vector Subtract Unsigned Byte Saturate
-        0x600 => vsub_ubytes_sat(a, b),
+        // [AltiVec-PEM p:6-161 s:6.2] vsububs
+        VxOp::Vsububs => vsub_ubytes_sat(a, b),
 
-        // -- Int <-> Float conversions (VX-form, va field is uimm scale) --
-        // [AltiVec-PEM p:6-49 s:6.2] vcfsx: Vector Convert from Signed Fixed-Point Word
-        0x34a => vcfsx(b, va),
-        // [AltiVec-PEM p:6-50 s:6.2] vcfux: Vector Convert from Unsigned Fixed-Point Word
-        0x38a => vcfux(b, va),
+        // -- Int <-> Float conversions (va field is uimm scale) --
+        // [AltiVec-PEM p:6-49 s:6.2] vcfsx
+        VxOp::Vcfsx => vcfsx(b, va),
+        // [AltiVec-PEM p:6-50 s:6.2] vcfux
+        VxOp::Vcfux => vcfux(b, va),
 
-        _ => {
-            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(xo as u64));
+        VxOp::Vmaxub
+        | VxOp::Vrlb
+        | VxOp::Vcmpequb
+        | VxOp::Vmuloub
+        | VxOp::Vaddfp
+        | VxOp::Vpkuhum
+        | VxOp::Vmaxuh
+        | VxOp::Vrlh
+        | VxOp::Vcmpequh
+        | VxOp::Vsubfp
+        | VxOp::Vpkuwum
+        | VxOp::Vmaxuw
+        | VxOp::Vrlw
+        | VxOp::Vpkuhus
+        | VxOp::Vcmpeqfp
+        | VxOp::Vpkuwus
+        | VxOp::Vmaxsb
+        | VxOp::Vslb
+        | VxOp::Vmulosb
+        | VxOp::Vrefp
+        | VxOp::Vpkshus
+        | VxOp::Vmaxsh
+        | VxOp::Vslh
+        | VxOp::Vmulosh
+        | VxOp::Vrsqrtefp
+        | VxOp::Vpkswus
+        | VxOp::Vaddcuw
+        | VxOp::Vmaxsw
+        | VxOp::Vexptefp
+        | VxOp::Vpkshss
+        | VxOp::Vsl
+        | VxOp::Vcmpgefp
+        | VxOp::Vlogefp
+        | VxOp::Vpkswss
+        | VxOp::Vaddubs
+        | VxOp::Vminub
+        | VxOp::Vsrb
+        | VxOp::Vcmpgtub
+        | VxOp::Vmuleub
+        | VxOp::Vrfin
+        | VxOp::Vupkhsb
+        | VxOp::Vadduhs
+        | VxOp::Vminuh
+        | VxOp::Vsrh
+        | VxOp::Vcmpgtuh
+        | VxOp::Vmuleuh
+        | VxOp::Vrfiz
+        | VxOp::Vupkhsh
+        | VxOp::Vadduws
+        | VxOp::Vminuw
+        | VxOp::Vcmpgtuw
+        | VxOp::Vrfip
+        | VxOp::Vupklsb
+        | VxOp::Vsr
+        | VxOp::Vcmpgtfp
+        | VxOp::Vrfim
+        | VxOp::Vupklsh
+        | VxOp::Vaddsbs
+        | VxOp::Vminsb
+        | VxOp::Vcmpgtsb
+        | VxOp::Vmulesb
+        | VxOp::Vpkpx
+        | VxOp::Vaddshs
+        | VxOp::Vminsh
+        | VxOp::Vcmpgtsh
+        | VxOp::Vmulesh
+        | VxOp::Vupkhpx
+        | VxOp::Vaddsws
+        | VxOp::Vminsw
+        | VxOp::Vcmpgtsw
+        | VxOp::Vctuxs
+        | VxOp::Vcmpbfp
+        | VxOp::Vctsxs
+        | VxOp::Vupklpx
+        | VxOp::Vsububm
+        | VxOp::Vavgub
+        | VxOp::Vmaxfp
+        | VxOp::Vslo
+        | VxOp::Vsubuhm
+        | VxOp::Vavguh
+        | VxOp::Vminfp
+        | VxOp::Vsro
+        | VxOp::Vsubuwm
+        | VxOp::Vavguw
+        | VxOp::Vavgsb
+        | VxOp::Vavgsh
+        | VxOp::Vsubcuw
+        | VxOp::Vavgsw
+        | VxOp::Vsum4ubs
+        | VxOp::Vsubuhs
+        | VxOp::Vsum4shs
+        | VxOp::Vsubuws
+        | VxOp::Vsum2sws
+        | VxOp::Vsubsbs
+        | VxOp::Vsum4sbs
+        | VxOp::Vsubshs
+        | VxOp::Vsubsws
+        | VxOp::Vsumsws => {
+            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(op as u64));
         }
     };
 
@@ -101,7 +215,7 @@ pub(crate) fn execute_vx(state: &mut PpuState, xo: u16, vt: u8, va: u8, vb: u8) 
 /// Execute a VA-form VMX instruction (primary=4, 6-bit sub-opcode, 4 registers).
 pub(crate) fn execute_va(
     state: &mut PpuState,
-    xo: u8,
+    op: VaOp,
     vt: u8,
     va: u8,
     vb: u8,
@@ -111,13 +225,26 @@ pub(crate) fn execute_va(
     let b = state.vr[vb as usize];
     let c = state.vr[vc as usize];
 
-    let result = match xo {
+    let result = match op {
         // [AltiVec-PEM p:6-133 s:6.2] vsel: Vector Select
-        0x2a => vsel(a, b, c),
+        VaOp::Vsel => vsel(a, b, c),
         // [AltiVec-PEM p:6-112 s:6.2] vperm: Vector Permute
-        0x2b => vperm(a, b, c),
-        _ => {
-            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(xo as u64));
+        VaOp::Vperm => vperm(a, b, c),
+        // Decode routes vsldoi to the typed variant; this arm keeps
+        // the match total for hand-built instructions.
+        VaOp::Vsldoi => vsldoi(a, b, vc & 0xF),
+        VaOp::Vmhaddshs
+        | VaOp::Vmhraddshs
+        | VaOp::Vmladduhm
+        | VaOp::Vmsumubm
+        | VaOp::Vmsummbm
+        | VaOp::Vmsumuhm
+        | VaOp::Vmsumuhs
+        | VaOp::Vmsumshm
+        | VaOp::Vmsumshs
+        | VaOp::Vmaddfp
+        | VaOp::Vnmsubfp => {
+            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(op as u64));
         }
     };
 

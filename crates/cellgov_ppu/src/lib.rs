@@ -9,6 +9,7 @@ pub mod decode;
 pub mod differential;
 pub mod exec;
 mod fp;
+pub mod funcmap;
 pub mod hle_watch;
 pub mod instruction;
 pub mod loader;
