@@ -28,3 +28,7 @@ impl Lv2Host {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/close_tests.rs"]
+mod tests;

@@ -23,6 +23,9 @@ pub enum SyscallClassification {
         /// dispatch time.
         index: u32,
     },
+    // [PPC-Book3 p:73 s:5.5.13 System Call Interrupt] sc with LEV=1 in
+    // problem state should be treated as a programming error (hypervisor
+    // call from unprivileged context is not permitted).
     /// Routes to the hypercall fault path; LEV >= 1 cannot originate from PS3 usermode.
     Hypercall {
         /// Privilege level from the `sc` operand.
@@ -57,49 +60,5 @@ pub const fn classify(lev: u8, r11: u64) -> SyscallClassification {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn classify_lv2_syscall() {
-        assert_eq!(classify(0, 22), SyscallClassification::Lv2 { number: 22 },);
-    }
-
-    #[test]
-    fn classify_unresolved_import_decodes_index() {
-        assert_eq!(
-            classify(0, 0x10005),
-            SyscallClassification::UnresolvedImport { index: 5 },
-        );
-    }
-
-    #[test]
-    fn classify_above_all_namespaces_falls_to_unknown() {
-        assert_eq!(
-            classify(0, 0x80000),
-            SyscallClassification::Unknown { r11: 0x80000 },
-        );
-    }
-
-    #[test]
-    fn classify_hypercall_routes_distinctly_for_lev_1() {
-        assert_eq!(
-            classify(1, 22),
-            SyscallClassification::Hypercall { lev: 1, r11: 22 },
-        );
-    }
-
-    #[test]
-    fn nonzero_lev_always_routes_to_hypercall() {
-        for lev in 1..=63u8 {
-            assert!(matches!(
-                classify(lev, 22),
-                SyscallClassification::Hypercall { .. }
-            ));
-            assert!(matches!(
-                classify(lev, 0x80000),
-                SyscallClassification::Hypercall { .. }
-            ));
-        }
-    }
-}
+#[path = "tests/syscall_classification_tests.rs"]
+mod tests;

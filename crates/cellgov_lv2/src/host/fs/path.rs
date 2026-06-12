@@ -31,3 +31,7 @@ pub(super) fn read_path_bytes(
     }
     Err(cell_errors::CELL_EFAULT)
 }
+
+#[cfg(test)]
+#[path = "tests/path_tests.rs"]
+mod tests;

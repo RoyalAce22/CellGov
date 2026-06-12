@@ -29,6 +29,7 @@ mod quicken;
 mod superpair;
 
 #[cfg(test)]
+#[path = "tests/test_support.rs"]
 mod test_support;
 
 pub use model::PredecodedShadow;

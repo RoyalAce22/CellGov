@@ -56,15 +56,5 @@ pub fn observe_from_tty(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decoder_format_in_metadata() {
-        assert_eq!(
-            Rpcs3Decoder::Interpreter.as_runner_str(),
-            "rpcs3-interpreter"
-        );
-        assert_eq!(Rpcs3Decoder::Llvm.as_runner_str(), "rpcs3-llvm");
-    }
-}
+#[path = "tests/observe_tests.rs"]
+mod tests;

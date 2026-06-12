@@ -18,3 +18,9 @@ cellgov_mem = { path = "../cellgov_mem" }
 cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
 cellgov_trace = { path = "../cellgov_trace" }
+
+[dev-dependencies]
+# Convention enforcement: the test-layout guard parses every workspace
+# src file to ban inline / bare `mod tests` declarations.
+proc-macro2 = { version = "1", features = ["span-locations"] }
+syn = { version = "2", features = ["full"] }

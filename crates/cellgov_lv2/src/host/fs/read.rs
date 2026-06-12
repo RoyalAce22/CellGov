@@ -88,3 +88,7 @@ impl Lv2Host {
         Lv2Dispatch::Immediate { code: 0, effects }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/read_tests.rs"]
+mod tests;

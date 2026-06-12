@@ -79,3 +79,7 @@ impl Lv2Host {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/lseek_tests.rs"]
+mod tests;

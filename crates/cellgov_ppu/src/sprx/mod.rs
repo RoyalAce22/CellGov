@@ -5,6 +5,7 @@
 mod load;
 mod parse;
 #[cfg(test)]
+#[path = "tests/test_fixtures.rs"]
 pub(crate) mod test_fixtures;
 
 pub use load::{

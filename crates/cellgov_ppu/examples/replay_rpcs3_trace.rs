@@ -57,8 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             skipped += 1;
             continue;
         }
-        let label_owned = format!("rec_{i}_pc_0x{:08x}", record.pc);
-        let label: &'static str = Box::leak(label_owned.into_boxed_str());
+        let label = format!("rec_{i}_pc_0x{:08x}", record.pc);
         let case = record.to_instruction_case(label, capture_id);
         match run_case(&case) {
             CaseOutcome::Pass => passed += 1,

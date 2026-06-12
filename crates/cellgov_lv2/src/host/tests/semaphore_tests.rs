@@ -1,0 +1,522 @@
+//! LV2 semaphore dispatch tests: wait decrement-or-park, post wake-or-increment, max-count enforcement, and get_value out-writes.
+
+use super::*;
+use crate::host::test_support::{
+    extract_write_u32, fake_runtime_with_valid_sync_attr, seed_primary_ppu, VALID_SYNC_ATTR_PTR,
+};
+use crate::ppu_thread::{PpuThreadAttrs, PpuThreadId};
+use crate::request::Lv2Request;
+
+#[test]
+fn semaphore_create_writes_id_and_stores_entry() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 2,
+            max: 10,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let entry = host.semaphores().lookup(id).unwrap();
+    assert_eq!(entry.count(), 2);
+    assert_eq!(entry.max(), 10);
+}
+
+#[test]
+fn semaphore_create_rejects_initial_above_max() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 11,
+            max: 10,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code, .. } = r else {
+        panic!("expected Immediate, got {r:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_EINVAL.into());
+}
+
+#[test]
+fn semaphore_destroy_unknown_returns_esrch() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let r = host.dispatch(Lv2Request::SemaphoreDestroy { id: 77 }, UnitId::new(0), &rt);
+    let Lv2Dispatch::Immediate { code, .. } = r else {
+        panic!("expected Immediate, got {r:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+}
+
+#[test]
+fn semaphore_destroy_with_waiter_returns_ebusy() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 0,
+            max: 10,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    host.semaphores_mut()
+        .enqueue_waiter(id, PpuThreadId::PRIMARY)
+        .unwrap();
+    let d = host.dispatch(Lv2Request::SemaphoreDestroy { id }, src, &rt);
+    let Lv2Dispatch::Immediate { code, .. } = d else {
+        panic!("expected Immediate, got {d:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+}
+
+#[test]
+fn semaphore_wait_with_positive_count_decrements_and_returns_ok() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 1,
+            max: 10,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let w = host.dispatch(Lv2Request::SemaphoreWait { id, timeout: 0 }, src, &rt);
+    assert!(matches!(
+        w,
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: _,
+        }
+    ));
+    assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
+}
+
+#[test]
+fn semaphore_wait_with_zero_count_parks_caller() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 0,
+            max: 10,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let w = host.dispatch(Lv2Request::SemaphoreWait { id, timeout: 0 }, src, &rt);
+    match w {
+        Lv2Dispatch::Block {
+            reason: crate::dispatch::Lv2BlockReason::Semaphore { id: sid },
+            pending: PendingResponse::ReturnCode { code: 0 },
+            ..
+        } => {
+            assert_eq!(sid, id);
+        }
+        other => panic!("expected Block on Semaphore, got {other:?}"),
+    }
+    let waiters: Vec<_> = host
+        .semaphores()
+        .lookup(id)
+        .unwrap()
+        .waiters()
+        .iter()
+        .collect();
+    assert_eq!(waiters, vec![PpuThreadId::PRIMARY]);
+}
+
+#[test]
+fn semaphore_trywait_with_positive_count_acquires() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 1,
+            max: 10,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let w = host.dispatch(Lv2Request::SemaphoreTryWait { id }, src, &rt);
+    assert!(matches!(
+        w,
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: _,
+        }
+    ));
+    assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
+}
+
+#[test]
+fn semaphore_trywait_with_zero_count_returns_ebusy() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 0,
+            max: 10,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let w = host.dispatch(Lv2Request::SemaphoreTryWait { id }, src, &rt);
+    let Lv2Dispatch::Immediate { code, .. } = w else {
+        panic!("expected Immediate, got {w:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
+    assert!(host.semaphores().lookup(id).unwrap().waiters().is_empty());
+}
+
+#[test]
+fn semaphore_trywait_unknown_returns_esrch() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let r = host.dispatch(Lv2Request::SemaphoreTryWait { id: 99 }, UnitId::new(0), &rt);
+    let Lv2Dispatch::Immediate { code, .. } = r else {
+        panic!("expected Immediate, got {r:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+}
+
+#[test]
+fn semaphore_get_value_writes_current_count() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 5,
+            max: 10,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let g = host.dispatch(
+        Lv2Request::SemaphoreGetValue { id, out_ptr: 0x200 },
+        src,
+        &rt,
+    );
+    match &g {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => {
+            assert_eq!(extract_write_u32(&e[0]), 5);
+        }
+        other => panic!("expected Immediate(0), got {other:?}"),
+    }
+}
+
+#[test]
+fn semaphore_get_value_null_out_ptr_returns_efault() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreGetValue { id: 1, out_ptr: 0 },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code, .. } = r else {
+        panic!("expected Immediate, got {r:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_EFAULT.into());
+}
+
+#[test]
+fn semaphore_get_value_unknown_returns_esrch() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreGetValue {
+            id: 99,
+            out_ptr: 0x200,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code, .. } = r else {
+        panic!("expected Immediate, got {r:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+}
+
+#[test]
+fn semaphore_post_unknown_returns_esrch() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let r = host.dispatch(
+        Lv2Request::SemaphorePost { id: 99, val: 1 },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code, .. } = r else {
+        panic!("expected Immediate, got {r:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+}
+
+#[test]
+fn semaphore_post_multi_increments_count_when_room() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 0,
+            max: 10,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let r = host.dispatch(Lv2Request::SemaphorePost { id, val: 3 }, src, &rt);
+    let Lv2Dispatch::Immediate { code, .. } = r else {
+        panic!("expected Immediate, got {r:?}");
+    };
+    assert_eq!(code, 0);
+    assert_eq!(host.semaphores().lookup(id).unwrap().count(), 3);
+}
+
+#[test]
+fn semaphore_post_unknown_id_returns_esrch_even_for_invalid_val() {
+    // Pins error order: id lookup precedes val validation.
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let r = host.dispatch(
+        Lv2Request::SemaphorePost { id: 999, val: 0 },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code, .. } = r else {
+        panic!("expected Immediate, got {r:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+}
+
+#[test]
+fn semaphore_post_with_no_waiters_increments() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 0,
+            max: 10,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let post = host.dispatch(Lv2Request::SemaphorePost { id, val: 1 }, src, &rt);
+    assert!(matches!(
+        post,
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: _,
+        }
+    ));
+    assert_eq!(host.semaphores().lookup(id).unwrap().count(), 1);
+}
+
+#[test]
+fn semaphore_post_wakes_parked_waiter_without_incrementing() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let poster_unit = UnitId::new(0);
+    let waiter_unit = UnitId::new(1);
+    seed_primary_ppu(&mut host, poster_unit);
+    host.ppu_threads_mut()
+        .create(
+            waiter_unit,
+            PpuThreadAttrs {
+                entry: 0,
+                arg: 0,
+                stack_base: 0,
+                stack_size: 0,
+                priority: 0,
+                tls_base: 0,
+            },
+        )
+        .unwrap();
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 0,
+            max: 10,
+        },
+        poster_unit,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    host.dispatch(
+        Lv2Request::SemaphoreWait { id, timeout: 0 },
+        waiter_unit,
+        &rt,
+    );
+    let post = host.dispatch(Lv2Request::SemaphorePost { id, val: 1 }, poster_unit, &rt);
+    match post {
+        Lv2Dispatch::WakeAndReturn {
+            code: 0,
+            woken_unit_ids,
+            ..
+        } => assert_eq!(woken_unit_ids, vec![waiter_unit]),
+        other => panic!("expected WakeAndReturn, got {other:?}"),
+    }
+    assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
+    assert!(host.semaphores().lookup(id).unwrap().waiters().is_empty());
+}
+
+#[test]
+fn semaphore_post_past_max_with_no_waiters_returns_ebusy() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 3,
+            max: 3,
+        },
+        src,
+        &rt,
+    );
+    let id = match &r {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let post = host.dispatch(Lv2Request::SemaphorePost { id, val: 1 }, src, &rt);
+    let Lv2Dispatch::Immediate { code, .. } = post else {
+        panic!("expected Immediate, got {post:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(host.semaphores().lookup(id).unwrap().count(), 3);
+}
+
+#[test]
+fn semaphore_wait_unknown_id_returns_esrch() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let r = host.dispatch(Lv2Request::SemaphoreWait { id: 99, timeout: 0 }, src, &rt);
+    let Lv2Dispatch::Immediate { code, .. } = r else {
+        panic!("expected Immediate, got {r:?}");
+    };
+    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+}

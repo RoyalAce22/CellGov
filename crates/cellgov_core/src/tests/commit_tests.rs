@@ -1,3 +1,5 @@
+//! Commit-pipeline effect application and fault-discard atomicity across every effect kind.
+
 use super::*;
 use cellgov_dma::{DmaDirection, DmaQueue, DmaRequest, FixedLatency};
 use cellgov_effects::{FaultKind, WritePayload};

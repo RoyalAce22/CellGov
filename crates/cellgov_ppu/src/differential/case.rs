@@ -118,7 +118,7 @@ pub enum OracleSource {
 #[derive(Debug, Clone)]
 pub struct InstructionCase {
     /// Human-readable label printed on mismatch.
-    pub label: &'static str,
+    pub label: String,
     /// State before `execute` runs.
     pub initial_state: PpuStateSnapshot,
     /// Memory mapped at `[base, base + bytes.len())` before

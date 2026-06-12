@@ -37,3 +37,7 @@ pub(super) fn validate_open_flags(
     }
     None
 }
+
+#[cfg(test)]
+#[path = "tests/flags_tests.rs"]
+mod tests;

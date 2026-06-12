@@ -13,6 +13,7 @@ mod entry;
 mod stream;
 
 #[cfg(test)]
+#[path = "tests/test_support.rs"]
 mod test_support;
 
 pub(crate) use entry::run;

@@ -31,5 +31,5 @@ pub use types::{
 };
 
 #[cfg(test)]
-#[path = "../tests/runtime_tests.rs"]
+#[path = "tests/runtime_tests.rs"]
 mod tests;

@@ -53,7 +53,7 @@ pub(super) fn state_with_three_gprs(
 
 /// Build an [`InstructionCase`] tagged [`OracleSource::Spec`].
 pub(super) fn case_keep_memory(
-    label: &'static str,
+    label: impl Into<String>,
     raw: u32,
     initial_state: PpuStateSnapshot,
     initial_memory: MemorySnapshot,
@@ -62,7 +62,7 @@ pub(super) fn case_keep_memory(
     rationale: &'static str,
 ) -> InstructionCase {
     InstructionCase {
-        label,
+        label: label.into(),
         initial_state,
         initial_memory,
         raw_instruction: raw,

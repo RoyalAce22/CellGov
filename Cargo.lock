@@ -319,6 +319,8 @@ dependencies = [
  "cellgov_sync",
  "cellgov_time",
  "cellgov_trace",
+ "proc-macro2",
+ "syn",
 ]
 
 [[package]]

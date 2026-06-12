@@ -24,4 +24,5 @@ mod stat_layout;
 mod write;
 
 #[cfg(test)]
-mod tests;
+#[path = "tests/common.rs"]
+mod common;

@@ -3,7 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_firmware::sce::{NpdHeaderInfo, SceError};
+use cellgov_firmware::npdrm::NpdHeaderInfo;
+use cellgov_firmware::sce::SceError;
 use cellgov_ps3_abi::sce::SCE_MAGIC;
 
 use crate::game::manifest::TitleManifest;
