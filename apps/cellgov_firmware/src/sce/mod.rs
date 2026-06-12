@@ -14,8 +14,8 @@ pub use decrypt::{decrypt_package, decrypt_sce_sections, decrypt_self_to_elf};
 pub use elf::mask_non_semantic_elf_bytes;
 pub use error::SceError;
 pub use raw::{
-    parse_sce_header, EncryptedMetadataDirectory, EncryptedSectionDescriptor, MetadataKeyEnvelope,
-    SceContainerHeader,
+    parse_program_authority_id, parse_sce_header, EncryptedMetadataDirectory,
+    EncryptedSectionDescriptor, MetadataKeyEnvelope, SceContainerHeader,
 };
 
 pub(crate) use decrypt::{decrypt_envelope, decrypt_sections_from_envelope};

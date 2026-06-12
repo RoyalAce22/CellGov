@@ -50,8 +50,9 @@ fn ss_access_control_engine_pkg_id_1_returns_enosys() {
 }
 
 #[test]
-fn ss_access_control_engine_pkg_id_2_writes_program_authority_id() {
+fn ss_access_control_engine_pkg_id_2_writes_boot_supplied_authority_id() {
     let mut host = Lv2Host::new();
+    host.set_program_authority_id(0x1010_0000_0100_0003);
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
         Lv2Request::SsAccessControlEngine {
@@ -70,13 +71,42 @@ fn ss_access_control_engine_pkg_id_2_writes_program_authority_id() {
                 assert_eq!(range.start().raw(), 0x9000);
                 assert_eq!(range.length(), 8);
                 let v = u64::from_be_bytes(bytes.bytes().try_into().unwrap());
-                assert_eq!(v, 0x1070_0000_3A00_0001);
+                assert_eq!(v, 0x1010_0000_0100_0003);
             } else {
                 panic!("expected SharedWriteIntent");
             }
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
+}
+
+#[test]
+fn ss_access_control_engine_pkg_id_2_defaults_to_retail_fallback() {
+    // A fresh host with no boot-supplied authority id (raw-ELF
+    // input path) serves the retail-application fallback.
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::SsAccessControlEngine {
+            pkg_id: 2,
+            a2: 0x9000,
+            a3: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result else {
+        panic!("expected Immediate(0), got {result:?}");
+    };
+    let Effect::SharedWriteIntent { bytes, .. } = &effects[0] else {
+        panic!("expected SharedWriteIntent");
+    };
+    let v = u64::from_be_bytes(bytes.bytes().try_into().unwrap());
+    assert_eq!(
+        v,
+        cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+        "raw-ELF default must be the retail-application authority id",
+    );
 }
 
 #[test]

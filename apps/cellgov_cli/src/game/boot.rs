@@ -27,18 +27,17 @@ const DEFAULT_PRIMARY_PRIO: u32 = 1001;
 /// Seeded ring size per slot. V256 shape: the dispatcher's six
 /// non-zero field budgets (56+8+76+4+22+10 = 176) drain inside the
 /// 256-byte limit, so module_start's terminal stall is the
-/// producer-fed cond[0] record-finish wait, not a mid-record
-/// depleted-ring symptom. See
-/// `docs/dev/phases/design/phases_41-50/phase_41.md`.
+/// producer-fed cond\[0\] record-finish wait, not a mid-record
+/// depleted-ring symptom.
 const CELLSYSUTIL_RING_LIMIT: u32 = 256;
 
 /// Boot-state seed for the cellSysutil slot-state shm.
 ///
 /// Models the first producer record an external firmware producer
 /// would have delivered before the title ran. Field consumers are
-/// the wait-fn guard reads decoded in the phase doc: state@+20
-/// (`!= 2` falls through), cursor@+16 vs limit@+4 (`<` enters the
-/// drain), read_pos@+8 / write_pos@+12 / data_offset@+0 drive the
+/// the libsysutil wait-fn guard reads: state@+20 (`!= 2` falls
+/// through), cursor@+16 vs limit@+4 (`<` enters the drain),
+/// read_pos@+8 / write_pos@+12 / data_offset@+0 drive the
 /// per-record memcpy, predicate@+30 (`0` avoids the early-exit
 /// error path).
 pub(super) fn cellsysutil_system_seed() -> cellgov_lv2::SystemStateSeed {
@@ -170,6 +169,9 @@ pub(super) struct PrepareOptions<'a> {
     pub elf_path: &'a str,
     /// Already-decrypted ELF bytes.
     pub elf_data: Vec<u8>,
+    /// Program authority id from the SELF identification header;
+    /// `None` (raw-ELF input) keeps the host's retail fallback.
+    pub authority_id: Option<u64>,
     pub firmware_dir: Option<&'a str>,
     pub strict_reserved: bool,
     pub dump_at_pc: Option<u64>,
@@ -478,6 +480,31 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // keyed shm is first mapped (sc 337).
     rt.lv2_host_mut()
         .register_system_seed(cellsysutil_system_seed());
+    // Boot identity served by sys_ss_access_control_engine pkg 2.
+    // Firmware modules classify callers by this value; libsysmodule's
+    // module_start runs full init only for non-system authids.
+    if let Some(authid) = opts.authority_id {
+        rt.lv2_host_mut().set_program_authority_id(authid);
+    }
+    // Adversarial knob: restore the pre-fix bdj.self (PAID_44)
+    // system authid so the cellSysmodule LoadModule-failure
+    // signature reappears. Used only by the authority-id revert
+    // tripwire to prove the per-title id is what retired the
+    // failures.
+    let authid_label = if parse_env_bool("CELLGOV_FORCE_SYSTEM_AUTHID") {
+        rt.lv2_host_mut()
+            .set_program_authority_id(cellgov_ps3_abi::sce::BDJ_SELF_PROGRAM_AUTHORITY_ID);
+        "forced system authid (CELLGOV_FORCE_SYSTEM_AUTHID)"
+    } else if opts.authority_id.is_some() {
+        "from SELF identification header"
+    } else {
+        "raw-ELF input -- retail-application fallback"
+    };
+    println!(
+        "program_authority_id: 0x{:016x} ({})",
+        rt.lv2_host().program_authority_id(),
+        authid_label,
+    );
     println!(
         "process_param: sdk_version=0x{:08x} ({})",
         proc_param

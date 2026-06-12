@@ -22,6 +22,9 @@ pub struct RunGameOptions<'a> {
     pub elf_path: &'a str,
     /// Pre-loaded plaintext ELF bytes (post-candidate-walk decrypt).
     pub elf_data: Vec<u8>,
+    /// Program authority id from the SELF identification header;
+    /// `None` (raw-ELF input) keeps the host's retail fallback.
+    pub authority_id: Option<u64>,
     pub max_steps: usize,
     pub trace: bool,
     pub profile: bool,
@@ -77,6 +80,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         title,
         elf_path,
         elf_data,
+        authority_id,
         max_steps,
         trace,
         profile,
@@ -116,6 +120,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         title,
         elf_path,
         elf_data,
+        authority_id,
         firmware_dir,
         strict_reserved,
         dump_at_pc,

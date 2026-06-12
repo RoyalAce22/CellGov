@@ -644,10 +644,12 @@ mod ss_access_control_engine {
 
     #[test]
     fn pkg_id_two_writes_program_authority_id_be_to_a2_and_returns_ok() {
-        // PAID_44 (bdj.self) per rpcs3/Crypto/key_vault.h.
-        const EXPECTED_AUTHID: u64 = 0x1070_0000_3A00_0001;
+        // The boot-supplied authority id (a retail-application id
+        // here) is served verbatim, big-endian.
+        const EXPECTED_AUTHID: u64 = 0x1010_0000_0100_0003;
 
         let mut host = Lv2Host::new();
+        host.set_program_authority_id(EXPECTED_AUTHID);
         let rt = FakeRuntime::new(0x10000);
         let src = UnitId::new(0);
         seed_primary_ppu(&mut host, src);

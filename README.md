@@ -76,14 +76,17 @@ CellGov answers that question:
 
 Pre-Alpha. What works today:
 
-- 3 titles boot to deterministic checkpoints (WipEout HD
-  Fury reaches `FirstRsxWrite`; flOw and Super Stardust HD
-  advance to named MaxSteps walls inside the firmware
-  libgcm spin-poll on `dma.ref` at `0x7a08` -- see
-  [docs/titles.md](docs/titles.md)). All three currently
-  diverge from RPCS3 at the checkpoint; each divergence names
-  the specific set of unmodeled syscalls as the next
-  implementation target (see "The null backend" above).
+- 3 titles boot to deterministic checkpoints past the
+  firmware `cellSysutil` init. WipEout HD Fury reaches
+  `FirstRsxWrite` and converges with RPCS3 at that
+  checkpoint (byte parity `975 non-semantic + 1 pending`);
+  flOw runs the full firmware-set boot to `sys_process_exit`,
+  and Super Stardust HD runs to a `MaxSteps` budget cap.
+  flOw and Super Stardust HD diverge from RPCS3, which keeps
+  executing past CellGov's stopping point; each divergence
+  names the specific unmodeled syscall as the next
+  implementation target (see "The null backend" above and
+  [docs/titles.md](docs/titles.md)).
 - PPU and SPU interpreters: complete decode for the PPC64 and
   SPU ABI surfaces titles in the current corpus exercise;
   coverage grows per phase (see

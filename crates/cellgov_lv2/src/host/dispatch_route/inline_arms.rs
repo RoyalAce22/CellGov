@@ -190,11 +190,15 @@ impl Lv2Host {
 
     /// `sys_ss_access_control_engine`. Oracle: RPCS3's `sys_ss.cpp`.
     /// `pkg_id` 1/3 require debug-or-root and return ENOSYS for
-    /// user-perm callers. `pkg_id == 2` writes the SELF
-    /// program-authority-id (`PAID_44 = bdj.self`, from RPCS3's
-    /// `key_vault.h`) to `*a2`; matches cellSysmodule's
-    /// recognised-caller branch in module_start. Any other `pkg_id`
-    /// is SS-domain status `0x8001_051D`.
+    /// user-perm callers. `pkg_id == 2` writes the booting process's
+    /// program authority id to `*a2` -- boot supplies it from the
+    /// title SELF's identification header via
+    /// [`Lv2Host::set_program_authority_id`]; raw-ELF inputs serve
+    /// the retail-application fallback. Firmware modules classify
+    /// callers by this value (libsysmodule's module_start skips its
+    /// init entirely for recognized system-process ids), so it must
+    /// name the booting title, never a system SELF. Any other
+    /// `pkg_id` is SS-domain status `0x8001_051D`.
     pub(super) fn dispatch_ss_access_control_engine(
         &self,
         pkg_id: u64,
@@ -207,8 +211,7 @@ impl Lv2Host {
                 Err(_) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
                 Ok(0) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
                 Ok(addr) => {
-                    const PROGRAM_AUTHORITY_ID: u64 = 0x1070_0000_3A00_0001;
-                    let authid_be = PROGRAM_AUTHORITY_ID.to_be_bytes();
+                    let authid_be = self.program_authority_id.to_be_bytes();
                     let write = Effect::SharedWriteIntent {
                         range: ByteRange::contiguous_u32(addr, 8),
                         bytes: WritePayload::from_slice(&authid_be),

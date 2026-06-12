@@ -85,3 +85,31 @@ fn state_hash_equal_across_two_runs_of_same_firmware() {
     b.set_firmware_identity("4.85", digest);
     assert_eq!(a.state_hash(), b.state_hash());
 }
+
+#[test]
+fn state_hash_unchanged_when_authority_id_is_the_retail_fallback() {
+    // The default (retail-application) authid is gated out of the
+    // hash so a raw-ELF boot reads identically to one that never
+    // set an authid.
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.set_program_authority_id(cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID);
+    assert_eq!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_changes_for_a_non_fallback_authority_id() {
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.set_program_authority_id(0x1070_0000_3A00_0001);
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_differs_between_two_distinct_authority_ids() {
+    let mut a = Lv2Host::new();
+    let mut b = Lv2Host::new();
+    a.set_program_authority_id(0x1070_0000_3A00_0001);
+    b.set_program_authority_id(0x1070_0000_5600_0001);
+    assert_ne!(a.state_hash(), b.state_hash());
+}

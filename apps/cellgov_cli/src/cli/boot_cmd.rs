@@ -80,6 +80,9 @@ struct BootInputs {
     /// path or candidate walk). Passed to `prepare()` so the
     /// decrypt happens exactly once.
     elf_data: Vec<u8>,
+    /// Program authority id from the SELF identification header;
+    /// `None` for raw-ELF inputs (boot serves the retail fallback).
+    authority_id: Option<u64>,
 }
 
 /// Resolve the title manifest plus the ELF path the boot will run. A
@@ -97,13 +100,13 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
             ));
         }
     }
-    let (elf_path, elf_data) = match explicit {
+    let (elf_path, image) = match explicit {
         Some(p) => {
-            let bytes = crate::cli::exit::load_ppu_image_with_title_or_die(&p, &title, &vfs_root);
-            (p, bytes)
+            let image = crate::cli::exit::load_ppu_image_with_title_or_die(&p, &title, &vfs_root);
+            (p, image)
         }
         None => {
-            let (bytes, path) =
+            let (image, path) =
                 crate::cli::exit::load_ppu_image_walk_candidates_or_die(&title, &vfs_root);
             let path_str = path
                 .to_str()
@@ -114,13 +117,14 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
                         path.display()
                     ))
                 });
-            (path_str, bytes)
+            (path_str, image)
         }
     };
     BootInputs {
         title,
         elf_path,
-        elf_data,
+        elf_data: image.elf_data,
+        authority_id: image.authority_id,
     }
 }
 
@@ -157,6 +161,7 @@ pub(crate) fn run_game(args: &[String]) {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
         elf_data: inputs.elf_data,
+        authority_id: inputs.authority_id,
         max_steps,
         trace,
         profile,
@@ -320,6 +325,7 @@ pub(crate) fn bench_boot_once(args: &[String]) {
             prescan,
         },
         inputs.elf_data,
+        inputs.authority_id,
     );
 }
 

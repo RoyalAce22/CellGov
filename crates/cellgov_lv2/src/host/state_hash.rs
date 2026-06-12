@@ -20,6 +20,7 @@ impl Lv2Host {
     /// runtime's `sync_state_hash` at every commit boundary.
     ///
     /// # Gating
+    ///
     /// Per-primitive tables and the child-stack allocator contribute
     /// only when non-empty / past their sentinel. `next_kernel_id`
     /// and `mem_alloc_ptr` always contribute, so a
@@ -27,6 +28,7 @@ impl Lv2Host {
     /// allocator state once the table empties again.
     ///
     /// # Cost
+    ///
     /// Linear in the number of live primitives plus per-thread
     /// lwmutex-hold and callback-parent map sizes; runs once per
     /// commit boundary.
@@ -82,6 +84,13 @@ impl Lv2Host {
         if let Some(fw) = self.firmware_identity() {
             hasher.write(&fw.image_version_hash.to_le_bytes());
             hasher.write(&fw.pup_sha256_bytes);
+        }
+        // A raw-ELF boot (no authid) and one set to the
+        // retail-application fallback serve byte-identical
+        // `sys_ss_access_control_engine` pkg-2 responses, so they hash
+        // identically; only a distinct system-process authid folds in.
+        if self.program_authority_id != cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID {
+            hasher.write(&self.program_authority_id.to_le_bytes());
         }
         hasher.finish()
     }

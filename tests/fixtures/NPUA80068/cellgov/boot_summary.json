@@ -3,7 +3,7 @@
     "kind": "first_rsx_write"
   },
   "outcome": "MaxSteps",
-  "steps": 390625,
+  "steps": 390433,
   "budget": 256,
-  "host_invariant_breaks": 0
+  "host_invariant_breaks": 1
 }

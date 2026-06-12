@@ -15,9 +15,18 @@ over those JSONs.
 ```bash
 cargo run --release -p cellgov_cli -- run-game \
   --title-manifest docs/title_manifests/{{content_id}}.toml \
+  --max-steps <N> \
   --save-observation tests/fixtures/{{content_id}}/cellgov/observation.json \
+  --save-boot-summary tests/fixtures/{{content_id}}/cellgov/boot_summary.json \
   --observation-manifest tests/fixtures/{{content_id}}/checkpoint.toml
 ```
+
+`--max-steps` is the instruction budget and defaults to 100,000.
+That default halts well before a title reaches its checkpoint;
+seeing the full breadth of boot currently needs a budget in the
+1,000,000+ range. Raise `<N>` until the run reaches its
+checkpoint (or settles at a deterministic wall) rather than
+stopping at `MaxSteps`.
 
 ## Capture the RPCS3 observation
 

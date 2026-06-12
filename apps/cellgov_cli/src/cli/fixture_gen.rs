@@ -137,7 +137,8 @@ pub(crate) fn run(args: &[String]) {
         }),
         &manifest,
         &vfs_root,
-    );
+    )
+    .elf_data;
 
     let cellgov: Observation = serde_json::from_slice(&load_file_or_die(&cellgov_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: parse {cellgov_path}: {e}")));

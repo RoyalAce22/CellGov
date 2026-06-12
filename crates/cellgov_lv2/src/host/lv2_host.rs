@@ -46,18 +46,15 @@ pub struct Lv2Host {
     /// A keyed 332 with a registered key returns the existing
     /// `mem_id` (RPCS3's SYS_SYNC_NOT_CARE path,
     /// `sys_mmapper.cpp:103-128`); an unregistered key mints and
-    /// registers. Not folded into [`Self::state_hash`]: the mint path
-    /// advances `next_kernel_id` (hashed) and the found path mutates
-    /// nothing.
+    /// registers. Not folded into [`Self::state_hash`].
     pub(super) mmapper_ipc: BTreeMap<u64, u32>,
     /// Boot-registered seeds keyed by `shm_ipc_key`; immutable after
     /// boot. Applied at most once, on the first 334 / 337 map of the
     /// matching shm. Not folded into [`Self::state_hash`]: the seed
     /// writes settle via `GuestMemory` (hashed there).
     pub(super) system_state_seeds: BTreeMap<u64, SystemStateSeed>,
-    /// Keys whose seed has been applied. Not folded into
-    /// [`Self::state_hash`] (the applied writes are; this set only
-    /// suppresses re-application on a re-map).
+    /// Keys whose seed has been applied; suppresses re-application on
+    /// a re-map. Not folded into [`Self::state_hash`].
     pub(super) system_seeds_applied: std::collections::BTreeSet<u64>,
     /// `shm_ipc_key -> mapped guest base` recorded when a seed is
     /// applied. The cond ring-check wake reads slot state through
@@ -90,16 +87,12 @@ pub struct Lv2Host {
     /// [`Self::state_hash`]; the handle table itself carries the
     /// hashable state.
     pub(super) pending_region_installs: Vec<PendingRegionInstall>,
-    /// Authoritative ledger of every mmapper-window range this host
-    /// has handed out via 334 / 337 (and not yet released). The
-    /// search in 337 consults this to find a free aligned range
-    /// at-or-after the caller's hint. Recorded as
-    /// `(start_addr -> size)` keyed in BTreeMap order so the
-    /// nearest-below lookup is `O(log n)`. Not folded into
-    /// [`Self::state_hash`] -- the install side-effect is what
-    /// settles via `GuestMemory`; this ledger is the host's local
-    /// witness of what was minted, used to keep the search and the
-    /// install coherent.
+    /// Ledger of every mmapper-window range handed out via 334 / 337
+    /// and not yet released. The search in 337 consults this to find a
+    /// free aligned range at-or-after the caller's hint; keyed
+    /// `start_addr -> size` so the nearest-below lookup is `O(log n)`.
+    /// Not folded into [`Self::state_hash`] (the install side-effect
+    /// settles via `GuestMemory`).
     pub(super) mmapper_install_ledger: BTreeMap<u32, u32>,
     pub(super) lwmutexes: LwMutexTable,
     pub(super) mutexes: MutexTable,
@@ -135,14 +128,14 @@ pub struct Lv2Host {
     pub(super) lwmutex_holds: BTreeMap<PpuThreadId, u32>,
     /// Folded into [`Self::state_hash`] when set.
     pub(super) firmware_identity: Option<FirmwareIdentity>,
-    /// Audit C-5b witness: count of `dispatch_thread_initialize`
+    /// Witness: Count of `dispatch_thread_initialize`
     /// invocations. The catch-all `debug_assert!` at
     /// `host/spu.rs:235` guards against being called with the
     /// wrong request variant; silence is non-vacuous only when
     /// the dispatch actually ran. Not folded into
     /// [`Self::state_hash`] (instrument-only).
     pub(super) spu_thread_initialize_dispatches: u64,
-    /// Audit C-6c witness: count of `cond_reacquire_wake` calls.
+    /// Witness: Count of `cond_reacquire_wake` calls.
     /// The `debug_assert!(!use_lwmutex, ...)` at `host/cond.rs:247`
     /// guards against an unimplemented lwmutex-cond re-acquire
     /// path; silence is non-vacuous only when the function ran.
@@ -158,6 +151,25 @@ pub struct Lv2Host {
     /// homebrew sees); this default matches that contract for
     /// callers that never invoke `set_sdk_version`.
     pub(super) sdk_version: u32,
+    /// The booting process's SELF program authority id, served by
+    /// `sys_ss_access_control_engine` pkg 2. Boot reads it from the
+    /// title SELF's plaintext identification header; raw-ELF inputs
+    /// keep the retail-application fallback (see
+    /// `cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID`).
+    /// Firmware classifies callers by this value -- libsysmodule's
+    /// module_start skips its whole init (including the lwmutex
+    /// every later `cellSysmoduleLoadModule` locks) for recognized
+    /// system-process ids. Folded into [`Self::state_hash`] when it
+    /// differs from the fallback.
+    pub(super) program_authority_id: u64,
+    /// Witness: total `sys_lwmutex_lock` calls across the boot that
+    /// failed because the id was not in the table (CELL_ESRCH). A
+    /// wrong program-authority-id skips libsysmodule's lwmutex
+    /// creation, so every later `cellSysmoduleLoadModule` locks id 0
+    /// and bumps this; a non-zero count is that signature. Counts
+    /// every occurrence boot-wide, not one window. Not hashed
+    /// (instrument-only).
+    pub(super) lwmutex_unknown_lock_count: u64,
 }
 
 /// Captured at boot via the verified `firmware.toml` manifest.
@@ -257,6 +269,8 @@ impl Lv2Host {
             spu_thread_initialize_dispatches: 0,
             cond_reacquire_wake_calls: 0,
             sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
+            program_authority_id: cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+            lwmutex_unknown_lock_count: 0,
         }
     }
 
@@ -276,16 +290,35 @@ impl Lv2Host {
         self.sdk_version
     }
 
-    /// Audit C-5b witness: count of `dispatch_thread_initialize`
-    /// invocations. See the field doc on
-    /// `spu_thread_initialize_dispatches`.
+    /// Set the booting process's program authority id (from the
+    /// title SELF's identification header). Callers with raw-ELF
+    /// input leave the retail-application fallback in place.
+    pub fn set_program_authority_id(&mut self, authority_id: u64) {
+        self.program_authority_id = authority_id;
+    }
+
+    /// The value `sys_ss_access_control_engine` pkg 2 serves.
+    #[inline]
+    pub fn program_authority_id(&self) -> u64 {
+        self.program_authority_id
+    }
+
+    /// Witness: count of `sys_lwmutex_lock` calls rejected for an
+    /// unknown id. The cellSysmodule LoadModule-failure signature.
+    #[inline]
+    pub fn lwmutex_unknown_lock_count(&self) -> u64 {
+        self.lwmutex_unknown_lock_count
+    }
+
+    /// Witness: count of `dispatch_thread_initialize` invocations.
+    /// See the field doc on `spu_thread_initialize_dispatches`.
     #[inline]
     pub fn spu_thread_initialize_dispatches(&self) -> u64 {
         self.spu_thread_initialize_dispatches
     }
 
-    /// Audit C-6c witness: count of `cond_reacquire_wake` calls.
-    /// See the field doc on `cond_reacquire_wake_calls`.
+    /// Witness: count of `cond_reacquire_wake` calls. See the field
+    /// doc on `cond_reacquire_wake_calls`.
     #[inline]
     pub fn cond_reacquire_wake_calls(&self) -> u64 {
         self.cond_reacquire_wake_calls

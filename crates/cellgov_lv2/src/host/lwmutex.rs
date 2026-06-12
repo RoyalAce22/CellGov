@@ -35,6 +35,7 @@ impl Lv2Host {
         };
         match self.lwmutexes.acquire_or_enqueue(id, caller) {
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Unknown => {
+                self.lwmutex_unknown_lock_count = self.lwmutex_unknown_lock_count.wrapping_add(1);
                 Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Acquired => Lv2Dispatch::immediate(0),
@@ -92,8 +93,6 @@ impl Lv2Host {
         let Some(entry) = self.lwmutexes.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        // Only parked waiters block destroy. The signal flag does
-        // not, since user-space ownership is invisible to us.
         // Only parked waiters block destroy; the signal flag does
         // not (user-space ownership is invisible to the kernel).
         if !entry.waiters().is_empty() {

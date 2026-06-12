@@ -38,14 +38,13 @@ pub(in crate::game) enum ModuleStartOutcome {
 ///
 /// `cellSysutil_Library`: its init dispatcher drains serialized
 /// records from a producer-fed shared-memory ring and terminally
-/// waits on cond[0] for the next record. The producer lives outside
+/// waits on cond\[0\] for the next record. The producer lives outside
 /// cellSysutil in real PS3 firmware and CellGov has no equivalent;
 /// satisfying the wait would mean inventing the producer's contract
 /// (STATE_FIELD, cursor advance, record bytes). The honest pieces
-/// (IPC-key registration, first-record seed, cond[1] ring-check arm)
+/// (IPC-key registration, first-record seed, cond\[1\] ring-check arm)
 /// advance the consumer through one record then stall AllBlocked --
-/// witnessed by `cond0_producer_waits` in production state. See
-/// `docs/dev/phases/design/phases_41-50/phase_41.md`.
+/// witnessed by `cond0_producer_waits` in production state.
 const HLE_STUBBED_MODULE_STARTS: &[&str] = &["cellSysutil_Library"];
 
 /// Why a module_start failed to complete.
@@ -359,6 +358,36 @@ pub(in crate::game) fn run_module_start(
         if !keyed.is_empty() {
             println!("  module_start keyed cond signals: {}", keyed.join(" "));
         }
+        // Structured witness for the cellSysutil stall-signature
+        // tripwire: every field as a parseable integer, plus the
+        // module-name match and the stall step count. `stalled` is
+        // 1 when module_start failed to return (the producer-fed
+        // wall), 0 when it returned. Slot-0 cond[0] signal count is
+        // reported as `cond0_slot0_signals`.
+        let cond0_slot0_key = cellgov_ps3_abi::system_ipc::CELLSYSUTIL_COND0_IPC_KEY_BASE;
+        let cond0_slot0_signals = host
+            .cond_keyed_signal_counts()
+            .get(&cond0_slot0_key)
+            .copied()
+            .unwrap_or(0);
+        let slot0_producer_waits = host
+            .cond0_producer_waits_by_slot()
+            .get(&0)
+            .copied()
+            .unwrap_or(0);
+        eprintln!(
+            "BENCH_CELLSYSUTIL_SEED_WITNESS: module={} stalled={} steps={} ring_wakes={} \
+             cond0_producer_waits={} slot0_producer_waits={} cond_signals={} \
+             cond0_slot0_signals={}",
+            prx_info.name,
+            u8::from(result.is_err()),
+            steps,
+            host.cond_ring_wakes(),
+            host.cond0_producer_waits(),
+            slot0_producer_waits,
+            host.cond_signal_dispatches(),
+            cond0_slot0_signals,
+        );
     }
 
     if !pc_hits.is_empty() {

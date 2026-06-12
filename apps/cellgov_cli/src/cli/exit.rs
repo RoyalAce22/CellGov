@@ -102,20 +102,38 @@ fn klicensee_resolver(
     }
 }
 
+/// Plaintext ELF bytes plus the boot identity read from the SELF
+/// wrapper before decryption. `authority_id` is `None` for raw-ELF
+/// inputs, which have no identification header.
+pub(crate) struct LoadedPpuImage {
+    pub elf_data: Vec<u8>,
+    pub authority_id: Option<u64>,
+}
+
 /// Read a PPU image at an explicit path, resolving the klicensee for
 /// NPDRM titles from the manifest's `rap_filename`.
 pub(crate) fn load_ppu_image_with_title_or_die(
     path: &str,
     title: &TitleManifest,
     vfs_root: &Path,
-) -> Vec<u8> {
+) -> LoadedPpuImage {
     let bytes = load_file_or_die(path);
     if !(bytes.len() >= 4 && bytes[..4] == SCE_MAGIC) {
-        return bytes;
+        return LoadedPpuImage {
+            elf_data: bytes,
+            authority_id: None,
+        };
     }
+    let authority_id = cellgov_firmware::sce::parse_program_authority_id(&bytes)
+        .map_err(|e| die(&format!("SELF {path}: identification header: {e}")))
+        .ok();
     let resolver = klicensee_resolver(title, vfs_root.to_path_buf());
-    cellgov_firmware::npdrm::decrypt_self_to_elf_auto(&bytes, resolver)
-        .unwrap_or_else(|e| die(&format!("failed to decrypt SELF {path}: {e}")))
+    let elf_data = cellgov_firmware::npdrm::decrypt_self_to_elf_auto(&bytes, resolver)
+        .unwrap_or_else(|e| die(&format!("failed to decrypt SELF {path}: {e}")));
+    LoadedPpuImage {
+        elf_data,
+        authority_id,
+    }
 }
 
 /// Walk `eboot_candidates` in declaration order, returning the first
@@ -124,7 +142,7 @@ pub(crate) fn load_ppu_image_with_title_or_die(
 pub(crate) fn load_ppu_image_walk_candidates_or_die(
     title: &TitleManifest,
     vfs_root: &Path,
-) -> (Vec<u8>, PathBuf) {
+) -> (LoadedPpuImage, PathBuf) {
     let resolved = title.resolve_eboot(vfs_root).unwrap_or_else(|e| {
         die(&format!(
             "load ppu image: resolve_eboot for title {}: {}",
@@ -149,15 +167,30 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
             }
         };
         if bytes.len() >= 4 && bytes[..4] == SCE_MAGIC {
+            let authority_id = cellgov_firmware::sce::parse_program_authority_id(&bytes).ok();
             match cellgov_firmware::npdrm::decrypt_self_to_elf_auto(&bytes, &resolver) {
-                Ok(elf) => return (elf, path),
+                Ok(elf) => {
+                    return (
+                        LoadedPpuImage {
+                            elf_data: elf,
+                            authority_id,
+                        },
+                        path,
+                    )
+                }
                 Err(e) => {
                     attempts.push((candidate.clone(), LoadCandidateError::Decrypt(e)));
                     continue;
                 }
             }
         } else if bytes.len() >= 4 && bytes[..4] == [0x7F, b'E', b'L', b'F'] {
-            return (bytes, path);
+            return (
+                LoadedPpuImage {
+                    elf_data: bytes,
+                    authority_id: None,
+                },
+                path,
+            );
         } else {
             attempts.push((candidate.clone(), LoadCandidateError::NotElf));
             continue;

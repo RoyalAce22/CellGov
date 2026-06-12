@@ -273,9 +273,6 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
     assert_eq!(installs, vec![(0x5400_0000_u64, 0x00a0_0000_usize)]);
 }
 
-/// sc 332 then sc 337: the search lands on the hint when the window
-/// is empty, the ledger records the install, and the runtime sees a
-/// `PendingRegionInstall` covering the written-back address.
 #[test]
 fn syscall_332_then_337_searches_installs_and_writes_back_found_addr() {
     let mut host = Lv2Host::new();
@@ -306,9 +303,6 @@ fn syscall_332_then_337_searches_installs_and_writes_back_found_addr() {
     assert_eq!(installs, vec![(0x5000_0000_u64, 0x0010_0000_usize)]);
 }
 
-/// sc 337 with a hint that collides with a prior install: the search
-/// must walk forward and the write-back must report the found
-/// (post-collision) address, not the hint.
 #[test]
 fn syscall_337_search_walks_past_existing_install() {
     let mut host = Lv2Host::new();
@@ -347,7 +341,6 @@ fn syscall_337_search_walks_past_existing_install() {
     );
 }
 
-/// sc 337 with a `mem_id` the handle table does not know.
 #[test]
 fn syscall_337_unknown_mem_id_returns_esrch_and_logs_break() {
     let mut host = Lv2Host::new();

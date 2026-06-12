@@ -32,6 +32,95 @@ fn decrypt_package_rejects_truncated() {
     assert!(decrypt_package(&[0u8; 8]).is_err());
 }
 
+/// Minimal SCE buffer with a program identification header at
+/// `pid_off` whose first u64 is `authid`.
+fn build_self_with_authid(pid_off: u64, authid: u64, len: usize) -> Vec<u8> {
+    let mut data = vec![0u8; len];
+    data[0..4].copy_from_slice(&0x53434500u32.to_be_bytes());
+    data[0x28..0x30].copy_from_slice(&pid_off.to_be_bytes());
+    let off = pid_off as usize;
+    if off + 8 <= len {
+        data[off..off + 8].copy_from_slice(&authid.to_be_bytes());
+    }
+    data
+}
+
+#[test]
+fn parse_program_authority_id_reads_the_pid_header_first_u64() {
+    let data = build_self_with_authid(0x70, 0x1010_0000_0100_0003, 0x100);
+    assert_eq!(
+        parse_program_authority_id(&data).unwrap(),
+        0x1010_0000_0100_0003
+    );
+}
+
+#[test]
+fn parse_program_authority_id_rejects_non_sce_input() {
+    let mut data = vec![0u8; 0x100];
+    data[0..4].copy_from_slice(&0x7F45_4C46u32.to_be_bytes()); // raw ELF magic
+    assert!(matches!(
+        parse_program_authority_id(&data).unwrap_err(),
+        SceError::BadMagic { .. }
+    ));
+}
+
+#[test]
+fn parse_program_authority_id_rejects_out_of_range_offset() {
+    let data = build_self_with_authid(0x1000, 0, 0x100);
+    assert!(matches!(
+        parse_program_authority_id(&data).unwrap_err(),
+        SceError::HeaderOffsetOutOfRange { .. }
+    ));
+}
+
+#[test]
+fn parse_program_authority_id_rejects_truncated_ext_header() {
+    let mut data = vec![0u8; 0x24];
+    data[0..4].copy_from_slice(&0x53434500u32.to_be_bytes());
+    assert!(matches!(
+        parse_program_authority_id(&data).unwrap_err(),
+        SceError::TooSmall { .. }
+    ));
+}
+
+/// Hand-verified ground truth (independent byte-level parse of the
+/// plaintext headers): flOw (NPDRM, program_type 8) and WipEout (disc
+/// APP, program_type 4) both carry the retail-application authority id
+/// `0x1010_0000_0100_0003`.
+#[test]
+fn parse_program_authority_id_matches_known_corpus_values() {
+    let root = {
+        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.pop();
+        p.pop();
+        p
+    };
+    let cases = [
+        (
+            "flOw (NPDRM SELF)",
+            "tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN",
+            0x1010_0000_0100_0003u64,
+        ),
+        (
+            "WipEout (disc SELF)",
+            "tools/rpcs3/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.BIN",
+            0x1010_0000_0100_0003u64,
+        ),
+    ];
+    for (label, rel, expected) in cases {
+        let path = root.join(rel);
+        let Ok(bytes) = std::fs::read(&path) else {
+            eprintln!("parse_program_authority_id corpus pin: skipping {label} (fixture absent)");
+            continue;
+        };
+        assert_eq!(
+            parse_program_authority_id(&bytes).unwrap(),
+            expected,
+            "{label}: authority id mismatch",
+        );
+    }
+}
+
 #[test]
 fn mask_non_semantic_elf_bytes_zeroes_section_header_fields_and_moves_nothing_else() {
     // The {e_shoff, e_shnum, e_shstrndx} set is empirically
@@ -51,8 +140,6 @@ fn mask_non_semantic_elf_bytes_zeroes_section_header_fields_and_moves_nothing_el
     assert_eq!(&elf[0x3C..0x3E], &[0u8; 2], "e_shnum");
     assert_eq!(&elf[0x3E..0x40], &[0u8; 2], "e_shstrndx");
 
-    // Nothing-else-moved: every byte outside the three masked
-    // ranges must equal its pre-mask value.
     for (i, (b_before, b_after)) in before.iter().zip(elf.iter()).enumerate() {
         let in_shoff = (0x28..0x30).contains(&i);
         let in_shnum = (0x3C..0x3E).contains(&i);
