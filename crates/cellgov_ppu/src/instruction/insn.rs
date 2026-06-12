@@ -1053,17 +1053,20 @@ pub enum PpuInstruction {
 
     // -- Vector (AltiVec / VMX) --
     // [AltiVec-PEM p:2] AltiVec architectural overview; VX/VA-form encoding under primary opcode 4.
-    /// Generic VX-form. `xo` is the 11-bit extended opcode; execution
-    /// dispatches on it rather than opening a new variant per VMX op.
+    /// Generic VX-form (and VXR-form with `rc`). Execution
+    /// dispatches on [`op`](crate::instruction::ops::VxOp) rather
+    /// than opening a new variant per VMX op.
     Vx {
-        xo: u16,
+        op: crate::instruction::ops::VxOp,
+        /// VXR record bit; only ever `true` for compare ops.
+        rc: bool,
         vt: u8,
         va: u8,
         vb: u8,
     },
     /// Generic VA-form (four register operands, 6-bit sub-opcode).
     Va {
-        xo: u8,
+        op: crate::instruction::ops::VaOp,
         vt: u8,
         va: u8,
         vb: u8,
@@ -1350,22 +1353,22 @@ pub enum PpuInstruction {
     },
 
     // [PPC-Book1 p:111 s:4.6.5 Floating-Point Arithmetic Instructions] primary 63 / 59 dispatch (fadd / fsub / fmul / fdiv / fmadd at p:111-113).
-    /// Generic double-precision FP (primary 63). `xo` selects the op.
-    /// `rc` is preserved at decode but not yet honored by the executor
-    /// (FPSCR/CR1 plumbing pending).
+    /// Generic double-precision FP (primary 63). `rc` is preserved
+    /// at decode but not yet honored by the executor (FPSCR/CR1
+    /// plumbing pending).
     Fp63 {
-        xo: u16,
+        op: crate::instruction::ops::Fp63Op,
         frt: u8,
         fra: u8,
         frb: u8,
         frc: u8,
         rc: bool,
     },
-    /// Generic single-precision FP (primary 59). `xo` selects the op.
-    /// `rc` is preserved at decode but not yet honored by the executor
-    /// (FPSCR/CR1 plumbing pending).
+    /// Generic single-precision FP (primary 59). `rc` is preserved
+    /// at decode but not yet honored by the executor (FPSCR/CR1
+    /// plumbing pending).
     Fp59 {
-        xo: u16,
+        op: crate::instruction::ops::Fp59Op,
         frt: u8,
         fra: u8,
         frb: u8,

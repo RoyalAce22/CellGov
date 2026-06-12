@@ -3,6 +3,7 @@
 use super::*;
 use crate::exec::test_support::exec_no_mem;
 use crate::exec::ExecuteVerdict;
+use crate::instruction::ops::{VaOp, VxOp};
 use crate::instruction::PpuInstruction;
 
 #[test]
@@ -45,7 +46,8 @@ fn vxor_typed_and_vx_stub_paths_produce_identical_state() {
     s_stub.vr[3] = 0xDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEFu128;
     exec_no_mem(
         &PpuInstruction::Vx {
-            xo: 0x4c4,
+            op: VxOp::Vxor,
+            rc: false,
             vt: 3,
             va: 1,
             vb: 2,
@@ -57,12 +59,13 @@ fn vxor_typed_and_vx_stub_paths_produce_identical_state() {
     assert_eq!(s_typed.vr[3], seed_va ^ seed_vb);
 }
 
-/// Per AltiVec-PEM Appendix A.5 Table A-6: the VX-form logical and
-/// shift instructions have specific 11-bit XO values. An earlier
-/// implementation used wrong XOs that either fell out of the 11-bit
-/// range (silently dead arms) or aliased onto OTHER instructions'
-/// canonical XOs, so guest code using e.g. `vmuleub` was silently
-/// getting `vmrglb` results. This test pins every corrected XO.
+/// Per AltiVec-PEM logical-op definition pages: vand=1028 (0x404),
+/// vandc=1092 (0x444), vor=1156 (0x484), vxor=1220 (0x4c4),
+/// vnor=1284 (0x504). An earlier table had vor and vnor swapped
+/// (1284 executed as OR), exactly the transcription-scramble class
+/// the encoding-law tests exist to catch; this test pins the
+/// corrected mapping with semantic probes.
+// [AltiVec-PEM p:6-111 s:6.2] vor XO=1156; [p:6-110] vnor XO=1284.
 #[test]
 fn vx_xo_table_matches_altivec_pem_canonical() {
     let pairs: &[(u16, u128, u128, u128, &str)] = &[
@@ -75,7 +78,7 @@ fn vx_xo_table_matches_altivec_pem_canonical() {
             "vand",
         ),
         (
-            0x504,
+            0x484,
             0x1234_0000_0000_0000_0000_0000_0000_0000,
             0x0000_5678_0000_0000_0000_0000_0000_0000,
             0x1234_5678_0000_0000_0000_0000_0000_0000,
@@ -96,7 +99,7 @@ fn vx_xo_table_matches_altivec_pem_canonical() {
             "vandc",
         ),
         (
-            0x484,
+            0x504,
             0x0F00_0000_0000_0000_0000_0000_0000_0000,
             0x00F0_0000_0000_0000_0000_0000_0000_0000,
             0xF00F_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF,
@@ -107,15 +110,7 @@ fn vx_xo_table_matches_altivec_pem_canonical() {
         let mut s = PpuState::new();
         s.vr[1] = va;
         s.vr[2] = vb;
-        exec_no_mem(
-            &PpuInstruction::Vx {
-                xo,
-                vt: 3,
-                va: 1,
-                vb: 2,
-            },
-            &mut s,
-        );
+        exec_no_mem(&vx(xo, 3, 1, 2), &mut s);
         assert_eq!(
             s.vr[3], expected,
             "{name} (xo={xo:#x}) produced wrong result"
@@ -232,19 +227,18 @@ fn vspltish_sign_extends_to_halfword() {
     assert_eq!(vspltish(0x1F), u128::from_be_bytes([0xFF; 16]));
 }
 
+/// Build a `Vx` from a raw 11-bit XO so the literal in each test
+/// stays the PEM-citable number.
+fn vx(xo: u16, vt: u8, va: u8, vb: u8) -> PpuInstruction {
+    let (op, rc) = VxOp::decode(xo).unwrap_or_else(|| panic!("undocumented test xo {xo}"));
+    PpuInstruction::Vx { op, rc, vt, va, vb }
+}
+
 fn run_vx(xo: u16, va: u128, vb: u128) -> u128 {
     let mut s = PpuState::new();
     s.vr[1] = va;
     s.vr[2] = vb;
-    let v = exec_no_mem(
-        &PpuInstruction::Vx {
-            xo,
-            vt: 3,
-            va: 1,
-            vb: 2,
-        },
-        &mut s,
-    );
+    let v = exec_no_mem(&vx(xo, 3, 1, 2), &mut s);
     assert_eq!(v, ExecuteVerdict::Continue);
     s.vr[3]
 }
@@ -255,27 +249,20 @@ fn run_vx_imm(xo: u16, va_field: u8, vb: u128) -> u128 {
     // the unused va register.
     let mut s = PpuState::new();
     s.vr[2] = vb;
-    let v = exec_no_mem(
-        &PpuInstruction::Vx {
-            xo,
-            vt: 3,
-            va: va_field,
-            vb: 2,
-        },
-        &mut s,
-    );
+    let v = exec_no_mem(&vx(xo, 3, va_field, 2), &mut s);
     assert_eq!(v, ExecuteVerdict::Continue);
     s.vr[3]
 }
 
 fn run_va(xo: u8, va: u128, vb: u128, vc: u128) -> u128 {
+    let op = VaOp::from_repr(xo).unwrap_or_else(|| panic!("undocumented test xo {xo}"));
     let mut s = PpuState::new();
     s.vr[1] = va;
     s.vr[2] = vb;
     s.vr[3] = vc;
     let v = exec_no_mem(
         &PpuInstruction::Va {
-            xo,
+            op,
             vt: 4,
             va: 1,
             vb: 2,
@@ -627,38 +614,43 @@ fn vperm_indexes_concat_of_a_and_b_by_low_5_bits_of_c() {
 //   CR6.bit1 = 0
 //   CR6.bit2 = 1 iff no element compared true
 //   CR6.bit3 = 0
-// The `PpuInstruction::Vx { xo, vt, va, vb }` variant in
-// `instruction/insn.rs` carries no Rc field, so the executor has
-// no way to be ASKED for the Rc=1 behavior. The current
-// `vcmpequw` arm only writes the result vector; CR is never
-// touched. The tests below pin that absence and pin the same
+// The `Vx` variant carries the VXR Rc bit, but the CR6-update path
+// is not implemented: an Rc=1 compare faults rather than silently
+// skipping the CR write. The tests below pin both halves and the
 // "no CR/XER side effect" invariant for every other VX/VA op.
 
-/// Documents that the `Vx` variant cannot request the Rc=1 CR6
-/// update path. The variant has no Rc field, so the executor
-/// never sets CR6 even on `vcmpequw`. A future implementer
-/// adding Rc plumbing should replace this test with the four
-/// CR6 cases (all-equal, none-equal, partial, Rc=0 untouched)
-/// listed in [AltiVec-PEM p:6-56 s:6.2].
 #[test]
-fn vcmpequw_rc_one_is_currently_unmodeled() {
+fn vcmpequw_rc_zero_writes_vector_only() {
     let mut s = PpuState::new();
     s.cr = 0xABCD_EF01;
     s.vr[1] = pack_u32x4([1, 2, 3, 4]);
     s.vr[2] = pack_u32x4([1, 2, 3, 4]);
-    exec_no_mem(
-        &PpuInstruction::Vx {
-            xo: 0x086,
-            vt: 3,
-            va: 1,
-            vb: 2,
-        },
-        &mut s,
-    );
+    exec_no_mem(&vx(0x086, 3, 1, 2), &mut s);
     // Result vector is set per the compare semantics.
     assert_eq!(s.vr[3], pack_u32x4([0xFFFF_FFFF; 4]));
-    // CR is unchanged because the variant carries no Rc bit.
+    // CR is untouched on the Rc=0 form.
     assert_eq!(s.cr, 0xABCD_EF01);
+}
+
+/// The Rc=1 form (`vcmpequw.`) also updates CR6; that path is
+/// unimplemented and must fault, never silently skip the CR write.
+/// An implementer should replace this with the four CR6 cases
+/// (all-equal, none-equal, partial, Rc=0 untouched) listed in
+/// [AltiVec-PEM p:6-56 s:6.2].
+#[test]
+fn vcmpequw_rc_one_faults_as_unimplemented() {
+    let mut s = PpuState::new();
+    s.vr[1] = pack_u32x4([1, 2, 3, 4]);
+    s.vr[2] = pack_u32x4([1, 2, 3, 4]);
+    let v = exec_no_mem(&vx(0x486, 3, 1, 2), &mut s);
+    assert!(
+        matches!(
+            v,
+            ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(0x486))
+        ),
+        "expected UnimplementedInstruction(0x486), got {v:?}"
+    );
+    assert_eq!(s.vr[3], 0, "faulting compare must not write the vector");
 }
 
 #[test]
@@ -668,15 +660,7 @@ fn vx_ops_do_not_touch_cr_or_xer_when_rc_zero() {
     s.xer = 0x1234_5678;
     s.vr[1] = pack_u32x4([1, 2, 3, 4]);
     s.vr[2] = pack_u32x4([10, 20, 30, 40]);
-    exec_no_mem(
-        &PpuInstruction::Vx {
-            xo: 0x080,
-            vt: 3,
-            va: 1,
-            vb: 2,
-        },
-        &mut s,
-    );
+    exec_no_mem(&vx(0x080, 3, 1, 2), &mut s);
     assert_eq!(s.vr[3], pack_u32x4([11, 22, 33, 44]));
     assert_eq!(s.cr, 0xABCD_EF01);
     assert_eq!(s.xer, 0x1234_5678);
@@ -693,7 +677,7 @@ fn vsel_does_not_touch_cr() {
     s.vr[3] = u128::from_be_bytes([0xFF; 16]);
     exec_no_mem(
         &PpuInstruction::Va {
-            xo: 0x2a,
+            op: VaOp::Vsel,
             vt: 4,
             va: 1,
             vb: 2,
@@ -723,7 +707,7 @@ fn vperm_does_not_touch_cr() {
     s.vr[3] = 0;
     exec_no_mem(
         &PpuInstruction::Va {
-            xo: 0x2b,
+            op: VaOp::Vperm,
             vt: 4,
             va: 1,
             vb: 2,

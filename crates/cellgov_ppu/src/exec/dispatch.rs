@@ -248,31 +248,38 @@ pub fn execute(
         | PpuInstruction::Rldcr { .. } => alu::execute(insn, state),
 
         // [AltiVec-PEM p:6-177 s:6.2] vxor routes through the canonical
-        // VX-form path under XO 0x4c4 so vector-pipeline hooks reach it
-        // alongside the generic `Vx { xo }` family.
-        PpuInstruction::Vxor { vt, va, vb } => vec::execute_vx(state, 0x4c4, vt, va, vb),
-        PpuInstruction::Vx { xo, vt, va, vb } => vec::execute_vx(state, xo, vt, va, vb),
-        PpuInstruction::Va { xo, vt, va, vb, vc } => vec::execute_va(state, xo, vt, va, vb, vc),
+        // VX-form path so vector-pipeline hooks reach it alongside the
+        // generic `Vx { op }` family.
+        PpuInstruction::Vxor { vt, va, vb } => vec::execute_vx(
+            state,
+            crate::instruction::ops::VxOp::Vxor,
+            false,
+            vt,
+            va,
+            vb,
+        ),
+        PpuInstruction::Vx { op, rc, vt, va, vb } => vec::execute_vx(state, op, rc, vt, va, vb),
+        PpuInstruction::Va { op, vt, va, vb, vc } => vec::execute_va(state, op, vt, va, vb, vc),
         PpuInstruction::Vsldoi { vt, va, vb, shb } => vec::execute_vsldoi(state, vt, va, vb, shb),
 
         // TODO(fp-rc): record-form CR1 update pending FPSCR plumbing;
         // `_rc` is preserved at decode.
         PpuInstruction::Fp63 {
-            xo,
+            op,
             frt,
             fra,
             frb,
             frc,
             rc: _rc,
-        } => fp::execute_fp63(state, xo, frt, fra, frb, frc),
+        } => fp::execute_fp63(state, op, frt, fra, frb, frc),
         PpuInstruction::Fp59 {
-            xo,
+            op,
             frt,
             fra,
             frb,
             frc,
             rc: _rc,
-        } => fp::execute_fp59(state, xo, frt, fra, frb, frc),
+        } => fp::execute_fp59(state, op, frt, fra, frb, frc),
 
         PpuInstruction::Li { .. }
         | PpuInstruction::Mr { .. }

@@ -11,6 +11,8 @@
 
 use std::io::{self, Write};
 
+use cellgov_ppu::funcmap::FunctionMap;
+
 use super::args::MAX_COUNT;
 use super::elf::PtLoad;
 
@@ -114,6 +116,7 @@ pub(super) fn disassemble<W: Write>(
     segments: &[PtLoad],
     vaddr: u64,
     count: usize,
+    symbols: Option<&FunctionMap>,
     out: &mut W,
 ) -> Result<DisasmStats, StreamError> {
     debug_assert!(vaddr.is_multiple_of(4), "parse_args must enforce alignment");
@@ -165,16 +168,39 @@ pub(super) fn disassemble<W: Write>(
             elf_bytes[file_off + 2],
             elf_bytes[file_off + 3],
         ]);
+        // Function separator when the stream crosses a span start.
+        if let Some(map) = symbols {
+            if let Ok(addr32) = u32::try_from(addr) {
+                if let Some(span) = map.span_at(addr32) {
+                    if span.start == addr32 {
+                        writeln!(
+                            out,
+                            "; -- function {} ({}) --",
+                            span.display_name(),
+                            span.origin.as_str()
+                        )
+                        .map_err(StreamError::Io)?;
+                    }
+                }
+            }
+        }
         match cellgov_ppu::decode::decode(raw) {
             Ok(insn) => {
                 consecutive = 0;
-                writeln!(out, "0x{addr:016x}  {raw:08x}  {insn:?}").map_err(StreamError::Io)?;
+                let text = cellgov_ppu::instruction::AsmText {
+                    insn: &insn,
+                    addr,
+                    symbols,
+                };
+                writeln!(out, "0x{addr:016x}  {raw:08x}  {text}").map_err(StreamError::Io)?;
                 stats.lines_written += 1;
             }
             Err(_) => {
                 consecutive += 1;
                 stats.decode_errors += 1;
-                writeln!(out, "0x{addr:016x}  {raw:08x}  <unsupported encoding>")
+                // `.word` keeps the line greppable and parseable by
+                // downstream tools.
+                writeln!(out, "0x{addr:016x}  {raw:08x}  .word 0x{raw:08x}")
                     .map_err(StreamError::Io)?;
                 stats.lines_written += 1;
                 if !stats.data_warning_emitted && consecutive >= CONSECUTIVE_DECODE_NOTE_THRESHOLD {

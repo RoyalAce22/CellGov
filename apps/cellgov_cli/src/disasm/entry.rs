@@ -26,17 +26,30 @@ pub(crate) fn run(args: &[String]) {
         .unwrap_or_else(|e| die(&format!("read elf {}: {e}", parsed.elf_path)));
     let segments = elf::parse_pt_loads(&elf_bytes).unwrap_or_else(|e| die(&e.message()));
 
+    let symbols = parsed.symbolize.then(|| {
+        let mut map = cellgov_ppu::funcmap::build(&elf_bytes)
+            .unwrap_or_else(|e| die(&format!("disasm --symbolize: {e}")));
+        crate::funcs::resolve_nids(&mut map);
+        map
+    });
+
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    let stats =
-        match stream::disassemble(&elf_bytes, &segments, parsed.vaddr, parsed.count, &mut out) {
-            Ok(s) => s,
-            Err(StreamError::BadVaddr(e)) => die(&e.message()),
-            Err(StreamError::Io(e)) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                std::process::exit(BROKEN_PIPE_EXIT_CODE);
-            }
-            Err(StreamError::Io(e)) => die(&format!("disasm: stdout write: {e}")),
-        };
+    let stats = match stream::disassemble(
+        &elf_bytes,
+        &segments,
+        parsed.vaddr,
+        parsed.count,
+        symbols.as_ref(),
+        &mut out,
+    ) {
+        Ok(s) => s,
+        Err(StreamError::BadVaddr(e)) => die(&e.message()),
+        Err(StreamError::Io(e)) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+            std::process::exit(BROKEN_PIPE_EXIT_CODE);
+        }
+        Err(StreamError::Io(e)) => die(&format!("disasm: stdout write: {e}")),
+    };
 
     // process::exit skips destructors, so the StdoutLock's drop-flush
     // never runs. Under `| less` or `> file`, the buffered tail of the

@@ -224,12 +224,13 @@ fn primary4_unknown_vx_xo_rejects_does_not_fabricate_stub() {
     let raw_known: u32 = (4u32 << 26) | (3u32 << 21) | (4u32 << 16) | (5u32 << 11) | 2;
     match decode(raw_known).unwrap() {
         PpuInstruction::Vx {
-            xo: 2,
+            op: crate::instruction::VxOp::Vmaxub,
+            rc: false,
             vt: 3,
             va: 4,
             vb: 5,
         } => {}
-        other => panic!("expected Vx xo=2, got {other:?}"),
+        other => panic!("expected Vx vmaxub, got {other:?}"),
     }
 }
 
@@ -249,13 +250,13 @@ fn primary4_unknown_va_xo_rejects_does_not_fabricate_stub() {
         (4u32 << 26) | (3u32 << 21) | (4u32 << 16) | (5u32 << 11) | (6u32 << 6) | 42;
     match decode(raw_known).unwrap() {
         PpuInstruction::Va {
-            xo: 42,
+            op: crate::instruction::VaOp::Vsel,
             vt: 3,
             va: 4,
             vb: 5,
             vc: 6,
         } => {}
-        other => panic!("expected Va xo=42, got {other:?}"),
+        other => panic!("expected Va vsel, got {other:?}"),
     }
 }
 

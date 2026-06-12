@@ -11,9 +11,10 @@
 pub(super) const MAX_COUNT: usize = 1 << 16;
 
 pub(super) fn usage() -> &'static str {
-    "usage: cellgov_cli disasm <elf-path> --vaddr <hex> [--count N]\n\
-     \t--vaddr  hex address (with or without 0x prefix); must be 4-byte aligned\n\
-     \t--count  decimal instruction count, 1..=65536, default 16"
+    "usage: cellgov_cli disasm <elf-path> --vaddr <hex> [--count N] [--symbolize]\n\
+     \t--vaddr      hex address (with or without 0x prefix); must be 4-byte aligned\n\
+     \t--count      decimal instruction count, 1..=65536, default 16\n\
+     \t--symbolize  build the OPD function map and annotate branch targets"
 }
 
 #[derive(Debug)]
@@ -21,6 +22,7 @@ pub(super) struct DisasmArgs<'a> {
     pub(super) elf_path: &'a str,
     pub(super) vaddr: u64,
     pub(super) count: usize,
+    pub(super) symbolize: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -53,10 +55,15 @@ pub(super) fn parse_args(args: &[String]) -> Result<DisasmArgs<'_>, ArgError> {
     let elf_path = args.get(2).map(String::as_str).ok_or(ArgError::Usage)?;
     let mut vaddr: Option<u64> = None;
     let mut count: usize = 16;
+    let mut symbolize = false;
 
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
+            "--symbolize" => {
+                symbolize = true;
+                i += 1;
+            }
             "--vaddr" => {
                 let v = args
                     .get(i + 1)
@@ -91,6 +98,7 @@ pub(super) fn parse_args(args: &[String]) -> Result<DisasmArgs<'_>, ArgError> {
         elf_path,
         vaddr,
         count,
+        symbolize,
     })
 }
 

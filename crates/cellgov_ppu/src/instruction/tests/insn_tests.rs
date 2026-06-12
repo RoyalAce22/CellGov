@@ -22,7 +22,7 @@ fn variant_name_matches_debug_prefix() {
         },
         PpuInstruction::Sc { lev: 0 },
         PpuInstruction::Fp63 {
-            xo: 0,
+            op: crate::instruction::ops::Fp63Op::Fcmpu,
             frt: 0,
             fra: 0,
             frb: 0,

@@ -111,57 +111,11 @@ pub fn spr_gap(direction: SprDirection, spr: u16) -> Option<SprGap> {
 /// search.
 pub const OPCODE_GAPS: &[OpcodeGap] = &[];
 
-/// Table 3a: documented primary-4 VA-form XOs (6-bit, in 0x20..=0x2F).
-///
-/// The decoder previously fabricated `Va { xo }` for any 6-bit XO in
-/// 0x20..=0x2F including ones the AltiVec PEM does not define. This
-/// directory is the gate: a primary-4 word whose `xo_6` is not in
-/// this list rejects via `reject_opcode` instead of silently
-/// becoming an opaque `Va { xo }` the executor would later have to
-/// fault on.
-///
-/// Source: AltiVec-PEM Appendix A.5 Table A-5, transcribed via
-/// `scripts/gen_altivec_comp_table.py`. The list includes vsldoi
-/// (XO 44) and vsel/vperm/vmsum*/vmhaddshs etc. (XOs 32-47 minus 35
-/// and 45 which are reserved).
-///
-/// MUST stay sorted ascending; [`is_known_va`] is a binary search.
-pub const KNOWN_VA_XOS: &[u8] = &[32, 33, 34, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47];
-
-/// Table 3b: documented primary-4 VX-form / VXR-form XOs.
-///
-/// The decoder dispatches primary 4 by `xo_11 = raw & 0x7FF`. VX-form
-/// uses the full 11 bits; VXR-form (compare ops) uses bit 21 of raw
-/// (which is bit 10 of `xo_11`) as the record bit, with the 10-bit
-/// XO at raw bits 22..31. Both VXR Rc=0 (base XO) and VXR Rc=1
-/// (`1024 | base`) forms are valid and must appear here.
-///
-/// Source: AltiVec-PEM Appendix A.5 Table A-6 / A-7, transcribed via
-/// `scripts/gen_altivec_comp_table.py`. Includes 109 VX, 13 VXR Rc=0,
-/// 13 VXR Rc=1, plus vxor at XO 1220 (which the decoder routes to
-/// the typed `Vxor` variant before this lookup runs).
-///
-/// MUST stay sorted ascending; [`is_known_vx`] is a binary search.
-pub const KNOWN_VX_XOS: &[u16] = &[
-    0, 2, 4, 6, 8, 10, 12, 14, 64, 66, 68, 70, 72, 74, 76, 78, 128, 130, 132, 134, 140, 142, 198,
-    206, 258, 260, 264, 266, 268, 270, 322, 324, 328, 330, 332, 334, 384, 386, 388, 394, 396, 398,
-    452, 454, 458, 462, 512, 514, 516, 518, 520, 522, 524, 526, 576, 578, 580, 582, 584, 586, 588,
-    590, 640, 642, 644, 646, 650, 652, 654, 708, 710, 714, 718, 768, 770, 772, 774, 776, 778, 780,
-    782, 832, 834, 836, 838, 840, 842, 844, 846, 896, 898, 900, 902, 906, 908, 966, 970, 974, 1024,
-    1026, 1028, 1030, 1034, 1036, 1088, 1090, 1092, 1094, 1098, 1100, 1152, 1154, 1156, 1158, 1220,
-    1222, 1282, 1284, 1346, 1408, 1410, 1478, 1536, 1542, 1544, 1600, 1606, 1608, 1664, 1670, 1672,
-    1734, 1792, 1798, 1800, 1856, 1862, 1920, 1926, 1928, 1990,
-];
-
-/// O(log N) lookup over [`KNOWN_VA_XOS`].
-pub fn is_known_va(xo: u8) -> bool {
-    KNOWN_VA_XOS.binary_search(&xo).is_ok()
-}
-
-/// O(log N) lookup over [`KNOWN_VX_XOS`].
-pub fn is_known_vx(xo: u16) -> bool {
-    KNOWN_VX_XOS.binary_search(&xo).is_ok()
-}
+// The primary-4 VX / VA gate directories formerly here
+// (`KNOWN_VX_XOS` / `KNOWN_VA_XOS`) are retired: the decoder now
+// gates on [`crate::instruction::ops::VxOp`] /
+// [`crate::instruction::ops::VaOp`], whose discriminants carry the
+// same transcription with compiler-enforced consumer coverage.
 
 /// Table 2 (`mfspr` direction). SPRs CellGov does not yet implement
 /// the read for. The XFX opcode itself is decoded (XO 339); the
