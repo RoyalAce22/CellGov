@@ -54,28 +54,6 @@ pub fn is_decode_error(code: u32) -> bool {
     (code & 0xFFFF_0000) == FAULT_DECODE_ERROR
 }
 
-#[cfg(test)]
-mod fault_class_tests {
-    use super::*;
-
-    #[test]
-    fn is_decode_error_pinpoints_the_decode_class() {
-        assert!(is_decode_error(FAULT_DECODE_ERROR));
-        assert!(is_decode_error(FAULT_DECODE_ERROR | 0xABCD));
-        for other in [
-            FAULT_PC_OUT_OF_RANGE,
-            FAULT_INVALID_ADDRESS,
-            FAULT_UNSUPPORTED_SYSCALL,
-            FAULT_DEBUG_BREAK,
-            FAULT_UNIMPLEMENTED_INSN,
-            FAULT_PROGRAM_TRAP,
-            FAULT_ALIGNMENT_INTERRUPT,
-        ] {
-            assert!(!is_decode_error(other), "spurious match for {other:#x}");
-        }
-    }
-}
-
 /// PPU architectural state snapshot for replay.
 // [PPC-Book1 p:18 s:2.3 Branch Processor Registers] CR is 32 bits in eight 4-bit fields; LR and CTR are 64-bit branch registers.
 #[derive(Debug, Clone)]

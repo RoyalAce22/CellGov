@@ -20,85 +20,48 @@ use super::{
 
 impl Runtime {
     /// Apply an `Lv2Dispatch` effects batch by **direct commit**,
-    /// bypassing the commit pipeline's [`StagingMemory`]. The
-    /// variants this function handles each take their own
-    /// dedicated path:
+    /// bypassing the commit pipeline's [`StagingMemory`].
     ///
-    /// - `SharedWriteIntent` -> [`GuestMemory::apply_commit`] after a
-    ///   `containing_region` pre-pass over the full memory subset.
-    ///   The whole memory subset commits all-or-none against
-    ///   validation; on memory-subset failure no `SharedWriteIntent`
-    ///   lands and a `dispatch.lv2_effect_apply_failed` invariant
-    ///   break carries the first failing address, length, and
-    ///   `MemError`.
-    /// - `MailboxSend` -> `MailboxRegistry::get_mut(..).force_send`
-    ///   plus a `set_status_override(Blocked -> Runnable)` on any
-    ///   unit Blocked on the matching `UnitId`.
-    /// - `RsxFlipRequest` -> [`crate::rsx::flip::RsxFlipState::request_flip`]
-    ///   (the same method `commit_pipeline.process` calls from the
-    ///   FIFO-advance path; both provenances share the destination).
-    /// - Every other `Effect` variant falls through the `_ => {}`
-    ///   catch-all and is silently dropped. LV2 dispatch handlers
-    ///   are responsible for not emitting effects the LV2 surface
-    ///   cannot apply (e.g. `RsxLabelWrite`, `DmaEnqueue`,
-    ///   `ReservationAcquire`, `ConditionalStore`); these belong to
-    ///   the unit-effect / FIFO-advance path through
-    ///   `commit_pipeline.process`.
+    /// - `SharedWriteIntent` -> [`GuestMemory::apply_commit`]; the
+    ///   memory subset validates and commits all-or-none, and a
+    ///   failure logs a `dispatch.lv2_effect_apply_failed` invariant
+    ///   break instead of landing any write.
+    /// - `MailboxSend` -> `force_send` plus a Blocked -> Runnable
+    ///   override on any unit blocked on the matching `UnitId`.
+    /// - `RsxFlipRequest` -> [`crate::rsx::flip::RsxFlipState::request_flip`];
+    ///   the flip transitions WAITING -> DONE on the next
+    ///   `commit_step` boundary, not during the dispatching batch.
+    /// - Every other variant is silently dropped: LV2 handlers must
+    ///   not emit effects the LV2 surface cannot apply (e.g.
+    ///   `RsxLabelWrite`, `DmaEnqueue`); those belong to the
+    ///   unit-effect path through `commit_pipeline.process`.
     ///
     /// [`StagingMemory`]: cellgov_mem::StagingMemory
     /// [`GuestMemory::apply_commit`]: cellgov_mem::GuestMemory::apply_commit
     ///
-    /// # Atomic-batch discard semantics (committed-on-dispatch)
+    /// # Atomic-batch discard semantics
     ///
-    /// These effects DO NOT participate in atomic-batch
-    /// discard-on-fault. If the containing `commit_step`'s
-    /// unit-staged effects fail `validate_write` and the batch is
-    /// discarded, the mutations this function applied have already
-    /// landed and are NOT rolled back. This is the documented
-    /// dispatcher-state-vs-staged-effect contract: a syscall has
-    /// returned its result to the guest by the time the batch
-    /// finalizes, so syscall-side state must persist independently
-    /// of the staged-effect batch's fate. The two consumer-side
-    /// docstrings in `cellgov_lv2::host::rsx::attribute` cite this
-    /// function for the same contract.
+    /// These mutations DO NOT participate in atomic-batch
+    /// discard-on-fault: by the time the containing batch finalizes,
+    /// the syscall has already returned its result to the guest, so
+    /// syscall-side state persists even when the batch's unit-staged
+    /// effects are discarded.
     ///
-    /// # Intra-`commit_step` ordering against unit `SharedWriteIntent`s
+    /// # Ordering against unit `SharedWriteIntent`s
     ///
-    /// `Runtime::commit_step` runs the staged unit-effect drain
-    /// (inside `commit_pipeline.process`) FIRST and `dispatch_syscall`
-    /// (which calls this function) SECOND. So an LV2
-    /// `SharedWriteIntent` to a given range deterministically lands
-    /// AFTER any same-batch unit store to the same range. This
-    /// ordering is structural (the call order in `commit_step`), not
-    /// a `(PriorityClass, source_time, source)` tiebreak through the
-    /// staging buffer. The triple on these effects is currently
-    /// INERT on the direct-commit path -- not consulted at all -- so
-    /// LV2 emit sites that set `source: UnitId::new(0)` /
-    /// `source_time: current_tick` carry that triple as a
-    /// well-formedness invariant, not as an ordering signal.
+    /// `Runtime::commit_step` drains staged unit effects FIRST and
+    /// calls this function SECOND, so an LV2 write deterministically
+    /// lands AFTER any same-batch unit store to the same range. The
+    /// ordering is structural (call order), not a staging-buffer
+    /// tiebreak; the `(PriorityClass, source_time, source)` triple
+    /// is inert on this path and carried as a well-formedness
+    /// invariant only.
     ///
     /// # Cross-module contract
     ///
-    /// LV2 handlers must not emit a non-memory effect whose semantics
-    /// depend on a co-batched `SharedWriteIntent` having committed; a
-    /// `debug_assert!` below traps that condition. Mailbox sends wake
-    /// any unit Blocked on the matching `UnitId`; RSX flip requests
-    /// transition WAITING -> DONE on the next `commit_step` boundary
-    /// via `RsxFlipState::complete_pending_flip`, NOT during the
-    /// dispatching batch.
-    ///
-    /// # Refactor tripwire
-    ///
-    /// If a future refactor routes these effects through
-    /// `StagingMemory::stage` instead of `apply_commit`, the
-    /// same-range collision against a same-tick unit store becomes
-    /// governed by the staging ordering comparator and the
-    /// currently-inert `(source, source_time)` triple becomes live.
-    /// The `lv2_direct_committed_writes` counter in `Runtime` is
-    /// witnessed by the unit test
-    /// `apply_lv2_effects_direct_commits_shared_write_intents` so a
-    /// regression that drops the direct-commit path drops the
-    /// counter to zero and the test fails red.
+    /// LV2 handlers must not emit a non-memory effect whose
+    /// semantics depend on a co-batched `SharedWriteIntent` having
+    /// committed; a `debug_assert!` below traps that condition.
     pub(super) fn apply_lv2_effects(&mut self, effects: &[Effect]) {
         let memory_failure = self.validate_lv2_memory_subset(effects);
         debug_assert!(
@@ -793,80 +756,5 @@ pub(crate) fn check_response_updates(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::syscall_table::SyscallResponseTable;
-    use cellgov_lv2::EventPayload;
-
-    #[test]
-    #[should_panic(expected = "is not in woken_unit_ids")]
-    fn check_response_updates_rejects_update_for_non_woken_unit() {
-        let table = SyscallResponseTable::new();
-        let waiter = UnitId::new(42);
-        let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0 })];
-        check_response_updates("test", &table, &[], &updates);
-    }
-
-    #[test]
-    #[should_panic(expected = "variant mismatch")]
-    fn check_response_updates_rejects_variant_mismatch() {
-        let mut table = SyscallResponseTable::new();
-        let waiter = UnitId::new(7);
-        let _ = table.insert(
-            waiter,
-            PendingResponse::EventQueueReceive {
-                out_ptr: 0x1000,
-                payload: None,
-            },
-        );
-        let updates = vec![(
-            waiter,
-            PendingResponse::EventFlagWake {
-                result_ptr: 0x1000,
-                observed: 0,
-            },
-        )];
-        check_response_updates("test", &table, &[waiter], &updates);
-    }
-
-    #[test]
-    fn check_response_updates_allows_return_code_to_replace_any_variant() {
-        let mut table = SyscallResponseTable::new();
-        let waiter = UnitId::new(7);
-        let _ = table.insert(
-            waiter,
-            PendingResponse::EventFlagWake {
-                result_ptr: 0x1000,
-                observed: 0,
-            },
-        );
-        let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0x80010013 })];
-        check_response_updates("test", &table, &[waiter], &updates);
-    }
-
-    #[test]
-    fn check_response_updates_accepts_same_variant_fill() {
-        let mut table = SyscallResponseTable::new();
-        let waiter = UnitId::new(7);
-        let _ = table.insert(
-            waiter,
-            PendingResponse::EventQueueReceive {
-                out_ptr: 0x1000,
-                payload: None,
-            },
-        );
-        let updates = vec![(
-            waiter,
-            PendingResponse::EventQueueReceive {
-                out_ptr: 0x1000,
-                payload: Some(EventPayload {
-                    source: 0x11,
-                    data1: 0x22,
-                    data2: 0x33,
-                    data3: 0x44,
-                }),
-            },
-        )];
-        check_response_updates("test", &table, &[waiter], &updates);
-    }
-}
+#[path = "tests/lv2_dispatch_tests.rs"]
+mod tests;

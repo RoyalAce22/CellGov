@@ -17,13 +17,32 @@ use super::super::{InstructionCase, MemorySnapshot};
 use super::case_keep_memory;
 use crate::differential::PpuStateSnapshot;
 
+// Extended opcodes (primary-31 X-form). Stride of 64 encodes the
+// left/right + LRU-hint bits.
+const XO_STVLX: u32 = 775;
+const XO_STVRX: u32 = 839;
+const XO_STVLXL: u32 = 903;
+const XO_STVRXL: u32 = 967;
+
+// Register assignments used throughout the corpus.
+const RA_IDX: u8 = 4;
+const RB_IDX: u8 = 5;
+const VS_IDX_STVLX: u8 = 11;
+const VS_IDX_STVRX: u8 = 12;
+const VS_IDX_STVLXL: u8 = 13;
+const VS_IDX_STVRXL: u8 = 14;
+
 /// Encode an X-form primary-31 instruction `(vs, ra, rb, xo)`.
 fn xform(vs: u8, ra: u8, rb: u8, xo: u32) -> u32 {
+    debug_assert!(
+        xo < (1 << 10),
+        "xo {xo} exceeds 10-bit X-form extended opcode field"
+    );
     (31u32 << 26)
         | ((vs as u32 & 0x1F) << 21)
         | ((ra as u32 & 0x1F) << 16)
         | ((rb as u32 & 0x1F) << 11)
-        | (xo << 1)
+        | ((xo & 0x3FF) << 1)
 }
 
 const BASE_ADDR: u64 = 0x4000;
@@ -37,6 +56,26 @@ fn memory_with(bytes: Vec<u8>) -> MemorySnapshot {
 
 fn zero_memory(len: usize) -> MemorySnapshot {
     memory_with(vec![0u8; len])
+}
+
+/// Decompose an EA into (misalignment m, stvlx count, aligned base
+/// offset): `m = EA & 0xF`, stvlx writes `16 - m` bytes at EA, stvrx
+/// writes `m` bytes at `EA - m`.
+fn ea_decompose(ea_offset: u64) -> (usize, usize, usize) {
+    let m = (ea_offset & 0xF) as usize;
+    (m, 16 - m, ea_offset as usize - m)
+}
+
+/// Label stem `{prefix}_offset_{ea}`, suffixed for the special byte
+/// counts (full vector, single byte, empty store).
+fn case_label(prefix: &str, ea_offset: u64, count: usize) -> String {
+    let base = format!("{prefix}_offset_{ea_offset}");
+    match count {
+        16 => format!("{base}_aligned_full"),
+        1 => format!("{base}_one_byte"),
+        0 => format!("{base}_zero_bytes"),
+        _ => base,
+    }
 }
 
 /// State preloaded with RA, RB, and VS.
@@ -70,27 +109,27 @@ const VS_PATTERN: u128 = 0x0011_2233_4455_6677_8899_AABB_CCDD_EEFF;
 /// `stvlx`: write the high `16 - m` bytes of VS starting at EA.
 // [CBE-Handbook p:744 s:A.3.3] stvlx VS, RA, RB.
 fn stvlx_cases() -> Vec<InstructionCase> {
-    let raw = xform(/*vs*/ 11, /*ra*/ 4, /*rb*/ 5, 775);
-    stvl_cases_for_xo(raw, "stvlx", VS_PATTERN, 11)
+    let raw = xform(VS_IDX_STVLX, RA_IDX, RB_IDX, XO_STVLX);
+    stvl_cases_for_xo(raw, "stvlx", VS_PATTERN, VS_IDX_STVLX as usize)
 }
 
 /// `stvrx`: write the low `m` bytes of VS at the aligned line below EA.
 // [CBE-Handbook p:744 s:A.3.3] stvrx VS, RA, RB.
 fn stvrx_cases() -> Vec<InstructionCase> {
-    let raw = xform(12, 4, 5, 839);
-    stvr_cases_for_xo(raw, "stvrx", VS_PATTERN, 12)
+    let raw = xform(VS_IDX_STVRX, RA_IDX, RB_IDX, XO_STVRX);
+    stvr_cases_for_xo(raw, "stvrx", VS_PATTERN, VS_IDX_STVRX as usize)
 }
 
 /// `stvlxl`: identical to stvlx + LRU hint.
 fn stvlxl_cases() -> Vec<InstructionCase> {
-    let raw = xform(13, 4, 5, 903);
-    stvl_cases_for_xo(raw, "stvlxl", VS_PATTERN, 13)
+    let raw = xform(VS_IDX_STVLXL, RA_IDX, RB_IDX, XO_STVLXL);
+    stvl_cases_for_xo(raw, "stvlxl", VS_PATTERN, VS_IDX_STVLXL as usize)
 }
 
 /// `stvrxl`: identical to stvrx + LRU hint.
 fn stvrxl_cases() -> Vec<InstructionCase> {
-    let raw = xform(14, 4, 5, 967);
-    stvr_cases_for_xo(raw, "stvrxl", VS_PATTERN, 14)
+    let raw = xform(VS_IDX_STVRXL, RA_IDX, RB_IDX, XO_STVRXL);
+    stvr_cases_for_xo(raw, "stvrxl", VS_PATTERN, VS_IDX_STVRXL as usize)
 }
 
 /// Shared case generator for stvlx / stvlxl. Covers EA offsets 0,
@@ -106,26 +145,22 @@ fn stvl_cases_for_xo(
     let vs_bytes = vs_pattern.to_be_bytes();
     let mut cases = Vec::new();
     for ea_offset in [0u64, 4, 8, 15] {
-        let initial = state_with_ra_rb_vs(4, BASE_ADDR, 5, ea_offset, vs_index, vs_pattern);
+        let initial = state_with_ra_rb_vs(
+            RA_IDX as usize,
+            BASE_ADDR,
+            RB_IDX as usize,
+            ea_offset,
+            vs_index,
+            vs_pattern,
+        );
+        // Stores have no register side effects; only memory changes.
         let expected_state = initial.clone();
-        let m = (ea_offset & 0xF) as usize;
-        let count = 16 - m;
+        let (_, count, _) = ea_decompose(ea_offset);
         let mut expected_bytes = vec![0u8; 32];
         expected_bytes[ea_offset as usize..ea_offset as usize + count]
             .copy_from_slice(&vs_bytes[..count]);
-        let label: &'static str = match (prefix, ea_offset) {
-            ("stvlx", 0) => "stvlx_aligned_offset_0",
-            ("stvlx", 4) => "stvlx_offset_4",
-            ("stvlx", 8) => "stvlx_offset_8",
-            ("stvlx", 15) => "stvlx_offset_15_one_byte",
-            ("stvlxl", 0) => "stvlxl_aligned_offset_0",
-            ("stvlxl", 4) => "stvlxl_offset_4",
-            ("stvlxl", 8) => "stvlxl_offset_8",
-            ("stvlxl", 15) => "stvlxl_offset_15_one_byte",
-            _ => unreachable!(),
-        };
         cases.push(case_keep_memory(
-            label,
+            case_label(prefix, ea_offset, count),
             raw,
             initial,
             zero_memory(32),
@@ -138,8 +173,10 @@ fn stvl_cases_for_xo(
 }
 
 /// Shared case generator for stvrx / stvrxl. EA offsets 0, 1, 8,
-/// and 15 cover: zero bytes (aligned EA), single byte, half line,
-/// and 15-byte tail.
+/// and 15 cover zero bytes (aligned EA), single byte, half line,
+/// and 15-byte tail within the first aligned line; 17, 24, and 31
+/// repeat those shapes in the second line, so the aligned base
+/// below EA is non-zero.
 fn stvr_cases_for_xo(
     raw: u32,
     prefix: &'static str,
@@ -148,31 +185,27 @@ fn stvr_cases_for_xo(
 ) -> Vec<InstructionCase> {
     let vs_bytes = vs_pattern.to_be_bytes();
     let mut cases = Vec::new();
-    for ea_offset in [0u64, 1, 8, 15] {
-        let initial = state_with_ra_rb_vs(4, BASE_ADDR, 5, ea_offset, vs_index, vs_pattern);
+    for ea_offset in [0u64, 1, 8, 15, 17, 24, 31] {
+        let initial = state_with_ra_rb_vs(
+            RA_IDX as usize,
+            BASE_ADDR,
+            RB_IDX as usize,
+            ea_offset,
+            vs_index,
+            vs_pattern,
+        );
+        // Stores have no register side effects; only memory changes.
         let expected_state = initial.clone();
-        let m = (ea_offset & 0xF) as usize;
-        let aligned_offset = (ea_offset as usize) - m;
-        let mut expected_bytes = vec![0u8; 32];
+        let (m, _, aligned_offset) = ea_decompose(ea_offset);
+        let mut expected_bytes = vec![0u8; 48];
         for i in 0..m {
             expected_bytes[aligned_offset + i] = vs_bytes[16 - m + i];
         }
-        let label: &'static str = match (prefix, ea_offset) {
-            ("stvrx", 0) => "stvrx_aligned_offset_0_zero_bytes",
-            ("stvrx", 1) => "stvrx_offset_1_one_byte",
-            ("stvrx", 8) => "stvrx_offset_8",
-            ("stvrx", 15) => "stvrx_offset_15",
-            ("stvrxl", 0) => "stvrxl_aligned_offset_0_zero_bytes",
-            ("stvrxl", 1) => "stvrxl_offset_1_one_byte",
-            ("stvrxl", 8) => "stvrxl_offset_8",
-            ("stvrxl", 15) => "stvrxl_offset_15",
-            _ => unreachable!(),
-        };
         cases.push(case_keep_memory(
-            label,
+            case_label(prefix, ea_offset, m),
             raw,
             initial,
-            zero_memory(32),
+            zero_memory(48),
             expected_state,
             memory_with(expected_bytes),
             "[CBE-Handbook p:744 s:A.3.3] stvrx: VS[16-m..16] -> MEM(EA&~0xF, m); m=EA&0xF",
@@ -182,93 +215,5 @@ fn stvr_cases_for_xo(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::super::{assert_case, run_corpus};
-    use super::*;
-
-    #[test]
-    fn cell_unaligned_vxu_store_corpus_passes_against_executor() {
-        let cases = cases();
-        assert!(
-            !cases.is_empty(),
-            "Cell-unaligned VXU store corpus must produce at least one case"
-        );
-        let report = run_corpus(&cases);
-        if !report.is_clean() {
-            let detail = report
-                .failed
-                .iter()
-                .map(|(label, outcome)| format!("  '{label}': {outcome:?}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            panic!(
-                "Cell-unaligned VXU store corpus: {} failure(s) of {}:\n{detail}",
-                report.failed.len(),
-                report.total()
-            );
-        }
-    }
-
-    #[test]
-    fn each_case_passes_through_assert_case() {
-        for case in cases() {
-            assert_case(&case);
-        }
-    }
-
-    #[test]
-    fn corpus_covers_all_four_ops() {
-        let cases = cases();
-        let labels: Vec<&str> = cases.iter().map(|c| c.label).collect();
-        for prefix in ["stvlx_", "stvrx_", "stvlxl_", "stvrxl_"] {
-            assert!(
-                labels.iter().any(|l| l.starts_with(prefix)),
-                "corpus missing any '{prefix}' case"
-            );
-        }
-    }
-
-    #[test]
-    fn stvlx_plus_stvrx_at_next_line_writes_full_vector() {
-        use crate::differential::run_case;
-        use crate::differential::CaseOutcome;
-
-        let ea_offset: u64 = 5;
-        let vs = VS_PATTERN;
-        let vs_bytes = vs.to_be_bytes();
-
-        // Stvlx at offset 5 writes bytes 0..11 of VS at [5..16].
-        let raw_stvlx = xform(11, 4, 5, 775);
-        let initial = state_with_ra_rb_vs(4, BASE_ADDR, 5, ea_offset, 11, vs);
-        let mut expected_bytes = vec![0u8; 32];
-        expected_bytes[5..16].copy_from_slice(&vs_bytes[..11]);
-        let case_l = case_keep_memory(
-            "stvlx_then_stvrx_part1",
-            raw_stvlx,
-            initial,
-            zero_memory(32),
-            state_with_ra_rb_vs(4, BASE_ADDR, 5, ea_offset, 11, vs),
-            memory_with(expected_bytes),
-            "[CBE-Handbook p:744 s:A.3.3] stvlx half of unaligned vector store pair",
-        );
-        assert_eq!(run_case(&case_l), CaseOutcome::Pass);
-
-        // Stvrx at offset 5+16 = 21 writes bytes 11..16 of VS at
-        // [16..21] (the next aligned line below EA = 21).
-        let ea_offset_2: u64 = 5 + 16;
-        let initial_2 = state_with_ra_rb_vs(4, BASE_ADDR, 5, ea_offset_2, 11, vs);
-        let mut expected_bytes_2 = vec![0u8; 32];
-        expected_bytes_2[16..21].copy_from_slice(&vs_bytes[11..]);
-        let raw_stvrx = xform(11, 4, 5, 839);
-        let case_r = case_keep_memory(
-            "stvlx_then_stvrx_part2",
-            raw_stvrx,
-            initial_2,
-            zero_memory(32),
-            state_with_ra_rb_vs(4, BASE_ADDR, 5, ea_offset_2, 11, vs),
-            memory_with(expected_bytes_2),
-            "[CBE-Handbook p:744 s:A.3.3] stvrx half of unaligned vector store pair",
-        );
-        assert_eq!(run_case(&case_r), CaseOutcome::Pass);
-    }
-}
+#[path = "tests/cell_unaligned_vxu_stores_tests.rs"]
+mod tests;

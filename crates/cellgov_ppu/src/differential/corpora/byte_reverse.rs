@@ -188,7 +188,7 @@ fn sdbrx_cases() -> Vec<InstructionCase> {
     expected_mem_bytes[0..8].copy_from_slice(&[0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01]);
     let expected_mem = make_memory(expected_mem_bytes);
     cases.push(InstructionCase {
-        label: "sdbrx_pattern_at_offset_0",
+        label: "sdbrx_pattern_at_offset_0".to_string(),
         initial_state: initial.clone(),
         initial_memory: initial_mem,
         raw_instruction: raw,
@@ -214,7 +214,7 @@ fn stwbrx_cases() -> Vec<InstructionCase> {
     expected_mem_bytes[4..8].copy_from_slice(&[0x44, 0x33, 0x22, 0x11]);
     let expected_mem = make_memory(expected_mem_bytes);
     cases.push(InstructionCase {
-        label: "stwbrx_low32_at_offset_4",
+        label: "stwbrx_low32_at_offset_4".to_string(),
         initial_state: initial.clone(),
         initial_memory: initial_mem,
         raw_instruction: raw,
@@ -240,7 +240,7 @@ fn sthbrx_cases() -> Vec<InstructionCase> {
     expected_mem_bytes[2..4].copy_from_slice(&[0xBE, 0xBA]);
     let expected_mem = make_memory(expected_mem_bytes);
     cases.push(InstructionCase {
-        label: "sthbrx_low16_at_offset_2",
+        label: "sthbrx_low16_at_offset_2".to_string(),
         initial_state: initial.clone(),
         initial_memory: initial_mem,
         raw_instruction: raw,
@@ -255,37 +255,5 @@ fn sthbrx_cases() -> Vec<InstructionCase> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::super::{assert_case, run_corpus};
-    use super::*;
-
-    #[test]
-    fn byte_reverse_corpus_passes_against_executor() {
-        let cases = cases();
-        assert!(
-            !cases.is_empty(),
-            "byte-reverse corpus must produce at least one case"
-        );
-        let report = run_corpus(&cases);
-        if !report.is_clean() {
-            let detail = report
-                .failed
-                .iter()
-                .map(|(label, outcome)| format!("  '{label}': {outcome:?}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            panic!(
-                "byte-reverse corpus: {} failure(s) of {}:\n{detail}",
-                report.failed.len(),
-                report.total()
-            );
-        }
-    }
-
-    #[test]
-    fn each_case_passes_through_assert_case() {
-        for case in cases() {
-            assert_case(&case);
-        }
-    }
-}
+#[path = "tests/byte_reverse_tests.rs"]
+mod tests;

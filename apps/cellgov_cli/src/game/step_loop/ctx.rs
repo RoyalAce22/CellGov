@@ -1,6 +1,5 @@
 //! [`StepLoopCtx`] -- mutable per-loop state plumbed through
-//! [`super::step_loop`]. Defined here so the driver and bench loops
-//! share one declaration.
+//! [`super::step_loop`].
 
 use std::time::Instant;
 

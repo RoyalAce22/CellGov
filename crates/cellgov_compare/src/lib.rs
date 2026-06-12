@@ -25,6 +25,7 @@ pub mod summary;
 pub mod sync_primitive_scan;
 
 #[cfg(test)]
+#[path = "tests/test_support.rs"]
 mod test_support;
 
 pub use boot_summary::{BootSummary, BootSummaryError, CheckpointKind};

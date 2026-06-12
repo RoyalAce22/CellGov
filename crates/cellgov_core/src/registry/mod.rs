@@ -10,6 +10,7 @@ mod state;
 mod unit_trait;
 
 #[cfg(test)]
+#[path = "tests/test_fixtures.rs"]
 mod test_fixtures;
 
 pub use state::UnitRegistry;

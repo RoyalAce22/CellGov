@@ -109,3 +109,7 @@ fn build_dirent(entry: &DirEntry) -> Vec<u8> {
     buf[2..2 + n].copy_from_slice(&name_bytes[..n]);
     buf
 }
+
+#[cfg(test)]
+#[path = "tests/readdir_tests.rs"]
+mod tests;

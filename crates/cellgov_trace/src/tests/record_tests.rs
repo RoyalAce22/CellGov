@@ -1,3 +1,5 @@
+//! TraceRecord wire format -- encode/decode roundtrips, locked tags and sizes, malformed-input rejection.
+
 use super::*;
 
 fn roundtrip(r: TraceRecord) {

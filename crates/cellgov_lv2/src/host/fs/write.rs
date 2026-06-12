@@ -91,3 +91,7 @@ impl Lv2Host {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/write_tests.rs"]
+mod tests;

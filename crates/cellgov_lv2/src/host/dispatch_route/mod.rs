@@ -9,4 +9,5 @@ mod inline_arms;
 mod unsupported_arms;
 
 #[cfg(test)]
+#[path = "tests/dispatch_route_tests.rs"]
 mod tests;

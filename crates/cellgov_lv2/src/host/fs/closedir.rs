@@ -29,3 +29,7 @@ impl Lv2Host {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/closedir_tests.rs"]
+mod tests;

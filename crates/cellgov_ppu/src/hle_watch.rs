@@ -1,61 +1,32 @@
 //! Env-gated per-call HLE return watch on guest PPU function entries.
 //!
-//! Configured by env var with NIDs the firmware exports. After PRX
-//! load, [`register_nid_resolution`] resolves each NID to its OPD
-//! entry PC. The PPU dispatch calls [`on_dispatch`] per instruction;
-//! `state.pc` matches drive entry/exit records via a per-thread
-//! in-flight stack of return PCs (snapshot of `lr` at entry).
+//! After PRX load, [`register_nid_resolution`] resolves each watched
+//! NID to its OPD entry PC. The PPU dispatch calls [`on_dispatch`]
+//! per instruction; `state.pc` matches drive entry/exit records via
+//! a per-thread in-flight stack of return PCs (`lr` at entry).
 //!
 //! Caller contract: invoke [`is_active`] (or any state-touching API)
 //! before the first dispatch so the [`OnceLock`] initializes and the
 //! first watched instruction is not missed.
 //!
-//! [`totals`] surfaces `dropped_body_events` -- non-zero proves the
-//! hook reached instruction dispatch even when no watched entry PC
-//! was hit, distinguishing "hook never fired" from "hook fired but
-//! never inside a watched scope."
+//! [`totals`] surfaces `dropped_body_events` -- non-zero
+//! distinguishes "hook fired but never inside a watched scope" from
+//! "hook never fired."
 //!
 //! Env vars:
 //!
 //!   CELLGOV_HLE_RETURN_WATCH       Comma-separated hex NIDs.
 //!   CELLGOV_HLE_RETURN_WATCH_PCS   Comma-separated `pc=name` for
-//!                                  per-PRX entries whose NID is not
-//!                                  unique across PRXes.
+//!                                  entries whose NID is not unique
+//!                                  across PRXes.
 //!   CELLGOV_HLE_RETURN_WATCH_PATH  Output file path.
 //!
-//! File format (little-endian, no padding inside records):
-//!
-//!   [Header, 16 + 4*N bytes]
-//!     magic     "CGHW"
-//!     version   u32 = 1
-//!     num_nids  u32 = N
-//!     nid_i     u32, i in 0..N    (real NIDs followed by raw-PC
-//!                                  synthetic IDs `pc | 0x80000000`)
-//!
-//!   [Resolution record], emitted once per watched ID at PRX load
-//!   (raw-PC entries emitted at watch init):
-//!     kind      u8 = 3
-//!     nid       u32
-//!     entry_pc  u32
-//!     name_len  u8
-//!     name      bytes\[name_len\]
-//!
-//!   [Entry record], emitted at each watched function entry:
-//!     kind      u8 = 1
-//!     record_no u64        (monotonic per file)
-//!     nid       u32
-//!     entry_pc  u32
-//!     pc        u32        (same as entry_pc for sanity)
-//!     lr        u32        (return PC after the call)
-//!     r3..r10   u64 x 8
-//!
-//!   [Exit record], emitted when pc reaches a watched call's return PC:
-//!     kind             u8 = 2
-//!     record_no        u64
-//!     nid              u32
-//!     entry_record_no  u64        (paired Entry's record_no)
-//!     pc               u32        (the return PC)
-//!     r3               u64        (return value)
+//! File format (little-endian, no padding inside records): a "CGHW"
+//! version-1 header carrying the watched-ID directory (raw-PC
+//! synthetic IDs are `pc | 0x80000000`), then tagged records --
+//! kind=3 NID resolution, kind=1 function entry (args r3..r10),
+//! kind=2 exit (return value r3, paired to its entry's record_no).
+//! Exact field layout is the write order in the emit fns below.
 
 #![allow(clippy::print_stderr)]
 

@@ -3,21 +3,99 @@
 //! NPDRM-wrapped SELFs carry an extra AES-128-CBC layer over the SCE
 //! metadata-info envelope. Peeling it needs a 16-byte klicensee
 //! derived from a RAP file the operator ships alongside the title.
-//! This module owns that derivation and the prefix decrypt; the
-//! post-envelope flow rejoins [`crate::sce::decrypt_self_to_elf`]'s
-//! shared CTR path.
+//! This module owns that derivation, the NPD header interpretation
+//! ([`find_npd_header_info`] over the generic supplemental walk in
+//! [`crate::sce`]), and the prefix decrypt; the post-envelope flow
+//! rejoins [`crate::sce::decrypt_self_to_elf`]'s shared CTR path.
 //!
 //! Fixture-dependent tests (`include_bytes!` of operator-supplied
 //! RAP and EBOOT files under `tools/rpcs3/dev_hdd0/`) live behind
 //! the `npdrm-oracle-vectors` feature.
 
 use aes::cipher::{BlockDecrypt, KeyInit};
-use cellgov_ps3_abi::sce::{NP_KLIC_FREE, NP_KLIC_KEY, RAP_E1, RAP_E2, RAP_KEY, RAP_PBOX};
+use cellgov_ps3_abi::sce::{
+    NP_KLIC_FREE, NP_KLIC_KEY, RAP_E1, RAP_E2, RAP_KEY, RAP_PBOX, SCE_SUPPLEMENTAL_KIND_NPDRM,
+};
 
 use crate::sce::{
     assemble_elf_from_sections, decrypt_envelope, decrypt_sections_from_envelope,
-    find_npd_header_info, parse_sce_header, NpdHeaderInfo, NpdLicense, SceError,
+    find_supplemental_body, parse_sce_header, SceError,
 };
+
+/// Validated NPDRM license type. Wire field is u32 BE; only 1 /
+/// 2 / 3 are accepted, with any other wire value surfacing as
+/// [`SceError::NpdrmBadLicense`] at the parse site. Discriminants
+/// match the wire encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum NpdLicense {
+    /// License type 1: network license, klicensee derived from a
+    /// per-account RAP file.
+    Network = 1,
+    /// License type 2: local license, klicensee derived from a
+    /// per-account RAP file.
+    Local = 2,
+    /// License type 3: free license; klicensee defaults to
+    /// `NP_KLIC_FREE` when no RAP is supplied.
+    Free = 3,
+}
+
+// Hand-rolled so the error path lands directly on
+// `SceError::NpdrmBadLicense { got }` without a `From` wrapper for
+// `num_enum::TryFromPrimitiveError`.
+impl TryFrom<u32> for NpdLicense {
+    type Error = SceError;
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(NpdLicense::Network),
+            2 => Ok(NpdLicense::Local),
+            3 => Ok(NpdLicense::Free),
+            got => Err(SceError::NpdrmBadLicense { got }),
+        }
+    }
+}
+
+/// NPDRM control info extracted from a type-3 supplemental header.
+#[derive(Debug, Clone)]
+pub struct NpdHeaderInfo {
+    /// Title `content_id` (up to 48 bytes, NUL-trimmed).
+    pub content_id: String,
+    /// Validated license type. Out-of-range wire values are
+    /// rejected by [`find_npd_header_info`] with
+    /// [`SceError::NpdrmBadLicense`]; consumers receive a value
+    /// already in the 1 / 2 / 3 set.
+    pub license: NpdLicense,
+}
+
+/// Find and interpret an SELF's NPDRM (type 3) supplemental header.
+///
+/// Returns `Ok(None)` for SELFs that have no NPDRM supplemental
+/// (APP-keyed retail / disc binaries take this path).
+pub fn find_npd_header_info(data: &[u8]) -> Result<Option<NpdHeaderInfo>, SceError> {
+    let Some(body) = find_supplemental_body(data, SCE_SUPPLEMENTAL_KIND_NPDRM)? else {
+        return Ok(None);
+    };
+    // Type-3 body is the 0x80-byte NPD_HEADER: content_id is 48
+    // bytes at NPD+0x10 (NUL-trimmed), license is u32 BE at NPD+0x08.
+    if body.len() < 0x80 {
+        return Err(SceError::HeaderOffsetOutOfRange {
+            what: "NPDRM supplemental NPD body",
+        });
+    }
+    let cid_bytes = &body[0x10..0x40];
+    let cid_end = cid_bytes.iter().position(|&b| b == 0).unwrap_or(0x30);
+    let content_id = String::from_utf8_lossy(&cid_bytes[..cid_end]).into_owned();
+    let license_raw = u32::from_be_bytes(
+        body[0x08..0x0C]
+            .try_into()
+            .expect("invariant: fixed 4-byte slice always converts to [u8; 4]"),
+    );
+    let license = NpdLicense::try_from(license_raw)?;
+    Ok(Some(NpdHeaderInfo {
+        content_id,
+        license,
+    }))
+}
 
 /// Derive the 16-byte intermediate klicensee (RIF key) from a 16-byte RAP.
 ///
@@ -139,126 +217,8 @@ fn resolve_npdrm_klicensee(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rap_to_klic_is_pure() {
-        let rap = [0x42u8; 16];
-        let a = rap_to_klic(&rap);
-        let b = rap_to_klic(&rap);
-        assert_eq!(a, b);
-    }
-
-    fn npd(license: NpdLicense, content_id: &str) -> NpdHeaderInfo {
-        NpdHeaderInfo {
-            license,
-            content_id: content_id.to_string(),
-        }
-    }
-
-    #[test]
-    fn resolve_klicensee_license_network_with_rap_returns_klic() {
-        let want = [0xABu8; 16];
-        let got = resolve_npdrm_klicensee(&npd(NpdLicense::Network, "NPUA80001"), |_| Some(want))
-            .unwrap();
-        assert_eq!(got, want);
-    }
-
-    #[test]
-    fn resolve_klicensee_license_local_with_rap_returns_klic() {
-        let want = [0xCDu8; 16];
-        let got =
-            resolve_npdrm_klicensee(&npd(NpdLicense::Local, "NPUA80068"), |_| Some(want)).unwrap();
-        assert_eq!(got, want);
-    }
-
-    #[test]
-    fn resolve_klicensee_license_network_without_rap_errors_with_content_id() {
-        let err =
-            resolve_npdrm_klicensee(&npd(NpdLicense::Network, "NPUA80001"), |_| None).unwrap_err();
-        match err {
-            SceError::NoRapForNpdrmTitle { content_id } => {
-                assert_eq!(content_id, "NPUA80001");
-            }
-            other => panic!("expected NoRapForNpdrmTitle, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolve_klicensee_license_local_without_rap_errors_with_content_id() {
-        let err =
-            resolve_npdrm_klicensee(&npd(NpdLicense::Local, "NPUA80068"), |_| None).unwrap_err();
-        match err {
-            SceError::NoRapForNpdrmTitle { content_id } => {
-                assert_eq!(content_id, "NPUA80068");
-            }
-            other => panic!("expected NoRapForNpdrmTitle, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolve_klicensee_license_free_without_rap_returns_np_klic_free() {
-        let got = resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| None).unwrap();
-        assert_eq!(got, NP_KLIC_FREE);
-    }
-
-    #[test]
-    fn resolve_klicensee_license_free_with_rap_returns_supplied_klic() {
-        let want = [0x77u8; 16];
-        let got =
-            resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| Some(want)).unwrap();
-        assert_eq!(got, want);
-    }
-
-    /// Minimal SCE header (0x20 bytes) carrying the given
-    /// `revision_flags`. Satisfies `parse_sce_header`'s magic check
-    /// so the debug guard can run; all other fields are zero.
-    fn synthetic_sce_header_with_revision_flags(revision_flags: u16) -> Vec<u8> {
-        let mut data = vec![0u8; 0x20];
-        data[0..4].copy_from_slice(b"SCE\0");
-        data[8..10].copy_from_slice(&revision_flags.to_be_bytes());
-        data
-    }
-
-    #[test]
-    fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_high_bit_set() {
-        let data = synthetic_sce_header_with_revision_flags(0x8000);
-        let dummy_klic = [0u8; 16];
-        let err = decrypt_self_to_elf_npdrm(&data, &dummy_klic).unwrap_err();
-        match err {
-            SceError::DebugSelfUnsupported { revision_flags } => {
-                assert_eq!(revision_flags, 0x8000);
-            }
-            other => panic!("expected DebugSelfUnsupported, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_both_bits_set() {
-        // High bit AND a non-zero revision in the low 15 bits:
-        // guard must fire on the raw value, error carries it whole.
-        let data = synthetic_sce_header_with_revision_flags(0xC042);
-        let dummy_klic = [0u8; 16];
-        let err = decrypt_self_to_elf_npdrm(&data, &dummy_klic).unwrap_err();
-        assert!(matches!(
-            err,
-            SceError::DebugSelfUnsupported {
-                revision_flags: 0xC042
-            }
-        ));
-    }
-
-    #[test]
-    fn decrypt_self_to_elf_npdrm_does_not_treat_high_revision_as_debug() {
-        // 0x7FFF: highest non-debug revision. Must fall through
-        // past the debug guard (the downstream NoAppKey is fine).
-        let data = synthetic_sce_header_with_revision_flags(0x7FFF);
-        let dummy_klic = [0u8; 16];
-        let err = decrypt_self_to_elf_npdrm(&data, &dummy_klic).unwrap_err();
-        assert!(!matches!(err, SceError::DebugSelfUnsupported { .. }));
-    }
-}
+#[path = "tests/npdrm_tests.rs"]
+mod tests;
 
 #[cfg(all(test, feature = "npdrm-oracle-vectors"))]
 mod oracle_vectors {

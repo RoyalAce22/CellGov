@@ -75,21 +75,37 @@ pub enum CaseOutcome {
     MemoryMismatch(Vec<MemoryByteMismatch>),
 }
 
-/// Run one case and return the [`CaseOutcome`].
-///
-/// Staged [`Effect::SharedWriteIntent`]s are applied to a private
-/// copy of the case's memory before the post-state and that memory
-/// are diffed against the expected snapshots.
-pub fn run_case(case: &InstructionCase) -> CaseOutcome {
+/// Failure modes of [`execute_snapshot`] that precede any diffing.
+#[derive(Debug)]
+enum ExecuteSnapshotError {
+    Decode(PpuDecodeError),
+    Verdict(ExecuteVerdict),
+}
+
+impl From<ExecuteSnapshotError> for CaseOutcome {
+    fn from(e: ExecuteSnapshotError) -> Self {
+        match e {
+            ExecuteSnapshotError::Decode(e) => CaseOutcome::DecodeError(e),
+            ExecuteSnapshotError::Verdict(v) => CaseOutcome::UnexpectedVerdict(v),
+        }
+    }
+}
+
+/// Decode and execute `raw` from `initial` against a memory image at
+/// `base`, returning the post-state and the image after staged
+/// stores are applied.
+fn execute_snapshot(
+    raw: u32,
+    initial: &PpuStateSnapshot,
+    base: u64,
+    mut memory: Vec<u8>,
+) -> Result<(PpuStateSnapshot, Vec<u8>), ExecuteSnapshotError> {
     let mut state = PpuState::new();
-    case.initial_state.apply(&mut state);
+    initial.apply(&mut state);
 
-    let mut memory = case.initial_memory.bytes.clone();
-    let base = case.initial_memory.base;
-
-    let inst = match decode(case.raw_instruction) {
+    let inst = match decode(raw) {
         Ok(i) => i,
-        Err(e) => return CaseOutcome::DecodeError(e),
+        Err(e) => return Err(ExecuteSnapshotError::Decode(e)),
     };
 
     let mut effects: Vec<Effect> = Vec::new();
@@ -108,12 +124,53 @@ pub fn run_case(case: &InstructionCase) -> CaseOutcome {
     store_buf.flush(&mut effects, UnitId::new(0));
 
     if verdict != ExecuteVerdict::Continue {
-        return CaseOutcome::UnexpectedVerdict(verdict);
+        return Err(ExecuteSnapshotError::Verdict(verdict));
     }
 
     apply_shared_writes(&mut memory, base, &effects);
+    Ok((PpuStateSnapshot::capture(&state), memory))
+}
 
-    let observed_state = PpuStateSnapshot::capture(&state);
+/// Execute `raw` from `initial` against a memory image at `base` and
+/// return the image after staged stores are applied.
+///
+/// Unlike [`run_case`], nothing is diffed: callers compose
+/// multi-instruction sequences by threading the returned image into
+/// the next call and asserting on the final bytes.
+///
+/// # Panics
+///
+/// If the decoder rejects `raw` or the executor returns a
+/// non-`Continue` verdict.
+#[track_caller]
+pub fn execute_into_memory(
+    raw: u32,
+    initial: &PpuStateSnapshot,
+    base: u64,
+    memory: Vec<u8>,
+) -> Vec<u8> {
+    match execute_snapshot(raw, initial, base, memory) {
+        Ok((_, memory)) => memory,
+        Err(e) => panic!("execute_into_memory: raw=0x{raw:08x} failed: {e:?}"),
+    }
+}
+
+/// Run one case and return the [`CaseOutcome`].
+///
+/// Staged [`Effect::SharedWriteIntent`]s are applied to a private
+/// copy of the case's memory before the post-state and that memory
+/// are diffed against the expected snapshots.
+pub fn run_case(case: &InstructionCase) -> CaseOutcome {
+    let (observed_state, memory) = match execute_snapshot(
+        case.raw_instruction,
+        &case.initial_state,
+        case.initial_memory.base,
+        case.initial_memory.bytes.clone(),
+    ) {
+        Ok(ok) => ok,
+        Err(e) => return e.into(),
+    };
+
     let state_diff = diff_state(&case.expected_state, &observed_state);
     if !state_diff.is_empty() {
         return CaseOutcome::StateMismatch(state_diff);
@@ -167,7 +224,7 @@ pub struct CorpusReport {
     /// Number of cases that returned [`CaseOutcome::Pass`].
     pub passed: usize,
     /// Per-failing-case `(label, outcome)` pairs in input order.
-    pub failed: Vec<(&'static str, CaseOutcome)>,
+    pub failed: Vec<(String, CaseOutcome)>,
 }
 
 impl CorpusReport {
@@ -188,7 +245,7 @@ pub fn run_corpus(cases: &[InstructionCase]) -> CorpusReport {
     for case in cases {
         match run_case(case) {
             CaseOutcome::Pass => report.passed += 1,
-            other => report.failed.push((case.label, other)),
+            other => report.failed.push((case.label.clone(), other)),
         }
     }
     report
@@ -354,73 +411,5 @@ fn format_memory_diff(diffs: &[MemoryByteMismatch]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::differential::{MemorySnapshot, OracleSource};
-
-    fn nop_state() -> PpuStateSnapshot {
-        PpuStateSnapshot::zero()
-    }
-
-    #[test]
-    fn ori_nop_passes_with_identity_expected_state() {
-        // 0x6000_0000 = ori r0, r0, 0 (canonical PPC nop).
-        let case = InstructionCase {
-            label: "ori_nop",
-            initial_state: nop_state(),
-            initial_memory: MemorySnapshot::empty(),
-            raw_instruction: 0x6000_0000,
-            expected_state: nop_state(),
-            expected_memory: MemorySnapshot::empty(),
-            source: OracleSource::Manual,
-        };
-        assert_eq!(run_case(&case), CaseOutcome::Pass);
-    }
-
-    #[test]
-    fn injected_state_divergence_is_reported() {
-        let mut bad = nop_state();
-        bad.gpr[3] = 0xDEAD_BEEF;
-        let case = InstructionCase {
-            label: "ori_nop_lying_expected",
-            initial_state: nop_state(),
-            initial_memory: MemorySnapshot::empty(),
-            raw_instruction: 0x6000_0000,
-            expected_state: bad,
-            expected_memory: MemorySnapshot::empty(),
-            source: OracleSource::Manual,
-        };
-        match run_case(&case) {
-            CaseOutcome::StateMismatch(diff) => {
-                assert_eq!(diff.gpr.len(), 1);
-                assert_eq!(diff.gpr[0], (3, 0xDEAD_BEEF, 0));
-            }
-            other => panic!("expected StateMismatch, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn decoder_rejection_surfaces_as_decode_error() {
-        // 0x0800_0000 = `tdi` (primary 2), unhandled by the decoder.
-        let case = InstructionCase {
-            label: "tdi_unhandled",
-            initial_state: nop_state(),
-            initial_memory: MemorySnapshot::empty(),
-            raw_instruction: 0x0800_0000,
-            expected_state: nop_state(),
-            expected_memory: MemorySnapshot::empty(),
-            source: OracleSource::Manual,
-        };
-        match run_case(&case) {
-            CaseOutcome::DecodeError(_) => {}
-            other => panic!("expected DecodeError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn empty_corpus_is_clean() {
-        let report = run_corpus(&[]);
-        assert!(report.is_clean());
-        assert_eq!(report.total(), 0);
-    }
-}
+#[path = "tests/runner_tests.rs"]
+mod tests;

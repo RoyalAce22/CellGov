@@ -83,3 +83,7 @@ impl Lv2Host {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/opendir_tests.rs"]
+mod tests;

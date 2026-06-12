@@ -1,3 +1,5 @@
+//! Cross-cutting SPU execution-unit lifecycle -- run-until-yield, budgets, faults, and snapshots.
+
 use super::*;
 use cellgov_exec::ExecutionContext;
 use cellgov_mem::GuestMemory;

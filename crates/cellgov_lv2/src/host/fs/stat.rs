@@ -136,3 +136,7 @@ impl Lv2Host {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/stat_tests.rs"]
+mod tests;

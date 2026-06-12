@@ -1,46 +1,26 @@
 //! Env-gated per-step value sample on guest memory.
 //!
-//! Reads a fixed byte range at periodic CG-step boundaries. Clock is
-//! step-gated, NOT commit-gated -- the sample reads the current
-//! region state regardless of how it got there, so the instrument is
-//! coverage-independent with respect to write paths.
-//!
-//! Pairs naturally with [`super::store_watch`]: store_watch
-//! answers "what writes to address X via the commit pipeline";
-//! value_sample answers "what value does address X carry at each
-//! step, by any path." If the sampled byte is zero at every
-//! pre-checkpoint sample, no writer produced non-zero by any path
-//! (commit pipeline, segment install, or otherwise).
+//! Reads a fixed byte range at periodic CG-step boundaries. The
+//! clock is step-gated, NOT commit-gated: the sample sees the
+//! current region state regardless of which path wrote it, so a
+//! byte that is zero at every sample was written non-zero by no
+//! path at all. Complements [`super::store_watch`], which answers
+//! "what writes address X via the commit pipeline."
 //!
 //! Env vars:
 //!
 //!   CELLGOV_VALUE_SAMPLE         `ADDR:WIDTH` in hex (e.g.
-//!                                `0x91FE9C:4`). Width must be in
-//!                                `[1, 256]`.
+//!                                `0x91FE9C:4`); width in `[1, 256]`.
 //!   CELLGOV_VALUE_SAMPLE_PATH    Output file path.
 //!   CELLGOV_VALUE_SAMPLE_STRIDE  Optional decimal stride; default 1
-//!                                (sample every step). 0 is rejected.
+//!                                (every step). 0 is rejected.
 //!
-//! File format (little-endian, no padding between records):
-//!
-//!   [Header, 16 bytes]
-//!     magic    "CGVS"
-//!     version  u32 = 2
-//!     addr     u32  (low 32 bits of configured address)
-//!     width    u32
-//!
-//!   Record, repeated:
-//!     step     u64
-//!     status   u8   (0 = unmapped/no-read; 1 = full-width read;
-//!                    2 = short read, `actual_len` bytes in `value`)
-//!     actual_len u32  (number of meaningful bytes in `value`; equals
-//!                    `width` for status=1, < `width` for status=2,
-//!                    0 for status=0)
-//!     value    bytes\[width\]  (zero-padded; only the first
-//!                            `actual_len` bytes are meaningful)
-//!
-//! Invariant: a short-read padding zero (status=2 tail past
-//! `actual_len`) must remain distinguishable from a measured zero.
+//! File format (little-endian, no padding): a "CGVS" version-2
+//! header (magic, version u32, addr u32, width u32), then one
+//! record per sample: step u64, status u8 (0 = unmapped, 1 =
+//! full-width read, 2 = short read), actual_len u32, value
+//! bytes\[width\] zero-padded. `actual_len` exists so a short-read
+//! padding zero stays distinguishable from a measured zero.
 
 #![allow(clippy::print_stderr)]
 

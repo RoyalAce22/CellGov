@@ -9,6 +9,7 @@ mod memory;
 mod state;
 
 #[cfg(test)]
+#[path = "tests/test_helpers.rs"]
 mod test_helpers;
 
 pub use attribute::{

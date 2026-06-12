@@ -24,14 +24,9 @@ impl Runtime {
         self.step_woke_others = false;
         // Trivial-step fast path under FaultDriven. Epoch still advances
         // to preserve the atomic-batch boundary; trace is off in this mode.
-        //
-        // The RSX-work-pending predicate must exactly mirror the
-        // slow-path advance trigger's negation. Slow-path runs the
-        // walker when `get != put || !call_stack.is_empty()`; the
-        // fast path may skip the walker only when both halves are
-        // false. Omitting the call-stack check let a state with
-        // `get == put` but a non-empty stack (mid-CALL, awaiting
-        // RET) take the fast path and silently skip the drain.
+        // The RSX half of the predicate must be the exact negation of the
+        // slow-path advance trigger (`get != put || !call_stack.is_empty()`),
+        // or a mid-CALL state with `get == put` would skip the drain.
         if self.mode == crate::runtime::types::RuntimeMode::FaultDriven
             && effects.is_empty()
             && result.fault.is_none()
@@ -44,13 +39,6 @@ impl Runtime {
         {
             self.epoch.advance();
             if let Some(unit) = self.last_scheduled_unit {
-                // The hardcoded `false` for step_woke_others is
-                // load-bearing: only Syscall / event-flag yields can
-                // set the flag, and `allows_trivial_fast_path()`
-                // excludes those yield reasons. The assert pins
-                // that coupling so a future yield-reason that wakes
-                // others without going through Syscall would trip
-                // here rather than silently dropping a wake notice.
                 debug_assert!(
                     !self.step_woke_others,
                     "fast path reached with step_woke_others=true; \
@@ -84,10 +72,8 @@ impl Runtime {
         let flip_pending_at_entry = self.rsx_flip.pending();
         let flip_status_at_entry = self.rsx_flip.status();
 
-        // Audit C-2 witness is incremented inside `process()` adjacent
-        // to the semaphore-region `debug_assert!` it witnesses; pass
-        // the runtime field through CommitContext so the count cannot
-        // diverge from the guard's evaluation frequency.
+        // `rsx_label_writes_committed` is threaded through CommitContext
+        // so `process()` increments it adjacent to the guard it witnesses.
         let mut ctx = CommitContext {
             memory: &mut self.memory,
             units: &mut self.registry,
@@ -118,14 +104,9 @@ impl Runtime {
             self.mirror_rsx_control_register_writes(effects);
         }
 
-        // `Runtime::step` always sets `last_scheduled_unit` to the
-        // unit it dispatched before calling `commit_step`. The
-        // fallback to `UnitId::new(0)` is structurally unreachable
-        // on the slow path; pin it so a future control-flow change
-        // that elides the assignment trips here rather than
-        // silently fabricating unit 0 as the batch source (which
-        // is a real valid id and would attribute the commit to
-        // it).
+        // `Runtime::step` sets `last_scheduled_unit` before every
+        // commit_step; the unit-0 fallback exists only because release
+        // builds must not panic on a `None` here.
         debug_assert!(
             self.last_scheduled_unit.is_some(),
             "commit_step slow path reached with last_scheduled_unit=None; \
@@ -163,23 +144,10 @@ impl Runtime {
         // (atomic-batch contract); cursor mutations land in THIS batch's
         // state-hash checkpoint.
         //
-        // Bring-up GET catch-up: when the consumer is on, reconcile
-        // `cursor.get` with the title's MMIO `GET_ADDR` before
-        // invoking the walker, monotonically (catch up only; never
-        // roll back). libgcm's FIFO bring-up writes the title's
-        // declared read position into MMIO GET; without this
-        // reconciliation the walker would start from a stale cursor
-        // (zero or wherever an earlier advance left it) and bail on
-        // the first malformed header in front of where the title
-        // actually staged its commands. The "monotonic" qualifier is
-        // load-bearing per the rationale on
-        // [`Self::mirror_rsx_control_register_writes`]: an
-        // unconditional mirror would let a guest GET write yank the
-        // cursor backward against an active walker. Once the walker
-        // takes ownership of GET (the engine-side `.release(...)`
-        // model from RPCS3 `Emu/RSX/NV47/HW/nv406e.cpp:19`), the
-        // CPU side does not write a smaller value; if it does, we
-        // ignore it.
+        // Bring-up GET catch-up: reconcile `cursor.get` with the title's
+        // MMIO GET before invoking the walker, so the walker starts from
+        // the read position libgcm staged at FIFO bring-up. Ownership
+        // rationale on [`Self::mirror_rsx_control_register_writes`].
         if self.rsx_consume_fifo {
             self.catch_up_cursor_get_from_mmio();
         }
@@ -204,34 +172,10 @@ impl Runtime {
                 .rsx_set_reference_dispatches
                 .wrapping_add(u64::from(advance_outcome.set_references_dispatched));
 
-            // 40F cursor->MMIO writeback: when the consumer reaches
-            // the FIFO tail cleanly, project (current_reference,
-            // get) into the MMIO control-register slots at
-            // 0xC000_0048 (dma.ref) and 0xC000_0044 (dma.get). The
-            // title's libgcm spin-poll on dma.ref clears when its
-            // expected reference value lands; the get writeback
-            // keeps the engine-side cursor projection consistent
-            // with our walker for any subsequent title-side reads.
-            // Gated on rsx_consume_fifo so reserved-region titles
-            // don't perturb the MMIO slots when the consumer is
-            // off. Mirror-failure handling matches the flip-status
-            // pattern: log + retain the model advance.
+            // Gated on rsx_consume_fifo so reserved-region titles keep
+            // their MMIO slots untouched when the consumer is off.
             if self.rsx_consume_fifo && advance_outcome.reached_put() {
                 self.mirror_rsx_cursor_to_mmio();
-                // C-6 invariant: after the writeback,
-                // `mem[REF_ADDR]` must equal
-                // `cursor.current_reference()`. The writeback is
-                // a one-line `apply_commit` on a 4-byte aligned
-                // slot in a region the manifest marked
-                // ReadWrite, so the only failure mode is a
-                // pipeline bug (filter, region-access mismatch,
-                // batch ordering). Compiler can't check it; the
-                // invariant lives here so a regression that
-                // silently drops the writeback is loud, not
-                // silent. Paired with
-                // `mirror_rsx_cursor_to_mmio_invariant_panics_under_debug`
-                // (debug-only `#[should_panic]` confirming the
-                // assertion fires on a divergent mirror).
                 self.assert_ref_addr_mirrors_cursor();
             }
         }
@@ -279,20 +223,9 @@ impl Runtime {
         outcome
     }
 
-    /// 40F cursor->MMIO writeback. Projects the cursor's
-    /// `current_reference` and `get` slots into MMIO at
-    /// `0xC000_0048` and `0xC000_0044`. The title's libgcm spin-poll
-    /// on `dma.ref` clears when the SET_REFERENCE value it baked
-    /// into the FIFO command stream reaches it via this writeback.
-    /// The `get` writeback keeps the engine-side cursor consistent
-    /// for any subsequent title-side reads of `dma.get`. Failure to
-    /// project follows the flip-status mirror pattern: log + retain
-    /// the model advance.
-    /// Monotonic one-shot GET catch-up. Reads `mem[GET_ADDR]` and
-    /// advances `cursor.get` to it iff the MMIO value is strictly
-    /// greater than the current cursor; otherwise leaves the cursor
-    /// alone. Called at every walker invocation; the monotonic guard
-    /// is the load-bearing piece. See the rewritten design comment on
+    /// Monotonic one-shot GET catch-up: advance `cursor.get` to
+    /// `mem[GET_ADDR]` iff the MMIO value is strictly greater.
+    /// Ownership rationale on
     /// [`Self::mirror_rsx_control_register_writes`].
     fn catch_up_cursor_get_from_mmio(&mut self) {
         use crate::rsx::control_register::GET_ADDR;
@@ -311,10 +244,8 @@ impl Runtime {
     }
 
     /// Post-writeback invariant: `mem[REF_ADDR]` equals
-    /// `cursor.current_reference()`. Debug builds panic via
-    /// `debug_assert!`; release builds emit a typed invariant break.
-    /// Paired test:
-    /// `mirror_rsx_cursor_to_mmio_invariant_panics_under_debug`.
+    /// `cursor.current_reference()`. Debug builds panic; release
+    /// builds emit a typed invariant break.
     fn assert_ref_addr_mirrors_cursor(&mut self) {
         use crate::rsx::control_register::REF_ADDR;
         let expected = self.rsx_cursor.current_reference();
@@ -350,6 +281,12 @@ impl Runtime {
         }
     }
 
+    /// Project the cursor's `current_reference` and `get` into the
+    /// MMIO control-register slots (`REF_ADDR`, `GET_ADDR`). The
+    /// title's libgcm spin-poll on `dma.ref` clears when the
+    /// SET_REFERENCE value it baked into the FIFO stream lands here.
+    /// On a failed write the projection is dropped (typed invariant
+    /// break) and the cursor model advance stands.
     fn mirror_rsx_cursor_to_mmio(&mut self) {
         use crate::rsx::control_register;
         let writes = [
@@ -384,30 +321,15 @@ impl Runtime {
     /// coverage mirrors; sub-word stores still apply to memory but
     /// leave the cursor alone.
     ///
-    /// `get` (`0xC000_0044`) is deliberately NOT mirrored from guest
-    /// writes by this general per-effect mirror. Two facts shape this:
-    ///
-    /// 1. The walker owns `get` in steady state. RPCS3
-    ///    `Emu/RSX/NV47/HW/nv406e.cpp:19` writes `dma.get` from the
-    ///    engine via `.release(get_pos())` at every SET_REFERENCE
-    ///    dispatch; no CPU-side write occurs once the walker is the
-    ///    active producer of the cursor.
-    /// 2. The CPU seeds the initial read position once at FIFO
-    ///    bring-up via the title's MMIO GET write (libgcm's
-    ///    pre-bringup phase, before the walker has consumed any
-    ///    methods). Without picking up that seed, the walker starts
-    ///    at a stale cursor and bails on a malformed header in front
-    ///    of where the title actually staged its commands.
-    ///
-    /// The catch-up at [`Self::catch_up_cursor_get_from_mmio`]
-    /// reconciles only at walker invocation, and only monotonically
-    /// (never roll the cursor backward). That placement is
-    /// load-bearing: an unconditional per-effect mirror here would
-    /// let a mid-walk guest GET write yank the cursor backward
-    /// against an active walker, the divergence the engine-owned-GET
-    /// model is meant to prevent. The engine-to-MMIO `get`
-    /// projection (the matching write back into MMIO) lives in
-    /// [`Self::mirror_rsx_cursor_to_mmio`].
+    /// `get` (`0xC000_0044`) is NOT mirrored here. The walker owns
+    /// `get` in steady state (RPCS3 `Emu/RSX/NV47/HW/nv406e.cpp:19`
+    /// writes `dma.get` from the engine at every SET_REFERENCE
+    /// dispatch); the CPU writes it once at FIFO bring-up to seed the
+    /// initial read position. [`Self::catch_up_cursor_get_from_mmio`]
+    /// picks up that seed at walker invocation, monotonically -- a
+    /// per-effect mirror here would let a mid-walk guest GET write
+    /// yank the cursor backward against an active walker. The reverse
+    /// projection lives in [`Self::mirror_rsx_cursor_to_mmio`].
     ///
     /// Runs after the batch applies and before the FIFO advance pass, so
     /// the drain sees the new put / ref in the same batch.
@@ -461,66 +383,5 @@ impl Runtime {
 }
 
 #[cfg(test)]
-mod tests {
-    use cellgov_mem::{GuestAddr, GuestMemory, PageSize, Region};
-    use cellgov_time::Budget;
-
-    use crate::Runtime;
-
-    fn make_rt_with_rsx_region() -> Runtime {
-        let regions = vec![
-            Region::new(0, 0x10000, "flat", PageSize::Page4K),
-            Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
-        ];
-        let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
-        Runtime::new(mem, Budget::new(1), 100)
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "after mirror_rsx_cursor_to_mmio")]
-    fn assert_ref_addr_mirrors_cursor_panics_when_writeback_was_dropped() {
-        let mut rt = make_rt_with_rsx_region();
-        rt.rsx_cursor_mut().set_reference(0xFFFF_FFFF);
-        rt.test_only_assert_ref_addr_mirrors_cursor();
-    }
-
-    #[test]
-    fn catch_up_advances_cursor_get_when_mmio_get_is_ahead() {
-        use crate::rsx::control_register::GET_ADDR;
-        let mut rt = make_rt_with_rsx_region();
-        let range = cellgov_mem::ByteRange::new(GuestAddr::new(GET_ADDR as u64), 4).unwrap();
-        rt.memory_mut()
-            .apply_commit(range, &0x0000_1000u32.to_be_bytes())
-            .unwrap();
-        rt.rsx_cursor_mut().set_get(0x0000_098c);
-        rt.test_only_catch_up_cursor_get_from_mmio();
-        assert_eq!(rt.rsx_cursor().get(), 0x0000_1000);
-    }
-
-    #[test]
-    fn catch_up_leaves_cursor_alone_when_mmio_get_is_behind() {
-        use crate::rsx::control_register::GET_ADDR;
-        let mut rt = make_rt_with_rsx_region();
-        let range = cellgov_mem::ByteRange::new(GuestAddr::new(GET_ADDR as u64), 4).unwrap();
-        rt.memory_mut()
-            .apply_commit(range, &0x0000_0500u32.to_be_bytes())
-            .unwrap();
-        rt.rsx_cursor_mut().set_get(0x0000_1000);
-        rt.test_only_catch_up_cursor_get_from_mmio();
-        assert_eq!(rt.rsx_cursor().get(), 0x0000_1000);
-    }
-
-    #[test]
-    fn catch_up_leaves_cursor_alone_when_mmio_get_equals_cursor() {
-        use crate::rsx::control_register::GET_ADDR;
-        let mut rt = make_rt_with_rsx_region();
-        let range = cellgov_mem::ByteRange::new(GuestAddr::new(GET_ADDR as u64), 4).unwrap();
-        rt.memory_mut()
-            .apply_commit(range, &0x0000_1000u32.to_be_bytes())
-            .unwrap();
-        rt.rsx_cursor_mut().set_get(0x0000_1000);
-        rt.test_only_catch_up_cursor_get_from_mmio();
-        assert_eq!(rt.rsx_cursor().get(), 0x0000_1000);
-    }
-}
+#[path = "tests/commit_step_tests.rs"]
+mod tests;

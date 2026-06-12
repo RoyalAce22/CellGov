@@ -28,11 +28,12 @@ mod spu;
 mod state_hash;
 
 #[cfg(test)]
+#[path = "tests/test_support.rs"]
 mod test_support;
 
 #[cfg(test)]
-#[path = "../tests/host_tests.rs"]
-mod cross_primitive_tests;
+#[path = "tests/host_tests.rs"]
+mod tests;
 
 pub use diagnostics::InvariantBreakReason;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
