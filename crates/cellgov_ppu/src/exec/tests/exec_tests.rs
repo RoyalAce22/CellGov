@@ -483,7 +483,7 @@ fn ld_stitches_eight_byte_stbs_in_store_buffer() {
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
 
-    let bytes = [b'1', b'0', b'0', b'0', b'0', b'0', b'0', b'0'];
+    let bytes = *b"10000000";
     for (i, b) in bytes.iter().enumerate() {
         s.gpr[3] = *b as u64;
         let v = execute(
