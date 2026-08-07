@@ -17,7 +17,7 @@ use super::title::{resolve_checkpoint_override, resolve_ps3_vfs_root, resolve_ti
 /// subprocess runs, as a percentage of the faster run.
 const AGREEMENT_GATE_PERCENT: f64 = 5.0;
 
-/// Where `cellgov_firmware install` lands the minimum viable PRX
+/// Where `cellgov_install install` lands the minimum viable PRX
 /// set's SPRXes by default.
 const DEFAULT_FIRMWARE_DIR: &str = "firmware/sys/external";
 

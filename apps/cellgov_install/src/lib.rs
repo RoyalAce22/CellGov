@@ -1,6 +1,6 @@
 //! PS3 firmware (PUP) parsing, SELF (SCE) decryption, and TAR extraction.
 //!
-//! Two consumers share one pipeline: the `cellgov_firmware` binary's
+//! Two consumers share one pipeline: the `cellgov_install` binary's
 //! `install` subcommand peels the outer SCE/PUP wrapping at install
 //! time, and `cellgov_cli`'s boot path calls
 //! [`sce::decrypt_self_to_elf`] (APP-keyed) or
@@ -14,7 +14,7 @@
 #![allow(
     clippy::print_stdout,
     clippy::print_stderr,
-    reason = "shared with the cellgov_firmware binary's user-facing output"
+    reason = "shared with the cellgov_install binary's user-facing output"
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 

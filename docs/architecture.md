@@ -20,13 +20,13 @@ backward edges. `cellgov_ps3_abi` is the data-only leaf for PS3
 ABI source-of-truth values (NIDs, errnos, struct layouts, syscall
 numbers, ELF/PRX layout, hardware constants); it depends on nothing
 in the workspace and is depended on by every layer that consumes
-PS3 ABI literals. `cellgov_firmware` is fully standalone (no
+PS3 ABI literals. `cellgov_install` is fully standalone (no
 workspace library dependencies); `cellgov_mkelf` likewise.
 
 ```mermaid
 graph BT
   subgraph apps ["apps/"]
-    firmware["cellgov_firmware"]
+    firmware["cellgov_install"]
     mkelf["cellgov_mkelf"]
     cli["cellgov_cli"]
   end
@@ -116,16 +116,16 @@ Four structural rules worth calling out:
 - `cellgov_explore` lives above `cellgov_core` and drives the runtime
   externally through `Runtime::step` / `commit_step` /
   `set_scheduler`. It never modifies the runtime model.
-- `cellgov_firmware` is a lib+bin: the binary exposes the `install`
+- `cellgov_install` is a lib+bin: the binary exposes the `install`
   and `decrypt-self` subcommands; the library exposes the same PUP
   / SCE / SELF / TAR / APP-key primitives. `cellgov_cli` takes a
   library dependency to decrypt SCE-wrapped SELFs on the fly at
   boot time. The crypto crates (`aes`, `cbc`, `ctr`, `hmac`,
-  `sha1`, `flate2`) are pulled by `cellgov_firmware` alone.
+  `sha1`, `flate2`) are pulled by `cellgov_install` alone.
 
 External dependencies are minimal: `serde`, `serde_json`, and `toml`
 in `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore`
-and `cellgov_cli`; crypto crates in `cellgov_firmware` only.
+and `cellgov_cli`; crypto crates in `cellgov_install` only.
 Everything else is workspace-internal. The workspace compiles under
 `unsafe_code = "forbid"`.
 
@@ -151,7 +151,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `cellgov_cli`                  | The user-facing binary: `run-game`, `bench-boot`, `bench-boot-once`, `dump`, `dump-prx-imports`, `disasm`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`, `rpcs3-attribute`, `fixture-gen`, `titles-gen`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `cellgov_firmware`             | PS3 firmware and SELF decrypter. Lib + bin. The binary's `install` subcommand peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` and writes per-module SELFs to `firmware/` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). The `decrypt-self` subcommand decrypts one SELF at a time. The library's `sce::decrypt_self_to_elf` is also called by `cellgov_cli`'s boot path to peel encrypted SELFs at load time. APP keys cover firmware revisions 0x0000-0x001D, mirroring RPCS3's `KeyVault::LoadSelfAPPKeys`. The fourteen-module minimum viable PRX set from the user's PUP decrypts bit-identically to the output of RPCS3's decrypter run on the same PUP (the user supplies the PUP; neither RPCS3 nor CellGov ships firmware). No RPCS3 dependency at runtime. |
+| `cellgov_install`             | PS3 firmware and SELF decrypter. Lib + bin. The binary's `install` subcommand peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` and writes per-module SELFs to `firmware/` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). The `decrypt-self` subcommand decrypts one SELF at a time. The library's `sce::decrypt_self_to_elf` is also called by `cellgov_cli`'s boot path to peel encrypted SELFs at load time. APP keys cover firmware revisions 0x0000-0x001D, mirroring RPCS3's `KeyVault::LoadSelfAPPKeys`. The fourteen-module minimum viable PRX set from the user's PUP decrypts bit-identically to the output of RPCS3's decrypter run on the same PUP (the user supplies the PUP; neither RPCS3 nor CellGov ships firmware). No RPCS3 dependency at runtime. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ## Guest memory layout
@@ -1204,7 +1204,7 @@ NPUA80068`), or explicit manifest path (`--title-manifest
   `resolve_eboot` then looks under
   `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead
   of the PSN HDD layout. The encrypted `EBOOT.BIN` is decrypted
-  in memory at boot through `cellgov_firmware::sce::decrypt_self_to_elf`.
+  in memory at boot through `cellgov_install::sce::decrypt_self_to_elf`.
 
 Per-title status (boot checkpoint reached, cross-runner observation
 match) is tracked in [titles.md](titles.md).
@@ -1227,7 +1227,7 @@ APP-keyed for disc titles and RAP-keyed NPDRM for PSN-HDD
 titles (the RAP file is declared in the manifest's
 `rap_filename` field and read from `<vfs-root>/home/00000001/exdata/`).
 `<vfs-root>` defaults to `vfs/dev_hdd0` -- the CellGov-owned VFS
-that `cellgov_firmware install-game` / `install-iso` populate from
+that `cellgov_install install-game` / `install-iso` populate from
 a user's PKG/ISO dumps -- and can be overridden by `--vfs-root` or
 `$CELLGOV_PS3_VFS_ROOT`. `tools/rpcs3/` is no longer the runtime
 source; it is an RPCS3 checkout kept only for offline baselines.
@@ -1245,14 +1245,14 @@ The diagnostic surface is:
   identical step counts across runs.
 - `dump-prx-imports <path>`: decodes any raw `.prx` or SCE-wrapped
   `.sprx`, auto-detects SCE wrappers (decrypted via
-  `cellgov_firmware::sce`), and prints the module's internal name,
+  `cellgov_install::sce`), and prints the module's internal name,
   export namespaces, and full import table.
 
 ## Boot status
 
 The `run-game` CLI subcommand loads a PS3 ELF -- raw, or
 SCE-wrapped (`SCE\0` magic is dispatched to
-`cellgov_firmware::sce::decrypt_self_to_elf` at load time) -- and
+`cellgov_install::sce::decrypt_self_to_elf` at load time) -- and
 runs the PPU at instruction-level granularity (Budget=1). When
 `--firmware-dir` resolves to a directory holding the minimum
 viable PRX set (it auto-defaults to `firmware/sys/external/` if
@@ -1362,7 +1362,7 @@ paths that no longer re-fire under the new trajectory.
 
 **WipEout HD Fury (BCES00664).** Disc ISO title; EBOOT is loaded
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
-SELF decryption via `cellgov_firmware decrypt-self`. Past the
+SELF decryption via `cellgov_install decrypt-self`. Past the
 seeded `cellSysutil_Library` `module_start`, WipEout reaches its
 `FirstRsxWrite` checkpoint at step 43,083 -- the one foundation
 title that converges with RPCS3 at its checkpoint (`Yes`), with

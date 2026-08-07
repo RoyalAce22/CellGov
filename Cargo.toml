@@ -19,7 +19,7 @@ members = [
     "crates/cellgov_explore",
     "apps/cellgov_cli",
     "apps/cellgov_mkelf",
-    "apps/cellgov_firmware",
+    "apps/cellgov_install",
     "bridges/rpcs3_to_observation",
 ]
 # Default-build excludes the RPCS3 bridge so a plain `cargo build`
@@ -45,7 +45,7 @@ default-members = [
     "crates/cellgov_explore",
     "apps/cellgov_cli",
     "apps/cellgov_mkelf",
-    "apps/cellgov_firmware",
+    "apps/cellgov_install",
 ]
 
 [workspace.package]

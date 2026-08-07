@@ -1,4 +1,4 @@
-//! Integration tests for `cellgov_firmware install` against a real
+//! Integration tests for `cellgov_install install` against a real
 //! PS3UPDAT.PUP.
 //!
 //! # Configuration
@@ -36,14 +36,14 @@ fn require_pup(test_name: &str) -> Option<PathBuf> {
         panic!("CELLGOV_REQUIRE_PUP set but {ENV_PUP} is unset or points at a non-existent file");
     }
     eprintln!(
-        "cellgov_firmware install integration ({test_name}): skipping \
+        "cellgov_install install integration ({test_name}): skipping \
          (set {ENV_PUP}=<absolute PUP path> to run)"
     );
     None
 }
 
 fn fresh_temp_dir(stem: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("cellgov_firmware_install_{stem}_31b2"));
+    let dir = std::env::temp_dir().join(format!("cellgov_install_install_{stem}_31b2"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -55,14 +55,14 @@ fn install_with_empty_output_dir_succeeds_and_populates_sys_external() {
         return;
     };
     let output = fresh_temp_dir("happy");
-    let bin = env!("CARGO_BIN_EXE_cellgov_firmware");
+    let bin = env!("CARGO_BIN_EXE_cellgov_install");
     let result = Command::new(bin)
         .arg("install")
         .arg(&pup)
         .arg("--output")
         .arg(&output)
         .output()
-        .expect("spawn cellgov_firmware install");
+        .expect("spawn cellgov_install install");
     assert!(
         result.status.success(),
         "install failed.\nstdout:\n{}\nstderr:\n{}",
@@ -99,14 +99,14 @@ fn install_refuses_non_empty_output_dir_without_force() {
     let output = fresh_temp_dir("refuse");
     std::fs::write(output.join("decoy.txt"), b"existing").unwrap();
 
-    let bin = env!("CARGO_BIN_EXE_cellgov_firmware");
+    let bin = env!("CARGO_BIN_EXE_cellgov_install");
     let result = Command::new(bin)
         .arg("install")
         .arg(&pup)
         .arg("--output")
         .arg(&output)
         .output()
-        .expect("spawn cellgov_firmware install");
+        .expect("spawn cellgov_install install");
     assert!(
         !result.status.success(),
         "expected install to refuse non-empty dir without --force\nstdout:\n{}\nstderr:\n{}",
@@ -129,7 +129,7 @@ fn install_force_flag_allows_non_empty_output_dir() {
     let output = fresh_temp_dir("force");
     std::fs::write(output.join("decoy.txt"), b"existing").unwrap();
 
-    let bin = env!("CARGO_BIN_EXE_cellgov_firmware");
+    let bin = env!("CARGO_BIN_EXE_cellgov_install");
     let result = Command::new(bin)
         .arg("install")
         .arg(&pup)
@@ -137,7 +137,7 @@ fn install_force_flag_allows_non_empty_output_dir() {
         .arg(&output)
         .arg("--force")
         .output()
-        .expect("spawn cellgov_firmware install --force");
+        .expect("spawn cellgov_install install --force");
     assert!(
         result.status.success(),
         "install --force failed.\nstdout:\n{}\nstderr:\n{}",

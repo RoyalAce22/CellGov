@@ -12,7 +12,7 @@ pub use export_table::FirmwareExportTable;
 pub use graph::{DependencyGraph, PrxModuleId};
 
 /// Minimum viable PRX set: fifteen modules whose
-/// `cellgov_firmware`-decrypted output matches RPCS3's decryption
+/// `cellgov_install`-decrypted output matches RPCS3's decryption
 /// of the same PUP (verified by
 /// `min_viable_prx_decrypt_matches_pre_decrypted_reference`) and
 /// whose export union is import-closed for the title corpus.

@@ -202,7 +202,7 @@ fn verify_post_decrypt_wrong_digest_returns_mismatch() {
 
 #[test]
 fn files_table_can_be_empty() {
-    // The cellgov_firmware install pipeline does not contractually
+    // The cellgov_install install pipeline does not contractually
     // guarantee at least one decrypted SPRX -- a PUP without APP
     // keys we recognise produces zero entries, and the manifest
     // should still round-trip rather than refuse to serialise.

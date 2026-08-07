@@ -34,7 +34,7 @@ pub(super) enum PrxLoadStageError {
     Decrypt {
         path: std::path::PathBuf,
         #[source]
-        source: cellgov_firmware::sce::SceError,
+        source: cellgov_install::sce::SceError,
     },
     /// A staged GOT slot's 4-byte ByteRange could not be constructed.
     #[error("GOT slot at 0x{stub_addr:08x} (nid 0x{nid:08x}): invalid 4-byte range")]

@@ -3,8 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_firmware::npdrm::NpdHeaderInfo;
-use cellgov_firmware::sce::SceError;
+use cellgov_install::npdrm::NpdHeaderInfo;
+use cellgov_install::sce::SceError;
 use cellgov_ps3_abi::sce::SCE_MAGIC;
 
 use crate::game::manifest::TitleManifest;
@@ -45,9 +45,9 @@ pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path)
                 rap_bytes.len(),
             ))
         });
-        Some(cellgov_firmware::npdrm::rap_to_klic(&rap_arr))
+        Some(cellgov_install::npdrm::rap_to_klic(&rap_arr))
     };
-    match cellgov_firmware::npdrm::decrypt_self_to_elf_auto(bytes, resolver) {
+    match cellgov_install::npdrm::decrypt_self_to_elf_auto(bytes, resolver) {
         Ok(elf) => elf,
         Err(e @ SceError::NoRapForNpdrmTitle { .. }) => die(&format!(
             "{e}; expected its RAP at {}/<content_id>.rap",
@@ -98,7 +98,7 @@ fn klicensee_resolver(
                 rap_bytes.len(),
             ))
         });
-        Some(cellgov_firmware::npdrm::rap_to_klic(&rap_arr))
+        Some(cellgov_install::npdrm::rap_to_klic(&rap_arr))
     }
 }
 
@@ -124,11 +124,11 @@ pub(crate) fn load_ppu_image_with_title_or_die(
             authority_id: None,
         };
     }
-    let authority_id = cellgov_firmware::sce::parse_program_authority_id(&bytes)
+    let authority_id = cellgov_install::sce::parse_program_authority_id(&bytes)
         .map_err(|e| die(&format!("SELF {path}: identification header: {e}")))
         .ok();
     let resolver = klicensee_resolver(title, vfs_root.to_path_buf());
-    let elf_data = cellgov_firmware::npdrm::decrypt_self_to_elf_auto(&bytes, resolver)
+    let elf_data = cellgov_install::npdrm::decrypt_self_to_elf_auto(&bytes, resolver)
         .unwrap_or_else(|e| die(&format!("failed to decrypt SELF {path}: {e}")));
     LoadedPpuImage {
         elf_data,
@@ -167,8 +167,8 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
             }
         };
         if bytes.len() >= 4 && bytes[..4] == SCE_MAGIC {
-            let authority_id = cellgov_firmware::sce::parse_program_authority_id(&bytes).ok();
-            match cellgov_firmware::npdrm::decrypt_self_to_elf_auto(&bytes, &resolver) {
+            let authority_id = cellgov_install::sce::parse_program_authority_id(&bytes).ok();
+            match cellgov_install::npdrm::decrypt_self_to_elf_auto(&bytes, &resolver) {
                 Ok(elf) => {
                     return (
                         LoadedPpuImage {

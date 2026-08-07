@@ -1,6 +1,6 @@
 //! PS3 firmware and SELF decryption CLI.
 //!
-//! Exposes [`cellgov_firmware`]'s library as `install` and
+//! Exposes [`cellgov_install`]'s library as `install` and
 //! `decrypt-self` subcommands.
 
 #![allow(
@@ -10,10 +10,10 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
-use cellgov_firmware::manifest::{
+use cellgov_install::manifest::{
     self, FirmwareFileEntry, FirmwareIdentity, FirmwareManifest, SUPPORTED_FORMAT_VERSION,
 };
-use cellgov_firmware::{disc_crypt, game_install, game_uninstall, pup, sce, tar};
+use cellgov_install::{disc_crypt, game_install, game_uninstall, pup, sce, tar};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -39,27 +39,29 @@ fn main() {
 
 fn print_usage() {
     eprintln!("usage:");
-    eprintln!("  cellgov_firmware install <PUP_PATH> [--output <dir>] [--force]");
+    eprintln!("  cellgov_install install <PUP_PATH> [--output <dir>] [--force]");
     eprintln!("    default --output: firmware/ (at the current working directory)");
     eprintln!("    --force: overwrite a non-empty output directory");
     eprintln!(
-        "  cellgov_firmware install-game <PKG_PATH> [--rap <RAP_PATH>] [--output <dir>] [--force]"
+        "  cellgov_install install-game <PKG_PATH> [--rap <RAP_PATH>] [--output <dir>] [--force]"
     );
     eprintln!("    default --output: vfs/ (at the current working directory)");
     eprintln!("    --rap: required for license-1/2 NPDRM titles, optional for license-3");
     eprintln!("    --force: overwrite an existing game directory");
     eprintln!(
-        "  cellgov_firmware install-iso <ISO_PATH> [--dkey <DKEY_PATH>] [--output <dir>] [--force]"
+        "  cellgov_install install-iso <ISO_PATH> [--dkey <DKEY_PATH>] [--output <dir>] [--force]"
     );
     eprintln!("    default --output: vfs/ (at the current working directory)");
     eprintln!("    --dkey: 16-byte disc key for an encrypted image; omit for a decrypted one");
     eprintln!("    extracts the disc tree to dev_bdvd/");
-    eprintln!("  cellgov_firmware uninstall <TITLE_ID> [--output <dir>] [--verify] [--keep-rap] [--force]");
+    eprintln!(
+        "  cellgov_install uninstall <TITLE_ID> [--output <dir>] [--verify] [--keep-rap] [--force]"
+    );
     eprintln!("    default --output: vfs/ (at the current working directory)");
     eprintln!("    --verify: re-hash the live tree against the install record first");
     eprintln!("    --keep-rap: leave the RAP in exdata/ (another title may share it)");
     eprintln!("    --force: uninstall even if --verify finds a modified tree");
-    eprintln!("  cellgov_firmware decrypt-self <SELF_PATH> [--output <path>]");
+    eprintln!("  cellgov_install decrypt-self <SELF_PATH> [--output <path>]");
 }
 
 /// Parsed `install` subcommand arguments.
@@ -71,7 +73,7 @@ struct InstallArgs {
 
 const DEFAULT_INSTALL_OUTPUT: &str = "firmware";
 
-/// Why a cellgov_firmware CLI helper failed.
+/// Why a cellgov_install CLI helper failed.
 #[derive(Debug, thiserror::Error)]
 enum FirmwareCliError {
     /// `install` invoked without a PUP path.
@@ -235,7 +237,7 @@ fn cmd_decrypt_self(args: &[String]) {
         std::process::exit(1);
     });
     println!(
-        "cellgov_firmware: decrypting {} ({:.1} MB)",
+        "cellgov_install: decrypting {} ({:.1} MB)",
         self_path.display(),
         data.len() as f64 / (1024.0 * 1024.0)
     );
@@ -250,7 +252,7 @@ fn cmd_decrypt_self(args: &[String]) {
         std::process::exit(1);
     });
     println!(
-        "cellgov_firmware: wrote {} ({:.1} MB)",
+        "cellgov_install: wrote {} ({:.1} MB)",
         output_path.display(),
         elf.len() as f64 / (1024.0 * 1024.0)
     );
@@ -302,7 +304,7 @@ fn cmd_install(args: &[String]) {
     });
 
     println!(
-        "cellgov_firmware: reading {} ({:.1} MB)",
+        "cellgov_install: reading {} ({:.1} MB)",
         pup_path.display(),
         pup_data.len() as f64 / (1024.0 * 1024.0)
     );
@@ -396,7 +398,7 @@ fn cmd_install(args: &[String]) {
     }
 
     if !extract_errors.is_empty() {
-        eprintln!("cellgov_firmware: {} extract errors:", extract_errors.len());
+        eprintln!("cellgov_install: {} extract errors:", extract_errors.len());
         for err in &extract_errors {
             eprintln!("  {err}");
         }
@@ -404,13 +406,13 @@ fn cmd_install(args: &[String]) {
 
     if total_files == 0 {
         eprintln!(
-            "cellgov_firmware: install produced 0 files (attempted {packages_attempted} dev_flash packages); refusing to claim success"
+            "cellgov_install: install produced 0 files (attempted {packages_attempted} dev_flash packages); refusing to claim success"
         );
         std::process::exit(1);
     }
 
     println!(
-        "cellgov_firmware: installed {} files to {} ({} packages, {} errors)",
+        "cellgov_install: installed {} files to {} ({} packages, {} errors)",
         total_files,
         output_dir.display(),
         packages_attempted,
@@ -514,7 +516,7 @@ fn cmd_install_game(args: &[String]) {
     });
 
     println!(
-        "cellgov_firmware: installing game from {} ({:.1} MB)",
+        "cellgov_install: installing game from {} ({:.1} MB)",
         parsed.pkg_path.display(),
         pkg_data.len() as f64 / (1024.0 * 1024.0)
     );
@@ -609,7 +611,7 @@ fn cmd_install_iso(args: &[String]) {
     });
 
     println!(
-        "cellgov_firmware: installing disc from {} ({:.1} MB)",
+        "cellgov_install: installing disc from {} ({:.1} MB)",
         parsed.iso_path.display(),
         iso_data.len() as f64 / (1024.0 * 1024.0)
     );
@@ -722,7 +724,7 @@ fn cmd_uninstall(args: &[String]) {
                 std::process::exit(1);
             });
 
-    println!("cellgov_firmware: uninstalled {}", outcome.title_id);
+    println!("cellgov_install: uninstalled {}", outcome.title_id);
     println!("  removed game dir {}", outcome.game_dir_removed.display());
     if let Some(rap) = &outcome.rap_removed {
         println!("  removed RAP {}", rap.display());
