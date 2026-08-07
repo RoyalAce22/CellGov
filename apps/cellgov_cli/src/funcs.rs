@@ -15,7 +15,7 @@ use crate::cli::title::resolve_ps3_vfs_root;
 
 const USAGE: &str = "cellgov_cli funcs <elf-path> [--json] [--vfs-root PATH]\n\
      \t(NPDRM EBOOTs resolve their RAP from <vfs-root>/home/00000001/exdata/;\n\
-     \t vfs-root defaults to CELLGOV_PS3_VFS_ROOT, then tools/rpcs3/dev_hdd0)";
+     \t vfs-root defaults to CELLGOV_PS3_VFS_ROOT, then vfs/dev_hdd0)";
 
 #[derive(Debug)]
 struct FuncsArgs<'a> {

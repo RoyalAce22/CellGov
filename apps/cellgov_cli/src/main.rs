@@ -51,10 +51,14 @@ const USAGE_RPCS3_ATTRIBUTE: &str =
     "cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR [--len N]] [--list] [--ranked]";
 const USAGE_FIXTURE_GEN: &str = "\
 cellgov_cli fixture-gen --manifest <path> --cellgov <path> --rpcs3 <path> --output-dir <path>
-\t\t[--vfs-root PATH] (defaults: CELLGOV_PS3_VFS_ROOT env, then tools/rpcs3/dev_hdd0)";
+\t\t[--vfs-root PATH] (defaults: CELLGOV_PS3_VFS_ROOT env, then vfs/dev_hdd0)";
 const USAGE_TITLES_GEN: &str = "\
 cellgov_cli titles-gen [--registry DIR] [--fixtures-dir DIR] [--output PATH]
 \t\t(defaults: docs/title_manifests, tests/fixtures, docs/titles.md)";
+const USAGE_GEN_MANIFEST: &str = "\
+cellgov_cli gen-manifest <--record PATH | --title-id ID> [--registry DIR] [--installs DIR] [--force]
+\t\temit a title-manifest stub from an install record; never overwrites an
+\t\texisting manifest (curated fields preserved) unless --force is given";
 
 /// Top-level dispatcher routes. Adding a variant produces an
 /// exhaustiveness error in [`Subcommand::tokens`], [`Subcommand::usage`],
@@ -78,6 +82,7 @@ enum Subcommand {
     Rpcs3Attribute,
     FixtureGen,
     TitlesGen,
+    GenManifest,
 }
 
 impl Subcommand {
@@ -100,6 +105,7 @@ impl Subcommand {
             Self::Rpcs3Attribute => &["rpcs3-attribute"],
             Self::FixtureGen => &["fixture-gen"],
             Self::TitlesGen => &["titles-gen"],
+            Self::GenManifest => &["gen-manifest"],
         }
     }
 
@@ -124,6 +130,7 @@ impl Subcommand {
             Self::Rpcs3Attribute => Some(USAGE_RPCS3_ATTRIBUTE),
             Self::FixtureGen => Some(USAGE_FIXTURE_GEN),
             Self::TitlesGen => Some(USAGE_TITLES_GEN),
+            Self::GenManifest => Some(USAGE_GEN_MANIFEST),
         }
     }
 
@@ -155,6 +162,7 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand::Rpcs3Attribute,
     Subcommand::FixtureGen,
     Subcommand::TitlesGen,
+    Subcommand::GenManifest,
 ];
 
 fn main() {
@@ -208,6 +216,7 @@ fn main() {
         Some(Subcommand::Rpcs3Attribute) => cli::rpcs3_attribute::run(&args),
         Some(Subcommand::FixtureGen) => cli::fixture_gen::run(&args),
         Some(Subcommand::TitlesGen) => cli::titles_gen::run(&args),
+        Some(Subcommand::GenManifest) => cli::gen_manifest::run(&args),
         None => match run_scenario(token) {
             Some((label, result)) => println!("{}", report(label, &result)),
             None => die(&format!(

@@ -13,7 +13,7 @@
 use cellgov_firmware::manifest::{
     self, FirmwareFileEntry, FirmwareIdentity, FirmwareManifest, SUPPORTED_FORMAT_VERSION,
 };
-use cellgov_firmware::{pup, sce, tar};
+use cellgov_firmware::{disc_crypt, game_install, game_uninstall, pup, sce, tar};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -26,6 +26,9 @@ fn main() {
 
     match args[1].as_str() {
         "install" => cmd_install(&args),
+        "install-game" => cmd_install_game(&args),
+        "install-iso" => cmd_install_iso(&args),
+        "uninstall" => cmd_uninstall(&args),
         "decrypt-self" => cmd_decrypt_self(&args),
         _ => {
             print_usage();
@@ -39,6 +42,23 @@ fn print_usage() {
     eprintln!("  cellgov_firmware install <PUP_PATH> [--output <dir>] [--force]");
     eprintln!("    default --output: firmware/ (at the current working directory)");
     eprintln!("    --force: overwrite a non-empty output directory");
+    eprintln!(
+        "  cellgov_firmware install-game <PKG_PATH> [--rap <RAP_PATH>] [--output <dir>] [--force]"
+    );
+    eprintln!("    default --output: vfs/ (at the current working directory)");
+    eprintln!("    --rap: required for license-1/2 NPDRM titles, optional for license-3");
+    eprintln!("    --force: overwrite an existing game directory");
+    eprintln!(
+        "  cellgov_firmware install-iso <ISO_PATH> [--dkey <DKEY_PATH>] [--output <dir>] [--force]"
+    );
+    eprintln!("    default --output: vfs/ (at the current working directory)");
+    eprintln!("    --dkey: 16-byte disc key for an encrypted image; omit for a decrypted one");
+    eprintln!("    extracts the disc tree to dev_bdvd/");
+    eprintln!("  cellgov_firmware uninstall <TITLE_ID> [--output <dir>] [--verify] [--keep-rap] [--force]");
+    eprintln!("    default --output: vfs/ (at the current working directory)");
+    eprintln!("    --verify: re-hash the live tree against the install record first");
+    eprintln!("    --keep-rap: leave the RAP in exdata/ (another title may share it)");
+    eprintln!("    --force: uninstall even if --verify finds a modified tree");
     eprintln!("  cellgov_firmware decrypt-self <SELF_PATH> [--output <path>]");
 }
 
@@ -57,12 +77,27 @@ enum FirmwareCliError {
     /// `install` invoked without a PUP path.
     #[error("install requires a PUP path")]
     MissingPupPath,
+    /// `install-game` invoked without a PKG path.
+    #[error("install-game requires a PKG path")]
+    MissingPkgPath,
+    /// `install-iso` invoked without an ISO path.
+    #[error("install-iso requires an ISO path")]
+    MissingIsoPath,
+    /// `uninstall` invoked without a title-id.
+    #[error("uninstall requires a title-id")]
+    MissingTitleId,
     /// `decrypt-self` invoked without a SELF path.
     #[error("decrypt-self requires a SELF path")]
     MissingSelfPath,
     /// `--output` flag with no following argument.
     #[error("--output requires a {kind} argument")]
     OutputFlagMissingValue { kind: &'static str },
+    /// `--rap` flag with no following argument.
+    #[error("--rap requires a path argument")]
+    RapFlagMissingValue,
+    /// `--dkey` flag with no following argument.
+    #[error("--dkey requires a path argument")]
+    DkeyFlagMissingValue,
     /// Unknown subcommand flag.
     #[error("unknown argument: {0}")]
     UnknownArgument(String),
@@ -407,6 +442,295 @@ fn cmd_install(args: &[String]) {
         manifest_path.display(),
         manifest.files.len()
     );
+}
+
+/// Parsed `install-game` subcommand arguments.
+struct InstallGameArgs {
+    pkg_path: PathBuf,
+    rap_path: Option<PathBuf>,
+    output_dir: PathBuf,
+    force: bool,
+}
+
+const DEFAULT_GAME_INSTALL_OUTPUT: &str = "vfs";
+/// Install records live at the project root, outside the PS3-shaped
+/// `vfs/` tree.
+const INSTALLS_DIR: &str = "installs";
+
+fn parse_install_game_args(args: &[String]) -> Result<InstallGameArgs, FirmwareCliError> {
+    if args.len() < 3 {
+        return Err(FirmwareCliError::MissingPkgPath);
+    }
+    let pkg_path = PathBuf::from(&args[2]);
+    let mut rap_path: Option<PathBuf> = None;
+    let mut output_dir: Option<PathBuf> = None;
+    let mut force = false;
+    let mut i = 3;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--rap" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(FirmwareCliError::RapFlagMissingValue);
+                }
+                rap_path = Some(PathBuf::from(&args[i]));
+            }
+            "--output" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(FirmwareCliError::OutputFlagMissingValue { kind: "directory" });
+                }
+                output_dir = Some(PathBuf::from(&args[i]));
+            }
+            "--force" => force = true,
+            other => return Err(FirmwareCliError::UnknownArgument(other.to_string())),
+        }
+        i += 1;
+    }
+    Ok(InstallGameArgs {
+        pkg_path,
+        rap_path,
+        output_dir: output_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_INSTALL_OUTPUT)),
+        force,
+    })
+}
+
+fn cmd_install_game(args: &[String]) {
+    let parsed = parse_install_game_args(args).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        print_usage();
+        std::process::exit(1);
+    });
+
+    let pkg_data = std::fs::read(&parsed.pkg_path).unwrap_or_else(|e| {
+        eprintln!("failed to read {}: {e}", parsed.pkg_path.display());
+        std::process::exit(1);
+    });
+    let rap_data = parsed.rap_path.as_ref().map(|p| {
+        std::fs::read(p).unwrap_or_else(|e| {
+            eprintln!("failed to read RAP {}: {e}", p.display());
+            std::process::exit(1);
+        })
+    });
+
+    println!(
+        "cellgov_firmware: installing game from {} ({:.1} MB)",
+        parsed.pkg_path.display(),
+        pkg_data.len() as f64 / (1024.0 * 1024.0)
+    );
+
+    let installs_dir = PathBuf::from(INSTALLS_DIR);
+    let outcome = game_install::install_pkg(
+        &pkg_data,
+        rap_data.as_deref(),
+        &parsed.output_dir,
+        &installs_dir,
+        parsed.force,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("install-game failed: {e}");
+        std::process::exit(1);
+    });
+
+    println!(
+        "  title {} (content {}): {} files -> {}",
+        outcome.title_id,
+        outcome.content_id,
+        outcome.file_count,
+        outcome.game_dir.display(),
+    );
+    println!(
+        "  RAP {}, record {}",
+        if outcome.rap_installed {
+            "installed"
+        } else {
+            "not installed (none required)"
+        },
+        outcome.record_path.display(),
+    );
+}
+
+/// Parsed `install-iso` subcommand arguments.
+struct InstallIsoArgs {
+    iso_path: PathBuf,
+    dkey_path: Option<PathBuf>,
+    output_dir: PathBuf,
+    force: bool,
+}
+
+fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCliError> {
+    if args.len() < 3 {
+        return Err(FirmwareCliError::MissingIsoPath);
+    }
+    let iso_path = PathBuf::from(&args[2]);
+    let mut dkey_path: Option<PathBuf> = None;
+    let mut output_dir: Option<PathBuf> = None;
+    let mut force = false;
+    let mut i = 3;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--dkey" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(FirmwareCliError::DkeyFlagMissingValue);
+                }
+                dkey_path = Some(PathBuf::from(&args[i]));
+            }
+            "--output" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(FirmwareCliError::OutputFlagMissingValue { kind: "directory" });
+                }
+                output_dir = Some(PathBuf::from(&args[i]));
+            }
+            "--force" => force = true,
+            other => return Err(FirmwareCliError::UnknownArgument(other.to_string())),
+        }
+        i += 1;
+    }
+    Ok(InstallIsoArgs {
+        iso_path,
+        dkey_path,
+        output_dir: output_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_INSTALL_OUTPUT)),
+        force,
+    })
+}
+
+fn cmd_install_iso(args: &[String]) {
+    let parsed = parse_install_iso_args(args).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        print_usage();
+        std::process::exit(1);
+    });
+
+    let iso_data = std::fs::read(&parsed.iso_path).unwrap_or_else(|e| {
+        eprintln!("failed to read {}: {e}", parsed.iso_path.display());
+        std::process::exit(1);
+    });
+
+    println!(
+        "cellgov_firmware: installing disc from {} ({:.1} MB)",
+        parsed.iso_path.display(),
+        iso_data.len() as f64 / (1024.0 * 1024.0)
+    );
+
+    // With --dkey the image is encrypted: decrypt it first, then the
+    // record's source hash is over the original (encrypted) bytes. With
+    // no --dkey the image is assumed already decrypted.
+    let decrypted = match &parsed.dkey_path {
+        Some(dkey_path) => {
+            let dkey = std::fs::read(dkey_path).unwrap_or_else(|e| {
+                eprintln!("failed to read disc key {}: {e}", dkey_path.display());
+                std::process::exit(1);
+            });
+            let dkey: [u8; 16] = dkey.as_slice().try_into().unwrap_or_else(|_| {
+                eprintln!("disc key must be exactly 16 bytes, got {}", dkey.len());
+                std::process::exit(1);
+            });
+            println!("  decrypting protected sectors with supplied disc key...");
+            disc_crypt::decrypt_disc_image(&iso_data, &dkey).unwrap_or_else(|e| {
+                eprintln!("disc decryption failed: {e}");
+                std::process::exit(1);
+            })
+        }
+        None => iso_data.clone(),
+    };
+
+    let installs_dir = PathBuf::from(INSTALLS_DIR);
+    let outcome = game_install::install_iso(
+        &decrypted,
+        &iso_data,
+        &parsed.output_dir,
+        &installs_dir,
+        parsed.force,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("install-iso failed: {e}");
+        std::process::exit(1);
+    });
+
+    println!(
+        "  title {}: {} files -> {}",
+        outcome.title_id,
+        outcome.file_count,
+        outcome.game_dir.display(),
+    );
+    println!("  record {}", outcome.record_path.display());
+}
+
+/// Parsed `uninstall` subcommand arguments.
+struct UninstallArgs {
+    title_id: String,
+    output_dir: PathBuf,
+    verify: bool,
+    keep_rap: bool,
+    force: bool,
+}
+
+fn parse_uninstall_args(args: &[String]) -> Result<UninstallArgs, FirmwareCliError> {
+    if args.len() < 3 {
+        return Err(FirmwareCliError::MissingTitleId);
+    }
+    let title_id = args[2].clone();
+    let mut output_dir: Option<PathBuf> = None;
+    let mut verify = false;
+    let mut keep_rap = false;
+    let mut force = false;
+    let mut i = 3;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--output" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(FirmwareCliError::OutputFlagMissingValue { kind: "directory" });
+                }
+                output_dir = Some(PathBuf::from(&args[i]));
+            }
+            "--verify" => verify = true,
+            "--keep-rap" => keep_rap = true,
+            "--force" => force = true,
+            other => return Err(FirmwareCliError::UnknownArgument(other.to_string())),
+        }
+        i += 1;
+    }
+    Ok(UninstallArgs {
+        title_id,
+        output_dir: output_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_INSTALL_OUTPUT)),
+        verify,
+        keep_rap,
+        force,
+    })
+}
+
+fn cmd_uninstall(args: &[String]) {
+    let parsed = parse_uninstall_args(args).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        print_usage();
+        std::process::exit(1);
+    });
+
+    let installs_dir = PathBuf::from(INSTALLS_DIR);
+    let opts = game_uninstall::UninstallOptions {
+        verify: parsed.verify,
+        keep_rap: parsed.keep_rap,
+        force: parsed.force,
+    };
+    let outcome =
+        game_uninstall::uninstall(&parsed.title_id, &parsed.output_dir, &installs_dir, opts)
+            .unwrap_or_else(|e| {
+                eprintln!("uninstall failed: {e}");
+                std::process::exit(1);
+            });
+
+    println!("cellgov_firmware: uninstalled {}", outcome.title_id);
+    println!("  removed game dir {}", outcome.game_dir_removed.display());
+    if let Some(rap) = &outcome.rap_removed {
+        println!("  removed RAP {}", rap.display());
+    }
+    if let Some(n) = outcome.files_verified {
+        println!("  verified {n} files against the record before removal");
+    }
+    println!("  removed record {}", outcome.record_removed.display());
 }
 
 /// Walk `dir` recursively in lexicographic order and append every

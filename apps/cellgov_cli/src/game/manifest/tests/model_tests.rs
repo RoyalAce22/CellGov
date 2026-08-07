@@ -61,6 +61,27 @@ fn resolve_eboot_disc_without_parent_returns_misconfigured() {
     }
 }
 
+#[test]
+fn resolve_eboot_rejects_dot_prefixed_content_id() {
+    use std::sync::atomic::Ordering;
+
+    // A content-id that would resolve an in-progress install sibling.
+    let m = hdd_manifest(".staging-NPAA00001", "t", &["EBOOT.BIN"]);
+    let before = HIDDEN_CONTENT_ID_REJECTIONS.load(Ordering::Relaxed);
+    let err = m
+        .resolve_eboot(Path::new("vfs/dev_hdd0"))
+        .expect_err("dot-prefixed content-id is rejected");
+    assert!(
+        matches!(err, ResolveEbootError::HiddenContentId { .. }),
+        "expected HiddenContentId, got {err:?}"
+    );
+    // Witness: the guard actually executed (not a vacuous pass).
+    assert_eq!(
+        HIDDEN_CONTENT_ID_REJECTIONS.load(Ordering::Relaxed),
+        before + 1
+    );
+}
+
 mod distribution_tests {
     use super::*;
     use strum::VariantArray;

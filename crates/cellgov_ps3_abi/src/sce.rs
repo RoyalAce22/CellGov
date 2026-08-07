@@ -87,6 +87,15 @@ pub const RAP_KEY: [u8; 0x10] = [
     0x86, 0x9F, 0x77, 0x45, 0xC1, 0x3F, 0xD8, 0x90, 0xCC, 0xF2, 0x91, 0x88, 0xE3, 0xCC, 0x3E, 0xDF,
 ];
 
+/// AES-128 key for retail PS3 PKG content decryption. Used directly,
+/// with no derivation, as the block-cipher key for the package's CTR
+/// keystream; the per-block counter is the header `klicensee` nonce
+/// plus the 16-byte block index. Mirrors `PKG_AES_KEY` in RPCS3's
+/// `key_vault.h`.
+pub const PKG_AES_KEY: [u8; 0x10] = [
+    0x2E, 0x7B, 0x71, 0xD7, 0xC9, 0xC9, 0xA1, 0x4E, 0xA3, 0x22, 0x1F, 0x18, 0x88, 0x28, 0xB8, 0xF8,
+];
+
 /// Byte-permutation indices applied per round of the
 /// `rap_to_rif` post-ECB stage. Index `i` of the round output is
 /// pulled from index `RAP_PBOX[i]` of the round input. Mirrors

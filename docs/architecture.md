@@ -1226,8 +1226,11 @@ it. CellGov decrypts retail SELFs in memory at boot time:
 APP-keyed for disc titles and RAP-keyed NPDRM for PSN-HDD
 titles (the RAP file is declared in the manifest's
 `rap_filename` field and read from `<vfs-root>/home/00000001/exdata/`).
-`<vfs-root>` defaults to `tools/rpcs3/dev_hdd0` and can be
-overridden by `--vfs-root` or `$CELLGOV_PS3_VFS_ROOT`.
+`<vfs-root>` defaults to `vfs/dev_hdd0` -- the CellGov-owned VFS
+that `cellgov_firmware install-game` / `install-iso` populate from
+a user's PKG/ISO dumps -- and can be overridden by `--vfs-root` or
+`$CELLGOV_PS3_VFS_ROOT`. `tools/rpcs3/` is no longer the runtime
+source; it is an RPCS3 checkout kept only for offline baselines.
 
 The diagnostic surface is:
 
