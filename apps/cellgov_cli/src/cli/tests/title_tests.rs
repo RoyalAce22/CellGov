@@ -51,5 +51,5 @@ fn resolve_ps3_vfs_root_default_is_project_relative() {
     let _guard = EnvGuard::unset("CELLGOV_PS3_VFS_ROOT");
     let args = sv(&["cli", "run-game", "--title", "flow"]);
     let got = resolve_ps3_vfs_root(&args);
-    assert_eq!(got, std::path::PathBuf::from("tools/rpcs3/dev_hdd0"));
+    assert_eq!(got, std::path::PathBuf::from("vfs/dev_hdd0"));
 }

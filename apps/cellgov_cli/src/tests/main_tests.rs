@@ -52,6 +52,7 @@ fn subcommands_const_is_exhaustive() {
         Subcommand::Rpcs3Attribute,
         Subcommand::FixtureGen,
         Subcommand::TitlesGen,
+        Subcommand::GenManifest,
     ];
     assert_eq!(
         SUBCOMMANDS.len(),

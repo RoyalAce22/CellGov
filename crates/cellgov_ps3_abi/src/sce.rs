@@ -87,6 +87,15 @@ pub const RAP_KEY: [u8; 0x10] = [
     CELLGOV-REDACTED-KEY,
 ];
 
+/// AES-128 key for retail PS3 PKG content decryption. Used directly,
+/// with no derivation, as the block-cipher key for the package's CTR
+/// keystream; the per-block counter is the header `klicensee` nonce
+/// plus the 16-byte block index. Mirrors `PKG_AES_KEY` in RPCS3's
+/// `key_vault.h`.
+pub const PKG_AES_KEY: [u8; 0x10] = [
+    CELLGOV-REDACTED-KEY,
+];
+
 /// Byte-permutation indices applied per round of the
 /// `rap_to_rif` post-ECB stage. Index `i` of the round output is
 /// pulled from index `RAP_PBOX[i]` of the round input. Mirrors

@@ -1,9 +1,5 @@
 # CellGov
 
-## NOTE:
-
-Hello! I am going on vacation until August 18th. Until then, no new commits will be made to the CellGov repo. If you have any comments, please raise an issue and I will respond when I get back.
-
 [![CI](https://img.shields.io/github/actions/workflow/status/RoyalAce22/CellGov/ci.yml?branch=main&label=CI)](https://github.com/RoyalAce22/CellGov/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![MSRV](https://img.shields.io/badge/MSRV-1.95-orange.svg)](https://blog.rust-lang.org/2026/04/03/Rust-1.95.0.html)

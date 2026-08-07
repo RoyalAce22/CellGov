@@ -143,7 +143,24 @@ pub enum ResolveEbootError {
         candidates: Vec<String>,
         probe_errors: Vec<(PathBuf, std::io::Error)>,
     },
+    /// `content_id` begins with `.`, which would resolve a hidden /
+    /// in-progress directory (e.g. an install's `.staging-*` sibling)
+    /// instead of a real title. There is no VFS directory scan -- titles
+    /// come from explicit manifests -- so this resolver is the gate that
+    /// keeps a dot-prefixed key off the boot path.
+    #[error("title '{short_name}' has a hidden content-id {content_id:?} (leading '.')")]
+    HiddenContentId {
+        content_id: String,
+        short_name: String,
+    },
 }
+
+/// Test witness: counts how many times the hidden-content-id guard in
+/// [`TitleManifest::resolve_eboot`] fired, so a test can prove the
+/// guard executed rather than passing vacuously.
+#[cfg(test)]
+pub(crate) static HIDDEN_CONTENT_ID_REJECTIONS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 fn render_not_found(
     searched: &Path,
@@ -190,6 +207,17 @@ impl TitleManifest {
     ///
     /// See [`ResolveEbootError`].
     pub fn resolve_eboot(&self, vfs_root: &Path) -> Result<PathBuf, ResolveEbootError> {
+        // A dot-prefixed content-id would resolve a hidden directory
+        // (an in-progress `.staging-*` / `.uninstalling-*` sibling);
+        // reject it so such residue can never be booted.
+        if self.content_id.starts_with('.') {
+            #[cfg(test)]
+            HIDDEN_CONTENT_ID_REJECTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Err(ResolveEbootError::HiddenContentId {
+                content_id: self.content_id.clone(),
+                short_name: self.short_name.clone(),
+            });
+        }
         let usrdir = match self.source {
             GameSource::Hdd => vfs_root.join("game").join(&self.content_id).join("USRDIR"),
             GameSource::Disc => {

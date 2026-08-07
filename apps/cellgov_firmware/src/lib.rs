@@ -19,11 +19,20 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod crypto;
+pub mod disc_crypt;
+pub mod game_install;
+pub mod game_uninstall;
+pub mod iso;
 pub mod manifest;
 pub mod npdrm;
+pub mod param_sfo;
+pub mod pkg;
 pub mod pup;
 pub mod sce;
 pub mod tar;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "tests/lib_tests.rs"]

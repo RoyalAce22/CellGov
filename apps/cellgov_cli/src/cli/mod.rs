@@ -8,6 +8,7 @@ pub(crate) mod env;
 pub(crate) mod exit;
 pub(crate) mod explore;
 pub(crate) mod fixture_gen;
+pub(crate) mod gen_manifest;
 pub(crate) mod rpcs3_attribute;
 pub(crate) mod scenarios;
 pub(crate) mod title;

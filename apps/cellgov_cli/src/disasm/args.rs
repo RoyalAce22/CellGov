@@ -15,7 +15,7 @@ pub(super) fn usage() -> &'static str {
      \t--vaddr      hex address (with or without 0x prefix); must be 4-byte aligned\n\
      \t--count      decimal instruction count, 1..=65536, default 16\n\
      \t--symbolize  build the OPD function map and annotate branch targets\n\
-     \t--vfs-root   PS3 vfs root for NPDRM RAP lookup (default: tools/rpcs3/dev_hdd0)"
+     \t--vfs-root   PS3 vfs root for NPDRM RAP lookup (default: vfs/dev_hdd0)"
 }
 
 #[derive(Debug)]

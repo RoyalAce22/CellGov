@@ -78,9 +78,9 @@ Choosing a checkpoint:
 | ------ | ------ | -------- | --------------------------------------------------------------------------------------------------------- |
 | `kind` | string | no       | `"disc"` for disc-ISO titles, `"hdd"` for PSN/HDD installs. Defaults to `"hdd"` when the block is absent. |
 
-`disc` titles are looked up under `tools/rpcs3/dev_bdvd/`; `hdd`
-titles under `tools/rpcs3/dev_hdd0/game/`. The actual VFS root
-can be overridden with the `CELLGOV_PS3_VFS_ROOT` env var.
+`disc` titles are looked up under `vfs/dev_bdvd/`; `hdd` titles
+under `vfs/dev_hdd0/game/`. The actual VFS root can be overridden
+with the `CELLGOV_PS3_VFS_ROOT` env var.
 
 ### `[rsx]` (optional)
 
@@ -186,9 +186,11 @@ unpopulated out-params and bails.
 
 ## Adding a new title
 
-1. Find or create the title's USRDIR under `tools/rpcs3/dev_hdd0/game/<content_id>/USRDIR/` (PSN/HDD) or
-   `tools/rpcs3/dev_bdvd/<content_id>/PS3_GAME/USRDIR/` (disc).
-   Both directories are gitignored.
+1. Install the title with `cellgov_firmware install-game <pkg> --rap <rap>`
+   (PSN/HDD) or `cellgov_firmware install-iso <iso> [--dkey <key>]`
+   (disc), which populates `vfs/dev_hdd0/game/<content_id>/USRDIR/`
+   or `vfs/dev_bdvd/<content_id>/PS3_GAME/USRDIR/` respectively (both
+   gitignored). `gen-manifest` can then emit a stub of this file.
 2. Confirm `EBOOT.BIN` is present. CellGov decrypts it in
    memory via `cellgov_firmware::sce::decrypt_self_to_elf`; do
    NOT write the decrypted bytes back to `EBOOT.elf`; a stale

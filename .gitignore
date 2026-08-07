@@ -44,6 +44,13 @@ tests/fixtures/*/rpcs3/*.dump
 # from firmware/sys/external/ at boot. Bytes are never vendored.
 firmware/
 
+# Game install destination. cellgov_firmware install-game / install-iso
+# extract user-supplied PKG/ISO dumps here (the CellGov-owned VFS); the
+# per-install records live in installs/. Multi-GB game bytes are never
+# vendored.
+vfs/
+installs/
+
 # AI tooling
 .claude/
 CLAUDE.local.md
