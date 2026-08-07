@@ -63,7 +63,7 @@ pub(crate) fn resolve_checkpoint_override(
 
 /// Resolve the PS3 VFS root using, in priority order: `--vfs-root
 /// <path>`, `CELLGOV_PS3_VFS_ROOT` env var, then `vfs/dev_hdd0` (the
-/// CellGov-owned VFS that `cellgov_firmware install-game` / `install-iso`
+/// CellGov-owned VFS that `cellgov_install install-game` / `install-iso`
 /// populate). `tools/rpcs3/` is no longer the default; it is an RPCS3
 /// checkout used only to generate offline baselines. Existence is not
 /// verified here.

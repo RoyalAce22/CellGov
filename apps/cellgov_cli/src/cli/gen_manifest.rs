@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_firmware::game_install::InstallRecord;
+use cellgov_install::game_install::InstallRecord;
 
 use crate::cli::exit::die;
 

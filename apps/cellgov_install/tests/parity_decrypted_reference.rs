@@ -72,9 +72,9 @@ fn locate_fixtures() -> Option<(PathBuf, PathBuf)> {
             );
         }
         eprintln!(
-            "cellgov_firmware parity: skipping (encrypted={}, reference={}; \
+            "cellgov_install parity: skipping (encrypted={}, reference={}; \
              set {ENV_FIRMWARE_DIR} / {ENV_DECRYPTED_REF_DIR} or run \
-             `cellgov_firmware install` to populate)",
+             `cellgov_install install` to populate)",
             encrypted.display(),
             reference.display(),
         );
@@ -98,7 +98,7 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path, r
             );
         }
         eprintln!(
-            "cellgov_firmware parity ({stem}): skipping (sprx={} exists={}, prx={} exists={})",
+            "cellgov_install parity ({stem}): skipping (sprx={} exists={}, prx={} exists={})",
             sprx_path.display(),
             sprx_path.is_file(),
             prx_path.display(),
@@ -107,7 +107,7 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path, r
         return;
     }
     let encrypted_bytes = std::fs::read(&sprx_path).unwrap();
-    let mut decrypted = cellgov_firmware::sce::decrypt_self_to_elf(&encrypted_bytes)
+    let mut decrypted = cellgov_install::sce::decrypt_self_to_elf(&encrypted_bytes)
         .unwrap_or_else(|e| panic!("{stem}: decrypt failed: {e}"));
     assert!(
         decrypted.len() >= 0x40,
@@ -132,8 +132,8 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path, r
         &[0u8; 2],
         "{stem}: SPRX inner ELF unexpectedly carries non-zero e_shstrndx"
     );
-    cellgov_firmware::sce::mask_non_semantic_elf_bytes(&mut decrypted);
-    cellgov_firmware::sce::mask_non_semantic_elf_bytes(&mut reference);
+    cellgov_install::sce::mask_non_semantic_elf_bytes(&mut decrypted);
+    cellgov_install::sce::mask_non_semantic_elf_bytes(&mut reference);
     assert_eq!(
         decrypted.len(),
         reference.len(),
@@ -240,7 +240,7 @@ fn rap_path_for(rap_filename: &str) -> PathBuf {
 /// non-semantic, so the masked hash is the byte-identity check;
 /// the unmasked hash is a strict-superset fast path that also
 /// requires the section tables to coincide. See
-/// [`cellgov_firmware::sce::mask_non_semantic_elf_bytes`] for the
+/// [`cellgov_install::sce::mask_non_semantic_elf_bytes`] for the
 /// section-vs-segment split.
 fn run_npdrm_oracle(oracle: &Oracle) {
     let title = &oracle.display;
@@ -251,7 +251,7 @@ fn run_npdrm_oracle(oracle: &Oracle) {
     let rap_path = rap_path_for(rap_filename);
     if !bin_path.is_file() || !rap_path.is_file() {
         eprintln!(
-            "cellgov_firmware C.2 ({title}): skipping; missing {} or {}",
+            "cellgov_install C.2 ({title}): skipping; missing {} or {}",
             bin_path.display(),
             rap_path.display(),
         );
@@ -272,8 +272,8 @@ fn run_npdrm_oracle(oracle: &Oracle) {
             rap.len()
         )
     });
-    let klic = cellgov_firmware::npdrm::rap_to_klic(&rap_arr);
-    let mut elf = cellgov_firmware::npdrm::decrypt_self_to_elf_npdrm(&bin, &klic)
+    let klic = cellgov_install::npdrm::rap_to_klic(&rap_arr);
+    let mut elf = cellgov_install::npdrm::decrypt_self_to_elf_npdrm(&bin, &klic)
         .unwrap_or_else(|e| panic!("{title}: NPDRM decrypt failed: {e}"));
     assert!(
         elf.len() >= 0x40,
@@ -286,7 +286,7 @@ fn run_npdrm_oracle(oracle: &Oracle) {
         eprintln!("{title}: byte-identical to RPCS3 oracle (unmasked)");
         return;
     }
-    cellgov_firmware::sce::mask_non_semantic_elf_bytes(&mut elf);
+    cellgov_install::sce::mask_non_semantic_elf_bytes(&mut elf);
     let got_masked: [u8; 32] = Sha256::digest(&elf).into();
     if got_masked == expected_masked {
         eprintln!(
@@ -310,14 +310,14 @@ fn run_app_oracle(oracle: &Oracle) {
     let bin_path = bin_path_for(&oracle.content_id, &oracle.key);
     if !bin_path.is_file() {
         eprintln!(
-            "cellgov_firmware C.2 ({title}): skipping; missing {}",
+            "cellgov_install C.2 ({title}): skipping; missing {}",
             bin_path.display()
         );
         return;
     }
     let expected = hex_to_bytes32(&oracle.unmasked_sha256, &format!("{title} unmasked"));
     let bin = std::fs::read(&bin_path).unwrap();
-    let elf = cellgov_firmware::sce::decrypt_self_to_elf(&bin)
+    let elf = cellgov_install::sce::decrypt_self_to_elf(&bin)
         .unwrap_or_else(|e| panic!("{title}: APP decrypt failed: {e}"));
     assert!(
         elf.len() >= 0x40,

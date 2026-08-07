@@ -1,4 +1,4 @@
-//! `firmware.toml` schema. Produced by `cellgov_firmware install`
+//! `firmware.toml` schema. Produced by `cellgov_install install`
 //! and consumed by `cellgov_cli`'s boot path to verify that the
 //! installed firmware matches a known PUP revision before any title
 //! boots through it.

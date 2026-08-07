@@ -7,7 +7,7 @@
 //! runs only when `CELLGOV_DISC_ISO` points at a decrypted image, and
 //! skips cleanly otherwise (the `path.exists()` skip-gate pattern).
 
-use cellgov_firmware::game_install;
+use cellgov_install::game_install;
 use std::path::{Path, PathBuf};
 
 /// Repo-root-relative RPCS3 disc reference for the given title-id.

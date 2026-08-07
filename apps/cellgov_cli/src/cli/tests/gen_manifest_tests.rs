@@ -1,8 +1,8 @@
 //! Title-manifest stub generation from install records.
 
 use super::*;
-use cellgov_firmware::game_install::{InstallRecord, SourceRecord, TitleRecord};
-use cellgov_firmware::manifest::Sha256;
+use cellgov_install::game_install::{InstallRecord, SourceRecord, TitleRecord};
+use cellgov_install::manifest::Sha256;
 use std::collections::BTreeMap;
 
 fn hdd_record() -> InstallRecord {

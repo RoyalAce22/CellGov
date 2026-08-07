@@ -10,7 +10,7 @@
 //! the `path.exists()` skip-gate pattern from
 //! `cellgov_ppu`'s `parse_real_liblv2`.
 
-use cellgov_firmware::game_install;
+use cellgov_install::game_install;
 use std::path::{Path, PathBuf};
 
 /// Operator dump directory holding the flOw `.pkg` and `.rap`.

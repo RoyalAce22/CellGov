@@ -50,7 +50,7 @@ fn locate_firmware_dir() -> Option<PathBuf> {
         }
         eprintln!(
             "firmware_set_load: skipping (firmware dir {} absent; \
-             run `cellgov_firmware install` to populate)",
+             run `cellgov_install install` to populate)",
             dir.display()
         );
         None
@@ -82,7 +82,7 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         let sprx_path = dir.join(format!("{stem}.sprx"));
         let raw = std::fs::read(&sprx_path)
             .unwrap_or_else(|e| panic!("read {}: {e}", sprx_path.display()));
-        let elf = cellgov_firmware::sce::decrypt_self_to_elf(&raw)
+        let elf = cellgov_install::sce::decrypt_self_to_elf(&raw)
             .unwrap_or_else(|e| panic!("decrypt {}: {e}", sprx_path.display()));
         match check_loadable(&elf) {
             Ok(()) => {}

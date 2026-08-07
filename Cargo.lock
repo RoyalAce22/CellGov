@@ -89,7 +89,7 @@ dependencies = [
  "cellgov_event",
  "cellgov_exec",
  "cellgov_explore",
- "cellgov_firmware",
+ "cellgov_install",
  "cellgov_lv2",
  "cellgov_mem",
  "cellgov_ppu",
@@ -202,7 +202,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cellgov_firmware"
+name = "cellgov_install"
 version = "0.0.0"
 dependencies = [
  "aes",

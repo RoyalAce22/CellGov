@@ -118,7 +118,7 @@ See [docs/architecture.md](docs/architecture.md) for the full pipeline, memory m
 
 ## Workspace
 
-Cargo workspace, 16 library crates and 3 binaries (+1 firmware tool). See
+Cargo workspace, 16 library crates and 3 binaries (+1 install tool). See
 [`docs/architecture.md`](docs/architecture.md) for the layering
 diagram and per-crate responsibilities.
 
@@ -140,7 +140,7 @@ requires PS3 system firmware. Download the official firmware update
 and install it with the included tool:
 
 ```bash
-cargo run -p cellgov_firmware -- install /path/to/PS3UPDAT.PUP
+cargo run -p cellgov_install -- install /path/to/PS3UPDAT.PUP
 ```
 
 The install unwraps the outer SCE/PUP envelope and writes per-module

@@ -38,7 +38,7 @@ fn read_firmware_module_elf(path: &Path) -> Result<Vec<u8>, PrxLoadStageError> {
         source,
     })?;
     if raw.len() >= 4 && &raw[..4] == b"SCE\0" {
-        cellgov_firmware::sce::decrypt_self_to_elf(&raw).map_err(|source| {
+        cellgov_install::sce::decrypt_self_to_elf(&raw).map_err(|source| {
             PrxLoadStageError::Decrypt {
                 path: path.to_path_buf(),
                 source,

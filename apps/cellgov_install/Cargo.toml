@@ -1,16 +1,16 @@
 [package]
-name = "cellgov_firmware"
+name = "cellgov_install"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [lib]
-name = "cellgov_firmware"
+name = "cellgov_install"
 path = "src/lib.rs"
 
 [[bin]]
-name = "cellgov_firmware"
+name = "cellgov_install"
 path = "src/main.rs"
 
 [dependencies]

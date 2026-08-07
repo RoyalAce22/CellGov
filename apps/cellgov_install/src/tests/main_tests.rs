@@ -3,7 +3,7 @@
 use super::*;
 
 fn argv(parts: &[&str]) -> Vec<String> {
-    let mut v = vec!["cellgov_firmware".to_string(), "install".to_string()];
+    let mut v = vec!["cellgov_install".to_string(), "install".to_string()];
     v.extend(parts.iter().map(|s| s.to_string()));
     v
 }
@@ -45,7 +45,7 @@ fn parse_force_and_output_in_either_order() {
 
 #[test]
 fn parse_missing_pup_errors() {
-    let r = parse_install_args(&["cellgov_firmware".into(), "install".into()]);
+    let r = parse_install_args(&["cellgov_install".into(), "install".into()]);
     assert!(r.is_err());
 }
 
@@ -63,14 +63,14 @@ fn parse_unknown_flag_errors() {
 
 #[test]
 fn check_output_dir_missing_is_ok() {
-    let dir = std::env::temp_dir().join("cellgov_firmware_test_missing_xyz_31b2");
+    let dir = std::env::temp_dir().join("cellgov_install_test_missing_xyz_31b2");
     let _ = std::fs::remove_dir_all(&dir);
     assert!(check_output_dir(&dir, false).is_ok());
 }
 
 #[test]
 fn check_output_dir_empty_is_ok() {
-    let dir = std::env::temp_dir().join("cellgov_firmware_test_empty_31b2");
+    let dir = std::env::temp_dir().join("cellgov_install_test_empty_31b2");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     assert!(check_output_dir(&dir, false).is_ok());
@@ -79,7 +79,7 @@ fn check_output_dir_empty_is_ok() {
 
 #[test]
 fn check_output_dir_nonempty_without_force_errors() {
-    let dir = std::env::temp_dir().join("cellgov_firmware_test_nonempty_31b2");
+    let dir = std::env::temp_dir().join("cellgov_install_test_nonempty_31b2");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("preexisting.txt"), b"x").unwrap();
@@ -89,7 +89,7 @@ fn check_output_dir_nonempty_without_force_errors() {
 
 #[test]
 fn check_output_dir_nonempty_with_force_is_ok() {
-    let dir = std::env::temp_dir().join("cellgov_firmware_test_force_31b2");
+    let dir = std::env::temp_dir().join("cellgov_install_test_force_31b2");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("preexisting.txt"), b"x").unwrap();

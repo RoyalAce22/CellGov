@@ -2,9 +2,9 @@
 //! executables.
 //!
 //! Behaviour (the decrypter pipeline, the PUP unpacker) lives in
-//! `cellgov_firmware::{sce,pup,crypto}`; this module is data only.
+//! `cellgov_install::{sce,pup,crypto}`; this module is data only.
 //! Per-revision SELF APP keys and the `app_key_for_revision` lookup
-//! live in `cellgov_firmware::crypto` alongside the const-fn
+//! live in `cellgov_install::crypto` alongside the const-fn
 //! constructors that build the APP_KEYS table.
 
 /// SCE container magic bytes (`"SCE\0"`) at offset 0 of every

@@ -160,7 +160,7 @@ fn regenerate_firmware_reloc_census() {
     };
     assert!(
         dir.is_dir(),
-        "firmware dir {} not found; run `cellgov_firmware install` first or set CELLGOV_FIRMWARE_DIR",
+        "firmware dir {} not found; run `cellgov_install install` first or set CELLGOV_FIRMWARE_DIR",
         dir.display()
     );
 
@@ -200,7 +200,7 @@ fn regenerate_firmware_reloc_census() {
                 continue;
             }
         };
-        let elf = match cellgov_firmware::sce::decrypt_self_to_elf(&raw) {
+        let elf = match cellgov_install::sce::decrypt_self_to_elf(&raw) {
             Ok(e) => e,
             Err(e) => {
                 skipped.push((name, format!("decrypt: {e}")));
