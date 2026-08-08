@@ -34,7 +34,7 @@ fn li_matches_addi_ra0() {
 #[test]
 fn mr_matches_or_same_reg() {
     let mut s1 = PpuState::new();
-    s1.gpr[4] = 0xDEAD_BEEF;
+    s1.set_gpr(4, 0xDEAD_BEEF);
     exec_no_mem(
         &PpuInstruction::Or {
             ra: 3,
@@ -46,7 +46,7 @@ fn mr_matches_or_same_reg() {
     );
 
     let mut s2 = PpuState::new();
-    s2.gpr[4] = 0xDEAD_BEEF;
+    s2.set_gpr(4, 0xDEAD_BEEF);
     exec_no_mem(&PpuInstruction::Mr { ra: 3, rs: 4 }, &mut s2);
 
     assert_eq!(s1.gpr[3], s2.gpr[3]);
@@ -56,7 +56,7 @@ fn mr_matches_or_same_reg() {
 #[test]
 fn nop_matches_ori_same_reg_zero() {
     let mut s1 = PpuState::new();
-    s1.gpr[5] = 0xDEAD;
+    s1.set_gpr(5, 0xDEAD);
     exec_no_mem(
         &PpuInstruction::Ori {
             ra: 5,
@@ -67,7 +67,7 @@ fn nop_matches_ori_same_reg_zero() {
     );
 
     let mut s2 = PpuState::new();
-    s2.gpr[5] = 0xDEAD;
+    s2.set_gpr(5, 0xDEAD);
     exec_no_mem(&PpuInstruction::Nop, &mut s2);
 
     assert_eq!(s1.gpr[5], s2.gpr[5]);
@@ -76,7 +76,7 @@ fn nop_matches_ori_same_reg_zero() {
 #[test]
 fn cmpw_zero_matches_cmpwi_zero() {
     let mut s1 = PpuState::new();
-    s1.gpr[3] = 42;
+    s1.set_gpr(3, 42);
     exec_no_mem(
         &PpuInstruction::Cmpwi {
             bf: 0,
@@ -87,17 +87,17 @@ fn cmpw_zero_matches_cmpwi_zero() {
     );
 
     let mut s2 = PpuState::new();
-    s2.gpr[3] = 42;
+    s2.set_gpr(3, 42);
     exec_no_mem(&PpuInstruction::CmpwZero { bf: 0, ra: 3 }, &mut s2);
 
-    assert_eq!(s1.cr, s2.cr);
+    assert_eq!(s1.cr(), s2.cr());
     assert_eq!(s2.cr_field(0), 0b0100); // GT
 }
 
 #[test]
 fn cmpw_zero_cr_field_2() {
     let mut s1 = PpuState::new();
-    s1.gpr[7] = 0;
+    s1.set_gpr(7, 0);
     exec_no_mem(
         &PpuInstruction::Cmpwi {
             bf: 2,
@@ -108,16 +108,16 @@ fn cmpw_zero_cr_field_2() {
     );
 
     let mut s2 = PpuState::new();
-    s2.gpr[7] = 0;
+    s2.set_gpr(7, 0);
     exec_no_mem(&PpuInstruction::CmpwZero { bf: 2, ra: 7 }, &mut s2);
 
-    assert_eq!(s1.cr, s2.cr);
+    assert_eq!(s1.cr(), s2.cr());
 }
 
 #[test]
 fn clrldi_matches_rldicl_sh0() {
     let mut s1 = PpuState::new();
-    s1.gpr[4] = 0xFFFF_FFFF_FFFF_FFFF;
+    s1.set_gpr(4, 0xFFFF_FFFF_FFFF_FFFF);
     exec_no_mem(
         &PpuInstruction::Rldicl {
             ra: 3,
@@ -130,7 +130,7 @@ fn clrldi_matches_rldicl_sh0() {
     );
 
     let mut s2 = PpuState::new();
-    s2.gpr[4] = 0xFFFF_FFFF_FFFF_FFFF;
+    s2.set_gpr(4, 0xFFFF_FFFF_FFFF_FFFF);
     exec_no_mem(
         &PpuInstruction::Clrldi {
             ra: 3,
@@ -147,7 +147,7 @@ fn clrldi_matches_rldicl_sh0() {
 #[test]
 fn sldi_matches_rldicr() {
     let mut s1 = PpuState::new();
-    s1.gpr[4] = 0x0000_0000_0000_00FF;
+    s1.set_gpr(4, 0x0000_0000_0000_00FF);
     exec_no_mem(
         &PpuInstruction::Rldicr {
             ra: 3,
@@ -160,7 +160,7 @@ fn sldi_matches_rldicr() {
     );
 
     let mut s2 = PpuState::new();
-    s2.gpr[4] = 0x0000_0000_0000_00FF;
+    s2.set_gpr(4, 0x0000_0000_0000_00FF);
     exec_no_mem(&PpuInstruction::Sldi { ra: 3, rs: 4, n: 8 }, &mut s2);
 
     assert_eq!(s1.gpr[3], s2.gpr[3]);
@@ -170,7 +170,7 @@ fn sldi_matches_rldicr() {
 #[test]
 fn srdi_matches_rldicl() {
     let mut s1 = PpuState::new();
-    s1.gpr[4] = 0xFF00_0000_0000_0000;
+    s1.set_gpr(4, 0xFF00_0000_0000_0000);
     exec_no_mem(
         &PpuInstruction::Rldicl {
             ra: 3,
@@ -183,7 +183,7 @@ fn srdi_matches_rldicl() {
     );
 
     let mut s2 = PpuState::new();
-    s2.gpr[4] = 0xFF00_0000_0000_0000;
+    s2.set_gpr(4, 0xFF00_0000_0000_0000);
     exec_no_mem(&PpuInstruction::Srdi { ra: 3, rs: 4, n: 8 }, &mut s2);
 
     assert_eq!(s1.gpr[3], s2.gpr[3]);
@@ -195,7 +195,7 @@ fn lwz_cmpwi_matches_separate_execution() {
     let mut mem = vec![0u8; 0x2000];
     mem[0x1008..0x100C].copy_from_slice(&42u32.to_be_bytes());
     let mut s1 = PpuState::new();
-    s1.gpr[1] = 0x1000;
+    s1.set_gpr(1, 0x1000);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lwz {
@@ -218,7 +218,7 @@ fn lwz_cmpwi_matches_separate_execution() {
     );
 
     let mut s2 = PpuState::new();
-    s2.gpr[1] = 0x1000;
+    s2.set_gpr(1, 0x1000);
     let mut effects2 = Vec::new();
     exec_with_mem(
         &PpuInstruction::LwzCmpwi {
@@ -235,7 +235,7 @@ fn lwz_cmpwi_matches_separate_execution() {
     );
 
     assert_eq!(s1.gpr[3], s2.gpr[3]);
-    assert_eq!(s1.cr, s2.cr);
+    assert_eq!(s1.cr(), s2.cr());
     assert_eq!(s2.gpr[3], 42);
     assert_eq!(s2.cr_field(0), 0b0010);
 }
@@ -243,7 +243,7 @@ fn lwz_cmpwi_matches_separate_execution() {
 #[test]
 fn li_stw_matches_separate_execution() {
     let mut s1 = PpuState::new();
-    s1.gpr[1] = 0x1000;
+    s1.set_gpr(1, 0x1000);
     let mut effects1 = Vec::new();
     exec_with_mem(
         &PpuInstruction::Li { rt: 5, imm: 99 },
@@ -265,7 +265,7 @@ fn li_stw_matches_separate_execution() {
     );
 
     let mut s2 = PpuState::new();
-    s2.gpr[1] = 0x1000;
+    s2.set_gpr(1, 0x1000);
     let mut effects2 = Vec::new();
     exec_with_mem(
         &PpuInstruction::LiStw {
@@ -289,8 +289,8 @@ fn li_stw_matches_separate_execution() {
 #[test]
 fn mflr_stw_matches_separate_execution() {
     let mut s1 = PpuState::new();
-    s1.lr = 0x0040_0100;
-    s1.gpr[1] = 0x1000;
+    s1.set_lr(0x0040_0100);
+    s1.set_gpr(1, 0x1000);
     let mut effects1 = Vec::new();
     exec_with_mem(
         &PpuInstruction::Mflr { rt: 0 },
@@ -312,8 +312,8 @@ fn mflr_stw_matches_separate_execution() {
     );
 
     let mut s2 = PpuState::new();
-    s2.lr = 0x0040_0100;
-    s2.gpr[1] = 0x1000;
+    s2.set_lr(0x0040_0100);
+    s2.set_gpr(1, 0x1000);
     let mut effects2 = Vec::new();
     exec_with_mem(
         &PpuInstruction::MflrStw {
@@ -338,7 +338,7 @@ fn lwz_mtlr_matches_separate_execution() {
     let mut mem = vec![0u8; 0x2000];
     mem[0x1010..0x1014].copy_from_slice(&0x0040_0100u32.to_be_bytes());
     let mut s1 = PpuState::new();
-    s1.gpr[1] = 0x1000;
+    s1.set_gpr(1, 0x1000);
     let mut effects1 = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lwz {
@@ -354,7 +354,7 @@ fn lwz_mtlr_matches_separate_execution() {
     exec_no_mem(&PpuInstruction::Mtlr { rs: 0 }, &mut s1);
 
     let mut s2 = PpuState::new();
-    s2.gpr[1] = 0x1000;
+    s2.set_gpr(1, 0x1000);
     let mut effects2 = Vec::new();
     exec_with_mem(
         &PpuInstruction::LwzMtlr {
@@ -369,16 +369,16 @@ fn lwz_mtlr_matches_separate_execution() {
     );
 
     assert_eq!(s1.gpr[0], s2.gpr[0]);
-    assert_eq!(s1.lr, s2.lr);
+    assert_eq!(s1.lr(), s2.lr());
     assert_eq!(s2.gpr[0], 0x0040_0100);
-    assert_eq!(s2.lr, 0x0040_0100);
+    assert_eq!(s2.lr(), 0x0040_0100);
 }
 
 #[test]
 fn cmpwi_bc_taken_matches_separate() {
     let mut s1 = PpuState::new();
     s1.pc = 0x1000;
-    s1.gpr[3] = 10;
+    s1.set_gpr(3, 10);
     exec_no_mem(
         &PpuInstruction::Cmpwi {
             bf: 0,
@@ -402,7 +402,7 @@ fn cmpwi_bc_taken_matches_separate() {
     // Bc offset is relative to super_pc + 4, not super_pc.
     let mut s2 = PpuState::new();
     s2.pc = 0x1000;
-    s2.gpr[3] = 10;
+    s2.set_gpr(3, 10);
     let v2 = exec_no_mem(
         &PpuInstruction::CmpwiBc {
             bf: 0,
@@ -415,7 +415,7 @@ fn cmpwi_bc_taken_matches_separate() {
         &mut s2,
     );
 
-    assert_eq!(s1.cr, s2.cr);
+    assert_eq!(s1.cr(), s2.cr());
     assert_eq!(v1, ExecuteVerdict::Branch);
     assert_eq!(v2, ExecuteVerdict::Branch);
     assert_eq!(s1.pc, s2.pc);
@@ -426,8 +426,8 @@ fn cmpwi_bc_taken_matches_separate() {
 fn cmpw_bc_taken_matches_separate() {
     let mut s1 = PpuState::new();
     s1.pc = 0x1000;
-    s1.gpr[3] = 42;
-    s1.gpr[4] = 42;
+    s1.set_gpr(3, 42);
+    s1.set_gpr(4, 42);
     exec_no_mem(
         &PpuInstruction::Cmpw {
             bf: 0,
@@ -450,8 +450,8 @@ fn cmpw_bc_taken_matches_separate() {
 
     let mut s2 = PpuState::new();
     s2.pc = 0x1000;
-    s2.gpr[3] = 42;
-    s2.gpr[4] = 42;
+    s2.set_gpr(3, 42);
+    s2.set_gpr(4, 42);
     let v2 = exec_no_mem(
         &PpuInstruction::CmpwBc {
             bf: 0,
@@ -464,7 +464,7 @@ fn cmpw_bc_taken_matches_separate() {
         &mut s2,
     );
 
-    assert_eq!(s1.cr, s2.cr);
+    assert_eq!(s1.cr(), s2.cr());
     assert_eq!(v1, ExecuteVerdict::Branch);
     assert_eq!(v2, ExecuteVerdict::Branch);
     assert_eq!(s1.pc, s2.pc);
@@ -477,7 +477,7 @@ fn ld_stitches_eight_byte_stbs_in_store_buffer() {
     // forwarding misses the load and falls through to pre-block memory.
     use crate::store_buffer::StoreBuffer;
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
+    s.set_gpr(1, 0x1000);
     let mem = vec![0u8; 0x100];
     let views: [(u64, &[u8]); 1] = [(0x1000, &mem)];
     let mut effects = Vec::new();
@@ -485,7 +485,7 @@ fn ld_stitches_eight_byte_stbs_in_store_buffer() {
 
     let bytes = *b"10000000";
     for (i, b) in bytes.iter().enumerate() {
-        s.gpr[3] = *b as u64;
+        s.set_gpr(3, *b as u64);
         let v = execute(
             &PpuInstruction::Stb {
                 rs: 3,
@@ -524,14 +524,14 @@ fn ld_overlays_partial_store_onto_pre_block_memory() {
     // memory, not pick one source.
     use crate::store_buffer::StoreBuffer;
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
+    s.set_gpr(1, 0x1000);
     let mut mem = vec![0u8; 0x100];
     mem[0..8].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44]);
     let views: [(u64, &[u8]); 1] = [(0x1000, &mem)];
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
 
-    s.gpr[3] = 0xDEAD_BEEF;
+    s.set_gpr(3, 0xDEAD_BEEF);
     let v = execute(
         &PpuInstruction::Stw {
             rs: 3,

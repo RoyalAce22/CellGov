@@ -297,10 +297,18 @@ step 4 entry, or a validation rejection mid-step 4) discards the
 entire batch -- the unit faults, the rest of the system sees
 nothing the unit tried to do. This is what makes the determinism
 guarantees mechanical rather than aspirational. When a fault
-occurs mid-batch (after some instructions have retired), the PPU
-restores a state snapshot taken at step entry and re-executes at
-Budget=1 so that pre-fault instructions commit individually and
-the faulting instruction is isolated.
+occurs mid-batch (after some instructions have retired) -- through
+any of the four fault exits: execute-verdict fault, memory fault,
+decode failure, or PC past the mapped image -- the PPU restores
+the full architectural-state snapshot taken at step entry after
+the runtime's committed inputs (syscall return, register writes)
+were applied -- reservation included -- clears the store buffer
+and the staged effects, rewinds the per-step trace so discarded
+retirements never reach the hash or zoom streams, and reports the
+fault with zero consumed cost. Pre-fault instructions are
+discarded outright, never re-executed; the fault diagnostic still
+names the faulting PC and captures fault-site registers before
+the rollback.
 
 A `DmaEnqueue` whose destination fails `validate_write` at
 step 4 (reserved or out-of-range) additionally marks the
@@ -357,7 +365,12 @@ Three optimization passes run at shadow build time:
 3. **Block-length annotation.** A backward scan fills
    `block_len[i]` with the number of instructions to the end of
    the basic block. Branches and syscalls terminate blocks. The
-   runtime uses this to size the inner loop's iteration count.
+   annotation is built and maintained but nothing reads it yet:
+   the fetch loop resolves one instruction per iteration from the
+   current PC. Batching the loop on block length would first
+   require widening invalidation back to the enclosing block head,
+   since a backward-scanned count is poisoned from the block head
+   through any slot that gains a terminator.
 
 Guest-visible code writes (self-modifying code, CRT0 relocations,
 GOT slot patching during PRX import binding) mark the affected
@@ -396,19 +409,41 @@ the per-call `ExecutionContext::trace_per_step` flag.
 `RuntimeMode::FullTrace` and `RuntimeMode::DeterminismCheck` set
 the flag; `FaultDriven` does not. When set, the unit emits one
 `PpuStateHash` (25 bytes: step + pc + 64-bit FNV-1a fingerprint of
-GPR + LR + CTR + XER + CR) per retired instruction. The runtime
+GPR + LR + CTR + XER + CR + reservation) per retired instruction.
+The fingerprint input set is one field list --
+`cellgov_exec::PpuFingerprint` -- consumed by the hash, the
+`PpuStateFull` snapshot, and the zoom diff walker alike, so a hash
+divergence always names a field in the zoom diff. The runtime
 drains them via `ExecutionUnit::drain_retired_state_hashes` after
 each `run_until_yield` and writes them to the main trace stream
 with monotonic per-instruction step indices that are independent
 of `steps_taken`. Per-instruction PC attribution is preserved at
 any `Budget` size: a single yield retiring N instructions emits N
 records, one per PC. `set_full_state_window(Some((lo, hi)))` enables a
-bounded-window second stream of `PpuStateFull` records (301 bytes
-each, full register snapshot) routed to a separate `zoom_trace`
-sink so the main per-step stream stays homogeneous. Cost: 876 ns per
+bounded-window second stream of `PpuStateFull` records (310 bytes
+each, the same fingerprint input set uncompressed) routed to a
+separate `zoom_trace` sink so the main per-step stream stays
+homogeneous. Cost: 876 ns per
 100 instructions when off, 27 us per 100 instructions when on
 (measured on a Windows dev box; the off branch is one predicted-away
 test in the hot loop).
+
+Both per-step instruments cover the fingerprint input set only
+(GPR, LR, CTR, XER, CR, reservation): FPR (256 bytes), VMX
+(512 bytes), and FPSCR (not yet modeled at all) are outside it, as
+are the scalar TB and VRSAVE SPRs, whose divergences surface only
+once an `mftb` / `mfvrsave` lands the value in a GPR.
+`PpuStateFull`'s name predates the distinction. The
+consequence is a scoping qualifier on every per-step localization
+result: the step `diverge` reports is the first **scalar-visible**
+divergence, not necessarily the first divergence. Byte-identical
+reruns are unaffected, and memory comparison still catches vector
+nondeterminism once it propagates to a store, but for vector-heavy
+code the localized step can sit arbitrarily far downstream of the
+true one. Widening the covered set is tracked as a unit with the
+`RegDiff` field-list derivation and the fingerprint-in-snapshot
+question, since the digest has to become incrementally maintained
+state to stay affordable.
 
 ## Execution units
 
@@ -478,7 +513,7 @@ Classified into typed `Lv2Request` variants:
 
 | Syscall                                            | Number                  | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sys_process_is_spu_lock_line_reservation_address` | 14                      | Returns 0 (SUCCESS) for any address; the deterministic-oracle does not partition guest memory into SPU-reservable vs. not. Behavioural oracle: RPCS3's `sys_process.cpp`.                                                                                                                                                                                                                                                                                                       |
+| `sys_process_is_spu_lock_line_reservation_address` | 14                      | CELL_EINVAL for zero or unknown flag bits, then verdict by the address's top nibble mirroring RPCS3's `sys_process.cpp`: main/user/RSX/RawSPU-MMIO nibbles succeed, PPU stack (0xD) is CELL_EPERM, private SPU MMIO (0xF) is CELL_EPERM only under the RAW_SPU flag, and unmodeled nibbles are CELL_EINVAL (RPCS3 consults sys_vm/mmapper state there; CellGov does not track it).                                                                                                 |
 | `sys_process_exit`                                 | 22                      | Cascades Finished to all units in the process.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `sys_ppu_thread_exit`                              | 41                      | Finishes the calling unit; wakes joiners with the exit value.                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `sys_ppu_thread_yield`                             | 43                      | No-op scheduling hint; round-robin picks the next runnable unit.                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -568,7 +603,7 @@ return `CELL_ENOSYS` with a traced diagnostic.
 
 | Syscall / Request                                        | Number | Behavior                                                                                                                                                                                                                                                                                                 |
 | -------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sys_ppu_thread_get_priority`                            | 48     | Writes target priority (s32) to `*priop`; unknown thread id falls back to 1001 (boot-seed primary priority). CELL_EFAULT on null `priop`.                                                                                                                                                                |
+| `sys_ppu_thread_get_priority`                            | 48     | Writes target priority (s32) to `*priop`; CELL_ESRCH for ids absent from the thread table (checked before the null gate, matching RPCS3's lookup-then-write order). CELL_EFAULT on null `priop`.                                                                                                          |
 | `sys_tty_read`                                           | 402    | CELL_EIO (debug console off in retail).                                                                                                                                                                                                                                                                  |
 | DEX-only unused slot                                     | 462    | CELL_ENOSYS so retail liblv2 takes its fallback path.                                                                                                                                                                                                                                                    |
 | `sys_memory_container_create`                            | 324    | Mints kernel id, writes to `*cid_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                                                                                                      |
@@ -576,8 +611,9 @@ return `CELL_ENOSYS` with a traced diagnostic.
 | `sys_mmapper_allocate_shared_memory`                     | 332    | Mints a monotonic mem_id, writes to `*mem_id_ptr`. A non-zero `ipc_key` routes through the process-shared IPC registry: a registered key returns the existing mem_id (size / flags ignored), an unregistered key mints and registers. CELL_EFAULT on null `mem_id_ptr`; CELL_ENOMEM when size exceeds u32; CELL_EALIGN when size is not a multiple of the flag-selected granule. |
 | `sys_mmapper_search_and_map`                             | 337    | Searches the install ledger for the first free aligned range of the handle's size at or after `start_addr`, records the install, and writes the actual mapped address back to `*alloc_addr_ptr` (not the caller's hint). CELL_EFAULT on null `alloc_addr_ptr`; CELL_EINVAL when `start_addr` is outside the mmapper window; CELL_ESRCH when `mem_id` is not in the handle table (332 / 362 must precede 337); CELL_ENOMEM when the search exhausts the window.                                                   |
 | `sys_mmapper_allocate_shared_memory_from_container`      | 362    | Same shape as 332 with `*mem_id_ptr` at r7.                                                                                                                                                                                                                                                              |
-| `_sys_prx_load_module`                                   | 480    | Resolves path at r3 against the PRX registry; returns the registered kernel id on match, otherwise echoes the path pointer as a synthetic non-zero id.                                                                                                                                                   |
-| `_sys_prx_start_module`                                  | 481    | CELL_EINVAL when `id == 0` or `pOpt == 0`. Otherwise writes `~0` (no-start sentinel) to `pOpt->entry` and returns CELL_OK.                                                                                                                                                                               |
+| `_sys_prx_load_module`                                   | 480    | Resolves path at r3 against the PRX registry; returns the registered kernel id on match. A firmware-path miss whose stem names a module retail firmware ships registers a stub entry under a real kernel id (RPCS3 forces the same `hle_load` fallback for its whitelisted names), stable across re-loads; a name outside the retail module set, or any other miss, is CELL_ENOENT; unreadable path pointer is CELL_EFAULT. |
+| `_sys_prx_start_module`                                  | 481    | Two-phase handshake on `pOpt->cmd & 0xF`. cmd=1 writes `~0` (no-start sentinel) to `pOpt->entry` (and `entry2` when `size != 0x20`) and returns CELL_OK; cmd=2 with `res == 0` marks the module started and returns CELL_OK, any other `res` returns `res & 0xFFFF_FFFF`; an unknown nibble is CELL_PRX_ERROR_ERROR. CELL_EINVAL when `id == 0` or `pOpt == 0`; CELL_ESRCH for an unknown id; CELL_EFAULT on unreadable or wrapping `pOpt`. |
+| `_sys_prx_unload_module`                                 | 483    | Withdraws a never-started module (an sc 480 miss stub the guest abandoned) with CELL_OK, freeing its id; a started resident module is CELL_PRX_ERROR_NOT_REMOVABLE; unknown id is CELL_PRX_ERROR_UNKNOWN_MODULE. Mirrors LV2's INITIALIZED/STOPPED-only withdraw.                                          |
 | `_sys_prx_register_module`                               | 484    | CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`) for non-VSH callers.                                                                                                                                                                                                                                    |
 | `_sys_prx_get_module_list`                               | 494    | `flags & 0x2 == 0` -> CELL_OK no-op. With bit 2 set: CELL_EFAULT on null `pInfo`, otherwise walks the PRX registry (filtering liblv2.sprx) writing kernel ids to the `idlist` slot and the count to `pInfo->count`. Iteration is BTreeMap-keyed so the byte output is independent of registration order. |
 | `_sys_prx_load_module_on_memcontainer`                   | 497    | Same resolver as 480.                                                                                                                                                                                                                                                                                    |
@@ -585,7 +621,7 @@ return `CELL_ENOSYS` with a traced diagnostic.
 | `TimeGetTimezone`                                        | --     | Writes 0 to `*timezone_ptr` and `*summer_time_ptr` (UTC). CELL_EFAULT on any null pointer.                                                                                                                                                                                                               |
 | `TimeGetCurrentTime`                                     | --     | Writes `(sec, nsec)` derived from the dispatch-entry tick snapshot. CELL_EFAULT on any null pointer.                                                                                                                                                                                                     |
 | `TimeGetTimebaseFrequency`                               | --     | Returns `CELL_PPU_TIMEBASE_HZ` as the syscall code (no effects).                                                                                                                                                                                                                                         |
-| `MemoryGetUserMemorySize`                                | --     | Writes `(total, available)` = `(0x0D50_0000, 0x0D50_0000)` (PS3 game-mode user-memory cap). CELL_EFAULT on null pointer.                                                                                                                                                                                 |
+| `MemoryGetUserMemorySize`                                | --     | Writes `(total, available)`: total is the game-mode cap `0x0D50_0000`, which is also the allocator's budget, so an allocation that succeeded can never coexist with `available == 0`'s contradiction. Known divergence: real LV2 also charges the loaded image and thread stacks, so its first-read `available` is already below total. CELL_EFAULT on null pointer. |
 | `MemoryContainerCreate`                                  | --     | Mints kernel id, writes to `*cid_ptr` (same payload shape as syscall 324).                                                                                                                                                                                                                               |
 | `Hypercall`                                              | --     | CELL_EINVAL + invariant-break log (PS3 usermode must not issue `sc` with `LEV != 0`).                                                                                                                                                                                                                    |
 | `Malformed`                                              | --     | CELL_EINVAL + invariant-break log.                                                                                                                                                                                                                                                                       |
@@ -612,11 +648,19 @@ syscall contaminate downstream guest state with a result the
 guest consumes as truth, and the null backend exists to make
 that failure mode impossible.
 
-The criterion the null backend enforces: every guest
-syscall produces either a real CellGov-computed result (the
-typed-variant arm ran) or an honest traced "not implemented"
-response (the null-backend arm ran). No fabricated success
-ever reaches the guest. The traced records feed cross-runner
+The criterion the null backend enforces is a **routing-layer**
+claim: every guest syscall reaches either a dedicated arm or
+the honest traced "not implemented" response -- never a
+default arm's blanket success. How much real LV2 behavior
+each *dedicated* arm reproduces is a separate, per-arm
+property: some arms are fully modeled, some simplify
+kernel-visible state, and some return plausible values with
+no backing state at all. That per-arm map is code
+(`cellgov_lv2::request::fidelity`: the typed half is an
+exhaustive match a new arm cannot skip; the routed-`Unsupported`
+half is a const table whose membership a dispatch probe gates)
+rendered to [lv2_fidelity.md](lv2_fidelity.md) under a
+drift-checked test. The traced records feed cross-runner
 analysis: an unmodeled-syscall diagnostic on a title's boot
 path identifies a specific implementation target, classified
 as **divergent honest gap** (RPCS3 delivers a real result
@@ -1114,7 +1158,8 @@ reports:
 
 - `cellgov_compare::diverge(a, b)` walks two trace byte buffers,
   filters each to `PpuStateHash` records, and reports the first
-  index where they disagree. Three outcomes: `Identical { count }`,
+  index where they disagree -- first *scalar-visible* disagreement,
+  per the coverage caveat above. Three outcomes: `Identical { count }`,
   `LengthDiffers { common_count, a_count, b_count }`, or
   `Differs { step, a_pc, b_pc, a_hash, b_hash, field }` with `field`
   in `{Pc, Hash}`. The check order is step count -> PC -> hash so
@@ -1127,11 +1172,12 @@ reports:
   inside the unit's window) and returns either
   `Found { step, a_pc, b_pc, diffs }` with per-field
   `RegDiff { field, a, b }` entries or
-  `MissingStep { step, a_missing, b_missing }`. An empty `diffs`
-  is the false-collision case
-  (`PpuStateHash` reported a divergence but `PpuStateFull` shows
-  byte-equal state) and tells the outer scanner it can resume from
-  the next step. Surfaced via `cellgov_cli zoom <a> <b> <step>`.
+  `MissingStep { step, a_missing, b_missing }`. The snapshot
+  carries the full fingerprint input set, so an empty `diffs`
+  means the states agree on everything the hash folds; if
+  `PpuStateHash` diverged at that same step, the harness is
+  skewing snapshots against hashes and the scan must not be
+  resumed past it. Surfaced via `cellgov_cli zoom <a> <b> <step>`.
 
 `run-game --save-state-trace <path>` writes the runtime's per-step
 `PpuStateHash` trace to disk (switching the runtime mode from
@@ -1209,6 +1255,31 @@ NPUA80068`), or explicit manifest path (`--title-manifest
 Per-title status (boot checkpoint reached, cross-runner observation
 match) is tracked in [titles.md](titles.md).
 
+### Title anchors and witnesses
+
+Each title's expected boot behaviour is committed data, not test
+code: `tests/fixtures/<content-id>/cellgov/boot_summary.json`
+records the step count, outcome, and a witness set -- named
+counters the boot emits as `BENCH_*` stderr lines (atomic-op
+executions, invariant breaks, PRX load misses, ...). Every
+witness carries a class: `exact` (any movement is a finding),
+`at-least` (a floor; losing coverage is a regression), `absent`
+(the boot does not reach this path), or `informational`. The
+checker also verifies each recorded witness's emitting line
+actually appeared in the boot output, so deleting an emitter
+cannot leave an `absent`-class witness vacuously green, and the
+parser rejects unknown keys and duplicate lines rather than
+guessing. `record-anchors` is the only writer: it re-measures,
+rewrites the baseline (outcome included), and appends one line to
+the title's append-only `boot_history.jsonl` per real move, so
+blessing a change is a reviewable data diff. The title suites
+(`title_witnesses`, `authority_id`) sit behind the `title-corpus`
+cargo feature because they need the operator's owned dumps;
+within a run, boots split "not installed" from "boot failure" via
+explicit stderr markers (`BENCH_TITLE_NOT_INSTALLED`,
+`BENCH_BOOT_INPUTS_RESOLVED`), skip missing titles by name, and
+fail unless at least one title actually booted.
+
 Adding a new title is a single-file TOML commit under
 `docs/title_manifests/`; no Rust change is needed as long as the title
 fits the existing checkpoint kinds (`process-exit`,
@@ -1253,7 +1324,8 @@ The diagnostic surface is:
 The `run-game` CLI subcommand loads a PS3 ELF -- raw, or
 SCE-wrapped (`SCE\0` magic is dispatched to
 `cellgov_install::sce::decrypt_self_to_elf` at load time) -- and
-runs the PPU at instruction-level granularity (Budget=1). When
+runs the PPU at the mode's default step budget (256; `--budget`
+overrides). When
 `--firmware-dir` resolves to a directory holding the minimum
 viable PRX set (it auto-defaults to `firmware/sys/external/` if
 that exists), the boot path loads those modules via
@@ -1280,10 +1352,19 @@ Dependency edges across modules feed a Kahn topological sort in
 [`prx_loader::graph`](../crates/cellgov_ppu/src/prx_loader/graph.rs)
 (SCC-based cycle attribution names only the participants, not
 their innocent downstream consumers). `start_modules` then iterates
-the topo order and invokes each module's `module_start`. The
-firmware identity (PUP hash + per-file SHA-256s) folds into
-`Lv2Host::sync_state_hash`, so two runs over the same firmware
-install produce byte-identical state hashes.
+the topo order and invokes each module's `module_start`.
+
+Every loaded module is verified against the corpus's
+`firmware.toml` manifest (written by `cellgov_install install`,
+located at or up to two levels above the firmware dir): the
+post-decrypt SHA-256 must match the manifest entry, and a file
+missing from the manifest, a digest mismatch, or a firmware dir
+without a manifest is a fatal boot error -- a supplied-but-
+unusable corpus never degrades silently into a firmware-less
+run. The verified identity (PUP hash + image version) then binds
+into `Lv2Host::sync_state_hash`, so two runs over the same
+firmware install produce byte-identical state hashes and a
+different install visibly moves them.
 
 Common boot sequence (per-title numbers below):
 
@@ -1343,8 +1424,10 @@ token, flOw advances past the spin, past the seeded
 firmware-set boot to `sys_process_exit` at step 11,224. CellGov
 reports `ProcessExit` where RPCS3 continues executing, so the
 cross-runner verdict is `No (outcome: ProcessExit vs Completed)`.
-One unmodeled syscall (`sys_prx` 483, module unload) surfaces as
-a `dispatch.unsupported_stub` / `CELL_ENOSYS` break on the way.
+Along the way the title asks `_sys_prx_load_module` for one name
+outside the retail firmware module set and receives the honest
+`CELL_ENOENT` (witnessed as `prx_load_not_found`), and its
+`_sys_prx_unload_module` call lands in the routed 483 arm.
 The prior `0x7a08` REF spin and the older `11,271 / ProcessExit`
 CRT0 abort are preserved as code paths that no longer fire under
 the post-FIFO-consumer trajectory.
@@ -1353,7 +1436,7 @@ the post-FIFO-consumer trajectory.
 `FirstRsxWrite` checkpoint historically (the attract-mode loop
 never calls `sys_process_exit`). Past the seeded
 `cellSysutil_Library` `module_start`, SSHD now runs to the
-`MaxSteps` budget cap at step 390,433 without reaching its first
+`MaxSteps` budget cap at step 390,432 without reaching its first
 RSX put-pointer write, so the cross-runner verdict is
 `No (outcome: Timeout vs Completed)`. One unmodeled syscall (465)
 returns `CELL_ENOSYS` along the way. The prior `14,341,833 /
@@ -1364,7 +1447,7 @@ paths that no longer re-fire under the new trajectory.
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_install decrypt-self`. Past the
 seeded `cellSysutil_Library` `module_start`, WipEout reaches its
-`FirstRsxWrite` checkpoint at step 43,083 -- the one foundation
+`FirstRsxWrite` checkpoint at step 43,082 -- the one foundation
 title that converges with RPCS3 at its checkpoint (`Yes`), with
 cross-runner byte parity at `975 non-semantic + 1 pending`. The
 prior `43,066 / COMMIT_FAULT: OutOfRange` and the earlier

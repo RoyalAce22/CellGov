@@ -12,8 +12,7 @@ use cellgov_time::Budget;
 /// [`crate::YieldReason`]; internal arch state lives on the unit
 /// itself.
 ///
-/// Discriminants are part of the binary trace format: do not reorder
-/// or renumber.
+/// Discriminants are part of the binary trace format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 #[repr(u8)]
 pub enum UnitStatus {
@@ -35,6 +34,27 @@ pub enum UnitStatus {
     Finished = 3,
 }
 
+/// Canonical PPU fingerprint input set.
+///
+/// One field list shared by three consumers: `PpuState::state_hash`
+/// folds exactly these fields, `TraceRecord::PpuStateFull` carries
+/// them, and the zoom diff walker enumerates them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PpuFingerprint {
+    /// General-purpose registers r0..r31.
+    pub gpr: [u64; 32],
+    /// Link register.
+    pub lr: u64,
+    /// Count register.
+    pub ctr: u64,
+    /// Fixed-point exception register.
+    pub xer: u64,
+    /// Condition register.
+    pub cr: u32,
+    /// Active reservation's 128-byte line address, if held.
+    pub reservation_line: Option<u64>,
+}
+
 /// A resumable execution unit: something that can take a budget, run
 /// for some guest time, and return a step result.
 ///
@@ -47,9 +67,7 @@ pub enum UnitStatus {
 /// pure deterministic data: no raw pointers, no host handles, no
 /// allocator-dependent internals, no mutex guards, no references
 /// into runtime-owned memory. A snapshot must be reconstructible
-/// into an equivalent unit state on a different host. The rule is
-/// architectural; the associated type is unbounded so implementations
-/// have freedom of representation.
+/// into an equivalent unit state on a different host.
 pub trait ExecutionUnit {
     /// Pure deterministic state capture used for replay and assertions.
     type Snapshot;
@@ -90,10 +108,11 @@ pub trait ExecutionUnit {
 
     /// Drain full-register snapshots collected during the most recent
     /// `run_until_yield` inside the unit's configured zoom-in window.
-    /// Each entry is `(pc, gpr, lr, ctr, xer, cr)` in retirement
-    /// order. Step indices pair with
-    /// [`Self::drain_retired_state_hashes`].
-    fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
+    /// Each entry is `(step, pc, fingerprint)` in retirement order,
+    /// where `step` is the unit's retirement counter at capture -- the
+    /// same units the window bounds use -- so a window that opens
+    /// mid-run still stamps each snapshot with its true step.
+    fn drain_retired_state_full(&mut self) -> Vec<(u64, u64, PpuFingerprint)> {
         Vec::new()
     }
 

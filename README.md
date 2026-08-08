@@ -88,19 +88,24 @@ Pre-Alpha. What works today:
   implementation target (see "The null backend" above and
   [docs/titles.md](docs/titles.md)).
 - PPU and SPU interpreters: complete decode for the PPC64 and
-  SPU ABI surfaces titles in the current corpus exercise;
-  coverage grows per phase (see
+  SPU ABI surfaces titles in the current corpus exercise (see
   [docs/architecture.md](docs/architecture.md) for the current
   per-instruction surface).
-- LV2: a growing set of classified syscalls (numbers shift
-  every phase as PRX coverage grows; see
-  [docs/architecture.md](docs/architecture.md)). Userspace
+- LV2: a growing set of classified syscalls, each handled arm
+  carrying a reviewed fidelity tag in the drift-checked
+  [docs/lv2_fidelity.md](docs/lv2_fidelity.md). Userspace
   surfaces load as firmware SPRX modules from the user's PUP.
   Unmodeled syscalls return an ABI-honest "not implemented"
   response via the null backend. Unresolved imports surface
   as named diagnostics via a guest-resident trampoline.
 - Sync primitives (lwmutex, event flag, semaphore, mutex, cond), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`).
-- Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`.
+- Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`;
+  every module a boot loads is verified against the install's
+  manifest, so an altered or mismatched firmware corpus fails
+  loudly instead of skewing the oracle.
+- Per-title boot baselines are committed data (step counts,
+  outcomes, and named behaviour witnesses), re-measured and
+  blessed through a single recording command.
 - ps3autotests cross-runner harness present.
 - Workspace test suite green in debug and release; zero
   `unsafe` (`unsafe_code = forbid`); strict clippy gate.

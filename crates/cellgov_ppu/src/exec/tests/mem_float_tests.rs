@@ -5,8 +5,8 @@ use super::*;
 #[test]
 fn stfsu_updates_ra_and_emits_store_effect() {
     let mut s = PpuState::new();
-    s.gpr[8] = 0x2000;
-    s.fpr[13] = 0x4000_0000_0000_0000;
+    s.set_gpr(8, 0x2000);
+    s.set_fpr(13, 0x4000_0000_0000_0000);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Stfsu {
@@ -33,8 +33,8 @@ fn stfsu_updates_ra_and_emits_store_effect() {
 #[test]
 fn stfdu_updates_ra_and_emits_store_effect() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.fpr[1] = 0xDEAD_BEEF_CAFE_BABE;
+    s.set_gpr(1, 0x100);
+    s.set_fpr(1, 0xDEAD_BEEF_CAFE_BABE);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Stfdu {
@@ -64,9 +64,9 @@ fn stfiwx_stores_low_32_bits_of_fpr_as_integer_word() {
     // stfiwx writes the low 32 bits of the FPR bit pattern verbatim;
     // no single-precision round-convert (unlike stfs).
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1000;
-    s.gpr[5] = 0x20;
-    s.fpr[13] = 0x4040_4040_1234_5678;
+    s.set_gpr(4, 0x1000);
+    s.set_gpr(5, 0x20);
+    s.set_fpr(13, 0x4040_4040_1234_5678);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Stfiwx {
@@ -97,8 +97,8 @@ fn lfsx_loads_single_and_round_converts_to_double() {
     let mut mem = vec![0u8; 0x100];
     mem[0x40..0x44].copy_from_slice(&0x3FC0_0000u32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[4] = 0x40;
-    s.gpr[5] = 0;
+    s.set_gpr(4, 0x40);
+    s.set_gpr(5, 0);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Lfsx {
@@ -120,8 +120,8 @@ fn lfsux_writes_back_ea_to_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x44..0x48].copy_from_slice(&0x4040_0000u32.to_be_bytes()); // 3.0f
     let mut s = PpuState::new();
-    s.gpr[4] = 0x40;
-    s.gpr[5] = 4;
+    s.set_gpr(4, 0x40);
+    s.set_gpr(5, 4);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Lfsux {
@@ -146,8 +146,8 @@ fn lfdx_loads_64_bit_double() {
     let bits = 0x4080_1122_3344_5566u64;
     mem[0x10..0x18].copy_from_slice(&bits.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[2] = 0x10;
-    s.gpr[3] = 0;
+    s.set_gpr(2, 0x10);
+    s.set_gpr(3, 0);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Lfdx {
@@ -170,8 +170,8 @@ fn lfdux_writes_back_ea_to_ra() {
     let bits = 0x4090_AAAA_BBBB_CCCCu64;
     mem[0x20..0x28].copy_from_slice(&bits.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[2] = 0x10;
-    s.gpr[3] = 0x10;
+    s.set_gpr(2, 0x10);
+    s.set_gpr(3, 0x10);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Lfdux {
@@ -192,10 +192,10 @@ fn lfdux_writes_back_ea_to_ra() {
 #[test]
 fn stfsx_stores_round_converted_single() {
     let mut s = PpuState::new();
-    s.gpr[4] = 0x100;
-    s.gpr[5] = 0x4;
+    s.set_gpr(4, 0x100);
+    s.set_gpr(5, 0x4);
     // 1.5 as double; round-convert to single bit pattern is 0x3FC00000.
-    s.fpr[6] = 0x3FF8_0000_0000_0000;
+    s.set_fpr(6, 0x3FF8_0000_0000_0000);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Stfsx {
@@ -221,9 +221,9 @@ fn stfsx_stores_round_converted_single() {
 #[test]
 fn stfsux_writes_back_ea_only_on_success() {
     let mut s = PpuState::new();
-    s.gpr[4] = 0x40;
-    s.gpr[5] = 0x4;
-    s.fpr[3] = 0x4040_0000_0000_0000; // 32.0 as double
+    s.set_gpr(4, 0x40);
+    s.set_gpr(5, 0x4);
+    s.set_fpr(3, 0x4040_0000_0000_0000); // 32.0 as double
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Stfsux {
@@ -244,10 +244,10 @@ fn stfsux_writes_back_ea_only_on_success() {
 #[test]
 fn stfdx_stores_64_bit_double_verbatim() {
     let mut s = PpuState::new();
-    s.gpr[4] = 0x80;
-    s.gpr[5] = 0x10;
+    s.set_gpr(4, 0x80);
+    s.set_gpr(5, 0x10);
     let bits = 0xC020_FFFF_0000_1111u64;
-    s.fpr[2] = bits;
+    s.set_fpr(2, bits);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Stfdx {
@@ -278,8 +278,8 @@ fn lfsx_preserves_nan_payload_bit_for_bit() {
     let mut mem = vec![0u8; 0x100];
     mem[0x10..0x14].copy_from_slice(&0x7F80_1234u32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[3] = 0x10;
-    s.gpr[4] = 0;
+    s.set_gpr(3, 0x10);
+    s.set_gpr(4, 0);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Lfsx {
@@ -305,11 +305,11 @@ fn stfsx_preserves_nan_payload_bit_for_bit() {
     // by the spec's WORD2:31 <- FRS5:34 selection). Expect WORD
     // = sign=1, exp=0xFF, frac23 = top 23 bits of frac52.
     let mut s = PpuState::new();
-    s.gpr[4] = 0x80;
-    s.gpr[5] = 0;
+    s.set_gpr(4, 0x80);
+    s.set_gpr(5, 0);
     let frac52: u64 = 0x000A_BCDE_DEAD_BEEF;
     let nan_d = (1u64 << 63) | (0x7FFu64 << 52) | frac52;
-    s.fpr[6] = nan_d;
+    s.set_fpr(6, nan_d);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Stfsx {
@@ -346,9 +346,9 @@ fn stfsx_then_lfsx_round_trips_nan_payload() {
 
     // stfsx round.
     let mut s = PpuState::new();
-    s.gpr[4] = 0x80;
-    s.gpr[5] = 0;
-    s.fpr[7] = canonical_fpr;
+    s.set_gpr(4, 0x80);
+    s.set_gpr(5, 0);
+    s.set_fpr(7, canonical_fpr);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Stfsx {
@@ -374,8 +374,8 @@ fn stfsx_then_lfsx_round_trips_nan_payload() {
     let mut mem = vec![0u8; 0x100];
     mem[0x40..0x44].copy_from_slice(&single_nan.to_be_bytes());
     let mut s2 = PpuState::new();
-    s2.gpr[3] = 0x40;
-    s2.gpr[4] = 0;
+    s2.set_gpr(3, 0x40);
+    s2.set_gpr(4, 0);
     let mut effects2 = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Lfsx {
@@ -404,8 +404,8 @@ fn lfsux_load_fault_does_not_write_ra() {
     // discipline.
     let mem = vec![0u8; 0x100];
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1000_0000; // far outside the 0x100-byte region
-    s.gpr[5] = 0;
+    s.set_gpr(4, 0x1000_0000); // far outside the 0x100-byte region
+    s.set_gpr(5, 0);
     let original_ra = s.gpr[4];
     let mut effects = Vec::new();
     let out = exec_with_mem(
@@ -436,9 +436,9 @@ fn stfsux_buffer_full_does_not_write_ra() {
     }
     assert!(store_buf.is_full());
     let mut s = PpuState::new();
-    s.gpr[4] = 0x80;
-    s.gpr[5] = 0x10;
-    s.fpr[3] = 0x4040_0000_0000_0000;
+    s.set_gpr(4, 0x80);
+    s.set_gpr(5, 0x10);
+    s.set_fpr(3, 0x4040_0000_0000_0000);
     let original_ra = s.gpr[4];
     let mem = [0u8; 0x200];
     let views: [(u64, &[u8]); 1] = [(0, &mem)];
@@ -467,9 +467,9 @@ fn stfdux_buffer_full_does_not_write_ra() {
         assert!(store_buf.insert(0x2000 + i * 4, 4, i as u128));
     }
     let mut s = PpuState::new();
-    s.gpr[4] = 0x60;
-    s.gpr[5] = 0x8;
-    s.fpr[2] = 0xDEAD_BEEF_CAFE_BABE;
+    s.set_gpr(4, 0x60);
+    s.set_gpr(5, 0x8);
+    s.set_fpr(2, 0xDEAD_BEEF_CAFE_BABE);
     let original_ra = s.gpr[4];
     let mem = [0u8; 0x200];
     let views: [(u64, &[u8]); 1] = [(0, &mem)];
@@ -494,8 +494,8 @@ fn stfdux_buffer_full_does_not_write_ra() {
 fn lfdux_load_fault_does_not_write_ra() {
     let mem = vec![0u8; 0x100];
     let mut s = PpuState::new();
-    s.gpr[2] = 0x2000_0000;
-    s.gpr[3] = 0;
+    s.set_gpr(2, 0x2000_0000);
+    s.set_gpr(3, 0);
     let original_ra = s.gpr[2];
     let mut effects = Vec::new();
     let out = exec_with_mem(
@@ -516,9 +516,9 @@ fn lfdux_load_fault_does_not_write_ra() {
 #[test]
 fn stfdux_writes_back_ea_to_ra() {
     let mut s = PpuState::new();
-    s.gpr[4] = 0x60;
-    s.gpr[5] = 0x8;
-    s.fpr[2] = 0xDEAD_BEEF_CAFE_BABE;
+    s.set_gpr(4, 0x60);
+    s.set_gpr(5, 0x8);
+    s.set_fpr(2, 0xDEAD_BEEF_CAFE_BABE);
     let mut effects = Vec::new();
     let out = exec_with_mem(
         &PpuInstruction::Stfdux {
@@ -542,8 +542,8 @@ fn stfsu_buffer_full_does_not_update_ra() {
     // BufferFull the update of RA must be skipped, so the caller can
     // retry after flushing without double-advancing the base pointer.
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
-    s.fpr[5] = (1.5f32 as f64).to_bits();
+    s.set_gpr(1, 0x1000);
+    s.set_fpr(5, (1.5f32 as f64).to_bits());
     let mut store_buf = StoreBuffer::new();
     // Fill the buffer to capacity. CAPACITY is private; saturate by
     // inserting until insert reports `is_full`.
@@ -573,8 +573,8 @@ fn stfsu_buffer_full_does_not_update_ra() {
 #[test]
 fn stfdu_buffer_full_does_not_update_ra() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x2000;
-    s.fpr[6] = 0xDEAD_BEEF_CAFE_F00Du64;
+    s.set_gpr(1, 0x2000);
+    s.set_fpr(6, 0xDEAD_BEEF_CAFE_F00Du64);
     let mut store_buf = StoreBuffer::new();
     while !store_buf.is_full() {
         assert!(store_buf.insert(0, 1, 0));
@@ -609,7 +609,7 @@ fn lfs_loads_single_and_converts_to_double() {
     let mut mem = vec![0u8; 0x100];
     mem[0x10..0x14].copy_from_slice(&0x4000_0000u32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lfs {
@@ -630,7 +630,7 @@ fn lfsu_loads_and_writes_back_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x14..0x18].copy_from_slice(&0x4040_0000u32.to_be_bytes()); // 3.0f
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lfsu {
@@ -653,7 +653,7 @@ fn lfd_loads_8_byte_double_big_endian() {
     let bits = 0x4010_2030_4050_6070u64;
     mem[0x10..0x18].copy_from_slice(&bits.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lfd {
@@ -675,7 +675,7 @@ fn lfdu_loads_double_and_writes_back_ra() {
     let bits = 0xDEAD_BEEF_CAFE_BABEu64;
     mem[0x18..0x20].copy_from_slice(&bits.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lfdu {
@@ -696,8 +696,8 @@ fn lfdu_loads_double_and_writes_back_ra() {
 fn stfs_round_converts_double_to_single() {
     // 1.5 double = 0x3FF8_0000_0000_0000 -> 1.5f single = 0x3FC00000.
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.fpr[5] = 0x3FF8_0000_0000_0000;
+    s.set_gpr(1, 0x100);
+    s.set_fpr(5, 0x3FF8_0000_0000_0000);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stfs {
@@ -726,7 +726,7 @@ fn lfd_preserves_nan_payload_8_bytes_verbatim() {
     let snan = 0x7FF0_0000_0000_0001u64;
     mem[0x10..0x18].copy_from_slice(&snan.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lfd {

@@ -8,13 +8,13 @@ use core::any::Any;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, UnitStatus,
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, PpuFingerprint,
+    UnitStatus,
 };
 use cellgov_time::Budget;
 
 /// Object-safe view of an execution unit.
 ///
-/// Blanket-impl'd for every `U: ExecutionUnit + Clone + 'static`.
 /// Method contracts mirror [`ExecutionUnit`]; see that trait for
 /// the authoritative docs.
 pub trait RegisteredUnit: 'static {
@@ -43,7 +43,7 @@ pub trait RegisteredUnit: 'static {
 
     /// Drain full-register snapshots collected inside the zoom-in window.
     /// See [`ExecutionUnit::drain_retired_state_full`].
-    fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)>;
+    fn drain_retired_state_full(&mut self) -> Vec<(u64, u64, PpuFingerprint)>;
 
     /// Drain instruction-variant profiling data.
     /// See [`ExecutionUnit::drain_profile_insns`].
@@ -101,7 +101,7 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     }
 
     #[inline]
-    fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
+    fn drain_retired_state_full(&mut self) -> Vec<(u64, u64, PpuFingerprint)> {
         ExecutionUnit::drain_retired_state_full(self)
     }
 

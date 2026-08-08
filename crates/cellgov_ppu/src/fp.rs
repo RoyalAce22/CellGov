@@ -140,7 +140,7 @@ pub fn execute_fp63(
         | Fp63Op::Mffs
         | Fp63Op::Mtfsf => return ExecuteVerdict::Continue,
     };
-    state.fpr[frt as usize] = result_bits;
+    state.set_fpr(frt as usize, result_bits);
     ExecuteVerdict::Continue
 }
 
@@ -173,7 +173,7 @@ pub fn execute_fp59(
         Fp59Op::Fsubs => a - b,
         Fp59Op::Fsqrts | Fp59Op::Fres => return ExecuteVerdict::Continue,
     };
-    state.fpr[frt as usize] = (result as f64).to_bits();
+    state.set_fpr(frt as usize, (result as f64).to_bits());
     ExecuteVerdict::Continue
 }
 

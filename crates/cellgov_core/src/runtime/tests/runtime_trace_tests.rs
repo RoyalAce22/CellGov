@@ -578,7 +578,18 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
     rt.registry_mut().register_with(|id| StateHashEmittingUnit {
         id,
         pairs_per_step: vec![vec![(0x100, 0xaa), (0x104, 0xbb), (0x108, 0xcc)]],
-        full_per_step: vec![vec![(0x104, [0u64; 32], 0, 0, 0, 0)]],
+        full_per_step: vec![vec![(
+            1,
+            0x104,
+            cellgov_exec::PpuFingerprint {
+                gpr: [0u64; 32],
+                lr: 0,
+                ctr: 0,
+                xer: 0,
+                cr: 0,
+                reservation_line: None,
+            },
+        )]],
         step_idx: Cell::new(0),
     });
     rt.step().unwrap();
@@ -604,7 +615,14 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
         .collect();
     assert_eq!(zoom_records.len(), 1);
     match &zoom_records[0] {
-        TraceRecord::PpuStateFull { pc, .. } => assert_eq!(*pc, 0x104),
+        TraceRecord::PpuStateFull { step, pc, .. } => {
+            assert_eq!(*pc, 0x104);
+            assert_eq!(
+                *step, 1,
+                "snapshot must carry the unit's retirement counter, \
+                 aligning with the hash record for the same instruction"
+            );
+        }
         other => panic!("expected PpuStateFull, got {other:?}"),
     }
 }

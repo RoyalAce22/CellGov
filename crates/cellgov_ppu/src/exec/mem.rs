@@ -35,7 +35,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -45,7 +45,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 1) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -55,7 +55,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 2) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -65,7 +65,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_se(region_views, store_buf, ea, 2) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -77,8 +77,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_se(region_views, store_buf, ea, 2) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -101,7 +101,7 @@ pub(crate) fn execute(
             for r in (rt as usize)..32 {
                 match load_ze(region_views, store_buf, ea, 4) {
                     Ok(val) => {
-                        state.gpr[r] = val;
+                        state.set_gpr(r, val);
                         ea = ea.wrapping_add(4);
                     }
                     Err(ea) => return ExecuteVerdict::MemFault(ea),
@@ -114,8 +114,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -126,8 +126,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 1) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -138,8 +138,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 2) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -150,8 +150,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -161,7 +161,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -171,7 +171,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_se(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -182,7 +182,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -192,7 +192,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 1) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -202,7 +202,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -212,7 +212,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 2) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -224,8 +224,8 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -236,8 +236,8 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 1) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -248,8 +248,8 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 2) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -260,8 +260,8 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -272,7 +272,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_se(region_views, store_buf, ea, 2) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -283,8 +283,8 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_se(region_views, store_buf, ea, 2) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -295,7 +295,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_se(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -306,8 +306,8 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_se(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.gpr[ra as usize] = ea;
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -332,7 +332,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             let v = buffer_store(store_buf, state, ea, 1, state.gpr[rs as usize]);
             if v == ExecuteVerdict::Continue {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -366,7 +366,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             let v = buffer_store(store_buf, state, ea, 2, state.gpr[rs as usize]);
             if v == ExecuteVerdict::Continue {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -379,7 +379,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             let v = buffer_store(store_buf, state, ea, 4, state.gpr[rs as usize]);
             if v == ExecuteVerdict::Continue {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -388,7 +388,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             let v = buffer_store(store_buf, state, ea, 8, state.gpr[rs as usize]);
             if v == ExecuteVerdict::Continue {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -405,7 +405,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             let verdict = buffer_store(store_buf, state, ea, 8, state.gpr[rs as usize]);
             if verdict.allows_writeback() {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             verdict
         }
@@ -424,7 +424,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             let v = buffer_store(store_buf, state, ea, 2, state.gpr[rs as usize]);
             if v.allows_writeback() {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -434,7 +434,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             let v = buffer_store(store_buf, state, ea, 4, state.gpr[rs as usize]);
             if v.allows_writeback() {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -444,7 +444,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             let v = buffer_store(store_buf, state, ea, 1, state.gpr[rs as usize]);
             if v.allows_writeback() {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -484,7 +484,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val.swap_bytes();
+                    state.set_gpr(rt as usize, val.swap_bytes());
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -494,7 +494,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = (val as u32).swap_bytes() as u64;
+                    state.set_gpr(rt as usize, (val as u32).swap_bytes() as u64);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -504,7 +504,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 2) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = (val as u16).swap_bytes() as u64;
+                    state.set_gpr(rt as usize, (val as u16).swap_bytes() as u64);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -536,9 +536,9 @@ pub(crate) fn execute(
             }
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     let line = ReservedLine::containing(ea);
-                    state.reservation = Some(line);
+                    state.set_reservation(Some(line));
                     effects.push(Effect::ReservationAcquire {
                         line_addr: line.addr(),
                         source: unit_id,
@@ -558,7 +558,7 @@ pub(crate) fn execute(
             if ea & 7 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
             }
-            let success = match state.reservation {
+            let success = match state.reservation() {
                 Some(line) => line.addr() == ReservedLine::containing(ea).addr(),
                 None => false,
             };
@@ -597,7 +597,7 @@ pub(crate) fn execute(
             } else {
                 state.set_cr_field(0, so);
             }
-            state.reservation = None;
+            state.set_reservation(None);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Lwarx { rt, ra, rb } => {
@@ -608,9 +608,9 @@ pub(crate) fn execute(
             }
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     let line = ReservedLine::containing(ea);
-                    state.reservation = Some(line);
+                    state.set_reservation(Some(line));
                     effects.push(Effect::ReservationAcquire {
                         line_addr: line.addr(),
                         source: unit_id,
@@ -627,7 +627,7 @@ pub(crate) fn execute(
             if ea & 3 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
             }
-            let success = match state.reservation {
+            let success = match state.reservation() {
                 Some(line) => line.addr() == ReservedLine::containing(ea).addr(),
                 None => false,
             };
@@ -659,7 +659,7 @@ pub(crate) fn execute(
             } else {
                 state.set_cr_field(0, so);
             }
-            state.reservation = None;
+            state.set_reservation(None);
             ExecuteVerdict::Continue
         }
 
@@ -674,7 +674,7 @@ pub(crate) fn execute(
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
             let shift = ((addr & 15) * 8) as u32;
-            state.vr[vt as usize] = if shift == 0 { val } else { val << shift };
+            state.set_vr(vt as usize, if shift == 0 { val } else { val << shift });
             ExecuteVerdict::Continue
         }
         PpuInstruction::Lvrx { vt, ra, rb } => {
@@ -686,11 +686,14 @@ pub(crate) fn execute(
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
             let lo = addr & 15;
-            state.vr[vt as usize] = if lo == 0 {
-                0
-            } else {
-                val >> ((16 - lo) * 8) as u32
-            };
+            state.set_vr(
+                vt as usize,
+                if lo == 0 {
+                    0
+                } else {
+                    val >> ((16 - lo) * 8) as u32
+                },
+            );
             ExecuteVerdict::Continue
         }
         // [CBE-Handbook p:744 s:A.3.3] lvlxl / lvrxl: identical to lvlx / lvrx,
@@ -704,7 +707,7 @@ pub(crate) fn execute(
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
             let shift = ((addr & 15) * 8) as u32;
-            state.vr[vt as usize] = if shift == 0 { val } else { val << shift };
+            state.set_vr(vt as usize, if shift == 0 { val } else { val << shift });
             ExecuteVerdict::Continue
         }
         PpuInstruction::Lvrxl { vt, ra, rb } => {
@@ -716,11 +719,14 @@ pub(crate) fn execute(
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
             let lo = addr & 15;
-            state.vr[vt as usize] = if lo == 0 {
-                0
-            } else {
-                val >> ((16 - lo) * 8) as u32
-            };
+            state.set_vr(
+                vt as usize,
+                if lo == 0 {
+                    0
+                } else {
+                    val >> ((16 - lo) * 8) as u32
+                },
+            );
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-21 s:6.2] Load Vector Indexed (lvx, X-form): EA = ((RA|0)+(RB)) & ~0xF; MEM(EA,16) -> vT.
@@ -731,7 +737,7 @@ pub(crate) fn execute(
                 Ok(v) => v,
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
-            state.vr[vt as usize] = val;
+            state.set_vr(vt as usize, val);
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-23 s:6.2] lvxl: same semantics as lvx; the "Last" suffix is a cache LRU
@@ -743,7 +749,7 @@ pub(crate) fn execute(
                 Ok(v) => v,
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
-            state.vr[vt as usize] = val;
+            state.set_vr(vt as usize, val);
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-21 s:6.2] lvsl: VRT[i] = sh + i for i in 0..16, where sh = EA[60:63].
@@ -755,7 +761,7 @@ pub(crate) fn execute(
             for (i, b) in bytes.iter_mut().enumerate() {
                 *b = sh.wrapping_add(i as u8);
             }
-            state.vr[vt as usize] = u128::from_be_bytes(bytes);
+            state.set_vr(vt as usize, u128::from_be_bytes(bytes));
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-22 s:6.2] lvsr: VRT[i] = 16 + i - sh for i in 0..16, where sh = EA[60:63].
@@ -767,7 +773,7 @@ pub(crate) fn execute(
             for (i, b) in bytes.iter_mut().enumerate() {
                 *b = 16u8.wrapping_add(i as u8).wrapping_sub(sh);
             }
-            state.vr[vt as usize] = u128::from_be_bytes(bytes);
+            state.set_vr(vt as usize, u128::from_be_bytes(bytes));
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-15 s:6.2] lvebx: byte load at EA into byte position (EA & 0xF) of VRT.
@@ -782,7 +788,7 @@ pub(crate) fn execute(
             };
             let mut bytes = state.vr[vt as usize].to_be_bytes();
             bytes[m] = byte;
-            state.vr[vt as usize] = u128::from_be_bytes(bytes);
+            state.set_vr(vt as usize, u128::from_be_bytes(bytes));
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-16 s:6.2] lvehx: halfword load at (EA & ~1) into halfword position
@@ -799,7 +805,7 @@ pub(crate) fn execute(
             let hb = val.to_be_bytes();
             bytes[m] = hb[0];
             bytes[m + 1] = hb[1];
-            state.vr[vt as usize] = u128::from_be_bytes(bytes);
+            state.set_vr(vt as usize, u128::from_be_bytes(bytes));
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-17 s:6.2] lvewx: word load at (EA & ~3) into word position
@@ -815,7 +821,7 @@ pub(crate) fn execute(
             let mut bytes = state.vr[vt as usize].to_be_bytes();
             let wb = val.to_be_bytes();
             bytes[m..m + 4].copy_from_slice(&wb);
-            state.vr[vt as usize] = u128::from_be_bytes(bytes);
+            state.set_vr(vt as usize, u128::from_be_bytes(bytes));
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-29 s:6.2] stvebx: byte at byte-position (EA & 0xF) of VS -> MEM(EA, 1).
@@ -1018,7 +1024,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(bits) => {
-                    state.fpr[frt as usize] = double_word(bits as u32);
+                    state.set_fpr(frt as usize, double_word(bits as u32));
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -1030,8 +1036,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(bits) => {
-                    state.fpr[frt as usize] = double_word(bits as u32);
-                    state.gpr[ra as usize] = ea;
+                    state.set_fpr(frt as usize, double_word(bits as u32));
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -1041,7 +1047,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(bits) => {
-                    state.fpr[frt as usize] = bits;
+                    state.set_fpr(frt as usize, bits);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -1053,8 +1059,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(bits) => {
-                    state.fpr[frt as usize] = bits;
-                    state.gpr[ra as usize] = ea;
+                    state.set_fpr(frt as usize, bits);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -1075,7 +1081,7 @@ pub(crate) fn execute(
             let bits = single_frs(state.fpr[frs as usize]);
             let v = buffer_store(store_buf, state, ea, 4, bits as u64);
             if v == ExecuteVerdict::Continue {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -1084,7 +1090,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             let v = buffer_store(store_buf, state, ea, 8, state.fpr[frs as usize]);
             if v == ExecuteVerdict::Continue {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -1113,7 +1119,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(bits) => {
-                    state.fpr[frt as usize] = double_word(bits as u32);
+                    state.set_fpr(frt as usize, double_word(bits as u32));
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -1124,8 +1130,8 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(bits) => {
-                    state.fpr[frt as usize] = double_word(bits as u32);
-                    state.gpr[ra as usize] = ea;
+                    state.set_fpr(frt as usize, double_word(bits as u32));
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -1135,7 +1141,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(bits) => {
-                    state.fpr[frt as usize] = bits;
+                    state.set_fpr(frt as usize, bits);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -1146,8 +1152,8 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(bits) => {
-                    state.fpr[frt as usize] = bits;
-                    state.gpr[ra as usize] = ea;
+                    state.set_fpr(frt as usize, bits);
+                    state.set_gpr(ra as usize, ea);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -1164,7 +1170,7 @@ pub(crate) fn execute(
             let bits = single_frs(state.fpr[frs as usize]);
             let v = buffer_store(store_buf, state, ea, 4, bits as u64);
             if v == ExecuteVerdict::Continue {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -1177,7 +1183,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             let v = buffer_store(store_buf, state, ea, 8, state.fpr[frs as usize]);
             if v == ExecuteVerdict::Continue {
-                state.gpr[ra as usize] = ea;
+                state.set_gpr(ra as usize, ea);
             }
             v
         }
@@ -1293,7 +1299,7 @@ fn string_load(
     }
     let mut reg = rt_start % 32;
     let mut byte_idx = 0usize;
-    state.gpr[reg] = 0;
+    state.set_gpr(reg, 0);
     for i in 0..n {
         let ea = base.wrapping_add(i as u64);
         let byte = match load_ze(region_views, store_buf, ea, 1) {
@@ -1301,12 +1307,12 @@ fn string_load(
             Err(e) => return ExecuteVerdict::MemFault(e),
         };
         let shift = (3 - byte_idx) * 8;
-        state.gpr[reg] |= (byte as u64) << shift;
+        state.set_gpr(reg, state.gpr[reg] | ((byte as u64) << shift));
         byte_idx += 1;
         if byte_idx == 4 && i + 1 < n {
             byte_idx = 0;
             reg = (reg + 1) % 32;
-            state.gpr[reg] = 0;
+            state.set_gpr(reg, 0);
         }
     }
     ExecuteVerdict::Continue

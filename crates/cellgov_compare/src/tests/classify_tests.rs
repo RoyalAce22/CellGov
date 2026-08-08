@@ -78,11 +78,11 @@ fn sync_primitive_id_range_classifies_when_populated() {
         ..ClassifierContext::default()
     };
     assert_eq!(
-        classify(&div(0x2000, 4), r.addr, &ctx),
+        classify(&div(0x2000, 4), r.addr, &ctx, &r.data, &r.data),
         DivergenceClass::SyncPrimitiveId,
     );
     assert_eq!(
-        classify(&div(0x2004, 4), r.addr, &ctx),
+        classify(&div(0x2004, 4), r.addr, &ctx, &r.data, &r.data),
         DivergenceClass::Unclassified,
     );
 }
@@ -94,7 +94,7 @@ fn elf_header_offset_inside_range_classifies_as_elf_header() {
         elf_header_range: Some(0x10000..0x10040),
         ..ClassifierContext::default()
     };
-    let class = classify(&div(0x35, 1), r.addr, &ctx);
+    let class = classify(&div(0x35, 1), r.addr, &ctx, &r.data, &r.data);
     assert_eq!(class, DivergenceClass::ElfHeader);
 }
 
@@ -105,7 +105,7 @@ fn elf_header_offset_just_past_end_does_not_match() {
         elf_header_range: Some(0x10000..0x10040),
         ..ClassifierContext::default()
     };
-    let class = classify(&div(0x40, 1), r.addr, &ctx);
+    let class = classify(&div(0x40, 1), r.addr, &ctx, &r.data, &r.data);
     assert_eq!(class, DivergenceClass::Unclassified);
 }
 
@@ -116,7 +116,7 @@ fn run_straddling_elf_header_boundary_is_unclassified() {
         elf_header_range: Some(0x10000..0x10040),
         ..ClassifierContext::default()
     };
-    let class = classify(&div(0x38, 0x10), r.addr, &ctx);
+    let class = classify(&div(0x38, 0x10), r.addr, &ctx, &r.data, &r.data);
     assert_eq!(class, DivergenceClass::Unclassified);
 }
 
@@ -128,7 +128,7 @@ fn divergence_exactly_filling_range_classifies() {
         ..ClassifierContext::default()
     };
     assert_eq!(
-        classify(&div(0x00, 0x40), r.addr, &ctx),
+        classify(&div(0x00, 0x40), r.addr, &ctx, &r.data, &r.data),
         DivergenceClass::ElfHeader
     );
 }
@@ -141,7 +141,7 @@ fn divergence_at_range_start_classifies() {
         ..ClassifierContext::default()
     };
     assert_eq!(
-        classify(&div(0x00, 1), r.addr, &ctx),
+        classify(&div(0x00, 1), r.addr, &ctx, &r.data, &r.data),
         DivergenceClass::ElfHeader
     );
 }
@@ -154,7 +154,7 @@ fn divergence_ending_at_range_end_classifies() {
         ..ClassifierContext::default()
     };
     assert_eq!(
-        classify(&div(0x3F, 1), r.addr, &ctx),
+        classify(&div(0x3F, 1), r.addr, &ctx, &r.data, &r.data),
         DivergenceClass::ElfHeader
     );
 }
@@ -164,7 +164,7 @@ fn empty_context_returns_unclassified_for_any_divergence() {
     let r = region("code", 0x10000, 0x40);
     let ctx = ClassifierContext::default();
     assert_eq!(
-        classify(&div(0x10, 1), r.addr, &ctx),
+        classify(&div(0x10, 1), r.addr, &ctx, &r.data, &r.data),
         DivergenceClass::Unclassified
     );
 }
@@ -176,44 +176,133 @@ fn sys_proc_param_range_classifies_when_populated() {
         sys_proc_param_range: Some(0x10700..0x10720),
         ..ClassifierContext::default()
     };
-    let class = classify(&div(0x710, 0x10), r.addr, &ctx);
+    let class = classify(&div(0x710, 0x10), r.addr, &ctx, &r.data, &r.data);
     assert_eq!(class, DivergenceClass::SysProcParam);
 }
 
 #[test]
 fn hle_opd_range_classifies_when_populated() {
-    let r = region("data", 0x820000, 0x10000);
+    let mut r = region("data", 0x820000, 0x10000);
+    let mut r_b = r.clone();
     let opd_range: Range<u64> = 0x824000..0x824400;
+    // Fill every touched slot with in-window pointers sharing their
+    // high 16 bits; the two runners disagree only in slot-index bits.
+    for off in (0x4100..0x4200).step_by(4) {
+        r.data[off..off + 4].copy_from_slice(&0x0082_1004u32.to_be_bytes());
+        r_b.data[off..off + 4].copy_from_slice(&0x0082_1010u32.to_be_bytes());
+    }
     let ctx = ClassifierContext {
         hle_opd_ranges: vec![opd_range],
         ..ClassifierContext::default()
     };
-    let class = classify(&div(0x4100, 0x100), r.addr, &ctx);
+    let class = classify(&div(0x4100, 0x100), r.addr, &ctx, &r.data, &r_b.data);
     assert_eq!(class, DivergenceClass::HleOpdSlot);
 }
 
 #[test]
 fn hle_opd_ranges_check_every_entry() {
-    let r = region("data", 0x820000, 0x10000);
+    let mut r = region("data", 0x820000, 0x10000);
+    let mut r_b = r.clone();
+    for off in [0x0usize, 0x4000, 0x8000] {
+        r.data[off..off + 4].copy_from_slice(&0x0082_1004u32.to_be_bytes());
+        r_b.data[off..off + 4].copy_from_slice(&0x0082_1010u32.to_be_bytes());
+    }
     let ctx = ClassifierContext {
         hle_opd_ranges: vec![0x820000..0x820004, 0x824000..0x824004, 0x828000..0x828004],
         ..ClassifierContext::default()
     };
+    for off in [0x0u64, 0x4000, 0x8000] {
+        assert_eq!(
+            classify(&div(off, 4), r.addr, &ctx, &r.data, &r_b.data),
+            DivergenceClass::HleOpdSlot
+        );
+    }
     assert_eq!(
-        classify(&div(0x0, 4), r.addr, &ctx),
-        DivergenceClass::HleOpdSlot
-    );
-    assert_eq!(
-        classify(&div(0x4000, 4), r.addr, &ctx),
-        DivergenceClass::HleOpdSlot
-    );
-    assert_eq!(
-        classify(&div(0x8000, 4), r.addr, &ctx),
-        DivergenceClass::HleOpdSlot
-    );
-    assert_eq!(
-        classify(&div(0x1000, 4), r.addr, &ctx),
+        classify(&div(0x1000, 4), r.addr, &ctx, &r.data, &r_b.data),
         DivergenceClass::Unclassified
+    );
+}
+
+/// The doc-claimed failure modes for the HleOpdSlot waiver, each
+/// refusing containment-based classification: a diverging toc word
+/// (zero is outside the pointer window), a pointer that left user
+/// memory, and a slot past the region image's end.
+#[test]
+fn hle_opd_slot_refuses_non_pointer_shapes() {
+    let mk = |a_val: u32, b_val: u32| {
+        let mut r = region("data", 0x820000, 0x10000);
+        let mut r_b = r.clone();
+        r.data[0x4000..0x4004].copy_from_slice(&a_val.to_be_bytes());
+        r_b.data[0x4000..0x4004].copy_from_slice(&b_val.to_be_bytes());
+        (r, r_b)
+    };
+    let opd_range: Range<u64> = 0x824000..0x824400;
+    let ctx = ClassifierContext {
+        hle_opd_ranges: vec![opd_range],
+        ..ClassifierContext::default()
+    };
+
+    // toc-shaped divergence: one side zero.
+    let (r, r_b) = mk(0x0082_1004, 0);
+    assert_eq!(
+        classify(&div(0x4000, 4), r.addr, &ctx, &r.data, &r_b.data),
+        DivergenceClass::Unclassified
+    );
+
+    // pointer crossed out of the user-memory window.
+    let (r, r_b) = mk(0x0082_1004, 0x5000_0000);
+    assert_eq!(
+        classify(&div(0x4000, 4), r.addr, &ctx, &r.data, &r_b.data),
+        DivergenceClass::Unclassified
+    );
+
+    // both in-window: waives regardless of how far apart the two
+    // backends placed their resolved code.
+    let (r, r_b) = mk(0x0082_1004, 0x0F83_1004);
+    assert_eq!(
+        classify(&div(0x4000, 4), r.addr, &ctx, &r.data, &r_b.data),
+        DivergenceClass::HleOpdSlot
+    );
+
+    let (r, r_b) = mk(0x0082_1004, 0x0082_1010);
+    assert_eq!(
+        classify(&div(0x4000, 4), r.addr, &ctx, &r.data, &r_b.data),
+        DivergenceClass::HleOpdSlot
+    );
+}
+
+#[test]
+fn hle_opd_slot_past_region_end_refuses() {
+    // Range extends past the region image; a slot the image cannot
+    // back must not waive.
+    let r = region("data", 0x820000, 0x4002);
+    let opd_range: Range<u64> = 0x824000..0x824400;
+    let ctx = ClassifierContext {
+        hle_opd_ranges: vec![opd_range],
+        ..ClassifierContext::default()
+    };
+    assert_eq!(
+        classify(&div(0x4000, 2), r.addr, &ctx, &r.data, &r.data),
+        DivergenceClass::Unclassified
+    );
+}
+
+/// A one-byte divergence inside a slot still checks the whole
+/// covering 4-byte slot in both images.
+#[test]
+fn hle_opd_partial_slot_run_checks_covering_slot() {
+    let mut r = region("data", 0x820000, 0x10000);
+    let mut r_b = r.clone();
+    r.data[0x4000..0x4004].copy_from_slice(&0x0082_1004u32.to_be_bytes());
+    r_b.data[0x4000..0x4004].copy_from_slice(&0x0082_1010u32.to_be_bytes());
+    let opd_range: Range<u64> = 0x824000..0x824400;
+    let ctx = ClassifierContext {
+        hle_opd_ranges: vec![opd_range],
+        ..ClassifierContext::default()
+    };
+    assert_eq!(
+        classify(&div(0x4003, 1), r.addr, &ctx, &r.data, &r_b.data),
+        DivergenceClass::HleOpdSlot
     );
 }
 
@@ -268,11 +357,11 @@ fn existing_fixture_offsets_classify_as_elf_header() {
     let ctx = ClassifierContext::from_observation(&obs_with(vec![r.clone()]))
         .expect("well-formed code region must classify");
     assert_eq!(
-        classify(&div(0x35, 1), r.addr, &ctx),
+        classify(&div(0x35, 1), r.addr, &ctx, &r.data, &r.data),
         DivergenceClass::ElfHeader
     );
     assert_eq!(
-        classify(&div(0x17, 1), r.addr, &ctx),
+        classify(&div(0x17, 1), r.addr, &ctx, &r.data, &r.data),
         DivergenceClass::ElfHeader
     );
 }

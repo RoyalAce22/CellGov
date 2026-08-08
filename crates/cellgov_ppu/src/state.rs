@@ -3,32 +3,60 @@
 use cellgov_ps3_abi::hardware::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
 
+/// Register-bank storage with read-only indexing.
+///
+/// There is no `IndexMut` and no `Clone`: every write lands in an
+/// owning [`PpuState`] setter.
+pub struct RegBank<T, const N: usize>([T; N]);
+
+impl<T, const N: usize> RegBank<T, N> {
+    /// Borrow the whole bank, e.g. for snapshotting or hashing.
+    #[inline]
+    pub fn as_array(&self) -> &[T; N] {
+        &self.0
+    }
+}
+
+impl<T, const N: usize> std::ops::Index<usize> for RegBank<T, N> {
+    type Output = T;
+
+    #[inline]
+    #[track_caller]
+    fn index(&self, i: usize) -> &T {
+        &self.0[i]
+    }
+}
+
 /// PPU architectural register file and SPRs.
-#[derive(Clone)]
+///
+/// Hash-covered fields (register banks, CR, LR, CTR, XER, the
+/// reservation) accept writes only through their setters;
+/// hash-excluded fields (PC, TB, VRSAVE, instrument counters)
+/// stay directly assignable.
 pub struct PpuState {
     /// General-purpose registers r0..r31.
     // [PPC-Book1 p:41 s:3.2.1] 64-bit GPRs.
-    pub gpr: [u64; GPR_COUNT],
+    pub gpr: RegBank<u64, GPR_COUNT>,
     /// Floating-point registers f0..f31 as raw f64 bit patterns.
     // [PPC-Book1 p:97 s:4.2] FPRs hold floating-point values in double format.
-    pub fpr: [u64; FPR_COUNT],
+    pub fpr: RegBank<u64, FPR_COUNT>,
     /// Vector registers v0..v31; big-endian (byte 0 is MSB).
     // [AltiVec-PEM p:40 s:2.3.1] 128-bit vector registers.
-    pub vr: [u128; VR_COUNT],
+    pub vr: RegBank<u128, VR_COUNT>,
     /// Program counter.
     pub pc: u64,
     /// Condition register: 8 x 4-bit fields packed into the low 32 bits.
     // [PPC-Book1 p:28 s:2.3.1] CR is 32-bit, eight 4-bit fields CR0..CR7.
-    pub cr: u32,
+    cr: u32,
     /// Link register.
     // [PPC-Book1 p:28 s:2.3] Link Register (LR), branch processor register.
-    pub lr: u64,
+    lr: u64,
     /// Count register.
     // [PPC-Book1 p:28 s:2.3] Count Register (CTR), branch processor register.
-    pub ctr: u64,
+    ctr: u64,
     /// Fixed-point exception register.
     // [PPC-Book1 p:42 s:3.2.2] XER is a 64-bit register.
-    pub xer: u64,
+    xer: u64,
     /// AltiVec VR-usage mask (SPR 256). Excluded from
     /// [`Self::state_hash`]; divergences surface via the GPR holding
     /// the `mfvrsave` result. Exclusion is sound only while VRSAVE is
@@ -70,16 +98,16 @@ pub struct PpuState {
     /// Per-unit half of the reservation; `stwcx`/`stdcx` succeeds only
     /// when this and [`cellgov_sync::ReservationTable`] agree.
     // [PPC-Book2 p:10 s:1.7.3.1] Reservation state: lwarx/ldarx sets, stwcx./stdcx. tests + clears.
-    pub reservation: Option<ReservedLine>,
+    reservation: Option<ReservedLine>,
 }
 
 impl PpuState {
     /// Construct a zeroed PPU state with no active reservation.
     pub fn new() -> Self {
         Self {
-            gpr: [0u64; GPR_COUNT],
-            fpr: [0u64; FPR_COUNT],
-            vr: [0u128; VR_COUNT],
+            gpr: RegBank([0u64; GPR_COUNT]),
+            fpr: RegBank([0u64; FPR_COUNT]),
+            vr: RegBank([0u128; VR_COUNT]),
             pc: 0,
             cr: 0,
             lr: 0,
@@ -100,6 +128,105 @@ impl PpuState {
         }
     }
 
+    /// Write GPR `k`.
+    #[inline]
+    #[track_caller]
+    pub fn set_gpr(&mut self, k: usize, v: u64) {
+        self.gpr.0[k] = v;
+    }
+
+    /// Write FPR `k` (raw f64 bit pattern).
+    #[inline]
+    #[track_caller]
+    pub fn set_fpr(&mut self, k: usize, v: u64) {
+        self.fpr.0[k] = v;
+    }
+
+    /// Write VR `k`.
+    #[inline]
+    #[track_caller]
+    pub fn set_vr(&mut self, k: usize, v: u128) {
+        self.vr.0[k] = v;
+    }
+
+    /// Replace the whole GPR bank (snapshot restore).
+    #[inline]
+    pub fn set_gpr_all(&mut self, regs: [u64; GPR_COUNT]) {
+        self.gpr.0 = regs;
+    }
+
+    /// Replace the whole FPR bank (snapshot restore).
+    #[inline]
+    pub fn set_fpr_all(&mut self, regs: [u64; FPR_COUNT]) {
+        self.fpr.0 = regs;
+    }
+
+    /// Replace the whole VR bank (snapshot restore).
+    #[inline]
+    pub fn set_vr_all(&mut self, regs: [u128; VR_COUNT]) {
+        self.vr.0 = regs;
+    }
+
+    /// Condition register.
+    #[inline]
+    pub fn cr(&self) -> u32 {
+        self.cr
+    }
+
+    /// Write the full condition register.
+    #[inline]
+    pub fn set_cr(&mut self, v: u32) {
+        self.cr = v;
+    }
+
+    /// Link register.
+    #[inline]
+    pub fn lr(&self) -> u64 {
+        self.lr
+    }
+
+    /// Write the link register.
+    #[inline]
+    pub fn set_lr(&mut self, v: u64) {
+        self.lr = v;
+    }
+
+    /// Count register.
+    #[inline]
+    pub fn ctr(&self) -> u64 {
+        self.ctr
+    }
+
+    /// Write the count register.
+    #[inline]
+    pub fn set_ctr(&mut self, v: u64) {
+        self.ctr = v;
+    }
+
+    /// Fixed-point exception register.
+    #[inline]
+    pub fn xer(&self) -> u64 {
+        self.xer
+    }
+
+    /// Write the full XER.
+    #[inline]
+    pub fn set_xer(&mut self, v: u64) {
+        self.xer = v;
+    }
+
+    /// Active reservation, if any.
+    #[inline]
+    pub fn reservation(&self) -> Option<ReservedLine> {
+        self.reservation
+    }
+
+    /// Set or clear the reservation.
+    #[inline]
+    pub fn set_reservation(&mut self, r: Option<ReservedLine>) {
+        self.reservation = r;
+    }
+
     /// Read CR field `field` (0..=7) as a 4-bit LT/GT/EQ/SO nibble.
     // [PPC-Book1 p:29 s:2.3.1] CR0 bits: 0=LT, 1=GT, 2=EQ, 3=SO.
     pub fn cr_field(&self, field: u8) -> u8 {
@@ -113,7 +240,7 @@ impl PpuState {
         debug_assert!(field <= 7, "CR field index out of range: {field}");
         let shift = (7 - field) * 4;
         let mask = !(0xFu32 << shift);
-        self.cr = (self.cr & mask) | (((val & 0xF) as u32) << shift);
+        self.set_cr((self.cr & mask) | (((val & 0xF) as u32) << shift));
     }
 
     /// Read a single CR bit in PPC numbering (bit 0 = MSB of CR).
@@ -128,7 +255,7 @@ impl PpuState {
         debug_assert!(bit <= 31, "CR bit index out of range: {bit}");
         let shift = 31 - bit;
         let mask = !(1u32 << shift);
-        self.cr = (self.cr & mask) | ((value as u32) << shift);
+        self.set_cr((self.cr & mask) | ((value as u32) << shift));
     }
 
     /// XER carry bit (PPC bit 34 from MSB = Rust bit 29 from LSB).
@@ -146,9 +273,9 @@ impl PpuState {
     /// Write XER carry bit (PPC bit 34 = Rust bit 29).
     pub fn set_xer_ca(&mut self, value: bool) {
         if value {
-            self.xer |= 1 << 29;
+            self.set_xer(self.xer | (1 << 29));
         } else {
-            self.xer &= !(1u64 << 29);
+            self.set_xer(self.xer & !(1u64 << 29));
         }
     }
 
@@ -156,9 +283,9 @@ impl PpuState {
     // [PPC-Book1 p:42 s:3.2.2] XER bit 33 is Overflow (OV); SO is sticky and OR'd from OV.
     pub fn set_xer_ov(&mut self, overflow: bool) {
         if overflow {
-            self.xer |= (1u64 << 31) | (1u64 << 30);
+            self.set_xer(self.xer | (1u64 << 31) | (1u64 << 30));
         } else {
-            self.xer &= !(1u64 << 30);
+            self.set_xer(self.xer & !(1u64 << 30));
         }
     }
 
@@ -197,23 +324,47 @@ impl PpuState {
         base.wrapping_add(self.gpr[rb as usize])
     }
 
-    /// FNV-1a over GPR, LR, CTR, XER, CR, and the reservation. PC, FPR,
-    /// VR, TB excluded (PC is paired at the trace level; FP/VR/TB
+    /// The canonical fingerprint input set for this state.
+    ///
+    /// [`Self::state_hash`] folds exactly these fields and the zoom
+    /// trace carries them, so a per-step hash divergence always names
+    /// a field in the zoom diff.
+    pub fn fingerprint(&self) -> cellgov_exec::PpuFingerprint {
+        cellgov_exec::PpuFingerprint {
+            gpr: self.gpr.0,
+            lr: self.lr,
+            ctr: self.ctr,
+            xer: self.xer,
+            cr: self.cr,
+            reservation_line: self.reservation.map(|l| l.addr()),
+        }
+    }
+
+    /// FNV-1a over the [`Self::fingerprint`] field set. PC, FPR, VR,
+    /// TB excluded (PC is paired at the trace level; FP/VR/TB
     /// divergences surface through GPR/CR).
     pub fn state_hash(&self) -> u64 {
+        let cellgov_exec::PpuFingerprint {
+            gpr,
+            lr,
+            ctr,
+            xer,
+            cr,
+            reservation_line,
+        } = self.fingerprint();
         let mut h = cellgov_mem::Fnv1aHasher::new();
-        for r in &self.gpr {
+        for r in &gpr {
             h.write(&r.to_le_bytes());
         }
-        h.write(&self.lr.to_le_bytes());
-        h.write(&self.ctr.to_le_bytes());
-        h.write(&self.xer.to_le_bytes());
-        h.write(&self.cr.to_le_bytes());
-        match self.reservation {
+        h.write(&lr.to_le_bytes());
+        h.write(&ctr.to_le_bytes());
+        h.write(&xer.to_le_bytes());
+        h.write(&cr.to_le_bytes());
+        match reservation_line {
             None => h.write(&[0u8]),
-            Some(line) => {
+            Some(addr) => {
                 h.write(&[1u8]);
-                h.write(&line.addr().to_le_bytes());
+                h.write(&addr.to_le_bytes());
             }
         }
         h.finish()
@@ -223,6 +374,34 @@ impl PpuState {
 impl Default for PpuState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// Manual because `RegBank` is not `Clone` (see its doc).
+impl Clone for PpuState {
+    fn clone(&self) -> Self {
+        Self {
+            gpr: RegBank(self.gpr.0),
+            fpr: RegBank(self.fpr.0),
+            vr: RegBank(self.vr.0),
+            pc: self.pc,
+            cr: self.cr,
+            lr: self.lr,
+            ctr: self.ctr,
+            xer: self.xer,
+            vrsave: self.vrsave,
+            vrsave_written: self.vrsave_written,
+            mfvrsave_executed: self.mfvrsave_executed,
+            ldarx_executed: self.ldarx_executed,
+            stdcx_executed: self.stdcx_executed,
+            lwarx_executed: self.lwarx_executed,
+            stwcx_executed: self.stwcx_executed,
+            mem_fault_arm_entries: self.mem_fault_arm_entries,
+            mem_fault_unmapped_routed: self.mem_fault_unmapped_routed,
+            dcbz_executed: self.dcbz_executed,
+            tb: self.tb,
+            reservation: self.reservation,
+        }
     }
 }
 
@@ -245,3 +424,7 @@ pub fn ppu_syscall_args(state: &PpuState) -> [u64; 9] {
 #[cfg(test)]
 #[path = "tests/state_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/fingerprint_tests.rs"]
+mod fingerprint_tests;

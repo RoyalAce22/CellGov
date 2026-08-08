@@ -51,7 +51,7 @@ fn altivec_memory_family_no_longer_in_directory() {
 
 #[test]
 fn cbe_unaligned_family_no_longer_in_directory() {
-    // Stage 40C.4 graduated lvlxl / lvrxl / stvlx / stvrx /
+    // The decoder graduated lvlxl / lvrxl / stvlx / stvrx /
     // stvlxl / stvrxl into the decoder. The two LRU-hint loads
     // share semantics with Lvlx / Lvrx; the four stores are
     // harness-gated fault stubs until Stage 40D verifies them.
@@ -65,7 +65,7 @@ fn cbe_unaligned_family_no_longer_in_directory() {
 
 #[test]
 fn xer_no_longer_in_spr_gaps() {
-    // Stage 40C.10 graduated mfxer / mtxer into the decoder; the
+    // The decoder graduated mfxer / mtxer; the
     // SPR-level directories drop their SPR-1 rows.
     assert!(spr_gap(SprDirection::MfSpr, 1).is_none());
     assert!(spr_gap(SprDirection::MtSpr, 1).is_none());
@@ -73,7 +73,7 @@ fn xer_no_longer_in_spr_gaps() {
 
 #[test]
 fn primary31_x_form_residue_no_longer_in_directory() {
-    // Stage 40C.9 graduated tw / td / popcntb / mcrxr into the
+    // The decoder graduated tw / td / popcntb / mcrxr into the
     // decoder. With that landing, the primary-31 X/XO directory is
     // empty; every encoding now decodes to a known variant.
     for xo in [4u16, 68, 122, 512] {

@@ -51,27 +51,27 @@ impl PpuStateSnapshot {
     /// Snapshot a [`PpuState`].
     pub fn capture(state: &PpuState) -> Self {
         Self {
-            gpr: state.gpr,
-            fpr: state.fpr,
-            vr: state.vr,
-            cr: state.cr,
-            lr: state.lr,
-            ctr: state.ctr,
-            xer: state.xer,
-            reservation: state.reservation,
+            gpr: *state.gpr.as_array(),
+            fpr: *state.fpr.as_array(),
+            vr: *state.vr.as_array(),
+            cr: state.cr(),
+            lr: state.lr(),
+            ctr: state.ctr(),
+            xer: state.xer(),
+            reservation: state.reservation(),
         }
     }
 
     /// Copy this snapshot into `state`, leaving PC and TB untouched.
     pub fn apply(&self, state: &mut PpuState) {
-        state.gpr = self.gpr;
-        state.fpr = self.fpr;
-        state.vr = self.vr;
-        state.cr = self.cr;
-        state.lr = self.lr;
-        state.ctr = self.ctr;
-        state.xer = self.xer;
-        state.reservation = self.reservation;
+        state.set_gpr_all(self.gpr);
+        state.set_fpr_all(self.fpr);
+        state.set_vr_all(self.vr);
+        state.set_cr(self.cr);
+        state.set_lr(self.lr);
+        state.set_ctr(self.ctr);
+        state.set_xer(self.xer);
+        state.set_reservation(self.reservation);
     }
 }
 

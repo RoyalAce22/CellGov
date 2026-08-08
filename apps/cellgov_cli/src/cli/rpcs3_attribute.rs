@@ -10,11 +10,11 @@
 //! # Examples
 //!
 //! ```text
-//! CELLGOV_HLE_TRACE_PATH=flow.htrc \
+//! CELLGOV_HLE_TRACE_PATH=title.htrc \
 //! CELLGOV_HLE_WATCH=0x101e3cb8:8 \
-//! tools/rpcs3-src/build-msvc/bin/rpcs3.exe --headless flow.elf
+//! tools/rpcs3-src/build-msvc/bin/rpcs3.exe --headless title.elf
 //!
-//! cellgov_cli rpcs3-attribute --trace flow.htrc --addr 0x101e3cb8
+//! cellgov_cli rpcs3-attribute --trace title.htrc --addr 0x101e3cb8
 //! ```
 
 use std::fs::File;

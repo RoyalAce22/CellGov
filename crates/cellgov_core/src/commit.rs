@@ -201,7 +201,7 @@ pub struct CommitContext<'a> {
     pub rsx_label_base: u32,
     /// Write-only from this pipeline.
     pub rsx_flip: &'a mut crate::rsx::flip::RsxFlipState,
-    /// Audit C-2 witness, incremented adjacent to the semaphore-region
+    /// Liveness witness, incremented adjacent to the semaphore-region
     /// `debug_assert!` per `RsxLabelWrite` seen during `process()`.
     /// Co-locating the counter with the guard makes it impossible for
     /// the witness to be vacuous: a future filter in `process()` that

@@ -6,7 +6,7 @@
 //! named-but-unimplemented and every unrecognized encoding the scan
 //! reaches, with the names Tables 1 and 2 carry.
 //!
-//! The scan is the early-warning half of Phase 40 layer 2; it sees
+//! The scan is the early-warning half of decode-gap coverage; it sees
 //! only code the caller hands it. The runtime [`PpuDecodeError`]
 //! path is the co-equal backstop for everything the scan cannot
 //! reach -- runtime PRX loads, computed-target jumps, self-modifying

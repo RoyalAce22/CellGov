@@ -5,8 +5,8 @@ use super::*;
 #[test]
 fn divdu_basic() {
     let mut s = PpuState::new();
-    s.gpr[3] = 100;
-    s.gpr[4] = 7;
+    s.set_gpr(3, 100);
+    s.set_gpr(4, 7);
     exec_no_mem(
         &PpuInstruction::Divdu {
             rt: 5,
@@ -23,8 +23,8 @@ fn divdu_basic() {
 #[test]
 fn divdu_divide_by_zero() {
     let mut s = PpuState::new();
-    s.gpr[3] = 100;
-    s.gpr[4] = 0;
+    s.set_gpr(3, 100);
+    s.set_gpr(4, 0);
     exec_no_mem(
         &PpuInstruction::Divdu {
             rt: 5,
@@ -41,8 +41,8 @@ fn divdu_divide_by_zero() {
 #[test]
 fn divdu_large_values() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
-    s.gpr[4] = 2;
+    s.set_gpr(3, 0xFFFF_FFFF_FFFF_FFFF);
+    s.set_gpr(4, 2);
     exec_no_mem(
         &PpuInstruction::Divdu {
             rt: 5,
@@ -59,8 +59,8 @@ fn divdu_large_values() {
 #[test]
 fn divd_signed() {
     let mut s = PpuState::new();
-    s.gpr[3] = (-100i64) as u64;
-    s.gpr[4] = 7;
+    s.set_gpr(3, (-100i64) as u64);
+    s.set_gpr(4, 7);
     exec_no_mem(
         &PpuInstruction::Divd {
             rt: 5,
@@ -82,8 +82,8 @@ fn divd_small_dividend_returns_zero() {
     // zero quotient.
     for (a, b) in [(0u64, 16u64), (1, 16), (0xFu64, 16), (15, 16)] {
         let mut s = PpuState::new();
-        s.gpr[3] = a;
-        s.gpr[4] = b;
+        s.set_gpr(3, a);
+        s.set_gpr(4, b);
         exec_no_mem(
             &PpuInstruction::Divd {
                 rt: 5,
@@ -101,8 +101,8 @@ fn divd_small_dividend_returns_zero() {
 #[test]
 fn divd_divide_by_zero() {
     let mut s = PpuState::new();
-    s.gpr[3] = 100;
-    s.gpr[4] = 0;
+    s.set_gpr(3, 100);
+    s.set_gpr(4, 0);
     exec_no_mem(
         &PpuInstruction::Divd {
             rt: 5,
@@ -119,8 +119,8 @@ fn divd_divide_by_zero() {
 #[test]
 fn mulld_basic() {
     let mut s = PpuState::new();
-    s.gpr[3] = 7;
-    s.gpr[4] = 8;
+    s.set_gpr(3, 7);
+    s.set_gpr(4, 8);
     exec_no_mem(
         &PpuInstruction::Mulld {
             rt: 5,
@@ -137,8 +137,8 @@ fn mulld_basic() {
 #[test]
 fn mulld_wraps_on_overflow() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
-    s.gpr[4] = 2;
+    s.set_gpr(3, 0xFFFF_FFFF_FFFF_FFFF);
+    s.set_gpr(4, 2);
     exec_no_mem(
         &PpuInstruction::Mulld {
             rt: 5,
@@ -156,8 +156,8 @@ fn mulld_wraps_on_overflow() {
 #[test]
 fn mulhdu_takes_high_64_bits_of_u128_product() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
-    s.gpr[4] = 2;
+    s.set_gpr(3, 0xFFFF_FFFF_FFFF_FFFF);
+    s.set_gpr(4, 2);
     exec_no_mem(
         &PpuInstruction::Mulhdu {
             rt: 5,
@@ -173,8 +173,8 @@ fn mulhdu_takes_high_64_bits_of_u128_product() {
 #[test]
 fn mulhdu_small_product_is_zero() {
     let mut s = PpuState::new();
-    s.gpr[3] = 7;
-    s.gpr[4] = 8;
+    s.set_gpr(3, 7);
+    s.set_gpr(4, 8);
     exec_no_mem(
         &PpuInstruction::Mulhdu {
             rt: 5,
@@ -190,8 +190,8 @@ fn mulhdu_small_product_is_zero() {
 #[test]
 fn mulhw_signed_high_32_bits() {
     let mut s = PpuState::new();
-    s.gpr[4] = (-2i32) as u32 as u64;
-    s.gpr[5] = 3;
+    s.set_gpr(4, (-2i32) as u32 as u64);
+    s.set_gpr(5, 3);
     exec_no_mem(
         &PpuInstruction::Mulhw {
             rt: 3,
@@ -207,8 +207,8 @@ fn mulhw_signed_high_32_bits() {
 #[test]
 fn mulhw_positive_produces_zero_high_bits() {
     let mut s = PpuState::new();
-    s.gpr[4] = 0x0001_0000;
-    s.gpr[5] = 0x0001_0000;
+    s.set_gpr(4, 0x0001_0000);
+    s.set_gpr(5, 0x0001_0000);
     exec_no_mem(
         &PpuInstruction::Mulhw {
             rt: 3,
@@ -224,8 +224,8 @@ fn mulhw_positive_produces_zero_high_bits() {
 #[test]
 fn mulhd_signed_high_doubleword() {
     let mut s = PpuState::new();
-    s.gpr[3] = u64::MAX;
-    s.gpr[4] = u64::MAX;
+    s.set_gpr(3, u64::MAX);
+    s.set_gpr(4, u64::MAX);
     exec_no_mem(
         &PpuInstruction::Mulhd {
             rt: 5,
@@ -237,8 +237,8 @@ fn mulhd_signed_high_doubleword() {
     );
     assert_eq!(s.gpr[5], 0);
 
-    s.gpr[3] = u64::MAX;
-    s.gpr[4] = 2;
+    s.set_gpr(3, u64::MAX);
+    s.set_gpr(4, 2);
     exec_no_mem(
         &PpuInstruction::Mulhd {
             rt: 5,
@@ -254,8 +254,8 @@ fn mulhd_signed_high_doubleword() {
 #[test]
 fn divwo_div_by_zero_sets_ov() {
     let mut s = PpuState::new();
-    s.gpr[3] = 100;
-    s.gpr[4] = 0;
+    s.set_gpr(3, 100);
+    s.set_gpr(4, 0);
     exec_no_mem(
         &PpuInstruction::Divw {
             rt: 5,
@@ -267,14 +267,14 @@ fn divwo_div_by_zero_sets_ov() {
         &mut s,
     );
     assert_eq!(s.gpr[5], 0);
-    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30);
+    assert_eq!(s.xer() & (1u64 << 30), 1u64 << 30);
 }
 
 #[test]
 fn mullwo_with_overflow_sets_ov() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x1_0000;
-    s.gpr[4] = 0x1_0000;
+    s.set_gpr(3, 0x1_0000);
+    s.set_gpr(4, 0x1_0000);
     exec_no_mem(
         &PpuInstruction::Mullw {
             rt: 5,
@@ -286,14 +286,14 @@ fn mullwo_with_overflow_sets_ov() {
         &mut s,
     );
     // 0x1_0000 * 0x1_0000 = 0x1_0000_0000, overflows 32-bit signed.
-    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30);
+    assert_eq!(s.xer() & (1u64 << 30), 1u64 << 30);
 }
 
 #[test]
 fn mulhwu_cr0_treats_high_bit_result_as_positive() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xFFFF_FFFFu32 as u64;
-    s.gpr[4] = 0xFFFF_FFFFu32 as u64;
+    s.set_gpr(3, 0xFFFF_FFFFu32 as u64);
+    s.set_gpr(4, 0xFFFF_FFFFu32 as u64);
     exec_no_mem(
         &PpuInstruction::Mulhwu {
             rt: 5,
@@ -311,8 +311,8 @@ fn mulhwu_cr0_treats_high_bit_result_as_positive() {
 #[test]
 fn divwu_cr0_treats_high_bit_result_as_positive() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xFFFF_FFFFu32 as u64;
-    s.gpr[4] = 1;
+    s.set_gpr(3, 0xFFFF_FFFFu32 as u64);
+    s.set_gpr(4, 1);
     exec_no_mem(
         &PpuInstruction::Divwu {
             rt: 5,
@@ -332,8 +332,8 @@ fn divwu_cr0_treats_high_bit_result_as_positive() {
 #[test]
 fn mullw_dot_sets_cr0_lt_on_negative_product() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0xFFFF_FFFF_FFFF_FFFE; // i32 -2
-    s.gpr[2] = 0x0000_0000_0000_0003;
+    s.set_gpr(1, 0xFFFF_FFFF_FFFF_FFFE); // i32 -2
+    s.set_gpr(2, 0x0000_0000_0000_0003);
     exec_no_mem(
         &PpuInstruction::Mullw {
             rt: 3,
@@ -353,8 +353,8 @@ fn mullw_dot_sets_cr0_lt_on_negative_product() {
 #[test]
 fn mulldo_signed_overflow_sets_ov() {
     let mut s = PpuState::new();
-    s.gpr[3] = i64::MAX as u64;
-    s.gpr[4] = 2;
+    s.set_gpr(3, i64::MAX as u64);
+    s.set_gpr(4, 2);
     exec_no_mem(
         &PpuInstruction::Mulld {
             rt: 5,
@@ -365,14 +365,14 @@ fn mulldo_signed_overflow_sets_ov() {
         },
         &mut s,
     );
-    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30, "OV set");
+    assert_eq!(s.xer() & (1u64 << 30), 1u64 << 30, "OV set");
 }
 
 #[test]
 fn mulld_dot_sets_cr0_gt_on_positive_product() {
     let mut s = PpuState::new();
-    s.gpr[3] = 7;
-    s.gpr[4] = 8;
+    s.set_gpr(3, 7);
+    s.set_gpr(4, 8);
     exec_no_mem(
         &PpuInstruction::Mulld {
             rt: 5,
@@ -391,8 +391,8 @@ fn mulld_dot_sets_cr0_gt_on_positive_product() {
 #[test]
 fn mulhw_dot_sets_cr0_lt_on_negative_high() {
     let mut s = PpuState::new();
-    s.gpr[3] = (-2i32) as u32 as u64;
-    s.gpr[4] = 3;
+    s.set_gpr(3, (-2i32) as u32 as u64);
+    s.set_gpr(4, 3);
     exec_no_mem(
         &PpuInstruction::Mulhw {
             rt: 5,
@@ -409,8 +409,8 @@ fn mulhw_dot_sets_cr0_lt_on_negative_high() {
 #[test]
 fn mulhd_dot_sets_cr0_eq_on_small_product() {
     let mut s = PpuState::new();
-    s.gpr[3] = 7;
-    s.gpr[4] = 8;
+    s.set_gpr(3, 7);
+    s.set_gpr(4, 8);
     exec_no_mem(
         &PpuInstruction::Mulhd {
             rt: 5,
@@ -428,8 +428,8 @@ fn mulhd_dot_sets_cr0_eq_on_small_product() {
 #[test]
 fn divw_dot_sets_cr0_lt_on_negative_quotient() {
     let mut s = PpuState::new();
-    s.gpr[3] = (-12i32) as u32 as u64;
-    s.gpr[4] = 4;
+    s.set_gpr(3, (-12i32) as u32 as u64);
+    s.set_gpr(4, 4);
     exec_no_mem(
         &PpuInstruction::Divw {
             rt: 5,
@@ -447,8 +447,8 @@ fn divw_dot_sets_cr0_lt_on_negative_quotient() {
 #[test]
 fn divwuo_div_by_zero_sets_ov() {
     let mut s = PpuState::new();
-    s.gpr[3] = 100;
-    s.gpr[4] = 0;
+    s.set_gpr(3, 100);
+    s.set_gpr(4, 0);
     exec_no_mem(
         &PpuInstruction::Divwu {
             rt: 5,
@@ -459,14 +459,14 @@ fn divwuo_div_by_zero_sets_ov() {
         },
         &mut s,
     );
-    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30);
+    assert_eq!(s.xer() & (1u64 << 30), 1u64 << 30);
 }
 
 #[test]
 fn divdo_div_by_zero_sets_ov() {
     let mut s = PpuState::new();
-    s.gpr[3] = 100;
-    s.gpr[4] = 0;
+    s.set_gpr(3, 100);
+    s.set_gpr(4, 0);
     exec_no_mem(
         &PpuInstruction::Divd {
             rt: 5,
@@ -477,14 +477,14 @@ fn divdo_div_by_zero_sets_ov() {
         },
         &mut s,
     );
-    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30);
+    assert_eq!(s.xer() & (1u64 << 30), 1u64 << 30);
 }
 
 #[test]
 fn divdo_min_div_neg1_sets_ov() {
     let mut s = PpuState::new();
-    s.gpr[3] = i64::MIN as u64;
-    s.gpr[4] = (-1i64) as u64;
+    s.set_gpr(3, i64::MIN as u64);
+    s.set_gpr(4, (-1i64) as u64);
     exec_no_mem(
         &PpuInstruction::Divd {
             rt: 5,
@@ -495,14 +495,14 @@ fn divdo_min_div_neg1_sets_ov() {
         },
         &mut s,
     );
-    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30);
+    assert_eq!(s.xer() & (1u64 << 30), 1u64 << 30);
 }
 
 #[test]
 fn divd_dot_sets_cr0_lt_on_negative_quotient() {
     let mut s = PpuState::new();
-    s.gpr[3] = (-12i64) as u64;
-    s.gpr[4] = 4;
+    s.set_gpr(3, (-12i64) as u64);
+    s.set_gpr(4, 4);
     exec_no_mem(
         &PpuInstruction::Divd {
             rt: 5,
@@ -519,8 +519,8 @@ fn divd_dot_sets_cr0_lt_on_negative_quotient() {
 #[test]
 fn divduo_div_by_zero_sets_ov() {
     let mut s = PpuState::new();
-    s.gpr[3] = 100;
-    s.gpr[4] = 0;
+    s.set_gpr(3, 100);
+    s.set_gpr(4, 0);
     exec_no_mem(
         &PpuInstruction::Divdu {
             rt: 5,
@@ -531,14 +531,14 @@ fn divduo_div_by_zero_sets_ov() {
         },
         &mut s,
     );
-    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30);
+    assert_eq!(s.xer() & (1u64 << 30), 1u64 << 30);
 }
 
 #[test]
 fn divdu_dot_sets_cr0_eq_on_zero_quotient() {
     let mut s = PpuState::new();
-    s.gpr[3] = 1;
-    s.gpr[4] = 100; // 1 / 100 = 0
+    s.set_gpr(3, 1);
+    s.set_gpr(4, 100); // 1 / 100 = 0
     exec_no_mem(
         &PpuInstruction::Divdu {
             rt: 5,

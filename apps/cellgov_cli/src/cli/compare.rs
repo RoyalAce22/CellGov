@@ -430,8 +430,10 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
 ///
 /// # Errors
 ///
-/// Exit codes: 0 on identical-state hash collision, 1 on a real diff,
-/// 2 when the requested step is missing from one or both windows.
+/// Exit codes: 0 when every fingerprint field and the PC agree at the
+/// step, 1 on a real diff (register field or PC), 2 when the
+/// requested step is missing from one or both windows, 3 when a zoom
+/// trace fails to decode.
 pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
     use cellgov_compare::{zoom_lookup, ZoomLookup};
     let a_bytes = load_file_or_die(a_path);
@@ -444,7 +446,16 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
             diffs,
         } => {
             if diffs.is_empty() {
-                println!("HASH_COLLISION step={step} pc=0x{a_pc:x}  full snapshots are byte-equal; resume scan from step {next}", next = step + 1);
+                // PC is outside the fingerprint, so `diverge` can name
+                // a Pc divergence whose zoom diff is empty -- that is
+                // a real control-flow divergence, not harness skew.
+                if a_pc != b_pc {
+                    println!(
+                        "PC_DIFF step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  registers agree but control flow diverged; the PC split is the divergence"
+                    );
+                    std::process::exit(1);
+                }
+                println!("NO_FIELD_DIFF step={step} pc=0x{a_pc:x}  snapshots agree on every fingerprint field and PC; if the hash stream diverged at this step, the harness is skewing snapshots against hashes -- investigate, do not resume the scan");
             } else {
                 println!(
                     "ZOOM step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  {} field(s) differ:",
@@ -467,6 +478,15 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
                 "MISSING_STEP step={step}  a_has_step={a_has_step}  b_has_step={b_has_step}  (zoom window did not cover this step on at least one side)"
             );
             std::process::exit(2);
+        }
+        ZoomLookup::CorruptTrace { a_error, b_error } => {
+            let describe = |e: Option<String>| e.unwrap_or_else(|| "ok".into());
+            println!(
+                "CORRUPT_TRACE  a: {}  b: {}  (zoom file damaged; widening the window will not help)",
+                describe(a_error),
+                describe(b_error)
+            );
+            std::process::exit(3);
         }
     }
 }

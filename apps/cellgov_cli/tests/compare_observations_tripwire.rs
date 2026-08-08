@@ -1,5 +1,5 @@
 //! Guard-liveness gate for the divergence-classifier cluster in
-//! `cellgov_compare`. The audit's bucket-B finding is that whenever
+//! `cellgov_compare`. The invariant: whenever
 //! `compare_observations` runs on a pair of observations that
 //! produce at least one byte divergence, four guarded paths fire
 //! as a unit:
@@ -131,11 +131,14 @@ fn divergence_classifier_cluster_fires_on_synthetic_pair() {
 
     // Producer output: every ByteDivergence carries length > 0 per
     // collect_byte_divergences' invariant.
-    let mut byte_divs: Vec<(u64, &ByteDivergence)> = Vec::new();
+    let mut byte_divs: Vec<(&str, u64, &ByteDivergence)> = Vec::new();
     for pair in &result.region_compare.pairs {
-        if let RegionPairOutcome::ByteDivergence { addr, bytes, .. } = pair {
+        if let RegionPairOutcome::ByteDivergence {
+            name, addr, bytes, ..
+        } = pair
+        {
             for div in bytes {
-                byte_divs.push((*addr, div));
+                byte_divs.push((name.as_str(), *addr, div));
             }
         }
     }
@@ -155,9 +158,25 @@ fn divergence_classifier_cluster_fires_on_synthetic_pair() {
     // Classifier consumer: classify.rs:232 fires on every run.
     let ctx = ClassifierContext::from_observation(&a)
         .expect("synthetic 'code' region is well-formed and large enough");
+    let region_data = |obs: &'static str, name: &str| -> Vec<u8> {
+        let o = if obs == "a" { &a } else { &b };
+        o.memory_regions
+            .iter()
+            .find(|r| r.name == name)
+            .map(|r| r.data.clone())
+            .expect("divergent pair region present in both observations")
+    };
     let classes: Vec<DivergenceClass> = byte_divs
         .iter()
-        .map(|(addr, div)| classify(div, *addr, &ctx))
+        .map(|(name, addr, div)| {
+            classify(
+                div,
+                *addr,
+                &ctx,
+                &region_data("a", name),
+                &region_data("b", name),
+            )
+        })
         .collect();
     assert_eq!(classes.len(), byte_divs.len());
 

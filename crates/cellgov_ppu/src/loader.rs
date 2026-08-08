@@ -256,7 +256,7 @@ pub fn load_ppu_elf(
             mem_bytes[entry_off + 7],
         ]);
         state.pc = code_addr as u64;
-        state.gpr[2] = toc as u64;
+        state.set_gpr(2, toc as u64);
     } else {
         state.pc = entry;
     }

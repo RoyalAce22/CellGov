@@ -130,9 +130,9 @@ three distinct skews that ProcessExit does not:
    targets RSX state and VRAM, not the main-memory regions we
    sample. The exception is methods that write guest memory --
    `SET_SEMAPHORE`, `NOTIFY`, `SET_REFERENCE` -- which would
-   produce a guest-side write inside the gap. Once Phase 39
-   models `NV406E_SET_REFERENCE` (the `ctrl.ref` writeback the
-   spin-poll consumes), this skew becomes non-theoretical for
+   produce a guest-side write inside the gap. With
+   `NV406E_SET_REFERENCE` modeled (the `ctrl.ref` writeback the
+   spin-poll consumes), this skew is non-theoretical for
    any title whose first batch carries one.
 
 The RSX1-vs-RSX2 diff bounds the torn-read skew empirically:
@@ -257,7 +257,7 @@ no `sys_log`, env-var parse on first use rather than at emulator
 start). Acceptable for in-tree investigation; gets cleaned up
 together with 0001 if either ever goes upstream.
 
-# 0003: PPU instruction trace (Stage 40D.2)
+# 0003: PPU instruction trace
 
 ## What it does
 
@@ -313,7 +313,7 @@ the trace loop is substantially slower than the normal interpreter
 or the LLVM recompiler. The `CELLGOV_PPU_TRACE_MAX_RECORDS` and
 `CELLGOV_PPU_TRACE_PRIMARY` filters are the practical way to keep
 captures small. 500 records of primary=14 (addi) on flOw's boot
-took under 25 seconds end-to-end during 40D.2 validation.
+took under 25 seconds end-to-end during validation.
 
 For now `emit_record` always passes `mem_len = 0`; memory diffs
 for loads and stores are a natural extension, and the dump format
@@ -355,7 +355,7 @@ printed with their full diff diagnostics so divergences surface
 as actionable executor bugs rather than opaque rejects.
 
 A first 1000-record capture of primary=31 from flOw's boot
-landed 988 / 1000 passing in 40D.2 validation, with the residual
+landed 988 / 1000 passing in validation, with the residual
 12 being legitimate semantic divergences (`stwcx.` / `stdcx.`
 CR0, `mftb` time-base read) that the harness now surfaces.
 

@@ -337,7 +337,12 @@ fn classify_all_panics_on_addr_mismatch_in_debug() {
         a_runner: "cellgov".to_string(),
         b_runner: "rpcs3".to_string(),
     };
-    let _ = classify_all(&result, &cellgov, &ClassifierContext::default());
+    let _ = classify_all(
+        &result,
+        &cellgov,
+        &cellgov.clone(),
+        &ClassifierContext::default(),
+    );
 }
 
 #[test]
@@ -357,7 +362,7 @@ fn classify_all_returns_one_class_per_byte_divergence() {
         elf_header_range: Some(0x10000..0x10040),
         ..ClassifierContext::default()
     };
-    let classes = classify_all(&result, &a, &ctx);
+    let classes = classify_all(&result, &a, &b, &ctx);
     assert_eq!(classes, vec![DivergenceClass::ElfHeader]);
 }
 
@@ -372,7 +377,7 @@ fn classify_all_returns_unclassified_without_dying() {
         vec![region("data", 0x80000, vec![0xFFu8; 8])],
     );
     let result = compare_observations(&a, &b);
-    let classes = classify_all(&result, &a, &ClassifierContext::default());
+    let classes = classify_all(&result, &a, &b, &ClassifierContext::default());
     assert_eq!(classes, vec![DivergenceClass::Unclassified]);
 }
 
@@ -607,7 +612,7 @@ fn fixture_gen_produces_byte_deterministic_output_across_two_invocations() {
         elf_header_range: Some(0x10000..0x10040),
         ..ClassifierContext::default()
     };
-    let classes = classify_all(&result, &a_obs, &ctx);
+    let classes = classify_all(&result, &a_obs, &b_obs, &ctx);
     let summary = summarize(&result, &classes);
 
     write_compare_report(&tmp, &result, &summary, &a_obs, &b_obs).unwrap();

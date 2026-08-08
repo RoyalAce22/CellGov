@@ -171,7 +171,7 @@ impl ExecutionUnit for WritingUnit {
     }
 }
 
-type FullStateTuple = (u64, [u64; 32], u64, u64, u64, u32);
+type FullStateTuple = (u64, u64, cellgov_exec::PpuFingerprint);
 
 #[derive(Clone)]
 

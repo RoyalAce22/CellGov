@@ -96,8 +96,8 @@ pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
             let mut state = cellgov_ppu::state::PpuState::new();
             cellgov_ppu::loader::load_ppu_elf(&ppu_elf, mem, &mut state)
                 .expect("scenario seed: load_ppu_elf on bundled microtest ELF");
-            state.gpr[1] = stack_top;
-            state.lr = 0;
+            state.set_gpr(1, stack_top);
+            state.set_lr(0);
             *primed_seed.borrow_mut() = Some(state);
         })
         .register(move |rt| {

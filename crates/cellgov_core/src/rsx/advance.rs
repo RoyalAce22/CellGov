@@ -111,7 +111,7 @@ fn dispatch_method(
 }
 
 /// Drain the FIFO from `cursor.get()` up to `cursor.put()`,
-/// honoring 40F-consumer control-flow headers.
+/// honoring the FIFO consumer's control-flow headers.
 ///
 /// FIFO bytes are interpreted as big-endian u32 (PS3 ABI). Emissions
 /// are appended to `emitted` in FIFO address order. Increment headers

@@ -25,7 +25,7 @@ index f5d91cc..98a1ef7 100644
  
  void ppu_thread::exec_task()
  {
-+	// CellGov per-instruction trace (Stage 40D.2). Opt-in via
++	// CellGov per-instruction trace. Opt-in via
 +	// CELLGOV_PPU_TRACE_PATH. When active, run the static
 +	// interpreter with `&ppu_ret` as next_fn so every instruction
 +	// returns to our loop body (vs the upstream chained-dispatch

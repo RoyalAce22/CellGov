@@ -118,7 +118,6 @@ impl Runtime {
 
         // PpuStateHash and PpuStateFull pair by step index so the diff
         // printer matches a hash divergence with its full-state snapshot.
-        let hash_base = self.per_step_index;
         for (pc, hash) in retired_hashes {
             self.trace.record(&TraceRecord::PpuStateHash {
                 step: self.per_step_index,
@@ -127,18 +126,29 @@ impl Runtime {
             });
             self.per_step_index += 1;
         }
-        // `hash_base + i` aligns `step` with the hash stream when the
-        // window starts at the unit's first retired instruction;
-        // mid-run windows match by PC instead.
-        for (i, (pc, gpr, lr, ctr, xer, cr)) in retired_full.into_iter().enumerate() {
+        // The unit stamps each snapshot with its retirement counter at
+        // capture, so mid-run windows keep true step attribution. For a
+        // single unit traced from boot this equals the hash stream's
+        // step index; with multiple traced units the hash stream
+        // interleaves globally and snapshots match by (step, pc).
+        for (step, pc, fingerprint) in retired_full {
+            let cellgov_exec::PpuFingerprint {
+                gpr,
+                lr,
+                ctr,
+                xer,
+                cr,
+                reservation_line,
+            } = fingerprint;
             self.zoom_trace.record(&TraceRecord::PpuStateFull {
-                step: hash_base + i as u64,
+                step,
                 pc,
                 gpr,
                 lr,
                 ctr,
                 xer,
                 cr,
+                reservation_line,
             });
         }
 

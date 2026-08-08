@@ -18,18 +18,18 @@ fn op59(xo: u16) -> Fp59Op {
 
 fn run63(xo: u16, fra_v: f64, frb_v: f64, frc_v: f64) -> f64 {
     let mut s = PpuState::new();
-    s.fpr[1] = f64_bits(fra_v);
-    s.fpr[2] = f64_bits(frb_v);
-    s.fpr[3] = f64_bits(frc_v);
+    s.set_fpr(1, f64_bits(fra_v));
+    s.set_fpr(2, f64_bits(frb_v));
+    s.set_fpr(3, f64_bits(frc_v));
     execute_fp63(&mut s, op63(xo), 0, 1, 2, 3);
     f64::from_bits(s.fpr[0])
 }
 
 fn run59(xo: u16, fra_v: f64, frb_v: f64, frc_v: f64) -> f64 {
     let mut s = PpuState::new();
-    s.fpr[1] = f64_bits(fra_v);
-    s.fpr[2] = f64_bits(frb_v);
-    s.fpr[3] = f64_bits(frc_v);
+    s.set_fpr(1, f64_bits(fra_v));
+    s.set_fpr(2, f64_bits(frb_v));
+    s.set_fpr(3, f64_bits(frc_v));
     execute_fp59(&mut s, op59(xo), 0, 1, 2, 3);
     f64::from_bits(s.fpr[0])
 }
@@ -89,7 +89,7 @@ fn fnmadd_negates_finite_results() {
 fn fctiwz_nan_input_produces_min_int_low32() {
     let nan_bits = f64::NAN.to_bits();
     let mut s = PpuState::new();
-    s.fpr[2] = nan_bits;
+    s.set_fpr(2, nan_bits);
     // xo = 15 -> fctiwz
     execute_fp63(&mut s, op63(15), 0, 0, 2, 0);
     // Spec: bits 32:63 = 0x8000_0000.
@@ -103,8 +103,8 @@ fn fctiw_xo14_dispatches() {
     // observe a write by seeding a sentinel and checking it
     // gets overwritten.
     let mut s = PpuState::new();
-    s.fpr[0] = 0xDEAD_BEEFu64;
-    s.fpr[2] = f64::to_bits(42.0);
+    s.set_fpr(0, 0xDEAD_BEEFu64);
+    s.set_fpr(2, f64::to_bits(42.0));
     execute_fp63(&mut s, op63(14), 0, 0, 2, 0);
     assert_eq!(s.fpr[0] & 0xFFFF_FFFF, 42);
 }
@@ -112,7 +112,7 @@ fn fctiw_xo14_dispatches() {
 #[test]
 fn fctidz_nan_input_produces_min_int64() {
     let mut s = PpuState::new();
-    s.fpr[2] = f64::NAN.to_bits();
+    s.set_fpr(2, f64::NAN.to_bits());
     // xo = 815 -> fctidz
     execute_fp63(&mut s, op63(815), 0, 0, 2, 0);
     assert_eq!(s.fpr[0], 0x8000_0000_0000_0000);
@@ -121,8 +121,8 @@ fn fctidz_nan_input_produces_min_int64() {
 #[test]
 fn fctid_xo814_dispatches() {
     let mut s = PpuState::new();
-    s.fpr[0] = 0xDEAD_BEEFu64;
-    s.fpr[2] = f64::to_bits(42.0);
+    s.set_fpr(0, 0xDEAD_BEEFu64);
+    s.set_fpr(2, f64::to_bits(42.0));
     execute_fp63(&mut s, op63(814), 0, 0, 2, 0);
     assert_eq!(s.fpr[0], 42);
 }
@@ -184,7 +184,7 @@ fn fmr_copies_frb_to_frt() {
     // xo = 72 -> fmr. FRT <- FRB; bit-exact, NaN payload preserved.
     let mut s = PpuState::new();
     let payload = 0x7FF8_0000_DEAD_BEEFu64; // QNaN with payload
-    s.fpr[2] = payload;
+    s.set_fpr(2, payload);
     execute_fp63(&mut s, op63(72), 0, 0, 2, 0);
     assert_eq!(s.fpr[0], payload);
 }
@@ -251,7 +251,7 @@ fn frsp_rounds_double_to_single_precision() {
 fn fcfid_converts_signed_int64_to_double() {
     // xo = 846 -> fcfid. FRB's raw bits are read as i64.
     let mut s = PpuState::new();
-    s.fpr[2] = (-3i64) as u64;
+    s.set_fpr(2, (-3i64) as u64);
     execute_fp63(&mut s, op63(846), 0, 0, 2, 0);
     assert_eq!(f64::from_bits(s.fpr[0]), -3.0);
 }
@@ -260,8 +260,8 @@ fn fcfid_converts_signed_int64_to_double() {
 fn fcmpu_finite_lt_sets_lt_bit() {
     // xo = 0 -> fcmpu. BF = (FRT >> 2) & 7.
     let mut s = PpuState::new();
-    s.fpr[1] = f64_bits(1.0);
-    s.fpr[2] = f64_bits(2.0);
+    s.set_fpr(1, f64_bits(1.0));
+    s.set_fpr(2, f64_bits(2.0));
     // FRT = 0 -> BF = 0; 1.0 < 2.0 -> LT bit (0b1000) in CR0.
     execute_fp63(&mut s, op63(0), 0, 1, 2, 0);
     assert_eq!(s.cr_field(0), 0b1000);
@@ -271,8 +271,8 @@ fn fcmpu_finite_lt_sets_lt_bit() {
 fn fcmpu_handles_nan_unordered() {
     // NaN vs anything -> FU bit (0b0001) in target CR field.
     let mut s = PpuState::new();
-    s.fpr[1] = f64::NAN.to_bits();
-    s.fpr[2] = f64_bits(0.0);
+    s.set_fpr(1, f64::NAN.to_bits());
+    s.set_fpr(2, f64_bits(0.0));
     execute_fp63(&mut s, op63(0), 0, 1, 2, 0);
     assert_eq!(s.cr_field(0), 0b0001);
 }
@@ -282,8 +282,8 @@ fn fcmpo_writes_to_bf_from_frt_high_bits() {
     // FRT = 0b01100 -> BF = top 3 bits = 0b011 = 3.
     // 5.0 > 3.0 -> GT bit (0b0100) in CR3.
     let mut s = PpuState::new();
-    s.fpr[1] = f64_bits(5.0);
-    s.fpr[2] = f64_bits(3.0);
+    s.set_fpr(1, f64_bits(5.0));
+    s.set_fpr(2, f64_bits(3.0));
     execute_fp63(&mut s, op63(32), 0b01100, 1, 2, 0);
     assert_eq!(s.cr_field(3), 0b0100);
     // CR0 untouched.
@@ -293,8 +293,8 @@ fn fcmpo_writes_to_bf_from_frt_high_bits() {
 #[test]
 fn fcmpu_finite_equal_sets_eq_bit() {
     let mut s = PpuState::new();
-    s.fpr[1] = f64_bits(2.5);
-    s.fpr[2] = f64_bits(2.5);
+    s.set_fpr(1, f64_bits(2.5));
+    s.set_fpr(2, f64_bits(2.5));
     execute_fp63(&mut s, op63(0), 0, 1, 2, 0);
     assert_eq!(s.cr_field(0), 0b0010);
 }
@@ -303,7 +303,7 @@ fn fcmpu_finite_equal_sets_eq_bit() {
 fn fctiw_rounds_toward_zero() {
     // Convert 3.7 to i32: round-toward-zero (FPSCR unmodeled) -> 3.
     let mut s = PpuState::new();
-    s.fpr[2] = f64_bits(3.7);
+    s.set_fpr(2, f64_bits(3.7));
     execute_fp63(&mut s, op63(14), 0, 0, 2, 0);
     assert_eq!(s.fpr[0] & 0xFFFF_FFFF, 3);
 }
@@ -312,7 +312,7 @@ fn fctiw_rounds_toward_zero() {
 fn fctid_converts_negative_double_to_int64() {
     // -42.9 -> -42 (round-toward-zero, sign-extended into 64 bits).
     let mut s = PpuState::new();
-    s.fpr[2] = f64_bits(-42.9);
+    s.set_fpr(2, f64_bits(-42.9));
     execute_fp63(&mut s, op63(814), 0, 0, 2, 0);
     assert_eq!(s.fpr[0] as i64, -42);
 }

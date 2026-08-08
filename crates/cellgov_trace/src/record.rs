@@ -20,7 +20,7 @@
 //! | `0x05` | `UnitBlocked`         | 1 + 8 + 1 = 10                         |
 //! | `0x06` | `UnitWoken`           | 1 + 8 + 1 = 10                         |
 //! | `0x07` | `PpuStateHash`        | 1 + 8 + 8 + 8 = 25                     |
-//! | `0x08` | `PpuStateFull`        | 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 = 301 |
+//! | `0x08` | `PpuStateFull`        | 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 + 1 + 8 = 310 |
 //! | `0x09` | `HostInvariantBreak`  | 1 + 1 = 2                              |
 //! | `0x0a` | `SyscallEntered`      | 1 + 8 + 8 + 8*8 + 1 = 82               |
 
@@ -147,8 +147,7 @@ pub enum TracedEffectKind {
 
 /// Reason a host-side invariant break was recorded into the trace
 /// stream. The bridge in `cellgov_core::runtime::trace_bridge` maps
-/// the lv2-owned source enum onto this mirror by exhaustive match
-/// (no `_` arm); a new reason on either side is a compile break.
+/// the lv2-owned source enum onto this mirror by exhaustive match.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
 )]
@@ -204,8 +203,9 @@ pub enum DecodeError {
     /// Hash-checkpoint-kind byte is not a known variant.
     #[error("unknown hash-checkpoint kind 0x{0:02x}")]
     UnknownHashKind(u8),
-    /// `fault_discarded` flag was neither 0 nor 1.
-    #[error("fault-discarded flag is neither 0 nor 1: 0x{0:02x}")]
+    /// A flag byte (`fault_discarded`, `PpuStateFull` reservation tag)
+    /// was neither 0 nor 1.
+    #[error("flag byte is neither 0 nor 1: 0x{0:02x}")]
     InvalidBool(u8),
     /// Effect-kind byte is not a known variant.
     #[error("unknown effect kind 0x{0:02x}")]
@@ -332,6 +332,11 @@ pub enum TraceRecord {
     /// `hash` covers GPR + LR + CTR + XER + CR under a canonical tooling-local
     /// byte layout. Emitted once per retired instruction when per-step tracing
     /// is active.
+    ///
+    /// FPR, VMX, and FPSCR are outside the covered set. A divergence confined
+    /// to float or vector state stays invisible until it reaches a covered
+    /// register, so the step a consumer derives from these records is the
+    /// first scalar-visible divergence, not necessarily the first divergence.
     PpuStateHash {
         /// Per-thread retired-instruction counter.
         step: u64,
@@ -340,12 +345,14 @@ pub enum TraceRecord {
         /// Hash of the PPU architectural state.
         hash: StateHash,
     },
-    /// Full PPU register snapshot at instruction retire.
+    /// Scalar PPU register snapshot at instruction retire.
     ///
-    /// Opt-in `[lo, hi]` window only, never on the hot path. Covers the same
-    /// architectural surface as `PpuStateHash` uncompressed, so a divergence
-    /// diff can name the exact disagreeing register. `step` matches
-    /// `PpuStateHash::step` for the same instruction.
+    /// Opt-in `[lo, hi]` window only, never on the hot path. Carries the
+    /// full fingerprint input set of [`PpuStateHash`](Self::PpuStateHash)
+    /// uncompressed -- GPR, LR, CTR, XER, CR, reservation; no float or
+    /// vector state -- so a hash divergence always names the disagreeing
+    /// field in the zoom diff. `step` matches `PpuStateHash::step` for
+    /// the same instruction.
     PpuStateFull {
         /// Per-thread retired-instruction counter.
         step: u64,
@@ -361,6 +368,8 @@ pub enum TraceRecord {
         xer: u64,
         /// Condition register.
         cr: u32,
+        /// Active reservation's 128-byte line address, if held.
+        reservation_line: Option<u64>,
     },
     /// Host-side invariant break observed during `Lv2Host::dispatch`.
     /// One record per `record_invariant_break` call in `cellgov_lv2`.
@@ -495,6 +504,7 @@ impl TraceRecord {
                 ctr,
                 xer,
                 cr,
+                reservation_line,
             } => {
                 buf.push(TAG_PPU_STATE_FULL);
                 write_u64(buf, *step);
@@ -506,6 +516,16 @@ impl TraceRecord {
                 write_u64(buf, *ctr);
                 write_u64(buf, *xer);
                 write_u32(buf, *cr);
+                match reservation_line {
+                    None => {
+                        buf.push(0);
+                        write_u64(buf, 0);
+                    }
+                    Some(addr) => {
+                        buf.push(1);
+                        write_u64(buf, *addr);
+                    }
+                }
             }
             TraceRecord::HostInvariantBreak { reason } => {
                 buf.push(TAG_HOST_INVARIANT_BREAK);
@@ -623,6 +643,13 @@ impl TraceRecord {
                 let ctr = read_u64(bytes, &mut pos)?;
                 let xer = read_u64(bytes, &mut pos)?;
                 let cr = read_u32(bytes, &mut pos)?;
+                let resv_tag = read_u8(bytes, &mut pos)?;
+                let resv_addr = read_u64(bytes, &mut pos)?;
+                let reservation_line = match resv_tag {
+                    0 => None,
+                    1 => Some(resv_addr),
+                    other => return Err(DecodeError::InvalidBool(other)),
+                };
                 TraceRecord::PpuStateFull {
                     step,
                     pc,
@@ -631,6 +658,7 @@ impl TraceRecord {
                     ctr,
                     xer,
                     cr,
+                    reservation_line,
                 }
             }
             TAG_HOST_INVARIANT_BREAK => {

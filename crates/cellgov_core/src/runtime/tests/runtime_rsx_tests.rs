@@ -414,7 +414,7 @@ fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
 
 #[test]
 fn rsx_label_writes_committed_counter_increments_on_label_write() {
-    // Audit C-2 witness: the rsx_label_writes_committed counter
+    // Liveness witness: the rsx_label_writes_committed counter
     // on Runtime increments per Effect::RsxLabelWrite submitted
     // to the commit pipeline. This proves the semaphore-region
     // debug_assert in commit.rs has its silence witnessed when

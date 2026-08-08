@@ -568,14 +568,14 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         {
             let state = unit.state_mut();
             state.pc = init.entry_code;
-            state.gpr[1] = init.stack_top;
-            state.gpr[2] = init.entry_toc;
-            state.gpr[3] = init.arg;
+            state.set_gpr(1, init.stack_top);
+            state.set_gpr(2, init.entry_toc);
+            state.set_gpr(3, init.arg);
             for (i, value) in init.extra_args.iter().enumerate() {
-                state.gpr[4 + i] = *value;
+                state.set_gpr(4 + i, *value);
             }
-            state.gpr[13] = init.tls_base;
-            state.lr = init.lr_sentinel;
+            state.set_gpr(13, init.tls_base);
+            state.set_lr(init.lr_sentinel);
         }
         if let Some(pc) = debug_opts.dump_at_pc {
             unit.set_break_pc(pc, debug_opts.dump_skip);
@@ -673,21 +673,21 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // r12 the malloc pagesize, r13 the TLS pointer. Stamped BEFORE
     // the primary unit is registered so module_start aliases bind
     // to the real entry state.
-    state.gpr[1] = PS3_PRIMARY_STACK_TOP;
-    state.lr = 0;
-    state.gpr[3] = 0;
-    state.gpr[4] = 0;
-    state.gpr[5] = 0;
-    state.gpr[6] = 0;
-    state.gpr[7] = 0x0100_0000;
-    state.gpr[8] = tls_info.map(|t| t.vaddr).unwrap_or(0);
-    state.gpr[9] = tls_info.map(|t| t.filesz).unwrap_or(0);
-    state.gpr[10] = tls_info.map(|t| t.memsz).unwrap_or(0);
-    state.gpr[11] = load_result.entry;
-    state.gpr[12] = malloc_pagesize as u64;
+    state.set_gpr(1, PS3_PRIMARY_STACK_TOP);
+    state.set_lr(0);
+    state.set_gpr(3, 0);
+    state.set_gpr(4, 0);
+    state.set_gpr(5, 0);
+    state.set_gpr(6, 0);
+    state.set_gpr(7, 0x0100_0000);
+    state.set_gpr(8, tls_info.map(|t| t.vaddr).unwrap_or(0));
+    state.set_gpr(9, tls_info.map(|t| t.filesz).unwrap_or(0));
+    state.set_gpr(10, tls_info.map(|t| t.memsz).unwrap_or(0));
+    state.set_gpr(11, load_result.entry);
+    state.set_gpr(12, malloc_pagesize as u64);
     // r13 is the PS3 PPC64 ABI TLS pointer; LV2 seeds it at process
     // creation and sys_initialize_tls does not touch it.
-    state.gpr[13] = super::prx::TLS_BASE + 0x7030;
+    state.set_gpr(13, super::prx::TLS_BASE + 0x7030);
 
     // Bound the predecode shadow to executable code; built BEFORE
     // module_start so the primary unit registers with it. PRX

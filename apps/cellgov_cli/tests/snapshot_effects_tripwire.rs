@@ -8,7 +8,7 @@
 //! observer (`cellgov_explore::observe_decisions_with_snapshots`)
 //! invokes it, and only at branching points.
 //!
-//! The audit's bucket-B witness for this guard is the count of
+//! The liveness witness for this guard is the count of
 //! snapshots taken during a run; this equals
 //! `ExplorationResult::total_branching_points` by construction
 //! because the observer snapshots exactly when
@@ -26,7 +26,7 @@
 //!
 //! This test uses cellgov_explore's library API directly; it does
 //! not require fixtures or subprocess invocation. Synthetic
-//! scenarios are always available, so unlike the other audit
+//! scenarios are always available, so unlike the corpus-gated
 //! tripwires there is no fixture-absent skip path.
 
 #![allow(

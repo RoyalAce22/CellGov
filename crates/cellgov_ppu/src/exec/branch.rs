@@ -27,7 +27,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
                 (state.pc as i64).wrapping_add(offset as i64) as u64
             };
             if link {
-                state.lr = state.pc + 4;
+                state.set_lr(state.pc + 4);
             }
             state.pc = target;
             ExecuteVerdict::Branch
@@ -42,7 +42,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             // [PPC-Book1 p:24 s:2.4] Branch Conditional B-form: target is EXTS(BD||0b00); LR is written under LK regardless of taken.
             let cond = branch_condition(state, bo, bi);
             if link {
-                state.lr = state.pc + 4;
+                state.set_lr(state.pc + 4);
             }
             if cond {
                 state.pc = if aa {
@@ -63,10 +63,10 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             // does not affect results.
             // [PPC-Book1 p:25 s:2.4] bclr XL-form: NIA <- LR[0:61]||0b00; CTR decremented when BO_2=0.
             // [PPC-Book1 p:21 s:2.4.1 Figure 23] BH field encodings; BH is independent of BO "at" hints and does not affect execution.
-            let target = state.lr & !3;
+            let target = state.lr() & !3;
             let cond = branch_condition(state, bo, bi);
             if link {
-                state.lr = state.pc + 4;
+                state.set_lr(state.pc + 4);
             }
             if cond {
                 state.pc = target;
@@ -84,10 +84,10 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             // [PPC-Book1 p:25 s:2.4] bcctr XL-form: NIA <- CTR[0:61]||0b00; specifying BO_2=0 yields an invalid form.
             let cond_ok = (bo & 0x10) != 0 || (state.cr_bit(bi) == ((bo & 0x08) != 0));
             if link {
-                state.lr = state.pc + 4;
+                state.set_lr(state.pc + 4);
             }
             if cond_ok {
-                state.pc = state.ctr & !3;
+                state.pc = state.ctr() & !3;
                 ExecuteVerdict::Branch
             } else {
                 ExecuteVerdict::Continue
@@ -110,10 +110,10 @@ pub(crate) fn branch_condition(state: &mut PpuState, bo: u8, bi: u8) -> bool {
     // [PPC-Book1 p:20 s:2.4.1 Figure 21] BO field encodings table; the "a"/"t" hint bits in BO_4 (0x01) are software hints only and do not affect results.
     let decr_ctr = (bo & 0x04) == 0;
     if decr_ctr {
-        state.ctr = state.ctr.wrapping_sub(1);
+        state.set_ctr(state.ctr().wrapping_sub(1));
     }
 
-    let ctr_ok = (bo & 0x04) != 0 || ((state.ctr != 0) ^ ((bo & 0x02) != 0));
+    let ctr_ok = (bo & 0x04) != 0 || ((state.ctr() != 0) ^ ((bo & 0x02) != 0));
     let cr_ok = (bo & 0x10) != 0 || (state.cr_bit(bi) == ((bo & 0x08) != 0));
 
     ctr_ok && cr_ok

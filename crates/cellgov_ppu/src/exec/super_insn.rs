@@ -24,27 +24,27 @@ pub(crate) fn execute(
     match *insn {
         // Quickened (specialized) forms
         PpuInstruction::Li { rt, imm } => {
-            state.gpr[rt as usize] = imm as i64 as u64;
+            state.set_gpr(rt as usize, imm as i64 as u64);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Mr { ra, rs } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize];
+            state.set_gpr(ra as usize, state.gpr[rs as usize]);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Slwi { ra, rs, n } => {
             let val = (state.gpr[rs as usize] as u32) << n;
-            state.gpr[ra as usize] = val as u64;
+            state.set_gpr(ra as usize, val as u64);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Srwi { ra, rs, n } => {
             let val = (state.gpr[rs as usize] as u32) >> n;
-            state.gpr[ra as usize] = val as u64;
+            state.set_gpr(ra as usize, val as u64);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Clrlwi { ra, rs, n } => {
             let mask = if n >= 32 { 0 } else { u32::MAX >> n };
             let val = (state.gpr[rs as usize] as u32) & mask;
-            state.gpr[ra as usize] = val as u64;
+            state.set_gpr(ra as usize, val as u64);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Nop => ExecuteVerdict::Continue,
@@ -65,15 +65,15 @@ pub(crate) fn execute(
         }
         PpuInstruction::Clrldi { ra, rs, n } => {
             let mask = if n >= 64 { 0 } else { u64::MAX >> n };
-            state.gpr[ra as usize] = state.gpr[rs as usize] & mask;
+            state.set_gpr(ra as usize, state.gpr[rs as usize] & mask);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Sldi { ra, rs, n } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] << n;
+            state.set_gpr(ra as usize, state.gpr[rs as usize] << n);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Srdi { ra, rs, n } => {
-            state.gpr[ra as usize] = state.gpr[rs as usize] >> n;
+            state.set_gpr(ra as usize, state.gpr[rs as usize] >> n);
             ExecuteVerdict::Continue
         }
 
@@ -90,7 +90,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra_load, offset);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
+                    state.set_gpr(rt as usize, val);
                     let a = val as i32;
                     let b = cmp_imm as i32;
                     let cr_val = if a < b {
@@ -115,7 +115,7 @@ pub(crate) fn execute(
             store_offset,
         } => {
             let val = imm as i64 as u64;
-            state.gpr[rt as usize] = val;
+            state.set_gpr(rt as usize, val);
             let ea = state.ea_d_form(ra_store, store_offset);
             buffer_store(store_buf, state, ea, 4, val)
         }
@@ -126,7 +126,7 @@ pub(crate) fn execute(
             ra_store,
             store_offset,
         } => {
-            state.gpr[rt as usize] = state.lr;
+            state.set_gpr(rt as usize, state.lr());
             let ea = state.ea_d_form(ra_store, store_offset);
             buffer_store(store_buf, state, ea, 4, state.gpr[rt as usize])
         }
@@ -140,8 +140,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra_load, offset);
             match load_ze(region_views, store_buf, ea, 4) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.lr = val;
+                    state.set_gpr(rt as usize, val);
+                    state.set_lr(val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -154,7 +154,7 @@ pub(crate) fn execute(
             ra_store,
             store_offset,
         } => {
-            state.gpr[rt as usize] = state.lr;
+            state.set_gpr(rt as usize, state.lr());
             let ea = state.ea_d_form(ra_store, store_offset);
             buffer_store(store_buf, state, ea, 8, state.gpr[rt as usize])
         }
@@ -168,8 +168,8 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra_load, offset);
             match load_ze(region_views, store_buf, ea, 8) {
                 Ok(val) => {
-                    state.gpr[rt as usize] = val;
-                    state.lr = val;
+                    state.set_gpr(rt as usize, val);
+                    state.set_lr(val);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),

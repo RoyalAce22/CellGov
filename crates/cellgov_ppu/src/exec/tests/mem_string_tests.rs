@@ -8,7 +8,7 @@ fn lswi_packs_bytes_four_per_register_msb_first() {
     let mut mem = vec![0u8; 0x100];
     mem[0x10..0x15].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE]);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Lswi {
@@ -34,7 +34,7 @@ fn lswi_nb_zero_means_32_bytes_and_wraps_at_r31() {
         *slot = i as u8;
     }
     let mut s = PpuState::new();
-    s.gpr[5] = 0;
+    s.set_gpr(5, 0);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Lswi {
@@ -60,9 +60,9 @@ fn stswi_extracts_bytes_msb_first_from_consecutive_registers() {
     // 5 bytes from RS=3 (4 bytes from r3, 1 byte from r4 high).
     let mem = vec![0u8; 0x100];
     let mut s = PpuState::new();
-    s.gpr[1] = 0x20;
-    s.gpr[3] = 0xAABB_CCDDu64;
-    s.gpr[4] = 0xEE00_0000u64;
+    s.set_gpr(1, 0x20);
+    s.set_gpr(3, 0xAABB_CCDDu64);
+    s.set_gpr(4, 0xEE00_0000u64);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Stswi {
@@ -107,9 +107,9 @@ fn lswx_uses_xer_tbc_byte_count() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20..0x23].copy_from_slice(&[0x11, 0x22, 0x33]);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x10;
-    s.xer = 0x3; // TBC=3 bytes
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x10);
+    s.set_xer(0x3); // TBC=3 bytes
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lswx {
@@ -129,10 +129,10 @@ fn lswx_uses_xer_tbc_byte_count() {
 #[test]
 fn lswx_zero_byte_count_is_noop() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x10;
-    s.gpr[3] = 0xDEAD_BEEF;
-    s.xer = 0;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x10);
+    s.set_gpr(3, 0xDEAD_BEEF);
+    s.set_xer(0);
     let mut effects = Vec::new();
     let v = exec_with_mem(
         &PpuInstruction::Lswx {
@@ -153,10 +153,10 @@ fn lswx_zero_byte_count_is_noop() {
 #[test]
 fn stswx_uses_xer_tbc_byte_count() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x10;
-    s.gpr[3] = 0xAABB_CCDDu64;
-    s.xer = 0x2;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x10);
+    s.set_gpr(3, 0xAABB_CCDDu64);
+    s.set_xer(0x2);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stswx {
@@ -184,13 +184,16 @@ fn stswx_uses_xer_tbc_byte_count() {
 #[test]
 fn stswi_nb_zero_means_32_bytes() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     for r in 0..8u32 {
-        s.gpr[3 + r as usize] = (r as u64) * 0x0101_0101_0101_0101 + 0x1020_3040;
+        s.set_gpr(
+            3 + r as usize,
+            (r as u64) * 0x0101_0101_0101_0101 + 0x1020_3040,
+        );
     }
     // To make the assertion simple, seed r3..r10 with known 32-bit words.
     for r in 0..8usize {
-        s.gpr[3 + r] = (0xA0 + r as u64) << 24 | ((0xB0 + r as u64) << 16);
+        s.set_gpr(3 + r, (0xA0 + r as u64) << 24 | ((0xB0 + r as u64) << 16));
     }
     let mut effects = Vec::new();
     exec_with_mem(
@@ -217,7 +220,7 @@ fn lswi_with_ra_zero_uses_literal_zero_base() {
     let mut mem = vec![0u8; 0x20];
     mem[0..4].copy_from_slice(&[0x01, 0x02, 0x03, 0x04]);
     let mut s = PpuState::new();
-    s.gpr[0] = 0xDEAD; // must be ignored
+    s.set_gpr(0, 0xDEAD); // must be ignored
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lswi {
@@ -242,8 +245,8 @@ fn ldbrx_reverses_8_bytes() {
     let mut mem = vec![0u8; 0x100];
     mem[0x10..0x18].copy_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Ldbrx {
@@ -265,9 +268,9 @@ fn lwbrx_reverses_low_4_bytes_and_zero_extends() {
     let mut mem = vec![0u8; 0x100];
     mem[0x10..0x14].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD]);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0;
-    s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0);
+    s.set_gpr(3, 0xFFFF_FFFF_FFFF_FFFF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lwbrx {
@@ -288,9 +291,9 @@ fn lhbrx_reverses_halfword_and_zero_extends() {
     let mut mem = vec![0u8; 0x100];
     mem[0x10..0x12].copy_from_slice(&[0x12, 0x34]);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0;
-    s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0);
+    s.set_gpr(3, 0xFFFF_FFFF_FFFF_FFFF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lhbrx {
@@ -309,9 +312,9 @@ fn lhbrx_reverses_halfword_and_zero_extends() {
 #[test]
 fn sdbrx_emits_byte_reversed_8_byte_store() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0;
-    s.gpr[5] = 0x0102_0304_0506_0708;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0);
+    s.set_gpr(5, 0x0102_0304_0506_0708);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Sdbrx {
@@ -336,9 +339,9 @@ fn sdbrx_emits_byte_reversed_8_byte_store() {
 #[test]
 fn stwbrx_emits_byte_reversed_low_4_bytes() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0;
-    s.gpr[5] = 0xFFFF_FFFF_AABB_CCDD;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0);
+    s.set_gpr(5, 0xFFFF_FFFF_AABB_CCDD);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stwbrx {
@@ -363,9 +366,9 @@ fn stwbrx_emits_byte_reversed_low_4_bytes() {
 #[test]
 fn sthbrx_emits_byte_reversed_low_halfword() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0;
-    s.gpr[5] = 0xFFFF_FFFF_FFFF_1234;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0);
+    s.set_gpr(5, 0xFFFF_FFFF_FFFF_1234);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Sthbrx {

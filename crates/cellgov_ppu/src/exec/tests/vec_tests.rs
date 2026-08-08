@@ -9,7 +9,7 @@ use crate::instruction::PpuInstruction;
 #[test]
 fn vxor_self_zeros_vector_register() {
     let mut s = PpuState::new();
-    s.vr[5] = 0xDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEFu128;
+    s.set_vr(5, 0xDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEFu128);
     let v = exec_no_mem(
         &PpuInstruction::Vxor {
             vt: 5,
@@ -28,9 +28,9 @@ fn vxor_typed_and_vx_stub_paths_produce_identical_state() {
     let seed_vb = 0xAAAA_BBBB_CCCC_DDDD_EEEE_FFFF_0000_1111u128;
 
     let mut s_typed = PpuState::new();
-    s_typed.vr[1] = seed_va;
-    s_typed.vr[2] = seed_vb;
-    s_typed.vr[3] = 0xDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEFu128;
+    s_typed.set_vr(1, seed_va);
+    s_typed.set_vr(2, seed_vb);
+    s_typed.set_vr(3, 0xDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEFu128);
     exec_no_mem(
         &PpuInstruction::Vxor {
             vt: 3,
@@ -41,9 +41,9 @@ fn vxor_typed_and_vx_stub_paths_produce_identical_state() {
     );
 
     let mut s_stub = PpuState::new();
-    s_stub.vr[1] = seed_va;
-    s_stub.vr[2] = seed_vb;
-    s_stub.vr[3] = 0xDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEFu128;
+    s_stub.set_vr(1, seed_va);
+    s_stub.set_vr(2, seed_vb);
+    s_stub.set_vr(3, 0xDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEFu128);
     exec_no_mem(
         &PpuInstruction::Vx {
             op: VxOp::Vxor,
@@ -108,8 +108,8 @@ fn vx_xo_table_matches_altivec_pem_canonical() {
     ];
     for &(xo, va, vb, expected, name) in pairs {
         let mut s = PpuState::new();
-        s.vr[1] = va;
-        s.vr[2] = vb;
+        s.set_vr(1, va);
+        s.set_vr(2, vb);
         exec_no_mem(&vx(xo, 3, 1, 2), &mut s);
         assert_eq!(
             s.vr[3], expected,
@@ -121,14 +121,20 @@ fn vx_xo_table_matches_altivec_pem_canonical() {
 #[test]
 fn vsldoi_shifts_by_shb_bytes() {
     let mut s = PpuState::new();
-    s.vr[1] = u128::from_be_bytes([
-        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE,
-        0xFF,
-    ]);
-    s.vr[2] = u128::from_be_bytes([
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-        0x10,
-    ]);
+    s.set_vr(
+        1,
+        u128::from_be_bytes([
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+            0xEE, 0xFF,
+        ]),
+    );
+    s.set_vr(
+        2,
+        u128::from_be_bytes([
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10,
+        ]),
+    );
     exec_no_mem(
         &PpuInstruction::Vsldoi {
             vt: 3,
@@ -236,8 +242,8 @@ fn vx(xo: u16, vt: u8, va: u8, vb: u8) -> PpuInstruction {
 
 fn run_vx(xo: u16, va: u128, vb: u128) -> u128 {
     let mut s = PpuState::new();
-    s.vr[1] = va;
-    s.vr[2] = vb;
+    s.set_vr(1, va);
+    s.set_vr(2, vb);
     let v = exec_no_mem(&vx(xo, 3, 1, 2), &mut s);
     assert_eq!(v, ExecuteVerdict::Continue);
     s.vr[3]
@@ -248,7 +254,7 @@ fn run_vx_imm(xo: u16, va_field: u8, vb: u128) -> u128 {
     // a 5-bit immediate, not a register selector. Use vr[0] (zero) as
     // the unused va register.
     let mut s = PpuState::new();
-    s.vr[2] = vb;
+    s.set_vr(2, vb);
     let v = exec_no_mem(&vx(xo, 3, va_field, 2), &mut s);
     assert_eq!(v, ExecuteVerdict::Continue);
     s.vr[3]
@@ -257,9 +263,9 @@ fn run_vx_imm(xo: u16, va_field: u8, vb: u128) -> u128 {
 fn run_va(xo: u8, va: u128, vb: u128, vc: u128) -> u128 {
     let op = VaOp::from_repr(xo).unwrap_or_else(|| panic!("undocumented test xo {xo}"));
     let mut s = PpuState::new();
-    s.vr[1] = va;
-    s.vr[2] = vb;
-    s.vr[3] = vc;
+    s.set_vr(1, va);
+    s.set_vr(2, vb);
+    s.set_vr(3, vc);
     let v = exec_no_mem(
         &PpuInstruction::Va {
             op,
@@ -622,14 +628,14 @@ fn vperm_indexes_concat_of_a_and_b_by_low_5_bits_of_c() {
 #[test]
 fn vcmpequw_rc_zero_writes_vector_only() {
     let mut s = PpuState::new();
-    s.cr = 0xABCD_EF01;
-    s.vr[1] = pack_u32x4([1, 2, 3, 4]);
-    s.vr[2] = pack_u32x4([1, 2, 3, 4]);
+    s.set_cr(0xABCD_EF01);
+    s.set_vr(1, pack_u32x4([1, 2, 3, 4]));
+    s.set_vr(2, pack_u32x4([1, 2, 3, 4]));
     exec_no_mem(&vx(0x086, 3, 1, 2), &mut s);
     // Result vector is set per the compare semantics.
     assert_eq!(s.vr[3], pack_u32x4([0xFFFF_FFFF; 4]));
     // CR is untouched on the Rc=0 form.
-    assert_eq!(s.cr, 0xABCD_EF01);
+    assert_eq!(s.cr(), 0xABCD_EF01);
 }
 
 /// The Rc=1 form (`vcmpequw.`) also updates CR6; that path is
@@ -640,8 +646,8 @@ fn vcmpequw_rc_zero_writes_vector_only() {
 #[test]
 fn vcmpequw_rc_one_faults_as_unimplemented() {
     let mut s = PpuState::new();
-    s.vr[1] = pack_u32x4([1, 2, 3, 4]);
-    s.vr[2] = pack_u32x4([1, 2, 3, 4]);
+    s.set_vr(1, pack_u32x4([1, 2, 3, 4]));
+    s.set_vr(2, pack_u32x4([1, 2, 3, 4]));
     let v = exec_no_mem(&vx(0x486, 3, 1, 2), &mut s);
     assert!(
         matches!(
@@ -656,25 +662,25 @@ fn vcmpequw_rc_one_faults_as_unimplemented() {
 #[test]
 fn vx_ops_do_not_touch_cr_or_xer_when_rc_zero() {
     let mut s = PpuState::new();
-    s.cr = 0xABCD_EF01;
-    s.xer = 0x1234_5678;
-    s.vr[1] = pack_u32x4([1, 2, 3, 4]);
-    s.vr[2] = pack_u32x4([10, 20, 30, 40]);
+    s.set_cr(0xABCD_EF01);
+    s.set_xer(0x1234_5678);
+    s.set_vr(1, pack_u32x4([1, 2, 3, 4]));
+    s.set_vr(2, pack_u32x4([10, 20, 30, 40]));
     exec_no_mem(&vx(0x080, 3, 1, 2), &mut s);
     assert_eq!(s.vr[3], pack_u32x4([11, 22, 33, 44]));
-    assert_eq!(s.cr, 0xABCD_EF01);
-    assert_eq!(s.xer, 0x1234_5678);
+    assert_eq!(s.cr(), 0xABCD_EF01);
+    assert_eq!(s.xer(), 0x1234_5678);
 }
 
 /// [AltiVec-PEM p:6-133 s:6.2] vsel is a VA-form op with no Rc bit.
 #[test]
 fn vsel_does_not_touch_cr() {
     let mut s = PpuState::new();
-    s.cr = 0xABCD_EF01;
-    s.xer = 0x1234_5678;
-    s.vr[1] = u128::from_be_bytes([0xAA; 16]);
-    s.vr[2] = u128::from_be_bytes([0xBB; 16]);
-    s.vr[3] = u128::from_be_bytes([0xFF; 16]);
+    s.set_cr(0xABCD_EF01);
+    s.set_xer(0x1234_5678);
+    s.set_vr(1, u128::from_be_bytes([0xAA; 16]));
+    s.set_vr(2, u128::from_be_bytes([0xBB; 16]));
+    s.set_vr(3, u128::from_be_bytes([0xFF; 16]));
     exec_no_mem(
         &PpuInstruction::Va {
             op: VaOp::Vsel,
@@ -686,25 +692,31 @@ fn vsel_does_not_touch_cr() {
         &mut s,
     );
     assert_eq!(s.vr[4], u128::from_be_bytes([0xBB; 16]));
-    assert_eq!(s.cr, 0xABCD_EF01);
-    assert_eq!(s.xer, 0x1234_5678);
+    assert_eq!(s.cr(), 0xABCD_EF01);
+    assert_eq!(s.xer(), 0x1234_5678);
 }
 
 /// [AltiVec-PEM p:6-112 s:6.2] vperm is a VA-form op with no Rc bit.
 #[test]
 fn vperm_does_not_touch_cr() {
     let mut s = PpuState::new();
-    s.cr = 0xABCD_EF01;
-    s.xer = 0x1234_5678;
-    s.vr[1] = u128::from_be_bytes([
-        0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
-        0xAF,
-    ]);
-    s.vr[2] = u128::from_be_bytes([
-        0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE,
-        0xBF,
-    ]);
-    s.vr[3] = 0;
+    s.set_cr(0xABCD_EF01);
+    s.set_xer(0x1234_5678);
+    s.set_vr(
+        1,
+        u128::from_be_bytes([
+            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD,
+            0xAE, 0xAF,
+        ]),
+    );
+    s.set_vr(
+        2,
+        u128::from_be_bytes([
+            0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD,
+            0xBE, 0xBF,
+        ]),
+    );
+    s.set_vr(3, 0);
     exec_no_mem(
         &PpuInstruction::Va {
             op: VaOp::Vperm,
@@ -715,6 +727,6 @@ fn vperm_does_not_touch_cr() {
         },
         &mut s,
     );
-    assert_eq!(s.cr, 0xABCD_EF01);
-    assert_eq!(s.xer, 0x1234_5678);
+    assert_eq!(s.cr(), 0xABCD_EF01);
+    assert_eq!(s.xer(), 0x1234_5678);
 }
