@@ -39,23 +39,26 @@ pub enum DivergenceClass {
     /// state, not by re-reading the loaded bytes.
     #[error("SysProcParam")]
     SysProcParam,
-    /// Bytes inside an HLE OPD trampoline slot. Non-semantic;
-    /// per-slot pointer indices differ across runners but the
-    /// resolved entry points are equivalent.
+    /// Bytes inside an HLE OPD trampoline slot. Non-semantic: the two
+    /// backends resolve the same import to different code addresses,
+    /// so the slot values cannot agree byte-for-byte. Every touched
+    /// 4-byte slot must hold, in both observations, a pointer inside
+    /// [`HLE_OPD_POINTER_WINDOW`]; anything else classifies
+    /// `Unclassified`.
+    ///
+    /// Not verified: that each slot's pointer targets the
+    /// functionally-equivalent import on both sides. That attestation
+    /// belongs to the import-binding layer, which the byte comparison
+    /// cannot see.
     #[error("HleOpdSlot")]
     HleOpdSlot,
     /// Bytes inside an LV2 sync-primitive user-side handle slot
     /// (e.g. `sys_lwmutex_t::sleep_queue`). The field carries an
     /// ABI-opaque kernel-allocated id consumed only through
-    /// sync-primitive syscalls (`_sys_lwmutex_lock`,
-    /// `sys_lwmutex_unlock`, etc.), which look the id up in the
-    /// runner-local id table. Per-runner id values differ because
-    /// the two kernels run independent allocators; every read of
-    /// the field flows back to its owning kernel and resolves to
-    /// the same logical sync object. The warrant is ABI-contract
-    /// (handle is opaque to user code), so the populator must key
-    /// only on slots whose layout proves the field is a kernel
-    /// handle.
+    /// sync-primitive syscalls, so per-runner values differ (the two
+    /// kernels run independent allocators) while every read resolves
+    /// to the same logical sync object. The populator must key only
+    /// on slots whose layout proves the field is a kernel handle.
     #[error("SyncPrimitiveId")]
     SyncPrimitiveId,
     /// No populated context range contained this divergence run.
@@ -80,14 +83,6 @@ impl DivergenceClass {
 /// Pre-computed guest-address ranges the classifier checks for
 /// containment.
 ///
-/// `hle_opd_ranges` aggregates three structurally distinct kinds,
-/// all classifying as `HleOpdSlot`: the primary function-stub
-/// table (one contiguous range from SCE PRX_PARAM
-/// `lib_stub_start..lib_stub_end`), zero or more 4-byte
-/// variable-stub slots, and zero or more contiguous secondary
-/// tables identified by the `0x04020100` / `0x04020200` header
-/// signature.
-///
 /// All entries must be pairwise non-overlapping; checked by
 /// [`debug_assert_disjoint`](Self::debug_assert_disjoint).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -102,14 +97,10 @@ pub struct ClassifierContext {
     /// table, variable stubs, FNID-walker-patched sibling tables).
     /// Empty until a populator slice fills them in.
     pub hle_opd_ranges: Vec<Range<u64>>,
-    /// Guest-address ranges of LV2 sync-primitive handle slots
-    /// (currently the `sys_lwmutex_t::sleep_queue` field at +0x10
-    /// of every `sys_lwmutex_t` in the title's data segment).
-    /// Each range covers exactly the 4-byte handle field; the
-    /// rest of the sync-primitive struct (lock_var, attribute,
-    /// recursive_count, pad) is not claimed because it does not
-    /// share the opaque-handle warrant. Empty until a populator
-    /// slice fills it in.
+    /// Guest-address ranges of LV2 sync-primitive handle slots. Each
+    /// range covers exactly the 4-byte handle field, never the rest
+    /// of the sync-primitive struct. Empty until a populator slice
+    /// fills it in.
     pub sync_primitive_id_ranges: Vec<Range<u64>>,
 }
 
@@ -212,11 +203,51 @@ impl ClassifierContext {
     }
 }
 
+/// Guest-pointer window an HLE OPD slot value must stay inside: user
+/// memory above the 64 KiB floor and below the 1 GiB user boundary.
+/// The upper bound must admit both backends' placements -- CellGov
+/// trampolines sit low (0x01xx_xxxx), while RPCS3 resolves imports
+/// into segments mapped at the 0x3000_0000 user window -- while still
+/// refusing zero, kernel-space values, and non-pointer data.
+pub const HLE_OPD_POINTER_WINDOW: Range<u32> = 0x0001_0000..0x4000_0000;
+
+/// True iff every 4-byte slot overlapping `[start, end)` carries, in
+/// both regions' bytes, a pointer inside [`HLE_OPD_POINTER_WINDOW`].
+/// Slots that fall outside either region's data refuse rather than
+/// waive, as does an empty range (a zero-length divergence is a
+/// caller bug and must not classify as anything waivable). See
+/// [`DivergenceClass::HleOpdSlot`] for what this does not attest.
+fn hle_opd_slots_equivalent(start: u64, end: u64, region_addr: u64, a: &[u8], b: &[u8]) -> bool {
+    if start >= end {
+        return false;
+    }
+    let mut slot = start & !3;
+    while slot < end {
+        let Some(rel) = slot.checked_sub(region_addr) else {
+            return false;
+        };
+        let off = rel as usize;
+        let (Some(a4), Some(b4)) = (a.get(off..off + 4), b.get(off..off + 4)) else {
+            return false;
+        };
+        let av = u32::from_be_bytes(a4.try_into().expect("4-byte slice"));
+        let bv = u32::from_be_bytes(b4.try_into().expect("4-byte slice"));
+        if !HLE_OPD_POINTER_WINDOW.contains(&av) || !HLE_OPD_POINTER_WINDOW.contains(&bv) {
+            return false;
+        }
+        slot += 4;
+    }
+    true
+}
+
 /// Classify a single byte-divergence run by full containment in one
 /// of `ctx`'s named ranges. Partial overlap returns `Unclassified`.
 ///
 /// `region_addr` is the `addr` field of the [`NamedMemoryRegion`] the
-/// divergence belongs to.
+/// divergence belongs to; `a_data` / `b_data` are the two
+/// observations' byte images of that region. The `HleOpdSlot` class
+/// additionally requires the structural slot checks on
+/// [`DivergenceClass::HleOpdSlot`].
 ///
 /// # Panics
 ///
@@ -228,6 +259,8 @@ pub fn classify(
     div: &ByteDivergence,
     region_addr: u64,
     ctx: &ClassifierContext,
+    a_data: &[u8],
+    b_data: &[u8],
 ) -> DivergenceClass {
     debug_assert!(div.length > 0, "ByteDivergence::length must be >= 1");
     let start = region_addr
@@ -249,7 +282,11 @@ pub fn classify(
     }
     for r in &ctx.hle_opd_ranges {
         if r.start <= start && end <= r.end {
-            return DivergenceClass::HleOpdSlot;
+            return if hle_opd_slots_equivalent(start, end, region_addr, a_data, b_data) {
+                DivergenceClass::HleOpdSlot
+            } else {
+                DivergenceClass::Unclassified
+            };
         }
     }
     for r in &ctx.sync_primitive_id_ranges {

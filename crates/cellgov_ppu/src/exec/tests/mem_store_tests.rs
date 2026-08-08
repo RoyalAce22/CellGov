@@ -5,8 +5,8 @@ use super::*;
 #[test]
 fn stw_emits_store_effect() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
-    s.gpr[5] = 0xDEADBEEF;
+    s.set_gpr(1, 0x1000);
+    s.set_gpr(5, 0xDEADBEEF);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Stw {
@@ -34,9 +34,9 @@ fn stw_emits_store_effect() {
 fn stdux_stores_doubleword_and_updates_base() {
     let mem = vec![0u8; 0x2000];
     let mut s = PpuState::new();
-    s.gpr[3] = 0xDEAD_BEEF_CAFE_F00D;
-    s.gpr[4] = 0x1000;
-    s.gpr[5] = 0x40;
+    s.set_gpr(3, 0xDEAD_BEEF_CAFE_F00D);
+    s.set_gpr(4, 0x1000);
+    s.set_gpr(5, 0x40);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Stdux {
@@ -58,8 +58,8 @@ fn stdux_stores_doubleword_and_updates_base() {
 fn stbu_updates_ra_with_effective_address() {
     let mem = vec![0u8; 0x100];
     let mut s = PpuState::new();
-    s.gpr[1] = 0x20;
-    s.gpr[6] = 0xAB;
+    s.set_gpr(1, 0x20);
+    s.set_gpr(6, 0xAB);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stbu {
@@ -85,8 +85,8 @@ fn stbu_updates_ra_with_effective_address() {
 fn sthu_updates_ra_with_effective_address() {
     let mem = vec![0u8; 0x100];
     let mut s = PpuState::new();
-    s.gpr[1] = 0x40;
-    s.gpr[5] = 0xBEEF;
+    s.set_gpr(1, 0x40);
+    s.set_gpr(5, 0xBEEF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Sthu {
@@ -115,8 +115,8 @@ fn dcbz_zeroes_128_byte_aligned_block() {
     let mut mem = vec![0xAAu8; 384];
     let mut s = PpuState::new();
     // ea = 0x1000 + 100 = 0x1064; aligned block starts at 0x1000.
-    s.gpr[3] = 100;
-    s.gpr[4] = 0x1000;
+    s.set_gpr(3, 100);
+    s.set_gpr(4, 0x1000);
     let mut effects = Vec::new();
     let v = exec_with_mem(
         &PpuInstruction::Dcbz { ra: 3, rb: 4 },
@@ -150,8 +150,8 @@ fn dcbz_ea_is_aligned_down_to_block_boundary() {
     let mem = vec![0xFFu8; 256];
     let mut s = PpuState::new();
     // EA = 0x2000 + 0x7F = 0x207F. Aligned EA = 0x2000.
-    s.gpr[3] = 0x7F;
-    s.gpr[4] = 0x2000;
+    s.set_gpr(3, 0x7F);
+    s.set_gpr(4, 0x2000);
     let mut effects = Vec::new();
     let v = exec_with_mem(
         &PpuInstruction::Dcbz { ra: 3, rb: 4 },
@@ -175,7 +175,7 @@ fn dcbz_ea_is_aligned_down_to_block_boundary() {
 
 #[test]
 fn dcbz_increments_counter_on_each_execution() {
-    // C-4 audit witness: dcbz_executed increments per Dcbz
+    // Liveness witness: dcbz_executed increments per Dcbz
     // arm entry. The MMIO-window debug_assert is evaluated
     // before the counter resolves; this proves silence is
     // non-vacuous when the counter is > 0.
@@ -183,8 +183,8 @@ fn dcbz_increments_counter_on_each_execution() {
     let mem = vec![0u8; 384];
     let mut s = PpuState::new();
     assert_eq!(s.dcbz_executed, 0);
-    s.gpr[3] = 0;
-    s.gpr[4] = 0x1000;
+    s.set_gpr(3, 0);
+    s.set_gpr(4, 0x1000);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Dcbz { ra: 3, rb: 4 },
@@ -209,8 +209,8 @@ fn dcbz_pre_checks_capacity_for_full_block() {
     // Buffer with 50 entries leaves 14 slots -- not enough for
     // dcbz's 16 doubleword stores.
     let mut s = PpuState::new();
-    s.gpr[1] = 0x2000;
-    s.gpr[2] = 0;
+    s.set_gpr(1, 0x2000);
+    s.set_gpr(2, 0);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
     for i in 0..50 {
@@ -258,8 +258,8 @@ fn stwu_with_ra_zero_panics_in_debug() {
 #[test]
 fn std_emits_8_byte_store_big_endian() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[5] = 0x0123_4567_89AB_CDEF;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(5, 0x0123_4567_89AB_CDEF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Std {
@@ -286,8 +286,8 @@ fn std_emits_8_byte_store_big_endian() {
 #[test]
 fn stdu_updates_ra_and_emits_8_byte_store() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[5] = 0xCAFE_F00D_DEAD_BEEF;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(5, 0xCAFE_F00D_DEAD_BEEF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stdu {
@@ -310,10 +310,10 @@ fn stdu_updates_ra_and_emits_8_byte_store() {
 #[test]
 fn stmw_emits_words_starting_at_rs_through_r31() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[29] = 0x1111_2222;
-    s.gpr[30] = 0x3333_4444;
-    s.gpr[31] = 0x5555_6666;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(29, 0x1111_2222);
+    s.set_gpr(30, 0x3333_4444);
+    s.set_gpr(31, 0x5555_6666);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stmw {
@@ -345,9 +345,9 @@ fn stmw_emits_words_starting_at_rs_through_r31() {
 #[test]
 fn stwx_emits_word_store_at_ra_plus_rb() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x10;
-    s.gpr[5] = 0xDEAD_BEEF;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x10);
+    s.set_gpr(5, 0xDEAD_BEEF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stwx {
@@ -372,9 +372,9 @@ fn stwx_emits_word_store_at_ra_plus_rb() {
 #[test]
 fn stdx_emits_8_byte_store_at_ra_plus_rb() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x8;
-    s.gpr[5] = 0x0011_2233_4455_6677;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x8);
+    s.set_gpr(5, 0x0011_2233_4455_6677);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stdx {
@@ -399,9 +399,9 @@ fn stdx_emits_8_byte_store_at_ra_plus_rb() {
 #[test]
 fn stbx_emits_low_byte_store() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x4;
-    s.gpr[5] = 0xFFFF_FFFF_FFFF_FF42;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x4);
+    s.set_gpr(5, 0xFFFF_FFFF_FFFF_FF42);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stbx {
@@ -426,9 +426,9 @@ fn stbx_emits_low_byte_store() {
 #[test]
 fn sthx_emits_low_halfword_store_big_endian() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x2;
-    s.gpr[5] = 0xFFFF_FFFF_FFFF_BEEF;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x2);
+    s.set_gpr(5, 0xFFFF_FFFF_FFFF_BEEF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Sthx {
@@ -453,9 +453,9 @@ fn sthx_emits_low_halfword_store_big_endian() {
 #[test]
 fn sthux_writes_back_ra_only_on_success() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x4;
-    s.gpr[5] = 0xCAFE;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x4);
+    s.set_gpr(5, 0xCAFE);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Sthux {
@@ -478,9 +478,9 @@ fn sthux_writes_back_ra_only_on_success() {
 #[test]
 fn stwux_writes_back_ra_only_on_success() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x8;
-    s.gpr[5] = 0xDEAD_BEEF;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x8);
+    s.set_gpr(5, 0xDEAD_BEEF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stwux {
@@ -499,9 +499,9 @@ fn stwux_writes_back_ra_only_on_success() {
 #[test]
 fn stbux_writes_back_ra_only_on_success() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x1;
-    s.gpr[5] = 0x33;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x1);
+    s.set_gpr(5, 0x33);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stbux {

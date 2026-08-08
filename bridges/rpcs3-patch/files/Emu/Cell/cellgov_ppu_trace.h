@@ -1,4 +1,4 @@
-// CellGov PPU instruction trace hook (Stage 40D.2). Env-var-gated
+// CellGov PPU instruction trace hook. Env-var-gated
 // capture of (pre_state, instruction, post_state, mem_pre, mem_post)
 // tuples for every PPU instruction in a configurable filter window.
 // The CellGov side ingests the dump and replays each record through

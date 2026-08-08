@@ -267,6 +267,7 @@ dependencies = [
  "cellgov_sync",
  "cellgov_testkit",
  "cellgov_time",
+ "cellgov_trace",
  "criterion",
  "derive_more",
  "sha1",

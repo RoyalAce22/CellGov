@@ -7,7 +7,7 @@ fn ldu_writes_ea_back_to_ra() {
     let mut mem = vec![0u8; 0x1028];
     mem[0x1018..0x1020].copy_from_slice(&0xDEAD_BEEF_CAFE_BABEu64.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1020;
+    s.set_gpr(4, 0x1020);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Ldu {
@@ -30,7 +30,7 @@ fn lwz_loads_from_memory() {
     let mut mem = vec![0u8; 0x2000];
     mem[0x1008..0x100C].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
+    s.set_gpr(1, 0x1000);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Lwz {
@@ -50,7 +50,7 @@ fn lwz_loads_from_memory() {
 #[test]
 fn lwz_mem_fault_on_bad_address() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
+    s.set_gpr(1, 0x1000);
     let result = exec_no_mem(
         &PpuInstruction::Lwz {
             rt: 3,
@@ -71,7 +71,7 @@ fn lha_sign_extends_halfword() {
     let mut mem = vec![0u8; 0x2000];
     mem[0x1002..0x1004].copy_from_slice(&0xFF80u16.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
+    s.set_gpr(1, 0x1000);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Lha {
@@ -96,7 +96,7 @@ fn lwa_sign_extends_word_into_64_bits() {
     let mut mem = vec![0u8; 0x2000];
     mem[0x1004..0x1008].copy_from_slice(&0xFFFF_FFFEu32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
+    s.set_gpr(1, 0x1000);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Lwa {
@@ -120,8 +120,8 @@ fn lwa_sign_extends_through_store_buffer_forward() {
     // exercises size-aware sign extension (sub-8-byte forwards
     // leave high u64 bits zero, so naive i64 cast would mis-sign).
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
-    s.gpr[5] = 0xFFFF_FFFE;
+    s.set_gpr(1, 0x1000);
+    s.set_gpr(5, 0xFFFF_FFFE);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
     let region_views: [(u64, &[u8]); 1] = [(0, &[0u8; 0x2000])];
@@ -158,8 +158,8 @@ fn lwa_sign_extends_through_store_buffer_forward() {
 #[test]
 fn lha_sign_extends_through_store_buffer_forward() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
-    s.gpr[5] = 0xFF80;
+    s.set_gpr(1, 0x1000);
+    s.set_gpr(5, 0xFF80);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
     let region_views: [(u64, &[u8]); 1] = [(0, &[0u8; 0x2000])];
@@ -197,7 +197,7 @@ fn lhzu_loads_halfword_and_updates_base() {
     let mut mem = vec![0u8; 0x2000];
     mem[0x1010..0x1012].copy_from_slice(&0xBEEFu16.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1000;
+    s.set_gpr(4, 0x1000);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Lhzu {
@@ -239,7 +239,7 @@ fn lwzu_with_ra_zero_panics_in_debug() {
 #[should_panic(expected = "lwzu invalid form")]
 fn lwzu_with_ra_eq_rt_panics_in_debug() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x10;
+    s.set_gpr(3, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lwzu {
@@ -263,8 +263,8 @@ fn lbz_loads_byte_zero_extended() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20] = 0xA5;
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(3, 0xFFFF_FFFF_FFFF_FFFF);
     let mut effects = Vec::new();
     let v = exec_with_mem(
         &PpuInstruction::Lbz {
@@ -286,8 +286,8 @@ fn lhz_loads_halfword_zero_extended_big_endian() {
     let mut mem = vec![0u8; 0x100];
     mem[0x10..0x12].copy_from_slice(&[0xBE, 0xEF]);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(3, 0xFFFF_FFFF_FFFF_FFFF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lhz {
@@ -308,7 +308,7 @@ fn ld_loads_doubleword_big_endian() {
     let mut mem = vec![0u8; 0x100];
     mem[0x10..0x18].copy_from_slice(&0x0123_4567_89AB_CDEFu64.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Ld {
@@ -329,7 +329,7 @@ fn lhau_sign_extends_and_writes_back_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x12..0x14].copy_from_slice(&0x8000u16.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lhau {
@@ -351,7 +351,7 @@ fn lwzu_loads_word_and_writes_back_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x14..0x18].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lwzu {
@@ -373,7 +373,7 @@ fn lbzu_loads_byte_and_writes_back_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x11] = 0x7E;
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lbzu {
@@ -398,7 +398,7 @@ fn lmw_loads_consecutive_words_until_r31() {
         mem[off..off + 4].copy_from_slice(&(0xAABB_0000u32 + r).to_be_bytes());
     }
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
+    s.set_gpr(1, 0x10);
     let mut effects = Vec::new();
     // RT=29 -> loads r29, r30, r31 (three words).
     let v = exec_with_mem(
@@ -422,7 +422,7 @@ fn lmw_loads_consecutive_words_until_r31() {
 fn lfault_lhau_does_not_update_ra() {
     let mem = vec![0u8; 0x100];
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000_0000;
+    s.set_gpr(1, 0x1000_0000);
     let original = s.gpr[1];
     let mut effects = Vec::new();
     let v = exec_with_mem(
@@ -468,8 +468,8 @@ fn lwzx_loads_word_at_ra_plus_rb() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20..0x24].copy_from_slice(&0xCAFE_BABEu32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x10;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lwzx {
@@ -490,9 +490,9 @@ fn lbzx_loads_byte_zero_extended() {
     let mut mem = vec![0u8; 0x100];
     mem[0x30] = 0x42;
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x20;
-    s.gpr[3] = 0xFFFF_FFFF_FFFF_FFFF;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x20);
+    s.set_gpr(3, 0xFFFF_FFFF_FFFF_FFFF);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lbzx {
@@ -513,8 +513,8 @@ fn lhzx_loads_halfword_zero_extended() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20..0x22].copy_from_slice(&0xABCDu16.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x10;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lhzx {
@@ -536,8 +536,8 @@ fn ldx_loads_doubleword_with_ra_zero_ignored() {
     let mut mem = vec![0u8; 0x100];
     mem[0x18..0x20].copy_from_slice(&0xCAFE_F00D_DEAD_BEEFu64.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[0] = 0xDEAD; // must be ignored
-    s.gpr[2] = 0x18;
+    s.set_gpr(0, 0xDEAD); // must be ignored
+    s.set_gpr(2, 0x18);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Ldx {
@@ -558,8 +558,8 @@ fn lhax_sign_extends_halfword() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20..0x22].copy_from_slice(&0xFF80u16.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x10;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lhax {
@@ -580,8 +580,8 @@ fn lwax_sign_extends_word() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20..0x24].copy_from_slice(&0xFFFF_FFFEu32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x10;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lwax {
@@ -602,8 +602,8 @@ fn lwzux_loads_and_writes_back_ra_only_on_success() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20..0x24].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[4] = 0x10;
-    s.gpr[5] = 0x10;
+    s.set_gpr(4, 0x10);
+    s.set_gpr(5, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lwzux {
@@ -624,8 +624,8 @@ fn lwzux_loads_and_writes_back_ra_only_on_success() {
 fn lwzux_fault_leaves_ra_unchanged() {
     let mem = vec![0u8; 0x40];
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1000_0000;
-    s.gpr[5] = 0;
+    s.set_gpr(4, 0x1000_0000);
+    s.set_gpr(5, 0);
     let original = s.gpr[4];
     let mut effects = Vec::new();
     let v = exec_with_mem(
@@ -648,8 +648,8 @@ fn lbzux_loads_byte_and_writes_back_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x21] = 0x99;
     let mut s = PpuState::new();
-    s.gpr[4] = 0x10;
-    s.gpr[5] = 0x11;
+    s.set_gpr(4, 0x10);
+    s.set_gpr(5, 0x11);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lbzux {
@@ -671,8 +671,8 @@ fn lhzux_loads_halfword_and_writes_back_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20..0x22].copy_from_slice(&0xC0DEu16.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[4] = 0x10;
-    s.gpr[5] = 0x10;
+    s.set_gpr(4, 0x10);
+    s.set_gpr(5, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lhzux {
@@ -694,8 +694,8 @@ fn ldux_loads_doubleword_and_writes_back_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x18..0x20].copy_from_slice(&0xDEAD_BEEF_CAFE_BABEu64.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[4] = 0x10;
-    s.gpr[5] = 0x8;
+    s.set_gpr(4, 0x10);
+    s.set_gpr(5, 0x8);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Ldux {
@@ -717,8 +717,8 @@ fn lhaux_sign_extends_and_writes_back_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20..0x22].copy_from_slice(&0xFFFFu16.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[4] = 0x10;
-    s.gpr[5] = 0x10;
+    s.set_gpr(4, 0x10);
+    s.set_gpr(5, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lhaux {
@@ -740,8 +740,8 @@ fn lwaux_sign_extends_and_writes_back_ra() {
     let mut mem = vec![0u8; 0x100];
     mem[0x20..0x24].copy_from_slice(&0x8000_0000u32.to_be_bytes());
     let mut s = PpuState::new();
-    s.gpr[4] = 0x10;
-    s.gpr[5] = 0x10;
+    s.set_gpr(4, 0x10);
+    s.set_gpr(5, 0x10);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lwaux {

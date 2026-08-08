@@ -125,9 +125,9 @@ pub(crate) fn buffer_store(
     size: u8,
     value: u64,
 ) -> ExecuteVerdict {
-    if let Some(line) = state.reservation {
+    if let Some(line) = state.reservation() {
         if line.overlaps_range(ea, size as u64) {
-            state.reservation = None;
+            state.set_reservation(None);
         }
     }
     if store_buf.insert(ea, size, value as u128) {

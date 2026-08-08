@@ -5,9 +5,9 @@ use super::*;
 #[test]
 fn mflr_mtlr_roundtrip() {
     let mut s = PpuState::new();
-    s.gpr[5] = 0xABCD;
+    s.set_gpr(5, 0xABCD);
     exec_no_mem(&PpuInstruction::Mtlr { rs: 5 }, &mut s);
-    assert_eq!(s.lr, 0xABCD);
+    assert_eq!(s.lr(), 0xABCD);
     exec_no_mem(&PpuInstruction::Mflr { rt: 3 }, &mut s);
     assert_eq!(s.gpr[3], 0xABCD);
 }
@@ -39,8 +39,8 @@ fn mftb_returns_strictly_increasing_values_within_step() {
 #[test]
 fn tw_no_condition_selected_never_traps() {
     let mut s = PpuState::new();
-    s.gpr[3] = 1;
-    s.gpr[4] = 2;
+    s.set_gpr(3, 1);
+    s.set_gpr(4, 2);
     let v = exec_no_mem(
         &PpuInstruction::Tw {
             to: 0,
@@ -55,8 +55,8 @@ fn tw_no_condition_selected_never_traps() {
 #[test]
 fn tw_equal_with_to_equal_bit_traps() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xDEAD_BEEF;
-    s.gpr[4] = 0xDEAD_BEEF;
+    s.set_gpr(3, 0xDEAD_BEEF);
+    s.set_gpr(4, 0xDEAD_BEEF);
     // TO bit 2 = equal, no other bits. TO = 0b00100 = 4.
     let v = exec_no_mem(
         &PpuInstruction::Tw {
@@ -75,8 +75,8 @@ fn tw_compares_low_32_bits_only() {
     // signed and unsigned comparison; the 32-bit `tw` arm must not
     // surface the high-half divergence as inequality.
     let mut s = PpuState::new();
-    s.gpr[3] = 0xAAAA_AAAA_0000_0001;
-    s.gpr[4] = 0x5555_5555_0000_0001;
+    s.set_gpr(3, 0xAAAA_AAAA_0000_0001);
+    s.set_gpr(4, 0x5555_5555_0000_0001);
     // TO = all-bits-but-equal = 0b11011 = 27; only the equal arm fires.
     let v = exec_no_mem(
         &PpuInstruction::Tw {
@@ -105,8 +105,8 @@ fn tw_compares_low_32_bits_only() {
 #[test]
 fn td_unsigned_greater_traps_when_high_bits_differ() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x8000_0000_0000_0000; // very large unsigned, also negative signed
-    s.gpr[4] = 0x0000_0000_0000_0001;
+    s.set_gpr(3, 0x8000_0000_0000_0000); // very large unsigned, also negative signed
+    s.set_gpr(4, 0x0000_0000_0000_0001);
     // TO bit 0 (signed less) AND bit 4 (unsigned greater): TO = 0b10001 = 17.
     // For 64-bit: a is < b signed AND a > b unsigned. Either selected
     // condition that matches fires the trap.
@@ -127,7 +127,7 @@ fn td_unsigned_greater_traps_when_high_bits_differ() {
 #[test]
 fn mfxer_reads_full_64_bit_xer_into_rt() {
     let mut s = PpuState::new();
-    s.xer = 0xDEAD_BEEF_CAFE_BABE;
+    s.set_xer(0xDEAD_BEEF_CAFE_BABE);
     exec_no_mem(&PpuInstruction::Mfxer { rt: 4 }, &mut s);
     assert_eq!(s.gpr[4], 0xDEAD_BEEF_CAFE_BABE);
 }
@@ -135,15 +135,15 @@ fn mfxer_reads_full_64_bit_xer_into_rt() {
 #[test]
 fn mtxer_writes_rs_into_xer() {
     let mut s = PpuState::new();
-    s.gpr[5] = 0x1234_5678_9ABC_DEF0;
+    s.set_gpr(5, 0x1234_5678_9ABC_DEF0);
     exec_no_mem(&PpuInstruction::Mtxer { rs: 5 }, &mut s);
-    assert_eq!(s.xer, 0x1234_5678_9ABC_DEF0);
+    assert_eq!(s.xer(), 0x1234_5678_9ABC_DEF0);
 }
 
 #[test]
 fn vrsave_round_trips_through_gpr() {
     let mut s = PpuState::new();
-    s.gpr[6] = 0x0000_0000_DEAD_BEEF;
+    s.set_gpr(6, 0x0000_0000_DEAD_BEEF);
     exec_no_mem(&PpuInstruction::Mtvrsave { rs: 6 }, &mut s);
     assert_eq!(s.vrsave, 0xDEAD_BEEF);
     // Distinct destination GPR so the test catches a buggy
@@ -155,7 +155,7 @@ fn vrsave_round_trips_through_gpr() {
 #[test]
 fn mtvrsave_truncates_upper_half_of_rs() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xFFFF_FFFF_8000_0001;
+    s.set_gpr(3, 0xFFFF_FFFF_8000_0001);
     exec_no_mem(&PpuInstruction::Mtvrsave { rs: 3 }, &mut s);
     assert_eq!(s.vrsave, 0x8000_0001);
 }
@@ -167,7 +167,7 @@ fn mfvrsave_zero_extends_into_rt() {
     let mut s = PpuState::new();
     s.vrsave = 0xCAFE_BABE;
     s.vrsave_written = true;
-    s.gpr[8] = 0xFFFF_FFFF_FFFF_FFFF;
+    s.set_gpr(8, 0xFFFF_FFFF_FFFF_FFFF);
     exec_no_mem(&PpuInstruction::Mfvrsave { rt: 8 }, &mut s);
     assert_eq!(s.gpr[8], 0x0000_0000_CAFE_BABE);
 }
@@ -175,7 +175,7 @@ fn mfvrsave_zero_extends_into_rt() {
 #[test]
 fn vrsave_write_then_read_does_not_trip_tripwire() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x0000_0000_1234_5678;
+    s.set_gpr(3, 0x0000_0000_1234_5678);
     exec_no_mem(&PpuInstruction::Mtvrsave { rs: 3 }, &mut s);
     exec_no_mem(&PpuInstruction::Mfvrsave { rt: 4 }, &mut s);
     assert_eq!(s.gpr[4], 0x1234_5678);
@@ -193,7 +193,7 @@ fn mfvrsave_before_any_mtvrsave_trips_tripwire() {
 #[test]
 fn mfvrsave_counter_increments_on_each_read() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x42;
+    s.set_gpr(3, 0x42);
     exec_no_mem(&PpuInstruction::Mtvrsave { rs: 3 }, &mut s);
     exec_no_mem(&PpuInstruction::Mfvrsave { rt: 4 }, &mut s);
     exec_no_mem(&PpuInstruction::Mfvrsave { rt: 5 }, &mut s);

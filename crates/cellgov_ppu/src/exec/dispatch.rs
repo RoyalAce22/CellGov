@@ -23,9 +23,11 @@ pub fn execute(
     store_buf: &mut StoreBuffer,
 ) -> ExecuteVerdict {
     cellgov_mem::store_watch::set_last_ppu_cia(state.pc as u32);
-    crate::hle_watch::on_dispatch(state.pc as u32, &state.gpr, state.lr);
+    crate::hle_watch::on_dispatch(state.pc as u32, state.gpr.as_array(), state.lr());
     match *insn {
-        PpuInstruction::Sc { .. } => crate::hle_watch::on_syscall(state.pc as u32, &state.gpr),
+        PpuInstruction::Sc { .. } => {
+            crate::hle_watch::on_syscall(state.pc as u32, state.gpr.as_array())
+        }
         PpuInstruction::B {
             offset,
             aa,
@@ -36,13 +38,21 @@ pub fn execute(
             } else {
                 (state.pc as i32).wrapping_add(offset) as u32
             };
-            crate::hle_watch::on_branch_link(state.pc as u32, &state.gpr, target);
+            crate::hle_watch::on_branch_link(state.pc as u32, state.gpr.as_array(), target);
         }
         PpuInstruction::Bcctr { link: true, .. } => {
-            crate::hle_watch::on_branch_link(state.pc as u32, &state.gpr, state.ctr as u32);
+            crate::hle_watch::on_branch_link(
+                state.pc as u32,
+                state.gpr.as_array(),
+                state.ctr() as u32,
+            );
         }
         PpuInstruction::Bclr { link: true, .. } => {
-            crate::hle_watch::on_branch_link(state.pc as u32, &state.gpr, state.lr as u32);
+            crate::hle_watch::on_branch_link(
+                state.pc as u32,
+                state.gpr.as_array(),
+                state.lr() as u32,
+            );
         }
         _ => {}
     }

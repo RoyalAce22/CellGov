@@ -168,7 +168,7 @@ pub(crate) fn run(args: &[String]) {
     let result = cellgov_compare::compare_observations(&cellgov, &rpcs3);
     let ctx = build_classifier_context(&eboot_bytes, &cellgov)
         .unwrap_or_else(|e| die(&format!("fixture-gen: build classifier context: {e}")));
-    let classes = classify_all(&result, &cellgov, &ctx);
+    let classes = classify_all(&result, &cellgov, &rpcs3, &ctx);
     let summary = summarize(&result, &classes);
 
     let out_dir = Path::new(&output_dir);
@@ -430,10 +430,12 @@ fn merge_adjacent_stub_ranges(stubs: &mut Vec<u32>) -> Vec<Range<u64>> {
 /// in flatten order over regions and bytes-within-region.
 ///
 /// `cellgov` must be the observation that seeded `ctx` via
-/// [`build_classifier_context`].
+/// [`build_classifier_context`]; `rpcs3` supplies the second image
+/// the HleOpdSlot structural checks read.
 pub(crate) fn classify_all(
     result: &ObservationCompareResult,
     cellgov: &Observation,
+    rpcs3: &Observation,
     ctx: &ClassifierContext,
 ) -> Vec<DivergenceClass> {
     let mut classes = Vec::new();
@@ -442,18 +444,28 @@ pub(crate) fn classify_all(
             name, addr, bytes, ..
         } = pair
         {
+            let a_region = cellgov.memory_regions.iter().find(|r| &r.name == name);
             debug_assert_eq!(
-                cellgov
-                    .memory_regions
-                    .iter()
-                    .find(|r| &r.name == name)
-                    .map(|r| r.addr),
+                a_region.map(|r| r.addr),
                 Some(*addr),
                 "ByteDivergence pair addr disagrees with cellgov observation; \
                  compare_observations IdentityMismatch invariant violated"
             );
+            // A ByteDivergence pair exists only when both observations
+            // carry the region; a miss here is the same broken-invariant
+            // class as the addr mismatch above. The empty-slice fallback
+            // fails closed (the slot checks refuse and the run lands in
+            // Pending), but it must still announce itself in debug.
+            let b_region = rpcs3.memory_regions.iter().find(|r| &r.name == name);
+            debug_assert!(
+                a_region.is_some() && b_region.is_some(),
+                "ByteDivergence pair region {name:?} missing from an observation; \
+                 compare_observations invariant violated"
+            );
+            let a_data: &[u8] = a_region.map(|r| r.data.as_slice()).unwrap_or(&[]);
+            let b_data: &[u8] = b_region.map(|r| r.data.as_slice()).unwrap_or(&[]);
             for div in bytes {
-                classes.push(classify(div, *addr, ctx));
+                classes.push(classify(div, *addr, ctx, a_data, b_data));
             }
         }
     }

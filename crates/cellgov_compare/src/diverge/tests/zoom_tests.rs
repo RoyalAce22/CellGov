@@ -30,6 +30,20 @@ fn full(step: u64, pc: u64, gpr: [u64; 32]) -> TraceRecord {
         ctr: 0,
         xer: 0,
         cr: 0,
+        reservation_line: None,
+    }
+}
+
+fn full_resv(step: u64, reservation_line: Option<u64>) -> TraceRecord {
+    TraceRecord::PpuStateFull {
+        step,
+        pc: 0,
+        gpr: [0u64; 32],
+        lr: 0,
+        ctr: 0,
+        xer: 0,
+        cr: 0,
+        reservation_line,
     }
 }
 
@@ -114,6 +128,7 @@ fn zoom_lookup_diffs_include_lr_ctr_xer_cr() {
         ctr: 2,
         xer: 3,
         cr: 4,
+        reservation_line: None,
     }]);
     let b = encode(&[TraceRecord::PpuStateFull {
         step: 0,
@@ -123,12 +138,65 @@ fn zoom_lookup_diffs_include_lr_ctr_xer_cr() {
         ctr: 200,
         xer: 300,
         cr: 400,
+        reservation_line: None,
     }]);
     match zoom_lookup(&a, &b, 0) {
         ZoomLookup::Found { diffs, .. } => {
             let names: Vec<&str> = diffs.iter().map(|d| d.field).collect();
             assert_eq!(names, vec!["lr", "ctr", "xer", "cr"]);
         }
+        other => panic!("expected Found, got {other:?}"),
+    }
+}
+
+#[test]
+fn zoom_lookup_reports_held_vs_released_reservation() {
+    let a = encode(&[full_resv(0, Some(0x1000))]);
+    let b = encode(&[full_resv(0, None)]);
+    match zoom_lookup(&a, &b, 0) {
+        ZoomLookup::Found { diffs, .. } => {
+            assert_eq!(diffs.len(), 1);
+            assert_eq!(diffs[0].field, "resv_held");
+            assert_eq!((diffs[0].a, diffs[0].b), (1, 0));
+        }
+        other => panic!("expected Found, got {other:?}"),
+    }
+}
+
+#[test]
+fn zoom_lookup_reports_differing_reservation_lines() {
+    let a = encode(&[full_resv(0, Some(0x1000))]);
+    let b = encode(&[full_resv(0, Some(0x2000))]);
+    match zoom_lookup(&a, &b, 0) {
+        ZoomLookup::Found { diffs, .. } => {
+            assert_eq!(diffs.len(), 1);
+            assert_eq!(diffs[0].field, "resv_line");
+            assert_eq!((diffs[0].a, diffs[0].b), (0x1000, 0x2000));
+        }
+        other => panic!("expected Found, got {other:?}"),
+    }
+}
+
+#[test]
+fn zoom_lookup_reports_corrupt_trace_not_missing_step() {
+    let good = encode(&[full(5, 0x100, [0u64; 32])]);
+    let mut corrupt = good.clone();
+    corrupt.truncate(corrupt.len() - 3);
+    match zoom_lookup(&good, &corrupt, 5) {
+        ZoomLookup::CorruptTrace { a_error, b_error } => {
+            assert!(a_error.is_none());
+            assert!(b_error.is_some());
+        }
+        other => panic!("expected CorruptTrace, got {other:?}"),
+    }
+}
+
+#[test]
+fn zoom_lookup_equal_reservations_produce_no_diff() {
+    let a = encode(&[full_resv(0, Some(0x1000))]);
+    let b = encode(&[full_resv(0, Some(0x1000))]);
+    match zoom_lookup(&a, &b, 0) {
+        ZoomLookup::Found { diffs, .. } => assert!(diffs.is_empty()),
         other => panic!("expected Found, got {other:?}"),
     }
 }

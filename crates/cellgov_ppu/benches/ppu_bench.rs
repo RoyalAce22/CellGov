@@ -106,8 +106,8 @@ fn bench_execute_add(c: &mut Criterion) {
     let uid = UnitId::new(0);
     c.bench_function("execute/add", |b| {
         let mut state = PpuState::new();
-        state.gpr[4] = 100;
-        state.gpr[5] = 200;
+        state.set_gpr(4, 100);
+        state.set_gpr(5, 200);
         let mut effects = Vec::new();
         let mut store_buf = StoreBuffer::new();
         b.iter(|| {
@@ -135,7 +135,7 @@ fn bench_execute_lwz(c: &mut Criterion) {
     let mem = vec![0u8; 0x2000];
     c.bench_function("execute/lwz", |b| {
         let mut state = PpuState::new();
-        state.gpr[1] = 0x1000;
+        state.set_gpr(1, 0x1000);
         let views: [(u64, &[u8]); 1] = [(0, &mem)];
         let mut effects = Vec::new();
         let mut store_buf = StoreBuffer::new();
@@ -163,8 +163,8 @@ fn bench_execute_stw(c: &mut Criterion) {
     let uid = UnitId::new(0);
     c.bench_function("execute/stw", |b| {
         let mut state = PpuState::new();
-        state.gpr[1] = 0x1000;
-        state.gpr[3] = 0xDEAD;
+        state.set_gpr(1, 0x1000);
+        state.set_gpr(3, 0xDEAD);
         let mut effects = Vec::new();
         let mut store_buf = StoreBuffer::new();
         b.iter(|| {
@@ -191,7 +191,7 @@ fn bench_execute_cmpwi(c: &mut Criterion) {
     let uid = UnitId::new(0);
     c.bench_function("execute/cmpwi", |b| {
         let mut state = PpuState::new();
-        state.gpr[3] = 42;
+        state.set_gpr(3, 42);
         let mut effects = Vec::new();
         let mut store_buf = StoreBuffer::new();
         b.iter(|| {
@@ -249,7 +249,7 @@ fn bench_execute_rlwinm(c: &mut Criterion) {
     let uid = UnitId::new(0);
     c.bench_function("execute/rlwinm", |b| {
         let mut state = PpuState::new();
-        state.gpr[4] = 0x12345678;
+        state.set_gpr(4, 0x12345678);
         let mut effects = Vec::new();
         let mut store_buf = StoreBuffer::new();
         b.iter(|| {
@@ -678,13 +678,13 @@ fn bench_run_until_yield_shadowed_hashes_mixed100(c: &mut Criterion) {
 /// Cost of one `PpuState::state_hash()` call in isolation.
 fn bench_state_hash(c: &mut Criterion) {
     let mut s = PpuState::new();
-    for (i, r) in s.gpr.iter_mut().enumerate() {
-        *r = 0x1000 + i as u64;
+    for i in 0..s.gpr.as_array().len() {
+        s.set_gpr(i, 0x1000 + i as u64);
     }
-    s.lr = 0xdead_beef;
-    s.ctr = 0xcafe_babe;
-    s.xer = 1 << 29;
-    s.cr = 0xa5a5_a5a5;
+    s.set_lr(0xdead_beef);
+    s.set_ctr(0xcafe_babe);
+    s.set_xer(1 << 29);
+    s.set_cr(0xa5a5_a5a5);
     c.bench_function("state_hash/full_register_file", |b| {
         b.iter(|| black_box(&s).state_hash())
     });

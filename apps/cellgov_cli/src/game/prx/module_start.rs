@@ -132,17 +132,17 @@ pub(in crate::game) fn run_module_start(
 
     let mut ms_state = cellgov_ppu::state::PpuState::new();
     ms_state.pc = ms.code;
-    ms_state.gpr[2] = ms.toc;
+    ms_state.set_gpr(2, ms.toc);
     // Offset below the game's stack_top so the two cannot collide
     // if a future caller runs them concurrently.
-    ms_state.gpr[1] = PS3_PRIMARY_STACK_BASE + 0x8000;
-    ms_state.gpr[11] = kctx_opd;
-    ms_state.gpr[12] = kctx_opd;
+    ms_state.set_gpr(1, PS3_PRIMARY_STACK_BASE + 0x8000);
+    ms_state.set_gpr(11, kctx_opd);
+    ms_state.set_gpr(12, kctx_opd);
     // PPC64 convention: r13 = TLS_area + 0x7030.
-    ms_state.gpr[13] = TLS_BASE + 0x30 + 0x7000;
+    ms_state.set_gpr(13, TLS_BASE + 0x30 + 0x7000);
     // LR=0 sentinel: blr from module_start jumps to PC=0, where the
     // all-zero word fails to decode and the fault signals a return.
-    ms_state.lr = 0;
+    ms_state.set_lr(0);
 
     let ms_unit_id = rt.registry_mut().register_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);

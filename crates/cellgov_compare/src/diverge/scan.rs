@@ -4,6 +4,11 @@
 //! records, and reports the first index where they disagree. Scan is
 //! O(min(len_a, len_b)) with constant auxiliary memory: both streams
 //! are consumed as iterators and never materialized.
+//!
+//! `PpuStateHash` covers scalar integer state only, so the reported step
+//! is the first *scalar-visible* disagreement. Two runs diverging in a
+//! float or vector register agree here until that value reaches a covered
+//! register, which can be arbitrarily far downstream.
 
 use cellgov_trace::{TraceReader, TraceRecord};
 
@@ -26,7 +31,8 @@ pub enum DivergeReport {
     },
     /// Both sides reached `step` but disagreed on `field`.
     Differs {
-        /// 0-based step index where the disagreement occurred.
+        /// 0-based index of the first scalar-visible disagreement; see the
+        /// module docs for why that is not always the first divergence.
         step: u64,
         /// PC on side A.
         a_pc: u64,

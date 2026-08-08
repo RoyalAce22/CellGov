@@ -208,7 +208,7 @@ pub(crate) fn execute_vx(
         }
     };
 
-    state.vr[vt as usize] = result;
+    state.set_vr(vt as usize, result);
     ExecuteVerdict::Continue
 }
 
@@ -248,7 +248,7 @@ pub(crate) fn execute_va(
         }
     };
 
-    state.vr[vt as usize] = result;
+    state.set_vr(vt as usize, result);
     ExecuteVerdict::Continue
 }
 
@@ -264,7 +264,7 @@ pub(crate) fn execute_vsldoi(
 ) -> ExecuteVerdict {
     let a = state.vr[va as usize];
     let b = state.vr[vb as usize];
-    state.vr[vt as usize] = vsldoi(a, b, shb);
+    state.set_vr(vt as usize, vsldoi(a, b, shb));
     ExecuteVerdict::Continue
 }
 

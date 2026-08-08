@@ -14,9 +14,9 @@ where
 #[test]
 fn stvx_aligns_ea_and_emits_store_effect() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
-    s.gpr[8] = 0x1F;
-    s.vr[0] = 0xAABB_CCDD_EEFF_0011_2233_4455_6677_8899u128;
+    s.set_gpr(1, 0x1000);
+    s.set_gpr(8, 0x1F);
+    s.set_vr(0, 0xAABB_CCDD_EEFF_0011_2233_4455_6677_8899u128);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Stvx {
@@ -60,8 +60,8 @@ fn lvlx_aligned_address_matches_lvx() {
     ];
     mem[0x1000..0x1010].copy_from_slice(&pattern);
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1000;
-    s.gpr[5] = 0;
+    s.set_gpr(4, 0x1000);
+    s.set_gpr(5, 0);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvlx {
@@ -87,8 +87,8 @@ fn lvlx_unaligned_shifts_high_bytes_up() {
     ];
     mem[0x1000..0x1010].copy_from_slice(&pattern);
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1003;
-    s.gpr[5] = 0;
+    s.set_gpr(4, 0x1003);
+    s.set_gpr(5, 0);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvlx {
@@ -115,8 +115,8 @@ fn lvrx_unaligned_shifts_low_bytes_down() {
     ];
     mem[0x1000..0x1010].copy_from_slice(&pattern);
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1003;
-    s.gpr[5] = 0;
+    s.set_gpr(4, 0x1003);
+    s.set_gpr(5, 0);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvrx {
@@ -139,9 +139,9 @@ fn lvrx_aligned_ea_zero_bytes() {
     let mut mem = vec![0u8; 0x2000];
     mem[0x1000..0x1010].copy_from_slice(&[0xFF; 16]);
     let mut s = PpuState::new();
-    s.gpr[4] = 0x1000;
-    s.gpr[5] = 0;
-    s.vr[7] = u128::MAX;
+    s.set_gpr(4, 0x1000);
+    s.set_gpr(5, 0);
+    s.set_vr(7, u128::MAX);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvrx {
@@ -164,9 +164,9 @@ fn stvx_pre_checks_capacity_for_both_halves() {
     // pre-check, the first half would commit and the retry
     // would duplicate it.
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
-    s.gpr[2] = 0;
-    s.vr[3] = 0xAABB_CCDD_EEFF_0011_2233_4455_6677_8899u128;
+    s.set_gpr(1, 0x1000);
+    s.set_gpr(2, 0);
+    s.set_vr(3, 0xAABB_CCDD_EEFF_0011_2233_4455_6677_8899u128);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
     for i in 0..63 {
@@ -199,8 +199,8 @@ fn lvlx_partial_overlap_merges_buffered_bytes_with_region() {
     // load reads the 16-byte line from regions and overlays the
     // 4 buffered bytes byte-by-byte instead of yielding.
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
-    s.gpr[2] = 0;
+    s.set_gpr(1, 0x1000);
+    s.set_gpr(2, 0);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
     assert!(store_buf.insert(0x1004, 4, 0xDEAD_BEEFu128));
@@ -236,8 +236,8 @@ fn lvlx_full_overlap_forwards_without_yielding() {
     // Sanity: when the buffer covers the full 16-byte line, the
     // load proceeds without yielding.
     let mut s = PpuState::new();
-    s.gpr[1] = 0x1000;
-    s.gpr[2] = 0;
+    s.set_gpr(1, 0x1000);
+    s.set_gpr(2, 0);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
     let val = 0xAABB_CCDD_EEFF_0011_2233_4455_6677_8899u128;
@@ -271,8 +271,8 @@ fn lvx_aligns_ea_down_to_16_byte_boundary() {
     ];
     mem[0x100..0x110].copy_from_slice(&pattern);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x0F; // EA = 0x10F -> aligned 0x100
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x0F); // EA = 0x10F -> aligned 0x100
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvx {
@@ -298,8 +298,8 @@ fn lvxl_matches_lvx_semantics() {
     ];
     mem[0x100..0x110].copy_from_slice(&pattern);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvxl {
@@ -319,8 +319,8 @@ fn lvxl_matches_lvx_semantics() {
 fn lvsl_sh_zero_returns_identity_vector() {
     // sh=0 -> VRT = [0, 1, 2, ..., 15].
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0);
     let mut effects = Vec::new();
     exec_no_mem_or_load(&mut s, &mut effects, |s, e| {
         exec_with_mem(
@@ -343,8 +343,8 @@ fn lvsl_sh_zero_returns_identity_vector() {
 fn lvsl_sh_nonzero_returns_shifted_identity() {
     // EA & 0xF = 3 -> VRT = [3, 4, 5, ..., 18].
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x3;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x3);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvsl {
@@ -368,8 +368,8 @@ fn lvsl_sh_nonzero_returns_shifted_identity() {
 fn lvsr_sh_zero_returns_descending_from_16() {
     // sh=0 -> VRT = [16, 17, ..., 31] (wraps low bits of u8).
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvsr {
@@ -393,8 +393,8 @@ fn lvsr_sh_zero_returns_descending_from_16() {
 fn lvsr_sh_three_returns_companion_to_lvsl() {
     // sh=3 -> VRT[i] = 16 + i - 3 = 13 + i, for i in 0..16.
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x3;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x3);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvsr {
@@ -420,11 +420,11 @@ fn lvebx_places_byte_in_be_lane_from_ea_low_nibble() {
     let mut mem = vec![0u8; 0x100];
     mem[0x15] = 0x7E;
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x05;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x05);
     // Pre-seed VR with a sentinel so we can verify other lanes are
     // preserved (spec-undefined but our implementation preserves).
-    s.vr[3] = 0xAAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAAu128;
+    s.set_vr(3, 0xAAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAAu128);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvebx {
@@ -448,9 +448,9 @@ fn lvehx_places_halfword_in_aligned_be_lane() {
     let mut mem = vec![0u8; 0x100];
     mem[0x14..0x16].copy_from_slice(&[0xBE, 0xEF]);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x05; // EA = 0x15 -> aligned to 0x14
-    s.vr[3] = 0;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x05); // EA = 0x15 -> aligned to 0x14
+    s.set_vr(3, 0);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvehx {
@@ -475,9 +475,9 @@ fn lvewx_places_word_in_aligned_be_lane() {
     let mut mem = vec![0u8; 0x100];
     mem[0x18..0x1C].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x10;
-    s.gpr[2] = 0x09; // EA = 0x19 -> aligned 0x18
-    s.vr[3] = 0;
+    s.set_gpr(1, 0x10);
+    s.set_gpr(2, 0x09); // EA = 0x19 -> aligned 0x18
+    s.set_vr(3, 0);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvewx {
@@ -507,8 +507,8 @@ fn lvlxl_matches_lvlx_semantics() {
     ];
     mem[0x100..0x110].copy_from_slice(&pattern);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x3;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x3);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvlxl {
@@ -533,9 +533,9 @@ fn lvrxl_aligned_ea_returns_zero() {
     let mut mem = vec![0u8; 0x200];
     mem[0x100..0x110].copy_from_slice(&[0xFF; 16]);
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0;
-    s.vr[5] = u128::MAX;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0);
+    s.set_vr(5, u128::MAX);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Lvrxl {
@@ -558,12 +558,12 @@ fn lvrxl_aligned_ea_returns_zero() {
 #[test]
 fn stvebx_emits_byte_from_be_lane_ea_low_nibble() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x5;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x5);
     // Lane 5 of the BE view holds the byte 0x55.
     let mut bytes = [0u8; 16];
     bytes[5] = 0x55;
-    s.vr[3] = u128::from_be_bytes(bytes);
+    s.set_vr(3, u128::from_be_bytes(bytes));
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stvebx {
@@ -588,12 +588,12 @@ fn stvebx_emits_byte_from_be_lane_ea_low_nibble() {
 #[test]
 fn stvehx_emits_halfword_from_aligned_be_lane() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x5; // EA = 0x105 -> aligned 0x104, lane 4
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x5); // EA = 0x105 -> aligned 0x104, lane 4
     let mut bytes = [0u8; 16];
     bytes[4] = 0xBE;
     bytes[5] = 0xEF;
-    s.vr[3] = u128::from_be_bytes(bytes);
+    s.set_vr(3, u128::from_be_bytes(bytes));
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stvehx {
@@ -618,14 +618,14 @@ fn stvehx_emits_halfword_from_aligned_be_lane() {
 #[test]
 fn stvewx_emits_word_from_aligned_be_lane() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x9; // EA = 0x109 -> aligned 0x108, lane 8
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x9); // EA = 0x109 -> aligned 0x108, lane 8
     let mut bytes = [0u8; 16];
     bytes[8] = 0xDE;
     bytes[9] = 0xAD;
     bytes[10] = 0xBE;
     bytes[11] = 0xEF;
-    s.vr[3] = u128::from_be_bytes(bytes);
+    s.set_vr(3, u128::from_be_bytes(bytes));
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stvewx {
@@ -656,12 +656,15 @@ fn stvlx_writes_high_bytes_starting_at_ea() {
     // EA & 0xF = 3 -> count = 16 - 3 = 13 bytes from VS[0..13]
     // stored to [EA..EA+13].
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x3;
-    s.vr[3] = u128::from_be_bytes([
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
-        0x1F,
-    ]);
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x3);
+    s.set_vr(
+        3,
+        u128::from_be_bytes([
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
+            0x1E, 0x1F,
+        ]),
+    );
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stvlx {
@@ -692,12 +695,15 @@ fn stvlx_writes_high_bytes_starting_at_ea() {
 fn stvrx_writes_low_bytes_to_aligned_line_below_ea() {
     // EA & 0xF = 3 -> 3 bytes from VS[13..16] -> [aligned..aligned+3].
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x3;
-    s.vr[3] = u128::from_be_bytes([
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
-        0x1F,
-    ]);
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x3);
+    s.set_vr(
+        3,
+        u128::from_be_bytes([
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
+            0x1E, 0x1F,
+        ]),
+    );
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stvrx {
@@ -726,9 +732,9 @@ fn stvrx_writes_low_bytes_to_aligned_line_below_ea() {
 fn stvrx_aligned_ea_is_noop() {
     // EA & 0xF = 0 -> m=0; no stores emitted.
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0;
-    s.vr[3] = u128::MAX;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0);
+    s.set_vr(3, u128::MAX);
     let mut effects = Vec::new();
     let v = exec_with_mem(
         &PpuInstruction::Stvrx {
@@ -748,12 +754,15 @@ fn stvrx_aligned_ea_is_noop() {
 #[test]
 fn stvlxl_matches_stvlx_semantics() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0xC; // 16 - 12 = 4 bytes
-    s.vr[3] = u128::from_be_bytes([
-        0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
-        0xAF,
-    ]);
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0xC); // 16 - 12 = 4 bytes
+    s.set_vr(
+        3,
+        u128::from_be_bytes([
+            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD,
+            0xAE, 0xAF,
+        ]),
+    );
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stvlxl {
@@ -784,12 +793,15 @@ fn stvlxl_matches_stvlx_semantics() {
 #[test]
 fn stvrxl_matches_stvrx_semantics() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0x2; // 2 bytes from VS[14..16] -> [0x100, 0x101]
-    s.vr[3] = u128::from_be_bytes([
-        0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE,
-        0xBF,
-    ]);
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0x2); // 2 bytes from VS[14..16] -> [0x100, 0x101]
+    s.set_vr(
+        3,
+        u128::from_be_bytes([
+            0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD,
+            0xBE, 0xBF,
+        ]),
+    );
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stvrxl {
@@ -817,10 +829,10 @@ fn stvrxl_matches_stvrx_semantics() {
 #[test]
 fn stvxl_emits_16_byte_store_in_two_halves() {
     let mut s = PpuState::new();
-    s.gpr[1] = 0x100;
-    s.gpr[2] = 0;
+    s.set_gpr(1, 0x100);
+    s.set_gpr(2, 0);
     let val = 0x0011_2233_4455_6677_8899_AABB_CCDD_EEFFu128;
-    s.vr[3] = val;
+    s.set_vr(3, val);
     let mut effects = Vec::new();
     exec_with_mem(
         &PpuInstruction::Stvxl {

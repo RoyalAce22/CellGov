@@ -96,13 +96,11 @@ pub struct PpuExecutionUnit {
     full_state_window: Option<(u64, u64)>,
     /// Increments on successful retirement only.
     retirement_counter: u64,
-    per_step_full_states: Vec<(u64, [u64; 32], u64, u64, u64, u32)>,
+    per_step_full_states: Vec<(u64, u64, cellgov_exec::PpuFingerprint)>,
     instruction_shadow: Option<shadow::PredecodedShadow>,
     shadow_hits: u64,
     shadow_misses: u64,
     store_buf: StoreBuffer,
-    /// Forces `Budget=1` on the next `run_until_yield`.
-    budget_override: Option<u64>,
     profile_mode: bool,
     profile_insns: std::collections::BTreeMap<&'static str, u64>,
     profile_pairs: std::collections::BTreeMap<(&'static str, &'static str), u64>,
@@ -126,7 +124,6 @@ impl PpuExecutionUnit {
             shadow_hits: 0,
             shadow_misses: 0,
             store_buf: StoreBuffer::new(),
-            budget_override: None,
             profile_mode: false,
             profile_insns: std::collections::BTreeMap::new(),
             profile_pairs: std::collections::BTreeMap::new(),
@@ -191,18 +188,18 @@ impl PpuExecutionUnit {
 impl PpuExecutionUnit {
     fn capture_regs(&self) -> FaultRegisterDump {
         FaultRegisterDump {
-            gprs: self.state.gpr,
-            lr: self.state.lr,
-            ctr: self.state.ctr,
-            xer: self.state.xer,
-            cr: self.state.cr,
+            gprs: *self.state.gpr.as_array(),
+            lr: self.state.lr(),
+            ctr: self.state.ctr(),
+            xer: self.state.xer(),
+            cr: self.state.cr(),
         }
     }
 
     fn fault_diag(&self, pc: u64) -> LocalDiagnostics {
         LocalDiagnostics {
             pc: Some(pc),
-            lr: Some(self.state.lr),
+            lr: Some(self.state.lr()),
             syscall_lev: None,
             faulting_ea: None,
             fault_regs: Some(self.capture_regs()),
@@ -212,11 +209,39 @@ impl PpuExecutionUnit {
     fn fault_diag_ea(&self, pc: u64, ea: u64) -> LocalDiagnostics {
         LocalDiagnostics {
             pc: Some(pc),
-            lr: Some(self.state.lr),
+            lr: Some(self.state.lr()),
             syscall_lev: None,
             faulting_ea: Some(ea),
             fault_regs: Some(self.capture_regs()),
         }
+    }
+
+    /// Fault-discards-all: restore the batch-entry state, drop staged
+    /// stores and effects, rewind the per-step trace to the batch
+    /// entry, and mark the unit faulted.
+    ///
+    /// Retirements discarded by the rollback never reach the trace
+    /// stream: their `PpuStateHash` / `PpuStateFull` entries are
+    /// truncated and `retirement_counter` is restored. Callers capture
+    /// diagnostics BEFORE calling this so `fault_regs` reflects the
+    /// fault site, not the entry snapshot.
+    fn discard_batch(
+        &mut self,
+        snapshot: &Option<state::PpuState>,
+        entry_hashes: usize,
+        entry_fulls: usize,
+        entry_retired: u64,
+        effects: &mut Vec<Effect>,
+    ) {
+        if let Some(snap) = snapshot.as_ref() {
+            self.state = snap.clone();
+        }
+        self.store_buf.clear();
+        effects.clear();
+        self.per_step_hashes.truncate(entry_hashes);
+        self.per_step_full_states.truncate(entry_fulls);
+        self.retirement_counter = entry_retired;
+        self.status = UnitStatus::Faulted;
     }
 }
 
@@ -237,17 +262,14 @@ impl ExecutionUnit for PpuExecutionUnit {
         ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
-        let max_budget = match self.budget_override.take() {
-            Some(b) => b,
-            None => budget.raw(),
-        };
+        let max_budget = budget.raw();
         let mut remaining = max_budget;
         effects.clear();
         self.store_buf.clear();
 
         // Cross-unit reservation clear: committed table is authoritative.
-        if self.state.reservation.is_some() && !ctx.reservation_held(self.id) {
-            self.state.reservation = None;
+        if self.state.reservation().is_some() && !ctx.reservation_held(self.id) {
+            self.state.set_reservation(None);
         }
 
         // `max` preserves strict TB monotonicity when a prior step's
@@ -257,21 +279,27 @@ impl ExecutionUnit for PpuExecutionUnit {
             self.state.tb = tb_from_tick;
         }
 
+        if let Some(code) = ctx.syscall_return() {
+            self.state.set_gpr(3, code);
+            self.state.pc += 4;
+        }
+        for &(reg, val) in ctx.register_writes() {
+            if (reg as usize) < 32 {
+                self.state.set_gpr(reg as usize, val);
+            }
+        }
+
+        // Taken after the runtime's committed inputs (syscall return,
+        // register writes) are applied: a mid-batch rollback must not
+        // undo state the commit pipeline already owns.
         let snapshot = if max_budget > 1 {
             Some(self.state.clone())
         } else {
             None
         };
-
-        if let Some(code) = ctx.syscall_return() {
-            self.state.gpr[3] = code;
-            self.state.pc += 4;
-        }
-        for &(reg, val) in ctx.register_writes() {
-            if (reg as usize) < 32 {
-                self.state.gpr[reg as usize] = val;
-            }
-        }
+        let entry_hashes = self.per_step_hashes.len();
+        let entry_fulls = self.per_step_full_states.len();
+        let entry_retired = self.retirement_counter;
 
         if self.break_pc == Some(self.state.pc) {
             if self.break_skip > 0 {
@@ -319,11 +347,18 @@ impl ExecutionUnit for PpuExecutionUnit {
                 self.shadow_misses += 1;
                 let pc = step_pc as usize;
                 if pc + 4 > mem.len() {
-                    self.status = UnitStatus::Faulted;
+                    let diag = self.fault_diag(step_pc);
+                    self.discard_batch(
+                        &snapshot,
+                        entry_hashes,
+                        entry_fulls,
+                        entry_retired,
+                        effects,
+                    );
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
-                        local_diagnostics: self.fault_diag(step_pc),
+                        consumed_cost: InstructionCost::ZERO,
+                        local_diagnostics: diag,
                         fault: Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
                         syscall_args: None,
                     };
@@ -337,11 +372,18 @@ impl ExecutionUnit for PpuExecutionUnit {
                         i
                     }
                     Err(_) => {
-                        self.status = UnitStatus::Faulted;
+                        let diag = self.fault_diag(step_pc);
+                        self.discard_batch(
+                            &snapshot,
+                            entry_hashes,
+                            entry_fulls,
+                            entry_retired,
+                            effects,
+                        );
                         return ExecutionStepResult {
                             yield_reason: YieldReason::Fault,
-                            consumed_cost: InstructionCost::new(budget.raw() - remaining),
-                            local_diagnostics: self.fault_diag(step_pc),
+                            consumed_cost: InstructionCost::ZERO,
+                            local_diagnostics: diag,
                             fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
                             syscall_args: None,
                         };
@@ -360,9 +402,11 @@ impl ExecutionUnit for PpuExecutionUnit {
                 }
                 if let Some((lo, hi)) = self.full_state_window {
                     if self.retirement_counter >= lo && self.retirement_counter <= hi {
-                        let s = &self.state;
-                        self.per_step_full_states
-                            .push((step_pc, s.gpr, s.lr, s.ctr, s.xer, s.cr));
+                        self.per_step_full_states.push((
+                            self.retirement_counter,
+                            step_pc,
+                            self.state.fingerprint(),
+                        ));
                     }
                 }
                 self.retirement_counter += 1;
@@ -416,7 +460,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc_lr_syscall_lev(
                             step_pc,
-                            self.state.lr,
+                            self.state.lr(),
                             lev,
                         ),
                         fault: None,
@@ -435,17 +479,13 @@ impl ExecutionUnit for PpuExecutionUnit {
                         PpuFault::AlignmentInterrupt(a) => self.fault_diag_ea(step_pc, a),
                         _ => self.fault_diag(step_pc),
                     };
-                    // Fault-discards-all: mid-batch rollback.
-                    if remaining < max_budget {
-                        if let Some(snap) = snapshot.as_ref() {
-                            self.state = snap.clone();
-                            self.store_buf.clear();
-                        }
-                    } else {
-                        self.store_buf.flush(effects, self.id);
-                    }
-                    effects.clear();
-                    self.status = UnitStatus::Faulted;
+                    self.discard_batch(
+                        &snapshot,
+                        entry_hashes,
+                        entry_fulls,
+                        entry_retired,
+                        effects,
+                    );
                     // Mask guards against upper-bit collision with the category prefix.
                     let code = match f {
                         PpuFault::PcOutOfRange(_) => FAULT_PC_OUT_OF_RANGE,
@@ -468,37 +508,34 @@ impl ExecutionUnit for PpuExecutionUnit {
                     };
                 }
                 ExecuteVerdict::MemFault(e) => {
-                    // arm_entries: coarse liveness witness; unmapped_routed:
-                    // discriminator that proves the catch-all `debug_assert!`
-                    // path was exercised.
-                    self.state.mem_fault_arm_entries =
-                        self.state.mem_fault_arm_entries.wrapping_add(1);
-                    let ea = match &e {
-                        cellgov_mem::MemError::Unmapped(ctx) => {
-                            self.state.mem_fault_unmapped_routed =
-                                self.state.mem_fault_unmapped_routed.wrapping_add(1);
-                            ctx.addr
-                        }
+                    let (ea, unmapped) = match &e {
+                        cellgov_mem::MemError::Unmapped(ctx) => (ctx.addr, true),
                         // Only Unmapped is reachable on this path.
                         _ => {
                             debug_assert!(
                                 false,
                                 "ExecuteVerdict::MemFault carrying non-Unmapped MemError: {e:?}"
                             );
-                            0
+                            (0, false)
                         }
                     };
                     let diag = self.fault_diag_ea(step_pc, ea);
-                    if remaining < max_budget {
-                        if let Some(snap) = snapshot.as_ref() {
-                            self.state = snap.clone();
-                            self.store_buf.clear();
-                        }
-                    } else {
-                        self.store_buf.flush(effects, self.id);
+                    self.discard_batch(
+                        &snapshot,
+                        entry_hashes,
+                        entry_fulls,
+                        entry_retired,
+                        effects,
+                    );
+                    // Incremented AFTER the rollback: the counters are
+                    // hash-excluded instruments, and restoring the entry
+                    // snapshot must not erase the record of this fault.
+                    self.state.mem_fault_arm_entries =
+                        self.state.mem_fault_arm_entries.wrapping_add(1);
+                    if unmapped {
+                        self.state.mem_fault_unmapped_routed =
+                            self.state.mem_fault_unmapped_routed.wrapping_add(1);
                     }
-                    effects.clear();
-                    self.status = UnitStatus::Faulted;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_cost: InstructionCost::ZERO,
@@ -538,9 +575,11 @@ impl ExecutionUnit for PpuExecutionUnit {
 
             if let Some((lo, hi)) = self.full_state_window {
                 if self.retirement_counter >= lo && self.retirement_counter <= hi {
-                    let s = &self.state;
-                    self.per_step_full_states
-                        .push((step_pc, s.gpr, s.lr, s.ctr, s.xer, s.cr));
+                    self.per_step_full_states.push((
+                        self.retirement_counter,
+                        step_pc,
+                        self.state.fingerprint(),
+                    ));
                 }
             }
             self.retirement_counter += 1;
@@ -561,16 +600,16 @@ impl ExecutionUnit for PpuExecutionUnit {
 
     fn snapshot(&self) -> PpuSnapshot {
         PpuSnapshot {
-            gpr: self.state.gpr,
-            fpr: self.state.fpr,
-            vr: self.state.vr,
+            gpr: *self.state.gpr.as_array(),
+            fpr: *self.state.fpr.as_array(),
+            vr: *self.state.vr.as_array(),
             pc: self.state.pc,
-            cr: self.state.cr,
-            lr: self.state.lr,
-            ctr: self.state.ctr,
-            xer: self.state.xer,
+            cr: self.state.cr(),
+            lr: self.state.lr(),
+            ctr: self.state.ctr(),
+            xer: self.state.xer(),
             tb: self.state.tb,
-            reservation_line: self.state.reservation.map(|l| l.addr()),
+            reservation_line: self.state.reservation().map(|l| l.addr()),
         }
     }
 
@@ -578,7 +617,7 @@ impl ExecutionUnit for PpuExecutionUnit {
         std::mem::take(&mut self.per_step_hashes)
     }
 
-    fn drain_retired_state_full(&mut self) -> Vec<(u64, [u64; 32], u64, u64, u64, u32)> {
+    fn drain_retired_state_full(&mut self) -> Vec<(u64, u64, cellgov_exec::PpuFingerprint)> {
         std::mem::take(&mut self.per_step_full_states)
     }
 
@@ -608,11 +647,11 @@ impl ExecutionUnit for PpuExecutionUnit {
 
     fn register_dump(&self) -> Option<cellgov_exec::FaultRegisterDump> {
         Some(cellgov_exec::FaultRegisterDump {
-            gprs: self.state.gpr,
-            lr: self.state.lr,
-            ctr: self.state.ctr,
-            xer: self.state.xer,
-            cr: self.state.cr,
+            gprs: *self.state.gpr.as_array(),
+            lr: self.state.lr(),
+            ctr: self.state.ctr(),
+            xer: self.state.xer(),
+            cr: self.state.cr(),
         })
     }
 }

@@ -6,10 +6,28 @@ use super::*;
 fn new_state_is_zeroed() {
     let s = PpuState::new();
     assert_eq!(s.pc, 0);
-    assert_eq!(s.lr, 0);
-    assert_eq!(s.ctr, 0);
-    assert_eq!(s.cr, 0);
-    assert!(s.gpr.iter().all(|&r| r == 0));
+    assert_eq!(s.lr(), 0);
+    assert_eq!(s.ctr(), 0);
+    assert_eq!(s.cr(), 0);
+    assert!(s.gpr.as_array().iter().all(|&r| r == 0));
+}
+
+/// Golden pin on the hash byte stream: reordering the fingerprint
+/// fold (field order or per-field encoding) shifts every recorded
+/// per-step hash in every trace and anchor, so it must fail HERE with
+/// a named cause, not later as an unexplained cross-runner mismatch.
+#[test]
+fn state_hash_byte_stream_is_pinned() {
+    let mut s = PpuState::new();
+    for i in 0..32 {
+        s.set_gpr(i, 0x0101_0101_0101_0101u64.wrapping_mul(i as u64 + 1));
+    }
+    s.set_lr(0x1122_3344_5566_7788);
+    s.set_ctr(0x99AA_BBCC_DDEE_FF00);
+    s.set_xer((1 << 29) | (1 << 31));
+    s.set_cr(0xA5A5_5A5A);
+    s.set_reservation(Some(ReservedLine::containing(0x3000_1080)));
+    assert_eq!(s.state_hash(), 0xCDB1_0BA6_1479_AD7A);
 }
 
 #[test]
@@ -35,15 +53,15 @@ fn cr_bit_reads_correct_position() {
 #[test]
 fn ea_d_form_ra_zero_uses_literal_zero() {
     let mut s = PpuState::new();
-    s.gpr[0] = 0xDEAD;
+    s.set_gpr(0, 0xDEAD);
     assert_eq!(s.ea_d_form(0, 100), 100);
 }
 
 #[test]
 fn ea_x_form_ra_zero_uses_literal_zero() {
     let mut s = PpuState::new();
-    s.gpr[0] = 0xDEAD;
-    s.gpr[5] = 200;
+    s.set_gpr(0, 0xDEAD);
+    s.set_gpr(5, 200);
     assert_eq!(s.ea_x_form(0, 5), 200);
 }
 
@@ -64,7 +82,7 @@ fn set_cr_field_preserves_other_fields() {
 #[test]
 fn ea_d_form_negative_displacement() {
     let mut s = PpuState::new();
-    s.gpr[1] = 1000;
+    s.set_gpr(1, 1000);
     assert_eq!(s.ea_d_form(1, -4), 996);
 }
 
@@ -81,12 +99,12 @@ fn xer_ca_round_trips() {
 #[test]
 fn set_xer_ca_does_not_touch_other_bits() {
     let mut s = PpuState::new();
-    s.xer = !(1u64 << 29);
+    s.set_xer(!(1u64 << 29));
     s.set_xer_ca(true);
-    assert_eq!(s.xer, !0u64, "set CA should preserve all other bits");
+    assert_eq!(s.xer(), !0u64, "set CA should preserve all other bits");
     s.set_xer_ca(false);
     assert_eq!(
-        s.xer,
+        s.xer(),
         !(1u64 << 29),
         "clear CA should preserve all other bits"
     );
@@ -96,16 +114,16 @@ fn set_xer_ca_does_not_touch_other_bits() {
 fn state_hash_is_reproducible_for_same_state() {
     let mut a = PpuState::new();
     let mut b = PpuState::new();
-    a.gpr[3] = 0x1234_5678_9abc_def0;
-    a.lr = 0x42;
-    a.ctr = 0x84;
-    a.xer = 1 << 29;
-    a.cr = 0xa5a5_a5a5;
-    b.gpr[3] = 0x1234_5678_9abc_def0;
-    b.lr = 0x42;
-    b.ctr = 0x84;
-    b.xer = 1 << 29;
-    b.cr = 0xa5a5_a5a5;
+    a.set_gpr(3, 0x1234_5678_9abc_def0);
+    a.set_lr(0x42);
+    a.set_ctr(0x84);
+    a.set_xer(1 << 29);
+    a.set_cr(0xa5a5_a5a5);
+    b.set_gpr(3, 0x1234_5678_9abc_def0);
+    b.set_lr(0x42);
+    b.set_ctr(0x84);
+    b.set_xer(1 << 29);
+    b.set_cr(0xa5a5_a5a5);
     assert_eq!(a.state_hash(), b.state_hash());
 }
 
@@ -116,7 +134,7 @@ fn state_hash_distinguishes_every_covered_field() {
 
     for i in 0..GPR_COUNT {
         let mut s = base.clone();
-        s.gpr[i] = 1;
+        s.set_gpr(i, 1);
         assert_ne!(
             s.state_hash(),
             baseline,
@@ -125,19 +143,19 @@ fn state_hash_distinguishes_every_covered_field() {
     }
 
     let mut s = base.clone();
-    s.lr = 1;
+    s.set_lr(1);
     assert_ne!(s.state_hash(), baseline, "LR must influence state_hash");
 
     let mut s = base.clone();
-    s.ctr = 1;
+    s.set_ctr(1);
     assert_ne!(s.state_hash(), baseline, "CTR must influence state_hash");
 
     let mut s = base.clone();
-    s.xer = 1;
+    s.set_xer(1);
     assert_ne!(s.state_hash(), baseline, "XER must influence state_hash");
 
     let mut s = base.clone();
-    s.cr = 1;
+    s.set_cr(1);
     assert_ne!(s.state_hash(), baseline, "CR must influence state_hash");
 }
 
@@ -151,11 +169,11 @@ fn state_hash_ignores_pc_fpr_vr() {
     assert_eq!(s.state_hash(), baseline, "PC is excluded");
 
     let mut s = base.clone();
-    s.fpr[7] = 0xffff_ffff_ffff_ffff;
+    s.set_fpr(7, 0xffff_ffff_ffff_ffff);
     assert_eq!(s.state_hash(), baseline, "FPR is excluded");
 
     let mut s = base.clone();
-    s.vr[0] = u128::MAX;
+    s.set_vr(0, u128::MAX);
     assert_eq!(s.state_hash(), baseline, "VR is excluded");
 }
 
@@ -247,18 +265,18 @@ fn state_hash_tracks_reservation_register() {
     let baseline = base.state_hash();
 
     let mut s = base.clone();
-    s.reservation = Some(ReservedLine::containing(0x1000));
+    s.set_reservation(Some(ReservedLine::containing(0x1000)));
     let h_a = s.state_hash();
     assert_ne!(h_a, baseline, "setting a reservation must flip the hash");
 
     let mut s = base.clone();
-    s.reservation = Some(ReservedLine::containing(0x2000));
+    s.set_reservation(Some(ReservedLine::containing(0x2000)));
     let h_b = s.state_hash();
     assert_ne!(h_a, h_b, "different reserved lines must hash distinctly");
 
     let mut s = base.clone();
-    s.reservation = Some(ReservedLine::containing(0x1000));
-    s.reservation = None;
+    s.set_reservation(Some(ReservedLine::containing(0x1000)));
+    s.set_reservation(None);
     assert_eq!(s.state_hash(), baseline);
 }
 
@@ -266,12 +284,12 @@ fn state_hash_tracks_reservation_register() {
 fn set_xer_ov_sets_ov_and_sticky_so() {
     let mut s = PpuState::new();
     s.set_xer_ov(true);
-    assert_eq!(s.xer & (1u64 << 30), 1u64 << 30, "OV set");
-    assert_eq!(s.xer & (1u64 << 31), 1u64 << 31, "SO set");
+    assert_eq!(s.xer() & (1u64 << 30), 1u64 << 30, "OV set");
+    assert_eq!(s.xer() & (1u64 << 31), 1u64 << 31, "SO set");
     s.set_xer_ov(false);
-    assert_eq!(s.xer & (1u64 << 30), 0, "OV cleared");
+    assert_eq!(s.xer() & (1u64 << 30), 0, "OV cleared");
     assert_eq!(
-        s.xer & (1u64 << 31),
+        s.xer() & (1u64 << 31),
         1u64 << 31,
         "SO remains sticky across clear"
     );
@@ -300,28 +318,28 @@ fn set_cr0_from_result_copies_sticky_so() {
 #[test]
 fn xer_ca_reads_only_bit_29() {
     let mut s = PpuState::new();
-    s.xer = !(1u64 << 29);
+    s.set_xer(!(1u64 << 29));
     assert!(!s.xer_ca());
-    s.xer = 1u64 << 29;
+    s.set_xer(1u64 << 29);
     assert!(s.xer_ca());
 }
 
 #[test]
 fn ppu_syscall_args_maps_r11_to_index_0_and_r3_through_r10_to_1_through_8() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xA300_0000_0000_0003;
-    s.gpr[4] = 0xA400_0000_0000_0004;
-    s.gpr[5] = 0xA500_0000_0000_0005;
-    s.gpr[6] = 0xA600_0000_0000_0006;
-    s.gpr[7] = 0xA700_0000_0000_0007;
-    s.gpr[8] = 0xA800_0000_0000_0008;
-    s.gpr[9] = 0xA900_0000_0000_0009;
-    s.gpr[10] = 0xAA00_0000_0000_000A;
-    s.gpr[11] = 0xAB00_0000_0000_000B;
-    s.gpr[0] = 0xDEAD_BEEF_DEAD_BEEF;
-    s.gpr[2] = 0xDEAD_BEEF_DEAD_BEEF;
-    s.gpr[12] = 0xDEAD_BEEF_DEAD_BEEF;
-    s.gpr[31] = 0xDEAD_BEEF_DEAD_BEEF;
+    s.set_gpr(3, 0xA300_0000_0000_0003);
+    s.set_gpr(4, 0xA400_0000_0000_0004);
+    s.set_gpr(5, 0xA500_0000_0000_0005);
+    s.set_gpr(6, 0xA600_0000_0000_0006);
+    s.set_gpr(7, 0xA700_0000_0000_0007);
+    s.set_gpr(8, 0xA800_0000_0000_0008);
+    s.set_gpr(9, 0xA900_0000_0000_0009);
+    s.set_gpr(10, 0xAA00_0000_0000_000A);
+    s.set_gpr(11, 0xAB00_0000_0000_000B);
+    s.set_gpr(0, 0xDEAD_BEEF_DEAD_BEEF);
+    s.set_gpr(2, 0xDEAD_BEEF_DEAD_BEEF);
+    s.set_gpr(12, 0xDEAD_BEEF_DEAD_BEEF);
+    s.set_gpr(31, 0xDEAD_BEEF_DEAD_BEEF);
 
     let args = ppu_syscall_args(&s);
     assert_eq!(args[0], 0xAB00_0000_0000_000B, "args[0] must be r11");

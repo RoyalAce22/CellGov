@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn ori_zero_is_move() {
     let mut s = PpuState::new();
-    s.gpr[5] = 0xCAFE;
+    s.set_gpr(5, 0xCAFE);
     exec_no_mem(
         &PpuInstruction::Ori {
             ra: 3,
@@ -20,7 +20,7 @@ fn ori_zero_is_move() {
 #[test]
 fn extsw_sign_extends_low_32_bits() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x0000_0000_8000_0000;
+    s.set_gpr(3, 0x0000_0000_8000_0000);
     exec_no_mem(
         &PpuInstruction::Extsw {
             ra: 4,
@@ -35,7 +35,7 @@ fn extsw_sign_extends_low_32_bits() {
 #[test]
 fn cntlzd_counts_64_for_zero() {
     let mut s = PpuState::new();
-    s.gpr[5] = 0;
+    s.set_gpr(5, 0);
     exec_no_mem(
         &PpuInstruction::Cntlzd {
             ra: 3,
@@ -50,7 +50,7 @@ fn cntlzd_counts_64_for_zero() {
 #[test]
 fn cntlzd_high_bit_set_returns_zero() {
     let mut s = PpuState::new();
-    s.gpr[5] = 1u64 << 63;
+    s.set_gpr(5, 1u64 << 63);
     exec_no_mem(
         &PpuInstruction::Cntlzd {
             ra: 3,
@@ -65,8 +65,8 @@ fn cntlzd_high_bit_set_returns_zero() {
 #[test]
 fn orc_is_or_with_complement_rb() {
     let mut s = PpuState::new();
-    s.gpr[4] = 0x00FF_0000;
-    s.gpr[5] = 0x0000_00FF;
+    s.set_gpr(4, 0x00FF_0000);
+    s.set_gpr(5, 0x0000_00FF);
     exec_no_mem(
         &PpuInstruction::Orc {
             ra: 3,
@@ -85,7 +85,7 @@ fn or_dot_sets_cr0_without_touching_result() {
     // `or. rA, rS, rS` must update CR0; quickening it to plain
     // `Mr` (move register) is incorrect because Mr has no Rc form.
     let mut s = PpuState::new();
-    s.gpr[4] = (-5i64) as u64;
+    s.set_gpr(4, (-5i64) as u64);
     exec_no_mem(
         &PpuInstruction::Or {
             ra: 3,
@@ -102,8 +102,8 @@ fn or_dot_sets_cr0_without_touching_result() {
 #[test]
 fn and_dot_sets_cr0_eq_on_zero() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xFF00;
-    s.gpr[4] = 0x00FF;
+    s.set_gpr(3, 0xFF00);
+    s.set_gpr(4, 0x00FF);
     exec_no_mem(
         &PpuInstruction::And {
             ra: 5,
@@ -120,7 +120,7 @@ fn and_dot_sets_cr0_eq_on_zero() {
 #[test]
 fn cntlzd_dot_sets_cr0_gt_when_value_nonzero() {
     let mut s = PpuState::new();
-    s.gpr[3] = 1u64 << 40;
+    s.set_gpr(3, 1u64 << 40);
     exec_no_mem(
         &PpuInstruction::Cntlzd {
             ra: 5,
@@ -139,7 +139,7 @@ fn andi_dot_propagates_xer_so_into_cr0() {
     // Hand-rolled CR0 construction that ignores XER[SO] would
     // produce a CR0 with the SO bit always zero.
     let mut s = PpuState::new();
-    s.gpr[3] = 0xFF;
+    s.set_gpr(3, 0xFF);
     s.set_xer_ov(true);
     exec_no_mem(
         &PpuInstruction::AndiDot {
@@ -159,7 +159,7 @@ fn andis_dot_shifts_immediate_left_16() {
     // andis. masks RS with (UI << 16). Reading andis. as andi.
     // would mask with 0x0F instead of 0x000F_0000 here.
     let mut s = PpuState::new();
-    s.gpr[3] = 0x00FF_00FF;
+    s.set_gpr(3, 0x00FF_00FF);
     exec_no_mem(
         &PpuInstruction::AndisDot {
             ra: 4,
@@ -177,7 +177,7 @@ fn andis_dot_shifts_immediate_left_16() {
 fn andis_dot_zero_result_sets_eq() {
     // No bit overlap between RS and (UI << 16) -> result 0 -> EQ.
     let mut s = PpuState::new();
-    s.gpr[3] = 0x0000_FFFF; // bits 0..16 only
+    s.set_gpr(3, 0x0000_FFFF); // bits 0..16 only
     exec_no_mem(
         &PpuInstruction::AndisDot {
             ra: 4,
@@ -194,7 +194,7 @@ fn andis_dot_zero_result_sets_eq() {
 fn popcntb_faults_on_cell_ppe() {
     // [CBE-Handbook p:738 s:A.2.4.1] Cell PPE does not implement popcntb.
     let mut s = PpuState::new();
-    s.gpr[5] = 0x3f1f_0f07_0301_ff00u64;
+    s.set_gpr(5, 0x3f1f_0f07_0301_ff00u64);
     let v = exec_no_mem(&PpuInstruction::Popcntb { ra: 3, rs: 5 }, &mut s);
     assert!(matches!(
         v,
@@ -209,8 +209,8 @@ fn popcntb_faults_on_cell_ppe() {
 #[test]
 fn andc_dot_sets_cr0_eq_on_zero() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xFF;
-    s.gpr[4] = 0xFF; // ~RB clears RS bits
+    s.set_gpr(3, 0xFF);
+    s.set_gpr(4, 0xFF); // ~RB clears RS bits
     exec_no_mem(
         &PpuInstruction::Andc {
             ra: 5,
@@ -226,8 +226,8 @@ fn andc_dot_sets_cr0_eq_on_zero() {
 #[test]
 fn orc_dot_sets_cr0_lt_on_negative_result() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0;
-    s.gpr[4] = 0; // ~RB = u64::MAX -> negative
+    s.set_gpr(3, 0);
+    s.set_gpr(4, 0); // ~RB = u64::MAX -> negative
     exec_no_mem(
         &PpuInstruction::Orc {
             ra: 5,
@@ -243,8 +243,8 @@ fn orc_dot_sets_cr0_lt_on_negative_result() {
 #[test]
 fn xor_dot_sets_cr0_eq_when_operands_equal() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xDEAD_BEEF;
-    s.gpr[4] = 0xDEAD_BEEF;
+    s.set_gpr(3, 0xDEAD_BEEF);
+    s.set_gpr(4, 0xDEAD_BEEF);
     exec_no_mem(
         &PpuInstruction::Xor {
             ra: 5,
@@ -260,8 +260,8 @@ fn xor_dot_sets_cr0_eq_when_operands_equal() {
 #[test]
 fn nor_dot_sets_cr0_lt_on_negative_result() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0;
-    s.gpr[4] = 0; // ~(0 | 0) = u64::MAX -> negative
+    s.set_gpr(3, 0);
+    s.set_gpr(4, 0); // ~(0 | 0) = u64::MAX -> negative
     exec_no_mem(
         &PpuInstruction::Nor {
             ra: 5,
@@ -277,8 +277,8 @@ fn nor_dot_sets_cr0_lt_on_negative_result() {
 #[test]
 fn nand_dot_sets_cr0_eq_when_both_all_ones() {
     let mut s = PpuState::new();
-    s.gpr[3] = u64::MAX;
-    s.gpr[4] = u64::MAX; // ~(MAX & MAX) = 0
+    s.set_gpr(3, u64::MAX);
+    s.set_gpr(4, u64::MAX); // ~(MAX & MAX) = 0
     exec_no_mem(
         &PpuInstruction::Nand {
             ra: 5,
@@ -294,8 +294,8 @@ fn nand_dot_sets_cr0_eq_when_both_all_ones() {
 #[test]
 fn eqv_dot_sets_cr0_lt_when_operands_equal() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0xDEAD_BEEF;
-    s.gpr[4] = 0xDEAD_BEEF; // ~(RS ^ RB) = u64::MAX
+    s.set_gpr(3, 0xDEAD_BEEF);
+    s.set_gpr(4, 0xDEAD_BEEF); // ~(RS ^ RB) = u64::MAX
     exec_no_mem(
         &PpuInstruction::Eqv {
             ra: 5,
@@ -313,7 +313,7 @@ fn eqv_dot_sets_cr0_lt_when_operands_equal() {
 #[test]
 fn cntlzw_dot_sets_cr0_gt_on_nonzero_count() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x0000_0000_0010_0000;
+    s.set_gpr(3, 0x0000_0000_0010_0000);
     exec_no_mem(
         &PpuInstruction::Cntlzw {
             ra: 5,
@@ -330,7 +330,7 @@ fn cntlzw_dot_sets_cr0_gt_on_nonzero_count() {
 #[test]
 fn extsb_dot_sets_cr0_lt_on_negative_byte() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x80; // i8 negative
+    s.set_gpr(3, 0x80); // i8 negative
     exec_no_mem(
         &PpuInstruction::Extsb {
             ra: 5,
@@ -345,7 +345,7 @@ fn extsb_dot_sets_cr0_lt_on_negative_byte() {
 #[test]
 fn extsh_dot_sets_cr0_lt_on_negative_halfword() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x8000; // i16 negative
+    s.set_gpr(3, 0x8000); // i16 negative
     exec_no_mem(
         &PpuInstruction::Extsh {
             ra: 5,
@@ -360,7 +360,7 @@ fn extsh_dot_sets_cr0_lt_on_negative_halfword() {
 #[test]
 fn extsw_dot_sets_cr0_lt_on_negative_word() {
     let mut s = PpuState::new();
-    s.gpr[3] = 0x8000_0000; // i32 negative
+    s.set_gpr(3, 0x8000_0000); // i32 negative
     exec_no_mem(
         &PpuInstruction::Extsw {
             ra: 5,

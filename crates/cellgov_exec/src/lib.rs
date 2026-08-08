@@ -19,5 +19,5 @@ pub mod yield_reason;
 pub use context::ExecutionContext;
 pub use fake_isa::{FakeIsaUnit, FakeOp};
 pub use step_result::{ExecutionStepResult, FaultRegisterDump, LocalDiagnostics};
-pub use unit::{ExecutionUnit, UnitStatus};
+pub use unit::{ExecutionUnit, PpuFingerprint, UnitStatus};
 pub use yield_reason::YieldReason;

@@ -184,15 +184,24 @@ fn ppu_zoom_bytes(mem: &GuestMemory, n: usize, window: (u64, u64)) -> Vec<u8> {
     let _ = ppu.run_until_yield(Budget::new(n as u64), &ctx, &mut Vec::new());
     let pairs = ppu.drain_retired_state_full();
     let mut writer = TraceWriter::new();
-    for (i, (pc, gpr, lr, ctr, xer, cr)) in pairs.into_iter().enumerate() {
+    for (step, pc, fingerprint) in pairs {
+        let cellgov_exec::PpuFingerprint {
+            gpr,
+            lr,
+            ctr,
+            xer,
+            cr,
+            reservation_line,
+        } = fingerprint;
         writer.record(&TraceRecord::PpuStateFull {
-            step: window.0 + i as u64,
+            step,
             pc,
             gpr,
             lr,
             ctr,
             xer,
             cr,
+            reservation_line,
         });
     }
     writer.take_bytes()
@@ -248,7 +257,7 @@ fn cli_zoom_subcommand_names_mutated_register_field() {
 }
 
 #[test]
-fn cli_zoom_reports_hash_collision_when_full_states_match() {
+fn cli_zoom_reports_no_field_diff_when_full_states_match() {
     use std::path::PathBuf;
     use std::process::Command;
     let dir = std::env::temp_dir().join("cellgov_9g4_collision");
@@ -269,15 +278,15 @@ fn cli_zoom_reports_hash_collision_when_full_states_match() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
-        "collision case should exit 0 so outer scan resumes: {stdout}"
+        "agreeing-snapshots case should exit 0: {stdout}"
     );
     assert!(
-        stdout.contains("HASH_COLLISION"),
-        "expected HASH_COLLISION line, got: {stdout}"
+        stdout.contains("NO_FIELD_DIFF"),
+        "expected NO_FIELD_DIFF line, got: {stdout}"
     );
     assert!(
-        stdout.contains("resume scan from step 6"),
-        "expected next-step resume hint, got: {stdout}"
+        stdout.contains("do not resume the scan"),
+        "expected harness-defect warning, got: {stdout}"
     );
 }
 

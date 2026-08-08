@@ -13,7 +13,7 @@
 //!   replaces via [`Runtime::set_scheduler`] (contract 3).
 //! - [`cellgov_trace::TraceWriter`] (main + zoom) -- cleared on
 //!   `restore_into` (contract 2).
-//! - `rsx_label_writes_committed` -- cumulative audit counter; never
+//! - `rsx_label_writes_committed` -- cumulative instrument counter; never
 //!   feeds the commit pipeline or FIFO advance, and carries its
 //!   pre-restore value forward.
 //! - `effects_buf`, `scheduler_dirty_after_restore` -- per-step
