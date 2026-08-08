@@ -3,13 +3,12 @@
 use super::*;
 
 #[test]
-fn lvsr_decodes_to_named_variant_post_40e() {
-    // lvsr v12, r0, r9 = 0x7d80484c (primary 31, XO 38). Stage
-    // 40E graduated the AltiVec-memory family into the decoder;
-    // the previous Phase-39-terminal "missing lvsr" reject is
-    // now a successful decode.
+fn lvsr_decodes_to_named_variant() {
+    // lvsr v12, r0, r9 = 0x7d80484c (primary 31, XO 38). The
+    // AltiVec-memory family decodes, so what was once a
+    // "missing lvsr" reject is now a successful decode.
     let raw = 0x7d80_484c;
-    let inst = decode(raw).expect("lvsr must decode after 40E");
+    let inst = decode(raw).expect("lvsr must decode");
     assert_eq!(
         inst,
         PpuInstruction::Lvsr {

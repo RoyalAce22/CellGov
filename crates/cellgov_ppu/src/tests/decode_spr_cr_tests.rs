@@ -13,8 +13,8 @@ fn mfspr_at_spr_1_decodes_to_mfxer() {
 #[test]
 fn mtspr_at_supervisor_spr_names_correct_mtspr_mnemonic() {
     // Same encoding pattern as the mfspr test above, but with
-    // XO 467 (mtspr direction). SPR=18 routes to mtdsisr after
-    // Stage 40C.10 graduated SPR 1 (mtxer) into the decoder.
+    // XO 467 (mtspr direction). SPR=18 routes to mtdsisr; SPR 1
+    // (mtxer) decodes, so it is no longer the gap exemplar.
     let raw: u32 = (31u32 << 26) | (3u32 << 21) | (18u32 << 16) | (0u32 << 11) | (467u32 << 1);
     let err = decode(raw).unwrap_err();
     match err {

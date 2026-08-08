@@ -140,7 +140,7 @@ impl LwMutexIdAllocator {
 pub struct LwMutexTable {
     entries: BTreeMap<u32, LwMutexEntry>,
     ids: LwMutexIdAllocator,
-    /// Audit C-6a witness: cumulative count of calls to
+    /// Non-vacuity witness: cumulative count of calls to
     /// `acquire_or_enqueue` and `enqueue_waiter`. The catch-all
     /// `debug_assert!`s at lines 234 and 254 of this file guard
     /// internal contains/duplicate-enqueue invariants; silence is
@@ -159,7 +159,7 @@ impl LwMutexTable {
         Self::default()
     }
 
-    /// Audit C-6a witness: cumulative count of
+    /// Non-vacuity witness: cumulative count of
     /// `acquire_or_enqueue` and `enqueue_waiter` calls. See the
     /// `acquires_count` field doc.
     #[inline]

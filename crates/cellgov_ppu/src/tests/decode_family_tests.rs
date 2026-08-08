@@ -259,7 +259,7 @@ fn load_store_string_family_decode_to_named_variants() {
 
 #[test]
 fn primary31_x_form_residue_decode_to_named_variants() {
-    // Stage 40C.9: tw / td / popcntb / mcrxr.
+    // tw / td / popcntb / mcrxr.
     // tw/td: TO rides in the rt slot; bit 31 reserved (= 0).
     // popcntb: standard X-form; no Rc.
     // mcrxr: BF occupies bits 6..8 (rt high 3 bits); bits 9..10 reserved.
@@ -297,8 +297,8 @@ fn primary31_x_form_residue_decode_to_named_variants() {
 
 #[test]
 fn xo_arith_and_logical_family_decode_to_named_variants() {
-    // Stage 40C.7: XO-form arith (subfze/subfme/addme) and
-    // 2-op logical (eqv/nand). XO-form uses 9-bit XO; logical
+    // XO-form arith (subfze/subfme/addme) and 2-op logical
+    // (eqv/nand). XO-form uses 9-bit XO; logical
     // uses 10-bit XO. Test the bit-exact encoding shape.
     let p31 = 31u32 << 26;
     let regs_xo = (3u32 << 21) | (4u32 << 16);
@@ -384,8 +384,8 @@ fn cache_hint_family_collapses_to_nop() {
 fn d_form_scalar_gaps_decode_to_named_variants() {
     // Each row: (primary, raw, expected). RT/RS/FRT/FRS=0,
     // RA=1, imm=4 (low bits free since none of these are
-    // DS-form). Stage 40C.1 promoted these 5 ops out of the
-    // OPCODE_GAPS top-level fall-through.
+    // DS-form). These 5 ops decode rather than falling through
+    // to the OPCODE_GAPS top-level arm.
     let mk = |primary: u32| (primary << 26) | (0u32 << 21) | (1u32 << 16) | 4u32;
     let cases: &[(u32, PpuInstruction)] = &[
         (

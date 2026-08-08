@@ -1,4 +1,4 @@
-//! `sys_rsx_memory_allocate` (665) and `sys_rsx_memory_free` (667).
+//! `sys_rsx_memory_allocate` (668) and `sys_rsx_memory_free` (669).
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -9,7 +9,7 @@ use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
 
 impl Lv2Host {
-    /// `sys_rsx_memory_allocate` (665): bump-allocate `size` bytes and write
+    /// `sys_rsx_memory_allocate` (668): bump-allocate `size` bytes and write
     /// `mem_handle` (u32 BE) and `mem_addr` (u64 BE) to the OUT pointers.
     ///
     /// # Errors

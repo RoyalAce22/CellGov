@@ -74,6 +74,11 @@ jobs:
       - name: cargo clippy (corpus suites)
         run: cargo clippy --workspace --all-targets --features "$CORPUS_FEATURES" -- -D warnings
 
+      - name: cargo doc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps
+
       - name: cargo test
         run: cargo test --workspace
 

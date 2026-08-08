@@ -22,8 +22,8 @@ fn mfspr_with_unsupported_spr_reports_named_spr_locator() {
     // is split: LSB-0 bits 16..20 (the decoder's `ra` slot) hold
     // SPR LOW 5 bits; LSB-0 bits 11..15 (`rb` slot) hold SPR HIGH
     // 5 bits; the decoder reassembles `spr = (rb << 5) | ra`. For
-    // SPR=18: low=18, high=0. (SPR 1 graduated to `mfxer` in
-    // Stage 40C.10, so the smoke test moved to the next named gap.)
+    // SPR=18: low=18, high=0. (SPR 1 decodes as `mfxer`, so the
+    // smoke test uses the next named gap.)
     let raw: u32 = (31u32 << 26) | (3u32 << 21) | (18u32 << 16) | (0u32 << 11) | (339u32 << 1);
     let err = decode(raw).unwrap_err();
     match err {
