@@ -78,6 +78,17 @@ impl Lv2Host {
         self.pending_invariant_breaks
             .push(InvariantBreakReason::Unspecified);
         self.invariant_break_count = self.invariant_break_count.saturating_add(1);
+        let slot = self.invariant_break_sites.entry(site).or_insert(0);
+        *slot = slot.saturating_add(1);
+    }
+
+    /// Break count for one `log_invariant_break` site string.
+    ///
+    /// The site vocabulary is the set of `"dispatch.*"` literals in
+    /// this crate; `"dispatch.unsupported_stub"` distinguishes the
+    /// null backend's generic arm from every dedicated arm.
+    pub fn invariant_break_site_count(&self, site: &str) -> u64 {
+        self.invariant_break_sites.get(site).copied().unwrap_or(0)
     }
 
     /// `None` means the thread table and the primitive diverged; the

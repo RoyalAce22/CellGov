@@ -78,6 +78,9 @@ pub struct TitleManifest {
     /// (license 1/2); omitted for APP-keyed disc titles and free
     /// (license 3) NPDRM titles that use `NP_KLIC_FREE`.
     pub rap_filename: Option<String>,
+    /// Instruction cap the witness suite boots this title under.
+    /// `None` uses the recorder's 100M-instruction default.
+    pub bench_max_steps: Option<u64>,
     /// Built-in boot checkpoint; CLI `--checkpoint` overrides.
     pub checkpoint: CheckpointTrigger,
     pub source: GameSource,

@@ -43,7 +43,6 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0u64)
     }
 
-    /// Mints a kernel id and writes it through `*cid_ptr`.
     pub(super) fn dispatch_memory_container_create(
         &mut self,
         cid_ptr: u32,
@@ -102,8 +101,22 @@ impl Lv2Host {
         }
     }
 
-    /// Writes `(total, available)` = `(0x0D50_0000, 0x0D50_0000)` to
-    /// `*mem_info_ptr` (PS3 game-mode user-memory cap). EFAULT on null.
+    /// Writes `(total, available)` to `*mem_info_ptr`; EFAULT on null.
+    ///
+    /// `total` is the PS3 game-mode user-memory cap. `available`
+    /// subtracts what the bump allocator has handed out this boot
+    /// (`sys_memory_free` is a no-op, so consumption is monotonic).
+    /// The allocator's budget equals `total`, so the subtraction
+    /// cannot underflow; `saturating_sub` guards the debug-only
+    /// invariant anyway.
+    ///
+    /// Known divergence from the oracle (RPCS3 reports
+    /// `container.size - container.used`): real LV2 charges the
+    /// loaded image and every thread stack to the same container, so
+    /// its first-read `available` is already below `total`. CellGov's
+    /// counter starts at the post-image allocator base and thread
+    /// stacks live in a separate region, so `available` over-reports
+    /// by the image size plus stack usage.
     pub(super) fn dispatch_memory_get_user_memory_size(
         &self,
         mem_info_ptr: u32,
@@ -113,7 +126,10 @@ impl Lv2Host {
             return d;
         }
         let total = cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL;
-        let available = total;
+        // ptr starts at base and only grows; set_mem_alloc_base resets both.
+        debug_assert!(self.mem_alloc_ptr >= self.mem_alloc_base);
+        let consumed = self.mem_alloc_ptr - self.mem_alloc_base;
+        let available = total.saturating_sub(consumed);
         let mut bytes = [0u8; 8];
         bytes[0..4].copy_from_slice(&total.to_be_bytes());
         bytes[4..8].copy_from_slice(&available.to_be_bytes());

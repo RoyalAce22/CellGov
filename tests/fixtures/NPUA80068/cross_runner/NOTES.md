@@ -6,13 +6,13 @@ developer: Housemarque
 engine: Housemarque proprietary
 distribution: PSN HDD
 checkpoint: FirstRsxWrite (requested; not reached)
-steps: 390433
+steps: 390432
 convergence: No (outcome: Timeout vs Completed)
 byte_parity: --
 ---
 
 Does not converge with RPCS3 at FirstRsxWrite: CellGov
-times out at `MaxSteps` (390,433 under default budget) before
+times out at `MaxSteps` (390,432 under default budget) before
 reaching the first RSX put-pointer write; RPCS3 completes
 the checkpoint. Byte parity undefined until convergence.
 

@@ -17,3 +17,7 @@ cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
 thiserror = "2"
 num_enum = "0.7"
+# EnumDiscriminants on Lv2Request: the per-arm fidelity map is an
+# exhaustive match over the fieldless discriminant enum, so a new
+# request variant cannot ship without declaring its fidelity.
+strum = { version = "0.26", default-features = false, features = ["derive"] }

@@ -69,6 +69,68 @@ fn set_mem_alloc_base_overrides_first_allocation_address() {
 }
 
 #[test]
+fn user_memory_size_available_falls_with_allocation() {
+    let mut host = Lv2Host::new();
+    host.set_mem_alloc_base(0x008A_0000);
+    let rt = FakeRuntime::new(0x10000);
+    let source = UnitId::new(0);
+    let total = cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL;
+
+    let query = |host: &mut Lv2Host| -> u32 {
+        match host.dispatch(
+            Lv2Request::MemoryGetUserMemorySize {
+                mem_info_ptr: 0x200,
+            },
+            source,
+            &rt,
+        ) {
+            Lv2Dispatch::Immediate { code: 0, effects } => match &effects[0] {
+                cellgov_effects::Effect::SharedWriteIntent { bytes, .. } => {
+                    let b = bytes.bytes();
+                    u32::from_be_bytes([b[4], b[5], b[6], b[7]])
+                }
+                other => panic!("expected SharedWriteIntent, got {other:?}"),
+            },
+            other => panic!("expected Immediate(0), got {other:?}"),
+        }
+    };
+    let alloc = |host: &mut Lv2Host, size: u64| {
+        let d = host.dispatch(
+            Lv2Request::MemoryAllocate {
+                size,
+                flags: 0x200,
+                alloc_addr_ptr: 0x100,
+            },
+            source,
+            &rt,
+        );
+        assert!(matches!(d, Lv2Dispatch::Immediate { code: 0, .. }));
+    };
+
+    assert_eq!(
+        query(&mut host),
+        total,
+        "nothing consumed before first alloc"
+    );
+
+    alloc(&mut host, 0x100);
+    assert_eq!(
+        query(&mut host),
+        total - 0x100,
+        "available falls by the allocated size"
+    );
+
+    // The next allocation first re-aligns the cursor to the 64 KiB
+    // granule, so the fall includes the alignment padding.
+    alloc(&mut host, 0x100);
+    assert_eq!(
+        query(&mut host),
+        total - 0x1_0000 - 0x100,
+        "available falls by padding-to-granule plus size"
+    );
+}
+
+#[test]
 fn memory_free_is_noop_stub() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(256);

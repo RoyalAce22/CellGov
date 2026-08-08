@@ -19,8 +19,8 @@
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Schema version this build understands. A mismatch on parse fails
-/// fast; the loader never tries to silently read a future schema.
+/// Schema version this build understands; any other value is
+/// rejected at parse time.
 pub const SUPPORTED_FORMAT_VERSION: u32 = 1;
 
 /// Fixed-width SHA-256 digest. On-disk form is 64 lowercase hex
@@ -96,10 +96,7 @@ pub struct FirmwareIdentity {
     pub pup_sha256: Sha256,
 }
 
-/// Per-file integrity entry. `path` is relative to the install root
-/// (e.g., `sys/external/liblv2.sprx`); `sha256` is over the
-/// post-decrypt ELF bytes; `revision` is the SCE container header's
-/// per-file revision tag.
+/// Per-file integrity entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FirmwareFileEntry {
     /// Install-root-relative path (e.g., `sys/external/liblv2.sprx`).
@@ -111,11 +108,7 @@ pub struct FirmwareFileEntry {
     pub revision: u16,
 }
 
-/// Raw on-disk shape. Deserialised first, then `TryFrom`-validated
-/// into `FirmwareManifest`. The serde derive on `RawManifest` is the
-/// only place TOML actually reads into; `FirmwareManifest`'s
-/// `try_from` attribute makes the validation structurally
-/// unavoidable.
+/// Raw on-disk shape; `TryFrom`-validated into [`FirmwareManifest`].
 #[derive(Deserialize)]
 struct RawManifest {
     format_version: u32,
@@ -159,8 +152,7 @@ pub enum ManifestError {
         /// Schema version this build understands.
         expected: u32,
     },
-    /// Two `[[files]]` entries shared the same `path`. Carries the
-    /// offending path so the operator can locate the duplicate.
+    /// Two `[[files]]` entries shared the same `path`.
     #[error("firmware.toml has duplicate [[files]].path: {0:?}")]
     DuplicatePath(String),
     /// Underlying TOML parse failure (malformed input, missing
@@ -170,26 +162,21 @@ pub enum ManifestError {
     /// Underlying TOML serialise failure.
     #[error("firmware.toml serialise: {0}")]
     TomlSer(#[from] toml::ser::Error),
-    /// Manifest entry was never verified by [`ManifestVerifier`]
-    /// before `finish()`; the install pipeline either failed to
-    /// produce the corresponding SPRX or never queued it for
-    /// verification.
+    /// Manifest entry was never `Match`-verified before
+    /// [`ManifestVerifier::finish`].
     #[error("firmware.toml entry {0:?} was never verified")]
     EntryUnverified(String),
 }
 
 /// Parse a `firmware.toml` text. Rejects unsupported
 /// `format_version`s, duplicate `path` entries, and malformed hex
-/// digests. The version + duplicate-path checks live inside
-/// `TryFrom<RawManifest>` so direct `toml::from_str::<FirmwareManifest>`
-/// callers get the same gates.
+/// digests.
 pub fn parse_manifest(text: &str) -> Result<FirmwareManifest, ManifestError> {
     toml::from_str(text).map_err(ManifestError::Toml)
 }
 
-/// Serialise `manifest` deterministically. `files` is sorted by
-/// `path` before emitting so the byte output is a pure function of
-/// the logical content; producers do not have to remember to sort.
+/// Serialise `manifest` deterministically; `files` is sorted by
+/// `path` before emitting.
 pub fn serialize_manifest(manifest: &FirmwareManifest) -> Result<String, ManifestError> {
     let mut canon = manifest.clone();
     canon.files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -213,8 +200,6 @@ pub enum VerifyOutcome {
     },
 }
 
-/// Hex-encode a 32-byte digest as lowercase ASCII. Local helper so
-/// the manifest crate stays free of the `hex` dependency.
 fn hex_encode_32(bytes: &[u8; 32]) -> String {
     let mut s = String::with_capacity(64);
     for b in bytes {
@@ -223,13 +208,20 @@ fn hex_encode_32(bytes: &[u8; 32]) -> String {
     s
 }
 
+/// SHA-256 over `bytes`, in the manifest's digest form.
+pub fn sha256_of(bytes: &[u8]) -> [u8; 32] {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes).into()
+}
+
 /// Verify a single loaded PRX against the manifest. `path` is the
 /// install-root-relative path the loader supplies (matching the
 /// manifest's `[[files]].path`); `post_decrypt_sha256` is the SHA-256
 /// over the reconstructed ELF bytes.
 ///
-/// Single-shot verifier; the boot path uses [`ManifestVerifier`] to
-/// guarantee every manifest entry is verified at least once.
+/// The boot path calls this per PRX it actually loads; the
+/// full-corpus [`ManifestVerifier`] is for verification flows that
+/// read every manifest entry.
 pub fn verify_post_decrypt(
     manifest: &FirmwareManifest,
     path: &str,
@@ -254,20 +246,18 @@ pub fn verify_post_decrypt(
 /// SPRXes all fail to decrypt for lack of APP keys legitimately
 /// produces this), but a consumer that promised "verify every
 /// manifest entry" cannot satisfy that promise vacuously over zero
-/// entries. The boot path constructs the verifier through
-/// [`ManifestVerifier::new`] and gets this error back instead of a
+/// entries; [`ManifestVerifier::new`] returns this instead of a
 /// trivially-passing `finish()`.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("firmware.toml has zero [[files]] entries; cannot verify vacuously")]
 pub struct EmptyManifest;
 
-/// Aggregate verifier. Constructed once at boot, fed each loaded
-/// PRX's `(path, digest)` pair, and drained with [`Self::finish`] --
-/// which fails if any manifest entry went unverified. The boot path
-/// cannot exit firmware setup without `finish`-ing, so a missing-PRX
-/// bug becomes a hard error at boot rather than an invisible
-/// footgun. Empty manifests are rejected at `new` time so the
-/// vacuous-true case cannot pass `finish`.
+/// Full-corpus aggregate verifier: fed each file's `(path, digest)`
+/// pair and drained with [`Self::finish`], which fails if any
+/// manifest entry went unverified. For verification flows that read every
+/// installed file; the per-boot check is [`verify_post_decrypt`]
+/// over the loaded subset, since verifying every entry means
+/// decrypting the whole corpus.
 #[derive(Debug)]
 pub struct ManifestVerifier<'a> {
     manifest: &'a FirmwareManifest,
@@ -275,12 +265,12 @@ pub struct ManifestVerifier<'a> {
 }
 
 impl<'a> ManifestVerifier<'a> {
-    /// Construct a verifier. Returns [`EmptyManifest`] if the
-    /// manifest has zero `[[files]]` entries -- a verifier built
-    /// against zero entries would `finish()` `Ok(())` against zero
-    /// verifications, which is exactly the trivially-true case the
-    /// "verify firmware matches a known PUP" contract is meant to
-    /// rule out.
+    /// Construct a verifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmptyManifest`] if the manifest has zero `[[files]]`
+    /// entries.
     pub fn new(manifest: &'a FirmwareManifest) -> Result<Self, EmptyManifest> {
         if manifest.files.is_empty() {
             return Err(EmptyManifest);

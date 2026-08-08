@@ -1,7 +1,15 @@
 use std::num::NonZeroU8;
 
 /// Typed LV2 syscall request decoded from PPU `sc` GPR state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The derived [`Lv2RequestKind`] discriminant enum backs the per-arm
+/// fidelity map in [`crate::request::fidelity`]; adding a variant here
+/// fails to compile until that map tags it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumDiscriminants)]
+#[strum_discriminants(
+    name(Lv2RequestKind),
+    derive(strum::VariantArray, strum::IntoStaticStr)
+)]
 pub enum Lv2Request {
     /// `sys_spu_image_open`.
     SpuImageOpen {

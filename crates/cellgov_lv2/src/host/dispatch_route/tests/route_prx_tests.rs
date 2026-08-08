@@ -76,7 +76,7 @@ fn syscall_480_returns_registered_kernel_id_for_known_stem() {
 }
 
 #[test]
-fn syscall_480_unknown_path_falls_back_to_pointer_echo() {
+fn syscall_480_non_firmware_unknown_path_returns_enoent() {
     let mut host = Lv2Host::new();
     let mut mem = cellgov_mem::GuestMemory::new(0x10000);
     let path = b"external/libnotfound.sprx\0";
@@ -96,7 +96,107 @@ fn syscall_480_unknown_path_falls_back_to_pointer_echo() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(0x5000));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ENOENT.into())
+    );
+    assert_eq!(host.prx_load_not_found_count(), 1);
+
+    // The pointer-echo id the old arm would have handed out must not
+    // start: ESRCH with no effects, so the sentinel write is never
+    // reached and the double-success chain is broken at both links.
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
+    let start = start_module(&mut host, 0x5000, p_opt, &rt);
+    assert_eq!(
+        start,
+        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ESRCH.into())
+    );
+}
+
+#[test]
+fn syscall_480_firmware_miss_registers_stub_and_start_reaches_sentinel() {
+    let mut host = Lv2Host::new();
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    // libmedi ships in retail firmware but is absent from this host's
+    // (empty) corpus, so the miss path stubs it.
+    let path = b"/dev_flash/sys/external/libmedi.sprx\0";
+    mem.apply_commit(
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x4800), path.len() as u64)
+            .unwrap(),
+        path,
+    )
+    .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+    let load = |host: &mut Lv2Host, rt: &FakeRuntime| {
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 480,
+                args: [0x4800, 0, 0, 0, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            rt,
+        )
+    };
+
+    let id = match load(&mut host, &rt) {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert!(effects.is_empty());
+            assert!(
+                code >= u64::from(crate::prx_registry::FIRST_KERNEL_ID),
+                "stub id {code:#x} must come from the kernel-id space, \
+                 not echo the path pointer"
+            );
+            u32::try_from(code).unwrap()
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    };
+    assert_eq!(host.prx_load_hle_stub_count(), 1);
+
+    // Re-load resolves the stub by stem: same id, no second mint.
+    assert_eq!(load(&mut host, &rt), Lv2Dispatch::immediate(u64::from(id)));
+    assert_eq!(host.prx_load_hle_stub_count(), 1);
+
+    // The stub id starts like any loaded module: NO_ENTRY sentinel.
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
+    let start = start_module(&mut host, id, p_opt, &rt);
+    match start {
+        Lv2Dispatch::Immediate { code: 0, effects } => assert_eq!(effects.len(), 1),
+        other => panic!("expected Immediate{{code:0}} with sentinel write, got {other:?}"),
+    }
+}
+
+/// The miss-stub path is gated on the retail firmware module set: a
+/// made-up name under `/dev_flash/sys/external/` names nothing any
+/// console serves, so minting a success id for it would fabricate.
+/// RPCS3's whitelist gate produces the same ENOENT.
+#[test]
+fn syscall_480_unknown_firmware_name_returns_enoent_not_a_stub() {
+    let mut host = Lv2Host::new();
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    let path = b"/dev_flash/sys/external/libnotfound.sprx\0";
+    mem.apply_commit(
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x4800), path.len() as u64)
+            .unwrap(),
+        path,
+    )
+    .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 480,
+            args: [0x4800, 0, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into())
+    );
+    assert_eq!(host.prx_load_hle_stub_count(), 0);
+    assert_eq!(host.prx_load_not_found_count(), 1);
 }
 
 #[test]
@@ -246,39 +346,77 @@ fn syscall_462_returns_enosys() {
     );
 }
 
-#[test]
-fn prx_start_module_writes_no_start_sentinel_to_p_opt_entry() {
+/// Register one module and return `(host, its kernel id)`.
+fn host_with_one_prx() -> (Lv2Host, u32) {
     let mut host = Lv2Host::new();
-    let p_opt: u32 = 0x4000;
+    let id = host.prx_registry_mut().register(
+        "libaudio".into(),
+        "cellAudio_Library".into(),
+        0x0147_0000,
+        0x0148_0000,
+        0x0147_1000,
+        None,
+        None,
+    );
+    (host, id)
+}
+
+/// Build a `sys_prx_start_stop_module_option_t` image.
+///
+/// `size`, `cmd`, and `res` are all `be_t<u64>`. Writing `size` as a
+/// `u32` at offset 0 lands in the HIGH half and reads back as zero --
+/// the bug this fixture exists to keep fixed.
+fn start_stop_option(size: u64, cmd: u64, res: u64) -> [u8; 0x28] {
+    let mut buf = [0u8; 0x28];
+    buf[0x00..0x08].copy_from_slice(&size.to_be_bytes());
+    buf[0x08..0x10].copy_from_slice(&cmd.to_be_bytes());
+    buf[0x18..0x20].copy_from_slice(&res.to_be_bytes());
+    buf
+}
+
+fn runtime_with(p_opt: u32, image: &[u8]) -> FakeRuntime {
     let mut mem = cellgov_mem::GuestMemory::new(0x10000);
-    let mut p_opt_buf = [0u8; 0x20];
-    p_opt_buf[0..4].copy_from_slice(&0x20u32.to_be_bytes());
     mem.apply_commit(
         ByteRange::new(
             cellgov_mem::GuestAddr::new(u64::from(p_opt)),
-            p_opt_buf.len() as u64,
+            image.len() as u64,
         )
         .unwrap(),
-        &p_opt_buf,
+        image,
     )
     .unwrap();
-    let rt = FakeRuntime::with_memory(mem);
+    FakeRuntime::with_memory(mem)
+}
+
+fn start_module(host: &mut Lv2Host, id: u32, p_opt: u32, rt: &FakeRuntime) -> Lv2Dispatch {
     let mut args = [0u64; 8];
-    args[0] = 0x1234;
+    args[0] = u64::from(id);
     args[2] = u64::from(p_opt);
-    let result = host.dispatch(
+    host.dispatch(
         Lv2Request::Unsupported { number: 481, args },
         UnitId::new(0),
-        &rt,
-    );
+        rt,
+    )
+}
+
+#[test]
+fn prx_start_module_cmd1_writes_no_entry_sentinel() {
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
+    let result = start_module(&mut host, id, p_opt, &rt);
     let effects = match result {
         Lv2Dispatch::Immediate { code: 0, effects } => effects,
         other => panic!("expected Immediate{{code:0}}, got {other:?}"),
     };
-    assert_eq!(effects.len(), 1, "expected exactly one write effect");
+    assert_eq!(
+        effects.len(),
+        1,
+        "size 0x20 has no entry2 field, so only entry is written"
+    );
     match &effects[0] {
         Effect::SharedWriteIntent { range, bytes, .. } => {
-            assert_eq!(range.start().raw(), u64::from(p_opt + 16));
+            assert_eq!(range.start().raw(), u64::from(p_opt + 0x10));
             assert_eq!(range.length(), 8);
             assert_eq!(bytes.bytes(), &u64::MAX.to_be_bytes());
         }
@@ -286,50 +424,213 @@ fn prx_start_module_writes_no_start_sentinel_to_p_opt_entry() {
     }
 }
 
+/// The size field is a `be_t<u64>`. Reading only its low 4 bytes at
+/// offset 0 yields the high half -- zero for every realistic size --
+/// which failed the `size >= 0x20` gate and returned EINVAL for every
+/// real caller.
 #[test]
-fn syscall_481_rejects_size_below_0x20_with_einval() {
-    let mut host = Lv2Host::new();
+fn prx_start_module_reads_size_as_a_full_be_u64() {
+    let (mut host, id) = host_with_one_prx();
     let p_opt: u32 = 0x4000;
-    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
-    let mut p_opt_buf = [0u8; 0x20];
-    p_opt_buf[0..4].copy_from_slice(&0x1Fu32.to_be_bytes());
-    mem.apply_commit(
-        ByteRange::new(
-            cellgov_mem::GuestAddr::new(u64::from(p_opt)),
-            p_opt_buf.len() as u64,
-        )
-        .unwrap(),
-        &p_opt_buf,
-    )
-    .unwrap();
-    let rt = FakeRuntime::with_memory(mem);
-    let mut args = [0u64; 8];
-    args[0] = 0x1234;
-    args[2] = u64::from(p_opt);
-    let result = host.dispatch(
-        Lv2Request::Unsupported { number: 481, args },
-        UnitId::new(0),
-        &rt,
-    );
+    let image = start_stop_option(0x20, 1, 0);
     assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+        &image[0x00..0x04],
+        &[0, 0, 0, 0],
+        "a BE u64 size of 0x20 has a zero high half -- the trap"
+    );
+    let rt = runtime_with(p_opt, &image);
+    assert!(
+        matches!(
+            start_module(&mut host, id, p_opt, &rt),
+            Lv2Dispatch::Immediate { code: 0, .. }
+        ),
+        "size 0x20 is legal; a 4-byte read of the high half would reject it"
     );
 }
 
 #[test]
-fn syscall_481_unreadable_p_opt_returns_efault_and_logs_break() {
-    let mut host = Lv2Host::new();
+fn prx_start_module_extended_size_also_writes_entry2() {
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x28, 1, 0));
+    let effects = match start_module(&mut host, id, p_opt, &rt) {
+        Lv2Dispatch::Immediate { code: 0, effects } => effects,
+        other => panic!("expected Immediate{{code:0}}, got {other:?}"),
+    };
+    assert_eq!(effects.len(), 2, "size != 0x20 carries entry2");
+    let addrs: Vec<u64> = effects
+        .iter()
+        .map(|e| match e {
+            Effect::SharedWriteIntent { range, .. } => range.start().raw(),
+            other => panic!("expected SharedWriteIntent, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        addrs,
+        vec![u64::from(p_opt + 0x10), u64::from(p_opt + 0x20)]
+    );
+}
+
+#[test]
+fn prx_start_module_cmd2_resident_returns_ok_with_no_writes() {
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0));
+    assert_eq!(
+        start_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(0)
+    );
+}
+
+#[test]
+fn prx_start_module_cmd2_non_resident_echoes_res_and_logs_break() {
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0x8001_0002));
+    let before = host.invariant_break_count();
+    assert_eq!(
+        start_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(0x8001_0002)
+    );
+    assert_eq!(host.invariant_break_count() - before, 1);
+}
+
+#[test]
+fn prx_start_module_unknown_cmd_returns_prx_error_and_logs_break() {
+    // RPCS3's default arm answers CELL_PRX_ERROR_ERROR, not an LV2
+    // errno -- liblv2's dispatcher branches on the 0x8001_1xxx class.
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ERROR;
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 7, 0));
+    let before = host.invariant_break_count();
+    assert_eq!(
+        start_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
+    );
+    assert_eq!(host.invariant_break_count() - before, 1);
+}
+
+#[test]
+fn prx_start_module_unknown_id_returns_esrch() {
+    let (mut host, _id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
+    assert_eq!(
+        start_module(&mut host, 0xDEAD_BEEF, p_opt, &rt),
+        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+    );
+}
+
+fn unload_module(host: &mut Lv2Host, id: u32, rt: &FakeRuntime) -> Lv2Dispatch {
+    let mut args = [0u64; 8];
+    args[0] = u64::from(id);
+    host.dispatch(
+        Lv2Request::Unsupported { number: 483, args },
+        UnitId::new(0),
+        rt,
+    )
+}
+
+#[test]
+fn prx_unload_module_started_returns_not_removable_and_counts() {
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_NOT_REMOVABLE;
+    let (mut host, id) = host_with_one_prx();
+    host.prx_registry_mut().mark_started(id);
     let rt = FakeRuntime::new(0x1000);
     let breaks_before = host.invariant_break_count();
-    let mut args = [0u64; 8];
-    args[0] = 0x1234;
-    args[2] = 0x4000_1000;
-    let result = host.dispatch(
-        Lv2Request::Unsupported { number: 481, args },
-        UnitId::new(0),
-        &rt,
+    assert_eq!(
+        unload_module(&mut host, id, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
     );
+    assert_eq!(host.prx_unload_rejections(), 1);
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+}
+
+/// LV2 withdraws an INITIALIZED (never-started) module: a stub the
+/// guest loaded and abandoned unloads with CELL_OK, and the id is
+/// freed for a later lookup to miss.
+#[test]
+fn prx_unload_module_unstarted_withdraws_with_ok() {
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
+    let (mut host, id) = host_with_one_prx();
+    let rt = FakeRuntime::new(0x1000);
+    assert_eq!(unload_module(&mut host, id, &rt), Lv2Dispatch::immediate(0));
+    assert_eq!(
+        host.prx_unload_rejections(),
+        0,
+        "a successful withdraw is not a rejection"
+    );
+    assert_eq!(
+        unload_module(&mut host, id, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into()),
+        "the withdrawn id must be gone"
+    );
+}
+
+/// Completing the sc 481 handshake (cmd=2, res=SYS_PRX_RESIDENT)
+/// moves the module to STARTED, which unload then refuses.
+#[test]
+fn prx_start_handshake_marks_started_and_blocks_unload() {
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_NOT_REMOVABLE;
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0));
+    assert_eq!(
+        start_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(0)
+    );
+    assert_eq!(
+        unload_module(&mut host, id, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
+    );
+}
+
+#[test]
+fn prx_unload_module_unknown_id_returns_unknown_module() {
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
+    let (mut host, _id) = host_with_one_prx();
+    let rt = FakeRuntime::new(0x1000);
+    assert_eq!(
+        unload_module(&mut host, 0xDEAD_BEEF, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into())
+    );
+    assert_eq!(
+        host.prx_unload_rejections(),
+        0,
+        "the rejection witness counts refusals to unload a real module, not unknown ids"
+    );
+}
+
+/// Non-vacuous guard for the witness: it must stay at zero when no
+/// unload is attempted.
+#[test]
+fn prx_unload_rejection_witness_starts_at_zero() {
+    let (host, _id) = host_with_one_prx();
+    assert_eq!(host.prx_unload_rejections(), 0);
+}
+
+/// RPCS3 never validates `pOpt->size`; it only compares `size != 0x20`
+/// to decide whether `entry2` exists. A sub-0x20 size therefore
+/// proceeds (and, matching the oracle's comparison, counts as an
+/// extended struct writing both entry sentinels).
+#[test]
+fn syscall_481_accepts_size_below_0x20_like_the_oracle() {
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x1F, 1, 0));
+    match start_module(&mut host, id, p_opt, &rt) {
+        Lv2Dispatch::Immediate { code: 0, effects } => assert_eq!(effects.len(), 2),
+        other => panic!("expected Immediate{{code:0}} with two sentinel writes, got {other:?}"),
+    }
+}
+
+#[test]
+fn syscall_481_unreadable_p_opt_returns_efault_and_logs_break() {
+    let (mut host, id) = host_with_one_prx();
+    let rt = FakeRuntime::new(0x1000);
+    let breaks_before = host.invariant_break_count();
+    let result = start_module(&mut host, id, 0x4000_1000, &rt);
     assert_eq!(
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
@@ -338,10 +639,10 @@ fn syscall_481_unreadable_p_opt_returns_efault_and_logs_break() {
 }
 
 #[test]
-fn prx_load_module_returns_r3_as_synthetic_id() {
+fn prx_load_module_unreadable_path_pointer_returns_efault() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(256);
-    let path_ptr: u64 = 0x0146_2d58;
+    let path_ptr: u64 = 0x0146_2d58; // far outside the 256-byte memory
     let mut args = [0u64; 8];
     args[0] = path_ptr;
     let result = host.dispatch(
@@ -351,8 +652,7 @@ fn prx_load_module_returns_r3_as_synthetic_id() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(path_ptr),
-        "syscall 480 must echo r3 as the synthesised module ID"
+        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_EFAULT.into())
     );
 }
 
@@ -608,11 +908,11 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
     use crate::host::Lv2Runtime;
     use cellgov_time::GuestTicks;
     struct WrapMock {
-        size_be: [u8; 4],
+        size_be: [u8; 8],
     }
     impl Lv2Runtime for WrapMock {
         fn read_committed(&self, _addr: u64, len: usize) -> Option<&[u8]> {
-            (len == 4).then_some(&self.size_be[..])
+            (len == 8).then_some(&self.size_be[..])
         }
         fn current_tick(&self) -> GuestTicks {
             GuestTicks::ZERO
@@ -629,16 +929,18 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
             true
         }
     }
-    let mut host = Lv2Host::new();
+    // A registered id is required: the ESRCH lookup precedes the
+    // wrap check, matching RPCS3's order, so an unknown id would
+    // never reach the path under test.
+    let (mut host, id) = host_with_one_prx();
     let breaks_before = host.invariant_break_count();
     let rt = WrapMock {
-        size_be: 0x20u32.to_be_bytes(),
+        size_be: 0x20u64.to_be_bytes(),
     };
-    // p_opt+24 wraps u32: 0xFFFF_FFFF - 23 = 0xFFFF_FFE8 is the
-    // smallest wrapping p_opt. Use 0xFFFF_FFF0 (entry at p_opt+16
-    // would wrap to 0x0000_0000).
+    // entry2 at p_opt+0x28 is the furthest field the struct can
+    // reach, so 0xFFFF_FFF0 wraps u32 before the write is staged.
     let mut args = [0u64; 8];
-    args[0] = 0x1234;
+    args[0] = u64::from(id);
     args[2] = 0xFFFF_FFF0_u64;
     let result = host.dispatch(
         Lv2Request::Unsupported { number: 481, args },

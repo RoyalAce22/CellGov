@@ -147,7 +147,7 @@ pub struct LwMutexTable {
     /// non-vacuous only when the functions actually ran. Not
     /// state-hashed (instrument-only).
     acquires_count: u64,
-    /// Audit C-6b witness: cumulative count of
+    /// Liveness witness: cumulative count of
     /// `release_and_wake_next` calls. Pairs with `acquires_count`
     /// on the release side. Not state-hashed.
     releases_count: u64,
@@ -167,7 +167,7 @@ impl LwMutexTable {
         self.acquires_count
     }
 
-    /// Audit C-6b witness: cumulative count of
+    /// Liveness witness: cumulative count of
     /// `release_and_wake_next` calls. See the `releases_count`
     /// field doc.
     #[inline]

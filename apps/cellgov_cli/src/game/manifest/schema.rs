@@ -77,6 +77,11 @@ pub(super) struct ManifestTitle {
     /// (license type 1 / 2). Omit for disc / APP-keyed titles.
     #[serde(default)]
     pub(super) rap_filename: Option<String>,
+    /// Instruction cap the witness suite boots this title under.
+    /// A title whose recorded outcome is `MaxSteps` reproduces it
+    /// only at the same cap.
+    #[serde(default)]
+    pub(super) bench_max_steps: Option<u64>,
 }
 
 #[derive(Debug, serde::Deserialize)]

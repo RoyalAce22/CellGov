@@ -24,11 +24,9 @@ use crate::cli::exit::die;
 /// block is absent.
 const DEFAULT_PRIMARY_PRIO: u32 = 1001;
 
-/// Seeded ring size per slot. V256 shape: the dispatcher's six
-/// non-zero field budgets (56+8+76+4+22+10 = 176) drain inside the
-/// 256-byte limit, so module_start's terminal stall is the
-/// producer-fed cond\[0\] record-finish wait, not a mid-record
-/// depleted-ring symptom.
+/// Seeded ring size per slot: the dispatcher's six non-zero field
+/// budgets (56+8+76+4+22+10 = 176 bytes) drain inside it, so the
+/// ring never depletes mid-record.
 const CELLSYSUTIL_RING_LIMIT: u32 = 256;
 
 /// Boot-state seed for the cellSysutil slot-state shm.
@@ -76,8 +74,6 @@ pub(super) fn cellsysutil_system_seed() -> cellgov_lv2::SystemStateSeed {
 /// at `0x10400000`.
 pub const HLE_HEAP_BASE: u32 = 0x10410000;
 
-/// Narrow `u64` to `u32` at the host/guest boundary; dies on
-/// overflow with `label` named.
 fn u32_or_die(label: &str, value: u64) -> u32 {
     u32::try_from(value)
         .unwrap_or_else(|_| die(&format!("{label}: 0x{value:x} does not fit in u32")))
@@ -148,6 +144,12 @@ pub(super) struct PreparedBoot {
     pub timings: StartupTimings,
     /// Per-step budget resolved during `prepare`.
     pub step_budget: Budget,
+    /// Where the served program-authority-id came from: `"self"`
+    /// (SELF identification header), `"fallback"` (raw-ELF retail
+    /// fallback), or `"forced"` (the adversarial env knob). Lets the
+    /// authority witness distinguish a real per-title id from a
+    /// parse regression that fell back to the shared retail constant.
+    pub authid_source: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -331,12 +333,9 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
 
     let code_floor = tramp_base;
 
-    let mut prx_modules =
+    let (mut prx_modules, verified_firmware) =
         load_firmware_set_bound(opts.firmware_dir, &modules, &mut mem, code_floor);
     let t_prx_load = t_start.elapsed();
-    if opts.firmware_dir.is_some() && prx_modules.is_empty() {
-        eprintln!("prx: firmware directory was supplied but no PRX was loaded");
-    }
     if prx_modules.is_empty() {
         // No firmware loaded: install trampolines so calls through
         // unresolved imports produce a structured fault.
@@ -467,6 +466,12 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let mut rt = Runtime::new(mem, step_budget, adjusted_max_steps);
     rt.set_mode(mode);
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
+    // Bind the manifest-verified PUP identity so the boot's state hash
+    // is a function of which firmware revision fed it.
+    if let Some(fw) = &verified_firmware {
+        rt.lv2_host_mut()
+            .set_firmware_identity(&fw.image_version, fw.pup_sha256);
+    }
     // Plumb the title's recorded SDK version into the LV2 host so
     // `sys_process_get_sdk_version` reports the value cellSysutil's
     // SDK-keyed init dispatcher gates on. Absent param segment leaves
@@ -486,19 +491,20 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     if let Some(authid) = opts.authority_id {
         rt.lv2_host_mut().set_program_authority_id(authid);
     }
-    // Adversarial knob: restore the pre-fix bdj.self (PAID_44)
-    // system authid so the cellSysmodule LoadModule-failure
-    // signature reappears. Used only by the authority-id revert
-    // tripwire to prove the per-title id is what retired the
-    // failures.
-    let authid_label = if parse_env_bool("CELLGOV_FORCE_SYSTEM_AUTHID") {
+    // Adversarial knob for the authority-id tripwire test: forcing
+    // the bdj.self system authid makes the cellSysmodule
+    // LoadModule-failure signature reappear.
+    let (authid_label, authid_source) = if parse_env_bool("CELLGOV_FORCE_SYSTEM_AUTHID") {
         rt.lv2_host_mut()
             .set_program_authority_id(cellgov_ps3_abi::sce::BDJ_SELF_PROGRAM_AUTHORITY_ID);
-        "forced system authid (CELLGOV_FORCE_SYSTEM_AUTHID)"
+        (
+            "forced system authid (CELLGOV_FORCE_SYSTEM_AUTHID)",
+            "forced",
+        )
     } else if opts.authority_id.is_some() {
-        "from SELF identification header"
+        ("from SELF identification header", "self")
     } else {
-        "raw-ELF input -- retail-application fallback"
+        ("raw-ELF input -- retail-application fallback", "fallback")
     };
     println!(
         "program_authority_id: 0x{:016x} ({})",
@@ -532,7 +538,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
                 info.name
             ));
         }
-        rt.lv2_host_mut().prx_registry_mut().register(
+        let id = rt.lv2_host_mut().prx_registry_mut().register(
             info.stem.clone(),
             info.name.clone(),
             u32_or_die("prx base", info.base),
@@ -543,6 +549,10 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             info.module_stop
                 .map(|opd| u32_or_die("prx module_stop", opd.code)),
         );
+        // Boot runs every firmware module's module_start below, so
+        // these enter the resident/started state LV2 refuses to
+        // unload; only sc 480 miss stubs stay unstarted.
+        rt.lv2_host_mut().prx_registry_mut().mark_started(id);
     }
     if let Some((bytes, memsz, align, vaddr)) = tls_template {
         rt.lv2_host_mut()
@@ -833,9 +843,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    // After module_starts complete, the four-byte mutex id at
-    // `*LIBLV2_ONCE_MUTEX_SLOT` must either be zero or reference
-    // an id present in the LV2 host's mutex table.
     assert_gating_state_coherent_with_host(&rt, !prx_modules.is_empty());
     debug_assert_eq!(
         modules_started, modules_total,
@@ -856,6 +863,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             prx_load: t_prx_load - t_hle_bind,
         },
         step_budget,
+        authid_source,
     }
 }
 

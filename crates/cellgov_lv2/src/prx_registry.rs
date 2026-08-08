@@ -22,6 +22,11 @@ pub struct LoadedPrxEntry {
     toc: u32,
     start_opd: Option<u32>,
     stop_opd: Option<u32>,
+    /// Whether `module_start` has run (LV2's `PRX_STATE_STARTED`).
+    /// Boot-loaded firmware modules are marked started by the boot
+    /// path; miss stubs stay unstarted until the guest completes the
+    /// sc 481 handshake. Unload withdraws only unstarted modules.
+    started: bool,
 }
 
 impl LoadedPrxEntry {
@@ -64,14 +69,21 @@ impl LoadedPrxEntry {
     pub fn stop_opd(&self) -> Option<u32> {
         self.stop_opd
     }
+
+    /// Whether `module_start` has run for this module.
+    pub fn started(&self) -> bool {
+        self.started
+    }
 }
 
 /// Table of loaded PRXs keyed by both kernel id and stem.
 ///
 /// Invariant: every key in `stem_to_id` resolves to a present
-/// `entries` row. [`register`](Self::register) is the only
-/// mutating surface; [`lookup_by_path`](Self::lookup_by_path)
-/// debug-asserts the invariant.
+/// `entries` row. [`register`](Self::register),
+/// [`mark_started`](Self::mark_started), and
+/// [`remove_unstarted`](Self::remove_unstarted) are the mutating
+/// surface; [`lookup_by_path`](Self::lookup_by_path) debug-asserts
+/// the invariant.
 #[derive(Debug, Clone)]
 pub struct LoadedPrxRegistry {
     entries: BTreeMap<u32, LoadedPrxEntry>,
@@ -162,10 +174,31 @@ impl LoadedPrxRegistry {
                 toc,
                 start_opd,
                 stop_opd,
+                started: false,
             },
         );
         self.stem_to_id.insert(stem, kernel_id);
         kernel_id
+    }
+
+    /// Mark `id`'s module started (`module_start` ran, or the guest
+    /// completed the sc 481 handshake). No-op for an unknown id.
+    pub fn mark_started(&mut self, id: u32) {
+        if let Some(e) = self.entries.get_mut(&id) {
+            e.started = true;
+        }
+    }
+
+    /// Withdraw an unstarted module, freeing its id. Returns the
+    /// removed entry, or `None` when `id` is unknown or the module is
+    /// started (LV2 withdraws only `INITIALIZED` / `STOPPED` states).
+    pub fn remove_unstarted(&mut self, id: u32) -> Option<LoadedPrxEntry> {
+        if self.entries.get(&id)?.started {
+            return None;
+        }
+        let entry = self.entries.remove(&id)?;
+        self.stem_to_id.remove(&entry.stem);
+        Some(entry)
     }
 
     /// Look up an entry by guest-supplied path; matched on the

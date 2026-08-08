@@ -50,6 +50,7 @@ fn title(content_id: &str, display: &str, year: u16, developer: &str) -> TitleMa
         engine: "test-engine".to_string(),
         distribution: Distribution::PsnHdd,
         rap_filename: None,
+        bench_max_steps: None,
         checkpoint: CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,

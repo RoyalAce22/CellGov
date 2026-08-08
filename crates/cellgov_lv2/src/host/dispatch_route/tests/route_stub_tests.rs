@@ -26,6 +26,50 @@ fn unsupported_dispatch_returns_cell_enosys() {
     );
 }
 
+// The exhaustive probe below is what keeps ROUTED_UNSUPPORTED_ARMS
+// honest: the typed half of the fidelity map is compile-enforced, but
+// a routed number's table row is data, and this is its drift gate.
+#[test]
+fn routed_unsupported_fidelity_table_matches_dispatch_exactly() {
+    use crate::request::fidelity::ROUTED_UNSUPPORTED_ARMS;
+
+    // LV2's syscall table has 1024 slots; the probe covers them all,
+    // so a routed number outside the range would escape it.
+    for (n, name, _) in ROUTED_UNSUPPORTED_ARMS {
+        assert!(*n < 1024, "{name} ({n}) outside the probed slot range");
+    }
+
+    let rt = FakeRuntime::new(0x10000);
+    let mut handled = Vec::new();
+    for number in 0..1024u64 {
+        // Fresh host per number: arms mutate state, and the stub-site
+        // counter must attribute to exactly one dispatch.
+        let mut host = Lv2Host::new();
+        let _ = host.dispatch(
+            Lv2Request::Unsupported {
+                number,
+                args: [0; 8],
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        if host.invariant_break_site_count("dispatch.unsupported_stub") == 0 {
+            handled.push(number);
+        }
+    }
+    let tagged: Vec<u64> = {
+        let mut v: Vec<u64> = ROUTED_UNSUPPORTED_ARMS.iter().map(|(n, _, _)| *n).collect();
+        v.sort_unstable();
+        v
+    };
+    assert_eq!(
+        handled, tagged,
+        "dispatch's routed-Unsupported set diverged from \
+         ROUTED_UNSUPPORTED_ARMS; update the fidelity table (and \
+         regenerate docs/lv2_fidelity.md) to match dispatch.rs"
+    );
+}
+
 #[test]
 fn unresolved_import_dispatch_returns_cell_einval() {
     let mut host = Lv2Host::new();

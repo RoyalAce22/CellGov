@@ -2,13 +2,12 @@
 //! against the user's installed firmware corpus, scoped to the
 //! minimum viable PRX set.
 //!
-//! Skipped silently when the firmware directory or any required PRX
-//! stem is absent. `CELLGOV_REQUIRE_FIRMWARE_SET_LOAD=1` promotes
-//! both conditions to a hard failure (CI knob).
+//! Requires the `firmware-corpus` feature and an installed firmware
+//! set; `CELLGOV_FIRMWARE_DIR` overrides the default location.
 
 #![allow(
     clippy::print_stderr,
-    reason = "integration test: stderr carries fixture-absent diagnostics"
+    reason = "integration test: stderr carries the per-module load census"
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -34,47 +33,34 @@ fn workspace_root() -> PathBuf {
 
 use cellgov_ppu::prx_loader::MIN_VIABLE_PRX_STEMS;
 
-fn locate_firmware_dir() -> Option<PathBuf> {
+fn locate_firmware_dir() -> PathBuf {
     let dir = match std::env::var("CELLGOV_FIRMWARE_DIR") {
         Ok(s) => PathBuf::from(s),
         Err(_) => workspace_root().join("firmware/sys/external"),
     };
-    if dir.is_dir() {
-        Some(dir)
-    } else {
-        if std::env::var_os("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD").is_some() {
-            panic!(
-                "CELLGOV_REQUIRE_FIRMWARE_SET_LOAD set but firmware dir not found: {}",
-                dir.display()
-            );
-        }
-        eprintln!(
-            "firmware_set_load: skipping (firmware dir {} absent; \
-             run `cellgov_install install` to populate)",
-            dir.display()
-        );
-        None
-    }
+    assert!(
+        dir.is_dir(),
+        "firmware dir not found: {}. Populate it with `cellgov_install install`, \
+         or point CELLGOV_FIRMWARE_DIR at an existing install.",
+        dir.display()
+    );
+    dir
 }
 
 #[test]
 fn load_firmware_set_against_installed_corpus_is_coherent() {
-    let Some(dir) = locate_firmware_dir() else {
-        return;
-    };
+    let dir = locate_firmware_dir();
 
-    let missing: Vec<&&str> = MIN_VIABLE_PRX_STEMS
+    let missing: Vec<&str> = MIN_VIABLE_PRX_STEMS
         .iter()
         .filter(|stem| !dir.join(format!("{stem}.sprx")).is_file())
+        .copied()
         .collect();
-    if !missing.is_empty() {
-        let names: Vec<&str> = missing.iter().map(|s| **s).collect();
-        if std::env::var_os("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD").is_some() {
-            panic!("CELLGOV_REQUIRE_FIRMWARE_SET_LOAD set but PRX stems missing: {names:?}");
-        }
-        eprintln!("firmware_set_load: skipping (PRX stems missing: {names:?})");
-        return;
-    }
+    assert!(
+        missing.is_empty(),
+        "firmware install at {} is incomplete -- missing PRX stems: {missing:?}",
+        dir.display()
+    );
 
     let mut bytes_by_path: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut multi_seg_skipped = 0usize;
@@ -121,8 +107,8 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     // test; a re-decrypted firmware where the loader picked up
     // single-segment relocs in a previously-multi-segment module
     // would break the test without any guard actually regressing,
-    // so the constant was anchor residue per the bucket-B audit
-    // criterion. Dropped.
+    // so the constant was anchor residue (a correctness-improving
+    // shift must not break a liveness test). Dropped.
     assert_eq!(
         bytes_by_path.len() + multi_seg_skipped,
         MIN_VIABLE_PRX_STEMS.len(),
@@ -260,11 +246,11 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
 // compatibility state from the closure investigation, not a
 // guard-liveness witness: a title-set churn that added or removed
 // a stem from the closure walk would break this test without any
-// loader / closure mechanism actually regressing. Per the bucket-B
-// audit criterion (correctness-improving trajectory shifts must
-// not break a liveness test), the assertion does not belong here.
+// loader / closure mechanism actually regressing. Since a
+// correctness-improving trajectory shift must not break a
+// liveness test, the assertion does not belong here.
 //
-// Deleted from this audit suite. The "every title in the corpus
+// Deleted from this suite. The "every title in the corpus
 // can resolve every namespace it imports" property belongs in the
 // titles/compat suite where the inputs are titles + their imports
 // rather than a hand-frozen list, so the assertion can derive its

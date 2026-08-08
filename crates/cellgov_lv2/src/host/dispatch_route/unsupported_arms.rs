@@ -14,10 +14,11 @@ use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
     /// `sys_ppu_thread_get_priority` (48): writes the target's
-    /// priority to `*priop`.
+    /// priority to `*priop`, CELL_ESRCH for ids absent from the
+    /// thread table.
     ///
-    /// Unknown thread ids fall back to 1001 (boot-seed primary
-    /// priority) for a self-consistent read-back. Oracle: RPCS3's
+    /// The id lookup precedes the `priop` null gate, matching
+    /// RPCS3's lookup-then-write order. Oracle: RPCS3's
     /// `sys_ppu_thread.cpp`.
     pub(super) fn dispatch_ppu_thread_get_priority(
         &self,
@@ -26,17 +27,18 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let thread_id = args[0] as u32;
         let priop = args[1] as u32;
+        let Some(thread) = self
+            .ppu_threads
+            .get(crate::ppu_thread::PpuThreadId::new(thread_id as u64))
+        else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+        };
         if let Some(d) = self.efault_if_null(&[priop]) {
             return d;
         }
-        let priority = self
-            .ppu_threads
-            .get(crate::ppu_thread::PpuThreadId::new(thread_id as u64))
-            .map(|t| t.attrs.priority)
-            .unwrap_or(1001);
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(priop, 4),
-            bytes: WritePayload::from_slice(&priority.to_be_bytes()),
+            bytes: WritePayload::from_slice(&thread.attrs.priority.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
             source_time: self.current_tick,
@@ -452,26 +454,62 @@ impl Lv2Host {
         Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
     }
 
-    /// `_sys_prx_start_module` (481): writes `~0` (no-start sentinel)
-    /// to `pOpt->entry` (offset 16).
+    /// `_sys_prx_start_module` (481): the two-phase start handshake.
+    ///
+    /// `pOpt->cmd & 0xF` selects the phase. Phase 1 hands the caller
+    /// the entry to invoke; phase 2 reports what that entry returned.
+    ///
+    /// CellGov runs every firmware module's `module_start` itself at
+    /// boot, in dependency order, so phase 1 reports `NO_ENTRY`
+    /// rather than the real OPD -- handing back the real address
+    /// would run `module_start` a second time. Phase 2 reporting
+    /// `SYS_PRX_RESIDENT` marks the module started, which is what
+    /// makes a later unload answer `NOT_REMOVABLE`.
+    ///
+    /// `pOpt->size` is never validated -- RPCS3's handler reads the
+    /// fields unconditionally and consults `size` only to decide
+    /// whether `entry2` exists (`sys_prx.cpp`).
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` for null `id`, null `pOpt`, or `pOpt->size < 0x20`.
-    /// - `CELL_EFAULT` (plus a `dispatch.prx_start_module_size_unreadable`
-    ///   break) when `pOpt->size` is unreadable.
+    /// - `CELL_EINVAL` for null `id` or null `pOpt`.
+    /// - `CELL_ESRCH` when `id` names no loaded module.
+    /// - `CELL_PRX_ERROR_ERROR` for an unrecognised command nibble
+    ///   (RPCS3's default arm).
+    /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
+    ///   not fit inside the 32-bit guest address space.
     pub(super) fn dispatch_prx_start_module(
         &mut self,
         args: [u64; 8],
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::sys_prx::{
+            start_cmd, start_stop_option as opt, CELL_PRX_ERROR_ERROR, SYS_PRX_RESIDENT,
+        };
+
         let id = args[0] as u32;
         let p_opt = args[2] as u32;
         if id == 0 || p_opt == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        let Some(size_bytes) = rt.read_committed(u64::from(p_opt), 4) else {
+        if self.prx_registry.lookup_by_id(id).is_none() {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+        }
+        // The base struct (through `res`) must fit below the 4 GiB
+        // boundary; `entry2`'s reach is gated after `size` is known.
+        if p_opt.checked_add(opt::MIN_SIZE as u32).is_none() {
+            self.log_invariant_break(
+                "dispatch.prx_start_module_p_opt_wraps",
+                format_args!(
+                    "_sys_prx_start_module option struct at p_opt={p_opt:#010x} wraps u32; \
+                     returning CELL_EFAULT (struct does not fit in 32-bit guest address space)"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        }
+
+        let Some(size) = self.read_be_u64(rt, p_opt + opt::SIZE_OFFSET) else {
             self.log_invariant_break(
                 "dispatch.prx_start_module_size_unreadable",
                 format_args!(
@@ -481,40 +519,151 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         };
-        let size = u32::from_be_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]]);
-        if size < 0x20 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
-        }
-        if p_opt.checked_add(24).is_none() {
+        // Extended struct: entry2 at +0x20 must also fit.
+        if size != opt::MIN_SIZE && p_opt.checked_add(opt::ENTRY2_OFFSET + 8).is_none() {
             self.log_invariant_break(
-                "dispatch.prx_start_module_p_opt_wraps",
+                "dispatch.prx_start_module_entry2_wraps",
                 format_args!(
-                    "_sys_prx_start_module 8-byte entry write at p_opt+16 wraps u32: \
-                     p_opt={p_opt:#010x}; returning CELL_EFAULT (struct does not fit in \
-                     32-bit guest address space)"
+                    "_sys_prx_start_module extended option struct at p_opt={p_opt:#010x} \
+                     (size={size:#x}) wraps u32 at entry2; returning CELL_EFAULT"
                 ),
             );
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
-        let entry_addr = p_opt.wrapping_add(16);
-        let no_start = u64::MAX.to_be_bytes();
-        let entry_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(entry_addr, 8),
-            bytes: WritePayload::from_slice(&no_start),
+        let Some(cmd) = self.read_be_u64(rt, p_opt + opt::CMD_OFFSET) else {
+            self.log_invariant_break(
+                "dispatch.prx_start_module_cmd_unreadable",
+                format_args!(
+                    "_sys_prx_start_module pOpt={p_opt:#010x} cmd field unreadable; \
+                     returning CELL_EFAULT"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        };
+
+        match cmd & start_cmd::MASK {
+            start_cmd::GET_ENTRY => {
+                let mut effects =
+                    vec![self.write_be_u64(requester, p_opt + opt::ENTRY_OFFSET, opt::NO_ENTRY)];
+                // entry2 exists only in the extended struct.
+                if size != opt::MIN_SIZE {
+                    effects.push(self.write_be_u64(
+                        requester,
+                        p_opt + opt::ENTRY2_OFFSET,
+                        opt::NO_ENTRY,
+                    ));
+                }
+                Lv2Dispatch::Immediate { code: 0, effects }
+            }
+            start_cmd::REPORT_RESULT => {
+                let Some(res) = self.read_be_u64(rt, p_opt + opt::RES_OFFSET) else {
+                    self.log_invariant_break(
+                        "dispatch.prx_start_module_res_unreadable",
+                        format_args!(
+                            "_sys_prx_start_module pOpt={p_opt:#010x} res field unreadable; \
+                             returning CELL_EFAULT"
+                        ),
+                    );
+                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                };
+                if res == SYS_PRX_RESIDENT {
+                    // LV2's STARTING -> STARTED transition: the module
+                    // is now resident and refuses unload.
+                    self.prx_registry.mark_started(id);
+                    return Lv2Dispatch::immediate(0);
+                }
+                // Phase 1 handed back NO_ENTRY, so the guest called
+                // nothing and cannot have a real result to report.
+                // Mirroring RPCS3, the low 32 bits come back as the
+                // error; a zero low word therefore returns CELL_OK.
+                self.log_invariant_break(
+                    "dispatch.prx_start_module_unexpected_res",
+                    format_args!(
+                        "_sys_prx_start_module id={id:#010x} cmd=2 reported res={res:#018x} \
+                         after phase 1 returned NO_ENTRY; returning res & 0xFFFF_FFFF \
+                         (CELL_OK when the low word is zero)"
+                    ),
+                );
+                Lv2Dispatch::immediate(res & 0xFFFF_FFFF)
+            }
+            other => {
+                self.log_invariant_break(
+                    "dispatch.prx_start_module_unknown_cmd",
+                    format_args!(
+                        "_sys_prx_start_module id={id:#010x} cmd nibble {other:#x} is not \
+                         GET_ENTRY(1) or REPORT_RESULT(2); returning CELL_PRX_ERROR_ERROR \
+                         (RPCS3's default arm)"
+                    ),
+                );
+                Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
+            }
+        }
+    }
+
+    /// `_sys_prx_unload_module` (483): withdraw an unstarted module,
+    /// refuse a started one.
+    ///
+    /// LV2 (and RPCS3's `_sys_prx_unload_module`) withdraws a module
+    /// in `INITIALIZED` or `STOPPED` state and answers
+    /// `CELL_PRX_ERROR_NOT_REMOVABLE` for `STARTED`. Boot-loaded
+    /// firmware modules are started (their images back the GOT slots
+    /// the title calls through), so they refuse; an sc 480 miss stub
+    /// the guest never started withdraws with `CELL_OK` and frees its
+    /// id, exactly as a real never-started module would.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_PRX_ERROR_UNKNOWN_MODULE` when `id` names no loaded module.
+    /// - `CELL_PRX_ERROR_NOT_REMOVABLE` for a started resident module.
+    pub(super) fn dispatch_prx_unload_module(&mut self, args: [u64; 8]) -> Lv2Dispatch {
+        use cellgov_ps3_abi::sys_prx::{
+            CELL_PRX_ERROR_NOT_REMOVABLE, CELL_PRX_ERROR_UNKNOWN_MODULE,
+        };
+
+        let id = args[0] as u32;
+        match self.prx_registry.lookup_by_id(id) {
+            None => Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into()),
+            Some(entry) if !entry.started() => {
+                let removed = self.prx_registry.remove_unstarted(id);
+                debug_assert!(removed.is_some(), "lookup said present and unstarted");
+                Lv2Dispatch::immediate(0)
+            }
+            Some(entry) => {
+                let stem = entry.stem().to_string();
+                self.prx_unload_rejections += 1;
+                self.log_invariant_break(
+                    "dispatch.prx_unload_module_resident",
+                    format_args!(
+                        "_sys_prx_unload_module id={id:#010x} ({stem}) is a started resident \
+                         module; returning CELL_PRX_ERROR_NOT_REMOVABLE"
+                    ),
+                );
+                Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
+            }
+        }
+    }
+
+    /// Read a big-endian `u64` from committed guest memory.
+    fn read_be_u64(&self, rt: &dyn Lv2Runtime, addr: u32) -> Option<u64> {
+        let bytes = rt.read_committed(u64::from(addr), 8)?;
+        Some(u64::from_be_bytes(bytes[..8].try_into().ok()?))
+    }
+
+    /// Stage a big-endian `u64` write to guest memory.
+    fn write_be_u64(&self, requester: UnitId, addr: u32, value: u64) -> Effect {
+        Effect::SharedWriteIntent {
+            range: ByteRange::contiguous_u32(addr, 8),
+            bytes: WritePayload::from_slice(&value.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
             source_time: self.current_tick,
-        };
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: vec![entry_write],
         }
     }
 
     /// `_sys_prx_register_module` (484): returns
     /// CELL_PRX_ERROR_ELF_IS_REGISTERED for non-VSH callers.
     pub(super) fn dispatch_prx_register_module(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(0x8001_1910)
+        Lv2Dispatch::immediate(cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ELF_IS_REGISTERED.into())
     }
 
     /// `_sys_prx_register_library` (486): returns CELL_OK (kernel's
@@ -653,7 +802,11 @@ impl Lv2Host {
     }
 
     /// `sys_rsx_attribute` (677): returns CELL_OK without state change.
-    pub(super) fn dispatch_rsx_attribute(&self) -> Lv2Dispatch {
+    pub(super) fn dispatch_rsx_attribute(&mut self) -> Lv2Dispatch {
+        self.log_invariant_break(
+            "dispatch.rsx_attribute_stub",
+            format_args!("sys_rsx_attribute: stub returning CELL_OK with no state change"),
+        );
         Lv2Dispatch::immediate(0)
     }
 }

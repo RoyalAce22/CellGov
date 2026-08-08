@@ -19,6 +19,14 @@ cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
 thiserror = "2"
 
+[features]
+# Opt-in for the SPU micro-test suite. The suite reads ELFs built by
+# tests/micro/*/build.sh (PS3 cross-toolchain, gitignored output); a
+# fresh checkout reports the tests as ignored rather than passing
+# vacuously, and with the feature on a missing artifact is a hard
+# error.
+spu-microtests = []
+
 [dev-dependencies]
 cellgov_compare = { path = "../cellgov_compare" }
 cellgov_core = { path = "../cellgov_core" }

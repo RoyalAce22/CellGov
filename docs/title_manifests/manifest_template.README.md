@@ -47,6 +47,8 @@ load error.
 | `developer`        | string   | yes      | Studio credit.                                                                                                                                                                                                                       |
 | `engine`           | string   | yes      | Engine name (e.g. `"PhyreEngine"`, `"<studio> proprietary"`).                                                                                                                                                                        |
 | `distribution`     | string   | yes      | One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`. Lowercase kebab; the loader rejects other casings.                                                                                                                                 |
+| `rap_filename`     | string   | no       | NPDRM license file under the VFS `exdata/` dir; needed to decrypt PSN EBOOTs whose RAP name does not match the content id.                                                                                                            |
+| `bench_max_steps`  | integer  | no       | Per-title instruction cap for `bench-boot-once` and the title suites; defaults to 100,000,000. Raise it when a title's checkpoint sits past the default cap.                                                                          |
 
 ### `[checkpoint]` (required)
 

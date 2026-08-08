@@ -120,6 +120,13 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
             (path_str, image)
         }
     };
+    // Past this line a failing run is a boot failure, never a missing
+    // dump; the suites key their skip/fail split on it.
+    eprintln!(
+        "{} title={}",
+        cellgov_compare::witnesses::BOOT_STARTED_SENTINEL,
+        title.name()
+    );
     BootInputs {
         title,
         elf_path,

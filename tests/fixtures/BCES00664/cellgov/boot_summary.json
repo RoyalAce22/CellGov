@@ -3,7 +3,89 @@
     "kind": "first_rsx_write"
   },
   "outcome": "RsxWriteCheckpoint",
-  "steps": 43083,
+  "steps": 43082,
   "budget": 256,
-  "host_invariant_breaks": 3
+  "host_invariant_breaks": 2,
+  "witnesses": {
+    "cond_reacquires": {
+      "value": 0,
+      "class": "absent"
+    },
+    "dcbz": {
+      "value": 615,
+      "class": "at-least"
+    },
+    "host_invariant_breaks": {
+      "value": 2,
+      "class": "exact"
+    },
+    "ldarx": {
+      "value": 11795,
+      "class": "at-least"
+    },
+    "lwarx": {
+      "value": 10805,
+      "class": "at-least"
+    },
+    "lwmutex_acquires": {
+      "value": 990,
+      "class": "at-least"
+    },
+    "lwmutex_releases": {
+      "value": 990,
+      "class": "at-least"
+    },
+    "lwmutex_unknown_locks": {
+      "value": 0,
+      "class": "absent"
+    },
+    "mem_fault_arm_entries": {
+      "value": 0,
+      "class": "absent"
+    },
+    "mem_fault_unmapped_routed": {
+      "value": 0,
+      "class": "absent"
+    },
+    "mfvrsave_executed": {
+      "value": 0,
+      "class": "absent"
+    },
+    "prx_load_hle_stubs": {
+      "value": 0,
+      "class": "at-least"
+    },
+    "prx_load_not_found": {
+      "value": 1,
+      "class": "at-least"
+    },
+    "rsx_label_writes": {
+      "value": 0,
+      "class": "absent"
+    },
+    "rsx_set_reference": {
+      "value": 0,
+      "class": "absent"
+    },
+    "spu_image_register": {
+      "value": 0,
+      "class": "absent"
+    },
+    "spu_thread_init": {
+      "value": 1,
+      "class": "at-least"
+    },
+    "stdcx": {
+      "value": 10805,
+      "class": "at-least"
+    },
+    "stwcx": {
+      "value": 8824,
+      "class": "at-least"
+    },
+    "vrsave_written": {
+      "value": 0,
+      "class": "exact"
+    }
+  }
 }

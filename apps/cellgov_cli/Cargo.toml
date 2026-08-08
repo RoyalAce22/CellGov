@@ -32,3 +32,24 @@ strum = { version = "0.26", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 sysinfo = "0.32"
+
+[features]
+# Suites that read the operator's local PS3 corpus. Firmware comes from
+# a console update package; titles come from owned game dumps. Both are
+# gitignored and cannot exist on a hosted runner, so the targets below
+# are not built unless the operator opts in -- a bare `cargo test` then
+# reports green only for gates that actually ran.
+firmware-corpus = []
+title-corpus = ["firmware-corpus"]
+
+[[test]]
+name = "firmware_set_load"
+required-features = ["firmware-corpus"]
+
+[[test]]
+name = "title_witnesses"
+required-features = ["title-corpus"]
+
+[[test]]
+name = "authority_id"
+required-features = ["title-corpus"]

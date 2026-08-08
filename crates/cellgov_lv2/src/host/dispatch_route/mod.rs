@@ -4,6 +4,7 @@
 //! in [`helpers`].
 
 mod dispatch;
+mod firmware_modules;
 mod helpers;
 mod inline_arms;
 mod unsupported_arms;

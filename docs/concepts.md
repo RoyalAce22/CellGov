@@ -116,10 +116,19 @@ kinds:
   unmodeled syscall returns an honest "not implemented"
   response, so no contaminating divergence can arise.
 
-State the criterion plainly: **CellGov never fabricates a
-result it did not compute.** Unmodeled syscalls get an
-ABI-honest, per-syscall, traced "not implemented" response;
-modeled syscalls produce the result; nothing in between.
+The criterion is two claims with different evidence
+standards:
+
+- **Routing layer** -- no syscall reaches the guest through a
+  default arm. Unmodeled syscalls get an ABI-honest,
+  per-syscall, traced "not implemented" response. Enforced by
+  the dispatcher's structure, uniformly.
+- **Per-arm fidelity** -- how much real LV2 behavior each
+  modeled arm reproduces. A per-arm property, individually
+  auditable: the map is code (`cellgov_lv2::request::fidelity`)
+  rendered to [lv2_fidelity.md](lv2_fidelity.md), and arms
+  tagged `abi-only` return plausible values without backing
+  state -- the first suspects in any divergence investigation.
 
 A divergence from RPCS3 is therefore an implementation
 target the oracle named, not a failure of the oracle. The

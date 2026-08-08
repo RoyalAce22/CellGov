@@ -6,10 +6,6 @@ use cellgov_ps3_abi::cell_errors;
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
 
-/// Exclusive upper bound of the PS3 `main` region the LV2 allocator
-/// may hand out from.
-const MEM_ALLOC_REGION_END: u32 = 0x4000_0000;
-
 impl Lv2Host {
     pub(super) fn dispatch_memory_allocate(
         &mut self,
@@ -17,8 +13,7 @@ impl Lv2Host {
         alloc_addr_ptr: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Every arithmetic step checked; the cursor is left unchanged
-        // on ENOMEM.
+        // The cursor is left unchanged on ENOMEM.
         const ALIGN: u32 = 0x1_0000;
         let Ok(size) = u32::try_from(size) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
@@ -33,7 +28,13 @@ impl Lv2Host {
         let Some(next) = aligned_ptr.checked_add(size) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
-        if next > MEM_ALLOC_REGION_END {
+        // The allocator's budget and sc 352's reported total are the
+        // same number, so "this allocation succeeded" and "available
+        // says there was room" can never contradict each other.
+        let region_end = self
+            .mem_alloc_base
+            .saturating_add(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL);
+        if next > region_end {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
         self.mem_alloc_ptr = next;

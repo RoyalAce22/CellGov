@@ -132,6 +132,7 @@ fn hdd_manifest(content_id: &str, short: &str, candidates: &[&str]) -> TitleMani
         engine: "test-engine".to_string(),
         distribution: Distribution::PsnHdd,
         rap_filename: None,
+        bench_max_steps: None,
         checkpoint: CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,

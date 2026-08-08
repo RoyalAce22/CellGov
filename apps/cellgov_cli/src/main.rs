@@ -59,6 +59,11 @@ const USAGE_GEN_MANIFEST: &str = "\
 cellgov_cli gen-manifest <--record PATH | --title-id ID> [--registry DIR] [--installs DIR] [--force]
 \t\temit a title-manifest stub from an install record; never overwrites an
 \t\texisting manifest (curated fields preserved) unless --force is given";
+const USAGE_RECORD_ANCHORS: &str = "\
+cellgov_cli record-anchors <--all | --title NAME> [--registry DIR]
+\t\tre-measure each title and rewrite its committed boot_summary.json
+\t\tbaseline; appends to boot_history.jsonl only when a value moved.
+\t\tWitness classes already set in the baseline are preserved.";
 
 /// Top-level dispatcher routes. Adding a variant produces an
 /// exhaustiveness error in [`Subcommand::tokens`], [`Subcommand::usage`],
@@ -83,6 +88,7 @@ enum Subcommand {
     FixtureGen,
     TitlesGen,
     GenManifest,
+    RecordAnchors,
 }
 
 impl Subcommand {
@@ -106,6 +112,7 @@ impl Subcommand {
             Self::FixtureGen => &["fixture-gen"],
             Self::TitlesGen => &["titles-gen"],
             Self::GenManifest => &["gen-manifest"],
+            Self::RecordAnchors => &["record-anchors"],
         }
     }
 
@@ -131,6 +138,7 @@ impl Subcommand {
             Self::FixtureGen => Some(USAGE_FIXTURE_GEN),
             Self::TitlesGen => Some(USAGE_TITLES_GEN),
             Self::GenManifest => Some(USAGE_GEN_MANIFEST),
+            Self::RecordAnchors => Some(USAGE_RECORD_ANCHORS),
         }
     }
 
@@ -163,6 +171,7 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand::FixtureGen,
     Subcommand::TitlesGen,
     Subcommand::GenManifest,
+    Subcommand::RecordAnchors,
 ];
 
 fn main() {
@@ -217,6 +226,7 @@ fn main() {
         Some(Subcommand::FixtureGen) => cli::fixture_gen::run(&args),
         Some(Subcommand::TitlesGen) => cli::titles_gen::run(&args),
         Some(Subcommand::GenManifest) => cli::gen_manifest::run(&args),
+        Some(Subcommand::RecordAnchors) => cli::record_anchors::run(&args),
         None => match run_scenario(token) {
             Some((label, result)) => println!("{}", report(label, &result)),
             None => die(&format!(
