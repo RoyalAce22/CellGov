@@ -136,6 +136,7 @@ cargo build --workspace
 cargo test --workspace
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
 CellGov has no runtime dependency on RPCS3. Booting a real PS3 game

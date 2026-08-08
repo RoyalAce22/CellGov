@@ -16,8 +16,8 @@ times out at `MaxSteps` (390,432 under default budget) before
 reaching the first RSX put-pointer write; RPCS3 completes
 the checkpoint. Byte parity undefined until convergence.
 
-Phase 39's BE-FIFO decode + IO->EA translation correctness
-fixes plus the `sys_rsx_context_attribute` FIFO_SETUP arm
+The BE-FIFO decode + IO->EA translation correctness fixes,
+plus the `sys_rsx_context_attribute` FIFO_SETUP arm,
 advanced SSHD past its prior `14,341,833 / Fault` at the
 RSX device-enumeration codepath; the Fault no longer fires.
 SSHD now caps at the same `MaxSteps` budget flOw hits at
@@ -46,13 +46,12 @@ RPCS3 corpus state (Stage E):
 ## Next step
 
 SSHD's fault is orthogonal to the 670 / 675 / 672 modeling
-that Phase 37 landed (verified: SSHD's anchor is unchanged
-at 14,341,833 / Fault / breaks=3 across Phase 36.7 and
-Phase 37). The downstream RSX-init divergence sits past the
-unbacked-mmapper blocker WipEout currently hits at step
-43,066; a successor phase backs the mmapper handout window
-and re-measures SSHD to confirm which RSX-init step is the
-next honest fault. The 0x10000 thread-flag log can downgrade
+(verified: SSHD's anchor held at 14,341,833 / Fault /
+breaks=3 across the two releases that landed it). The
+downstream RSX-init divergence sits past the unbacked-mmapper
+blocker WipEout currently hits at step 43,066; backing the
+mmapper handout window and re-measuring SSHD is what confirms
+which RSX-init step is the next honest fault. The 0x10000 thread-flag log can downgrade
 from invariant-break to a one-line note in the same effort
 if a lie-vs-gap classifier emerges; until then the count of
 3 reflects honest "unmodeled" reports against RPCS3-faithful

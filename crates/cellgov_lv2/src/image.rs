@@ -46,8 +46,8 @@ pub struct ContentStore {
     by_path: BTreeMap<Vec<u8>, SpuImageRecord>,
     by_handle: BTreeMap<SpuImageHandle, Vec<u8>>,
     next_handle: u32,
-    /// Cumulative count of [`Self::register`] invocations. Audit
-    /// C-5a witness: the path-shape `debug_assert!`s in `register`
+    /// Cumulative count of [`Self::register`] invocations.
+    /// Non-vacuity witness: the path-shape `debug_assert!`s in `register`
     /// (lines 74/79, 107/112/128 of this file) are conditional on
     /// register being called; this counter makes their silence
     /// non-vacuous. Increments per call regardless of whether the
@@ -73,7 +73,7 @@ impl ContentStore {
         }
     }
 
-    /// Audit C-5a witness: cumulative count of `register` calls.
+    /// Non-vacuity witness: cumulative count of `register` calls.
     /// See the field doc on `register_invocations`.
     #[inline]
     pub fn register_invocations(&self) -> u64 {

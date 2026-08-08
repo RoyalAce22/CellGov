@@ -1,4 +1,4 @@
-//! Regenerate `docs/dev/firmware_reloc_census.md` from the installed
+//! Regenerate `docs/dev/audits/firmware_reloc_census.md` from the installed
 //! firmware corpus. Run with:
 //!
 //! ```text
@@ -238,10 +238,12 @@ fn regenerate_firmware_reloc_census() {
     )
     .expect("write to String");
     writeln!(out).expect("write to String");
+    // The generating machine's absolute firmware path stays out of the
+    // committed text; the parenthetical already tells a reader where
+    // the corpus came from without pinning it to one checkout.
     writeln!(
         out,
-        "Source: every `*.sprx` under `{}` (default `firmware/sys/external`, overridable via `CELLGOV_FIRMWARE_DIR`). Each row lists the distinct `R_PPC64_*` types observed in that PRX's `PT_PRX_RELOC` segment after SCE decryption. The applier at `crates/cellgov_ppu/src/sprx.rs::apply_relocations` must cover the union of these types for the dependency-ordered firmware loader to handle every module. The \"Applier covered?\" column reads `cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`, so this doc and the applier never disagree silently.",
-        dir.display()
+        "Source: every `*.sprx` under the firmware directory (default `firmware/sys/external`, overridable via `CELLGOV_FIRMWARE_DIR`). Each row lists the distinct `R_PPC64_*` types observed in that PRX's `PT_PRX_RELOC` segment after SCE decryption. The applier at `crates/cellgov_ppu/src/sprx.rs::apply_relocations` must cover the union of these types for the dependency-ordered firmware loader to handle every module. The \"Applier covered?\" column reads `cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`, so this doc and the applier never disagree silently."
     )
     .expect("write to String");
     writeln!(out).expect("write to String");
@@ -362,7 +364,7 @@ fn regenerate_firmware_reloc_census() {
         writeln!(out).expect("write to String");
     }
 
-    let dst = workspace_root().join("docs/dev/firmware_reloc_census.md");
+    let dst = workspace_root().join("docs/dev/audits/firmware_reloc_census.md");
     // docs/dev/ is gitignored; create it so fs::write does not ENOENT.
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent).expect("create docs/dev parent dir");

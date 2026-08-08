@@ -421,3 +421,89 @@ fn render_rows_sorted_with_empty_input_returns_empty_vec() {
     let rows = render_rows_sorted(std::iter::empty(), tmp.path()).unwrap();
     assert!(rows.is_empty());
 }
+
+// -- committed-doc drift gate --
+
+fn repo_root() -> &'static Path {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("apps/cellgov_cli has a workspace root two levels up")
+}
+
+/// Collapse table-cell padding so a markdown formatter's column
+/// alignment does not read as drift; content changes still do.
+/// Mirrors the same helper in `cellgov_lv2`'s `fidelity_doc` gate.
+fn normalize(text: &str) -> String {
+    let mut out = String::new();
+    for line in text.replace("\r\n", "\n").lines() {
+        let line = line.trim_end();
+        if line.starts_with('|') && line.ends_with('|') {
+            let cells: Vec<String> = line
+                .trim_matches('|')
+                .split('|')
+                .map(|c| {
+                    let c = c.trim();
+                    // Separator cells carry alignment (`---:`); keep
+                    // the colon, collapse only the dash run.
+                    let core = c.trim_end_matches(':');
+                    if core.len() >= 3 && core.chars().all(|ch| ch == '-') {
+                        let suffix = if c.ends_with(':') { ":" } else { "" };
+                        format!("---{suffix}")
+                    } else {
+                        c.to_string()
+                    }
+                })
+                .collect();
+            out.push_str(&format!("| {} |\n", cells.join(" | ")));
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn render_committed_matrix() -> String {
+    let root = repo_root();
+    let registry = TitleRegistry::scan_dir(&root.join("docs/title_manifests"))
+        .expect("scan docs/title_manifests");
+    let (body, n) =
+        render_doc(registry.iter(), &root.join("tests/fixtures")).expect("render titles.md body");
+    assert!(n > 0, "registry is empty; the gate would pass vacuously");
+    body
+}
+
+#[test]
+fn committed_titles_doc_matches_generator() {
+    let path = repo_root().join("docs/titles.md");
+    let committed =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    assert_eq!(
+        normalize(&committed),
+        normalize(&render_committed_matrix()),
+        "docs/titles.md is stale; regenerate with:\n  \
+         cargo run --release -p cellgov_cli -- titles-gen"
+    );
+}
+
+#[test]
+fn drift_gate_ignores_table_padding() {
+    let padded = "| Serial    | Steps |\n| --------- | ----: |\n| NPUA80001 |    11 |\n";
+    let tight = "| Serial | Steps |\n| --- | ---: |\n| NPUA80001 | 11 |\n";
+    assert_eq!(normalize(padded), normalize(tight));
+}
+
+#[test]
+fn drift_gate_still_sees_content_change() {
+    let a = "| Serial | Steps |\n| --- | ---: |\n| NPUA80001 | 11,224 |\n";
+    let b = "| Serial | Steps |\n| --- | ---: |\n| NPUA80001 | 11,299 |\n";
+    assert_ne!(normalize(a), normalize(b));
+}
+
+#[test]
+fn drift_gate_keeps_column_alignment_distinct() {
+    let right = "| Steps |\n| ---: |\n";
+    let left = "| Steps |\n| --- |\n";
+    assert_ne!(normalize(right), normalize(left));
+}

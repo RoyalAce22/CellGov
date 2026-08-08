@@ -52,13 +52,30 @@ pub(crate) fn run(args: &[String]) {
         .unwrap_or_else(|e| die(&format!("titles-gen: scan {registry_dir}: {e}")));
 
     let fixtures = Path::new(&fixtures_dir);
-    let rows = render_rows_sorted(registry.iter(), fixtures)
-        .unwrap_or_else(|e| die(&format!("titles-gen: {e}")));
-    let body =
-        super::fixture_gen::apply_subs(TITLES_TEMPLATE, &[("matrix_rows", &rows.join("\n"))]);
+    let (body, n_titles) =
+        render_doc(registry.iter(), fixtures).unwrap_or_else(|e| die(&format!("titles-gen: {e}")));
     std::fs::write(Path::new(&output), body)
         .unwrap_or_else(|e| die(&format!("titles-gen: write {output}: {e}")));
-    println!("titles-gen: wrote {output} ({} title(s))", rows.len());
+    println!("titles-gen: wrote {output} ({n_titles} title(s))");
+}
+
+/// Render the whole `docs/titles.md` body, plus the row count.
+///
+/// Shared by [`run`] and the committed-doc drift gate so the test
+/// checks the same bytes the generator writes.
+///
+/// # Errors
+///
+/// `SummaryLoadError` if a per-title summary exists but cannot be
+/// read or parsed.
+fn render_doc<'a>(
+    titles: impl IntoIterator<Item = &'a TitleManifest>,
+    fixtures: &Path,
+) -> Result<(String, usize), SummaryLoadError> {
+    let rows = render_rows_sorted(titles, fixtures)?;
+    let body =
+        super::fixture_gen::apply_subs(TITLES_TEMPLATE, &[("matrix_rows", &rows.join("\n"))]);
+    Ok((body, rows.len()))
 }
 
 /// Refuse any `--flag` (or `--flag=value`) not in [`KNOWN_FLAGS`]

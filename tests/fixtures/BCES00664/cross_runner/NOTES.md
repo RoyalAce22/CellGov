@@ -62,16 +62,22 @@ that loads the same firmware.
 ### Non-writer (CG side)
 
 CG's commit pipeline writes the same 8-byte span at the
-same `ea = 0x0091FE98` with value zero. CG does not retire
-the firmware helper at PC `0x01664EE4` along its
-pre-checkpoint trajectory; it reaches the destination EA
-via a different call graph that does not invoke the
-helper.
+same `ea = 0x0091FE98` with value zero. The available
+evidence indicates CG does not retire the firmware helper
+at PC `0x01664EE4` along its pre-checkpoint trajectory,
+reaching the destination EA via a call graph that does not
+invoke it -- but this is NOT confirmed at instruction
+granularity. The store-attribution signal is
+`LAST_PPU_CIA`, an end-of-step approximation, so a CG store
+issued via a PRX call that returns before the step yields
+cannot be excluded. Confirming it needs per-store PC
+threading through `StoreBuffer::Entry` / `flush()` /
+`SharedWriteIntent` / `apply_commit`.
 
-Verifiable from shipped tooling:
+Supporting observation from shipped tooling:
 `target/release/cellgov_cli.exe bench-boot --title wipeout
 --checkpoint pc=0x6516F0 --max-steps 100000000` halts at
-step 43,156 / Fault without firing the PC check at
+step 43,082 / Fault without firing the PC check at
 `0x6516F0` (the title call site preceding the path that
 on RP reaches the helper).
 
@@ -83,7 +89,7 @@ pre-checkpoint trajectory; the record stays inside the
 title's data segment.
 
 Inert at FirstRsxWrite: CG reaches FirstRsxWrite at
-step 43,156, `host_invariant_breaks=3`, bit-identical
+step 43,082, `host_invariant_breaks=2`, bit-identical
 across two `bench-boot --title wipeout` runs. CG and RP
 read divergent values at `+0x0c` along their respective
 pre-checkpoint trajectories with no resulting step-count
