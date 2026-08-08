@@ -89,7 +89,7 @@ impl Lv2Host {
                     .prx_registry
                     .lookup_by_id(id)
                     .expect("ids() yields present entries");
-                hasher.write(&[u8::from(entry.started())]);
+                hasher.write(&[entry.state() as u8]);
                 hasher.write(entry.stem().as_bytes());
                 hasher.write(&[0u8]);
             }

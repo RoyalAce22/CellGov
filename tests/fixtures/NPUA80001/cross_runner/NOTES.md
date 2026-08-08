@@ -14,16 +14,17 @@ byte_parity: --
 Does not converge with RPCS3 at the manifest's `process-exit`
 checkpoint: outcomes are distinct.
 
-CellGov reaches `process-exit` at step 11,299 (cumulative
-2,892,544 instructions at the default budget of 256 per step).
+CellGov reaches `process-exit` at step 11,224 (cumulative
+2,873,344 instructions at the default budget of 256 per step).
 The boot trajectory is an EARLY ABORT: the title calls
-`sys_process_exit(CELL_EABORT)` at step 5910, then runs a 5,389-
-step atexit / cleanup sequence (which generates 43 host-invariant
+`sys_process_exit(CELL_EABORT)` at step 5910, then runs its
+atexit / cleanup sequence -- walking every registered module id
+through the `_sys_prx_stop_module` / `_sys_prx_unload_module`
+handshake -- then calls `sys_process_exit(1)` at step 11,224.
+The runtime detects `NoRunnableUnit` and reports
+`outcome=ProcessExit`. The cleanup generates 4 host-invariant
 breaks: 1 SPU initialize, 1 PPU thread create with unmodeled
-flag, 2 RSX `cellGcmResetFlipStatus`, 39 `_sys_prx_stop_module`
-across 13 module IDs x 3 stacks), then calls
-`sys_process_exit(1)` at step 11,299. The runtime detects
-`NoRunnableUnit` and reports `outcome=ProcessExit`.
+flag, 2 RSX `cellGcmResetFlipStatus`.
 
 Why the abort: zero host-invariant breaks fire in `[0, 5910)`,
 so the title's pre-abort fatal condition came back through a
@@ -35,11 +36,13 @@ unwired `sys_rsx_context_attribute(package_id=0x10A)` arm
 returning CELL_EINVAL. Pinning the specific trigger is the
 entry point for a future ISA-coverage / SPURS-bringup phase.
 
-The 43 host-invariant breaks are all expected-benign per
+The 4 host-invariant breaks are all expected-benign per
 `docs/dev/bug_investigations/flow_post_40f_libgcm_ref_addr_spin.md`
 ("Pre-close verification" section): the SPU + PPU init / thread
-warnings are pre-existing; the RSX attribute and PRX stop_module
-arms are honest not-implemented ENOSYS/EINVAL returns.
+warnings are pre-existing; the RSX attribute arm is an honest
+not-implemented EINVAL return. The 39 `_sys_prx_stop_module`
+breaks that previously dominated the count retired when the 482
+stop handshake was modeled.
 
 RPCS3 corpus state (Stage E):
   outcome: Completed

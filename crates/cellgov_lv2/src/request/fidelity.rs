@@ -113,6 +113,11 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
             ArmFidelity::PartialState,
         ),
         (
+            syscall::SYS_PRX_STOP_MODULE,
+            "_sys_prx_stop_module",
+            ArmFidelity::PartialState,
+        ),
+        (
             syscall::SYS_PRX_UNLOAD_MODULE,
             "_sys_prx_unload_module",
             ArmFidelity::PartialState,

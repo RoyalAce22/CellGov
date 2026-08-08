@@ -174,6 +174,78 @@ fn ids_iterates_in_monotonic_order() {
     assert!(ids[1] < ids[2]);
 }
 
+// -- lifecycle state machine --
+
+#[test]
+fn register_starts_in_initialized() {
+    let mut reg = LoadedPrxRegistry::new();
+    let id = register_libaudio(&mut reg);
+    assert_eq!(reg.lookup_by_id(id).unwrap().state(), PrxState::Initialized);
+}
+
+#[test]
+fn mark_started_transitions_to_started() {
+    let mut reg = LoadedPrxRegistry::new();
+    let id = register_libaudio(&mut reg);
+    reg.mark_started(id);
+    assert_eq!(reg.lookup_by_id(id).unwrap().state(), PrxState::Started);
+}
+
+#[test]
+fn begin_stop_transitions_only_started() {
+    let mut reg = LoadedPrxRegistry::new();
+    let id = register_libaudio(&mut reg);
+    assert_eq!(reg.begin_stop(id), Some(PrxState::Initialized));
+    assert_eq!(
+        reg.lookup_by_id(id).unwrap().state(),
+        PrxState::Initialized,
+        "a non-Started module must not transition"
+    );
+    reg.mark_started(id);
+    assert_eq!(reg.begin_stop(id), Some(PrxState::Started));
+    assert_eq!(reg.lookup_by_id(id).unwrap().state(), PrxState::Stopping);
+    assert_eq!(reg.begin_stop(id), Some(PrxState::Stopping));
+    assert_eq!(reg.begin_stop(0xDEAD_BEEF), None);
+}
+
+#[test]
+fn finish_stop_transitions_only_stopping() {
+    let mut reg = LoadedPrxRegistry::new();
+    let id = register_libaudio(&mut reg);
+    assert!(!reg.finish_stop(id));
+    reg.mark_started(id);
+    assert!(!reg.finish_stop(id));
+    reg.begin_stop(id);
+    assert!(reg.finish_stop(id));
+    assert_eq!(reg.lookup_by_id(id).unwrap().state(), PrxState::Stopped);
+    assert!(!reg.finish_stop(id), "Stopped does not re-finish");
+    assert!(!reg.finish_stop(0xDEAD_BEEF));
+}
+
+#[test]
+fn withdraw_removable_accepts_initialized_and_stopped_only() {
+    let mut reg = LoadedPrxRegistry::new();
+    let id = register_libaudio(&mut reg);
+    reg.mark_started(id);
+    assert!(reg.withdraw_removable(id).is_none(), "Started refuses");
+    reg.begin_stop(id);
+    assert!(reg.withdraw_removable(id).is_none(), "Stopping refuses");
+    reg.finish_stop(id);
+    let entry = reg.withdraw_removable(id).expect("Stopped withdraws");
+    assert_eq!(entry.kernel_id(), id);
+    assert!(reg.lookup_by_id(id).is_none());
+    assert!(
+        reg.lookup_by_path("libaudio.sprx").is_none(),
+        "stem index must drop with the entry"
+    );
+
+    let id2 = register_libaudio(&mut reg);
+    assert!(
+        reg.withdraw_removable(id2).is_some(),
+        "Initialized withdraws"
+    );
+}
+
 // -- duplicate registration --
 
 #[test]

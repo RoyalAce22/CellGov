@@ -11,6 +11,26 @@ use std::collections::BTreeMap;
 /// `FIRST_KERNEL_ID` and above.
 pub const FIRST_KERNEL_ID: u32 = 0x4002_0000;
 
+/// LV2 module lifecycle states CellGov models.
+///
+/// `STARTING` and `DESTROYED` are omitted: start phase 1 persists no
+/// transition in this model, and withdrawal removes the entry
+/// outright. Discriminants feed the host state hash; `Initialized`
+/// and `Started` keep the byte values the pre-enum boolean hashed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PrxState {
+    /// Loaded; `module_start` has not run.
+    Initialized = 0,
+    /// `module_start` ran (host-side at boot, or the guest completed
+    /// the sc 481 handshake).
+    Started = 1,
+    /// Stop handshake phase 1 accepted; awaiting the phase 2 report.
+    Stopping = 2,
+    /// Stop handshake completed; eligible for withdrawal.
+    Stopped = 3,
+}
+
 /// One entry per loaded PRX.
 #[derive(Debug, Clone)]
 pub struct LoadedPrxEntry {
@@ -22,11 +42,11 @@ pub struct LoadedPrxEntry {
     toc: u32,
     start_opd: Option<u32>,
     stop_opd: Option<u32>,
-    /// Whether `module_start` has run (LV2's `PRX_STATE_STARTED`).
     /// Boot-loaded firmware modules are marked started by the boot
-    /// path; miss stubs stay unstarted until the guest completes the
-    /// sc 481 handshake. Unload withdraws only unstarted modules.
-    started: bool,
+    /// path; miss stubs stay `Initialized` until the guest completes
+    /// the sc 481 handshake. Unload withdraws only `Initialized` /
+    /// `Stopped` entries.
+    state: PrxState,
 }
 
 impl LoadedPrxEntry {
@@ -70,9 +90,9 @@ impl LoadedPrxEntry {
         self.stop_opd
     }
 
-    /// Whether `module_start` has run for this module.
-    pub fn started(&self) -> bool {
-        self.started
+    /// Current lifecycle state.
+    pub fn state(&self) -> PrxState {
+        self.state
     }
 }
 
@@ -80,8 +100,10 @@ impl LoadedPrxEntry {
 ///
 /// Invariant: every key in `stem_to_id` resolves to a present
 /// `entries` row. [`register`](Self::register),
-/// [`mark_started`](Self::mark_started), and
-/// [`remove_unstarted`](Self::remove_unstarted) are the mutating
+/// [`mark_started`](Self::mark_started),
+/// [`begin_stop`](Self::begin_stop),
+/// [`finish_stop`](Self::finish_stop), and
+/// [`withdraw_removable`](Self::withdraw_removable) are the mutating
 /// surface; [`lookup_by_path`](Self::lookup_by_path) debug-asserts
 /// the invariant.
 #[derive(Debug, Clone)]
@@ -174,7 +196,7 @@ impl LoadedPrxRegistry {
                 toc,
                 start_opd,
                 stop_opd,
-                started: false,
+                state: PrxState::Initialized,
             },
         );
         self.stem_to_id.insert(stem, kernel_id);
@@ -185,16 +207,46 @@ impl LoadedPrxRegistry {
     /// completed the sc 481 handshake). No-op for an unknown id.
     pub fn mark_started(&mut self, id: u32) {
         if let Some(e) = self.entries.get_mut(&id) {
-            e.started = true;
+            e.state = PrxState::Started;
         }
     }
 
-    /// Withdraw an unstarted module, freeing its id. Returns the
-    /// removed entry, or `None` when `id` is unknown or the module is
-    /// started (LV2 withdraws only `INITIALIZED` / `STOPPED` states).
-    pub fn remove_unstarted(&mut self, id: u32) -> Option<LoadedPrxEntry> {
-        if self.entries.get(&id)?.started {
-            return None;
+    /// Stop-handshake phase 1: transition `Started -> Stopping`.
+    ///
+    /// Returns the state before the call so the dispatcher can map a
+    /// non-`Started` state to its error code; `None` for an unknown
+    /// id. Only the `Started` state transitions.
+    pub fn begin_stop(&mut self, id: u32) -> Option<PrxState> {
+        let e = self.entries.get_mut(&id)?;
+        let old = e.state;
+        if old == PrxState::Started {
+            e.state = PrxState::Stopping;
+        }
+        Some(old)
+    }
+
+    /// Stop-handshake phase 2: transition `Stopping -> Stopped`.
+    ///
+    /// Returns whether the transition applied; `false` for an unknown
+    /// id or any other state.
+    pub fn finish_stop(&mut self, id: u32) -> bool {
+        match self.entries.get_mut(&id) {
+            Some(e) if e.state == PrxState::Stopping => {
+                e.state = PrxState::Stopped;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Withdraw an `Initialized` or `Stopped` module, freeing its id.
+    /// Returns the removed entry, or `None` when `id` is unknown or
+    /// the module is `Started` / `Stopping` (LV2 withdraws only
+    /// `INITIALIZED` / `STOPPED` states).
+    pub fn withdraw_removable(&mut self, id: u32) -> Option<LoadedPrxEntry> {
+        match self.entries.get(&id)?.state {
+            PrxState::Initialized | PrxState::Stopped => {}
+            PrxState::Started | PrxState::Stopping => return None,
         }
         let entry = self.entries.remove(&id)?;
         self.stem_to_id.remove(&entry.stem);

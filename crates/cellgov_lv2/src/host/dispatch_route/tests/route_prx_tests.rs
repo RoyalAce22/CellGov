@@ -692,6 +692,308 @@ fn syscall_481_rejects_zero_p_opt_with_einval() {
     );
 }
 
+// -- _sys_prx_stop_module (482) --
+
+fn stop_module(host: &mut Lv2Host, id: u32, p_opt: u32, rt: &FakeRuntime) -> Lv2Dispatch {
+    let mut args = [0u64; 8];
+    args[0] = u64::from(id);
+    args[2] = u64::from(p_opt);
+    host.dispatch(
+        Lv2Request::Unsupported { number: 482, args },
+        UnitId::new(0),
+        rt,
+    )
+}
+
+/// Register one started module and return `(host, its kernel id)`.
+fn host_with_one_started_prx() -> (Lv2Host, u32) {
+    let (mut host, id) = host_with_one_prx();
+    host.prx_registry_mut().mark_started(id);
+    (host, id)
+}
+
+/// RPCS3's 482 looks the id up before the null-pOpt gate -- the
+/// reverse of 481's EINVAL-first order.
+#[test]
+fn syscall_482_esrch_precedes_einval() {
+    let (mut host, id) = host_with_one_started_prx();
+    let rt = FakeRuntime::new(0x1000);
+    assert_eq!(
+        stop_module(&mut host, 0xDEAD_BEEF, 0, &rt),
+        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+        "unknown id with null pOpt reports the id miss, not EINVAL"
+    );
+    assert_eq!(
+        stop_module(&mut host, id, 0, &rt),
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
+}
+
+#[test]
+fn syscall_482_cmd1_writes_no_entry_and_moves_to_stopping() {
+    let (mut host, id) = host_with_one_started_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
+    let effects = match stop_module(&mut host, id, p_opt, &rt) {
+        Lv2Dispatch::Immediate { code: 0, effects } => effects,
+        other => panic!("expected Immediate{{code:0}}, got {other:?}"),
+    };
+    assert_eq!(
+        effects.len(),
+        1,
+        "size 0x20 has no entry2 field, so only entry is written"
+    );
+    match &effects[0] {
+        Effect::SharedWriteIntent { range, bytes, .. } => {
+            assert_eq!(range.start().raw(), u64::from(p_opt + 0x10));
+            assert_eq!(range.length(), 8);
+            assert_eq!(bytes.bytes(), &u64::MAX.to_be_bytes());
+        }
+        other => panic!("expected SharedWriteIntent, got {other:?}"),
+    }
+    use crate::prx_registry::PrxState;
+    assert_eq!(
+        host.prx_registry().lookup_by_id(id).unwrap().state(),
+        PrxState::Stopping
+    );
+}
+
+#[test]
+fn syscall_482_cmd1_extended_size_also_writes_entry2() {
+    let (mut host, id) = host_with_one_started_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x28, 1, 0));
+    let effects = match stop_module(&mut host, id, p_opt, &rt) {
+        Lv2Dispatch::Immediate { code: 0, effects } => effects,
+        other => panic!("expected Immediate{{code:0}}, got {other:?}"),
+    };
+    assert_eq!(effects.len(), 2, "size != 0x20 carries entry2");
+}
+
+#[test]
+fn syscall_482_cmd1_wrong_states_report_their_codes() {
+    use cellgov_ps3_abi::sys_prx::{
+        CELL_PRX_ERROR_ALREADY_STOPPED, CELL_PRX_ERROR_ALREADY_STOPPING, CELL_PRX_ERROR_NOT_STARTED,
+    };
+    let p_opt: u32 = 0x4000;
+    let image = start_stop_option(0x20, 1, 0);
+
+    let (mut host, id) = host_with_one_prx();
+    let rt = runtime_with(p_opt, &image);
+    assert_eq!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_STARTED.into()),
+        "Initialized reports NOT_STARTED"
+    );
+
+    let (mut host, id) = host_with_one_started_prx();
+    let rt = runtime_with(p_opt, &image);
+    assert!(matches!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::Immediate { code: 0, .. }
+    ));
+    assert_eq!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_ALREADY_STOPPING.into()),
+        "a second phase 1 reports ALREADY_STOPPING"
+    );
+    host.prx_registry_mut().finish_stop(id);
+    assert_eq!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_ALREADY_STOPPED.into()),
+        "a stop after completion reports ALREADY_STOPPED"
+    );
+}
+
+/// Phase 1 hands back NO_ENTRY, so the guest calls nothing between
+/// the two phases.
+#[test]
+fn syscall_482_full_handshake_unblocks_unload() {
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
+    let (mut host, id) = host_with_one_started_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
+    assert!(matches!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::Immediate { code: 0, .. }
+    ));
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0));
+    let breaks_before = host.invariant_break_count();
+    assert_eq!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(0)
+    );
+    assert_eq!(
+        host.invariant_break_count(),
+        breaks_before,
+        "a well-ordered handshake is not an invariant break"
+    );
+    assert_eq!(unload_module(&mut host, id, &rt), Lv2Dispatch::immediate(0));
+    assert_eq!(
+        unload_module(&mut host, id, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into()),
+        "the withdrawn id must be gone"
+    );
+}
+
+#[test]
+fn syscall_482_stopping_module_still_refuses_unload() {
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_NOT_REMOVABLE;
+    let (mut host, id) = host_with_one_started_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
+    assert!(matches!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::Immediate { code: 0, .. }
+    ));
+    assert_eq!(
+        unload_module(&mut host, id, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
+    );
+}
+
+/// cmd=2 res=0 without an accepted phase 1: RPCS3 hard-asserts, so
+/// there is no oracle behaviour; CellGov logs the break, returns
+/// CELL_OK, and leaves the state alone.
+#[test]
+fn syscall_482_cmd2_without_phase1_logs_break_and_keeps_state() {
+    use crate::prx_registry::PrxState;
+    let (mut host, id) = host_with_one_started_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0));
+    let breaks_before = host.invariant_break_count();
+    assert_eq!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(0)
+    );
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.prx_registry().lookup_by_id(id).unwrap().state(),
+        PrxState::Started
+    );
+}
+
+#[test]
+fn syscall_482_cmd2_res1_returns_can_not_stop_and_logs_break() {
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_CAN_NOT_STOP;
+    let (mut host, id) = host_with_one_started_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 1));
+    let breaks_before = host.invariant_break_count();
+    assert_eq!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_CAN_NOT_STOP.into())
+    );
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+}
+
+#[test]
+fn syscall_482_cmd2_other_res_returns_ok_without_transition() {
+    use crate::prx_registry::PrxState;
+    let (mut host, id) = host_with_one_started_prx();
+    let p_opt: u32 = 0x4000;
+    // Move to Stopping first so a buggy arm that transitions anyway
+    // would be caught by the state assert.
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
+    stop_module(&mut host, id, p_opt, &rt);
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0x8001_0002));
+    let breaks_before = host.invariant_break_count();
+    assert_eq!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(0),
+        "RPCS3's default res arm returns CELL_OK"
+    );
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.prx_registry().lookup_by_id(id).unwrap().state(),
+        PrxState::Stopping,
+        "only res=0 completes the stop"
+    );
+}
+
+/// Repeating cmd=4 still succeeds, since it never transitions.
+#[test]
+fn syscall_482_cmd4_writes_entries_and_keeps_started() {
+    use crate::prx_registry::PrxState;
+    let (mut host, id) = host_with_one_started_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x28, 4, 0));
+    let effects = match stop_module(&mut host, id, p_opt, &rt) {
+        Lv2Dispatch::Immediate { code: 0, effects } => effects,
+        other => panic!("expected Immediate{{code:0}}, got {other:?}"),
+    };
+    assert_eq!(effects.len(), 2, "extended struct writes entry and entry2");
+    assert_eq!(
+        host.prx_registry().lookup_by_id(id).unwrap().state(),
+        PrxState::Started
+    );
+    assert!(matches!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::Immediate { code: 0, .. }
+    ));
+}
+
+/// cmd=8 (and any nibble-4/8 value that is not exactly 4, e.g. 0x14)
+/// takes RPCS3's todo arm: CELL_OK, no writes, no state change.
+#[test]
+fn syscall_482_cmd8_is_a_no_op_stub_that_logs_break() {
+    use crate::prx_registry::PrxState;
+    for cmd in [8u64, 0x14, 0x18] {
+        let (mut host, id) = host_with_one_started_prx();
+        let p_opt: u32 = 0x4000;
+        let rt = runtime_with(p_opt, &start_stop_option(0x20, cmd, 0));
+        let breaks_before = host.invariant_break_count();
+        assert_eq!(
+            stop_module(&mut host, id, p_opt, &rt),
+            Lv2Dispatch::immediate(0),
+            "cmd={cmd:#x}"
+        );
+        assert_eq!(host.invariant_break_count() - breaks_before, 1);
+        assert_eq!(
+            host.prx_registry().lookup_by_id(id).unwrap().state(),
+            PrxState::Started
+        );
+    }
+}
+
+#[test]
+fn syscall_482_cmd4_wrong_state_reports_not_started() {
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_NOT_STARTED;
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 4, 0));
+    assert_eq!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_STARTED.into())
+    );
+}
+
+#[test]
+fn syscall_482_unknown_cmd_returns_prx_error_and_logs_break() {
+    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ERROR;
+    let (mut host, id) = host_with_one_started_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 7, 0));
+    let before = host.invariant_break_count();
+    assert_eq!(
+        stop_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
+    );
+    assert_eq!(host.invariant_break_count() - before, 1);
+}
+
+#[test]
+fn syscall_482_unreadable_p_opt_returns_efault_and_logs_break() {
+    let (mut host, id) = host_with_one_started_prx();
+    let rt = FakeRuntime::new(0x1000);
+    let breaks_before = host.invariant_break_count();
+    assert_eq!(
+        stop_module(&mut host, id, 0x4000_1000, &rt),
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+}
+
 #[test]
 fn syscall_494_rejects_null_p_info_with_efault() {
     let mut host = Lv2Host::new();

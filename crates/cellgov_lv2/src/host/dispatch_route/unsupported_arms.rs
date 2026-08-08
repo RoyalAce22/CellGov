@@ -600,22 +600,252 @@ impl Lv2Host {
         }
     }
 
-    /// `_sys_prx_unload_module` (483): withdraw an unstarted module,
-    /// refuse a started one.
+    /// `_sys_prx_stop_module` (482): the two-phase stop handshake.
+    ///
+    /// `pOpt->cmd & 0xF` selects the arm, mirroring sc 481. Phase 1
+    /// moves a `Started` module to `Stopping` and hands the caller
+    /// the entry to invoke; phase 2 reporting `res == 0` completes
+    /// `Stopping -> Stopped`, after which unload withdraws the
+    /// module.
+    ///
+    /// CellGov never runs guest `module_stop` (modules were started
+    /// host-side at boot without running guest code), so phase 1
+    /// reports `NO_ENTRY` exactly as sc 481 does; liblv2 then skips
+    /// the call and reports zero.
+    ///
+    /// Unlike sc 481, the id lookup precedes the null-`pOpt` gate:
+    /// RPCS3's 482 orders ESRCH before EINVAL (`sys_prx.cpp`), and a
+    /// zero id is just an id the lookup misses.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when `id` names no loaded module.
+    /// - `CELL_EINVAL` for null `pOpt`.
+    /// - `CELL_PRX_ERROR_NOT_STARTED` / `ALREADY_STOPPED` /
+    ///   `ALREADY_STOPPING` when cmd 1 / 4 / 8 finds the module in
+    ///   the wrong state.
+    /// - `CELL_PRX_ERROR_CAN_NOT_STOP` when phase 2 reports `res == 1`.
+    /// - `CELL_PRX_ERROR_ERROR` for an unrecognised command nibble
+    ///   (RPCS3's default arm).
+    /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
+    ///   not fit inside the 32-bit guest address space.
+    pub(super) fn dispatch_prx_stop_module(
+        &mut self,
+        args: [u64; 8],
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        use crate::prx_registry::PrxState;
+        use cellgov_ps3_abi::sys_prx::{
+            start_cmd, start_stop_option as opt, stop_cmd, CELL_PRX_ERROR_ALREADY_STOPPED,
+            CELL_PRX_ERROR_ALREADY_STOPPING, CELL_PRX_ERROR_CAN_NOT_STOP, CELL_PRX_ERROR_ERROR,
+            CELL_PRX_ERROR_NOT_STARTED,
+        };
+
+        let id = args[0] as u32;
+        let p_opt = args[2] as u32;
+        if self.prx_registry.lookup_by_id(id).is_none() {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+        }
+        if p_opt == 0 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+        // The base struct (through `res`) must fit below the 4 GiB
+        // boundary; `entry2`'s reach is gated after `size` is known.
+        if p_opt.checked_add(opt::MIN_SIZE as u32).is_none() {
+            self.log_invariant_break(
+                "dispatch.prx_stop_module_p_opt_wraps",
+                format_args!(
+                    "_sys_prx_stop_module option struct at p_opt={p_opt:#010x} wraps u32; \
+                     returning CELL_EFAULT (struct does not fit in 32-bit guest address space)"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        }
+
+        let Some(size) = self.read_be_u64(rt, p_opt + opt::SIZE_OFFSET) else {
+            self.log_invariant_break(
+                "dispatch.prx_stop_module_size_unreadable",
+                format_args!(
+                    "_sys_prx_stop_module pOpt={p_opt:#010x} size field unreadable; \
+                     returning CELL_EFAULT"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        };
+        // Extended struct: entry2 at +0x20 must also fit.
+        if size != opt::MIN_SIZE && p_opt.checked_add(opt::ENTRY2_OFFSET + 8).is_none() {
+            self.log_invariant_break(
+                "dispatch.prx_stop_module_entry2_wraps",
+                format_args!(
+                    "_sys_prx_stop_module extended option struct at p_opt={p_opt:#010x} \
+                     (size={size:#x}) wraps u32 at entry2; returning CELL_EFAULT"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        }
+        let Some(cmd) = self.read_be_u64(rt, p_opt + opt::CMD_OFFSET) else {
+            self.log_invariant_break(
+                "dispatch.prx_stop_module_cmd_unreadable",
+                format_args!(
+                    "_sys_prx_stop_module pOpt={p_opt:#010x} cmd field unreadable; \
+                     returning CELL_EFAULT"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        };
+
+        // Write NO_ENTRY to `entry` (and `entry2` for the extended
+        // struct); shared by the cmd 1 and cmd 4 arms.
+        let no_entry_effects = |host: &Self| {
+            let mut effects =
+                vec![host.write_be_u64(requester, p_opt + opt::ENTRY_OFFSET, opt::NO_ENTRY)];
+            if size != opt::MIN_SIZE {
+                effects.push(host.write_be_u64(
+                    requester,
+                    p_opt + opt::ENTRY2_OFFSET,
+                    opt::NO_ENTRY,
+                ));
+            }
+            effects
+        };
+        let wrong_state = |state: PrxState| match state {
+            PrxState::Initialized => Some(CELL_PRX_ERROR_NOT_STARTED),
+            PrxState::Stopped => Some(CELL_PRX_ERROR_ALREADY_STOPPED),
+            PrxState::Stopping => Some(CELL_PRX_ERROR_ALREADY_STOPPING),
+            PrxState::Started => None,
+        };
+
+        match cmd & start_cmd::MASK {
+            start_cmd::GET_ENTRY => {
+                let old = self
+                    .prx_registry
+                    .begin_stop(id)
+                    .expect("id lookup succeeded above");
+                if let Some(err) = wrong_state(old) {
+                    return Lv2Dispatch::immediate(err.into());
+                }
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: no_entry_effects(self),
+                }
+            }
+            start_cmd::REPORT_RESULT => {
+                let Some(res) = self.read_be_u64(rt, p_opt + opt::RES_OFFSET) else {
+                    self.log_invariant_break(
+                        "dispatch.prx_stop_module_res_unreadable",
+                        format_args!(
+                            "_sys_prx_stop_module pOpt={p_opt:#010x} res field unreadable; \
+                             returning CELL_EFAULT"
+                        ),
+                    );
+                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                };
+                match res {
+                    0 => {
+                        if !self.prx_registry.finish_stop(id) {
+                            // RPCS3 hard-asserts STOPPING here; a
+                            // phase 2 with no accepted phase 1 has no
+                            // oracle behaviour to mirror.
+                            self.log_invariant_break(
+                                "dispatch.prx_stop_module_unexpected_state",
+                                format_args!(
+                                    "_sys_prx_stop_module id={id:#010x} cmd=2 res=0 but the \
+                                     module is not in the Stopping state; returning CELL_OK \
+                                     without a transition"
+                                ),
+                            );
+                        }
+                        Lv2Dispatch::immediate(0)
+                    }
+                    1 => {
+                        // Phase 1 handed back NO_ENTRY, so the guest
+                        // called nothing; a can-not-stop report is a
+                        // gap signal even though the code is faithful.
+                        self.log_invariant_break(
+                            "dispatch.prx_stop_module_unexpected_res",
+                            format_args!(
+                                "_sys_prx_stop_module id={id:#010x} cmd=2 reported res=1 after \
+                                 phase 1 returned NO_ENTRY; returning \
+                                 CELL_PRX_ERROR_CAN_NOT_STOP"
+                            ),
+                        );
+                        Lv2Dispatch::immediate(CELL_PRX_ERROR_CAN_NOT_STOP.into())
+                    }
+                    other => {
+                        // RPCS3: "Nothing happens (probably
+                        // unexpected value)".
+                        self.log_invariant_break(
+                            "dispatch.prx_stop_module_unexpected_res",
+                            format_args!(
+                                "_sys_prx_stop_module id={id:#010x} cmd=2 reported \
+                                 res={other:#018x} after phase 1 returned NO_ENTRY; returning \
+                                 CELL_OK with no state change (RPCS3's default arm)"
+                            ),
+                        );
+                        Lv2Dispatch::immediate(0)
+                    }
+                }
+            }
+            stop_cmd::GET_ENTRIES | stop_cmd::DISABLE_STOP => {
+                let state = self
+                    .prx_registry
+                    .lookup_by_id(id)
+                    .expect("id lookup succeeded above")
+                    .state();
+                if let Some(err) = wrong_state(state) {
+                    return Lv2Dispatch::immediate(err.into());
+                }
+                // RPCS3 selects the arm by nibble but branches on the
+                // FULL cmd value: only exactly 4 reads the entries;
+                // 8, 0x14, 0x18, ... all take the disable-stop path.
+                if cmd == stop_cmd::GET_ENTRIES {
+                    return Lv2Dispatch::Immediate {
+                        code: 0,
+                        effects: no_entry_effects(self),
+                    };
+                }
+                self.log_invariant_break(
+                    "dispatch.prx_stop_module_disable_stop_stub",
+                    format_args!(
+                        "_sys_prx_stop_module id={id:#010x} cmd={cmd:#x} disable-stop is a \
+                         no-op stub returning CELL_OK; matches RPCS3's todo arm"
+                    ),
+                );
+                Lv2Dispatch::immediate(0)
+            }
+            other => {
+                self.log_invariant_break(
+                    "dispatch.prx_stop_module_unknown_cmd",
+                    format_args!(
+                        "_sys_prx_stop_module id={id:#010x} cmd nibble {other:#x} is not 1, 2, \
+                         4, or 8; returning CELL_PRX_ERROR_ERROR (RPCS3's default arm)"
+                    ),
+                );
+                Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
+            }
+        }
+    }
+
+    /// `_sys_prx_unload_module` (483): withdraw an `Initialized` or
+    /// `Stopped` module, refuse a `Started` / `Stopping` one.
     ///
     /// LV2 (and RPCS3's `_sys_prx_unload_module`) withdraws a module
     /// in `INITIALIZED` or `STOPPED` state and answers
-    /// `CELL_PRX_ERROR_NOT_REMOVABLE` for `STARTED`. Boot-loaded
-    /// firmware modules are started (their images back the GOT slots
-    /// the title calls through), so they refuse; an sc 480 miss stub
-    /// the guest never started withdraws with `CELL_OK` and frees its
-    /// id, exactly as a real never-started module would.
+    /// `CELL_PRX_ERROR_NOT_REMOVABLE` otherwise. Boot-loaded firmware
+    /// modules are started (their images back the GOT slots the title
+    /// calls through), so they refuse until the guest completes the
+    /// sc 482 stop handshake; an sc 480 miss stub the guest never
+    /// started withdraws with `CELL_OK` and frees its id, exactly as
+    /// a real never-started module would.
     ///
     /// # Errors
     ///
     /// - `CELL_PRX_ERROR_UNKNOWN_MODULE` when `id` names no loaded module.
-    /// - `CELL_PRX_ERROR_NOT_REMOVABLE` for a started resident module.
+    /// - `CELL_PRX_ERROR_NOT_REMOVABLE` for a started or stopping
+    ///   resident module.
     pub(super) fn dispatch_prx_unload_module(&mut self, args: [u64; 8]) -> Lv2Dispatch {
+        use crate::prx_registry::PrxState;
         use cellgov_ps3_abi::sys_prx::{
             CELL_PRX_ERROR_NOT_REMOVABLE, CELL_PRX_ERROR_UNKNOWN_MODULE,
         };
@@ -623,23 +853,25 @@ impl Lv2Host {
         let id = args[0] as u32;
         match self.prx_registry.lookup_by_id(id) {
             None => Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into()),
-            Some(entry) if !entry.started() => {
-                let removed = self.prx_registry.remove_unstarted(id);
-                debug_assert!(removed.is_some(), "lookup said present and unstarted");
-                Lv2Dispatch::immediate(0)
-            }
-            Some(entry) => {
-                let stem = entry.stem().to_string();
-                self.prx_unload_rejections += 1;
-                self.log_invariant_break(
-                    "dispatch.prx_unload_module_resident",
-                    format_args!(
-                        "_sys_prx_unload_module id={id:#010x} ({stem}) is a started resident \
-                         module; returning CELL_PRX_ERROR_NOT_REMOVABLE"
-                    ),
-                );
-                Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
-            }
+            Some(entry) => match entry.state() {
+                PrxState::Initialized | PrxState::Stopped => {
+                    let removed = self.prx_registry.withdraw_removable(id);
+                    debug_assert!(removed.is_some(), "lookup said present and removable");
+                    Lv2Dispatch::immediate(0)
+                }
+                PrxState::Started | PrxState::Stopping => {
+                    let stem = entry.stem().to_string();
+                    self.prx_unload_rejections += 1;
+                    self.log_invariant_break(
+                        "dispatch.prx_unload_module_resident",
+                        format_args!(
+                            "_sys_prx_unload_module id={id:#010x} ({stem}) is a started \
+                             resident module; returning CELL_PRX_ERROR_NOT_REMOVABLE"
+                        ),
+                    );
+                    Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
+                }
+            },
         }
     }
 
