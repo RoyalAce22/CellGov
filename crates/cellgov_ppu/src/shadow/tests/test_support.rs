@@ -36,11 +36,6 @@ pub(super) fn b_raw(offset: i32) -> u32 {
     (18 << 26) | ((offset as u32) & 0x03FFFFFC)
 }
 
-/// Encode `sc` (system call).
-pub(super) fn sc_raw() -> u32 {
-    (17 << 26) | 2
-}
-
 /// Encode `or rA, rS, rB` (opcode 31, XO 444).
 pub(super) fn or_raw(rs: u32, ra: u32, rb: u32) -> u32 {
     debug_assert!(rs < 32 && ra < 32 && rb < 32, "GPR index out of range");

@@ -287,7 +287,7 @@ fn super_pair_cmpwi_bc_link_no_fuse() {
 }
 
 #[test]
-fn super_pair_cmpwi_bc_is_block_terminator() {
+fn super_pair_cmpwi_bc_fuses_after_a_leading_li() {
     let shadow = build_from_words(0, &[li_raw(3, 5), cmpwi_raw(0, 3, 5), bc_raw(0x0C, 2, 8)]);
     assert!(matches!(shadow.get(0), Some(PpuInstruction::Li { .. })));
     assert!(matches!(
@@ -295,8 +295,6 @@ fn super_pair_cmpwi_bc_is_block_terminator() {
         Some(PpuInstruction::CmpwiBc { .. })
     ));
     assert_eq!(shadow.get(8), Some(PpuInstruction::Consumed));
-    assert_eq!(shadow.block_len_at(0), 2);
-    assert_eq!(shadow.block_len_at(4), 1);
 }
 
 #[test]
@@ -359,13 +357,9 @@ fn super_pair_std_std_offset_overflow_no_fuse() {
 }
 
 #[test]
-fn super_pair_block_len_with_mid_sequence_cmpwi_bc() {
-    // Five-instruction sequence: three li, then cmpwi + bc. After
-    // super-pairing, slots 3..4 collapse to CmpwiBc + Consumed.
-    // block_len must terminate at the CmpwiBc and continue past
-    // the Consumed for slots after the branch. compute_block_lengths
-    // is unconditionally re-run after super-pairing in build, so a
-    // CmpwiBc anywhere in the shadow is recognized as a terminator.
+fn super_pair_cmpwi_bc_fuses_mid_sequence() {
+    // The pair rule must fire on a cmpwi/bc that is not at slot 0:
+    // the walk skips forward past unfusable leading slots.
     let shadow = build_from_words(
         0,
         &[
@@ -384,9 +378,4 @@ fn super_pair_block_len_with_mid_sequence_cmpwi_bc() {
         Some(PpuInstruction::CmpwiBc { .. })
     ));
     assert_eq!(shadow.get(16), Some(PpuInstruction::Consumed));
-    // Block runs slot 0 through the CmpwiBc terminator at slot 3.
-    assert_eq!(shadow.block_len_at(0), 4);
-    assert_eq!(shadow.block_len_at(4), 3);
-    assert_eq!(shadow.block_len_at(8), 2);
-    assert_eq!(shadow.block_len_at(12), 1, "CmpwiBc terminates the block");
 }

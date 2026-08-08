@@ -1,5 +1,5 @@
 //! Pins the per-unit predecoded shadow non-aliasing invariant for
-//! `Runtime::snapshot`: a switch to `Arc`-shared `slots`/`stale`/`block_len`
+//! `Runtime::snapshot`: a switch to `Arc`-shared `slots`/`stale`
 //! storage would let branch A's `invalidate_range` corrupt branch B.
 
 #![allow(
@@ -14,8 +14,6 @@ use cellgov_ps3_abi::ppc_isa::{PPC_ADDI_R3_R3_1, PPC_BLR};
 
 const SHADOW_BASE: u64 = 0x1000;
 
-/// Two `addi` followed by `blr` -- yields `block_len = [3, 2, 1]` so the
-/// block-length aliasing assertion has signal.
 fn shadow_bytes() -> [u8; 12] {
     let mut bytes = [0u8; 12];
     bytes[0..4].copy_from_slice(&PPC_ADDI_R3_R3_1.to_be_bytes());
@@ -76,41 +74,22 @@ fn encoding_decodes_to_expected() {
 fn cloned_shadow_unaffected_by_invalidate_on_original() {
     let (mut original, clone) = build_shadow_pair();
     let unaffected_pre = clone.get(SHADOW_BASE);
-    let unaffected_pre_block_len = clone.block_len_at(SHADOW_BASE);
-    assert!(
-        unaffected_pre_block_len > 1,
-        "test setup: shadow_bytes must produce a multi-instruction \
-         basic block (got block_len_at(base) = {unaffected_pre_block_len})",
-    );
 
     // Mutate the original (simulates SMC / CRT0 reloc on a snapshot's host).
     original.invalidate_range(SHADOW_BASE, 4);
 
-    // Original now reports the slot stale AND its block length collapsed.
     assert!(
         original.get(SHADOW_BASE).is_none(),
         "test setup: invalidate_range must stale the slot in the original",
     );
-    assert_eq!(
-        original.block_len_at(SHADOW_BASE),
-        1,
-        "test setup: invalidate_range must collapse block_len in the original",
-    );
 
-    // The clone must NOT have been affected. Aliasing canary: if any
-    // of slots / stale / block_len ever shares storage via Arc, one
-    // of these assertions fires.
+    // Aliasing canary: if slots / stale ever share storage via Arc,
+    // this fires.
     assert_eq!(
         clone.get(SHADOW_BASE),
         unaffected_pre,
         "shadow `slots`/`stale` aliased the original -- \
          branch A invalidate leaked into branch B (via slot lookup)",
-    );
-    assert_eq!(
-        clone.block_len_at(SHADOW_BASE),
-        unaffected_pre_block_len,
-        "shadow `block_len` aliased the original -- \
-         branch A invalidate leaked into branch B (via block-length collapse)",
     );
 }
 
@@ -118,7 +97,6 @@ fn cloned_shadow_unaffected_by_invalidate_on_original() {
 fn cloned_shadow_invalidate_does_not_propagate_to_original() {
     let (original, mut clone) = build_shadow_pair();
     let unaffected_pre = original.get(SHADOW_BASE);
-    let unaffected_pre_block_len = original.block_len_at(SHADOW_BASE);
 
     clone.invalidate_range(SHADOW_BASE, 4);
 
@@ -126,22 +104,11 @@ fn cloned_shadow_invalidate_does_not_propagate_to_original() {
         clone.get(SHADOW_BASE).is_none(),
         "test setup: invalidate_range must stale the slot in the clone",
     );
-    assert_eq!(
-        clone.block_len_at(SHADOW_BASE),
-        1,
-        "test setup: invalidate_range must collapse block_len in the clone",
-    );
 
     assert_eq!(
         original.get(SHADOW_BASE),
         unaffected_pre,
         "shadow `slots`/`stale` aliased the clone -- \
          branch B invalidate leaked into branch A (via slot lookup)",
-    );
-    assert_eq!(
-        original.block_len_at(SHADOW_BASE),
-        unaffected_pre_block_len,
-        "shadow `block_len` aliased the clone -- \
-         branch B invalidate leaked into branch A (via block-length collapse)",
     );
 }
