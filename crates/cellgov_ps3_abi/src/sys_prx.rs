@@ -97,5 +97,16 @@ pub mod start_cmd {
     pub const MASK: u64 = 0xF;
 }
 
+/// `cmd` values specific to `_sys_prx_stop_module`; phases 1 / 2 are
+/// shared with [`start_cmd`].
+pub mod stop_cmd {
+    /// Hand back the stop entries without a state transition. The
+    /// arm is selected by the low nibble but this branch fires only
+    /// on a full-value match, mirroring RPCS3's `pOpt->cmd == 4`.
+    pub const GET_ENTRIES: u64 = 4;
+    /// Disable stop-function execution (kernel-side no-op in RPCS3).
+    pub const DISABLE_STOP: u64 = 8;
+}
+
 /// `res` value meaning the started module stays resident.
 pub const SYS_PRX_RESIDENT: u64 = 0;

@@ -5,8 +5,8 @@
 Do not edit by hand: the non-ignored test in the same file fails on drift. -->
 
 Of LV2's 1024 syscall slots, 90 classify to a typed arm
-and 20 route to a dedicated arm inside `Unsupported`;
-the remaining **914 slots are the null backend** --
+and 21 route to a dedicated arm inside `Unsupported`;
+the remaining **913 slots are the null backend** --
 the honest traced `CELL_ENOSYS` refusal is the default, not
 the exception. The `null-backend` rows below are the handful
 of syscalls given _dedicated_ routing or diagnostics that
@@ -146,6 +146,7 @@ arm. Any number not listed dispatches to the null backend.
 | 462 | `uns_func slot 462 (DEX-only)` | modeled |
 | 480 | `_sys_prx_load_module` | partial-state |
 | 481 | `_sys_prx_start_module` | partial-state |
+| 482 | `_sys_prx_stop_module` | partial-state |
 | 483 | `_sys_prx_unload_module` | partial-state |
 | 484 | `_sys_prx_register_module` | modeled |
 | 486 | `_sys_prx_register_library` | partial-state |

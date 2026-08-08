@@ -5,7 +5,7 @@
   "outcome": "ProcessExit",
   "steps": 11224,
   "budget": 256,
-  "host_invariant_breaks": 43,
+  "host_invariant_breaks": 4,
   "witnesses": {
     "cond_reacquires": {
       "value": 0,
@@ -16,7 +16,7 @@
       "class": "at-least"
     },
     "host_invariant_breaks": {
-      "value": 43,
+      "value": 4,
       "class": "exact"
     },
     "ldarx": {

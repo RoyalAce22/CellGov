@@ -347,6 +347,8 @@ lv2_syscalls! {
     SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER = 497;
     /// `sys_prx_start_module`.
     SYS_PRX_START_MODULE = 481;
+    /// `sys_prx_stop_module`.
+    SYS_PRX_STOP_MODULE = 482;
     /// `sys_prx_unload_module`.
     SYS_PRX_UNLOAD_MODULE = 483;
     /// `sys_tty_read`.
