@@ -16,20 +16,15 @@ pub struct PredecodedShadow {
     /// and fall through to the raw fetch + decode path.
     slots: Vec<Option<PpuInstruction>>,
     stale: Vec<bool>,
-    /// Instructions remaining to end of basic block (inclusive).
-    /// Stale slots collapse to 1 (conservative single-instruction block).
-    block_len: Vec<u16>,
 }
 
 impl PredecodedShadow {
     /// Build a shadow from raw guest memory bytes.
     ///
     /// `base` is the guest address of `bytes[0]`. Decode is followed
-    /// by a quickening pass and a super-pairing pass; block lengths
-    /// are recomputed once super-pairing has fixed terminator status
-    /// for the fused variants. Any PC outside `[base, base +
-    /// bytes.len())` falls back to live decode + `refresh` on the
-    /// hot path.
+    /// by a quickening pass and a super-pairing pass. Any PC outside
+    /// `[base, base + bytes.len())` falls back to live decode +
+    /// `refresh` on the hot path.
     pub fn build(base: u64, bytes: &[u8]) -> Self {
         let n_slots = bytes.len() / 4;
         let mut slots = Vec::with_capacity(n_slots);
@@ -40,38 +35,10 @@ impl PredecodedShadow {
             slots.push(decode::decode(raw).ok());
         }
         let stale = vec![false; n_slots];
-        let block_len = Self::compute_block_lengths(&slots);
-        let mut shadow = Self {
-            base,
-            slots,
-            stale,
-            block_len,
-        };
+        let mut shadow = Self { base, slots, stale };
         shadow.quicken();
         shadow.super_pair();
-        // CmpwiBc/CmpwBc promote non-terminators to terminators.
-        shadow.block_len = Self::compute_block_lengths(&shadow.slots);
         shadow
-    }
-
-    fn compute_block_lengths(slots: &[Option<PpuInstruction>]) -> Vec<u16> {
-        let n = slots.len();
-        let mut bl = vec![1u16; n];
-        if n == 0 {
-            return bl;
-        }
-        // End of shadow is an implicit block boundary.
-        for i in (0..n.saturating_sub(1)).rev() {
-            match &slots[i] {
-                Some(insn) if !insn.is_block_terminator() => {
-                    bl[i] = bl[i + 1].saturating_add(1);
-                }
-                _ => {
-                    bl[i] = 1;
-                }
-            }
-        }
-        bl
     }
 
     /// Guest base address of the shadowed range.
@@ -131,12 +98,9 @@ impl PredecodedShadow {
     /// `Consumed` that the fetch loop skips without executing what
     /// was actually written there. Both halves are staled as a unit
     /// so the runtime falls back to raw fetch + decode for either
-    /// side until the caller refreshes them.
-    ///
-    /// Predecessor `block_len` entries are not recomputed here; they
-    /// may overshoot, but the per-slot `stale`/`None` check on each
-    /// fetch re-bounds the block. Pair with [`refresh`](Self::refresh)
-    /// to repopulate once new bytes are committed.
+    /// side until the caller refreshes them. Pair with
+    /// [`refresh`](Self::refresh) to repopulate once new bytes are
+    /// committed.
     pub fn invalidate_range(&mut self, addr: u64, len: u64) {
         if len == 0 {
             return;
@@ -167,7 +131,6 @@ impl PredecodedShadow {
 
         for i in first_slot..last_slot {
             self.stale[i] = true;
-            self.block_len[i] = 1;
         }
     }
 
@@ -196,54 +159,7 @@ impl PredecodedShadow {
         let quickened = insn.map(|i| quicken_insn(i).unwrap_or(i));
         self.slots[idx] = quickened;
         self.stale[idx] = false;
-        self.rescan_block_len(idx);
         Some(quickened)
-    }
-
-    /// Instructions remaining in the basic block at `pc` (inclusive).
-    ///
-    /// Upper bound only: invalidation without a subsequent refresh
-    /// leaves predecessor counts unchanged. Returns 1 for out-of-range
-    /// or misaligned `pc`.
-    #[inline]
-    pub fn block_len_at(&self, pc: u64) -> u16 {
-        if pc < self.base {
-            return 1;
-        }
-        let byte_offset = pc - self.base;
-        if byte_offset & 3 != 0 {
-            return 1;
-        }
-        let idx = (byte_offset / 4) as usize;
-        if idx >= self.block_len.len() {
-            return 1;
-        }
-        self.block_len[idx]
-    }
-
-    fn rescan_block_len(&mut self, idx: usize) {
-        let is_term = match &self.slots[idx] {
-            Some(insn) => insn.is_block_terminator(),
-            None => true,
-        };
-        if is_term || idx + 1 >= self.slots.len() || self.stale.get(idx + 1) == Some(&true) {
-            self.block_len[idx] = 1;
-        } else {
-            self.block_len[idx] = self.block_len[idx + 1].saturating_add(1);
-        }
-        let mut i = idx;
-        while i > 0 {
-            i -= 1;
-            if self.stale[i] {
-                break;
-            }
-            match &self.slots[i] {
-                Some(insn) if !insn.is_block_terminator() => {
-                    self.block_len[i] = self.block_len[i + 1].saturating_add(1);
-                }
-                _ => break,
-            }
-        }
     }
 
     /// Rewrite decoded slots in place into specialized instruction
@@ -266,11 +182,7 @@ impl PredecodedShadow {
     /// Fuse adjacent instruction pairs into superinstructions.
     ///
     /// Runs after [`quicken`](Self::quicken); the second slot of a
-    /// fused pair is replaced with `Consumed`. Pairs that cross a
-    /// block boundary (first operand is a terminator) are skipped,
-    /// but fusions that *produce* a terminator (CmpwiBc/CmpwBc) are
-    /// allowed -- the caller in [`build`](Self::build) recomputes
-    /// `block_len` after this runs.
+    /// fused pair is replaced with `Consumed`.
     fn super_pair(&mut self) {
         let n = self.slots.len();
         if n < 2 {

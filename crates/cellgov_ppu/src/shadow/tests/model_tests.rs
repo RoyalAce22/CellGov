@@ -1,9 +1,7 @@
 //! Shadow code-cache slot lookup and range invalidation.
 
 use super::*;
-use crate::shadow::test_support::{
-    b_raw, build_from_words, cmpwi_raw, li_raw, lwz_raw, sc_raw, stw_raw,
-};
+use crate::shadow::test_support::{build_from_words, cmpwi_raw, li_raw, lwz_raw, stw_raw};
 
 #[test]
 fn build_decodes_all_slots() {
@@ -95,67 +93,6 @@ fn invalidate_partial_byte_within_slot_stales_that_slot() {
         shadow.get(0).is_none(),
         "1-byte write inside slot must stale it"
     );
-}
-
-#[test]
-fn block_len_straight_line() {
-    let shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), li_raw(5, 3), li_raw(6, 4)]);
-    assert_eq!(shadow.block_len_at(0), 4);
-    assert_eq!(shadow.block_len_at(4), 3);
-    assert_eq!(shadow.block_len_at(8), 2);
-    assert_eq!(shadow.block_len_at(12), 1);
-}
-
-#[test]
-fn block_len_branch_terminates() {
-    let shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), b_raw(8), li_raw(5, 3)]);
-    assert_eq!(shadow.block_len_at(0), 3);
-    assert_eq!(shadow.block_len_at(4), 2);
-    assert_eq!(shadow.block_len_at(8), 1);
-    assert_eq!(shadow.block_len_at(12), 1);
-}
-
-#[test]
-fn block_len_syscall_terminates() {
-    let shadow = build_from_words(0, &[li_raw(3, 1), sc_raw(), li_raw(4, 2)]);
-    assert_eq!(shadow.block_len_at(0), 2);
-    assert_eq!(shadow.block_len_at(4), 1);
-    assert_eq!(shadow.block_len_at(8), 1);
-}
-
-#[test]
-fn block_len_invalidation_resets() {
-    let mut shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), li_raw(5, 3)]);
-    assert_eq!(shadow.block_len_at(0), 3);
-    shadow.invalidate_range(4, 4);
-    // Predecessor block_len is an upper bound post-invalidation.
-    assert_eq!(shadow.block_len_at(0), 3);
-    assert_eq!(shadow.block_len_at(4), 1);
-    assert_eq!(shadow.block_len_at(8), 1);
-}
-
-#[test]
-fn block_len_refresh_rescans() {
-    let mut shadow = build_from_words(0, &[li_raw(3, 1), li_raw(4, 2), li_raw(5, 3)]);
-    assert_eq!(shadow.block_len_at(0), 3);
-    shadow.invalidate_range(4, 4);
-    assert_eq!(shadow.block_len_at(4), 1);
-    shadow.refresh(4, li_raw(4, 99));
-    assert_eq!(shadow.block_len_at(4), 2);
-    assert_eq!(shadow.block_len_at(0), 3);
-}
-
-#[test]
-fn block_len_out_of_range_returns_one() {
-    let shadow = build_from_words(0x100, &[li_raw(3, 1)]);
-    assert_eq!(shadow.block_len_at(0), 1);
-    assert_eq!(shadow.block_len_at(0x200), 1);
-}
-
-#[test]
-fn block_len_empty_shadow() {
-    let shadow = PredecodedShadow::build(0, &[]);
-    assert_eq!(shadow.block_len_at(0), 1);
 }
 
 #[test]
