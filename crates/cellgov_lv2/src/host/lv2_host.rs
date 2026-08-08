@@ -35,6 +35,11 @@ pub struct Lv2Host {
     /// event-flag / cond. `lwmutexes` has its own allocator from 1.
     pub(super) next_kernel_id: u32,
     pub(super) mem_alloc_ptr: u32,
+    /// Where `mem_alloc_ptr` started this boot; `ptr - base` is the
+    /// consumed-bytes figure `sys_memory_get_user_memory_size`
+    /// subtracts from the reported total. Boot config, not hashed
+    /// (`mem_alloc_ptr` already carries the allocator into the hash).
+    pub(super) mem_alloc_base: u32,
     /// Bump cursor for `sys_mmapper_allocate_address` (256 MiB+ chunks).
     pub(super) mmapper_addr_cursor: u32,
     pub(super) rsx_mem_alloc_ptr: u32,
@@ -76,6 +81,10 @@ pub struct Lv2Host {
     /// Witness: `sys_cond_signal` dispatch count (drain witness for
     /// the seeded-ring consumer). Not hashed (instrument-only).
     pub(super) cond_signal_dispatches: u64,
+    /// Witness: `_sys_prx_unload_module` calls refused because the
+    /// target is a resident firmware module. Not hashed
+    /// (instrument-only).
+    pub(super) prx_unload_rejections: u64,
     /// Witness: `sys_cond_signal` dispatches keyed by the target
     /// cond's create-time ipc_key (keyed conds only). Per-slot /
     /// per-facility drain attribution for the seeded-ring consumer.
@@ -104,6 +113,9 @@ pub struct Lv2Host {
     pub(super) current_tick: GuestTicks,
     /// Running count of host-invariant breaks. Not hashed.
     pub(super) invariant_break_count: usize,
+    /// Per-site break counts keyed by the static site string passed
+    /// to `log_invariant_break`. Not hashed (instrument-only).
+    pub(super) invariant_break_sites: std::collections::BTreeMap<&'static str, u64>,
     /// Drained after each `Lv2Host::dispatch` by the runtime. Not
     /// folded into [`Self::state_hash`].
     pub(super) pending_invariant_breaks: Vec<super::diagnostics::InvariantBreakReason>,
@@ -170,6 +182,13 @@ pub struct Lv2Host {
     /// every occurrence boot-wide, not one window. Not hashed
     /// (instrument-only).
     pub(super) lwmutex_unknown_lock_count: u64,
+    /// Witness: sc 480/497 registry misses on a firmware path,
+    /// resolved by registering a stub entry under a real kernel id.
+    /// Not hashed (instrument-only).
+    pub(super) prx_load_hle_stub_count: u64,
+    /// Witness: sc 480/497 loads reported `CELL_ENOENT` (non-firmware
+    /// path or unusable path bytes). Not hashed (instrument-only).
+    pub(super) prx_load_not_found_count: u64,
 }
 
 /// Captured at boot via the verified `firmware.toml` manifest.
@@ -234,6 +253,7 @@ impl Lv2Host {
             stack_allocator: ThreadStackAllocator::new(),
             next_kernel_id: 0x4000_0001, // non-zero to catch uninitialized use
             mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
+            mem_alloc_base: 0x0001_0000,
             mmapper_addr_cursor: Self::MMAPPER_REGION_START,
             rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
             rsx_mem_handle_counter: 1,
@@ -247,6 +267,7 @@ impl Lv2Host {
             cond_ring_wakes: 0,
             cond0_producer_waits_by_slot: BTreeMap::new(),
             cond_signal_dispatches: 0,
+            prx_unload_rejections: 0,
             cond_keyed_signal_counts: BTreeMap::new(),
             pending_region_installs: Vec::new(),
             mmapper_install_ledger: BTreeMap::new(),
@@ -258,6 +279,7 @@ impl Lv2Host {
             conds: CondTable::new(),
             current_tick: GuestTicks::ZERO,
             invariant_break_count: 0,
+            invariant_break_sites: std::collections::BTreeMap::new(),
             pending_invariant_breaks: Vec::new(),
             tty_log: Vec::new(),
             process_counts: process::ProcessCounts::new(),
@@ -271,6 +293,8 @@ impl Lv2Host {
             sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
             program_authority_id: cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
             lwmutex_unknown_lock_count: 0,
+            prx_load_hle_stub_count: 0,
+            prx_load_not_found_count: 0,
         }
     }
 
@@ -308,6 +332,18 @@ impl Lv2Host {
     #[inline]
     pub fn lwmutex_unknown_lock_count(&self) -> u64 {
         self.lwmutex_unknown_lock_count
+    }
+
+    /// Witness: sc 480/497 firmware-path misses stubbed with a real id.
+    #[inline]
+    pub fn prx_load_hle_stub_count(&self) -> u64 {
+        self.prx_load_hle_stub_count
+    }
+
+    /// Witness: sc 480/497 loads reported `CELL_ENOENT`.
+    #[inline]
+    pub fn prx_load_not_found_count(&self) -> u64 {
+        self.prx_load_not_found_count
     }
 
     /// Witness: count of `dispatch_thread_initialize` invocations.
@@ -450,6 +486,7 @@ impl Lv2Host {
             Self::SYS_RSX_MEM_BASE,
         );
         self.mem_alloc_ptr = base;
+        self.mem_alloc_base = base;
     }
 
     /// sys_rsx host context.
@@ -618,6 +655,13 @@ impl Lv2Host {
     /// summed over slots.
     pub fn cond0_producer_waits(&self) -> u64 {
         self.cond0_producer_waits_by_slot.values().sum()
+    }
+
+    /// Witness: `_sys_prx_unload_module` calls refused because the
+    /// target is a resident firmware module.
+    #[inline]
+    pub fn prx_unload_rejections(&self) -> u64 {
+        self.prx_unload_rejections
     }
 
     /// Witness: cond\[0\] producer-wait parks keyed by slot index.

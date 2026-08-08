@@ -45,14 +45,26 @@ const MODULES: &[&str] = &[
     "libsysutil_np",
 ];
 
+/// Env override verbatim; the default anchors to the workspace root,
+/// since integration tests run with the crate directory as CWD and a
+/// bare relative default would never resolve.
 fn dir_from_env_or_default(env_key: &str, default: &str) -> PathBuf {
     std::env::var(env_key)
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(default))
+        .unwrap_or_else(|_| workspace_root().join(default))
 }
 
+/// `CELLGOV_REQUIRE_PARITY_FIXTURES` truthiness: `0`, `false`, and
+/// empty mean OFF, matching what a wrapper script setting the var to
+/// opt out would expect. Anything else means ON.
 fn require_fixtures() -> bool {
-    std::env::var_os(ENV_REQUIRE_FIXTURES).is_some()
+    match std::env::var_os(ENV_REQUIRE_FIXTURES) {
+        None => false,
+        Some(v) => {
+            let v = v.to_string_lossy();
+            !(v.is_empty() || v == "0" || v.eq_ignore_ascii_case("false"))
+        }
+    }
 }
 
 /// Returns `None` when either fixture dir is absent;
@@ -83,7 +95,13 @@ fn locate_fixtures() -> Option<(PathBuf, PathBuf)> {
     Some((encrypted, reference))
 }
 
-fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path, require: bool) {
+/// Returns `true` when the pair was actually compared.
+fn decrypt_and_compare(
+    stem: &str,
+    encrypted_dir: &Path,
+    reference_dir: &Path,
+    require: bool,
+) -> bool {
     let sprx_path = encrypted_dir.join(format!("{stem}.sprx"));
     let prx_path = reference_dir.join(format!("{stem}.prx"));
     if !sprx_path.is_file() || !prx_path.is_file() {
@@ -104,7 +122,7 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path, r
             prx_path.display(),
             prx_path.is_file(),
         );
-        return;
+        return false;
     }
     let encrypted_bytes = std::fs::read(&sprx_path).unwrap();
     let mut decrypted = cellgov_install::sce::decrypt_self_to_elf(&encrypted_bytes)
@@ -153,6 +171,7 @@ fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, reference_dir: &Path, r
             decrypted[first_diff], reference[first_diff],
         );
     }
+    true
 }
 
 #[test]
@@ -161,9 +180,25 @@ fn min_viable_prx_decrypt_matches_pre_decrypted_reference() {
         return;
     };
     let require = require_fixtures();
+    let mut compared = 0usize;
     for stem in MODULES {
-        decrypt_and_compare(stem, &encrypted_dir, &reference_dir, require);
+        if decrypt_and_compare(stem, &encrypted_dir, &reference_dir, require) {
+            compared += 1;
+        }
     }
+    // Anti-vacuity floor: both fixture dirs exist, so a run that
+    // compared nothing (e.g. a renamed reference tree) must not pass
+    // as if it verified the pipeline.
+    assert!(
+        compared > 0,
+        "both parity fixture dirs exist but none of the {} module pairs was \
+         present to compare; the fixture layout has drifted",
+        MODULES.len()
+    );
+    eprintln!(
+        "cellgov_install parity: compared {compared}/{} module pairs",
+        MODULES.len()
+    );
 }
 
 // Game-title SELF byte-identity gates. Oracles live in
@@ -250,6 +285,16 @@ fn run_npdrm_oracle(oracle: &Oracle) {
     });
     let rap_path = rap_path_for(rap_filename);
     if !bin_path.is_file() || !rap_path.is_file() {
+        if require_fixtures() {
+            panic!(
+                "{ENV_REQUIRE_FIXTURES} set but ({title}) oracle fixture missing: \
+                 bin={} exists={}, rap={} exists={}",
+                bin_path.display(),
+                bin_path.is_file(),
+                rap_path.display(),
+                rap_path.is_file(),
+            );
+        }
         eprintln!(
             "cellgov_install C.2 ({title}): skipping; missing {} or {}",
             bin_path.display(),
@@ -309,6 +354,13 @@ fn run_app_oracle(oracle: &Oracle) {
     let title = &oracle.display;
     let bin_path = bin_path_for(&oracle.content_id, &oracle.key);
     if !bin_path.is_file() {
+        if require_fixtures() {
+            panic!(
+                "{ENV_REQUIRE_FIXTURES} set but ({title}) oracle fixture missing: \
+                 bin={}",
+                bin_path.display(),
+            );
+        }
         eprintln!(
             "cellgov_install C.2 ({title}): skipping; missing {}",
             bin_path.display()

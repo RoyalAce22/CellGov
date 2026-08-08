@@ -259,6 +259,7 @@ impl TitleManifest {
             engine: file.title.engine,
             distribution,
             rap_filename: file.title.rap_filename,
+            bench_max_steps: file.title.bench_max_steps,
             checkpoint,
             source,
             rsx_mirror,

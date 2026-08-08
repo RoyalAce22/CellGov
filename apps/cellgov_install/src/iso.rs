@@ -12,8 +12,7 @@
 //! This module is a pure function from a *decrypted* image to its
 //! extracted file tree; an encrypted disc is decrypted first (the
 //! disc-key pass), then read here. Format facts come from public
-//! reverse-engineering (ECMA-119 and RPCS3's `Loader/ISO.cpp`); no
-//! leaked-SDK provenance.
+//! sources only (ECMA-119 and RPCS3's `Loader/ISO.cpp`).
 //!
 //! Scope is deliberately narrow: directories are single-extent,
 //! Extended Attribute Records and Associated Files are rejected rather
@@ -112,7 +111,7 @@ pub enum IsoError {
         /// `interleave` gap.
         gap: u8,
     },
-    /// Directory nesting exceeded [`MAX_DEPTH`] (malformed image).
+    /// Directory nesting exceeded the depth cap (malformed image).
     #[error("ISO directory nesting exceeds {max}", max = MAX_DEPTH)]
     DepthExceeded,
     /// A directory record declares an Extended Attribute Record. PS3

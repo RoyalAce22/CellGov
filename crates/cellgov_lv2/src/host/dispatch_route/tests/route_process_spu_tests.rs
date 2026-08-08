@@ -3,13 +3,29 @@
 use super::*;
 
 #[test]
-fn syscall_48_writes_priority_to_priop() {
+fn syscall_48_writes_tracked_priority_to_priop() {
+    use crate::ppu_thread::PpuThreadAttrs;
     let mut host = Lv2Host::new();
+    host.seed_primary_ppu_thread(
+        UnitId::new(0),
+        PpuThreadAttrs {
+            entry: 0x1000,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x1_0000,
+            priority: 500,
+            tls_base: 0,
+        },
+    );
+    let thread_id = host
+        .ppu_thread_id_for_unit(UnitId::new(0))
+        .expect("seeded primary thread")
+        .raw();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 48,
-            args: [0x0100_0000, 0x9000, 0, 0, 0, 0, 0, 0],
+            args: [thread_id, 0x9000, 0, 0, 0, 0, 0, 0],
         },
         UnitId::new(0),
         &rt,
@@ -21,13 +37,52 @@ fn syscall_48_writes_priority_to_priop() {
             if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
                 assert_eq!(range.start().raw(), 0x9000);
                 assert_eq!(range.length(), 4);
-                assert_eq!(bytes.bytes(), &1001u32.to_be_bytes());
+                assert_eq!(bytes.bytes(), &500u32.to_be_bytes());
             } else {
                 panic!("expected SharedWriteIntent");
             }
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
+}
+
+// Effects are the only write channel (hard rule 1), so an empty effects
+// vec IS the proof that nothing lands at priop.
+#[test]
+fn syscall_48_unknown_id_returns_esrch_without_writing_priop() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 48,
+            args: [0x0100_0000, 0x9000, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ESRCH.into())
+    );
+}
+
+#[test]
+fn syscall_48_unknown_id_beats_null_priop() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 48,
+            args: [0x0100_0000, 0, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ESRCH.into()),
+        "id lookup precedes the priop null gate, matching RPCS3's order"
+    );
 }
 
 #[test]

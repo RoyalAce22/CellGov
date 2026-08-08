@@ -6,12 +6,12 @@ developer: Sony Liverpool
 engine: Studio Liverpool proprietary
 distribution: Disc ISO
 checkpoint: FirstRsxWrite
-steps: 43083
+steps: 43082
 convergence: Yes
 byte_parity: 975 non-semantic + 1 pending
 ---
 
-Reaches `FirstRsxWrite` at step 43,083 deterministically across
+Reaches `FirstRsxWrite` at step 43,082 deterministically across
 two runs. Both runners are sampled at the same checkpoint: CG at
 its `MemError::ReservedWrite` trap on the put-store, RP at the
 `CELLGOV_DUMP_PATH_RSX` trigger (first observed

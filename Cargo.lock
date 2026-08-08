@@ -229,6 +229,7 @@ dependencies = [
  "cellgov_sync",
  "cellgov_time",
  "num_enum",
+ "strum",
  "thiserror",
 ]
 

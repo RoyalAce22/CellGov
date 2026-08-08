@@ -4,12 +4,8 @@
 //!
 //! Types that contribute to the host's `state_hash` must be folded
 //! through FNV-1a via their `.raw()` (or `.to_le_bytes()`) accessor,
-//! not via `std::hash::Hash`. The runtime's `sync_state_hash` is
-//! cross-build stable, so any hasher whose output depends on
-//! compiler version / build configuration (`DefaultHasher`,
-//! `RandomState`) is forbidden. New fields land their contribution
-//! in [`Lv2Host::state_hash`]; gating on `!is_empty()` keeps the
-//! hash stable at boot until a primitive is actually used.
+//! not via `std::hash::Hash`: the runtime's `sync_state_hash` must
+//! stay stable across compiler versions and build configurations.
 
 use crate::ppu_thread::ThreadStackAllocator;
 
@@ -80,6 +76,23 @@ impl Lv2Host {
         }
         if !self.fs_store.is_empty() {
             hasher.write(&self.fs_store.state_hash().to_le_bytes());
+        }
+        // Guest-mutable (sc 480 mints miss stubs): two hosts that
+        // disagree on which modules a guest loaded (or unloaded)
+        // must not hash equal, or the divergence hides until a later
+        // sc 494 module-list walk touches memory.
+        if !self.prx_registry.is_empty() {
+            hasher.write(&(self.prx_registry.len() as u64).to_le_bytes());
+            for id in self.prx_registry.ids() {
+                hasher.write(&id.to_le_bytes());
+                let entry = self
+                    .prx_registry
+                    .lookup_by_id(id)
+                    .expect("ids() yields present entries");
+                hasher.write(&[u8::from(entry.started())]);
+                hasher.write(entry.stem().as_bytes());
+                hasher.write(&[0u8]);
+            }
         }
         if let Some(fw) = self.firmware_identity() {
             hasher.write(&fw.image_version_hash.to_le_bytes());

@@ -310,3 +310,11 @@ fn manifest_verifier_unknown_path_is_not_in_manifest_and_does_not_count() {
         "sys/external/liblv2.sprx"
     );
 }
+
+#[test]
+fn sha256_of_matches_the_empty_input_vector() {
+    // FIPS 180-4 empty-message digest; pins that sha256_of is plain
+    // single-shot SHA-256 over the input bytes.
+    let expected = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    assert_eq!(Sha256(sha256_of(b"")).to_hex(), expected);
+}

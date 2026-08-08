@@ -27,7 +27,7 @@ fn new_store_is_empty() {
 
 #[test]
 fn register_invocations_counter_increments_per_call() {
-    // C-5a audit witness: register_invocations counts every
+    // Liveness witness: register_invocations counts every
     // register() call, regardless of whether the registration
     // was novel or matched an existing path. Proves the path-
     // shape debug_assert!s' silence is non-vacuous when > 0.

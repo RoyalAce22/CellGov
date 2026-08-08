@@ -144,6 +144,12 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
     vfs_root: &Path,
 ) -> (LoadedPpuImage, PathBuf) {
     let resolved = title.resolve_eboot(vfs_root).unwrap_or_else(|e| {
+        // No content directory at all: the dump is not on this machine.
+        eprintln!(
+            "{} title={} (no content directory)",
+            cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL,
+            title.name()
+        );
         die(&format!(
             "load ppu image: resolve_eboot for title {}: {}",
             title.name(),
@@ -195,6 +201,20 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
             attempts.push((candidate.clone(), LoadCandidateError::NotElf));
             continue;
         }
+    }
+    // Missing dump vs broken dump: only when every candidate failed
+    // because the file does not exist is the title "not installed".
+    // An existing file that failed to decrypt or parse must die
+    // without the marker so the suites surface it as a boot failure.
+    let all_missing = attempts.iter().all(|(_, why)| {
+        matches!(why, LoadCandidateError::Io(e) if e.kind() == std::io::ErrorKind::NotFound)
+    });
+    if all_missing {
+        eprintln!(
+            "{} title={} (no eboot candidate present)",
+            cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL,
+            title.name()
+        );
     }
     let usrdir_str = usrdir.display();
     let attempts_str = attempts

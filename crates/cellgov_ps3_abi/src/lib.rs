@@ -4,6 +4,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod cell_errors;
+pub mod dev_flash;
 pub mod elf;
 pub mod hardware;
 pub mod nid;
@@ -15,6 +16,7 @@ pub mod spu_channels;
 pub mod sys_fs;
 pub mod sys_memory;
 pub mod sys_process;
+pub mod sys_prx;
 pub mod sys_rsx;
 pub mod sys_spu;
 pub mod sys_sync;

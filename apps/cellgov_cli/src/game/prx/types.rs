@@ -19,24 +19,32 @@ pub(in crate::game) struct PrxLoadInfo {
     pub(in crate::game) module_stop: Option<cellgov_ppu::sprx::LoadedOpd>,
 }
 
+/// Firmware identity read from a `firmware.toml` whose entries
+/// covered every PRX the boot loaded. Bound into the LV2 host so the
+/// PUP revision folds into the state hash.
+#[derive(Debug, Clone)]
+pub(in crate::game) struct VerifiedFirmware {
+    /// `[firmware].image_version` from the manifest.
+    pub image_version: String,
+    /// `[firmware].pup_sha256` digest bytes.
+    pub pup_sha256: [u8; 32],
+}
+
 /// Why a firmware PRX failed to stage through the GOT-patch path.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum PrxLoadStageError {
-    /// Reading the firmware module file failed.
     #[error("read {}: {source}", path.display())]
     Read {
         path: std::path::PathBuf,
         #[source]
         source: std::io::Error,
     },
-    /// SCE / SELF decryption failed.
     #[error("decrypt {}: {source}", path.display())]
     Decrypt {
         path: std::path::PathBuf,
         #[source]
         source: cellgov_install::sce::SceError,
     },
-    /// A staged GOT slot's 4-byte ByteRange could not be constructed.
     #[error("GOT slot at 0x{stub_addr:08x} (nid 0x{nid:08x}): invalid 4-byte range")]
     GotSlotBadRange { stub_addr: u32, nid: u32 },
     /// `StagingMemory::drain_into` rejected the batch; guest memory

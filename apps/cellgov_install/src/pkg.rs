@@ -42,9 +42,9 @@ const ENTRY_KIND_SDAT: u8 = 9;
 /// are retained; metadata packets are not parsed here.
 #[derive(Debug, Clone)]
 pub struct PkgHeader {
-    /// Release type; only [`PKG_TYPE_RELEASE`] reaches a caller.
+    /// Release type; only `PKG_TYPE_RELEASE` reaches a caller.
     pub pkg_type: u16,
-    /// Platform tag; only [`PKG_PLATFORM_PS3`] reaches a caller.
+    /// Platform tag; only `PKG_PLATFORM_PS3` reaches a caller.
     pub pkg_platform: u16,
     /// Number of item records in the encrypted entry table.
     pub file_count: u32,
@@ -162,7 +162,7 @@ pub enum PkgError {
         /// Bytes available in the decrypted data region.
         region: usize,
     },
-    /// An item's name field is longer than [`MAX_NAME_LEN`].
+    /// An item's name field is longer than `MAX_NAME_LEN`.
     #[error("PKG entry {index}: name size 0x{size:x} exceeds 0x{max:x}", max = MAX_NAME_LEN)]
     NameTooLong {
         /// Zero-based entry index.

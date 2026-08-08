@@ -9,6 +9,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod baseline;
+pub mod boot_history;
 pub mod boot_summary;
 pub mod classify;
 pub mod compare;
@@ -23,6 +24,8 @@ pub mod runner_cellgov;
 pub mod runner_rpcs3;
 pub mod summary;
 pub mod sync_primitive_scan;
+pub mod witness_parse;
+pub mod witnesses;
 
 #[cfg(test)]
 #[path = "tests/test_support.rs"]

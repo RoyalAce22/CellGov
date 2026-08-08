@@ -4,6 +4,21 @@ use super::*;
 use cellgov_exec::ExecutionContext;
 use cellgov_mem::GuestMemory;
 
+/// Read a micro-test build artifact. Only reached when the
+/// `spu-microtests` feature opted in (see the `cfg_attr(ignore)` on
+/// every caller), so absence is a hard error, not a skip: opting in
+/// declares the corpus built.
+fn microtest_elf<P: AsRef<std::path::Path>>(path: P) -> Vec<u8> {
+    let path = path.as_ref();
+    std::fs::read(path).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e}\nthe spu-microtests feature declares the micro-test corpus \
+             built; build it with the corresponding tests/micro/*/build.sh",
+            path.display()
+        )
+    })
+}
+
 #[test]
 fn new_unit_is_runnable() {
     let unit = SpuExecutionUnit::new(UnitId::new(0));
@@ -328,12 +343,12 @@ fn wrch_mfc_cmd_yields_dma_submitted() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
 fn run_spu_fixed_value_binary() {
-    let path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
-    if !path.exists() {
-        return;
-    }
-    let elf_data = std::fs::read(path).unwrap();
+    let elf_data = microtest_elf("../../tests/micro/spu_fixed_value/build/spu_main.elf");
 
     let mut unit = SpuExecutionUnit::new(UnitId::new(10));
     loader::load_spu_elf(&elf_data, unit.state_mut()).unwrap();
@@ -419,20 +434,18 @@ fn run_spu_fixed_value_binary() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
 fn mailbox_roundtrip_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/mailbox_roundtrip/build/spu_main.elf");
-    if !elf_path.exists() {
-        return;
-    }
 
     let baseline_dir = std::path::Path::new("../../baselines/mailbox_roundtrip");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
-    if !interp_path.exists() || !llvm_path.exists() {
-        return;
-    }
 
-    let elf_data = std::fs::read(elf_path).unwrap();
+    let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
     // SPU XORs inbound 0x42 with 0xFFFFFFFF -> 0xFFFFFFBD.
     let mailbox_value: u32 = 0x42;
@@ -500,14 +513,15 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
 fn spu_atomic_cross_spu_counter_is_exactly_2n() {
     const INCREMENTS_PER_THREAD: u32 = 32;
     let elf_path =
         std::path::Path::new("../../tests/micro/spu_atomic_cross_spu/build/spu_main.elf");
-    if !elf_path.exists() {
-        return;
-    }
-    let elf_data = std::fs::read(elf_path).unwrap();
+    let elf_data = microtest_elf(elf_path);
 
     // Atomic line at 0x10000 (128-byte aligned); per-SPU 16-byte
     // result slots at 0x11000 and 0x11010.
@@ -585,20 +599,18 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
 fn atomic_reservation_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/atomic_reservation/build/spu_main.elf");
-    if !elf_path.exists() {
-        return;
-    }
 
     let baseline_dir = std::path::Path::new("../../baselines/atomic_reservation");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
-    if !interp_path.exists() || !llvm_path.exists() {
-        return;
-    }
 
-    let elf_data = std::fs::read(elf_path).unwrap();
+    let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
 
     let factory = || {
@@ -659,20 +671,18 @@ fn atomic_reservation_matches_rpcs3_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
 fn barrier_wakeup_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/barrier_wakeup/build/spu_main.elf");
-    if !elf_path.exists() {
-        return;
-    }
 
     let baseline_dir = std::path::Path::new("../../baselines/barrier_wakeup");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
-    if !interp_path.exists() || !llvm_path.exists() {
-        return;
-    }
 
-    let elf_data = std::fs::read(elf_path).unwrap();
+    let elf_data = microtest_elf(elf_path);
     // 256-byte aligned; low byte of argp encodes thread index.
     let base_ea: u64 = 0x1_0000;
 
@@ -744,20 +754,18 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
 fn ls_to_shared_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/ls_to_shared/build/spu_main.elf");
-    if !elf_path.exists() {
-        return;
-    }
 
     let baseline_dir = std::path::Path::new("../../baselines/ls_to_shared");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
-    if !interp_path.exists() || !llvm_path.exists() {
-        return;
-    }
 
-    let elf_data = std::fs::read(elf_path).unwrap();
+    let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
 
     let factory = || {
@@ -818,12 +826,12 @@ fn ls_to_shared_matches_rpcs3_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
 fn dma_completion_payloads_are_correct() {
-    let path = std::path::Path::new("../../tests/micro/dma_completion/build/spu_main.elf");
-    if !path.exists() {
-        return;
-    }
-    let elf_data = std::fs::read(path).unwrap();
+    let elf_data = microtest_elf("../../tests/micro/dma_completion/build/spu_main.elf");
 
     let mut unit = SpuExecutionUnit::new(UnitId::new(20));
     loader::load_spu_elf(&elf_data, unit.state_mut()).unwrap();
@@ -889,20 +897,18 @@ fn dma_completion_payloads_are_correct() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
 fn dma_completion_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/dma_completion/build/spu_main.elf");
-    if !elf_path.exists() {
-        return;
-    }
 
     let baseline_dir = std::path::Path::new("../../baselines/dma_completion");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
-    if !interp_path.exists() || !llvm_path.exists() {
-        return;
-    }
 
-    let elf_data = std::fs::read(elf_path).unwrap();
+    let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
 
     let factory = || {
@@ -963,20 +969,18 @@ fn dma_completion_matches_rpcs3_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
 fn spu_fixed_value_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
-    if !elf_path.exists() {
-        return;
-    }
 
     let baseline_dir = std::path::Path::new("../../baselines/spu_fixed_value");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
-    if !interp_path.exists() || !llvm_path.exists() {
-        return;
-    }
 
-    let elf_data = std::fs::read(elf_path).unwrap();
+    let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
 
     let factory = || {

@@ -130,6 +130,7 @@ pub fn bench_boot(
         prescan: opts.prescan,
     });
     let mut rt = prepared.rt;
+    let authid_source = prepared.authid_source;
     let active_checkpoint = opts
         .checkpoint_override
         .unwrap_or_else(|| opts.title.checkpoint_trigger());
@@ -160,14 +161,11 @@ pub fn bench_boot(
         "BENCH_VRSAVE_WITNESS: mfvrsave_executed={total_mfvrsave_executed} vrsave_written={any_vrsave_written}"
     );
 
-    // Host-side invariant-break witness: total
-    // `Lv2Host::log_invariant_break` calls retired during the boot.
     let host_invariant_breaks = rt.lv2_host().invariant_break_count() as u64;
     eprintln!("BENCH_HOST_INVARIANT_BREAKS: count={host_invariant_breaks}");
 
-    // Atomic-alignment witness: per-mnemonic execution counts for
-    // ldarx/stdcx/lwarx/stwcx. Per-mnemonic so word-width and
-    // doubleword paths report independently.
+    // Per-mnemonic so word-width and doubleword paths report
+    // independently.
     let mut ldarx_total: u64 = 0;
     let mut stdcx_total: u64 = 0;
     let mut lwarx_total: u64 = 0;
@@ -207,18 +205,12 @@ pub fn bench_boot(
         "BENCH_MEM_FAULT_WITNESS: arm_entries={mem_fault_arm_entries} unmapped_routed={mem_fault_unmapped_routed}"
     );
 
-    // RSX label-write witness: total Effect::RsxLabelWrite
-    // submitted to the commit pipeline.
     let rsx_label_writes_committed = rt.rsx_label_writes_committed();
     eprintln!("BENCH_RSX_LABEL_WRITES_WITNESS: count={rsx_label_writes_committed}");
 
-    // RSX SET_REFERENCE-dispatch witness: total
-    // `NV406E_SET_REFERENCE` dispatches the walker fired.
     let rsx_set_reference_dispatches = rt.rsx_set_reference_dispatches();
     eprintln!("BENCH_RSX_SET_REFERENCE_WITNESS: count={rsx_set_reference_dispatches}");
 
-    // dcbz witness: total Dcbz executor-arm entries across PPU
-    // units.
     let mut dcbz_total: u64 = 0;
     for (_id, unit) in rt.registry().iter() {
         if let Some(ppu) = unit
@@ -230,18 +222,12 @@ pub fn bench_boot(
     }
     eprintln!("BENCH_DCBZ_WITNESS: count={dcbz_total}");
 
-    // SPU-image-register witness: total ContentStore::register
-    // invocations across this runtime's lifetime.
     let spu_image_registers = rt.lv2_host().content_store().register_invocations();
     eprintln!("BENCH_SPU_IMAGE_REGISTER_WITNESS: count={spu_image_registers}");
 
-    // SPU thread-initialize dispatch witness: total
-    // `Lv2HostDispatcher::dispatch_thread_initialize` invocations.
     let spu_thread_init_dispatches = rt.lv2_host().spu_thread_initialize_dispatches();
     eprintln!("BENCH_SPU_THREAD_INIT_WITNESS: count={spu_thread_init_dispatches}");
 
-    // lwmutex / cond witnesses: acquire / release / reacquire
-    // counters.
     let lwmutex_acquires = rt.lv2_host().lwmutexes().acquires_count();
     let lwmutex_releases = rt.lv2_host().lwmutexes().releases_count();
     let cond_reacquires = rt.lv2_host().cond_reacquire_wake_calls();
@@ -249,15 +235,20 @@ pub fn bench_boot(
         "BENCH_LWMUTEX_COND_WITNESS: lwmutex_acquires={lwmutex_acquires} lwmutex_releases={lwmutex_releases} cond_reacquires={cond_reacquires}"
     );
 
-    // Authority-id witness: served program-authority-id and the
-    // count of `sys_lwmutex_lock` calls rejected for an unknown id
-    // (the cellSysmodule LoadModule-failure signature, which a wrong
-    // system authid reintroduces).
+    // lwmutex_unknown_locks is the cellSysmodule LoadModule-failure
+    // signature; a wrong system authid reintroduces it.
     let program_authority_id = rt.lv2_host().program_authority_id();
     let lwmutex_unknown_locks = rt.lv2_host().lwmutex_unknown_lock_count();
     eprintln!(
-        "BENCH_AUTHORITY_ID_WITNESS: program_authority_id=0x{program_authority_id:016x} lwmutex_unknown_locks={lwmutex_unknown_locks}"
+        "BENCH_AUTHORITY_ID_WITNESS: program_authority_id=0x{program_authority_id:016x} authid_source={authid_source} lwmutex_unknown_locks={lwmutex_unknown_locks}"
     );
+
+    // PRX load-miss witnesses: firmware misses stubbed with a real
+    // kernel id vs loads reported CELL_ENOENT. Non-vacuity evidence
+    // for the sc 480 miss arms.
+    let prx_hle_stubs = rt.lv2_host().prx_load_hle_stub_count();
+    let prx_not_found = rt.lv2_host().prx_load_not_found_count();
+    eprintln!("BENCH_PRX_LOAD_WITNESS: hle_stubs={prx_hle_stubs} not_found={prx_not_found}");
 
     BenchBootResult {
         steps,

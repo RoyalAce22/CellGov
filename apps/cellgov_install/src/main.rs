@@ -736,7 +736,9 @@ fn cmd_uninstall(args: &[String]) {
 }
 
 /// Walk `dir` recursively in lexicographic order and append every
-/// path ending in `.sprx` to `paths`.
+/// path ending in `.sprx` or `.prx` to `paths`. `.prx` covers
+/// pre-decrypted corpora, which the boot verifier loads through the
+/// same manifest path.
 fn collect_sprx_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -749,7 +751,7 @@ fn collect_sprx_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
         } else if p
             .extension()
             .and_then(|x| x.to_str())
-            .is_some_and(|x| x.eq_ignore_ascii_case("sprx"))
+            .is_some_and(|x| x.eq_ignore_ascii_case("sprx") || x.eq_ignore_ascii_case("prx"))
         {
             paths.push(p);
         }
@@ -779,21 +781,29 @@ fn build_firmware_manifest(
             path: sprx_path.clone(),
             source,
         })?;
-        let elf = match sce::decrypt_self_to_elf(&raw) {
-            Ok(e) => e,
-            Err(_) => {
-                skipped += 1;
-                continue;
-            }
+        // Pre-decrypted `.prx` files carry no SCE wrapper: hash the
+        // raw bytes (identical to their post-decrypt image) and record
+        // revision 0, since the wrapper that carried it is gone.
+        let (elf, revision) = if raw.len() >= 4 && &raw[..4] == b"SCE\0" {
+            let elf = match sce::decrypt_self_to_elf(&raw) {
+                Ok(e) => e,
+                Err(_) => {
+                    skipped += 1;
+                    continue;
+                }
+            };
+            // decrypt_self_to_elf already parsed the same header to get
+            // here, so this parse cannot fail; expect rather than
+            // silent-fallback so a future change that decouples the two
+            // paths surfaces the violation instead of writing 0.
+            let revision = sce::parse_sce_header(&raw)
+                .expect("decrypt_self_to_elf success implies parse_sce_header success")
+                .revision_flags
+                & 0x7FFF;
+            (elf, revision)
+        } else {
+            (raw, 0)
         };
-        // decrypt_self_to_elf already parsed the same header to get
-        // here, so this parse cannot fail; expect rather than
-        // silent-fallback so a future change that decouples the two
-        // paths surfaces the violation instead of writing 0.
-        let revision = sce::parse_sce_header(&raw)
-            .expect("decrypt_self_to_elf success implies parse_sce_header success")
-            .revision_flags
-            & 0x7FFF;
         let mut h = Sha256::new();
         h.update(&elf);
         let sha256 = manifest::Sha256(h.finalize().into());

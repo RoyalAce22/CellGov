@@ -53,6 +53,7 @@ fn subcommands_const_is_exhaustive() {
         Subcommand::FixtureGen,
         Subcommand::TitlesGen,
         Subcommand::GenManifest,
+        Subcommand::RecordAnchors,
     ];
     assert_eq!(
         SUBCOMMANDS.len(),

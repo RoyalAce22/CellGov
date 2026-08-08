@@ -7,6 +7,7 @@ use cellgov_time::Budget;
 use serde::{Deserialize, Serialize};
 
 use crate::runner_cellgov::BootOutcome;
+use crate::witnesses::WitnessSet;
 
 /// One title's run-side summary, JSON-serialized to
 /// `tests/fixtures/<id>/cellgov/boot_summary.json` by convention.
@@ -35,6 +36,10 @@ pub struct BootSummary {
     /// deserialization defaults to 0 if absent. Measurement-only:
     /// nonzero counts do not drive a non-zero exit code.
     pub host_invariant_breaks: u64,
+    /// Per-witness baseline for this title, keyed by the `BENCH_*`
+    /// name the boot path emits. Empty until the title is recorded.
+    #[serde(default, skip_serializing_if = "WitnessSet::is_empty")]
+    pub witnesses: WitnessSet,
 }
 
 impl BootSummary {
@@ -73,6 +78,7 @@ impl BootSummary {
             steps,
             budget,
             host_invariant_breaks,
+            witnesses: WitnessSet::new(),
         };
         s.validate()?;
         Ok(s)
@@ -152,19 +158,23 @@ struct BootSummaryShadow {
     budget: Budget,
     #[serde(default)]
     host_invariant_breaks: u64,
+    #[serde(default)]
+    witnesses: WitnessSet,
 }
 
 impl TryFrom<BootSummaryShadow> for BootSummary {
     type Error = BootSummaryError;
 
     fn try_from(s: BootSummaryShadow) -> Result<Self, Self::Error> {
-        Self::new_with_breaks(
+        let mut summary = Self::new_with_breaks(
             s.checkpoint,
             s.outcome,
             s.steps,
             s.budget,
             s.host_invariant_breaks,
-        )
+        )?;
+        summary.witnesses = s.witnesses;
+        Ok(summary)
     }
 }
 

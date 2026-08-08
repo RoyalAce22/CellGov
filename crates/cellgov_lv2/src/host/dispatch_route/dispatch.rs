@@ -314,6 +314,10 @@ impl Lv2Host {
                 args,
             } => self.dispatch_prx_start_module(args, requester, rt),
             Lv2Request::Unsupported {
+                number: syscall::SYS_PRX_UNLOAD_MODULE,
+                args,
+            } => self.dispatch_prx_unload_module(args),
+            Lv2Request::Unsupported {
                 number: syscall::TTY_READ,
                 ..
             } => self.dispatch_tty_read(),

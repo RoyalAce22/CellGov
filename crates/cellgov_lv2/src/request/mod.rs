@@ -16,7 +16,8 @@
 //! that race a sibling thread on the id never observe a stale slot.
 
 mod classify;
+pub mod fidelity;
 mod types;
 
 pub use classify::{classify, classify_with_lev};
-pub use types::Lv2Request;
+pub use types::{Lv2Request, Lv2RequestKind};

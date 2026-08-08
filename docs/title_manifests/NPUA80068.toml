@@ -8,6 +8,10 @@ developer = "Housemarque"
 engine = "Housemarque proprietary"
 distribution = "psn-hdd"
 rap_filename = "UP9000-NPUA80068_00-STARDUSTFULL0001.rap"
+# This title does not reach its checkpoint -- the cap is what ends the
+# run, so its recorded MaxSteps outcome and step count only reproduce
+# at this exact value.
+bench_max_steps = 100_000_000
 
 [checkpoint]
 kind = "first-rsx-write"
