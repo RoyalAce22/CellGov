@@ -108,6 +108,51 @@ pub(crate) fn make_test_prx() -> Vec<u8> {
     buf[stub1 + 8..stub1 + 12].copy_from_slice(&0x60u32.to_be_bytes());
 
     // Three RELA entries (24 bytes each) at 0x3F0.
+    write_relocs(&mut buf);
+
+    buf
+}
+
+/// [`make_test_prx`] with the module and export-library names
+/// replaced, plus an optional single-function import entry naming
+/// `import_lib`. Both names must be exactly 7 bytes: they overwrite
+/// the fixture's `testmod` / `testlib` in place.
+pub(crate) fn make_test_prx_graph_node(
+    module_name: &str,
+    export_lib: &str,
+    import_lib: Option<&str>,
+) -> Vec<u8> {
+    assert_eq!(module_name.len(), 7, "module name must be 7 bytes");
+    assert_eq!(export_lib.len(), 7, "export library name must be 7 bytes");
+    let mut buf = make_test_prx();
+    buf[0x1F4..0x1FB].copy_from_slice(module_name.as_bytes());
+    buf[0x2B0..0x2B7].copy_from_slice(export_lib.as_bytes());
+
+    if let Some(imp_name) = import_lib {
+        // Entry at file 0x300 (vaddr 0x210), 0x2C bytes, one function;
+        // name at vaddr 0x240, NID at 0x260, stub at 0x270. Mirrors
+        // the recipe in `prx_loader/tests/body_tests.rs`.
+        let entry_off: usize = 0x300;
+        let mi = 0x1F0usize;
+        buf[mi + 44..mi + 48].copy_from_slice(&0x210u32.to_be_bytes());
+        buf[mi + 48..mi + 52].copy_from_slice(&0x23Cu32.to_be_bytes());
+        buf[entry_off] = 0x2C;
+        buf[entry_off + 6..entry_off + 8].copy_from_slice(&1u16.to_be_bytes());
+        buf[entry_off + 16..entry_off + 20].copy_from_slice(&0x240u32.to_be_bytes());
+        buf[entry_off + 20..entry_off + 24].copy_from_slice(&0x260u32.to_be_bytes());
+        buf[entry_off + 24..entry_off + 28].copy_from_slice(&0x270u32.to_be_bytes());
+        let name_bytes = imp_name.as_bytes();
+        assert!(name_bytes.len() < 32, "import name too long for fixture");
+        buf[0x330..0x330 + name_bytes.len()].copy_from_slice(name_bytes);
+        buf[0x330 + name_bytes.len()] = 0;
+        buf[0x350..0x354].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
+        buf[0x360..0x364].copy_from_slice(&0u32.to_be_bytes());
+    }
+    buf
+}
+
+/// Three RELA entries (24 bytes each) at 0x3F0.
+fn write_relocs(buf: &mut [u8]) {
     // [0] ADDR32 text->text at offset 0x50, addend 0x80.
     let rel0 = 0x3F0;
     buf[rel0..rel0 + 8].copy_from_slice(&0x50u64.to_be_bytes());
@@ -129,6 +174,4 @@ pub(crate) fn make_test_prx() -> Vec<u8> {
     let r_info2: u64 = (0x0001u64 << 32) | R_PPC64_ADDR32 as u64;
     buf[rel2 + 8..rel2 + 16].copy_from_slice(&r_info2.to_be_bytes());
     buf[rel2 + 16..rel2 + 24].copy_from_slice(&0x10i64.to_be_bytes());
-
-    buf
 }

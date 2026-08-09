@@ -70,8 +70,13 @@ pub struct LoadedPrx {
     pub data_start: u64,
     /// Exclusive end of the data segment range.
     pub data_end: u64,
-    /// Exported function NIDs mapped to relocated OPD guest addresses.
-    pub exports: BTreeMap<u32, u64>,
+    /// Export library name -> its NIDs -> relocated OPD guest addresses.
+    ///
+    /// Keyed by library rather than flattened to NIDs because one
+    /// module can publish several libraries, and two modules can
+    /// export the same NID under different library names. A flat
+    /// NID map cannot tell those apart.
+    pub exports: BTreeMap<String, BTreeMap<u32, u64>>,
     /// Relocated `module_start` OPD, if exported.
     pub module_start: Option<LoadedOpd>,
     /// Relocated `module_stop` OPD, if exported.
@@ -311,10 +316,11 @@ pub fn load_prx(
         return Err(PrxLoadError::BatchCommitFailed { count, source });
     }
 
-    let mut exports = BTreeMap::new();
+    let mut exports: BTreeMap<String, BTreeMap<u32, u64>> = BTreeMap::new();
     for lib in &prx.exports {
+        let by_nid = exports.entry(lib.name.clone()).or_default();
         for func in &lib.functions {
-            exports.insert(func.nid, base + func.vaddr as u64);
+            by_nid.insert(func.nid, base + func.vaddr as u64);
         }
     }
 

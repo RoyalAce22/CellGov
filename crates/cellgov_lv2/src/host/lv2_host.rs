@@ -213,11 +213,19 @@ pub struct Lv2Host {
     /// non-zero, so an unprivileged boot hashes as it did before the
     /// field existed.
     pub(super) control_flags1: u32,
-    /// Firmware NID -> OPD address, supplied at boot from the loaded
-    /// firmware set. The sc 484 CoreOS branch resolves a caller's
-    /// import NIDs against it; empty for a boot with no firmware set,
-    /// which makes every import unresolved rather than wrong.
-    pub(super) firmware_exports: std::collections::BTreeMap<u32, u32>,
+    /// Firmware library name -> NID -> OPD address, supplied at boot
+    /// from the loaded firmware set. The sc 484 CoreOS branch resolves
+    /// a caller's import NIDs against it under the library each import
+    /// entry names; empty for a boot with no firmware set, which makes
+    /// every import unresolved rather than wrong.
+    pub(super) firmware_exports:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<u32, u32>>,
+    /// Unresolved-import NID -> the libraries the guest asked for it
+    /// from, supplied at boot by the GOT patcher. Diagnostic-only: lets
+    /// `dispatch_unresolved_import` name the library the guest named
+    /// instead of only the NID. Not hashed.
+    pub(super) unresolved_import_requesters:
+        std::collections::BTreeMap<u32, std::collections::BTreeSet<String>>,
     /// Witness: sc 484 calls seen, with a valid option struct.
     pub(super) prx_register_module_count: u64,
     /// Witness: of those, ones that took the CoreOS manual-link branch.
@@ -366,6 +374,7 @@ impl Lv2Host {
             program_authority_id: cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
             control_flags1: 0,
             firmware_exports: std::collections::BTreeMap::new(),
+            unresolved_import_requesters: std::collections::BTreeMap::new(),
             prx_register_module_count: 0,
             prx_register_module_manual_count: 0,
             prx_register_module_linked: 0,
@@ -413,10 +422,22 @@ impl Lv2Host {
         self.control_flags1 = flags;
     }
 
-    /// Install the firmware NID -> OPD map the sc 484 CoreOS branch
-    /// resolves against.
-    pub fn set_firmware_exports(&mut self, map: std::collections::BTreeMap<u32, u32>) {
+    /// Install the firmware library -> NID -> OPD map the sc 484
+    /// CoreOS branch resolves against.
+    pub fn set_firmware_exports(
+        &mut self,
+        map: std::collections::BTreeMap<String, std::collections::BTreeMap<u32, u32>>,
+    ) {
         self.firmware_exports = map;
+    }
+
+    /// Install the unresolved-import NID -> requesting-libraries map
+    /// the trampoline diagnostic names libraries from.
+    pub fn set_unresolved_import_requesters(
+        &mut self,
+        map: std::collections::BTreeMap<u32, std::collections::BTreeSet<String>>,
+    ) {
+        self.unresolved_import_requesters = map;
     }
 
     /// Witness tuple for the frontier run: (sc 484 calls, manual-link

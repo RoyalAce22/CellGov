@@ -226,12 +226,18 @@ fn patch_imports_against_unresolved_nid_yields_unresolved_import() {
     let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
     let err =
         patch_imports_against(&one_import(0xDEADBEEF, 0x100), &table, 0, &mut mem).unwrap_err();
-    assert_eq!(err, PrxLoaderError::UnresolvedImport { nid: 0xDEADBEEF });
+    assert_eq!(
+        err,
+        PrxLoaderError::UnresolvedImport {
+            namespace: "synth".to_string(),
+            nid: 0xDEADBEEF,
+        }
+    );
 }
 
 #[test]
 fn patch_imports_against_opd_above_u32_yields_out_of_range() {
-    let table = FirmwareExportTable::for_test(&[(0xCAFEBABE, 0x1_0000_0000u64)]);
+    let table = FirmwareExportTable::for_test("synth", &[(0xCAFEBABE, 0x1_0000_0000u64)]);
     let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
     let err =
         patch_imports_against(&one_import(0xCAFEBABE, 0x100), &table, 0, &mut mem).unwrap_err();
@@ -246,7 +252,7 @@ fn patch_imports_against_opd_above_u32_yields_out_of_range() {
 
 #[test]
 fn patch_imports_against_succeeds_and_writes_be_opd_into_got_slot() {
-    let table = FirmwareExportTable::for_test(&[(0xAAAA1111, 0x4000_0080u64)]);
+    let table = FirmwareExportTable::for_test("synth", &[(0xAAAA1111, 0x4000_0080u64)]);
     let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
     patch_imports_against(&one_import(0xAAAA1111, 0x100), &table, 0, &mut mem).expect("patch");
     let got = &mem.as_bytes()[0x100..0x104];
@@ -261,7 +267,7 @@ fn patch_imports_against_writes_at_load_base_plus_stub_addr() {
     let load_base: u64 = 0x2000;
     let stub_vaddr: u32 = 0x300;
     let runtime_stub = load_base + u64::from(stub_vaddr);
-    let table = FirmwareExportTable::for_test(&[(0xAAAA1111, opd_addr)]);
+    let table = FirmwareExportTable::for_test("synth", &[(0xAAAA1111, opd_addr)]);
     let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
     patch_imports_against(
         &one_import(0xAAAA1111, stub_vaddr),
@@ -285,7 +291,7 @@ fn patch_imports_against_writes_at_load_base_plus_stub_addr() {
 fn patch_imports_against_is_atomic_on_phase1_failure() {
     // First import resolves, second is missing; the failure must
     // discard the first.
-    let table = FirmwareExportTable::for_test(&[(0xAAAA1111, 0x4000_0080u64)]);
+    let table = FirmwareExportTable::for_test("synth", &[(0xAAAA1111, 0x4000_0080u64)]);
     let mut mem = cellgov_mem::GuestMemory::new(0x10_000);
     let before = mem.content_hash();
     let imports = vec![crate::prx::ImportedModule {
@@ -303,7 +309,13 @@ fn patch_imports_against_is_atomic_on_phase1_failure() {
         variables: Vec::new(),
     }];
     let err = patch_imports_against(&imports, &table, 0, &mut mem).unwrap_err();
-    assert_eq!(err, PrxLoaderError::UnresolvedImport { nid: 0xBBBB2222 });
+    assert_eq!(
+        err,
+        PrxLoaderError::UnresolvedImport {
+            namespace: "synth".to_string(),
+            nid: 0xBBBB2222,
+        }
+    );
     assert_eq!(
         mem.content_hash(),
         before,
@@ -315,10 +327,10 @@ fn patch_imports_against_is_atomic_on_phase1_failure() {
 fn patch_imports_against_is_atomic_on_phase2_drain_failure() {
     // Both imports resolve in Phase-1; the second points outside
     // GuestMemory so the Phase-2 drain rejects the batch.
-    let table = FirmwareExportTable::for_test(&[
-        (0xAAAA1111, 0x4000_0080u64),
-        (0xBBBB2222, 0x4000_00C0u64),
-    ]);
+    let table = FirmwareExportTable::for_test(
+        "synth",
+        &[(0xAAAA1111, 0x4000_0080u64), (0xBBBB2222, 0x4000_00C0u64)],
+    );
     let mut mem = cellgov_mem::GuestMemory::new(0x1000);
     let before = mem.content_hash();
     let imports = vec![crate::prx::ImportedModule {

@@ -688,7 +688,8 @@ impl Runtime {
             .set_status_override(source, UnitStatus::Blocked);
     }
 
-    /// Debug-only: every updated unit is in the wake set, and each
+    /// Debug-only: every updated unit is in the wake set or parked
+    /// with a staged response being replaced, and each
     /// payload-carrying update's variant matches the existing entry.
     fn assert_response_updates_valid(
         &self,
@@ -732,9 +733,15 @@ pub(crate) fn check_response_updates(
     response_updates: &[(UnitId, PendingResponse)],
 ) {
     for (waiter, update) in response_updates {
+        // A legitimate update targets a unit being woken now, or a
+        // still-parked unit whose staged response is being replaced --
+        // the cond two-hop restages a contended waiter's cond-wait
+        // response as the mutex-grant response without waking it.
+        // Neither-woken-nor-parked means the update can never deliver.
         assert!(
-            woken_unit_ids.contains(waiter),
-            "{site}: response_updates entry for {waiter:?} is not in woken_unit_ids",
+            woken_unit_ids.contains(waiter) || table.peek(*waiter).is_some(),
+            "{site}: response_updates entry for {waiter:?} is neither in woken_unit_ids \
+             nor parked with a pending response",
         );
         // ReturnCode is the universal cancel/timeout override and
         // may replace any prior variant; the tag invariant only

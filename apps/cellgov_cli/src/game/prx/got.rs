@@ -49,7 +49,7 @@ fn build_unresolved_trampoline_body(nid: u32) -> [u8; UNRESOLVED_TRAMP_BODY_BYTE
 const UNRESOLVED_TRAMP_SLOT_BYTES: u32 = 8 + UNRESOLVED_TRAMP_BODY_BYTES as u32;
 
 /// Outcome of an atomic GOT patch batch.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct GotPatchStats {
     /// Imports patched to firmware OPDs.
     pub(super) resolved: usize,
@@ -61,6 +61,10 @@ pub(super) struct GotPatchStats {
     /// End of the trampoline region (caller advances the allocator
     /// floor here).
     pub(super) tramp_region_end: u64,
+    /// Trampolined NID -> the libraries whose import tables asked for
+    /// it. Diagnostic payload for the host's unresolved-import arm;
+    /// the trampoline itself carries only the NID.
+    pub(super) unresolved_requesters: BTreeMap<u32, std::collections::BTreeSet<String>>,
 }
 
 /// Stage the OPD + sc-issuing body for one unresolved-import
@@ -100,46 +104,62 @@ pub(super) fn patch_got_atomic(
     modules: &[cellgov_ppu::prx::ImportedModule],
     mem: &mut GuestMemory,
     tramp_base: u64,
-    mut lookup: impl FnMut(u32) -> Option<u64>,
+    mut lookup: impl FnMut(&str, u32) -> Option<u64>,
 ) -> Result<GotPatchStats, PrxLoadStageError> {
     let mut staging = StagingMemory::new();
     let mut stats = GotPatchStats {
         tramp_region_end: tramp_base,
         ..GotPatchStats::default()
     };
+    // Keyed by NID alone even though lookup is namespaced: the
+    // trampoline's only payload is the NID, so two libraries with the
+    // same unresolved NID would stage byte-identical slots. Sharing
+    // one keeps the region size independent of how imports are
+    // grouped.
     let mut nid_to_tramp_opd: BTreeMap<u32, u64> = BTreeMap::new();
     let mut next_tramp_offset: u64 = 0;
 
-    for func in modules.iter().flat_map(|m| m.functions.iter()) {
-        stats.total += 1;
+    // Iterated per module rather than flat_mapped over functions so
+    // the library name reaches `lookup`; an import names the library
+    // it wants, and resolving without it rebinds to whichever module
+    // happens to export the NID.
+    for module in modules {
+        for func in &module.functions {
+            stats.total += 1;
 
-        let opd_u32 = if let Some(addr) = lookup(func.nid) {
-            stats.resolved += 1;
-            addr as u32
-        } else {
-            stats.trampolined += 1;
-            let slot_base = if let Some(&existing) = nid_to_tramp_opd.get(&func.nid) {
-                existing
+            let opd_u32 = if let Some(addr) = lookup(&module.name, func.nid) {
+                stats.resolved += 1;
+                addr as u32
             } else {
-                let slot_base = tramp_base + next_tramp_offset;
-                next_tramp_offset += UNRESOLVED_TRAMP_SLOT_BYTES as u64;
-                stage_unresolved_trampoline(&mut staging, slot_base, func.nid);
-                nid_to_tramp_opd.insert(func.nid, slot_base);
-                slot_base
+                stats.trampolined += 1;
+                stats
+                    .unresolved_requesters
+                    .entry(func.nid)
+                    .or_default()
+                    .insert(module.name.clone());
+                let slot_base = if let Some(&existing) = nid_to_tramp_opd.get(&func.nid) {
+                    existing
+                } else {
+                    let slot_base = tramp_base + next_tramp_offset;
+                    next_tramp_offset += UNRESOLVED_TRAMP_SLOT_BYTES as u64;
+                    stage_unresolved_trampoline(&mut staging, slot_base, func.nid);
+                    nid_to_tramp_opd.insert(func.nid, slot_base);
+                    slot_base
+                };
+                slot_base as u32
             };
-            slot_base as u32
-        };
 
-        let range = ByteRange::new(GuestAddr::new(func.stub_addr as u64), 4).ok_or(
-            PrxLoadStageError::GotSlotBadRange {
-                stub_addr: func.stub_addr,
-                nid: func.nid,
-            },
-        )?;
-        staging.stage(StagedWrite {
-            range,
-            bytes: opd_u32.to_be_bytes().to_vec(),
-        });
+            let range = ByteRange::new(GuestAddr::new(func.stub_addr as u64), 4).ok_or(
+                PrxLoadStageError::GotSlotBadRange {
+                    stub_addr: func.stub_addr,
+                    nid: func.nid,
+                },
+            )?;
+            staging.stage(StagedWrite {
+                range,
+                bytes: opd_u32.to_be_bytes().to_vec(),
+            });
+        }
     }
 
     stats.tramp_region_end = tramp_base + next_tramp_offset;

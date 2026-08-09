@@ -5,10 +5,22 @@ use crate::syscall_table::SyscallResponseTable;
 use cellgov_lv2::EventPayload;
 
 #[test]
-#[should_panic(expected = "is not in woken_unit_ids")]
-fn check_response_updates_rejects_update_for_non_woken_unit() {
+#[should_panic(expected = "neither in woken_unit_ids nor parked")]
+fn check_response_updates_rejects_update_for_unit_neither_woken_nor_parked() {
     let table = SyscallResponseTable::new();
     let waiter = UnitId::new(42);
+    let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0 })];
+    check_response_updates("test", &table, &[], &updates);
+}
+
+#[test]
+fn check_response_updates_accepts_restage_for_parked_unit() {
+    // The cond two-hop: signal moves a contended waiter to the mutex
+    // waiter list without waking it, restaging its parked cond-wait
+    // response as the eventual mutex-grant response.
+    let mut table = SyscallResponseTable::new();
+    let waiter = UnitId::new(42);
+    let _ = table.insert(waiter, PendingResponse::ReturnCode { code: 0 });
     let updates = vec![(waiter, PendingResponse::ReturnCode { code: 0 })];
     check_response_updates("test", &table, &[], &updates);
 }

@@ -7,6 +7,9 @@ const OPT: u32 = 0x2000;
 const STUB_TABLE: u32 = 0x3000;
 const NIDS: u32 = 0x3100;
 const SLOTS: u32 = 0x3200;
+const LIB_NAME: u32 = 0x3300;
+/// Library name the fixture's import entry asks for.
+const LIB: &str = "testlib";
 const ELF_IS_REGISTERED: u64 = 0x8001_1910;
 /// A CoreOS authority id: `>> 36 == 0x0107_0000`.
 const COREOS_AUTHID: u64 = 0x1070_0005_FF00_0001;
@@ -36,9 +39,13 @@ fn memory_with(module_type: u64, size: u64, nids: &[u32]) -> cellgov_mem::GuestM
         let mut hdr = vec![0u8; 0x1C];
         hdr[0] = 0x1C;
         hdr[6..8].copy_from_slice(&(nids.len() as u16).to_be_bytes());
+        hdr[16..20].copy_from_slice(&LIB_NAME.to_be_bytes());
         hdr[20..24].copy_from_slice(&NIDS.to_be_bytes());
         hdr[24..28].copy_from_slice(&SLOTS.to_be_bytes());
         put(&mut mem, STUB_TABLE, &hdr);
+        let mut name = LIB.as_bytes().to_vec();
+        name.push(0);
+        put(&mut mem, LIB_NAME, &name);
         let mut nid_bytes = Vec::new();
         for n in nids {
             nid_bytes.extend_from_slice(&n.to_be_bytes());
@@ -47,6 +54,16 @@ fn memory_with(module_type: u64, size: u64, nids: &[u32]) -> cellgov_mem::GuestM
         put(&mut mem, SLOTS, &vec![0u8; nids.len() * 4]);
     }
     mem
+}
+
+/// Firmware-export map holding `nids` under library `lib`.
+fn exports_under(
+    lib: &str,
+    nids: &[(u32, u32)],
+) -> std::collections::BTreeMap<String, std::collections::BTreeMap<u32, u32>> {
+    [(lib.to_string(), nids.iter().copied().collect())]
+        .into_iter()
+        .collect()
 }
 
 fn call(host: &mut Lv2Host, rt: &FakeRuntime, opt: u64) -> Lv2Dispatch {
@@ -109,7 +126,7 @@ fn a_non_coreos_caller_keeps_elf_is_registered() {
 fn a_coreos_caller_binds_its_got_slot_to_the_exporter_opd() {
     let mut host = Lv2Host::new();
     host.set_program_authority_id(COREOS_AUTHID);
-    host.set_firmware_exports([(0xDEAD_BEEF, 0x0080_1234)].into_iter().collect());
+    host.set_firmware_exports(exports_under(LIB, &[(0xDEAD_BEEF, 0x0080_1234)]));
     let rt = FakeRuntime::with_memory(memory_with(1, 0x30, &[0xDEAD_BEEF]));
 
     match call(&mut host, &rt, OPT.into()) {
@@ -127,6 +144,23 @@ fn a_coreos_caller_binds_its_got_slot_to_the_exporter_opd() {
     }
     let (calls, manual, linked, unresolved) = host.prx_register_module_witness();
     assert_eq!((calls, manual, linked, unresolved), (1, 1, 1, 0));
+}
+
+#[test]
+fn a_nid_exported_under_a_different_library_does_not_bind() {
+    // The export exists, but not under the library the guest's import
+    // entry names. Binding it anyway would be the NID-only rebind the
+    // namespaced key exists to prevent.
+    let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
+    host.set_firmware_exports(exports_under("otherlib", &[(0xDEAD_BEEF, 0x0080_1234)]));
+    let rt = FakeRuntime::with_memory(memory_with(1, 0x30, &[0xDEAD_BEEF]));
+    match call(&mut host, &rt, OPT.into()) {
+        Lv2Dispatch::Immediate { code: 0, effects } => assert!(effects.is_empty()),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    }
+    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    assert_eq!((manual, linked, unresolved), (1, 0, 1));
 }
 
 #[test]
