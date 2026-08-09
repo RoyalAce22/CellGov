@@ -34,6 +34,11 @@ pub struct FirmwareImage {
     /// Resolved import edges; self-imports filtered. Every target is
     /// a key in `loaded`.
     pub imports_by_id: BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>>,
+    /// Export libraries dropped because an earlier module already
+    /// published the same namespace: `(namespace name, winner, loser)`.
+    /// The loser still loads and still runs its `module_start`; only
+    /// this library's NIDs are absent from `export_table`.
+    pub shadowed_export_libraries: Vec<(String, PrxModuleId, PrxModuleId)>,
 }
 
 /// Failure surface for the multi-PRX loader.
@@ -147,18 +152,6 @@ pub enum PrxLoaderError {
         first_path: String,
         /// Later path whose parse produced the same id.
         second_path: String,
-    },
-    /// Two PRXs publish the same export-namespace name.
-    /// `namespace` is the hashed namespace id (see
-    /// [`graph::module_id_from_name`]).
-    #[error("duplicate export namespace {namespace:?} between {first:?} and {second:?}")]
-    DuplicateExportNamespace {
-        /// Hashed namespace id that both modules publish.
-        namespace: PrxModuleId,
-        /// First module observed to publish the namespace.
-        first: PrxModuleId,
-        /// Second module whose exports collide with `first`.
-        second: PrxModuleId,
     },
     /// Cursor arithmetic overflowed u64 while laying out modules.
     #[error("load address space exhausted")]
@@ -300,6 +293,7 @@ pub fn load_firmware_set(
     // PRX's file-level identity (`parsed.module_id`) is distinct
     // from the names it exports under.
     let mut provider_of_namespace: BTreeMap<PrxModuleId, PrxModuleId> = BTreeMap::new();
+    let mut shadowed_export_libraries: Vec<(String, PrxModuleId, PrxModuleId)> = Vec::new();
 
     for (path, bytes) in &bytes_by_path {
         let parsed = crate::sprx::parse_prx(bytes).map_err(PrxLoaderError::Parse)?;
@@ -312,19 +306,26 @@ pub fn load_firmware_set(
             });
         }
         check_relocations_within_text_data(&parsed)?;
-        for lib in &parsed.exports {
+        let mut parsed = parsed;
+        // First module to publish a namespace owns it; a later module
+        // publishing the same name keeps loading but loses that one
+        // export library. Oracle: RPCS3 takes a per-library-name lock
+        // and logs "Skipped module '%s' (already loaded)"
+        // (`PPUModule.cpp` `ppu_register_library_lock`), rather than
+        // failing the load.
+        parsed.exports.retain(|lib| {
             let ns_id = graph::module_id_from_name(&lib.name);
-            if let Some(&first) = provider_of_namespace.get(&ns_id) {
-                if first != id {
-                    return Err(PrxLoaderError::DuplicateExportNamespace {
-                        namespace: ns_id,
-                        first,
-                        second: id,
-                    });
+            match provider_of_namespace.get(&ns_id) {
+                Some(&first) if first != id => {
+                    shadowed_export_libraries.push((lib.name.clone(), first, id));
+                    false
+                }
+                _ => {
+                    provider_of_namespace.insert(ns_id, id);
+                    true
                 }
             }
-            provider_of_namespace.insert(ns_id, id);
-        }
+        });
         let imports = parse_imports_or_propagate(bytes, id)?;
         imports_by_id.insert(id, imports);
         path_by_id.insert(id, path.clone());
@@ -423,6 +424,7 @@ pub fn load_firmware_set(
         export_table,
         topological_order: dep_graph.order,
         imports_by_id: import_targets_by_id,
+        shadowed_export_libraries,
     })
 }
 

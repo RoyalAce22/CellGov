@@ -331,6 +331,14 @@ pub(in crate::game) fn load_firmware_set_bound(
         stats.trampolined,
         stats.tramp_region_end,
     );
+    // A shadowed library is a real fidelity fact, not a detail: the
+    // losing module's callers resolve to the winner's implementation.
+    for (namespace, first, second) in &image.shadowed_export_libraries {
+        println!(
+            "prx: export namespace {namespace:?} published by {first:?} and {second:?}; \
+             kept {first:?}, dropped the later library"
+        );
+    }
 
     // Pure-data NID -> OPD view for the sc 484 CoreOS manual link;
     // the host cannot reach the loader's export table itself.
