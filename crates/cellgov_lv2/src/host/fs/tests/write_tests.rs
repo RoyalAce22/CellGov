@@ -1,5 +1,5 @@
 //! `sys_fs_write` dispatch tests: read-only-model null-backend
-//! responses pinned per RPCS3 `sys_fs.cpp:1206-1223` precedence.
+//! responses pinned per RPCS3 `sys_fs.cpp` `sys_fs_write` precedence.
 
 use cellgov_effects::Effect;
 use cellgov_ps3_abi::cell_errors;
@@ -40,7 +40,7 @@ fn null_nwrite_ptr_returns_efault_and_emits_no_effects() {
     assert_eq!(code, u64::from(cell_errors::CELL_EFAULT));
     assert!(
         effects.is_empty(),
-        "null nwrite_ptr must emit zero effects (RPCS3 sys_fs.cpp:1206-1209)"
+        "null nwrite_ptr must emit zero effects (RPCS3 sys_fs_write)"
     );
 }
 
@@ -58,10 +58,10 @@ fn null_buf_ptr_returns_efault_and_zeros_nwrite() {
 
 #[test]
 fn zero_size_with_valid_fd_returns_ok_with_nwrite_zero_and_no_break() {
-    // RPCS3 sys_fs.cpp:1225-1237: nbytes == 0 reaches the OK arm
-    // only after the file-existence check at :1219 passes. Our
-    // model never sets file->lock, so the EBUSY sub-arm is dead;
-    // a valid fd with size==0 returns CELL_OK + nwrite=0.
+    // RPCS3 sys_fs_write: nbytes == 0 reaches the OK arm only
+    // after the file-existence check passes. Our model never sets
+    // file->lock, so the EBUSY sub-arm is dead; a valid fd with
+    // size==0 returns CELL_OK + nwrite=0.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"hello".to_vec())
@@ -83,16 +83,14 @@ fn zero_size_with_valid_fd_returns_ok_with_nwrite_zero_and_no_break() {
 
 #[test]
 fn write_to_dir_fd_returns_ebadf_not_ok_for_both_zero_and_nonzero_size() {
-    // RPCS3 sys_fs.cpp:1217 does a typed downcast:
+    // RPCS3 sys_fs_write does a typed downcast:
     //   const auto file = idm::get_unlocked<lv2_fs_object, lv2_file>(fd);
     // A dir fd (lv2_dir, not lv2_file) yields a null and lands at the
-    // !file arm at :1219 -> CELL_EBADF. The CellGov mirror discriminates
-    // at the data-structure level: FsStore keeps file fds in `open_fds`
-    // and dir fds in a separate `open_dirs` map, and `fstat` only looks
-    // up `open_fds`. So a dir fd reads as UnknownFd to `fstat` and
-    // arm 3's CELL_EBADF fires correctly. This test pins that property
-    // so a future FsStore::fstat that started accepting dir fds for
-    // some unrelated reason would surface as a regression here.
+    // !file arm -> CELL_EBADF. The CellGov mirror discriminates at the
+    // data-structure level: FsStore keeps file fds in `open_fds` and
+    // dir fds in a separate `open_dirs` map, and `fstat` only looks up
+    // `open_fds`, so a dir fd reads as UnknownFd and arm 3's
+    // CELL_EBADF fires.
     let mut host = Lv2Host::new();
     let dir_fd = host
         .fs_store_mut()
@@ -108,8 +106,8 @@ fn write_to_dir_fd_returns_ebadf_not_ok_for_both_zero_and_nonzero_size() {
             code,
             u64::from(cell_errors::CELL_EBADF),
             "sys_fs_write(dir_fd, _, {size:#x}, _) must yield CELL_EBADF \
-             (RPCS3 sys_fs.cpp:1217 downcast to lv2_file returns null for a dir fd, \
-             firing the !file arm at :1219 before any size check)"
+             (RPCS3 sys_fs_write downcast to lv2_file returns null for a dir fd, \
+             firing the !file arm before any size check)"
         );
         extract_nwrite_zero(&effects, 0x2000);
     }
@@ -117,11 +115,10 @@ fn write_to_dir_fd_returns_ebadf_not_ok_for_both_zero_and_nonzero_size() {
 
 #[test]
 fn zero_size_with_bad_fd_returns_ebadf_not_ok() {
-    // RPCS3 sys_fs.cpp:1217-1225 -- ordering matters: fd resolution
-    // (line 1217) and the `!file` arm (line 1219) run BEFORE the
-    // `!nbytes` short-circuit at line 1225. A zero-byte write to a
-    // bogus fd is CELL_EBADF, not CELL_OK. The arm's earlier shape
-    // returned OK regardless of fd, laundering this divergence.
+    // RPCS3 sys_fs_write -- ordering matters: fd resolution (the
+    // downcast) and the `!file` arm run BEFORE the `!nbytes`
+    // short-circuit. A zero-byte write to a bogus fd is CELL_EBADF,
+    // not CELL_OK.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x10000);
     // fd=99 is not registered; FsStore::fstat returns Err.
@@ -132,7 +129,7 @@ fn zero_size_with_bad_fd_returns_ebadf_not_ok() {
     assert_eq!(
         code,
         u64::from(cell_errors::CELL_EBADF),
-        "bad fd at size==0 must yield CELL_EBADF per RPCS3 sys_fs.cpp:1219 \
+        "bad fd at size==0 must yield CELL_EBADF per RPCS3 sys_fs_write \
          (file-existence check precedes the size==0 short-circuit)"
     );
     extract_nwrite_zero(&effects, 0x2000);
@@ -140,12 +137,8 @@ fn zero_size_with_bad_fd_returns_ebadf_not_ok() {
 
 #[test]
 fn nonzero_size_with_valid_fd_returns_ebadf_zeros_nwrite_and_logs_break() {
-    // Load-bearing witness: prior dispatch arm aliased ALL writes to
-    // dispatch_tty_write, reporting up to size bytes "written" with
-    // CELL_OK. The fix returns CELL_EBADF (read-only model has no
-    // writable fd) with nwrite=0 plus a log_invariant_break entry.
     // The fd is registered so the rejection is specifically the
-    // access-mode arm (RPCS3 sys_fs.cpp:1219 second condition), not
+    // access-mode arm (RPCS3 sys_fs_write, second condition), not
     // the file-existence arm (covered separately).
     let mut host = Lv2Host::new();
     host.fs_store_mut()
@@ -172,12 +165,8 @@ fn nonzero_size_with_valid_fd_returns_ebadf_zeros_nwrite_and_logs_break() {
 
 #[test]
 fn u32_max_plus_one_size_does_not_truncate_and_returns_ebadf() {
-    // Prior code did `u32::try_from(size).unwrap_or(u32::MAX)`,
-    // silently clamping a u64 size above u32::MAX to 0xFFFFFFFF and
-    // reporting that many bytes "written." The new dispatcher takes
-    // the u64 size as-is and routes it to the CELL_EBADF arm; nwrite
-    // is 0 regardless of how large the request claimed to be. Uses a
-    // valid fd so the rejection is the access-mode arm specifically.
+    // Uses a valid fd so the rejection is the access-mode arm
+    // specifically; nwrite is 0 regardless of the claimed size.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"hello".to_vec())

@@ -85,7 +85,7 @@ impl PpuThreadTable {
     /// record of its own; real LV2 attributes those syscalls to
     /// the calling (primary) thread (see RPCS3
     /// `_sys_prx_start_module(ppu_thread&, ...)`,
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_prx.cpp:515`).
+    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_prx.cpp`).
     /// Aliasing the transient unit to the primary thread here
     /// gives sync-syscall dispatch sites a real PpuThreadId for
     /// the caller without weakening the strict lookup elsewhere.

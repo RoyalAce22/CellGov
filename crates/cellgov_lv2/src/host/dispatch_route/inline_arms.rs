@@ -344,12 +344,15 @@ impl Lv2Host {
         // from the requester map the GOT patcher installed, not from
         // the syscall. More than one library can appear when two
         // import tables both failed to resolve the same NID.
+        // An absent entry and an empty set both mean "no recorded
+        // library": an empty set must not leave a dangling
+        // "imported from" with nothing after it.
         let requested_from = match self.unresolved_import_requesters.get(&nid) {
-            None => String::new(),
-            Some(libs) => {
+            Some(libs) if !libs.is_empty() => {
                 let list = libs.iter().map(String::as_str).collect::<Vec<_>>();
                 format!(", imported from {}", list.join(", "))
             }
+            _ => String::new(),
         };
         match cellgov_ps3_abi::nid::lookup(nid) {
             Some((module, name)) => {

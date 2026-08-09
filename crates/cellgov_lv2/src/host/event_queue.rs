@@ -20,7 +20,7 @@ impl Lv2Host {
     /// `sys_event_port_connect_ipc` (140) can find it.
     ///
     /// The oracle passes `SYS_SYNC_NEWLY_CREATED` unconditionally
-    /// (RPCS3 `sys_event.cpp:251`), so unlike the shm path there is no
+    /// (RPCS3 `sys_event.cpp`), so unlike the shm path there is no
     /// resolve-or-create: a key already registered is `CELL_EEXIST`,
     /// and the way a second referent reaches the queue is 140, not a
     /// second create.
@@ -66,7 +66,7 @@ impl Lv2Host {
     ///
     /// `CELL_EINVAL` for a `port_type` outside
     /// {`SYS_EVENT_PORT_LOCAL`, `SYS_EVENT_PORT_IPC`}. Oracle: RPCS3
-    /// `sys_event.cpp:621`.
+    /// `sys_event.cpp`.
     pub(super) fn dispatch_event_port_create(
         &mut self,
         id_ptr: u32,
@@ -75,7 +75,7 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         if port_type != SYS_EVENT_PORT_LOCAL && port_type != SYS_EVENT_PORT_IPC {
-            // The oracle logs this too (`sys_event.cpp:623`); a guest
+            // The oracle logs this too (`sys_event.cpp`); a guest
             // that trips it is passing a type LV2 does not define.
             self.log_invariant_break(
                 "dispatch.event_port_create_bad_type",
@@ -112,7 +112,8 @@ impl Lv2Host {
     ///
     /// The two forms differ only in how the queue is named and which
     /// port type they accept, so they share one body. Oracle: RPCS3
-    /// `sys_event.cpp:665-732`.
+    /// `sys_event.cpp` (`sys_event_port_connect_local` /
+    /// `sys_event_port_connect_ipc`).
     ///
     /// # Errors
     ///

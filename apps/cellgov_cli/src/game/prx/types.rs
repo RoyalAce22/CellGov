@@ -59,6 +59,13 @@ pub(super) enum PrxLoadStageError {
     },
     #[error("GOT slot at 0x{stub_addr:08x} (nid 0x{nid:08x}): invalid 4-byte range")]
     GotSlotBadRange { stub_addr: u32, nid: u32 },
+    /// The value destined for a 4-byte GOT slot (a resolved OPD or a
+    /// trampoline slot) lies beyond the 32-bit guest address space;
+    /// truncating it would alias an unrelated guest address.
+    #[error(
+        "GOT slot for nid 0x{nid:08x}: value 0x{addr:016x} exceeds the 32-bit guest address space"
+    )]
+    GotSlotValueBeyondU32 { nid: u32, addr: u64 },
     /// `StagingMemory::drain_into` rejected the batch; guest memory
     /// is unchanged by the atomic-batch contract.
     #[error("GOT batch validation failed ({source}); {staged} staged write(s) discarded")]

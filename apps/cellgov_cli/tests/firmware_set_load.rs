@@ -42,7 +42,8 @@ fn locate_firmware_dir() -> PathBuf {
     };
     assert!(
         dir.is_dir(),
-        "firmware dir not found: {}. Populate it with `cellgov_install install`,          or point CELLGOV_FIRMWARE_DIR at an existing install.",
+        "firmware dir not found: {}. Populate it with `cellgov_install install`, \
+         or point CELLGOV_FIRMWARE_DIR at an existing install.",
         dir.display()
     );
     dir
@@ -231,21 +232,3 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         image.export_table.len()
     );
 }
-
-// `min_viable_prx_set_exports_required_namespaces` previously
-// asserted a frozen `REQUIRED` namespace list (cellSysmodule,
-// cellSysutil, cellGcmSys, cellSpurs, sys_io, cellSysutilAvconfExt)
-// against the firmware corpus. That list was per-corpus
-// compatibility state from the closure investigation, not a
-// guard-liveness witness: a title-set churn that added or removed
-// a stem from the closure walk would break this test without any
-// loader / closure mechanism actually regressing. Since a
-// correctness-improving trajectory shift must not break a
-// liveness test, the assertion does not belong here.
-//
-// Deleted from this suite. The "every title in the corpus
-// can resolve every namespace it imports" property belongs in the
-// titles/compat suite where the inputs are titles + their imports
-// rather than a hand-frozen list, so the assertion can derive its
-// expectation from the same corpus state it validates. No
-// relocation has been performed in this commit; this is a marker.

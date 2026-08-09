@@ -81,9 +81,8 @@ fn build_silently_accepts_same_nid_same_opd() {
 
 #[test]
 fn same_nid_under_different_namespaces_resolves_to_each_exporter() {
-    // The case the whole re-key exists for: 118 NIDs in the retail
-    // firmware are exported by two or three libraries at different
-    // addresses. Under a NID-only key the second is ConflictingExport.
+    // Retail firmware exports some NIDs under multiple libraries at
+    // different addresses.
     let a = PrxModuleId(1);
     let b = PrxModuleId(2);
     let mut loaded = BTreeMap::new();
@@ -98,8 +97,6 @@ fn same_nid_under_different_namespaces_resolves_to_each_exporter() {
 
 #[test]
 fn one_module_publishing_two_libraries_keeps_both_nids_separate() {
-    // A flat NID map lets the second library silently overwrite the
-    // first when a module publishes the same NID twice.
     let a = PrxModuleId(1);
     let mut loaded = BTreeMap::new();
     loaded.insert(
@@ -227,7 +224,7 @@ fn build_rejects_duplicate_id_in_order() {
 fn build_reports_first_recorder_on_three_way_conflict() {
     // A records 0xA at 0x1000; B agrees (no-op); C disagrees.
     // The error must name A as `first` (the recorder), not B
-    // (the silent agreer). Locking the recorder semantics.
+    // (the silent agreer).
     let a = PrxModuleId(1);
     let b = PrxModuleId(2);
     let c = PrxModuleId(3);
@@ -272,13 +269,8 @@ fn build_returns_on_first_conflict_when_multiple_exist() {
 
 impl FirmwareExportTable {
     /// Test-only constructor: build a table of `(nid, opd)` pairs
-    /// under one library name, with a synthetic origin. Lets unit
-    /// tests inject a known table without paying the precondition
-    /// checks `build` runs over `loaded` / `order`.
-    ///
-    /// The namespace is explicit because lookups now go through it:
-    /// a table built under one name is invisible to an importer
-    /// asking for another.
+    /// under one library name, with a synthetic origin, skipping the
+    /// precondition checks `build` runs over `loaded` / `order`.
     pub(crate) fn for_test(namespace: &str, entries: &[(u32, u64)]) -> Self {
         Self {
             entries: [(

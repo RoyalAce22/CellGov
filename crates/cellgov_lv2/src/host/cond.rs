@@ -41,7 +41,7 @@ impl Lv2Host {
         }
         // Effective ipc_key is the attr's key iff pshared ==
         // SYS_SYNC_PROCESS_SHARED, else 0. Oracle: RPCS3's
-        // `lv2_obj::get_key` (`sys_sync.h:308`). An unreadable attr
+        // `lv2_obj::get_key` (`sys_sync.h`). An unreadable attr
         // stays keyless; attr validation is otherwise unchanged.
         if let Some(ipc_key) = cond_attr_ipc_key(attr_ptr, rt) {
             if ipc_key != 0 {
@@ -346,7 +346,6 @@ impl Lv2Host {
         }
     }
 
-    /// Cond-wake mutex reacquire for one thread.
     fn cond_reacquire_wake(
         &mut self,
         waker: PpuThreadId,

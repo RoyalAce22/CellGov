@@ -31,10 +31,11 @@ impl Runtime {
     /// - `RsxFlipRequest` -> [`crate::rsx::flip::RsxFlipState::request_flip`];
     ///   the flip transitions WAITING -> DONE on the next
     ///   `commit_step` boundary, not during the dispatching batch.
-    /// - Every other variant is silently dropped: LV2 handlers must
-    ///   not emit effects the LV2 surface cannot apply (e.g.
-    ///   `RsxLabelWrite`, `DmaEnqueue`); those belong to the
-    ///   unit-effect path through `commit_pipeline.process`.
+    /// - Every other variant is dropped with a named invariant
+    ///   break: LV2 handlers must not emit effects the LV2 surface
+    ///   cannot apply (e.g. `RsxLabelWrite`, `DmaEnqueue`); those
+    ///   belong to the unit-effect path through
+    ///   `commit_pipeline.process`.
     ///
     /// [`StagingMemory`]: cellgov_mem::StagingMemory
     /// [`GuestMemory::apply_commit`]: cellgov_mem::GuestMemory::apply_commit
@@ -87,13 +88,6 @@ impl Runtime {
             );
         }
         for effect in effects {
-            // Exhaustive match with no wildcard: a new variant on
-            // cellgov_effects::Effect must add an arm here (compile
-            // error otherwise). This is the "classify, never silently
-            // drop" discipline applied to effect application -- a
-            // future LV2 handler that emits an unmodeled variant
-            // surfaces loudly via the unsupported-arm log_invariant_break
-            // rather than vanishing through a `_ => {}` catch-all.
             match effect {
                 Effect::SharedWriteIntent { range, bytes, .. } => {
                     if memory_failure.is_some() {
@@ -104,10 +98,6 @@ impl Runtime {
                          the same predicate apply_commit uses internally -- so this Err \
                          path is structurally unreachable",
                     );
-                    // Tripwire witness: a future refactor that routes
-                    // this through StagingMemory drops the increment;
-                    // the integration test below asserts this stays
-                    // nonzero on a real FIFO_SETUP commit_step.
                     self.lv2_direct_committed_writes =
                         self.lv2_direct_committed_writes.wrapping_add(1);
                 }
@@ -128,15 +118,6 @@ impl Runtime {
                 Effect::RsxFlipRequest { buffer_index } => {
                     self.rsx_flip.request_flip(*buffer_index);
                 }
-                // Unsupported-from-LV2 variants. Each names the
-                // expected origin so a reader can disambiguate "LV2
-                // handler emitted by mistake" from "execution-unit
-                // path leaked through". All route through
-                // log_invariant_break under the
-                // `runtime.apply_lv2_effects_unsupported_*` tag prefix
-                // for grep-separability from genuine internal-invariant
-                // failures (matches the cellgov_lv2 `_unsupported_`
-                // convention for honest not-implemented arms).
                 Effect::MailboxReceiveAttempt { .. } => {
                     self.lv2_host.log_invariant_break(
                         "runtime.apply_lv2_effects_unsupported_mailbox_receive_attempt",
@@ -619,7 +600,8 @@ impl Runtime {
 
     /// Overrides replace (not merge) the existing entry;
     /// [`Self::assert_response_updates_valid`] enforces that every
-    /// updated unit is in `woken_unit_ids` and each update's variant
+    /// updated unit is in `woken_unit_ids` or still parked with a
+    /// pending response, and each payload-carrying update's variant
     /// matches the existing entry.
     ///
     /// Cross-module contract: when the caller is a callback worker,

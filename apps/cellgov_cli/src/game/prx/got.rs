@@ -65,6 +65,11 @@ pub(super) struct GotPatchStats {
     /// it. Diagnostic payload for the host's unresolved-import arm;
     /// the trampoline itself carries only the NID.
     pub(super) unresolved_requesters: BTreeMap<u32, std::collections::BTreeSet<String>>,
+    /// Variable imports the batch saw but did not bind. There is no
+    /// variable-import binder yet, so each vref slot keeps its
+    /// pre-load bytes; callers report the count so the gap is
+    /// witnessed rather than silent.
+    pub(super) variables_unbound: usize,
 }
 
 /// Stage the OPD + sc-issuing body for one unresolved-import
@@ -124,12 +129,18 @@ pub(super) fn patch_got_atomic(
     // it wants, and resolving without it rebinds to whichever module
     // happens to export the NID.
     for module in modules {
+        // No variable-import binder exists yet; count what it would
+        // have bound so the gap stays witnessed at the call sites.
+        stats.variables_unbound += module.variables.len();
         for func in &module.functions {
             stats.total += 1;
 
             let opd_u32 = if let Some(addr) = lookup(&module.name, func.nid) {
                 stats.resolved += 1;
-                addr as u32
+                u32::try_from(addr).map_err(|_| PrxLoadStageError::GotSlotValueBeyondU32 {
+                    nid: func.nid,
+                    addr,
+                })?
             } else {
                 stats.trampolined += 1;
                 stats
@@ -141,6 +152,19 @@ pub(super) fn patch_got_atomic(
                     existing
                 } else {
                     let slot_base = tramp_base + next_tramp_offset;
+                    // The OPD word and the body pointer inside the
+                    // slot are 4-byte guest addresses; reject a slot
+                    // whose end does not fit rather than truncate.
+                    if slot_base
+                        .checked_add(u64::from(UNRESOLVED_TRAMP_SLOT_BYTES))
+                        .and_then(|end| u32::try_from(end).ok())
+                        .is_none()
+                    {
+                        return Err(PrxLoadStageError::GotSlotValueBeyondU32 {
+                            nid: func.nid,
+                            addr: slot_base,
+                        });
+                    }
                     next_tramp_offset += UNRESOLVED_TRAMP_SLOT_BYTES as u64;
                     stage_unresolved_trampoline(&mut staging, slot_base, func.nid);
                     nid_to_tramp_opd.insert(func.nid, slot_base);

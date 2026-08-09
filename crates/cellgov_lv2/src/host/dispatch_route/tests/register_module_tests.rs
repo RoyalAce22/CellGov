@@ -27,6 +27,21 @@ fn put(mem: &mut cellgov_mem::GuestMemory, at: u32, bytes: &[u8]) {
 /// when `nids` is non-empty, a one-module import table: entry header
 /// at [`STUB_TABLE`], NID array at [`NIDS`], GOT slots at [`SLOTS`].
 fn memory_with(module_type: u64, size: u64, nids: &[u32]) -> cellgov_mem::GuestMemory {
+    let mut name = LIB.as_bytes().to_vec();
+    name.push(0);
+    memory_with_name(module_type, size, nids, LIB_NAME, &name)
+}
+
+/// Like [`memory_with`], but the entry's library-name pointer and the
+/// raw bytes at that address (written verbatim, no NUL appended) are
+/// caller-controlled.
+fn memory_with_name(
+    module_type: u64,
+    size: u64,
+    nids: &[u32],
+    name_ptr: u32,
+    name_bytes: &[u8],
+) -> cellgov_mem::GuestMemory {
     let mut mem = cellgov_mem::GuestMemory::new(0x10000);
     let mut opt = vec![0u8; 0x30];
     opt[0..8].copy_from_slice(&size.to_be_bytes());
@@ -39,13 +54,13 @@ fn memory_with(module_type: u64, size: u64, nids: &[u32]) -> cellgov_mem::GuestM
         let mut hdr = vec![0u8; 0x1C];
         hdr[0] = 0x1C;
         hdr[6..8].copy_from_slice(&(nids.len() as u16).to_be_bytes());
-        hdr[16..20].copy_from_slice(&LIB_NAME.to_be_bytes());
+        hdr[16..20].copy_from_slice(&name_ptr.to_be_bytes());
         hdr[20..24].copy_from_slice(&NIDS.to_be_bytes());
         hdr[24..28].copy_from_slice(&SLOTS.to_be_bytes());
         put(&mut mem, STUB_TABLE, &hdr);
-        let mut name = LIB.as_bytes().to_vec();
-        name.push(0);
-        put(&mut mem, LIB_NAME, &name);
+        if !name_bytes.is_empty() {
+            put(&mut mem, LIB_NAME, name_bytes);
+        }
         let mut nid_bytes = Vec::new();
         for n in nids {
             nid_bytes.extend_from_slice(&n.to_be_bytes());
@@ -161,6 +176,108 @@ fn a_nid_exported_under_a_different_library_does_not_bind() {
     }
     let (_, manual, linked, unresolved) = host.prx_register_module_witness();
     assert_eq!((manual, linked, unresolved), (1, 0, 1));
+}
+
+#[test]
+fn an_unreadable_library_name_is_a_named_refusal_not_a_bind() {
+    // The export exists under the right library, but the entry's
+    // name pointer aims outside guest memory. The NID must stay
+    // unresolved and the refusal must be named, not absorbed into a
+    // quiet miss.
+    let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
+    host.set_firmware_exports(exports_under(LIB, &[(0xDEAD_BEEF, 0x0080_1234)]));
+    let rt = FakeRuntime::with_memory(memory_with_name(1, 0x30, &[0xDEAD_BEEF], 0xFFFF_0000, &[]));
+    match call(&mut host, &rt, OPT.into()) {
+        Lv2Dispatch::Immediate { code: 0, effects } => assert!(effects.is_empty()),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    }
+    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    assert_eq!((manual, linked, unresolved), (1, 0, 1));
+    assert_eq!(
+        host.invariant_break_site_count("dispatch.prx_register_module_name_unreadable"),
+        1
+    );
+}
+
+#[test]
+fn an_unterminated_library_name_within_the_cap_is_unreadable() {
+    // 256 non-NUL bytes exhaust the read cap without a terminator;
+    // the whole entry resolves under no library and the refusal is
+    // named.
+    let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
+    host.set_firmware_exports(exports_under(LIB, &[(0xDEAD_BEEF, 0x0080_1234)]));
+    let rt = FakeRuntime::with_memory(memory_with_name(
+        1,
+        0x30,
+        &[0xDEAD_BEEF],
+        LIB_NAME,
+        &[b'A'; 256],
+    ));
+    match call(&mut host, &rt, OPT.into()) {
+        Lv2Dispatch::Immediate { code: 0, effects } => assert!(effects.is_empty()),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    }
+    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    assert_eq!((manual, linked, unresolved), (1, 0, 1));
+    assert_eq!(
+        host.invariant_break_site_count("dispatch.prx_register_module_name_unreadable"),
+        1
+    );
+}
+
+#[test]
+fn a_255_byte_library_name_still_resolves() {
+    // The loader-side parsers accept names up to PRX_NAME_MAX_LEN
+    // (256) bytes; the runtime lookup must accept the same length or
+    // a name the loader keyed can never match.
+    let name: String = "a".repeat(255);
+    let mut name_bytes = name.clone().into_bytes();
+    name_bytes.push(0);
+    let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
+    host.set_firmware_exports(exports_under(&name, &[(0xDEAD_BEEF, 0x0080_1234)]));
+    let rt = FakeRuntime::with_memory(memory_with_name(
+        1,
+        0x30,
+        &[0xDEAD_BEEF],
+        LIB_NAME,
+        &name_bytes,
+    ));
+    match call(&mut host, &rt, OPT.into()) {
+        Lv2Dispatch::Immediate { code: 0, effects } => assert_eq!(effects.len(), 1),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    }
+    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    assert_eq!((manual, linked, unresolved), (1, 1, 0));
+}
+
+#[test]
+fn a_non_utf8_library_name_matches_its_lossy_decoded_key() {
+    // The firmware-export keys are minted by the loader's lossy
+    // decoder, so a non-UTF-8 guest name must look up under the same
+    // lossy decoding rather than being rejected outright.
+    let raw = [0xFFu8, b'l', b'i', b'b'];
+    let key = String::from_utf8_lossy(&raw).into_owned();
+    let mut name_bytes = raw.to_vec();
+    name_bytes.push(0);
+    let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
+    host.set_firmware_exports(exports_under(&key, &[(0xDEAD_BEEF, 0x0080_1234)]));
+    let rt = FakeRuntime::with_memory(memory_with_name(
+        1,
+        0x30,
+        &[0xDEAD_BEEF],
+        LIB_NAME,
+        &name_bytes,
+    ));
+    match call(&mut host, &rt, OPT.into()) {
+        Lv2Dispatch::Immediate { code: 0, effects } => assert_eq!(effects.len(), 1),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    }
+    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    assert_eq!((manual, linked, unresolved), (1, 1, 0));
 }
 
 #[test]

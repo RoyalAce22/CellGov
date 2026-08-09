@@ -192,8 +192,7 @@ impl Runtime {
         // model; the mirror at `RSX_FLIP_STATUS_MIRROR_ADDR` is a
         // best-effort projection for titles that poll the address.
         // On failure the projection is dropped (typed invariant break)
-        // but the model advance stands -- rolling `rsx_flip` back to
-        // match a failed projection would corrupt the source of truth.
+        // but the model advance stands.
         if self.rsx_mirror_writes {
             let flip_status_now = self.rsx_flip.status();
             if flip_status_now != flip_status_at_entry {
@@ -326,7 +325,7 @@ impl Runtime {
     /// leave the cursor alone.
     ///
     /// `get` (`0xC000_0044`) is NOT mirrored here. The walker owns
-    /// `get` in steady state (RPCS3 `Emu/RSX/NV47/HW/nv406e.cpp:19`
+    /// `get` in steady state (RPCS3 `Emu/RSX/NV47/HW/nv406e.cpp` `set_reference`
     /// writes `dma.get` from the engine at every SET_REFERENCE
     /// dispatch); the CPU writes it once at FIFO bring-up to seed the
     /// initial read position. [`Self::catch_up_cursor_get_from_mmio`]

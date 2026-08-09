@@ -119,9 +119,7 @@ pub enum PrxLoaderError {
     /// Per-module parse failed.
     #[error("PRX parse: {0}")]
     Parse(#[source] crate::sprx::PrxParseError),
-    /// A closure-selection candidate failed to parse. Carries the
-    /// path: selection scans a whole directory, and a corrupt file
-    /// must be nameable without re-running the scan.
+    /// A closure-selection candidate failed to parse.
     #[error("selection candidate {path}: {source}")]
     CandidateParseFailed {
         /// Candidate file that failed to parse.
@@ -278,7 +276,6 @@ fn parse_imports_or_propagate(
     }
 }
 
-/// 64K-align upwards with overflow detection.
 fn align_up_64k(cursor: u64) -> Result<u64, PrxLoaderError> {
     cursor
         .checked_add(0xFFFF)
@@ -352,9 +349,7 @@ pub fn load_firmware_set(
     // Translate each import's namespace name to the providing
     // module's id. A namespace with no provider in this closure
     // surfaces as MissingDependency unless it is on the
-    // PERMITTED_MISSING_NAMESPACES allowlist. The manifest contract
-    // names imports by namespace; resolving by NID alone would
-    // rebind to any module exporting the same NID.
+    // PERMITTED_MISSING_NAMESPACES allowlist.
     let mut import_targets_by_id: BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>> = BTreeMap::new();
     for (importer, imports) in &imports_by_id {
         let mut targets: BTreeSet<PrxModuleId> = BTreeSet::new();
@@ -406,10 +401,6 @@ pub fn load_firmware_set(
 
     let export_table = FirmwareExportTable::build(&loaded, &dep_graph.order)?;
 
-    // Resolve any env-gated CELLGOV_HLE_RETURN_WATCH NIDs against the
-    // freshly built firmware export table. No-op when the env var is
-    // unset; otherwise registers (nid, entry_pc) so the per-instruction
-    // dispatch hook can match.
     resolve_hle_watch_nids(&export_table, memory);
 
     for id in &dep_graph.order {

@@ -50,7 +50,6 @@ pub struct ClosureSelection {
     pub unprovided_roots: BTreeSet<String>,
 }
 
-/// Per-candidate parse product the walk runs on.
 struct Candidate {
     exports: BTreeSet<String>,
     imports: BTreeSet<String>,
@@ -67,8 +66,7 @@ struct Candidate {
 /// # Errors
 ///
 /// [`PrxLoaderError::CandidateParseFailed`] when a candidate does not
-/// parse as a PRX. A file that cannot parse cannot load, and dropping
-/// it silently would turn a corrupt install into a smaller boot.
+/// parse as a PRX.
 pub fn select_import_closure(
     candidates: &BTreeMap<String, Vec<u8>>,
     roots: Option<&BTreeSet<String>>,

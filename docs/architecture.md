@@ -479,11 +479,24 @@ The NID lookup database (~5,327 entries) lives in
 human-readable name resolution in fault diagnostics.
 
 The PRX loader resolves every game import to a firmware OPD if
-one exists. Imports without a matching firmware export are
-patched to the unresolved-import trampoline (see "LV2 host"
-table). The minimum viable PRX set loads in topological-sort
-order, with `module_start` invoked per module under a synthetic
-kernel-context OPD.
+one exists. Firmware exports are keyed on (namespace, NID) --
+the library name each import entry carries -- so a NID that
+several modules export under different library names cannot
+rebind across them. Imports without a matching firmware export
+are patched to the unresolved-import trampoline (see "LV2 host"
+table), with each unresolved NID attributed to the library that
+requested it. The load set is derived per title
+(`prx_loader::selection::select_import_closure`): a game loads
+the provider closure of the namespaces its binary statically
+imports; a firmware executable, which builds its import tables
+at runtime, loads every viable module in the install. Modules
+that cannot load are pruned with a typed, reported reason
+(unprovided import, multi-segment relocations, duplicate module
+identity) -- never silently dropped. The selected set loads in
+topological-sort order, with `module_start` invoked per module
+under a synthetic kernel-context OPD; a `module_start` that
+faults in guest code is skipped with a named witness rather
+than aborting the boot.
 
 `run-game` exposes two env vars for firmware-loading experiments:
 `CELLGOV_PRX_BASE` overrides the firmware PRX load address, and
@@ -642,7 +655,7 @@ return `CELL_ENOSYS` with a traced diagnostic.
 | `_sys_prx_start_module`                                  | 481    | Two-phase handshake on `pOpt->cmd & 0xF`. cmd=1 writes `~0` (no-start sentinel) to `pOpt->entry` (and `entry2` when `size != 0x20`) and returns CELL_OK; cmd=2 with `res == 0` marks the module started and returns CELL_OK, any other `res` returns `res & 0xFFFF_FFFF`; an unknown nibble is CELL_PRX_ERROR_ERROR. CELL_EINVAL when `id == 0` or `pOpt == 0`; CELL_ESRCH for an unknown id; CELL_EFAULT on unreadable or wrapping `pOpt`. |
 | `_sys_prx_stop_module`                                   | 482    | Stop-side counterpart of 481 on the same option struct, with 481's cmd 1/2 handshake plus cmd 4 (read entries, no state change) and cmd 8 (disable-stop no-op stub). cmd=1 moves a started module to stopping and writes the `~0` sentinel entries; cmd=2 with `res == 0` completes the stop (making a later unload succeed), `res == 1` is CELL_PRX_ERROR_CAN_NOT_STOP, other values are CELL_OK no-ops; wrong-state calls answer CELL_PRX_ERROR_NOT_STARTED / ALREADY_STOPPED / ALREADY_STOPPING. Unlike 481 the id lookup precedes the null-`pOpt` gate (CELL_ESRCH before CELL_EINVAL); CELL_EFAULT on unreadable or wrapping `pOpt`. |
 | `_sys_prx_unload_module`                                 | 483    | Withdraws a never-started module (an sc 480 miss stub the guest abandoned) or one whose sc 482 stop handshake completed, with CELL_OK, freeing its id; a started or stopping resident module is CELL_PRX_ERROR_NOT_REMOVABLE; unknown id is CELL_PRX_ERROR_UNKNOWN_MODULE. Mirrors LV2's INITIALIZED/STOPPED-only withdraw.                                          |
-| `_sys_prx_register_module`                               | 484    | Reads the option struct at r4: sizes `0x1c` / `0x20` are the legacy forms (rebuilt with `type = 0`, so no field reads), `0x30` carries the module type plus the caller's stub table `(ea, size)`; any other size is CELL_EINVAL, a null or unreadable option pointer is CELL_EINVAL / CELL_EFAULT. With `type & 1 == 0` the call is CELL_OK and nothing is bound. With the bit set the caller is handing the kernel its own import tables, which only a privileged CoreOS process may do -- a normal application gets CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`), while a CoreOS caller has its stub table linked against the resolved firmware exports. Privilege comes from the SELF capability header (see "Process privilege"). |
+| `_sys_prx_register_module`                               | 484    | Reads the option struct at r4: sizes `0x1c` / `0x20` are the legacy forms (rebuilt with `type = 0`, so no field reads), `0x30` carries the module type plus the caller's stub table `(ea, size)`; any other size is CELL_EINVAL, a null or unreadable option pointer is CELL_EINVAL / CELL_EFAULT. With `type & 1 == 0` the call is CELL_OK and nothing is bound. With the bit set the caller is handing the kernel its own import tables, which only a privileged CoreOS process may do -- a normal application gets CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`), while a CoreOS caller has its stub table linked against the resolved firmware exports, each entry resolving under the library name it carries; a NID the named library does not export stays unresolved and is attributed to that library in diagnostics. Privilege comes from the SELF capability header (see "Process privilege"). |
 | `_sys_prx_register_library`                              | 486    | CELL_OK -- the kernel's no-match success path.                                                                                                                                                                                                                                                           |
 | `_sys_prx_get_module_list`                               | 494    | `flags & 0x2 == 0` -> CELL_OK no-op. With bit 2 set: CELL_EFAULT on null `pInfo`, otherwise walks the PRX registry (filtering liblv2.sprx) writing kernel ids to the `idlist` slot and the count to `pInfo->count`, capped at the caller's `pInfo->max`. A null `idlist` skips the slot writes but still writes the count. Iteration is BTreeMap-keyed so the byte output is independent of registration order. CELL_EFAULT on a wrapping `pInfo` or unreadable `max` / `idlist` fields. |
 | `_sys_prx_load_module_on_memcontainer`                   | 497    | Same resolver as 480.                                                                                                                                                                                                                                                                                    |
@@ -1400,22 +1413,24 @@ SCE-wrapped (`SCE\0` magic is dispatched to
 `cellgov_install::sce::decrypt_self_to_elf` at load time) -- and
 runs the PPU at the mode's default step budget (256; `--budget`
 overrides). When
-`--firmware-dir` resolves to a directory holding the minimum
-viable PRX set (it auto-defaults to `firmware/sys/external/` if
-that exists), the boot path loads those modules via
-`prx_loader::load_firmware_set`, executes their `module_start`
-functions in dependency order, and resolves game imports against
-real firmware exports. `CELLGOV_NO_FIRMWARE_DIR=1` suppresses the
+`--firmware-dir` resolves to a directory holding the firmware
+SPRX modules (it auto-defaults to `firmware/sys/external/` if
+that exists), the boot path scans every module in the install,
+derives the title's load set
+(`prx_loader::selection::select_import_closure`: a game takes
+the provider closure of its statically imported namespaces, a
+firmware executable takes all viable modules), loads it via
+`prx_loader::load_firmware_set`, executes the modules'
+`module_start` functions in dependency order, and resolves game
+imports against real firmware exports keyed on (namespace,
+NID). `CELLGOV_NO_FIRMWARE_DIR=1` suppresses the
 auto-default; the boot then runs with no PRX loaded and every
-game import routes to the unresolved-import trampoline. The
-firmware set covers liblv2, libsysmodule, libfiber, libsre,
-libfs, libio, libnet, libnetctl, libspurs_jq, libsync2,
-libsysutil, libsysutil_np, libsysutil_avconf_ext, libgcm_sys,
-and libaudio; `_sys_prx_load_module` /
+game import routes to the unresolved-import trampoline.
+`_sys_prx_load_module` /
 `_sys_prx_get_module_list` resolve against the registered
 closure rather than echoing the path-pointer.
 
-Minimum-viable-PRX-set loading is one atomic pipeline. Each parsed SPRX
+Firmware-set loading is one atomic pipeline. Each parsed SPRX
 goes through the relocation applier in
 [`cellgov_ppu::sprx::load_prx`](../crates/cellgov_ppu/src/sprx/load.rs),
 which stages segment bytes, BSS zero-fill, and reloc patches into
@@ -1443,7 +1458,7 @@ different install visibly moves them.
 Common boot sequence (per-title numbers below):
 
 1. Load `EBOOT.elf` into guest memory; parse import tables.
-2. Load the minimum viable PRX set's SPRX closure (atomic-batch
+2. Load the derived SPRX closure (atomic-batch
    reloc applier), apply relocations, surface exports.
 3. Resolve every game GOT slot against the firmware export
    table. NIDs without a matching export are patched to a
@@ -1495,7 +1510,7 @@ clears the libgcm REF spin at offset `0x7a08` that the title
 previously sat in. With the consumer publishing the completion
 token, flOw advances past the spin, past the seeded
 `cellSysutil_Library` `module_start`, and runs the full
-firmware-set boot to `sys_process_exit` at step 11,224. CellGov
+firmware-set boot to `sys_process_exit` at step 11,212. CellGov
 reports `ProcessExit` where RPCS3 continues executing, so the
 cross-runner verdict is `No (outcome: ProcessExit vs Completed)`.
 Along the way the title asks `_sys_prx_load_module` for one name
@@ -1512,7 +1527,7 @@ the post-FIFO-consumer trajectory.
 `FirstRsxWrite` checkpoint historically (the attract-mode loop
 never calls `sys_process_exit`). Past the seeded
 `cellSysutil_Library` `module_start`, SSHD now runs to the
-`MaxSteps` budget cap at step 390,432 without reaching its first
+`MaxSteps` budget cap at step 390,435 without reaching its first
 RSX put-pointer write, so the cross-runner verdict is
 `No (outcome: Timeout vs Completed)`. One unmodeled syscall (465)
 returns `CELL_ENOSYS` along the way. The prior `14,341,833 /
@@ -1532,21 +1547,22 @@ re-fire under the new trajectory. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
 
 **System shell (vsh).** Boots straight out of the firmware image
-with no install step, and reaches `sys_process_exit` at step 832
-with 61 host-invariant breaks. The shell is a far heavier LV2
-consumer than any game in the corpus: it takes the privileged
-`_sys_prx_register_module` branch, drives the event-port family,
-and produces on the firmware system-IPC key namespace
+with no install step, under the full derived load set (130 of
+142 external modules -- the (namespace, NID) export key lets the
+whole install coexist), and runs to the `MaxSteps` budget cap at
+step 390,312. The shell is a far heavier LV2 consumer than any
+game in the corpus: it takes the privileged
+`_sys_prx_register_module` branch and links its runtime import
+tables under the library each entry names, drives the event-port
+family, and produces on the firmware system-IPC key namespace
 (`0x8006_0100_0000_xxxx`) that no game touches.
 
-The exit is not yet attributed. Implementing the event-port family
-moved the anchor from 1,232 steps to 832 -- the shell fails
-*earlier* with an identical exit cause, which means the missing
-ports were a symptom on the path rather than the wall. The
-`config_service_agent` CELL_EPERM that reads like the cause does
-not originate in LV2: `0x80010009` appears nowhere in the run's
-full set of non-zero dispatch returns. What terminates the shell
-is still open.
+The earlier `sys_process_exit` at step 832 was a symptom of the
+partial module set, not a shell defect: with the full set loaded
+the shell runs 470x further and no longer exits. One module's
+`module_start` faults in guest code (cellRtcAlarm, calling into
+a subsystem whose init is a declared LLE divergence) and is
+skipped with a named witness.
 
 ## Microtest corpus
 
