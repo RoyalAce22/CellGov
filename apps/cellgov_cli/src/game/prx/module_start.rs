@@ -152,7 +152,7 @@ pub(in crate::game) fn run_module_start(
     // Cross-module contract: the transient module_start unit shares
     // the primary thread's PpuThreadId so sync syscalls resolve their
     // caller. Real LV2 routes module_start through the calling thread
-    // (sys_prx.cpp:515). Alias is dropped after the unit retires so
+    // (sys_prx.cpp `_sys_prx_start_module`). Alias is dropped after the unit retires so
     // post-boot lookups against this UnitId fall through to the
     // strict ESRCH path.
     if !rt.lv2_host_mut().alias_unit_to_primary(ms_unit_id) {

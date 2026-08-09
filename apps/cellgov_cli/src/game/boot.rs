@@ -816,10 +816,11 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
                     Err(e) => die(&format!("{e}")),
                 }
                 // Each module_start either Skipped (no unit registered,
-                // count unchanged) or Completed (transient unit ended
-                // Faulted, count unchanged). The primary's blocked
-                // override holds, so the count never grew during the
-                // module's sub-loop.
+                // count unchanged) or ran a transient unit that ended
+                // Faulted -- at the return sentinel (Completed) or at
+                // a real fault (Faulted) -- so the count is unchanged
+                // either way. The primary's blocked override holds, so
+                // the count never grew during the module's sub-loop.
                 debug_assert_eq!(
                     rt.registry().runnable_ids().count(),
                     runnable_before,
@@ -898,11 +899,16 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     assert_gating_state_coherent_with_host(&rt, !prx_modules.is_empty());
     // Faulted starts are witnessed skips (BENCH_MODULE_START_FAULTS),
     // so completeness is completed + faulted, not completed alone.
-    debug_assert_eq!(
-        modules_started + modules_faulted,
-        modules_total,
-        "module_start: completed {modules_started} + faulted {modules_faulted}          of {modules_total} modules",
-    );
+    // CELLGOV_SKIP_MODULE_START legitimately runs nothing (its own
+    // witnessed skip), so the invariant binds only when the loop ran.
+    if !skip_ms {
+        debug_assert_eq!(
+            modules_started + modules_faulted,
+            modules_total,
+            "module_start: completed {modules_started} + faulted {modules_faulted} \
+             of {modules_total} modules",
+        );
+    }
 
     // Clear the runtime override so the scheduler can pick the primary
     // on the first `rt.step()` of the title loop.

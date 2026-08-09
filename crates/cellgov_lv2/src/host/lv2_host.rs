@@ -52,7 +52,7 @@ pub struct Lv2Host {
     /// `ipc_key -> mem_id` for process-shared mmapper allocations.
     /// A keyed 332 with a registered key returns the existing
     /// `mem_id` (RPCS3's SYS_SYNC_NOT_CARE path,
-    /// `sys_mmapper.cpp:103-128`); an unregistered key mints and
+    /// `sys_mmapper.cpp` `create_lv2_shm`); an unregistered key mints and
     /// registers. Not folded into [`Self::state_hash`].
     pub(super) mmapper_ipc: BTreeMap<u64, u32>,
     /// Boot-registered seeds keyed by `shm_ipc_key`; immutable after
@@ -173,16 +173,16 @@ pub struct Lv2Host {
     /// Folded into [`Self::state_hash`] when set.
     pub(super) firmware_identity: Option<FirmwareIdentity>,
     /// Witness: Count of `dispatch_thread_initialize`
-    /// invocations. The catch-all `debug_assert!` at
-    /// `host/spu.rs:235` guards against being called with the
-    /// wrong request variant; silence is non-vacuous only when
-    /// the dispatch actually ran. Not folded into
-    /// [`Self::state_hash`] (instrument-only).
+    /// invocations. That dispatcher's catch-all `debug_assert!`
+    /// guards against being called with the wrong request
+    /// variant; silence is non-vacuous only when the dispatch
+    /// actually ran. Not folded into [`Self::state_hash`]
+    /// (instrument-only).
     pub(super) spu_thread_initialize_dispatches: u64,
     /// Witness: Count of `cond_reacquire_wake` calls.
-    /// The `debug_assert!(!use_lwmutex, ...)` at `host/cond.rs:247`
-    /// guards against an unimplemented lwmutex-cond re-acquire
-    /// path; silence is non-vacuous only when the function ran.
+    /// That function's `debug_assert!(!use_lwmutex, ...)` guards
+    /// against an unimplemented lwmutex-cond re-acquire path;
+    /// silence is non-vacuous only when the function ran.
     /// Not folded into [`Self::state_hash`].
     pub(super) cond_reacquire_wake_calls: u64,
     /// `sys_process_get_sdk_version` return value. Read from the
@@ -723,11 +723,12 @@ impl Lv2Host {
     /// `hint` is rounded UP to `align`; misaligned hints do not
     /// fail. RPCS3's `area->alloc` does the same (the
     /// `start_addr != area->addr` check at
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:696` is
+    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp`
+    /// `sys_mmapper_search_and_map` is
     /// area selection, not in-area alignment).
     ///
     /// Returns `None` on exhaustion (matches RPCS3's `CELL_ENOMEM`
-    /// path at `sys_mmapper.cpp:753`).
+    /// path in `sys_mmapper_search_and_map`).
     pub(super) fn mmapper_search_free_range(
         &self,
         hint: u32,

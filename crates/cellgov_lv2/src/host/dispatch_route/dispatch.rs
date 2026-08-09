@@ -316,8 +316,8 @@ impl Lv2Host {
                 self.dispatch_ss_access_control_engine(pkg_id, a2, requester)
             }
             // Both signatures place `path` at arg 0: RPCS3
-            // sys_prx.cpp:506 `_sys_prx_load_module(path, flags, pOpt)`,
-            // sys_prx.cpp:497 `_sys_prx_load_module_on_memcontainer(path, mem_ct, flags, pOpt)`.
+            // sys_prx.cpp `_sys_prx_load_module(path, flags, pOpt)`,
+            // sys_prx.cpp `_sys_prx_load_module_on_memcontainer(path, mem_ct, flags, pOpt)`.
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_LOAD_MODULE,
                 args,

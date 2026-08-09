@@ -5,23 +5,6 @@
 //! the key. Two modules exporting one NID under different library
 //! names each resolve to their own exporter; the firmware corpus
 //! relies on this, and a NID-only key cannot express it.
-//!
-//! Within one library name, the first module in `order` records the
-//! authoritative OPD address. A later module exporting the same NID
-//! under that same name must agree on the address; disagreement
-//! surfaces as [`super::PrxLoaderError::ConflictingExport`] naming
-//! the library, with the recording module as `first` and the
-//! disagreeing module as `second`. The agreement branch (same NID,
-//! same OPD) is a defensive silent no-op; shipping SPRX layouts do
-//! not produce it, since exports point into the exporter's own text
-//! segment.
-//!
-//! `build` requires `order` to be a permutation of `loaded.keys()`:
-//! a duplicate id in `order` surfaces as
-//! [`super::PrxLoaderError::DuplicateModuleInOrder`], and a set
-//! mismatch surfaces as [`super::PrxLoaderError::OrderLoadedMismatch`].
-//! Both precondition checks fail fast so a downstream "unresolved
-//! NID at bind time" cannot mask an upstream contract break.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,9 +13,7 @@ use crate::sprx::LoadedPrx;
 use super::{PrxLoaderError, PrxModuleId};
 
 /// Library name -> NID -> (relocated OPD guest address, originating
-/// module). The origin is retained inside the entry so the
-/// `ConflictingExport` error reports the recorder structurally rather
-/// than via a parallel-map invariant.
+/// module).
 ///
 /// Nested rather than keyed on a `(String, u32)` tuple so a lookup
 /// can borrow the namespace as `&str` without allocating a key.
@@ -58,9 +39,8 @@ impl FirmwareExportTable {
     /// - [`PrxLoaderError::ConflictingExport`] if two modules export
     ///   the same NID *under the same library name* to different OPD
     ///   addresses. The same NID under two different library names is
-    ///   not a conflict -- that is the case this key exists to
-    ///   separate. Same name, same NID, same address is treated as
-    ///   agreement and silently kept; see the module-level note.
+    ///   not a conflict. Same name, same NID, same address is treated
+    ///   as agreement and silently kept.
     pub fn build(
         loaded: &BTreeMap<PrxModuleId, LoadedPrx>,
         order: &[PrxModuleId],
@@ -127,11 +107,9 @@ impl FirmwareExportTable {
     /// Every library exporting `nid`, for callers holding a NID with
     /// no namespace to pair it with.
     ///
-    /// Returns all matches rather than the first: 118 NIDs in the
-    /// retail firmware corpus are exported by two or three libraries,
-    /// so picking one silently resolves to the wrong function in a
-    /// measurable fraction of cases. A caller that cannot disambiguate
-    /// should say so rather than guess.
+    /// Returns all matches rather than the first: the retail firmware
+    /// corpus exports some NIDs from more than one library, so picking
+    /// one silently resolves to the wrong function.
     ///
     /// O(namespaces) -- this walks every library, unlike [`Self::get`].
     pub fn get_any_by_nid(&self, nid: u32) -> Vec<(&str, u64)> {
@@ -151,9 +129,7 @@ impl FirmwareExportTable {
         self.entries.values().all(BTreeMap::is_empty)
     }
 
-    /// Iterate every recorded `(namespace, NID)` pair. Used by
-    /// bidirectional-consistency tests that need a key-only view of
-    /// the table without exposing internal origin tracking.
+    /// Iterate every recorded `(namespace, NID)` pair.
     pub fn keys(&self) -> impl Iterator<Item = (&str, u32)> + '_ {
         self.entries
             .iter()

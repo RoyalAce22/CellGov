@@ -18,21 +18,21 @@ use crate::host::Lv2Host;
 impl Lv2Host {
     /// `sys_fs_write` -- no writable fd in the FS model.
     ///
-    /// # Errors (precedence mirrors RPCS3 sys_fs.cpp:1206-1237)
+    /// # Errors (precedence mirrors RPCS3 `sys_fs_write`)
     ///
     /// 1. `nwrite_ptr == 0` -> `CELL_EFAULT`, no effects.
     /// 2. `buf_ptr == 0` -> `CELL_EFAULT`, 8-byte zero write to `nwrite_ptr`.
     /// 3. fd not in FsStore -> `CELL_EBADF`, 8-byte zero write to `nwrite_ptr`.
-    ///    Matches the `!file` half of `sys_fs.cpp:1219` which runs BEFORE the
-    ///    `!nbytes` short-circuit at :1225 -- a bad fd is EBADF even when
+    ///    Matches the `!file` half of `sys_fs_write`'s fd gate, which runs BEFORE
+    ///    the `!nbytes` short-circuit -- a bad fd is EBADF even when
     ///    `size == 0`.
     /// 4. fd valid, `size == 0` -> `CELL_OK`, 8-byte zero write to `nwrite_ptr`
-    ///    (RPCS3 sys_fs.cpp:1225-1237; our model never sets `file->lock`,
+    ///    (RPCS3 `sys_fs_write`; our model never sets `file->lock`,
     ///    so the EBUSY arm is dead).
     /// 5. fd valid, `size > 0` -> `CELL_EBADF`, 8-byte zero write to `nwrite_ptr`,
     ///    plus `log_invariant_break` documenting the read-only-model rejection.
     ///    Matches the `(nbytes && !(file->flags & CELL_FS_O_ACCMODE))` half of
-    ///    `sys_fs.cpp:1219` for a read-only-opened file.
+    ///    `sys_fs_write` for a read-only-opened file.
     pub(in crate::host) fn dispatch_fs_write(
         &mut self,
         fd: u32,

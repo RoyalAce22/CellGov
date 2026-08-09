@@ -27,6 +27,31 @@ fn check_response_updates_accepts_restage_for_parked_unit() {
 
 #[test]
 #[should_panic(expected = "variant mismatch")]
+fn check_response_updates_rejects_variant_mismatch_for_parked_unit() {
+    // The parked-restage arm must not bypass the variant check: a
+    // restage that changes a parked waiter's payload shape would owe
+    // out-pointer writes the wake path cannot honor.
+    let mut table = SyscallResponseTable::new();
+    let waiter = UnitId::new(7);
+    let _ = table.insert(
+        waiter,
+        PendingResponse::EventQueueReceive {
+            out_ptr: 0x1000,
+            payload: None,
+        },
+    );
+    let updates = vec![(
+        waiter,
+        PendingResponse::EventFlagWake {
+            result_ptr: 0x1000,
+            observed: 0,
+        },
+    )];
+    check_response_updates("test", &table, &[], &updates);
+}
+
+#[test]
+#[should_panic(expected = "variant mismatch")]
 fn check_response_updates_rejects_variant_mismatch() {
     let mut table = SyscallResponseTable::new();
     let waiter = UnitId::new(7);

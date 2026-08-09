@@ -329,7 +329,7 @@ fn a_namespace_event_queue_create_and_enqueue_bump_channel_two() {
 }
 
 /// The oracle passes `SYS_SYNC_NEWLY_CREATED` unconditionally
-/// (RPCS3 `sys_event.cpp:251`), so a duplicate key is refused rather
+/// (RPCS3 `sys_event.cpp`), so a duplicate key is refused rather
 /// than resolved. The witness still records the attempt.
 #[test]
 fn a_second_keyed_create_on_the_same_key_is_eexist() {
@@ -400,8 +400,7 @@ fn connect_ipc_to_an_unregistered_namespace_key_is_esrch_and_still_witnessed() {
         connected,
         Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
     );
-    // Counted before the resolve, so a miss is visible -- this is the
-    // reading a vsh boot produces today.
+    // Counted before the resolve, so a miss is visible.
     assert_eq!(host.system_ipc_witness().event_port_connects, 1);
 }
 

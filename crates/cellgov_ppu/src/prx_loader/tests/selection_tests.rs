@@ -134,6 +134,100 @@ fn a_self_provided_namespace_does_not_prune() {
 }
 
 #[test]
+fn a_duplicate_module_identity_is_pruned_keeping_the_first_path() {
+    // Same module name in both files -> same file-level identity.
+    // The first in path order owns it; the later one is pruned with
+    // the owner named, and its exports stop providing.
+    let cands = candidates(&[
+        (
+            "a.sprx",
+            make_test_prx_graph_node("modaaaa", "libaaaa", None),
+        ),
+        (
+            "z.sprx",
+            make_test_prx_graph_node("modaaaa", "libzzzz", None),
+        ),
+    ]);
+    let sel = select_import_closure(&cands, None).expect("select");
+    assert_eq!(selected(&sel), vec!["a.sprx"]);
+    assert_eq!(
+        sel.pruned,
+        vec![(
+            "z.sprx".to_string(),
+            super::PruneReason::DuplicateModuleIdentity {
+                kept: "a.sprx".to_string(),
+            }
+        )]
+    );
+
+    // The dropped duplicate's library has no provider: a root naming
+    // it must be reported unprovided, not silently resolved.
+    let sel = select_import_closure(&cands, Some(&roots(&["libzzzz"]))).expect("select");
+    assert!(sel.selected.is_empty());
+    assert_eq!(sel.unprovided_roots, roots(&["libzzzz"]));
+}
+
+#[test]
+fn a_corrupt_candidate_is_a_hard_error_naming_the_path() {
+    // "a.sprx" sorts before "bad.sprx", so the good candidate parses
+    // first; the error must still name the corrupt file, not the
+    // first path in the scan.
+    let cands = candidates(&[
+        (
+            "a.sprx",
+            make_test_prx_graph_node("modaaaa", "libaaaa", None),
+        ),
+        ("bad.sprx", b"not a prx".to_vec()),
+    ]);
+    let err = select_import_closure(&cands, None).unwrap_err();
+    match err {
+        crate::prx_loader::PrxLoaderError::CandidateParseFailed { path, .. } => {
+            assert_eq!(path, "bad.sprx");
+        }
+        other => panic!("expected CandidateParseFailed, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_multi_segment_relocation_candidate_is_pruned_not_fatal() {
+    // RELA r_info lives at file 0x3F8 in the fixture; its high half
+    // is the packed segment field (sym), so writing 2 there makes
+    // the first relocation target segment 2 -- the loader-rejected
+    // multi-segment case.
+    let mut multiseg = make_test_prx_graph_node("modcccc", "libcccc", None);
+    multiseg[0x3F8..0x3FC].copy_from_slice(&2u32.to_be_bytes());
+    let cands = candidates(&[
+        (
+            "a.sprx",
+            make_test_prx_graph_node("modaaaa", "libaaaa", None),
+        ),
+        ("c.sprx", multiseg),
+    ]);
+    let sel = select_import_closure(&cands, None).expect("select");
+    assert_eq!(selected(&sel), vec!["a.sprx"]);
+    assert_eq!(
+        sel.pruned,
+        vec![(
+            "c.sprx".to_string(),
+            super::PruneReason::MultiSegmentRelocations
+        )]
+    );
+}
+
+#[test]
+fn empty_candidates_select_nothing_and_report_every_root_unprovided() {
+    let cands: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let sel = select_import_closure(&cands, None).expect("select");
+    assert!(sel.selected.is_empty());
+    assert!(sel.pruned.is_empty());
+    assert!(sel.unprovided_roots.is_empty());
+
+    let sel = select_import_closure(&cands, Some(&roots(&["libaaaa"]))).expect("select");
+    assert!(sel.selected.is_empty());
+    assert_eq!(sel.unprovided_roots, roots(&["libaaaa"]));
+}
+
+#[test]
 fn no_roots_selects_every_viable_candidate() {
     let cands = candidates(&[
         (

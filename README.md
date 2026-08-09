@@ -46,11 +46,11 @@ syscall surface, not a pass/fail scoreboard; each `No` row
 identifies the specific firmware path whose modeling closes
 the divergence. A title transitions from "boots-with-
 honest-gaps" to "boots-clean (converges)" when the
-divergent-gap count for its PRX closure reaches zero. The
-current "minimum PRX set" is scaffolding and not the final goal -- it
-dissolves title-by-title as syscall coverage grows, and
-loading a title's full transitive PRX closure becomes safe
-to attempt precisely because the null backend makes a
+divergent-gap count for its PRX closure reaches zero. Each
+title loads exactly its transitive PRX closure -- the firmware
+modules its binary imports, derived at boot rather than
+hand-listed -- and that full-closure load is safe to attempt
+precisely because the null backend makes a
 premature load fail honestly (named divergence) instead of
 silently (fabricated success). See
 [docs/concepts.md](docs/concepts.md) for the honest /
@@ -88,12 +88,14 @@ Pre-Alpha. What works today:
   implementation target (see "The null backend" above and
   [docs/titles.md](docs/titles.md)).
 - The PS3 system shell boots as a guest process, straight out
-  of the firmware image with no install step. It exercises
-  paths no game reaches -- privileged module registration
-  driven by the executable's own SELF capability header, the
+  of the firmware image with no install step, under nearly the
+  complete firmware module set -- exports resolve under the
+  library name each import carries, so modules that share NIDs
+  coexist. It exercises paths no game reaches -- privileged
+  module registration driven by the executable's own SELF
+  capability header, runtime import linking, the
   event-port family, and the firmware's system-IPC key
-  namespace -- and runs to `sys_process_exit`. What terminates
-  it is not yet attributed.
+  namespace -- and runs to a `MaxSteps` budget cap.
 - PPU and SPU interpreters: complete decode for the PPC64 and
   SPU ABI surfaces titles in the current corpus exercise (see
   [docs/architecture.md](docs/architecture.md) for the current

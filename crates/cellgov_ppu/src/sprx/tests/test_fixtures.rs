@@ -107,7 +107,6 @@ pub(crate) fn make_test_prx() -> Vec<u8> {
     buf[stub1 + 4..stub1 + 8].copy_from_slice(&0x50u32.to_be_bytes());
     buf[stub1 + 8..stub1 + 12].copy_from_slice(&0x60u32.to_be_bytes());
 
-    // Three RELA entries (24 bytes each) at 0x3F0.
     write_relocs(&mut buf);
 
     buf

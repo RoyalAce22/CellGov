@@ -117,7 +117,7 @@ impl Lv2Host {
     /// existing `mem_id` with `size` / `flags` ignored, an
     /// unregistered key mints and registers. Oracle: RPCS3's
     /// `create_lv2_shm` SYS_SYNC_NOT_CARE path
-    /// (`sys_mmapper.cpp:103-128`).
+    /// (`sys_mmapper.cpp`).
     ///
     /// # Errors
     ///
@@ -319,10 +319,11 @@ impl Lv2Host {
     /// write the actual mapped address back to `*alloc_addr_ptr`.
     ///
     /// Oracle: RPCS3
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp:688-762`.
+    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp`
+    /// `sys_mmapper_search_and_map`.
     /// RPCS3 calls `area->alloc(...)` which searches the area; the
     /// out-pointer receives the actually mapped address, not the
-    /// caller's hint (line 760).
+    /// caller's hint.
     ///
     /// # Errors
     /// - `CELL_EFAULT` when `alloc_addr_ptr` is null.
@@ -368,9 +369,7 @@ impl Lv2Host {
         self.mmapper_ledger_insert(found_addr, handle.size);
         // Coherence witness: on success, the install must be pending
         // AND the ledger must contain the address we are writing
-        // back. Catches a future change that drops one half of the
-        // pair (write-back without install, install without ledger
-        // record, etc.). See
+        // back. See
         // `docs/dev/bug_investigations/cellsysutil_mmapper_oob.md`.
         debug_assert!(
             self.pending_region_installs
@@ -961,22 +960,13 @@ impl Lv2Host {
         use cellgov_ps3_abi::elf::{
             PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_NAME_PTR_OFFSET, PRX_IMPORT_NIDS_PTR_OFFSET,
             PRX_IMPORT_NUM_FUNC_OFFSET, PRX_IMPORT_SIZE_OFFSET, PRX_IMPORT_STUB_PTR_OFFSET,
+            PRX_NAME_MAX_LEN,
         };
-
-        /// Longest library name read from a guest entry. Retail names
-        /// top out around 30 bytes (`cellSysutil_avconf_ext`); the cap
-        /// bounds the read, not the format.
-        const MAX_LIBRARY_NAME_LEN: usize = 128;
 
         let mut effects = Vec::new();
         let Some(table_end) = stub_ea.checked_add(stub_size) else {
             return effects;
         };
-        // Local tallies flushed after the walk: `library` below borrows
-        // `self.firmware_exports` across the inner loop, which blocks
-        // incrementing the witness fields in place.
-        let mut linked: u64 = 0;
-        let mut unresolved: u64 = 0;
         let mut cursor = stub_ea;
         while cursor < table_end {
             let Some(hdr) =
@@ -1010,15 +1000,32 @@ impl Lv2Host {
                 hdr[PRX_IMPORT_NAME_PTR_OFFSET + 2],
                 hdr[PRX_IMPORT_NAME_PTR_OFFSET + 3],
             ]);
-            // An unreadable or non-UTF-8 library name resolves under
-            // no library: the entry's NIDs still walk (so the witness
-            // counts them) but every lookup misses. Binding them
-            // against an arbitrary library would be the flat-map bug
-            // this key exists to remove.
-            let library = rt
-                .read_committed_until(u64::from(name_ptr), MAX_LIBRARY_NAME_LEN, 0)
-                .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                .and_then(|name| self.firmware_exports.get(name));
+            // The cap and the lossy decode mirror the loader-side
+            // decoders that mint the `firmware_exports` keys
+            // (`cellgov_ppu::prx::read_cstring`,
+            // `cellgov_ppu::sprx::parse::read_cstring`): a name the
+            // loader accepted must produce the identical lookup key
+            // here, or the library silently never resolves.
+            let library = match rt.read_committed_until(u64::from(name_ptr), PRX_NAME_MAX_LEN, 0) {
+                Some(bytes) => self
+                    .firmware_exports
+                    .get(String::from_utf8_lossy(bytes).as_ref()),
+                None => {
+                    // An unreadable name resolves under no library:
+                    // the entry's NIDs still walk (so the witness
+                    // counts them) but every lookup misses.
+                    self.log_invariant_break(
+                        "dispatch.prx_register_module_name_unreadable",
+                        format_args!(
+                            "import entry at 0x{cursor:08x}: library-name pointer \
+                             0x{name_ptr:08x} is unreadable or unterminated within \
+                             {PRX_NAME_MAX_LEN} bytes; its {func_count} import NID(s) \
+                             stay unresolved",
+                        ),
+                    );
+                    None
+                }
+            };
             for i in 0..u32::from(func_count) {
                 let (Some(nid_at), Some(slot_at)) = (
                     nids_ptr.checked_add(i * 4).map(u64::from),
@@ -1030,7 +1037,7 @@ impl Lv2Host {
                     break;
                 };
                 let Some(&opd) = library.and_then(|lib| lib.get(&nid)) else {
-                    unresolved += 1;
+                    self.prx_register_module_unresolved += 1;
                     continue;
                 };
                 effects.push(Effect::SharedWriteIntent {
@@ -1040,15 +1047,13 @@ impl Lv2Host {
                     source: requester,
                     source_time: self.current_tick,
                 });
-                linked += 1;
+                self.prx_register_module_linked += 1;
             }
             let Some(next) = cursor.checked_add(u32::from(entry_size)) else {
                 break;
             };
             cursor = next;
         }
-        self.prx_register_module_linked += linked;
-        self.prx_register_module_unresolved += unresolved;
         effects
     }
 

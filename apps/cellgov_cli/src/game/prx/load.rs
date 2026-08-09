@@ -29,20 +29,27 @@ fn find_firmware_module(dir_path: &Path, stem: &str) -> Option<PathBuf> {
     None
 }
 
-/// Every `*.sprx` directly under `dir_path`, sorted.
+/// Every `*.sprx` directly under `dir_path`, sorted; an unreadable
+/// directory or entry dies with the io error.
 fn scan_sprx_files(dir_path: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir_path) else {
-        return Vec::new();
-    };
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| {
-            p.extension()
-                .and_then(|x| x.to_str())
-                .is_some_and(|x| x.eq_ignore_ascii_case("sprx"))
-        })
-        .collect();
+    let entries = std::fs::read_dir(dir_path)
+        .unwrap_or_else(|e| die(&format!("prx: read_dir {}: {e}", dir_path.display())));
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|e| {
+            die(&format!(
+                "prx: read_dir entry under {}: {e}",
+                dir_path.display()
+            ))
+        });
+        let p = entry.path();
+        if p.extension()
+            .and_then(|x| x.to_str())
+            .is_some_and(|x| x.eq_ignore_ascii_case("sprx"))
+        {
+            paths.push(p);
+        }
+    }
     paths.sort();
     paths
 }
@@ -201,6 +208,13 @@ pub(in crate::game) fn install_unresolved_trampolines_only(
             return (None, std::collections::BTreeMap::new());
         }
     };
+    if stats.variables_unbound > 0 {
+        eprintln!(
+            "prx: {} variable import(s) left unbound (no variable-import binder; \
+             each vref slot keeps its pre-load bytes)",
+            stats.variables_unbound,
+        );
+    }
     if stats.trampolined == 0 {
         return (None, std::collections::BTreeMap::new());
     }
@@ -270,12 +284,10 @@ pub(in crate::game) fn load_firmware_set_bound(
             dir_path.display()
         ));
     }
+    let mut internal_paths: Vec<(&str, String)> = Vec::new();
     if include_internal {
         let internal_dir = fw_root.join("sys").join("internal");
         for stem in FIRMWARE_INTERNAL_PRX_STEMS {
-            // Absent from the install is fatal rather than a stub: the
-            // shell asked for a real module and a stub would answer
-            // with a handle backed by nothing.
             let path = find_firmware_module(&internal_dir, stem).unwrap_or_else(|| {
                 die(&format!(
                     "prx: firmware-exec boot needs sys/internal/{stem}, absent under {}",
@@ -290,6 +302,7 @@ pub(in crate::game) fn load_firmware_set_bound(
                 Some(s) => s.to_string(),
                 None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
             };
+            internal_paths.push((stem, path_str.clone()));
             candidates.insert(path_str, elf);
         }
     }
@@ -319,6 +332,23 @@ pub(in crate::game) fn load_firmware_set_bound(
     for ns in &selection.unprovided_roots {
         println!("prx: title imports namespace {ns:?}: no firmware module provides it");
     }
+    // A stem present but dropped by selection leaves the shell's
+    // runtime load-by-path unbacked, so it is fatal like an absent
+    // stem.
+    for (stem, path) in &internal_paths {
+        if selection.selected.contains(path) {
+            continue;
+        }
+        let reason = selection
+            .pruned
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, r)| r.to_string())
+            .unwrap_or_else(|| "viable but not selected".to_string());
+        die(&format!(
+            "prx: firmware-exec boot needs sys/internal/{stem}, but selection dropped it: {reason}"
+        ));
+    }
 
     // id_to_stem feeds the boot-side Lv2Host PRX registry so
     // firmware-side `_sys_prx_load_module(path)` can resolve guest
@@ -332,11 +362,10 @@ pub(in crate::game) fn load_firmware_set_bound(
             .expect("selection only returns candidate paths");
         let path = std::path::Path::new(path_str);
         verify_against_manifest(&fw_manifest, &fw_root, path, &elf);
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_string();
+        let stem = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => die(&format!("prx: cannot derive a module stem from {path_str}")),
+        };
         match cellgov_ppu::sprx::parse_prx(&elf) {
             Ok(parsed) => {
                 id_to_stem.insert(parsed.module_id, stem);
@@ -355,7 +384,15 @@ pub(in crate::game) fn load_firmware_set_bound(
         )),
     };
 
-    let prx_high_water = image.loaded.values().map(|p| p.data_end).max().unwrap_or(0);
+    // Empty image (selection chose no module): fall back to prx_base,
+    // not 0, so trampolines never land in the null page where a call
+    // through a null OPD would reach them.
+    let prx_high_water = image
+        .loaded
+        .values()
+        .map(|p| p.data_end)
+        .max()
+        .unwrap_or(prx_base);
     let tramp_base = page_align_up_u64(prx_high_water);
     let stats = match patch_got_atomic(modules, mem, tramp_base, |ns, nid| {
         image.export_table.get(ns, nid)
@@ -364,7 +401,7 @@ pub(in crate::game) fn load_firmware_set_bound(
         Err(e) => die(&format!("prx: firmware-set GOT patch aborted ({e})")),
     };
     println!(
-        "prx: firmware-set loaded {} module(s), {} NIDs in export table, \
+        "prx: firmware-set loaded {} module(s), {} (namespace, NID) pairs in export table, \
          {}/{} game imports resolved to firmware OPDs, \
          {} routed to unresolved-import trampoline (region 0x{tramp_base:08x}..0x{:08x})",
         image.loaded.len(),
@@ -374,8 +411,15 @@ pub(in crate::game) fn load_firmware_set_bound(
         stats.trampolined,
         stats.tramp_region_end,
     );
-    // A shadowed library is a real fidelity fact, not a detail: the
-    // losing module's callers resolve to the winner's implementation.
+    if stats.variables_unbound > 0 {
+        eprintln!(
+            "prx: {} variable import(s) left unbound (no variable-import binder; \
+             each vref slot keeps its pre-load bytes)",
+            stats.variables_unbound,
+        );
+    }
+    // The losing module's callers resolve to the winner's
+    // implementation.
     for (namespace, first, second) in &image.shadowed_export_libraries {
         println!(
             "prx: export namespace {namespace:?} published by {first:?} and {second:?}; \
@@ -390,13 +434,17 @@ pub(in crate::game) fn load_firmware_set_bound(
     let mut exports: std::collections::BTreeMap<String, std::collections::BTreeMap<u32, u32>> =
         std::collections::BTreeMap::new();
     for (ns, nid) in image.export_table.keys() {
-        let Some(opd) = image
-            .export_table
-            .get(ns, nid)
-            .and_then(|opd| u32::try_from(opd).ok())
-        else {
-            continue;
-        };
+        let opd = image.export_table.get(ns, nid).unwrap_or_else(|| {
+            die(&format!(
+                "prx: export table key {ns:?}::0x{nid:08x} vanished between keys() and get()"
+            ))
+        });
+        let opd = u32::try_from(opd).unwrap_or_else(|_| {
+            die(&format!(
+                "prx: export {ns:?}::0x{nid:08x} OPD 0x{opd:x} exceeds the 32-bit \
+                 guest address space"
+            ))
+        });
         exports.entry(ns.to_string()).or_default().insert(nid, opd);
     }
     let host_link = HostLinkMaps {

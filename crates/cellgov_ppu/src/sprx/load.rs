@@ -14,16 +14,10 @@ pub use cellgov_ps3_abi::elf::{
 
 /// Relocation types `apply_relocations` knows how to apply.
 ///
-/// Source of truth for "what the applier covers." Any new arm added
-/// to the `match r.rtype` in `apply_relocations` must also land here;
-/// the `applier_supported_types_match_apply_relocations` test enforces
-/// alignment by feeding each entry through the applier and rejecting
-/// `UnsupportedReloc`.
-///
-/// External consumers (the firmware reloc census regenerator at
-/// `apps/cellgov_cli/tests/firmware_reloc_census.rs`) read this
-/// slice rather than hardcoding a parallel list, so the regenerated
-/// doc cannot disagree silently with the applier.
+/// The firmware reloc census regenerator
+/// (`apps/cellgov_cli/tests/firmware_reloc_census.rs`) reads this
+/// slice; the `applier_supported_types_match_apply_relocations` test
+/// keeps it aligned with the `match` in `apply_relocations`.
 pub const APPLIER_SUPPORTED_TYPES: &[u32] = &[
     R_PPC64_ADDR32,
     R_PPC64_ADDR16_LO,
@@ -72,10 +66,8 @@ pub struct LoadedPrx {
     pub data_end: u64,
     /// Export library name -> its NIDs -> relocated OPD guest addresses.
     ///
-    /// Keyed by library rather than flattened to NIDs because one
-    /// module can publish several libraries, and two modules can
-    /// export the same NID under different library names. A flat
-    /// NID map cannot tell those apart.
+    /// Keyed by library because two modules can export the same NID
+    /// under different library names.
     pub exports: BTreeMap<String, BTreeMap<u32, u64>>,
     /// Relocated `module_start` OPD, if exported.
     pub module_start: Option<LoadedOpd>,
@@ -98,8 +90,6 @@ pub struct LoadedOpd {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PrxLoadError {
     /// Segment does not fit in guest memory at the chosen base.
-    /// `segment` names which of the PRX's two segments (typically
-    /// `"text"` or `"data"`) failed.
     #[error(
         "PRX {segment} segment out of range at 0x{:016x} (size 0x{:x})",
         placement.addr, placement.size
@@ -110,12 +100,7 @@ pub enum PrxLoadError {
         /// Which PRX segment failed: `"text"` or `"data"`.
         segment: &'static str,
     },
-    /// u64 overflow in segment-placement arithmetic. `cause`
-    /// distinguishes the `base + vaddr` (start) computation from the
-    /// `start + size` (end) computation. `segment` names which
-    /// segment produced it. `size` is meaningful only when
-    /// `cause = "start+size"`; for `cause = "base+vaddr"` size is
-    /// reported as 0 because it wasn't involved.
+    /// u64 overflow in segment-placement arithmetic.
     #[error("PRX {segment} segment overflow ({cause}) vaddr 0x{vaddr:016x} size 0x{size:x}")]
     SegmentSizeOverflow {
         /// Which segment produced the overflow.
@@ -129,8 +114,7 @@ pub enum PrxLoadError {
         size: u64,
     },
     /// Text and data segments overlap in guest address space after
-    /// relocation. The applier would clobber bytes of one with the
-    /// other; surfacing rather than silently corrupting.
+    /// relocation.
     #[error(
         "PRX segments overlap: first ends at 0x{first_end:016x}, second starts at 0x{second_start:016x}"
     )]
@@ -140,9 +124,8 @@ pub enum PrxLoadError {
         /// Computed start of the later segment.
         second_start: u64,
     },
-    /// `ByteRange::new` rejected the (addr, length) pair (overflow,
-    /// straddles a region boundary, etc.). Distinct from a region
-    /// validation failure, which produces `MemoryFault`.
+    /// `ByteRange::new` rejected the (addr, length) pair. Distinct
+    /// from a region validation failure, which produces [`Self::MemoryFault`].
     #[error("PRX memory range invalid at 0x{addr:016x} length 0x{length:x}")]
     MemoryRangeInvalid {
         /// Guest address the rejected `ByteRange` started at.
@@ -150,9 +133,7 @@ pub enum PrxLoadError {
         /// Length in bytes the rejected `ByteRange` requested.
         length: u64,
     },
-    /// Per-write region check rejected the access. `source` is the
-    /// underlying `MemError`; covers both reads and writes routed
-    /// through `read_checked` / `apply_commit`.
+    /// Per-write region check rejected the access.
     #[error("PRX memory fault at 0x{addr:016x}: {source}")]
     MemoryFault {
         /// Guest address the faulting access targeted.
@@ -162,9 +143,8 @@ pub enum PrxLoadError {
         source: cellgov_mem::MemError,
     },
     /// Atomic-batch commit through `StagingMemory::drain_into`
-    /// rejected the batch as a whole. Item-level attribution is not
-    /// available at this layer; `count` is the number of staged
-    /// writes the batch carried.
+    /// rejected the batch as a whole; item-level attribution is not
+    /// available at this layer.
     #[error("PRX staging commit ({count} writes) rejected: {source}")]
     BatchCommitFailed {
         /// Number of staged writes in the rejected batch.
@@ -187,8 +167,7 @@ pub enum PrxLoadError {
         seg: usize,
     },
     /// Relocation `offset` falls outside its target segment's
-    /// `memsz`. A malformed PRX could otherwise patch into a
-    /// neighbouring segment.
+    /// `memsz`.
     #[error("PRX reloc type {rtype} offset 0x{offset:x} out of segment (size 0x{seg_size:x})")]
     RelocOffsetOutOfSegment {
         /// Type of the offending relocation.
@@ -211,8 +190,6 @@ pub enum PrxLoadError {
     },
     /// The patch offset, REL24 displacement, or ADDR16_LO_DS value
     /// has nonzero low bits the encoded field cannot represent.
-    /// `kind` distinguishes the three sources; `value` carries the
-    /// offending quantity in the form `kind` names.
     #[error("PRX reloc type {rtype} misaligned ({kind:?}) value {value}")]
     RelocMisaligned {
         /// Type of the offending relocation.
@@ -229,8 +206,7 @@ pub enum PrxLoadError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelocMisalignedKind {
     /// The patch offset within its target segment is not aligned
-    /// to the relocation's write width. Fires before any encoding-
-    /// specific check.
+    /// to the relocation's write width.
     PatchOffset,
     /// REL24 branch displacement (value - target) has nonzero low
     /// bits; the `LI || 0b00` encoding requires the displacement be
@@ -352,9 +328,8 @@ pub fn load_prx(
     })
 }
 
-/// Compute `(start, end)` for a segment in guest space, surfacing
-/// any u64 overflow as `SegmentSizeOverflow`. End is exclusive.
-/// `segment` names which segment for diagnostic attribution.
+/// Compute exclusive-end `(start, end)` for a segment in guest space,
+/// surfacing any u64 overflow as `SegmentSizeOverflow`.
 fn segment_extent(
     base: u64,
     seg: &PrxSegment,
@@ -379,10 +354,9 @@ fn segment_extent(
     Ok((start, end))
 }
 
-/// Region-availability check for a segment placement. The segment's
-/// full `[guest_addr, guest_addr + memsz)` range must lie inside a
-/// single region; `containing_region` returns `None` if it straddles
-/// a boundary or falls outside the region map.
+/// Region-availability check: the segment's full
+/// `[guest_addr, guest_addr + memsz)` range must lie inside a
+/// single region.
 fn validate_segment_region(
     memory: &cellgov_mem::GuestMemory,
     seg: &PrxSegment,
@@ -403,8 +377,7 @@ fn validate_segment_region(
 
 /// Stage one segment's content bytes plus BSS zero-fill into the
 /// shared staging buffer. Region availability is the caller's
-/// responsibility (see [`validate_segment_region`]); this function
-/// only constructs [`cellgov_mem::ByteRange`]s and pushes writes.
+/// responsibility (see [`validate_segment_region`]).
 fn stage_segment(
     staging: &mut cellgov_mem::StagingMemory,
     seg: &PrxSegment,
@@ -462,9 +435,8 @@ fn stage_load(
     apply_relocations(staging, base, &prx.text, &prx.data, &prx.relocations)
 }
 
-/// Width in bytes of the patch a given relocation type writes.
-/// `None` for any unsupported type; caller maps to
-/// `PrxLoadError::UnsupportedReloc`.
+/// Width in bytes of the patch a given relocation type writes;
+/// `None` for any unsupported type.
 fn reloc_write_size(rtype: u32) -> Option<u64> {
     match rtype {
         R_PPC64_ADDR32 | R_PPC64_REL24 => Some(4),
@@ -482,12 +454,6 @@ fn reloc_write_size(rtype: u32) -> Option<u64> {
 ///
 /// On `Err` the caller must `clear()` the staging buffer to satisfy
 /// the [`cellgov_mem::StagingMemory`] Drop precondition.
-///
-/// # Sequencing
-///
-/// Overlapping RMW relocations both see pre-batch content and stage
-/// order picks the winner. The debug-only check below rejects
-/// overlap rather than relying on last-staged-wins.
 fn apply_relocations(
     staging: &mut cellgov_mem::StagingMemory,
     base: u64,
@@ -590,8 +556,7 @@ fn apply_relocations(
                 // ELFv1 PPC64 ABI: ADDR16_LO_DS computes `(S+A) &
                 // 0xFFFC`; the encoded DS field requires the value
                 // be 4-byte-aligned, so the low two bits of (S+A)
-                // must be zero. A misaligned value is a corrupt
-                // PRX; surface rather than silently zero.
+                // must be zero.
                 if value32 & 0x3 != 0 {
                     return Err(PrxLoadError::RelocMisaligned {
                         rtype: r.rtype,
@@ -637,9 +602,6 @@ fn apply_relocations(
                 let patched = (insn & !mask) | ((delta as u32) & mask);
                 patched.to_be_bytes().to_vec()
             }
-            // `reloc_write_size` above already rejected unsupported
-            // types via UnsupportedReloc, so this arm is unreachable
-            // by construction; the panic guards a logic violation.
             other => unreachable!("reloc_write_size accepted type {other} but match arm missing"),
         };
 

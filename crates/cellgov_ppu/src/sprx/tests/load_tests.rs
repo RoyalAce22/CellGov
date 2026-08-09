@@ -212,9 +212,7 @@ fn load_uses_per_opd_toc_not_module_info_toc() {
 
 #[test]
 fn applier_supported_types_match_apply_relocations() {
-    // Feed each type in APPLIER_SUPPORTED_TYPES through
-    // apply_relocations and reject UnsupportedReloc. Other errors
-    // (overflow, write failure) are fine -- absence of
+    // Other errors (overflow, write failure) are fine -- absence of
     // UnsupportedReloc is the invariant.
     let text = PrxSegment {
         vaddr: 0,
@@ -260,13 +258,6 @@ fn is_applier_supported_matches_const_list() {
     assert!(!is_applier_supported(0), "type 0 (NONE) is not covered");
 }
 
-/// Bidirectional check: every reloc-type integer in a swept
-/// range that is NOT in APPLIER_SUPPORTED_TYPES must trigger
-/// UnsupportedReloc, proving `apply_relocations` does not silently
-/// accept any type missing from the const list. The complementary
-/// direction (`applier_supported_types_match_apply_relocations`
-/// above) proves every type in the const list IS handled.
-/// Together: const list and applier match-arm set are equal.
 #[test]
 fn unsupported_reloc_types_rejected_outside_const_list() {
     use std::collections::BTreeSet;
@@ -367,14 +358,21 @@ fn load_real_liblv2() {
         first_insn
     );
 
-    let exports_nid =
-        |nid: u32| -> bool { loaded.exports.values().any(|lib| lib.contains_key(&nid)) };
+    // Assert the library key, not just NID presence anywhere: the
+    // per-library map exists to attribute a NID to its namespace, so
+    // an any-library scan would mask a misattribution. liblv2's own
+    // export table names the sysPrxForUser library (RPCS3 resolves
+    // these NIDs through its sysPrxForUser module).
+    let sys_prx_for_user = loaded
+        .exports
+        .get("sysPrxForUser")
+        .expect("liblv2 publishes the sysPrxForUser library");
     assert!(
-        exports_nid(cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS),
-        "should export sys_initialize_tls"
+        sys_prx_for_user.contains_key(&cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS),
+        "should export sys_initialize_tls under sysPrxForUser"
     );
     assert!(
-        exports_nid(cellgov_ps3_abi::nid::sys_prx_for_user::MALLOC),
-        "should export _sys_malloc"
+        sys_prx_for_user.contains_key(&cellgov_ps3_abi::nid::sys_prx_for_user::MALLOC),
+        "should export _sys_malloc under sysPrxForUser"
     );
 }

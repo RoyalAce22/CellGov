@@ -15,11 +15,6 @@
 //! shadowing, and then counts collisions under both keys. The
 //! shadowing replay mirrors `prx_loader::body::load_firmware_set`; if
 //! that policy changes, this census changes with it.
-//!
-//! A NID that appears in none of the report's tables is exported at
-//! most once in the corpus; the "already resolved by shadowing"
-//! section exists so a conflict observed by hand can be matched
-//! against the corpus rather than assumed missing.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -47,13 +42,17 @@ fn filename_is_safe(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
 }
 
+/// Panics on an unreadable directory or entry: an io failure here
+/// would otherwise shrink the census silently and skew the verdict.
 fn sprx_paths_in(dir: &PathBuf) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
+    let entries =
+        std::fs::read_dir(dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()));
     let mut v: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
+        .map(|entry| {
+            entry
+                .unwrap_or_else(|e| panic!("read_dir entry under {}: {e}", dir.display()))
+                .path()
+        })
         .filter(|p| {
             p.extension()
                 .and_then(|x| x.to_str())
@@ -103,12 +102,25 @@ fn regenerate_firmware_export_conflict_census() {
     for p in sprx_paths_in(&external) {
         candidates.push(("external", p));
     }
-    for p in sprx_paths_in(&internal) {
-        candidates.push(("internal", p));
+    if internal.is_dir() {
+        for p in sprx_paths_in(&internal) {
+            candidates.push(("internal", p));
+        }
     }
 
     let mut modules: Vec<Module> = Vec::new();
     let mut skipped: Vec<(String, String)> = Vec::new();
+    // The census claims to cover the internal sibling; an absent
+    // directory must show up in the report, not shrink it silently.
+    if !internal.is_dir() {
+        skipped.push((
+            "internal/".to_string(),
+            format!(
+                "directory absent ({}); internal modules not censused",
+                internal.display()
+            ),
+        ));
+    }
 
     for (origin, path) in &candidates {
         let name = path

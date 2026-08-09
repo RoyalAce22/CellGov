@@ -571,7 +571,7 @@ pub enum Lv2Request {
         fd: u32,
     },
     /// `sys_fs_write` request. The FS model is read-side only, so
-    /// the dispatcher mirrors RPCS3 sys_fs.cpp:1219 and returns
+    /// the dispatcher mirrors RPCS3 `sys_fs_write` and returns
     /// `CELL_EBADF` for any non-zero write. All four fields ride
     /// to the dispatcher intact (no truncation at classification).
     FsWrite {

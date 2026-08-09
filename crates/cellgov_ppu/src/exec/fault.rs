@@ -22,7 +22,7 @@ pub enum PpuFault {
     #[error("PPU program trap (TO=0x{0:02x})")]
     ProgramTrap(u8),
     // [PPC-Book2 p:24 s:3.3] lwarx/ldarx: "EA must be a multiple of [4/8]"; misaligned raises an alignment interrupt.
-    // [PPC-Book2 p:25 s:3.3] stwcx./stdcx.: same alignment contract; the architecture permits "alignment error handler" OR "boundedly undefined", RPCS3 chose the handler-throw path (PPUThread.cpp:3078/3224).
+    // [PPC-Book2 p:25 s:3.3] stwcx./stdcx.: same alignment contract; the architecture permits "alignment error handler" OR "boundedly undefined", RPCS3 chose the handler-throw path (PPUThread.cpp, `ppu_load_acquire_reservation` / `ppu_store_reservation`).
     /// Reservation operand (`lwarx` / `ldarx` / `stwcx.` / `stdcx.`)
     /// EA not aligned to the operand size (4 or 8 bytes). Payload
     /// is the misaligned EA.
