@@ -5,6 +5,7 @@
 pub mod cond;
 mod errors;
 pub mod event_flag;
+pub mod event_port;
 pub mod event_queue;
 pub mod lwmutex;
 pub mod mutex;
@@ -16,6 +17,10 @@ pub use errors::{DuplicateEnqueue, IdCollision};
 pub use event_flag::{
     EventFlagCreateError, EventFlagEnqueueError, EventFlagEntry, EventFlagTable, EventFlagWait,
     EventFlagWaiter, EventFlagWake,
+};
+pub use event_port::{
+    EventPortConnectError, EventPortDestroyError, EventPortDisconnectError, EventPortEntry,
+    EventPortTable, SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL,
 };
 pub use event_queue::{
     EventPayload, EventQueueEnqueueError, EventQueueEntry, EventQueueReceive, EventQueueSend,

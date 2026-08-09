@@ -49,19 +49,6 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_event_port_connect_local` (136): port -> queue binding
-    /// not modeled; reports CELL_ENOSYS.
-    pub(super) fn dispatch_event_port_connect_local(&mut self) -> Lv2Dispatch {
-        self.log_invariant_break(
-            "dispatch.event_port_connect_local_unmodeled",
-            format_args!(
-                "sys_event_port_connect_local: port -> queue binding not modeled; \
-                 returning CELL_ENOSYS"
-            ),
-        );
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
-    }
-
     /// `sys_memory_container_create` (324): mints a container id and
     /// writes it to `*cid`.
     ///

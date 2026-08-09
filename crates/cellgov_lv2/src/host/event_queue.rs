@@ -12,13 +12,22 @@ use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
-use crate::sync_primitives::EventPayload;
+use crate::sync_primitives::{EventPayload, SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
 
 impl Lv2Host {
-    /// A keyed create mints a fresh queue even when `ipc_key` is
-    /// already registered; the registry exists for attribution, not
-    /// for attach. The namespace witness counts the second caller as a
-    /// reference so the gap is visible in a run.
+    /// A non-zero `ipc_key` registers the queue under that key so
+    /// `sys_event_port_connect_ipc` (140) can find it.
+    ///
+    /// The oracle passes `SYS_SYNC_NEWLY_CREATED` unconditionally
+    /// (RPCS3 `sys_event.cpp:251`), so unlike the shm path there is no
+    /// resolve-or-create: a key already registered is `CELL_EEXIST`,
+    /// and the way a second referent reaches the queue is 140, not a
+    /// second create.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ENOMEM` when the queue table rejects the id.
+    /// - `CELL_EEXIST` when `ipc_key` is already registered.
     pub(super) fn dispatch_event_queue_create(
         &mut self,
         id_ptr: u32,
@@ -26,6 +35,13 @@ impl Lv2Host {
         size: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
+        if ipc_key != 0 && self.event_queue_ipc.contains_key(&ipc_key) {
+            if super::is_system_ipc_key(ipc_key) {
+                self.system_ipc_witness.event_queue_references += 1;
+                self.system_ipc_witness.note_key(ipc_key);
+            }
+            return Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into());
+        }
         // size == 0 defaults to EQUEUE_MAX_RECV_EVENT (127).
         let effective_size = if size == 0 { 127 } else { size };
         let id = self.alloc_id();
@@ -34,20 +50,139 @@ impl Lv2Host {
         }
         if ipc_key != 0 {
             self.event_queue_ipc_keys.insert(id, ipc_key);
-            // First registration wins so a later reference attributes
-            // to the queue the key originally named.
-            let first = !self.event_queue_ipc.contains_key(&ipc_key);
-            self.event_queue_ipc.entry(ipc_key).or_insert(id);
+            self.event_queue_ipc.insert(ipc_key, id);
             if super::is_system_ipc_key(ipc_key) {
-                if first {
-                    self.system_ipc_witness.event_queue_creates += 1;
-                } else {
-                    self.system_ipc_witness.event_queue_references += 1;
-                }
+                self.system_ipc_witness.event_queue_creates += 1;
                 self.system_ipc_witness.note_key(ipc_key);
             }
         }
         self.immediate_write_u32(id, id_ptr, requester)
+    }
+
+    /// `sys_event_port_create` (134).
+    ///
+    /// # Errors
+    ///
+    /// `CELL_EINVAL` for a `port_type` outside
+    /// {`SYS_EVENT_PORT_LOCAL`, `SYS_EVENT_PORT_IPC`}. Oracle: RPCS3
+    /// `sys_event.cpp:621`.
+    pub(super) fn dispatch_event_port_create(
+        &mut self,
+        id_ptr: u32,
+        port_type: u64,
+        name: u64,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        if port_type != SYS_EVENT_PORT_LOCAL && port_type != SYS_EVENT_PORT_IPC {
+            // The oracle logs this too (`sys_event.cpp:623`); a guest
+            // that trips it is passing a type LV2 does not define.
+            self.log_invariant_break(
+                "dispatch.event_port_create_bad_type",
+                format_args!("sys_event_port_create: port_type {port_type} is neither LOCAL(1) nor IPC(3); returning CELL_EINVAL"),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+        self.process_counts.event_port_inc();
+        let id = self.alloc_id();
+        self.event_ports.create_with_id(id, port_type, name);
+        self.immediate_write_u32(id, id_ptr, requester)
+    }
+
+    /// `sys_event_port_destroy` (135).
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` for an unknown port.
+    /// - `CELL_EISCONN` while the port is still connected.
+    pub(super) fn dispatch_event_port_destroy(&mut self, id: u32) -> Lv2Dispatch {
+        use crate::sync_primitives::EventPortDestroyError as E;
+        match self.event_ports.destroy(id) {
+            Ok(()) => {
+                self.process_counts.event_port_dec();
+                Lv2Dispatch::immediate(0)
+            }
+            Err(E::UnknownPort) => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            Err(E::Connected) => Lv2Dispatch::immediate(cell_errors::CELL_EISCONN.into()),
+        }
+    }
+
+    /// `sys_event_port_connect_local` (136) and
+    /// `sys_event_port_connect_ipc` (140).
+    ///
+    /// The two forms differ only in how the queue is named and which
+    /// port type they accept, so they share one body. Oracle: RPCS3
+    /// `sys_event.cpp:665-732`.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when 140 is given `ipc_key == 0`, or the port's
+    ///   type does not match the connect form.
+    /// - `CELL_ESRCH` when either the port or the queue is absent.
+    /// - `CELL_EISCONN` when the port already has a binding.
+    fn dispatch_event_port_connect(
+        &mut self,
+        port_id: u32,
+        queue_id: Option<u32>,
+        required_type: u64,
+    ) -> Lv2Dispatch {
+        use crate::sync_primitives::EventPortConnectError as E;
+        let Some(queue_id) = queue_id else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+        };
+        if self.event_queues.lookup(queue_id).is_none() {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+        }
+        match self.event_ports.connect(port_id, queue_id, required_type) {
+            Ok(()) => Lv2Dispatch::immediate(0),
+            Err(E::UnknownPort) => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            Err(E::WrongType) => Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+            Err(E::AlreadyConnected) => Lv2Dispatch::immediate(cell_errors::CELL_EISCONN.into()),
+        }
+    }
+
+    pub(super) fn dispatch_event_port_connect_local(
+        &mut self,
+        port_id: u32,
+        queue_id: u32,
+    ) -> Lv2Dispatch {
+        self.dispatch_event_port_connect(port_id, Some(queue_id), SYS_EVENT_PORT_LOCAL)
+    }
+
+    /// Resolves `ipc_key` through the keyed-queue registry a keyed
+    /// `sys_event_queue_create` populated.
+    pub(super) fn dispatch_event_port_connect_ipc(
+        &mut self,
+        port_id: u32,
+        ipc_key: u64,
+    ) -> Lv2Dispatch {
+        if ipc_key == 0 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+        let queue_id = self.event_queue_ipc.get(&ipc_key).copied();
+        self.event_port_ipc_connects.0 += 1;
+        if queue_id.is_some() {
+            self.event_port_ipc_connects.1 += 1;
+        }
+        if super::is_system_ipc_key(ipc_key) {
+            self.system_ipc_witness.event_port_connects += 1;
+            self.system_ipc_witness.note_key(ipc_key);
+        }
+        self.dispatch_event_port_connect(port_id, queue_id, SYS_EVENT_PORT_IPC)
+    }
+
+    /// `sys_event_port_disconnect` (137).
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` for an unknown port.
+    /// - `CELL_ENOTCONN` when the port has no binding.
+    pub(super) fn dispatch_event_port_disconnect(&mut self, port_id: u32) -> Lv2Dispatch {
+        use crate::sync_primitives::EventPortDisconnectError as E;
+        match self.event_ports.disconnect(port_id) {
+            Ok(()) => Lv2Dispatch::immediate(0),
+            Err(E::UnknownPort) => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            Err(E::NotConnected) => Lv2Dispatch::immediate(cell_errors::CELL_ENOTCONN.into()),
+        }
     }
 
     pub(super) fn dispatch_event_queue_destroy(&mut self, id: u32) -> Lv2Dispatch {
@@ -58,6 +193,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
         self.event_queues.destroy(id);
+        self.event_ports.unbind_queue(id);
         if let Some(ipc_key) = self.event_queue_ipc_keys.remove(&id) {
             if self.event_queue_ipc.get(&ipc_key) == Some(&id) {
                 self.event_queue_ipc.remove(&ipc_key);
@@ -179,21 +315,30 @@ impl Lv2Host {
         data2: u64,
         data3: u64,
     ) -> Lv2Dispatch {
-        // port_id == queue_id (1:1 binding).
+        // The event's `source` is the port, but delivery goes to the
+        // queue the port is connected to.
+        let Some(port) = self.event_ports.lookup(port_id) else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+        };
+        let Some(queue_id) = port.queue() else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOTCONN.into());
+        };
         let payload = EventPayload {
             source: port_id as u64,
             data1,
             data2,
             data3,
         };
-        let sent = self.event_queues.send_and_wake_or_enqueue(port_id, payload);
+        let sent = self
+            .event_queues
+            .send_and_wake_or_enqueue(queue_id, payload);
         // A refused send (unknown queue, full queue) is not a delivery.
         if matches!(
             sent,
             crate::sync_primitives::EventQueueSend::Enqueued
                 | crate::sync_primitives::EventQueueSend::Woke { .. }
         ) {
-            if let Some(&ipc_key) = self.event_queue_ipc_keys.get(&port_id) {
+            if let Some(&ipc_key) = self.event_queue_ipc_keys.get(&queue_id) {
                 if super::is_system_ipc_key(ipc_key) {
                     self.system_ipc_witness.event_queue_enqueues += 1;
                     self.system_ipc_witness.note_key(ipc_key);

@@ -5,8 +5,8 @@
 Do not edit by hand: the non-ignored test in the same file fails on drift. -->
 
 Of LV2's 1024 syscall slots, 90 classify to a typed arm
-and 21 route to a dedicated arm inside `Unsupported`;
-the remaining **913 slots are the null backend** --
+and 23 route to a dedicated arm inside `Unsupported`;
+the remaining **911 slots are the null backend** --
 the honest traced `CELL_ENOSYS` refusal is the default, not
 the exception. The `null-backend` rows below are the handful
 of syscalls given _dedicated_ routing or diagnostics that
@@ -135,7 +135,9 @@ arm. Any number not listed dispatches to the null backend.
 | Syscall | Name | Fidelity |
 | --- | --- | --- |
 | 48 | `sys_ppu_thread_get_priority` | modeled |
-| 136 | `sys_event_port_connect_local` | null-backend |
+| 136 | `sys_event_port_connect_local` | modeled |
+| 137 | `sys_event_port_disconnect` | modeled |
+| 140 | `sys_event_port_connect_ipc` | modeled |
 | 324 | `sys_memory_container_create` | abi-only |
 | 330 | `sys_mmapper_allocate_address` | partial-state |
 | 332 | `sys_mmapper_allocate_shared_memory` | partial-state |

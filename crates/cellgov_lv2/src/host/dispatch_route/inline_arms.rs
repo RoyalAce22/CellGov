@@ -274,24 +274,6 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `sys_event_port_create` stub: mirrors [`Self::dispatch_timer_create`]
-    /// against the event-port counter.
-    pub(super) fn dispatch_event_port_create(
-        &mut self,
-        id_ptr: u32,
-        requester: UnitId,
-    ) -> Lv2Dispatch {
-        self.process_counts.event_port_inc();
-        let id = self.alloc_id();
-        self.immediate_write_u32(id, id_ptr, requester)
-    }
-
-    /// `sys_event_port_destroy` stub: mirrors [`Self::dispatch_timer_destroy`].
-    pub(super) fn dispatch_event_port_destroy(&mut self) -> Lv2Dispatch {
-        self.process_counts.event_port_dec();
-        Lv2Dispatch::immediate(0)
-    }
-
     /// PS3 usermode never issues `sc` with LEV != 0; reject with
     /// CELL_EINVAL and log.
     pub(super) fn dispatch_hypercall_rejection(

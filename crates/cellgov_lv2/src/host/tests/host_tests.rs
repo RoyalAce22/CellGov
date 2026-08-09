@@ -516,9 +516,10 @@ fn lost_wake_event_queue_send_before_receive_delivers_buffered_payload() {
         Lv2Dispatch::Immediate { effects: e, .. } => extract_write_u32(&e[0]),
         other => panic!("expected Immediate, got {other:?}"),
     };
+    let port_id = connected_port(&mut host, &rt, src, q_id);
     let send = host.dispatch(
         Lv2Request::EventPortSend {
-            port_id: q_id,
+            port_id,
             data1: 0xAAAA,
             data2: 0xBBBB,
             data3: 0xCCCC,
