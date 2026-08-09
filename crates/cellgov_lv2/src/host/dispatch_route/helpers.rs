@@ -79,6 +79,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(u64::from(id));
         }
         self.prx_load_not_found_count += 1;
+        *self.prx_load_misses.entry(path.to_owned()).or_insert(0) += 1;
         Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into())
     }
 

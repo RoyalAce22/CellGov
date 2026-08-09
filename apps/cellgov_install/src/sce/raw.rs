@@ -191,6 +191,41 @@ pub fn parse_program_authority_id(data: &[u8]) -> Result<u64, SceError> {
     Ok(read_be_u64(data, pid_off))
 }
 
+/// Read `ctrl_flags1` from the SELF's plaintext capability header
+/// (supplemental record type 1), or `Ok(None)` when the SELF carries
+/// no such record.
+///
+/// Plaintext, like the program-authority id: no decryption and no RAP
+/// material is involved. The value is the first big-endian word of the
+/// record body.
+///
+/// A SELF with more than one type-1 record resolves to the first, which
+/// is the value the reference implementation ends up with as well (it
+/// takes the first and treats a second as an error).
+///
+/// # Errors
+///
+/// [`SceError::BadMagic`] / [`SceError::TooSmall`] for non-SCE input,
+/// [`SceError::HeaderOffsetOutOfRange`] when the chain escapes the
+/// buffer or a record body is truncated below the 4 bytes the flags
+/// word occupies.
+pub fn parse_control_flags1(data: &[u8]) -> Result<Option<u32>, SceError> {
+    parse_sce_header(data)?;
+    let Some(body) = find_supplemental_body(
+        data,
+        cellgov_ps3_abi::sce::SCE_SUPPLEMENTAL_KIND_PLAINTEXT_CAPABILITY,
+    )?
+    else {
+        return Ok(None);
+    };
+    if body.len() < 4 {
+        return Err(SceError::HeaderOffsetOutOfRange {
+            what: "SELF plaintext capability header body",
+        });
+    }
+    Ok(Some(read_be_u32(body, 0)))
+}
+
 /// Walk an SELF's supplemental-header chain and return the body of
 /// the first record of `kind`, if present.
 ///

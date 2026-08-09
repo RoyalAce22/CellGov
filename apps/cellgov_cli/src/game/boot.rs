@@ -174,6 +174,9 @@ pub(super) struct PrepareOptions<'a> {
     /// Program authority id from the SELF identification header;
     /// `None` (raw-ELF input) keeps the host's retail fallback.
     pub authority_id: Option<u64>,
+    /// `ctrl_flags1` from the SELF's plaintext capability header;
+    /// `None` for raw-ELF input and for a SELF without the record.
+    pub control_flags1: Option<u32>,
     pub firmware_dir: Option<&'a str>,
     pub strict_reserved: bool,
     pub dump_at_pc: Option<u64>,
@@ -333,8 +336,16 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
 
     let code_floor = tramp_base;
 
-    let (mut prx_modules, verified_firmware) =
-        load_firmware_set_bound(opts.firmware_dir, &modules, &mut mem, code_floor);
+    let (mut prx_modules, verified_firmware, firmware_exports) = load_firmware_set_bound(
+        opts.firmware_dir,
+        &modules,
+        &mut mem,
+        code_floor,
+        matches!(
+            opts.title.source,
+            crate::game::manifest::GameSource::FirmwareExec { .. }
+        ),
+    );
     let t_prx_load = t_start.elapsed();
     if prx_modules.is_empty() {
         // No firmware loaded: install trampolines so calls through
@@ -511,6 +522,25 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         rt.lv2_host().program_authority_id(),
         authid_label,
     );
+    // Process privilege, from the SELF's plaintext capability header.
+    // No LV2 arm consults these yet; they are boot identity that the
+    // root-gated surfaces read in their own slices.
+    if let Some(flags) = opts.control_flags1 {
+        rt.lv2_host_mut().set_control_flags1(flags);
+    }
+    // Resolution source for the sc 484 CoreOS manual import link.
+    rt.lv2_host_mut().set_firmware_exports(firmware_exports);
+    {
+        let h = rt.lv2_host();
+        println!(
+            "ctrl_flags1: 0x{:08x} (root={} debug_or_root={} debug={} coreos={})",
+            h.control_flags1(),
+            h.has_root_perm(),
+            h.debug_or_root(),
+            h.has_debug_perm(),
+            h.is_coreos(),
+        );
+    }
     println!(
         "process_param: sdk_version=0x{:08x} ({})",
         proc_param

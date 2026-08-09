@@ -65,6 +65,31 @@ pub const RETAIL_APP_PROGRAM_AUTHORITY_ID: u64 = 0x1010_0000_0100_0003;
 /// Mirrors the PAID_44 value in RPCS3's `unself.h`.
 pub const BDJ_SELF_PROGRAM_AUTHORITY_ID: u64 = 0x1070_0000_3A00_0001;
 
+/// `supplemental_header.type == 1` marks the plaintext capability
+/// header, whose first word is `ctrl_flag1`. The record is 0x30 bytes
+/// (0x10 header + 0x20 body) and is readable without decryption.
+pub const SCE_SUPPLEMENTAL_KIND_PLAINTEXT_CAPABILITY: u32 = 1;
+
+/// A program authority id identifies a CoreOS SELF (vsh and the other
+/// system executables) when its top 28 bits equal this value.
+/// Compare as `authority_id >> 36`.
+pub const COREOS_AUTHORITY_ID_PREFIX: u64 = 0x0107_0000;
+
+/// `ctrl_flags1` mask for root privilege.
+///
+/// The three capability masks overlap and their exact bit semantics
+/// are unconfirmed even in the reference implementation; they are
+/// mirrored as-is rather than reduced to disjoint bits.
+pub const CTRL_FLAGS1_ROOT_MASK: u32 = 0xC000_0000;
+
+/// `ctrl_flags1` mask for debug-or-root privilege. See
+/// [`CTRL_FLAGS1_ROOT_MASK`] on the overlap.
+pub const CTRL_FLAGS1_DEBUG_OR_ROOT_MASK: u32 = 0xE000_0000;
+
+/// `ctrl_flags1` mask for debug privilege. See
+/// [`CTRL_FLAGS1_ROOT_MASK`] on the overlap.
+pub const CTRL_FLAGS1_DEBUG_MASK: u32 = 0xA000_0000;
+
 /// AES-128 key applied (ECB) to the RAP-derived intermediate value to
 /// produce the NPDRM layer key that decrypts the metadata-info
 /// envelope. Mirrors `NP_KLIC_KEY` in RPCS3's `key_vault.h`.

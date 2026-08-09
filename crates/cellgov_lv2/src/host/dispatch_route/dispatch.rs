@@ -142,9 +142,9 @@ impl Lv2Host {
             Lv2Request::SemaphoreGetValue { id, out_ptr } => {
                 self.dispatch_semaphore_get_value(id, out_ptr, requester)
             }
-            Lv2Request::EventQueueCreate { id_ptr, size, .. } => {
-                self.dispatch_event_queue_create(id_ptr, size, requester)
-            }
+            Lv2Request::EventQueueCreate {
+                id_ptr, key, size, ..
+            } => self.dispatch_event_queue_create(id_ptr, key, size, requester),
             Lv2Request::EventQueueDestroy { queue_id } => {
                 self.dispatch_event_queue_destroy(queue_id)
             }
@@ -331,8 +331,8 @@ impl Lv2Host {
             } => self.dispatch_uns_func_462(),
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_REGISTER_MODULE,
-                ..
-            } => self.dispatch_prx_register_module(),
+                args,
+            } => self.dispatch_prx_register_module(args, requester, rt),
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_REGISTER_LIBRARY,
                 ..

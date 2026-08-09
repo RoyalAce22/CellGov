@@ -329,9 +329,41 @@ pub(in crate::game) fn run_module_start(
             println!("    {count:>8}x  syscall {num}");
         }
     }
+    // Namespace witnesses, reported here as well as at bench close
+    // because a module_start that stalls never reaches the step loop.
+    // Counters are cumulative across every module_start so far.
+    let host = rt.lv2_host();
+    let ipc = host.system_ipc_witness();
+    if !ipc.is_silent() {
+        eprintln!(
+            "BENCH_SYSTEM_IPC_WITNESS_AT_MODULE_START: module={} shm_creates={} \
+             shm_attaches={} shm_maps={} shm_writes={} cond_creates={} cond_waits={} \
+             cond_signals={} equeue_creates={} equeue_refs={} equeue_enqueues={} keys={}",
+            prx_info.name,
+            ipc.shm_creates,
+            ipc.shm_attaches,
+            ipc.shm_maps,
+            ipc.shm_writes,
+            ipc.cond_creates,
+            ipc.cond_waits,
+            ipc.cond_signals,
+            ipc.event_queue_creates,
+            ipc.event_queue_references,
+            ipc.event_queue_enqueues,
+            ipc.keys_touched.len(),
+        );
+        let inventory: Vec<String> = ipc
+            .keys_touched
+            .iter()
+            .map(|(key, events)| format!("0x{key:016x}={events}"))
+            .collect();
+        eprintln!(
+            "BENCH_SYSTEM_IPC_KEYS_AT_MODULE_START: {}",
+            inventory.join(",")
+        );
+    }
     // Seeded-ring stall witnesses; the producer-fed waits these count
     // are the declared cellSysutil module_start wall.
-    let host = rt.lv2_host();
     if host.system_seed_applied(cellgov_ps3_abi::system_ipc::CELLSYSUTIL_SHM_IPC_KEY) {
         println!(
             "  module_start seed witnesses: ring_wakes={} cond0_producer_waits={} cond_signals={}",

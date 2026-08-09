@@ -46,6 +46,10 @@ impl Lv2Host {
         if let Some(ipc_key) = cond_attr_ipc_key(attr_ptr, rt) {
             if ipc_key != 0 {
                 self.cond_ipc_keys.insert(id, ipc_key);
+                if super::is_system_ipc_key(ipc_key) {
+                    self.system_ipc_witness.cond_creates += 1;
+                    self.system_ipc_witness.note_key(ipc_key);
+                }
             }
         }
         self.immediate_write_u32(id, id_ptr, requester)
@@ -98,6 +102,22 @@ impl Lv2Host {
         false
     }
 
+    /// Bump the namespace wait / signal witness for a keyed cond.
+    fn note_system_ipc_cond_event(&mut self, id: u32, signal: bool) {
+        let Some(&ipc_key) = self.cond_ipc_keys.get(&id) else {
+            return;
+        };
+        if !super::is_system_ipc_key(ipc_key) {
+            return;
+        }
+        if signal {
+            self.system_ipc_witness.cond_signals += 1;
+        } else {
+            self.system_ipc_witness.cond_waits += 1;
+        }
+        self.system_ipc_witness.note_key(ipc_key);
+    }
+
     /// Bump the producer-wait witness when a park lands on a
     /// cellSysutil cond\[0\] (record-finish wait for the next
     /// producer record).
@@ -124,6 +144,7 @@ impl Lv2Host {
         if self.conds.lookup(id).is_none() {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         }
+        self.note_system_ipc_cond_event(id, false);
         if self.cond_ring_wake_check(id, rt) {
             return Lv2Dispatch::immediate(0);
         }
@@ -213,6 +234,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_cond_signal_all(&mut self, id: u32) -> Lv2Dispatch {
+        self.note_system_ipc_cond_event(id, true);
         let Some(entry) = self.conds.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
@@ -282,6 +304,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_cond_signal_to(&mut self, id: u32, target_thread: u32) -> Lv2Dispatch {
+        self.note_system_ipc_cond_event(id, true);
         let Some(entry) = self.conds.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
@@ -308,6 +331,7 @@ impl Lv2Host {
         if let Some(&ipc_key) = self.cond_ipc_keys.get(&id) {
             *self.cond_keyed_signal_counts.entry(ipc_key).or_insert(0) += 1;
         }
+        self.note_system_ipc_cond_event(id, true);
         let Some(entry) = self.conds.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };

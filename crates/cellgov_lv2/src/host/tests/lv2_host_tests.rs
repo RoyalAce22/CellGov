@@ -449,3 +449,91 @@ fn system_state_seeds_iterate_in_key_order() {
     let keys: Vec<u64> = host.system_state_seeds().keys().copied().collect();
     assert_eq!(keys, vec![0x8006_0100_0000_0010, 0x8006_0100_0000_0030]);
 }
+
+mod privilege_predicates {
+    use super::*;
+
+    /// The three capability masks overlap by construction, so a value
+    /// table is the readable way to pin them. Columns:
+    /// (ctrl_flags1, root, debug_or_root, debug).
+    const CASES: &[(u32, bool, bool, bool)] = &[
+        // No capability header, or one with no privilege bits: the
+        // retail shape.
+        (0x0000_0000, false, false, false),
+        // vsh.self's real value.
+        (0x4000_0000, true, true, false),
+        // bit31 alone is in all three masks.
+        (0x8000_0000, true, true, true),
+        // bit29 is in the debug and debug-or-root masks but not root:
+        // the one value that separates debug from root.
+        (0x2000_0000, false, true, true),
+        // Low bits carry no privilege.
+        (0x0FFF_FFFF, false, false, false),
+        (0xFFFF_FFFF, true, true, true),
+    ];
+
+    #[test]
+    fn masks_match_the_oracle_value_table() {
+        for &(flags, root, debug_or_root, debug) in CASES {
+            let mut host = Lv2Host::new();
+            host.set_control_flags1(flags);
+            assert_eq!(host.has_root_perm(), root, "root for 0x{flags:08x}");
+            assert_eq!(
+                host.debug_or_root(),
+                debug_or_root,
+                "debug_or_root for 0x{flags:08x}"
+            );
+            assert_eq!(host.has_debug_perm(), debug, "debug for 0x{flags:08x}");
+        }
+    }
+
+    #[test]
+    fn root_implies_debug_or_root() {
+        for &(flags, ..) in CASES {
+            let mut host = Lv2Host::new();
+            host.set_control_flags1(flags);
+            assert!(
+                !host.has_root_perm() || host.debug_or_root(),
+                "0x{flags:08x}: root without debug_or_root"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fresh_host_is_unprivileged() {
+        let host = Lv2Host::new();
+        assert_eq!(host.control_flags1(), 0);
+        assert!(!host.has_root_perm());
+        assert!(!host.debug_or_root());
+        assert!(!host.has_debug_perm());
+    }
+
+    #[test]
+    fn coreos_is_authority_id_derived_not_flag_derived() {
+        // A firmware library: CoreOS authority id, no privilege bits.
+        // Proves the two predicates are independent rather than one
+        // being a proxy for the other.
+        let mut lib = Lv2Host::new();
+        lib.set_program_authority_id(0x1070_0000_4000_0001);
+        assert!(lib.is_coreos());
+        assert!(!lib.has_root_perm());
+
+        // vsh.self: CoreOS and root.
+        let mut vsh = Lv2Host::new();
+        vsh.set_program_authority_id(0x1070_0005_FF00_0001);
+        vsh.set_control_flags1(0x4000_0000);
+        assert!(vsh.is_coreos());
+        assert!(vsh.has_root_perm());
+
+        // A retail application is neither.
+        let mut game = Lv2Host::new();
+        game.set_program_authority_id(cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID);
+        assert!(!game.is_coreos());
+        assert!(!game.has_root_perm());
+    }
+
+    #[test]
+    fn the_default_authority_id_is_not_coreos() {
+        assert!(!Lv2Host::new().is_coreos());
+    }
+}

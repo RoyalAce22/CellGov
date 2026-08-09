@@ -56,7 +56,13 @@ pub(super) struct ManifestRsx {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ManifestSource {
+    /// One of `"hdd"`, `"disc"`, `"firmware-exec"`.
     pub(super) kind: String,
+    /// Host directory holding the executable. Required by
+    /// `firmware-exec`, rejected by the other kinds, which derive the
+    /// directory from `content_id`.
+    #[serde(default)]
+    pub(super) path: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]

@@ -83,6 +83,7 @@ struct BootInputs {
     /// Program authority id from the SELF identification header;
     /// `None` for raw-ELF inputs (boot serves the retail fallback).
     authority_id: Option<u64>,
+    control_flags1: Option<u32>,
 }
 
 /// Resolve the title manifest plus the ELF path the boot will run. A
@@ -132,6 +133,7 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
         elf_path,
         elf_data: image.elf_data,
         authority_id: image.authority_id,
+        control_flags1: image.control_flags1,
     }
 }
 
@@ -169,6 +171,7 @@ pub(crate) fn run_game(args: &[String]) {
         elf_path: &inputs.elf_path,
         elf_data: inputs.elf_data,
         authority_id: inputs.authority_id,
+        control_flags1: inputs.control_flags1,
         max_steps,
         trace,
         profile,
@@ -333,6 +336,7 @@ pub(crate) fn bench_boot_once(args: &[String]) {
         },
         inputs.elf_data,
         inputs.authority_id,
+        inputs.control_flags1,
     );
 }
 

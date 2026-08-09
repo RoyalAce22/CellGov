@@ -91,6 +91,11 @@ impl Lv2Host {
         self.invariant_break_sites.get(site).copied().unwrap_or(0)
     }
 
+    /// Every site that broke this run, with its count.
+    pub fn invariant_break_sites(&self) -> &std::collections::BTreeMap<&'static str, u64> {
+        &self.invariant_break_sites
+    }
+
     /// `None` means the thread table and the primitive diverged; the
     /// divergence is logged as an invariant break and the caller must
     /// skip the wake to leave surviving waiters intact.

@@ -40,3 +40,52 @@ pub const MIN_VIABLE_PRX_STEMS: &[&str] = &[
     "libsysutil_avconf_ext",
     "libsysutil_np",
 ];
+
+/// Modules under `sys/internal/` that the system shell loads by full
+/// path at runtime. Kept apart from [`MIN_VIABLE_PRX_STEMS`] because
+/// no title needs them and loading them changes a boot's trajectory:
+/// only a firmware-exec boot pulls this set in.
+///
+/// Evidence-driven and expected to grow as the shell's boot advances.
+/// An entry earns its place by the shell demonstrably requesting the
+/// path, not by shipping in the firmware -- `sys/internal/` holds
+/// dozens of modules the shell never asks for.
+pub const FIRMWARE_INTERNAL_PRX_STEMS: &[&str] = &["libfs_utility2"];
+
+#[cfg(test)]
+mod stem_set_tests {
+    use super::{FIRMWARE_INTERNAL_PRX_STEMS, MIN_VIABLE_PRX_STEMS};
+
+    #[test]
+    fn the_two_stem_sets_are_disjoint() {
+        // An overlap would load the same module twice under two
+        // directories and trip ConflictingExport on the second.
+        for s in FIRMWARE_INTERNAL_PRX_STEMS {
+            assert!(
+                !MIN_VIABLE_PRX_STEMS.contains(s),
+                "{s:?} is in both stem sets"
+            );
+        }
+    }
+
+    #[test]
+    fn stems_carry_no_directory_or_extension() {
+        // Both lists are joined with a directory and a suffix at the
+        // load site, so an entry that already carries either resolves
+        // to a path that does not exist.
+        for s in MIN_VIABLE_PRX_STEMS
+            .iter()
+            .chain(FIRMWARE_INTERNAL_PRX_STEMS)
+        {
+            assert!(!s.is_empty(), "empty stem");
+            assert!(
+                !s.contains('/') && !s.contains('\\'),
+                "{s:?} carries a directory separator"
+            );
+            assert!(
+                !s.ends_with(".sprx") && !s.ends_with(".prx"),
+                "{s:?} carries a file extension"
+            );
+        }
+    }
+}

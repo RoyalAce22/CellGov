@@ -110,12 +110,14 @@ pub fn bench_boot(
     opts: BenchOptions<'_>,
     elf_data: Vec<u8>,
     authority_id: Option<u64>,
+    control_flags1: Option<u32>,
 ) -> BenchBootResult {
     let prepared = boot::prepare(boot::PrepareOptions {
         title: opts.title,
         elf_path: opts.elf_path,
         elf_data,
         authority_id,
+        control_flags1,
         firmware_dir: opts.firmware_dir,
         strict_reserved: opts.strict_reserved,
         dump_at_pc: None,
@@ -163,6 +165,20 @@ pub fn bench_boot(
 
     let host_invariant_breaks = rt.lv2_host().invariant_break_count() as u64;
     eprintln!("BENCH_HOST_INVARIANT_BREAKS: count={host_invariant_breaks}");
+    // Only the first break of a boot prints its detail line, so the
+    // per-site split is the only way to read the rest.
+    let break_sites: Vec<String> = rt
+        .lv2_host()
+        .invariant_break_sites()
+        .iter()
+        .map(|(site, hits)| format!("{site}={hits}"))
+        .collect();
+    if !break_sites.is_empty() {
+        eprintln!(
+            "BENCH_HOST_INVARIANT_BREAK_SITES: {}",
+            break_sites.join(" ")
+        );
+    }
 
     // Per-mnemonic so word-width and doubleword paths report
     // independently.
@@ -243,12 +259,75 @@ pub fn bench_boot(
         "BENCH_AUTHORITY_ID_WITNESS: program_authority_id=0x{program_authority_id:016x} authid_source={authid_source} lwmutex_unknown_locks={lwmutex_unknown_locks}"
     );
 
+    // sc 484 witness: how many register-module calls arrived, how
+    // many took the CoreOS manual-link branch, and how the import
+    // walk resolved. A frontier run with linked=0 means the branch
+    // ran but bound nothing.
+    let (reg_calls, reg_manual, reg_linked, reg_unresolved) =
+        rt.lv2_host().prx_register_module_witness();
+    eprintln!(
+        "BENCH_REGISTER_MODULE_WITNESS: calls={reg_calls} manual={reg_manual} linked_slots={reg_linked} unresolved_nids={reg_unresolved}"
+    );
+
+    // Null-backend inventory: which syscalls this title issued that
+    // CellGov does not implement, and how often. The key set is the
+    // frontier row; the counts separate a probe from a retry loop.
+    let unsupported: Vec<String> = rt
+        .lv2_host()
+        .unsupported_syscalls()
+        .iter()
+        .map(|(number, hits)| format!("{number}={hits}"))
+        .collect();
+    eprintln!(
+        "BENCH_UNSUPPORTED_SYSCALL_WITNESS: distinct={} {}",
+        unsupported.len(),
+        unsupported.join(" "),
+    );
+
+    // System-IPC namespace production witnesses, both channels. A
+    // silent namespace prints all zeros; the key line is suppressed
+    // rather than printed empty.
+    let ipc = rt.lv2_host().system_ipc_witness();
+    eprintln!(
+        "BENCH_SYSTEM_IPC_WITNESS: shm_creates={} shm_attaches={} shm_maps={} shm_writes={} \
+         cond_creates={} cond_waits={} cond_signals={} equeue_creates={} equeue_refs={} \
+         equeue_enqueues={} keys={}",
+        ipc.shm_creates,
+        ipc.shm_attaches,
+        ipc.shm_maps,
+        ipc.shm_writes,
+        ipc.cond_creates,
+        ipc.cond_waits,
+        ipc.cond_signals,
+        ipc.event_queue_creates,
+        ipc.event_queue_references,
+        ipc.event_queue_enqueues,
+        ipc.keys_touched.len(),
+    );
+    if !ipc.keys_touched.is_empty() {
+        let inventory: Vec<String> = ipc
+            .keys_touched
+            .iter()
+            .map(|(key, events)| format!("0x{key:016x}={events}"))
+            .collect();
+        eprintln!("BENCH_SYSTEM_IPC_KEYS: {}", inventory.join(","));
+    }
+
     // PRX load-miss witnesses: firmware misses stubbed with a real
     // kernel id vs loads reported CELL_ENOENT. Non-vacuity evidence
     // for the sc 480 miss arms.
     let prx_hle_stubs = rt.lv2_host().prx_load_hle_stub_count();
     let prx_not_found = rt.lv2_host().prx_load_not_found_count();
     eprintln!("BENCH_PRX_LOAD_WITNESS: hle_stubs={prx_hle_stubs} not_found={prx_not_found}");
+    let prx_misses: Vec<String> = rt
+        .lv2_host()
+        .prx_load_misses()
+        .iter()
+        .map(|(path, hits)| format!("{path}={hits}"))
+        .collect();
+    if !prx_misses.is_empty() {
+        eprintln!("BENCH_PRX_LOAD_MISSES: {}", prx_misses.join(" "));
+    }
 
     BenchBootResult {
         steps,
@@ -266,8 +345,9 @@ pub fn bench_boot_one_run(
     opts: BenchOptions<'_>,
     elf_data: Vec<u8>,
     authority_id: Option<u64>,
+    control_flags1: Option<u32>,
 ) -> BenchBootResult {
-    let r = bench_boot(opts, elf_data, authority_id);
+    let r = bench_boot(opts, elf_data, authority_id, control_flags1);
     println!(
         "BENCH_RESULT steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
         r.steps,
