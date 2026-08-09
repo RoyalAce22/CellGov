@@ -1,6 +1,10 @@
 //! End-to-end exercise of [`cellgov_ppu::prx_loader::load_firmware_set`]
-//! against the user's installed firmware corpus, scoped to the
-//! minimum viable PRX set.
+//! against the user's full installed firmware corpus: every viable
+//! `sys/external` module, selected by import-closure viability.
+//!
+//! The (namespace, NID) export key is what makes the full-install
+//! load possible; a regression to NID-only resolution surfaces here
+//! as `ConflictingExport` long before any title boot sees it.
 //!
 //! Requires the `firmware-corpus` feature and an installed firmware
 //! set; `CELLGOV_FIRMWARE_DIR` overrides the default location.
@@ -14,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use cellgov_mem::{GuestMemory, PageSize, Region};
-use cellgov_ppu::prx_loader::{check_loadable, load_firmware_set, PrxLoaderError, PrxModuleId};
+use cellgov_ppu::prx_loader::{load_firmware_set, select_import_closure, PrxModuleId};
 
 fn workspace_root() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -31,8 +35,6 @@ fn workspace_root() -> PathBuf {
     }
 }
 
-use cellgov_ppu::prx_loader::MIN_VIABLE_PRX_STEMS;
-
 fn locate_firmware_dir() -> PathBuf {
     let dir = match std::env::var("CELLGOV_FIRMWARE_DIR") {
         Ok(s) => PathBuf::from(s),
@@ -40,8 +42,7 @@ fn locate_firmware_dir() -> PathBuf {
     };
     assert!(
         dir.is_dir(),
-        "firmware dir not found: {}. Populate it with `cellgov_install install`, \
-         or point CELLGOV_FIRMWARE_DIR at an existing install.",
+        "firmware dir not found: {}. Populate it with `cellgov_install install`,          or point CELLGOV_FIRMWARE_DIR at an existing install.",
         dir.display()
     );
     dir
@@ -51,75 +52,58 @@ fn locate_firmware_dir() -> PathBuf {
 fn load_firmware_set_against_installed_corpus_is_coherent() {
     let dir = locate_firmware_dir();
 
-    let missing: Vec<&str> = MIN_VIABLE_PRX_STEMS
-        .iter()
-        .filter(|stem| !dir.join(format!("{stem}.sprx")).is_file())
-        .copied()
+    let mut candidates: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let mut sprx_paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("read_dir on validated firmware dir")
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| x.eq_ignore_ascii_case("sprx"))
+        })
         .collect();
+    sprx_paths.sort();
     assert!(
-        missing.is_empty(),
-        "firmware install at {} is incomplete -- missing PRX stems: {missing:?}",
-        dir.display()
+        sprx_paths.len() >= 100,
+        "expected a full retail install (100+ modules), found {} -- wrong directory?",
+        sprx_paths.len()
     );
-
-    let mut bytes_by_path: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    let mut multi_seg_skipped = 0usize;
-    for stem in MIN_VIABLE_PRX_STEMS {
-        let sprx_path = dir.join(format!("{stem}.sprx"));
-        let raw = std::fs::read(&sprx_path)
+    for sprx_path in &sprx_paths {
+        let raw = std::fs::read(sprx_path)
             .unwrap_or_else(|e| panic!("read {}: {e}", sprx_path.display()));
         let elf = cellgov_install::sce::decrypt_self_to_elf(&raw)
             .unwrap_or_else(|e| panic!("decrypt {}: {e}", sprx_path.display()));
-        match check_loadable(&elf) {
-            Ok(()) => {}
-            Err(PrxLoaderError::MultiSegmentRelocations {
-                module,
-                segment_idx,
-            }) => {
-                eprintln!(
-                    "firmware_set_load: skipping {} ({:?}, segment_idx={segment_idx}) -- multi-segment, deferred phase",
-                    sprx_path.display(),
-                    module
-                );
-                multi_seg_skipped += 1;
-                continue;
-            }
-            Err(e) => panic!("check_loadable {}: {e:?}", sprx_path.display()),
-        }
-        // Firmware filenames are ASCII alphanumeric per install
-        // conventions (the reloc-census regenerator enforces the
-        // [A-Za-z0-9._-]+ charset on the same directory). Using
-        // to_str avoids the lossy fallback that BTreeMap key
-        // collisions could exploit.
         let path_str = sprx_path
             .to_str()
             .unwrap_or_else(|| panic!("non-utf8 firmware path: {}", sprx_path.display()))
             .to_string();
-        bytes_by_path.insert(path_str, elf);
+        candidates.insert(path_str, elf);
     }
-    // Mechanism check: every stem in the input set is accounted for
-    // -- either loaded into bytes_by_path or filtered as
-    // multi-segment. A new failure mode in `check_loadable` that
-    // bypasses both buckets would trip here.
-    //
-    // The previous shape ('multi_seg_skipped == MULTI_SEG_EXPECTED')
-    // baked the current corpus snapshot's filter count into the
-    // test; a re-decrypted firmware where the loader picked up
-    // single-segment relocs in a previously-multi-segment module
-    // would break the test without any guard actually regressing,
-    // so the constant was anchor residue (a correctness-improving
-    // shift must not break a liveness test). Dropped.
+
+    let selection = select_import_closure(&candidates, None)
+        .unwrap_or_else(|e| panic!("selection failed: {e}"));
+    for (path, reason) in &selection.pruned {
+        eprintln!("firmware_set_load: pruned {path}: {reason}");
+    }
     assert_eq!(
-        bytes_by_path.len() + multi_seg_skipped,
-        MIN_VIABLE_PRX_STEMS.len(),
-        "stem accounting broken: loaded={} + multi_seg_skipped={} != input={}",
-        bytes_by_path.len(),
-        multi_seg_skipped,
-        MIN_VIABLE_PRX_STEMS.len()
+        selection.selected.len() + selection.pruned.len(),
+        candidates.len(),
+        "selection accounting broken: every candidate is selected or pruned"
     );
+
+    let mut bytes_by_path: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for path in &selection.selected {
+        let elf = candidates
+            .remove(path)
+            .expect("selected path is a candidate");
+        bytes_by_path.insert(path.clone(), elf);
+    }
     eprintln!(
-        "firmware_set_load: prepared {} minimum-viable PRX modules ({multi_seg_skipped} multi-segment-skipped)",
-        bytes_by_path.len()
+        "firmware_set_load: selected {} of {} modules ({} pruned)",
+        bytes_by_path.len(),
+        sprx_paths.len(),
+        selection.pruned.len()
     );
 
     // Pre-parse the set of module ids the input is expected to
@@ -150,25 +134,34 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         "loaded ids differ from input ids (synthesized or dropped)"
     );
 
-    // (b) Export-table == union of every module's exports.
-    let union: BTreeSet<u32> = image
+    // (b) Export-table == union of every module's (library, NID) pairs.
+    let union: BTreeSet<(&str, u32)> = image
         .loaded
         .values()
-        .flat_map(|p| p.exports.keys().copied())
+        .flat_map(|p| {
+            p.exports
+                .iter()
+                .flat_map(|(ns, by_nid)| by_nid.keys().map(move |&nid| (ns.as_str(), nid)))
+        })
         .collect();
-    let table_keys: BTreeSet<u32> = image.export_table.nids().collect();
+    let table_keys: BTreeSet<(&str, u32)> = image.export_table.keys().collect();
     assert_eq!(
         union, table_keys,
         "export table != union of per-module exports"
     );
     for prx in image.loaded.values() {
-        for (&nid, &opd) in &prx.exports {
-            let table_opd = image.export_table.get(nid).expect("nid in table");
-            assert_eq!(
-                table_opd, opd,
-                "table NID 0x{nid:08x} maps to 0x{table_opd:x} but module {} carries 0x{opd:x}",
-                prx.name
-            );
+        for (namespace, by_nid) in &prx.exports {
+            for (&nid, &opd) in by_nid {
+                let table_opd = image
+                    .export_table
+                    .get(namespace, nid)
+                    .expect("(namespace, nid) in table");
+                assert_eq!(
+                    table_opd, opd,
+                    "table {namespace}::0x{nid:08x} maps to 0x{table_opd:x} but module {} carries 0x{opd:x}",
+                    prx.name
+                );
+            }
         }
     }
 
@@ -233,7 +226,7 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     }
 
     eprintln!(
-        "firmware_set_load: loaded {} minimum-viable PRX modules; export table {} NIDs",
+        "firmware_set_load: loaded {} PRX modules; export table {} (namespace, NID) pairs",
         image.loaded.len(),
         image.export_table.len()
     );

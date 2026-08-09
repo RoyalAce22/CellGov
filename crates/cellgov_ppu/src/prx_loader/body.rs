@@ -17,7 +17,7 @@ pub const SYNTHETIC_GAME_ELF_ID: PrxModuleId = PrxModuleId(0x811c_9dc5);
 /// unresolved stub.
 const PERMITTED_MISSING_NAMESPACES: &[&str] = &["cellLibprof"];
 
-fn is_permitted_missing(namespace: &str) -> bool {
+pub(super) fn is_permitted_missing(namespace: &str) -> bool {
     PERMITTED_MISSING_NAMESPACES.contains(&namespace)
 }
 
@@ -62,9 +62,12 @@ pub enum PrxLoaderError {
         /// Namespace id (not file id) that no loaded module publishes.
         target: PrxModuleId,
     },
-    /// Two modules export the same NID with different OPD addresses.
-    #[error("conflicting export NID 0x{nid:08x} between {first:?} and {second:?}")]
+    /// Two modules export the same NID under one library name with
+    /// different OPD addresses.
+    #[error("conflicting export NID 0x{nid:08x} in library {namespace} between {first:?} and {second:?}")]
     ConflictingExport {
+        /// Library name both modules export the NID under.
+        namespace: String,
         /// NID with conflicting export definitions.
         nid: u32,
         /// First exporter encountered in topological order.
@@ -72,10 +75,13 @@ pub enum PrxLoaderError {
         /// Second exporter whose OPD address disagreed with `first`.
         second: PrxModuleId,
     },
-    /// Game ELF / firmware module imports a NID no firmware module exports.
-    #[error("unresolved import NID 0x{nid:08x}")]
+    /// Game ELF / firmware module imports a NID no firmware module
+    /// exports under the library the importer named.
+    #[error("unresolved import NID 0x{nid:08x} from library {namespace}")]
     UnresolvedImport {
-        /// NID that has no matching entry in the merged export table.
+        /// Library the importer asked for the NID from.
+        namespace: String,
+        /// NID that has no matching entry under `namespace`.
         nid: u32,
     },
     /// Per-import Phase-1 failure in `patch_imports_against`: a
@@ -113,6 +119,17 @@ pub enum PrxLoaderError {
     /// Per-module parse failed.
     #[error("PRX parse: {0}")]
     Parse(#[source] crate::sprx::PrxParseError),
+    /// A closure-selection candidate failed to parse. Carries the
+    /// path: selection scans a whole directory, and a corrupt file
+    /// must be nameable without re-running the scan.
+    #[error("selection candidate {path}: {source}")]
+    CandidateParseFailed {
+        /// Candidate file that failed to parse.
+        path: String,
+        /// Underlying parser error.
+        #[source]
+        source: crate::sprx::PrxParseError,
+    },
     /// Per-module import-table parse failed. `NoImportsTable` is the
     /// legitimate no-imports-declared case and does not surface here.
     #[error("import-table parse for {module:?}: {source}")]
@@ -437,11 +454,29 @@ fn resolve_hle_watch_nids(export_table: &FirmwareExportTable, memory: &cellgov_m
         return;
     }
     for nid in crate::hle_watch::watched_nids() {
-        let Some(opd_addr) = export_table.get(nid) else {
-            eprintln!(
-                "[cellgov] hle-return-watch: NID 0x{nid:08x} not present in firmware export table"
-            );
-            continue;
+        let matches = export_table.get_any_by_nid(nid);
+        let (namespace, opd_addr) = match matches.as_slice() {
+            [] => {
+                eprintln!(
+                    "[cellgov] hle-return-watch: NID 0x{nid:08x} not present in firmware export table"
+                );
+                continue;
+            }
+            [(ns, opd)] => (*ns, *opd),
+            ambiguous => {
+                // The watch env var supplies a bare NID. Resolving it
+                // to one of several exporters would watch a function
+                // the operator did not name and report it under the
+                // NID they did.
+                let libs: Vec<&str> = ambiguous.iter().map(|(ns, _)| *ns).collect();
+                eprintln!(
+                    "[cellgov] hle-return-watch: NID 0x{nid:08x} is exported by {} libraries ({}); \
+                     it names no single function, so it is not watched",
+                    ambiguous.len(),
+                    libs.join(", ")
+                );
+                continue;
+            }
         };
         let range = match cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(opd_addr), 4) {
             Some(r) => r,
@@ -463,7 +498,7 @@ fn resolve_hle_watch_nids(export_table: &FirmwareExportTable, memory: &cellgov_m
         };
         let name = cellgov_ps3_abi::nid::lookup(nid)
             .map(|(_, fname)| fname)
-            .unwrap_or("<unknown>");
+            .unwrap_or(namespace);
         crate::hle_watch::register_nid_resolution(nid, name, entry_pc);
     }
 }
@@ -505,8 +540,11 @@ fn patch_imports_against(
     let mut resolved: Vec<(cellgov_mem::ByteRange, [u8; 4])> = Vec::new();
     for imp in imports {
         for f in &imp.functions {
-            let Some(opd_addr) = export_table.get(f.nid) else {
-                return Err(PrxLoaderError::UnresolvedImport { nid: f.nid });
+            let Some(opd_addr) = export_table.get(&imp.name, f.nid) else {
+                return Err(PrxLoaderError::UnresolvedImport {
+                    namespace: imp.name.clone(),
+                    nid: f.nid,
+                });
             };
             let opd_u32 =
                 u32::try_from(opd_addr).map_err(|_| PrxLoaderError::OpdAddressOutOfRange {

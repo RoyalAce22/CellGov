@@ -336,7 +336,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
 
     let code_floor = tramp_base;
 
-    let (mut prx_modules, verified_firmware, firmware_exports) = load_firmware_set_bound(
+    let (mut prx_modules, verified_firmware, mut host_link) = load_firmware_set_bound(
         opts.firmware_dir,
         &modules,
         &mut mem,
@@ -350,11 +350,12 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     if prx_modules.is_empty() {
         // No firmware loaded: install trampolines so calls through
         // unresolved imports produce a structured fault.
-        if let Some(info) =
-            super::prx::install_unresolved_trampolines_only(&modules, &mut mem, code_floor as u64)
-        {
+        let (info, requesters) =
+            super::prx::install_unresolved_trampolines_only(&modules, &mut mem, code_floor as u64);
+        if let Some(info) = info {
             prx_modules.push(info);
         }
+        host_link.unresolved_requesters = requesters;
     }
 
     pre_init_tls(&elf_data, &mut mem);
@@ -528,8 +529,11 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     if let Some(flags) = opts.control_flags1 {
         rt.lv2_host_mut().set_control_flags1(flags);
     }
-    // Resolution source for the sc 484 CoreOS manual import link.
-    rt.lv2_host_mut().set_firmware_exports(firmware_exports);
+    // Resolution source for the sc 484 CoreOS manual import link, and
+    // the requester map behind the unresolved-import diagnostic.
+    rt.lv2_host_mut().set_firmware_exports(host_link.exports);
+    rt.lv2_host_mut()
+        .set_unresolved_import_requesters(host_link.unresolved_requesters);
     {
         let h = rt.lv2_host();
         println!(
@@ -789,15 +793,26 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         .filter(|p| p.module_start.is_some())
         .count();
     let skip_ms = parse_env_bool("CELLGOV_SKIP_MODULE_START");
-    let modules_started = match (prx_modules.is_empty(), skip_ms) {
+    let (modules_started, modules_faulted) = match (prx_modules.is_empty(), skip_ms) {
         (false, false) => {
             let mut completed: usize = 0;
+            let mut faulted: Vec<String> = Vec::new();
             for info in &prx_modules {
                 let runnable_before = rt.registry().runnable_ids().count();
                 match run_module_start(&mut rt, info, kctx_opd) {
                     Ok(ModuleStartOutcome::Completed { .. })
                     | Ok(ModuleStartOutcome::HleStubbed) => completed += 1,
                     Ok(ModuleStartOutcome::Skipped) => {}
+                    // A guest fault leaves the module un-started and the
+                    // boot alive: the runner already tore the transient
+                    // unit down (alias dropped, unit Faulted and skipped),
+                    // and one broken init out of a derived load set must
+                    // not brick every other module's boot. The other
+                    // error kinds can leave a parked unit behind, so they
+                    // stay fatal.
+                    Err(super::prx::ModuleStartError::Faulted { module, .. }) => {
+                        faulted.push(module);
+                    }
                     Err(e) => die(&format!("{e}")),
                 }
                 // Each module_start either Skipped (no unit registered,
@@ -812,19 +827,26 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
                     info.name,
                 );
             }
-            completed
+            if !faulted.is_empty() {
+                eprintln!(
+                    "BENCH_MODULE_START_FAULTS: count={} modules={}",
+                    faulted.len(),
+                    faulted.join(",")
+                );
+            }
+            (completed, faulted.len())
         }
         (false, true) => {
             eprintln!("module_start: skipped (CELLGOV_SKIP_MODULE_START set)");
-            0
+            (0, 0)
         }
         (true, true) => {
             eprintln!(
                 "module_start: CELLGOV_SKIP_MODULE_START set, but no PRX was loaded -- flag has no effect"
             );
-            0
+            (0, 0)
         }
-        (true, false) => 0,
+        (true, false) => (0, 0),
     };
 
     // Override holds for the duration of the module_start loop: the
@@ -874,9 +896,12 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     }
 
     assert_gating_state_coherent_with_host(&rt, !prx_modules.is_empty());
+    // Faulted starts are witnessed skips (BENCH_MODULE_START_FAULTS),
+    // so completeness is completed + faulted, not completed alone.
     debug_assert_eq!(
-        modules_started, modules_total,
-        "module_start: completed {modules_started} of {modules_total} modules",
+        modules_started + modules_faulted,
+        modules_total,
+        "module_start: completed {modules_started} + faulted {modules_faulted}          of {modules_total} modules",
     );
 
     // Clear the runtime override so the scheduler can pick the primary

@@ -53,7 +53,7 @@
     },
     "prx_load_hle_stubs": {
       "value": 0,
-      "class": "at-least"
+      "class": "absent"
     },
     "prx_load_not_found": {
       "value": 1,

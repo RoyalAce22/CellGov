@@ -332,12 +332,25 @@ impl Lv2Host {
     }
 
     /// `UnresolvedImport`: trampoline in an unpatched GOT slot fired;
-    /// log NID + name (if in the db) and return CELL_EINVAL.
+    /// log NID + name (if in the db) + the library the import table
+    /// asked for it from (if the boot recorded one), and return
+    /// CELL_EINVAL.
     pub(super) fn dispatch_unresolved_import(
         &mut self,
         nid: u32,
         _requester: cellgov_event::UnitId,
     ) -> Lv2Dispatch {
+        // The trampoline carries only the NID, so the library comes
+        // from the requester map the GOT patcher installed, not from
+        // the syscall. More than one library can appear when two
+        // import tables both failed to resolve the same NID.
+        let requested_from = match self.unresolved_import_requesters.get(&nid) {
+            None => String::new(),
+            Some(libs) => {
+                let list = libs.iter().map(String::as_str).collect::<Vec<_>>();
+                format!(", imported from {}", list.join(", "))
+            }
+        };
         match cellgov_ps3_abi::nid::lookup(nid) {
             Some((module, name)) => {
                 let module_label = if module.is_empty() {
@@ -348,8 +361,8 @@ impl Lv2Host {
                 self.log_invariant_break(
                     "dispatch.unresolved_import",
                     format_args!(
-                        "GOT slot for NID 0x{nid:08x} ({module_label}::{name}) was not bound \
-                         by patch_got_atomic; returning CELL_EINVAL",
+                        "GOT slot for NID 0x{nid:08x} ({module_label}::{name}{requested_from}) \
+                         was not bound by patch_got_atomic; returning CELL_EINVAL",
                     ),
                 );
             }
@@ -357,8 +370,8 @@ impl Lv2Host {
                 self.log_invariant_break(
                     "dispatch.unresolved_import",
                     format_args!(
-                        "GOT slot for NID 0x{nid:08x} (no name in NID db) was not bound by \
-                         patch_got_atomic; returning CELL_EINVAL",
+                        "GOT slot for NID 0x{nid:08x} (no name in NID db{requested_from}) was \
+                         not bound by patch_got_atomic; returning CELL_EINVAL",
                     ),
                 );
             }

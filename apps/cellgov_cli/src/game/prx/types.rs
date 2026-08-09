@@ -19,6 +19,18 @@ pub(in crate::game) struct PrxLoadInfo {
     pub(in crate::game) module_stop: Option<cellgov_ppu::sprx::LoadedOpd>,
 }
 
+/// The two link-time maps the boot hands the LV2 host: the firmware
+/// export view the sc 484 CoreOS manual link resolves against, and
+/// the trampolined-NID requester list the unresolved-import
+/// diagnostic names libraries from.
+#[derive(Debug, Clone, Default)]
+pub(in crate::game) struct HostLinkMaps {
+    /// Library name -> NID -> OPD, mirroring the loader's export table.
+    pub exports: std::collections::BTreeMap<String, std::collections::BTreeMap<u32, u32>>,
+    /// Trampolined NID -> libraries whose import tables asked for it.
+    pub unresolved_requesters: std::collections::BTreeMap<u32, std::collections::BTreeSet<String>>,
+}
+
 /// Firmware identity read from a `firmware.toml` whose entries
 /// covered every PRX the boot loaded. Bound into the LV2 host so the
 /// PUP revision folds into the state hash.

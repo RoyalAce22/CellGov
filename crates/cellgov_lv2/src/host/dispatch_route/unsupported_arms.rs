@@ -959,14 +959,24 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Vec<Effect> {
         use cellgov_ps3_abi::elf::{
-            PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_NIDS_PTR_OFFSET, PRX_IMPORT_NUM_FUNC_OFFSET,
-            PRX_IMPORT_SIZE_OFFSET, PRX_IMPORT_STUB_PTR_OFFSET,
+            PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_NAME_PTR_OFFSET, PRX_IMPORT_NIDS_PTR_OFFSET,
+            PRX_IMPORT_NUM_FUNC_OFFSET, PRX_IMPORT_SIZE_OFFSET, PRX_IMPORT_STUB_PTR_OFFSET,
         };
+
+        /// Longest library name read from a guest entry. Retail names
+        /// top out around 30 bytes (`cellSysutil_avconf_ext`); the cap
+        /// bounds the read, not the format.
+        const MAX_LIBRARY_NAME_LEN: usize = 128;
 
         let mut effects = Vec::new();
         let Some(table_end) = stub_ea.checked_add(stub_size) else {
             return effects;
         };
+        // Local tallies flushed after the walk: `library` below borrows
+        // `self.firmware_exports` across the inner loop, which blocks
+        // incrementing the witness fields in place.
+        let mut linked: u64 = 0;
+        let mut unresolved: u64 = 0;
         let mut cursor = stub_ea;
         while cursor < table_end {
             let Some(hdr) =
@@ -994,6 +1004,21 @@ impl Lv2Host {
                 hdr[PRX_IMPORT_STUB_PTR_OFFSET + 2],
                 hdr[PRX_IMPORT_STUB_PTR_OFFSET + 3],
             ]);
+            let name_ptr = u32::from_be_bytes([
+                hdr[PRX_IMPORT_NAME_PTR_OFFSET],
+                hdr[PRX_IMPORT_NAME_PTR_OFFSET + 1],
+                hdr[PRX_IMPORT_NAME_PTR_OFFSET + 2],
+                hdr[PRX_IMPORT_NAME_PTR_OFFSET + 3],
+            ]);
+            // An unreadable or non-UTF-8 library name resolves under
+            // no library: the entry's NIDs still walk (so the witness
+            // counts them) but every lookup misses. Binding them
+            // against an arbitrary library would be the flat-map bug
+            // this key exists to remove.
+            let library = rt
+                .read_committed_until(u64::from(name_ptr), MAX_LIBRARY_NAME_LEN, 0)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .and_then(|name| self.firmware_exports.get(name));
             for i in 0..u32::from(func_count) {
                 let (Some(nid_at), Some(slot_at)) = (
                     nids_ptr.checked_add(i * 4).map(u64::from),
@@ -1004,8 +1029,8 @@ impl Lv2Host {
                 let Some(nid) = read_be_u32(rt, nid_at) else {
                     break;
                 };
-                let Some(&opd) = self.firmware_exports.get(&nid) else {
-                    self.prx_register_module_unresolved += 1;
+                let Some(&opd) = library.and_then(|lib| lib.get(&nid)) else {
+                    unresolved += 1;
                     continue;
                 };
                 effects.push(Effect::SharedWriteIntent {
@@ -1015,13 +1040,15 @@ impl Lv2Host {
                     source: requester,
                     source_time: self.current_tick,
                 });
-                self.prx_register_module_linked += 1;
+                linked += 1;
             }
             let Some(next) = cursor.checked_add(u32::from(entry_size)) else {
                 break;
             };
             cursor = next;
         }
+        self.prx_register_module_linked += linked;
+        self.prx_register_module_unresolved += unresolved;
         effects
     }
 

@@ -33,10 +33,12 @@ fn load_test_prx_exports_relocated() {
     let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
     let loaded = load_prx(&prx, &mut mem, base).unwrap();
 
-    assert_eq!(loaded.exports.len(), 3);
-    assert_eq!(loaded.exports[&0xAAAAAAAA], base + 0x40);
-    assert_eq!(loaded.exports[&0xBBBBBBBB], base + 0x50);
-    assert_eq!(loaded.exports[&0xCCCCCCCC], base + 0x60);
+    let lib = &loaded.exports["testlib"];
+    assert_eq!(loaded.exports.len(), 1, "one export library");
+    assert_eq!(lib.len(), 3);
+    assert_eq!(lib[&0xAAAAAAAA], base + 0x40);
+    assert_eq!(lib[&0xBBBBBBBB], base + 0x50);
+    assert_eq!(lib[&0xCCCCCCCC], base + 0x60);
 }
 
 #[test]
@@ -365,16 +367,14 @@ fn load_real_liblv2() {
         first_insn
     );
 
+    let exports_nid =
+        |nid: u32| -> bool { loaded.exports.values().any(|lib| lib.contains_key(&nid)) };
     assert!(
-        loaded
-            .exports
-            .contains_key(&cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS),
+        exports_nid(cellgov_ps3_abi::nid::sys_prx_for_user::INITIALIZE_TLS),
         "should export sys_initialize_tls"
     );
     assert!(
-        loaded
-            .exports
-            .contains_key(&cellgov_ps3_abi::nid::sys_prx_for_user::MALLOC),
+        exports_nid(cellgov_ps3_abi::nid::sys_prx_for_user::MALLOC),
         "should export _sys_malloc"
     );
 }

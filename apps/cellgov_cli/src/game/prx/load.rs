@@ -9,9 +9,9 @@ use cellgov_mem::GuestMemory;
 use crate::cli::exit::die;
 
 use super::got::patch_got_atomic;
-use super::types::{PrxLoadInfo, PrxLoadStageError, VerifiedFirmware};
+use super::types::{HostLinkMaps, PrxLoadInfo, PrxLoadStageError, VerifiedFirmware};
 
-use cellgov_ppu::prx_loader::{FIRMWARE_INTERNAL_PRX_STEMS, MIN_VIABLE_PRX_STEMS};
+use cellgov_ppu::prx_loader::FIRMWARE_INTERNAL_PRX_STEMS;
 
 /// Locate the firmware module file for `stem` under `dir_path`.
 ///
@@ -27,6 +27,24 @@ fn find_firmware_module(dir_path: &Path, stem: &str) -> Option<PathBuf> {
         return Some(prx);
     }
     None
+}
+
+/// Every `*.sprx` directly under `dir_path`, sorted.
+fn scan_sprx_files(dir_path: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir_path) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| x.eq_ignore_ascii_case("sprx"))
+        })
+        .collect();
+    paths.sort();
+    paths
 }
 
 /// Locate and parse `firmware.toml` at or above `dir_path`.
@@ -166,29 +184,32 @@ fn resolve_prx_base(code_floor: u32) -> u64 {
 /// Install unresolved-import trampolines for every game import when
 /// no firmware was loaded. Returns a synthetic [`PrxLoadInfo`]
 /// describing the trampoline region so boot.rs's alloc-base
-/// computation accounts for it, or `None` when the game has no
-/// imports.
+/// computation accounts for it (`None` when the game has no imports),
+/// plus the trampolined-NID requester map for the host diagnostic.
 pub(in crate::game) fn install_unresolved_trampolines_only(
     modules: &[cellgov_ppu::prx::ImportedModule],
     mem: &mut GuestMemory,
     tramp_base: u64,
-) -> Option<PrxLoadInfo> {
-    let stats = match patch_got_atomic(modules, mem, tramp_base, |_| None) {
+) -> (
+    Option<PrxLoadInfo>,
+    std::collections::BTreeMap<u32, std::collections::BTreeSet<String>>,
+) {
+    let stats = match patch_got_atomic(modules, mem, tramp_base, |_, _| None) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("prx: trampoline-only GOT patch aborted ({e})");
-            return None;
+            return (None, std::collections::BTreeMap::new());
         }
     };
     if stats.trampolined == 0 {
-        return None;
+        return (None, std::collections::BTreeMap::new());
     }
     println!(
         "prx: no firmware loaded -- {} game imports routed to unresolved-import trampoline \
          (region 0x{tramp_base:08x}..0x{:08x})",
         stats.trampolined, stats.tramp_region_end,
     );
-    Some(PrxLoadInfo {
+    let info = PrxLoadInfo {
         name: "<unresolved-import-trampolines>".to_string(),
         stem: String::new(),
         base: tramp_base,
@@ -197,7 +218,8 @@ pub(in crate::game) fn install_unresolved_trampolines_only(
         relocs_applied: 0,
         module_start: None,
         module_stop: None,
-    })
+    };
+    (Some(info), stats.unresolved_requesters)
 }
 
 /// Load the minimum viable PRX set via
@@ -218,67 +240,42 @@ pub(in crate::game) fn load_firmware_set_bound(
     mem: &mut GuestMemory,
     code_floor: u32,
     include_internal: bool,
-) -> (
-    Vec<PrxLoadInfo>,
-    Option<VerifiedFirmware>,
-    std::collections::BTreeMap<u32, u32>,
-) {
+) -> (Vec<PrxLoadInfo>, Option<VerifiedFirmware>, HostLinkMaps) {
     let Some(dir) = firmware_dir else {
         println!("prx: firmware-set mode requires --firmware-dir");
-        return (Vec::new(), None, std::collections::BTreeMap::new());
+        return (Vec::new(), None, HostLinkMaps::default());
     };
     let dir_path = std::path::PathBuf::from(dir);
     let (fw_root, fw_manifest) = locate_and_parse_manifest(&dir_path);
 
-    let mut bytes_by_path: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    // id_to_stem feeds the boot-side Lv2Host PRX registry so
-    // firmware-side `_sys_prx_load_module(path)` can resolve guest
-    // paths back to a kernel id.
-    let mut id_to_stem: BTreeMap<cellgov_ppu::prx_loader::PrxModuleId, String> = BTreeMap::new();
-    let mut missing: Vec<&str> = Vec::new();
-    for stem in MIN_VIABLE_PRX_STEMS {
-        let path = match find_firmware_module(&dir_path, stem) {
-            Some(p) => p,
-            None => {
-                missing.push(*stem);
-                continue;
-            }
-        };
+    // Candidate universe: every module in the firmware directory,
+    // plus -- for a firmware executable -- the sys/internal stems the
+    // shell loads by path at runtime. Their imports participate in
+    // viability like anyone else's.
+    let mut candidates: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for path in scan_sprx_files(&dir_path) {
         let elf = match read_firmware_module_elf(&path) {
             Ok(d) => d,
             Err(e) => die(&format!("prx: {e}")),
         };
-        verify_against_manifest(&fw_manifest, &fw_root, &path, &elf);
-        // Pull module_id up front so the post-load image.loaded map
-        // can be keyed back to the file stem (the registry is keyed
-        // by stem since cellSysmoduleLoadModule passes guest paths).
-        match cellgov_ppu::sprx::parse_prx(&elf) {
-            Ok(parsed) => {
-                id_to_stem.insert(parsed.module_id, (*stem).to_string());
-            }
-            Err(e) => die(&format!("prx: failed to parse {}: {e:?}", path.display())),
-        }
         let path_str = match path.to_str() {
             Some(s) => s.to_string(),
             None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
         };
-        bytes_by_path.insert(path_str, elf);
+        candidates.insert(path_str, elf);
     }
-    if !missing.is_empty() {
+    if candidates.is_empty() {
         die(&format!(
-            "prx: firmware-set mode: minimum viable PRX stems missing under {}: {missing:?}",
+            "prx: firmware-set mode: no .sprx modules under {}",
             dir_path.display()
         ));
     }
-
-    // A firmware executable loads these by full path at runtime; the
-    // guest's sc 480 then resolves them by stem out of this same set.
-    // Absent from the install is fatal here rather than a stub: the
-    // shell asked for a real module and a stub would answer with a
-    // handle backed by nothing.
     if include_internal {
         let internal_dir = fw_root.join("sys").join("internal");
         for stem in FIRMWARE_INTERNAL_PRX_STEMS {
+            // Absent from the install is fatal rather than a stub: the
+            // shell asked for a real module and a stub would answer
+            // with a handle backed by nothing.
             let path = find_firmware_module(&internal_dir, stem).unwrap_or_else(|| {
                 die(&format!(
                     "prx: firmware-exec boot needs sys/internal/{stem}, absent under {}",
@@ -289,19 +286,64 @@ pub(in crate::game) fn load_firmware_set_bound(
                 Ok(d) => d,
                 Err(e) => die(&format!("prx: {e}")),
             };
-            verify_against_manifest(&fw_manifest, &fw_root, &path, &elf);
-            match cellgov_ppu::sprx::parse_prx(&elf) {
-                Ok(parsed) => {
-                    id_to_stem.insert(parsed.module_id, (*stem).to_string());
-                }
-                Err(e) => die(&format!("prx: failed to parse {}: {e:?}", path.display())),
-            }
             let path_str = match path.to_str() {
                 Some(s) => s.to_string(),
                 None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
             };
-            bytes_by_path.insert(path_str, elf);
+            candidates.insert(path_str, elf);
         }
+    }
+
+    // A game names its roots in its own import table; a firmware
+    // executable builds its import tables at runtime and names none,
+    // so its load set is every viable candidate.
+    let root_namespaces: Option<std::collections::BTreeSet<String>> = if include_internal {
+        None
+    } else {
+        Some(modules.iter().map(|m| m.name.clone()).collect())
+    };
+    let selection =
+        match cellgov_ppu::prx_loader::select_import_closure(&candidates, root_namespaces.as_ref())
+        {
+            Ok(s) => s,
+            Err(e) => die(&format!("prx: firmware-set selection failed: {e}")),
+        };
+    println!(
+        "prx: import-closure selection: {} of {} candidate module(s) selected",
+        selection.selected.len(),
+        candidates.len(),
+    );
+    for (path, reason) in &selection.pruned {
+        println!("prx: pruned {path}: {reason}");
+    }
+    for ns in &selection.unprovided_roots {
+        println!("prx: title imports namespace {ns:?}: no firmware module provides it");
+    }
+
+    // id_to_stem feeds the boot-side Lv2Host PRX registry so
+    // firmware-side `_sys_prx_load_module(path)` can resolve guest
+    // paths back to a kernel id (the registry is keyed by stem since
+    // cellSysmoduleLoadModule passes guest paths).
+    let mut bytes_by_path: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let mut id_to_stem: BTreeMap<cellgov_ppu::prx_loader::PrxModuleId, String> = BTreeMap::new();
+    for path_str in &selection.selected {
+        let elf = candidates
+            .remove(path_str)
+            .expect("selection only returns candidate paths");
+        let path = std::path::Path::new(path_str);
+        verify_against_manifest(&fw_manifest, &fw_root, path, &elf);
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        match cellgov_ppu::sprx::parse_prx(&elf) {
+            Ok(parsed) => {
+                id_to_stem.insert(parsed.module_id, stem);
+            }
+            Err(e) => die(&format!("prx: failed to parse {path_str}: {e:?}")),
+        }
+        bytes_by_path.insert(path_str.clone(), elf);
     }
 
     let prx_base = resolve_prx_base(code_floor);
@@ -315,8 +357,9 @@ pub(in crate::game) fn load_firmware_set_bound(
 
     let prx_high_water = image.loaded.values().map(|p| p.data_end).max().unwrap_or(0);
     let tramp_base = page_align_up_u64(prx_high_water);
-    let stats = match patch_got_atomic(modules, mem, tramp_base, |nid| image.export_table.get(nid))
-    {
+    let stats = match patch_got_atomic(modules, mem, tramp_base, |ns, nid| {
+        image.export_table.get(ns, nid)
+    }) {
         Ok(s) => s,
         Err(e) => die(&format!("prx: firmware-set GOT patch aborted ({e})")),
     };
@@ -340,19 +383,26 @@ pub(in crate::game) fn load_firmware_set_bound(
         );
     }
 
-    // Pure-data NID -> OPD view for the sc 484 CoreOS manual link;
-    // the host cannot reach the loader's export table itself.
-    let export_map: std::collections::BTreeMap<u32, u32> = image
-        .export_table
-        .nids()
-        .filter_map(|nid| {
-            image
-                .export_table
-                .get(nid)
-                .and_then(|opd| u32::try_from(opd).ok())
-                .map(|opd| (nid, opd))
-        })
-        .collect();
+    // Pure-data library -> NID -> OPD view for the sc 484 CoreOS
+    // manual link; the host cannot reach the loader's export table
+    // itself. Same key as the table -- the arm reads each guest
+    // import entry's library-name pointer and resolves under it.
+    let mut exports: std::collections::BTreeMap<String, std::collections::BTreeMap<u32, u32>> =
+        std::collections::BTreeMap::new();
+    for (ns, nid) in image.export_table.keys() {
+        let Some(opd) = image
+            .export_table
+            .get(ns, nid)
+            .and_then(|opd| u32::try_from(opd).ok())
+        else {
+            continue;
+        };
+        exports.entry(ns.to_string()).or_default().insert(nid, opd);
+    }
+    let host_link = HostLinkMaps {
+        exports,
+        unresolved_requesters: stats.unresolved_requesters,
+    };
 
     let mut out: Vec<PrxLoadInfo> = Vec::with_capacity(image.loaded.len());
     // Park the trampoline region as a synthetic PrxLoadInfo entry so
@@ -389,5 +439,5 @@ pub(in crate::game) fn load_firmware_set_bound(
         image_version: fw_manifest.firmware.image_version.clone(),
         pup_sha256: fw_manifest.firmware.pup_sha256.0,
     };
-    (out, Some(identity), export_map)
+    (out, Some(identity), host_link)
 }
