@@ -48,6 +48,7 @@ fn image_with_order(order: Vec<PrxModuleId>, with_start: &[PrxModuleId]) -> Firm
         export_table: FirmwareExportTable::default(),
         topological_order: order,
         imports_by_id: BTreeMap::new(),
+        shadowed_export_libraries: Vec::new(),
     }
 }
 
@@ -470,4 +471,46 @@ fn load_firmware_set_self_namespace_import_does_not_trip_missing_dependency() {
              expected the loader to recognise testlib's own export"
         );
     }
+}
+
+/// PS3 firmware genuinely ships two modules publishing one export
+/// library name (`libaudio` and `sys_audio` both publish
+/// `mios2_Client`). The oracle takes a per-library-name lock and skips
+/// the later publisher's library, keeping the module
+/// (`PPUModule.cpp` `ppu_register_library_lock`); a hard load failure
+/// would refuse a firmware set the console accepts.
+#[test]
+fn a_second_module_publishing_the_same_export_namespace_is_shadowed_not_rejected() {
+    let first = crate::sprx::test_fixtures::make_test_prx();
+    let mut second = crate::sprx::test_fixtures::make_test_prx();
+    // Module name lives at file 0x1F4 and decides module_id; the
+    // export library names are untouched, so the two modules differ in
+    // identity while publishing the same namespaces.
+    second[0x1F4..0x1FB].copy_from_slice(b"testmo2");
+
+    let mut by_path = BTreeMap::new();
+    by_path.insert("alpha.sprx".to_string(), first);
+    by_path.insert("beta.sprx".to_string(), second);
+    let mut mem = cellgov_mem::GuestMemory::new(0x2000_0000);
+
+    let image = load_firmware_set(by_path, &mut mem, 0x1000_0000)
+        .expect("a duplicate export namespace must not fail the load");
+
+    assert_eq!(image.loaded.len(), 2, "both modules stay loaded");
+    assert!(
+        !image.shadowed_export_libraries.is_empty(),
+        "the later publisher's library must be recorded as shadowed"
+    );
+    let alpha = crate::prx_loader::graph::module_id_from_name("testmod");
+    let beta = crate::prx_loader::graph::module_id_from_name("testmo2");
+    for (_, winner, loser) in &image.shadowed_export_libraries {
+        assert_eq!(*winner, alpha, "first module by path order owns the name");
+        assert_eq!(*loser, beta);
+    }
+    // The loser contributes no exports under a shadowed name, so its
+    // OPDs cannot win a NID the winner also publishes.
+    assert!(
+        image.loaded[&beta].exports.is_empty(),
+        "every library of the loser was shadowed, so it exports nothing"
+    );
 }
