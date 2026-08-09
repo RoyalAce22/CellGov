@@ -258,6 +258,19 @@ pub fn bench_boot(
     eprintln!(
         "BENCH_AUTHORITY_ID_WITNESS: program_authority_id=0x{program_authority_id:016x} authid_source={authid_source} lwmutex_unknown_locks={lwmutex_unknown_locks}"
     );
+    eprintln!(
+        "BENCH_MUTEX_UNLOCK_WITNESS: not_owner={}",
+        rt.lv2_host().mutex_unlock_not_owner_count()
+    );
+    // Every non-zero immediate return, error or value. A code absent
+    // here was never produced by LV2 this boot.
+    let codes: Vec<String> = rt
+        .lv2_host()
+        .dispatch_nonzero_returns()
+        .iter()
+        .map(|(code, hits)| format!("0x{code:08x}={hits}"))
+        .collect();
+    eprintln!("BENCH_DISPATCH_RETURN_WITNESS: {}", codes.join(" "));
 
     // sc 484 witness: how many register-module calls arrived, how
     // many took the CoreOS manual-link branch, and how the import
@@ -267,6 +280,15 @@ pub fn bench_boot(
         rt.lv2_host().prx_register_module_witness();
     eprintln!(
         "BENCH_REGISTER_MODULE_WITNESS: calls={reg_calls} manual={reg_manual} linked_slots={reg_linked} unresolved_nids={reg_unresolved}"
+    );
+
+    // Event-port IPC binding: attempts vs. those that found a queue
+    // registered under the key. A gap is the connect-before-create
+    // race, or a producer CellGov never runs.
+    let (ipc_attempts, ipc_bound) = rt.lv2_host().event_port_ipc_connects();
+    eprintln!(
+        "BENCH_EVENT_PORT_WITNESS: ipc_connect_attempts={ipc_attempts} ipc_connect_bound={ipc_bound} keyed_queues={}",
+        rt.lv2_host().keyed_event_queue_count(),
     );
 
     // Null-backend inventory: which syscalls this title issued that

@@ -1,7 +1,7 @@
 //! LV2 event-queue and event-port dispatch tests: buffered payload delivery, receive parking, tryreceive batch draining, and EBUSY destroy.
 
 use super::*;
-use crate::host::test_support::{extract_write_u32, seed_primary_ppu, FakeRuntime};
+use crate::host::test_support::{connected_port, extract_write_u32, seed_primary_ppu, FakeRuntime};
 use crate::ppu_thread::{PpuThreadAttrs, PpuThreadId};
 use crate::request::Lv2Request;
 
@@ -255,9 +255,10 @@ fn event_port_send_with_parked_waiter_emits_wake_and_return_with_payload() {
         waiter_unit,
         &rt,
     );
+    let port_id = connected_port(&mut host, &rt, sender_unit, id);
     let send = host.dispatch(
         Lv2Request::EventPortSend {
-            port_id: id,
+            port_id,
             data1: 0xAA,
             data2: 0xBB,
             data3: 0xCC,
@@ -280,7 +281,9 @@ fn event_port_send_with_parked_waiter_emits_wake_and_return_with_payload() {
                 PendingResponse::EventQueueReceive {
                     payload: Some(p), ..
                 } => {
-                    assert_eq!(p.source, id as u64);
+                    // `source` identifies the sending PORT, not the
+                    // queue the event landed in.
+                    assert_eq!(p.source, u64::from(port_id));
                     assert_eq!(p.data1, 0xAA);
                     assert_eq!(p.data2, 0xBB);
                     assert_eq!(p.data3, 0xCC);
@@ -437,9 +440,10 @@ fn event_port_send_with_no_waiters_enqueues_payload() {
         } => extract_write_u32(&e[0]),
         other => panic!("expected Immediate(0), got {other:?}"),
     };
+    let port_id = connected_port(&mut host, &rt, src, id);
     let send = host.dispatch(
         Lv2Request::EventPortSend {
-            port_id: id,
+            port_id,
             data1: 0xAA,
             data2: 0xBB,
             data3: 0xCC,

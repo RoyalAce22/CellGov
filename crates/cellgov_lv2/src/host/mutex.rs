@@ -94,6 +94,7 @@ impl Lv2Host {
                 Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }
             crate::sync_primitives::MutexRelease::NotOwner => {
+                self.mutex_unlock_not_owner_count += 1;
                 Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into())
             }
             crate::sync_primitives::MutexRelease::Freed => Lv2Dispatch::immediate(0),

@@ -64,7 +64,17 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
         (
             syscall::EVENT_PORT_CONNECT_LOCAL,
             "sys_event_port_connect_local",
-            ArmFidelity::NullBackend,
+            ArmFidelity::Modeled,
+        ),
+        (
+            syscall::EVENT_PORT_DISCONNECT,
+            "sys_event_port_disconnect",
+            ArmFidelity::Modeled,
+        ),
+        (
+            syscall::EVENT_PORT_CONNECT_IPC,
+            "sys_event_port_connect_ipc",
+            ArmFidelity::Modeled,
         ),
         (
             syscall::MEMORY_CONTAINER_CREATE_324,

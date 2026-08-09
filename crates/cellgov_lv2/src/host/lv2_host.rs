@@ -15,7 +15,8 @@ use crate::ppu_thread::{
 };
 use crate::prx_registry::LoadedPrxRegistry;
 use crate::sync_primitives::{
-    CondTable, EventFlagTable, EventQueueTable, LwMutexTable, MutexTable, SemaphoreTable,
+    CondTable, EventFlagTable, EventPortTable, EventQueueTable, LwMutexTable, MutexTable,
+    SemaphoreTable,
 };
 use crate::thread_group::ThreadGroupTable;
 
@@ -98,6 +99,11 @@ pub struct Lv2Host {
     /// `ipc_key -> queue id` for keyed event queues, in creation
     /// order. Not hashed.
     pub(super) event_queue_ipc: BTreeMap<u64, u32>,
+    /// Witness: `(attempts, bound)` for `sys_event_port_connect_ipc`
+    /// across every namespace. A gap between the two is the count of
+    /// connects that named a key no queue is registered under. Not
+    /// hashed (instrument-only).
+    pub(super) event_port_ipc_connects: (u64, u64),
     /// Witness: guest paths sc 480 / 497 answered `CELL_ENOENT`, with
     /// hit counts. The key set names which modules a title asks for
     /// that the corpus cannot serve. Not hashed (instrument-only).
@@ -132,6 +138,7 @@ pub struct Lv2Host {
     pub(super) mutexes: MutexTable,
     pub(super) semaphores: SemaphoreTable,
     pub(super) event_queues: EventQueueTable,
+    pub(super) event_ports: EventPortTable,
     pub(super) event_flags: EventFlagTable,
     pub(super) conds: CondTable,
     /// Dispatch-local scratch; not folded into [`Self::state_hash`].
@@ -228,6 +235,17 @@ pub struct Lv2Host {
     /// every occurrence boot-wide, not one window. Not hashed
     /// (instrument-only).
     pub(super) lwmutex_unknown_lock_count: u64,
+    /// Witness: every non-zero `Lv2Dispatch::Immediate` code any arm
+    /// returned, keyed by code. Includes successful returns that carry
+    /// a value (kernel ids, pids), not just errors -- the point is
+    /// completeness: a code absent here was never returned by LV2, so a
+    /// guest reporting it built it itself. Not hashed
+    /// (instrument-only).
+    pub(super) dispatch_nonzero_returns: BTreeMap<u64, u64>,
+    /// Witness: `sys_mutex_unlock` calls refused with `CELL_EPERM`
+    /// because the caller does not own the mutex. Not hashed
+    /// (instrument-only).
+    pub(super) mutex_unlock_not_owner_count: u64,
     /// Witness: sc 480/497 registry misses on a firmware path,
     /// resolved by registering a stub entry under a real kernel id.
     /// Not hashed (instrument-only).
@@ -317,6 +335,7 @@ impl Lv2Host {
             cond_keyed_signal_counts: BTreeMap::new(),
             event_queue_ipc_keys: BTreeMap::new(),
             event_queue_ipc: BTreeMap::new(),
+            event_port_ipc_connects: (0, 0),
             prx_load_misses: BTreeMap::new(),
             unsupported_syscalls: BTreeMap::new(),
             system_ipc_witness: SystemIpcWitness::default(),
@@ -327,6 +346,7 @@ impl Lv2Host {
             mutexes: MutexTable::new(),
             semaphores: SemaphoreTable::new(),
             event_queues: EventQueueTable::new(),
+            event_ports: EventPortTable::new(),
             event_flags: EventFlagTable::new(),
             conds: CondTable::new(),
             current_tick: GuestTicks::ZERO,
@@ -351,6 +371,8 @@ impl Lv2Host {
             prx_register_module_linked: 0,
             prx_register_module_unresolved: 0,
             lwmutex_unknown_lock_count: 0,
+            mutex_unlock_not_owner_count: 0,
+            dispatch_nonzero_returns: BTreeMap::new(),
             prx_load_hle_stub_count: 0,
             prx_load_not_found_count: 0,
         }
@@ -812,6 +834,26 @@ impl Lv2Host {
     /// Witness: null-backend hits keyed by syscall number.
     pub fn unsupported_syscalls(&self) -> &BTreeMap<u64, u64> {
         &self.unsupported_syscalls
+    }
+
+    /// Witness: every non-zero immediate return code, by code.
+    pub fn dispatch_nonzero_returns(&self) -> &BTreeMap<u64, u64> {
+        &self.dispatch_nonzero_returns
+    }
+
+    /// Witness: `sys_mutex_unlock` refusals for a non-owning caller.
+    pub fn mutex_unlock_not_owner_count(&self) -> u64 {
+        self.mutex_unlock_not_owner_count
+    }
+
+    /// Witness: `(attempts, bound)` for `sys_event_port_connect_ipc`.
+    pub fn event_port_ipc_connects(&self) -> (u64, u64) {
+        self.event_port_ipc_connects
+    }
+
+    /// Count of event queues registered under an ipc key.
+    pub fn keyed_event_queue_count(&self) -> usize {
+        self.event_queue_ipc.len()
     }
 
     /// Witness: sc 480 / 497 paths answered `CELL_ENOENT`.

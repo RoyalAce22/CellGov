@@ -197,6 +197,47 @@ pub(super) fn opd_runtime(param_addr: u32, entry_code: u32, entry_toc: u32) -> F
     FakeRuntime::with_memory(mem)
 }
 
+/// Create a LOCAL event port and connect it to `queue_id`, returning
+/// the port id. Sends resolve through the binding, so a test that
+/// wants delivery needs a connected port rather than a bare queue id.
+pub(super) fn connected_port(
+    host: &mut Lv2Host,
+    rt: &FakeRuntime,
+    src: UnitId,
+    queue_id: u32,
+) -> u32 {
+    let created = host.dispatch(
+        Lv2Request::EventPortCreate {
+            id_ptr: 0x180,
+            port_type: crate::sync_primitives::SYS_EVENT_PORT_LOCAL as u32,
+            name: 0,
+        },
+        src,
+        rt,
+    );
+    let port_id = match &created {
+        crate::dispatch::Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    let connected = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 136,
+            args: [u64::from(port_id), u64::from(queue_id), 0, 0, 0, 0, 0, 0],
+        },
+        src,
+        rt,
+    );
+    assert_eq!(
+        connected,
+        crate::dispatch::Lv2Dispatch::immediate(0),
+        "connect_local must succeed"
+    );
+    port_id
+}
+
 pub(super) fn create_mutex_host(host: &mut Lv2Host, src: UnitId, rt: &FakeRuntime) -> u32 {
     let created = host.dispatch(
         Lv2Request::MutexCreate {

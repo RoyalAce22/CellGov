@@ -142,7 +142,7 @@ fn syscall_677_returns_ok_no_effects() {
 }
 
 #[test]
-fn syscall_136_event_port_connect_local_returns_enosys() {
+fn syscall_136_event_port_connect_local_on_unknown_ids_returns_esrch() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -155,7 +155,7 @@ fn syscall_136_event_port_connect_local_returns_enosys() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
+        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
     );
 }
 

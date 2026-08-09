@@ -10,8 +10,8 @@ use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::test_support::{
-    create_mutex_host, extract_write_u32, fake_runtime_with_valid_sync_attr, seed_primary_ppu,
-    FakeRuntime, VALID_SYNC_ATTR_PTR,
+    connected_port, create_mutex_host, extract_write_u32, fake_runtime_with_valid_sync_attr,
+    seed_primary_ppu, FakeRuntime, VALID_SYNC_ATTR_PTR,
 };
 use crate::host::{is_system_ipc_key, Lv2Host};
 use crate::request::Lv2Request;
@@ -259,6 +259,27 @@ fn a_namespace_cond_wait_bumps_the_wait_witness() {
     assert_eq!(host.system_ipc_witness().cond_waits, 1);
 }
 
+/// Create an IPC-type port (the type `sys_event_port_connect_ipc`
+/// requires).
+fn ipc_port(host: &mut Lv2Host, rt: &FakeRuntime, src: UnitId) -> u32 {
+    let created = host.dispatch(
+        Lv2Request::EventPortCreate {
+            id_ptr: 0x380,
+            port_type: crate::sync_primitives::SYS_EVENT_PORT_IPC as u32,
+            name: 0,
+        },
+        src,
+        rt,
+    );
+    match &created {
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: e,
+        } => extract_write_u32(&e[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    }
+}
+
 fn create_event_queue(host: &mut Lv2Host, rt: &FakeRuntime, key: u64) -> u32 {
     let created = host.dispatch(
         Lv2Request::EventQueueCreate {
@@ -280,47 +301,126 @@ fn create_event_queue(host: &mut Lv2Host, rt: &FakeRuntime, key: u64) -> u32 {
 }
 
 #[test]
-fn a_namespace_event_queue_create_reference_and_enqueue_bump_channel_two() {
+fn a_namespace_event_queue_create_and_enqueue_bump_channel_two() {
     let mut host = Lv2Host::new();
     let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
     let queue_id = create_event_queue(&mut host, &rt, NS_KEY);
-    create_event_queue(&mut host, &rt, NS_KEY);
+    let port_id = connected_port(&mut host, &rt, src, queue_id);
     let sent = host.dispatch(
         Lv2Request::EventPortSend {
-            port_id: queue_id,
+            port_id,
             data1: 1,
             data2: 2,
             data3: 3,
         },
-        UnitId::new(0),
+        src,
         &rt,
     );
     assert!(matches!(sent, Lv2Dispatch::Immediate { code: 0, .. }));
 
     let w = host.system_ipc_witness();
     assert_eq!(
-        (
-            w.event_queue_creates,
-            w.event_queue_references,
-            w.event_queue_enqueues
-        ),
-        (1, 1, 1)
+        (w.event_queue_creates, w.event_queue_enqueues),
+        (1, 1),
+        "a keyed create and a delivery through a connected port"
     );
+}
+
+/// The oracle passes `SYS_SYNC_NEWLY_CREATED` unconditionally
+/// (RPCS3 `sys_event.cpp:251`), so a duplicate key is refused rather
+/// than resolved. The witness still records the attempt.
+#[test]
+fn a_second_keyed_create_on_the_same_key_is_eexist() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    create_event_queue(&mut host, &rt, NS_KEY);
+    let second = host.dispatch(
+        Lv2Request::EventQueueCreate {
+            id_ptr: 0x300,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            key: NS_KEY,
+            size: 4,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        second,
+        Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into())
+    );
+    let w = host.system_ipc_witness();
+    assert_eq!((w.event_queue_creates, w.event_queue_references), (1, 1));
+}
+
+/// Connecting by key is how a second referent reaches the queue --
+/// the path a duplicate create does NOT provide.
+#[test]
+fn connect_ipc_resolves_a_namespace_key_and_bumps_the_connect_witness() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let queue_id = create_event_queue(&mut host, &rt, NS_KEY);
+    let port_id = ipc_port(&mut host, &rt, src);
+
+    let connected = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 140,
+            args: [u64::from(port_id), NS_KEY, 0, 0, 0, 0, 0, 0],
+        },
+        src,
+        &rt,
+    );
+    assert_eq!(connected, Lv2Dispatch::immediate(0));
+    assert_eq!(
+        host.event_ports.lookup(port_id).unwrap().queue(),
+        Some(queue_id)
+    );
+    assert_eq!(host.system_ipc_witness().event_port_connects, 1);
+}
+
+#[test]
+fn connect_ipc_to_an_unregistered_namespace_key_is_esrch_and_still_witnessed() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let port_id = ipc_port(&mut host, &rt, src);
+    let connected = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 140,
+            args: [u64::from(port_id), NS_KEY, 0, 0, 0, 0, 0, 0],
+        },
+        src,
+        &rt,
+    );
+    assert_eq!(
+        connected,
+        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+    );
+    // Counted before the resolve, so a miss is visible -- this is the
+    // reading a vsh boot produces today.
+    assert_eq!(host.system_ipc_witness().event_port_connects, 1);
 }
 
 #[test]
 fn an_event_queue_outside_the_namespace_leaves_channel_two_silent() {
     let mut host = Lv2Host::new();
     let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
     let queue_id = create_event_queue(&mut host, &rt, OTHER_KEY);
+    let port_id = connected_port(&mut host, &rt, src, queue_id);
     host.dispatch(
         Lv2Request::EventPortSend {
-            port_id: queue_id,
+            port_id,
             data1: 0,
             data2: 0,
             data3: 0,
         },
-        UnitId::new(0),
+        src,
         &rt,
     );
     assert!(host.system_ipc_witness().is_silent());
@@ -330,33 +430,54 @@ fn an_event_queue_outside_the_namespace_leaves_channel_two_silent() {
 fn a_refused_send_is_not_counted_as_an_enqueue() {
     let mut host = Lv2Host::new();
     let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
     let queue_id = create_event_queue(&mut host, &rt, NS_KEY);
-    // Depth 4 with no receiver: the fifth send is refused.
-    for _ in 0..4 {
+    let port_id = connected_port(&mut host, &rt, src, queue_id);
+    let send = |host: &mut Lv2Host| {
         host.dispatch(
             Lv2Request::EventPortSend {
-                port_id: queue_id,
+                port_id,
                 data1: 0,
                 data2: 0,
                 data3: 0,
             },
-            UnitId::new(0),
+            src,
             &rt,
-        );
+        )
+    };
+    // Depth 4 with no receiver: the fifth send is refused.
+    for _ in 0..4 {
+        send(&mut host);
     }
-    let refused = host.dispatch(
+    assert_eq!(
+        send(&mut host),
+        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+    );
+    assert_eq!(host.system_ipc_witness().event_queue_enqueues, 4);
+}
+
+#[test]
+fn a_send_through_an_unconnected_port_is_enotconn() {
+    let mut host = Lv2Host::new();
+    let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    create_event_queue(&mut host, &rt, NS_KEY);
+    let port_id = ipc_port(&mut host, &rt, src);
+    let sent = host.dispatch(
         Lv2Request::EventPortSend {
-            port_id: queue_id,
+            port_id,
             data1: 0,
             data2: 0,
             data3: 0,
         },
-        UnitId::new(0),
+        src,
         &rt,
     );
     assert_eq!(
-        refused,
-        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+        sent,
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOTCONN.into())
     );
-    assert_eq!(host.system_ipc_witness().event_queue_enqueues, 4);
+    assert_eq!(host.system_ipc_witness().event_queue_enqueues, 0);
 }

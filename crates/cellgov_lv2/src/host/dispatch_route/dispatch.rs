@@ -29,6 +29,23 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
+        let out = self.dispatch_routed(request, requester, rt);
+        if let Lv2Dispatch::Immediate { code, .. } = &out {
+            if *code != 0 {
+                *self.dispatch_nonzero_returns.entry(*code).or_insert(0) += 1;
+            }
+        }
+        out
+    }
+
+    /// The routing match itself. Split from [`Self::dispatch`] so the
+    /// return witness sees every arm's return through one point.
+    fn dispatch_routed(
+        &mut self,
+        request: Lv2Request,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
         self.current_tick = rt.current_tick();
         match request {
             Lv2Request::SpuImageOpen { img_ptr, path_ptr } => {
@@ -347,8 +364,16 @@ impl Lv2Host {
             } => self.dispatch_prx_get_module_list(args, requester, rt),
             Lv2Request::Unsupported {
                 number: syscall::EVENT_PORT_CONNECT_LOCAL,
-                ..
-            } => self.dispatch_event_port_connect_local(),
+                args,
+            } => self.dispatch_event_port_connect_local(args[0] as u32, args[1] as u32),
+            Lv2Request::Unsupported {
+                number: syscall::EVENT_PORT_CONNECT_IPC,
+                args,
+            } => self.dispatch_event_port_connect_ipc(args[0] as u32, args[1]),
+            Lv2Request::Unsupported {
+                number: syscall::EVENT_PORT_DISCONNECT,
+                args,
+            } => self.dispatch_event_port_disconnect(args[0] as u32),
             Lv2Request::Unsupported {
                 number: syscall::GAMEPAD_YCON_IF,
                 ..
@@ -413,10 +438,12 @@ impl Lv2Host {
                 self.dispatch_rwlock_create(id_ptr, requester)
             }
             Lv2Request::RwlockDestroy { .. } => self.dispatch_rwlock_destroy(),
-            Lv2Request::EventPortCreate { id_ptr, .. } => {
-                self.dispatch_event_port_create(id_ptr, requester)
-            }
-            Lv2Request::EventPortDestroy { .. } => self.dispatch_event_port_destroy(),
+            Lv2Request::EventPortCreate {
+                id_ptr,
+                port_type,
+                name,
+            } => self.dispatch_event_port_create(id_ptr, u64::from(port_type), name, requester),
+            Lv2Request::EventPortDestroy { id } => self.dispatch_event_port_destroy(id),
             Lv2Request::Hypercall { lev, r11, args } => {
                 self.dispatch_hypercall_rejection(lev.get(), r11, args)
             }

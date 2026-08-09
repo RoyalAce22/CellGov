@@ -74,6 +74,9 @@ pub struct SystemIpcWitness {
     /// `sys_event_port_send` (138) deliveries to a namespace-keyed
     /// queue.
     pub event_queue_enqueues: u64,
+    /// `sys_event_port_connect_ipc` (140) calls naming a namespace
+    /// key, counted before the resolve so a miss is visible too.
+    pub event_port_connects: u64,
     /// Per-key event totals over every counter above that attributes to
     /// a single key. The key set is the namespace inventory a frontier
     /// run reports.

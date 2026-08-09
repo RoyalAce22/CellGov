@@ -366,6 +366,10 @@ lv2_syscalls! {
     SYS_PRX_GET_MODULE_LIST = 494;
     /// `sys_event_port_connect_local`.
     EVENT_PORT_CONNECT_LOCAL = 136;
+    /// `sys_event_port_disconnect`.
+    EVENT_PORT_DISCONNECT = 137;
+    /// `sys_event_port_connect_ipc`.
+    EVENT_PORT_CONNECT_IPC = 140;
     /// Gamepad YCON interface (RPCS3 `sys_io.cpp`).
     GAMEPAD_YCON_IF = 621;
     /// HID is-root query (RPCS3 `sys_io.cpp`).
