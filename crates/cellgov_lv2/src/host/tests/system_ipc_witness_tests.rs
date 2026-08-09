@@ -265,7 +265,7 @@ fn ipc_port(host: &mut Lv2Host, rt: &FakeRuntime, src: UnitId) -> u32 {
     let created = host.dispatch(
         Lv2Request::EventPortCreate {
             id_ptr: 0x380,
-            port_type: crate::sync_primitives::SYS_EVENT_PORT_IPC as u32,
+            port_type: cellgov_ps3_abi::sys_sync::SYS_EVENT_PORT_IPC as u32,
             name: 0,
         },
         src,

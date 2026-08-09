@@ -520,7 +520,8 @@ Classified into typed `Lv2Request` variants:
 | `sys_lwmutex_*`                                    | 95-99                   | Create / destroy / lock / unlock / trylock. FIFO waiter list. The kernel entry holds only `signaled` plus the waiter list -- owner and recursion count live in the guest-side `sys_lwmutex_t`, so unlock does not consult the caller. CELL_EDEADLK fires when the caller is already parked on the sleep queue, not on owner re-entry.                                                                                                                                            |
 | `sys_mutex_*`                                      | 100-104                 | Create / destroy / lock / unlock / trylock. Heavy-mutex variant of lwmutex with attribute capture; unlike lwmutex the kernel entry DOES track the owner. Destroy (101) is CELL_ESRCH on unknown id, CELL_EBUSY while owned or with waiters present.                                                                                                                                                                                                                             |
 | `sys_cond_*`                                       | 105-110                 | Create / destroy / wait / signal / signal_all / signal_to. Two-hop drop-and-reacquire mutex protocol.                                                                                                                                                                                                                                                                                                                                                                           |
-| `sys_event_queue_*`                                | 128-131, 138            | Create / destroy / receive / tryreceive / port_send. Bounded FIFO with 4-u64 payloads.                                                                                                                                                                                                                                                                                                                                                                                          |
+| `sys_event_queue_*`                                | 128-131                 | Create / destroy / receive / tryreceive. Bounded FIFO with 4-u64 payloads. A non-zero `ipc_key` registers the queue under that key so a port can later find it; a key already registered is CELL_EEXIST, because create passes `SYS_SYNC_NEWLY_CREATED` and therefore has no attach-on-create path.                                                                                                                                                                              |
+| `sys_event_port_*`                                 | 134-138, 140            | Create / destroy / connect_local / disconnect / port_send / connect_ipc. A port is created unbound with type `SYS_EVENT_PORT_LOCAL` (1) or `SYS_EVENT_PORT_IPC` (3) -- any other type is CELL_EINVAL -- and binds to exactly one queue, named by queue id (136) for a local port or by ipc key (140) for an IPC port. The type gates which form is accepted (CELL_EINVAL on mismatch); rebinding a bound port is CELL_EISCONN, and destroy refuses while bound (also CELL_EISCONN). Send (138) resolves through the binding, so an unconnected port cannot deliver. Disconnect (137) is CELL_ENOTCONN on an unbound port. |
 | `sys_time_get_timezone`                            | 144                     | Writes zero through both out-pointers (UTC, no DST). CellGov has no host-time dependency.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `sys_spu_image_open`                               | 156                     | Looks up SPU ELF by path, writes `sys_spu_image_t` to guest memory.                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `sys_spu_image_import`                             | 158                     | Registers `size` bytes at the guest pointer into the `ContentStore` and writes a `sys_spu_image_t` referring to the registered blob.                                                                                                                                                                                                                                                                                                                                            |
@@ -573,7 +574,6 @@ constant-return stubs: `sys_process_getpid` (1),
 `sys_ppu_thread_start` (53, a no-op because SUSPENDED collapses
 into create), `sys_timer_create` / `_destroy` (70 / 71),
 `sys_rwlock_create` / `_destroy` (120 / 121),
-`sys_event_port_create` / `_destroy` (134 / 135),
 `sys_time_get_timebase_frequency` (147), and `sys_fs_write` (803,
 the read-only model: CELL_EBADF for any `size > 0`, CELL_OK for a
 zero-length write).
@@ -642,11 +642,10 @@ return `CELL_ENOSYS` with a traced diagnostic.
 | `_sys_prx_start_module`                                  | 481    | Two-phase handshake on `pOpt->cmd & 0xF`. cmd=1 writes `~0` (no-start sentinel) to `pOpt->entry` (and `entry2` when `size != 0x20`) and returns CELL_OK; cmd=2 with `res == 0` marks the module started and returns CELL_OK, any other `res` returns `res & 0xFFFF_FFFF`; an unknown nibble is CELL_PRX_ERROR_ERROR. CELL_EINVAL when `id == 0` or `pOpt == 0`; CELL_ESRCH for an unknown id; CELL_EFAULT on unreadable or wrapping `pOpt`. |
 | `_sys_prx_stop_module`                                   | 482    | Stop-side counterpart of 481 on the same option struct, with 481's cmd 1/2 handshake plus cmd 4 (read entries, no state change) and cmd 8 (disable-stop no-op stub). cmd=1 moves a started module to stopping and writes the `~0` sentinel entries; cmd=2 with `res == 0` completes the stop (making a later unload succeed), `res == 1` is CELL_PRX_ERROR_CAN_NOT_STOP, other values are CELL_OK no-ops; wrong-state calls answer CELL_PRX_ERROR_NOT_STARTED / ALREADY_STOPPED / ALREADY_STOPPING. Unlike 481 the id lookup precedes the null-`pOpt` gate (CELL_ESRCH before CELL_EINVAL); CELL_EFAULT on unreadable or wrapping `pOpt`. |
 | `_sys_prx_unload_module`                                 | 483    | Withdraws a never-started module (an sc 480 miss stub the guest abandoned) or one whose sc 482 stop handshake completed, with CELL_OK, freeing its id; a started or stopping resident module is CELL_PRX_ERROR_NOT_REMOVABLE; unknown id is CELL_PRX_ERROR_UNKNOWN_MODULE. Mirrors LV2's INITIALIZED/STOPPED-only withdraw.                                          |
-| `_sys_prx_register_module`                               | 484    | CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`) for non-VSH callers.                                                                                                                                                                                                                                    |
+| `_sys_prx_register_module`                               | 484    | Reads the option struct at r4: sizes `0x1c` / `0x20` are the legacy forms (rebuilt with `type = 0`, so no field reads), `0x30` carries the module type plus the caller's stub table `(ea, size)`; any other size is CELL_EINVAL, a null or unreadable option pointer is CELL_EINVAL / CELL_EFAULT. With `type & 1 == 0` the call is CELL_OK and nothing is bound. With the bit set the caller is handing the kernel its own import tables, which only a privileged CoreOS process may do -- a normal application gets CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`), while a CoreOS caller has its stub table linked against the resolved firmware exports. Privilege comes from the SELF capability header (see "Process privilege"). |
 | `_sys_prx_register_library`                              | 486    | CELL_OK -- the kernel's no-match success path.                                                                                                                                                                                                                                                           |
 | `_sys_prx_get_module_list`                               | 494    | `flags & 0x2 == 0` -> CELL_OK no-op. With bit 2 set: CELL_EFAULT on null `pInfo`, otherwise walks the PRX registry (filtering liblv2.sprx) writing kernel ids to the `idlist` slot and the count to `pInfo->count`, capped at the caller's `pInfo->max`. A null `idlist` skips the slot writes but still writes the count. Iteration is BTreeMap-keyed so the byte output is independent of registration order. CELL_EFAULT on a wrapping `pInfo` or unreadable `max` / `idlist` fields. |
 | `_sys_prx_load_module_on_memcontainer`                   | 497    | Same resolver as 480.                                                                                                                                                                                                                                                                                    |
-| `sys_event_port_connect_local`                           | 136    | CELL_ENOSYS plus a `dispatch.event_port_connect_local_unmodeled` invariant break -- port-to-queue binding is not modeled.                                                                                                                                                                                 |
 | `sys_hid_manager_is_process_permission_root`             | 512    | Returns 0: retail titles run unprivileged.                                                                                                                                                                                                                                                               |
 | `sys_gamepad_ycon_if`                                    | 621    | CELL_OK stub plus an invariant break; matches RPCS3's todo-and-OK stub.                                                                                                                                                                                                                                  |
 | `sys_rsx_attribute`                                      | 677    | CELL_OK with no state change, plus an invariant break.                                                                                                                                                                                                                                                   |
@@ -663,6 +662,30 @@ return `CELL_ENOSYS` with a traced diagnostic.
 arm; nonzero `SYS_PPU_THREAD_CREATE_{JOINABLE,INTERRUPT}` flag bits
 are not modeled in the thread-table state and fire an invariant-break
 log on first occurrence.
+
+### Process privilege
+
+A few syscalls answer differently depending on how privileged the
+booting executable is -- the kernel will let a system process do
+things it refuses a retail game. CellGov derives that privilege
+from the executable itself rather than from a per-title switch.
+
+Two independent facts come out of the SELF header:
+
+- **Program authority id**, from the identification header. Its top
+  28 bits identify a CoreOS SELF -- the system shell and the other
+  firmware executables. A raw ELF with no SELF wrapper falls back to
+  the retail-application id `0x1010_0000_0100_0003`.
+- **Capability flags**, from the plaintext capability supplemental
+  header (`type == 1`). This record is readable without decryption,
+  and its first word `ctrl_flag1` carries the root and debug masks.
+
+The predicates built on those two answer "may this process do X".
+`_sys_prx_register_module` (484) is the current consumer: only a
+CoreOS process may hand the kernel its own import tables. The masks
+overlap and their exact bit semantics are unconfirmed even in the
+reference implementation, so they are mirrored as-is rather than
+reduced to disjoint bits.
 
 ### Null backend for unmodeled syscalls
 
@@ -1128,6 +1151,16 @@ import to a firmware OPD and writes the resulting address into
 the GOT slot; from the PPU's perspective every `bl` reaches the
 firmware module's code directly.
 
+Two firmware modules can publish the same export library, which
+the loader resolves by first-wins shadowing rather than by
+refusing the load: the first module to claim a library name keeps
+it, the later module still loads with that one library dropped,
+and the shadowing is recorded. The PS3 behaves the same way -- it
+takes a per-library-name lock, so the second publisher's copy is
+skipped while the module itself loads normally. Treating the
+collision as a hard error instead would make a firmware set that
+boots on hardware fail to load here.
+
 The RSX CPU-side completion surface (`cellgov_core::rsx`)
 remains in Rust: it owns the FIFO cursor, command-buffer
 parsing, label updates, and the reports / driver-info / DMA
@@ -1262,7 +1295,7 @@ Title-specific configuration lives in TOML manifests under
 directory at startup, building a registry that the CLI looks up
 by short name (`--title sshd`), content id (`--content-id
 NPUA80068`), or explicit manifest path (`--title-manifest
-<file>`). The harness is currently wired for three titles:
+<file>`). The harness is currently wired for four titles:
 
 - **flOw** (NPUA80001): PSN HDD, NPDRM-keyed. Manifest declares
   the `process-exit` checkpoint kind and enables `[rsx] mirror = true`
@@ -1285,6 +1318,13 @@ NPUA80068`), or explicit manifest path (`--title-manifest
   `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead
   of the PSN HDD layout. The encrypted `EBOOT.BIN` is decrypted
   in memory at boot through `cellgov_install::sce::decrypt_self_to_elf`.
+- **System shell** (`vsh`): not a game. A `[source] kind =
+  "firmware-exec"` block points the resolver at the firmware image
+  itself (`firmware/vsh/module/vsh.self`) rather than at any
+  installed-game layout, so the shell boots as an ordinary guest
+  process with no install step. It is the one entry that exercises
+  the privileged paths described under "Process privilege"; its
+  checkpoint kind is `process-exit`.
 
 Per-title status (boot checkpoint reached, cross-runner observation
 match) is tracked in [titles.md](titles.md).
@@ -1490,6 +1530,23 @@ prior `43,066 / COMMIT_FAULT: OutOfRange` and the earlier
 cellSysutil stall are preserved as code paths that no longer
 re-fire under the new trajectory. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
+
+**System shell (vsh).** Boots straight out of the firmware image
+with no install step, and reaches `sys_process_exit` at step 832
+with 61 host-invariant breaks. The shell is a far heavier LV2
+consumer than any game in the corpus: it takes the privileged
+`_sys_prx_register_module` branch, drives the event-port family,
+and produces on the firmware system-IPC key namespace
+(`0x8006_0100_0000_xxxx`) that no game touches.
+
+The exit is not yet attributed. Implementing the event-port family
+moved the anchor from 1,232 steps to 832 -- the shell fails
+*earlier* with an identical exit cause, which means the missing
+ports were a symptom on the path rather than the wall. The
+`config_service_agent` CELL_EPERM that reads like the cause does
+not originate in LV2: `0x80010009` appears nowhere in the run's
+full set of non-zero dispatch returns. What terminates the shell
+is still open.
 
 ## Microtest corpus
 

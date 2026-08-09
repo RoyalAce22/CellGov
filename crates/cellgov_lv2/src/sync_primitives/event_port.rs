@@ -7,12 +7,6 @@
 
 use std::collections::BTreeMap;
 
-/// `SYS_EVENT_PORT_LOCAL`: connectable only by queue id.
-pub const SYS_EVENT_PORT_LOCAL: u64 = 1;
-
-/// `SYS_EVENT_PORT_IPC`: connectable only by ipc key.
-pub const SYS_EVENT_PORT_IPC: u64 = 3;
-
 /// One event port.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventPortEntry {

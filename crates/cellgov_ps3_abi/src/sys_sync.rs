@@ -1,4 +1,5 @@
-//! PS3 `sys_*_attribute_t` synchronization-primitive flag bits.
+//! PS3 synchronization-primitive attribute flag bits and event-port
+//! type enumerants.
 //!
 //! The `protocol` field selects wake order; the `type` field selects
 //! whether multiple waiters are allowed on the same primitive. These
@@ -26,3 +27,11 @@ pub const SYS_SYNC_WAITER_SINGLE: u32 = 0x10000;
 
 /// `type = SYS_SYNC_WAITER_MULTIPLE`: any number of threads may park.
 pub const SYS_SYNC_WAITER_MULTIPLE: u32 = 0x20000;
+
+/// `port_type = SYS_EVENT_PORT_LOCAL`: connectable only by queue id,
+/// through `sys_event_port_connect_local` (136).
+pub const SYS_EVENT_PORT_LOCAL: u64 = 1;
+
+/// `port_type = SYS_EVENT_PORT_IPC`: connectable only by ipc key,
+/// through `sys_event_port_connect_ipc` (140).
+pub const SYS_EVENT_PORT_IPC: u64 = 3;

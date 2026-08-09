@@ -1,4 +1,5 @@
 use super::*;
+use cellgov_ps3_abi::sys_sync::{SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
 
 const P: u32 = 7;
 const Q: u32 = 42;

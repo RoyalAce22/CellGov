@@ -9,10 +9,11 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::sys_sync::{SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
-use crate::sync_primitives::{EventPayload, SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
+use crate::sync_primitives::EventPayload;
 
 impl Lv2Host {
     /// A non-zero `ipc_key` registers the queue under that key so
