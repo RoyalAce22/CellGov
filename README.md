@@ -76,7 +76,7 @@ CellGov answers that question:
 
 Pre-Alpha. What works today:
 
-- 3 titles boot to deterministic checkpoints past the
+- 3 games boot to deterministic checkpoints past the
   firmware `cellSysutil` init. WipEout HD Fury reaches
   `FirstRsxWrite` and converges with RPCS3 at that
   checkpoint (byte parity `975 non-semantic + 1 pending`);
@@ -87,6 +87,13 @@ Pre-Alpha. What works today:
   names the specific unmodeled syscall as the next
   implementation target (see "The null backend" above and
   [docs/titles.md](docs/titles.md)).
+- The PS3 system shell boots as a guest process, straight out
+  of the firmware image with no install step. It exercises
+  paths no game reaches -- privileged module registration
+  driven by the executable's own SELF capability header, the
+  event-port family, and the firmware's system-IPC key
+  namespace -- and runs to `sys_process_exit`. What terminates
+  it is not yet attributed.
 - PPU and SPU interpreters: complete decode for the PPC64 and
   SPU ABI surfaces titles in the current corpus exercise (see
   [docs/architecture.md](docs/architecture.md) for the current
@@ -98,7 +105,7 @@ Pre-Alpha. What works today:
   Unmodeled syscalls return an ABI-honest "not implemented"
   response via the null backend. Unresolved imports surface
   as named diagnostics via a guest-resident trampoline.
-- Sync primitives (lwmutex, event flag, semaphore, mutex, cond), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`).
+- Sync primitives (lwmutex, event flag, semaphore, mutex, cond, event queues and ports), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`).
 - Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`;
   every module a boot loads is verified against the install's
   manifest, so an altered or mismatched firmware corpus fails

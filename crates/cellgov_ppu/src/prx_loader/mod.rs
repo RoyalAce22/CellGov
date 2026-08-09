@@ -46,14 +46,14 @@ pub const MIN_VIABLE_PRX_STEMS: &[&str] = &[
 /// no title needs them and loading them changes a boot's trajectory:
 /// only a firmware-exec boot pulls this set in.
 ///
-/// Evidence-driven and expected to grow as the shell's boot advances.
 /// An entry earns its place by the shell demonstrably requesting the
 /// path, not by shipping in the firmware -- `sys/internal/` holds
 /// dozens of modules the shell never asks for.
-/// `sys_audio` is deliberately absent despite the shell requesting it:
-/// it exports a NID that `libaudio` also exports at a different OPD,
-/// under a different namespace, and the export table is NID-keyed
-/// without a namespace dimension.
+///
+/// `sys_audio` is absent despite the shell requesting it: it exports a
+/// NID that `libaudio` also exports at a different OPD under a
+/// different namespace, and the export table is NID-keyed with no
+/// namespace dimension.
 pub const FIRMWARE_INTERNAL_PRX_STEMS: &[&str] = &["libfs_utility2"];
 
 #[cfg(test)]

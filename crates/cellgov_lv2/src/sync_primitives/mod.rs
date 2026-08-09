@@ -20,7 +20,7 @@ pub use event_flag::{
 };
 pub use event_port::{
     EventPortConnectError, EventPortDestroyError, EventPortDisconnectError, EventPortEntry,
-    EventPortTable, SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL,
+    EventPortTable,
 };
 pub use event_queue::{
     EventPayload, EventQueueEnqueueError, EventQueueEntry, EventQueueReceive, EventQueueSend,
