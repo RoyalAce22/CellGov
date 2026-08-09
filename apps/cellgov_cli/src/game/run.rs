@@ -25,6 +25,8 @@ pub struct RunGameOptions<'a> {
     /// Program authority id from the SELF identification header;
     /// `None` (raw-ELF input) keeps the host's retail fallback.
     pub authority_id: Option<u64>,
+    /// `ctrl_flags1` from the SELF capability header; `None` keeps 0.
+    pub control_flags1: Option<u32>,
     pub max_steps: usize,
     pub trace: bool,
     pub profile: bool,
@@ -81,6 +83,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         elf_path,
         elf_data,
         authority_id,
+        control_flags1,
         max_steps,
         trace,
         profile,
@@ -121,6 +124,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         elf_path,
         elf_data,
         authority_id,
+        control_flags1,
         firmware_dir,
         strict_reserved,
         dump_at_pc,

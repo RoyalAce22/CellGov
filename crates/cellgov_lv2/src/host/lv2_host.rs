@@ -22,6 +22,7 @@ use crate::thread_group::ThreadGroupTable;
 use super::mmapper::{MmapperHandleTable, PendingRegionInstall, SystemStateSeed};
 use super::process;
 use super::rsx::SysRsxContext;
+use super::system_ipc_witness::{SystemIpcMapping, SystemIpcWitness};
 
 /// LV2 host model driven by [`Self::dispatch`].
 #[derive(Debug, Clone)]
@@ -90,6 +91,30 @@ pub struct Lv2Host {
     /// per-facility drain attribution for the seeded-ring consumer.
     /// Not hashed (instrument-only).
     pub(super) cond_keyed_signal_counts: BTreeMap<u64, u64>,
+    /// `event-queue id -> create-time ipc_key` for keyed queues (key 0
+    /// entries are not stored), mirroring [`Self::cond_ipc_keys`]. Not
+    /// hashed: create-time config mirrored from the caller's argument.
+    pub(super) event_queue_ipc_keys: BTreeMap<u32, u64>,
+    /// `ipc_key -> queue id` for keyed event queues, in creation
+    /// order. Not hashed.
+    pub(super) event_queue_ipc: BTreeMap<u64, u32>,
+    /// Witness: guest paths sc 480 / 497 answered `CELL_ENOENT`, with
+    /// hit counts. The key set names which modules a title asks for
+    /// that the corpus cannot serve. Not hashed (instrument-only).
+    pub(super) prx_load_misses: BTreeMap<String, u64>,
+    /// Witness: null-backend hits keyed by syscall number. The key set
+    /// is the boot's unimplemented-syscall inventory; the counts
+    /// separate a one-shot probe from a retry loop. Not hashed
+    /// (instrument-only).
+    pub(super) unsupported_syscalls: BTreeMap<u64, u64>,
+    /// Witness: system-IPC namespace production counters. Not hashed
+    /// (instrument-only).
+    pub(super) system_ipc_witness: SystemIpcWitness,
+    /// Guest ranges where a namespace-keyed shm is mapped, recorded at
+    /// 334 / 337 and tested against every committed write. Keyed by
+    /// mapped base so an overlapping remap replaces its predecessor.
+    /// Not hashed.
+    pub(super) system_ipc_mappings: BTreeMap<u32, SystemIpcMapping>,
     /// Pending region-install requests emitted by 334 / 337. Drained
     /// by the runtime post-dispatch and applied to `GuestMemory`
     /// before the dispatch's effects commit. Not folded into
@@ -174,6 +199,27 @@ pub struct Lv2Host {
     /// system-process ids. Folded into [`Self::state_hash`] when it
     /// differs from the fallback.
     pub(super) program_authority_id: u64,
+    /// `ctrl_flags1` from the booting SELF's plaintext capability
+    /// header (supplemental record type 1); 0 when the SELF carries no
+    /// such record and for raw-ELF input. Source of the root / debug
+    /// privilege predicates. Folded into [`Self::state_hash`] when
+    /// non-zero, so an unprivileged boot hashes as it did before the
+    /// field existed.
+    pub(super) control_flags1: u32,
+    /// Firmware NID -> OPD address, supplied at boot from the loaded
+    /// firmware set. The sc 484 CoreOS branch resolves a caller's
+    /// import NIDs against it; empty for a boot with no firmware set,
+    /// which makes every import unresolved rather than wrong.
+    pub(super) firmware_exports: std::collections::BTreeMap<u32, u32>,
+    /// Witness: sc 484 calls seen, with a valid option struct.
+    pub(super) prx_register_module_count: u64,
+    /// Witness: of those, ones that took the CoreOS manual-link branch.
+    pub(super) prx_register_module_manual_count: u64,
+    /// Witness: GOT slots bound by the manual-link branch.
+    pub(super) prx_register_module_linked: u64,
+    /// Witness: import NIDs the manual-link branch could not resolve;
+    /// their slots keep the guest's own stub address.
+    pub(super) prx_register_module_unresolved: u64,
     /// Witness: total `sys_lwmutex_lock` calls across the boot that
     /// failed because the id was not in the table (CELL_ESRCH). A
     /// wrong program-authority-id skips libsysmodule's lwmutex
@@ -269,6 +315,12 @@ impl Lv2Host {
             cond_signal_dispatches: 0,
             prx_unload_rejections: 0,
             cond_keyed_signal_counts: BTreeMap::new(),
+            event_queue_ipc_keys: BTreeMap::new(),
+            event_queue_ipc: BTreeMap::new(),
+            prx_load_misses: BTreeMap::new(),
+            unsupported_syscalls: BTreeMap::new(),
+            system_ipc_witness: SystemIpcWitness::default(),
+            system_ipc_mappings: BTreeMap::new(),
             pending_region_installs: Vec::new(),
             mmapper_install_ledger: BTreeMap::new(),
             lwmutexes: LwMutexTable::new(),
@@ -292,6 +344,12 @@ impl Lv2Host {
             cond_reacquire_wake_calls: 0,
             sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
             program_authority_id: cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+            control_flags1: 0,
+            firmware_exports: std::collections::BTreeMap::new(),
+            prx_register_module_count: 0,
+            prx_register_module_manual_count: 0,
+            prx_register_module_linked: 0,
+            prx_register_module_unresolved: 0,
             lwmutex_unknown_lock_count: 0,
             prx_load_hle_stub_count: 0,
             prx_load_not_found_count: 0,
@@ -325,6 +383,71 @@ impl Lv2Host {
     #[inline]
     pub fn program_authority_id(&self) -> u64 {
         self.program_authority_id
+    }
+
+    /// Set `ctrl_flags1` from the booting SELF's plaintext capability
+    /// header. Raw-ELF input and SELFs without the record leave 0.
+    pub fn set_control_flags1(&mut self, flags: u32) {
+        self.control_flags1 = flags;
+    }
+
+    /// Install the firmware NID -> OPD map the sc 484 CoreOS branch
+    /// resolves against.
+    pub fn set_firmware_exports(&mut self, map: std::collections::BTreeMap<u32, u32>) {
+        self.firmware_exports = map;
+    }
+
+    /// Witness tuple for the frontier run: (sc 484 calls, manual-link
+    /// calls, GOT slots bound, import NIDs left unresolved).
+    #[inline]
+    pub fn prx_register_module_witness(&self) -> (u64, u64, u64, u64) {
+        (
+            self.prx_register_module_count,
+            self.prx_register_module_manual_count,
+            self.prx_register_module_linked,
+            self.prx_register_module_unresolved,
+        )
+    }
+
+    /// Raw capability word backing the privilege predicates.
+    #[inline]
+    pub fn control_flags1(&self) -> u32 {
+        self.control_flags1
+    }
+
+    /// Whether the booting process holds root privilege.
+    ///
+    /// The three capability predicates share bits -- root implies
+    /// debug-or-root, and the debug mask overlaps both. They are
+    /// mirrored from the oracle rather than reduced to disjoint bits,
+    /// because the exact per-bit meaning is unconfirmed there too.
+    #[inline]
+    pub fn has_root_perm(&self) -> bool {
+        self.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_ROOT_MASK != 0
+    }
+
+    /// Whether the booting process holds debug or root privilege; the
+    /// widest of the three masks. See [`Self::has_root_perm`].
+    #[inline]
+    pub fn debug_or_root(&self) -> bool {
+        self.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_OR_ROOT_MASK != 0
+    }
+
+    /// Whether the booting process holds debug privilege. See
+    /// [`Self::has_root_perm`].
+    #[inline]
+    pub fn has_debug_perm(&self) -> bool {
+        self.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_MASK != 0
+    }
+
+    /// Whether the booting process is a CoreOS SELF (vsh and the other
+    /// system executables). Derived from the program authority id, not
+    /// from `ctrl_flags1`: the two are independent, and a CoreOS SELF
+    /// is not necessarily root-capable (firmware libraries carry a
+    /// CoreOS authority id with `ctrl_flags1 == 0`).
+    #[inline]
+    pub fn is_coreos(&self) -> bool {
+        self.program_authority_id >> 36 == cellgov_ps3_abi::sce::COREOS_AUTHORITY_ID_PREFIX
     }
 
     /// Witness: count of `sys_lwmutex_lock` calls rejected for an
@@ -679,6 +802,76 @@ impl Lv2Host {
     /// cond's create-time ipc_key.
     pub fn cond_keyed_signal_counts(&self) -> &BTreeMap<u64, u64> {
         &self.cond_keyed_signal_counts
+    }
+
+    /// Witness: system-IPC namespace production counters.
+    pub fn system_ipc_witness(&self) -> &SystemIpcWitness {
+        &self.system_ipc_witness
+    }
+
+    /// Witness: null-backend hits keyed by syscall number.
+    pub fn unsupported_syscalls(&self) -> &BTreeMap<u64, u64> {
+        &self.unsupported_syscalls
+    }
+
+    /// Witness: sc 480 / 497 paths answered `CELL_ENOENT`.
+    pub fn prx_load_misses(&self) -> &BTreeMap<String, u64> {
+        &self.prx_load_misses
+    }
+
+    /// Count committed writes that land in a namespace-keyed shm.
+    ///
+    /// # Cross-module contract
+    ///
+    /// The runtime must call this once per successful commit, with the
+    /// same effect slice the commit pipeline applied. Calling it before
+    /// the commit succeeds would count writes a fault discarded.
+    ///
+    /// O(writes * mappings), and returns on the first line for a boot
+    /// that mapped no namespace shm at all.
+    pub fn note_committed_effects(&mut self, effects: &[cellgov_effects::Effect]) {
+        if self.system_ipc_mappings.is_empty() {
+            return;
+        }
+        for effect in effects {
+            let cellgov_effects::Effect::SharedWriteIntent { range, .. } = effect else {
+                continue;
+            };
+            let start = range.start().raw();
+            let end = start.saturating_add(range.length());
+            let hit = self
+                .system_ipc_mappings
+                .values()
+                .find(|m| {
+                    let m_start = u64::from(m.base);
+                    start < m_start + u64::from(m.size) && m_start < end
+                })
+                .map(|m| m.ipc_key);
+            if let Some(ipc_key) = hit {
+                self.system_ipc_witness.shm_writes += 1;
+                self.system_ipc_witness.note_key(ipc_key);
+            }
+        }
+    }
+
+    /// Record a namespace-keyed shm mapping and bump the map witness.
+    pub(super) fn note_system_ipc_map(&mut self, mem_id: u32, base: u32, size: u32) {
+        let Some((&ipc_key, _)) = self.mmapper_ipc.iter().find(|&(_, &id)| id == mem_id) else {
+            return;
+        };
+        if !super::is_system_ipc_key(ipc_key) {
+            return;
+        }
+        self.system_ipc_mappings.insert(
+            base,
+            SystemIpcMapping {
+                ipc_key,
+                base,
+                size,
+            },
+        );
+        self.system_ipc_witness.shm_maps += 1;
+        self.system_ipc_witness.note_key(ipc_key);
     }
 
     /// Read-only `pending_region_installs` snapshot used by sibling

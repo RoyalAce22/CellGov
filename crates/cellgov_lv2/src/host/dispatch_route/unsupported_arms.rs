@@ -157,8 +157,15 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
         }
         let keyed = ipc_key != 0 && ipc_key != SYS_MMAPPER_NO_SHM_KEY;
+        let in_namespace = keyed && crate::host::is_system_ipc_key(ipc_key);
         let mem_id = match self.mmapper_ipc.get(&ipc_key) {
-            Some(&existing) if keyed => existing,
+            Some(&existing) if keyed => {
+                if in_namespace {
+                    self.system_ipc_witness.shm_attaches += 1;
+                    self.system_ipc_witness.note_key(ipc_key);
+                }
+                existing
+            }
             _ => {
                 let mem_id = self.alloc_id();
                 self.mmapper_handles.insert(
@@ -170,6 +177,10 @@ impl Lv2Host {
                 );
                 if keyed {
                     self.mmapper_ipc.insert(ipc_key, mem_id);
+                }
+                if in_namespace {
+                    self.system_ipc_witness.shm_creates += 1;
+                    self.system_ipc_witness.note_key(ipc_key);
                 }
                 mem_id
             }
@@ -310,6 +321,7 @@ impl Lv2Host {
             self.mmapper_install_ledger.contains_key(&(addr as u32)),
             "sc 334 coherence: mmapper_install_ledger missing entry for {addr:#x}",
         );
+        self.note_system_ipc_map(mem_id, addr as u32, handle.size);
         let effects = self.system_seed_effects(mem_id, addr as u32, requester);
         Lv2Dispatch::Immediate { code: 0, effects }
     }
@@ -383,6 +395,7 @@ impl Lv2Host {
             self.mmapper_install_ledger.contains_key(&found_addr),
             "sc 337 coherence: mmapper_install_ledger missing entry for {found_addr:#x}",
         );
+        self.note_system_ipc_map(mem_id, found_addr, handle.size);
         let mut effects = self.system_seed_effects(mem_id, found_addr, requester);
         effects.push(Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(alloc_addr_ptr, 4),
@@ -894,8 +907,135 @@ impl Lv2Host {
 
     /// `_sys_prx_register_module` (484): returns
     /// CELL_PRX_ERROR_ELF_IS_REGISTERED for non-VSH callers.
-    pub(super) fn dispatch_prx_register_module(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ELF_IS_REGISTERED.into())
+    pub(super) fn dispatch_prx_register_module(
+        &mut self,
+        args: [u64; 8],
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ELF_IS_REGISTERED;
+
+        let opt = args[1];
+        if opt == 0 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+        let Some(size) = read_be_u64(rt, opt) else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        };
+        // 0x1c / 0x20 are the legacy option forms. The oracle rebuilds
+        // them with type = 0, which skips the branch entirely, so they
+        // need no field reads here.
+        let (module_type, stub_ea, stub_size) = match size {
+            0x1c | 0x20 => (0u64, 0u32, 0u32),
+            0x30 => {
+                let Some(t) = read_be_u64(rt, opt + 0x08) else {
+                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                };
+                let (Some(ea), Some(sz)) =
+                    (read_be_u32(rt, opt + 0x20), read_be_u32(rt, opt + 0x24))
+                else {
+                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                };
+                (t, ea, sz)
+            }
+            _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+        };
+        self.prx_register_module_count += 1;
+
+        if module_type & 0x1 == 0 {
+            return Lv2Dispatch::immediate(0);
+        }
+        if !self.is_coreos() {
+            // Only a CoreOS process may hand the kernel its own tables.
+            return Lv2Dispatch::immediate(CELL_PRX_ERROR_ELF_IS_REGISTERED.into());
+        }
+        self.prx_register_module_manual_count += 1;
+        let effects = self.link_manual_imports(stub_ea, stub_size, requester, rt);
+        Lv2Dispatch::Immediate { code: 0, effects }
+    }
+
+    /// Bind the import table at `[stub_ea, stub_ea + stub_size)` against
+    /// the firmware export map, returning one `SharedWriteIntent` per
+    /// resolved GOT slot.
+    ///
+    /// The caller-supplied table is guest data and may be uninitialised
+    /// -- a CoreOS module can reach this arm with a garbage pointer and
+    /// a huge size. Every read is bounds-checked through the runtime and
+    /// a failed read ends the walk rather than faulting the host; an
+    /// unresolved NID is left alone so the guest's own stub address
+    /// stays in the slot and the failure stays visible.
+    fn link_manual_imports(
+        &mut self,
+        stub_ea: u32,
+        stub_size: u32,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+    ) -> Vec<Effect> {
+        use cellgov_ps3_abi::elf::{
+            PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_NIDS_PTR_OFFSET, PRX_IMPORT_NUM_FUNC_OFFSET,
+            PRX_IMPORT_SIZE_OFFSET, PRX_IMPORT_STUB_PTR_OFFSET,
+        };
+
+        let mut effects = Vec::new();
+        let Some(table_end) = stub_ea.checked_add(stub_size) else {
+            return effects;
+        };
+        let mut cursor = stub_ea;
+        while cursor < table_end {
+            let Some(hdr) =
+                rt.read_committed(u64::from(cursor), PRX_IMPORT_ENTRY_MIN_SIZE as usize)
+            else {
+                break;
+            };
+            let entry_size = hdr[PRX_IMPORT_SIZE_OFFSET];
+            if entry_size < PRX_IMPORT_ENTRY_MIN_SIZE {
+                break;
+            }
+            let func_count = u16::from_be_bytes([
+                hdr[PRX_IMPORT_NUM_FUNC_OFFSET],
+                hdr[PRX_IMPORT_NUM_FUNC_OFFSET + 1],
+            ]);
+            let nids_ptr = u32::from_be_bytes([
+                hdr[PRX_IMPORT_NIDS_PTR_OFFSET],
+                hdr[PRX_IMPORT_NIDS_PTR_OFFSET + 1],
+                hdr[PRX_IMPORT_NIDS_PTR_OFFSET + 2],
+                hdr[PRX_IMPORT_NIDS_PTR_OFFSET + 3],
+            ]);
+            let stub_ptr = u32::from_be_bytes([
+                hdr[PRX_IMPORT_STUB_PTR_OFFSET],
+                hdr[PRX_IMPORT_STUB_PTR_OFFSET + 1],
+                hdr[PRX_IMPORT_STUB_PTR_OFFSET + 2],
+                hdr[PRX_IMPORT_STUB_PTR_OFFSET + 3],
+            ]);
+            for i in 0..u32::from(func_count) {
+                let (Some(nid_at), Some(slot_at)) = (
+                    nids_ptr.checked_add(i * 4).map(u64::from),
+                    stub_ptr.checked_add(i * 4).map(u64::from),
+                ) else {
+                    break;
+                };
+                let Some(nid) = read_be_u32(rt, nid_at) else {
+                    break;
+                };
+                let Some(&opd) = self.firmware_exports.get(&nid) else {
+                    self.prx_register_module_unresolved += 1;
+                    continue;
+                };
+                effects.push(Effect::SharedWriteIntent {
+                    range: ByteRange::contiguous_u32(slot_at as u32, 4),
+                    bytes: WritePayload::from_slice(&opd.to_be_bytes()),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: self.current_tick,
+                });
+                self.prx_register_module_linked += 1;
+            }
+            let Some(next) = cursor.checked_add(u32::from(entry_size)) else {
+                break;
+            };
+            cursor = next;
+        }
+        effects
     }
 
     /// `_sys_prx_register_library` (486): returns CELL_OK (kernel's
@@ -1041,4 +1181,18 @@ impl Lv2Host {
         );
         Lv2Dispatch::immediate(0)
     }
+}
+
+/// Big-endian u32 at `addr`, or `None` when the range is unmapped.
+fn read_be_u32(rt: &dyn Lv2Runtime, addr: u64) -> Option<u32> {
+    let b = rt.read_committed(addr, 4)?;
+    Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+/// Big-endian u64 at `addr`, or `None` when the range is unmapped.
+fn read_be_u64(rt: &dyn Lv2Runtime, addr: u64) -> Option<u64> {
+    let b = rt.read_committed(addr, 8)?;
+    Some(u64::from_be_bytes([
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+    ]))
 }

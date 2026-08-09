@@ -11,7 +11,7 @@ use crate::cli::exit::die;
 use super::got::patch_got_atomic;
 use super::types::{PrxLoadInfo, PrxLoadStageError, VerifiedFirmware};
 
-use cellgov_ppu::prx_loader::MIN_VIABLE_PRX_STEMS;
+use cellgov_ppu::prx_loader::{FIRMWARE_INTERNAL_PRX_STEMS, MIN_VIABLE_PRX_STEMS};
 
 /// Locate the firmware module file for `stem` under `dir_path`.
 ///
@@ -217,10 +217,15 @@ pub(in crate::game) fn load_firmware_set_bound(
     modules: &[cellgov_ppu::prx::ImportedModule],
     mem: &mut GuestMemory,
     code_floor: u32,
-) -> (Vec<PrxLoadInfo>, Option<VerifiedFirmware>) {
+    include_internal: bool,
+) -> (
+    Vec<PrxLoadInfo>,
+    Option<VerifiedFirmware>,
+    std::collections::BTreeMap<u32, u32>,
+) {
     let Some(dir) = firmware_dir else {
         println!("prx: firmware-set mode requires --firmware-dir");
-        return (Vec::new(), None);
+        return (Vec::new(), None, std::collections::BTreeMap::new());
     };
     let dir_path = std::path::PathBuf::from(dir);
     let (fw_root, fw_manifest) = locate_and_parse_manifest(&dir_path);
@@ -266,6 +271,39 @@ pub(in crate::game) fn load_firmware_set_bound(
         ));
     }
 
+    // A firmware executable loads these by full path at runtime; the
+    // guest's sc 480 then resolves them by stem out of this same set.
+    // Absent from the install is fatal here rather than a stub: the
+    // shell asked for a real module and a stub would answer with a
+    // handle backed by nothing.
+    if include_internal {
+        let internal_dir = fw_root.join("sys").join("internal");
+        for stem in FIRMWARE_INTERNAL_PRX_STEMS {
+            let path = find_firmware_module(&internal_dir, stem).unwrap_or_else(|| {
+                die(&format!(
+                    "prx: firmware-exec boot needs sys/internal/{stem}, absent under {}",
+                    internal_dir.display()
+                ))
+            });
+            let elf = match read_firmware_module_elf(&path) {
+                Ok(d) => d,
+                Err(e) => die(&format!("prx: {e}")),
+            };
+            verify_against_manifest(&fw_manifest, &fw_root, &path, &elf);
+            match cellgov_ppu::sprx::parse_prx(&elf) {
+                Ok(parsed) => {
+                    id_to_stem.insert(parsed.module_id, (*stem).to_string());
+                }
+                Err(e) => die(&format!("prx: failed to parse {}: {e:?}", path.display())),
+            }
+            let path_str = match path.to_str() {
+                Some(s) => s.to_string(),
+                None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
+            };
+            bytes_by_path.insert(path_str, elf);
+        }
+    }
+
     let prx_base = resolve_prx_base(code_floor);
 
     let image = match cellgov_ppu::prx_loader::load_firmware_set(bytes_by_path, mem, prx_base) {
@@ -293,6 +331,20 @@ pub(in crate::game) fn load_firmware_set_bound(
         stats.trampolined,
         stats.tramp_region_end,
     );
+
+    // Pure-data NID -> OPD view for the sc 484 CoreOS manual link;
+    // the host cannot reach the loader's export table itself.
+    let export_map: std::collections::BTreeMap<u32, u32> = image
+        .export_table
+        .nids()
+        .filter_map(|nid| {
+            image
+                .export_table
+                .get(nid)
+                .and_then(|opd| u32::try_from(opd).ok())
+                .map(|opd| (nid, opd))
+        })
+        .collect();
 
     let mut out: Vec<PrxLoadInfo> = Vec::with_capacity(image.loaded.len());
     // Park the trampoline region as a synthetic PrxLoadInfo entry so
@@ -329,5 +381,5 @@ pub(in crate::game) fn load_firmware_set_bound(
         image_version: fw_manifest.firmware.image_version.clone(),
         pup_sha256: fw_manifest.firmware.pup_sha256.0,
     };
-    (out, Some(identity))
+    (out, Some(identity), export_map)
 }

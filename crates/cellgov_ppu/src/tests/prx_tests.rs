@@ -98,6 +98,10 @@ fn parse_retail_eboot_imports() {
     assert!(names.contains(&"cellGcmSys"));
 }
 
+/// `p_filesz` written on synthetic PT_PRX_PARAM headers, matching the
+/// `header_size` the builders declare.
+const PRX_PARAM_BODY_SIZE: u64 = 0x40;
+
 /// Minimal ELF with PT_LOAD mapped 1:1 (vaddr == file offset) and
 /// one import module of one function.
 fn build_synthetic_prx_elf(nid: u32) -> Vec<u8> {
@@ -126,10 +130,12 @@ fn build_synthetic_prx_elf(nid: u32) -> Vec<u8> {
     data[ph0 + 16..ph0 + 24].copy_from_slice(&0u64.to_be_bytes());
     data[ph0 + 32..ph0 + 40].copy_from_slice(&(TOTAL_SIZE as u64).to_be_bytes());
 
-    // PT_PRX_PARAM pointing at PARAM_OFF.
+    // PT_PRX_PARAM pointing at PARAM_OFF. p_filesz must be non-zero:
+    // a bodyless segment means "no imports" and is parsed as such.
     let ph1 = 64 + 56;
     data[ph1..ph1 + 4].copy_from_slice(&PT_PRX_PARAM.to_be_bytes());
     data[ph1 + 8..ph1 + 16].copy_from_slice(&(PARAM_OFF as u64).to_be_bytes());
+    data[ph1 + 32..ph1 + 40].copy_from_slice(&PRX_PARAM_BODY_SIZE.to_be_bytes());
 
     // PrxParamHeader: header_size=0x40, magic, imports table.
     data[PARAM_OFF..PARAM_OFF + 4].copy_from_slice(&0x40u32.to_be_bytes());
@@ -491,4 +497,67 @@ fn parse_prefers_pt_prx_param_over_library_info_when_both_present() {
     assert_eq!(modules[0].name, "tst");
     assert_eq!(modules[0].functions.len(), 1);
     assert_eq!(modules[0].functions[0].nid, 0xDEAD_BEEF);
+}
+
+/// Zero a synthetic ELF's PT_PRX_PARAM body, reproducing the CoreOS
+/// shape: `p_offset == 0`, `p_filesz == 0`.
+fn make_prx_param_bodyless(data: &mut [u8]) {
+    let ph1 = 64 + 56;
+    data[ph1 + 8..ph1 + 16].copy_from_slice(&0u64.to_be_bytes());
+    data[ph1 + 32..ph1 + 40].copy_from_slice(&0u64.to_be_bytes());
+}
+
+#[test]
+fn bodyless_prx_param_parses_as_empty_import_set() {
+    let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+    make_prx_param_bodyless(&mut data);
+    let modules = parse_imports(&data).expect("bodyless PT_PRX_PARAM must not reject");
+    assert!(
+        modules.is_empty(),
+        "expected no imports, got {} module(s)",
+        modules.len()
+    );
+}
+
+#[test]
+fn bodyless_prx_param_does_not_fall_back_to_library_info() {
+    // A CoreOS image keeps a real load address in segment 0's
+    // p_paddr, so falling back to the library-info locator would
+    // parse an unrelated address as a struct pointer and fabricate
+    // imports. build_library_info_prx_elf supplies exactly that
+    // shape: a valid library-info path reachable via p_paddr.
+    let mut data = build_library_info_prx_elf(0xCAFE_BABE);
+    assert_eq!(
+        parse_imports(&data)
+            .expect("fixture must parse via library_info")
+            .len(),
+        1,
+        "fixture precondition: the library-info path yields one module"
+    );
+
+    // Grow the phdr table by one and append a bodyless PT_PRX_PARAM.
+    let ph1 = 64 + 56;
+    data[56..58].copy_from_slice(&2u16.to_be_bytes());
+    data[ph1..ph1 + 4].copy_from_slice(&PT_PRX_PARAM.to_be_bytes());
+
+    let modules = parse_imports(&data).expect("bodyless PT_PRX_PARAM must not reject");
+    assert!(
+        modules.is_empty(),
+        "bodyless PT_PRX_PARAM must terminate the search, but the          library-info fallback produced {} module(s)",
+        modules.len()
+    );
+}
+
+#[test]
+fn prx_param_with_a_body_still_rejects_bad_magic() {
+    let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+    let param_off = 176;
+    data[param_off + 4..param_off + 8].copy_from_slice(&0x0202_0166u32.to_be_bytes());
+    assert!(
+        matches!(
+            parse_imports(&data),
+            Err(ImportParseError::BadMagic(0x0202_0166))
+        ),
+        "the bodyless guard must not weaken the magic check on a segment that has a body"
+    );
 }

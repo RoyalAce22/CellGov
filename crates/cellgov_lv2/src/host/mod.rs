@@ -26,6 +26,7 @@ mod runtime;
 mod semaphore;
 mod spu;
 mod state_hash;
+mod system_ipc_witness;
 
 #[cfg(test)]
 #[path = "tests/test_support.rs"]
@@ -43,3 +44,4 @@ pub use rsx::{
     PACKAGE_CELLGOV_SET_VBLANK_HANDLER,
 };
 pub use runtime::Lv2Runtime;
+pub use system_ipc_witness::{is_system_ipc_key, SystemIpcWitness};

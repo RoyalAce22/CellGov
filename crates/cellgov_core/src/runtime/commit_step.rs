@@ -89,6 +89,10 @@ impl Runtime {
         };
         let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
 
+        if outcome.is_ok() {
+            self.lv2_host.note_committed_effects(effects);
+        }
+
         // Invalidate predecoded caches overlapping committed writes.
         if outcome.is_ok() {
             for effect in effects {

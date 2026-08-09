@@ -14,6 +14,12 @@ pub enum GameSource {
     /// EBOOT at `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/`.
     /// Requires `vfs_root` to have a non-empty parent.
     Disc,
+    /// Executable shipped inside the firmware image, at `dir` on the
+    /// host. Ignores `vfs_root`: a firmware executable is not
+    /// installed under `/dev_hdd0/game/` and has no content id
+    /// directory. Relative `dir` resolves against the process's
+    /// current directory, matching [`MountEntry::host`].
+    FirmwareExec { dir: PathBuf },
 }
 
 /// Distribution channel for the `titles.md` Format column. Display only;
@@ -24,6 +30,9 @@ pub enum Distribution {
     PsnHdd,
     RetailHdd,
     DiscIso,
+    /// Shipped inside the firmware image rather than distributed as a
+    /// title (vsh and the other CoreOS executables).
+    FirmwareExec,
 }
 
 impl Distribution {
@@ -34,6 +43,7 @@ impl Distribution {
             Self::PsnHdd => "PSN HDD",
             Self::RetailHdd => "Retail HDD",
             Self::DiscIso => "Disc ISO",
+            Self::FirmwareExec => "Firmware Exec",
         }
     }
 
@@ -43,6 +53,7 @@ impl Distribution {
             Self::PsnHdd => "psn-hdd",
             Self::RetailHdd => "retail-hdd",
             Self::DiscIso => "disc-iso",
+            Self::FirmwareExec => "firmware-exec",
         }
     }
 
@@ -221,7 +232,7 @@ impl TitleManifest {
                 short_name: self.short_name.clone(),
             });
         }
-        let usrdir = match self.source {
+        let usrdir = match &self.source {
             GameSource::Hdd => vfs_root.join("game").join(&self.content_id).join("USRDIR"),
             GameSource::Disc => {
                 let parent = match vfs_root.parent() {
@@ -239,6 +250,7 @@ impl TitleManifest {
                     .join("PS3_GAME")
                     .join("USRDIR")
             }
+            GameSource::FirmwareExec { dir } => dir.clone(),
         };
         let mut probe_errors = Vec::new();
         for name in &self.eboot_candidates {

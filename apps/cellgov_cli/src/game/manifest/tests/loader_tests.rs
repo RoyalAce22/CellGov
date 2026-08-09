@@ -735,3 +735,95 @@ kind = "process-exit"
     let err = TitleManifest::load_from_text(text, Path::new("typo.toml")).expect_err("rejects");
     assert!(matches!(err, ManifestError::Parse { .. }));
 }
+
+const FIRMWARE_EXEC_TOML: &str = r#"
+[title]
+content_id = "FWX"
+short_name = "fwx"
+display_name = "Firmware exec fixture"
+eboot_candidates = ["vsh.self"]
+year = 2025
+developer = "test-developer"
+engine = "test-engine"
+distribution = "firmware-exec"
+
+[source]
+kind = "firmware-exec"
+path = "firmware/vsh/module"
+
+[checkpoint]
+kind = "process-exit"
+"#;
+
+#[test]
+fn firmware_exec_source_carries_its_directory() {
+    let m = TitleManifest::load_from_text(FIRMWARE_EXEC_TOML, Path::new("fwx.toml"))
+        .expect("firmware-exec manifest loads");
+    assert_eq!(m.distribution, Distribution::FirmwareExec);
+    assert_eq!(
+        m.source,
+        GameSource::FirmwareExec {
+            dir: PathBuf::from("firmware/vsh/module")
+        }
+    );
+    // The game-only requirements are absent, not defaulted.
+    assert_eq!(m.rap_filename, None);
+    assert_eq!(m.content, None);
+    assert!(m.mounts.is_empty());
+}
+
+#[test]
+fn firmware_exec_source_without_path_is_rejected() {
+    let text = FIRMWARE_EXEC_TOML.replace(
+        "path = \"firmware/vsh/module\"
+",
+        "",
+    );
+    let err = TitleManifest::load_from_text(&text, Path::new("fwx.toml"))
+        .expect_err("firmware-exec needs a path");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("firmware-exec") && msg.contains("path"),
+        "message should name the missing key: {msg}"
+    );
+}
+
+#[test]
+fn source_path_on_a_game_kind_is_rejected() {
+    let text = FIRMWARE_EXEC_TOML.replace("kind = \"firmware-exec\"", "kind = \"hdd\"");
+    let err = TitleManifest::load_from_text(&text, Path::new("fwx.toml"))
+        .expect_err("path is firmware-exec only");
+    assert!(
+        err.to_string().contains("firmware-exec"),
+        "message should say which kind accepts path: {err}"
+    );
+}
+
+#[test]
+fn unknown_source_kind_lists_firmware_exec() {
+    let text = FIRMWARE_EXEC_TOML.replace("kind = \"firmware-exec\"", "kind = \"bluray\"");
+    let err = TitleManifest::load_from_text(&text, Path::new("fwx.toml"))
+        .expect_err("unknown kind rejects");
+    assert!(
+        err.to_string().contains("firmware-exec"),
+        "accepted-kind list is stale: {err}"
+    );
+}
+
+/// The committed vsh manifest is the one #276 boots; a change that
+/// reintroduces a game-only requirement on it should fail here.
+#[test]
+fn committed_vsh_manifest_declares_no_game_requirements() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root two levels up");
+    let path = root.join("docs/title_manifests/VSH.toml");
+    let m = TitleManifest::load_from_path(&path).expect("committed vsh manifest loads");
+    assert_eq!(m.short_name, "vsh");
+    assert_eq!(m.distribution, Distribution::FirmwareExec);
+    assert!(matches!(m.source, GameSource::FirmwareExec { .. }));
+    assert_eq!(m.rap_filename, None, "vsh.self is CoreOS-keyed, not NPDRM");
+    assert_eq!(m.content, None);
+    assert!(m.mounts.is_empty());
+}

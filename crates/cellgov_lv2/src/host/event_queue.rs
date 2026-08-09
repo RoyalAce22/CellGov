@@ -15,9 +15,14 @@ use crate::host::Lv2Host;
 use crate::sync_primitives::EventPayload;
 
 impl Lv2Host {
+    /// A keyed create mints a fresh queue even when `ipc_key` is
+    /// already registered; the registry exists for attribution, not
+    /// for attach. The namespace witness counts the second caller as a
+    /// reference so the gap is visible in a run.
     pub(super) fn dispatch_event_queue_create(
         &mut self,
         id_ptr: u32,
+        ipc_key: u64,
         size: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
@@ -26,6 +31,21 @@ impl Lv2Host {
         let id = self.alloc_id();
         if !self.event_queues.create_with_id(id, effective_size) {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+        }
+        if ipc_key != 0 {
+            self.event_queue_ipc_keys.insert(id, ipc_key);
+            // First registration wins so a later reference attributes
+            // to the queue the key originally named.
+            let first = !self.event_queue_ipc.contains_key(&ipc_key);
+            self.event_queue_ipc.entry(ipc_key).or_insert(id);
+            if super::is_system_ipc_key(ipc_key) {
+                if first {
+                    self.system_ipc_witness.event_queue_creates += 1;
+                } else {
+                    self.system_ipc_witness.event_queue_references += 1;
+                }
+                self.system_ipc_witness.note_key(ipc_key);
+            }
         }
         self.immediate_write_u32(id, id_ptr, requester)
     }
@@ -38,6 +58,11 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
         self.event_queues.destroy(id);
+        if let Some(ipc_key) = self.event_queue_ipc_keys.remove(&id) {
+            if self.event_queue_ipc.get(&ipc_key) == Some(&id) {
+                self.event_queue_ipc.remove(&ipc_key);
+            }
+        }
         Lv2Dispatch::immediate(0)
     }
 
@@ -161,7 +186,21 @@ impl Lv2Host {
             data2,
             data3,
         };
-        match self.event_queues.send_and_wake_or_enqueue(port_id, payload) {
+        let sent = self.event_queues.send_and_wake_or_enqueue(port_id, payload);
+        // A refused send (unknown queue, full queue) is not a delivery.
+        if matches!(
+            sent,
+            crate::sync_primitives::EventQueueSend::Enqueued
+                | crate::sync_primitives::EventQueueSend::Woke { .. }
+        ) {
+            if let Some(&ipc_key) = self.event_queue_ipc_keys.get(&port_id) {
+                if super::is_system_ipc_key(ipc_key) {
+                    self.system_ipc_witness.event_queue_enqueues += 1;
+                    self.system_ipc_witness.note_key(ipc_key);
+                }
+            }
+        }
+        match sent {
             crate::sync_primitives::EventQueueSend::Unknown => {
                 Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }

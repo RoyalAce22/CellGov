@@ -263,3 +263,102 @@ fn assemble_zero_phnum_with_zero_phentsize_is_accepted() {
         panic!("unexpected BadElfEntSize for SPRX-shape input");
     }
 }
+
+/// SCE buffer with a supplemental chain holding one record of `kind`
+/// whose body is `body`. Chain offset/size live at 0x58 / 0x60.
+fn build_self_with_supplemental(kind: u32, body: &[u8]) -> Vec<u8> {
+    const CHAIN_OFF: usize = 0x100;
+    let record_size = 0x10 + body.len();
+    let mut data = vec![0u8; CHAIN_OFF + record_size + 0x10];
+    data[0..4].copy_from_slice(&0x5343_4500u32.to_be_bytes());
+    data[0x58..0x60].copy_from_slice(&(CHAIN_OFF as u64).to_be_bytes());
+    data[0x60..0x68].copy_from_slice(&(record_size as u64).to_be_bytes());
+    data[CHAIN_OFF..CHAIN_OFF + 4].copy_from_slice(&kind.to_be_bytes());
+    data[CHAIN_OFF + 4..CHAIN_OFF + 8].copy_from_slice(&(record_size as u32).to_be_bytes());
+    data[CHAIN_OFF + 0x10..CHAIN_OFF + 0x10 + body.len()].copy_from_slice(body);
+    data
+}
+
+#[test]
+fn parse_control_flags1_reads_the_capability_body_first_word() {
+    let mut body = vec![0u8; 0x20];
+    body[0..4].copy_from_slice(&0x4000_0000u32.to_be_bytes());
+    let data = build_self_with_supplemental(1, &body);
+    assert_eq!(parse_control_flags1(&data).unwrap(), Some(0x4000_0000));
+}
+
+#[test]
+fn parse_control_flags1_is_none_when_no_capability_record_is_present() {
+    // A type-3 (NPDRM) record only: the chain exists but carries no
+    // capability header, which is the unprivileged retail shape.
+    let data = build_self_with_supplemental(3, &[0u8; 0x20]);
+    assert_eq!(parse_control_flags1(&data).unwrap(), None);
+}
+
+#[test]
+fn parse_control_flags1_rejects_a_body_too_short_for_the_flags_word() {
+    let data = build_self_with_supplemental(1, &[0u8; 2]);
+    assert!(
+        matches!(
+            parse_control_flags1(&data).unwrap_err(),
+            SceError::HeaderOffsetOutOfRange { .. }
+        ),
+        "a 2-byte capability body cannot hold the flags word"
+    );
+}
+
+#[test]
+fn parse_control_flags1_rejects_non_sce_input() {
+    let data = vec![0u8; 0x200];
+    assert!(matches!(
+        parse_control_flags1(&data).unwrap_err(),
+        SceError::BadMagic { .. }
+    ));
+}
+
+/// Corpus pin for the privilege split this slice exists to produce:
+/// vsh.self is root-capable, retail application SELFs are not.
+#[test]
+fn parse_control_flags1_matches_known_corpus_values() {
+    let root = {
+        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.pop();
+        p.pop();
+        p
+    };
+    let cases = [
+        (
+            "vsh.self (CoreOS)",
+            "firmware/vsh/module/vsh.self",
+            0x4000_0000u32,
+        ),
+        (
+            "flOw (NPDRM SELF)",
+            "vfs/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN",
+            0x0000_0000u32,
+        ),
+        (
+            "Super Stardust HD (NPDRM SELF)",
+            "vfs/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.BIN",
+            0x0000_0000u32,
+        ),
+    ];
+    let mut checked = 0;
+    for (label, rel, expected) in cases {
+        let path = root.join(rel);
+        let Ok(bytes) = std::fs::read(&path) else {
+            eprintln!("parse_control_flags1 corpus pin: skipping {label} (fixture absent)");
+            continue;
+        };
+        let got = parse_control_flags1(&bytes).unwrap().unwrap_or(0);
+        assert_eq!(got, expected, "{label}: ctrl_flags1 mismatch");
+        // The whole point of the value: root for vsh, not for games.
+        assert_eq!(
+            got & 0xC000_0000 != 0,
+            expected != 0,
+            "{label}: root predicate disagrees with the pinned flags"
+        );
+        checked += 1;
+    }
+    eprintln!("parse_control_flags1 corpus pin: checked {checked}/3 fixtures");
+}

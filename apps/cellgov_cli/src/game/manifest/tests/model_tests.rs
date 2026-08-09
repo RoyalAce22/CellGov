@@ -141,3 +141,40 @@ fn hdd_manifest(content_id: &str, short: &str, candidates: &[&str]) -> TitleMani
         mounts: Vec::new(),
     }
 }
+
+#[test]
+fn resolve_eboot_firmware_exec_uses_its_dir_and_ignores_vfs_root() {
+    let tmp = TmpDir::new("resolve_firmware_exec");
+    let moddir = tmp.path().join("firmware").join("vsh").join("module");
+    std::fs::create_dir_all(&moddir).unwrap();
+    std::fs::write(moddir.join("vsh.self"), b"x").unwrap();
+
+    let mut m = hdd_manifest("VSH", "vsh", &["vsh.self"]);
+    m.distribution = Distribution::FirmwareExec;
+    m.source = GameSource::FirmwareExec {
+        dir: moddir.clone(),
+    };
+
+    // A vfs_root that would break an Hdd or Disc resolve: no game
+    // directory under it, and no parent for the disc layout.
+    let got = m
+        .resolve_eboot(Path::new(""))
+        .expect("firmware-exec resolves from its own dir");
+    assert_eq!(got, moddir.join("vsh.self"));
+}
+
+#[test]
+fn resolve_eboot_firmware_exec_missing_file_reports_the_firmware_dir() {
+    let tmp = TmpDir::new("resolve_firmware_exec_absent");
+    let moddir = tmp.path().join("firmware").join("vsh").join("module");
+    let mut m = hdd_manifest("VSH", "vsh", &["vsh.self"]);
+    m.source = GameSource::FirmwareExec {
+        dir: moddir.clone(),
+    };
+    match m.resolve_eboot(Path::new("")) {
+        Err(ResolveEbootError::NotFound { searched, .. }) => {
+            assert_eq!(searched, moddir);
+        }
+        other => panic!("expected NotFound under the firmware dir, got {other:?}"),
+    }
+}

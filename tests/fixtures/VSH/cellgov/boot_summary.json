@@ -1,0 +1,9 @@
+{
+  "checkpoint": {
+    "kind": "process_exit"
+  },
+  "outcome": "ProcessExit",
+  "steps": 1232,
+  "budget": 256,
+  "host_invariant_breaks": 264
+}

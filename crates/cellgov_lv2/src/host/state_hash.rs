@@ -105,6 +105,11 @@ impl Lv2Host {
         if self.program_authority_id != cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID {
             hasher.write(&self.program_authority_id.to_le_bytes());
         }
+        // Same gating rationale: an unprivileged boot carries 0 and
+        // hashes as it did before the field existed.
+        if self.control_flags1 != 0 {
+            hasher.write(&self.control_flags1.to_le_bytes());
+        }
         hasher.finish()
     }
 }

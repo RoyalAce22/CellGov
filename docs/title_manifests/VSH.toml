@@ -1,0 +1,22 @@
+[title]
+content_id = "VSH"
+short_name = "vsh"
+display_name = "PS3 System Software (vsh)"
+eboot_candidates = ["vsh.self"]
+# Build date of the installed firmware image (release 04.9200,
+# build 68466, 2025-02-18) rather than vsh's original ship year;
+# the authoritative version lives in firmware/firmware.toml.
+year = 2025
+developer = "Sony Interactive Entertainment"
+engine = "PAF"
+distribution = "firmware-exec"
+
+# vsh ships inside the firmware image, not under /dev_hdd0/game/, so
+# there is no content-id directory and no RAP: the SELF is CoreOS-keyed
+# rather than NPDRM-wrapped.
+[source]
+kind = "firmware-exec"
+path = "firmware/vsh/module"
+
+[checkpoint]
+kind = "process-exit"

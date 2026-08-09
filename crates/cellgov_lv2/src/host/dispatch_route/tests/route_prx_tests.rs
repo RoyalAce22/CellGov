@@ -314,7 +314,7 @@ fn syscall_486_returns_ok() {
 }
 
 #[test]
-fn syscall_484_returns_elf_is_registered() {
+fn syscall_484_null_option_pointer_is_einval() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(256);
     let result = host.dispatch(
@@ -325,8 +325,15 @@ fn syscall_484_returns_elf_is_registered() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(0x8001_1910));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_EINVAL.into())
+    );
 }
+
+#[cfg(test)]
+#[path = "register_module_tests.rs"]
+mod register_module;
 
 #[test]
 fn syscall_462_returns_enosys() {

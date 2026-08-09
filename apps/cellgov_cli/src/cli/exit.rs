@@ -103,11 +103,14 @@ fn klicensee_resolver(
 }
 
 /// Plaintext ELF bytes plus the boot identity read from the SELF
-/// wrapper before decryption. `authority_id` is `None` for raw-ELF
-/// inputs, which have no identification header.
+/// wrapper before decryption. Both identity fields are `None` for
+/// raw-ELF inputs, which have no SELF headers; `control_flags1` is
+/// also `None` for a SELF that carries no plaintext capability
+/// header, which is the unprivileged case.
 pub(crate) struct LoadedPpuImage {
     pub elf_data: Vec<u8>,
     pub authority_id: Option<u64>,
+    pub control_flags1: Option<u32>,
 }
 
 /// Read a PPU image at an explicit path, resolving the klicensee for
@@ -122,17 +125,21 @@ pub(crate) fn load_ppu_image_with_title_or_die(
         return LoadedPpuImage {
             elf_data: bytes,
             authority_id: None,
+            control_flags1: None,
         };
     }
     let authority_id = cellgov_install::sce::parse_program_authority_id(&bytes)
         .map_err(|e| die(&format!("SELF {path}: identification header: {e}")))
         .ok();
+    let control_flags1 = cellgov_install::sce::parse_control_flags1(&bytes)
+        .unwrap_or_else(|e| die(&format!("SELF {path}: capability header: {e}")));
     let resolver = klicensee_resolver(title, vfs_root.to_path_buf());
     let elf_data = cellgov_install::npdrm::decrypt_self_to_elf_auto(&bytes, resolver)
         .unwrap_or_else(|e| die(&format!("failed to decrypt SELF {path}: {e}")));
     LoadedPpuImage {
         elf_data,
         authority_id,
+        control_flags1,
     }
 }
 
@@ -174,12 +181,16 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
         };
         if bytes.len() >= 4 && bytes[..4] == SCE_MAGIC {
             let authority_id = cellgov_install::sce::parse_program_authority_id(&bytes).ok();
+            let control_flags1 = cellgov_install::sce::parse_control_flags1(&bytes)
+                .ok()
+                .flatten();
             match cellgov_install::npdrm::decrypt_self_to_elf_auto(&bytes, &resolver) {
                 Ok(elf) => {
                     return (
                         LoadedPpuImage {
                             elf_data: elf,
                             authority_id,
+                            control_flags1,
                         },
                         path,
                     )
@@ -194,6 +205,7 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
                 LoadedPpuImage {
                     elf_data: bytes,
                     authority_id: None,
+                    control_flags1: None,
                 },
                 path,
             );

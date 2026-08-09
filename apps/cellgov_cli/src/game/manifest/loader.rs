@@ -139,17 +139,41 @@ impl TitleManifest {
                 })
             }
         };
+        let source_path = file.source.as_ref().and_then(|s| s.path.clone());
         let source = match file.source.as_ref().map(|s| s.kind.as_str()) {
             Some("disc") => GameSource::Disc,
             Some("hdd") => GameSource::Hdd,
+            Some("firmware-exec") => {
+                let dir = source_path.clone().ok_or_else(|| ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: "source kind 'firmware-exec' requires a 'path = \"...\"' \
+                              directory: a firmware executable is not installed under \
+                              /dev_hdd0/game/, so there is no content-id directory to \
+                              derive it from"
+                        .to_string(),
+                })?;
+                GameSource::FirmwareExec {
+                    dir: PathBuf::from(dir),
+                }
+            }
             Some(other) => {
                 return Err(ManifestError::Parse {
                     path: origin.to_path_buf(),
-                    message: format!("unknown source kind '{other}' (accepted: disc, hdd)"),
+                    message: format!(
+                        "unknown source kind '{other}' (accepted: disc, hdd, firmware-exec)"
+                    ),
                 });
             }
             None => GameSource::Hdd,
         };
+        if source_path.is_some() && !matches!(source, GameSource::FirmwareExec { .. }) {
+            return Err(ManifestError::Parse {
+                path: origin.to_path_buf(),
+                message: "[source] path is only meaningful for kind = \"firmware-exec\"; \
+                          hdd and disc titles derive their directory from content_id"
+                    .to_string(),
+            });
+        }
         let (rsx_mirror, rsx_consume) = file
             .rsx
             .as_ref()
@@ -222,7 +246,8 @@ impl TitleManifest {
             ManifestError::Parse {
                 path: origin.to_path_buf(),
                 message: format!(
-                    "unknown distribution {:?} (accepted: psn-hdd, retail-hdd, disc-iso)",
+                    "unknown distribution {:?} \
+                     (accepted: psn-hdd, retail-hdd, disc-iso, firmware-exec)",
                     file.title.distribution
                 ),
             }

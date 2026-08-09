@@ -318,6 +318,7 @@ impl Lv2Host {
         number: u64,
         args: [u64; 8],
     ) -> Lv2Dispatch {
+        *self.unsupported_syscalls.entry(number).or_insert(0) += 1;
         self.log_invariant_break(
             "dispatch.unsupported_stub",
             format_args!(

@@ -113,3 +113,30 @@ fn state_hash_differs_between_two_distinct_authority_ids() {
     b.set_program_authority_id(0x1070_0000_5600_0001);
     assert_ne!(a.state_hash(), b.state_hash());
 }
+
+#[test]
+fn state_hash_unchanged_for_unprivileged_control_flags() {
+    // Retail SELFs carry ctrl_flags1 == 0, so introducing the field
+    // must not move their hash.
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.set_control_flags1(0);
+    assert_eq!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_changes_for_root_control_flags() {
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.set_control_flags1(0x4000_0000);
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_differs_between_two_distinct_control_flags() {
+    let mut a = Lv2Host::new();
+    let mut b = Lv2Host::new();
+    a.set_control_flags1(0x4000_0000);
+    b.set_control_flags1(0x8000_0000);
+    assert_ne!(a.state_hash(), b.state_hash());
+}

@@ -172,9 +172,12 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
 
     let (imports_table_start_vaddr, imports_table_end_vaddr) =
         match locate_imports_via_prx_param(data, phoff, phentsize, phnum)? {
-            Some(table) => table,
-            None => locate_imports_via_library_info(data, phoff, phentsize, phnum)?
-                .ok_or(ImportParseError::NoImportsTable)?,
+            PrxParamLocation::Table(start, end) => (start, end),
+            PrxParamLocation::Empty => return Ok(Vec::new()),
+            PrxParamLocation::Absent => {
+                locate_imports_via_library_info(data, phoff, phentsize, phnum)?
+                    .ok_or(ImportParseError::NoImportsTable)?
+            }
         };
 
     let segments = build_segment_map(data, phoff, phentsize, phnum);
@@ -362,17 +365,30 @@ pub fn import_summary(modules: &[ImportedModule]) -> String {
 
 // -- Internal helpers --
 
+/// Outcome of the `PT_PRX_PARAM` search.
+enum PrxParamLocation {
+    /// No LOOS+2 segment in the program header table; the caller
+    /// falls back to the `ppu_prx_library_info` locator.
+    Absent,
+    /// A LOOS+2 segment is present but carries no body. The image
+    /// declares no imports; the caller must not fall back, because
+    /// segment 0's `p_paddr` is a valid load address on such images
+    /// and the fallback would parse it as a library-info pointer.
+    Empty,
+    /// Imports table `(start, end)` v-addrs.
+    Table(u32, u32),
+}
+
 /// Locate the imports table via a `PT_PRX_PARAM` (LOOS+2) program
-/// header carrying a `PrxParamHeader`. Returns the `(start, end)`
-/// v-addrs of the table on success, or `None` if no LOOS+2 segment
-/// was found. Used by game ELFs and user-mode PRXs.
+/// header carrying a `PrxParamHeader`. Used by game ELFs and
+/// user-mode PRXs.
 fn locate_imports_via_prx_param(
     data: &[u8],
     phoff: usize,
     phentsize: usize,
     phnum: usize,
-) -> Result<Option<(u32, u32)>, ImportParseError> {
-    let mut prx_param_offset = None;
+) -> Result<PrxParamLocation, ImportParseError> {
+    let mut prx_param = None;
     for i in 0..phnum {
         let base = phoff
             .checked_add(
@@ -389,13 +405,20 @@ fn locate_imports_via_prx_param(
         let p_type = loader::read_u32(data, base);
         if p_type == PT_PRX_PARAM {
             let p_offset = loader::read_u64(data, base + PHDR_P_OFFSET_OFFSET) as usize;
-            prx_param_offset = Some(p_offset);
+            let p_filesz = loader::read_u64(data, base + PHDR_P_FILESZ_OFFSET);
+            prx_param = Some((p_offset, p_filesz));
             break;
         }
     }
-    let Some(param_off) = prx_param_offset else {
-        return Ok(None);
+    let Some((param_off, param_filesz)) = prx_param else {
+        return Ok(PrxParamLocation::Absent);
     };
+    // A bodyless LOOS+2 segment is the CoreOS/vsh shape: its
+    // p_offset is 0, so reading the header here would decode the
+    // ELF identification bytes as a PrxParamHeader.
+    if param_filesz == 0 {
+        return Ok(PrxParamLocation::Empty);
+    }
     let param_end = param_off
         .checked_add(PRX_PARAM_HEADER_MIN_SIZE as usize)
         .ok_or(ImportParseError::OutOfBounds)?;
@@ -420,7 +443,7 @@ fn locate_imports_via_prx_param(
             end: end_vaddr,
         });
     }
-    Ok(Some((start, end_vaddr)))
+    Ok(PrxParamLocation::Table(start, end_vaddr))
 }
 
 /// Locate the imports table via a `ppu_prx_library_info` struct
