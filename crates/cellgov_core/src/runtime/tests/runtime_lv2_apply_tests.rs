@@ -117,7 +117,7 @@ fn apply_lv2_effects_loud_rejects_unsupported_effect_variant() {
     // generalizes via the compiler-witness (all 10 are structurally
     // identical reject paths).
     let mut rt = build(4096, 1, 100);
-    let pre_breaks = rt.lv2_host().invariant_break_count();
+    let pre_breaks = rt.lv2_host().observability().invariant_break_count;
 
     let marker = Effect::TraceMarker {
         marker: 0xDEAD_BEEF,
@@ -126,7 +126,7 @@ fn apply_lv2_effects_loud_rejects_unsupported_effect_variant() {
     rt.apply_lv2_effects(&[marker]);
 
     assert_eq!(
-        rt.lv2_host().invariant_break_count(),
+        rt.lv2_host().observability().invariant_break_count,
         pre_breaks + 1,
         "unsupported-variant arm must increment invariant_break_count; a count of \
          {pre_breaks} (unchanged) means the variant slipped through silently -- \
@@ -181,7 +181,7 @@ fn lv2_apply_rolls_back_count_when_idlist_target_is_reserved() {
         None,
     );
 
-    let breaks_before = rt.lv2_host().invariant_break_count();
+    let breaks_before = rt.lv2_host().observability().invariant_break_count;
     rt.dispatch_lv2_request(
         cellgov_lv2::Lv2Request::Unsupported {
             number: 494,
@@ -191,7 +191,7 @@ fn lv2_apply_rolls_back_count_when_idlist_target_is_reserved() {
     );
 
     assert_eq!(
-        rt.lv2_host().invariant_break_count() - breaks_before,
+        rt.lv2_host().observability().invariant_break_count - breaks_before,
         1,
         "expected one dispatch.lv2_effect_apply_failed break for the reserved idlist target"
     );
@@ -240,7 +240,7 @@ fn lv2_apply_rolls_back_count_when_idlist_target_is_unmapped() {
         None,
     );
 
-    let breaks_before = rt.lv2_host().invariant_break_count();
+    let breaks_before = rt.lv2_host().observability().invariant_break_count;
     rt.dispatch_lv2_request(
         cellgov_lv2::Lv2Request::Unsupported {
             number: 494,
@@ -250,7 +250,7 @@ fn lv2_apply_rolls_back_count_when_idlist_target_is_unmapped() {
     );
 
     assert_eq!(
-        rt.lv2_host().invariant_break_count() - breaks_before,
+        rt.lv2_host().observability().invariant_break_count - breaks_before,
         1,
         "expected one dispatch.lv2_effect_apply_failed break for the unmapped idlist target"
     );

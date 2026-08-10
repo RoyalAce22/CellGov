@@ -8,6 +8,7 @@ use cellgov_ps3_abi::cell_errors;
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::ppu_thread::{AddJoinWaiter, PpuThreadId};
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     pub(super) fn dispatch_ppu_thread_join(
@@ -15,9 +16,10 @@ impl Lv2Host {
         target: u64,
         status_out_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let target_id = PpuThreadId::new(target);
-        let Some(target_thread) = self.ppu_threads.get(target_id) else {
+        let Some(target_thread) = self.state.ppu_threads.get(target_id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if target_thread.state.is_finished() {
@@ -27,17 +29,18 @@ impl Lv2Host {
                 bytes: WritePayload::from_slice(&exit_value.to_be_bytes()),
                 ordering: PriorityClass::Normal,
                 source: requester,
-                source_time: self.current_tick,
+                source_time: tick,
             };
             return Lv2Dispatch::Immediate {
                 code: 0,
                 effects: vec![write],
             };
         }
-        let Some(caller_thread_id) = self.ppu_threads.thread_id_for_unit(requester) else {
+        let Some(caller_thread_id) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         match self
+            .state
             .ppu_threads
             .add_join_waiter(target_id, caller_thread_id)
         {
@@ -121,7 +124,7 @@ impl Lv2Host {
             }
         };
 
-        let tls_bytes = self.tls_template.instantiate();
+        let tls_bytes = self.state.tls_template.instantiate();
         // Empty template encodes "no TLS, r13 = 0".
         let tls_base = if tls_bytes.is_empty() {
             0
@@ -161,12 +164,12 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         // Abnormal exit paths skip the HLE unlock wrapper, so clear
         // the hold count here.
-        if let Some(tid) = self.ppu_threads.thread_id_for_unit(requester) {
+        if let Some(tid) = self.state.ppu_threads.thread_id_for_unit(requester) {
             self.lwmutex_holds_clear(tid);
         }
-        let waiters_unit_ids = match self.ppu_threads.thread_id_for_unit(requester) {
+        let waiters_unit_ids = match self.state.ppu_threads.thread_id_for_unit(requester) {
             Some(tid) => {
-                let waiter_thread_ids = self.ppu_threads.mark_finished(tid, exit_value);
+                let waiter_thread_ids = self.state.ppu_threads.mark_finished(tid, exit_value);
                 waiter_thread_ids
                     .into_iter()
                     .filter_map(|wtid| self.resolve_wake_thread(wtid, "ppu_thread_exit.joiner"))
@@ -176,7 +179,7 @@ impl Lv2Host {
                 // Empty table is a legitimate testkit pre-seed; a
                 // non-empty table with no caller entry would strand
                 // joiners.
-                if !self.ppu_threads.is_empty() {
+                if !self.state.ppu_threads.is_empty() {
                     self.record_invariant_break(
                         "ppu_thread_exit.unknown_caller",
                         format_args!(
@@ -205,10 +208,12 @@ impl Lv2Host {
     /// `LwMutexWake` pending response.
     fn release_held_lwmutexes_on_exit(&mut self) -> Vec<UnitId> {
         let ids: Vec<u32> = self
+            .state
             .lwmutexes
             .iter_ids()
             .filter(|id| {
-                self.lwmutexes
+                self.state
+                    .lwmutexes
                     .lookup(*id)
                     .map(|e| !e.waiters().is_empty())
                     .unwrap_or(false)
@@ -217,6 +222,7 @@ impl Lv2Host {
         let mut inheritors = Vec::new();
         for id in ids {
             if let crate::sync_primitives::LwMutexRelease::Transferred { new_owner } = self
+                .state
                 .lwmutexes
                 .release_and_wake_next(id, PpuThreadId::PRIMARY)
             {

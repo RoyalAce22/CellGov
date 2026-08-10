@@ -88,7 +88,7 @@ fn sys_rsx_device_map_dev_id_8_is_idempotent_across_calls() {
 #[test]
 fn sys_rsx_device_map_dev_id_not_8_returns_einval_and_bumps_count() {
     let mut host = Lv2Host::new();
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     for bad_dev_id in [0, 1, 7, 9, 11, u32::MAX] {
         let d = dispatch_device_map(&mut host, 0x1000, 0x1008, bad_dev_id);
         let Lv2Dispatch::Immediate { code, effects } = &d else {
@@ -101,7 +101,10 @@ fn sys_rsx_device_map_dev_id_not_8_returns_einval_and_bumps_count() {
         );
         assert!(effects.is_empty(), "dev_id {bad_dev_id}");
     }
-    assert_eq!(host.invariant_break_count() - breaks_before, 6);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        6
+    );
 }
 
 #[test]
@@ -116,7 +119,7 @@ fn rsx_device_addr_value_is_within_rpcs3_documented_range() {
 #[test]
 fn sys_rsx_device_map_null_dev_addr_returns_efault_and_emits_no_writes() {
     let mut host = Lv2Host::new();
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let d = dispatch_device_map(&mut host, 0, 0x1008, 8);
     let Lv2Dispatch::Immediate { code, effects } = d else {
         panic!("expected Immediate, got {d:?}");
@@ -132,7 +135,7 @@ fn sys_rsx_device_map_null_dev_addr_returns_efault_and_emits_no_writes() {
          got effects: {effects:?}"
     );
     assert_eq!(
-        host.invariant_break_count() - breaks_before,
+        host.observability().invariant_break_count - breaks_before,
         1,
         "the null-pointer EFAULT path must log_invariant_break exactly once \
          so release builds surface the case the prior debug_assert hid"

@@ -11,6 +11,7 @@ use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     // `sys_event_flag_wait_mode` bit layout:
@@ -46,6 +47,7 @@ impl Lv2Host {
         init: u64,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if id_ptr == 0 || attr_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
@@ -73,23 +75,27 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let id = self.alloc_id();
-        if self.event_flags.create_with_id(id, init).is_err() {
+        if self.state.event_flags.create_with_id(id, init).is_err() {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
-        self.immediate_write_u32(id, id_ptr, requester)
+        self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     pub(super) fn dispatch_event_flag_destroy(&mut self, id: u32) -> Lv2Dispatch {
-        let Some(entry) = self.event_flags.lookup(id) else {
+        let Some(entry) = self.state.event_flags.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if !entry.waiters().is_empty() {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
-        self.event_flags.destroy(id);
+        self.state.event_flags.destroy(id);
         Lv2Dispatch::immediate(0)
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "request payload plus the dispatch tick"
+    )]
     pub(super) fn dispatch_event_flag_wait(
         &mut self,
         id: u32,
@@ -98,14 +104,15 @@ impl Lv2Host {
         result_ptr: u32,
         timeout: u64,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         };
-        match self.event_flags.try_wait(id, bits, mode) {
+        match self.state.event_flags.try_wait(id, bits, mode) {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
                 let write = Effect::SharedWriteIntent {
@@ -113,7 +120,7 @@ impl Lv2Host {
                     bytes: WritePayload::from_slice(&observed.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: requester,
-                    source_time: self.current_tick,
+                    source_time: tick,
                 };
                 Lv2Dispatch::Immediate {
                     code: 0,
@@ -123,10 +130,11 @@ impl Lv2Host {
             Some(crate::sync_primitives::EventFlagWait::NoMatch) => {
                 // Finite timeout with no peer that could set/clear:
                 // ETIMEDOUT immediately.
-                if timeout != 0 && !self.ppu_threads.has_other_alive_thread(caller) {
+                if timeout != 0 && !self.state.ppu_threads.has_other_alive_thread(caller) {
                     return Lv2Dispatch::immediate(cell_errors::CELL_ETIMEDOUT.into());
                 }
                 match self
+                    .state
                     .event_flags
                     .enqueue_waiter(id, caller, bits, mode, result_ptr)
                 {
@@ -157,11 +165,12 @@ impl Lv2Host {
         mode_raw: u32,
         result_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         };
-        match self.event_flags.try_wait(id, bits, mode) {
+        match self.state.event_flags.try_wait(id, bits, mode) {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
                 let write = Effect::SharedWriteIntent {
@@ -169,7 +178,7 @@ impl Lv2Host {
                     bytes: WritePayload::from_slice(&observed.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: requester,
-                    source_time: self.current_tick,
+                    source_time: tick,
                 };
                 Lv2Dispatch::Immediate {
                     code: 0,
@@ -183,7 +192,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_event_flag_set(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
-        let Some(woken) = self.event_flags.set_and_wake(id, bits) else {
+        let Some(woken) = self.state.event_flags.set_and_wake(id, bits) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if woken.is_empty() {
@@ -212,7 +221,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_event_flag_clear(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
-        if !self.event_flags.clear_bits(id, bits) {
+        if !self.state.event_flags.clear_bits(id, bits) {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         }
         Lv2Dispatch::immediate(0)
@@ -223,8 +232,9 @@ impl Lv2Host {
         id: u32,
         num_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let Some(waiters) = self.event_flags.cancel_waiters(id) else {
+        let Some(waiters) = self.state.event_flags.cancel_waiters(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let count = waiters.len() as u32;
@@ -248,7 +258,7 @@ impl Lv2Host {
                 bytes: WritePayload::from_slice(&count.to_be_bytes()),
                 ordering: PriorityClass::Normal,
                 source: requester,
-                source_time: self.current_tick,
+                source_time: tick,
             });
         }
         if unit_ids.is_empty() {
@@ -267,8 +277,9 @@ impl Lv2Host {
         id: u32,
         flags_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let Some(entry) = self.event_flags.lookup(id) else {
+        let Some(entry) = self.state.event_flags.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if flags_ptr == 0 {
@@ -280,7 +291,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&bits.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,

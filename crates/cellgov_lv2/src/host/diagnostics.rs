@@ -26,15 +26,9 @@ pub enum InvariantBreakReason {
 }
 
 impl Lv2Host {
-    /// Running count of host-invariant breaks observed during dispatch.
-    #[inline]
-    pub fn invariant_break_count(&self) -> usize {
-        self.invariant_break_count
-    }
-
     /// Drain pending [`InvariantBreakReason`] events.
     pub fn drain_pending_invariant_breaks(&mut self) -> std::vec::Drain<'_, InvariantBreakReason> {
-        self.pending_invariant_breaks.drain(..)
+        self.obs.pending_invariant_breaks.drain(..)
     }
 
     /// Drain pending shared-memory region-install requests emitted by
@@ -47,7 +41,8 @@ impl Lv2Host {
     /// commit; otherwise subsequent guest writes through `addr` trip
     /// `CommitError::OutOfRange`.
     pub fn drain_pending_region_installs(&mut self) -> impl Iterator<Item = (u64, usize)> + '_ {
-        self.pending_region_installs
+        self.derived
+            .pending_region_installs
             .drain(..)
             .map(|p| (p.addr, p.size))
     }
@@ -66,7 +61,7 @@ impl Lv2Host {
     /// guest input during normal operation (e.g. `Unsupported`
     /// syscalls during real boots).
     pub fn log_invariant_break(&mut self, site: &'static str, details: std::fmt::Arguments<'_>) {
-        if self.invariant_break_count == 0 {
+        if self.obs.invariant_break_count == 0 {
             #[allow(
                 clippy::print_stderr,
                 reason = "one-shot diagnostic for guest-reachable invariant breaks; gated on the first occurrence so a hostile guest cannot spam stderr"
@@ -75,10 +70,11 @@ impl Lv2Host {
                 eprintln!("lv2 host invariant break at {site}: {details}");
             }
         }
-        self.pending_invariant_breaks
+        self.obs
+            .pending_invariant_breaks
             .push(InvariantBreakReason::Unspecified);
-        self.invariant_break_count = self.invariant_break_count.saturating_add(1);
-        let slot = self.invariant_break_sites.entry(site).or_insert(0);
+        self.obs.invariant_break_count = self.obs.invariant_break_count.saturating_add(1);
+        let slot = self.obs.invariant_break_sites.entry(site).or_insert(0);
         *slot = slot.saturating_add(1);
     }
 
@@ -88,12 +84,11 @@ impl Lv2Host {
     /// this crate; `"dispatch.unsupported_stub"` distinguishes the
     /// null backend's generic arm from every dedicated arm.
     pub fn invariant_break_site_count(&self, site: &str) -> u64 {
-        self.invariant_break_sites.get(site).copied().unwrap_or(0)
-    }
-
-    /// Every site that broke this run, with its count.
-    pub fn invariant_break_sites(&self) -> &std::collections::BTreeMap<&'static str, u64> {
-        &self.invariant_break_sites
+        self.obs
+            .invariant_break_sites
+            .get(site)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// `None` means the thread table and the primitive diverged; the
@@ -104,7 +99,7 @@ impl Lv2Host {
         thread: PpuThreadId,
         site: &'static str,
     ) -> Option<UnitId> {
-        match self.ppu_threads.get(thread) {
+        match self.state.ppu_threads.get(thread) {
             Some(t) => Some(t.unit_id),
             None => {
                 self.record_invariant_break(

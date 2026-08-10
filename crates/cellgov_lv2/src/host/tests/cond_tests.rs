@@ -875,7 +875,7 @@ fn cond_signal_all_flags_invariant_break_on_double_parked_waker() {
     host.mutexes_mut()
         .enqueue_waiter(mutex_id, PpuThreadId::PRIMARY)
         .unwrap();
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let r = host.dispatch(
         Lv2Request::CondSignalAll { id: cond_id },
         signaler_unit,
@@ -897,7 +897,7 @@ fn cond_signal_all_flags_invariant_break_on_double_parked_waker() {
         }
         other => panic!("expected WakeAndReturn, got {other:?}"),
     }
-    assert!(host.invariant_break_count() > breaks_before);
+    assert!(host.observability().invariant_break_count > breaks_before);
     assert_eq!(
         host.mutexes()
             .lookup(mutex_id)
@@ -1466,7 +1466,7 @@ fn cond_create_with_pshared_attr_captures_ipc_key() {
     let mutex_id = create_mutex_host(&mut host, src, &rt);
     let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
     assert_eq!(
-        host.cond_ipc_keys.get(&cond_id),
+        host.derived.cond_ipc_keys.get(&cond_id),
         Some(&0x8006_0100_0000_0030)
     );
 }
@@ -1479,7 +1479,7 @@ fn cond_create_without_pshared_stays_keyless() {
     seed_primary_ppu(&mut host, src);
     let mutex_id = create_mutex_host(&mut host, src, &rt);
     let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
-    assert!(!host.cond_ipc_keys.contains_key(&cond_id));
+    assert!(!host.derived.cond_ipc_keys.contains_key(&cond_id));
 }
 
 #[test]
@@ -1491,15 +1491,15 @@ fn cond_destroy_drops_captured_ipc_key() {
     let mutex_id = create_mutex_host(&mut host, src, &rt);
     let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
     host.dispatch(Lv2Request::CondDestroy { id: cond_id }, src, &rt);
-    assert!(!host.cond_ipc_keys.contains_key(&cond_id));
+    assert!(!host.derived.cond_ipc_keys.contains_key(&cond_id));
 }
 
 /// Mark the cellSysutil seed applied at `base` so the ring-check arm
 /// reads slot state from the test runtime's memory.
 fn mark_seed_applied_at(host: &mut Lv2Host, base: u32) {
     let key = cellgov_ps3_abi::system_ipc::CELLSYSUTIL_SHM_IPC_KEY;
-    host.system_seeds_applied.insert(key);
-    host.system_seed_bases.insert(key, base);
+    host.derived.system_seeds_applied.insert(key);
+    host.derived.system_seed_bases.insert(key, base);
 }
 
 #[test]
@@ -1532,8 +1532,8 @@ fn cond_wait_ring_wake_fires_for_cond1_when_slot_ring_has_unconsumed_data() {
         matches!(r, Lv2Dispatch::Immediate { code: 0, .. }),
         "ring-check arm must satisfy the wait immediately, got {r:?}",
     );
-    assert_eq!(host.cond_ring_wakes(), 1);
-    assert_eq!(host.cond0_producer_waits(), 0);
+    assert_eq!(host.observability().cond_ring_wakes, 1);
+    assert_eq!(host.observability().cond0_producer_waits(), 0);
     let entry = host.conds().lookup(cond_id).unwrap();
     assert!(entry.waiters().is_empty(), "caller must not park");
 }
@@ -1569,7 +1569,7 @@ fn cond_wait_slot1_cond1_reads_slot1_ring() {
         &rt,
     );
     assert!(matches!(r, Lv2Dispatch::Immediate { code: 0, .. }));
-    assert_eq!(host.cond_ring_wakes(), 1);
+    assert_eq!(host.observability().cond_ring_wakes, 1);
 }
 
 #[test]
@@ -1606,8 +1606,8 @@ fn cond_wait_cond1_depleted_ring_parks_without_witness() {
         matches!(r, Lv2Dispatch::Block { .. }),
         "depleted ring must park the caller, got {r:?}",
     );
-    assert_eq!(host.cond_ring_wakes(), 0);
-    assert_eq!(host.cond0_producer_waits(), 0);
+    assert_eq!(host.observability().cond_ring_wakes, 0);
+    assert_eq!(host.observability().cond0_producer_waits(), 0);
 }
 
 #[test]
@@ -1641,8 +1641,8 @@ fn cond_wait_cond0_parks_even_with_ring_data_and_counts_producer_wait() {
         matches!(r, Lv2Dispatch::Block { .. }),
         "cond[0] must park; its wake is producer-fed, got {r:?}",
     );
-    assert_eq!(host.cond_ring_wakes(), 0);
-    assert_eq!(host.cond0_producer_waits(), 1);
+    assert_eq!(host.observability().cond_ring_wakes, 0);
+    assert_eq!(host.observability().cond0_producer_waits(), 1);
 }
 
 #[test]
@@ -1672,7 +1672,7 @@ fn cond_wait_keyless_cond_never_consults_the_ring() {
         &rt,
     );
     assert!(matches!(r, Lv2Dispatch::Block { .. }));
-    assert_eq!(host.cond_ring_wakes(), 0);
+    assert_eq!(host.observability().cond_ring_wakes, 0);
 }
 
 #[test]
@@ -1695,8 +1695,8 @@ fn cond_signal_dispatches_witness_counts_invocations() {
         Lv2Dispatch::Immediate { effects: e, .. } => extract_write_u32(&e[0]),
         other => panic!("expected Immediate, got {other:?}"),
     };
-    assert_eq!(host.cond_signal_dispatches(), 0);
+    assert_eq!(host.observability().cond_signal_dispatches, 0);
     host.dispatch(Lv2Request::CondSignal { id: cond_id }, src, &rt);
     host.dispatch(Lv2Request::CondSignal { id: cond_id }, src, &rt);
-    assert_eq!(host.cond_signal_dispatches(), 2);
+    assert_eq!(host.observability().cond_signal_dispatches, 2);
 }

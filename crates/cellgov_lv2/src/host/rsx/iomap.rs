@@ -58,9 +58,9 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        self.rsx_context.iomap_io = io;
-        self.rsx_context.iomap_ea = ea;
-        self.rsx_context.iomap_size = size;
+        self.state.rsx_context.iomap_io = io;
+        self.state.rsx_context.iomap_ea = ea;
+        self.state.rsx_context.iomap_size = size;
         Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
     }
 }

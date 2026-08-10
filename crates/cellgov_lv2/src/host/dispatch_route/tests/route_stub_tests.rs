@@ -163,7 +163,7 @@ fn syscall_136_event_port_connect_local_on_unknown_ids_returns_esrch() {
 fn malformed_request_records_invariant_break_and_returns_einval() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    let before = host.invariant_break_count();
+    let before = host.observability().invariant_break_count;
     let result = host.dispatch(
         Lv2Request::Malformed {
             number: 99,
@@ -177,14 +177,14 @@ fn malformed_request_records_invariant_break_and_returns_einval() {
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     );
-    assert!(host.invariant_break_count() > before);
+    assert!(host.observability().invariant_break_count > before);
 }
 
 #[test]
 fn hypercall_records_invariant_break_and_returns_einval() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    let before = host.invariant_break_count();
+    let before = host.observability().invariant_break_count;
     let result = host.dispatch(
         Lv2Request::Hypercall {
             lev: std::num::NonZeroU8::new(1).unwrap(),
@@ -198,14 +198,14 @@ fn hypercall_records_invariant_break_and_returns_einval() {
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     );
-    assert!(host.invariant_break_count() > before);
+    assert!(host.observability().invariant_break_count > before);
 }
 
 #[test]
 fn spu_thread_group_terminate_logs_invariant_break_and_returns_enosys() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    let before = host.invariant_break_count();
+    let before = host.observability().invariant_break_count;
     let result = host.dispatch(
         Lv2Request::SpuThreadGroupTerminate {
             group_id: 1,
@@ -218,14 +218,14 @@ fn spu_thread_group_terminate_logs_invariant_break_and_returns_enosys() {
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
     );
-    assert!(host.invariant_break_count() > before);
+    assert!(host.observability().invariant_break_count > before);
 }
 
 #[test]
 fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    let before = host.invariant_break_count();
+    let before = host.observability().invariant_break_count;
     let _ = host.dispatch(
         Lv2Request::PpuThreadCreate {
             id_ptr: 0x9000,
@@ -239,7 +239,7 @@ fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
         &rt,
     );
     assert!(
-        host.invariant_break_count() > before,
+        host.observability().invariant_break_count > before,
         "expected log_invariant_break to fire on nonzero flags"
     );
 }

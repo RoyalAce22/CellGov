@@ -8,6 +8,7 @@ use cellgov_ps3_abi::sys_rsx::device_map;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
+use cellgov_time::GuestTicks;
 
 const _: () = assert!(
     device_map::ADDR + device_map::RESERVATION_SIZE <= Lv2Host::MMAPPER_REGION_START,
@@ -29,6 +30,7 @@ impl Lv2Host {
         _a2_ptr: u32,
         dev_id: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if dev_id != 8 {
             self.log_invariant_break(
@@ -57,7 +59,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&device_addr.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: cell_errors::CELL_OK.into(),

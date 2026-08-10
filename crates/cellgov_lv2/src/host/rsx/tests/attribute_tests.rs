@@ -51,7 +51,7 @@ fn sys_rsx_context_attribute_flip_queued_path_out_of_range_nibble_falls_back_wit
     let mut host = Lv2Host::new();
     let source = UnitId::new(0);
     allocate_context(&mut host, source);
-    let pre_breaks = host.invariant_break_count();
+    let pre_breaks = host.observability().invariant_break_count;
 
     let rt = FakeRuntime::new(0x1_0000);
     let d = host.dispatch(
@@ -74,7 +74,7 @@ fn sys_rsx_context_attribute_flip_queued_path_out_of_range_nibble_falls_back_wit
         Effect::RsxFlipRequest { buffer_index: 0 }
     ));
     assert!(
-        host.invariant_break_count() > pre_breaks,
+        host.observability().invariant_break_count > pre_breaks,
         "out-of-range nibble fallback must witness a log_invariant_break \
          so a future consumer can disambiguate slot-0-was-requested from \
          clamped-from-9",
@@ -132,7 +132,7 @@ fn sys_rsx_context_attribute_flip_direct_path_no_match_falls_back_to_zero() {
     let mut host = Lv2Host::new();
     let source = UnitId::new(0);
     allocate_context(&mut host, source);
-    let pre_breaks = host.invariant_break_count();
+    let pre_breaks = host.observability().invariant_break_count;
 
     let rt = FakeRuntime::new(0x1_0000);
     let d = host.dispatch(
@@ -155,7 +155,7 @@ fn sys_rsx_context_attribute_flip_direct_path_no_match_falls_back_to_zero() {
         Effect::RsxFlipRequest { buffer_index: 0 }
     ));
     assert!(
-        host.invariant_break_count() > pre_breaks,
+        host.observability().invariant_break_count > pre_breaks,
         "no-match fallback must witness a log_invariant_break so the \
          silent-substitution is non-vacuous; otherwise the 0 we synthesize \
          would be indistinguishable from a successful match against slot 0",

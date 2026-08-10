@@ -77,13 +77,13 @@ fn rsx_flip_status_mirror_failure_preserves_model_and_surfaces_break() {
         let s1 = rt.step().unwrap();
         rt.commit_step(&s1.result, &s1.effects).unwrap();
         let after_waiting_status = rt.rsx_flip().status();
-        let after_waiting_breaks = rt.lv2_host().invariant_break_count();
+        let after_waiting_breaks = rt.lv2_host().observability().invariant_break_count;
         rt.registry_mut()
             .register_with(|id| CountingUnit::new(id, 5));
         let s2 = rt.step().unwrap();
         rt.commit_step(&s2.result, &s2.effects).unwrap();
         let status_after = rt.rsx_flip().status();
-        let breaks_total = rt.lv2_host().invariant_break_count();
+        let breaks_total = rt.lv2_host().observability().invariant_break_count;
         let mirror_bytes = rt
             .memory()
             .read(ByteRange::new(GuestAddr::new(RSX_FLIP_STATUS_MIRROR_ADDR as u64), 4).unwrap())

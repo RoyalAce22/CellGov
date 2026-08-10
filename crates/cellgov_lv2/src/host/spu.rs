@@ -13,6 +13,7 @@ use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::request::Lv2Request;
 use crate::thread_group::{DestroyGroupError, GroupState, MAX_SLOTS_PER_GROUP};
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_spu_image_import`: register `size` bytes at `img_ptr` in
@@ -23,6 +24,10 @@ impl Lv2Host {
     ///
     /// - `CELL_EINVAL` when `img_ptr` / `size` are out of guest bounds.
     /// - `CELL_EFAULT` when `handle_out` is not writable for 16 bytes.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "request payload plus the dispatch tick"
+    )]
     pub(super) fn dispatch_image_import(
         &mut self,
         handle_out: u32,
@@ -31,6 +36,7 @@ impl Lv2Host {
         type_id: u32,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         // > usize image cannot satisfy a read; reject as CELL_EINVAL
         // alongside the out-of-bounds branch.
@@ -61,7 +67,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&img_struct),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -75,6 +81,7 @@ impl Lv2Host {
         path_ptr: u32,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let path_bytes = match rt.read_committed(path_ptr as u64, sys_spu::IMAGE_PATH_MAX) {
             Some(bytes) => bytes,
@@ -91,7 +98,7 @@ impl Lv2Host {
         };
         let path = &path_bytes[..path_len];
 
-        let record = match self.content.lookup_by_path(path) {
+        let record = match self.state.content.lookup_by_path(path) {
             Some(r) => r,
             None => {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
@@ -113,7 +120,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&img_struct),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
 
         Lv2Dispatch::Immediate {
@@ -127,11 +134,12 @@ impl Lv2Host {
         id_ptr: u32,
         num_threads: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if num_threads > MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        let group_id = match self.groups.create(num_threads) {
+        let group_id = match self.state.groups.create(num_threads) {
             Some(id) => id,
             None => {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EAGAIN.into());
@@ -144,7 +152,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&group_id.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
 
         Lv2Dispatch::Immediate {
@@ -157,7 +165,7 @@ impl Lv2Host {
     /// not [`GroupState::Running`]. Unknown id -> CELL_ESRCH; running
     /// group -> CELL_EBUSY (the title must terminate or join first).
     pub(super) fn dispatch_group_destroy(&mut self, group_id: u32) -> Lv2Dispatch {
-        let code = match self.groups.destroy(group_id) {
+        let code = match self.state.groups.destroy(group_id) {
             Ok(()) => 0,
             Err(DestroyGroupError::Unknown) => cell_errors::CELL_ESRCH.into(),
             Err(DestroyGroupError::Busy) => cell_errors::CELL_EBUSY.into(),
@@ -169,7 +177,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_group_start(&mut self, group_id: u32) -> Lv2Dispatch {
-        let group = match self.groups.get_mut(group_id) {
+        let group = match self.state.groups.get_mut(group_id) {
             Some(g) => g,
             None => {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
@@ -180,7 +188,12 @@ impl Lv2Host {
         // pass's `expect` requires `lookup_by_handle` to be a pure read.
         let slot_entries: Vec<_> = group.slots.iter().map(|(&k, v)| (k, v.clone())).collect();
         for (_slot_idx, slot) in &slot_entries {
-            if self.content.lookup_by_handle(slot.image_handle).is_none() {
+            if self
+                .state
+                .content
+                .lookup_by_handle(slot.image_handle)
+                .is_none()
+            {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
             }
         }
@@ -188,6 +201,7 @@ impl Lv2Host {
         let mut inits = std::collections::BTreeMap::new();
         for (slot_idx, slot) in &slot_entries {
             let record = self
+                .state
                 .content
                 .lookup_by_handle(slot.image_handle)
                 .expect("handle validated above");
@@ -203,7 +217,8 @@ impl Lv2Host {
             );
         }
 
-        self.groups
+        self.state
+            .groups
             .get_mut(group_id)
             .expect("group existed above")
             .state = GroupState::Running;
@@ -220,9 +235,10 @@ impl Lv2Host {
         req: Lv2Request,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        self.spu_thread_initialize_dispatches =
-            self.spu_thread_initialize_dispatches.wrapping_add(1);
+        self.obs.spu_thread_initialize_dispatches =
+            self.obs.spu_thread_initialize_dispatches.wrapping_add(1);
         let (thread_ptr, group_id, thread_num, img_ptr, arg_ptr) = match req {
             Lv2Request::SpuThreadInitialize {
                 thread_ptr,
@@ -292,6 +308,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         match self
+            .state
             .groups
             .initialize_thread(group_id, thread_num, handle, args)
         {
@@ -313,7 +330,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&thread_id.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
 
         Lv2Dispatch::Immediate {
@@ -328,8 +345,9 @@ impl Lv2Host {
         cause_ptr: u32,
         status_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let group = match self.groups.get(group_id) {
+        let group = match self.state.groups.get(group_id) {
             Some(g) => g,
             None => {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
@@ -364,7 +382,7 @@ impl Lv2Host {
                         ),
                         ordering: PriorityClass::Normal,
                         source: requester,
-                        source_time: self.current_tick,
+                        source_time: tick,
                     });
                 }
                 if status_ptr != 0 {
@@ -374,7 +392,7 @@ impl Lv2Host {
                         bytes: WritePayload::from_slice(&0u32.to_be_bytes()),
                         ordering: PriorityClass::Normal,
                         source: requester,
-                        source_time: self.current_tick,
+                        source_time: tick,
                     });
                 }
                 Lv2Dispatch::Immediate { code: 0, effects }
@@ -389,7 +407,7 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         // Non-running target: ESRCH. Silent drop would lose mailbox data.
-        let target_uid = match self.groups.running_unit_for_thread(thread_id) {
+        let target_uid = match self.state.groups.running_unit_for_thread(thread_id) {
             Some(uid) => uid,
             None => {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());

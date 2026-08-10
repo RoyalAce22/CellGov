@@ -1,4 +1,4 @@
-//! Lv2Host state-hash sensitivity: PPU table, TLS template, hold counts, child stacks, and firmware identity each shift the hash deterministically.
+//! Lv2Host state-hash sensitivity: each hashed field shifts the hash deterministically.
 
 use super::*;
 use crate::host::test_support::primary_attrs;
@@ -138,5 +138,142 @@ fn state_hash_differs_between_two_distinct_control_flags() {
     let mut b = Lv2Host::new();
     a.set_control_flags1(0x4000_0000);
     b.set_control_flags1(0x8000_0000);
+    assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn state_hash_changes_after_event_port_create() {
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.state.event_ports.create_with_id(0x100, 1, 0);
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_changes_when_an_event_port_connects() {
+    let mut unconnected = Lv2Host::new();
+    unconnected.state.event_ports.create_with_id(0x100, 1, 0);
+    let mut connected = Lv2Host::new();
+    connected.state.event_ports.create_with_id(0x100, 1, 0);
+    connected
+        .state
+        .event_ports
+        .connect(0x100, 0x200, 1)
+        .unwrap();
+    assert_ne!(unconnected.state_hash(), connected.state_hash());
+}
+
+#[test]
+fn state_hash_returns_to_table_baseline_after_event_port_destroy() {
+    // The port table gates on non-empty, and destroy does not touch
+    // the shared id allocator here, so create-then-destroy with a
+    // fixed id reads as the fresh table again.
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.state.event_ports.create_with_id(0x100, 1, 0);
+    host.state.event_ports.destroy(0x100).unwrap();
+    assert_eq!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_changes_after_mmapper_handle_insert() {
+    use crate::host::mmapper::MmapperHandle;
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.state.mmapper_handles.insert(
+        5,
+        MmapperHandle {
+            size: 0x10_0000,
+            align: 0x10_0000,
+        },
+    );
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_changes_after_mmapper_cursor_advance() {
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.mmapper_alloc(0x1000).unwrap();
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_changes_after_mmapper_ipc_registration() {
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.state.mmapper_ipc.insert(0x8006_0100_0000_0010, 7);
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_differs_when_one_ipc_key_maps_to_two_mem_ids() {
+    let mut a = Lv2Host::new();
+    let mut b = Lv2Host::new();
+    a.state.mmapper_ipc.insert(0x8006_0100_0000_0010, 7);
+    b.state.mmapper_ipc.insert(0x8006_0100_0000_0010, 8);
+    assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn state_hash_changes_after_a_process_count_increment() {
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.state.process_counts.fs_fd_inc();
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_stays_off_baseline_after_alloc_id_backed_port_create_then_destroy() {
+    // The port table gates out once empty again, but the id the
+    // create consumed advanced next_kernel_id, which always folds.
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    let id = host.alloc_id();
+    host.state.event_ports.create_with_id(id, 1, 0);
+    host.state.event_ports.destroy(id).unwrap();
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_differs_between_two_distinct_process_count_classes() {
+    // Counters fold positionally with no per-field tag, so the same
+    // value in different classes must still read differently.
+    let mut a = Lv2Host::new();
+    let mut b = Lv2Host::new();
+    a.state.process_counts.timer_inc();
+    b.state.process_counts.rwlock_inc();
+    assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn state_hash_returns_to_baseline_after_process_count_inc_then_dec() {
+    // Counter-level gate edge: back at all-zero the fold drops out.
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.state.process_counts.timer_inc();
+    host.state.process_counts.timer_dec();
+    assert_eq!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_differs_when_mmapper_size_and_align_are_transposed() {
+    use crate::host::mmapper::MmapperHandle;
+    let mut a = Lv2Host::new();
+    let mut b = Lv2Host::new();
+    a.state.mmapper_handles.insert(
+        5,
+        MmapperHandle {
+            size: 0x10_0000,
+            align: 0x1000,
+        },
+    );
+    b.state.mmapper_handles.insert(
+        5,
+        MmapperHandle {
+            size: 0x1000,
+            align: 0x10_0000,
+        },
+    );
     assert_ne!(a.state_hash(), b.state_hash());
 }

@@ -11,6 +11,7 @@ use super::flags::validate_open_flags;
 use super::mount::MountResolution;
 use super::path::read_path_bytes;
 use super::ptr::out_ptr_writable;
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_fs_open` -- allocate a read-only fd against either a
@@ -26,6 +27,10 @@ impl Lv2Host {
     /// 3. Path exists AND flags request write semantics -> CELL_EROFS.
     /// 4. Path exists, flags OK -> CELL_OK with one fd-write effect.
     /// 5. Path missing or non-UTF-8 -> CELL_ENOENT.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "request payload plus the dispatch tick"
+    )]
     pub(in crate::host) fn dispatch_fs_open(
         &mut self,
         path_ptr: u32,
@@ -34,6 +39,7 @@ impl Lv2Host {
         _mode: u32,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if !out_ptr_writable(rt, fd_out_ptr, 4, 4) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
@@ -58,7 +64,7 @@ impl Lv2Host {
             if let Some(err) = flag_err {
                 return Lv2Dispatch::immediate(err.into());
             }
-            return self.open_existing_blob(p, fd_out_ptr, requester);
+            return self.open_existing_blob(p, fd_out_ptr, requester, tick);
         }
 
         match self.try_mount_resolve_and_cache(p) {
@@ -66,7 +72,7 @@ impl Lv2Host {
                 if let Some(err) = flag_err {
                     return Lv2Dispatch::immediate(err.into());
                 }
-                self.open_existing_blob(p, fd_out_ptr, requester)
+                self.open_existing_blob(p, fd_out_ptr, requester, tick)
             }
             MountResolution::Failed(err) => Lv2Dispatch::immediate(err.into()),
             MountResolution::Unmounted => Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into()),
@@ -85,11 +91,12 @@ impl Lv2Host {
         path: &str,
         fd_out_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         match self.fs_store_mut().open_fd(path) {
             Ok(fd) => {
                 self.fs_fd_count_inc();
-                self.immediate_write_u32(fd, fd_out_ptr, requester)
+                self.immediate_write_u32(fd, fd_out_ptr, requester, tick)
             }
             Err(FsError::FdExhausted) => Lv2Dispatch::immediate(cell_errors::CELL_EMFILE.into()),
             Err(other) => {

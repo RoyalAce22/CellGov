@@ -44,6 +44,24 @@ impl MmapperHandleTable {
     pub(crate) fn get(&self, mem_id: u32) -> Option<MmapperHandle> {
         self.handles.get(&mem_id).copied()
     }
+
+    /// True when no handles are live.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.handles.is_empty()
+    }
+
+    /// FNV-1a over every handle's id, size, and align, via raw
+    /// little-endian bytes per the host state-hash contract.
+    pub(crate) fn state_hash(&self) -> u64 {
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
+        hasher.write(&(self.handles.len() as u64).to_le_bytes());
+        for (mem_id, handle) in &self.handles {
+            hasher.write(&mem_id.to_le_bytes());
+            hasher.write(&handle.size.to_le_bytes());
+            hasher.write(&handle.align.to_le_bytes());
+        }
+        hasher.finish()
+    }
 }
 
 /// Pending region-install request emitted by 334 and drained by the

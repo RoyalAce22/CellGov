@@ -11,6 +11,7 @@ use crate::dispatch::Lv2Dispatch;
 
 use crate::host::mmapper::{MmapperHandle, PendingRegionInstall};
 use crate::host::{Lv2Host, Lv2Runtime};
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_ppu_thread_get_priority` (48): writes the target's
@@ -24,10 +25,12 @@ impl Lv2Host {
         &self,
         args: [u64; 8],
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let thread_id = args[0] as u32;
         let priop = args[1] as u32;
         let Some(thread) = self
+            .state
             .ppu_threads
             .get(crate::ppu_thread::PpuThreadId::new(thread_id as u64))
         else {
@@ -41,7 +44,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&thread.attrs.priority.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -58,6 +61,7 @@ impl Lv2Host {
         &mut self,
         args: [u64; 8],
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let cid_ptr = args[0] as u32;
         if let Some(d) = self.efault_if_null(&[cid_ptr]) {
@@ -69,7 +73,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&cid.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -85,6 +89,7 @@ impl Lv2Host {
         &mut self,
         args: [u64; 8],
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let size = args[0] as u32;
         let alloc_addr_ptr = args[3] as u32;
@@ -98,7 +103,7 @@ impl Lv2Host {
                     bytes: WritePayload::from_slice(&addr.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: requester,
-                    source_time: self.current_tick,
+                    source_time: tick,
                 };
                 Lv2Dispatch::Immediate {
                     code: 0,
@@ -128,6 +133,7 @@ impl Lv2Host {
         &mut self,
         args: [u64; 8],
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let ipc_key = args[0];
         let size = args[1];
@@ -145,17 +151,17 @@ impl Lv2Host {
         }
         let keyed = ipc_key != 0 && ipc_key != SYS_MMAPPER_NO_SHM_KEY;
         let in_namespace = keyed && crate::host::is_system_ipc_key(ipc_key);
-        let mem_id = match self.mmapper_ipc.get(&ipc_key) {
+        let mem_id = match self.state.mmapper_ipc.get(&ipc_key) {
             Some(&existing) if keyed => {
                 if in_namespace {
-                    self.system_ipc_witness.shm_attaches += 1;
-                    self.system_ipc_witness.note_key(ipc_key);
+                    self.obs.system_ipc_witness.shm_attaches += 1;
+                    self.obs.system_ipc_witness.note_key(ipc_key);
                 }
                 existing
             }
             _ => {
                 let mem_id = self.alloc_id();
-                self.mmapper_handles.insert(
+                self.state.mmapper_handles.insert(
                     mem_id,
                     MmapperHandle {
                         size: size_u32,
@@ -163,11 +169,11 @@ impl Lv2Host {
                     },
                 );
                 if keyed {
-                    self.mmapper_ipc.insert(ipc_key, mem_id);
+                    self.state.mmapper_ipc.insert(ipc_key, mem_id);
                 }
                 if in_namespace {
-                    self.system_ipc_witness.shm_creates += 1;
-                    self.system_ipc_witness.note_key(ipc_key);
+                    self.obs.system_ipc_witness.shm_creates += 1;
+                    self.obs.system_ipc_witness.note_key(ipc_key);
                 }
                 mem_id
             }
@@ -177,7 +183,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -201,8 +207,10 @@ impl Lv2Host {
         mem_id: u32,
         base_addr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Vec<Effect> {
         let Some(&ipc_key) = self
+            .state
             .mmapper_ipc
             .iter()
             .find(|&(_, &id)| id == mem_id)
@@ -210,15 +218,16 @@ impl Lv2Host {
         else {
             return Vec::new();
         };
-        if self.system_seeds_applied.contains(&ipc_key) {
+        if self.derived.system_seeds_applied.contains(&ipc_key) {
             return Vec::new();
         }
-        let Some(seed) = self.system_state_seeds.get(&ipc_key) else {
+        let Some(seed) = self.derived.system_state_seeds.get(&ipc_key) else {
             return Vec::new();
         };
-        self.system_seeds_applied.insert(ipc_key);
-        self.system_seed_bases.insert(ipc_key, base_addr);
+        self.derived.system_seeds_applied.insert(ipc_key);
+        self.derived.system_seed_bases.insert(ipc_key, base_addr);
         let handle_size = self
+            .state
             .mmapper_handles
             .get(mem_id)
             .map(|h| h.size)
@@ -239,7 +248,7 @@ impl Lv2Host {
                     bytes: WritePayload::from_slice(bytes),
                     ordering: PriorityClass::Normal,
                     source: requester,
-                    source_time: self.current_tick,
+                    source_time: tick,
                 }
             })
             .collect()
@@ -263,13 +272,14 @@ impl Lv2Host {
         &mut self,
         args: [u64; 8],
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let addr = args[0];
         let mem_id = args[1] as u32;
         if !(0x2000_0000..0xC000_0000).contains(&addr) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        let Some(handle) = self.mmapper_handles.get(mem_id) else {
+        let Some(handle) = self.state.mmapper_handles.get(mem_id) else {
             self.log_invariant_break(
                 "dispatch.mmapper_map_unknown_mem_id",
                 format_args!(
@@ -288,10 +298,12 @@ impl Lv2Host {
         if end > 0xC000_0000 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        self.pending_region_installs.push(PendingRegionInstall {
-            addr,
-            size: handle.size as usize,
-        });
+        self.derived
+            .pending_region_installs
+            .push(PendingRegionInstall {
+                addr,
+                size: handle.size as usize,
+            });
         // Record in the host ledger so sc 337's search sees this
         // range as occupied. `addr` is in `[0x2000_0000, 0xC000_0000)`
         // per the range check above, so the u32 narrow is lossless.
@@ -299,17 +311,20 @@ impl Lv2Host {
         // Coherence witness: same property as sc 337. See
         // `docs/dev/bug_investigations/cellsysutil_mmapper_oob.md`.
         debug_assert!(
-            self.pending_region_installs
+            self.derived
+                .pending_region_installs
                 .iter()
                 .any(|i| i.addr == addr && i.size == handle.size as usize),
             "sc 334 coherence: pending_region_installs missing entry for {addr:#x}",
         );
         debug_assert!(
-            self.mmapper_install_ledger.contains_key(&(addr as u32)),
+            self.derived
+                .mmapper_install_ledger
+                .contains_key(&(addr as u32)),
             "sc 334 coherence: mmapper_install_ledger missing entry for {addr:#x}",
         );
         self.note_system_ipc_map(mem_id, addr as u32, handle.size);
-        let effects = self.system_seed_effects(mem_id, addr as u32, requester);
+        let effects = self.system_seed_effects(mem_id, addr as u32, requester, tick);
         Lv2Dispatch::Immediate { code: 0, effects }
     }
 
@@ -337,6 +352,7 @@ impl Lv2Host {
         &mut self,
         args: [u64; 8],
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let start_addr = args[0] as u32;
         let mem_id = args[1] as u32;
@@ -347,7 +363,7 @@ impl Lv2Host {
         if !(Lv2Host::MMAPPER_REGION_START..Lv2Host::MMAPPER_REGION_END).contains(&start_addr) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        let Some(handle) = self.mmapper_handles.get(mem_id) else {
+        let Some(handle) = self.state.mmapper_handles.get(mem_id) else {
             self.log_invariant_break(
                 "dispatch.mmapper_search_and_map_unknown_mem_id",
                 format_args!(
@@ -362,33 +378,38 @@ impl Lv2Host {
         else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
-        self.pending_region_installs.push(PendingRegionInstall {
-            addr: u64::from(found_addr),
-            size: handle.size as usize,
-        });
+        self.derived
+            .pending_region_installs
+            .push(PendingRegionInstall {
+                addr: u64::from(found_addr),
+                size: handle.size as usize,
+            });
         self.mmapper_ledger_insert(found_addr, handle.size);
         // Coherence witness: on success, the install must be pending
         // AND the ledger must contain the address we are writing
         // back. See
         // `docs/dev/bug_investigations/cellsysutil_mmapper_oob.md`.
         debug_assert!(
-            self.pending_region_installs
+            self.derived
+                .pending_region_installs
                 .iter()
                 .any(|i| i.addr == u64::from(found_addr) && i.size == handle.size as usize),
             "sc 337 coherence: pending_region_installs missing entry for {found_addr:#x}",
         );
         debug_assert!(
-            self.mmapper_install_ledger.contains_key(&found_addr),
+            self.derived
+                .mmapper_install_ledger
+                .contains_key(&found_addr),
             "sc 337 coherence: mmapper_install_ledger missing entry for {found_addr:#x}",
         );
         self.note_system_ipc_map(mem_id, found_addr, handle.size);
-        let mut effects = self.system_seed_effects(mem_id, found_addr, requester);
+        let mut effects = self.system_seed_effects(mem_id, found_addr, requester, tick);
         effects.push(Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(alloc_addr_ptr, 4),
             bytes: WritePayload::from_slice(&found_addr.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         });
         Lv2Dispatch::Immediate { code: 0, effects }
     }
@@ -406,6 +427,7 @@ impl Lv2Host {
         &mut self,
         args: [u64; 8],
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let size = args[1];
         let flags = args[3];
@@ -421,7 +443,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
         }
         let mem_id = self.alloc_id();
-        self.mmapper_handles.insert(
+        self.state.mmapper_handles.insert(
             mem_id,
             MmapperHandle {
                 size: size_u32,
@@ -433,7 +455,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -482,6 +504,7 @@ impl Lv2Host {
         args: [u64; 8],
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         use cellgov_ps3_abi::sys_prx::{
             start_cmd, start_stop_option as opt, CELL_PRX_ERROR_ERROR, SYS_PRX_RESIDENT,
@@ -492,7 +515,7 @@ impl Lv2Host {
         if id == 0 || p_opt == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        if self.prx_registry.lookup_by_id(id).is_none() {
+        if self.state.prx_registry.lookup_by_id(id).is_none() {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         }
         // The base struct (through `res`) must fit below the 4 GiB
@@ -542,14 +565,19 @@ impl Lv2Host {
 
         match cmd & start_cmd::MASK {
             start_cmd::GET_ENTRY => {
-                let mut effects =
-                    vec![self.write_be_u64(requester, p_opt + opt::ENTRY_OFFSET, opt::NO_ENTRY)];
+                let mut effects = vec![self.write_be_u64(
+                    requester,
+                    p_opt + opt::ENTRY_OFFSET,
+                    opt::NO_ENTRY,
+                    tick,
+                )];
                 // entry2 exists only in the extended struct.
                 if size != opt::MIN_SIZE {
                     effects.push(self.write_be_u64(
                         requester,
                         p_opt + opt::ENTRY2_OFFSET,
                         opt::NO_ENTRY,
+                        tick,
                     ));
                 }
                 Lv2Dispatch::Immediate { code: 0, effects }
@@ -568,7 +596,7 @@ impl Lv2Host {
                 if res == SYS_PRX_RESIDENT {
                     // LV2's STARTING -> STARTED transition: the module
                     // is now resident and refuses unload.
-                    self.prx_registry.mark_started(id);
+                    self.state.prx_registry.mark_started(id);
                     return Lv2Dispatch::immediate(0);
                 }
                 // Phase 1 handed back NO_ENTRY, so the guest called
@@ -633,6 +661,7 @@ impl Lv2Host {
         args: [u64; 8],
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         use crate::prx_registry::PrxState;
         use cellgov_ps3_abi::sys_prx::{
@@ -643,7 +672,7 @@ impl Lv2Host {
 
         let id = args[0] as u32;
         let p_opt = args[2] as u32;
-        if self.prx_registry.lookup_by_id(id).is_none() {
+        if self.state.prx_registry.lookup_by_id(id).is_none() {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         }
         if p_opt == 0 {
@@ -698,12 +727,13 @@ impl Lv2Host {
         // struct); shared by the cmd 1 and cmd 4 arms.
         let no_entry_effects = |host: &Self| {
             let mut effects =
-                vec![host.write_be_u64(requester, p_opt + opt::ENTRY_OFFSET, opt::NO_ENTRY)];
+                vec![host.write_be_u64(requester, p_opt + opt::ENTRY_OFFSET, opt::NO_ENTRY, tick)];
             if size != opt::MIN_SIZE {
                 effects.push(host.write_be_u64(
                     requester,
                     p_opt + opt::ENTRY2_OFFSET,
                     opt::NO_ENTRY,
+                    tick,
                 ));
             }
             effects
@@ -718,6 +748,7 @@ impl Lv2Host {
         match cmd & start_cmd::MASK {
             start_cmd::GET_ENTRY => {
                 let old = self
+                    .state
                     .prx_registry
                     .begin_stop(id)
                     .expect("id lookup succeeded above");
@@ -742,7 +773,7 @@ impl Lv2Host {
                 };
                 match res {
                     0 => {
-                        if !self.prx_registry.finish_stop(id) {
+                        if !self.state.prx_registry.finish_stop(id) {
                             // RPCS3 hard-asserts STOPPING here; a
                             // phase 2 with no accepted phase 1 has no
                             // oracle behaviour to mirror.
@@ -788,6 +819,7 @@ impl Lv2Host {
             }
             stop_cmd::GET_ENTRIES | stop_cmd::DISABLE_STOP => {
                 let state = self
+                    .state
                     .prx_registry
                     .lookup_by_id(id)
                     .expect("id lookup succeeded above")
@@ -850,17 +882,17 @@ impl Lv2Host {
         };
 
         let id = args[0] as u32;
-        match self.prx_registry.lookup_by_id(id) {
+        match self.state.prx_registry.lookup_by_id(id) {
             None => Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into()),
             Some(entry) => match entry.state() {
                 PrxState::Initialized | PrxState::Stopped => {
-                    let removed = self.prx_registry.withdraw_removable(id);
+                    let removed = self.state.prx_registry.withdraw_removable(id);
                     debug_assert!(removed.is_some(), "lookup said present and removable");
                     Lv2Dispatch::immediate(0)
                 }
                 PrxState::Started | PrxState::Stopping => {
                     let stem = entry.stem().to_string();
-                    self.prx_unload_rejections += 1;
+                    self.obs.prx_unload_rejections += 1;
                     self.log_invariant_break(
                         "dispatch.prx_unload_module_resident",
                         format_args!(
@@ -881,13 +913,13 @@ impl Lv2Host {
     }
 
     /// Stage a big-endian `u64` write to guest memory.
-    fn write_be_u64(&self, requester: UnitId, addr: u32, value: u64) -> Effect {
+    fn write_be_u64(&self, requester: UnitId, addr: u32, value: u64, tick: GuestTicks) -> Effect {
         Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(addr, 8),
             bytes: WritePayload::from_slice(&value.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         }
     }
 
@@ -898,6 +930,7 @@ impl Lv2Host {
         args: [u64; 8],
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ELF_IS_REGISTERED;
 
@@ -926,7 +959,7 @@ impl Lv2Host {
             }
             _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
         };
-        self.prx_register_module_count += 1;
+        self.obs.prx_register_module_count += 1;
 
         if module_type & 0x1 == 0 {
             return Lv2Dispatch::immediate(0);
@@ -935,8 +968,8 @@ impl Lv2Host {
             // Only a CoreOS process may hand the kernel its own tables.
             return Lv2Dispatch::immediate(CELL_PRX_ERROR_ELF_IS_REGISTERED.into());
         }
-        self.prx_register_module_manual_count += 1;
-        let effects = self.link_manual_imports(stub_ea, stub_size, requester, rt);
+        self.obs.prx_register_module_manual_count += 1;
+        let effects = self.link_manual_imports(stub_ea, stub_size, requester, rt, tick);
         Lv2Dispatch::Immediate { code: 0, effects }
     }
 
@@ -956,6 +989,7 @@ impl Lv2Host {
         stub_size: u32,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Vec<Effect> {
         use cellgov_ps3_abi::elf::{
             PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_NAME_PTR_OFFSET, PRX_IMPORT_NIDS_PTR_OFFSET,
@@ -1008,6 +1042,7 @@ impl Lv2Host {
             // here, or the library silently never resolves.
             let library = match rt.read_committed_until(u64::from(name_ptr), PRX_NAME_MAX_LEN, 0) {
                 Some(bytes) => self
+                    .derived
                     .firmware_exports
                     .get(String::from_utf8_lossy(bytes).as_ref()),
                 None => {
@@ -1037,7 +1072,7 @@ impl Lv2Host {
                     break;
                 };
                 let Some(&opd) = library.and_then(|lib| lib.get(&nid)) else {
-                    self.prx_register_module_unresolved += 1;
+                    self.obs.prx_register_module_unresolved += 1;
                     continue;
                 };
                 effects.push(Effect::SharedWriteIntent {
@@ -1045,9 +1080,9 @@ impl Lv2Host {
                     bytes: WritePayload::from_slice(&opd.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: requester,
-                    source_time: self.current_tick,
+                    source_time: tick,
                 });
-                self.prx_register_module_linked += 1;
+                self.obs.prx_register_module_linked += 1;
             }
             let Some(next) = cursor.checked_add(u32::from(entry_size)) else {
                 break;
@@ -1080,6 +1115,7 @@ impl Lv2Host {
         args: [u64; 8],
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let flags = args[0];
         let p_info = args[1] as u32;
@@ -1132,12 +1168,13 @@ impl Lv2Host {
             idlist_bytes[3],
         ]);
         let liblv2_id = self
+            .state
             .prx_registry
             .lookup_by_path("liblv2.sprx")
             .map(|e| e.kernel_id());
         let mut count: u32 = 0;
         if idlist_ptr != 0 {
-            for kid in self.prx_registry.ids() {
+            for kid in self.state.prx_registry.ids() {
                 if Some(kid) == liblv2_id {
                     continue;
                 }
@@ -1159,7 +1196,7 @@ impl Lv2Host {
                     bytes: WritePayload::from_slice(&kid.to_be_bytes()),
                     ordering: PriorityClass::Normal,
                     source: requester,
-                    source_time: self.current_tick,
+                    source_time: tick,
                 });
                 count += 1;
             }
@@ -1169,7 +1206,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&count.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         });
         Lv2Dispatch::Immediate { code: 0, effects }
     }

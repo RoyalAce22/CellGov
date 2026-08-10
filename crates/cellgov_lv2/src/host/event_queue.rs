@@ -14,6 +14,7 @@ use cellgov_ps3_abi::sys_sync::{SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
 use crate::sync_primitives::EventPayload;
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// A non-zero `ipc_key` registers the queue under that key so
@@ -35,29 +36,30 @@ impl Lv2Host {
         ipc_key: u64,
         size: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if ipc_key != 0 && self.event_queue_ipc.contains_key(&ipc_key) {
+        if ipc_key != 0 && self.derived.event_queue_ipc.contains_key(&ipc_key) {
             if super::is_system_ipc_key(ipc_key) {
-                self.system_ipc_witness.event_queue_references += 1;
-                self.system_ipc_witness.note_key(ipc_key);
+                self.obs.system_ipc_witness.event_queue_references += 1;
+                self.obs.system_ipc_witness.note_key(ipc_key);
             }
             return Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into());
         }
         // size == 0 defaults to EQUEUE_MAX_RECV_EVENT (127).
         let effective_size = if size == 0 { 127 } else { size };
         let id = self.alloc_id();
-        if !self.event_queues.create_with_id(id, effective_size) {
+        if !self.state.event_queues.create_with_id(id, effective_size) {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
         if ipc_key != 0 {
-            self.event_queue_ipc_keys.insert(id, ipc_key);
-            self.event_queue_ipc.insert(ipc_key, id);
+            self.derived.event_queue_ipc_keys.insert(id, ipc_key);
+            self.derived.event_queue_ipc.insert(ipc_key, id);
             if super::is_system_ipc_key(ipc_key) {
-                self.system_ipc_witness.event_queue_creates += 1;
-                self.system_ipc_witness.note_key(ipc_key);
+                self.obs.system_ipc_witness.event_queue_creates += 1;
+                self.obs.system_ipc_witness.note_key(ipc_key);
             }
         }
-        self.immediate_write_u32(id, id_ptr, requester)
+        self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     /// `sys_event_port_create` (134).
@@ -73,6 +75,7 @@ impl Lv2Host {
         port_type: u64,
         name: u64,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if port_type != SYS_EVENT_PORT_LOCAL && port_type != SYS_EVENT_PORT_IPC {
             // The oracle logs this too (`sys_event.cpp`); a guest
@@ -83,10 +86,10 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        self.process_counts.event_port_inc();
+        self.state.process_counts.event_port_inc();
         let id = self.alloc_id();
-        self.event_ports.create_with_id(id, port_type, name);
-        self.immediate_write_u32(id, id_ptr, requester)
+        self.state.event_ports.create_with_id(id, port_type, name);
+        self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     /// `sys_event_port_destroy` (135).
@@ -97,9 +100,9 @@ impl Lv2Host {
     /// - `CELL_EISCONN` while the port is still connected.
     pub(super) fn dispatch_event_port_destroy(&mut self, id: u32) -> Lv2Dispatch {
         use crate::sync_primitives::EventPortDestroyError as E;
-        match self.event_ports.destroy(id) {
+        match self.state.event_ports.destroy(id) {
             Ok(()) => {
-                self.process_counts.event_port_dec();
+                self.state.process_counts.event_port_dec();
                 Lv2Dispatch::immediate(0)
             }
             Err(E::UnknownPort) => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
@@ -131,10 +134,14 @@ impl Lv2Host {
         let Some(queue_id) = queue_id else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        if self.event_queues.lookup(queue_id).is_none() {
+        if self.state.event_queues.lookup(queue_id).is_none() {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         }
-        match self.event_ports.connect(port_id, queue_id, required_type) {
+        match self
+            .state
+            .event_ports
+            .connect(port_id, queue_id, required_type)
+        {
             Ok(()) => Lv2Dispatch::immediate(0),
             Err(E::UnknownPort) => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Err(E::WrongType) => Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
@@ -160,14 +167,14 @@ impl Lv2Host {
         if ipc_key == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        let queue_id = self.event_queue_ipc.get(&ipc_key).copied();
-        self.event_port_ipc_connects.0 += 1;
+        let queue_id = self.derived.event_queue_ipc.get(&ipc_key).copied();
+        self.obs.event_port_ipc_connects.0 += 1;
         if queue_id.is_some() {
-            self.event_port_ipc_connects.1 += 1;
+            self.obs.event_port_ipc_connects.1 += 1;
         }
         if super::is_system_ipc_key(ipc_key) {
-            self.system_ipc_witness.event_port_connects += 1;
-            self.system_ipc_witness.note_key(ipc_key);
+            self.obs.system_ipc_witness.event_port_connects += 1;
+            self.obs.system_ipc_witness.note_key(ipc_key);
         }
         self.dispatch_event_port_connect(port_id, queue_id, SYS_EVENT_PORT_IPC)
     }
@@ -180,7 +187,7 @@ impl Lv2Host {
     /// - `CELL_ENOTCONN` when the port has no binding.
     pub(super) fn dispatch_event_port_disconnect(&mut self, port_id: u32) -> Lv2Dispatch {
         use crate::sync_primitives::EventPortDisconnectError as E;
-        match self.event_ports.disconnect(port_id) {
+        match self.state.event_ports.disconnect(port_id) {
             Ok(()) => Lv2Dispatch::immediate(0),
             Err(E::UnknownPort) => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Err(E::NotConnected) => Lv2Dispatch::immediate(cell_errors::CELL_ENOTCONN.into()),
@@ -188,17 +195,17 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_event_queue_destroy(&mut self, id: u32) -> Lv2Dispatch {
-        let Some(entry) = self.event_queues.lookup(id) else {
+        let Some(entry) = self.state.event_queues.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if !entry.waiters().is_empty() {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
-        self.event_queues.destroy(id);
-        self.event_ports.unbind_queue(id);
-        if let Some(ipc_key) = self.event_queue_ipc_keys.remove(&id) {
-            if self.event_queue_ipc.get(&ipc_key) == Some(&id) {
-                self.event_queue_ipc.remove(&ipc_key);
+        self.state.event_queues.destroy(id);
+        self.state.event_ports.unbind_queue(id);
+        if let Some(ipc_key) = self.derived.event_queue_ipc_keys.remove(&id) {
+            if self.derived.event_queue_ipc.get(&ipc_key) == Some(&id) {
+                self.derived.event_queue_ipc.remove(&ipc_key);
             }
         }
         Lv2Dispatch::immediate(0)
@@ -209,11 +216,12 @@ impl Lv2Host {
         id: u32,
         out_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        match self.event_queues.try_receive(id) {
+        match self.state.event_queues.try_receive(id) {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::EventQueueReceive::Delivered(payload)) => {
                 // sys_event_t: four big-endian u64s at out_ptr.
@@ -227,7 +235,7 @@ impl Lv2Host {
                     bytes: WritePayload::from_slice(&buf),
                     ordering: PriorityClass::Normal,
                     source: requester,
-                    source_time: self.current_tick,
+                    source_time: tick,
                 };
                 Lv2Dispatch::Immediate {
                     code: 0,
@@ -235,7 +243,7 @@ impl Lv2Host {
                 }
             }
             Some(crate::sync_primitives::EventQueueReceive::Empty) => {
-                match self.event_queues.enqueue_waiter(id, caller, out_ptr) {
+                match self.state.event_queues.enqueue_waiter(id, caller, out_ptr) {
                     Ok(()) => {}
                     Err(crate::sync_primitives::EventQueueEnqueueError::UnknownId) => {
                         return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
@@ -263,6 +271,7 @@ impl Lv2Host {
         size: u32,
         count_out: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         // try_receive_batch drains destructively; every output
         // ByteRange is validated up front.
@@ -275,7 +284,7 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
             }
         }
-        let Some(batch) = self.event_queues.try_receive_batch(id, size as usize) else {
+        let Some(batch) = self.state.event_queues.try_receive_batch(id, size as usize) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let count = batch.len() as u32;
@@ -293,7 +302,7 @@ impl Lv2Host {
                 bytes: WritePayload::from_slice(&buf),
                 ordering: PriorityClass::Normal,
                 source: requester,
-                source_time: self.current_tick,
+                source_time: tick,
             });
         }
         let count_range = ByteRange::contiguous_u32(count_out, 4);
@@ -302,7 +311,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&count.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         });
         Lv2Dispatch::Immediate {
             code: 0u64,
@@ -319,7 +328,7 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         // The event's `source` is the port, but delivery goes to the
         // queue the port is connected to.
-        let Some(port) = self.event_ports.lookup(port_id) else {
+        let Some(port) = self.state.event_ports.lookup(port_id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let Some(queue_id) = port.queue() else {
@@ -332,6 +341,7 @@ impl Lv2Host {
             data3,
         };
         let sent = self
+            .state
             .event_queues
             .send_and_wake_or_enqueue(queue_id, payload);
         // A refused send (unknown queue, full queue) is not a delivery.
@@ -340,10 +350,10 @@ impl Lv2Host {
             crate::sync_primitives::EventQueueSend::Enqueued
                 | crate::sync_primitives::EventQueueSend::Woke { .. }
         ) {
-            if let Some(&ipc_key) = self.event_queue_ipc_keys.get(&queue_id) {
+            if let Some(&ipc_key) = self.derived.event_queue_ipc_keys.get(&queue_id) {
                 if super::is_system_ipc_key(ipc_key) {
-                    self.system_ipc_witness.event_queue_enqueues += 1;
-                    self.system_ipc_witness.note_key(ipc_key);
+                    self.obs.system_ipc_witness.event_queue_enqueues += 1;
+                    self.obs.system_ipc_witness.note_key(ipc_key);
                 }
             }
         }

@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN;
-use cellgov_time::GuestTicks;
 
 use crate::fs_store::{FsMountTable, FsStore};
 use crate::image::ContentStore;
@@ -20,247 +19,24 @@ use crate::sync_primitives::{
 };
 use crate::thread_group::ThreadGroupTable;
 
-use super::mmapper::{MmapperHandleTable, PendingRegionInstall, SystemStateSeed};
+use super::mmapper::{MmapperHandleTable, SystemStateSeed};
 use super::process;
 use super::rsx::SysRsxContext;
-use super::system_ipc_witness::{SystemIpcMapping, SystemIpcWitness};
+use super::system_ipc_witness::SystemIpcMapping;
+use super::{derived, observability, state};
 
 /// LV2 host model driven by [`Self::dispatch`].
 #[derive(Debug, Clone)]
 pub struct Lv2Host {
-    pub(super) content: ContentStore,
-    pub(super) groups: ThreadGroupTable,
-    pub(super) ppu_threads: PpuThreadTable,
-    pub(super) tls_template: TlsTemplate,
-    pub(super) stack_allocator: ThreadStackAllocator,
-    /// Shared id allocator for mutex / semaphore / event-queue /
-    /// event-flag / cond. `lwmutexes` has its own allocator from 1.
-    pub(super) next_kernel_id: u32,
-    pub(super) mem_alloc_ptr: u32,
-    /// Where `mem_alloc_ptr` started this boot; `ptr - base` is the
-    /// consumed-bytes figure `sys_memory_get_user_memory_size`
-    /// subtracts from the reported total. Boot config, not hashed
-    /// (`mem_alloc_ptr` already carries the allocator into the hash).
-    pub(super) mem_alloc_base: u32,
-    /// Bump cursor for `sys_mmapper_allocate_address` (256 MiB+ chunks).
-    pub(super) mmapper_addr_cursor: u32,
-    pub(super) rsx_mem_alloc_ptr: u32,
-    pub(super) rsx_mem_handle_counter: u32,
-    pub(super) rsx_context: SysRsxContext,
-    /// Populated by 332 / 362, consumed by 334 / 337.
-    pub(super) mmapper_handles: MmapperHandleTable,
-    /// `ipc_key -> mem_id` for process-shared mmapper allocations.
-    /// A keyed 332 with a registered key returns the existing
-    /// `mem_id` (RPCS3's SYS_SYNC_NOT_CARE path,
-    /// `sys_mmapper.cpp` `create_lv2_shm`); an unregistered key mints and
-    /// registers. Not folded into [`Self::state_hash`].
-    pub(super) mmapper_ipc: BTreeMap<u64, u32>,
-    /// Boot-registered seeds keyed by `shm_ipc_key`; immutable after
-    /// boot. Applied at most once, on the first 334 / 337 map of the
-    /// matching shm. Not folded into [`Self::state_hash`]: the seed
-    /// writes settle via `GuestMemory` (hashed there).
-    pub(super) system_state_seeds: BTreeMap<u64, SystemStateSeed>,
-    /// Keys whose seed has been applied; suppresses re-application on
-    /// a re-map. Not folded into [`Self::state_hash`].
-    pub(super) system_seeds_applied: std::collections::BTreeSet<u64>,
-    /// `shm_ipc_key -> mapped guest base` recorded when a seed is
-    /// applied. The cond ring-check wake reads slot state through
-    /// this base. Not hashed (derived from the hashed map effects).
-    pub(super) system_seed_bases: BTreeMap<u64, u32>,
-    /// `cond id -> create-time ipc_key` for process-shared conds
-    /// (key 0 entries are not stored). Not hashed: create-time
-    /// config mirrored from guest memory.
-    pub(super) cond_ipc_keys: BTreeMap<u32, u64>,
-    /// Witness: times the cond\[1\] ring-check arm satisfied a wait
-    /// immediately. Expected 0 under the V256 seed; a non-zero
-    /// value means a refill wait observed a non-depleted ring.
-    /// Not hashed (instrument-only).
-    pub(super) cond_ring_wakes: u64,
-    /// Witness: parks on a cellSysutil cond\[0\] -- the producer-fed
-    /// record-finish waits CellGov has no producer for -- keyed by
-    /// slot index. Not hashed (instrument-only).
-    pub(super) cond0_producer_waits_by_slot: BTreeMap<u64, u64>,
-    /// Witness: `sys_cond_signal` dispatch count (drain witness for
-    /// the seeded-ring consumer). Not hashed (instrument-only).
-    pub(super) cond_signal_dispatches: u64,
-    /// Witness: `_sys_prx_unload_module` calls refused because the
-    /// target is a resident firmware module. Not hashed
-    /// (instrument-only).
-    pub(super) prx_unload_rejections: u64,
-    /// Witness: `sys_cond_signal` dispatches keyed by the target
-    /// cond's create-time ipc_key (keyed conds only). Per-slot /
-    /// per-facility drain attribution for the seeded-ring consumer.
-    /// Not hashed (instrument-only).
-    pub(super) cond_keyed_signal_counts: BTreeMap<u64, u64>,
-    /// `event-queue id -> create-time ipc_key` for keyed queues (key 0
-    /// entries are not stored), mirroring [`Self::cond_ipc_keys`]. Not
-    /// hashed: create-time config mirrored from the caller's argument.
-    pub(super) event_queue_ipc_keys: BTreeMap<u32, u64>,
-    /// `ipc_key -> queue id` for keyed event queues, in creation
-    /// order. Not hashed.
-    pub(super) event_queue_ipc: BTreeMap<u64, u32>,
-    /// Witness: `(attempts, bound)` for `sys_event_port_connect_ipc`
-    /// across every namespace. A gap between the two is the count of
-    /// connects that named a key no queue is registered under. Not
-    /// hashed (instrument-only).
-    pub(super) event_port_ipc_connects: (u64, u64),
-    /// Witness: guest paths sc 480 / 497 answered `CELL_ENOENT`, with
-    /// hit counts. The key set names which modules a title asks for
-    /// that the corpus cannot serve. Not hashed (instrument-only).
-    pub(super) prx_load_misses: BTreeMap<String, u64>,
-    /// Witness: null-backend hits keyed by syscall number. The key set
-    /// is the boot's unimplemented-syscall inventory; the counts
-    /// separate a one-shot probe from a retry loop. Not hashed
-    /// (instrument-only).
-    pub(super) unsupported_syscalls: BTreeMap<u64, u64>,
-    /// Witness: system-IPC namespace production counters. Not hashed
-    /// (instrument-only).
-    pub(super) system_ipc_witness: SystemIpcWitness,
-    /// Guest ranges where a namespace-keyed shm is mapped, recorded at
-    /// 334 / 337 and tested against every committed write. Keyed by
-    /// mapped base so an overlapping remap replaces its predecessor.
-    /// Not hashed.
-    pub(super) system_ipc_mappings: BTreeMap<u32, SystemIpcMapping>,
-    /// Pending region-install requests emitted by 334 / 337. Drained
-    /// by the runtime post-dispatch and applied to `GuestMemory`
-    /// before the dispatch's effects commit. Not folded into
-    /// [`Self::state_hash`]; the handle table itself carries the
-    /// hashable state.
-    pub(super) pending_region_installs: Vec<PendingRegionInstall>,
-    /// Ledger of every mmapper-window range handed out via 334 / 337
-    /// and not yet released. The search in 337 consults this to find a
-    /// free aligned range at-or-after the caller's hint; keyed
-    /// `start_addr -> size` so the nearest-below lookup is `O(log n)`.
-    /// Not folded into [`Self::state_hash`] (the install side-effect
-    /// settles via `GuestMemory`).
-    pub(super) mmapper_install_ledger: BTreeMap<u32, u32>,
-    pub(super) lwmutexes: LwMutexTable,
-    pub(super) mutexes: MutexTable,
-    pub(super) semaphores: SemaphoreTable,
-    pub(super) event_queues: EventQueueTable,
-    pub(super) event_ports: EventPortTable,
-    pub(super) event_flags: EventFlagTable,
-    pub(super) conds: CondTable,
-    /// Dispatch-local scratch; not folded into [`Self::state_hash`].
-    pub(super) current_tick: GuestTicks,
-    /// Running count of host-invariant breaks. Not hashed.
-    pub(super) invariant_break_count: usize,
-    /// Per-site break counts keyed by the static site string passed
-    /// to `log_invariant_break`. Not hashed (instrument-only).
-    pub(super) invariant_break_sites: std::collections::BTreeMap<&'static str, u64>,
-    /// Drained after each `Lv2Host::dispatch` by the runtime. Not
-    /// folded into [`Self::state_hash`].
-    pub(super) pending_invariant_breaks: Vec<super::diagnostics::InvariantBreakReason>,
-    /// Captured `sys_tty_write` byte stream. Not folded into
-    /// [`Self::state_hash`].
-    pub(super) tty_log: Vec<u8>,
-    /// Feeds `sys_process_get_number_of_object`. Not folded into
-    /// [`Self::state_hash`].
-    pub(super) process_counts: process::ProcessCounts,
-    pub(super) fs_store: FsStore,
-    /// Consulted by the dispatch layer when a guest path is not
-    /// pre-registered in [`Self::fs_store`]. Boot populates from the
-    /// title manifest; immutable thereafter.
-    pub(super) fs_mounts: FsMountTable,
-    /// Minimum viable PRX set loaded at boot. Empty when no
-    /// firmware-dir was configured.
-    pub(super) prx_registry: LoadedPrxRegistry,
-    /// Per-thread count of distinct lwmutexes held. Recursive
-    /// re-acquires of the same lwmutex do not bump the count; only
-    /// first-acquire (FREE -> me) and kernel-side transfer
-    /// (LwMutexWake) do.
-    pub(super) lwmutex_holds: BTreeMap<PpuThreadId, u32>,
-    /// Folded into [`Self::state_hash`] when set.
-    pub(super) firmware_identity: Option<FirmwareIdentity>,
-    /// Witness: Count of `dispatch_thread_initialize`
-    /// invocations. That dispatcher's catch-all `debug_assert!`
-    /// guards against being called with the wrong request
-    /// variant; silence is non-vacuous only when the dispatch
-    /// actually ran. Not folded into [`Self::state_hash`]
-    /// (instrument-only).
-    pub(super) spu_thread_initialize_dispatches: u64,
-    /// Witness: Count of `cond_reacquire_wake` calls.
-    /// That function's `debug_assert!(!use_lwmutex, ...)` guards
-    /// against an unimplemented lwmutex-cond re-acquire path;
-    /// silence is non-vacuous only when the function ran.
-    /// Not folded into [`Self::state_hash`].
-    pub(super) cond_reacquire_wake_calls: u64,
-    /// `sys_process_get_sdk_version` return value. Read from the
-    /// title ELF's `sys_proc_param` segment at boot (see
-    /// `cellgov_ppu::loader::find_sys_process_param`). RPCS3 mirror:
-    /// `g_ps3_process_info.sdk_ver` set from the LOOS+1 program
-    /// header's `process_param_t.sdk_version`
-    /// (rpcs3 PPUModule.cpp). The PS3 sentinel for
-    /// absent param segment is `0xFFFFFFFF` (the same one PSL1GHT
-    /// homebrew sees); this default matches that contract for
-    /// callers that never invoke `set_sdk_version`.
-    pub(super) sdk_version: u32,
-    /// The booting process's SELF program authority id, served by
-    /// `sys_ss_access_control_engine` pkg 2. Boot reads it from the
-    /// title SELF's plaintext identification header; raw-ELF inputs
-    /// keep the retail-application fallback (see
-    /// `cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID`).
-    /// Firmware classifies callers by this value -- libsysmodule's
-    /// module_start skips its whole init (including the lwmutex
-    /// every later `cellSysmoduleLoadModule` locks) for recognized
-    /// system-process ids. Folded into [`Self::state_hash`] when it
-    /// differs from the fallback.
-    pub(super) program_authority_id: u64,
-    /// `ctrl_flags1` from the booting SELF's plaintext capability
-    /// header (supplemental record type 1); 0 when the SELF carries no
-    /// such record and for raw-ELF input. Source of the root / debug
-    /// privilege predicates. Folded into [`Self::state_hash`] when
-    /// non-zero, so an unprivileged boot hashes as it did before the
-    /// field existed.
-    pub(super) control_flags1: u32,
-    /// Firmware library name -> NID -> OPD address, supplied at boot
-    /// from the loaded firmware set. The sc 484 CoreOS branch resolves
-    /// a caller's import NIDs against it under the library each import
-    /// entry names; empty for a boot with no firmware set, which makes
-    /// every import unresolved rather than wrong.
-    pub(super) firmware_exports:
-        std::collections::BTreeMap<String, std::collections::BTreeMap<u32, u32>>,
-    /// Unresolved-import NID -> the libraries the guest asked for it
-    /// from, supplied at boot by the GOT patcher. Diagnostic-only: lets
-    /// `dispatch_unresolved_import` name the library the guest named
-    /// instead of only the NID. Not hashed.
-    pub(super) unresolved_import_requesters:
-        std::collections::BTreeMap<u32, std::collections::BTreeSet<String>>,
-    /// Witness: sc 484 calls seen, with a valid option struct.
-    pub(super) prx_register_module_count: u64,
-    /// Witness: of those, ones that took the CoreOS manual-link branch.
-    pub(super) prx_register_module_manual_count: u64,
-    /// Witness: GOT slots bound by the manual-link branch.
-    pub(super) prx_register_module_linked: u64,
-    /// Witness: import NIDs the manual-link branch could not resolve;
-    /// their slots keep the guest's own stub address.
-    pub(super) prx_register_module_unresolved: u64,
-    /// Witness: total `sys_lwmutex_lock` calls across the boot that
-    /// failed because the id was not in the table (CELL_ESRCH). A
-    /// wrong program-authority-id skips libsysmodule's lwmutex
-    /// creation, so every later `cellSysmoduleLoadModule` locks id 0
-    /// and bumps this; a non-zero count is that signature. Counts
-    /// every occurrence boot-wide, not one window. Not hashed
-    /// (instrument-only).
-    pub(super) lwmutex_unknown_lock_count: u64,
-    /// Witness: every non-zero `Lv2Dispatch::Immediate` code any arm
-    /// returned, keyed by code. Includes successful returns that carry
-    /// a value (kernel ids, pids), not just errors -- the point is
-    /// completeness: a code absent here was never returned by LV2, so a
-    /// guest reporting it built it itself. Not hashed
-    /// (instrument-only).
-    pub(super) dispatch_nonzero_returns: BTreeMap<u64, u64>,
-    /// Witness: `sys_mutex_unlock` calls refused with `CELL_EPERM`
-    /// because the caller does not own the mutex. Not hashed
-    /// (instrument-only).
-    pub(super) mutex_unlock_not_owner_count: u64,
-    /// Witness: sc 480/497 registry misses on a firmware path,
-    /// resolved by registering a stub entry under a real kernel id.
-    /// Not hashed (instrument-only).
-    pub(super) prx_load_hle_stub_count: u64,
-    /// Witness: sc 480/497 loads reported `CELL_ENOENT` (non-firmware
-    /// path or unusable path bytes). Not hashed (instrument-only).
-    pub(super) prx_load_not_found_count: u64,
+    /// Hashed guest-visible state: every field folds into
+    /// [`Self::state_hash`] by construction.
+    pub(super) state: state::Lv2State,
+    /// Unhashed guest-visible state; each field's doc names where a
+    /// divergence in it is caught instead.
+    pub(super) derived: derived::Lv2Derived,
+    /// Instruments and diagnostics; inert with respect to
+    /// guest-visible execution.
+    pub(super) obs: observability::Lv2Observability,
 }
 
 /// Captured at boot via the verified `firmware.toml` manifest.
@@ -318,72 +94,52 @@ impl Lv2Host {
             .register_blob("/app_home/output.txt".to_string(), Vec::new())
             .expect("synthetic registration cannot collide on a fresh store");
         Self {
-            content: ContentStore::new(),
-            groups: ThreadGroupTable::new(),
-            ppu_threads: PpuThreadTable::new(),
-            tls_template: TlsTemplate::empty(),
-            stack_allocator: ThreadStackAllocator::new(),
-            next_kernel_id: 0x4000_0001, // non-zero to catch uninitialized use
-            mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
-            mem_alloc_base: 0x0001_0000,
-            mmapper_addr_cursor: Self::MMAPPER_REGION_START,
-            rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
-            rsx_mem_handle_counter: 1,
-            rsx_context: SysRsxContext::new(),
-            mmapper_handles: MmapperHandleTable::new(),
-            mmapper_ipc: BTreeMap::new(),
-            system_state_seeds: BTreeMap::new(),
-            system_seeds_applied: std::collections::BTreeSet::new(),
-            system_seed_bases: BTreeMap::new(),
-            cond_ipc_keys: BTreeMap::new(),
-            cond_ring_wakes: 0,
-            cond0_producer_waits_by_slot: BTreeMap::new(),
-            cond_signal_dispatches: 0,
-            prx_unload_rejections: 0,
-            cond_keyed_signal_counts: BTreeMap::new(),
-            event_queue_ipc_keys: BTreeMap::new(),
-            event_queue_ipc: BTreeMap::new(),
-            event_port_ipc_connects: (0, 0),
-            prx_load_misses: BTreeMap::new(),
-            unsupported_syscalls: BTreeMap::new(),
-            system_ipc_witness: SystemIpcWitness::default(),
-            system_ipc_mappings: BTreeMap::new(),
-            pending_region_installs: Vec::new(),
-            mmapper_install_ledger: BTreeMap::new(),
-            lwmutexes: LwMutexTable::new(),
-            mutexes: MutexTable::new(),
-            semaphores: SemaphoreTable::new(),
-            event_queues: EventQueueTable::new(),
-            event_ports: EventPortTable::new(),
-            event_flags: EventFlagTable::new(),
-            conds: CondTable::new(),
-            current_tick: GuestTicks::ZERO,
-            invariant_break_count: 0,
-            invariant_break_sites: std::collections::BTreeMap::new(),
-            pending_invariant_breaks: Vec::new(),
-            tty_log: Vec::new(),
-            process_counts: process::ProcessCounts::new(),
-            fs_store,
-            fs_mounts: FsMountTable::new(),
-            prx_registry: LoadedPrxRegistry::new(),
-            lwmutex_holds: BTreeMap::new(),
-            firmware_identity: None,
-            spu_thread_initialize_dispatches: 0,
-            cond_reacquire_wake_calls: 0,
-            sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
-            program_authority_id: cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
-            control_flags1: 0,
-            firmware_exports: std::collections::BTreeMap::new(),
-            unresolved_import_requesters: std::collections::BTreeMap::new(),
-            prx_register_module_count: 0,
-            prx_register_module_manual_count: 0,
-            prx_register_module_linked: 0,
-            prx_register_module_unresolved: 0,
-            lwmutex_unknown_lock_count: 0,
-            mutex_unlock_not_owner_count: 0,
-            dispatch_nonzero_returns: BTreeMap::new(),
-            prx_load_hle_stub_count: 0,
-            prx_load_not_found_count: 0,
+            state: state::Lv2State {
+                content: ContentStore::new(),
+                groups: ThreadGroupTable::new(),
+                ppu_threads: PpuThreadTable::new(),
+                tls_template: TlsTemplate::empty(),
+                stack_allocator: ThreadStackAllocator::new(),
+                next_kernel_id: 0x4000_0001, // non-zero to catch uninitialized use
+                mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
+                mmapper_addr_cursor: Self::MMAPPER_REGION_START,
+                rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
+                rsx_mem_handle_counter: 1,
+                rsx_context: SysRsxContext::new(),
+                mmapper_handles: MmapperHandleTable::new(),
+                mmapper_ipc: BTreeMap::new(),
+                lwmutexes: LwMutexTable::new(),
+                mutexes: MutexTable::new(),
+                semaphores: SemaphoreTable::new(),
+                event_queues: EventQueueTable::new(),
+                event_ports: EventPortTable::new(),
+                event_flags: EventFlagTable::new(),
+                conds: CondTable::new(),
+                lwmutex_holds: BTreeMap::new(),
+                fs_store,
+                prx_registry: LoadedPrxRegistry::new(),
+                firmware_identity: None,
+                program_authority_id: cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+                control_flags1: 0,
+                process_counts: process::ProcessCounts::new(),
+            },
+            derived: derived::Lv2Derived {
+                mem_alloc_base: 0x0001_0000,
+                system_state_seeds: BTreeMap::new(),
+                system_seeds_applied: std::collections::BTreeSet::new(),
+                system_seed_bases: BTreeMap::new(),
+                cond_ipc_keys: BTreeMap::new(),
+                event_queue_ipc_keys: BTreeMap::new(),
+                event_queue_ipc: BTreeMap::new(),
+                pending_region_installs: Vec::new(),
+                mmapper_install_ledger: BTreeMap::new(),
+                fs_mounts: FsMountTable::new(),
+                sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
+                firmware_exports: BTreeMap::new(),
+            },
+            // Derived `Default` IS the boot state, so
+            // `clear_observability` cannot drift from `new`.
+            obs: observability::Lv2Observability::default(),
         }
     }
 
@@ -393,33 +149,33 @@ impl Lv2Host {
     /// parsed `sdk_version` through. Callers that omit this leave the
     /// PS3 absent-case sentinel `0xFFFFFFFF` in place.
     pub fn set_sdk_version(&mut self, sdk_version: u32) {
-        self.sdk_version = sdk_version;
+        self.derived.sdk_version = sdk_version;
     }
 
     /// The value `sys_process_get_sdk_version` will write into the
     /// caller's `version_out_ptr`.
     #[inline]
     pub fn sdk_version(&self) -> u32 {
-        self.sdk_version
+        self.derived.sdk_version
     }
 
     /// Set the booting process's program authority id (from the
     /// title SELF's identification header). Callers with raw-ELF
     /// input leave the retail-application fallback in place.
     pub fn set_program_authority_id(&mut self, authority_id: u64) {
-        self.program_authority_id = authority_id;
+        self.state.program_authority_id = authority_id;
     }
 
     /// The value `sys_ss_access_control_engine` pkg 2 serves.
     #[inline]
     pub fn program_authority_id(&self) -> u64 {
-        self.program_authority_id
+        self.state.program_authority_id
     }
 
     /// Set `ctrl_flags1` from the booting SELF's plaintext capability
     /// header. Raw-ELF input and SELFs without the record leave 0.
     pub fn set_control_flags1(&mut self, flags: u32) {
-        self.control_flags1 = flags;
+        self.state.control_flags1 = flags;
     }
 
     /// Install the firmware library -> NID -> OPD map the sc 484
@@ -428,7 +184,7 @@ impl Lv2Host {
         &mut self,
         map: std::collections::BTreeMap<String, std::collections::BTreeMap<u32, u32>>,
     ) {
-        self.firmware_exports = map;
+        self.derived.firmware_exports = map;
     }
 
     /// Install the unresolved-import NID -> requesting-libraries map
@@ -437,25 +193,34 @@ impl Lv2Host {
         &mut self,
         map: std::collections::BTreeMap<u32, std::collections::BTreeSet<String>>,
     ) {
-        self.unresolved_import_requesters = map;
+        self.obs.unresolved_import_requesters = map;
     }
 
-    /// Witness tuple for the frontier run: (sc 484 calls, manual-link
-    /// calls, GOT slots bound, import NIDs left unresolved).
-    #[inline]
-    pub fn prx_register_module_witness(&self) -> (u64, u64, u64, u64) {
-        (
-            self.prx_register_module_count,
-            self.prx_register_module_manual_count,
-            self.prx_register_module_linked,
-            self.prx_register_module_unresolved,
-        )
+    /// The host's instruments and diagnostics, read-only; the witness
+    /// surface `BENCH_*` emitters and tests walk.
+    pub fn observability(&self) -> &observability::Lv2Observability {
+        &self.obs
+    }
+
+    /// Reset every instrument to its boot state.
+    ///
+    /// Test hook for the observability inertness gate: a boot that
+    /// clears this after every committed step must produce the same
+    /// state-hash sequence and trace bytes as one that records.
+    ///
+    /// `pending_invariant_breaks` is carried over, not reset; the
+    /// field's doc on [`observability::Lv2Observability`] names the
+    /// contract.
+    pub fn clear_observability(&mut self) {
+        let pending = std::mem::take(&mut self.obs.pending_invariant_breaks);
+        self.obs = observability::Lv2Observability::default();
+        self.obs.pending_invariant_breaks = pending;
     }
 
     /// Raw capability word backing the privilege predicates.
     #[inline]
     pub fn control_flags1(&self) -> u32 {
-        self.control_flags1
+        self.state.control_flags1
     }
 
     /// Whether the booting process holds root privilege.
@@ -466,21 +231,21 @@ impl Lv2Host {
     /// because the exact per-bit meaning is unconfirmed there too.
     #[inline]
     pub fn has_root_perm(&self) -> bool {
-        self.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_ROOT_MASK != 0
+        self.state.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_ROOT_MASK != 0
     }
 
     /// Whether the booting process holds debug or root privilege; the
     /// widest of the three masks. See [`Self::has_root_perm`].
     #[inline]
     pub fn debug_or_root(&self) -> bool {
-        self.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_OR_ROOT_MASK != 0
+        self.state.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_OR_ROOT_MASK != 0
     }
 
     /// Whether the booting process holds debug privilege. See
     /// [`Self::has_root_perm`].
     #[inline]
     pub fn has_debug_perm(&self) -> bool {
-        self.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_MASK != 0
+        self.state.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_MASK != 0
     }
 
     /// Whether the booting process is a CoreOS SELF (vsh and the other
@@ -490,52 +255,19 @@ impl Lv2Host {
     /// CoreOS authority id with `ctrl_flags1 == 0`).
     #[inline]
     pub fn is_coreos(&self) -> bool {
-        self.program_authority_id >> 36 == cellgov_ps3_abi::sce::COREOS_AUTHORITY_ID_PREFIX
-    }
-
-    /// Witness: count of `sys_lwmutex_lock` calls rejected for an
-    /// unknown id. The cellSysmodule LoadModule-failure signature.
-    #[inline]
-    pub fn lwmutex_unknown_lock_count(&self) -> u64 {
-        self.lwmutex_unknown_lock_count
-    }
-
-    /// Witness: sc 480/497 firmware-path misses stubbed with a real id.
-    #[inline]
-    pub fn prx_load_hle_stub_count(&self) -> u64 {
-        self.prx_load_hle_stub_count
-    }
-
-    /// Witness: sc 480/497 loads reported `CELL_ENOENT`.
-    #[inline]
-    pub fn prx_load_not_found_count(&self) -> u64 {
-        self.prx_load_not_found_count
-    }
-
-    /// Witness: count of `dispatch_thread_initialize` invocations.
-    /// See the field doc on `spu_thread_initialize_dispatches`.
-    #[inline]
-    pub fn spu_thread_initialize_dispatches(&self) -> u64 {
-        self.spu_thread_initialize_dispatches
-    }
-
-    /// Witness: count of `cond_reacquire_wake` calls. See the field
-    /// doc on `cond_reacquire_wake_calls`.
-    #[inline]
-    pub fn cond_reacquire_wake_calls(&self) -> u64 {
-        self.cond_reacquire_wake_calls
+        self.state.program_authority_id >> 36 == cellgov_ps3_abi::sce::COREOS_AUTHORITY_ID_PREFIX
     }
 
     /// Record the verified-firmware identity. Boot is one-shot; a
     /// second call panics in debug builds.
     pub fn set_firmware_identity(&mut self, image_version: &str, pup_sha256_bytes: [u8; 32]) {
         debug_assert!(
-            self.firmware_identity.is_none(),
+            self.state.firmware_identity.is_none(),
             "firmware identity already set; boot is one-shot",
         );
         let mut h = cellgov_mem::Fnv1aHasher::new();
         h.write(image_version.as_bytes());
-        self.firmware_identity = Some(FirmwareIdentity {
+        self.state.firmware_identity = Some(FirmwareIdentity {
             image_version_hash: h.finish(),
             pup_sha256_bytes,
         });
@@ -543,32 +275,32 @@ impl Lv2Host {
 
     /// `None` until boot records one.
     pub fn firmware_identity(&self) -> Option<&FirmwareIdentity> {
-        self.firmware_identity.as_ref()
+        self.state.firmware_identity.as_ref()
     }
 
     /// In-memory filesystem store.
     pub fn fs_store(&self) -> &FsStore {
-        &self.fs_store
+        &self.state.fs_store
     }
 
     /// Mutable view of [`Self::fs_store`].
     pub fn fs_store_mut(&mut self) -> &mut FsStore {
-        &mut self.fs_store
+        &mut self.state.fs_store
     }
 
     /// Guest-path to host-path mount table.
     pub fn fs_mounts(&self) -> &FsMountTable {
-        &self.fs_mounts
+        &self.derived.fs_mounts
     }
 
     /// Mutable view; written by boot only.
     pub fn fs_mounts_mut(&mut self) -> &mut FsMountTable {
-        &mut self.fs_mounts
+        &mut self.derived.fs_mounts
     }
 
     /// Distinct lwmutexes currently held by `tid`.
     pub fn lwmutex_holds_for(&self, tid: PpuThreadId) -> u32 {
-        self.lwmutex_holds.get(&tid).copied().unwrap_or(0)
+        self.state.lwmutex_holds.get(&tid).copied().unwrap_or(0)
     }
 
     /// Bumps the count for a first-acquire (FREE -> tid) or a
@@ -576,7 +308,7 @@ impl Lv2Host {
     /// the owner) are tracked elsewhere and must not pass through
     /// this entry.
     pub fn lwmutex_holds_inc(&mut self, tid: PpuThreadId) {
-        let slot = self.lwmutex_holds.entry(tid).or_insert(0);
+        let slot = self.state.lwmutex_holds.entry(tid).or_insert(0);
         debug_assert!(*slot < u32::MAX, "lwmutex hold count overflow on {tid:?}",);
         *slot += 1;
     }
@@ -584,11 +316,11 @@ impl Lv2Host {
     /// Release builds saturate at 0 so a leak does not corrupt
     /// downstream counters.
     pub fn lwmutex_holds_dec(&mut self, tid: PpuThreadId) {
-        if let Some(slot) = self.lwmutex_holds.get_mut(&tid) {
+        if let Some(slot) = self.state.lwmutex_holds.get_mut(&tid) {
             debug_assert!(*slot > 0, "lwmutex hold count underflow on {tid:?}",);
             *slot = slot.saturating_sub(1);
             if *slot == 0 {
-                self.lwmutex_holds.remove(&tid);
+                self.state.lwmutex_holds.remove(&tid);
             }
         } else {
             debug_assert!(
@@ -601,12 +333,12 @@ impl Lv2Host {
     /// Used at thread-exit and stale-owner recovery so a dead
     /// thread's count does not leak.
     pub fn lwmutex_holds_clear(&mut self, tid: PpuThreadId) {
-        self.lwmutex_holds.remove(&tid);
+        self.state.lwmutex_holds.remove(&tid);
     }
 
     /// `false` when `unit` has no PPU thread mapping.
     pub fn unit_holds_lwmutex(&self, unit: UnitId) -> bool {
-        match self.ppu_threads.thread_id_for_unit(unit) {
+        match self.state.ppu_threads.thread_id_for_unit(unit) {
             Some(tid) => self.lwmutex_holds_for(tid) > 0,
             None => false,
         }
@@ -615,23 +347,17 @@ impl Lv2Host {
     /// See [`process::ProcessCounts::fs_fd_inc`] for the no-decrement
     /// contract.
     pub(super) fn fs_fd_count_inc(&mut self) {
-        self.process_counts.fs_fd_inc();
+        self.state.process_counts.fs_fd_inc();
     }
 
     /// Increment the live `sys_lwcond` object count.
     pub fn lwcond_count_inc(&mut self) {
-        self.process_counts.lwcond_inc();
+        self.state.process_counts.lwcond_inc();
     }
 
     /// Decrement the live `sys_lwcond` count; saturates at 0.
     pub fn lwcond_count_dec(&mut self) {
-        self.process_counts.lwcond_dec();
-    }
-
-    /// `sys_tty_write` byte stream in dispatch order.
-    #[inline]
-    pub fn tty_log(&self) -> &[u8] {
-        &self.tty_log
+        self.state.process_counts.lwcond_dec();
     }
 
     /// Callers that load a real ELF must set this to the
@@ -651,43 +377,43 @@ impl Lv2Host {
             "mem_alloc_base must sit below SYS_RSX_MEM_BASE ({:#x}), got {base:#x}",
             Self::SYS_RSX_MEM_BASE,
         );
-        self.mem_alloc_ptr = base;
-        self.mem_alloc_base = base;
+        self.state.mem_alloc_ptr = base;
+        self.derived.mem_alloc_base = base;
     }
 
     /// sys_rsx host context.
     #[inline]
     pub fn sys_rsx_context(&self) -> &SysRsxContext {
-        &self.rsx_context
+        &self.state.rsx_context
     }
 
     /// Record an iomap mapping without going through 672. Synthetic
     /// test scenarios use this to wire up the IO -> EA translation
     /// the FIFO advance pass needs without booting the firmware-set
-    /// `sys_rsx_context_iomap` path. Matches the
-    /// `seed_primary_ppu_thread` pattern; production code calls
-    /// `dispatch_sys_rsx_context_iomap` which validates against the
+    /// `sys_rsx_context_iomap` path. Production code calls
+    /// `dispatch_sys_rsx_context_iomap`, which validates against the
     /// 672 contract.
     pub fn seed_rsx_iomap(&mut self, io: u32, ea: u32, size: u32) {
-        self.rsx_context.iomap_io = io;
-        self.rsx_context.iomap_ea = ea;
-        self.rsx_context.iomap_size = size;
+        self.state.rsx_context.iomap_io = io;
+        self.state.rsx_context.iomap_ea = ea;
+        self.state.rsx_context.iomap_size = size;
     }
 
     /// Mark the sys_rsx context as allocated under `context_id`
     /// without going through 670. Synthetic test scenarios use this
     /// to satisfy the `allocated && matching id` guard at the top of
     /// `sys_rsx_context_attribute` (674) without the OUT-pointer
-    /// memory plumbing 670 requires. Matches `seed_rsx_iomap`'s
-    /// shape; production code calls `dispatch_sys_rsx_context_allocate`.
+    /// memory plumbing 670 requires. Production code calls
+    /// `dispatch_sys_rsx_context_allocate`.
     pub fn seed_rsx_context_allocated(&mut self, context_id: u32) {
-        self.rsx_context.allocated = true;
-        self.rsx_context.context_id = context_id;
+        self.state.rsx_context.allocated = true;
+        self.state.rsx_context.context_id = context_id;
     }
 
     pub(super) fn alloc_id(&mut self) -> u32 {
-        let id = self.next_kernel_id;
-        self.next_kernel_id = self
+        let id = self.state.next_kernel_id;
+        self.state.next_kernel_id = self
+            .state
             .next_kernel_id
             .checked_add(1)
             .expect("kernel id space exhausted");
@@ -706,12 +432,12 @@ impl Lv2Host {
         }
         let granule = 0x1000_0000u32;
         let rounded = size.checked_add(granule - 1)? & !(granule - 1);
-        let base = self.mmapper_addr_cursor;
+        let base = self.state.mmapper_addr_cursor;
         let next = base.checked_add(rounded)?;
         if next > Self::MMAPPER_REGION_END {
             return None;
         }
-        self.mmapper_addr_cursor = next;
+        self.state.mmapper_addr_cursor = next;
         Some(base)
     }
 
@@ -754,6 +480,7 @@ impl Lv2Host {
             // Find the closest ledger entry whose start is < end. If
             // its [start, start+len) overlaps [candidate, end), advance.
             let prior = self
+                .derived
                 .mmapper_install_ledger
                 .range(..end)
                 .next_back()
@@ -776,7 +503,7 @@ impl Lv2Host {
     /// Record an mmapper-window install in the host ledger. Paired
     /// with a `PendingRegionInstall` push by the same dispatch.
     pub(super) fn mmapper_ledger_insert(&mut self, addr: u32, size: u32) {
-        let prior = self.mmapper_install_ledger.insert(addr, size);
+        let prior = self.derived.mmapper_install_ledger.insert(addr, size);
         debug_assert!(
             prior.is_none(),
             "mmapper ledger: addr {addr:#x} already recorded (size {prior:?})",
@@ -785,102 +512,37 @@ impl Lv2Host {
 
     /// `ipc_key -> mem_id` registrations made by keyed 332 calls.
     pub fn mmapper_ipc(&self) -> &BTreeMap<u64, u32> {
-        &self.mmapper_ipc
+        &self.state.mmapper_ipc
     }
 
     /// Register a boot-state seed; a duplicate `shm_ipc_key` replaces
     /// the prior entry (last-write-wins). Boot-only: registering
     /// after the matching shm has been mapped has no effect.
     pub fn register_system_seed(&mut self, seed: SystemStateSeed) {
-        self.system_state_seeds.insert(seed.shm_ipc_key, seed);
+        self.derived
+            .system_state_seeds
+            .insert(seed.shm_ipc_key, seed);
     }
 
     /// Boot-registered seeds keyed by `shm_ipc_key`.
     pub fn system_state_seeds(&self) -> &BTreeMap<u64, SystemStateSeed> {
-        &self.system_state_seeds
+        &self.derived.system_state_seeds
     }
 
     /// `true` once the seed registered under `shm_ipc_key` has been
     /// applied by a 334 / 337 map.
     pub fn system_seed_applied(&self, shm_ipc_key: u64) -> bool {
-        self.system_seeds_applied.contains(&shm_ipc_key)
+        self.derived.system_seeds_applied.contains(&shm_ipc_key)
     }
 
     /// Mapped guest base of the seeded shm, once applied.
     pub fn system_seed_base(&self, shm_ipc_key: u64) -> Option<u32> {
-        self.system_seed_bases.get(&shm_ipc_key).copied()
-    }
-
-    /// Witness: times the cond\[1\] ring-check arm satisfied a wait
-    /// immediately.
-    #[inline]
-    pub fn cond_ring_wakes(&self) -> u64 {
-        self.cond_ring_wakes
-    }
-
-    /// Witness: parks on a cellSysutil cond\[0\] record-finish wait,
-    /// summed over slots.
-    pub fn cond0_producer_waits(&self) -> u64 {
-        self.cond0_producer_waits_by_slot.values().sum()
-    }
-
-    /// Witness: `_sys_prx_unload_module` calls refused because the
-    /// target is a resident firmware module.
-    #[inline]
-    pub fn prx_unload_rejections(&self) -> u64 {
-        self.prx_unload_rejections
-    }
-
-    /// Witness: cond\[0\] producer-wait parks keyed by slot index.
-    pub fn cond0_producer_waits_by_slot(&self) -> &BTreeMap<u64, u64> {
-        &self.cond0_producer_waits_by_slot
-    }
-
-    /// Witness: `sys_cond_signal` dispatch count.
-    #[inline]
-    pub fn cond_signal_dispatches(&self) -> u64 {
-        self.cond_signal_dispatches
-    }
-
-    /// Witness: `sys_cond_signal` dispatches keyed by the target
-    /// cond's create-time ipc_key.
-    pub fn cond_keyed_signal_counts(&self) -> &BTreeMap<u64, u64> {
-        &self.cond_keyed_signal_counts
-    }
-
-    /// Witness: system-IPC namespace production counters.
-    pub fn system_ipc_witness(&self) -> &SystemIpcWitness {
-        &self.system_ipc_witness
-    }
-
-    /// Witness: null-backend hits keyed by syscall number.
-    pub fn unsupported_syscalls(&self) -> &BTreeMap<u64, u64> {
-        &self.unsupported_syscalls
-    }
-
-    /// Witness: every non-zero immediate return code, by code.
-    pub fn dispatch_nonzero_returns(&self) -> &BTreeMap<u64, u64> {
-        &self.dispatch_nonzero_returns
-    }
-
-    /// Witness: `sys_mutex_unlock` refusals for a non-owning caller.
-    pub fn mutex_unlock_not_owner_count(&self) -> u64 {
-        self.mutex_unlock_not_owner_count
-    }
-
-    /// Witness: `(attempts, bound)` for `sys_event_port_connect_ipc`.
-    pub fn event_port_ipc_connects(&self) -> (u64, u64) {
-        self.event_port_ipc_connects
+        self.derived.system_seed_bases.get(&shm_ipc_key).copied()
     }
 
     /// Count of event queues registered under an ipc key.
     pub fn keyed_event_queue_count(&self) -> usize {
-        self.event_queue_ipc.len()
-    }
-
-    /// Witness: sc 480 / 497 paths answered `CELL_ENOENT`.
-    pub fn prx_load_misses(&self) -> &BTreeMap<String, u64> {
-        &self.prx_load_misses
+        self.derived.event_queue_ipc.len()
     }
 
     /// Count committed writes that land in a namespace-keyed shm.
@@ -894,7 +556,7 @@ impl Lv2Host {
     /// O(writes * mappings), and returns on the first line for a boot
     /// that mapped no namespace shm at all.
     pub fn note_committed_effects(&mut self, effects: &[cellgov_effects::Effect]) {
-        if self.system_ipc_mappings.is_empty() {
+        if self.obs.system_ipc_mappings.is_empty() {
             return;
         }
         for effect in effects {
@@ -904,6 +566,7 @@ impl Lv2Host {
             let start = range.start().raw();
             let end = start.saturating_add(range.length());
             let hit = self
+                .obs
                 .system_ipc_mappings
                 .values()
                 .find(|m| {
@@ -912,21 +575,22 @@ impl Lv2Host {
                 })
                 .map(|m| m.ipc_key);
             if let Some(ipc_key) = hit {
-                self.system_ipc_witness.shm_writes += 1;
-                self.system_ipc_witness.note_key(ipc_key);
+                self.obs.system_ipc_witness.shm_writes += 1;
+                self.obs.system_ipc_witness.note_key(ipc_key);
             }
         }
     }
 
     /// Record a namespace-keyed shm mapping and bump the map witness.
     pub(super) fn note_system_ipc_map(&mut self, mem_id: u32, base: u32, size: u32) {
-        let Some((&ipc_key, _)) = self.mmapper_ipc.iter().find(|&(_, &id)| id == mem_id) else {
+        let Some((&ipc_key, _)) = self.state.mmapper_ipc.iter().find(|&(_, &id)| id == mem_id)
+        else {
             return;
         };
         if !super::is_system_ipc_key(ipc_key) {
             return;
         }
-        self.system_ipc_mappings.insert(
+        self.obs.system_ipc_mappings.insert(
             base,
             SystemIpcMapping {
                 ipc_key,
@@ -934,61 +598,63 @@ impl Lv2Host {
                 size,
             },
         );
-        self.system_ipc_witness.shm_maps += 1;
-        self.system_ipc_witness.note_key(ipc_key);
+        self.obs.system_ipc_witness.shm_maps += 1;
+        self.obs.system_ipc_witness.note_key(ipc_key);
     }
 
     /// Read-only `pending_region_installs` snapshot used by sibling
     /// dispatch-arm tests. Not a drain; the runtime is still the
     /// authoritative drain consumer.
     #[cfg(all(test, debug_assertions))]
-    pub(super) fn drain_pending_region_installs_inspect(&self) -> &[PendingRegionInstall] {
-        &self.pending_region_installs
+    pub(super) fn drain_pending_region_installs_inspect(
+        &self,
+    ) -> &[super::mmapper::PendingRegionInstall] {
+        &self.derived.pending_region_installs
     }
 
     /// Per-title content manifest store.
     pub fn content_store(&self) -> &ContentStore {
-        &self.content
+        &self.state.content
     }
 
     /// Mutable view of [`Self::content_store`].
     pub fn content_store_mut(&mut self) -> &mut ContentStore {
-        &mut self.content
+        &mut self.state.content
     }
 
     /// Loaded-PRX registry.
     pub fn prx_registry(&self) -> &LoadedPrxRegistry {
-        &self.prx_registry
+        &self.state.prx_registry
     }
 
     /// Mutable view of [`Self::prx_registry`].
     pub fn prx_registry_mut(&mut self) -> &mut LoadedPrxRegistry {
-        &mut self.prx_registry
+        &mut self.state.prx_registry
     }
 
     /// SPU thread-group table.
     pub fn thread_groups(&self) -> &ThreadGroupTable {
-        &self.groups
+        &self.state.groups
     }
 
     /// Mutable view of [`Self::thread_groups`].
     pub fn thread_groups_mut(&mut self) -> &mut ThreadGroupTable {
-        &mut self.groups
+        &mut self.state.groups
     }
 
     /// PPU thread table.
     pub fn ppu_threads(&self) -> &PpuThreadTable {
-        &self.ppu_threads
+        &self.state.ppu_threads
     }
 
     /// Mutable view of [`Self::ppu_threads`].
     pub fn ppu_threads_mut(&mut self) -> &mut PpuThreadTable {
-        &mut self.ppu_threads
+        &mut self.state.ppu_threads
     }
 
     /// Call exactly once after the primary PPU unit is registered.
     pub fn seed_primary_ppu_thread(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) {
-        self.ppu_threads.insert_primary(unit_id, attrs);
+        self.state.ppu_threads.insert_primary(unit_id, attrs);
     }
 
     /// Alias a transient unit (e.g. a per-module module_start unit)
@@ -997,27 +663,29 @@ impl Lv2Host {
     /// thread" contract. See
     /// [`PpuThreadTable::alias_unit`][crate::ppu_thread::PpuThreadTable::alias_unit].
     pub fn alias_unit_to_primary(&mut self, unit_id: UnitId) -> bool {
-        self.ppu_threads.alias_unit(unit_id, PpuThreadId::PRIMARY)
+        self.state
+            .ppu_threads
+            .alias_unit(unit_id, PpuThreadId::PRIMARY)
     }
 
     /// Drop an alias previously installed via [`Self::alias_unit_to_primary`].
     pub fn drop_ppu_thread_alias(&mut self, unit_id: UnitId) -> bool {
-        self.ppu_threads.drop_alias(unit_id)
+        self.state.ppu_threads.drop_alias(unit_id)
     }
 
     /// PPU thread record bound to `unit_id`, if any.
     pub fn ppu_thread_for_unit(&self, unit_id: UnitId) -> Option<&PpuThread> {
-        self.ppu_threads.get_by_unit(unit_id)
+        self.state.ppu_threads.get_by_unit(unit_id)
     }
 
     /// PPU thread id bound to `unit_id`, if any.
     pub fn ppu_thread_id_for_unit(&self, unit_id: UnitId) -> Option<PpuThreadId> {
-        self.ppu_threads.thread_id_for_unit(unit_id)
+        self.state.ppu_threads.thread_id_for_unit(unit_id)
     }
 
     /// `false` when `unit_id` has no PPU mapping.
     pub fn is_ppu_thread_finished_for_unit(&self, unit_id: UnitId) -> bool {
-        match self.ppu_threads.get_by_unit(unit_id) {
+        match self.state.ppu_threads.get_by_unit(unit_id) {
             Some(thread) => thread.state.is_finished(),
             None => false,
         }
@@ -1025,77 +693,77 @@ impl Lv2Host {
 
     /// Install the TLS template used for new PPU threads.
     pub fn set_tls_template(&mut self, template: TlsTemplate) {
-        self.tls_template = template;
+        self.state.tls_template = template;
     }
 
     /// Installed TLS template.
     pub fn tls_template(&self) -> &TlsTemplate {
-        &self.tls_template
+        &self.state.tls_template
     }
 
     /// Lightweight mutex table.
     pub fn lwmutexes(&self) -> &LwMutexTable {
-        &self.lwmutexes
+        &self.state.lwmutexes
     }
 
     /// Mutable view of [`Self::lwmutexes`].
     pub fn lwmutexes_mut(&mut self) -> &mut LwMutexTable {
-        &mut self.lwmutexes
+        &mut self.state.lwmutexes
     }
 
     /// Mutex table.
     pub fn mutexes(&self) -> &MutexTable {
-        &self.mutexes
+        &self.state.mutexes
     }
 
     /// Mutable view of [`Self::mutexes`].
     pub fn mutexes_mut(&mut self) -> &mut MutexTable {
-        &mut self.mutexes
+        &mut self.state.mutexes
     }
 
     /// Semaphore table.
     pub fn semaphores(&self) -> &SemaphoreTable {
-        &self.semaphores
+        &self.state.semaphores
     }
 
     /// Mutable view of [`Self::semaphores`].
     pub fn semaphores_mut(&mut self) -> &mut SemaphoreTable {
-        &mut self.semaphores
+        &mut self.state.semaphores
     }
 
     /// Event-queue table.
     pub fn event_queues(&self) -> &EventQueueTable {
-        &self.event_queues
+        &self.state.event_queues
     }
 
     /// Mutable view of [`Self::event_queues`].
     pub fn event_queues_mut(&mut self) -> &mut EventQueueTable {
-        &mut self.event_queues
+        &mut self.state.event_queues
     }
 
     /// Event-flag table.
     pub fn event_flags(&self) -> &EventFlagTable {
-        &self.event_flags
+        &self.state.event_flags
     }
 
     /// Condition-variable table.
     pub fn conds(&self) -> &CondTable {
-        &self.conds
+        &self.state.conds
     }
 
     /// Mutable view of [`Self::conds`].
     pub fn conds_mut(&mut self) -> &mut CondTable {
-        &mut self.conds
+        &mut self.state.conds
     }
 
     /// Mutable view of [`Self::event_flags`].
     pub fn event_flags_mut(&mut self) -> &mut EventFlagTable {
-        &mut self.event_flags
+        &mut self.state.event_flags
     }
 
     /// Allocate a child-thread stack of `size` bytes at `align`.
     pub fn allocate_child_stack(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
-        self.stack_allocator.allocate(size, align)
+        self.state.stack_allocator.allocate(size, align)
     }
 
     /// Bind an SPU `unit_id` to `(group_id, slot)`.
@@ -1105,7 +773,7 @@ impl Lv2Host {
         group_id: u32,
         slot: u32,
     ) -> Result<(), crate::thread_group::RecordSpuError> {
-        self.groups.record_spu(unit_id, group_id, slot)
+        self.state.groups.record_spu(unit_id, group_id, slot)
     }
 
     /// `Ok(Some(group_id))` when this notify drove the group to
@@ -1114,7 +782,7 @@ impl Lv2Host {
         &mut self,
         unit_id: cellgov_event::UnitId,
     ) -> Result<Option<u32>, crate::thread_group::NotifySpuFinishedError> {
-        self.groups.notify_spu_finished(unit_id)
+        self.state.groups.notify_spu_finished(unit_id)
     }
 }
 

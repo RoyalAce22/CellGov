@@ -102,6 +102,31 @@ impl EventPortTable {
         self.ports.get(&id)
     }
 
+    /// True when no ports are live.
+    pub fn is_empty(&self) -> bool {
+        self.ports.is_empty()
+    }
+
+    /// FNV-1a over every port's id, type, name, and queue binding,
+    /// via raw little-endian bytes per the host state-hash contract.
+    pub fn state_hash(&self) -> u64 {
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
+        hasher.write(&(self.ports.len() as u64).to_le_bytes());
+        for (id, port) in &self.ports {
+            hasher.write(&id.to_le_bytes());
+            hasher.write(&port.port_type.to_le_bytes());
+            hasher.write(&port.name.to_le_bytes());
+            match port.queue {
+                Some(queue_id) => {
+                    hasher.write(&[1]);
+                    hasher.write(&queue_id.to_le_bytes());
+                }
+                None => hasher.write(&[0]),
+            }
+        }
+        hasher.finish()
+    }
+
     /// Bind `id` to `queue_id`.
     ///
     /// `required_type` is the port type this connect form accepts;

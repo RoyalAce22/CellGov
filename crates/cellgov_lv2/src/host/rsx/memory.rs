@@ -7,6 +7,7 @@ use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_rsx_memory_allocate` (668): bump-allocate `size` bytes and write
@@ -22,38 +23,39 @@ impl Lv2Host {
         mem_addr_ptr: u32,
         size: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if size == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
-        let Some(end) = self.rsx_mem_alloc_ptr.checked_add(size) else {
+        let Some(end) = self.state.rsx_mem_alloc_ptr.checked_add(size) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
         if end > Self::SYS_RSX_MEM_END {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
 
-        let handle = self.rsx_mem_handle_counter;
-        let addr = self.rsx_mem_alloc_ptr;
-        self.rsx_mem_alloc_ptr = end;
-        self.rsx_mem_handle_counter = handle.wrapping_add(1);
+        let handle = self.state.rsx_mem_handle_counter;
+        let addr = self.state.rsx_mem_alloc_ptr;
+        self.state.rsx_mem_alloc_ptr = end;
+        self.state.rsx_mem_handle_counter = handle.wrapping_add(1);
         // Subsequent sys_rsx_context_allocate consumes this reservation
         // instead of bumping the cursor again.
-        self.rsx_context.pending_mem_addr = addr;
+        self.state.rsx_context.pending_mem_addr = addr;
 
         let handle_write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(mem_handle_ptr, 4),
             bytes: WritePayload::from_slice(&handle.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         let addr_write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(mem_addr_ptr, 8),
             bytes: WritePayload::from_slice(&(addr as u64).to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
 
         Lv2Dispatch::Immediate {

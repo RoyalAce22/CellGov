@@ -8,8 +8,13 @@ use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "request payload plus the dispatch tick"
+    )]
     pub(super) fn dispatch_semaphore_create(
         &mut self,
         id_ptr: u32,
@@ -18,6 +23,7 @@ impl Lv2Host {
         max: i32,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         // EFAULT for NULL id/attr precedes bounds checks (real LV2 order).
         if id_ptr == 0 || attr_ptr == 0 {
@@ -39,7 +45,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let id = self.alloc_id();
-        match self.semaphores.create_with_id(id, initial, max) {
+        match self.state.semaphores.create_with_id(id, initial, max) {
             Ok(()) => {}
             Err(crate::sync_primitives::SemaphoreCreateError::IdCollision(_)) => {
                 // Host-invariant break; ENOMEM is the best-effort errno
@@ -50,17 +56,17 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
             }
         }
-        self.immediate_write_u32(id, id_ptr, requester)
+        self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     pub(super) fn dispatch_semaphore_destroy(&mut self, id: u32) -> Lv2Dispatch {
-        let Some(entry) = self.semaphores.lookup(id) else {
+        let Some(entry) = self.state.semaphores.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if !entry.waiters().is_empty() {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
-        self.semaphores.destroy(id);
+        self.state.semaphores.destroy(id);
         Lv2Dispatch::immediate(0)
     }
 
@@ -70,20 +76,20 @@ impl Lv2Host {
         timeout: u64,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        match self.semaphores.try_wait(id) {
+        match self.state.semaphores.try_wait(id) {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::SemaphoreWait::Empty) => {
                 // Finite timeout with no peer that could post: ETIMEDOUT
                 // now, since CellGov has no guest clock and blocking the
                 // only live thread would stall the schedule.
-                if timeout != 0 && !self.ppu_threads.has_other_alive_thread(caller) {
+                if timeout != 0 && !self.state.ppu_threads.has_other_alive_thread(caller) {
                     return Lv2Dispatch::immediate(cell_errors::CELL_ETIMEDOUT.into());
                 }
-                match self.semaphores.enqueue_waiter(id, caller) {
+                match self.state.semaphores.enqueue_waiter(id, caller) {
                     Ok(()) => {}
                     // Both branches are host-invariant breaks (try_wait
                     // confirmed the id; a blocked caller cannot re-enter
@@ -106,7 +112,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_semaphore_trywait(&mut self, id: u32) -> Lv2Dispatch {
-        match self.semaphores.try_wait(id) {
+        match self.state.semaphores.try_wait(id) {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::SemaphoreWait::Empty) => {
@@ -120,16 +126,17 @@ impl Lv2Host {
         id: u32,
         out_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         // EFAULT for NULL out precedes the id lookup (real LV2 order).
         if out_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
-        let Some(entry) = self.semaphores.lookup(id) else {
+        let Some(entry) = self.state.semaphores.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let count = entry.count() as u32;
-        self.immediate_write_u32(count, out_ptr, requester)
+        self.immediate_write_u32(count, out_ptr, requester, tick)
     }
 
     pub(super) fn dispatch_semaphore_post(&mut self, id: u32, val: i32) -> Lv2Dispatch {
@@ -137,7 +144,7 @@ impl Lv2Host {
         // then val<=0, then overflow-vs-max. The overflow check folds in
         // waiters: post(N) wakes up to N waiters and only the leftover
         // counts toward `max`.
-        let Some(entry) = self.semaphores.lookup(id) else {
+        let Some(entry) = self.state.semaphores.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if val <= 0 {
@@ -148,7 +155,7 @@ impl Lv2Host {
         if leftover > entry.max() - entry.count() {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
-        match self.semaphores.post_and_wake_n(id, val as u32) {
+        match self.state.semaphores.post_and_wake_n(id, val as u32) {
             crate::sync_primitives::SemaphorePostN::Unknown => {
                 Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }
